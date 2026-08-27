@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Sessions: **New chat** now opens directly in the active project when one is selected, instead of always dropping into the generic managed `chats` root. Chats opened with no active project (and explicit mini-chat/VS Code targets) still use the managed chats root as before.
+
 ## [1.21.0] - 2026-08-26
 
 - **Chat scrolling rebuilt around your message.** Sending parks your message near the top and the reply streams in below it, gliding smoothly a paragraph at a time. Scrolling up immediately hands you the wheel; the scroll-to-bottom pill carries the model's working status while you're away.

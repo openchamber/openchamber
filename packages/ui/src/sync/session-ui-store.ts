@@ -1099,7 +1099,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       const hasExplicitProjectTarget = options?.directoryOverride !== undefined
         || (options?.selectedProjectId !== undefined && options.selectedProjectId !== CHAT_DRAFT_PROJECT_ID)
         || isVSCodeRuntime()
-      target = options?.selectedProjectId === CHAT_DRAFT_PROJECT_ID || !hasExplicitProjectTarget
+      target = options?.selectedProjectId === CHAT_DRAFT_PROJECT_ID
+        || (!hasExplicitProjectTarget && !activeProject?.path)
         ? "chat"
         : "project"
     }
