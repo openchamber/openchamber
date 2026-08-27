@@ -1,7 +1,7 @@
 import React from 'react';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { refreshGlobalSessions, refreshGlobalSessionsForDirectories, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { useChildStoreManager } from '@/sync/sync-context';
+import { useAllLiveSessions, useChildStoreManager } from '@/sync/sync-context';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -10,6 +10,8 @@ import { buildSessionBootstrapDemands } from './sessionBootstrapDemands';
 import { buildKnownSessionDirectories } from './sessionListDirectories';
 import { useAuthoritativeSessionCleanup } from './useAuthoritativeSessionCleanup';
 import { normalizePath } from '../utils';
+import { selectWorktreeDiscoveryProjects } from '../sessions/worktreeDiscoveryProjects';
+import { useUIStore } from '@/stores/useUIStore';
 
 const EMPTY_WORKTREES_BY_PROJECT = new Map();
 
@@ -26,13 +28,37 @@ export const useSessionListSync = ({
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
   const availableWorktreesByProject = useSessionUIStore((state) => isVSCode ? EMPTY_WORKTREES_BY_PROJECT : state.availableWorktreesByProject);
-  const knownDirectories = React.useMemo(
-    () => buildKnownSessionDirectories(projects, availableWorktreesByProject, { includeWorktrees: !isVSCode }),
-    [availableWorktreesByProject, isVSCode, projects],
-  );
+  const backgroundProjectSessionLoadingEnabled = useUIStore((state) => state.backgroundProjectSessionLoadingEnabled);
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
   const hasAuthoritativeGlobalSessions = useGlobalSessionsStore((state) => state.status === 'ready');
+  const liveSessions = useAllLiveSessions();
+  const eligibilitySessions = React.useMemo(() => {
+    const sessions = [...globalActiveSessions];
+    const sessionIds = new Set(sessions.map((session) => session.id));
+    for (const session of liveSessions) {
+      if (sessionIds.has(session.id)) continue;
+      sessionIds.add(session.id);
+      sessions.push(session);
+    }
+    return sessions;
+  }, [globalActiveSessions, liveSessions]);
+  const eligibleProjects = React.useMemo(
+    () => backgroundProjectSessionLoadingEnabled
+      ? projects
+      : selectWorktreeDiscoveryProjects(
+        projects,
+        activeProjectId,
+        eligibilitySessions,
+        availableWorktreesByProject,
+        isVSCode,
+      ),
+    [activeProjectId, availableWorktreesByProject, backgroundProjectSessionLoadingEnabled, eligibilitySessions, isVSCode, projects],
+  );
+  const knownDirectories = React.useMemo(
+    () => buildKnownSessionDirectories(eligibleProjects, availableWorktreesByProject, { includeWorktrees: !isVSCode }),
+    [availableWorktreesByProject, eligibleProjects, isVSCode],
+  );
   const bootstrapDemandOwner = `session-list-sync:${React.useId()}`;
 
   React.useEffect(() => {

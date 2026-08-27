@@ -6,6 +6,7 @@ import { installHookTestDom } from '../test-utils/testDom';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useUIStore } from '@/stores/useUIStore';
 import type { WorktreeMetadata } from '@/types/worktree';
 
 type Event =
@@ -38,11 +39,13 @@ const childStores = {
   },
   clearBootstrapDemand: (owner: string) => state.clearedOwners.push(owner),
 };
-type GlobalSessionsState = { activeSessions: never[]; archivedSessions: never[]; status: 'ready' };
+type Session = { id: string; directory: string };
+type GlobalSessionsState = { activeSessions: Session[]; archivedSessions: Session[]; status: 'ready' };
 const globalSessions: GlobalSessionsState = { activeSessions: [], archivedSessions: [], status: 'ready' };
 
 mock.module('@/sync/sync-context', () => ({
   useChildStoreManager: () => childStores,
+  useAllLiveSessions: () => [],
 }));
 mock.module('@/sync/sync-refs', () => ({ getAllSyncSessions: () => [] }));
 mock.module('@/stores/useGlobalSessionsStore', () => ({
@@ -99,11 +102,14 @@ describe('useSessionListSync', () => {
     state.listener = null;
     state.subscriptions = 0;
     state.unsubscriptions = 0;
+    globalSessions.activeSessions = [];
+    globalSessions.archivedSessions = [];
     dom = installHookTestDom();
     root = createRoot(dom.container);
     useProjectsStore.setState({ projects, activeProjectId: 'project' });
     useDirectoryStore.setState({ currentDirectory: '/project' });
     useSessionUIStore.setState({ currentSessionDirectory: null, availableWorktreesByProject: new Map() });
+    useUIStore.setState({ backgroundProjectSessionLoadingEnabled: true });
   });
 
   afterEach(() => {
@@ -121,6 +127,37 @@ describe('useSessionListSync', () => {
     expect(state.directoryRefreshes).toEqual([]);
     expect(state.subscriptions).toBe(1);
     expect(state.cleanupInputs.at(-1)).toEqual({ enabled: true, hasAuthoritativeGlobalSessions: true, sessionCount: 0, sessions: [] });
+  });
+
+  test('limits background demands to active and session-owning projects when disabled', () => {
+    useUIStore.setState({ backgroundProjectSessionLoadingEnabled: false });
+    useProjectsStore.setState({
+      projects: [
+        { id: 'project', path: '/project' },
+        { id: 'inactive', path: '/inactive' },
+      ],
+      activeProjectId: 'project',
+    });
+
+    act(() => root.render(<LifecycleProbe isVSCode={false} />));
+
+    expect(state.demands[0]?.directories).toEqual(['/project']);
+  });
+
+  test('keeps a non-active project with an active session when disabled', () => {
+    useUIStore.setState({ backgroundProjectSessionLoadingEnabled: false });
+    useProjectsStore.setState({
+      projects: [
+        { id: 'project', path: '/project' },
+        { id: 'session-owner', path: '/session-owner' },
+      ],
+      activeProjectId: 'project',
+    });
+    globalSessions.activeSessions = [{ id: 'session', directory: '/session-owner' }];
+
+    act(() => root.render(<LifecycleProbe isVSCode={false} />));
+
+    expect(state.demands[0]?.directories).toEqual(['/project', '/session-owner']);
   });
 
   test('refreshes every VS Code directory on first mount and only topology additions afterward', () => {
