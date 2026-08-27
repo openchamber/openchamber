@@ -32,8 +32,11 @@ import {
 } from '@/lib/worktrees/worktreeManager';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useAllLiveSessions } from '@/sync/sync-context';
 import { normalizePath } from './sidebar/utils';
 import { recordWorktreesSeen } from './sidebar/projects/worktreeFirstSeen';
+import { selectWorktreeDiscoveryProjects } from './sidebar/sessions/worktreeDiscoveryProjects';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { streamPerfCount, streamPerfMark } from '@/stores/utils/streamDebug';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
@@ -145,6 +148,8 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   // sessionAttentionStates removed — now using notification-store directly in SessionNodeItem
   const worktreeMetadata = useSessionUIStore((state) => state.worktreeMetadata);
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+  const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
+  const liveSessions = useAllLiveSessions();
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const knownSessionDirectories = React.useMemo(
     () => buildKnownSessionDirectories(projects, availableWorktreesByProject, { includeWorktrees: !isVSCode }),
@@ -177,11 +182,30 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   })));
 
   const runtimeKey = getRuntimeKey();
+  const worktreeDiscoverySessions = React.useMemo(() => {
+    const sessions = [...globalActiveSessions];
+    const sessionIds = new Set(sessions.map((session) => session.id));
+    for (const session of liveSessions) {
+      if (sessionIds.has(session.id)) continue;
+      sessionIds.add(session.id);
+      sessions.push(session);
+    }
+    return sessions;
+  }, [globalActiveSessions, liveSessions]);
+  const worktreeDiscoveryProjects = React.useMemo(
+    () => selectWorktreeDiscoveryProjects(
+      projects,
+      activeProjectId,
+      worktreeDiscoverySessions,
+      availableWorktreesByProject,
+    ),
+    [activeProjectId, availableWorktreesByProject, projects, worktreeDiscoverySessions],
+  );
   const projectWorktreeDiscoveryKey = React.useMemo(
-    () => `${runtimeKey}|${projects
+    () => `${runtimeKey}|${worktreeDiscoveryProjects
       .map((project) => `${project.id}:${normalizePath(project.path) ?? ''}`)
       .join('|')}`,
-    [projects, runtimeKey],
+    [runtimeKey, worktreeDiscoveryProjects],
   );
   const [resolvedWorktreeTopologyKey, setResolvedWorktreeTopologyKey] = React.useState<string | null>(
     isVSCode ? projectWorktreeDiscoveryKey : null,
@@ -195,7 +219,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
 
     const discoverWorktrees = async () => {
       const discoveryRuntimeKey = runtimeKey;
-      const projectEntries = useProjectsStore.getState().projects;
+      const projectEntries = worktreeDiscoveryProjects;
       if (projectEntries.length === 0 || isVSCode) {
         if (!cancelled) {
           setUnresolvedWorktreeProjectPaths(new Set());
@@ -280,7 +304,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [isVSCode, projectWorktreeDiscoveryKey, runtimeKey, worktreeDiscoveryRevision]);
+  }, [isVSCode, projectWorktreeDiscoveryKey, runtimeKey, worktreeDiscoveryProjects, worktreeDiscoveryRevision]);
 
   React.useEffect(() => {
     if (isVSCode) return;
