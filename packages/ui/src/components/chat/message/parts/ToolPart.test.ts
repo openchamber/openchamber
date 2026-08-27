@@ -5,6 +5,7 @@ import { readTaskTagSessionIdFromOutput } from './taskSessionIdParser';
 import { parseDiffToUnified, tryParseJsonOutput } from '../toolRenderers';
 import { getStreamingThrottleText } from '../../hooks/useStreamingTextThrottle';
 import { getToolDescriptionFallback, getToolHeaderTitle, getToolSecondaryText } from './toolRenderUtils';
+import type { ToolState } from '@opencode-ai/sdk/v2';
 
 describe('getToolOutput', () => {
     test('prefers state.output for completed tools', () => {
@@ -153,27 +154,43 @@ describe('streaming output transitions', () => {
 });
 
 describe('getToolHeaderTitle', () => {
-    test('uses authoritative completed and running titles', () => {
-        expect(getToolHeaderTitle({ status: 'completed', title: 'Listed projects' }, 'OpenChamber')).toBe('Listed projects');
-        expect(getToolHeaderTitle({ status: 'running', title: 'Listing projects' }, 'OpenChamber')).toBe('Listing projects');
+    const completedState: ToolState = {
+        status: 'completed',
+        input: {},
+        output: '',
+        title: 'Listed projects',
+        metadata: {},
+        time: { start: 0, end: 0 },
+    };
+
+    test('uses authoritative titles for custom and plugin tools', () => {
+        expect(getToolHeaderTitle('custom_tool', completedState, 'Custom Tool')).toBe('Listed projects');
+        expect(getToolHeaderTitle('openchamber', completedState, 'OpenChamber')).toBe('Listed projects');
+        expect(getToolHeaderTitle('custom_tool', { status: 'running', input: {}, time: { start: 0 }, title: 'Listing projects' }, 'Custom Tool')).toBe('Listing projects');
     });
 
     test('trims authoritative titles', () => {
-        expect(getToolHeaderTitle({ status: 'completed', title: '  Listed projects  ' }, 'OpenChamber')).toBe('Listed projects');
+        expect(getToolHeaderTitle('custom_tool', { ...completedState, title: '  Listed projects  ' }, 'Custom Tool')).toBe('Listed projects');
+    });
+
+    test('keeps built-in display names and secondary descriptions', () => {
+        const editState: ToolState = { ...completedState, title: 'src/file.ts' };
+        expect(getToolHeaderTitle('edit', editState, 'Edit File')).toBe('Edit File');
+        expect(getToolSecondaryText('edit', 'src/file.ts', editState)).toBe('src/file.ts');
     });
 
     test('falls back to the metadata display name for blank or missing titles', () => {
-        expect(getToolHeaderTitle({ status: 'running', title: '   ' }, 'OpenChamber')).toBe('OpenChamber');
-        expect(getToolHeaderTitle({ status: 'completed' }, 'OpenChamber')).toBe('OpenChamber');
+        expect(getToolHeaderTitle('custom_tool', { status: 'running', input: {}, time: { start: 0 }, title: '   ' }, 'Custom Tool')).toBe('Custom Tool');
+        expect(getToolHeaderTitle('custom_tool', { status: 'pending', input: {}, raw: '' }, 'Custom Tool')).toBe('Custom Tool');
     });
 
     test('suppresses only secondary text matching an authoritative title', () => {
-        const state = { status: 'completed', title: '  Listed projects  ' };
-        expect(getToolSecondaryText('Listed projects', state)).toBeNull();
-        expect(getToolSecondaryText('  Listed projects  ', state)).toBeNull();
-        expect(getToolSecondaryText('src/file.ts', { status: 'completed', title: 'src\\file.ts' })).toBeNull();
-        expect(getToolSecondaryText('3 projects', state)).toBe('3 projects');
-        expect(getToolSecondaryText('OpenChamber', { status: 'completed' })).toBe('OpenChamber');
+        const state: ToolState = { ...completedState, title: '  Listed projects  ' };
+        expect(getToolSecondaryText('custom_tool', 'Listed projects', state)).toBeNull();
+        expect(getToolSecondaryText('custom_tool', '  Listed projects  ', state)).toBeNull();
+        expect(getToolSecondaryText('custom_tool', 'src/file.ts', { ...completedState, title: 'src\\file.ts' })).toBe('src/file.ts');
+        expect(getToolSecondaryText('custom_tool', '3 projects', state)).toBe('3 projects');
+        expect(getToolSecondaryText('custom_tool', 'Custom Tool', { ...completedState, title: '' })).toBe('Custom Tool');
     });
 });
 

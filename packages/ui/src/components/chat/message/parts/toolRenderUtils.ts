@@ -1,9 +1,39 @@
+import type { ToolState } from '@opencode-ai/sdk/v2';
+
 // Keep only tools with a direct in-app navigation destination compact. Every
 // other tool uses ToolPart so custom, plugin, and MCP calls expose their input
 // and output through the common expandable renderer.
 const STATIC_TOOL_NAMES = new Set<string>(['read', 'skill']);
 
 const STANDALONE_TOOL_NAMES = new Set<string>(['task']);
+
+// OpenCode built-ins keep their dedicated path, command, and status rendering.
+// Unknown tools and OpenChamber plugin actions may provide a useful per-call title.
+const OPENCODE_BUILT_IN_TOOL_NAMES = new Set<string>([
+    'read',
+    'write',
+    'edit',
+    'multiedit',
+    'apply_patch',
+    'bash',
+    'grep',
+    'glob',
+    'list',
+    'task',
+    'webfetch',
+    'websearch',
+    'codesearch',
+    'todowrite',
+    'todoread',
+    'skill',
+    'question',
+    'lsp',
+    'plan_enter',
+    'plan_exit',
+    'structuredoutput',
+    'create',
+    'file_write',
+]);
 
 const normalizeToolName = (toolName: unknown): string => {
     if (typeof toolName !== 'string') return '';
@@ -18,24 +48,27 @@ const normalizeToolName = (toolName: unknown): string => {
     return withoutIndex;
 };
 
-const getAuthoritativeToolTitle = (state: unknown): string | null => {
-    const title = typeof state === 'object' && state !== null && 'title' in state
-        ? state.title
-        : undefined;
-    if (typeof title !== 'string') return null;
-    const trimmedTitle = title.trim();
-    return trimmedTitle.length > 0 ? trimmedTitle : null;
+const getAuthoritativeToolTitle = (state: ToolState): string | null => {
+    if (state.status !== 'running' && state.status !== 'completed') {
+        return null;
+    }
+
+    const trimmedTitle = state.title?.trim();
+    return trimmedTitle && trimmedTitle.length > 0 ? trimmedTitle : null;
 };
 
-export const getToolHeaderTitle = (state: unknown, displayName: string): string => {
-    return getAuthoritativeToolTitle(state) ?? displayName;
+export const getToolHeaderTitle = (toolName: string, state: ToolState, displayName: string): string => {
+    return OPENCODE_BUILT_IN_TOOL_NAMES.has(normalizeToolName(toolName))
+        ? displayName
+        : getAuthoritativeToolTitle(state) ?? displayName;
 };
 
-export const getToolSecondaryText = (value: unknown, state: unknown): string | null => {
-    if (typeof value !== 'string' || value.trim().length === 0) return null;
-    const normalizedValue = value.trim().replace(/\\/g, '/');
-    const normalizedTitle = getAuthoritativeToolTitle(state)?.replace(/\\/g, '/');
-    return normalizedValue === normalizedTitle ? null : value;
+export const getToolSecondaryText = (toolName: string, value: string | undefined, state: ToolState): string | null => {
+    if (!value || value.trim().length === 0) return null;
+    if (OPENCODE_BUILT_IN_TOOL_NAMES.has(normalizeToolName(toolName))) return value;
+
+    const title = getAuthoritativeToolTitle(state);
+    return title && value.trim() === title ? null : value;
 };
 
 export const isExpandableTool = (toolName: unknown): boolean => {

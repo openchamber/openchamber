@@ -523,7 +523,7 @@ const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDi
         return getLspToolDescription(input, currentDirectory);
     }
 
-    const desc = input?.description || metadata?.description || '';
+    const desc = input?.description || metadata?.description || ('title' in state && state.title) || '';
     return getToolDescriptionFallback(part.tool, desc, input);
 };
 
@@ -1937,8 +1937,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const descriptionPath = getToolDescriptionPath(normalizedPart, state, currentDirectory);
     const description = getToolDescription(normalizedPart, state, currentDirectory);
     const displayName = getToolMetadata(normalizedPartTool || part.tool).displayName;
-    const headerTitle = getToolHeaderTitle(state, displayName);
-    const secondaryDescription = getToolSecondaryText(description, state);
+    const headerTitle = getToolHeaderTitle(normalizedPartTool, state, displayName);
+    const secondaryDescription = getToolSecondaryText(normalizedPartTool, description, state);
     
     // Tool title/description — shown inline as context
     const justificationText = React.useMemo(() => {
@@ -1957,8 +1957,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         ) {
             return null;
         }
-        const inputDesc = input?.description;
-        return getToolSecondaryText(inputDesc, state);
+        const inputDesc = getToolDescriptionFallback(normalizedPartTool, input?.description, undefined);
+        return getToolSecondaryText(normalizedPartTool, inputDesc, state);
     }, [descriptionPath, normalizedPartTool, input, state]);
     const runtime = React.useContext(RuntimeAPIContext);
     const mobileActions = useMobileAppActions();
