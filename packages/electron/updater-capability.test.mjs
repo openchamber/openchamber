@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { assertUpdaterCapability } from './updater-capability.mjs';
+import { assertUpdaterCapability, resolveLinuxUpdatePackageType } from './updater-capability.mjs';
 
 test('preserves updater behavior outside packaged Linux', () => {
   assert.doesNotThrow(() => assertUpdaterCapability({ platform: 'darwin', packaged: true }));
@@ -9,7 +9,24 @@ test('preserves updater behavior outside packaged Linux', () => {
   assert.doesNotThrow(() => assertUpdaterCapability({ platform: 'linux', packaged: false }));
 });
 
-test('rejects packaged Linux execution outside an AppImage', () => {
+test('detects a packaged deb from Electron Builder package metadata', () => {
+  assert.equal(
+    resolveLinuxUpdatePackageType({
+      platform: 'linux',
+      packaged: true,
+      resourcesPath: '/opt/OpenChamber/resources',
+      readFile: () => 'deb\n',
+    }),
+    'deb',
+  );
+  assert.doesNotThrow(() => assertUpdaterCapability({
+    platform: 'linux',
+    packaged: true,
+    packageType: 'deb',
+  }));
+});
+
+test('rejects packaged Linux execution outside a supported package type', () => {
   assert.throws(
     () => assertUpdaterCapability({ platform: 'linux', packaged: true, appImagePath: '' }),
     /Start OpenChamber from its \.AppImage file/,
