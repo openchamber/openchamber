@@ -77,6 +77,8 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const { t } = useI18n();
   const [isSessionSearchOpen, setIsSessionSearchOpen] = React.useState(false);
   const [sessionSearchQuery, setSessionSearchQuery] = React.useState('');
+  // Reported by the session list below: the header cannot see what matched.
+  const [searchMatchCount, setSearchMatchCount] = React.useState(0);
   const sessionSearchContainerRef = React.useRef<HTMLDivElement | null>(null);
   const sessionSearchInputRef = React.useRef<HTMLInputElement | null>(null);
   const [editingProjectDialogId, setEditingProjectDialogId] = React.useState<string | null>(null);
@@ -631,7 +633,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         sessionSearchQuery={sessionSearchQuery}
         setSessionSearchQuery={setSessionSearchQuery}
         hasSessionSearchQuery={hasSessionSearchQuery}
-        searchMatchCount={0}
+        searchMatchCount={searchMatchCount}
         collapseAllProjects={projectView.actions.collapseAllProjects}
         expandAllProjects={projectView.actions.expandAllProjects}
       />
@@ -668,6 +670,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
           isWorktreeTopologyLoading,
           unresolvedWorktreeProjectPaths,
           projectView: projectView.state,
+          onSearchMatchCountChange: setSearchMatchCount,
         }}
         actions={{
           rowActions: {

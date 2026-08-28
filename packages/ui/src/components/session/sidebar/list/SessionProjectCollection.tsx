@@ -88,6 +88,12 @@ type SessionProjectCollectionProps = {
     isWorktreeTopologyLoading: boolean;
     unresolvedWorktreeProjectPaths: ReadonlySet<string>;
     projectView: ReturnType<typeof useSessionProjectViewState>['state'];
+    /**
+     * The match count belongs in the sidebar header, which renders above this
+     * list, while only the list knows what matched. Reported upwards rather
+     * than recomputed there, so the number and the rows can never disagree.
+     */
+    onSearchMatchCountChange: (count: number) => void;
   };
   actions: {
     rowActions: {
@@ -219,7 +225,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     () => chatGroup ? [chatGroup] : EMPTY_STANDALONE_GROUPS,
     [chatGroup],
   );
-  const { projectSections, groupSearchDataByGroup, sectionsForRender, flatSectionsForRender } = useSessionSidebarSections({
+  const { projectSections, groupSearchDataByGroup, sectionsForRender, flatSectionsForRender, searchMatchCount } = useSessionSidebarSections({
     normalizedProjects: topology.projects,
     getSessionsForProject,
     getArchivedSessionsForProject,
@@ -235,6 +241,14 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     foldersMap,
     standaloneGroups,
   });
+
+  const onSearchMatchCountChange = view.onSearchMatchCountChange;
+  React.useEffect(() => {
+    onSearchMatchCountChange(searchMatchCount);
+  }, [onSearchMatchCountChange, searchMatchCount]);
+  // Unmounting means nothing is listed any more, so the header must not keep
+  // showing the last count it was told about.
+  React.useEffect(() => () => onSearchMatchCountChange(0), [onSearchMatchCountChange]);
 
   // Second bootstrap-demand owner: the layout-level useSessionListSync keeps
   // every known directory alive at background priority even when the sidebar
