@@ -524,8 +524,14 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     view.mobileVariant,
     view.normalizedSessionSearchQuery,
   ]);
+  // The chats live in the scroller's top content, which the "no project section
+  // matched" branch drops. Tell the scroller when that content is itself a
+  // search result, or a chat-only match renders as "no matches" (issue #3200).
+  const topContentHasSearchMatches = view.hasSessionSearchQuery
+    && standaloneGroups.some((group) => groupSearchDataByGroup.get(group)?.hasMatch === true);
   const scrollerModel = React.useMemo(() => ({
     topContent: recentSection,
+    topContentHasSearchMatches,
     hasSharedSessions: Boolean(recentSection),
     sectionsForRender: orderedSectionsForRender,
     projectSections,
@@ -552,6 +558,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     view.searchEmptyState,
     visibleSessionCountByGroup,
     recentSection,
+    topContentHasSearchMatches,
     singleProjectMode,
     selectedSingleProjectId,
   ]);
