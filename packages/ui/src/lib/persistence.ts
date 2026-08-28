@@ -65,9 +65,6 @@ const persistRuntimeSettingsMirror = (settings: DesktopSettings, runtimeKey: str
     projects: settings.projects,
     activeProjectId: settings.activeProjectId,
     sidebarProjectDisplayMode: settings.sidebarProjectDisplayMode,
-    worktreeDiscoveryEnabled: settings.worktreeDiscoveryEnabled,
-    worktreeDiscoveryIntervalMs: settings.worktreeDiscoveryIntervalMs,
-    backgroundProjectSessionLoadingEnabled: settings.backgroundProjectSessionLoadingEnabled,
     sidebarSessionGroupingMode: settings.sidebarSessionGroupingMode,
     sidebarProjectSortOrder: settings.sidebarProjectSortOrder,
     sidebarShowRecentSection: settings.sidebarShowRecentSection,
@@ -548,9 +545,6 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     showReasoningTraces: defaults.showReasoningTraces,
     streamingAutoFollowEnabled: defaults.streamingAutoFollowEnabled,
     workStatusPanelEnabled: defaults.workStatusPanelEnabled,
-     worktreeDiscoveryEnabled: defaults.worktreeDiscoveryEnabled,
-    worktreeDiscoveryIntervalMs: defaults.worktreeDiscoveryIntervalMs,
-     backgroundProjectSessionLoadingEnabled: defaults.backgroundProjectSessionLoadingEnabled,
     workStatusHiddenSections: defaults.workStatusHiddenSections,
     sessionRecapEnabled: defaults.sessionRecapEnabled,
     sessionSuggestionEnabled: defaults.sessionSuggestionEnabled,
@@ -683,19 +677,6 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.autoSaveEnabled === 'boolean' && settings.autoSaveEnabled !== store.autoSaveEnabled) {
     store.setAutoSaveEnabled(settings.autoSaveEnabled);
   }
-   if (typeof settings.worktreeDiscoveryEnabled === 'boolean'
-     && settings.worktreeDiscoveryEnabled !== store.worktreeDiscoveryEnabled) {
-     store.setWorktreeDiscoveryEnabled(settings.worktreeDiscoveryEnabled);
-   }
-   if (typeof settings.worktreeDiscoveryIntervalMs === 'number'
-     && Number.isFinite(settings.worktreeDiscoveryIntervalMs)
-     && settings.worktreeDiscoveryIntervalMs !== store.worktreeDiscoveryIntervalMs) {
-     store.setWorktreeDiscoveryIntervalMs(settings.worktreeDiscoveryIntervalMs);
-   }
-   if (typeof settings.backgroundProjectSessionLoadingEnabled === 'boolean'
-     && settings.backgroundProjectSessionLoadingEnabled !== store.backgroundProjectSessionLoadingEnabled) {
-     store.setBackgroundProjectSessionLoadingEnabled(settings.backgroundProjectSessionLoadingEnabled);
-   }
   if (typeof settings.autoDeleteAfterDays === 'number' && Number.isFinite(settings.autoDeleteAfterDays)) {
     const normalized = Math.max(1, Math.min(365, settings.autoDeleteAfterDays));
     if (normalized !== store.autoDeleteAfterDays) {
@@ -1220,15 +1201,6 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.autoSaveEnabled === 'boolean') {
     result.autoSaveEnabled = candidate.autoSaveEnabled;
   }
-   if (typeof candidate.worktreeDiscoveryEnabled === 'boolean') {
-     result.worktreeDiscoveryEnabled = candidate.worktreeDiscoveryEnabled;
-   }
-   if (typeof candidate.worktreeDiscoveryIntervalMs === 'number' && Number.isFinite(candidate.worktreeDiscoveryIntervalMs)) {
-     result.worktreeDiscoveryIntervalMs = Math.max(0, Math.floor(candidate.worktreeDiscoveryIntervalMs));
-   }
-   if (typeof candidate.backgroundProjectSessionLoadingEnabled === 'boolean') {
-     result.backgroundProjectSessionLoadingEnabled = candidate.backgroundProjectSessionLoadingEnabled;
-   }
   if (typeof candidate.autoDeleteAfterDays === 'number' && Number.isFinite(candidate.autoDeleteAfterDays)) {
     result.autoDeleteAfterDays = candidate.autoDeleteAfterDays;
   }

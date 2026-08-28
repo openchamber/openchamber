@@ -70,9 +70,6 @@ export type DesktopSettings = {
   sidebarSessionGroupingMode?: 'by-worktree' | 'flat';
   sidebarProjectSortOrder?: 'manual' | 'a-z' | 'z-a' | 'date-added' | 'recent';
   sidebarShowRecentSection?: boolean;
-  worktreeDiscoveryEnabled?: boolean;
-  worktreeDiscoveryIntervalMs?: number;
-  backgroundProjectSessionLoadingEnabled?: boolean;
   securityScopedBookmarks?: string[];
   pinnedDirectories?: string[];
   showReasoningTraces?: boolean;

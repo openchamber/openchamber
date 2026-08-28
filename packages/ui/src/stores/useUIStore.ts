@@ -700,9 +700,6 @@ interface UIStore {
   autoDeleteEnabled: boolean;
   /** Global file-editor autosave. Default true for backward compatibility. */
   autoSaveEnabled: boolean;
-  worktreeDiscoveryEnabled: boolean;
-  worktreeDiscoveryIntervalMs: number;
-  backgroundProjectSessionLoadingEnabled: boolean;
   autoDeleteAfterDays: number;
   sessionRetentionAction: SessionRetentionAction;
   autoDeleteLastRunAt: number | null;
@@ -888,9 +885,6 @@ interface UIStore {
   setShowOpenCodeRestartConfirm: (value: boolean) => void;
   setAutoDeleteEnabled: (value: boolean) => void;
   setAutoSaveEnabled: (value: boolean) => void;
-  setWorktreeDiscoveryEnabled: (value: boolean) => void;
-  setWorktreeDiscoveryIntervalMs: (value: number) => void;
-  setBackgroundProjectSessionLoadingEnabled: (value: boolean) => void;
   setAutoDeleteAfterDays: (days: number) => void;
   setSessionRetentionAction: (value: SessionRetentionAction) => void;
   setAutoDeleteLastRunAt: (timestamp: number | null) => void;
@@ -1060,10 +1054,7 @@ export const useUIStore = create<UIStore>()(
         showDeletionDialog: true,
         showOpenCodeRestartConfirm: true,
         autoDeleteEnabled: false,
-         autoSaveEnabled: true,
-         worktreeDiscoveryEnabled: false,
-         worktreeDiscoveryIntervalMs: 0,
-         backgroundProjectSessionLoadingEnabled: false,
+        autoSaveEnabled: true,
         autoDeleteAfterDays: 30,
         sessionRetentionAction: 'archive',
         autoDeleteLastRunAt: null,
@@ -1842,18 +1833,6 @@ export const useUIStore = create<UIStore>()(
 
         setAutoSaveEnabled: (value) => {
           set({ autoSaveEnabled: value });
-        },
-
-        setWorktreeDiscoveryEnabled: (value) => {
-          set({ worktreeDiscoveryEnabled: value });
-        },
-
-        setWorktreeDiscoveryIntervalMs: (value) => {
-          set({ worktreeDiscoveryIntervalMs: Math.max(0, Math.floor(value)) });
-        },
-
-        setBackgroundProjectSessionLoadingEnabled: (value) => {
-          set({ backgroundProjectSessionLoadingEnabled: value });
         },
 
         setAutoDeleteAfterDays: (days) => {
@@ -2668,15 +2647,6 @@ export const useUIStore = create<UIStore>()(
           if (typeof state.autoSaveEnabled !== 'boolean') {
             state.autoSaveEnabled = true;
           }
-          if (typeof state.worktreeDiscoveryEnabled !== 'boolean') {
-            state.worktreeDiscoveryEnabled = false;
-          }
-          if (typeof state.worktreeDiscoveryIntervalMs !== 'number' || !Number.isFinite(state.worktreeDiscoveryIntervalMs)) {
-            state.worktreeDiscoveryIntervalMs = 0;
-          }
-          if (typeof state.backgroundProjectSessionLoadingEnabled !== 'boolean') {
-            state.backgroundProjectSessionLoadingEnabled = false;
-          }
 
           state.contextRailHiddenSurfaces = Array.isArray(state.contextRailHiddenSurfaces)
             ? (state.contextRailHiddenSurfaces as unknown[]).filter((id): id is string => typeof id === 'string' && id.trim() !== '')
@@ -2722,10 +2692,7 @@ export const useUIStore = create<UIStore>()(
           showDeletionDialog: state.showDeletionDialog,
           showOpenCodeRestartConfirm: state.showOpenCodeRestartConfirm,
           autoDeleteEnabled: state.autoDeleteEnabled,
-           autoSaveEnabled: state.autoSaveEnabled,
-           worktreeDiscoveryEnabled: state.worktreeDiscoveryEnabled,
-           worktreeDiscoveryIntervalMs: state.worktreeDiscoveryIntervalMs,
-           backgroundProjectSessionLoadingEnabled: state.backgroundProjectSessionLoadingEnabled,
+          autoSaveEnabled: state.autoSaveEnabled,
           autoDeleteAfterDays: state.autoDeleteAfterDays,
           sessionRetentionAction: state.sessionRetentionAction,
           autoDeleteLastRunAt: state.autoDeleteLastRunAt,
