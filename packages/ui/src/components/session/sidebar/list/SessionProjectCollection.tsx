@@ -11,8 +11,9 @@ import { ProjectSessionSelectionEffect } from '../projects/useProjectSessionSele
 import type { WorktreeMetadata } from '@/types/worktree';
 import { useRecentSessionCollection, useSessionProjectCollection } from './sessionCollection';
 import { buildSessionBootstrapDemands, filterBackgroundEligibleSections } from './sessionBootstrapDemands';
-import { useChildStoreManager } from '@/sync/sync-context';
+import { useAllLiveSessions, useChildStoreManager } from '@/sync/sync-context';
 import { createSessionOwnershipIndex } from '../sessions/sessionOwnership';
+import { isProjectEligibleForBackgroundDiscovery } from '../sessions/worktreeDiscoveryProjects';
 import { useProjectSessionLists } from '../projects/useProjectSessionLists';
 import { useSessionSidebarSections } from '../projects/useSessionSidebarSections';
 import { SessionPrefetchEffect } from './useSessionPrefetch';
@@ -178,10 +179,22 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     () => createSessionOwnershipIndex(collection.sessions, topology.projects, topology.availableWorktreesByProject, topology.isVSCode, collection.archivedSessions),
     [collection.archivedSessions, collection.sessions, topology.availableWorktreesByProject, topology.isVSCode, topology.projects],
   );
-  const backgroundEligibleProjectIds = React.useMemo(() => new Set([
-    ...(view.activeProjectId ? [view.activeProjectId] : []),
-    ...ownership.sessionsByProject.keys(),
-  ]), [ownership.sessionsByProject, view.activeProjectId]);
+  const liveSessions = useAllLiveSessions();
+  const liveSessionIds = React.useMemo(
+    () => new Set(liveSessions.map((session) => session.id)),
+    [liveSessions],
+  );
+  const backgroundEligibleProjectIds = React.useMemo(() => {
+    const eligible = new Set(view.activeProjectId ? [view.activeProjectId] : []);
+    for (const project of topology.projects) {
+      const isEligible = isProjectEligibleForBackgroundDiscovery(
+        { id: project.id, sidebarCollapsed: projectView.collapsedProjects.has(project.id) },
+        { activeProjectId: view.activeProjectId, sessionsByProject: ownership.sessionsByProject, liveSessionIds },
+      );
+      if (isEligible) eligible.add(project.id);
+    }
+    return eligible;
+  }, [liveSessionIds, ownership.sessionsByProject, projectView.collapsedProjects, topology.projects, view.activeProjectId]);
   const { getSessionsForProject, getArchivedSessionsForProject } = useProjectSessionLists({ ownership });
   const { projectSections, groupSearchDataByGroup, sectionsForRender, flatSectionsForRender } = useSessionSidebarSections({
     normalizedProjects: topology.projects,

@@ -192,14 +192,22 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     }
     return sessions;
   }, [globalActiveSessions, liveSessions]);
+  const liveSessionIds = React.useMemo(
+    () => new Set(liveSessions.map((session) => session.id)),
+    [liveSessions],
+  );
   const worktreeDiscoveryProjects = React.useMemo(
     () => selectWorktreeDiscoveryProjects(
       projects,
       activeProjectId,
       worktreeDiscoverySessions,
       availableWorktreesByProject,
+      // Not `isVSCode`: repo-status scoping below reuses this list and has
+      // always resolved VS Code sessions through parent-directory ownership.
+      false,
+      liveSessionIds,
     ),
-    [activeProjectId, availableWorktreesByProject, projects, worktreeDiscoverySessions],
+    [activeProjectId, availableWorktreesByProject, liveSessionIds, projects, worktreeDiscoverySessions],
   );
   const worktreeDiscoveryProjectIds = React.useMemo(
     () => new Set(worktreeDiscoveryProjects.map((project) => project.id)),
