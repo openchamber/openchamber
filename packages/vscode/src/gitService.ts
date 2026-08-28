@@ -763,24 +763,82 @@ async function getGitBranchesRaw(directory: string): Promise<GitBranchResult> {
   return { all, current, branches };
 }
 
+const gitRefExists = async (directory: string, ref: string): Promise<boolean> => {
+  const result = await execGit(['show-ref', '--verify', '--quiet', ref], directory);
+  return result.exitCode === 0;
+};
+
+/**
+ * The branch selector lists remote-tracking branches beside local ones, so
+ * picking `origin/main` means "work on main", not "detach HEAD at the remote's
+ * commit" — which is what a literal checkout of a remote-tracking ref does.
+ * Resolve such a pick to the local branch, creating it with tracking when it
+ * does not exist yet. Anything we cannot resolve is checked out as requested,
+ * leaving git's own DWIM behavior intact.
+ */
+const resolveBranchCheckoutTarget = async (
+  directory: string,
+  branch: string
+): Promise<{ branch: string; remoteRef: string | null }> => {
+  const requested = String(branch || '').trim();
+  const asRequested = { branch: requested, remoteRef: null };
+  if (!requested) {
+    return asRequested;
+  }
+
+  if (await gitRefExists(directory, `refs/heads/${requested}`)) {
+    return asRequested;
+  }
+
+  const remoteRef = requested.replace(/^remotes\//, '');
+  if (!(await gitRefExists(directory, `refs/remotes/${remoteRef}`))) {
+    return asRequested;
+  }
+
+  const remotesResult = await execGit(['remote'], directory);
+  const remotes = remotesResult.exitCode === 0
+    ? remotesResult.stdout.split('\n').map((line) => line.trim()).filter(Boolean)
+    : [];
+  const remote = remotes.find((name) => remoteRef.startsWith(`${name}/`));
+  if (!remote) {
+    return asRequested;
+  }
+
+  const localBranch = remoteRef.slice(remote.length + 1);
+  // `origin/HEAD` names no branch of its own; it is a pointer to one.
+  if (!localBranch || localBranch === 'HEAD') {
+    return asRequested;
+  }
+
+  const localExists = await gitRefExists(directory, `refs/heads/${localBranch}`);
+  return { branch: localBranch, remoteRef: localExists ? null : remoteRef };
+};
+
 /**
  * Checkout a branch
  */
 export async function checkoutBranch(directory: string, branch: string): Promise<{ success: boolean; branch: string }> {
+  const target = await resolveBranchCheckoutTarget(directory, branch);
+
+  if (target.remoteRef) {
+    const tracked = await execGit(['checkout', '-b', target.branch, '--track', target.remoteRef], directory);
+    return { success: tracked.exitCode === 0, branch: target.branch };
+  }
+
   const repo = await getRepository(directory);
-  
+
   if (repo) {
     try {
-      await repo.checkout(branch);
-      return { success: true, branch };
+      await repo.checkout(target.branch);
+      return { success: true, branch: target.branch };
     } catch (error) {
       console.error('[GitService] Failed to checkout branch:', error);
     }
   }
 
   // Fallback to raw git
-  const result = await execGit(['checkout', branch], directory);
-  return { success: result.exitCode === 0, branch };
+  const result = await execGit(['checkout', target.branch], directory);
+  return { success: result.exitCode === 0, branch: target.branch };
 }
 
 /**

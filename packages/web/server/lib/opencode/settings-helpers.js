@@ -1,3 +1,5 @@
+import { isAgentMemoryFeatureAvailable } from '../agent-memory/feature-flag.js';
+
 export const createSettingsHelpers = (dependencies) => {
   const {
     normalizePathForPersistence,
@@ -27,6 +29,9 @@ export const createSettingsHelpers = (dependencies) => {
   const PWA_ORIENTATION_VALUES = new Set(['system', 'portrait', 'landscape']);
   const MOBILE_KEYBOARD_MODE_VALUES = new Set(['native', 'resize-content']);
   const TERMINAL_SHELL_VALUES = new Set(['auto', 'bash', 'zsh', 'sh', 'fish', 'pwsh', 'powershell', 'cmd', 'dash', 'ksh', 'nu']);
+  const SIDEBAR_PROJECT_DISPLAY_MODE_VALUES = new Set(['all', 'single']);
+  const SIDEBAR_SESSION_GROUPING_MODE_VALUES = new Set(['by-worktree', 'flat']);
+  const SIDEBAR_PROJECT_SORT_ORDER_VALUES = new Set(['manual', 'a-z', 'z-a', 'date-added', 'recent']);
   const HIDDEN_MODELS_MAX = 1024;
   const RECENT_EFFORTS_MAX_KEYS = 128;
   const RECENT_EFFORTS_MAX_VARIANTS_PER_KEY = 5;
@@ -176,6 +181,16 @@ export const createSettingsHelpers = (dependencies) => {
       const normalized = normalizeDirectoryPath(candidate.opencodeBinary).trim();
       result.opencodeBinary = normalized;
     }
+    if (typeof candidate.workStatusPanelEnabled === 'boolean') {
+      result.workStatusPanelEnabled = candidate.workStatusPanelEnabled;
+    }
+    if (Array.isArray(candidate.workStatusHiddenSections)) {
+      // Ids are validated on the client, which owns the section list; here we
+      // only guarantee the shape, so a malformed payload cannot land on disk.
+      result.workStatusHiddenSections = [
+        ...new Set(candidate.workStatusHiddenSections.filter((entry) => typeof entry === 'string' && entry.length > 0)),
+      ];
+    }
     if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
       result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
     }
@@ -230,6 +245,18 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.activeProjectId === 'string' && candidate.activeProjectId.length > 0) {
       result.activeProjectId = candidate.activeProjectId;
+    }
+    if (SIDEBAR_PROJECT_DISPLAY_MODE_VALUES.has(candidate.sidebarProjectDisplayMode)) {
+      result.sidebarProjectDisplayMode = candidate.sidebarProjectDisplayMode;
+    }
+    if (SIDEBAR_SESSION_GROUPING_MODE_VALUES.has(candidate.sidebarSessionGroupingMode)) {
+      result.sidebarSessionGroupingMode = candidate.sidebarSessionGroupingMode;
+    }
+    if (SIDEBAR_PROJECT_SORT_ORDER_VALUES.has(candidate.sidebarProjectSortOrder)) {
+      result.sidebarProjectSortOrder = candidate.sidebarProjectSortOrder;
+    }
+    if (typeof candidate.sidebarShowRecentSection === 'boolean') {
+      result.sidebarShowRecentSection = candidate.sidebarShowRecentSection;
     }
 
     if (Array.isArray(candidate.securityScopedBookmarks)) {
@@ -352,17 +379,8 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.maxLastMessageLength === 'number' && Number.isFinite(candidate.maxLastMessageLength)) {
       result.maxLastMessageLength = Math.max(10, Math.round(candidate.maxLastMessageLength));
     }
-    if (typeof candidate.usageAutoRefresh === 'boolean') {
-      result.usageAutoRefresh = candidate.usageAutoRefresh;
-    }
-    if (typeof candidate.usageRefreshIntervalMs === 'number' && Number.isFinite(candidate.usageRefreshIntervalMs)) {
-      result.usageRefreshIntervalMs = Math.max(30000, Math.min(300000, Math.round(candidate.usageRefreshIntervalMs)));
-    }
     if (candidate.usageDisplayMode === 'usage' || candidate.usageDisplayMode === 'remaining') {
       result.usageDisplayMode = candidate.usageDisplayMode;
-    }
-    if (typeof candidate.usageShowPredValues === 'boolean') {
-      result.usageShowPredValues = candidate.usageShowPredValues;
     }
     if (Array.isArray(candidate.usageDropdownProviders)) {
       result.usageDropdownProviders = normalizeStringArray(candidate.usageDropdownProviders);
@@ -373,6 +391,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.autoDeleteAfterDays === 'number' && Number.isFinite(candidate.autoDeleteAfterDays)) {
       const normalizedDays = Math.max(1, Math.min(365, Math.round(candidate.autoDeleteAfterDays)));
       result.autoDeleteAfterDays = normalizedDays;
+    }
+    if (candidate.sessionRetentionAction === 'archive' || candidate.sessionRetentionAction === 'delete') {
+      result.sessionRetentionAction = candidate.sessionRetentionAction;
     }
     if (candidate.tunnelBootstrapTtlMs === null) {
       result.tunnelBootstrapTtlMs = null;
@@ -501,8 +522,14 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.showOpenCodeUpdateNotifications === 'boolean') {
       result.showOpenCodeUpdateNotifications = candidate.showOpenCodeUpdateNotifications;
     }
+    if (typeof candidate.agentWebToolEnabled === 'boolean') {
+      result.agentWebToolEnabled = candidate.agentWebToolEnabled;
+    }
     if (typeof candidate.agentControlToolEnabled === 'boolean') {
       result.agentControlToolEnabled = candidate.agentControlToolEnabled;
+    }
+    if (typeof candidate.agentMemoryToolEnabled === 'boolean') {
+      result.agentMemoryToolEnabled = candidate.agentMemoryToolEnabled;
     }
     if (typeof candidate.optimizeSystemPrompt === 'boolean') {
       result.optimizeSystemPrompt = candidate.optimizeSystemPrompt;
@@ -588,6 +615,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.terminalFontSize === 'number' && Number.isFinite(candidate.terminalFontSize)) {
       result.terminalFontSize = Math.max(9, Math.min(52, Math.round(candidate.terminalFontSize)));
+    }
+    if (typeof candidate.editorFontSize === 'number' && Number.isFinite(candidate.editorFontSize)) {
+      result.editorFontSize = Math.max(9, Math.min(32, Math.round(candidate.editorFontSize)));
     }
     if (typeof candidate.terminalShell === 'string') {
       const shell = candidate.terminalShell.trim().toLowerCase();
@@ -901,6 +931,9 @@ export const createSettingsHelpers = (dependencies) => {
     return {
       ...sanitized,
       hasManagedRemoteTunnelToken,
+      // Tells the client whether agent memory exists in this build at all, so
+      // its settings row and panel tab can be absent rather than merely off.
+      agentMemoryFeatureAvailable: isAgentMemoryFeatureAvailable(),
       ...(pwaAppName ? { pwaAppName } : {}),
       pwaOrientation,
       mobileKeyboardMode,

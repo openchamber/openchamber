@@ -1,5 +1,15 @@
-import { afterEach, describe, expect, it } from 'bun:test';
-import { createEventPipeline } from '../event-pipeline';
+import { afterEach, describe, expect, it, mock } from 'bun:test';
+
+// A WebSocket attempt mints an `oc_url_token` before connecting, because a WS
+// upgrade cannot carry an Authorization header. Stub only that mint so the
+// socket assertions below exercise the transport rather than the auth round-trip.
+const actualRuntimeAuth = await import('@/lib/runtime-auth');
+mock.module('@/lib/runtime-auth', () => ({
+  ...actualRuntimeAuth,
+  refreshRuntimeUrlAuthToken: async () => 'test-url-token',
+}));
+
+const { createEventPipeline } = await import('../event-pipeline');
 
 const originalDocument = globalThis.document;
 const originalWindow = globalThis.window;
@@ -48,9 +58,9 @@ class FakeWebSocket {
     this.onmessage?.({ data: JSON.stringify(payload) });
   }
 
-  emitClose() {
+  emitClose(code = 1006, reason = '') {
     this.readyState = 3;
-    this.onclose?.();
+    this.onclose?.({ code, reason });
   }
 }
 

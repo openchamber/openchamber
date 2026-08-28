@@ -6,6 +6,10 @@ export interface RetryOptions {
   retryIf?: (error: unknown) => boolean
 }
 
+// undici tears down half-open upstream connection with `TypeError: terminated`
+// (exact failure from the #2470 logs); the SDK client also rejects reads with
+// normalized "request timed out" error after OPENCODE_REQUEST_TIMEOUT_MS.
+// Both are transient — managed process may be restarting.
 const TRANSIENT_MESSAGES = [
   "load failed",
   "network connection was lost",
@@ -18,6 +22,8 @@ const TRANSIENT_MESSAGES = [
   "opencode api unavailable",
   "503",
   "502",
+  "terminated",
+  "request timed out",
 ]
 
 function isTransientError(error: unknown): boolean {

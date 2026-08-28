@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/electron",
-  "version": "1.18.1",
+  "version": "1.21.0",
   "private": true,
   "description": "Electron desktop runtime for OpenChamber",
   "author": "OpenChamber",
@@ -13,9 +13,10 @@
     "electron-updater": "^6.8.3"
   },
   "devDependencies": {
-    "@electron/rebuild": "^3.7.0",
-    "electron": "^41.2.1",
-    "electron-builder": "^26.0.0"
+    "@electron/rebuild": "^4.2.0",
+    "electron": "^43.3.0",
+    "electron-builder": "^26.0.0",
+    "node-abi": "^4.33.0"
   },
   "trustedDependencies": [
     "electron"
@@ -39,6 +40,7 @@
     "bundle:main": "bun ./scripts/bundle-main.mjs",
     "generate:macos-icon": "node ./scripts/generate-macos-icon-assets.cjs",
     "rebuild:native": "node ./scripts/rebuild-native.mjs",
+    "test": "node ../../scripts/run-isolated-tests.mjs .",
     "test:architecture": "node --test ./startup-url-selection.test.mjs ./scripts/target-architecture.test.mjs ./scripts/verify-linux-appimage.test.mjs ./scripts/verify-update-manifest.test.mjs ./scripts/ensure-electron.test.mjs",
     "test:updater": "node --test ./updater-capability.test.mjs ./updater-channel.test.mjs ./updater-check.test.mjs ./updater-feed.test.mjs ./scripts/finalize-latest-yml.test.mjs ./scripts/updater-e2e-fixture.test.mjs",
     "test:linux-desktop": "node --test ./linux-autostart.test.mjs && node ./scripts/smoke-linux-app-discovery.mjs && node ./scripts/smoke-path-open-utils.mjs",

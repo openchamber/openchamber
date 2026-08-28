@@ -83,7 +83,10 @@ const resolveVariant = (providers, providerID, modelID, variant) => {
 const parseConfigModel = (value) => splitModel(value);
 
 const buildDirectoryHeaders = (directory) => ({
-  ...(directory ? { 'x-opencode-directory': directory } : {}),
+  // OpenCode rejects non-ASCII header values; the official SDK sends this
+  // header percent-encoded, so match that wire format (non-ASCII checkout
+  // paths such as "Masaüstü" otherwise fail every dispatched prompt).
+  ...(directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : {}),
 });
 
 const fetchJson = async (url, authHeaders, fallback, directory) => {
@@ -357,6 +360,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     waitForOpenCodeReady,
     emitSessionCreatedEvent,
     createSessionGoal: createSessionGoalOverride,
+    sessionKnowledgeRuntime = null,
   } = dependencies;
 
   // Last user message of an existing session, as a selection to reuse. Returns
@@ -520,6 +524,13 @@ export const createOpenChamberSessionService = (dependencies) => {
       }
     } else {
       const baseline = await latestUserMessageID({ client, sessionID, directory });
+      // A session the agent dispatched has no UI to attach the project's
+      // standing context, so it is asked for here. Never fails the dispatch:
+      // a session that runs without its background beats one that never runs.
+      const knowledge = sessionKnowledgeRuntime
+        ? await sessionKnowledgeRuntime.resolvePendingForSession(sessionID, directory)
+          .catch(() => ({ text: '', signature: '' }))
+        : { text: '', signature: '' };
       try {
         await runPromptAsync({
           baseUrl,
@@ -531,6 +542,7 @@ export const createOpenChamberSessionService = (dependencies) => {
             ...(agent ? { agent } : {}),
             ...(variant ? { variant } : {}),
             parts: [
+              ...(knowledge.text ? [{ type: 'text', text: knowledge.text, synthetic: true }] : []),
               { type: 'text', text: expandedPrompt },
               ...(goalInput.enabled
                 ? [{ type: 'text', text: buildGoalIntroText(goalInput.tokenBudget), synthetic: true }]
@@ -540,6 +552,11 @@ export const createOpenChamberSessionService = (dependencies) => {
         });
       } catch (error) {
         throw markGoalPartial(error);
+      }
+      if (knowledge.text && sessionKnowledgeRuntime) {
+        // After the prompt is accepted, so a rejected dispatch carries it again.
+        await sessionKnowledgeRuntime.recordDelivered(sessionID, directory, knowledge.signature)
+          .catch(() => undefined);
       }
       const landed = await waitForPromptLanded({
         client,

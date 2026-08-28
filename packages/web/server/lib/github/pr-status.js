@@ -332,6 +332,38 @@ const safeListPulls = async (octokit, options) => {
 const REPO_PULLS_CACHE_TTL_MS = 45_000;
 const repoPullsCache = new Map();
 
+// Remembered answer to "what is the newest closed/merged PR for this head?",
+// so discovery polls do not re-ask GitHub every few minutes.
+//
+// A found record barely ever changes: it would take a second PR on the same
+// head, and while that one is open the open-PR path wins and never reads this
+// cache at all. "No history yet" is the volatile answer, since closing or
+// merging a PR elsewhere flips it, so it expires far sooner. Either way, doing
+// it from OpenChamber invalidates the entry immediately.
+const HISTORICAL_PR_FOUND_TTL_MS = 6 * 60 * 60 * 1000;
+const HISTORICAL_PR_ABSENT_TTL_MS = 10 * 60 * 1000;
+const HISTORICAL_PR_CACHE_MAX_ENTRIES = 500;
+const _historicalPrCache = new Map();
+
+const isHistoricalPrCacheFresh = (entry) => {
+  if (!entry) {
+    return false;
+  }
+  const ttl = entry.pr ? HISTORICAL_PR_FOUND_TTL_MS : HISTORICAL_PR_ABSENT_TTL_MS;
+  return Date.now() - entry.fetchedAt < ttl;
+};
+
+const rememberHistoricalPr = (key, pr) => {
+  _historicalPrCache.delete(key);
+  _historicalPrCache.set(key, { pr, fetchedAt: Date.now() });
+  if (_historicalPrCache.size > HISTORICAL_PR_CACHE_MAX_ENTRIES) {
+    const oldest = _historicalPrCache.keys().next().value;
+    if (oldest !== undefined) {
+      _historicalPrCache.delete(oldest);
+    }
+  }
+};
+
 export const invalidateRepoPullsCache = (owner, repo) => {
   const prefix = `${normalizeText(owner)}/${normalizeText(repo)}::`;
   for (const key of repoPullsCache.keys()) {
@@ -345,6 +377,13 @@ export const invalidateRepoPullsCache = (owner, repo) => {
     const [repoPart] = key.split('::');
     if (repoPart && repoPart.split(',').includes(repoNameLower)) {
       _searchMissCache.delete(key);
+    }
+  }
+  // A merge or close changes the branch's PR history, so drop it too.
+  const historicalPrefix = `${normalizeRepoKey(owner, repo)}::`;
+  for (const key of _historicalPrCache.keys()) {
+    if (key.startsWith(historicalPrefix)) {
+      _historicalPrCache.delete(key);
     }
   }
 };
@@ -440,60 +479,61 @@ const searchFallbackPr = async ({ octokit, branch, repoNames }) => {
 
   const normalizedRepoNames = new Set(repoNames.map((name) => normalizeLower(name)).filter(Boolean));
 
-  for (const state of ['open', 'closed']) {
-    let response;
+  // The Search API has a tiny quota, so it is only spent on live branch status.
+  // Closed/merged history is resolved by the cheaper per-head repo queries.
+  let response;
+  try {
+    response = await octokit.rest.search.issuesAndPullRequests({
+      q: `is:pr state:open head:${branch}`,
+      per_page: 20,
+    });
+    // If we get here, search API works for this repo — clear the disabled flag
+    _searchApiDisabledRepos.delete(repoKey);
+  } catch (error) {
+    noteIfGitHubRateLimit(error);
+    if (error?.status === 403) {
+      _searchApiDisabledRepos.set(repoKey, Date.now());
+      return null;
+    }
+    if (error?.status === 404) {
+      rememberSearchMiss(missKey);
+      return null;
+    }
+    throw error;
+  }
+
+  const items = Array.isArray(response?.data?.items) ? response.data.items : [];
+  for (const item of items) {
+    const repo = parseRepoFromApiUrl(item?.repository_url);
+    if (!repo) {
+      continue;
+    }
+    if (normalizedRepoNames.size > 0 && !normalizedRepoNames.has(normalizeLower(repo.repo))) {
+      continue;
+    }
     try {
-      response = await octokit.rest.search.issuesAndPullRequests({
-        q: `is:pr state:${state} head:${branch}`,
-        per_page: 20,
+      const prResponse = await octokit.rest.pulls.get({
+        owner: repo.owner,
+        repo: repo.repo,
+        pull_number: item.number,
       });
-      // If we get here, search API works for this repo — clear the disabled flag
-      _searchApiDisabledRepos.delete(repoKey);
-    } catch (error) {
-      noteIfGitHubRateLimit(error);
-      if (error?.status === 403) {
-        _searchApiDisabledRepos.set(repoKey, Date.now());
-        return null;
+      const pr = prResponse?.data;
+      if (!pr || normalizeText(pr.head?.ref) !== branch) {
+        continue;
       }
-      if (error?.status === 404) {
+      return {
+        repo: {
+          owner: repo.owner,
+          repo: repo.repo,
+          url: `https://github.com/${repo.owner}/${repo.repo}`,
+        },
+        pr,
+      };
+    } catch (error) {
+      if (error?.status === 403 || error?.status === 404) {
         continue;
       }
       throw error;
-    }
-
-    const items = Array.isArray(response?.data?.items) ? response.data.items : [];
-    for (const item of items) {
-      const repo = parseRepoFromApiUrl(item?.repository_url);
-      if (!repo) {
-        continue;
-      }
-      if (normalizedRepoNames.size > 0 && !normalizedRepoNames.has(normalizeLower(repo.repo))) {
-        continue;
-      }
-      try {
-        const prResponse = await octokit.rest.pulls.get({
-          owner: repo.owner,
-          repo: repo.repo,
-          pull_number: item.number,
-        });
-        const pr = prResponse?.data;
-        if (!pr || normalizeText(pr.head?.ref) !== branch) {
-          continue;
-        }
-        return {
-          repo: {
-            owner: repo.owner,
-            repo: repo.repo,
-            url: `https://github.com/${repo.owner}/${repo.repo}`,
-          },
-          pr,
-        };
-      } catch (error) {
-        if (error?.status === 403 || error?.status === 404) {
-          continue;
-        }
-        throw error;
-      }
     }
   }
 
@@ -501,7 +541,22 @@ const searchFallbackPr = async ({ octokit, branch, repoNames }) => {
   return null;
 };
 
-const findFirstMatchingPr = async ({ octokit, target, branch, sourceCandidates, force = false, coverage = null }) => {
+const isTerminalPr = (pr) => Boolean(pr) && (pr.state === 'closed' || Boolean(pr.merged_at));
+
+/**
+ * Resolve the PRs a branch is associated with in one repo target.
+ *
+ * Returns both candidates because they answer different questions:
+ * `open` is live branch status, `historical` is the last closed/merged PR for
+ * the same head. The caller must prefer an open PR from ANY target over a
+ * historical one — otherwise a merged fork PR hides an open upstream PR.
+ *
+ * `includeHistory` is off by default and must stay that way for secondary
+ * targets. Live status is worth searching the whole fork network for; history
+ * is not, and doing it per target multiplied the serial GitHub calls until the
+ * route hit its resolve timeout and reported no status at all.
+ */
+const findBranchPrCandidates = async ({ octokit, target, branch, sourceCandidates, force = false, coverage = null, includeHistory = false }) => {
   const matcher = buildSourceMatcher(sourceCandidates);
   const sourceOwners = [];
   sourceCandidates.forEach((candidate) => pushUnique(sourceOwners, candidate.repo?.owner));
@@ -511,45 +566,71 @@ const findFirstMatchingPr = async ({ octokit, target, branch, sourceCandidates, 
     .filter((pr) => matcher.matches(pr, target.repo.repo))
     .sort((left, right) => matcher.compare(left, right, target.repo.repo))[0] ?? null;
 
-  for (const state of ['open', 'closed']) {
-    // Shared per-repo list first: one pulls.list answers every branch of the
-    // repo within the TTL. A miss in a complete list is authoritative — skip
-    // the per-branch query fan entirely.
-    let listWasComplete = false;
-    try {
-      const listEntry = await getRepoPulls(octokit, target.repo, state, { force });
-      const fromList = pickPreferred(listEntry.prs);
-      if (fromList) {
-        return fromList;
-      }
-      listWasComplete = listEntry.complete;
-    } catch {
-      // fall through to the precise per-branch queries
+  // The shared repo-level open list answers every branch of the repo within the
+  // TTL. A miss in a complete list is authoritative: no open PR exists here.
+  let openListWasComplete = false;
+  try {
+    const listEntry = await getRepoPulls(octokit, target.repo, 'open', { force });
+    const fromList = pickPreferred(listEntry.prs);
+    if (fromList) {
+      return { open: fromList, historical: null };
     }
-    if (listWasComplete) {
-      continue;
-    }
-    if (coverage) {
-      coverage.authoritative = false;
-    }
+    openListWasComplete = listEntry.complete;
+  } catch {
+    // fall through to the precise per-head queries
+  }
 
-    for (const owner of sourceOwners) {
-      const directCandidates = await safeListPulls(octokit, {
-        owner: target.repo.owner,
-        repo: target.repo.repo,
-        state,
-        head: `${owner}:${branch}`,
-        per_page: 100,
-      });
-      const direct = pickPreferred(directCandidates);
-      if (direct) {
-        return direct;
-      }
+  if (!openListWasComplete && coverage) {
+    coverage.authoritative = false;
+  }
+
+  // A complete open list already proved there is no open PR in this repo. With
+  // no history to look up there is nothing left to ask GitHub.
+  if (openListWasComplete && !includeHistory) {
+    return { open: null, historical: null };
+  }
+
+  const historicalKey = `${normalizeRepoKey(target.repo?.owner, target.repo?.repo)}::${branch}`;
+  if (includeHistory && !force && openListWasComplete) {
+    const cached = _historicalPrCache.get(historicalKey);
+    if (isHistoricalPrCacheFresh(cached)) {
+      return { open: null, historical: cached.pr };
     }
   }
 
-  return null;
+  // One query per source owner. With history enabled `state: 'all'` answers
+  // both questions at once, so asking for history never costs an extra call.
+  let historical = null;
+  for (const owner of sourceOwners) {
+    const directCandidates = await safeListPulls(octokit, {
+      owner: target.repo.owner,
+      repo: target.repo.repo,
+      state: includeHistory ? 'all' : 'open',
+      head: `${owner}:${branch}`,
+      per_page: 100,
+    });
+    const openMatch = pickPreferred(directCandidates.filter((pr) => !isTerminalPr(pr)));
+    if (openMatch) {
+      return { open: openMatch, historical: null };
+    }
+    if (includeHistory && !historical) {
+      // Among past PRs for the same head the newest one is the relevant record.
+      historical = directCandidates
+        .filter((pr) => normalizeText(pr?.head?.ref) === branch)
+        .filter((pr) => matcher.matches(pr, target.repo.repo))
+        .filter(isTerminalPr)
+        .sort((left, right) => (right?.number ?? 0) - (left?.number ?? 0))[0] ?? null;
+    }
+  }
+
+  if (includeHistory) {
+    rememberHistoricalPr(historicalKey, historical);
+  }
+  return { open: null, historical };
 };
+
+// Exported for focused unit tests of open-versus-historical branch matching.
+export { findBranchPrCandidates };
 
 export async function resolveGitHubPrStatus({ octokit, directory, branch, remoteName, force = false }) {
   // A deleted worktree can still have a session in the sidebar that keeps
@@ -593,7 +674,16 @@ export async function resolveGitHubPrStatus({ octokit, directory, branch, remote
     };
   }
 
-  const sourceCandidates = resolvedTargets.slice();
+  // Only the repo this branch actually pushes to (the ranked-first remote)
+  // and its fork network can be the SOURCE of the branch's PRs. Other
+  // configured remotes — a maintainer's checkout often carries contributor
+  // forks — are places to look for an open PR, but their `owner:branch`
+  // heads are unrelated branches that merely share a name; treating them as
+  // sources made a fork's closed `main` PR show up on the local main.
+  const primaryRemoteName = resolvedTargets[0]?.remoteName ?? null;
+  const sourceCandidates = resolvedTargets.filter(
+    (target) => target.remoteName === primaryRemoteName,
+  );
   // When every consulted repo list was complete, a no-PR result is
   // authoritative and the expensive Search API fallback is pointless.
   const coverage = { authoritative: true };
@@ -601,6 +691,11 @@ export async function resolveGitHubPrStatus({ octokit, directory, branch, remote
   let fallbackRepo = resolvedTargets[0].repo;
   let fallbackRemoteName = resolvedTargets[0].remoteName;
   let fallbackDefaultBranch = await getRepoDefaultBranch(octokit, fallbackRepo);
+
+  // The first closed/merged PR found, in target priority order. It is only
+  // returned once every target has been checked for an open PR, so an open
+  // upstream PR always wins over a merged fork PR for the same head.
+  let historicalMatch = null;
 
   for (const target of resolvedTargets) {
     const defaultBranch = await getRepoDefaultBranch(octokit, target.repo);
@@ -616,18 +711,33 @@ export async function resolveGitHubPrStatus({ octokit, directory, branch, remote
         continue;
       }
 
-      const pr = await findFirstMatchingPr({
+      // History is only asked of the branch's own repo and its own name: the
+      // ranked-first target is the remote this branch actually pushes to.
+      // Searching the rest of the fork network for history would multiply
+      // serial GitHub calls for no additional user-visible information.
+      const isPrimaryAssociation = target === resolvedTargets[0] && candidateBranch === branchCandidates[0];
+
+      const { open, historical } = await findBranchPrCandidates({
         octokit,
         target,
         branch: candidateBranch,
         sourceCandidates,
         force,
         coverage,
+        includeHistory: isPrimaryAssociation,
       });
-      if (pr) {
+      if (open) {
         return {
           repo: target.repo,
-          pr,
+          pr: open,
+          defaultBranch,
+          resolvedRemoteName: target.remoteName,
+        };
+      }
+      if (historical && !historicalMatch) {
+        historicalMatch = {
+          repo: target.repo,
+          pr: historical,
           defaultBranch,
           resolvedRemoteName: target.remoteName,
         };
@@ -652,6 +762,10 @@ export async function resolveGitHubPrStatus({ octokit, directory, branch, remote
         resolvedRemoteName: null,
       };
     }
+  }
+
+  if (historicalMatch) {
+    return historicalMatch;
   }
 
   return {

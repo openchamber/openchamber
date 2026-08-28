@@ -9,13 +9,12 @@ import { getDefaultModels } from '@/lib/quota/model-families';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
-const DEFAULT_REFRESH_INTERVAL_MS = 60000;
+const QUOTA_REFRESH_INTERVAL_MS = 3 * 60 * 1000;
+let quotaAutoRefreshConsumers = 0;
+let quotaAutoRefreshInterval: number | null = null;
 
 interface QuotaSettingsState {
-  autoRefresh: boolean;
-  refreshIntervalMs: number;
   displayMode: 'usage' | 'remaining';
-  showPredValues: boolean;
   dropdownProviderIds: QuotaProviderId[];
   selectedModels: Record<string, string[]>;  // Map of providerId -> selected model names
   expandedFamilies: Record<string, string[]>;  // Map of providerId -> EXPANDED family IDs (header dropdown - inverted)
@@ -31,12 +30,10 @@ interface QuotaStore extends QuotaSettingsState {
 
   loadSettings: () => Promise<void>;
   fetchAllQuotas: () => Promise<void>;
+  fetchQuotas: (providerIds: QuotaProviderId[]) => Promise<void>;
   fetchProviderQuota: (providerId: QuotaProviderId) => Promise<void>;
   setSelectedProvider: (providerId: QuotaProviderId | null) => void;
-  setAutoRefresh: (enabled: boolean) => void;
-  setRefreshInterval: (intervalMs: number) => void;
   setDisplayMode: (mode: 'usage' | 'remaining') => void;
-  setShowPredValues: (enabled: boolean) => void;
   setDropdownProviderIds: (providerIds: QuotaProviderId[]) => void;
   setSelectedModels: (providerId: string, modelNames: string[]) => void;
   toggleModelSelected: (providerId: string, modelName: string) => void;
@@ -47,18 +44,7 @@ interface QuotaStore extends QuotaSettingsState {
 
 const parseSettings = (data: Record<string, unknown> | null): QuotaSettingsState => {
   const allProviderIds = QUOTA_PROVIDERS.map((provider) => provider.id);
-  const autoRefresh = typeof data?.usageAutoRefresh === 'boolean'
-    ? data.usageAutoRefresh
-    : false;
-  const refreshIntervalMs =
-    typeof data?.usageRefreshIntervalMs === 'number' && Number.isFinite(data.usageRefreshIntervalMs)
-      ? Math.max(30000, Math.min(300000, Math.round(data.usageRefreshIntervalMs)))
-      : DEFAULT_REFRESH_INTERVAL_MS;
-
   const displayMode = data?.usageDisplayMode === 'remaining' ? 'remaining' : 'usage';
-  const showPredValues = typeof data?.usageShowPredValues === 'boolean'
-    ? data.usageShowPredValues
-    : false;
   const rawDropdownProviders = Array.isArray(data?.usageDropdownProviders)
     ? data?.usageDropdownProviders
     : null;
@@ -91,10 +77,7 @@ const parseSettings = (data: Record<string, unknown> | null): QuotaSettingsState
   }
 
   return {
-    autoRefresh,
-    refreshIntervalMs,
     displayMode,
-    showPredValues,
     dropdownProviderIds,
     selectedModels,
     expandedFamilies,
@@ -125,10 +108,7 @@ const loadSettingsFromRuntime = async (): Promise<QuotaSettingsState> => {
   }
 
   return {
-    autoRefresh: false,
-    refreshIntervalMs: DEFAULT_REFRESH_INTERVAL_MS,
     displayMode: 'usage',
-    showPredValues: false,
     dropdownProviderIds: QUOTA_PROVIDERS.map((provider) => provider.id),
     selectedModels: {},
     expandedFamilies: {},
@@ -144,10 +124,7 @@ export const useQuotaStore = create<QuotaStore>()(
       isFetchingProvider: {},
       lastUpdated: null,
       error: null,
-      autoRefresh: false,
-      refreshIntervalMs: DEFAULT_REFRESH_INTERVAL_MS,
       displayMode: 'usage',
-      showPredValues: false,
       dropdownProviderIds: QUOTA_PROVIDERS.map((provider) => provider.id),
       selectedModels: {},
       expandedFamilies: {},
@@ -161,9 +138,8 @@ export const useQuotaStore = create<QuotaStore>()(
         }
       },
 
-      fetchAllQuotas: async () => {
+      fetchQuotas: async (providerIds) => {
         set({ isLoading: true, error: null });
-        const providerIds = QUOTA_PROVIDERS.map((provider) => provider.id);
         try {
           await Promise.all(
             providerIds.map((providerId) => get().fetchProviderQuota(providerId))
@@ -176,6 +152,10 @@ export const useQuotaStore = create<QuotaStore>()(
           const message = error instanceof Error ? error.message : 'Failed to fetch quotas';
           set({ isLoading: false, error: message });
         }
+      },
+
+      fetchAllQuotas: async () => {
+        await get().fetchQuotas(QUOTA_PROVIDERS.map((provider) => provider.id));
       },
 
       fetchProviderQuota: async (providerId) => {
@@ -219,13 +199,7 @@ export const useQuotaStore = create<QuotaStore>()(
       },
 
       setSelectedProvider: (providerId) => set({ selectedProviderId: providerId }),
-      setAutoRefresh: (enabled) => set({ autoRefresh: enabled }),
-      setRefreshInterval: (intervalMs) => {
-        const clamped = Math.max(30000, Math.min(300000, Math.round(intervalMs)));
-        set({ refreshIntervalMs: clamped });
-      },
       setDisplayMode: (mode) => set({ displayMode: mode }),
-      setShowPredValues: (enabled) => set({ showPredValues: enabled }),
       setDropdownProviderIds: (providerIds) => set({ dropdownProviderIds: providerIds }),
 
       setSelectedModels: (providerId, modelNames) => {
@@ -290,19 +264,23 @@ export const useQuotaStore = create<QuotaStore>()(
 );
 
 export const useQuotaAutoRefresh = () => {
-  const autoRefresh = useQuotaStore((state) => state.autoRefresh);
-  const refreshIntervalMs = useQuotaStore((state) => state.refreshIntervalMs);
-  const fetchAllQuotas = useQuotaStore((state) => state.fetchAllQuotas);
-
   React.useEffect(() => {
-    if (!autoRefresh) {
-      return;
+    quotaAutoRefreshConsumers += 1;
+    if (quotaAutoRefreshInterval === null) {
+      quotaAutoRefreshInterval = window.setInterval(() => {
+        const { dropdownProviderIds, fetchQuotas } = useQuotaStore.getState();
+        if (dropdownProviderIds.length > 0) {
+          void fetchQuotas(dropdownProviderIds);
+        }
+      }, QUOTA_REFRESH_INTERVAL_MS);
     }
 
-    const interval = window.setInterval(() => {
-      fetchAllQuotas();
-    }, refreshIntervalMs);
-
-    return () => window.clearInterval(interval);
-  }, [autoRefresh, refreshIntervalMs, fetchAllQuotas]);
+    return () => {
+      quotaAutoRefreshConsumers -= 1;
+      if (quotaAutoRefreshConsumers === 0 && quotaAutoRefreshInterval !== null) {
+        window.clearInterval(quotaAutoRefreshInterval);
+        quotaAutoRefreshInterval = null;
+      }
+    };
+  }, []);
 };

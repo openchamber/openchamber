@@ -12,6 +12,47 @@ const buffer = (tabId: string) => useTerminalStore.getState().getBuffer('/repo',
 describe('terminal state reconciliation', () => {
   afterEach(() => useTerminalStore.getState().clearAll());
 
+  test('adopts unknown server sessions into the fresh placeholder tab', () => {
+    setup();
+    useTerminalStore.getState().adoptServerSessions('/repo', [
+      { sessionId: 'srv-1', status: 'running', createdAt: 100 },
+      { sessionId: 'srv-2', status: 'exited', createdAt: null },
+    ]);
+    const state = useTerminalStore.getState().getDirectoryState('/repo')!;
+    expect(state.tabs.map((tab) => tab.id)).toEqual(['srv-1', 'srv-2']);
+    expect(state.tabs[0].terminalSessionId).toBe('srv-1');
+    expect(state.tabs[0].lifecycle).toBe('running');
+    expect(state.tabs[1].lifecycle).toBe('exited');
+    expect(state.activeTabId).toBe('srv-1');
+  });
+
+  test('adoption is additive: existing tabs and referenced sessions survive', () => {
+    const tabId = setup();
+    useTerminalStore.getState().appendToBuffer('/repo', tabId, 'output', 1);
+    useTerminalStore.getState().setTabSessionId('/repo', tabId, 'srv-live');
+    useTerminalStore.getState().adoptServerSessions('/repo', [
+      { sessionId: 'srv-live', status: 'running', createdAt: 1 },
+      { sessionId: 'srv-orphan', status: 'running', createdAt: 2 },
+    ]);
+    const state = useTerminalStore.getState().getDirectoryState('/repo')!;
+    expect(state.tabs).toHaveLength(2);
+    expect(state.tabs[0].id).toBe(tabId);
+    expect(state.tabs[1].id).toBe('srv-orphan');
+    expect(state.activeTabId).toBe(tabId);
+  });
+
+  test('re-adopting the same sessions changes nothing', () => {
+    setup();
+    useTerminalStore.getState().adoptServerSessions('/repo', [
+      { sessionId: 'srv-1', status: 'running', createdAt: 100 },
+    ]);
+    const before = useTerminalStore.getState().sessions;
+    useTerminalStore.getState().adoptServerSessions('/repo', [
+      { sessionId: 'srv-1', status: 'running', createdAt: 100 },
+    ]);
+    expect(useTerminalStore.getState().sessions).toBe(before);
+  });
+
   test('applies snapshots atomically and deduplicates output by sequence', () => {
     const tabId = setup();
     useTerminalStore.getState().replaceBuffer('/repo', tabId, 'prompt', 4);

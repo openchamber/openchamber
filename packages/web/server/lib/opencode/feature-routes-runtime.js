@@ -5,8 +5,12 @@ import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
 import { registerSessionGoalRoutes } from '../session-goal/routes.js';
 import { registerGitHubRoutes } from '../github/routes.js';
 import { registerGitRoutes } from '../git/routes.js';
+import { registerDevServerRoutes } from '../dev-servers/routes.js';
 import { registerMagicPromptRoutes } from '../magic-prompts/routes.js';
 import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
+import { registerProjectContextRoutes } from '../project-context/routes.js';
+import { registerAgentMemoryRoutes } from '../agent-memory/routes.js';
+import { registerSessionKnowledgeRoutes } from '../session-knowledge/routes.js';
 import { registerPermissionAutoAcceptRoutes } from '../permission-auto-accept/runtime.js';
 import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
@@ -14,6 +18,7 @@ import { registerProjectIconRoutes } from './project-icon-routes.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
 import { registerOpenChamberSessionRoutes } from '../openchamber-sessions/routes.js';
 import { registerOpenChamberControlRoutes } from '../openchamber-control/routes.js';
+import { registerMarkdownImageGrantRoutes } from '../markdown-image-grants/routes.js';
 import { registerSkillRoutes } from './skill-routes.js';
 import { registerPluginRoutes } from './plugin-routes.js';
 import { getNpmInfo, clearCache as clearNpmCache } from './npm-registry.js';
@@ -40,12 +45,11 @@ import {
 import { SKILL_DIR, SKILL_SCOPE, readSkillSupportingFile, writeSkillSupportingFile, deleteSkillSupportingFile } from './shared.js';
 import { getSkillSources, discoverSkills, mergeDiscoveredSkills, createSkill, updateSkill, deleteSkill, renameSkill, isManagedSkillPath } from './skills.js';
 import { getCuratedSkillsSources } from '../skills-catalog/curated-sources.js';
-import { getCacheKey, getCachedScan, setCachedScan } from '../skills-catalog/cache.js';
-import { isClawdHubSource, parseSkillRepoSource } from '../skills-catalog/source.js';
+import { getCacheKey, scanWithCache } from '../skills-catalog/cache.js';
+import { parseSkillRepoSource } from '../skills-catalog/source.js';
 import { scanSkillsRepository } from '../skills-catalog/scan.js';
 import { installSkillsFromRepository } from '../skills-catalog/install.js';
-import { scanClawdHubPage } from '../skills-catalog/clawdhub/scan.js';
-import { installSkillsFromClawdHub } from '../skills-catalog/clawdhub/install.js';
+import { fetchGitHubRepoMetas } from '../skills-catalog/github-meta.js';
 
 export const createFeatureRoutesRuntime = (dependencies) => {
   const {
@@ -110,8 +114,14 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
       getOpenCodePort,
+      getOwnPorts,
+      devServerScanner,
       buildAugmentedPath,
       projectConfigRuntime,
+      projectContextRuntime,
+      agentMemoryRuntime,
+      isAgentMemoryEnabled,
+      sessionKnowledgeRuntime,
       scheduledTasksRuntime,
       scheduledTaskService,
       openChamberSessionService,
@@ -186,6 +196,16 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     });
 
     registerOpenChamberControlRoutes(app, { controlService: openChamberControlService });
+
+    registerMarkdownImageGrantRoutes(app, {
+      fsPromises,
+      path,
+      os,
+      crypto,
+      validateDirectoryPath,
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders,
+    });
 
     registerConfigEntityRoutes(app, {
       resolveProjectDirectory,
@@ -266,14 +286,11 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       SKILL_DIR,
       getCuratedSkillsSources,
       getCacheKey,
-      getCachedScan,
-      setCachedScan,
+      scanWithCache,
       parseSkillRepoSource,
       scanSkillsRepository,
       installSkillsFromRepository,
-      scanClawdHubPage,
-      installSkillsFromClawdHub,
-      isClawdHubSource,
+      fetchGitHubRepoMetas,
       getProfiles,
       getProfile,
     });
@@ -284,11 +301,16 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerSessionGoalRoutes(app);
     registerGitHubRoutes(app);
     registerGitRoutes(app);
+    registerDevServerRoutes(app, { scanner: devServerScanner, getOwnPorts });
     registerMagicPromptRoutes(app, {
       fsPromises,
       path,
       openchamberDataDir,
     });
+    registerProjectContextRoutes(app, { projectContextRuntime });
+    registerAgentMemoryRoutes(app, { agentMemoryRuntime, isAgentMemoryEnabled });
+    registerSessionKnowledgeRoutes(app, { sessionKnowledgeRuntime });
+
     registerSessionFoldersRoutes(app, {
       fsPromises,
       path,

@@ -29,7 +29,6 @@ function ContextMenuContent({ className, positionerClassName, children, style, .
         <BaseContextMenu.Popup
           data-slot="dropdown-menu-content"
           style={{
-            backgroundColor: "var(--surface-elevated)",
             color: "var(--surface-elevated-foreground)",
             ...style,
           }}

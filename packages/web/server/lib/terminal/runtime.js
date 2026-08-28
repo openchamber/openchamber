@@ -228,7 +228,7 @@ export function createTerminalRuntime({
     }
     if (!existing && sessions.size + pendingSessionCreates.size >= MAX_SESSIONS) throw new Error('Maximum terminal sessions reached');
     const creation = (async () => {
-      const session = existing ?? { id, sequence: 0, history: '', pendingHistoryControlSequence: '', pendingThemeControlSequence: '', eventQueue: [], draining: false };
+      const session = existing ?? { id, sequence: 0, history: '', pendingHistoryControlSequence: '', pendingThemeControlSequence: '', eventQueue: [], draining: false, createdAt: Date.now() };
       await startSession(session, { cwd, cols, rows, themeMode, terminalBackground, terminalForeground, shell: normalizedShell, loginShell });
       sessions.set(id, session);
       return session;
@@ -296,6 +296,34 @@ export function createTerminalRuntime({
     } catch (error) {
       res.status(500).json({ error: error?.message || 'Failed to list terminal shells' });
     }
+  });
+  app.get('/api/terminal/sessions', (req, res) => {
+    const rawCwd = typeof req.query?.cwd === 'string' ? req.query.cwd.trim() : '';
+    const cwdFilter = rawCwd ? path.resolve(rawCwd) : null;
+    const list = [];
+    for (const session of sessions.values()) {
+      if (cwdFilter && path.resolve(session.cwd) !== cwdFilter) continue;
+      list.push({
+        sessionId: session.id,
+        cwd: session.cwd,
+        status: session.status,
+        createdAt: Number.isInteger(session.createdAt) ? session.createdAt : null,
+      });
+    }
+    res.json({ sessions: list });
+  });
+  app.post('/api/terminal/touch', (req, res) => {
+    const rawIds = Array.isArray(req.body?.sessionIds) ? req.body.sessionIds : [];
+    const now = Date.now();
+    let touched = 0;
+    for (const id of rawIds) {
+      if (typeof id !== 'string') continue;
+      const session = sessions.get(id);
+      if (!session) continue;
+      session.lastActivity = now;
+      touched += 1;
+    }
+    res.json({ touched });
   });
   app.post('/api/terminal/create', async (req, res) => {
     try { const session = await createSession(req.body ?? {}); res.json({ sessionId: session.id, cols: session.cols, rows: session.rows, status: session.status }); }

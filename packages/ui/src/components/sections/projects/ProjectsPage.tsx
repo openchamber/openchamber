@@ -37,6 +37,7 @@ export const ProjectsPage: React.FC = () => {
       color: data.color,
       iconBackground: data.iconBackground,
       defaultModel: data.defaultModel ?? null,
+      defaultVariant: data.defaultVariant ?? null,
     });
   }, [selectedProject, updateProjectMeta]);
 

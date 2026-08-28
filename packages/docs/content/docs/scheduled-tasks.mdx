@@ -25,7 +25,7 @@ Check **Run as goal** to make the run pursue its prompt to completion instead of
 
 ## Loops: scheduled tasks as markdown files
 
-A **loop** is a scheduled task defined as a portable markdown file you can commit to your repo. Drop a file into `.agents/loops/` and the task appears on the next sync — no dialog needed:
+A **loop** is a scheduled task defined as a portable markdown file you can commit to your repo. Drop a file into `.agents/loops/` and open the Scheduled Tasks list to sync it — no server restart needed:
 
 ```markdown
 ---
@@ -60,7 +60,7 @@ If a project loop and a user loop share a name, the project loop wins.
 
 ### How loops behave
 
-- The **file is authoritative** while it exists: edits made in the UI are reverted on the next sync. The scheduled-tasks dialog marks loop tasks and disables their edit/enable/delete actions — **run now** still works. To stop a loop, delete the file (or set `enabled: false`).
+- The **file is authoritative** while it exists. **Edit** opens it in the built-in file editor, the enabled toggle updates its frontmatter, and deleting the task deletes the markdown file after confirmation. **Run now** remains available.
 - Runtime state (last run, next run, status) lives in the project config and is never written back into the markdown file.
 - Renaming the `name` field renames the task in place. If a loop file temporarily fails to parse (mid-edit, merge conflict), its task is kept with the last good definition until the file is fixed.
 - `daily`/`weekly`/`once` schedules and goal settings remain UI-only; loop files are always cron.

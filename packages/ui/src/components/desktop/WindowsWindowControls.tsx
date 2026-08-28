@@ -205,7 +205,10 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
       <button
         key="close"
         type="button"
-        className={cn(buttonClassName, 'hover:bg-status-error hover:text-status-error-foreground')}
+        className={cn(
+          buttonClassName,
+          'hover:bg-[var(--status-error-background)] hover:text-[var(--status-error-foreground)]',
+        )}
         onClick={() => { void invokeDesktop('desktop_close_current_window'); }}
         title={t('header.windowControls.close')}
         aria-label={t('header.windowControls.close')}

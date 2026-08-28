@@ -13,15 +13,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 
-import { DiffIcon } from '@/components/icons/DiffIcon';
-import { useUIStore, type ContextPanelMode, type MainTab } from '@/stores/useUIStore';
+import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { formatSessionWorktreeBadge } from '@/sync/session-worktree-contract';
 import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useSessionMessagesResolved } from '@/sync/sync-context';
+import { useDirectoryStore as useAppDirectoryStore } from '@/stores/useDirectoryStore';
+import { isChatDirectoryForHome } from '@/lib/chatDirectories';
 import { useSync } from '@/sync/use-sync';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
@@ -37,44 +37,33 @@ import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
 import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
-import { cn, hasModifier } from '@/lib/utils';
-import { McpDropdownContent } from '@/components/mcp/McpDropdown';
-import { McpIcon } from '@/components/icons/McpIcon';
-import { ProviderLogo } from '@/components/ui/ProviderLogo';
-import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
-import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
-import { PaceIndicator } from '@/components/sections/usage/PaceIndicator';
-import { updateDesktopSettings } from '@/lib/persistence';
-import { formatTimeForPreference } from '@/lib/timeFormat';
-import { eventMatchesShortcut, formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
-import type { TimeFormatPreference } from '@/stores/useUIStore';
+import { cn } from '@/lib/utils';
+import { formatShortcutForDisplay, getEffectiveShortcutCombo, type ShortcutActionId } from '@/lib/shortcuts';
+import { useKeybinds } from '@/hooks/useKeybind';
 import {
-  getAllModelFamilies,
-  getDisplayModelName,
-  groupModelsByFamily,
-  sortModelFamilies,
 } from '@/lib/quota/model-families';
 
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import type { UsageWindow } from '@/types';
 import type { GitHubAuthStatus } from '@/lib/api/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
-import { useTerminalStore } from '@/stores/useTerminalStore';
-import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
+import { SessionTabsStrip, type SessionTabMenuArgs } from './SessionTabsStrip';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag, type UpdateInfo } from '@/lib/desktop';
-import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
+import { desktopHostsGet, redactSensitiveUrl } from '@/lib/desktopHosts';
+import {
+  LOCAL_HOST_ID,
+  buildLocalDesktopHost,
+  getLocalDesktopOrigin,
+  resolveCurrentDesktopHost,
+} from '@/lib/desktopCurrentHost';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { useShallow } from 'zustand/react/shallow';
 import type { IconName } from "@/components/icon/icons";
 import { toast } from '@/components/ui';
@@ -82,10 +71,9 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { startSessionTreeWorktreeMove, useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
+import { buildSessionTreeMoveMessages, requestSessionTreeMove, useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
 
 const DESKTOP_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50 hover:bg-interactive-hover transition-colors';
-const MOBILE_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-9 w-9 items-center justify-center gap-2 p-2 rounded-md typography-ui-label font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50 hover:text-foreground hover:bg-interactive-hover transition-colors';
 
 type HeaderIconActionButtonProps = {
   visible?: boolean;
@@ -269,32 +257,11 @@ type DesktopServicesMenuProps = {
   isDesktopServicesOpen: boolean;
   setIsDesktopServicesOpen: React.Dispatch<React.SetStateAction<boolean>>;
   refreshCurrentInstanceLabel: () => Promise<void>;
-  desktopServicesTab: 'instance' | 'usage' | 'mcp';
-  setDesktopServicesTab: React.Dispatch<React.SetStateAction<'instance' | 'usage' | 'mcp'>>;
-  quotaResultsLength: number;
-  fetchAllQuotas: () => Promise<unknown>;
-  servicesTabItems: SortableTabsStripItem[];
-  quotaLastUpdated: number | null;
-  quotaDisplayMode: 'usage' | 'remaining';
-  quotaDisplayTabItems: SortableTabsStripItem[];
-  handleDisplayModeChange: (mode: 'usage' | 'remaining') => Promise<void>;
-  handleUsageRefresh: () => void;
-  isQuotaLoading: boolean;
-  isUsageRefreshSpinning: boolean;
-  hasRateLimits: boolean;
-  rateLimitGroups: RateLimitGroup[];
-  expandedFamilies: Record<string, string[]>;
-  toggleFamilyExpanded: (providerId: string, familyId: string) => void;
-  shortcutLabel: (actionId: string) => string;
-  showDevShutdown: boolean;
-  isDevShutdownInFlight: boolean;
-  onDevShutdown: () => Promise<void>;
+  shortcutLabel: (actionId: ShortcutActionId) => string;
   remoteUpdateInfo: UpdateInfo | null;
   remoteUpdateChecking: boolean;
   remoteUpdateError: string | null;
   onOpenRemoteUpdate: () => void;
-  showPredValues: boolean;
-  timeFormatPreference: TimeFormatPreference;
 };
 
 const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
@@ -305,32 +272,11 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   isDesktopServicesOpen,
   setIsDesktopServicesOpen,
   refreshCurrentInstanceLabel,
-  desktopServicesTab,
-  setDesktopServicesTab,
-  quotaResultsLength,
-  fetchAllQuotas,
-  servicesTabItems,
-  quotaLastUpdated,
-  quotaDisplayMode,
-  quotaDisplayTabItems,
-  handleDisplayModeChange,
-  handleUsageRefresh,
-  isQuotaLoading,
-  isUsageRefreshSpinning,
-  hasRateLimits,
-  rateLimitGroups,
-  expandedFamilies,
-  toggleFamilyExpanded,
   shortcutLabel,
-  showDevShutdown,
-  isDevShutdownInFlight,
-  onDevShutdown,
   remoteUpdateInfo,
   remoteUpdateChecking,
   remoteUpdateError,
   onOpenRemoteUpdate,
-  showPredValues,
-  timeFormatPreference,
 }: DesktopServicesMenuProps) {
   const { t } = useI18n();
   return (
@@ -340,9 +286,6 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
         setIsDesktopServicesOpen(open);
         if (open) {
           void refreshCurrentInstanceLabel();
-          if (desktopServicesTab === 'usage' && quotaResultsLength === 0) {
-            void fetchAllQuotas();
-          }
         }
       }}
     >
@@ -359,7 +302,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                 isDesktopApp ? 'w-auto max-w-[14rem] justify-start gap-1.5 px-2.5' : 'h-8 w-8'
               )}
             >
-              <Icon name="stack" className="h-[18px] w-[18px]" />
+              <Icon name="server" className="h-[18px] w-[18px]" />
               {isDesktopApp ? (
                 <span className="truncate typography-ui-label font-medium text-foreground">{compactCurrentInstanceLabel}</span>
               ) : null}
@@ -368,45 +311,18 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
         </TooltipTrigger>
         <TooltipContent>
           <p>
-            {isDesktopApp
-              ? t('header.services.tooltip.currentInstanceWithShortcuts', {
-                  current: currentInstanceLabel,
-                  toggle: shortcutLabel('toggle_services_menu'),
-                  nextTab: shortcutLabel('cycle_services_tab'),
-                })
-              : t('header.services.tooltip.servicesWithShortcuts', {
-                  toggle: shortcutLabel('toggle_services_menu'),
-                  nextTab: shortcutLabel('cycle_services_tab'),
-                })}
+            {t('header.services.tooltip.currentInstance', {
+              current: currentInstanceLabel,
+              toggle: shortcutLabel('toggle_services_menu'),
+            })}
           </p>
         </TooltipContent>
       </Tooltip>
       <DropdownMenuContent
         align="end"
-        className="w-[min(27rem,calc(100vw-2rem))] max-h-[75vh] overflow-y-auto bg-[var(--surface-elevated)] p-0"
+        className="w-[min(27rem,calc(100vw-2rem))] max-h-[75vh] overflow-y-auto p-0"
       >
-        <div className="sticky top-0 z-20 px-2 pt-1.5 pb-px">
-          <div className="h-9">
-            <SortableTabsStrip
-              items={servicesTabItems}
-              activeId={desktopServicesTab}
-              onSelect={(tabID) => {
-                const value = tabID as 'instance' | 'usage' | 'mcp';
-                setDesktopServicesTab(value);
-                if (value === 'usage' && quotaResultsLength === 0) {
-                  void fetchAllQuotas();
-                }
-              }}
-              layoutMode="fit"
-              variant="active-pill"
-              activePillInsetClassName="gap-0.5 px-px py-0"
-              activePillButtonClassName="h-8"
-              className="h-full"
-            />
-          </div>
-        </div>
-
-        {isDesktopApp && desktopServicesTab === 'instance' ? (
+        {isDesktopApp ? (
           <div>
             {!currentInstanceIsLocal ? (
               <div className="border-b border-[var(--interactive-border)] px-4 py-2.5">
@@ -435,185 +351,13 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
             ) : null}
             <DesktopHostSwitcherDialog
               embedded
-              open={isDesktopServicesOpen && desktopServicesTab === 'instance'}
+              open={isDesktopServicesOpen}
               onOpenChange={() => {}}
               onHostSwitched={() => setIsDesktopServicesOpen(false)}
             />
           </div>
         ) : null}
 
-        {desktopServicesTab === 'mcp' ? (
-          <McpDropdownContent active={isDesktopServicesOpen && desktopServicesTab === 'mcp'} />
-        ) : null}
-
-        {desktopServicesTab === 'usage' ? (
-          <div className="overflow-x-hidden">
-            <div className="flex items-center justify-between gap-3 border-b border-[var(--interactive-border)] px-4 py-2.5">
-              <div className="flex min-w-0 items-baseline gap-2">
-                <span className="typography-ui-header font-semibold text-foreground">{t('header.services.rateLimits')}</span>
-                <span className="truncate typography-micro text-muted-foreground">{formatTime(quotaLastUpdated, timeFormatPreference)}</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="h-7 w-[10.5rem]">
-                  <SortableTabsStrip
-                    items={quotaDisplayTabItems}
-                    activeId={quotaDisplayMode}
-                    onSelect={(tabID) => void handleDisplayModeChange(tabID as 'usage' | 'remaining')}
-                    layoutMode="fit"
-                    variant="active-pill"
-                    activePillInsetClassName="gap-0.5 px-px py-0"
-                    className="h-full"
-                  />
-                </div>
-                <button
-                  type="button"
-                  className={cn(
-                    'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
-                    'hover:text-foreground hover:bg-interactive-hover',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
-                  )}
-                  onClick={handleUsageRefresh}
-                  disabled={isQuotaLoading || isUsageRefreshSpinning}
-                  aria-label={t('header.services.refreshRateLimitsAria')}
-                >
-                  <Icon name="refresh" className={cn('h-4 w-4', isUsageRefreshSpinning && 'animate-spin')} />
-                </button>
-              </div>
-            </div>
-
-            {!hasRateLimits ? (
-              <div className="px-4 py-5 text-center">
-                <span className="typography-ui-label text-muted-foreground">{t('header.services.noRateLimits')}</span>
-              </div>
-            ) : null}
-
-            {/* One elevated card per provider (same card language as the mobile
-                usage popover) instead of a flat run of divider-separated rows. */}
-            <div className="space-y-2 px-3 py-2.5">
-              {rateLimitGroups.map((group) => {
-                const providerExpandedFamilies = expandedFamilies[group.providerId] ?? [];
-                return (
-                  <div key={group.providerId} className="min-w-0 rounded-xl bg-[var(--surface-muted)] p-3">
-                    <div className="flex items-center gap-2 pb-2">
-                      <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
-                      <span className="typography-ui-label font-medium text-foreground">{group.providerName}</span>
-                    </div>
-                    {group.entries.length === 0 && (!group.modelFamilies || group.modelFamilies.length === 0) ? (
-                      <div>
-                        <span className="typography-ui-label text-muted-foreground">{group.error ?? t('header.services.noRateLimitsReported')}</span>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {group.entries.map(([label, window]) => {
-                          const displayPercent = quotaDisplayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
-                          const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds, label);
-                          const expectedMarker = paceInfo?.dailyAllocationPercent != null
-                            ? (quotaDisplayMode === 'remaining'
-                                ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
-                                : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
-                            : null;
-                          const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
-                          const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference);
-                          return (
-                            <div key={`${group.providerId}-${label}`} className="flex flex-col gap-1.5">
-                              <div className="flex min-w-0 items-center justify-between gap-3">
-                                <div className="min-w-0 flex items-center gap-2">
-                                  <span className="truncate typography-ui-label text-foreground">{formatWindowLabel(label)}</span>
-                                  {resetLabel ? (
-                                    <span className="truncate typography-micro text-muted-foreground">
-                                      {resetLabel}
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <span className="typography-ui-label tabular-nums text-foreground">
-                                  {metricLabel === '-' ? '' : metricLabel}
-                                </span>
-                              </div>
-                              <UsageProgressBar
-                                percent={displayPercent}
-                                tonePercent={window.usedPercent}
-                                className="h-1.5"
-                                expectedMarkerPercent={expectedMarker}
-                              />
-                              {paceInfo && showPredValues ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
-                            </div>
-                          );
-                        })}
-                        {group.modelFamilies && group.modelFamilies.length > 0 ? (
-                          <div className="space-y-0.5">
-                            {group.modelFamilies.map((family) => {
-                              const familyKey = family.familyId ?? 'other';
-                              const isExpanded = providerExpandedFamilies.includes(familyKey);
-                              return (
-                                <Collapsible
-                                  key={familyKey}
-                                  open={isExpanded}
-                                  onOpenChange={() => toggleFamilyExpanded(group.providerId, familyKey)}
-                                >
-                                  <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md px-1 py-1.5 text-left hover:bg-[var(--interactive-hover)]/50 transition-colors">
-                                    <span className="typography-ui-label font-medium text-foreground">{family.familyLabel}</span>
-                                    {isExpanded ? <Icon name="arrow-down-s" className="h-4 w-4 text-muted-foreground" /> : <Icon name="arrow-right-s" className="h-4 w-4 text-muted-foreground" />}
-                                  </CollapsibleTrigger>
-                                  <CollapsibleContent>
-                                    <div className="space-y-2.5 pb-1 pl-1 pt-1">
-                                      {family.models.map(([modelName, window]) => {
-                                        const displayPercent = quotaDisplayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
-                                        const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds);
-                                        const expectedMarker = paceInfo?.dailyAllocationPercent != null
-                                          ? (quotaDisplayMode === 'remaining'
-                                              ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
-                                              : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
-                                          : null;
-                                        const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
-                                        return (
-                                          <div key={`${group.providerId}-${modelName}`} className="flex flex-col gap-1.5">
-                                            <div className="flex min-w-0 items-center justify-between gap-3">
-                                              <span className="truncate typography-micro text-muted-foreground">{getDisplayModelName(modelName)}</span>
-                                              <span className="typography-ui-label tabular-nums text-foreground">
-                                                {metricLabel === '-' ? '' : metricLabel}
-                                              </span>
-                                            </div>
-                                            <UsageProgressBar
-                                              percent={displayPercent}
-                                              tonePercent={window.usedPercent}
-                                              className="h-1.5"
-                                              expectedMarkerPercent={expectedMarker}
-                                            />
-                                            {paceInfo && showPredValues ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  </CollapsibleContent>
-                                </Collapsible>
-                              );
-                            })}
-                          </div>
-                        ) : null}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
-
-        {showDevShutdown ? (
-          <>
-            <div className="mx-4 my-2 border-t border-[var(--interactive-border)]" />
-            <div className="px-2 pb-2">
-              <DropdownMenuItem
-                disabled={isDevShutdownInFlight}
-                onSelect={() => {
-                  void onDevShutdown();
-                }}
-              >
-                {t('header.services.shutdownDev')}
-              </DropdownMenuItem>
-            </div>
-          </>
-        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -655,14 +399,6 @@ const formatCompactHeaderLabel = (value: string): string => {
   return trimmed.length > 12 ? `${trimmed.slice(0, 9).trimEnd()}...` : trimmed;
 };
 
-const formatTime = (timestamp: number | null, timeFormatPreference: 'auto' | '12h' | '24h') => {
-  if (!timestamp) return '-';
-  try {
-    return formatTimeForPreference(timestamp, timeFormatPreference, { fallback: '-' });
-  } catch {
-    return '-';
-  }
-};
 
 const normalize = (value: string): string => {
   if (!value) return '';
@@ -683,32 +419,6 @@ const getActiveContextMode = (panelState: {
   return activeTab?.mode ?? null;
 };
 
-interface TabConfig {
-  id: MainTab;
-  label: string;
-  icon: IconName | 'diff';
-  badge?: number;
-  showDot?: boolean;
-}
-
-interface RateLimitGroup {
-  providerId: string;
-  providerName: string;
-  entries: Array<[string, UsageWindow]>;
-  error?: string;
-  modelFamilies?: Array<{
-    familyId: string | null;
-    familyLabel: string;
-    models: Array<[string, UsageWindow]>;
-  }>;
-}
-
-interface HeaderProps {
-  onToggleLeftDrawer?: () => void;
-  onToggleRightDrawer?: () => void;
-  leftDrawerOpen?: boolean;
-  rightDrawerOpen?: boolean;
-}
 
 type HeaderSessionSnapshot = {
   title: string | null;
@@ -719,28 +429,17 @@ type HeaderSessionSnapshot = {
   parentId: string | null;
 };
 
-export const Header: React.FC<HeaderProps> = ({
-  onToggleLeftDrawer,
-  onToggleRightDrawer,
-  leftDrawerOpen,
-  rightDrawerOpen,
-}) => {
+export const Header: React.FC = () => {
   streamPerfCount('ui.header.render');
   const { t } = useI18n();
-  const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
-  const toggleSidebar = useUIStore((state) => state.toggleSidebar);
   const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
   const openContextOverview = useUIStore((state) => state.openContextOverview);
-  const openContextPlan = useUIStore((state) => state.openContextPlan);
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
-  const activeMainTab = useUIStore((state) => state.activeMainTab);
-  const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
-  const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
+  const sessionTabsEnabled = useUIStore((state) => state.sessionTabsEnabled);
 
   const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
   const runtimeApis = useRuntimeAPIs();
-  const [isDevShutdownInFlight, setIsDevShutdownInFlight] = React.useState(false);
 
   const getContextUsage = useSessionUIStore((state) => state.getContextUsage);
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
@@ -751,7 +450,8 @@ export const Header: React.FC<HeaderProps> = ({
   const currentGlobalSession = useGlobalSessionsStore(useShallow(React.useCallback(
     (state): HeaderSessionSnapshot | null => {
       if (!currentSessionId) return null;
-      const session = state.activeSessions.find((candidate) => candidate.id === currentSessionId);
+       const session = [...state.activeSessions, ...state.archivedSessions]
+         .find((candidate) => candidate.id === currentSessionId);
       if (!session) return null;
       const record = session as typeof session & { directory?: string | null; slug?: string | null };
       return {
@@ -785,15 +485,7 @@ export const Header: React.FC<HeaderProps> = ({
     const pathSegments = activeProject.path.split(/[\\/]/).filter(Boolean);
     return pathSegments[pathSegments.length - 1] ?? null;
   }, [activeProject]);
-  const quotaResults = useQuotaStore((state) => state.results);
-  const fetchAllQuotas = useQuotaStore((state) => state.fetchAllQuotas);
-  const isQuotaLoading = useQuotaStore((state) => state.isLoading);
-  const quotaLastUpdated = useQuotaStore((state) => state.lastUpdated);
-  const quotaDisplayMode = useQuotaStore((state) => state.displayMode);
-  const showPredValues = useQuotaStore((state) => state.showPredValues);
-  const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
   const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
-  const setQuotaDisplayMode = useQuotaStore((state) => state.setDisplayMode);
 
   const { isMobile } = useDeviceInfo();
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
@@ -879,14 +571,11 @@ export const Header: React.FC<HeaderProps> = ({
     }
   }, [contextUsage, currentSessionId, isContextUsageResolvedForSession]);
 
-  const isSessionSwitcherOpen = useUIStore((state) => state.isSessionSwitcherOpen);
   const githubAvatarUrl = githubAuthStatus?.connected ? (githubAuthStatus.user?.avatarUrl ?? null) : null;
   const githubLogin = githubAuthStatus?.connected ? (githubAuthStatus.user?.login ?? null) : null;
   const githubAccounts = githubAuthStatus?.accounts ?? [];
   const [isSwitchingGitHubAccount, setIsSwitchingGitHubAccount] = React.useState(false);
-  const [isMobileRateLimitsOpen, setIsMobileRateLimitsOpen] = React.useState(false);
   const [isDesktopServicesOpen, setIsDesktopServicesOpen] = React.useState(false);
-  const [isUsageRefreshSpinning, setIsUsageRefreshSpinning] = React.useState(false);
   const [currentInstanceLabel, setCurrentInstanceLabel] = React.useState('Local');
   const [currentInstanceIsLocal, setCurrentInstanceIsLocal] = React.useState(true);
   const [remoteUpdateDialogOpen, setRemoteUpdateDialogOpen] = React.useState(false);
@@ -894,18 +583,36 @@ export const Header: React.FC<HeaderProps> = ({
   const [remoteUpdateChecking, setRemoteUpdateChecking] = React.useState(false);
   const [remoteUpdateError, setRemoteUpdateError] = React.useState<string | null>(null);
   const compactCurrentInstanceLabel = React.useMemo(() => formatCompactHeaderLabel(currentInstanceLabel), [currentInstanceLabel]);
-  const [desktopServicesTab, setDesktopServicesTab] = React.useState<'instance' | 'usage' | 'mcp'>(
-    isDesktopApp ? 'instance' : 'usage'
-  );
-  const [mobileServicesTab, setMobileServicesTab] = React.useState<'usage' | 'mcp'>('usage');
-  useEffect(() => {
-    if (!isDesktopApp && desktopServicesTab === 'instance') {
-      setDesktopServicesTab('usage');
-    }
-  }, [desktopServicesTab, isDesktopApp]);
-
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
-  const showDesktopHeaderContextUsage = !isVSCode && activeMainTab === 'chat' && !!stableDesktopContextUsage && stableDesktopContextUsage.totalTokens > 0;
+  // While the work-status panel is on screen it already reports the project,
+  // the branch and the context fill — three paces away in the same window.
+  // These yield to it rather than saying the same thing twice, and return the
+  // moment the panel is switched off or squeezed out by a narrow chat.
+  const workStatusPanelVisible = useUIStore((state) => state.workStatusPanelVisible);
+  const workStatusPanelEnabled = useUIStore((state) => state.workStatusPanelEnabled);
+  const setWorkStatusPanelEnabled = useUIStore((state) => state.setWorkStatusPanelEnabled);
+  const workStatusPanelFits = useUIStore((state) => state.workStatusPanelFits);
+  const workStatusOverlayOpen = useUIStore((state) => state.workStatusOverlayOpen);
+  const setWorkStatusOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
+
+  // Two meanings for one button. With room beside the chat it switches the
+  // panel on and off. Without room it cannot be shown inline at all, so it
+  // reads as off and opens the panel over the chat instead — the stored
+  // preference is left alone, so the panel comes back on its own once the
+  // window is wide enough again.
+  const workStatusPanelShownInline = workStatusPanelEnabled && workStatusPanelFits;
+  const workStatusToggleActive = workStatusPanelShownInline || workStatusOverlayOpen;
+  const handleWorkStatusToggle = React.useCallback(() => {
+    if (workStatusPanelEnabled && !workStatusPanelFits) {
+      setWorkStatusOverlayOpen(!workStatusOverlayOpen);
+      return;
+    }
+    setWorkStatusPanelEnabled(!workStatusPanelEnabled);
+  }, [setWorkStatusOverlayOpen, setWorkStatusPanelEnabled, workStatusOverlayOpen, workStatusPanelEnabled, workStatusPanelFits]);
+  const showDesktopHeaderContextUsage = !isVSCode
+    && !workStatusPanelVisible
+    && !!stableDesktopContextUsage
+    && stableDesktopContextUsage.totalTokens > 0;
   const desktopHeaderDisplayPercentage = stableDesktopContextUsage && stableDesktopContextUsage.contextLimit > 0
     ? Math.min(999, (stableDesktopContextUsage.totalTokens / stableDesktopContextUsage.contextLimit) * 100)
     : 0;
@@ -923,26 +630,19 @@ export const Header: React.FC<HeaderProps> = ({
       }
       setCurrentInstanceIsLocal(false);
 
+      // Same resolution the host switcher's own header uses, so the button and
+      // the panel it opens can never disagree about which instance this is.
       const cfg = await desktopHostsGet();
-      const localOrigin = window.__OPENCHAMBER_LOCAL_ORIGIN__ || window.location.origin;
-      const runtimeApiBaseUrl = getRuntimeApiBaseUrl();
+      const localOrigin = getLocalDesktopOrigin();
+      const resolved = resolveCurrentDesktopHost([buildLocalDesktopHost(localOrigin), ...cfg.hosts]);
 
-      if (runtimeApiBaseUrl && locationMatchesHost(runtimeApiBaseUrl, localOrigin)) {
+      if (resolved.id === LOCAL_HOST_ID) {
         setCurrentInstanceLabel('Local');
         setCurrentInstanceIsLocal(true);
         return;
       }
 
-      const match = cfg.hosts.find((host) => {
-        return runtimeApiBaseUrl ? locationMatchesHost(runtimeApiBaseUrl, getDesktopHostApiUrl(host)) : false;
-      });
-
-      if (match?.label?.trim()) {
-        setCurrentInstanceLabel(redactSensitiveUrl(match.label.trim()));
-        return;
-      }
-
-      setCurrentInstanceLabel('Instance');
+      setCurrentInstanceLabel(redactSensitiveUrl(resolved.label.trim() || 'Instance'));
     } catch {
       setCurrentInstanceLabel('Local');
       setCurrentInstanceIsLocal(true);
@@ -951,6 +651,11 @@ export const Header: React.FC<HeaderProps> = ({
 
   useEffect(() => {
     void refreshCurrentInstanceLabel();
+    // Switching instances does not remount the header, so without this the
+    // button would keep naming the instance the window left behind.
+    return subscribeRuntimeEndpointChanged(() => {
+      void refreshCurrentInstanceLabel();
+    });
   }, [refreshCurrentInstanceLabel]);
 
   const checkRemoteInstanceUpdate = React.useCallback(async () => {
@@ -1039,126 +744,11 @@ export const Header: React.FC<HeaderProps> = ({
   }, [checkRemoteInstanceUpdate, remoteUpdateInfo?.available]);
 
   useQuotaAutoRefresh();
-  const selectedModels = useQuotaStore((state) => state.selectedModels);
-  const expandedFamilies = useQuotaStore((state) => state.expandedFamilies);
-  const toggleFamilyExpanded = useQuotaStore((state) => state.toggleFamilyExpanded);
 
-  const rateLimitGroups = React.useMemo(() => {
-    const groups: RateLimitGroup[] = [];
-
-    for (const provider of QUOTA_PROVIDERS) {
-      if (!dropdownProviderIds.includes(provider.id)) {
-        continue;
-      }
-      const result = quotaResults.find((entry) => entry.providerId === provider.id);
-      const windows = (result?.usage?.windows ?? {}) as Record<string, UsageWindow>;
-      const models = result?.usage?.models;
-      const entries = Object.entries(windows);
-
-      const group: RateLimitGroup = {
-        providerId: provider.id,
-        providerName: provider.name,
-        entries,
-        error: (result && !result.ok && result.configured) ? result.error : undefined,
-      };
-
-      // Add model families if provider has per-model quotas
-      if (models && Object.keys(models).length > 0) {
-        const providerSelectedModels = selectedModels[provider.id] ?? [];
-        // hasExplicitSelection = true means user has selected specific models to show
-        // If the array exists but is empty, treat as "show all" (user cleared selection)
-        const hasExplicitSelection = providerSelectedModels.length > 0;
-        const modelGroups = groupModelsByFamily(models, provider.id);
-        const families = getAllModelFamilies(provider.id);
-        const sortedFamilies = sortModelFamilies(families);
-
-        group.modelFamilies = [];
-
-        // Add predefined families first
-        for (const family of sortedFamilies) {
-          const modelNames = modelGroups.get(family.id) ?? [];
-          if (modelNames.length === 0) continue;
-
-          // Filter to selected models only, OR show all if nothing selected
-          const selectedModelNames = hasExplicitSelection
-            ? modelNames.filter((m: string) => providerSelectedModels.includes(m))
-            : modelNames;
-          if (selectedModelNames.length === 0) continue;
-
-          const familyModels: Array<[string, UsageWindow]> = [];
-          for (const modelName of selectedModelNames) {
-            const modelUsage = models[modelName] as { windows?: Record<string, UsageWindow> } | undefined;
-            if (modelUsage?.windows) {
-              const windowEntries = Object.entries(modelUsage.windows);
-              if (windowEntries.length > 0) {
-                familyModels.push([modelName, windowEntries[0][1]]);
-              }
-            }
-          }
-
-          if (familyModels.length > 0) {
-            group.modelFamilies.push({
-              familyId: family.id,
-              familyLabel: family.label,
-              models: familyModels,
-            });
-          }
-        }
-
-        // Add "Other" family for remaining models
-        const otherModelNames = modelGroups.get(null) ?? [];
-        const selectedOtherModels = hasExplicitSelection
-          ? otherModelNames.filter((m: string) => providerSelectedModels.includes(m))
-          : otherModelNames;
-        if (selectedOtherModels.length > 0) {
-          const otherModels: Array<[string, UsageWindow]> = [];
-          for (const modelName of selectedOtherModels) {
-            const modelUsage = models[modelName] as { windows?: Record<string, UsageWindow> } | undefined;
-            if (modelUsage?.windows) {
-              const windowEntries = Object.entries(modelUsage.windows);
-              if (windowEntries.length > 0) {
-                otherModels.push([modelName, windowEntries[0][1]]);
-              }
-            }
-          }
-          if (otherModels.length > 0) {
-            group.modelFamilies.push({
-              familyId: null,
-              familyLabel: t('header.services.modelFamily.other'),
-              models: otherModels,
-            });
-          }
-        }
-      }
-
-      if (entries.length > 0 || (group.modelFamilies && group.modelFamilies.length > 0) || group.error) {
-        groups.push(group);
-      }
-    }
-
-    return groups;
-  }, [dropdownProviderIds, quotaResults, selectedModels, t]);
-  const hasRateLimits = rateLimitGroups.length > 0;
   React.useEffect(() => {
     void loadQuotaSettings();
   }, [loadQuotaSettings]);
-  const handleDisplayModeChange = React.useCallback(async (mode: 'usage' | 'remaining') => {
-    setQuotaDisplayMode(mode);
-    try {
-      await updateDesktopSettings({ usageDisplayMode: mode });
-    } catch (error) {
-      console.warn('Failed to update usage display mode:', error);
-    }
-  }, [setQuotaDisplayMode]);
 
-  const handleUsageRefresh = React.useCallback(() => {
-    if (isUsageRefreshSpinning) return;
-    setIsUsageRefreshSpinning(true);
-    const minSpinPromise = new Promise(resolve => setTimeout(resolve, 500));
-    Promise.all([fetchAllQuotas(), minSpinPromise]).finally(() => {
-      setIsUsageRefreshSpinning(false);
-    });
-  }, [fetchAllQuotas, isUsageRefreshSpinning]);
 
   const currentSessionSnapshot = currentSessionId
     ? currentGlobalSession ?? null
@@ -1277,6 +867,10 @@ export const Header: React.FC<HeaderProps> = ({
     }
     return normalize(state.newSessionDraft.bootstrapPendingDirectory ?? state.newSessionDraft.directoryOverride ?? '');
   });
+  const draftTarget = useSessionUIStore((state) => state.newSessionDraft.target);
+  const draftProjectId = useSessionUIStore((state) => state.newSessionDraft.selectedProjectId);
+  const selectedSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
+  const homeDirectory = useAppDirectoryStore((state) => state.homeDirectory);
 
   const openDirectory = React.useMemo(() => {
     return worktreeDirectory || sessionDirectory || draftDirectory;
@@ -1305,6 +899,15 @@ export const Header: React.FC<HeaderProps> = ({
 
   const gitBranchForDirectory = useGitBranchLabel(openDirectory || null);
   const currentBranchLabel = gitBranchForDirectory || currentSessionWorktreeBranch || catalogWorktreeBranch;
+  const isChatContext = isNewSessionDraftOpen
+    ? draftTarget === 'chat'
+    : isChatDirectoryForHome(sessionDirectory || selectedSessionDirectory, homeDirectory);
+
+  // Whether the title carries a second line under it. Hoisted because the
+  // session menu's vertical alignment depends on the same answer.
+  const showHeaderMetaRow = !isChatContext && !workStatusPanelVisible
+    && Boolean(activeProjectLabel || currentBranchLabel || (!isNewSessionDraftOpen && worktreeBadgeKind));
+
 
   const currentSessionTitle = React.useMemo(() => {
     if (!currentSessionId) {
@@ -1322,24 +925,36 @@ export const Header: React.FC<HeaderProps> = ({
   const deleteSessions = useSessionUIStore((state) => state.deleteSessions);
   const [isRenamingHeaderSession, setIsRenamingHeaderSession] = React.useState(false);
   const [isHeaderSessionMenuOpen, setIsHeaderSessionMenuOpen] = React.useState(false);
-  const pendingHeaderRenameRef = React.useRef(false);
+  /** Session id whose rename was requested from a tab menu; survives the
+      activation that a Rename on an inactive tab performs first. */
+  const pendingHeaderRenameRef = React.useRef<string | null>(null);
   const [headerSessionTitleDraft, setHeaderSessionTitleDraft] = React.useState('');
-  const [pendingHeaderRetentionAction, setPendingHeaderRetentionAction] = React.useState<'archive' | 'delete' | null>(null);
+  const [pendingHeaderRetentionAction, setPendingHeaderRetentionAction] = React.useState<{ action: 'archive' | 'delete'; sessionId: string } | null>(null);
   const headerRenameFormRef = React.useRef<HTMLFormElement | null>(null);
 
-  React.useEffect(() => {
-    pendingHeaderRenameRef.current = false;
-    setIsHeaderSessionMenuOpen(false);
-    setIsRenamingHeaderSession(false);
-    setHeaderSessionTitleDraft('');
-    setPendingHeaderRetentionAction(null);
-  }, [currentSessionId]);
 
   const beginHeaderSessionRename = React.useCallback(() => {
     if (!currentSessionId) return;
     setHeaderSessionTitleDraft(currentSession?.title?.trim() || currentSessionTitle);
     setIsRenamingHeaderSession(true);
   }, [currentSession?.title, currentSessionId, currentSessionTitle]);
+
+  const beginHeaderSessionRenameRef = React.useRef(beginHeaderSessionRename);
+  beginHeaderSessionRenameRef.current = beginHeaderSessionRename;
+
+  React.useEffect(() => {
+    setIsHeaderSessionMenuOpen(false);
+    setPendingHeaderRetentionAction(null);
+    if (currentSessionId && pendingHeaderRenameRef.current === currentSessionId) {
+      // Rename on an inactive tab activates it first; the switch itself is
+      // when the rename can begin (the menu may close before or after it).
+      pendingHeaderRenameRef.current = null;
+      beginHeaderSessionRenameRef.current();
+      return;
+    }
+    setIsRenamingHeaderSession(false);
+    setHeaderSessionTitleDraft('');
+  }, [currentSessionId]);
 
   const saveHeaderSessionRename = React.useCallback(async () => {
     if (!currentSessionId) return;
@@ -1362,18 +977,18 @@ export const Header: React.FC<HeaderProps> = ({
     return () => document.removeEventListener('mousedown', handleDocumentMouseDown);
   }, [isRenamingHeaderSession, saveHeaderSessionRename]);
 
-  const copyCurrentSessionId = React.useCallback(() => {
-    if (!currentSessionId) return;
-    void copyTextToClipboard(currentSessionId).then((result) => {
+  const copySessionIdFor = React.useCallback((sessionId: string) => {
+    if (!sessionId) return;
+    void copyTextToClipboard(sessionId).then((result) => {
       toast[result.ok ? 'success' : 'error'](t(result.ok
         ? 'sessions.sidebar.session.copyId.success'
         : 'sessions.sidebar.session.copyId.error'));
     }).catch(() => toast.error(t('sessions.sidebar.session.copyId.error')));
-  }, [currentSessionId, t]);
+  }, [t]);
 
-  const shareCurrentSession = React.useCallback(async () => {
-    if (!currentSessionId) return;
-    const result = await shareSession(currentSessionId);
+  const shareSessionFor = React.useCallback(async (sessionId: string) => {
+    if (!sessionId) return;
+    const result = await shareSession(sessionId);
     if (result?.share?.url) {
       const copied = await copyTextToClipboard(result.share.url);
       toast[copied.ok ? 'success' : 'warning'](t('sessions.sidebar.session.share.successTitle'), {
@@ -1384,25 +999,24 @@ export const Header: React.FC<HeaderProps> = ({
       return;
     }
     toast.error(t('sessions.sidebar.session.share.error'));
-  }, [currentSessionId, shareSession, t]);
+  }, [shareSession, t]);
 
-  const copyCurrentSessionShareUrl = React.useCallback(() => {
-    const shareUrl = currentSession?.shareUrl;
+  const copySessionShareUrl = React.useCallback((shareUrl: string | null | undefined) => {
     if (!shareUrl) return;
     void copyTextToClipboard(shareUrl).then((result) => {
       toast[result.ok ? 'success' : 'error'](t(result.ok
         ? 'sessions.sidebar.session.menu.copied'
         : 'sessions.sidebar.session.share.copyUrlError'));
     }).catch(() => toast.error(t('sessions.sidebar.session.share.copyUrlError')));
-  }, [currentSession?.shareUrl, t]);
+  }, [t]);
 
-  const unshareCurrentSession = React.useCallback(async () => {
-    if (!currentSessionId) return;
-    const result = await unshareSession(currentSessionId);
+  const unshareSessionFor = React.useCallback(async (sessionId: string) => {
+    if (!sessionId) return;
+    const result = await unshareSession(sessionId);
     toast[result ? 'success' : 'error'](t(result
       ? 'sessions.sidebar.session.unshare.success'
       : 'sessions.sidebar.session.unshare.error'));
-  }, [currentSessionId, t, unshareSession]);
+  }, [t, unshareSession]);
 
   const exportCurrentSession = React.useCallback(async () => {
     if (!currentSessionId || !openDirectory) {
@@ -1445,19 +1059,22 @@ export const Header: React.FC<HeaderProps> = ({
       }
     }
 
-    startSessionTreeWorktreeMove({
+    requestSessionTreeMove({
+      kind: 'quick',
       root,
       descendants,
       sourceDirectory: sessionDirectory,
-      successMessage: t('sessions.sidebar.session.moveToWorktree.success'),
-      failureMessage: t('sessions.sidebar.session.moveToWorktree.failed'),
+      messages: buildSessionTreeMoveMessages(t, {
+        success: 'sessions.sidebar.session.moveToWorktree.success',
+        failure: 'sessions.sidebar.session.moveToWorktree.failed',
+      }),
     });
   }, [currentSessionId, isCurrentSessionActive, isCurrentSessionMovingToWorktree, sessionDirectory, t]);
 
   const confirmHeaderRetentionAction = React.useCallback(async () => {
-    if (!currentSessionId || !pendingHeaderRetentionAction) return;
+    if (!pendingHeaderRetentionAction) return;
     const sessions = useGlobalSessionsStore.getState().activeSessions;
-    const ids = [currentSessionId];
+    const ids = [pendingHeaderRetentionAction.sessionId];
     for (let index = 0; index < ids.length; index += 1) {
       const parentId = ids[index];
       for (const session of sessions) {
@@ -1466,7 +1083,7 @@ export const Header: React.FC<HeaderProps> = ({
         }
       }
     }
-    const action = pendingHeaderRetentionAction;
+    const action = pendingHeaderRetentionAction.action;
     setPendingHeaderRetentionAction(null);
     const result = action === 'archive' ? await archiveSessions(ids) : await deleteSessions(ids);
     const failedIds = result.failedIds;
@@ -1479,7 +1096,7 @@ export const Header: React.FC<HeaderProps> = ({
     toast.success(t(action === 'archive'
       ? 'sessions.sidebar.session.archive.success'
       : 'sessions.sidebar.session.delete.success'));
-  }, [archiveSessions, currentSessionId, deleteSessions, pendingHeaderRetentionAction, t]);
+  }, [archiveSessions, deleteSessions, pendingHeaderRetentionAction, t]);
 
   // Full-page surfaces (Scheduled, Archive, Worktrees, Multi-run) replace the
   // chat area; while one is open the header shows the surface identity
@@ -1539,25 +1156,15 @@ export const Header: React.FC<HeaderProps> = ({
     };
   }, [actionDirectory, activeProjectRef]);
 
-  const projectActionsContext = React.useMemo(() => {
-    if (activeProjectRef && actionDirectory) {
-      return { projectRef: activeProjectRef, directory: actionDirectory };
-    }
-    return lastProjectActionsContextRef.current;
-  }, [actionDirectory, activeProjectRef]);
 
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
   const isSessionPlanAvailable = useSessionUIStore((state) => state.isSessionPlanAvailable);
   const planTabAvailable = planModeEnabled && currentSessionId ? isSessionPlanAvailable(currentSessionId) : false;
-  const showPlanTab = planTabAvailable;
   const lastPlanSessionKeyRef = React.useRef<string>('');
 
   // Reset plan tab availability when session changes
   React.useEffect(() => {
     if (!planModeEnabled) {
-      if (useUIStore.getState().activeMainTab === 'plan') {
-        useUIStore.getState().setActiveMainTab('chat');
-      }
       return;
     }
 
@@ -1566,11 +1173,6 @@ export const Header: React.FC<HeaderProps> = ({
     const sessionKey = `${currentSessionId || 'none'}:${sessionDirectory || 'none'}:${currentSession?.created || 0}:${currentSession?.slug || 'none'}`;
     if (lastPlanSessionKeyRef.current !== sessionKey) {
       lastPlanSessionKeyRef.current = sessionKey;
-    }
-
-    // If plan is not available but user is on plan tab, switch them back to chat
-    if (!planTabAvailable && useUIStore.getState().activeMainTab === 'plan') {
-      useUIStore.getState().setActiveMainTab('chat');
     }
   }, [
     planModeEnabled,
@@ -1613,43 +1215,18 @@ export const Header: React.FC<HeaderProps> = ({
     }
   }, [isSwitchingGitHubAccount, runtimeApis.github, setGitHubAuthStatus]);
 
-  const blurActiveElement = React.useCallback(() => {
-    if (typeof document === 'undefined') {
-      return;
-    }
 
-    const active = document.activeElement as HTMLElement | null;
-    if (!active) {
-      return;
-    }
-
-    const tagName = active.tagName;
-    const isInput = tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT';
-
-    if (isInput || active.isContentEditable) {
-      active.blur();
-    }
-  }, []);
-
-  const handleOpenSessionSwitcher = React.useCallback(() => {
-    if (isMobile) {
-      blurActiveElement();
-      setSessionSwitcherOpen(!isSessionSwitcherOpen);
-      return;
-    }
-    toggleSidebar();
-  }, [blurActiveElement, isMobile, isSessionSwitcherOpen, setSessionSwitcherOpen, toggleSidebar]);
 
   const handleOpenDraftMiniChat = React.useCallback(() => {
     void invokeDesktop('desktop_open_draft_mini_chat_window', {
-      directory: normalize(openDirectory || activeProject?.path || ''),
-      projectId: activeProject?.id ?? null,
+      directory: isChatContext ? '' : draftDirectory,
+      projectId: isChatContext ? null : draftProjectId,
       apiBaseUrl: getRuntimeApiBaseUrl(),
       clientToken: getRuntimeBearerTokenSync(),
     }).catch((error) => {
       console.warn('[header] failed to open draft mini chat window', error);
     });
-  }, [activeProject?.id, activeProject?.path, openDirectory]);
+  }, [draftDirectory, draftProjectId, isChatContext]);
 
   const handleOpenCurrentMiniChat = React.useCallback(() => {
     if (isNewSessionDraftOpen) {
@@ -1662,13 +1239,13 @@ export const Header: React.FC<HeaderProps> = ({
     }
     void invokeDesktop('desktop_open_session_mini_chat_window', {
       sessionId: currentSessionId,
-      directory: normalize(openDirectory || activeProject?.path || ''),
+      directory: sessionDirectory || normalize(selectedSessionDirectory || '') || worktreeDirectory,
       apiBaseUrl: getRuntimeApiBaseUrl(),
       clientToken: getRuntimeBearerTokenSync(),
     }).catch((error) => {
       console.warn('[header] failed to open session mini chat window', error);
     });
-  }, [activeProject?.path, currentSessionId, handleOpenDraftMiniChat, isNewSessionDraftOpen, openDirectory]);
+  }, [currentSessionId, handleOpenDraftMiniChat, isNewSessionDraftOpen, selectedSessionDirectory, sessionDirectory, worktreeDirectory]);
 
   const handleOpenContextPanel = React.useCallback(() => {
     const directory = normalize(openDirectory || '');
@@ -1688,64 +1265,8 @@ export const Header: React.FC<HeaderProps> = ({
   const isContextPanelActive = activeContextMode === 'context';
 
 
-  const handleOpenContextPlan = React.useCallback(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return;
-    }
-
-    const panelState = useUIStore.getState().contextPanelByDirectory[directory];
-    if (getActiveContextMode(panelState) === 'plan') {
-      closeContextPanel(directory);
-      return;
-    }
-
-    openContextPlan(directory);
-  }, [closeContextPanel, openContextPlan, openDirectory]);
-
 
   const desktopHeaderIconButtonClass = DESKTOP_HEADER_ICON_BUTTON_CLASS;
-  const mobileHeaderIconButtonClass = MOBILE_HEADER_ICON_BUTTON_CLASS;
-  const mobileActiveHeaderItem = React.useMemo(() => {
-    if (isMobileRateLimitsOpen) {
-      return 'services';
-    }
-    if (leftDrawerOpen) {
-      return 'sessions';
-    }
-    if (rightDrawerOpen) {
-      return 'git';
-    }
-    return activeMainTab;
-  }, [activeMainTab, isMobileRateLimitsOpen, leftDrawerOpen, rightDrawerOpen]);
-
-  const closeMobileHeaderPanels = React.useCallback(() => {
-    setIsMobileRateLimitsOpen(false);
-    if (leftDrawerOpen && onToggleLeftDrawer) {
-      onToggleLeftDrawer();
-    }
-    if (rightDrawerOpen && onToggleRightDrawer) {
-      onToggleRightDrawer();
-    }
-    if (!onToggleLeftDrawer && isSessionSwitcherOpen) {
-      setSessionSwitcherOpen(false);
-    }
-  }, [isSessionSwitcherOpen, leftDrawerOpen, onToggleLeftDrawer, onToggleRightDrawer, rightDrawerOpen, setSessionSwitcherOpen]);
-
-  const handleMobileLeftDrawerToggle = React.useCallback(() => {
-    if (!leftDrawerOpen) {
-      setIsMobileRateLimitsOpen(false);
-    }
-    onToggleLeftDrawer?.();
-  }, [leftDrawerOpen, onToggleLeftDrawer]);
-
-  const handleMobileRightDrawerToggle = React.useCallback(() => {
-    if (!rightDrawerOpen) {
-      setIsMobileRateLimitsOpen(false);
-    }
-    onToggleRightDrawer?.();
-  }, [onToggleRightDrawer, rightDrawerOpen]);
-
   // Left padding the header needs to clear the OS window controls (macOS
   // traffic lights / window-controls-overlay). When the sidebar is open this
   // space is owned by the sidebar's top strip instead, so the header drops back
@@ -1910,268 +1431,34 @@ export const Header: React.FC<HeaderProps> = ({
     }
   }, [isDesktopApp]);
 
-  const tabs: TabConfig[] = React.useMemo(() => {
-    if (isMobile) {
-      const base: TabConfig[] = [
-        { id: 'chat', label: t('layout.mainTab.chat'), icon: "chat-4" },
-      ];
-
-      if (showPlanTab) {
-        base.push({ id: 'plan', label: t('layout.mainTab.plan'), icon: "file-text" });
-      }
-
-      base.push(
-        { id: 'diff', label: t('layout.mainTab.diff'), icon: 'diff' },
-        { id: 'files', label: t('layout.mainTab.files'), icon: "folder-6" },
-        { id: 'terminal', label: t('layout.mainTab.terminal'), icon: "terminal-box" },
-        { id: 'context', label: t('layout.mainTab.context'), icon: "file-list-2" },
-        { id: 'diagram', label: t('layout.mainTab.diagram'), icon: 'file' },
-      );
-
-      return base;
-    }
-
-    // Desktop: no tabs in header
-    return [];
-  }, [isMobile, showPlanTab, t]);
-
-  const shortcutLabel = React.useCallback((actionId: string) => {
+  const shortcutLabel = React.useCallback((actionId: ShortcutActionId) => {
     return formatShortcutForDisplay(getEffectiveShortcutCombo(actionId, shortcutOverrides));
   }, [shortcutOverrides]);
 
-  useEffect(() => {
-    // Project actions may intentionally promote the terminal to the desktop
-    // main view, and diagram clicks open the diagram viewer; every other
-    // legacy main tab now lives in the context panel on desktop.
-    if (!isMobile && activeMainTab !== 'chat' && activeMainTab !== 'terminal' && activeMainTab !== 'diagram') {
-      setActiveMainTab('chat');
-    }
-  }, [activeMainTab, isMobile, setActiveMainTab]);
 
-  const servicesTabs = React.useMemo(() => {
-    const base: Array<{ value: 'instance' | 'usage' | 'mcp'; label: string; icon: React.ReactNode }> = [];
-    if (isDesktopApp) {
-      base.push({ value: 'instance', label: t('layout.services.instance'), icon: <Icon name="server" className="h-3.5 w-3.5" /> });
-    }
-    base.push(
-      { value: 'usage', label: t('layout.services.usage'), icon: <Icon name="timer" className="h-3.5 w-3.5" /> },
-      { value: 'mcp', label: 'MCP', icon: <McpIcon className="h-3.5 w-3.5" /> }
-    );
-    return base;
-  }, [isDesktopApp, t]);
 
-  const servicesTabItems = React.useMemo(() => {
-    return servicesTabs.map((tab) => ({
-      id: tab.value,
-      label: tab.label,
-      icon: tab.icon,
-    }));
-  }, [servicesTabs]);
-
-  const showDevShutdown = React.useMemo(() => {
-    if (typeof window === 'undefined') return false;
-    if (isDesktopApp) return false;
-    if (isVSCode) return false;
-    const host = window.location.hostname;
-    return host === 'localhost' || host === '127.0.0.1' || host === '::1';
-  }, [isDesktopApp, isVSCode]);
-
-  const handleDevShutdown = React.useCallback(async () => {
-    if (isDevShutdownInFlight) return;
-    setIsDevShutdownInFlight(true);
-    setIsDesktopServicesOpen(false);
-
-    const previewUrls: string[] = [];
-    let shutdownRequested = false;
-    try {
-      try {
-        for (const [, dirState] of useTerminalStore.getState().sessions.entries()) {
-          for (const tab of dirState.tabs) {
-            if (tab.previewUrl) {
-              previewUrls.push(tab.previewUrl);
-            }
-          }
-        }
-      } catch {
-        // ignore
-      }
-
-      try {
-        // Ensure preview/dev terminals don't linger.
-        await runtimeApis.terminal.forceKill?.({});
-      } catch {
-        // ignore
-      }
-
-      try {
-        const devRes = await runtimeFetch('/api/system/dev-shutdown', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ previewUrls }),
-        });
-        if (devRes.ok) {
-          shutdownRequested = true;
-        } else {
-          const shutdownRes = await runtimeFetch('/api/system/shutdown', { method: 'POST' });
-          shutdownRequested = shutdownRes.ok;
-        }
-      } catch {
-        // ignore
-      }
-    } finally {
-      if (!shutdownRequested) {
-        setIsDevShutdownInFlight(false);
-      }
-    }
-  }, [isDevShutdownInFlight, runtimeApis.terminal, setIsDesktopServicesOpen]);
-
-  const quotaDisplayTabs = React.useMemo(() => {
-    return [
-      { value: 'usage' as const, label: t('header.services.used') },
-      { value: 'remaining' as const, label: t('header.services.remaining') },
-    ];
-  }, [t]);
-
-  const quotaDisplayTabItems = React.useMemo(() => {
-    return quotaDisplayTabs.map((tab) => ({ id: tab.value, label: tab.label }));
-  }, [quotaDisplayTabs]);
-
-  const mobileServicesTabItems = React.useMemo<SortableTabsStripItem[]>(() => {
-    return [
-      { id: 'usage', label: t('layout.services.usage'), icon: <Icon name="timer" className="h-3.5 w-3.5" /> },
-      { id: 'mcp', label: 'MCP', icon: <McpIcon className="h-3.5 w-3.5" /> },
-    ];
-  }, [t]);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (hasModifier(e) && !e.shiftKey && !e.altKey) {
-        const num = parseInt(e.key, 10);
-        if (num >= 1 && num <= tabs.length) {
-          e.preventDefault();
-          if (isMobile) {
-            blurActiveElement();
-            closeMobileHeaderPanels();
-          }
-          setActiveMainTab(tabs[num - 1].id);
-        }
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [blurActiveElement, closeMobileHeaderPanels, isMobile, setActiveMainTab, tabs]);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const toggleServicesCombo = getEffectiveShortcutCombo('toggle_services_menu', shortcutOverrides);
-      if (eventMatchesShortcut(e, toggleServicesCombo)) {
-        e.preventDefault();
-
-        if (isDesktopServicesOpen) {
-          setIsDesktopServicesOpen(false);
-        } else {
-          setIsDesktopServicesOpen(true);
-          void refreshCurrentInstanceLabel();
-          if (desktopServicesTab === 'usage' && quotaResults.length === 0) {
-            void fetchAllQuotas();
-          }
-        }
+  useKeybinds({
+    rename_current_session: () => {
+      if (!currentSessionId || isMobile) return false;
+      beginHeaderSessionRename();
+    },
+    toggle_services_menu: () => {
+      if (isDesktopServicesOpen) {
+        setIsDesktopServicesOpen(false);
         return;
       }
-
-      const cycleServicesCombo = getEffectiveShortcutCombo('cycle_services_tab', shortcutOverrides);
-      if (eventMatchesShortcut(e, cycleServicesCombo)) {
-        e.preventDefault();
-
-        const tabValues = servicesTabs.map((tab) => tab.value) as Array<'instance' | 'usage' | 'mcp'>;
-        if (tabValues.length === 0) {
-          return;
-        }
-
-        const currentIndex = tabValues.indexOf(desktopServicesTab);
-        const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % tabValues.length;
-        const nextTab = tabValues[nextIndex];
-        setDesktopServicesTab(nextTab);
-        setIsDesktopServicesOpen(true);
-        void refreshCurrentInstanceLabel();
-        if (nextTab === 'usage' && quotaResults.length === 0) {
-          void fetchAllQuotas();
-        }
-        return;
-      }
-
-      const toggleContextPlanCombo = getEffectiveShortcutCombo('toggle_context_plan', shortcutOverrides);
-      if (eventMatchesShortcut(e, toggleContextPlanCombo)) {
-        e.preventDefault();
-        handleOpenContextPlan();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [
-    shortcutOverrides,
-    isDesktopServicesOpen,
-    desktopServicesTab,
-    servicesTabs,
-    quotaResults.length,
-    fetchAllQuotas,
-    refreshCurrentInstanceLabel,
-    handleOpenContextPlan,
-  ]);
-
-  const renderTab = (tab: TabConfig) => {
-    const isActive = activeMainTab === tab.id;
-    const isDiffTab = tab.icon === 'diff';
-    const tabIconName = isDiffTab ? null : (tab.icon as IconName);
-    const isChatTab = tab.id === 'chat';
-
-    const renderIcon = (iconSize: number) => {
-      if (isDiffTab) {
-        return <DiffIcon size={iconSize} />;
-      }
-      return tabIconName ? <Icon name={tabIconName} className={`h-${iconSize/4} w-${iconSize/4}`} /> : null;
-    };
-
-    const tabButton = (
-      <button
-        type="button"
-        onClick={() => setActiveMainTab(tab.id)}
-          className={cn(
-            'relative flex h-8 items-center gap-2 px-3 rounded-lg typography-ui-label font-medium transition-colors',
-            isActive
-              ? 'app-region-no-drag bg-interactive-selection text-interactive-selection-foreground shadow-none'
-              : 'app-region-no-drag text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-            isChatTab && !isMobile && 'min-w-[100px] justify-center'
-          )}
-        aria-label={tab.label}
-        aria-selected={isActive}
-        role="tab"
-      >
-        {isMobile ? (
-          renderIcon(20)
-        ) : (
-          <>
-            {renderIcon(16)}
-            <span className="header-tab-label">{tab.label}</span>
-          </>
-        )}
-
-        {tab.badge !== undefined && tab.badge > 0 && (
-          <span className="header-tab-badge typography-micro text-status-info font-medium">
-            {tab.badge}
-          </span>
-        )}
-      </button>
-    );
-
-    return <React.Fragment key={tab.id}>{tabButton}</React.Fragment>;
-  };
+      setIsDesktopServicesOpen(true);
+      void refreshCurrentInstanceLabel();
+    },
+  });
 
   const desktopSidebarActions = (
     <>
       <OpenInAppButton directory={actionDirectory} className="mr-1" />
+      {/* Instances only exist in the desktop app. On web the menu was left
+          holding a single dev-only shutdown action, which is not a reason to
+          keep a dropdown in the header. */}
+      {isDesktopApp ? (
       <DesktopServicesMenu
         isDesktopApp={isDesktopApp}
         currentInstanceLabel={currentInstanceLabel}
@@ -2180,33 +1467,13 @@ export const Header: React.FC<HeaderProps> = ({
         isDesktopServicesOpen={isDesktopServicesOpen}
         setIsDesktopServicesOpen={setIsDesktopServicesOpen}
         refreshCurrentInstanceLabel={refreshCurrentInstanceLabel}
-        desktopServicesTab={desktopServicesTab}
-        setDesktopServicesTab={setDesktopServicesTab}
-        quotaResultsLength={quotaResults.length}
-        fetchAllQuotas={fetchAllQuotas}
-        servicesTabItems={servicesTabItems}
-        quotaLastUpdated={quotaLastUpdated}
-        quotaDisplayMode={quotaDisplayMode}
-        showPredValues={showPredValues}
-        quotaDisplayTabItems={quotaDisplayTabItems}
-        handleDisplayModeChange={handleDisplayModeChange}
-        handleUsageRefresh={handleUsageRefresh}
-        isQuotaLoading={isQuotaLoading}
-        isUsageRefreshSpinning={isUsageRefreshSpinning}
-        hasRateLimits={hasRateLimits}
-        rateLimitGroups={rateLimitGroups}
-        expandedFamilies={expandedFamilies}
-        toggleFamilyExpanded={toggleFamilyExpanded}
         shortcutLabel={shortcutLabel}
-        showDevShutdown={showDevShutdown}
-        isDevShutdownInFlight={isDevShutdownInFlight}
-        onDevShutdown={handleDevShutdown}
         remoteUpdateInfo={remoteUpdateInfo}
         remoteUpdateChecking={remoteUpdateChecking}
         remoteUpdateError={remoteUpdateError}
         onOpenRemoteUpdate={openRemoteInstanceUpdate}
-        timeFormatPreference={timeFormatPreference}
       />
+      ) : null}
       <DesktopGitHubControl
         isMobile={isMobile}
         githubAuthStatus={githubAuthStatus}
@@ -2221,11 +1488,82 @@ export const Header: React.FC<HeaderProps> = ({
 
   const showMiniChatHeaderAction = hasElectronDesktopIPC && (isNewSessionDraftOpen || Boolean(currentSessionId));
 
+  const renderSessionTabMenu = React.useCallback(({ session, isActive, select, closeOtherTabs, components }: SessionTabMenuArgs) => {
+    const { Item, Separator } = components;
+    const shareUrl = session.share?.url ?? null;
+    const canMoveToWorktree = isActive && !isVSCode && !isChatContext && currentSession && !currentSession.parentId;
+    return (
+      <>
+        <Item onClick={() => { if (!isActive) select(); pendingHeaderRenameRef.current = session.id; }}>
+          <Icon name="pencil-ai" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.rename')}
+        </Item>
+        <Item onClick={() => copySessionIdFor(session.id)}>
+          <Icon name="file-copy" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.copyId')}
+        </Item>
+        <Separator />
+        {shareUrl ? (
+          <>
+            <Item onClick={() => copySessionShareUrl(shareUrl)}>
+              <Icon name="file-copy" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.copyLink')}
+            </Item>
+            <Item onClick={() => void unshareSessionFor(session.id)}>
+              <Icon name="link-unlink-m" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.unshare')}
+            </Item>
+          </>
+        ) : (
+          <Item onClick={() => void shareSessionFor(session.id)}>
+            <Icon name="share-2" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.share')}
+          </Item>
+        )}
+        {isActive ? (
+          <Item onClick={() => void exportCurrentSession()}>
+            <Icon name="download" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.exportMarkdown')}
+          </Item>
+        ) : null}
+        {canMoveToWorktree ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="block">
+                <Item
+                  disabled={!sessionDirectory || isCurrentSessionActive || isCurrentSessionMovingToWorktree}
+                  onClick={moveCurrentSessionToWorktree}
+                  className="w-full"
+                >
+                  <Icon name="folder-shared" className="mr-2 size-4" />
+                  {t('sessions.sidebar.session.menu.moveToWorktree')}
+                </Item>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="right" className="max-w-72">
+              {isCurrentSessionMovingToWorktree
+                ? t('sessions.sidebar.session.moveToWorktree.tooltipMoving')
+                : isCurrentSessionActive
+                  ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy')
+                  : t('sessions.sidebar.session.moveToWorktree.tooltip')}
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
+        <Separator />
+        <Item onClick={closeOtherTabs}>
+          <Icon name="close-circle" className="mr-2 size-4" />{t('header.sessionTabs.closeOtherTabs')}
+        </Item>
+        <Separator />
+        <Item onClick={() => setPendingHeaderRetentionAction({ action: 'archive', sessionId: session.id })}>
+          <Icon name="inbox-archive" className="mr-2 size-4" />{t('sessions.sidebar.bulkActions.archive')}
+        </Item>
+        <Item className="text-destructive focus:text-destructive" onClick={() => setPendingHeaderRetentionAction({ action: 'delete', sessionId: session.id })}>
+          <Icon name="delete-bin" className="mr-2 size-4" />{t('sessions.sidebar.bulkActions.delete')}
+        </Item>
+      </>
+    );
+  }, [copySessionIdFor, copySessionShareUrl, currentSession, exportCurrentSession, isChatContext, isCurrentSessionActive, isCurrentSessionMovingToWorktree, isVSCode, moveCurrentSessionToWorktree, sessionDirectory, shareSessionFor, t, unshareSessionFor]);
+
   const renderDesktop = () => (
     <div
       onMouseDown={handleDragStart}
       className={cn(
-        'app-region-drag relative flex h-12 select-none items-center pr-3',
+        'app-region-drag relative flex h-12 select-none items-center',
+        usesFramelessChrome && windowControlsSide === 'right' ? 'pr-0' : 'pr-3',
         macosHeaderSizeClass
       )}
       style={webWindowControlsOverlayStyle}
@@ -2262,7 +1600,7 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             ) : null}
           </div>
-        ) : (
+        ) : (isVSCode || !sessionTabsEnabled) ? (
           <div className="app-region-no-drag mr-3 flex min-w-0 max-w-full items-center gap-0.5 py-0.5 -my-0.5 text-left">
             {!isSidebarOpen ? (
               <SessionSwitcherDropdown align="start">
@@ -2280,6 +1618,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <form
                   ref={headerRenameFormRef}
                   className="flex w-full min-w-0 items-center gap-2 leading-tight"
+                  onPointerDown={(event) => event.stopPropagation()}
                   onSubmit={(event) => {
                     event.preventDefault();
                     void saveHeaderSessionRename();
@@ -2321,7 +1660,7 @@ export const Header: React.FC<HeaderProps> = ({
                   {isNewSessionDraftOpen ? t('sessions.switcher.draftTitle') : currentSessionTitle}
                 </span>
               )}
-              {(activeProjectLabel || currentBranchLabel || (!isNewSessionDraftOpen && worktreeBadgeKind)) ? (
+              {showHeaderMetaRow ? (
                 <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
                   {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
                   {currentBranchLabel ? (
@@ -2342,14 +1681,19 @@ export const Header: React.FC<HeaderProps> = ({
                 </span>
               ) : null}
             </div>
-            <div className="flex h-[18px] shrink-0 items-center justify-center self-start">
+            <div className={cn(
+              'flex h-[18px] shrink-0 items-center justify-center',
+              // Top-aligned only when the title has a metadata line under it;
+              // alone, the title is centred and the button must follow.
+              showHeaderMetaRow ? 'self-start' : 'self-center',
+            )}>
               {currentSessionId && !isNewSessionDraftOpen && !isRenamingHeaderSession ? (
                 <DropdownMenu
                   open={isHeaderSessionMenuOpen}
                   onOpenChange={setIsHeaderSessionMenuOpen}
                   onOpenChangeComplete={(open) => {
-                    if (!open && pendingHeaderRenameRef.current) {
-                      pendingHeaderRenameRef.current = false;
+                    if (!open && pendingHeaderRenameRef.current && pendingHeaderRenameRef.current === currentSessionId) {
+                      pendingHeaderRenameRef.current = null;
                       beginHeaderSessionRename();
                     }
                   }}
@@ -2360,19 +1704,19 @@ export const Header: React.FC<HeaderProps> = ({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="min-w-[190px]">
-                    <DropdownMenuItem onClick={() => { pendingHeaderRenameRef.current = true; }}><Icon name="pencil-ai" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.rename')}</DropdownMenuItem>
-                    <DropdownMenuItem onClick={copyCurrentSessionId}><Icon name="file-copy" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.copyId')}</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { pendingHeaderRenameRef.current = currentSessionId; }}><Icon name="pencil-ai" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.rename')}</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => currentSessionId && copySessionIdFor(currentSessionId)}><Icon name="file-copy" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.copyId')}</DropdownMenuItem>
                     <DropdownMenuSeparator />
                     {currentSession?.shareUrl ? (
                       <>
-                        <DropdownMenuItem onClick={copyCurrentSessionShareUrl}><Icon name="file-copy" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.copyLink')}</DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => void unshareCurrentSession()}><Icon name="link-unlink-m" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.unshare')}</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => copySessionShareUrl(currentSession?.shareUrl)}><Icon name="file-copy" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.copyLink')}</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => { if (currentSessionId) void unshareSessionFor(currentSessionId); }}><Icon name="link-unlink-m" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.unshare')}</DropdownMenuItem>
                       </>
                     ) : (
-                      <DropdownMenuItem onClick={() => void shareCurrentSession()}><Icon name="share-2" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.share')}</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => { if (currentSessionId) void shareSessionFor(currentSessionId); }}><Icon name="share-2" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.share')}</DropdownMenuItem>
                     )}
                     <DropdownMenuItem onClick={() => void exportCurrentSession()}><Icon name="download" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.exportMarkdown')}</DropdownMenuItem>
-                    {!isVSCode && currentSession && !currentSession.parentId ? (
+                    {!isVSCode && !isChatContext && currentSession && !currentSession.parentId ? (
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <span className="block">
@@ -2396,22 +1740,89 @@ export const Header: React.FC<HeaderProps> = ({
                       </Tooltip>
                     ) : null}
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => setPendingHeaderRetentionAction('archive')}><Icon name="inbox-archive" className="mr-2 size-4" />{t('sessions.sidebar.bulkActions.archive')}</DropdownMenuItem>
-                    <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => setPendingHeaderRetentionAction('delete')}><Icon name="delete-bin" className="mr-2 size-4" />{t('sessions.sidebar.bulkActions.delete')}</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { if (currentSessionId) setPendingHeaderRetentionAction({ action: 'archive', sessionId: currentSessionId }); }}><Icon name="inbox-archive" className="mr-2 size-4" />{t('sessions.sidebar.bulkActions.archive')}</DropdownMenuItem>
+                    <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => { if (currentSessionId) setPendingHeaderRetentionAction({ action: 'delete', sessionId: currentSessionId }); }}><Icon name="delete-bin" className="mr-2 size-4" />{t('sessions.sidebar.bulkActions.delete')}</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               ) : null}
             </div>
           </div>
-        )}
-
-        {tabs.length > 0 && (
-          <div className="flex items-center gap-1 rounded-lg bg-[var(--surface-muted)]/50 p-1">
-            {tabs.map((tab) => renderTab(tab))}
+        ) : (
+          <div className="app-region-no-drag flex h-full min-w-0 flex-1 items-center gap-0.5 text-left">
+            {!isSidebarOpen ? (
+              <SessionSwitcherDropdown align="start">
+                <button
+                  type="button"
+                  className={desktopHeaderIconButtonClass}
+                  aria-label={t('sessions.switcher.openAria')}
+                >
+                  <Icon name="history" className="h-[18px] w-[18px]" />
+                </button>
+              </SessionSwitcherDropdown>
+            ) : null}
+            <SessionTabsStrip
+              renderMenu={renderSessionTabMenu}
+              suppressActiveTabControls={isRenamingHeaderSession}
+              onMenuOpenChangeComplete={(open) => {
+                if (!open && pendingHeaderRenameRef.current && pendingHeaderRenameRef.current === currentSessionId) {
+                  pendingHeaderRenameRef.current = null;
+                  beginHeaderSessionRename();
+                }
+              }}
+            >
+            <div className="flex min-w-0 flex-col justify-center">
+              {isRenamingHeaderSession ? (
+                <form
+                  ref={headerRenameFormRef}
+                  className="flex w-full min-w-0 items-center gap-2 leading-tight"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void saveHeaderSessionRename();
+                  }}
+                >
+                  <input
+                    value={headerSessionTitleDraft}
+                    onChange={(event) => setHeaderSessionTitleDraft(event.target.value)}
+                    autoFocus
+                    onKeyDown={(event) => {
+                      event.stopPropagation();
+                      if (event.key === 'Escape') {
+                        setIsRenamingHeaderSession(false);
+                      }
+                    }}
+                    placeholder={t('sessions.sidebar.session.menu.rename')}
+                    className="min-w-0 flex-1 bg-transparent text-[13px] font-medium leading-4 outline-none placeholder:text-muted-foreground"
+                  />
+                  <button
+                    type="submit"
+                    aria-label={t('sessions.sidebar.session.rename.save')}
+                    title={t('sessions.sidebar.session.rename.save')}
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                  >
+                    <Icon name="check" className="size-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsRenamingHeaderSession(false)}
+                    aria-label={t('sessions.sidebar.session.rename.cancel')}
+                    title={t('sessions.sidebar.session.rename.cancel')}
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                  >
+                    <Icon name="close" className="size-4" />
+                  </button>
+                </form>
+              ) : (
+                <span className="block overflow-hidden whitespace-nowrap text-[13px] font-medium leading-4 text-foreground max-w-full">
+                  {isNewSessionDraftOpen ? t('sessions.switcher.draftTitle') : currentSessionTitle}
+                </span>
+              )}
+            </div>
+            </SessionTabsStrip>
           </div>
         )}
 
-        <div className="flex-1" />
+        {activeSurfaceHeader || isVSCode || !sessionTabsEnabled ? <div className="flex-1" /> : null}
 
         <div className="flex shrink-0 items-center gap-1">
           {showDesktopHeaderContextUsage && stableDesktopContextUsage ? (
@@ -2431,6 +1842,7 @@ export const Header: React.FC<HeaderProps> = ({
               percentIconClassName="h-4.5 w-4.5"
             />
           ) : null}
+
           <HeaderIconActionButton
             visible={showMiniChatHeaderAction}
             title={isNewSessionDraftOpen ? t('header.actions.newMiniChat') : t('header.actions.openSessionMiniChat')}
@@ -2439,6 +1851,40 @@ export const Header: React.FC<HeaderProps> = ({
             className={cn(desktopHeaderIconButtonClass, 'mr-1')}
             Icon={'picture-in-picture-2'}
           />
+          {!isVSCode ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  data-work-status-toggle="true"
+                  aria-pressed={workStatusToggleActive}
+                  aria-label={t('header.workStatusPanel.toggleAria')}
+                  onClick={handleWorkStatusToggle}
+                  className={cn(
+                    DESKTOP_HEADER_ICON_BUTTON_CLASS,
+                    // Trailing gap before the sidebar actions; it moved here
+                    // with the button when this took the last position.
+                    'mr-1',
+                    // On is the resting state and carries no chrome; off is the
+                    // one worth signalling, so it dims instead of filling.
+                    workStatusToggleActive ? 'text-foreground' : 'text-muted-foreground/50',
+                  )}
+                >
+                  <Icon name="list-indefinite" className="h-[18px] w-[18px]" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {workStatusPanelEnabled && !workStatusPanelFits
+                  ? (workStatusOverlayOpen
+                    ? t('header.workStatusPanel.hide')
+                    : t('header.workStatusPanel.showOverlay'))
+                  : workStatusPanelEnabled
+                    ? t('header.workStatusPanel.hide')
+                    : t('header.workStatusPanel.show')}
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
+
           {desktopSidebarActions}
           <WindowsWindowControls visible={usesFramelessChrome && windowControlsSide === 'right'} position="right" />
         </div>
@@ -2446,434 +1892,10 @@ export const Header: React.FC<HeaderProps> = ({
     </div>
   );
 
-  const renderMobile = () => (
-    <div className="app-region-drag relative flex items-center gap-2 px-3 py-2 select-none">
-      <div className="flex items-center gap-2 shrink-0">
-        {/* Use drawer toggle when onToggleLeftDrawer is provided, otherwise use legacy session switcher */}
-        {onToggleLeftDrawer ? (
-          <button
-            type="button"
-            onClick={handleMobileLeftDrawerToggle}
-            className={cn(
-              mobileHeaderIconButtonClass,
-              mobileActiveHeaderItem === 'sessions' && 'bg-interactive-selection text-interactive-selection-foreground'
-            )}
-            aria-label={leftDrawerOpen ? t('header.actions.closeSessionsAria') : t('header.actions.openSessionsAria')}
-          >
-            <Icon name="layout-left" className="h-5 w-5" />
-          </button>
-        ) : isSessionSwitcherOpen ? (
-          <button
-            type="button"
-            onClick={() => setSessionSwitcherOpen(false)}
-            className="app-region-no-drag h-9 w-9 p-2 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-md active:bg-interactive-active"
-            aria-label={t('header.actions.backAria')}
-          >
-            <Icon name="arrow-left-s" className="h-5 w-5" />
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={handleOpenSessionSwitcher}
-            className="app-region-no-drag h-9 w-9 p-2 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-md active:bg-interactive-active"
-            aria-label={t('header.actions.openSessionsAria')}
-          >
-            <Icon name="play-list-add" className="h-5 w-5" />
-          </button>
-        )}
-
-        {!onToggleLeftDrawer && isSessionSwitcherOpen && (
-          <span className="typography-ui-label font-semibold text-foreground">{t('header.sessions.title')}</span>
-        )}
-      </div>
-
-      {(!isSessionSwitcherOpen || Boolean(onToggleLeftDrawer)) && (
-        <>
-          <div className="app-region-no-drag flex min-w-0 flex-1 items-center">
-            <div className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden scrollbar-hidden touch-pan-x overscroll-x-contain">
-              <div className="flex w-max items-center gap-1 pr-1">
-                <div
-                  className="flex items-center gap-0.5 rounded-lg bg-[var(--surface-muted)]/50 p-0.5"
-                  role="tablist"
-                  aria-label={t('header.navigation.mainAria')}
-                >
-                  {tabs.map((tab) => {
-                    const isActive = activeMainTab === tab.id;
-                    const isDiffTab = tab.icon === 'diff';
-                    const tabIconName = isDiffTab ? null : (tab.icon as IconName);
-                    return (
-                      <Tooltip key={tab.id}>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (isMobile) {
-                                blurActiveElement();
-                                closeMobileHeaderPanels();
-                              }
-                              setActiveMainTab(tab.id);
-                            }}
-                            aria-label={tab.label}
-                            aria-selected={isActive}
-                            role="tab"
-                            className={cn(
-                              mobileHeaderIconButtonClass,
-                              'relative rounded-lg',
-                              mobileActiveHeaderItem === tab.id && 'bg-interactive-selection text-interactive-selection-foreground'
-                            )}
-                          >
-                            {isDiffTab ? (
-                              <DiffIcon className="h-5 w-5" />
-                            ) : tabIconName ? (
-                              <Icon name={tabIconName} className="h-5 w-5" />
-                            ) : null}
-                            {tab.badge !== undefined && tab.badge > 0 && (
-                              <span className="absolute -top-1 -right-1 text-[10px] font-semibold text-primary">
-                                {tab.badge}
-                              </span>
-                            )}
-                            {tab.showDot && (
-                              <span
-                                className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-primary"
-                                aria-label={t('header.changes.availableAria')}
-                              />
-                            )}
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>{tab.label}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1 shrink-0">
-            {projectActionsContext && (
-              <ProjectActionsButton
-                projectRef={projectActionsContext.projectRef}
-                directory={projectActionsContext.directory}
-                compact
-                allowMobile
-                className="h-9"
-              />
-            )}
-
-            {/* Mobile Services Menu (Usage + MCP) */}
-            <DropdownMenu
-              open={isMobileRateLimitsOpen}
-              onOpenChange={(open) => {
-                if (open) {
-                  if (leftDrawerOpen && onToggleLeftDrawer) {
-                    onToggleLeftDrawer();
-                  }
-                  if (rightDrawerOpen && onToggleRightDrawer) {
-                    onToggleRightDrawer();
-                  }
-                }
-                setIsMobileRateLimitsOpen(open);
-                if (open && quotaResults.length === 0) {
-                  fetchAllQuotas();
-                }
-              }}
-            >
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label={t('header.services.viewAria')}
-                      className={cn(
-                        mobileHeaderIconButtonClass,
-                        mobileActiveHeaderItem === 'services' && 'bg-interactive-selection text-interactive-selection-foreground'
-                      )}
-                    >
-                      <Icon name="stack" className="h-5 w-5" />
-                    </button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>{t('header.services.title')}</p>
-                </TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent
-                align="end"
-                sideOffset={0}
-                positionerClassName="!fixed !bottom-0 !left-0 !right-0 !top-[var(--oc-header-height,56px)] !transform-none"
-                className="h-full w-screen max-h-none rounded-none border-0 p-0 pt-1 overflow-hidden"
-              >
-                <div className="flex h-full flex-col bg-[var(--surface-elevated)]">
-                  <div className="sticky top-0 z-20 bg-[var(--surface-elevated)] px-2 py-px">
-                    <div className="flex items-center justify-between gap-2 px-3 py-0">
-                      <div className="h-10 min-w-0 flex-1">
-                        <SortableTabsStrip
-                          items={mobileServicesTabItems}
-                          activeId={mobileServicesTab}
-                          onSelect={(tabID) => {
-                            const value = tabID as 'usage' | 'mcp';
-                            setMobileServicesTab(value);
-                            if (value === 'usage' && quotaResults.length === 0) {
-                              fetchAllQuotas();
-                            }
-                          }}
-                          layoutMode="fit"
-                          variant="active-pill"
-                          activePillInsetClassName="gap-0.5 px-px py-0"
-                          activePillButtonClassName="h-8"
-                          className="h-full"
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setIsMobileRateLimitsOpen(false)}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover"
-                        aria-label={t('header.services.closeAria')}
-                      >
-                        <Icon name="close" className="h-5 w-5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {mobileServicesTab === 'mcp' && (
-                    <McpDropdownContent active={isMobileRateLimitsOpen && mobileServicesTab === 'mcp'} />
-                  )}
-
-                  {mobileServicesTab === 'usage' && (
-                    <div className="flex-1 overflow-y-auto overflow-x-hidden pb-[calc(4rem+env(safe-area-inset-bottom))]">
-                      {/* Mobile usage header */}
-                      <div className="border-b border-[var(--interactive-border)]">
-                        <div className="flex items-center justify-between gap-3 px-4 py-3">
-                          <div className="flex flex-col min-w-0 gap-0.5">
-                            <span className="typography-ui-header font-semibold text-foreground">{t('header.services.rateLimits')}</span>
-                            <span className="truncate typography-micro text-muted-foreground">
-                              {formatTime(quotaLastUpdated, timeFormatPreference)}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <div className="flex items-center h-6">
-                              <button
-                                type="button"
-                                onClick={() => handleDisplayModeChange('usage')}
-                                className={cn(
-                                  'typography-ui-label px-1 pb-0.5 transition-colors',
-                                  quotaDisplayMode === 'usage'
-                                    ? 'text-foreground border-b-2 border-[var(--primary-base)]'
-                                    : 'text-muted-foreground hover:text-foreground'
-                                )}
-                              >
-                                {t('header.services.used')}
-                              </button>
-                              <span className="text-muted-foreground typography-ui-label px-0.5">·</span>
-                              <button
-                                type="button"
-                                onClick={() => handleDisplayModeChange('remaining')}
-                                className={cn(
-                                  'typography-ui-label px-1 pb-0.5 transition-colors',
-                                  quotaDisplayMode === 'remaining'
-                                    ? 'text-foreground border-b-2 border-[var(--primary-base)]'
-                                    : 'text-muted-foreground hover:text-foreground'
-                                )}
-                              >
-                                {t('header.services.remaining')}
-                              </button>
-                            </div>
-                            <button
-                              type="button"
-                              className={cn(
-                                'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
-                                'hover:text-foreground hover:bg-interactive-hover',
-                                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
-                              )}
-                              onClick={handleUsageRefresh}
-                              disabled={isQuotaLoading || isUsageRefreshSpinning}
-                              aria-label={t('header.services.refreshRateLimitsAria')}
-                            >
-                              <Icon name="refresh" className={cn('h-4 w-4', isUsageRefreshSpinning && 'animate-spin')} />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-
-                      {!hasRateLimits && (
-                        <div className="px-4 py-6 text-center">
-                          <span className="typography-ui-label text-muted-foreground">{t('header.services.noRateLimits')}</span>
-                        </div>
-                      )}
-
-                      {/* Mobile provider groups */}
-                      <div className="py-1">
-                        {rateLimitGroups.map((group, index) => (
-                          <React.Fragment key={group.providerId}>
-                            {index > 0 ? (
-                              <div className="mx-4 my-1 border-t border-[var(--interactive-border)]" />
-                            ) : null}
-
-                            {/* Provider header */}
-                            <div className="flex items-center gap-2 px-4 py-2">
-                              <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
-                              <span className="typography-ui-label font-medium text-foreground">{group.providerName}</span>
-                            </div>
-
-                            {group.entries.length === 0 && (!group.modelFamilies || group.modelFamilies.length === 0) ? (
-                              <div className="px-4 pb-2">
-                                <span className="typography-ui-label text-muted-foreground">
-                                  {group.error ?? t('header.services.noRateLimitsReported')}
-                                </span>
-                              </div>
-                            ) : (
-                              <div className="space-y-3 px-4 pb-2">
-                                {/* Window-level entries */}
-                                {group.entries.map(([label, window]) => {
-                                  const displayPercent = quotaDisplayMode === 'remaining'
-                                    ? window.remainingPercent
-                                    : window.usedPercent;
-                                  const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds, label);
-                                  const expectedMarker = paceInfo?.dailyAllocationPercent != null
-                                    ? (quotaDisplayMode === 'remaining'
-                                        ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
-                                        : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
-                                    : null;
-                                  const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
-                                  const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference);
-                                  return (
-                                    <div key={`${group.providerId}-${label}`} className="flex flex-col gap-1.5">
-                                      <div className="flex min-w-0 items-center justify-between gap-3">
-                                        <div className="min-w-0 flex items-center gap-2">
-                                          <span className="truncate typography-ui-label text-foreground">{formatWindowLabel(label)}</span>
-                                          {resetLabel ? (
-                                            <span className="truncate typography-micro text-muted-foreground">
-                                              {resetLabel}
-                                            </span>
-                                          ) : null}
-                                        </div>
-                                        <span className="typography-ui-label text-foreground tabular-nums">
-                                          {metricLabel === '-' ? '' : metricLabel}
-                                        </span>
-                                      </div>
-                                      <UsageProgressBar
-                                        percent={displayPercent}
-                                        tonePercent={window.usedPercent}
-                                        className="h-1.5"
-                                        expectedMarkerPercent={expectedMarker}
-                                      />
-                                      {paceInfo && showPredValues ? (
-                                        <PaceIndicator paceInfo={paceInfo} compact />
-                                      ) : null}
-                                    </div>
-                                  );
-                                })}
-
-                                {/* Model family collapsibles */}
-                                {group.modelFamilies && group.modelFamilies.length > 0 && (
-                                  <div className="space-y-0.5">
-                                    {group.modelFamilies.map((family) => {
-                                      const providerExpandedFamilies = expandedFamilies[group.providerId] ?? [];
-                                      const isExpanded = providerExpandedFamilies.includes(family.familyId ?? 'other');
-
-                                      return (
-                                        <Collapsible
-                                          key={family.familyId ?? 'other'}
-                                          open={isExpanded}
-                                          onOpenChange={() => toggleFamilyExpanded(group.providerId, family.familyId ?? 'other')}
-                                        >
-                                          <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md px-1 py-1.5 text-left hover:bg-[var(--interactive-hover)]/50 transition-colors">
-                                            <span className="typography-ui-label font-medium text-foreground">
-                                              {family.familyLabel}
-                                            </span>
-                                            {isExpanded ? (
-                                              <Icon name="arrow-down-s" className="h-4 w-4 text-muted-foreground" />
-                                            ) : (
-                                              <Icon name="arrow-right-s" className="h-4 w-4 text-muted-foreground" />
-                                            )}
-                                          </CollapsibleTrigger>
-                                          <CollapsibleContent>
-                                            <div className="space-y-2.5 pb-1 pl-1 pt-1">
-                                              {family.models.map(([modelName, window]) => {
-                                                const displayPercent = quotaDisplayMode === 'remaining'
-                                                  ? window.remainingPercent
-                                                  : window.usedPercent;
-                                                const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds);
-                                                const expectedMarker = paceInfo?.dailyAllocationPercent != null
-                                                  ? (quotaDisplayMode === 'remaining'
-                                                      ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
-                                                      : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
-                                                  : null;
-                                                const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
-                                                return (
-                                                  <div key={`${group.providerId}-${modelName}`} className="flex flex-col gap-1.5">
-                                                    <div className="flex min-w-0 items-center justify-between gap-3">
-                                                      <span className="truncate typography-micro text-muted-foreground">{getDisplayModelName(modelName)}</span>
-                                                      <span className="typography-ui-label text-foreground tabular-nums">
-                                                        {metricLabel === '-' ? '' : metricLabel}
-                                                      </span>
-                                                    </div>
-                                                    <UsageProgressBar
-                                                      percent={displayPercent}
-                                                      tonePercent={window.usedPercent}
-                                                      className="h-1.5"
-                                                      expectedMarkerPercent={expectedMarker}
-                                                    />
-                                                    {paceInfo && showPredValues ? (
-                                                      <PaceIndicator paceInfo={paceInfo} compact />
-                                                    ) : null}
-                                                  </div>
-                                                );
-                                              })}
-                                            </div>
-                                          </CollapsibleContent>
-                                        </Collapsible>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </React.Fragment>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            {onToggleRightDrawer ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={handleMobileRightDrawerToggle}
-                    className={cn(
-                      mobileHeaderIconButtonClass,
-                      'relative',
-                      mobileActiveHeaderItem === 'git' && 'bg-interactive-selection text-interactive-selection-foreground'
-                    )}
-                    aria-label={rightDrawerOpen ? 'Close git sidebar' : 'Open git sidebar'}
-                  >
-                    <Icon name="layout-right" className="h-5 w-5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>{rightDrawerOpen ? 'Close git sidebar' : 'Open git sidebar'}</p>
-                </TooltipContent>
-              </Tooltip>
-            ) : null}
-          </div>
-        </>
-      )}
-    </div>
-  );
-
-  const headerClassName = cn(
-    'header-safe-area relative z-10 bg-background',
-    // Mobile keeps a full-width divider. On desktop the divider lives on the chat
-    // content wrapper instead, so it doesn't run between the header and the right
-    // sidebar (they read as one continuous surface).
-    isMobile && 'border-b border-border/50'
-  );
+  // The divider lives on the chat content wrapper instead of the header, so it
+  // doesn't run between the header and the right sidebar (they read as one
+  // continuous surface).
+  const headerClassName = 'header-safe-area relative z-10 bg-background';
 
   return (
     <>
@@ -2882,15 +1904,15 @@ export const Header: React.FC<HeaderProps> = ({
         className={headerClassName}
         style={{ ['--padding-scale' as string]: '1' } as React.CSSProperties}
       >
-        {isMobile ? renderMobile() : renderDesktop()}
+        {renderDesktop()}
       </header>
       <Dialog open={pendingHeaderRetentionAction !== null} onOpenChange={(open) => { if (!open) setPendingHeaderRetentionAction(null); }}>
         <DialogContent showCloseButton={false} className="max-w-sm gap-5">
           <DialogHeader>
-            <DialogTitle>{pendingHeaderRetentionAction === 'delete'
+            <DialogTitle>{pendingHeaderRetentionAction?.action === 'delete'
               ? t('sessions.sidebar.dialogs.deleteSession.title')
               : t('sessions.sidebar.dialogs.archiveSession.title')}</DialogTitle>
-            <DialogDescription>{pendingHeaderRetentionAction === 'delete'
+            <DialogDescription>{pendingHeaderRetentionAction?.action === 'delete'
               ? t('sessions.sidebar.dialogs.deleteSession.single', { sessionTitle: currentSessionTitle })
               : t('sessions.sidebar.dialogs.archiveSession.single', { sessionTitle: currentSessionTitle })}</DialogDescription>
           </DialogHeader>
@@ -2899,7 +1921,7 @@ export const Header: React.FC<HeaderProps> = ({
               {t('sessions.sidebar.dialogs.cancel')}
             </Button>
             <Button variant="destructive" size="sm" onClick={() => void confirmHeaderRetentionAction()}>
-              {pendingHeaderRetentionAction === 'delete'
+              {pendingHeaderRetentionAction?.action === 'delete'
                 ? t('sessions.sidebar.bulkActions.delete')
                 : t('sessions.sidebar.bulkActions.archive')}
             </Button>

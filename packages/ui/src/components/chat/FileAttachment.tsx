@@ -2,6 +2,7 @@ import React, { useRef, memo } from 'react';
 import { useInputStore } from '@/sync/input-store';
 import type { AttachedFile } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
@@ -833,7 +834,10 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
                 <button
                   type="button"
                   onClick={() => {
-                    useUIStore.getState().navigateToDiagram(filePath);
+                    const directory = useDirectoryStore.getState().currentDirectory;
+                    if (directory) {
+                      useUIStore.getState().openContextFile(directory, filePath);
+                    }
                   }}
                   className={cn(
                     "flex items-center gap-2 p-2 rounded-lg border border-border/40 bg-muted/10 hover:bg-muted/20 transition-colors text-left cursor-pointer",

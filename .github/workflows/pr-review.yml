@@ -105,8 +105,40 @@ jobs:
 
           echo "safe=true" >> "$GITHUB_OUTPUT"
 
-      - name: Mark review pending
+      - name: Throttle push-burst reviews
+        id: throttle
         if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+        run: |
+          # Manual commands always run; only push-triggered re-reviews are throttled,
+          # so a push burst cannot produce a review per push.
+          if [ "$EVENT_NAME" != "pull_request_target" ] || [ "$EVENT_ACTION" != "synchronize" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          last_review_at="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" --paginate \
+            | jq -r '[.[] | select(.user.login == "openchamber-bot[bot]" and (.body | contains("<!-- oc-review-meta "))) | .created_at] | last // empty')"
+
+          if [ -z "$last_review_at" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          age="$(( $(date +%s) - $(date -d "$last_review_at" +%s) ))"
+          if [ "$age" -lt 900 ]; then
+            echo "Last review was ${age}s ago; skipping push-triggered re-review (15m throttle)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Mark review pending
+        if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && steps.throttle.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
@@ -204,7 +236,7 @@ jobs:
         run: sleep 30
 
       - name: Install opencode
-        if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true'
+        if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && steps.throttle.outputs.skip != 'true'
         run: |
           set -o pipefail
           install_log="$(mktemp)"
@@ -237,16 +269,16 @@ jobs:
           exit "$((curl_status || install_status))"
 
       - name: Record review start
-        if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true'
+        if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && steps.throttle.outputs.skip != 'true'
         id: review-start
         run: echo "started_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 
       - name: Review pull request
-        if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true'
+        if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && steps.throttle.outputs.skip != 'true'
         id: review-run
         env:
           REVIEW_TIMEOUT: 30m
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          ZHIPU_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_URL: ${{ steps.pr.outputs.url }}
@@ -302,7 +334,7 @@ jobs:
 
       - name: Verify and enforce review verdict
         id: verdict
-        if: always() && steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true'
+        if: always() && steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && steps.throttle.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
@@ -388,9 +420,8 @@ jobs:
             fail_automation "Review comment does not identify the expected HEAD."
           fi
 
-          if ! printf '%s' "$body" | grep -Fq '<h3>Applied Repository Guidance</h3>' || \
-             ! printf '%s' "$body" | grep -Fq '| Source | Why applicable | Rules/invariants evaluated |'; then
-            fail_automation "Review comment does not contain the required applied-guidance record."
+          if ! printf '%s' "$body" | grep -Fq '**For the maintainer:**'; then
+            fail_automation "Review comment does not contain the maintainer verdict line."
           fi
 
           expected_marker="<!-- oc-review-meta {\"head\":\"$REVIEW_HEAD_SHA\",\"verdict\":\"$verdict\"} -->"
@@ -424,7 +455,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Mark automation failure
-        if: always() && steps.pr.outputs.draft == 'false' && steps.verdict.outcome != 'success' && steps.safety.outputs.safe != 'false'
+        if: always() && steps.pr.outputs.draft == 'false' && steps.verdict.outcome != 'success' && steps.safety.outputs.safe != 'false' && steps.throttle.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}

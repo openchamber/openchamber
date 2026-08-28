@@ -13,7 +13,6 @@ export type ContextSurfaceId =
   | 'notes'
   | 'context'
   | 'browser'
-  | 'preview'
   | 'chat';
 
 export type ContextSurfaceDescriptor = {
@@ -25,8 +24,8 @@ export type ContextSurfaceDescriptor = {
   /**
    * 'always' surfaces can be opened empty from the rail.
    * 'has-content' surfaces are content-driven: they need an existing tab of
-   * their mode (a preview URL emitted, a split session) and stay hidden on
-   * the rail until one exists.
+   * their mode (a split session, a diff to show) and stay hidden on the rail
+   * until one exists.
    */
   availability: 'always' | 'has-content';
   /** Short tooltip explanation shown on the rail. */
@@ -89,7 +88,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     descriptionKey: 'contextRail.surface.editor.description',
     defaultWidthFraction: 3 / 5,
     mode: 'file',
-    icon: 'braces',
+    icon: 'file-edit',
     labelKey: 'contextPanel.mode.files',
     availability: 'always',
   },
@@ -105,9 +104,12 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
   {
     id: 'notes',
     descriptionKey: 'contextRail.surface.notes.description',
-    defaultWidthFraction: 1 / 3,
+    // As wide as the files surface: this panel now carries a sidebar and a
+    // content column, and a third of the window leaves the content column too
+    // narrow to read a note in.
+    defaultWidthFraction: 3 / 5,
     mode: 'notes',
-    icon: 'sticky-note',
+    icon: 'book-marked',
     labelKey: 'contextRail.surface.notes',
     availability: 'always',
   },
@@ -128,15 +130,6 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     icon: 'global',
     labelKey: 'contextPanel.mode.browser',
     availability: 'always',
-  },
-  {
-    id: 'preview',
-    descriptionKey: 'contextRail.surface.preview.description',
-    defaultWidthFraction: 0.45,
-    mode: 'preview',
-    icon: 'window',
-    labelKey: 'contextPanel.mode.preview',
-    availability: 'has-content',
   },
   {
     id: 'chat',
@@ -194,6 +187,9 @@ export const sortContextSurfaces = (railOrder: readonly string[]): ContextSurfac
 
 type VisibleRailSurfacesOptions = {
   railOrder: readonly string[];
+  /** Surfaces the user chose to hide from the rail (and from the digit
+      shortcuts, which share this filter). */
+  hiddenSurfaces?: readonly string[];
   planModeEnabled: boolean;
   isVSCode: boolean;
   screenWidth: number;
@@ -210,12 +206,23 @@ type VisibleRailSurfacesOptions = {
  */
 export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOptions): ContextSurfaceDescriptor[] => {
   return sortContextSurfaces(options.railOrder).filter((surface) => {
+    if (options.hiddenSurfaces?.includes(surface.id)) {
+      return false;
+    }
     if (surface.id === 'plan' && !options.planModeEnabled) {
       return false;
     }
     // The walkthrough needs room for a stop list beside real code, and its
     // diffs come from OpenChamber's Git routes, which VS Code does not serve.
     if (surface.id === 'walkthrough' && (options.isVSCode || options.screenWidth < WALKTHROUGH_MIN_WIDTH)) {
+      return false;
+    }
+    // VS Code already is an editor with a browser next to it. What OpenChamber
+    // could add there is a bare frame: no annotation, no agent control, no
+    // remote dev servers — all of which need a Chromium host the extension does
+    // not have. Offering the surface anyway would promise the panel people see
+    // on the desktop.
+    if (surface.id === 'browser' && options.isVSCode) {
       return false;
     }
     if (surface.availability === 'has-content') {

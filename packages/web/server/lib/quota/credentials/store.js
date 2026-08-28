@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const MANAGED_QUOTA_PROVIDERS = new Set(['opencode-go', 'ollama-cloud', 'cursor']);
+const MANAGED_QUOTA_PROVIDERS = new Set(['ollama-cloud', 'cursor']);
 
 const credentialsDirectory = () => path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -43,6 +43,16 @@ export const writeQuotaCredential = (providerId, credential) => {
 
 export const deleteQuotaCredential = (providerId) => {
   try { fs.unlinkSync(credentialPath(providerId)); } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+};
+
+// OpenCode Go used to store a browser auth cookie here. Its usage API now uses
+// OpenCode's auth.json API key, so remove the obsolete secret without reading it.
+export const deleteLegacyOpenCodeGoCredential = () => {
+  try {
+    fs.unlinkSync(path.join(credentialsDirectory(), 'opencode-go.json'));
+  } catch (error) {
     if (error?.code !== 'ENOENT') throw error;
   }
 };

@@ -40,7 +40,7 @@ The following functions are exported and used by the web server:
 ### Branch Operations
 - `getBranches(directory)`: Get list of local and remote branches (filtered to active remote branches).
 - `createBranch(directory, branchName, options)`: Create and checkout a new branch.
-- `checkoutBranch(directory, branchName)`: Checkout an existing branch.
+- `checkoutBranch(directory, branchName)`: Checkout an existing branch. A remote-tracking name (`origin/main`, or the `remotes/`-prefixed form) resolves to the local branch of that name, created with `--track` when it does not exist yet, because the branch selector offers remote branches as places to work rather than commits to inspect — a literal checkout of the remote ref would detach HEAD. A local branch whose own name looks like a remote ref wins over that resolution, and anything unresolvable is checked out as requested. The returned `branch` is the branch that was actually checked out, which callers should report instead of the requested name.
 - `deleteBranch(directory, branch, options)`: Delete a branch (supports force flag).
 - `renameBranch(directory, oldName, newName)`: Rename a branch and preserve upstream tracking.
 - `getRemotes(directory)`: Get list of configured remotes.
@@ -51,6 +51,14 @@ The following functions are exported and used by the web server:
 - `createWorktree(directory, input)`: Create a new worktree (supports 'new' and 'existing' modes, upstream setup). After populating the worktree, the repository's `post-checkout` hook runs once with git's standard arguments (null ref as previous HEAD, the checked-out HEAD, and flag `1`) from the worktree directory, mirroring `git worktree add` without `--no-checkout`; a missing or non-executable hook is skipped and a failing hook is logged as a warning, never failing worktree creation or the session bootstrap.
 - `removeWorktree(directory, input)`: Remove a worktree (optionally delete local branch).
 - `isLinkedWorktree(directory)`: Check if directory is a linked worktree (not primary).
+
+### Worktree creation from a GitHub pull request
+The UI provisions `pr-<owner>` via `ensureRemoteName`/`ensureRemoteUrl`
+(HTTPS clone URL preferred over SSH) and checks out
+`remotes/pr-<owner>/<head>`. A missing head URL or unreachable fork fails with
+a clear error before a worktree is kept. If upstream fetch fails during
+bootstrap, tracking is left unset rather than writing `branch.*.remote` /
+`branch.*.merge` for a ref that was never fetched.
 
 ### Commit and Remote Operations
 - `commit(directory, message, options)`: Create a commit from the current index. `options.stageFiles` may be provided with `options.files` by older callers to stage only selected unstaged rows before committing, but the shared Git panel now stages/unstages explicitly before commit.

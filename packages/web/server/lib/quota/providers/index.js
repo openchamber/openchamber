@@ -7,7 +7,7 @@
 
 import { buildResult } from '../utils/index.js';
 
-import * as claude from './claude.js';
+import * as claude from './claude/index.js';
 import * as codex from './codex.js';
 import * as copilot from './copilot.js';
 import * as crof from './crof.js';
@@ -151,6 +151,9 @@ const registry = {
   }
 };
 
+const pendingFetches = new Map();
+
+
 export const listConfiguredQuotaProviders = () => {
   const configured = [];
 
@@ -167,7 +170,7 @@ export const listConfiguredQuotaProviders = () => {
   return configured;
 };
 
-export const fetchQuotaForProvider = async (providerId) => {
+const fetchQuotaForProviderUncoalesced = async (providerId) => {
   const provider = registry[providerId];
 
   if (!provider) {
@@ -191,6 +194,17 @@ export const fetchQuotaForProvider = async (providerId) => {
       error: error instanceof Error ? error.message : 'Request failed'
     });
   }
+};
+
+export const fetchQuotaForProvider = (providerId) => {
+  const existing = pendingFetches.get(providerId);
+  if (existing) return existing;
+
+  const pending = fetchQuotaForProviderUncoalesced(providerId).finally(() => {
+    if (pendingFetches.get(providerId) === pending) pendingFetches.delete(providerId);
+  });
+  pendingFetches.set(providerId, pending);
+  return pending;
 };
 
 export const fetchClaudeQuota = claude.fetchQuota;

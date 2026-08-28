@@ -3,6 +3,8 @@ import { Menu as BaseMenu } from "@base-ui/react/menu"
 
 import { cn } from "@/lib/utils"
 import { Icon } from "@/components/icon/Icon";
+import { shortcutRegistry } from "@/lib/shortcuts";
+import { handleDropdownNavigationKey } from "./dropdown-navigation";
 import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass, dropdownMenuSubTriggerClass } from "./dropdown-menu.styles";
 
 type AsChildProps = { asChild?: boolean };
@@ -13,7 +15,9 @@ type AsChildRenderProps = {
 
 type DropdownPortalContextValue = {
   portalContainer: HTMLElement | null;
+  collisionBoundary: Element | null;
   setPortalContainer: (container: HTMLElement | null) => void;
+  setCollisionBoundary: (boundary: Element | null) => void;
 };
 
 const DropdownPortalContext = React.createContext<DropdownPortalContextValue | null>(null);
@@ -32,18 +36,46 @@ function renderFromAsChild(asChild: boolean | undefined, children: React.ReactNo
   return { children };
 }
 
+type DropdownMenuProps = React.ComponentProps<typeof BaseMenu.Root> & {
+  disableGlobalShortcuts?: boolean;
+};
+
 function DropdownMenu({
+  disableGlobalShortcuts = false,
+  open,
+  defaultOpen,
+  onOpenChange,
   ...props
-}: React.ComponentProps<typeof BaseMenu.Root>) {
+}: DropdownMenuProps) {
   const [portalContainer, setPortalContainer] = React.useState<HTMLElement | null>(null);
+  const [collisionBoundary, setCollisionBoundary] = React.useState<Element | null>(null);
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen ?? false);
+  const isOpen = open ?? uncontrolledOpen;
   const portalContextValue = React.useMemo<DropdownPortalContextValue>(() => ({
     portalContainer,
+    collisionBoundary,
     setPortalContainer,
-  }), [portalContainer]);
+    setCollisionBoundary,
+  }), [collisionBoundary, portalContainer]);
+
+  React.useLayoutEffect(() => {
+    if (!disableGlobalShortcuts || !isOpen) return;
+    return shortcutRegistry.suspend();
+  }, [disableGlobalShortcuts, isOpen]);
+
+  const handleOpenChange: NonNullable<React.ComponentProps<typeof BaseMenu.Root>['onOpenChange']> = (nextOpen, eventDetails) => {
+    if (open === undefined) setUncontrolledOpen(nextOpen);
+    onOpenChange?.(nextOpen, eventDetails);
+  };
 
   return (
     <DropdownPortalContext.Provider value={portalContextValue}>
-      <BaseMenu.Root {...props} />
+      <BaseMenu.Root
+        {...props}
+        defaultOpen={defaultOpen}
+        open={open}
+        onOpenChange={handleOpenChange}
+      />
     </DropdownPortalContext.Provider>
   )
 }
@@ -62,6 +94,7 @@ function DropdownMenuTrigger({
     }
     const element = target instanceof HTMLElement ? target : null;
     portalContext.setPortalContainer(resolveDialogContainer(element));
+    portalContext.setCollisionBoundary(element?.closest('main') ?? null);
   }, [portalContext]);
 
   const r = renderFromAsChild(asChild, children);
@@ -89,6 +122,8 @@ type ContentProps = {
   alignOffset?: number;
   portalToBody?: boolean;
   positionerClassName?: string;
+  constrainToMain?: boolean;
+  collisionAvoidance?: React.ComponentProps<typeof BaseMenu.Positioner>["collisionAvoidance"];
   style?: React.CSSProperties;
   className?: string;
   children?: React.ReactNode;
@@ -103,13 +138,27 @@ function DropdownMenuContent({
   alignOffset,
   portalToBody = false,
   positionerClassName,
+  constrainToMain = false,
+  collisionAvoidance,
   style,
   children,
   onCloseAutoFocus,
+  onKeyDown,
   ...props
 }: ContentProps) {
   const portalContext = React.useContext(DropdownPortalContext);
   void onCloseAutoFocus
+
+  const handleKeyDown: NonNullable<React.ComponentProps<typeof BaseMenu.Popup>['onKeyDown']> = (event) => {
+    onKeyDown?.(event);
+    handleDropdownNavigationKey(event, (navigationKey) => {
+      event.currentTarget.dispatchEvent(new KeyboardEvent('keydown', {
+        key: navigationKey,
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+  };
 
   return (
     <BaseMenu.Portal container={portalToBody ? undefined : portalContext?.portalContainer || undefined}>
@@ -118,12 +167,13 @@ function DropdownMenuContent({
         align={align}
         side={side}
         alignOffset={alignOffset}
+        collisionBoundary={constrainToMain ? portalContext?.collisionBoundary ?? undefined : undefined}
+        collisionAvoidance={collisionAvoidance}
         className={cn("app-region-no-drag z-50", positionerClassName)}
       >
         <BaseMenu.Popup
           data-slot="dropdown-menu-content"
           style={{
-            backgroundColor: 'var(--surface-elevated)',
             color: 'var(--surface-elevated-foreground)',
             ...style,
           }}
@@ -132,6 +182,7 @@ function DropdownMenuContent({
             className
           )}
           {...props}
+          onKeyDown={handleKeyDown}
         >
           {children}
         </BaseMenu.Popup>
@@ -280,7 +331,6 @@ function DropdownMenuSubContent({
         <BaseMenu.Popup
           data-slot="dropdown-menu-sub-content"
           style={{
-            backgroundColor: 'var(--surface-elevated)',
             color: 'var(--surface-elevated-foreground)',
           }}
           className={cn(

@@ -1,3 +1,7 @@
+/** One stray uncaught exception is survivable; a storm means the process is broken. */
+const UNCAUGHT_STORM_LIMIT = 10;
+const UNCAUGHT_STORM_WINDOW_MS = 60_000;
+
 export const createServerStartupRuntime = (dependencies) => {
   const {
     process,
@@ -148,9 +152,26 @@ export const createServerStartupRuntime = (dependencies) => {
       console.error('Unhandled Rejection at:', promise, 'reason:', reason);
     });
 
+    // A single stray exception — a socket teardown race, a Node-internal bug
+    // like `setTypeOfService EINVAL` — must not take the server down. Nothing
+    // restarts this process (it is embedded in the desktop app or run by hand
+    // in a terminal), so shutting down turns every such stray into "the
+    // instance is unreachable until I restart it". Mirror the
+    // unhandledRejection policy above: log and keep serving. A sustained storm
+    // of exceptions is a different situation — the process is genuinely
+    // broken — so that still shuts down rather than limping along half-alive.
+    const exceptionTimes = [];
     process.on('uncaughtException', (error) => {
       console.error('Uncaught Exception:', error);
-      gracefulShutdown();
+      const now = Date.now();
+      exceptionTimes.push(now);
+      while (exceptionTimes.length > 0 && now - exceptionTimes[0] > UNCAUGHT_STORM_WINDOW_MS) {
+        exceptionTimes.shift();
+      }
+      if (exceptionTimes.length > UNCAUGHT_STORM_LIMIT) {
+        console.error(`More than ${UNCAUGHT_STORM_LIMIT} uncaught exceptions within a minute; shutting down.`);
+        gracefulShutdown();
+      }
     });
   };
 

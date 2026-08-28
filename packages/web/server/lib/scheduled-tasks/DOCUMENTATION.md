@@ -9,6 +9,55 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
 - Runtime orchestration and execution is owned by `packages/web/server/lib/scheduled-tasks/runtime.js`.
 - This module is OpenChamber feature logic; it is intentionally separate from OpenCode proxy/runtime internals.
 
+## Cross-instance occurrence claiming
+
+Multiple OpenChamber server processes can share the same on-disk project config
+(for example CLI `serve` on port 3000 and the Electron desktop server on port
+57123). Each process keeps its own timers, so without coordination a daily (or
+weekly / cron / once) slot would dispatch twice.
+
+Before a **scheduled** run creates a session, the runtime claims the occurrence
+in shared project config under the project write lock:
+
+- Writes `state.lastScheduledFor` to the armed `nextRunAt` timestamp and advances
+  `state.nextRunAt` to the following occurrence.
+- A second instance that loses the claim skips session creation and reschedules
+  from the winner's persisted `nextRunAt`.
+- Project config writes also take a cross-process `.json.lock` file so the
+  read-modify-write is serialized across processes, not only within one process.
+- Lock timeout / filesystem errors on claim, manual-start, or completion state
+  writes always release the in-process running slot (via `finally`) and best-effort
+  re-arm the **next future** occurrence; they must not leave the task permanently
+  "running" or reject unhandled from the queue pump.
+- Project write locks release the in-process promise chain even when
+  `acquireProjectFileLock` times out, so a later write for the same project can
+  proceed after the on-disk lock is cleared (a hung chain would permanently wedge
+  every mutating API and strand `runTask` before its `finally`).
+- Re-arm helpers only schedule a persisted `nextRunAt` when it is still in the
+  future. A past slot (common for `once` after claim, which cannot advance
+  `nextRunAt`) falls back to `computeNextRunAt` — which returns null for a
+  consumed/past once occurrence — so a losing instance stops instead of
+  spinning delay-0 timers against the project lock.
+- On claim lock/fs failure, best-effort persist `lastStatus: error` + `lastError`
+  when nobody else claimed the occurrence, so a past `once` task is not left
+  enabled-but-inert with only a warn log. Recurring schedules still re-arm the
+  next slot.
+- On completion-write failure after a session already ran, in-memory status is
+  set to a terminal value and a single persist retry is attempted so
+  `lastStatus` does not stay `running`. Manual `runNow` still returns the
+  `sessionID` as a successful dispatch (`ok` follows run status, with
+  `persistError` set) rather than a hard 500; the run API and Scheduled Tasks
+  UI surface `persistError` as a warning toast.
+- The claim predicate rejects a duplicate solely via `lastScheduledFor` within
+  slack of this occurrence. It does not consult advanced on-disk `nextRunAt`
+  (that field is routinely overwritten by a second instance syncing inside
+  `TASK_DUE_SLACK_MS`, including on later days when `lastScheduledFor` is already
+  set from a prior claim).
+- Claiming always writes `nextRunAt` (including `undefined`) so a past once-slot
+  is cleared when there is no following occurrence.
+
+Manual `runNow` does not claim a schedule occurrence.
+
 ## Files
 
 - `packages/web/server/lib/scheduled-tasks/runtime.js`
@@ -21,10 +70,12 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
 - `packages/web/server/lib/scheduled-tasks/loops.js`
   - Discovery of `.agents/loops/*.md` (project scope, ancestors up to the worktree root) and `~/.agents/loops/*.md` (user scope)
   - Frontmatter parsing into scheduled-task definitions
-  - `syncProject` reconciles discovered loops with the persisted task list on every project sync (startup, task save/delete)
+  - `syncProject` reconciles discovered loops with the persisted task list on every project sync (startup, task list load, task save/delete)
 
 - `packages/web/server/lib/scheduled-tasks/routes.js`
   - Scheduled task CRUD endpoints
+  - Listing tasks reconciles loop files first, so opening the Scheduled Tasks UI discovers file additions, edits, and removals without a server restart
+  - Loop-file endpoints toggle `enabled` in frontmatter or delete the authoritative markdown file, then reconcile the project
   - Manual run endpoint
   - OpenChamber events SSE stream endpoint
 
@@ -93,14 +144,12 @@ project write lock on every `syncProject` when the project path is known:
 - **Malformed files** (missing `name`/`schedule`/`model`/body, invalid cron,
   unreadable) are reported to the scheduler as `definition: null` entries and
   warned about; they never block valid loops in the same or other scopes.
-- **UI edits** to a loop-sourced task are preserved in the config but the loop
-  file remains authoritative: the next reconciliation re-applies the file's
-  definition (including `enabled`). Use `enabled: false` in the file to
-  disable. Deleting a loop-sourced task through the API is rejected with a 400
-  while its loop file still exists on disk — the loop file is the removal
-  surface; once the file is gone, deleting the orphan task is allowed. The
-  scheduled-tasks UI marks loop tasks as file-managed and disables their
-  edit/enable/delete actions for the same reason; `run now` remains available.
+- **Loop-file mutations.** The loop file remains authoritative. The scheduled-
+  tasks UI opens it in the built-in file editor, updates its `enabled`
+  frontmatter through the loop-file endpoint, and deletes the file through the
+  loop-file endpoint after confirmation. Each mutation reconciles the project.
+  The general task deletion API still rejects loop-sourced tasks while their
+  file exists; once the file is gone, deleting an orphan task is allowed.
 
 ## Public exports (runtime.js)
 
@@ -119,6 +168,8 @@ project write lock on every `syncProject` when the project path is known:
   - `GET /api/projects/:projectId/scheduled-tasks`
   - `PUT /api/projects/:projectId/scheduled-tasks`
   - `DELETE /api/projects/:projectId/scheduled-tasks/:taskId`
+  - `PATCH /api/projects/:projectId/scheduled-tasks/:taskId/loop-file`
+  - `DELETE /api/projects/:projectId/scheduled-tasks/:taskId/loop-file`
   - `POST /api/projects/:projectId/scheduled-tasks/:taskId/run`
   - `GET /api/openchamber/scheduled-tasks/status`
   - `GET /api/openchamber/events`

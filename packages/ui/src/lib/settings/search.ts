@@ -1,4 +1,5 @@
 import type { I18nKey } from '@/lib/i18n/store';
+import { useUIStore } from '@/stores/useUIStore';
 import type { SettingsPageSlug, SettingsRuntimeContext } from './metadata';
 import { getSettingsPageMeta } from './metadata';
 
@@ -49,7 +50,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'appearance',
     titleKey: 'settings.openchamber.visual.field.weekStartsOn',
     keywords: ['calendar', 'monday', 'sunday'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'appearance.light-theme',
@@ -64,14 +64,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.visual.field.darkTheme',
     keywords: ['theme', 'color', 'dark mode'],
     isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'appearance.window-transparency',
-    page: 'appearance',
-    titleKey: 'settings.openchamber.visual.field.macVibrancy',
-    descriptionKey: 'settings.openchamber.visual.field.macVibrancyHint',
-    keywords: ['transparent', 'transparency', 'vibrancy', 'blur', 'macos', 'opaque'],
-    isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
   },
   {
     id: 'appearance.dock-badge',
@@ -157,17 +149,18 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['editor', 'autosave', 'auto-save', 'files', 'save'],
   },
   {
-    id: 'appearance.expanded-editor-toolbar',
-    page: 'general',
-    titleKey: 'settings.openchamber.visual.field.expandedEditorToolbar',
-    keywords: ['editor', 'toolbar', 'tabs', 'docked', 'files'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
     id: 'appearance.file-editor-keymap',
     page: 'general',
     titleKey: 'settings.openchamber.visual.field.fileEditorKeymap',
     keywords: ['editor', 'vim', 'keymap'],
+  },
+  {
+    id: 'appearance.session-tabs',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.sessionTabsGroup',
+    descriptionKey: 'settings.openchamber.visual.field.sessionTabsInfo',
+    keywords: ['session', 'tabs', 'header', 'working set'],
+    isAvailable: (ctx) => !ctx.isMobile && !ctx.isVSCode,
   },
   {
     id: 'appearance.terminal-quick-keys',
@@ -183,6 +176,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.visual.field.sendAnonymousUsageReports',
     descriptionKey: 'settings.openchamber.visual.field.sendAnonymousUsageReportsHint',
     keywords: ['telemetry', 'analytics'],
+  },
+  {
+    id: 'general.app-links',
+    page: 'general',
+    titleKey: 'settings.openchamber.appLinks.title',
+    descriptionKey: 'settings.openchamber.appLinks.info',
+    keywords: ['security', 'app link', 'deep link', 'scheme', 'protocol', 'obsidian', 'notion'],
   },
   {
     id: 'chat.render-mode',
@@ -239,6 +239,19 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'chat',
     titleKey: 'settings.openchamber.visual.section.reasoning',
     keywords: ['thinking', 'traces'],
+  },
+  {
+    id: 'chat.streaming',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.section.streaming',
+    keywords: ['stream', 'scroll'],
+  },
+  {
+    id: 'chat.streaming-auto-follow',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.streamingAutoFollow',
+    descriptionKey: 'settings.openchamber.visual.field.streamingAutoFollowInfo',
+    keywords: ['autoscroll', 'auto-scroll', 'follow', 'stick to bottom', 'streaming'],
   },
   {
     id: 'chat.sticky-user-header',
@@ -484,10 +497,28 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   {
     id: 'sessions.agent-control-tool',
     page: 'general',
-    titleKey: 'settings.openchamber.opencodeCli.field.agentControlTool',
-    descriptionKey: 'settings.openchamber.opencodeCli.field.agentControlToolInfo',
+    titleKey: 'settings.openchamber.tools.field.agentControlTool',
+    descriptionKey: 'settings.openchamber.tools.field.agentControlToolInfo',
     keywords: ['agent', 'tool', 'orchestration', 'openchamber', 'sessions', 'schedule', 'control'],
     isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'sessions.agent-web-tool',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.field.agentWebTool',
+    descriptionKey: 'settings.openchamber.tools.field.agentWebToolInfo',
+    keywords: ['agent', 'tool', 'web', 'browser', 'page', 'preview', 'openchamber'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'sessions.agent-memory-tool',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.field.agentMemoryTool',
+    descriptionKey: 'settings.openchamber.tools.field.agentMemoryToolInfo',
+    keywords: ['agent', 'tool', 'memory', 'remember', 'recall', 'preferences', 'openchamber'],
+    // Unreleased: searching for a setting that is not rendered would take the
+    // user to an empty spot on the page.
+    isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentMemoryFeatureAvailable,
   },
   {
     id: 'git.github-account',
@@ -521,11 +552,11 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['ignored', 'files', 'gitignore'],
   },
   {
-    id: 'usage.header-menu',
+    id: 'usage.work-status-panel',
     page: 'usage',
-    titleKey: 'settings.usage.page.options.showInHeader',
-    descriptionKey: 'settings.usage.page.options.showInHeaderTooltip',
-    keywords: ['quota', 'header', 'dropdown'],
+    titleKey: 'settings.usage.page.options.showInWorkStatus',
+    descriptionKey: 'settings.usage.page.options.showInWorkStatusTooltip',
+    keywords: ['quota', 'work', 'status', 'panel'],
   },
   {
     id: 'usage.model-quotas',
@@ -538,6 +569,18 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'projects',
     titleKey: 'settings.projects.page.field.projectName',
     keywords: ['label', 'display name', 'project metadata'],
+  },
+  {
+    id: 'projects.default-model',
+    page: 'projects',
+    titleKey: 'settings.projects.page.field.projectModel',
+    keywords: ['model', 'default', 'new chat', 'project metadata'],
+  },
+  {
+    id: 'projects.default-thinking',
+    page: 'projects',
+    titleKey: 'settings.projects.page.field.projectThinking',
+    keywords: ['thinking', 'variant', 'reasoning', 'effort', 'model', 'project metadata'],
   },
   {
     id: 'projects.accent-color',
@@ -932,6 +975,27 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.notifications.page.push.title',
     keywords: ['background', 'push'],
     isAvailable: (ctx) => ctx.isWeb && !ctx.isDesktop && !ctx.isVSCode,
+  },
+
+  {
+    id: 'integrations.third-party',
+    page: 'integrations',
+    titleKey: 'settings.integrations.thirdParty.title',
+    keywords: ['plugin', 'provider', 'oauth', 'install', 'update', 'remove'],
+  },
+  {
+    id: 'integrations.third-party.opencode-claude',
+    page: 'integrations',
+    titleKey: 'settings.integrations.thirdParty.opencodeClaude.name',
+    descriptionKey: 'settings.integrations.thirdParty.opencodeClaude.description',
+    keywords: ['claude', 'anthropic', 'claude code', 'pro', 'max', 'agent sdk', '@openchamber/opencode-claude'],
+  },
+  {
+    id: 'integrations.third-party.opencode-cursor-oauth',
+    page: 'integrations',
+    titleKey: 'settings.integrations.thirdParty.opencodeCursorOauth.name',
+    descriptionKey: 'settings.integrations.thirdParty.opencodeCursorOauth.description',
+    keywords: ['cursor', 'oauth', 'subscription', 'openai compatible', '@openchamber/opencode-cursor'],
   },
 ] as const;
 

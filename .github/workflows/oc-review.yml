@@ -32,6 +32,9 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      - name: Tests
+        run: bun run test
+
       - name: Electron Linux packaging unit tests
         working-directory: packages/electron
         run: |

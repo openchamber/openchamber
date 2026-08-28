@@ -245,6 +245,13 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
       const fitAddon = new module.FitAddon();
       terminal.loadAddon(fitAddon);
       terminal.open(container);
+      // ghostty-web marks the container contenteditable for touch IME input but
+      // sets autocapitalize/autocorrect only on its hidden textarea. Mobile
+      // keyboards (iOS and Android) therefore auto-capitalize the first letter
+      // of every terminal command; disable IME text mangling on the container.
+      container.setAttribute('autocapitalize', 'off');
+      container.setAttribute('autocorrect', 'off');
+      container.setAttribute('spellcheck', 'false');
       terminalRef.current = terminal;
       fitRef.current = fitAddon;
       subscriptions = [terminal.onData((data) => inputRef.current(data))];

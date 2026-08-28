@@ -3,11 +3,8 @@ import { configureRuntimeUrlResolver } from '@/lib/runtime-url';
 import {
   activateRelayTunnel,
   deactivateRelayTunnel,
-  getActiveRelayTunnel,
   type RelayRuntimeDescriptor,
 } from '@/lib/relay/runtime-tunnel';
-
-export { getActiveRelayTunnel };
 
 export type RuntimeEndpointChangedDetail = {
   apiBaseUrl: string;

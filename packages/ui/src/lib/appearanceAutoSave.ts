@@ -7,6 +7,9 @@ import type { TerminalShell } from '@/lib/api/types';
 
 type AppearanceSlice = {
   showReasoningTraces: boolean;
+  streamingAutoFollowEnabled: boolean;
+  workStatusPanelEnabled: boolean;
+  workStatusHiddenSections: string[];
   sessionRecapEnabled: boolean;
   sessionSuggestionEnabled: boolean;
   sessionGoalEnabled: boolean;
@@ -60,6 +63,9 @@ export const startAppearanceAutoSave = (): void => {
 
   let previous: AppearanceSlice = {
     showReasoningTraces: useUIStore.getState().showReasoningTraces,
+    streamingAutoFollowEnabled: useUIStore.getState().streamingAutoFollowEnabled,
+    workStatusPanelEnabled: useUIStore.getState().workStatusPanelEnabled,
+    workStatusHiddenSections: useUIStore.getState().workStatusHiddenSections,
     sessionRecapEnabled: useUIStore.getState().sessionRecapEnabled,
     sessionSuggestionEnabled: useUIStore.getState().sessionSuggestionEnabled,
     sessionGoalEnabled: useUIStore.getState().sessionGoalEnabled,
@@ -100,6 +106,9 @@ export const startAppearanceAutoSave = (): void => {
   useUIStore.subscribe((state) => {
     const current: AppearanceSlice = {
       showReasoningTraces: state.showReasoningTraces,
+      streamingAutoFollowEnabled: state.streamingAutoFollowEnabled,
+      workStatusPanelEnabled: state.workStatusPanelEnabled,
+      workStatusHiddenSections: state.workStatusHiddenSections,
       sessionRecapEnabled: state.sessionRecapEnabled,
       sessionSuggestionEnabled: state.sessionSuggestionEnabled,
       sessionGoalEnabled: state.sessionGoalEnabled,
@@ -139,8 +148,19 @@ export const startAppearanceAutoSave = (): void => {
 
     const diff: Partial<DesktopSettings> = {};
 
+    if (current.workStatusPanelEnabled !== previous.workStatusPanelEnabled) {
+      diff.workStatusPanelEnabled = current.workStatusPanelEnabled;
+    }
+    // Compared by content: the store hands back a new array on every change,
+    // so an identity check would push a write on unrelated store updates.
+    if (current.workStatusHiddenSections.join('\u0000') !== previous.workStatusHiddenSections.join('\u0000')) {
+      diff.workStatusHiddenSections = current.workStatusHiddenSections;
+    }
     if (current.showReasoningTraces !== previous.showReasoningTraces) {
       diff.showReasoningTraces = current.showReasoningTraces;
+    }
+    if (current.streamingAutoFollowEnabled !== previous.streamingAutoFollowEnabled) {
+      diff.streamingAutoFollowEnabled = current.streamingAutoFollowEnabled;
     }
     if (current.sessionRecapEnabled !== previous.sessionRecapEnabled) {
       diff.sessionRecapEnabled = current.sessionRecapEnabled;

@@ -7,11 +7,10 @@ import React, {
 } from 'react';
 import { flushSync } from 'react-dom';
 import type { Theme, ThemeMode } from '@/types/theme';
-import type { DesktopSettings } from '@/lib/desktop';
 import { isDesktopLocalOriginActive, isDesktopShell as detectDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { setDesktopWindowTheme } from '@/lib/desktopNative';
 import { CSSVariableGenerator } from '@/lib/theme/cssGenerator';
-import { updateDesktopSettings } from '@/lib/persistence';
+import { type SettingsSyncedDetail, updateDesktopSettings } from '@/lib/persistence';
 import {
   themes,
   getThemeById,
@@ -347,9 +346,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     if (typeof document === 'undefined') {
       return;
     }
-    const hasMacVibrancy = document.documentElement.hasAttribute('data-oc-vibrancy')
-      || window.__OPENCHAMBER_ELECTRON__?.macVibrancy === true;
-    const chromeColor = hasMacVibrancy ? 'transparent' : theme.colors.surface.background;
+    const chromeColor = theme.colors.surface.background;
 
     document.body.style.backgroundColor = chromeColor;
 
@@ -624,7 +621,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       return;
     }
     const handleSettingsSynced = (event: Event) => {
-      const detail = (event as CustomEvent<DesktopSettings>).detail;
+      const detail = (event as CustomEvent<SettingsSyncedDetail>).detail?.settings;
       if (!detail) {
         return;
       }

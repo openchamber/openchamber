@@ -21,6 +21,64 @@ Alguns prompts têm uma parte visível (a mensagem que você veria) e uma parte 
 
 Mudou de ideia? Cada prompt tem **reset to default**, e há um **reset all** se você quiser recomeçar em tudo.
 
+## Onde cada prompt é usado
+
+Cada prompt nas tabelas abaixo indica onde ele roda e o que o dispara. Confira o gatilho antes de editar, para saber qual fluxo você está mudando.
+
+### Git
+
+| Prompt | Onde roda | Quando dispara |
+| --- | --- | --- |
+| Geração de commit | O botão de gerar na caixa de commit da vista git, e a tela Changes no mobile | Você gera uma mensagem de commit. São preenchidos os arquivos selecionados e os assuntos dos commits recentes do branch, para a mensagem seguir o estilo do seu repositório. |
+| Geração de PR | O formulário de criação de pull request na aba PR da vista git | Você gera título e corpo de um PR. São preenchidos os branches base e head, os commits e arquivos alterados entre eles, o contexto adicional que você escreveu e o template de PR do repositório, quando existe. |
+| Resolução de conflito de merge/rebase | O diálogo de conflitos na vista git, quando um merge ou rebase para em conflitos | Você escolhe "Resolve in current session" ou "Resolve in new session". O agente lê os arquivos em conflito, propõe uma estratégia por arquivo e aguarda sua confirmação antes de editar, fazer stage ou continuar a operação. |
+| Resolução de conflito de cherry-pick | A seção "Re-integrate commits" de uma sessão em worktree | Mover os commits da sessão para o branch de destino esbarra em um conflito e você passa para o agente. O agente resolve dentro do worktree temporário, faz stage dos arquivos e continua o cherry-pick. |
+
+### GitHub
+
+| Prompt | Onde roda | Quando dispara |
+| --- | --- | --- |
+| Revisão de PR | O seletor "Link GitHub PR" no menu de anexos do composer, e o diálogo de novo worktree | Dois gatilhos. Anexar um PR como contexto renderiza as instruções, que saem com a sua próxima mensagem. Criar uma sessão de worktree a partir de um PR usa o prompt como primeira mensagem dessa sessão, com o contexto completo do PR anexado. |
+| Revisão de issue | O diálogo de novo worktree, quando o worktree parte de uma issue | A primeira mensagem da nova sessão revisa a issue, com o corpo e os comentários anexados como contexto. |
+| Revisão de checks falhos / comentários de PR / comentário único de PR | — | Hoje nenhum fluxo os envia. A vista de PR antes os disparava com ações de revisão de um clique; agora checks falhos e comentários são fixados como rascunhos de contexto do chat. Continuam editáveis para que overrides existentes mantenham efeito. |
+
+### Planning
+
+| Prompt | Onde roda | Quando dispara |
+| --- | --- | --- |
+| Planejamento a partir de todo | O painel Todos na barra lateral do projeto | Você envia um todo para uma sessão ou uma nova sessão em worktree. O texto do todo vira a mensagem visível; as instruções transformam isso em um diálogo de planejamento guiado por perguntas, em vez de pular direto para a implementação. |
+| Melhorar plano | A ação "Improve" sobre um plano salvo na vista Plans | Você envia um plano salvo para o fluxo de melhoria. O agente lê primeiro o arquivo do plano, propõe mudanças ancoradas no estado atual do repositório e se oferece para editar o mesmo arquivo. |
+| Implementar plano | A ação "Implement" sobre um plano salvo | Você envia um plano salvo para o fluxo de implementação. O agente lê o arquivo do plano e o implementa do início ao fim sem ampliar o escopo, salvando ajustes do plano no arquivo quando o próprio plano se mostra errado. |
+
+### Session
+
+A maioria alimenta comandos de barra digitados no composer. A maioria também aparece como chips de partida no rascunho de nova sessão.
+
+| Prompt | Onde roda | Quando dispara |
+| --- | --- | --- |
+| Tour pelo código | `/explore` | Você pede uma orientação geral do código. |
+| Resumo de sessão | `/summary`, opcionalmente `/summary <tópico>` | Você resume a conversa até aqui — útil para passar para uma nova sessão. Precisa de uma sessão existente. |
+| Revisão do workspace | `/workspace-review` | Você pede ao agente para revisar o diff atual do workspace quanto a intenção, correção e segurança. |
+| Planejamento de feature | `/plan-feature` | Você transforma uma ideia grosseira de feature em um plano de implementação por um diálogo guiado de perguntas e respostas. |
+| Construir Goal | `/craft-goal`, opcionalmente `/craft-goal <ideia>` | Você transforma uma ideia em um objetivo Goal verificável para o diálogo de Goal. |
+| Retomar o fio | `/catch-up` | Você volta a um projeto e pergunta onde as coisas pararam e o que fazer a seguir. |
+| Depuração | `/debug` | Você investiga um bug: o agente levanta hipóteses, confirma a causa raiz no código e só então propõe uma correção. |
+| Pesar opções | `/weigh` | Você sabe o que construir, mas não como. O agente compara duas ou três abordagens e recomenda uma. |
+| Fusion | A ação "Run fusion" em um grupo de multi-run | Você combina as saídas de várias execuções em uma resposta. As saídas das execuções são anexadas depois das instruções. |
+
+### Prompts sem página no Settings
+
+Alguns prompts disparam automaticamente e não têm página editável no Settings:
+
+| Prompt | Quando dispara |
+| --- | --- |
+| Tarefa agendada | `/schedule-task`, opcionalmente com uma ideia inicial. Conduz o diálogo que define uma tarefa agendada. |
+| Handoff de revisão | `/handoff-review`, ou o botão Review na vista de diff com handoff ativado. Gera o handoff na sessão de trabalho. |
+| Mensagem inicial da sessão de revisão | A primeira mensagem da sessão de revisão gerada — com o handoff quando um foi produzido, sem ele caso contrário. |
+| Feedback de revisão / resposta de implementação | Levam mensagens entre as duas sessões: o feedback do revisor volta para a sessão que implementa, e a resposta do implementador retorna à sessão de revisão. |
+
 ## Relacionado
 
 - [Fluxos de Git e GitHub](/pt-br/git/) — muitos desses prompts alimentam os fluxos de git
+- [Notas, todos e planos](/pt-br/notes-todos-plans/) — os todos e planos por trás dos prompts de Planning
+- [Multi-run](/pt-br/multi-run/) — grupos de execução e fusion

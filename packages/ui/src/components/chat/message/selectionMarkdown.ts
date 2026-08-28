@@ -58,7 +58,7 @@ const toSelectionNode = (node: Node): SelectionNode | null => {
   };
 };
 
-export const trimSelectionNodes = (nodes: SelectionNode[]): SelectionNode[] => {
+const trimSelectionNodes = (nodes: SelectionNode[]): SelectionNode[] => {
   return nodes
     .filter((node) => node.type === 'text' || !node.isCodeLineNumber)
     .map((node) => node.type === 'text'

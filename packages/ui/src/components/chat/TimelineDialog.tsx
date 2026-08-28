@@ -223,20 +223,48 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
 
     if (!currentSessionId) return null;
 
+    const turnActions = (
+        <>
+            <button
+                type="button"
+                className="text-[11px] uppercase tracking-wide text-muted-foreground/90 hover:text-foreground"
+                onClick={() => {
+                    void onScrollByTurnOffset?.(-1);
+                    onOpenChange(false);
+                }}
+            >
+                {t('chat.timeline.actions.previousTurn')}
+            </button>
+            <span className="text-muted-foreground/50">/</span>
+            <button
+                type="button"
+                className="text-[11px] uppercase tracking-wide text-muted-foreground/90 hover:text-foreground"
+                onClick={() => {
+                    onResumeToLatest?.();
+                    onOpenChange(false);
+                }}
+            >
+                {t('chat.timeline.actions.latest')}
+            </button>
+        </>
+    );
+
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-2xl max-h-[70vh] flex flex-col">
-                <DialogHeader>
+            <DialogContent className="max-w-2xl max-h-[70vh] max-md:max-h-[85dvh] flex flex-col overflow-y-auto">
+                <DialogHeader className="shrink-0">
                     <DialogTitle className="flex items-center gap-2">
                         <Icon name="time" className="h-5 w-5" />
                         {t('chat.timeline.title')}
                     </DialogTitle>
-                    <DialogDescription>
-                        {t('chat.timeline.description')}
-                    </DialogDescription>
+                    {!isMobile && (
+                        <DialogDescription>
+                            {t('chat.timeline.description')}
+                        </DialogDescription>
+                    )}
                 </DialogHeader>
 
-                <div className="relative mt-2">
+                <div className="relative mt-2 shrink-0">
                     <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
                         autoFocus
@@ -249,7 +277,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                 </div>
 
                 {canLoadEarlier && onLoadEarlier && (
-                    <div className="flex justify-center py-1">
+                    <div className="flex shrink-0 justify-center py-1">
                         <Button
                             type="button"
                             variant="link"
@@ -266,7 +294,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                     </div>
                 )}
 
-                <div ref={listRef} className="flex-1 overflow-y-auto">
+                <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto">
                     {filteredMessages.length === 0 ? (
                         <div className="text-center text-muted-foreground py-8">
                             {searchQuery ? t('chat.timeline.empty.search') : t('chat.timeline.empty.session')}
@@ -312,7 +340,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                                         onMouseEnter={() => setSelectedIndex(index)}
                                     >
                                         <span className={cn(
-                                            "typography-meta w-16 flex-shrink-0 text-right tabular-nums",
+                                            "typography-meta min-w-16 flex-shrink-0 text-right tabular-nums whitespace-nowrap",
                                             isSelected ? "text-interactive-selection-foreground/70" : "text-muted-foreground"
                                         )}>
                                             {messageTime}
@@ -373,45 +401,31 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                     )}
                 </div>
 
-                <div className="mt-4 p-3 bg-muted/30 rounded-lg">
-                    <p className="typography-meta text-muted-foreground font-medium mb-2">{t('chat.timeline.actions.title')}</p>
-                    <div className="mb-2 flex items-center gap-2">
-                        <button
-                            type="button"
-                            className="text-[11px] uppercase tracking-wide text-muted-foreground/90 hover:text-foreground"
-                            onClick={() => {
-                                void onScrollByTurnOffset?.(-1);
-                                onOpenChange(false);
-                            }}
-                        >
-                            {t('chat.timeline.actions.previousTurn')}
-                        </button>
-                        <span className="text-muted-foreground/50">/</span>
-                        <button
-                            type="button"
-                            className="text-[11px] uppercase tracking-wide text-muted-foreground/90 hover:text-foreground"
-                            onClick={() => {
-                                onResumeToLatest?.();
-                                onOpenChange(false);
-                            }}
-                        >
-                            {t('chat.timeline.actions.latest')}
-                        </button>
+                {isMobile ? (
+                    <div className="mt-2 flex shrink-0 items-center justify-center gap-2 border-t border-border/60 pt-2">
+                        {turnActions}
                     </div>
-                    <div className="flex flex-col gap-1.5 typography-meta text-muted-foreground">
-                        <div className="flex items-center gap-2">
-                            <span>{t('chat.timeline.help.clickMessage')}</span>
+                ) : (
+                    <div className="mt-4 p-3 bg-muted/30 rounded-lg shrink-0">
+                        <p className="typography-meta text-muted-foreground font-medium mb-2">{t('chat.timeline.actions.title')}</p>
+                        <div className="mb-2 flex items-center gap-2">
+                            {turnActions}
                         </div>
-                        <div className="flex items-center gap-2">
-                            <Icon name="arrow-go-back" className="h-4 w-4 flex-shrink-0" />
-                            <span>{t('chat.timeline.help.undoToPoint')}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <Icon name="git-branch" className="h-4 w-4 flex-shrink-0" />
-                            <span>{t('chat.timeline.help.createSessionFromHere')}</span>
+                        <div className="flex flex-col gap-1.5 typography-meta text-muted-foreground">
+                            <div className="flex items-center gap-2">
+                                <span>{t('chat.timeline.help.clickMessage')}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <Icon name="arrow-go-back" className="h-4 w-4 flex-shrink-0" />
+                                <span>{t('chat.timeline.help.undoToPoint')}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <Icon name="git-branch" className="h-4 w-4 flex-shrink-0" />
+                                <span>{t('chat.timeline.help.createSessionFromHere')}</span>
+                            </div>
                         </div>
                     </div>
-                </div>
+                )}
             </DialogContent>
         </Dialog>
     );

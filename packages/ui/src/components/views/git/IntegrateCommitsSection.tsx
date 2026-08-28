@@ -18,7 +18,7 @@ import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
-import { useUIStore } from '@/stores/useUIStore';
+import { rankByQuery } from '@/lib/search/fuzzySearch';
 import { getGitCommitSummaries } from '@/lib/gitApi';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import {
@@ -64,9 +64,14 @@ export const IntegrateCommitsSection: React.FC<{
 }) => {
   const { t } = useI18n();
   const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
-  const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const [branchDropdownOpen, setBranchDropdownOpen] = React.useState(false);
+  const [branchSearch, setBranchSearch] = React.useState('');
   const searchInputRef = React.useRef<HTMLInputElement>(null);
+
+  const filteredBranches = React.useMemo(
+    () => rankByQuery(localBranches, branchSearch, (branch) => [branch]),
+    [localBranches, branchSearch]
+  );
 
   const [targetBranch, setTargetBranch] = React.useState<string>(defaultTargetBranch);
   React.useEffect(() => {
@@ -228,8 +233,6 @@ export const IntegrateCommitsSection: React.FC<{
           { text: context.payloadText, synthetic: true },
         ],
       });
-      // Navigate to chat tab so user sees the new session
-      setActiveMainTab('chat');
       return;
     }
 
@@ -244,8 +247,7 @@ export const IntegrateCommitsSection: React.FC<{
       { text: context.instructionsText, synthetic: true },
       { text: context.payloadText, synthetic: true },
     ]);
-    setActiveMainTab('chat');
-  }, [currentSessionId, setActiveMainTab, buildConflictContext, openNewSessionDraft, setPendingInputText, setPendingSyntheticParts, t]);
+  }, [currentSessionId, buildConflictContext, openNewSessionDraft, setPendingInputText, setPendingSyntheticParts, t]);
 
   const handleMove = React.useCallback(async () => {
     if (ui.kind !== 'ready') return;
@@ -380,10 +382,13 @@ export const IntegrateCommitsSection: React.FC<{
                 align="end"
                 className="w-72 p-0 max-h-[var(--available-height)] flex flex-col overflow-hidden"
               >
-                <Command className="h-full min-h-0">
+                {/* rankByQuery owns filtering/ordering; cmdk must not re-filter. */}
+                <Command className="h-full min-h-0" shouldFilter={false}>
                   <CommandInput
                     ref={searchInputRef}
                     placeholder={t('gitView.branch.searchPlaceholder')}
+                    value={branchSearch}
+                    onValueChange={setBranchSearch}
                     onKeyDown={(event) => event.stopPropagation()}
                   />
                   <CommandList
@@ -393,7 +398,7 @@ export const IntegrateCommitsSection: React.FC<{
                   >
                     <CommandEmpty>{t('gitView.branch.empty')}</CommandEmpty>
                     <CommandGroup heading={t('gitView.branch.localBranches')}>
-                      {localBranches.map((branch) => (
+                      {filteredBranches.map((branch) => (
                         <CommandItem
                           key={branch}
                           value={branch}
@@ -401,6 +406,7 @@ export const IntegrateCommitsSection: React.FC<{
                             setTargetBranch(branch);
                             persistTarget(branch);
                             setBranchDropdownOpen(false);
+                            setBranchSearch('');
                           }}
                         >
                           {branch}

@@ -1,6 +1,8 @@
 import type { Message, Part } from "@opencode-ai/sdk/v2";
 
 type TokenBreakdown = {
+    /** Server-reported window of the turn's final round-trip. Optional in the schema; absent on older servers. */
+    total?: number;
     input?: number;
     output?: number;
     reasoning?: number;
@@ -24,6 +26,31 @@ export const sumTokenBreakdown = (breakdown: TokenBreakdown | null | undefined):
     return inputTokens + outputTokens + reasoningTokens + cacheReadTokens + cacheWriteTokens;
 };
 
+/**
+ * Tokens the context window actually holds, from one message's token payload.
+ *
+ * The breakdown fields accumulate across every API round-trip inside a single
+ * assistant turn: each tool call re-reads the whole (cached) prompt, so on a
+ * multi-step turn `cache.read` alone can add up to several times the context
+ * window (observed on opencode 1.18.18: cache.read 3,291,956 on a turn whose
+ * 1M window really held 232,872 — rendered as a 330% context readout). The
+ * server reports the final round-trip's window as `tokens.total` (optional in
+ * the message schema, absent on older servers). Prefer it; fall back to
+ * summing the fields only when the server did not send it.
+ */
+export const contextTokensFromBreakdown = (breakdown: TokenBreakdown | null | undefined): number => {
+    if (!breakdown || typeof breakdown !== 'object') {
+        return 0;
+    }
+
+    const reportedTotal = breakdown.total;
+    if (typeof reportedTotal === 'number' && Number.isFinite(reportedTotal) && reportedTotal > 0) {
+        return reportedTotal;
+    }
+
+    return sumTokenBreakdown(breakdown);
+};
+
 export const extractTokensFromMessage = (message: { info: Message; parts: Part[] }): number => {
     const tokens = (message.info as { tokens?: number | TokenBreakdown }).tokens;
 
@@ -32,7 +59,7 @@ export const extractTokensFromMessage = (message: { info: Message; parts: Part[]
     }
 
     if (tokens && typeof tokens === 'object') {
-        return sumTokenBreakdown(tokens);
+        return contextTokensFromBreakdown(tokens);
     }
 
     const tokenPart = message.parts.find(
@@ -47,7 +74,7 @@ export const extractTokensFromMessage = (message: { info: Message; parts: Part[]
         return tokenPart.tokens;
     }
 
-    return sumTokenBreakdown(tokenPart.tokens);
+    return contextTokensFromBreakdown(tokenPart.tokens);
 };
 
 type CacheHitRateResult = {

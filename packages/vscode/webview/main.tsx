@@ -16,6 +16,7 @@ import type { VSCodeActiveEditorFile } from '@/sync/input-store';
 import { usePermissionStore } from '@openchamber/ui/stores/permissionStore';
 import { processVSCodePermissionAutoAccept } from '@openchamber/ui/sync/vscode-permission-auto-accept';
 import type { PermissionRequest } from '@opencode-ai/sdk/v2/client';
+import { focusChatInput } from '@openchamber/ui/components/chat/composer/editor/dom';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
 type PanelType = 'chat' | 'agentManager';
@@ -1064,7 +1065,7 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
-  const quotaCredentialMatch = pathname.match(/^\/api\/quota\/credentials\/(opencode-go|ollama-cloud|cursor)(?:\/(validate|import))?$/);
+  const quotaCredentialMatch = pathname.match(/^\/api\/quota\/credentials\/(ollama-cloud|cursor)(?:\/(validate|import))?$/);
   if (quotaCredentialMatch) {
     try {
       const body = method === 'PUT' ? await extractJsonBody(input, init, method) : undefined;
@@ -1292,6 +1293,10 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   return originalFetch(input as RequestInfo, init);
 };
 
+onCommand('focusChatInput', () => {
+  focusChatInput();
+});
+
 onCommand('addContextSelection', (payload) => {
   const { filePath, filename, text } = payload as { filePath?: unknown; filename?: unknown; text?: unknown };
   if (typeof filePath !== 'string' || typeof filename !== 'string' || typeof text !== 'string') {
@@ -1306,7 +1311,9 @@ onCommand('addContextSelection', (payload) => {
 
   import('@/sync/input-store').then(({ useInputStore }) => {
     const file = new File([new Blob([text], { type: 'text/plain' })], trimmedFilename, { type: 'text/plain' });
-    void useInputStore.getState().addVSCodeSelectionAttachment(trimmedPath, file);
+    void useInputStore.getState().addVSCodeSelectionAttachment(trimmedPath, file).finally(() => {
+      focusChatInput();
+    });
   });
 });
 

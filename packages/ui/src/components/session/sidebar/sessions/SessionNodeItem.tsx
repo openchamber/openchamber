@@ -1,0 +1,1769 @@
+import React from 'react';
+import type { Session } from '@opencode-ai/sdk/v2';
+import { ContextMenu } from '@base-ui/react/context-menu';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass, dropdownMenuSubTriggerClass } from '@/components/ui/dropdown-menu.styles';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn, formatDirectoryName } from '@/lib/utils';
+import { canUseElectronDesktopIPC, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
+import { toast } from '@/components/ui';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { Icon } from "@/components/icon/Icon";
+import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getExportRevealLabelKey, revealExportedMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
+import type { ChildSessionExport } from '@/lib/exportSession';
+import { useGlobalSessionStatus, useSessionPermissions, useSessionQuestionCount } from '@/sync/sync-context';
+import { useSessionMessageRecordsForExport } from '@/sync/use-sync';
+import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
+import { DraggableSessionRow } from '../folders/sessionFolderDnd';
+import { canShowSessionWorktreeMenu, getSessionWorktreeMenuDisabled, nodeContainsSessionId, nodeHasPinnedMembershipChange, selectQuestionBadgeSessionScopes } from './sessionNodeItemUtils';
+import type { SessionNode } from '../types';
+import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from '../utils';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { getGitHubPrStatusKey, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
+import { useSessionUnseenCount } from '@/sync/notification-store';
+import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
+import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
+import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
+import { useI18n } from '@/lib/i18n';
+import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
+import { getSessionGoal } from '@/lib/sessionGoalMetadata';
+import { sessionGoalStatusColor, sessionGoalStatusLabelKey } from '@/lib/sessionGoalPresentation';
+import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
+import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { getChatsRootFromDirectory } from '@/lib/chatDirectories';
+import { parseMultiRunSessionTitle } from '@/lib/multirun/title';
+import { MultiRunFusionDialog } from '@/components/multirun/MultiRunFusionDialog';
+import { FusionIcon } from '@/components/icons/FusionIcon';
+import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
+import {
+  buildSessionTreeMoveMessages,
+  requestSessionTreeMove,
+  useIsSessionWorktreeMovePending,
+} from '@/lib/worktrees/sessionWorktreeMove';
+import { streamPerfCount } from '@/stores/utils/streamDebug';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
+import { useUIStore } from '@/stores/useUIStore';
+import type { WorktreeMetadata } from '@/types/worktree';
+import {
+  getSessionWorktreeMenuState,
+  type SessionWorktreeMenuTarget,
+  type StartSessionWorktreeMenuLoadResult,
+} from '../sessionWorktreeMenu';
+
+type SecondaryMeta = {
+  projectLabel?: string | null;
+  branchLabel?: string | null;
+};
+
+export type SessionNodeItemProps = {
+  node: SessionNode;
+  depth?: number;
+  groupDirectory?: string | null;
+  projectId?: string | null;
+  archivedBucket?: boolean;
+  pinnedSessionIds: Set<string>;
+  expandedParents: Set<string>;
+  hasSessionSearchQuery: boolean;
+  normalizedSessionSearchQuery: string;
+  notifyOnSubtasks: boolean;
+  editingId: string | null;
+  setEditingId: (id: string | null) => void;
+  editTitle: string;
+  setEditTitle: (value: string) => void;
+  handleSaveEdit: (titleOverride?: string) => void;
+  handleCancelEdit: () => void;
+  toggleParent: (expansionKey: string) => void;
+  handleSessionSelect: (sessionId: string, sessionDirectory: string | null) => void;
+  handleSessionDoubleClick: (sessionId: string, sessionTitle: string) => void;
+  handleShareSession: (session: Session) => void;
+  copiedSessionId: string | null;
+  handleCopyShareUrl: (url: string, sessionId: string) => void;
+  handleCopySessionId: (sessionId: string) => void;
+  handleUnshareSession: (sessionId: string) => void;
+  openSidebarMenuKey: string | null;
+  setOpenSidebarMenuKey: (key: string | null) => void;
+  createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
+  handleDeleteSession: (session: Session, source?: { archivedBucket?: boolean; hardDelete?: boolean; skipConfirm?: boolean }) => void;
+  handleRestoreSession: (session: Session) => void;
+  startSessionWorktreeMenuLoad: (args: {
+    projectId: string | null;
+    sourceDirectory: string | null;
+    currentWorktree: WorktreeMetadata | null;
+  }) => StartSessionWorktreeMenuLoadResult;
+  mobileVariant: boolean;
+  alwaysShowActions: boolean;
+  secondaryMeta?: SecondaryMeta | null;
+  renderContext?: 'project' | 'recent';
+  /**
+   * Precomputed set of session IDs whose subtree contains the session
+   * currently being edited. Precomputed once per group render.
+   */
+  subtreeContainsEditing: Set<string>;
+  /**
+   * Precomputed session ID of the row whose sidebar menu is open, or null
+   * if no menu is open. Only one row can have its menu open at a time.
+   */
+  menuOpenSessionId: string | null;
+  /**
+   * Precomputed structural key for this node. Encodes the IDs and child
+   * counts of all descendants so a reference-only change to `node` (e.g.
+   * a fresh tree rebuild) can be detected with a single string compare
+   * instead of a recursive walk per row.
+   */
+  nodeStructureKey: string;
+  /**
+   * Resolves the per-row render extras for each child node. SessionGroupSection
+   * walks the whole tree once to precompute the structure key for every
+   * descendant; SessionNodeItem's recursive child render uses this lookup
+   * to fetch the right key for each child it produces.
+   */
+  children?: React.ReactNode;
+};
+
+const areNodeWorktreeRenderSemanticsEqual = (prev: SessionNode, next: SessionNode): boolean => (
+  normalizePath(prev.worktree?.path ?? null) === normalizePath(next.worktree?.path ?? null)
+  && prev.worktree?.branch === next.worktree?.branch
+);
+
+// Shared row geometry: the gutter edge matches the zone-header band padding
+// (px-1.5 = 6px), the marker slot is icon-wide (14px) with a 6px gap, so row
+// text starts exactly where the zone-header label starts. Nested children
+// shift by one gutter step per depth level.
+const ROW_GUTTER_LEFT_PX = 6;
+const ROW_DEPTH_STEP_PX = 14;
+const ROW_TEXT_LEFT_PX = ROW_GUTTER_LEFT_PX + 14 + 6;
+
+const cancelScrollAnchorByContainer = new WeakMap<HTMLElement, () => void>();
+
+const holdSessionRowPosition = (target: HTMLElement): void => {
+  const row = target.closest<HTMLElement>('[data-session-row]');
+  const container = row?.closest<HTMLElement>('.overlay-scrollbar-container');
+  if (!row || !container) return;
+
+  cancelScrollAnchorByContainer.get(container)?.();
+
+  const initialTop = row.getBoundingClientRect().top;
+  let remainingFrames = 3;
+  let cancelled = false;
+  let frameId: number | null = null;
+  const cancel = () => {
+    cancelled = true;
+    if (frameId !== null) window.cancelAnimationFrame(frameId);
+    frameId = null;
+    cancelScrollAnchorByContainer.delete(container);
+    container.removeEventListener('wheel', cancel);
+    container.removeEventListener('touchstart', cancel);
+  };
+  const restore = () => {
+    if (cancelled || !row.isConnected || !container.isConnected) {
+      cancel();
+      return;
+    }
+    const delta = row.getBoundingClientRect().top - initialTop;
+    if (Math.abs(delta) > 0.5) {
+      container.scrollTop += delta;
+      streamPerfCount('ui.sidebar.selection_scroll_anchor_adjustment');
+    }
+    remainingFrames -= 1;
+    if (remainingFrames <= 0) {
+      cancel();
+      return;
+    }
+    frameId = window.requestAnimationFrame(restore);
+  };
+
+  container.addEventListener('wheel', cancel, { passive: true });
+  container.addEventListener('touchstart', cancel, { passive: true });
+  cancelScrollAnchorByContainer.set(container, cancel);
+  frameId = window.requestAnimationFrame(restore);
+};
+
+type QuickSessionActionProps = {
+  archiveLabel: string;
+  deleteLabel: string;
+  buttonSizeClass: string;
+  iconSizeClass: string;
+  onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => void;
+  onMouseDown: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  onArchive: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  onDelete: (event: React.MouseEvent<HTMLButtonElement>) => void;
+};
+
+// Extracted so only this small button re-renders when Shift is pressed/released,
+// instead of every mounted session row.
+const QuickSessionAction = React.memo(function QuickSessionAction({
+  archiveLabel,
+  deleteLabel,
+  buttonSizeClass,
+  iconSizeClass,
+  onPointerDown,
+  onMouseDown,
+  onArchive,
+  onDelete,
+}: QuickSessionActionProps): React.ReactNode {
+  const shiftHeld = useShiftKeyHeld();
+  const label = shiftHeld ? deleteLabel : archiveLabel;
+
+  const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    if (shiftHeld || event.shiftKey) {
+      onDelete(event);
+      return;
+    }
+    onArchive(event);
+  };
+
+  return (
+    <Tooltip delayDuration={500}>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            'inline-flex items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+            shiftHeld
+              ? 'text-destructive hover:text-destructive'
+              : 'text-muted-foreground hover:text-foreground',
+            buttonSizeClass,
+          )}
+          aria-label={label}
+          onPointerDown={onPointerDown}
+          onMouseDown={onMouseDown}
+          onClick={handleClick}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          <Icon name={shiftHeld ? 'delete-bin' : 'archive'} className={iconSizeClass} />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="left" sideOffset={8}>
+        {label}
+      </TooltipContent>
+    </Tooltip>
+  );
+});
+
+function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode {
+  streamPerfCount('ui.sidebar_session_node.render');
+  const { t } = useI18n();
+  const {
+    node,
+    depth = 0,
+    groupDirectory,
+    projectId,
+    archivedBucket = false,
+    pinnedSessionIds,
+    expandedParents,
+    hasSessionSearchQuery,
+    normalizedSessionSearchQuery,
+    notifyOnSubtasks,
+    editingId,
+    setEditingId,
+    editTitle,
+    setEditTitle,
+    handleSaveEdit,
+    handleCancelEdit,
+    toggleParent,
+    handleSessionSelect,
+    handleSessionDoubleClick,
+    handleShareSession,
+    copiedSessionId,
+    handleCopyShareUrl,
+    handleCopySessionId,
+    handleUnshareSession,
+    openSidebarMenuKey,
+    setOpenSidebarMenuKey,
+    createFolderAndStartRename,
+    handleDeleteSession,
+    handleRestoreSession,
+    startSessionWorktreeMenuLoad,
+    mobileVariant,
+    alwaysShowActions,
+    secondaryMeta,
+    renderContext = 'project',
+    children,
+  } = props;
+  const togglePinnedSession = useSessionPinnedStore((state) => state.toggle);
+  const getFoldersForScope = useSessionFoldersStore((state) => state.getFoldersForScope);
+  const getSessionFolderId = useSessionFoldersStore((state) => state.getSessionFolderId);
+  const removeSessionFromFolder = useSessionFoldersStore((state) => state.removeSessionFromFolder);
+  const addSessionToFolder = useSessionFoldersStore((state) => state.addSessionToFolder);
+  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
+
+  const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
+  const isElectron = React.useMemo(() => canUseElectronDesktopIPC(), []);
+  const runtimeApis = React.useContext(RuntimeAPIContext);
+  const revealOnHoverClass = isVSCode
+    ? 'group-hover:opacity-100 group-hover:pointer-events-auto'
+    : 'group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto';
+  const hideOnHoverClass = isVSCode
+    ? 'group-hover:opacity-0'
+    : 'group-hover:opacity-0 group-focus-within:opacity-0';
+  const showOpenInEditorAction = isVSCode;
+  const showQuickArchiveAction = !archivedBucket && !mobileVariant;
+  const revealPaddingClass = isVSCode
+    // VS Code rows reveal up to three actions on hover
+    // (open-in-editor + quick-archive + menu, each h-4). The date sits in the
+    // row flow, so the title must shrink enough to clear the actions or they
+    // overlap the timestamp. Open-in-editor is always present in VS Code.
+    ? (showQuickArchiveAction && showOpenInEditorAction
+        ? 'group-hover:pr-18'
+        : showQuickArchiveAction || showOpenInEditorAction
+          ? 'group-hover:pr-14'
+          : 'group-hover:pr-8')
+    // Reserve just enough room for the hover-revealed actions (two 16px
+    // buttons + gap, anchored at the row edge past the title's own end) so
+    // they never overlap the title without leaving a large hole.
+    : (showQuickArchiveAction
+        ? 'group-hover:pr-7 group-focus-within:pr-7'
+        : 'group-hover:pr-3 group-focus-within:pr-3');
+  const alwaysActionPaddingClass = showQuickArchiveAction ? 'pr-13' : 'pr-7';
+  const suppressNextSelectRef = React.useRef(false);
+  const [isTouchPressed, setIsTouchPressed] = React.useState(false);
+  const editingIdRef = React.useRef(editingId);
+  editingIdRef.current = editingId;
+  const pendingRenameRef = React.useRef<{ id: string; title: string } | null>(null);
+  const pendingFolderCreateRef = React.useRef(false);
+  const handleSaveEditRef = React.useRef(handleSaveEdit);
+  handleSaveEditRef.current = handleSaveEdit;
+  const [renameDraft, setRenameDraft] = React.useState(editTitle);
+  const renameDraftRef = React.useRef(renameDraft);
+  renameDraftRef.current = renameDraft;
+  const renameTargetRef = React.useRef<string | null>(null);
+  const formRef = React.useRef<HTMLFormElement>(null);
+
+  const session = node.session;
+  const resolvedSession = session;
+  // Tooltip context: recent rows receive project/branch via secondaryMeta;
+  // project rows resolve them from the row's own props/node instead.
+  const projectLabelFromStore = useProjectsStore(
+    React.useCallback((state) => {
+      if (secondaryMeta?.projectLabel || !projectId) return null;
+      const project = state.projects.find((entry) => entry.id === projectId);
+      if (!project) return null;
+      return project.label?.trim() || formatDirectoryName(normalizePath(project.path) ?? project.path, null) || project.path;
+    }, [projectId, secondaryMeta?.projectLabel]),
+  );
+  const tooltipProjectLabel = secondaryMeta?.projectLabel
+    ?? (projectLabelFromStore ? formatProjectLabel(projectLabelFromStore) : null);
+  const tooltipBranchLabel = secondaryMeta?.branchLabel ?? node.worktree?.branch ?? null;
+  const prLookupKey = React.useMemo(() => {
+    if (isVSCode) return null;
+    const branch = node.worktree?.branch?.trim();
+    const directory = normalizePath(node.worktree?.path ?? null);
+    return branch && directory ? getGitHubPrStatusKey(directory, branch) : null;
+  }, [isVSCode, node.worktree]);
+  const prSummary = usePrVisualSummary(prLookupKey);
+  const prIconColor = prSummary ? `var(--pr-${prSummary.visualState})` : undefined;
+  const sessionGroupingMode = useSessionDisplayStore((state) => state.sessionGroupingMode);
+  // In by-worktree grouping the project tree already shows the branch on the
+  // group sub-header, so the per-row marker only appears in flat mode and in
+  // the mixed-context recent list.
+  const showInlineBranchMarker = Boolean(tooltipBranchLabel)
+    && (renderContext === 'recent' || sessionGroupingMode === 'flat');
+  const prStatusLabel = React.useMemo(() => {
+    if (!prSummary) return null;
+    switch (prSummary.visualState) {
+      case 'merged':
+        return t('sessions.sidebar.group.pr.status.merged');
+      case 'open':
+        return (prSummary.canMerge === true || prSummary.mergeableState === 'clean' || prSummary.checks?.state === 'success')
+          ? t('sessions.sidebar.group.pr.status.readyToMerge')
+          : t('sessions.sidebar.group.pr.status.open');
+      case 'blocked':
+        return prSummary.mergeableState === 'dirty'
+          ? t('sessions.sidebar.group.pr.status.mergeConflicts')
+          : t('sessions.sidebar.group.pr.status.mergeBlocked');
+      case 'draft':
+        return t('sessions.sidebar.group.pr.status.draft');
+      case 'closed':
+        return t('sessions.sidebar.group.pr.status.closed');
+      default:
+        return null;
+    }
+  }, [prSummary, t]);
+  const isActive = useSessionUIStore((state) => state.currentSessionId === session.id);
+
+  const sessionDirectory = normalizePath(session.directory ?? null) ?? normalizePath(groupDirectory ?? null);
+  // Multi-select scope: sessions are flat per project, so selection groups by
+  // project (falling back to the directory when no project is known) — a
+  // selection must survive mixing sessions from different worktrees.
+  const selectionScopeKey = projectId ?? sessionDirectory ?? null;
+  const loadExportRecords = useSessionMessageRecordsForExport();
+
+  const selectionModeEnabled = useSessionMultiSelectStore((state) => state.enabled);
+  const isRowSelected = useSessionMultiSelectStore(
+    React.useCallback((state) => state.selectedIds.has(session.id), [session.id]),
+  );
+  const toggleRowSelected = useSessionMultiSelectStore((state) => state.toggleSelected);
+  const setRowRange = useSessionMultiSelectStore((state) => state.setRange);
+
+  const collectNodeDescendantIds = React.useCallback((root: SessionNode): string[] => {
+    const out: string[] = [];
+    const walk = (n: SessionNode) => {
+      n.children.forEach((child) => {
+        out.push(child.session.id);
+        walk(child);
+      });
+    };
+    walk(root);
+    return out;
+  }, []);
+
+  const collectNodeDescendantSessions = React.useCallback((root: SessionNode): Session[] => {
+    const out: Session[] = [];
+    const walk = (current: SessionNode) => {
+      current.children.forEach((child) => {
+        out.push(child.session);
+        walk(child);
+      });
+    };
+    walk(root);
+    return out;
+  }, []);
+
+  const [exportDialogOpen, setExportDialogOpen] = React.useState(false);
+  const [exportIncludeSubtasks, setExportIncludeSubtasks] = React.useState(true);
+
+  const menuInstanceKey = `${renderContext}:${archivedBucket ? 'archived' : 'active'}:${session.id}`;
+  const isZombie = useViewportStore(
+    React.useCallback((state) => Boolean(state.sessionMemoryState.get(viewportSessionKey(session.id))?.isZombie), [session.id]),
+  );
+  const sessionStatus = useGlobalSessionStatus(session.id);
+  const statusType = sessionStatus?.type ?? 'idle';
+  const isStreaming = statusType === 'busy' || statusType === 'retry';
+  // Read as a boolean, not as the value: the row must not re-render on every
+  // tick of the counter it only decides to mount.
+  const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
+  const isMovingToWorktree = useIsSessionWorktreeMovePending(session.id);
+  const currentWorktreeMetadata = node.worktree ?? useSessionUIStore.getState().getWorktreeMetadata(session.id) ?? null;
+  const [worktreeTargets, setWorktreeTargets] = React.useState<SessionWorktreeMenuTarget[]>([]);
+  const [worktreeTargetsLoading, setWorktreeTargetsLoading] = React.useState(false);
+  const [worktreeTargetsLoadFailed, setWorktreeTargetsLoadFailed] = React.useState(false);
+  const worktreeSubmenuOpenRef = React.useRef(false);
+  const worktreeLoadSequenceRef = React.useRef(0);
+  const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined, { bootstrap: false });
+  const sessionGoal = getSessionGoal(resolvedSession);
+  const sessionGoalGlyph = sessionGoal ? (
+    // SAFETY: sessionGoalStatusLabelKey contains an i18n key for every SessionGoalStatus.
+    <span
+      className="inline-flex flex-shrink-0 items-center"
+      title={t(sessionGoalStatusLabelKey[sessionGoal.status] as never)}
+      aria-label={t(sessionGoalStatusLabelKey[sessionGoal.status] as never)}
+    >
+      <Icon name="target" className="h-3 w-3" style={{ color: sessionGoalStatusColor[sessionGoal.status] }} />
+    </span>
+  ) : null;
+  const sessionTitle = resolvedSession.title || t('sessions.sidebar.session.untitled');
+  const hasChildren = node.children.length > 0;
+  const isPinnedSession = isSessionPinned(pinnedSessionIds, sessionDirectory, session.id);
+  // Per-render-context expansion key: the same session can appear in both
+  // the project's root and the "Recent" list, and expanding one should not
+  // expand the other. Matches the format of menuInstanceKey.
+  const expansionKey = menuInstanceKey;
+  const isExpanded = hasSessionSearchQuery ? true : expandedParents.has(expansionKey);
+  const questionBadgeSessionScopes = React.useMemo(
+    () => selectQuestionBadgeSessionScopes(node, isExpanded, sessionDirectory),
+    [isExpanded, node, sessionDirectory],
+  );
+  const pendingQuestionCount = useSessionQuestionCount(questionBadgeSessionScopes);
+  const isSubtaskSession = Boolean(resolvedSession.parentID);
+  const unseenCount = useSessionUnseenCount(session.id);
+  const needsAttention = unseenCount > 0 && (!isSubtaskSession || notifyOnSubtasks);
+  const sessionTimestamp = resolvedSession.time?.updated || resolvedSession.time?.created || Date.now();
+  const sessionUpdatedLabel = formatSessionDateLabel(sessionTimestamp);
+  const sessionCompactUpdatedLabel = formatSessionCompactDateLabel(sessionTimestamp);
+  const isMenuOpen = openSidebarMenuKey === menuInstanceKey;
+  const [isContextMenuOpen, setIsContextMenuOpen] = React.useState(false);
+  const isSessionMenuOpen = isMenuOpen || isContextMenuOpen;
+  const isMultiRunLikeSession = React.useMemo(() => parseMultiRunSessionTitle(resolvedSession.title) !== null, [resolvedSession.title]);
+  const [fusionDialogOpen, setFusionDialogOpen] = React.useState(false);
+
+  const descendantCount = React.useMemo(() => collectNodeDescendantIds(node).length, [collectNodeDescendantIds, node]);
+
+  const collectChildExports = React.useCallback(async (children: SessionNode[]): Promise<{ children: ChildSessionExport[]; skipped: number }> => {
+    const results: ChildSessionExport[] = [];
+    let skipped = 0;
+    for (const child of children) {
+      try {
+        if (!sessionDirectory) throw new Error('Session directory is required for export');
+        const childRecords = await loadExportRecords({ directory: sessionDirectory, sessionID: child.session.id });
+        if (!childRecords) throw new Error('Session runtime changed during export');
+        const childTitle = child.session.title || t('sessions.sidebar.session.export.untitledSubagent');
+        // SAFETY: OpenCode session payloads may carry the optional agent label used by exports.
+        const childAgent = (child.session as Session & { agent?: string }).agent;
+        const grandChildren = await collectChildExports(child.children);
+        skipped += grandChildren.skipped;
+        results.push({
+          title: childTitle,
+          agent: childAgent,
+          records: childRecords,
+          children: grandChildren.children,
+        });
+      } catch {
+        skipped += collectNodeDescendantIds(child).length + 1;
+      }
+    }
+    return { children: results, skipped };
+  }, [collectNodeDescendantIds, loadExportRecords, sessionDirectory, t]);
+
+  const showSkippedSubtasksWarning = React.useCallback((count: number) => {
+    if (count <= 0) return;
+    toast.warning(count === 1
+      ? t('sessions.sidebar.session.export.skippedSubtaskSingle', { count })
+      : t('sessions.sidebar.session.export.skippedSubtaskMany', { count }));
+  }, [t]);
+
+  const doExportSession = React.useCallback(async (includeSubtasks: boolean) => {
+    if (!sessionDirectory) {
+      toast.error(t('sessions.sidebar.session.export.nothingToExport'));
+      return;
+    }
+
+    const records = await loadExportRecords({ directory: sessionDirectory, sessionID: session.id }).catch(() => null);
+    if (!records) {
+      toast.error(t('sessions.sidebar.session.export.failedLoadHistory'));
+      return;
+    }
+    if (records.length === 0) {
+      toast.error(t('sessions.sidebar.session.export.nothingToExport'));
+      return;
+    }
+
+    let childExports: ChildSessionExport[] | undefined;
+    let skippedSubtaskCount = 0;
+    if (includeSubtasks && node.children.length > 0) {
+      const collected = await collectChildExports(node.children);
+      childExports = collected.children;
+      skippedSubtaskCount = collected.skipped;
+    }
+
+    const markdown = formatSessionAsMarkdown(records, resolvedSession.title ?? null, childExports);
+    const filename = buildExportFilename(resolvedSession.title ?? null);
+    const savedPath = await saveAsMarkdownDesktop(markdown, filename);
+
+    if (savedPath) {
+      toast.success(t('sessions.sidebar.session.export.success'), {
+        action: {
+          label: t(getExportRevealLabelKey()),
+          onClick: () => {
+            void revealExportedMarkdown(savedPath).then((revealed) => {
+              if (!revealed) {
+                toast.error(t('sessions.sidebar.session.export.failedRevealPath'));
+              }
+            });
+          },
+        },
+      });
+      showSkippedSubtasksWarning(skippedSubtaskCount);
+      return;
+    }
+
+    downloadAsMarkdown(markdown, filename);
+    toast.success(t('sessions.sidebar.session.export.success'));
+    showSkippedSubtasksWarning(skippedSubtaskCount);
+  }, [collectChildExports, loadExportRecords, node.children, resolvedSession.title, session.id, sessionDirectory, showSkippedSubtasksWarning, t]);
+  const handleExportSession = React.useCallback(async () => {
+    if (node.children.length > 0) {
+      setExportIncludeSubtasks(true);
+      setExportDialogOpen(true);
+      return;
+    }
+    await doExportSession(false);
+  }, [doExportSession, node.children.length]);
+
+  const handleOpenMiniChatWindow = React.useCallback(() => {
+    if (!sessionDirectory) return;
+    void invokeDesktop('desktop_open_session_mini_chat_window', {
+      sessionId: session.id,
+      directory: sessionDirectory,
+      apiBaseUrl: getRuntimeApiBaseUrl(),
+      clientToken: getRuntimeBearerTokenSync(),
+    }).catch((error) => {
+      console.warn('[session-sidebar] failed to open mini chat window', error);
+    });
+  }, [session.id, sessionDirectory]);
+
+  // Capture outside-clicks to save edits — immune to focus-race with onBlur.
+  React.useEffect(() => {
+    if (editingId !== session.id) return;
+    const handleDocMouseDown = (e: MouseEvent) => {
+      // The same session can be rendered twice (recent + project), each with
+      // its own rename form. A click inside ANY rename form for this session
+      // must not count as "outside", or the sibling instance would save and
+      // exit the rename mid-edit.
+      // SAFETY: DOM mousedown targets are Nodes; closest is used only when the target is an Element.
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      const withinRenameForm = target?.closest?.(`[data-session-rename-form="${CSS.escape(session.id)}"]`);
+      if (formRef.current && !withinRenameForm) {
+        handleSaveEditRef.current(renameDraftRef.current);
+      }
+    };
+    document.addEventListener('mousedown', handleDocMouseDown);
+    return () => document.removeEventListener('mousedown', handleDocMouseDown);
+  }, [editingId, session.id]);
+
+  React.useLayoutEffect(() => {
+    if (editingId !== session.id) {
+      if (renameTargetRef.current === session.id) {
+        renameTargetRef.current = null;
+      }
+      return;
+    }
+    if (renameTargetRef.current === session.id) return;
+    renameTargetRef.current = session.id;
+    setRenameDraft(editTitle);
+  }, [editingId, editTitle, session.id]);
+
+  if (editingId === session.id) {
+    return (
+      <div
+        key={session.id}
+        style={{ paddingLeft: ROW_TEXT_LEFT_PX + depth * ROW_DEPTH_STEP_PX }}
+        // my-0.5 matches the normal row box so entering rename mode does not
+        // shift the row vertically.
+        className="group relative my-0.5 flex items-center rounded-sm py-1 pr-1.5"
+      >
+        <div className="flex min-w-0 flex-1 flex-col gap-0">
+          <form
+            ref={formRef}
+            data-session-rename-form={session.id}
+            className="flex w-full items-center gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              handleSaveEdit(renameDraft);
+            }}
+          >
+            <input
+              value={renameDraft}
+              onChange={(event) => setRenameDraft(event.target.value)}
+              className="flex-1 min-w-0 bg-transparent typography-ui-label outline-none placeholder:text-muted-foreground"
+              autoFocus
+              placeholder={t('sessions.sidebar.session.menu.rename')}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === 'Escape') {
+                  handleCancelEdit();
+                  return;
+                }
+              }}
+            />
+            <button
+              type="submit"
+              aria-label={t('sessions.sidebar.session.rename.save')}
+              title={t('sessions.sidebar.session.rename.save')}
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+            >
+              <Icon name="check" className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={handleCancelEdit}
+              aria-label={t('sessions.sidebar.session.rename.cancel')}
+              title={t('sessions.sidebar.session.rename.cancel')}
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+            >
+              <Icon name="close" className="size-4" />
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  const pendingPermissionCount = sessionPermissions.length;
+  const pendingQuestionLabel = pendingQuestionCount === 1
+    ? t('sessions.sidebar.session.status.questionPendingSingle')
+    : t('sessions.sidebar.session.status.questionPendingMany', { count: pendingQuestionCount });
+  const showUnreadStatus = !isMovingToWorktree && !isStreaming && needsAttention && !isActive;
+  const showStatusMarker = isStreaming || showUnreadStatus;
+  // Both states are the same static dot; only the color separates "running"
+  // from "unread". The elapsed-turn readout on the right carries the motion
+  // that a spinner used to, at one repaint per second instead of per frame.
+  const statusMarkerLabel = isStreaming
+    ? t('sessions.sidebar.session.status.active')
+    : t('sessions.sidebar.session.status.unread');
+  const statusMarkerContent = (
+    <span
+      className={cn(
+        'h-1.5 w-1.5 rounded-full',
+        isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
+      )}
+      aria-label={statusMarkerLabel}
+      title={statusMarkerLabel}
+    />
+  );
+  // The settled duration lives exactly as long as the unread marker does, so a
+  // session read (or watched) while it finishes never keeps a stale total.
+  const showActivityDuration = (isStreaming || showUnreadStatus) && hasActivityDuration;
+  const hideLeadingIndicatorOnHover = !alwaysShowActions && hasChildren && (isMovingToWorktree || showStatusMarker || isPinnedSession);
+  const showPinnedMarker = isPinnedSession && !isMovingToWorktree && !showStatusMarker;
+  const pinnedMarkerContent = (
+    <Icon
+      name="pushpin"
+      className="h-3 w-3 flex-shrink-0 text-primary"
+      aria-label={t('sessions.sidebar.session.status.pinned')}
+    />
+  );
+  const leadingIndicators = isMovingToWorktree || showStatusMarker || showPinnedMarker ? (
+    <span
+      style={{ left: ROW_GUTTER_LEFT_PX + depth * ROW_DEPTH_STEP_PX }}
+      className={cn(
+        'pointer-events-none absolute top-1/2 inline-flex h-3.5 w-3.5 -translate-y-1/2 items-center justify-center transition-opacity',
+        hideLeadingIndicatorOnHover ? 'opacity-100 group-hover:opacity-0 group-focus-within:opacity-0' : '',
+      )}
+    >
+      {isMovingToWorktree ? (
+        <Icon
+          name="loader-4"
+          className="h-3 w-3 animate-spin text-primary"
+          aria-label={t('sessions.sidebar.session.status.movingToWorktree')}
+        />
+      ) : showStatusMarker ? statusMarkerContent : showPinnedMarker ? pinnedMarkerContent : null}
+    </span>
+  ) : null;
+  const hideChevronUntilHover = hasChildren && !alwaysShowActions && (isMovingToWorktree || showStatusMarker || isPinnedSession);
+  const subsessionChevron = hasChildren ? (
+    <span
+      role="button"
+      tabIndex={0}
+      onClick={(event) => {
+        event.stopPropagation();
+        // Blur mouse-click focus so the hover-only chevron/indicator swap
+        // resets on mouse-leave instead of sticking via :focus-within.
+        event.currentTarget.blur();
+        toggleParent(expansionKey);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleParent(expansionKey);
+        }
+      }}
+      style={{ minWidth: 14, minHeight: 14, left: ROW_GUTTER_LEFT_PX + depth * ROW_DEPTH_STEP_PX }}
+      className={cn(
+        'absolute top-1/2 inline-flex h-3.5 w-3.5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+        hideChevronUntilHover
+          ? 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
+          : '',
+      )}
+      aria-label={isExpanded
+        ? t('sessions.sidebar.session.subsessions.collapse')
+        : t('sessions.sidebar.session.subsessions.expand')}
+    >
+      {isExpanded ? <Icon name="arrow-down-s" className="h-3 w-3" /> : <Icon name="arrow-right-s" className="h-3 w-3" />}
+    </span>
+  ) : null;
+
+  const streamingIndicator = isZombie
+    ? <Icon name="error-warning" className="h-4 w-4 text-status-warning" />
+    : null;
+
+  const handleMenuOpenChange = (open: boolean) => {
+    if (open) {
+      setIsContextMenuOpen(false);
+    }
+    setOpenSidebarMenuKey(open ? menuInstanceKey : null);
+  };
+
+  const handleMenuOpenChangeComplete = (open: boolean) => {
+    if (!open && pendingRenameRef.current) {
+      const { id, title } = pendingRenameRef.current;
+      pendingRenameRef.current = null;
+      setEditingId(id);
+      setEditTitle(title);
+    }
+  };
+
+  const handleContextMenuOpenChange = (open: boolean) => {
+    setIsContextMenuOpen(open);
+  };
+
+  const handleMenuTriggerClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setOpenSidebarMenuKey(isMenuOpen ? null : menuInstanceKey);
+  };
+
+  const handleMenuTriggerPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleMenuTriggerMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleQuickArchivePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleQuickArchiveMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleQuickArchiveClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setOpenSidebarMenuKey(null);
+    handleDeleteSession(session, { archivedBucket });
+  };
+
+  const handleQuickDeleteClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setOpenSidebarMenuKey(null);
+    handleDeleteSession(session, { archivedBucket, hardDelete: true, skipConfirm: true });
+  };
+
+  const handleOpenInEditorPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleOpenInEditorMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleOpenInEditorClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void runtimeApis?.vscode?.executeCommand('openchamber.openSessionInEditor', session.id, sessionTitle);
+  };
+
+  const handleRowSelect = (event?: React.MouseEvent<HTMLElement>) => {
+    if (suppressNextSelectRef.current) {
+      suppressNextSelectRef.current = false;
+      return;
+    }
+    if (selectionModeEnabled) {
+      event?.preventDefault();
+      event?.stopPropagation();
+      if (event?.shiftKey) {
+        const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-session-row]'));
+        const orderedIds = rows
+          .map((el) => el.getAttribute('data-session-row'))
+          .filter((id): id is string => id !== null && id.length > 0);
+        const currentAnchor = useSessionMultiSelectStore.getState().anchorId;
+        const descendantsById = new Map<string, string[]>();
+        descendantsById.set(session.id, collectNodeDescendantIds(node));
+        setRowRange(currentAnchor, session.id, orderedIds, selectionScopeKey, descendantsById);
+        return;
+      }
+      toggleRowSelected(session.id, selectionScopeKey, collectNodeDescendantIds(node));
+      return;
+    }
+    if (event?.currentTarget) holdSessionRowPosition(event.currentTarget);
+    handleSessionSelect(session.id, sessionDirectory);
+  };
+
+  // The selection/active highlight covers the WHOLE row box (gutter, edge
+  // paddings), while the primary click target is the inner title button.
+  // Make the rest of the highlighted box clickable too — but only for clicks
+  // that did not originate from an interactive child (title button, chevron,
+  // action menu), so nothing double-fires.
+  const handleRowBackgroundClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented) return;
+    // SAFETY: React click targets are DOM EventTargets; closest is valid only for HTMLElements.
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (target?.closest('button, a, input, [role="menuitem"], [role="menu"]')) return;
+    handleRowSelect(event);
+  };
+
+  const handleRowMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
+    if (event.button === 2 || (event.button === 0 && event.ctrlKey && !selectionModeEnabled)) {
+      suppressNextSelectRef.current = true;
+    }
+  };
+  const handleRowPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (mobileVariant && event.pointerType === 'touch') {
+      setIsTouchPressed(true);
+    }
+  };
+  const handleRowPointerEnd = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (mobileVariant && event.pointerType === 'touch') {
+      setIsTouchPressed(false);
+    }
+  };
+
+  const handleWorktreeSubmenuOpenChange = (open: boolean) => {
+    worktreeSubmenuOpenRef.current = open;
+    worktreeLoadSequenceRef.current += 1;
+    const loadSequence = worktreeLoadSequenceRef.current;
+    if (!open) {
+      setWorktreeTargetsLoading(false);
+      setWorktreeTargetsLoadFailed(false);
+      return;
+    }
+    const load = startSessionWorktreeMenuLoad({
+      projectId: projectId ?? null,
+      sourceDirectory: sessionDirectory,
+      currentWorktree: currentWorktreeMetadata,
+    });
+    setWorktreeTargets(load.cachedTargets);
+    setWorktreeTargetsLoading(true);
+    setWorktreeTargetsLoadFailed(false);
+    void load.refreshTargets
+      .then((freshTargets) => {
+        if (!worktreeSubmenuOpenRef.current || worktreeLoadSequenceRef.current !== loadSequence) {
+          return;
+        }
+        setWorktreeTargets(freshTargets);
+        setWorktreeTargetsLoading(false);
+        setWorktreeTargetsLoadFailed(false);
+      })
+      .catch(() => {
+        if (!worktreeSubmenuOpenRef.current || worktreeLoadSequenceRef.current !== loadSequence) {
+          return;
+        }
+        setWorktreeTargetsLoading(false);
+        setWorktreeTargetsLoadFailed(true);
+      });
+  };
+
+  const renderSessionMenuItems = ({
+    Item,
+    Separator,
+    Sub,
+    SubTrigger,
+    SubContent,
+  }: {
+    Item: React.ElementType;
+    Separator: React.ElementType;
+    Sub: React.ElementType;
+    SubTrigger: React.ElementType;
+    SubContent: React.ElementType;
+  }) => (
+    <>
+      <Item
+        onClick={() => {
+          // Defer rename until dropdown close transition completes.
+          // onOpenChangeComplete fires after animation + focus cleanup are done,
+          // avoiding focus stealing from Base UI's unmount cleanup.
+          pendingRenameRef.current = { id: session.id, title: sessionTitle };
+        }}
+        className="[&>svg]:mr-1"
+      >
+        <Icon name="pencil-ai" className="mr-1 h-4 w-4" />
+        {t('sessions.sidebar.session.menu.rename')}
+      </Item>
+      <Item onClick={() => handleCopySessionId(session.id)} className="[&>svg]:mr-1">
+        <Icon name="file-copy" className="mr-1 h-4 w-4" />
+        {t('sessions.sidebar.session.menu.copyId')}
+      </Item>
+      <Item onClick={() => sessionDirectory && togglePinnedSession({ directory: sessionDirectory, sessionId: session.id })} className="[&>svg]:mr-1">
+        {isPinnedSession ? <Icon name="unpin" className="mr-1 h-4 w-4" /> : <Icon name="pushpin" className="mr-1 h-4 w-4" />}
+        {isPinnedSession ? t('sessions.sidebar.session.menu.unpin') : t('sessions.sidebar.session.menu.pin')}
+      </Item>
+      {!resolvedSession.share ? (
+        <Item onClick={() => handleShareSession(resolvedSession)} className="[&>svg]:mr-1">
+          <Icon name="share-2" className="mr-1 h-4 w-4" />
+          {t('sessions.sidebar.session.menu.share')}
+        </Item>
+      ) : (
+        <>
+          <Item onClick={() => { if (resolvedSession.share?.url) handleCopyShareUrl(resolvedSession.share.url, session.id); }} className="[&>svg]:mr-1">
+            {copiedSessionId === session.id
+              ? <><Icon name="check" className="mr-1 h-4 w-4"  style={{ color: 'var(--status-success)' }}/>{t('sessions.sidebar.session.menu.copied')}</>
+              : <><Icon name="file-copy" className="mr-1 h-4 w-4" />{t('sessions.sidebar.session.menu.copyLink')}</>}
+          </Item>
+          <Item onClick={() => handleUnshareSession(session.id)} className="[&>svg]:mr-1">
+            <Icon name="link-unlink-m" className="mr-1 h-4 w-4" />
+            {t('sessions.sidebar.session.menu.unshare')}
+          </Item>
+        </>
+      )}
+      <Item onClick={() => { void handleExportSession(); }} className="[&>svg]:mr-1">
+        <Icon name="download" className="mr-1 h-4 w-4" />
+        {t('sessions.sidebar.session.menu.exportMarkdown')}
+      </Item>
+      {canShowSessionWorktreeMenu({ isSubtaskSession, archivedBucket: Boolean(archivedBucket), isVSCode, sessionDirectory }) ? (() => {
+        const isWorktreeMenuDisabled = getSessionWorktreeMenuDisabled({
+          sessionDirectory,
+          isStreaming,
+          isMovingToWorktree,
+        });
+        const worktreeMenuState = getSessionWorktreeMenuState({
+          targets: worktreeTargets,
+          isRefreshing: worktreeTargetsLoading,
+          loadFailed: worktreeTargetsLoadFailed,
+        });
+        return (
+          <Sub onOpenChange={handleWorktreeSubmenuOpenChange}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <SubTrigger
+                  disabled={isWorktreeMenuDisabled}
+                  className="w-full [&>svg]:mr-1"
+                  data-session-worktree-submenu-trigger={session.id}
+                >
+                  <Icon name="folder-shared" className="mr-1 h-4 w-4" />
+                  {t('sessions.sidebar.session.menu.moveToWorktreeTargets')}
+                </SubTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="max-w-72">
+                {isMovingToWorktree
+                  ? t('sessions.sidebar.session.moveToWorktree.tooltipMoving')
+                  : isStreaming
+                    ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy')
+                    : t('sessions.sidebar.session.moveToWorktree.tooltipTargets')}
+              </TooltipContent>
+            </Tooltip>
+            <SubContent className="min-w-[220px]" data-session-worktree-submenu={session.id}>
+              {worktreeTargets.map((target) => {
+                const targetPath = normalizePath(target.metadata.path ?? null) ?? target.metadata.path;
+                const itemLabel = target.isPrimary
+                  ? t('sessions.sidebar.session.moveToWorktree.main')
+                  : (target.metadata.label || target.metadata.branch || target.metadata.name || target.metadata.path);
+                const isDisabled = target.isCurrent || target.metadata.worktreeStatus !== 'ready';
+
+                return (
+                  <Item
+                    key={targetPath}
+                    disabled={isDisabled}
+                    title={target.metadata.path}
+                    data-session-worktree-target={targetPath}
+                    onClick={() => {
+                      if (isDisabled || !sessionDirectory) {
+                        return;
+                      }
+                      requestSessionTreeMove({
+                        kind: 'existing',
+                        root: resolvedSession,
+                        descendants: collectNodeDescendantSessions(node),
+                        sourceDirectory: sessionDirectory,
+                        destination: target.metadata,
+                        messages: buildSessionTreeMoveMessages(t, {
+                          success: 'sessions.sidebar.session.moveToWorktree.existingSuccess',
+                          failure: 'sessions.sidebar.session.moveToWorktree.existingFailed',
+                        }),
+                      });
+                    }}
+                  >
+                    <span className="flex min-w-0 flex-1 items-center gap-1 truncate">
+                      <span className="truncate">{itemLabel}</span>
+                      {target.isCurrent ? <span className="sr-only">{t('sessions.sidebar.session.moveToWorktree.current')}</span> : null}
+                    </span>
+                    {target.isCurrent ? <Icon name="check" className="ml-2 h-3.5 w-3.5 flex-shrink-0 text-primary" aria-hidden="true" /> : null}
+                  </Item>
+                );
+              })}
+              {worktreeMenuState.refreshState === 'loading' ? (
+                <Item disabled data-session-worktree-refresh-state="loading" className="py-0.5 text-muted-foreground typography-micro">
+                  {t('sessions.sidebar.session.moveToWorktree.refreshing')}
+                </Item>
+              ) : null}
+              {worktreeMenuState.refreshState === 'error' ? (
+                <Item disabled data-session-worktree-refresh-state="error" className="py-0.5 text-muted-foreground typography-micro">
+                  {t('sessions.sidebar.session.moveToWorktree.loadFailed')}
+                </Item>
+              ) : null}
+              <Separator />
+              {worktreeMenuState.showNewWorktreeAction ? (
+                <Item
+                  disabled={isWorktreeMenuDisabled}
+                  data-session-worktree-new-action="true"
+                  onClick={() => {
+                    if (isWorktreeMenuDisabled || !sessionDirectory) return;
+                    requestSessionTreeMove({
+                      kind: 'quick',
+                      root: resolvedSession,
+                      descendants: collectNodeDescendantSessions(node),
+                      sourceDirectory: sessionDirectory,
+                      messages: buildSessionTreeMoveMessages(t, {
+                        success: 'sessions.sidebar.session.moveToWorktree.success',
+                        failure: 'sessions.sidebar.session.moveToWorktree.failed',
+                      }),
+                    });
+                  }}
+                  className="[&>svg]:mr-1"
+                >
+                  <Icon name="add" className="mr-1 h-4 w-4" />
+                  {t('sessions.sidebar.session.menu.newWorktree')}
+                </Item>
+              ) : null}
+            </SubContent>
+          </Sub>
+        );
+      })() : null}
+      {isMultiRunLikeSession ? (
+        <Item onClick={() => setFusionDialogOpen(true)} className="[&>svg]:mr-1">
+          <FusionIcon className="mr-1 h-4 w-4" />
+          {t('sessions.sidebar.session.menu.runFusion')}
+        </Item>
+      ) : null}
+
+      {sessionDirectory && !archivedBucket ? (() => {
+        // Folders are flat per project: list folders from every scope of the
+        // owning project (root + all worktrees) so sessions can be filed
+        // across worktrees. Each action targets the folder's owning scope,
+        // and moving between scopes clears the previous membership first.
+        const scopes: string[] = [];
+        const pushScope = (candidate: string | null | undefined) => {
+          const normalized = normalizePath(candidate ?? null);
+          if (normalized && !scopes.includes(normalized)) scopes.push(normalized);
+        };
+        if (projectId && !isVSCode) {
+          const project = useProjectsStore.getState().projects.find((entry) => entry.id === projectId);
+          const projectRoot = normalizePath(project?.path ?? null);
+          pushScope(projectRoot);
+          if (projectRoot) {
+            (useSessionUIStore.getState().availableWorktreesByProject.get(projectRoot) ?? [])
+              .forEach((worktree) => pushScope(worktree.path));
+          }
+        }
+        pushScope(getChatsRootFromDirectory(sessionDirectory));
+        pushScope(sessionDirectory);
+        const folderEntries = scopes.flatMap((scope) =>
+          getFoldersForScope(scope).map((folder) => ({ scope, folder })));
+        const currentEntry = folderEntries.find(({ scope, folder }) =>
+          getSessionFolderId(scope, session.id) === folder.id) ?? null;
+        const defaultScope = scopes[0] ?? sessionDirectory;
+        return (
+          <>
+            <Separator />
+            <Sub>
+              <SubTrigger className="[&>svg]:mr-1"><Icon name="folder" className="h-4 w-4" />{t('sessions.sidebar.folders.moveToFolder')}</SubTrigger>
+              <SubContent className="min-w-[180px]">
+                {folderEntries.length === 0 ? (
+                  <Item disabled className="text-muted-foreground">{t('sessions.sidebar.folders.none')}</Item>
+                ) : (
+                  folderEntries.map(({ scope, folder }) => {
+                    const isCurrent = currentEntry?.folder.id === folder.id;
+                    return (
+                      <Item key={folder.id} onClick={() => {
+                        if (isCurrent) {
+                          removeSessionFromFolder(scope, session.id);
+                          return;
+                        }
+                        if (currentEntry && currentEntry.scope !== scope) {
+                          removeSessionFromFolder(currentEntry.scope, session.id);
+                        }
+                        addSessionToFolder(scope, folder.id, session.id);
+                      }}>
+                        <span className="flex-1 truncate">{folder.name}</span>
+                        {isCurrent ? <Icon name="check" className="ml-2 h-3.5 w-3.5 text-primary flex-shrink-0" /> : null}
+                      </Item>
+                    );
+                  })
+                )}
+                <Separator />
+                <Item onClick={() => {
+                   const newFolder = createFolderAndStartRename(defaultScope);
+                   if (!newFolder) return;
+                   pendingFolderCreateRef.current = true;
+                  if (currentEntry && currentEntry.scope !== defaultScope) {
+                    removeSessionFromFolder(currentEntry.scope, session.id);
+                  }
+                  addSessionToFolder(defaultScope, newFolder.id, session.id);
+                }}>
+                  <Icon name="add" className="mr-1 h-4 w-4" />
+                  {t('sessions.sidebar.folders.newFolderEllipsis')}
+                </Item>
+                {currentEntry ? (
+                  <Item onClick={() => { removeSessionFromFolder(currentEntry.scope, session.id); }} className="text-destructive focus:text-destructive">
+                    <Icon name="close" className="mr-1 h-4 w-4" />
+                    {t('sessions.sidebar.folders.removeFromFolder')}
+                  </Item>
+                ) : null}
+              </SubContent>
+            </Sub>
+          </>
+        );
+      })() : null}
+
+      {!isVSCode ? (
+        <Item
+          disabled={!sessionDirectory}
+          onClick={() => {
+            if (!sessionDirectory) return;
+            openContextPanelTab(sessionDirectory, {
+              mode: 'chat',
+              dedupeKey: `session:${session.id}`,
+              label: sessionTitle,
+              sessionTitleFallback: sessionTitle,
+            });
+          }}
+          className="[&>svg]:mr-1"
+        >
+          <Icon name="chat-4" className="mr-1 h-4 w-4" />
+          <span className="truncate">{t('sessions.sidebar.session.menu.openInSidePanel')}</span>
+          <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">{t('sessions.sidebar.session.menu.betaBadge')}</span>
+        </Item>
+      ) : null}
+
+      {isElectron ? (
+        <Item
+          disabled={!sessionDirectory}
+          onClick={handleOpenMiniChatWindow}
+          className="[&>svg]:mr-1"
+        >
+          <Icon name="window" className="mr-1 h-4 w-4" />
+          <span className="truncate">{t('sessions.sidebar.session.menu.openMiniChatWindow')}</span>
+        </Item>
+      ) : null}
+
+      <Separator />
+      {!archivedBucket ? (
+        <Item className="[&>svg]:mr-1" onClick={() => handleDeleteSession(session, { archivedBucket })}>
+          <Icon name="inbox-archive" className="mr-1 h-4 w-4" />
+          {t('sessions.sidebar.bulkActions.archive')}
+        </Item>
+      ) : null}
+      {archivedBucket ? (
+        <Item className="[&>svg]:mr-1" onClick={() => handleRestoreSession(session)}>
+          <Icon name="inbox-unarchive" className="mr-1 h-4 w-4" />
+          {t('sessions.sidebar.bulkActions.restore')}
+        </Item>
+      ) : null}
+      <Item className="text-destructive focus:text-destructive [&>svg]:mr-1" onClick={() => handleDeleteSession(session, { archivedBucket, hardDelete: true })}>
+        <Icon name="delete-bin" className="mr-1 h-4 w-4" />
+        {t('sessions.sidebar.bulkActions.delete')}
+      </Item>
+    </>
+  );
+
+  const sessionMenuContent = (
+    <DropdownMenuContent align="end" className="min-w-[180px]" finalFocus={() => {
+      if (pendingFolderCreateRef.current) {
+        pendingFolderCreateRef.current = false;
+        return false;
+      }
+      return editingIdRef.current ? false : true;
+    }}>
+      {renderSessionMenuItems({
+        Item: DropdownMenuItem,
+        Separator: DropdownMenuSeparator,
+        Sub: DropdownMenuSub,
+        SubTrigger: DropdownMenuSubTrigger,
+        SubContent: DropdownMenuSubContent,
+      })}
+    </DropdownMenuContent>
+  );
+
+  const contextMenuContent = (
+    <ContextMenu.Portal>
+      <ContextMenu.Positioner className="app-region-no-drag z-50">
+        <ContextMenu.Popup
+          data-slot="dropdown-menu-content"
+          finalFocus={() => {
+            if (pendingFolderCreateRef.current) {
+              pendingFolderCreateRef.current = false;
+              return false;
+            }
+            return editingIdRef.current ? false : true;
+          }}
+          style={{
+            color: 'var(--surface-elevated-foreground)',
+          }}
+          className={cn(dropdownMenuPopupClass, 'min-w-[180px]')}
+        >
+          {renderSessionMenuItems({
+            Item: ({ className, ...itemProps }: React.ComponentProps<typeof ContextMenu.Item>) => (
+              <ContextMenu.Item className={cn(dropdownMenuItemClass, className)} {...itemProps} />
+            ),
+            Separator: ({ className, ...separatorProps }: React.ComponentProps<typeof ContextMenu.Separator>) => (
+              <ContextMenu.Separator className={cn(dropdownMenuSeparatorClass, className)} {...separatorProps} />
+            ),
+            Sub: ContextMenu.SubmenuRoot,
+            SubTrigger: ({ className, children, ...triggerProps }: React.ComponentProps<typeof ContextMenu.SubmenuTrigger>) => (
+              <ContextMenu.SubmenuTrigger className={cn(dropdownMenuSubTriggerClass, className)} {...triggerProps}>
+                {children}
+                <Icon name="arrow-right-s" className="ml-auto size-3.5" />
+              </ContextMenu.SubmenuTrigger>
+            ),
+            SubContent: ({ className, children, ...popupProps }: React.ComponentProps<typeof ContextMenu.Popup>) => (
+              <ContextMenu.Portal>
+                <ContextMenu.Positioner className="app-region-no-drag z-50">
+                  <ContextMenu.Popup
+                    data-slot="dropdown-menu-sub-content"
+                    style={{
+                      backgroundColor: 'var(--surface-elevated)',
+                      color: 'var(--surface-elevated-foreground)',
+                    }}
+                    className={cn(dropdownMenuPopupClass, className)}
+                    {...popupProps}
+                  >
+                    {children}
+                  </ContextMenu.Popup>
+                </ContextMenu.Positioner>
+              </ContextMenu.Portal>
+            ),
+          })}
+        </ContextMenu.Popup>
+      </ContextMenu.Positioner>
+    </ContextMenu.Portal>
+  );
+
+  return (
+    <React.Fragment key={session.id}>
+      <DraggableSessionRow sessionId={session.id} sessionDirectory={sessionDirectory ?? null} sessionTitle={sessionTitle}>
+        <ContextMenu.Root open={isContextMenuOpen} onOpenChange={handleContextMenuOpenChange} onOpenChangeComplete={handleMenuOpenChangeComplete}>
+          <ContextMenu.Trigger
+            render={
+              <div
+                data-session-row={session.id}
+                data-session-scope={selectionScopeKey ?? ''}
+                data-session-archived={archivedBucket ? '1' : '0'}
+                onClick={handleRowBackgroundClick}
+                // Row geometry mirrors the zone-header band: full container
+                // width, px-1.5 inner edge, a 14px icon-wide gutter (status
+                // marker / chevron) plus a 6px gap, so the title starts at the
+                // same x as the header text. Children indent one gutter step.
+                style={{ paddingLeft: ROW_TEXT_LEFT_PX + depth * ROW_DEPTH_STEP_PX }}
+                className={cn(
+                  'group relative my-0.5 flex cursor-pointer items-center rounded-md py-1 pr-1.5',
+                  // Active (currently open) session gets a subtle primary tint;
+                  // multi-select highlight takes precedence when both apply.
+                  isActive && !isRowSelected && 'bg-primary/10',
+                  isRowSelected && 'bg-interactive-selection',
+                )}
+              />
+            }
+          >
+          {leadingIndicators}
+          {subsessionChevron}
+          <div className="flex min-w-0 flex-1 items-center">
+            {(
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+ 	                    onPointerDown={handleRowPointerDown}
+ 	                    onPointerUp={handleRowPointerEnd}
+ 	                    onPointerCancel={handleRowPointerEnd}
+ 	                    onMouseDown={handleRowMouseDown}
+ 	                    onClick={(event) => handleRowSelect(event)}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      handleSessionDoubleClick(session.id, sessionTitle);
+                    }}
+                    className={cn(
+	                      'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none transition-[padding]',
+	                      isTouchPressed && 'bg-interactive-hover/70',
+                      alwaysShowActions
+                        ? (isVSCode ? revealPaddingClass : alwaysActionPaddingClass)
+                        : revealPaddingClass,
+                    )}
+                  >
+                    <div className="flex w-full items-center min-w-0 flex-1 gap-1 overflow-hidden">
+                      {/* Unread emphasis is color-only: a font-weight change
+                          would reflow the truncated title and cause a micro
+                          horizontal shift when the status flips. */}
+                      <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : needsAttention ? 'text-foreground' : 'text-foreground/80')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
+                      {/* While a turn runs (and until its result is read) the
+                          elapsed counter takes over this slot from the usual
+                          goal/branch/date metadata, which stays one hover or
+                          one read away. */}
+                      {alwaysShowActions ? (
+                        // Touch runtimes have no hover tooltip, so the compact
+                        // date stays inline there.
+                        <span className="ml-2 inline-flex flex-shrink-0 items-center gap-1 text-[0.72rem] text-muted-foreground/75">
+                          {showActivityDuration ? (
+                            <SessionActivityDuration sessionId={session.id} running={isStreaming} />
+                          ) : (
+                            <>
+                              {sessionGoalGlyph}
+                              {showInlineBranchMarker ? (
+                                <Icon
+                                  name="git-branch"
+                                  className={cn('h-3 w-3', !prIconColor && 'text-muted-foreground/60')}
+                                  style={prIconColor ? { color: prIconColor } : undefined}
+                                />
+                              ) : null}
+                              {sessionCompactUpdatedLabel}
+                            </>
+                          )}
+                        </span>
+                      ) : (showActivityDuration || sessionGoalGlyph || showInlineBranchMarker) ? (
+                        <div className="relative ml-1 flex h-4 flex-shrink-0 items-center justify-end">
+                          <span className={cn(
+                            'inline-flex items-center gap-1 whitespace-nowrap text-right transition-opacity duration-150',
+                            isSessionMenuOpen
+                              ? 'opacity-0'
+                              : hideOnHoverClass,
+                          )}>
+                            {showActivityDuration ? (
+                              <SessionActivityDuration
+                                sessionId={session.id}
+                                running={isStreaming}
+                                className="text-[0.72rem]"
+                              />
+                            ) : (
+                              <>
+                                {sessionGoalGlyph}
+                                {showInlineBranchMarker ? (
+                                  <Icon
+                                    name="git-branch"
+                                    className={cn('h-3 w-3', !prIconColor && 'text-muted-foreground/60')}
+                                    style={prIconColor ? { color: prIconColor } : undefined}
+                                  />
+                                ) : null}
+                              </>
+                            )}
+                          </span>
+                        </div>
+                      ) : null}
+                      {pendingPermissionCount > 0 ? (
+                        <span className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1 py-0.5 text-[0.7rem] text-destructive flex-shrink-0" title={t('sessions.sidebar.session.status.permissionRequired')} aria-label={t('sessions.sidebar.session.status.permissionRequired')}>
+                          <Icon name="shield" className="h-3 w-3" />
+                          <span className="leading-none">{pendingPermissionCount}</span>
+                        </span>
+                      ) : null}
+                      {pendingQuestionCount > 0 ? (
+                        <span className="inline-flex items-center gap-1 rounded bg-status-info/10 px-1 py-0.5 text-[0.7rem] text-status-info flex-shrink-0" title={pendingQuestionLabel} aria-label={pendingQuestionLabel}>
+                          <Icon name="question" className="h-3 w-3" />
+                          <span className="leading-none">{pendingQuestionCount}</span>
+                        </span>
+                      ) : null}
+                    </div>
+                  </button>
+                </TooltipTrigger>
+                {/* VS Code already shows project context via workspace headers, so
+                    the per-row metadata tooltip is redundant noise there. */}
+                {!isVSCode ? (
+                <TooltipContent side="right" sideOffset={8} className="max-w-xs text-left">
+                  <div className="flex min-w-44 flex-col gap-1.5 text-left text-xs">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="min-w-0 truncate font-medium text-foreground">{sessionTitle}</span>
+                      <span className="flex-shrink-0 text-muted-foreground" title={sessionUpdatedLabel}>{sessionCompactUpdatedLabel}</span>
+                    </div>
+                    {tooltipProjectLabel ? (
+                      <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+                        <Icon name="folder" className="h-3 w-3 flex-shrink-0" />
+                        <span className="min-w-0 truncate">{tooltipProjectLabel}</span>
+                      </div>
+                    ) : null}
+                    {tooltipBranchLabel ? (
+                      <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+                        <Icon name="git-branch" className="h-3 w-3 flex-shrink-0" style={prIconColor ? { color: prIconColor } : undefined} />
+                        <span className="min-w-0 truncate">{tooltipBranchLabel}</span>
+                      </div>
+                    ) : null}
+                    {prSummary && prStatusLabel ? (
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <Icon name="git-pull-request" className="h-3 w-3 flex-shrink-0" style={prIconColor ? { color: prIconColor } : undefined} />
+                        <span className="min-w-0 truncate" style={prIconColor ? { color: prIconColor } : undefined}>
+                          #{prSummary.number} · {prStatusLabel}
+                        </span>
+                      </div>
+                    ) : null}
+                  </div>
+                </TooltipContent>
+                ) : null}
+              </Tooltip>
+            )}
+          </div>
+
+          {streamingIndicator && !mobileVariant ? (
+            <div className="absolute right-0 top-1/2 -translate-y-1/2 z-10">
+              {streamingIndicator}
+            </div>
+          ) : null}
+
+          <div className={cn(
+            'absolute right-0 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5 transition-opacity',
+            isSessionMenuOpen
+              ? 'opacity-100'
+              : (alwaysShowActions && !isVSCode)
+                ? 'opacity-100'
+                : cn('opacity-0', revealOnHoverClass),
+          )}>
+            {showQuickArchiveAction ? (
+              <QuickSessionAction
+                archiveLabel={t('sessions.sidebar.bulkActions.archive')}
+                deleteLabel={t('sessions.sidebar.bulkActions.delete')}
+                buttonSizeClass={!alwaysShowActions ? 'h-4 w-4' : 'h-6 w-6'}
+                iconSizeClass={!alwaysShowActions ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5'}
+                onPointerDown={handleQuickArchivePointerDown}
+                onMouseDown={handleQuickArchiveMouseDown}
+                onArchive={handleQuickArchiveClick}
+                onDelete={handleQuickDeleteClick}
+              />
+            ) : null}
+            {showOpenInEditorAction ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className={cn(
+                      'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+                      !alwaysShowActions ? 'h-4 w-4' : 'h-6 w-6',
+                    )}
+                    aria-label={t('sessions.sidebar.session.actions.openInEditor')}
+                    onPointerDown={handleOpenInEditorPointerDown}
+                    onMouseDown={handleOpenInEditorMouseDown}
+                    onClick={handleOpenInEditorClick}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
+                    <Icon name="external-link" className={cn(!alwaysShowActions ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5')} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="left" sideOffset={8}>
+                  {t('sessions.sidebar.session.actions.openInEditor')}
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
+            <DropdownMenu open={isMenuOpen} onOpenChange={handleMenuOpenChange} onOpenChangeComplete={handleMenuOpenChangeComplete}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(
+                    'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+                    !alwaysShowActions
+                      ? (isSessionMenuOpen
+                          ? 'h-4 w-4 opacity-100'
+                          : cn('h-4 w-4 opacity-0', revealOnHoverClass))
+                      : 'h-6 w-6 opacity-100',
+                  )}
+                  aria-label={t('sessions.sidebar.session.menu.label')}
+                  onPointerDown={handleMenuTriggerPointerDown}
+                  onMouseDown={handleMenuTriggerMouseDown}
+                  onClick={handleMenuTriggerClick}
+                  onKeyDown={(event) => event.stopPropagation()}
+                >
+                   <Icon name="more-2" className={cn(!alwaysShowActions ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5')} />
+                </button>
+              </DropdownMenuTrigger>
+              {sessionMenuContent}
+            </DropdownMenu>
+          </div>
+          </ContextMenu.Trigger>
+          {contextMenuContent}
+        </ContextMenu.Root>
+      </DraggableSessionRow>
+      {hasChildren && isExpanded ? children : null}
+      <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
+        <DialogContent showCloseButton={false} className="max-w-sm gap-5">
+          <DialogHeader>
+            <DialogTitle>{t('sessions.sidebar.session.export.dialog.title')}</DialogTitle>
+            <DialogDescription>
+              {descendantCount === 1
+                ? t('sessions.sidebar.session.export.dialog.descriptionSingle', { count: descendantCount })
+                : t('sessions.sidebar.session.export.dialog.descriptionMany', { count: descendantCount })}
+            </DialogDescription>
+          </DialogHeader>
+          <label className="flex items-center gap-2 typography-ui-label cursor-pointer">
+            <input
+              type="checkbox"
+              checked={exportIncludeSubtasks}
+              onChange={(e) => setExportIncludeSubtasks(e.target.checked)}
+              className="h-4 w-4 rounded border-border accent-primary"
+            />
+            {t('sessions.sidebar.session.export.dialog.includeSubtasks')}
+          </label>
+          <DialogFooter>
+            <Button
+              type="button"
+              onClick={() => setExportDialogOpen(false)}
+              variant="outline"
+              size="sm"
+            >
+              {t('sessions.sidebar.dialogs.cancel')}
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                setExportDialogOpen(false);
+                void doExportSession(exportIncludeSubtasks);
+              }}
+              size="sm"
+            >
+              {t('sessions.sidebar.session.export.dialog.confirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {isMultiRunLikeSession ? (
+        <MultiRunFusionDialog
+          session={resolvedSession}
+          open={fusionDialogOpen}
+          onOpenChange={setFusionDialogOpen}
+        />
+      ) : null}
+    </React.Fragment>
+  );
+}
+
+const getNodeSessionDirectory = (node: SessionNode): string | null => {
+  return normalizePath(node.session.directory ?? null);
+};
+
+const isSecondaryMetaEqual = (prev?: SecondaryMeta | null, next?: SecondaryMeta | null): boolean => {
+  return (prev?.projectLabel ?? null) === (next?.projectLabel ?? null)
+    && (prev?.branchLabel ?? null) === (next?.branchLabel ?? null);
+};
+
+const getMenuSessionIdFromKey = (props: SessionNodeItemProps): string | null => {
+  if (!props.openSidebarMenuKey) return null;
+  const bucketTag = props.archivedBucket ? 'archived' : 'active';
+  const prefix = `${props.renderContext ?? 'project'}:${bucketTag}:`;
+  return props.openSidebarMenuKey.startsWith(prefix)
+    ? props.openSidebarMenuKey.slice(prefix.length)
+    : null;
+};
+
+const getRelevantMenuSessionId = (props: SessionNodeItemProps): string | null => {
+  return props.menuOpenSessionId ?? getMenuSessionIdFromKey(props);
+};
+
+const subtreeContainsSession = (
+  props: SessionNodeItemProps,
+  sessionId: string | null,
+  precomputed: Set<string>,
+): boolean => {
+  if (!sessionId) return false;
+  if (precomputed.has(props.node.session.id)) return true;
+  return nodeContainsSessionId(props.node, sessionId);
+};
+
+const hasSetMembershipChangeInNode = (
+  prevNode: SessionNode,
+  nextNode: SessionNode,
+  prevSet: Set<string>,
+  nextSet: Set<string>,
+  getKey: (node: SessionNode) => string,
+): boolean => {
+  if (prevNode.session.id !== nextNode.session.id) return true;
+  const key = getKey(prevNode);
+  if (prevSet.has(key) !== nextSet.has(key)) return true;
+  if (prevNode.children.length !== nextNode.children.length) return true;
+  for (let i = 0; i < prevNode.children.length; i += 1) {
+    if (hasSetMembershipChangeInNode(prevNode.children[i], nextNode.children[i], prevSet, nextSet, getKey)) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const hasExpansionMembershipChange = (prev: SessionNodeItemProps, next: SessionNodeItemProps): boolean => {
+  if (prev.hasSessionSearchQuery || next.hasSessionSearchQuery) return false;
+  const prevBucketTag = prev.archivedBucket ? 'archived' : 'active';
+  const nextBucketTag = next.archivedBucket ? 'archived' : 'active';
+  return hasSetMembershipChangeInNode(
+    prev.node,
+    next.node,
+    prev.expandedParents,
+    next.expandedParents,
+    (node) => `${prev.renderContext ?? 'project'}:${prevBucketTag}:${node.session.id}`,
+  ) || hasSetMembershipChangeInNode(
+    prev.node,
+    next.node,
+    prev.expandedParents,
+    next.expandedParents,
+    (node) => `${next.renderContext ?? 'project'}:${nextBucketTag}:${node.session.id}`,
+  );
+};
+
+const areSessionRenderSemanticsEqual = (prev: Session, next: Session): boolean => (
+  prev.id === next.id
+  && prev.title === next.title
+  && prev.directory === next.directory
+  && prev.parentID === next.parentID
+  && prev.share?.url === next.share?.url
+  && prev.time?.created === next.time?.created
+  && prev.time?.updated === next.time?.updated
+  && prev.time?.archived === next.time?.archived
+);
+
+const areSessionNodeItemPropsEqual = (prev: SessionNodeItemProps, next: SessionNodeItemProps): boolean => {
+  if (prev.node.session.id !== next.node.session.id) return false;
+  if (!areSessionRenderSemanticsEqual(prev.node.session, next.node.session)) return false;
+  if (!areNodeWorktreeRenderSemanticsEqual(prev.node, next.node)) return false;
+  if (prev.depth !== next.depth) return false;
+  if (prev.groupDirectory !== next.groupDirectory) return false;
+  if (prev.projectId !== next.projectId) return false;
+  if (prev.archivedBucket !== next.archivedBucket) return false;
+  if ((prev.renderContext ?? 'project') !== (next.renderContext ?? 'project')) return false;
+  if (prev.mobileVariant !== next.mobileVariant) return false;
+  if (prev.alwaysShowActions !== next.alwaysShowActions) return false;
+  if (prev.hasSessionSearchQuery !== next.hasSessionSearchQuery) return false;
+  if (prev.normalizedSessionSearchQuery !== next.normalizedSessionSearchQuery) return false;
+  if (prev.notifyOnSubtasks !== next.notifyOnSubtasks) return false;
+  if (prev.nodeStructureKey !== next.nodeStructureKey) return false;
+  if (getNodeSessionDirectory(prev.node) !== getNodeSessionDirectory(next.node)) return false;
+  if (!isSecondaryMetaEqual(prev.secondaryMeta, next.secondaryMeta)) return false;
+
+  if (prev.pinnedSessionIds !== next.pinnedSessionIds
+    && nodeHasPinnedMembershipChange(
+      prev.node,
+      next.node,
+      prev.pinnedSessionIds,
+      next.pinnedSessionIds,
+      prev.groupDirectory,
+      next.groupDirectory,
+    )) {
+    return false;
+  }
+
+  if (prev.expandedParents !== next.expandedParents && hasExpansionMembershipChange(prev, next)) {
+    return false;
+  }
+
+  if (prev.editingId !== next.editingId
+    && (
+      subtreeContainsSession(prev, prev.editingId, prev.subtreeContainsEditing)
+      || subtreeContainsSession(next, next.editingId, next.subtreeContainsEditing)
+    )) {
+    return false;
+  }
+
+  if (prev.editTitle !== next.editTitle
+    && (
+      subtreeContainsSession(prev, prev.editingId, prev.subtreeContainsEditing)
+      || subtreeContainsSession(next, next.editingId, next.subtreeContainsEditing)
+    )) {
+    return false;
+  }
+
+  if (prev.copiedSessionId !== next.copiedSessionId
+    && (
+      nodeContainsSessionId(prev.node, prev.copiedSessionId)
+      || nodeContainsSessionId(next.node, next.copiedSessionId)
+    )) {
+    return false;
+  }
+
+  if (prev.openSidebarMenuKey !== next.openSidebarMenuKey) {
+    const prevMenuSessionId = getRelevantMenuSessionId(prev);
+    const nextMenuSessionId = getRelevantMenuSessionId(next);
+    if (nodeContainsSessionId(prev.node, prevMenuSessionId) || nodeContainsSessionId(next.node, nextMenuSessionId)) {
+      return false;
+    }
+  }
+
+  return prev.setEditingId === next.setEditingId
+    && prev.setEditTitle === next.setEditTitle
+    && prev.handleSaveEdit === next.handleSaveEdit
+    && prev.handleCancelEdit === next.handleCancelEdit
+    && prev.toggleParent === next.toggleParent
+    && prev.handleSessionSelect === next.handleSessionSelect
+    && prev.handleSessionDoubleClick === next.handleSessionDoubleClick
+    && prev.handleShareSession === next.handleShareSession
+    && prev.handleCopyShareUrl === next.handleCopyShareUrl
+    && prev.handleCopySessionId === next.handleCopySessionId
+    && prev.handleUnshareSession === next.handleUnshareSession
+    && prev.setOpenSidebarMenuKey === next.setOpenSidebarMenuKey
+    && prev.createFolderAndStartRename === next.createFolderAndStartRename
+    && prev.handleDeleteSession === next.handleDeleteSession
+    && prev.handleRestoreSession === next.handleRestoreSession
+    && prev.startSessionWorktreeMenuLoad === next.startSessionWorktreeMenuLoad
+    && prev.children === next.children;
+};
+
+export const SessionNodeItem = React.memo(SessionNodeItemComponent, areSessionNodeItemPropsEqual);
