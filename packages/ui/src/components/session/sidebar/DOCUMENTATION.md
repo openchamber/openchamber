@@ -16,8 +16,8 @@ kept at this root in `types.ts` and `utils.tsx`.
 unconditionally. The hook publishes complete directory bootstrap demand,
 refreshes newly added topology, coalesces control events, and performs
 authoritative cleanup. Root-level `useGlobalSessionsPolling` remains the only
-initial and 45-second global poller. `useSessionListSync` must not create a
-second global polling lifecycle.
+owner of the initial global load and its recovery-signal refresh.
+`useSessionListSync` must not create a second global polling lifecycle.
 
 The global sessions cache is the complete source for active and archived
 coverage. Initialized directory stores only supply sessions missing from that

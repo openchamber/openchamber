@@ -119,10 +119,17 @@ Session materialization recency is keyed by runtime and directory. Foreground lo
 Use `useGlobalSessionsStore` when the UI needs a **shared global session cache**.
 
 Each full app root owns one global polling lifecycle through
-`useGlobalSessionsPolling`. The web/desktop root and VS Code chat root load once
-when mounted and refresh every 45 seconds so sessions created by another
-OpenCode process are discovered without relying on the sidebar or native tray
-being visible. Embedded chats and the VS Code agent-manager panel do not poll.
+`useGlobalSessionsPolling`. The web/desktop root and VS Code chat root load the
+full list once when mounted. After that the live event stream is the primary
+discovery path, and the unscoped refresh runs only when this window may have
+missed events: the document becoming visible, window focus, `pageshow`, or
+`openchamber:system-resume`. Those signals share a 30-second minimum spacing, and
+a 10-minute backstop interval covers a window that stays visible and focused, so
+a session created by another OpenCode process is still discovered without the
+sidebar or native tray being visible. Enumerating every project root is
+expensive for the OpenCode server, so this path must stay signal-driven rather
+than returning to a short blind interval. Embedded chats and the VS Code
+agent-manager panel do not poll.
 The sidebar and tray consume the same store and must not start their own
 full-list timers. Surface-specific refreshes, such as opening the mobile session
 sheet or returning from suspension, may still request freshness at their
