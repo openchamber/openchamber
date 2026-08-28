@@ -6,6 +6,7 @@ export const dict = {
   'common.loading': 'Wird geladen...',
   'common.unavailable': 'Nicht verfügbar',
   'common.language.english': 'Englisch',
+  'common.language.arabic': 'Arabisch',
   'common.language.french': 'Französisch',
   'common.language.simplifiedChinese': 'Chinesisch (Vereinfacht)',
   'common.language.traditionalChinese': 'Chinesisch (Traditionell)',

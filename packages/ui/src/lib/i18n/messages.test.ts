@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { dict as enDict } from './messages/en';
+import { dict as arDict } from './messages/ar';
 import { dict as esDict } from './messages/es';
 import { dict as deDict } from './messages/de';
 import { dict as frDict } from './messages/fr';
@@ -14,6 +15,7 @@ import { dict as zhTwDict } from './messages/zh-TW';
 
 const localeDictionaries = {
   en: enDict,
+  ar: arDict,
   de: deDict,
   fr: frDict,
   es: esDict,

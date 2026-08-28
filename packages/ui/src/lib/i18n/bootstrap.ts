@@ -38,6 +38,25 @@ const EN_MESSAGES: BootstrapMessages = {
   loadingData: (providersText, agentsText) => `Loading data (${providersText}, ${agentsText})…`,
 };
 
+const AR_MESSAGES: BootstrapMessages = {
+  startingApi: 'جارٍ تشغيل OpenCode API…',
+  initializing: 'جارٍ التهيئة…',
+  connecting: 'جارٍ الاتصال…',
+  connected: 'تم الاتصال!',
+  connectionError: 'خطأ في الاتصال',
+  disconnected: 'انقطع الاتصال',
+  reconnecting: 'جارٍ إعادة الاتصال…',
+  initialDataLoadFailed: 'تم الاتصال بـ OpenCode، لكن فشل تحميل البيانات الأولية.',
+  cliNotFound: 'OpenCode CLI غير موجود. الرجاء تثبيته أولًا.',
+  providersReady: '✓ المزوّدون',
+  providersLoading: '… المزوّدون',
+  agentsReady: '✓ الوكلاء',
+  agentsLoading: '… الوكلاء',
+  startingDevServer: (hostLabel) => `جارٍ تشغيل خادم تطوير الويب (${hostLabel})...`,
+  waitingDevServer: (hostLabel, attempt) => `بانتظار خادم تطوير الويب (${hostLabel})... المحاولة ${attempt}`,
+  loadingData: (providersText, agentsText) => `جارٍ تحميل البيانات (${providersText}, ${agentsText})…`,
+};
+
 const FR_MESSAGES: BootstrapMessages = {
   startingApi: 'Démarrage de l’API OpenCode…',
   initializing: 'Initialisation…',
@@ -234,6 +253,7 @@ export const getBootstrapMessages = (locale: Locale): BootstrapMessages => {
 
 const BOOTSTRAP_MESSAGES: Record<Locale, BootstrapMessages> = {
   en: EN_MESSAGES,
+  ar: AR_MESSAGES,
   de: DE_MESSAGES,
   fr: FR_MESSAGES,
   'zh-CN': ZH_CN_MESSAGES,
