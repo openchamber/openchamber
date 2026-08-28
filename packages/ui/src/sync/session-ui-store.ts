@@ -195,7 +195,7 @@ export function routeMessage(params: {
           messageId: messageID,
           directory: requestDirectory,
         }).then(() => {}),
-      });
+      })
     }
   }
 
@@ -799,7 +799,7 @@ export async function materializeOpenDraftSession(selection: {
     if (currentDraft.draftId === draft.draftId) {
       useSessionUIStore.setState({
         newSessionDraft: { ...currentDraft, preparedChatDirectory: null },
-      })
+      });
     }
   }
 
