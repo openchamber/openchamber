@@ -13,12 +13,10 @@
 
 import React from 'react';
 
-import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
-import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
+import { useProjectContextOwner } from '@/hooks/useProjectContextOwner';
 
 /**
  * The directory is a parameter rather than read from `useEffectiveDirectory`,
@@ -29,18 +27,9 @@ export const useAgentMemorySync = (directory: string | null): void => {
   const enabled = useUIStore((state) => (
     state.agentMemoryFeatureAvailable && state.agentMemoryToolEnabled
   ));
-  const projects = useProjectsStore((state) => state.projects);
-  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
-  const effectiveDirectory = directory ?? '';
   const load = useAgentMemoryStore((state) => state.load);
-
-  const projectPath = React.useMemo(() => {
-    if (!effectiveDirectory) {
-      return null;
-    }
-    const resolved = resolveProjectForSessionDirectory(projects, availableWorktreesByProject, effectiveDirectory);
-    return resolved?.path ?? null;
-  }, [availableWorktreesByProject, effectiveDirectory, projects]);
+  const owner = useProjectContextOwner(directory);
+  const projectPath = owner?.path ?? null;
 
   React.useEffect(() => {
     if (!enabled) {

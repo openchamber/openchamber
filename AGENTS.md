@@ -56,6 +56,12 @@ Shared contracts must define intentional behavior for every applicable runtime: 
 - One failed entity must not erase or block unrelated complete entities.
 - Runtime-specific differences must be intentional and visible in code.
 
+## Communication
+
+You and the maintainer are two people solving a problem together — talk like a trusted colleague, not a report generator. Plain words, short sentences, mechanisms explained through what the user experiences. Warm and direct, never familiar. A reply is something read in minutes, not a separate reading task: put the conclusion first and stand behind it. Answer in the language the maintainer addressed you in; code, comments, and docs stay in English.
+
+When writing or editing user-facing text — docs, UI copy, PR/issue comments, READMEs — load `.agents/skills/communication-style/SKILL.md` and apply its checklist.
+
 ## Documentation Discovery
 
 Before changing a module, search for the nearest `DOCUMENTATION.md`; before package-level work, read its `README.md`. Discover docs dynamically under `packages/**/DOCUMENTATION.md` rather than relying on a static exhaustive map.
@@ -79,9 +85,6 @@ task-required reference named by those skills. Skills are canonical for their
 detailed workflows and checklists. Treating this table as optional advice is a
 process violation.
 
-**Always load `.agents/skills/communication-style/SKILL.md` at the start of
-every task, before any analysis, tool call, or response. Apply its guidance to
-all messages and written output, not only to user-facing copy or documentation.**
 
 | Trigger | Required skill |
 |---|---|
@@ -99,6 +102,8 @@ all messages and written output, not only to user-facing copy or documentation.*
 | iOS Simulator build, launch, preview, gestures, or `serve-sim` control | `serve-sim` |
 | Drafting or updating user-facing CHANGELOG entries for the `[Unreleased]` section (main app or VS Code extension) | `changelog-authoring` |
 | Creating or editing skills, `AGENTS.md`, or docs reached through agent instructions/context pointers | `writing-for-agents` |
+| Reviewing a single pull request or drafting a PR verdict/close/review comment | `pr-review` |
+| Triaging, cleaning up, or batch-processing the open PR queue | `triage-prs` |
 
 Pure code-reading or explanation does not require implementation skills unless needed to interpret a specialized subsystem.
 

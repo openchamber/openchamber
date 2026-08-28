@@ -114,7 +114,7 @@
       "link": "#CCCCCC",
       "linkHover": "#a2bee8",
       "inlineCode": "#a2bee8",
-      "inlineCodeBackground": "#1A1A1A",
+      "inlineCodeBackground": "#0D0D0D",
       "blockquote": "#808080",
       "blockquoteBorder": "#333333",
       "listMarker": "#99999999"

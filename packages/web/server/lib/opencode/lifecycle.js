@@ -112,8 +112,45 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     now = Date.now,
   } = deps;
 
+  const killProcessOnPortWin32 = (port) => {
+    try {
+      // Get-NetTCPConnection reads the same locale-independent WinNT API
+      // netstat's display layer translates (e.g. "LISTENING" renders as
+      // "ABHÖREN"/"ÉCOUTE"/"ESCUTANDO" on non-English Windows), so this
+      // works regardless of the OS display language.
+      const result = spawnSync(
+        'powershell',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `Get-NetTCPConnection -State Listen -LocalPort ${Number.parseInt(port, 10)} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess`,
+        ],
+        { encoding: 'utf8', timeout: 5000, windowsHide: true }
+      );
+      const output = result.stdout || '';
+      const myPid = process.pid;
+      const pids = new Set();
+      for (const line of output.split(/\r?\n/)) {
+        const pid = Number.parseInt(line.trim(), 10);
+        if (pid && pid !== myPid) pids.add(pid);
+      }
+      for (const pid of pids) {
+        try {
+          spawnSync('taskkill', ['/PID', String(pid), '/F'], { stdio: 'ignore', timeout: 3000, windowsHide: true });
+        } catch {
+        }
+      }
+    } catch {
+    }
+  };
+
   const killProcessOnPort = (port) => {
-    if (!port || process.platform === 'win32') return;
+    if (!port) return;
+    if (process.platform === 'win32') {
+      killProcessOnPortWin32(port);
+      return;
+    }
     try {
       const result = spawnSync('lsof', ['-ti', `:${port}`], { encoding: 'utf8', timeout: 5000, windowsHide: true });
       const output = result.stdout || '';
@@ -324,7 +361,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       // Drop it from the registry only once it has actually exited, so a child
       // that survived teardown stays eligible for the next run's reaper.
       if (Number.isInteger(pid) && hasChildProcessExited(child)) {
-        unregisterManagedProcess(pid);
+        await unregisterManagedProcess(pid);
       }
     }
   };
@@ -477,7 +514,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     // actual host (Electron sets OPENCHAMBER_RUNTIME='desktop'; the standalone
     // web CLI leaves it unset → 'web'; SSH remote → 'ssh-remote') rather than a
     // hardcoded label, matching the server's existing runtimeName convention.
-    registerManagedProcess({
+    await registerManagedProcess({
       pid: child.pid,
       ownerPid: process.pid,
       port,
@@ -792,11 +829,12 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
       if (state.isExternalOpenCode) {
         console.log('Re-probing external OpenCode server...');
-        const probePort = state.openCodePort || env.ENV_CONFIGURED_OPENCODE_PORT || 4096;
+        const probePort = state.openCodePort ?? env.ENV_EFFECTIVE_PORT ?? 4096;
         const probeOrigin = state.openCodeBaseUrl ?? env.ENV_CONFIGURED_OPENCODE_HOST?.origin;
         const healthy = await probeExternalOpenCode(probePort, probeOrigin);
         if (healthy) {
           console.log(`External OpenCode server on port ${probePort} is healthy`);
+          state.openCodeBaseUrl = probeOrigin ?? null;
           setOpenCodePort(probePort);
           state.isOpenCodeReady = true;
           state.lastOpenCodeError = null;
@@ -859,10 +897,11 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       }
 
       // The restart may have landed on a NEW port (the old one can remain
-      // occupied by an orphaned process, e.g. Windows killProcessOnPort is a
-      // no-op). Upstream event readers pinned to the old process would keep
-      // the UI silent forever, so rebind them to the current port. Best
-      // effort: a failure here must not fail the restart itself.
+      // occupied if killProcessOnPort/waitForPortRelease didn't free it in
+      // time, on any platform). Upstream event readers pinned to the old
+      // process would keep the UI silent forever, so rebind them to the
+      // current port. Best effort: a failure here must not fail the restart
+      // itself.
       try {
         onOpenCodeRestarted?.();
       } catch (error) {
@@ -875,7 +914,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     } catch (error) {
       console.error(`Failed to restart OpenCode: ${error.message}`);
       state.lastOpenCodeError = error.message;
-      if (!env.ENV_CONFIGURED_OPENCODE_PORT) {
+      if (!env.ENV_EFFECTIVE_PORT) {
         state.openCodePort = null;
         syncToHmrState();
       }

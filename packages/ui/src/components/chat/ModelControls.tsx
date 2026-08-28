@@ -2283,7 +2283,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 : 'Default';
 
             return (
-                <span className={cn('typography-micro whitespace-nowrap', wasAdjusted ? 'text-foreground' : 'text-muted-foreground')}>
+                <span className={cn(
+                    'typography-micro whitespace-nowrap',
+                    isHighlighted
+                        ? (wasAdjusted ? 'text-interactive-selection-foreground' : 'text-interactive-selection-foreground/70')
+                        : (wasAdjusted ? 'text-foreground' : 'text-muted-foreground'),
+                )}>
                     Thinking: {displayLabel}
                 </span>
             );

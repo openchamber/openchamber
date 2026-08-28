@@ -4,7 +4,7 @@ import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { useFreshestPrVisualSummaryForBranch } from '@/stores/useGitHubPrStatusStore';
-import { useSession, useSessionMessages } from '@/sync/sync-context';
+import { useSessionMessages } from '@/sync/sync-context';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -14,6 +14,8 @@ import { resolveUsageTone } from '@/lib/quota';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { normalizePath } from '@/lib/pathNormalization';
 import { computeContextUsage } from './contextUsage';
+import { formatCost } from './subagentCost';
+import { useSubagentCostRollup } from './useSubagentCostRollup';
 import {
   WorkStatusCallout,
   WorkStatusMeter,
@@ -33,11 +35,6 @@ type Props = {
   showRepository: boolean;
 };
 
-// Spend is read against a budget, so it keeps its real precision instead of
-// collapsing to two decimals. Trailing zeros are dropped so exact values stay
-// short.
-const trimZeros = (value: string): string => (value.includes('.') ? value.replace(/0+$/, '').replace(/\.$/, '') : value);
-const formatCost = (cost: number): string => `$${trimZeros(cost.toFixed(4))}`;
 // Matches the header readout exactly: one decimal, capped the same way, so the
 // two places that report context fill never disagree by a rounding step.
 const formatPercent = (percent: number): string => `${Math.min(percent, 999).toFixed(1)}%`;
@@ -49,7 +46,6 @@ const formatPercent = (percent: number): string => `${Math.min(percent, 999).toF
  */
 export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, goalRow, showSession, showRepository }) => {
   const { t } = useI18n();
-  const session = useSession(sessionId ?? '', directory ?? undefined);
   const { git } = useRuntimeAPIs();
   const ensureStatus = useGitStore((state) => state.ensureStatus);
   const fetchStatus = useGitStore((state) => state.fetchStatus);
@@ -195,7 +191,16 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
     : usageTone === 'warn' ? 'var(--status-warning)'
       : 'var(--status-success)';
 
-  const cost = typeof session?.cost === 'number' && session.cost > 0 ? session.cost : null;
+  // Rollup total: own cost plus every descendant subagent's cost, recursively
+  // (see useSubagentCostRollup). Shown here instead of session.cost alone, so
+  // spend that ran in a spawned subagent doesn't hide from the reader.
+  const { totalCost, ownCost, subagentCost, subagentCount } = useSubagentCostRollup(sessionId);
+  const cost = totalCost !== null && totalCost > 0 ? totalCost : null;
+  // The total answers "what has this cost"; the split answers "why is it more
+  // than the session I am looking at". Only worth a line once subagents exist —
+  // without them the total *is* the session's own cost and the row would
+  // restate the number directly above it.
+  const showCostBreakdown = cost !== null && subagentCount > 0 && subagentCost > 0;
   const hasSession = showSession && (usagePercent !== null || cost !== null || Boolean(goalRow));
   const hasRepository = showRepository && Boolean(branch || changed || prSummary || attentionLabel);
 
@@ -224,6 +229,17 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                 )}
               />
               <WorkStatusMeter percent={usagePercent} color={meterColor} />
+              {/* Caption, not a row: it explains the figure above it rather
+                  than reporting a reading of its own, so it carries no icon
+                  and no label column. */}
+              {showCostBreakdown ? (
+                <p className="mx-1 mb-1 truncate text-[11px] leading-4 text-muted-foreground tabular-nums">
+                  {t('chat.workStatus.cost.breakdown', {
+                    session: formatCost(ownCost),
+                    subagents: formatCost(subagentCost),
+                  })}
+                </p>
+              ) : null}
             </>
           ) : null}
           {/* Below the context readout: the goal is a standing instruction,

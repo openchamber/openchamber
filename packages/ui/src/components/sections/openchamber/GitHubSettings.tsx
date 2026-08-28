@@ -256,7 +256,7 @@ export const GitHubSettings: React.FC = () => {
     }
   }, [runtimeGitHub, setStatus, t]);
 
-  if (isLoading) {
+  if (isLoading && !hasChecked) {
     return null;
   }
 

@@ -1,3 +1,8 @@
+## [Unreleased]
+
+- GitHub Copilot usage now shows a single AI Credits window, matching Copilot's token-based quota, in place of the old Chat Requests and Completions windows (thanks to @jakoss).
+- The context usage readout now reports the session cost including everything its subagents spent, matching the work status panel instead of showing a lower figure.
+
 ## [1.21.0] - 2026-08-26
 
 - **Chat context attachments:** diff and file comments, terminal selections, and linked issues/PRs now show in the conversation as compact context cards — source header, captured content behind an expander, your comment below — instead of raw text inside the message.
@@ -46,6 +51,8 @@
 - Attachments: extracted Office and OpenDocument content is now capped and presented more compactly, preventing large documents and their images from overwhelming the message context.
 - Projects: project names now match the folder name exactly, so `.ssh` and `opencode-claude` are no longer shown as `.Ssh` and `Opencode Claude`; names you renamed yourself are kept.
 - Skills Catalog: the source is now named ClawHub instead of "ClawdHub" (thanks to @makeittech).
+- Add Project now adds the chosen folder to the workspace instead of showing a "Failed to add project" toast.
+- The model selection menu no longer shows white text on a white highlight when a high-contrast theme is active, so the hovered or selected model stays legible (thanks to @bashrusakh).
 
 ## [1.18.4] - 2026-08-14
 

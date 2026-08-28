@@ -22,6 +22,11 @@ All notable changes to this project will be documented in this file.
 - Chat: comment on a reply — select text in a chat message (or in a rendered markdown preview in Files) and choose Comment to attach exactly that quote, with a source line range when it can be located, plus your note to the next message. The selection stays highlighted while you type, and the selection menu was restyled — Add to chat is now Add to input.
 - Diff: comment like a review — hovering a line shows a + button in the gutter; clicking it, clicking a line, or dragging across lines opens the comment editor for that line or range. The comment editor and saved-comment cards match the chat's comment style.
 - Composer: hovering or tapping a context chip above the input opens a stacked preview of everything attached, where a comment can be edited in place or an item removed before sending.
+- Work status: the session cost now counts what its subagents spent, with a line under the context meter splitting the session's own cost from the subagents' share, and each subagent's cost shown next to it in the Subagents list. Previously a session that delegated most of its work looked far cheaper than it was.
+- Files: opening a file over 5,000 lines is no longer blocked — the line-count guard now allows up to 20,000 lines, letting large files reach the virtualized full-file preview instead of being rejected at the open step (thanks @gaojunran).
+- Usage: GitHub Copilot now shows a single AI Credits window, matching Copilot's token-based quota, in place of the old Chat Requests and Completions windows (thanks to @jakoss).
+- Settings: fixed the Cloudflare Tunnel download link shown when cloudflared is not installed (thanks to @AyoubAchour).
+
 ## [1.21.0] - 2026-08-26
 
 - **Chat scrolling rebuilt around your message.** Sending parks your message near the top and the reply streams in below it, gliding smoothly a paragraph at a time. Scrolling up immediately hands you the wheel; the scroll-to-bottom pill carries the model's working status while you're away.
@@ -42,6 +47,7 @@ All notable changes to this project will be documented in this file.
 - Search: every searchable picker uses one matcher now — best matches first, multi-word queries in any order, punctuation ignored ("gpt4o" finds "gpt-4o"). Ctrl/Cmd+P matches whole file paths.
 - Chat: @ file mentions rank files and directories together by match quality, and long paths keep the folder next to the file name visible.
 - Chat: a "Follow new content while streaming" checkbox (Settings → Chat → Streaming, on by default) turns automatic following off entirely; with it off, the scroll-to-bottom pill now appears as soon as the reply grows past the visible area.
+- Chat: undoing or redoing a parent session now keeps its subagent sessions at the same point in history instead of leaving their later work behind (thanks to @alexandrereyes).
 - Command palette: rarely used commands (pin session, copy session ID, multi-run launcher, archived sessions, notes, todos, status, theme) are found by typing but stay off the first screen.
 - Mobile: narrowing a browser window past phone size switches into the mobile layout (and back when widened); the old/new mobile layout setting is gone.
 - Browser: an agent opening a page with the browser tool no longer pops the browser panel open (or switches the surface you're on) — the page loads in the background and the rail is where you peek at it.
@@ -105,6 +111,7 @@ All notable changes to this project will be documented in this file.
 - Git: pull-request checks in Work status stay current as their status changes.
 - UI: the default dialog close button is easier to click or tap (thanks to @rockinrimmer).
 - Desktop/Windows: the close button now aligns correctly with the rest of the window chrome.
+- Session assist: recaps and suggested follow-ups now work when the Anthropic provider is configured to use a custom endpoint; they previously failed every time instead of using that configured connection.
 
 ## [1.19.0] - 2026-08-19
 
@@ -132,6 +139,10 @@ All notable changes to this project will be documented in this file.
 - Desktop: browser pages served from a self-signed loopback HTTPS address now load instead of being blocked by the certificate warning.
 - Browser: typing a comment on a page no longer triggers app shortcuts.
 - Skills Catalog: the source is now named ClawHub instead of "ClawdHub" (thanks to @makeittech).
+- Chat: dismissing an agent's clarifying questions no longer leaves the session stuck on the question screen — the next task shows its thinking and final response again.
+- VSCode: Add Project now adds the chosen folder to the workspace instead of showing a "Failed to add project" toast.
+- UI: the model selection menu no longer shows white text on a white highlight when a high-contrast theme is active, so the hovered or selected model stays legible (thanks to @bashrusakh).
+- Settings: an explicitly set `OPENCODE_BINARY` environment variable is no longer discarded when settings contain an empty opencodeBinary value; the environment variable keeps pointing the managed OpenCode server at the binary you chose.
 
 ## [1.18.4] - 2026-08-14
 

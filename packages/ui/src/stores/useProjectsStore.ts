@@ -49,7 +49,7 @@ interface ProjectsStore {
   activeProjectId: string | null;
   manualProjectOrder: string[];
 
-  addProject: (path: string, options?: { label?: string; id?: string }) => ProjectEntry | null;
+  addProject: (path: string, options?: { label?: string; id?: string }) => Promise<ProjectEntry | null>;
   removeProject: (id: string) => void;
   setActiveProject: (id: string) => void;
   setActiveProjectIdOnly: (id: string) => void;
@@ -166,6 +166,13 @@ const normalizeProjectPath = (value: string): string => {
   }
   return normalized.length > 1 ? normalized.replace(/\/+$/, '') : normalized;
 };
+
+// VS Code workspace folder paths come from the extension host with uppercase
+// drive letters (see resolveWorkspaceFolders in packages/vscode), while paths
+// typed or browsed in the webview keep the lowercase drive of fsPath. Normalize
+// to the workspace form so dedupe and active-path matching agree on Windows.
+const normalizeVSCodeWorkspacePath = (value: string): string =>
+  value.replace(/^([a-z]):/, (_, letter: string) => letter.toUpperCase() + ':');
 
 // Folder names are shown verbatim: title-casing them turned `.ssh` into `.Ssh`
 // and made every project look like a name the user never chose.
@@ -584,8 +591,29 @@ export const useProjectsStore = create<ProjectsStore>()(
       return { ok: true, normalizedPath: normalized };
     },
 
-    addProject: (path: string, options?: { label?: string; id?: string }) => {
+    addProject: async (path: string, options?: { label?: string; id?: string }) => {
       if (isVSCodeProjectsRuntime) {
+        // Projects are scoped to VS Code workspace folders in this runtime.
+        // Adding a folder through the extension host makes the project appear
+        // in the workspace and the new folder is synced back as a project.
+        const validation = get().validateProjectPath(path);
+        if (!validation.ok || !validation.normalizedPath) {
+          return null;
+        }
+        const normalizedPath = normalizeVSCodeWorkspacePath(validation.normalizedPath);
+        const existing = get().projects.find((project) => project.path === normalizedPath);
+        if (existing) {
+          return existing;
+        }
+        const runtimeApis = getRegisteredRuntimeAPIs();
+        if (runtimeApis?.vscode?.addWorkspaceFolder) {
+          try {
+            const folders = await runtimeApis.vscode.addWorkspaceFolder(normalizedPath);
+            return get().syncVSCodeWorkspaceFolders(folders, normalizedPath);
+          } catch {
+            return null;
+          }
+        }
         return null;
       }
       const { validateProjectPath } = get();
