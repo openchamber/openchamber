@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { EditorState, type TransactionSpec } from '@codemirror/state';
-import type { EditorView } from '@codemirror/view';
 import { createRoot } from 'react-dom/client';
 
 import { ComposerEditor, type ComposerEditorHandle, type ComposerEditorProps } from '../ComposerEditor';
