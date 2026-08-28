@@ -799,7 +799,7 @@ export async function materializeOpenDraftSession(selection: {
     if (currentDraft.draftId === draft.draftId) {
       useSessionUIStore.setState({
         newSessionDraft: { ...currentDraft, preparedChatDirectory: null },
-      });
+      })
     }
   }
 
@@ -1016,7 +1016,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             useViewportStore.getState().updateViewportAnchor(prevId, prevMessages.length - 1)
           }
         }
-      })
+      });
     }
 
     // Mark session viewed in notification store + update active session ref
