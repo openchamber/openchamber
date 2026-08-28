@@ -1,10 +1,16 @@
 import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
-import { parseRoute, updateBrowserURL, hasRouteParams } from '@/lib/router';
+<<<<<<< HEAD
+import { parseRoute, updateBrowserURL, hasRouteParams, RECENT_SESSION_TOKEN } from '@/lib/router';
 import { openSessionFromRoute } from '@/lib/router/openSessionFromRoute';
+=======
+import { parseRoute, updateBrowserURL, hasRouteParams, RECENT_SESSION_TOKEN } from '@/lib/router';
+>>>>>>> 80b57c394 (feat(ui): restore recent session from URL token)
 import type { RouteState, AppRouteState } from '@/lib/router';
 import { resolveSettingsSlug } from '@/lib/settings/metadata';
+import { resolveRecentSession, shouldApplyResolvedRecentSession } from '@/lib/recentSession';
+import { getLastActiveSessionClearGeneration } from '@/sync/last-session-cache';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 
@@ -47,6 +53,7 @@ export function useRouter(): void {
   // Track initialization to avoid duplicate applies
   const initializedRef = React.useRef(false);
   const isApplyingRouteRef = React.useRef(false);
+  const routeGenerationRef = React.useRef(0);
 
   // Get store actions (stable references)
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
@@ -58,16 +65,36 @@ export function useRouter(): void {
    */
   const applyRoute = React.useCallback(
     async (route: RouteState) => {
-      if (isApplyingRouteRef.current) {
-        return;
-      }
-
+      const generation = ++routeGenerationRef.current;
       isApplyingRouteRef.current = true;
 
       try {
         // 1. Apply session first (may trigger async operations)
         if (route.sessionId) {
-          await openSessionFromRoute(route.sessionId);
+          if (route.sessionId === RECENT_SESSION_TOKEN) {
+            const sessionIdBeforeResolution = useSessionUIStore.getState().currentSessionId;
+            const clearGenerationBeforeResolution = getLastActiveSessionClearGeneration();
+            const resolved = await resolveRecentSession();
+            if (generation !== routeGenerationRef.current) {
+              return;
+            }
+            const userClearedPointerDuringResolution =
+              getLastActiveSessionClearGeneration() !== clearGenerationBeforeResolution;
+            if (
+              userClearedPointerDuringResolution
+              || !shouldApplyResolvedRecentSession(
+                sessionIdBeforeResolution,
+                useSessionUIStore.getState().currentSessionId,
+              )
+            ) {
+              return;
+            }
+            if (resolved) {
+              await openSessionFromRoute(resolved.sessionId);
+            }
+          } else {
+            await openSessionFromRoute(route.sessionId);
+          }
         }
 
         // 2. Handle settings first because it is a full-screen overlay.
@@ -100,7 +127,9 @@ export function useRouter(): void {
           navigateToDiff(route.diffFile);
         }
       } finally {
-        isApplyingRouteRef.current = false;
+        if (generation === routeGenerationRef.current) {
+          isApplyingRouteRef.current = false;
+        }
       }
     },
     [setSettingsDialogOpen, setSettingsPage, navigateToDiff]
@@ -153,6 +182,11 @@ export function useRouter(): void {
     // Apply the initial route
     const initializeRoute = async () => {
       await applyRoute(route);
+
+      // Do not normalize the initial URL after a newer popstate route wins.
+      if (routeGenerationRef.current !== 1) {
+        return;
+      }
 
       // After applying, update URL to normalized form (use replaceState).
       // Use the parsed route values instead of an immediate store snapshot so
