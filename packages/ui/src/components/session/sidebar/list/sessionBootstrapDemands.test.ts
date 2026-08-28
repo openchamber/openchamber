@@ -65,8 +65,10 @@ describe("buildSessionBootstrapDemands", () => {
 })
 
 describe("filterBackgroundEligibleSections", () => {
-  test("keeps all sections when background loading is enabled", () => {
-    expect(filterBackgroundEligibleSections(sections, null, new Set(["project-a"]))).toBe(sections)
+  test("keeps eligible sections even when they are collapsed", () => {
+    const filtered = filterBackgroundEligibleSections(sections, new Set(["project-a"]), new Set(["project-a"]))
+
+    expect(filtered.map((section) => section.project.id)).toEqual(["project-a"])
   })
 
   test("drops collapsed inactive projects but keeps explicitly expanded projects", () => {

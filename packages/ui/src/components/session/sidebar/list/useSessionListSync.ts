@@ -11,7 +11,6 @@ import { buildKnownSessionDirectories } from './sessionListDirectories';
 import { useAuthoritativeSessionCleanup } from './useAuthoritativeSessionCleanup';
 import { normalizePath } from '../utils';
 import { selectWorktreeDiscoveryProjects } from '../sessions/worktreeDiscoveryProjects';
-import { useUIStore } from '@/stores/useUIStore';
 
 const EMPTY_WORKTREES_BY_PROJECT = new Map();
 
@@ -28,7 +27,6 @@ export const useSessionListSync = ({
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
   const availableWorktreesByProject = useSessionUIStore((state) => isVSCode ? EMPTY_WORKTREES_BY_PROJECT : state.availableWorktreesByProject);
-  const backgroundProjectSessionLoadingEnabled = useUIStore((state) => state.backgroundProjectSessionLoadingEnabled);
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
   const hasAuthoritativeGlobalSessions = useGlobalSessionsStore((state) => state.status === 'ready');
@@ -44,20 +42,24 @@ export const useSessionListSync = ({
     return sessions;
   }, [globalActiveSessions, liveSessions]);
   const eligibleProjects = React.useMemo(
-    () => backgroundProjectSessionLoadingEnabled
-      ? projects
-      : selectWorktreeDiscoveryProjects(
-        projects,
-        activeProjectId,
-        eligibilitySessions,
-        availableWorktreesByProject,
-        isVSCode,
-      ),
-    [activeProjectId, availableWorktreesByProject, backgroundProjectSessionLoadingEnabled, eligibilitySessions, isVSCode, projects],
+    () => selectWorktreeDiscoveryProjects(
+      projects,
+      activeProjectId,
+      eligibilitySessions,
+      availableWorktreesByProject,
+      isVSCode,
+    ),
+    [activeProjectId, availableWorktreesByProject, eligibilitySessions, isVSCode, projects],
+  );
+  // Eligibility tracks live sessions, so keying the set on its contents keeps the
+  // demand/refresh effects from re-running on every session tick.
+  const knownDirectoriesSignature = React.useMemo(
+    () => [...buildKnownSessionDirectories(eligibleProjects, availableWorktreesByProject, { includeWorktrees: !isVSCode })].join('\u0000'),
+    [availableWorktreesByProject, eligibleProjects, isVSCode],
   );
   const knownDirectories = React.useMemo(
-    () => buildKnownSessionDirectories(eligibleProjects, availableWorktreesByProject, { includeWorktrees: !isVSCode }),
-    [availableWorktreesByProject, eligibleProjects, isVSCode],
+    () => new Set(knownDirectoriesSignature === '' ? [] : knownDirectoriesSignature.split('\u0000')),
+    [knownDirectoriesSignature],
   );
   const bootstrapDemandOwner = `session-list-sync:${React.useId()}`;
 

@@ -13,10 +13,9 @@ type BootstrapProjectSection = {
 
 export const filterBackgroundEligibleSections = <TSection extends BootstrapProjectSection>(
   sections: TSection[],
-  backgroundEligibleProjectIds: ReadonlySet<string> | null,
+  backgroundEligibleProjectIds: ReadonlySet<string>,
   collapsedProjects: ReadonlySet<string>,
 ): TSection[] => {
-  if (!backgroundEligibleProjectIds) return sections;
   return sections.filter((section) => (
     backgroundEligibleProjectIds.has(section.project.id) || !collapsedProjects.has(section.project.id)
   ));

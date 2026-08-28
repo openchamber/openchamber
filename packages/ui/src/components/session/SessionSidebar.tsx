@@ -148,8 +148,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   // sessionAttentionStates removed — now using notification-store directly in SessionNodeItem
   const worktreeMetadata = useSessionUIStore((state) => state.worktreeMetadata);
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
-  const worktreeDiscoveryEnabled = useUIStore((state) => state.worktreeDiscoveryEnabled);
-  const worktreeDiscoveryIntervalMs = useUIStore((state) => state.worktreeDiscoveryIntervalMs);
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const liveSessions = useAllLiveSessions();
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
@@ -195,13 +193,13 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     return sessions;
   }, [globalActiveSessions, liveSessions]);
   const worktreeDiscoveryProjects = React.useMemo(
-    () => worktreeDiscoveryEnabled ? selectWorktreeDiscoveryProjects(
+    () => selectWorktreeDiscoveryProjects(
       projects,
       activeProjectId,
       worktreeDiscoverySessions,
       availableWorktreesByProject,
-    ) : [],
-    [activeProjectId, availableWorktreesByProject, projects, worktreeDiscoveryEnabled, worktreeDiscoverySessions],
+    ),
+    [activeProjectId, availableWorktreesByProject, projects, worktreeDiscoverySessions],
   );
   const worktreeDiscoveryProjectIds = React.useMemo(
     () => new Set(worktreeDiscoveryProjects.map((project) => project.id)),
@@ -219,7 +217,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const [worktreeDiscoveryRevision, requestWorktreeDiscovery] = React.useReducer((revision) => revision + 1, 0);
   const isWorktreeTopologyLoading = !isVSCode && resolvedWorktreeTopologyKey !== projectWorktreeDiscoveryKey;
   const [unresolvedWorktreeProjectPaths, setUnresolvedWorktreeProjectPaths] = React.useState<ReadonlySet<string>>(new Set());
-  const lastWorktreeDiscoveryAtRef = React.useRef(0);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -306,18 +303,12 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       setResolvedWorktreeTopologyKey(projectWorktreeDiscoveryKey);
     };
 
-    const elapsed = Date.now() - lastWorktreeDiscoveryAtRef.current;
-    const delay = Math.max(0, worktreeDiscoveryIntervalMs - elapsed);
-    const timer = setTimeout(() => {
-      lastWorktreeDiscoveryAtRef.current = Date.now();
-      void discoverWorktrees();
-    }, delay);
+    void discoverWorktrees();
 
     return () => {
       cancelled = true;
-      clearTimeout(timer);
     };
-  }, [isVSCode, projectWorktreeDiscoveryKey, runtimeKey, worktreeDiscoveryIntervalMs, worktreeDiscoveryProjects, worktreeDiscoveryRevision]);
+  }, [isVSCode, projectWorktreeDiscoveryKey, runtimeKey, worktreeDiscoveryProjects, worktreeDiscoveryRevision]);
 
   React.useEffect(() => {
     if (isVSCode) return;
@@ -432,7 +423,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
 
   const gitRepoStatus = useGitRepoStatusMap(isVisible ? normalizedProjectPaths : EMPTY_STRING_ARRAY);
   useProjectRepoStatus({
-    enabled: isVisible && worktreeDiscoveryEnabled,
+    enabled: isVisible,
     normalizedProjects: normalizedProjects.filter((project) => worktreeDiscoveryProjectIds.has(project.id)),
     gitRepoStatus,
     setProjectRepoStatus,

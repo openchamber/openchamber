@@ -6,7 +6,6 @@ import { installHookTestDom } from '../test-utils/testDom';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useUIStore } from '@/stores/useUIStore';
 import type { WorktreeMetadata } from '@/types/worktree';
 
 type Event =
@@ -109,7 +108,6 @@ describe('useSessionListSync', () => {
     useProjectsStore.setState({ projects, activeProjectId: 'project' });
     useDirectoryStore.setState({ currentDirectory: '/project' });
     useSessionUIStore.setState({ currentSessionDirectory: null, availableWorktreesByProject: new Map() });
-    useUIStore.setState({ backgroundProjectSessionLoadingEnabled: true });
   });
 
   afterEach(() => {
@@ -129,8 +127,7 @@ describe('useSessionListSync', () => {
     expect(state.cleanupInputs.at(-1)).toEqual({ enabled: true, hasAuthoritativeGlobalSessions: true, sessionCount: 0, sessions: [] });
   });
 
-  test('limits background demands to active and session-owning projects when disabled', () => {
-    useUIStore.setState({ backgroundProjectSessionLoadingEnabled: false });
+  test('limits background demands to active and session-owning projects', () => {
     useProjectsStore.setState({
       projects: [
         { id: 'project', path: '/project' },
@@ -144,8 +141,7 @@ describe('useSessionListSync', () => {
     expect(state.demands[0]?.directories).toEqual(['/project']);
   });
 
-  test('keeps a non-active project with an active session when disabled', () => {
-    useUIStore.setState({ backgroundProjectSessionLoadingEnabled: false });
+  test('keeps a non-active project with an active session', () => {
     useProjectsStore.setState({
       projects: [
         { id: 'project', path: '/project' },
@@ -162,9 +158,17 @@ describe('useSessionListSync', () => {
 
   test('refreshes every VS Code directory on first mount and only topology additions afterward', () => {
     act(() => root.render(<LifecycleProbe isVSCode />));
+    globalSessions.activeSessions = [{ id: 'session', directory: '/added' }];
     act(() => useProjectsStore.setState({ projects: [...projects, { id: 'added', path: '/added' }] }));
 
     expect(state.directoryRefreshes).toEqual([['/project'], ['/added']]);
+  });
+
+  test('ignores VS Code topology additions that own no session and are not active', () => {
+    act(() => root.render(<LifecycleProbe isVSCode />));
+    act(() => useProjectsStore.setState({ projects: [...projects, { id: 'added', path: '/added' }] }));
+
+    expect(state.directoryRefreshes).toEqual([['/project']]);
   });
 
   test('coalesces control events and clears the listener, timeout, and demand on unmount', async () => {
