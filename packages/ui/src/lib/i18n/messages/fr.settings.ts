@@ -2096,7 +2096,7 @@ export const settingsDict = {
   'settings.remoteInstances.direct.sidebarDescription': 'Se connecter avec un lien ou un jeton',
   'settings.remoteInstances.direct.title': 'Autres serveurs OpenChamber',
   'settings.remoteInstances.direct.description': 'Serveurs vers lesquels cette application peut basculer. Importez un lien de connexion depuis un autre serveur ou ajoutez-le par adresse.',
-  'settings.remoteInstances.direct.addDialog.description': 'Ajoutez un autre serveur OpenChamber par URL. Utilisez ceci lorsque le serveur est déjà lancé et que vous disposez d’un token de connexion.',
+  'settings.remoteInstances.direct.addDialog.description': 'Ajoutez un autre serveur OpenChamber par URL. Utilisez ceci lorsque le serveur est déjà lancé et que vous disposez d’un jeton de connexion.',
   'settings.remoteInstances.direct.field.labelPlaceholder': 'Libellé (facultatif)',
   'settings.remoteInstances.direct.field.urlPlaceholder': 'https://hôte:port',
   'settings.remoteInstances.direct.field.tokenPlaceholder': 'Jeton de connexion (facultatif pour les serveurs locaux de confiance)',
