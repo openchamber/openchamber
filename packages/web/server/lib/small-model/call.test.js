@@ -10,6 +10,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../opencode/shared.js', () => ({
   readConfig: vi.fn(),
   readConfigLayers: vi.fn(),
+  // Pure predicate with no disk access — the real implementation, so header
+  // parsing is exercised rather than stubbed.
+  isPlainObject: (value) => value instanceof Object && !Array.isArray(value),
 }));
 
 vi.mock('./runtime-providers.js', () => ({ getRuntimeProvider: vi.fn(async () => null) }));
@@ -120,6 +123,39 @@ describe('callSmallModel — custom provider config', () => {
       });
 
       expect(lastCall(fetchMock).init.headers.Authorization).toBe('Bearer sk-env-key');
+    });
+
+    it('sends configured provider headers alongside the bearer token', async () => {
+      process.env.OPENCHAMBER_TEST_GATEWAY_KEY = 'sub-key';
+      readConfig.mockReturnValue({
+        provider: {
+          custom: {
+            options: {
+              apiKey: 'sk-config',
+              baseURL: 'https://proxy.example.test/v1',
+              headers: {
+                'Ocp-Apim-Subscription-Key': '{env:OPENCHAMBER_TEST_GATEWAY_KEY}',
+                'x-tenant': 'team',
+              },
+            },
+          },
+        },
+      });
+      fetchMock.mockResolvedValue(ok('hello'));
+
+      await callSmallModel({
+        auth: {},
+        catalog: {},
+        workingDirectory: '/proj',
+        providerID: 'custom',
+        modelID: 'model',
+        prompt: 'hi',
+      });
+
+      const { init } = lastCall(fetchMock);
+      expect(init.headers['Ocp-Apim-Subscription-Key']).toBe('sub-key');
+      expect(init.headers['x-tenant']).toBe('team');
+      expect(init.headers.Authorization).toBe('Bearer sk-config');
     });
 
     it('uses apiKey and baseURL from provider config when no auth.json entry exists', async () => {

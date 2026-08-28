@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { readAuthFile, writeAuthFile } from '../opencode/auth.js';
-import { readConfig, readConfigLayers } from '../opencode/shared.js';
+import { readConfig, readConfigLayers, isPlainObject } from '../opencode/shared.js';
 import { getCatalogProvider } from './catalog.js';
 import { getAuthEntryForProvider } from './resolve.js';
 import { getRuntimeProvider } from './runtime-providers.js';
@@ -544,6 +544,29 @@ const resolveConfigApiKey = (value, workingDirectory, providerID) => {
   }
 };
 
+/**
+ * `options.headers` from the provider config, with the same `{env:…}`/`{file:…}`
+ * substitutions the API key gets.
+ *
+ * OpenCode sends these on every request, so dropping them here would have the
+ * small model authenticating differently from the request path against the same
+ * URL. Gateways fronted by an API-management layer reject a bearer-only request
+ * outright, because the header is the credential rather than a supplement to it.
+ */
+const readConfiguredHeaders = (providerCfg, workingDirectory, providerID) => {
+  const configured = providerCfg?.options?.headers;
+  if (!isPlainObject(configured)) return null;
+  const headers = {};
+  for (const [name, value] of Object.entries(configured)) {
+    // Config headers are strings; a malformed entry is skipped rather than
+    // stringified into a header the gateway would reject.
+    if (String(value) !== value) continue;
+    const resolved = resolveConfigApiKey(value.trim(), workingDirectory, providerID);
+    if (resolved) headers[name] = resolved;
+  }
+  return Object.keys(headers).length ? headers : null;
+};
+
 const readProviderConfig = (workingDirectory, providerID) => {
   try {
     const config = readConfig(workingDirectory);
@@ -554,6 +577,7 @@ const readProviderConfig = (workingDirectory, providerID) => {
     const apiKey = rawApiKey ? resolveConfigApiKey(rawApiKey, workingDirectory, providerID) : null;
     return {
       baseURL,
+      headers: readConfiguredHeaders(providerCfg, workingDirectory, providerID),
       // Shape the config-supplied key as a regular api-key auth entry so it
       // can win the precedence check below and flow through the dispatch's
       // `entry.type === 'api' ? entry.key : ...` branch unchanged.
@@ -753,7 +777,9 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
 
   return callOpenaiCompatible({
     baseURL,
-    headers: { Authorization: `Bearer ${apiKey}` },
+    // Configured headers last: a gateway that authenticates on its own header
+    // must be able to override the bearer default rather than sit beside it.
+    headers: { Authorization: `Bearer ${apiKey}`, ...(providerConfig?.headers || {}) },
     modelID,
     prompt,
     system,
