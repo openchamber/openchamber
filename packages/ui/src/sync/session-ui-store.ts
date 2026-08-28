@@ -195,7 +195,7 @@ export function routeMessage(params: {
           messageId: messageID,
           directory: requestDirectory,
         }).then(() => {}),
-      })
+      });
     }
   }
 
