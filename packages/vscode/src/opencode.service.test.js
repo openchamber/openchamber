@@ -89,8 +89,8 @@ mock.module('crypto', () => ({
 }));
 
 mock.module('./opencodeProcessRegistry', () => ({
-  registerManagedProcess: () => { registryRegistrations += 1; },
-  unregisterManagedProcess: () => { registryUnregistrations += 1; },
+  registerManagedProcess: async () => { registryRegistrations += 1; },
+  unregisterManagedProcess: async () => { registryUnregistrations += 1; },
   reapOrphanedProcesses: async () => {
     registryReaps += 1;
     return { inspected: 0, reaped: 0 };

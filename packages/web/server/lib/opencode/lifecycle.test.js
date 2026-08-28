@@ -158,6 +158,13 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
   return runtime;
 };
 
+const waitForExternalHealth = async (base) => {
+  const response = await fetch(`${base}/global/health`, { method: 'GET' });
+  if (!response.ok) return false;
+  const body = await response.json().catch(() => null);
+  return body?.healthy === true;
+};
+
 describe('OpenCode lifecycle', () => {
   it('records an authoritative ready terminal event for external startup', async () => {
     globalThis.fetch = vi.fn(async () => ({
@@ -393,7 +400,7 @@ describe('OpenCode lifecycle', () => {
       json: async () => ({ healthy: true }),
     }));
     globalThis.fetch = fetchMock;
-    const runtime = createRuntime({}, {
+    const runtime = createRuntime({ waitForReady: waitForExternalHealth }, {
       openCodePort: null,
       openCodeBaseUrl: null,
       isExternalOpenCode: true,
@@ -419,7 +426,7 @@ describe('OpenCode lifecycle', () => {
       ok: false,
       json: async () => null,
     }));
-    const runtime = createRuntime({}, {
+    const runtime = createRuntime({ waitForReady: waitForExternalHealth }, {
       openCodePort: 4095,
       openCodeBaseUrl: 'http://seamus:4095',
       isExternalOpenCode: true,
