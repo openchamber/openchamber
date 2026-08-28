@@ -10,7 +10,8 @@ import { sessionEvents } from '@/lib/sessionEvents';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { getAllSyncSessions } from '@/sync/sync-refs';
+import { ensureGlobalSessionsLoaded, resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { formatSessionDateLabel, normalizePath } from '@/components/session/sidebar/utils';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -35,6 +36,10 @@ export function ArchiveView(): React.ReactNode {
   const [query, setQuery] = React.useState('');
   const [selectedDirectory, setSelectedDirectory] = React.useState<string | null>(null);
   const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE);
+
+  React.useEffect(() => {
+    if (open) void ensureGlobalSessionsLoaded(getAllSyncSessions());
+  }, [open]);
 
   const normalizedQuery = query.trim().toLowerCase();
 

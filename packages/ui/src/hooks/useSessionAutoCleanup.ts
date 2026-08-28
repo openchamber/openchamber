@@ -88,8 +88,11 @@ export const useSessionAutoCleanup = (enabledOrOptions?: boolean | CleanupOption
   const runningRef = React.useRef(false);
 
   React.useEffect(() => {
+    if (!needsGlobalSessions) {
+      return;
+    }
     void ensureGlobalSessionsLoaded(getAllSyncSessions());
-  }, []);
+  }, [needsGlobalSessions]);
 
   const candidates = React.useMemo(() => {
     if (autoDeleteAfterDays <= 0) {
