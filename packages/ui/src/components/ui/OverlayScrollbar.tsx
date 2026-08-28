@@ -66,6 +66,11 @@ function bindScrollbar(
   let hideDeadlineMs = 0;
   let lastUserIntentTimeMs = Number.NEGATIVE_INFINITY;
   let pointerOverThumb = false;
+  // The thumb is a sibling overlay of the container, so hover state is tracked
+  // for both: moving the pointer from the container onto the thumb fires the
+  // container's pointerleave before the thumb's pointerover, and the hide timer
+  // must not run in the gap between those two events.
+  let pointerOverContainer = false;
 
   // Drag state is the minimum snapshot needed to convert pointer travel back into a scroll offset.
   let drag: {
@@ -83,11 +88,11 @@ function bindScrollbar(
   };
 
   const scheduleHide = () => {
-    if (pointerOverThumb || drag || hideTimerId !== null) return;
+    if (pointerOverThumb || pointerOverContainer || drag || hideTimerId !== null) return;
 
     const hide = () => {
       hideTimerId = null;
-      if (pointerOverThumb || drag) return;
+      if (pointerOverThumb || pointerOverContainer || drag) return;
       const delay = hideDeadlineMs - performance.now();
       if (delay > 0) {
         hideTimerId = setTimeout(hide, delay);
@@ -246,7 +251,45 @@ function bindScrollbar(
     scheduleHide();
   };
 
+  // Reveal the thumb while the pointer is inside the scrollable area. This is a
+  // deliberate affordance for finding the scrollbar without scrolling first, on
+  // every runtime with a mouse pointer (web, Electron, VS Code webview). The
+  // pointerType guard keeps it inert on touch/pen: pointerenter/pointerleave
+  // fire for every pointer type (a touch taps the container on touchstart), so
+  // without the guard every tap on a scroll container would flash the thumb.
+  // The overlay root is a DOM sibling of the container, so the same hand-off race
+  // that scheduleHide guards against applies: the container's pointerleave can
+  // fire before the thumb's pointerover, and the fire-time re-check in
+  // scheduleHide keeps the thumb from vanishing under a pointer that moved onto it.
+  const onContainerPointerEnter = (event: PointerEvent) => {
+    if (event.pointerType !== "mouse") return;
+    pointerOverContainer = true;
+    if (options.suppressVisibility) return;
+    hideDeadlineMs = performance.now() + options.hideDelayMs;
+    if (hideTimerId !== null) {
+      clearTimeout(hideTimerId);
+      hideTimerId = null;
+    }
+    setVisible(true);
+    // Re-measure on enter so the horizontal thumb reflects the current geometry:
+    // if the container has horizontal overflow the thumb is revealed, otherwise
+    // it stays hidden. This matches the original PR's updateMetrics() behavior
+    // and avoids the regression where onScroll (which does not measure) would
+    // leave a legitimately overflowing horizontal thumb hidden while hovering.
+    if (!options.disableHorizontal) scheduleUpdate(true);
+  };
+
+  const onContainerPointerLeave = (event: PointerEvent) => {
+    if (event.pointerType !== "mouse") return;
+    pointerOverContainer = false;
+    if (options.suppressVisibility) return;
+    hideDeadlineMs = performance.now() + options.hideDelayMs;
+    scheduleHide();
+  };
+
   container.addEventListener("scroll", onScroll, { passive: true });
+  container.addEventListener("pointerenter", onContainerPointerEnter);
+  container.addEventListener("pointerleave", onContainerPointerLeave);
   root.addEventListener("pointerdown", onPointerDown);
   root.addEventListener("pointermove", onPointerMove);
   root.addEventListener("pointerup", onPointerEnd);
@@ -322,6 +365,8 @@ function bindScrollbar(
       if (frameId !== null) cancelAnimationFrame(frameId);
       if (hideTimerId !== null) clearTimeout(hideTimerId);
       container.removeEventListener("scroll", onScroll);
+      container.removeEventListener("pointerenter", onContainerPointerEnter);
+      container.removeEventListener("pointerleave", onContainerPointerLeave);
       setUserIntentListeners(false);
       root.removeEventListener("pointerdown", onPointerDown);
       root.removeEventListener("pointermove", onPointerMove);
