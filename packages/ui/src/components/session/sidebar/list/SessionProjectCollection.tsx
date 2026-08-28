@@ -35,6 +35,10 @@ import { isCapacitorApp } from '@/lib/platform';
 
 const PR_NO_PR_RETRY_MS = 5 * 60_000;
 
+// A stable empty array: without a chats group the sections hook must not see a
+// new reference on every render.
+const EMPTY_STANDALONE_GROUPS: SessionGroup[] = [];
+
 const isRootSession = (session: Session): boolean => {
   // SAFETY: OpenCode attaches parentID to hierarchical session records,
   // although the SDK's base Session type does not currently declare it.
@@ -181,6 +185,40 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     [collection.archivedSessions, collection.sessions, topology.availableWorktreesByProject, topology.isVSCode, topology.projects],
   );
   const { getSessionsForProject, getArchivedSessionsForProject } = useProjectSessionLists({ ownership });
+  // Built before the sections hook runs, because that hook owns the search data
+  // for every group the sidebar renders — the chats group included. A group the
+  // hook never sees renders an empty list while a search is active.
+  const chatGroup = React.useMemo<SessionGroup | null>(() => {
+    if (topology.isVSCode) return null;
+    const chatsRoot = getChatsRootForHome(view.homeDirectory)
+      ?? collection.chatSessions.map((session) => getChatsRootFromDirectory(session.directory)).find(Boolean)
+      ?? null;
+    if (!chatsRoot) return null;
+    const folderScopes = Array.from(new Set([
+      chatsRoot,
+      ...collection.chatSessions.map((session) => normalizePath(session.directory ?? null)).filter(Boolean),
+    ])).filter((directory): directory is string => Boolean(directory))
+      .map((directory) => ({ scopeKey: directory, directory }));
+    return {
+      id: 'managed-chats',
+      label: '',
+      branch: null,
+      description: null,
+      isMain: true,
+      worktree: null,
+      directory: chatsRoot,
+      folderScopeKey: chatsRoot,
+      folderScopes,
+      draftTarget: 'chat',
+      sessions: collection.chatSessions
+        .filter((session) => !session.time?.archived && isRootSession(session))
+        .map((session) => ({ session, children: (collection.childrenMap.get(session.id) ?? []).filter((child) => !child.time?.archived).map((child) => ({ session: child, children: [], worktree: null })), worktree: null })),
+    };
+  }, [collection.chatSessions, collection.childrenMap, topology.isVSCode, view.homeDirectory]);
+  const standaloneGroups = React.useMemo<SessionGroup[]>(
+    () => chatGroup ? [chatGroup] : EMPTY_STANDALONE_GROUPS,
+    [chatGroup],
+  );
   const { projectSections, groupSearchDataByGroup, sectionsForRender, flatSectionsForRender } = useSessionSidebarSections({
     normalizedProjects: topology.projects,
     getSessionsForProject,
@@ -195,6 +233,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     filterSessionNodesForSearch,
     buildGroupSearchText,
     foldersMap,
+    standaloneGroups,
   });
 
   // Second bootstrap-demand owner: the layout-level useSessionListSync keeps
@@ -379,33 +418,6 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     scrollerActions.setActiveProjectIdOnly,
     scrollerActions.setSessionSwitcherOpen,
   ]);
-  const chatGroup = React.useMemo<SessionGroup | null>(() => {
-    if (topology.isVSCode) return null;
-    const chatsRoot = getChatsRootForHome(view.homeDirectory)
-      ?? collection.chatSessions.map((session) => getChatsRootFromDirectory(session.directory)).find(Boolean)
-      ?? null;
-    if (!chatsRoot) return null;
-    const folderScopes = Array.from(new Set([
-      chatsRoot,
-      ...collection.chatSessions.map((session) => normalizePath(session.directory ?? null)).filter(Boolean),
-    ])).filter((directory): directory is string => Boolean(directory))
-      .map((directory) => ({ scopeKey: directory, directory }));
-    return {
-      id: 'managed-chats',
-      label: '',
-      branch: null,
-      description: null,
-      isMain: true,
-      worktree: null,
-      directory: chatsRoot,
-      folderScopeKey: chatsRoot,
-      folderScopes,
-      draftTarget: 'chat',
-      sessions: collection.chatSessions
-        .filter((session) => !session.time?.archived && isRootSession(session))
-        .map((session) => ({ session, children: (collection.childrenMap.get(session.id) ?? []).filter((child) => !child.time?.archived).map((child) => ({ session: child, children: [], worktree: null })), worktree: null })),
-    };
-  }, [collection.chatSessions, collection.childrenMap, topology.isVSCode, view.homeDirectory]);
   const renderChatsSection = React.useCallback(() => {
     if (!chatGroup) return null;
     return <SessionGroupSection
