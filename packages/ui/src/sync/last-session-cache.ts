@@ -79,6 +79,19 @@ export function readLastActiveSession(
   return entry ? { sessionId: entry.sessionId, directory: entry.directory } : null
 }
 
+// A server can be opened through several equivalent origins (LAN address,
+// reverse proxy, or the public hostname). If the current origin has no exact
+// entry, the newest pointer is the safest continuity fallback; the caller
+// still validates the session against an authoritative snapshot.
+export function readMostRecentLastActiveSession(
+  storage: Storage = getDeferredSafeStorage(),
+): PersistedLastSession | null {
+  const entries = Object.values(readEnvelope(storage).runtimes)
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+  const entry = entries[0]
+  return entry ? { sessionId: entry.sessionId, directory: entry.directory } : null
+}
+
 export function clearLastActiveSession(
   runtimeKey: string,
   storage: Storage = getDeferredSafeStorage(),
