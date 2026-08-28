@@ -5,6 +5,7 @@ import { useAllLiveSessions, useChildStoreManager } from '@/sync/sync-context';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useKnownSessionDirectoriesStore } from '@/stores/useKnownSessionDirectoriesStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { buildSessionBootstrapDemands } from './sessionBootstrapDemands';
 import { buildKnownSessionDirectories } from './sessionListDirectories';
@@ -41,6 +42,10 @@ export const useSessionListSync = ({
     }
     return sessions;
   }, [globalActiveSessions, liveSessions]);
+  const liveSessionIds = React.useMemo(
+    () => new Set(liveSessions.map((session) => session.id)),
+    [liveSessions],
+  );
   const eligibleProjects = React.useMemo(
     () => selectWorktreeDiscoveryProjects(
       projects,
@@ -48,8 +53,9 @@ export const useSessionListSync = ({
       eligibilitySessions,
       availableWorktreesByProject,
       isVSCode,
+      liveSessionIds,
     ),
-    [activeProjectId, availableWorktreesByProject, eligibilitySessions, isVSCode, projects],
+    [activeProjectId, availableWorktreesByProject, eligibilitySessions, isVSCode, liveSessionIds, projects],
   );
   // Eligibility tracks live sessions, so keying the set on its contents keeps the
   // demand/refresh effects from re-running on every session tick.
@@ -61,7 +67,14 @@ export const useSessionListSync = ({
     () => new Set(knownDirectoriesSignature === '' ? [] : knownDirectoriesSignature.split('\u0000')),
     [knownDirectoriesSignature],
   );
+  const setKnownSessionDirectories = useKnownSessionDirectoriesStore((state) => state.setDirectories);
+  const clearKnownSessionDirectories = useKnownSessionDirectoriesStore((state) => state.clearDirectories);
   const bootstrapDemandOwner = `session-list-sync:${React.useId()}`;
+
+  React.useEffect(() => {
+    setKnownSessionDirectories(knownDirectories);
+    return clearKnownSessionDirectories;
+  }, [clearKnownSessionDirectories, knownDirectories, setKnownSessionDirectories]);
 
   React.useEffect(() => {
     childStores.setBootstrapDemand(bootstrapDemandOwner, buildSessionBootstrapDemands({
@@ -81,9 +94,9 @@ export const useSessionListSync = ({
     const directories = new Set(knownDirectories);
     const previous = knownProjectSessionDirectoriesRef.current;
     knownProjectSessionDirectoriesRef.current = directories;
-    const added = previous ? [...directories].filter((directory) => !previous.has(directory)) : isVSCode ? [...directories] : [];
+    const added = previous ? [...directories].filter((directory) => !previous.has(directory)) : [...directories];
     if (added.length) void refreshGlobalSessionsForDirectories(added, getAllSyncSessions());
-  }, [isVSCode, knownDirectories]);
+  }, [knownDirectories]);
 
   React.useEffect(() => {
     let timeout: ReturnType<typeof setTimeout> | null = null;
