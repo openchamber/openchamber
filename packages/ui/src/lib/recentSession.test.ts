@@ -40,6 +40,9 @@ mock.module('@/stores/useGlobalSessionsStore', () => ({
   refreshGlobalSessions: async (): Promise<SnapshotResult> => {
     const next = snapshotCalls.shift();
     if (next?.pending) return new Promise<SnapshotResult>(() => undefined);
+    if (!next) {
+      return { activeSessions: committedSessions };
+    }
     if (next?.reject) {
       storeStatus = 'error';
       throw new Error('network down');
