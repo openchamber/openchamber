@@ -7,6 +7,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import {
+  selectMcpServersForDirectory,
   useMcpConfigStore,
   envRecordToArray,
   type McpDraft,
@@ -19,7 +20,7 @@ import {
 } from './mcpImport';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { usePendingOpenCodeRestartStore } from '@/stores/usePendingOpenCodeRestartStore';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { cn } from '@/lib/utils';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
@@ -556,7 +557,6 @@ export const McpPage: React.FC = () => {
   );
   const {
     selectedMcpName,
-    mcpServers,
     mcpDraft,
     setMcpDraft,
     setSelectedMcp,
@@ -566,7 +566,6 @@ export const McpPage: React.FC = () => {
     deleteMcp,
   } = useMcpConfigStore(useShallow((s) => ({
     selectedMcpName: s.selectedMcpName,
-    mcpServers: s.mcpServers,
     mcpDraft: s.mcpDraft,
     setMcpDraft: s.setMcpDraft,
     setSelectedMcp: s.setSelectedMcp,
@@ -576,10 +575,12 @@ export const McpPage: React.FC = () => {
     deleteMcp: s.deleteMcp,
   })));
 
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  // Settings browses whichever project its own selector points at; the app
+  // stays where it is.
+  const currentDirectory = useSettingsDirectory();
   const isVSCodeAuthRuntime = React.useMemo(() => isVSCodeRuntime(), []);
-  const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(currentDirectory ?? null));
-  const mcpDiagnostics = useMcpStore((state) => state.getDiagnosticForDirectory(currentDirectory ?? null));
+  const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(currentDirectory));
+  const mcpDiagnostics = useMcpStore((state) => state.getDiagnosticForDirectory(currentDirectory));
   const refreshStatus = useMcpStore((state) => state.refresh);
   const connectMcp = useMcpStore((state) => state.connect);
   const disconnectMcp = useMcpStore((state) => state.disconnect);
@@ -588,7 +589,8 @@ export const McpPage: React.FC = () => {
   const testConnectionMcp = useMcpStore((state) => state.testConnection);
   const pendingRestartChanges = usePendingOpenCodeRestartStore((state) => state.changes);
 
-  const selectedServer = selectedMcpName ? getMcpByName(selectedMcpName) : null;
+  const mcpServers = useMcpConfigStore((state) => selectMcpServersForDirectory(state, currentDirectory));
+  const selectedServer = selectedMcpName ? getMcpByName(selectedMcpName, currentDirectory) : null;
   const isNewServer = Boolean(mcpDraft && mcpDraft.name === selectedMcpName && !selectedServer);
 
   // ── form state ──
@@ -908,7 +910,7 @@ export const McpPage: React.FC = () => {
     };
     setIsSaving(true);
     try {
-      const result = isNewServer ? await createMcp(draft) : await updateMcp(name, draft);
+      const result = isNewServer ? await createMcp(draft, currentDirectory) : await updateMcp(name, draft, currentDirectory);
       if (result.ok) {
         await clearPendingMcpAuthContext(authStateKey);
         resetTransientAuthState();
@@ -940,7 +942,7 @@ export const McpPage: React.FC = () => {
   const handleDelete = async () => {
     if (!selectedMcpName) return;
     setIsDeleting(true);
-    const result = await deleteMcp(selectedMcpName);
+    const result = await deleteMcp(selectedMcpName, currentDirectory);
     if (result.ok) {
       await clearPendingMcpAuthContext(authStateKey);
       resetTransientAuthState();
@@ -967,7 +969,7 @@ export const McpPage: React.FC = () => {
       } else {
         await connectMcp(selectedMcpName, currentDirectory);
         await refreshStatus({ directory: currentDirectory, silent: true });
-        const nextStatus = useMcpStore.getState().getStatusForDirectory(currentDirectory ?? null)[selectedMcpName];
+        const nextStatus = useMcpStore.getState().getStatusForDirectory(currentDirectory)[selectedMcpName];
         if (nextStatus?.status === 'connected') {
           toast.success(t('settings.mcp.page.toast.connected'));
         } else if (nextStatus?.status === 'needs_auth') {
@@ -1029,7 +1031,7 @@ export const McpPage: React.FC = () => {
     const actionKey = runtimeActionKey;
     let queuedStateKey: string | null = null;
     try {
-      const currentStatus = useMcpStore.getState().getStatusForDirectory(currentDirectory ?? null)[selectedMcpName]?.status;
+      const currentStatus = useMcpStore.getState().getStatusForDirectory(currentDirectory)[selectedMcpName]?.status;
       authPollStartsFromNeedsAuthRef.current = currentStatus === 'needs_auth' || currentStatus === 'needs_client_registration';
 
       // One implementation for every surface that can authorise; the page
@@ -1237,7 +1239,7 @@ export const McpPage: React.FC = () => {
       void (async () => {
         authPollAttemptsRef.current += 1;
         await refreshStatus({ directory: currentDirectory, silent: true });
-        const nextStatus = useMcpStore.getState().getStatusForDirectory(currentDirectory ?? null)[selectedMcpName];
+        const nextStatus = useMcpStore.getState().getStatusForDirectory(currentDirectory)[selectedMcpName];
 
         if (!nextStatus) {
           return;

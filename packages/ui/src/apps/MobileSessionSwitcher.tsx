@@ -3,7 +3,7 @@ import type { Session } from '@opencode-ai/sdk/v2';
 
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { formatSessionCompactDateLabel } from '@/components/session/sidebar/utils';
-import { useSwitcherItems } from '@/components/session/sidebar/hooks/useSwitcherItems';
+import { useSwitcherItems } from '@/components/session/sidebar/shell/useSwitcherItems';
 import { useTabletLayout } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';

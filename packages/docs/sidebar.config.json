@@ -350,6 +350,21 @@
           }
         },
         {
+          "label": "Integrations",
+          "link": "/integrations/",
+          "translations": {
+            "uk": "Інтеграції",
+            "zh-CN": "集成",
+            "es": "Integraciones",
+            "pt-BR": "Integrações",
+            "ko": "통합 기능",
+            "pl": "Integracje",
+            "fr": "Intégrations",
+            "ja": "統合機能",
+            "de": "Integrationen"
+          }
+        },
+        {
           "label": "MCP Servers",
           "link": "/mcp/",
           "translations": {
@@ -638,18 +653,18 @@
           }
         },
         {
-          "label": "Desktop Browser",
+          "label": "Browser Panel",
           "link": "/desktop-browser/",
           "translations": {
-            "uk": "Десктопний браузер",
-            "zh-CN": "桌面浏览器",
-            "es": "Navegador de escritorio",
-            "pt-BR": "Navegador desktop",
-            "ko": "데스크톱 브라우저",
-            "pl": "Przeglądarka na pulpicie",
-            "fr": "Navigateur desktop",
-            "ja": "デスクトップブラウザ",
-            "de": "Desktop-Browser"
+            "uk": "Панель браузера",
+            "zh-CN": "浏览器面板",
+            "es": "Panel del navegador",
+            "pt-BR": "Painel do navegador",
+            "ko": "브라우저 패널",
+            "pl": "Panel przeglądarki",
+            "fr": "Panneau navigateur",
+            "ja": "ブラウザパネル",
+            "de": "Browser-Panel"
           }
         },
         {

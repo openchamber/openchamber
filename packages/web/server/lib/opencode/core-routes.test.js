@@ -491,7 +491,7 @@ describe('core-routes', () => {
     expect(dependencies.clientPairingRuntime.redeemPairingSession).toHaveBeenCalledTimes(11);
   });
 
-  it('should let preview proxy credentials reach preview proxy validation', async () => {
+  it('no longer exempts preview-proxy style credentials from API auth', async () => {
     const app = express();
     const requireAuth = vi.fn((_req, res) => res.status(401).type('text/plain').send('Authentication required'));
 
@@ -523,20 +523,18 @@ describe('core-routes', () => {
 
     app.use('/api/preview/proxy', (_req, res) => res.json({ reached: true }));
 
+    // The preview proxy is gone; the token that used to bypass the auth gate
+    // must no longer open a hole for any route that happens to match the path.
     await request(app)
       .get('/api/preview/proxy/abc123/?oc_preview_token=preview-secret')
-      .expect(200, { reached: true });
+      .expect(401, 'Authentication required');
 
     await request(app)
       .get('/api/preview/proxy/abc123/')
       .set('Cookie', 'oc_preview_token=preview-secret')
-      .expect(200, { reached: true });
-
-    await request(app)
-      .get('/api/preview/proxy/abc123/')
       .expect(401, 'Authentication required');
 
-    expect(requireAuth).toHaveBeenCalledTimes(1);
+    expect(requireAuth).toHaveBeenCalledTimes(2);
   });
 });
 

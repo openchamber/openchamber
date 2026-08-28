@@ -161,6 +161,29 @@ describe('openchamber session routes', () => {
     }
   });
 
+  it('percent-encodes the directory header for non-ASCII checkout paths', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ id: 'ses_123' }) }));
+    try {
+      const { app } = createApp();
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/home/user/Masaüstü/projeler', title: 'Side task' })
+        .expect(200);
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'x-opencode-directory': encodeURIComponent('/home/user/Masaüstü/projeler'),
+          }),
+        }),
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('parses JSON body without global middleware', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ id: 'ses_123' }) }));

@@ -21,6 +21,7 @@ import { isTerminalShell } from '@/lib/terminalShell';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID } from '@/lib/theme/themes';
 import { DEFAULT_OPEN_IN_APP_ID } from '@/lib/openInApps';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
 export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void => {
   if (typeof window === 'undefined') {
@@ -63,6 +64,10 @@ const persistRuntimeSettingsMirror = (settings: DesktopSettings, runtimeKey: str
     homeDirectory: settings.homeDirectory,
     projects: settings.projects,
     activeProjectId: settings.activeProjectId,
+    sidebarProjectDisplayMode: settings.sidebarProjectDisplayMode,
+    sidebarSessionGroupingMode: settings.sidebarSessionGroupingMode,
+    sidebarProjectSortOrder: settings.sidebarProjectSortOrder,
+    sidebarShowRecentSection: settings.sidebarShowRecentSection,
     pinnedDirectories: settings.pinnedDirectories,
     gitmojiEnabled: settings.gitmojiEnabled,
     directoryShowHidden: settings.directoryShowHidden,
@@ -130,7 +135,7 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
 
   if (Array.isArray(settings.projects) && settings.projects.length > 0) {
     const collapsed = settings.projects
-      .filter((project) => (project as unknown as { sidebarCollapsed?: boolean }).sidebarCollapsed === true)
+      .filter((project) => project.sidebarCollapsed === true)
       .map((project) => project.id)
       .filter((id): id is string => typeof id === 'string' && id.length > 0);
     if (collapsed.length > 0) {
@@ -194,11 +199,23 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   setOrRemoveLocalStorage('sttLanguage', typeof settings.sttLanguage === 'string' ? settings.sttLanguage : null);
 };
 
-const dispatchSettingsSynced = (settings: DesktopSettings): void => {
+export interface SettingsSyncedDetail {
+  settings: DesktopSettings;
+  /** Whether listeners may adopt cross-window workspace pointers
+      (activeProjectId / lastDirectory). True only for a bootstrap-grade sync:
+      the settings document is shared by every window of this server, so a
+      mid-session reconciliation adopting them would hijack this window's
+      workspace with another window's choice. */
+  adoptWorkspace: boolean;
+}
+
+const dispatchSettingsSynced = (settings: DesktopSettings, adoptWorkspace: boolean): void => {
   if (typeof window === 'undefined') {
     return;
   }
-  window.dispatchEvent(new CustomEvent<DesktopSettings>('openchamber:settings-synced', { detail: settings }));
+  window.dispatchEvent(new CustomEvent<SettingsSyncedDetail>('openchamber:settings-synced', {
+    detail: { settings, adoptWorkspace },
+  }));
 };
 
 type SettingsSaveState = 'idle' | 'saving' | 'error';
@@ -273,13 +290,14 @@ const sanitizeSkillCatalogs = (value: unknown): DesktopSettings['skillCatalogs']
     if (seen.has(id)) continue;
     seen.add(id);
 
-    result.push({
+    const catalog: NonNullable<DesktopSettings['skillCatalogs']>[number] = {
       id,
       label,
       source,
-      ...(subpath ? { subpath } : {}),
-      ...(gitIdentityId ? { gitIdentityId } : {}),
-    });
+    };
+    if (subpath) catalog.subpath = subpath;
+    if (gitIdentityId) catalog.gitIdentityId = gitIdentityId;
+    result.push(catalog);
   }
 
   return result;
@@ -393,7 +411,7 @@ const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefin
       project.icon = candidate.icon.trim();
     }
     if (candidate.iconImage === null) {
-      (project as unknown as Record<string, unknown>).iconImage = null;
+      project.iconImage = null;
     } else if (candidate.iconImage && typeof candidate.iconImage === 'object') {
       const iconImage = candidate.iconImage as Record<string, unknown>;
       const mime = typeof iconImage.mime === 'string' ? iconImage.mime.trim() : '';
@@ -404,18 +422,18 @@ const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefin
         ? iconImage.source
         : null;
       if (mime && updatedAt > 0 && source) {
-        (project as unknown as Record<string, unknown>).iconImage = { mime, updatedAt, source };
+        project.iconImage = { mime, updatedAt, source };
       }
     }
     if (typeof candidate.color === 'string' && candidate.color.trim().length > 0) {
       project.color = candidate.color.trim();
     }
     if (candidate.iconBackground === null) {
-      (project as unknown as Record<string, unknown>).iconBackground = null;
+      project.iconBackground = null;
     } else {
       const iconBackground = normalizeIconBackground(candidate.iconBackground);
       if (iconBackground) {
-        (project as unknown as Record<string, unknown>).iconBackground = iconBackground;
+        project.iconBackground = iconBackground;
       }
     }
     if (typeof candidate.addedAt === 'number' && Number.isFinite(candidate.addedAt) && candidate.addedAt >= 0) {
@@ -429,7 +447,7 @@ const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefin
       project.lastOpenedAt = candidate.lastOpenedAt;
     }
     if (typeof candidate.sidebarCollapsed === 'boolean') {
-      (project as unknown as Record<string, unknown>).sidebarCollapsed = candidate.sidebarCollapsed;
+      project.sidebarCollapsed = candidate.sidebarCollapsed;
     }
     result.push(project);
   }
@@ -507,7 +525,7 @@ const sanitizeModelRefs = (value: unknown, limit: number): Array<{ providerID: s
 };
 
 const getPersistApi = (): PersistApi | undefined => {
-  const candidate = (useUIStore as unknown as { persist?: PersistApi }).persist;
+  const candidate = useUIStore.persist;
   if (candidate && typeof candidate === 'object') {
     return candidate;
   }
@@ -525,6 +543,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     darkThemeId: DEFAULT_DARK_THEME_ID,
     openInAppId: DEFAULT_OPEN_IN_APP_ID,
     showReasoningTraces: defaults.showReasoningTraces,
+    streamingAutoFollowEnabled: defaults.streamingAutoFollowEnabled,
     workStatusPanelEnabled: defaults.workStatusPanelEnabled,
     workStatusHiddenSections: defaults.workStatusHiddenSections,
     sessionRecapEnabled: defaults.sessionRecapEnabled,
@@ -553,6 +572,8 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     inputSpellcheckEnabled: defaults.inputSpellcheckEnabled,
     showOpenCodeUpdateNotifications: defaults.showOpenCodeUpdateNotifications,
     agentControlToolEnabled: defaults.agentControlToolEnabled,
+    agentWebToolEnabled: defaults.agentWebToolEnabled,
+    agentMemoryToolEnabled: defaults.agentMemoryToolEnabled,
     showToolFileIcons: defaults.showToolFileIcons,
     codeBlockLineWrap: defaults.codeBlockLineWrap,
     showTurnChangedFiles: defaults.showTurnChangedFiles,
@@ -570,7 +591,6 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     messageStreamTransport: 'auto',
     stickyUserHeader: defaults.stickyUserHeader,
     promptNavigatorEnabled: defaults.promptNavigatorEnabled,
-    expandedEditorToolbar: defaults.expandedEditorToolbar,
     wideChatLayoutEnabled: defaults.wideChatLayoutEnabled,
     showSplitAssistantMessageActions: defaults.showSplitAssistantMessageActions,
     draftStartersVisible: defaults.draftStartersVisible,
@@ -629,6 +649,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.showReasoningTraces === 'boolean' && settings.showReasoningTraces !== store.showReasoningTraces) {
     store.setShowReasoningTraces(settings.showReasoningTraces);
+  }
+  if (typeof settings.streamingAutoFollowEnabled === 'boolean' && settings.streamingAutoFollowEnabled !== store.streamingAutoFollowEnabled) {
+    store.setStreamingAutoFollowEnabled(settings.streamingAutoFollowEnabled);
   }
   if (typeof settings.sessionRecapEnabled === 'boolean' && settings.sessionRecapEnabled !== store.sessionRecapEnabled) {
     store.setSessionRecapEnabled(settings.sessionRecapEnabled);
@@ -729,6 +752,25 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   ) {
     store.setAgentControlToolEnabled(settings.agentControlToolEnabled);
   }
+  if (
+    typeof settings.agentWebToolEnabled === 'boolean'
+    && settings.agentWebToolEnabled !== store.agentWebToolEnabled
+  ) {
+    store.setAgentWebToolEnabled(settings.agentWebToolEnabled);
+  }
+  if (
+    typeof settings.agentMemoryToolEnabled === 'boolean'
+    && settings.agentMemoryToolEnabled !== store.agentMemoryToolEnabled
+  ) {
+    store.setAgentMemoryToolEnabled(settings.agentMemoryToolEnabled);
+  }
+  // Server-owned: it says whether this build has the feature at all.
+  if (
+    typeof settings.agentMemoryFeatureAvailable === 'boolean'
+    && settings.agentMemoryFeatureAvailable !== store.agentMemoryFeatureAvailable
+  ) {
+    store.setAgentMemoryFeatureAvailable(settings.agentMemoryFeatureAvailable);
+  }
   if (typeof settings.showToolFileIcons === 'boolean' && settings.showToolFileIcons !== store.showToolFileIcons) {
     store.setShowToolFileIcons(settings.showToolFileIcons);
   }
@@ -814,9 +856,6 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.promptNavigatorEnabled === 'boolean' && settings.promptNavigatorEnabled !== store.promptNavigatorEnabled) {
     store.setPromptNavigatorEnabled(settings.promptNavigatorEnabled);
-  }
-  if (typeof settings.expandedEditorToolbar === 'boolean' && settings.expandedEditorToolbar !== store.expandedEditorToolbar) {
-    store.setExpandedEditorToolbar(settings.expandedEditorToolbar);
   }
   if (typeof settings.wideChatLayoutEnabled === 'boolean' && settings.wideChatLayoutEnabled !== store.wideChatLayoutEnabled) {
     store.setWideChatLayoutEnabled(settings.wideChatLayoutEnabled);
@@ -1007,6 +1046,26 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.filesViewShowGitignored === 'boolean') {
     setFilesViewShowGitignored(settings.filesViewShowGitignored, { persist: false });
   }
+  const sessionDisplayChanges: Partial<ReturnType<typeof useSessionDisplayStore.getState>> = {};
+  if (settings.sidebarProjectDisplayMode === 'all' || settings.sidebarProjectDisplayMode === 'single') {
+    sessionDisplayChanges.projectDisplayMode = settings.sidebarProjectDisplayMode;
+  }
+  if (settings.sidebarSessionGroupingMode === 'by-worktree' || settings.sidebarSessionGroupingMode === 'flat') {
+    sessionDisplayChanges.sessionGroupingMode = settings.sidebarSessionGroupingMode;
+  }
+  if (settings.sidebarProjectSortOrder === 'manual'
+    || settings.sidebarProjectSortOrder === 'a-z'
+    || settings.sidebarProjectSortOrder === 'z-a'
+    || settings.sidebarProjectSortOrder === 'date-added'
+    || settings.sidebarProjectSortOrder === 'recent') {
+    sessionDisplayChanges.projectSortOrder = settings.sidebarProjectSortOrder;
+  }
+  if (typeof settings.sidebarShowRecentSection === 'boolean') {
+    sessionDisplayChanges.showRecentSection = settings.sidebarShowRecentSection;
+  }
+  if (Object.keys(sessionDisplayChanges).length > 0) {
+    useSessionDisplayStore.setState(sessionDisplayChanges);
+  }
 };
 
 const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
@@ -1063,6 +1122,22 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.activeProjectId === 'string' && candidate.activeProjectId.length > 0) {
     result.activeProjectId = candidate.activeProjectId;
   }
+  if (candidate.sidebarProjectDisplayMode === 'all' || candidate.sidebarProjectDisplayMode === 'single') {
+    result.sidebarProjectDisplayMode = candidate.sidebarProjectDisplayMode;
+  }
+  if (candidate.sidebarSessionGroupingMode === 'by-worktree' || candidate.sidebarSessionGroupingMode === 'flat') {
+    result.sidebarSessionGroupingMode = candidate.sidebarSessionGroupingMode;
+  }
+  if (candidate.sidebarProjectSortOrder === 'manual'
+    || candidate.sidebarProjectSortOrder === 'a-z'
+    || candidate.sidebarProjectSortOrder === 'z-a'
+    || candidate.sidebarProjectSortOrder === 'date-added'
+    || candidate.sidebarProjectSortOrder === 'recent') {
+    result.sidebarProjectSortOrder = candidate.sidebarProjectSortOrder;
+  }
+  if (typeof candidate.sidebarShowRecentSection === 'boolean') {
+    result.sidebarShowRecentSection = candidate.sidebarShowRecentSection;
+  }
 
   if (Array.isArray(candidate.securityScopedBookmarks)) {
     result.securityScopedBookmarks = candidate.securityScopedBookmarks.filter(
@@ -1098,6 +1173,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.showReasoningTraces === 'boolean') {
     result.showReasoningTraces = candidate.showReasoningTraces;
+  }
+  if (typeof candidate.streamingAutoFollowEnabled === 'boolean') {
+    result.streamingAutoFollowEnabled = candidate.streamingAutoFollowEnabled;
   }
   if (typeof candidate.sessionRecapEnabled === 'boolean') {
     result.sessionRecapEnabled = candidate.sessionRecapEnabled;
@@ -1318,11 +1396,7 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     for (const [providerId, config] of Object.entries(candidate.usageModelGroups)) {
       if (config && typeof config === 'object') {
         const typedConfig = config as Record<string, unknown>;
-        const providerConfig: {
-          customGroups?: Array<{id: string; label: string; models: string[]; order: number}>;
-          modelAssignments?: Record<string, string>;
-          renamedGroups?: Record<string, string>;
-        } = {};
+        const providerConfig: NonNullable<DesktopSettings['usageModelGroups']>[string] = {};
 
         // Parse customGroups
         if (Array.isArray(typedConfig.customGroups)) {
@@ -1374,6 +1448,12 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.agentControlToolEnabled === 'boolean') {
     result.agentControlToolEnabled = candidate.agentControlToolEnabled;
+  }
+  if (typeof candidate.agentWebToolEnabled === 'boolean') {
+    result.agentWebToolEnabled = candidate.agentWebToolEnabled;
+  }
+  if (typeof candidate.agentMemoryToolEnabled === 'boolean') {
+    result.agentMemoryToolEnabled = candidate.agentMemoryToolEnabled;
   }
   if (typeof candidate.openCodeUpdateToastDismissedVersion === 'string') {
     result.openCodeUpdateToastDismissedVersion = candidate.openCodeUpdateToastDismissedVersion.trim().slice(0, 128);
@@ -1445,9 +1525,6 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.promptNavigatorEnabled === 'boolean') {
     result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
-  }
-  if (typeof candidate.expandedEditorToolbar === 'boolean') {
-    result.expandedEditorToolbar = candidate.expandedEditorToolbar;
   }
   if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
     result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
@@ -1611,6 +1688,62 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
 };
 
 type SettingsRuntimeContext = { runtimeKey: string; generation: number };
+type SettingsMutation = { revision: number; changes: Partial<DesktopSettings> };
+type SettingsOperation = { revision: number };
+
+class SettingsMutationTracker {
+  private revision = 0;
+  private mutations: SettingsMutation[] = [];
+  private operations = new Set<SettingsOperation>();
+
+  record(changes: Partial<DesktopSettings>): number {
+    this.revision += 1;
+    if (this.operations.size > 0) {
+      const latest = this.mutations.at(-1);
+      // A new segment is only needed when an operation started after the last one.
+      const crossedOperationBoundary = latest
+        ? [...this.operations].some((operation) => operation.revision >= latest.revision)
+        : true;
+      if (latest && !crossedOperationBoundary) {
+        latest.revision = this.revision;
+        latest.changes = { ...latest.changes, ...changes };
+      } else {
+        this.mutations.push({ revision: this.revision, changes });
+      }
+    }
+    return this.revision;
+  }
+
+  begin(revision = this.revision): SettingsOperation {
+    const operation = { revision };
+    this.operations.add(operation);
+    return operation;
+  }
+
+  reconcile(settings: DesktopSettings, operation: SettingsOperation): DesktopSettings {
+    let reconciled = settings;
+    for (const mutation of this.mutations) {
+      if (mutation.revision <= operation.revision) continue;
+      reconciled = { ...reconciled, ...mutation.changes };
+    }
+    return reconciled;
+  }
+
+  finish(operation: SettingsOperation): void {
+    if (!this.operations.delete(operation)) return;
+    if (this.operations.size === 0) {
+      this.mutations = [];
+      return;
+    }
+    const oldestRevision = Math.min(...[...this.operations].map(({ revision }) => revision));
+    this.mutations = this.mutations.filter((mutation) => mutation.revision > oldestRevision);
+  }
+
+  reset(): void {
+    this.mutations = [];
+    this.operations.clear();
+  }
+}
 
 // Short-lived cache + in-flight dedup for settings fetches to avoid repeated GET calls during startup
 let _settingsRuntimeGeneration = 0;
@@ -1621,6 +1754,8 @@ let _pendingSettingsContext: SettingsRuntimeContext | null = null;
 let _settingsFlushTimer: ReturnType<typeof setTimeout> | null = null;
 let _settingsFlushWaiters: Array<() => void> = [];
 let _settingsLifecycleInitialized = false;
+let _pendingSettingsRevision = 0;
+const _settingsMutationTracker = new SettingsMutationTracker();
 const SETTINGS_CACHE_TTL = 2_000; // 2 seconds — covers the startup burst
 const SETTINGS_DEBOUNCE_MS = 200;
 
@@ -1649,6 +1784,8 @@ const ensureSettingsRuntimeLifecycle = (): void => {
   subscribeRuntimeEndpointChanged((detail) => {
     if (detail.runtimeKey === detail.previousRuntimeKey) return;
     _settingsRuntimeGeneration += 1;
+    _settingsMutationTracker.reset();
+    _pendingSettingsRevision = 0;
     _settingsCache = null;
     _settingsInflight = null;
   });
@@ -1716,19 +1853,21 @@ export const invalidateSettingsCache = (): void => {
   _settingsCache = null;
 };
 
-export const syncDesktopSettings = async (): Promise<void> => {
+export const syncDesktopSettings = async (options?: { adoptWorkspace?: boolean }): Promise<void> => {
+  const adoptWorkspace = options?.adoptWorkspace !== false;
   if (typeof window === 'undefined') {
     return;
   }
   ensureSettingsRuntimeLifecycle();
   const context = captureSettingsRuntimeContext();
+  const operation = _settingsMutationTracker.begin();
 
-  const persistApi = getPersistApi();
+  const persistApis = [getPersistApi(), useSessionDisplayStore.persist];
 
   // Wait for Zustand persist hydration before applying server settings.
   // Otherwise `set()`-calls race with hydration: we set X, then hydration
   // reads localStorage and overwrites back to the persisted value.
-  const waitForHydration = (): Promise<void> => {
+  const waitForPersistHydration = (persistApi: PersistApi | undefined): Promise<void> => {
     if (!persistApi?.hasHydrated || persistApi.hasHydrated()) {
       return Promise.resolve();
     }
@@ -1751,12 +1890,29 @@ export const syncDesktopSettings = async (): Promise<void> => {
       if (persistApi.hasHydrated?.()) finish();
     });
   };
+  const waitForHydration = (): Promise<void> => Promise.all(
+    persistApis.map(waitForPersistHydration),
+  ).then(() => undefined);
 
   // Each step is wrapped in try/catch so a failure in one side-effect (e.g.
   // a TypeError from writing to a contextBridge-protected global) doesn't
   // prevent server settings from reaching the Zustand store.
-  const applySettings = async (settings: DesktopSettings) => {
+  // Local changes sitting in the debounce buffer are not yet tracked as
+  // mutations (record() only stores while a request is in flight), so a GET
+  // racing the debounce window would briefly revert them. Reapply the
+  // pending buffer over every reconciled result.
+  const overlayPendingChanges = (settings: DesktopSettings): DesktopSettings => {
+    if (!_pendingSettingsChanges || !_pendingSettingsContext) return settings;
+    if (!isSettingsRuntimeContextCurrent(_pendingSettingsContext)) return settings;
+    return { ...settings, ..._pendingSettingsChanges };
+  };
+
+  const applySettings = async (loadedSettings: DesktopSettings) => {
     if (!isSettingsRuntimeContextCurrent(context)) return;
+    let settings = overlayPendingChanges(_settingsMutationTracker.reconcile(loadedSettings, operation));
+    await waitForHydration();
+    if (!isSettingsRuntimeContextCurrent(context)) return;
+    settings = overlayPendingChanges(_settingsMutationTracker.reconcile(loadedSettings, operation));
     const shouldPersistCraftGoalMigration = settings.draftStartersCraftGoalAdded !== true
       || settings.draftStartersScheduleTaskAdded !== true;
     // `autoSaveEnabled` is new to the settings backend. Until the server has a
@@ -1765,16 +1921,31 @@ export const syncDesktopSettings = async (): Promise<void> => {
     // `openchamber:files:auto-save-enabled`. Prefer the hydrated store value and
     // seed the backend once so later omitted→default authority is correct.
     const shouldSeedAutoSaveEnabled = typeof settings.autoSaveEnabled !== 'boolean';
+    const shouldSeedSidebarProjectDisplayMode = settings.sidebarProjectDisplayMode === undefined;
+    const shouldSeedSidebarSessionGroupingMode = settings.sidebarSessionGroupingMode === undefined;
+    const shouldSeedSidebarProjectSortOrder = settings.sidebarProjectSortOrder === undefined;
+    const shouldSeedSidebarShowRecentSection = settings.sidebarShowRecentSection === undefined;
     const authoritativeSettings = materializeAuthoritativeUiSettings(settings);
     try {
       persistToLocalStorage(settings);
     } catch (error) {
       console.warn('persistToLocalStorage failed:', error);
     }
-    await waitForHydration();
-    if (!isSettingsRuntimeContextCurrent(context)) return;
     if (shouldSeedAutoSaveEnabled) {
       authoritativeSettings.autoSaveEnabled = useUIStore.getState().autoSaveEnabled;
+    }
+    const sessionDisplayState = useSessionDisplayStore.getState();
+    if (shouldSeedSidebarProjectDisplayMode) {
+      authoritativeSettings.sidebarProjectDisplayMode = sessionDisplayState.projectDisplayMode;
+    }
+    if (shouldSeedSidebarSessionGroupingMode) {
+      authoritativeSettings.sidebarSessionGroupingMode = sessionDisplayState.sessionGroupingMode;
+    }
+    if (shouldSeedSidebarProjectSortOrder) {
+      authoritativeSettings.sidebarProjectSortOrder = sessionDisplayState.projectSortOrder;
+    }
+    if (shouldSeedSidebarShowRecentSection) {
+      authoritativeSettings.sidebarShowRecentSection = sessionDisplayState.showRecentSection;
     }
     if (settings.draftStarters === undefined) {
       useUIStore.setState({ globalDraftStarters: null });
@@ -1795,12 +1966,24 @@ export const syncDesktopSettings = async (): Promise<void> => {
     if (shouldSeedAutoSaveEnabled) {
       migrationPatch.autoSaveEnabled = authoritativeSettings.autoSaveEnabled;
     }
+    if (shouldSeedSidebarProjectDisplayMode) {
+      migrationPatch.sidebarProjectDisplayMode = authoritativeSettings.sidebarProjectDisplayMode;
+    }
+    if (shouldSeedSidebarSessionGroupingMode) {
+      migrationPatch.sidebarSessionGroupingMode = authoritativeSettings.sidebarSessionGroupingMode;
+    }
+    if (shouldSeedSidebarProjectSortOrder) {
+      migrationPatch.sidebarProjectSortOrder = authoritativeSettings.sidebarProjectSortOrder;
+    }
+    if (shouldSeedSidebarShowRecentSection) {
+      migrationPatch.sidebarShowRecentSection = authoritativeSettings.sidebarShowRecentSection;
+    }
     if (Object.keys(migrationPatch).length > 0) {
       await updateDesktopSettings(migrationPatch);
       if (!isSettingsRuntimeContextCurrent(context)) return;
     }
 
-    dispatchSettingsSynced(authoritativeSettings);
+    dispatchSettingsSynced(authoritativeSettings, adoptWorkspace);
   };
 
   try {
@@ -1810,6 +1993,8 @@ export const syncDesktopSettings = async (): Promise<void> => {
     }
   } catch (error) {
     console.warn('Failed to synchronise settings:', error);
+  } finally {
+    _settingsMutationTracker.finish(operation);
   }
 };
 
@@ -1817,9 +2002,11 @@ export const syncDesktopSettings = async (): Promise<void> => {
 async function _flushSettingsUpdate(): Promise<void> {
   const changes = _pendingSettingsChanges;
   const context = _pendingSettingsContext;
+  const revision = _pendingSettingsRevision;
   const waiters = _settingsFlushWaiters;
   _pendingSettingsChanges = null;
   _pendingSettingsContext = null;
+  _pendingSettingsRevision = 0;
   _settingsFlushTimer = null;
   _settingsFlushWaiters = [];
   try {
@@ -1828,59 +2015,66 @@ async function _flushSettingsUpdate(): Promise<void> {
       dispatchSettingsSaveState('saved');
       return;
     }
+    const operation = _settingsMutationTracker.begin(revision);
 
-    const runtimeSettings = getRuntimeSettingsAPI();
-    if (runtimeSettings) {
+    try {
+      const runtimeSettings = getRuntimeSettingsAPI();
+      if (runtimeSettings) {
+        try {
+          const updated = await runtimeSettings.save(changes);
+          if (!isSettingsRuntimeContextCurrent(context)) return;
+          if (updated) {
+            const reconciled = _settingsMutationTracker.reconcile(updated, operation);
+            applyDesktopUiPreferences(reconciled);
+            dispatchSettingsSynced(reconciled, false);
+            _settingsCache = null;
+          }
+          dispatchSettingsSaveState(updated ? 'saved' : 'error');
+          return;
+        } catch (error) {
+          if (!isSettingsRuntimeContextCurrent(context)) return;
+          console.warn('Failed to update settings via runtime settings API:', error);
+        }
+      }
+
+      if (!isSettingsRuntimeContextCurrent(context)) return;
       try {
-        const updated = await runtimeSettings.save(changes);
+        const response = await runtimeFetch('/api/config/settings', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify(changes),
+        });
+
+        if (!isSettingsRuntimeContextCurrent(context)) return;
+        if (!response.ok) {
+          console.warn('Failed to update shared settings via API:', response.status, response.statusText);
+          dispatchSettingsSaveState('error');
+          return;
+        }
+
+        const updated = sanitizeWebSettings(await response.json().catch(() => null));
         if (!isSettingsRuntimeContextCurrent(context)) return;
         if (updated) {
-          applyDesktopUiPreferences(updated);
-          dispatchSettingsSynced(updated);
+          const reconciled = _settingsMutationTracker.reconcile(updated, operation);
+          applyDesktopUiPreferences(reconciled);
+          dispatchSettingsSynced(reconciled, false);
+          dispatchSettingsSaveState('saved');
+          // Invalidate GET cache so next read sees the fresh data
           _settingsCache = null;
+        } else {
+          dispatchSettingsSaveState('error');
         }
-        dispatchSettingsSaveState(updated ? 'saved' : 'error');
-        return;
       } catch (error) {
-        if (!isSettingsRuntimeContextCurrent(context)) return;
-        console.warn('Failed to update settings via runtime settings API:', error);
+        if (isSettingsRuntimeContextCurrent(context)) {
+          console.warn('Failed to update shared settings via API:', error);
+          dispatchSettingsSaveState('error');
+        }
       }
-    }
-
-    if (!isSettingsRuntimeContextCurrent(context)) return;
-    try {
-      const response = await runtimeFetch('/api/config/settings', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify(changes),
-      });
-
-      if (!isSettingsRuntimeContextCurrent(context)) return;
-      if (!response.ok) {
-        console.warn('Failed to update shared settings via API:', response.status, response.statusText);
-        dispatchSettingsSaveState('error');
-        return;
-      }
-
-      const updated = (await response.json().catch(() => null)) as DesktopSettings | null;
-      if (!isSettingsRuntimeContextCurrent(context)) return;
-      if (updated) {
-        applyDesktopUiPreferences(updated);
-        dispatchSettingsSynced(updated);
-        dispatchSettingsSaveState('saved');
-        // Invalidate GET cache so next read sees the fresh data
-        _settingsCache = null;
-      } else {
-        dispatchSettingsSaveState('error');
-      }
-    } catch (error) {
-      if (isSettingsRuntimeContextCurrent(context)) {
-        console.warn('Failed to update shared settings via API:', error);
-        dispatchSettingsSaveState('error');
-      }
+    } finally {
+      _settingsMutationTracker.finish(operation);
     }
   } finally {
     waiters.forEach((resolve) => resolve());
@@ -1901,6 +2095,7 @@ export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): 
 
   _pendingSettingsChanges = { ...(_pendingSettingsChanges ?? {}), ...changes };
   _pendingSettingsContext = context;
+  _pendingSettingsRevision = _settingsMutationTracker.record(changes);
   dispatchSettingsSaveState('saving');
 
   if (_settingsFlushTimer) {

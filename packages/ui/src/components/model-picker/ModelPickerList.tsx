@@ -12,6 +12,7 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { CSS as DndCSS } from '@dnd-kit/utilities';
 import { Icon } from '@/components/icon/Icon';
 import { Input } from '@/components/ui/input';
+import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -455,18 +456,18 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     return hiddenModels.some((hidden) => hidden.providerID === providerID && hidden.modelID === modelID);
   }, [hiddenModels]);
 
-  const matchesQuery = React.useCallback((modelName: string, providerName: string) => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return true;
-    return modelName.toLowerCase().includes(query) || providerName.toLowerCase().includes(query);
-  }, [searchQuery]);
+  const matchesQuery = React.useCallback(
+    (modelName: string, providerName: string, modelID?: string) =>
+      matchesRankQuery([modelName, modelID, providerName], searchQuery),
+    [searchQuery],
+  );
 
   const filteredFavorites = React.useMemo(() => favoriteModels.filter(({ model, providerID, modelID }) => {
     if (allowedProviderSet && !allowedProviderSet.has(providerID)) return false;
     if (isModelAllowed && !isModelAllowed(providerID, modelID)) return false;
     if (isHidden(providerID, modelID)) return false;
     const providerName = providerById.get(providerID)?.name || providerID;
-    return matchesQuery(getModelDisplayName(model), providerName);
+    return matchesQuery(getModelDisplayName(model), providerName, modelID);
   }), [allowedProviderSet, favoriteModels, isHidden, isModelAllowed, matchesQuery, providerById]);
 
   const filteredRecents = React.useMemo(() => recentModels.filter(({ model, providerID, modelID }) => {
@@ -474,7 +475,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     if (isModelAllowed && !isModelAllowed(providerID, modelID)) return false;
     if (isHidden(providerID, modelID)) return false;
     const providerName = providerById.get(providerID)?.name || providerID;
-    return matchesQuery(getModelDisplayName(model), providerName);
+    return matchesQuery(getModelDisplayName(model), providerName, modelID);
   }), [allowedProviderSet, isHidden, isModelAllowed, matchesQuery, providerById, recentModels]);
 
   const orderedProviders = React.useMemo(() => {
@@ -495,7 +496,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
         const modelID = typeof model.id === 'string' ? model.id : '';
         if (!modelID || isHidden(provider.id, modelID)) return false;
         if (isModelAllowed && !isModelAllowed(provider.id, modelID)) return false;
-        return matchesQuery(getModelDisplayName(model), provider.name || provider.id);
+        return matchesQuery(getModelDisplayName(model), provider.name || provider.id, modelID);
       });
       return { ...provider, models: filteredModels };
     })
@@ -544,8 +545,9 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
       ? Math.min(STICKY_FADE_MIN_SIZE + scroller.scrollTop, STICKY_FADE_MAX_SIZE)
       : 0;
     stickyFadeSizeRef.current = fadeSize;
-    scroller.style.setProperty('--scroll-shadow-top-size', `${fadeSize}px`);
-    scroller.style.setProperty(
+    const fadeRoot = scroller.closest<HTMLElement>('.oc-sticky-fade-root');
+    fadeRoot?.style.setProperty('--scroll-shadow-top-size', `${fadeSize}px`);
+    fadeRoot?.style.setProperty(
       '--scroll-shadow-top-clear-size',
       `${Math.min(Math.max(fadeSize - 8, 0), STICKY_FADE_CLEAR_MAX_SIZE)}px`,
     );
@@ -688,7 +690,9 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
               onMouseMove={handleMouseActivity}
               className={cn(
                 'w-full text-left px-2 py-1.5 rounded-md typography-meta flex items-center gap-2 cursor-pointer',
-                !disabled && (isHighlighted ? 'bg-interactive-selection' : 'hover:bg-interactive-hover/50'),
+                !disabled && (isHighlighted
+                  ? 'bg-interactive-selection text-interactive-selection-foreground'
+                  : 'hover:bg-interactive-hover/50'),
                 disabled && 'cursor-not-allowed opacity-60',
                 rowClassName,
               )}
@@ -701,9 +705,9 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
                 ) : null}
                 {showProviderLogo ? <ProviderLogo providerId={entry.providerID} className="h-3.5 w-3.5 flex-shrink-0" /> : null}
                 <span className="font-medium truncate">{getModelDisplayName(entry.model)}</span>
-                {contextTokens ? <span className="typography-micro text-muted-foreground flex-shrink-0">{contextTokens}</span> : null}
+                {contextTokens ? <span className={cn('typography-micro flex-shrink-0', isHighlighted ? 'text-interactive-selection-foreground/70' : 'text-muted-foreground')}>{contextTokens}</span> : null}
               </div>
-              {count > 0 ? <span className="typography-micro text-muted-foreground flex-shrink-0">x{count}</span> : null}
+              {count > 0 ? <span className={cn('typography-micro flex-shrink-0', isHighlighted ? 'text-interactive-selection-foreground/70' : 'text-muted-foreground')}>x{count}</span> : null}
               {renderRowEnd?.(entry, { isHighlighted, isSelected })}
               {isSelected ? <Icon name="check" className="h-4 w-4 text-primary flex-shrink-0" /> : null}
               {onToggleFavorite ? (
@@ -875,24 +879,23 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
 
       <div
         className="oc-sticky-fade-root relative flex min-h-0 flex-1"
+        // SAFETY: these custom properties configure the viewport-owned edge fade.
+        style={stickyHeaders ? { '--scroll-shadow-top-size': '0px' } as React.CSSProperties : undefined}
         onPointerDownCapture={stickyHeaders ? blockStickyFadeInteraction : undefined}
         onClickCapture={stickyHeaders ? blockStickyFadeInteraction : undefined}
         onContextMenuCapture={stickyHeaders ? blockStickyFadeInteraction : undefined}
       >
-      <ScrollableOverlay
-        ref={scrollRef}
-        useScrollShadow={stickyHeaders}
-        hideBottomScrollShadow
-        scrollShadowSize={12}
-        outerClassName={maxHeightClassName}
-        className="oc-sticky-fade-scroller overlay-scrollbar-target--no-gutter"
-        style={{
-          ...(stickyHeaders ? { '--scroll-shadow-top-size': '0px' } as React.CSSProperties : {}),
-          ...maxHeightStyle,
-        }}
-        onScroll={stickyHeaders ? (event) => syncStickyFade(event.currentTarget) : undefined}
-      >
-        <div className="px-1">
+        <ScrollableOverlay
+          ref={scrollRef}
+          useScrollShadow={stickyHeaders}
+          hideBottomScrollShadow
+          scrollShadowSize={12}
+          outerClassName={maxHeightClassName}
+          className="overlay-scrollbar-target--no-gutter"
+          style={maxHeightStyle}
+          onScroll={stickyHeaders ? (event) => syncStickyFade(event.currentTarget) : undefined}
+        >
+          <div className="px-1">
           {includeNotSelected ? (
             <>
               <button
@@ -963,16 +966,16 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
               </div>
             ))
           )}
-        </div>
-      </ScrollableOverlay>
-      {stickyHeaders && leadingSectionKey ? (
-        <div
-          className="oc-sticky-fade-overlay pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center gap-2 px-3 py-1.5 typography-micro font-semibold uppercase tracking-wider text-muted-foreground"
-          aria-hidden="true"
-        >
-          {renderSectionIdentity(leadingSectionKey)}
-        </div>
-      ) : null}
+          </div>
+        </ScrollableOverlay>
+        {stickyHeaders && leadingSectionKey ? (
+          <div
+            className="oc-sticky-fade-overlay pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center gap-2 px-3 py-1.5 typography-micro font-semibold uppercase tracking-wider text-muted-foreground"
+            aria-hidden="true"
+          >
+            {renderSectionIdentity(leadingSectionKey)}
+          </div>
+        ) : null}
       </div>
 
       <div className="px-3 pt-1 pb-1.5 border-t border-border/40 typography-micro text-muted-foreground">

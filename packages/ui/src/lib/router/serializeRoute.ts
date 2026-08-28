@@ -1,4 +1,3 @@
-import type { MainTab } from '@/stores/useUIStore';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 import { ROUTE_PARAMS } from './types';
 
@@ -7,16 +6,9 @@ import { ROUTE_PARAMS } from './types';
  */
 export interface AppRouteState {
   sessionId: string | null;
-  tab: MainTab;
   isSettingsOpen: boolean;
   settingsPath: string;
-  diffFile: string | null;
 }
-
-/**
- * Default tab when none is specified.
- */
-const DEFAULT_TAB: MainTab = 'chat';
 
 /**
  * Serialize application state to URL search parameters.
@@ -38,15 +30,6 @@ function serializeRoute(state: AppRouteState): URLSearchParams {
     return params;
   }
 
-  // Tab - only include if not the default
-  if (state.tab !== DEFAULT_TAB) {
-    params.set(ROUTE_PARAMS.TAB, state.tab);
-  }
-
-  // Diff file - only include when on diff tab
-  if (state.tab === 'diff' && state.diffFile && state.diffFile.trim().length > 0) {
-    params.set(ROUTE_PARAMS.FILE, state.diffFile);
-  }
 
   return params;
 }

@@ -4,6 +4,7 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
+import { AutocompleteRowTooltip } from './composer/ui/AutocompleteRowTooltip';
 
 interface SkillInfo {
   name: string;
@@ -31,7 +32,7 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
 }, ref) => {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const isMobile = useUIStore((state) => state.isMobile);
-  const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, isMobile);
+  const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, true, 240);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const selectedIndexRef = React.useRef(0);
   const keyboardNavigationRef = React.useRef(false);
@@ -126,6 +127,7 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
     const isProject = skill.scope === 'project';
     const source = skill.source || 'opencode';
     return (
+      <AutocompleteRowTooltip description={skill.description} active={!isMobile && index === selectedIndex}>
       <div
         key={`${skill.name}-${skill.scope}`}
         ref={(el) => {
@@ -157,13 +159,9 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
               {source}
             </span>
           </div>
-          {skill.description && !isMobile && (
-            <div className="typography-meta text-muted-foreground mt-0.5 truncate">
-              {skill.description}
-            </div>
-          )}
         </div>
       </div>
+      </AutocompleteRowTooltip>
     );
   };
 

@@ -4,6 +4,11 @@ import { togglePermissionAutoAccept } from "../../components/chat/permissionAuto
 const storage = new Map<string, string>()
 const createSessionCalls: Array<{ title?: string; directory: string | null; parentID: string | null; metadata?: unknown }> = []
 const permissionAutoAcceptCalls: Array<[string, boolean]> = []
+const savedVariantCalls: Array<string | undefined> = []
+let configVariantOverride: string | null | undefined
+// Sync's session→directory index. `createSession` writes it, and directory
+// resolution reads it as the authoritative source, so the mock has to keep one.
+const sessionDirectoryRegistry = new Map<string, string>()
 let createdSessionDirectory: string | undefined
 
 const getMockCalls = (fn: unknown): unknown[][] => ((fn as { mock?: { calls: unknown[][] } }).mock?.calls ?? [])
@@ -73,6 +78,8 @@ mock.module("@/stores/utils/safeStorage", () => ({
 mock.module("@/lib/opencode/client", () => ({
   opencodeClient: {
     getDirectory: () => null,
+    getFilesystemHome: mock(async () => "/home/test"),
+    createDirectory: mock(async (path: string) => ({ success: true, path })),
     setDirectory: mock(() => undefined),
   },
 }))
@@ -91,6 +98,9 @@ mock.module("@/stores/useConfigStore", () => ({
   useConfigStore: {
     getState: () => ({
       currentAgentName: "agent-default",
+      currentProviderId: "provider",
+      currentModelId: "model",
+      currentVariantSelection: { override: configVariantOverride, inherited: "high" },
       agents: [],
       activateDirectory: mock(async () => undefined),
       applyDefaultModelAgentSelection: mock(() => undefined),
@@ -165,7 +175,9 @@ mock.module("../selection-store", () => ({
       saveSessionModelSelection: () => undefined,
       saveSessionAgentSelection: () => undefined,
       saveAgentModelForSession: () => undefined,
-      saveAgentModelVariantForSession: () => undefined,
+      saveAgentModelVariantForSession: (_sessionId: string, _agent: string, _provider: string, _model: string, variant: string | undefined) => {
+        savedVariantCalls.push(variant)
+      },
       getSessionAgentSelection: () => null,
       getSessionModelSelection: () => null,
       getAgentModelForSession: () => null,
@@ -239,13 +251,34 @@ mock.module("../sync-refs", () => ({
   getSyncMessages: () => [],
   getSyncParts: () => [],
   getAllSyncSessions: () => [],
-  getSyncSessionDirectory: () => null,
+  getSyncSessionDirectory: (sessionId: string) => sessionDirectoryRegistry.get(sessionId) ?? null,
+  registerSessionDirectory: (sessionId: string, directory: string) => {
+    sessionDirectoryRegistry.set(sessionId, directory)
+  },
 }))
 
 mock.module("../session-actions", () => ({
-  createSession: mock(async (title: string | undefined, directory: string | null, parentID: string | null, metadata?: unknown) => {
+  // Mirrors the real action's authoritative steps: the created session becomes
+  // current under the directory the server confirmed, and that directory enters
+  // the routing index. Everything these tests assert about routing depends on
+  // those two, so a mock without them tests nothing.
+  createSession: mock(async (
+    title: string | undefined,
+    directory: string | null,
+    parentID: string | null,
+    metadata?: unknown,
+    selectionTransition?: "submitted-draft",
+  ) => {
     createSessionCalls.push({ title, directory, parentID, metadata })
-    return { id: "ses_issue_2039", directory: createdSessionDirectory ?? directory }
+    const session = { id: "ses_issue_2039", directory: createdSessionDirectory ?? directory }
+    const sessionDirectory = session.directory ?? null
+    if (sessionDirectory) {
+      sessionDirectoryRegistry.set(session.id, sessionDirectory)
+    }
+    const { useSessionUIStore: store } = await import("../session-ui-store")
+    store.getState().setCurrentSession(session.id, sessionDirectory, selectionTransition)
+    store.getState().markSessionAsOpenChamberCreated(session.id)
+    return session
   }),
   deleteSession: mock(async () => true),
   deleteSessions: mock(async () => ({ deletedIds: [], failedIds: [] })),
@@ -320,16 +353,21 @@ describe("issue 2039 draft auto-accept", () => {
   beforeEach(() => {
     storage.clear()
     createSessionCalls.length = 0
+    sessionDirectoryRegistry.clear()
     permissionAutoAcceptCalls.length = 0
+    savedVariantCalls.length = 0
+    configVariantOverride = undefined
     createdSessionDirectory = undefined
 
     useSessionUIStore.setState({
       currentSessionId: null,
       currentSessionDirectory: null,
       newSessionDraft: {
+        draftId: 0,
         open: false,
         directoryOverride: null,
         parentID: null,
+        target: "chat",
       },
     })
   })
@@ -355,6 +393,29 @@ describe("issue 2039 draft auto-accept", () => {
     expect(useSessionUIStore.getState().currentSessionId).toBe("ses_issue_2039")
   })
 
+  test("stores only an explicit draft variant as the session override", async () => {
+    useSessionUIStore.getState().openNewSessionDraft()
+    await materializeOpenDraftSession({
+      providerID: "provider",
+      modelID: "model",
+      agent: "agent-default",
+      variant: "high",
+    })
+
+    expect(savedVariantCalls).toEqual([undefined])
+
+    configVariantOverride = "high"
+    useSessionUIStore.getState().openNewSessionDraft()
+    await materializeOpenDraftSession({
+      providerID: "provider",
+      modelID: "model",
+      agent: "agent-default",
+      variant: "high",
+    })
+
+    expect(savedVariantCalls).toEqual([undefined, "high"])
+  })
+
   test("does not apply draft auto-accept after the draft is closed", async () => {
     useSessionUIStore.getState().openNewSessionDraft()
     useSessionUIStore.getState().setDraftPermissionAutoAcceptEnabled(true)
@@ -371,6 +432,27 @@ describe("issue 2039 draft auto-accept", () => {
     expect(result).toBeNull()
     expect(createSessionCalls).toHaveLength(0)
     expect(permissionAutoAcceptCalls).toHaveLength(0)
+  })
+
+  test("transfers draft project context pins only to the session it creates", async () => {
+    useSessionUIStore.getState().openNewSessionDraft({
+      projectContextPins: { notes: ["note-a"], plans: [] },
+    })
+    useSessionUIStore.getState().setDraftProjectContextPin("plan", "plan-a", true)
+
+    await materializeOpenDraftSession({ providerID: "provider", modelID: "model" })
+
+    expect(createSessionCalls[0]?.metadata).toEqual({
+      openchamber: {
+        project_context_pins: { notes: ["note-a"], plans: ["plan-a"] },
+      },
+    })
+    expect(useSessionUIStore.getState().newSessionDraft.projectContextPins).toBe(undefined)
+
+    useSessionUIStore.getState().openNewSessionDraft()
+    await materializeOpenDraftSession({ providerID: "provider", modelID: "model" })
+
+    expect(createSessionCalls[1]?.metadata).toBe(undefined)
   })
 
   test("uses the server-authoritative directory after worktree session creation", async () => {

@@ -37,9 +37,11 @@ import { setActionRefs } from "./session-actions"
 import { setSyncRefs, getAllSyncSessions } from "./sync-refs"
 import { useSessionUIStore } from "./session-ui-store"
 import { stripSessionDiffSnapshots } from "./sanitize"
-import { applySessionEventToGlobalSessions } from "./session-event-router"
+import { upsertSessionRecord } from "./session-records"
+import { applySessionEventToGlobalSessions, applySessionEventsToGlobalSessions } from "./session-event-router"
 import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./reconnect-recovery"
+import { messagesBefore } from "./message-ordering"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
 import {
@@ -51,7 +53,12 @@ import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
-import { applyGlobalSessionStatusEvent, applyGlobalSessionStatusSnapshot, useGlobalSessionStatusStore } from "./global-session-status"
+import {
+  applyGlobalSessionStatusEvent,
+  applyGlobalSessionStatusEvents,
+  applyGlobalSessionStatusSnapshot,
+  useGlobalSessionStatusStore,
+} from "./global-session-status"
 import type { State } from "./types"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { PermissionRequest } from "@/types/permission"
@@ -69,6 +76,7 @@ import { getRuntimeLiveStatusSeed, LIVE_STATUS_TTL_MS } from "./runtime-live-mem
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { isFilesystemError } from "@/lib/api/files-errors"
+import { formatMessage, useI18nStore } from "@/lib/i18n"
 import { listGlobalSessionPages } from "@/stores/globalSessions"
 import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests } from "./scoped-blocking-requests"
 import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type UserMessageHistorySnapshot } from "./user-message-history"
@@ -84,22 +92,29 @@ import {
 // Context
 // ---------------------------------------------------------------------------
 
-type SyncSystem = {
+type SyncRuntime = {
   childStores: ChildStoreManager
   messageLoader: SessionMessageLoader
   runtimeKey: string
   sdk: OpencodeClient
+}
+
+type SyncSystem = SyncRuntime & {
   directory: string
 }
 
 const SYNC_CONTEXT_GLOBAL_KEY = "__openchamber_sync_context__"
+const SYNC_RUNTIME_CONTEXT_GLOBAL_KEY = "__openchamber_sync_runtime_context__"
 type SyncGlobal = typeof globalThis & {
   [SYNC_CONTEXT_GLOBAL_KEY]?: React.Context<SyncSystem | null>
+  [SYNC_RUNTIME_CONTEXT_GLOBAL_KEY]?: React.Context<SyncRuntime | null>
 }
 
 const syncGlobal = globalThis as SyncGlobal
 const SyncContext = syncGlobal[SYNC_CONTEXT_GLOBAL_KEY] ?? createContext<SyncSystem | null>(null)
 syncGlobal[SYNC_CONTEXT_GLOBAL_KEY] = SyncContext
+const SyncRuntimeContext = syncGlobal[SYNC_RUNTIME_CONTEXT_GLOBAL_KEY] ?? createContext<SyncRuntime | null>(null)
+syncGlobal[SYNC_RUNTIME_CONTEXT_GLOBAL_KEY] = SyncRuntimeContext
 
 type SdkResult<T> = {
   data?: T
@@ -135,6 +150,12 @@ function useSyncSystem() {
   return ctx
 }
 
+export function useSyncRuntime() {
+  const ctx = useContext(SyncRuntimeContext)
+  if (!ctx) throw new Error("useSyncRuntime must be used within <SyncProvider>")
+  return ctx
+}
+
 function getLiveStates(childStores: ChildStoreManager): State[] {
   return Array.from(childStores.children.values(), (store) => store.getState())
 }
@@ -145,25 +166,42 @@ function useLiveSyncSelector<T>(
   subscribe?: (childStores: ChildStoreManager, notify: () => void) => () => void,
 ): T {
   const { childStores } = useSyncSystem()
-  const cacheRef = useRef<T | undefined>(undefined)
-  const initializedRef = useRef(false)
+  const sourceRevisionRef = useRef(0)
+  const cacheRef = useRef<{
+    childStores: ChildStoreManager
+    selector: (states: State[]) => T
+    revision: number
+    value: T
+  } | null>(null)
 
   const getSnapshot = useCallback(() => {
-    const next = selector(getLiveStates(childStores))
-    if (initializedRef.current && isEqual(cacheRef.current as T, next)) {
-      return cacheRef.current as T
+    const cached = cacheRef.current
+    if (
+      cached
+      && cached.childStores === childStores
+      && cached.selector === selector
+      && cached.revision === sourceRevisionRef.current
+    ) {
+      return cached.value
     }
-
-    cacheRef.current = next
-    initializedRef.current = true
-    return next
+    const next = selector(getLiveStates(childStores))
+    const value = cached && isEqual(cached.value, next) ? cached.value : next
+    cacheRef.current = { childStores, selector, revision: sourceRevisionRef.current, value }
+    return value
   }, [childStores, isEqual, selector])
 
+  const subscribeToSource = useCallback((notify: () => void) => {
+    const invalidate = () => {
+      sourceRevisionRef.current += 1
+      notify()
+    }
+    // Force the post-subscribe snapshot to close the read-before-subscribe gap.
+    sourceRevisionRef.current += 1
+    return subscribe ? subscribe(childStores, invalidate) : childStores.subscribeAll(invalidate)
+  }, [childStores, subscribe])
+
   return React.useSyncExternalStore(
-    useCallback(
-      (notify) => subscribe ? subscribe(childStores, notify) : childStores.subscribeAll(notify),
-      [childStores, subscribe],
-    ),
+    subscribeToSource,
     getSnapshot,
     getSnapshot,
   )
@@ -179,12 +217,16 @@ type DirectoryEventBatch = {
   states: Map<StoreApi<DirectoryStore>, DirectoryStore>
   clonedFields: Map<StoreApi<DirectoryStore>, Set<keyof State>>
   changedStores: Set<StoreApi<DirectoryStore>>
+  globalSessionEvents: Event[]
+  globalStatusEventsByDirectory: Map<string, Event[]>
 }
 
 const createDirectoryEventBatch = (): DirectoryEventBatch => ({
   states: new Map(),
   clonedFields: new Map(),
   changedStores: new Set(),
+  globalSessionEvents: [],
+  globalStatusEventsByDirectory: new Map(),
 })
 
 const getDirectoryEventState = (
@@ -193,6 +235,10 @@ const getDirectoryEventState = (
 ): DirectoryStore => batch?.states.get(store) ?? store.getState()
 
 const publishDirectoryEventBatch = (batch: DirectoryEventBatch): void => {
+  applySessionEventsToGlobalSessions(batch.globalSessionEvents)
+  for (const [directory, events] of batch.globalStatusEventsByDirectory) {
+    applyGlobalSessionStatusEvents(directory, events)
+  }
   for (const store of batch.changedStores) {
     const state = batch.states.get(store)
     if (!state) continue
@@ -225,7 +271,10 @@ export function useAllSessionStatuses(): Record<string, SessionStatus> {
 
 export function useAllLiveSessions(): Session[] {
   return useLiveSyncSelector(
-    useCallback((states) => aggregateLiveSessions(states), []),
+    useCallback((states) => {
+      countSyncPerformance("liveSessionAggregateRuns")
+      return aggregateLiveSessions(states)
+    }, []),
     areSessionListsEquivalent,
     useCallback(
       (childStores: ChildStoreManager, notify: () => void) => childStores.subscribeAllSelected(
@@ -455,6 +504,32 @@ const handleUiNotificationEvent = (payload: Event, fallbackDirectory: string): b
   }
 
   const notification = properties as UiNotificationPayload
+  const kind = asOptionalString(notification.kind)
+  const sessionId = asOptionalString(notification.sessionId)
+  const directory = asOptionalString(notification.directory)
+    ?? (fallbackDirectory !== "global" ? fallbackDirectory : "")
+
+  if (kind === "opencode-restart-interrupted") {
+    const dictionary = useI18nStore.getState().dictionary
+    const title = formatMessage(dictionary, "chat.toast.opencodeRestartInterrupted.title")
+    const options = {
+      id: "opencode-restart-interrupted",
+      description: formatMessage(dictionary, "chat.toast.opencodeRestartInterrupted.description"),
+      duration: Infinity,
+    }
+    if (sessionId && directory) {
+      toast.info(title, {
+        ...options,
+        action: {
+          label: formatMessage(dictionary, "chat.toast.opencodeRestartInterrupted.openSession"),
+          onClick: () => openSessionFromToast(sessionId, directory),
+        },
+      })
+    } else {
+      toast.info(title, options)
+    }
+  }
+
   if ((notification.desktopNotificationDelivered === true || notification.desktopStdoutActive === true) && getRuntimeKey() === "local") {
     return true
   }
@@ -468,9 +543,9 @@ const handleUiNotificationEvent = (payload: Event, fallbackDirectory: string): b
     title: asOptionalString(notification.title),
     body: asOptionalString(notification.body),
     tag: asOptionalString(notification.tag),
-    kind: asOptionalString(notification.kind),
-    sessionId: asOptionalString(notification.sessionId),
-    directory: asOptionalString(notification.directory) ?? (fallbackDirectory && fallbackDirectory !== "global" ? fallbackDirectory : undefined),
+    kind,
+    sessionId,
+    directory: directory || undefined,
     requireHidden: notification.requireHidden === true,
   }).catch((error) => {
     console.warn("[notifications] failed to dispatch UI notification", error)
@@ -631,15 +706,24 @@ async function resyncDirectorySessionStatuses(
   if (mode === "authoritative") {
     applyGlobalSessionStatusSnapshot(directory, nextStatuses, candidateSessionIds)
     // An authoritative snapshot that settles sessions previously observed
-    // busy/retry can orphan running tool parts (managed process died
-    // mid-turn, #2577): finalize them now. The snapshot write above already
-    // lowered their status to explicit idle, which is the gate the helper
-    // requires — a session the snapshot reports busy stays untouched.
+    // busy/retry can leave their trailing assistant message and tool parts
+    // unfinished (managed process died mid-turn, #2577): finalize them now.
+    // The snapshot write above already lowered their status to explicit idle,
+    // which is the gate the helper requires — a session the snapshot reports
+    // busy stays untouched.
     for (const sessionId of candidateSessionIds) {
       const interrupted = interruptedTurnToolParts(store.getState(), sessionId)
       if (interrupted) {
+        if (!interrupted.parts) {
+          store.setState((state) => ({
+            message: { ...state.message, [sessionId]: interrupted.messages },
+          }))
+          continue
+        }
+        const interruptedParts = interrupted.parts
         store.setState((state) => ({
-          part: { ...state.part, [interrupted.messageID]: interrupted.parts },
+          message: { ...state.message, [sessionId]: interrupted.messages },
+          part: { ...state.part, [interrupted.messageID]: interruptedParts },
         }))
       }
     }
@@ -1371,28 +1455,13 @@ async function resyncDirectoryAfterReconnect(
 
     const nextSession = stripSessionDiffSnapshots(session)
     store.setState((state: DirectoryStore) => {
-      const sessionIndex = state.session.findIndex((item) => item.id === nextSession.id)
-      let sessions = state.session
-      let sessionChanged = false
+      const sessions = upsertSessionRecord(state.session, nextSession)
       let sessionTotal = state.sessionTotal
 
-      if (sessionIndex >= 0) {
-        if (!haveEquivalentSyncSnapshots(sessions[sessionIndex], nextSession)) {
-          sessions = [...state.session]
-          sessions[sessionIndex] = nextSession
-          sessionChanged = true
-        }
-      } else {
-        sessions = [...state.session]
-        sessions.push(nextSession)
-        sessions.sort((a, b) => cmp(a.id, b.id))
-        if (!nextSession.parentID) sessionTotal += 1
-        sessionChanged = true
-      }
-
-      if (!sessionChanged) {
+      if (sessions === state.session) {
         return state
       }
+      if (!state.session.some((item) => item.id === nextSession.id) && !nextSession.parentID) sessionTotal += 1
 
       return {
         session: sessions,
@@ -1418,6 +1487,7 @@ export function handleEvent(
   skipVSCodeAutoAccept = false,
   streamingDirectory?: string,
   batch?: DirectoryEventBatch,
+  globalEffectsAlreadyApplied = false,
 ) {
   if ((payload as { type?: unknown }).type === "openchamber:permission-auto-accept.updated") {
     const properties = (payload as unknown as { properties?: unknown }).properties
@@ -1446,12 +1516,19 @@ export function handleEvent(
     return
   }
 
-  applySessionEventToGlobalSessions(payload)
-  // Keep the cross-project status map current for ALL directories (mirrors the
-  // global-session handling above). Child stores remain the primary source for
-  // synced directories; this map covers sessions a child store doesn't list
-  // (unopened directories, or list/status races for just-created sessions).
-  applyGlobalSessionStatusEvent(directory, payload)
+  if (!globalEffectsAlreadyApplied) {
+    if (batch) {
+      batch.globalSessionEvents.push(payload)
+      const statusEvents = batch.globalStatusEventsByDirectory.get(directory)
+      if (statusEvents) statusEvents.push(payload)
+      else batch.globalStatusEventsByDirectory.set(directory, [payload])
+    } else {
+      applySessionEventToGlobalSessions(payload)
+      // Child stores remain the primary source for synced directories; this
+      // index covers unopened directories and list/status races.
+      applyGlobalSessionStatusEvent(directory, payload)
+    }
+  }
 
   // Global events
   if (directory === "global" || !directory) {
@@ -1534,7 +1611,17 @@ export function handleEvent(
         if (eventKey && pendingVSCodePermissionEvents.get(eventKey) !== eventToken) return
         if (eventKey) pendingVSCodePermissionEvents.delete(eventKey)
         if (expectedRuntimeKey !== getRuntimeKey()) return
-        if (!accepted) handleEvent(rawDirectory, payload, childStores, routingIndex, expectedRuntimeKey, true, streamingDirectory)
+        if (!accepted) handleEvent(
+          rawDirectory,
+          payload,
+          childStores,
+          routingIndex,
+          expectedRuntimeKey,
+          true,
+          streamingDirectory,
+          undefined,
+          true,
+        )
       }
       void processVSCodePermissionAutoAccept(permission, resolvedDirectory).then(
         completePermissionCheck,
@@ -1803,18 +1890,32 @@ export function handleEvent(
         messageID,
       })
     }
-    // The reducer already wrote the idle/error status into `draft`; mark the
-    // orphaned tools using the batched state and publish through the batch.
+    // The reducer already wrote the idle/error status into `draft`; finalize
+    // the interrupted message and orphaned tools through the same batch.
     if (sessionID) {
       const interrupted = interruptedTurnToolParts(state, sessionID)
       if (interrupted) {
-        cloneField("part", (value) => ({ ...(value ?? {}) }))
-        ;(draft as DirectoryStore).part[interrupted.messageID] = interrupted.parts
+        cloneField("message", (value) => ({ ...value }))
+        draft.message[sessionID] = interrupted.messages
+        if (interrupted.parts) {
+          cloneField("part", (value) => ({ ...(value ?? {}) }))
+          draft.part[interrupted.messageID] = interrupted.parts
+        }
         if (batch) {
           batch.states.set(store, draft as DirectoryStore)
           batch.changedStores.add(store)
         } else {
-          store.setState({ part: { ...(store.getState().part), [interrupted.messageID]: interrupted.parts } })
+          const currentState = store.getState()
+          if (interrupted.parts) {
+            store.setState({
+              message: { ...currentState.message, [sessionID]: interrupted.messages },
+              part: { ...currentState.part, [interrupted.messageID]: interrupted.parts },
+            })
+          } else {
+            store.setState({
+              message: { ...currentState.message, [sessionID]: interrupted.messages },
+            })
+          }
         }
       }
     }
@@ -1828,29 +1929,31 @@ export function handleEvent(
 //
 // A managed OpenCode process can die mid-turn (crash, health-check restart).
 // The persisted turn then never settles: the trailing assistant message has
-// no `time.completed` and its tool parts stay `pending`/`running` forever —
-// the server never finalizes them (anomalyco/opencode#19023). The
+// no `time.completed`, and any tool parts can stay `pending`/`running`
+// forever — the server never finalizes them (anomalyco/opencode#19023). The
 // settle-triggered tail refresh above refetches the same stale records, so
-// the UI would keep running tool timers and "working" styling indefinitely
-// (#2577).
+// the UI would keep the assistant message unfinished and any tool timers and
+// "working" styling active indefinitely (#2577).
 //
 // OpenCode keeps a turn's session busy while it is genuinely alive —
 // including while waiting for a question/permission reply — so once a
 // session is AUTHORITATIVELY settled (a `session.idle`/`session.error`
 // event, or an authoritative status snapshot that lowers a previously busy
 // session) and the trailing assistant message is still unfinished with
-// active tool parts and no pending question/permission, the turn is
-// definitively interrupted. Finalize the orphaned parts locally as
-// `error`/`Interrupted` with an end time — the same shape OpenCode itself
-// writes for cancelled tools. A later terminal part event or a refresh that
-// carries the true terminal state supersedes the mark; a stale refresh that
-// still reports `running` is rejected by the reducer's and the materializer's
-// final-status preservation.
+// no pending question/permission, the turn is definitively interrupted.
+// Complete the assistant message locally with MessageAbortedError and finalize
+// any orphaned parts as `error`/`Interrupted` with an end time — the same shape
+// OpenCode itself writes for cancelled tools. A later terminal event can
+// supersede the mark; a stale refresh cannot regress the locally final state.
+type AssistantMessage = Extract<Message, { role: "assistant" }>
+type SdkMessageAbortedError = Extract<NonNullable<AssistantMessage["error"]>, { name: "MessageAbortedError" }>
+type LocalMessageAbortedError = SdkMessageAbortedError & { message: string }
+
 export function interruptedTurnToolParts(
   state: DirectoryStore,
   sessionID: string,
   now = Date.now(),
-): { messageID: string; parts: Part[] } | null {
+): { messageID: string; messages: Message[]; parts?: Part[] } | null {
   if ((state.question?.[sessionID] ?? []).length > 0) return null
   if ((state.permission?.[sessionID] ?? []).length > 0) return null
 
@@ -1862,37 +1965,62 @@ export function interruptedTurnToolParts(
     return null
   }
 
-  const messageID = getStaleRunningToolMessageID(state, sessionID)
-  if (!messageID) return null
-  const message = (state.message[sessionID] ?? []).find((candidate) => candidate.id === messageID)
-  if (!message) return null
-  if (typeof (message as { time?: { completed?: unknown } }).time?.completed === "number") {
+  const messages = state.message[sessionID] ?? []
+  let messageIndex = -1
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const candidate = messages[index]
+    if (candidate.role === "user") return null
+    if (candidate.role !== "assistant") continue
+    messageIndex = index
+    break
+  }
+  if (messageIndex < 0) return null
+
+  const message = messages[messageIndex]
+  if (message.role !== "assistant") return null
+  if (message.time.completed !== undefined) {
     // The turn finished; a missed terminal tool event is the tail refresh's
     // job, not an interruption.
     return null
   }
 
-  const current = state.part[messageID]
-  if (!current) return null
+  const messageID = message.id
+  const nextMessages = [...messages]
+  const error = {
+    name: "MessageAbortedError",
+    data: { message: "aborted" },
+    message: "aborted",
+  } satisfies LocalMessageAbortedError
+  nextMessages[messageIndex] = {
+    ...message,
+    time: { ...message.time, completed: now },
+    error,
+  }
 
-  let changed = false
-  const nextParts = current.map((part) => {
+  let partsChanged = false
+  const currentParts = state.part[messageID]
+  const nextParts = currentParts?.map((part) => {
     if (part.type !== "tool") return part
-    const partState = (part as { state?: { status?: unknown; time?: { start?: number } } }).state
-    if (!partState) return part
-    if (partState.status !== "pending" && partState.status !== "running") return part
-    changed = true
+    if (part.state.status !== "pending" && part.state.status !== "running") return part
+    partsChanged = true
+    const partTime = "time" in part.state ? part.state.time : undefined
+    const start = typeof partTime?.start === "number" ? partTime.start : now
     return {
       ...part,
       state: {
-        ...partState,
-        status: "error",
+        ...part.state,
+        status: "error" as const,
         error: "Interrupted",
-        time: { ...(partState.time ?? {}), end: now },
+        time: { start, end: now },
       },
-    } as Part
+    }
   })
-  return changed ? { messageID, parts: nextParts } : null
+
+  return {
+    messageID,
+    messages: nextMessages,
+    parts: partsChanged ? nextParts : undefined,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1946,15 +2074,13 @@ export function SyncProvider(props: {
   const pipelineHasConnectedRef = useRef(false)
   const pipelineDisconnectedBeforeFirstConnectRef = useRef(false)
 
+  const runtime = useMemo<SyncRuntime>(
+    () => ({ childStores, messageLoader, runtimeKey, sdk: props.sdk }),
+    [childStores, messageLoader, props.sdk, runtimeKey],
+  )
   const system = useMemo<SyncSystem>(
-    () => ({
-      childStores,
-      messageLoader,
-      runtimeKey,
-      sdk: props.sdk,
-      directory: props.directory,
-    }),
-    [childStores, messageLoader, props.sdk, props.directory, runtimeKey],
+    () => ({ ...runtime, directory: props.directory }),
+    [props.directory, runtime],
   )
 
   const triggerDirectoryResync = useCallback((directory: string, reason: SessionMaterializationReason) => {
@@ -2469,7 +2595,14 @@ export function SyncProvider(props: {
     return unsubscribe
   }, [props.directory, childStores])
 
-  return <SyncContext.Provider value={system}>{props.children}</SyncContext.Provider>
+  // Directory navigation must not republish stable runtime dependencies.
+  return (
+    <SyncContext.Provider value={system}>
+      <SyncRuntimeContext.Provider value={runtime}>
+        {props.children}
+      </SyncRuntimeContext.Provider>
+    </SyncContext.Provider>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -2567,6 +2700,48 @@ export function useSessionParts(messageID: string, directory?: string) {
     useCallback((state: State) => state.part[messageID] ?? EMPTY_PARTS, [messageID]),
     directory,
   )
+}
+
+const EMPTY_PARTS_BY_MESSAGE: Record<string, Part[]> = {}
+
+/**
+ * Get parts for several messages at once, keyed by message id. The snapshot
+ * keeps its identity until one of the requested part arrays changes, so a
+ * streaming turn can overlay every one of its step messages — not only the
+ * currently streaming one — without tearing between them when the stream
+ * moves to the next message.
+ */
+export function useSessionPartsForMessages(messageIDs: readonly string[], directory?: string): Record<string, Part[]> {
+  const store = useDirectoryStore(directory)
+  const cacheRef = React.useRef<{ ids: readonly string[]; parts: Record<string, Part[]> } | null>(null)
+  const getSnapshot = useCallback(() => {
+    if (messageIDs.length === 0) return EMPTY_PARTS_BY_MESSAGE
+    const state = store.getState()
+    const cached = cacheRef.current
+    if (
+      cached
+      && cached.ids === messageIDs
+      && messageIDs.every((id) => (state.part[id] ?? EMPTY_PARTS) === (cached.parts[id] ?? EMPTY_PARTS))
+    ) {
+      return cached.parts
+    }
+    const parts: Record<string, Part[]> = {}
+    for (const id of messageIDs) parts[id] = state.part[id] ?? EMPTY_PARTS
+    cacheRef.current = { ids: messageIDs, parts }
+    return parts
+  }, [messageIDs, store])
+  const subscribe = useCallback((notify: () => void) => {
+    if (messageIDs.length === 0) return () => undefined
+    return store.subscribe((state, previous) => {
+      for (const id of messageIDs) {
+        if (state.part[id] !== previous.part[id]) {
+          notify()
+          return
+        }
+      }
+    })
+  }, [messageIDs, store])
+  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
 /** Get status for a specific session */
@@ -2712,13 +2887,25 @@ export function useScopedBlockingQuestions(sessionID: string | null, directory?:
   return useScopedBlockingRequests(sessionID, directory, selectQuestionRequestsBySession, EMPTY_QUESTION_REQUESTS)
 }
 
+const sessionsByIdCache = new WeakMap<State["session"], Map<string, Session>>()
+
+const getSessionById = (sessions: State["session"], sessionID?: string | null): Session | undefined => {
+  if (!sessionID) return undefined
+  let sessionsById = sessionsByIdCache.get(sessions)
+  if (!sessionsById) {
+    sessionsById = new Map(sessions.map((session) => [session.id, session]))
+    sessionsByIdCache.set(sessions, sessionsById)
+  }
+  return sessionsById.get(sessionID)
+}
+
 export function useParentSession(sessionID: string | null, directory?: string): Session | null {
   return useDirectorySync(
     useCallback((state: State) => {
       if (!sessionID) return null
-      const current = state.session.find((s) => s.id === sessionID)
+      const current = getSessionById(state.session, sessionID)
       if (!current?.parentID) return null
-      return state.session.find((s) => s.id === current.parentID)
+      return getSessionById(state.session, current.parentID)
         ?? getAllSyncSessions().find((s) => s.id === current.parentID)
         ?? null
     }, [sessionID]),
@@ -2731,7 +2918,8 @@ export function useSession(sessionID?: string | null, directory?: string) {
   const { childStores } = useSyncSystem()
   const getSnapshot = useCallback(() => {
     if (directory) {
-      return childStores.getChild(directory)?.getState().session.find((session) => session.id === sessionID)
+      const sessions = childStores.getChild(directory)?.getState().session
+      return sessions ? getSessionById(sessions, sessionID) : undefined
     }
     return findLiveSession(getLiveStates(childStores), sessionID)
   }, [childStores, directory, sessionID])
@@ -2767,26 +2955,6 @@ export function useSyncDirectory() {
 /** Get the child store manager (for advanced operations) */
 export function useChildStoreManager() {
   return useSyncSystem().childStores
-}
-
-export type SessionTextMessage = {
-  id: string
-  role: string | null
-  text: string
-}
-
-const getPartText = (part: Part): string => {
-  if (part?.type !== "text") return ""
-  const text = (part as { text?: unknown }).text
-  return typeof text === "string" ? text : ""
-}
-
-const getConcatenatedTextFromParts = (parts: Part[]): string => {
-  let text = ""
-  for (const part of parts) {
-    text += getPartText(part)
-  }
-  return text
 }
 
 type SessionMessageRecord = { info: Message; parts: Part[] }
@@ -3015,7 +3183,7 @@ function getVisibleMessagesForSession(state: State, sessionID: string, previous?
 
   return {
     sourceMessages,
-    visibleMessages: revertMessageID ? sourceMessages.filter((message) => message.id < revertMessageID) : sourceMessages,
+    visibleMessages: messagesBefore(sourceMessages, revertMessageID),
     revertMessageID,
   }
 }
@@ -3112,19 +3280,6 @@ export function useSessionRenderable(sessionID: string, directory?: string): boo
     [sessionID, store],
   )
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
-}
-
-export function useSessionTextMessages(sessionID: string, directory?: string): SessionTextMessage[] {
-  const records = useSessionMessageRecords(sessionID, directory)
-
-  return useMemo(
-    () => records.map((record) => ({
-      id: record.info.id,
-      role: typeof record.info.role === "string" ? record.info.role : null,
-      text: getConcatenatedTextFromParts(record.parts),
-    })),
-    [records],
-  )
 }
 
 export function useUserMessageHistory(sessionID: string, directory?: string): string[] {

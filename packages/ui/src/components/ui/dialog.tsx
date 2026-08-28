@@ -111,7 +111,7 @@ function DialogContent({
         {showCloseButton && (
           <BaseDialog.Close
             data-slot="dialog-close"
-            className="ring-offset-background focus:ring-ring data-[open]:bg-interactive-active data-[open]:text-foreground absolute top-2 right-2 rounded-lg opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none text-muted-foreground hover:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
+            className="ring-offset-background focus:ring-ring data-[open]:bg-interactive-active data-[open]:text-foreground absolute top-2 right-2 z-10 inline-flex size-7 items-center justify-center rounded-lg opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none text-muted-foreground hover:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
           >
             <Icon name="close"/>
             <span className="sr-only">{t('dialog.common.actions.close')}</span>

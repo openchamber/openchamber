@@ -4,6 +4,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { formatMoney } from '@/lib/money';
 import { clampPercent, resolveUsageTone } from '@/lib/quota';
 
 interface ContextUsageDisplayProps {
@@ -12,6 +13,7 @@ interface ContextUsageDisplayProps {
   colorPercentage?: number;
   contextLimit: number;
   outputLimit?: number;
+  cost?: number | null;
   size?: 'default' | 'compact';
   isMobile?: boolean;
   hideIcon?: boolean;
@@ -29,6 +31,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
   colorPercentage,
   contextLimit,
   outputLimit,
+  cost = null,
   size = 'default',
   isMobile = false,
   hideIcon = false,
@@ -73,10 +76,13 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
   const circularProgressOffset = circularProgressCircumference * (1 - progressPct / 100);
 
   const safeOutputLimit = typeof outputLimit === 'number' ? Math.max(outputLimit, 0) : 0;
+  const normalizedCost = cost ?? 0;
+  const hasCost = normalizedCost > 0 && Number.isFinite(normalizedCost);
   const tooltipLines = [
     t('contextUsage.tooltip.usedTokens', { tokens: formatTokens(totalTokens) }),
     t('contextUsage.tooltip.contextLimit', { tokens: formatTokens(contextLimit) }),
     t('contextUsage.tooltip.outputLimit', { tokens: formatTokens(safeOutputLimit) }),
+    ...(hasCost ? [t('contextUsage.tooltip.cost', { cost: formatMoney(normalizedCost) })] : []),
   ];
 
   const isInteractive = !isMobile && typeof onClick === 'function';
@@ -183,6 +189,12 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
                 <span className="typography-meta text-muted-foreground">{t('contextUsage.mobile.outputLimit')}</span>
                 <span className="typography-meta text-foreground font-medium">{formatTokens(safeOutputLimit)}</span>
               </div>
+              {hasCost ? (
+                <div className="flex justify-between items-center">
+                  <span className="typography-meta text-muted-foreground">{t('contextUsage.mobile.cost')}</span>
+                  <span className="typography-meta text-foreground font-medium">{formatMoney(normalizedCost)}</span>
+                </div>
+              ) : null}
               <div className="flex justify-between items-center pt-1 border-t border-border/40">
                 <span className="typography-meta text-muted-foreground">{t('contextUsage.mobile.usage')}</span>
                 <span className={cn('typography-meta font-semibold', getPercentageColor(colorPct))}>

@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
+import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.mjs';
@@ -31,6 +32,8 @@ import {
   setLinuxAutostartEnabled,
 } from './linux-autostart.mjs';
 import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.mjs';
+import { shouldAllowBrowserPanelCertificateError } from './browser-panel-security.mjs';
+import { attachRendererRecovery } from './renderer-recovery.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 
 const execFileAsync = promisify(execFile);
@@ -306,6 +309,9 @@ const readDesktopMinimizeToTrayStatus = () => {
   };
 };
 
+// Close-to-tray gate. The persisted key is still `desktopMinimizeToTrayEnabled`
+// (settings written by earlier versions), but the behavior it controls is the
+// window close path only; minimize stays a normal taskbar/dock minimize.
 const shouldHideMainWindowToTray = (browserWindow) => {
   if (process.platform !== 'win32' && process.platform !== 'linux') return false;
   if (!state.trayController) return false;
@@ -556,10 +562,15 @@ const writeJsonFile = async (filePath, data) => {
   // Atomic: write to a temp file then rename. Readers never see a partial
   // JSON file that could parse-error and get coerced to {}.
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  await fsp.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
-  if (process.platform !== 'win32') await fsp.chmod(tmp, 0o600);
-  await fsp.rename(tmp, filePath);
-  if (process.platform !== 'win32') await fsp.chmod(filePath, 0o600);
+  try {
+    await fsp.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
+    if (process.platform !== 'win32') await fsp.chmod(tmp, 0o600);
+    await replaceFileWithRetry(tmp, filePath);
+    if (process.platform !== 'win32') await fsp.chmod(filePath, 0o600);
+  } catch (error) {
+    await fsp.rm(tmp, { force: true }).catch(() => {});
+    throw error;
+  }
 };
 
 const readSettingsRoot = () => {
@@ -1129,6 +1140,85 @@ const injectRuntimeConfigIntoHtml = (html) => {
   return `${initScript}${html}`;
 };
 
+/**
+ * The browser panel's own session, kept separate from OpenChamber's.
+ *
+ * Every page the user opens in the panel shares this partition, which is what
+ * lets a dev-server login persist between sessions without touching the app's
+ * own storage.
+ */
+const BROWSER_PANEL_PARTITION = 'persist:openchamber-browser';
+
+/**
+ * Denies device and location access to pages shown in the browser panel.
+ *
+ * Electron grants permission requests by default when no handler is set. The
+ * panel loads whatever address the user types, so that default would hand a
+ * page the camera, the microphone, or the user's location without anything
+ * being asked or shown — a browser people would not tolerate.
+ *
+ * This denies rather than prompts: a prompt is the right end state, but a
+ * silent grant is the one outcome that must not stay. Denials are logged so a
+ * page that legitimately needs something is diagnosable rather than mysterious.
+ */
+const MAX_FAVICON_BYTES = 512 * 1024;
+const FAVICON_MIME_TYPES = new Set([
+  'image/x-icon',
+  'image/vnd.microsoft.icon',
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/svg+xml',
+]);
+
+/**
+ * Resolves a web contents id to a browser-panel view, or refuses.
+ *
+ * These commands take an id from the renderer, and an id is guessable. Without
+ * this a compromised renderer could point capture or the debugger at another
+ * window's contents. Membership of the panel's own session is the proof: only
+ * views created with that partition have it, and nothing else in the app does.
+ */
+const resolveBrowserPanelContents = (rawId) => {
+  const id = Number.isFinite(rawId) ? Math.trunc(rawId) : null;
+  if (id === null || id < 0) throw new Error('webContentsId is required');
+  const target = webContents.fromId(id);
+  if (!target || target.isDestroyed()) throw new Error('WebContents not found');
+  if (target.session !== session.fromPartition(BROWSER_PANEL_PARTITION)) {
+    throw new Error('That view is not a browser panel page');
+  }
+  return target;
+};
+
+const hardenBrowserPanelSession = () => {
+  const panelSession = session.fromPartition(BROWSER_PANEL_PARTITION);
+
+  app.on('certificate-error', (event, contents, url, error, _certificate, callback) => {
+    if (contents.session === panelSession && shouldAllowBrowserPanelCertificateError({ url, error })) {
+      event.preventDefault();
+      callback(true);
+      return;
+    }
+    callback(false);
+  });
+
+  panelSession.setPermissionRequestHandler((_contents, permission, callback, details) => {
+    log.info('[electron] browser panel denied a permission request', {
+      permission,
+      origin: details?.requestingUrl || '',
+    });
+    callback(false);
+  });
+
+  // Asked before some features even request; answering here keeps a page from
+  // reporting a capability it would then be denied.
+  panelSession.setPermissionCheckHandler(() => false);
+
+  // Serial, HID and USB device pickers.
+  panelSession.setDevicePermissionHandler(() => false);
+};
+
 const registerPackagedUiProtocol = () => {
   if (!shouldUsePackagedUi()) return;
   protocol.handle(UI_PROTOCOL, async (request) => {
@@ -1151,7 +1241,15 @@ const registerPackagedUiProtocol = () => {
         if (filePath.endsWith('.html')) {
           const html = await fsp.readFile(filePath, 'utf8');
           const body = injectRuntimeConfigIntoHtml(html);
-          return new Response(body, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+          // index.html must never be cached: it names the hashed asset
+          // bundles, and a cached copy keeps a freshly installed build
+          // loading the previous version's UI from the renderer disk cache.
+          return new Response(body, {
+            headers: {
+              'Content-Type': 'text/html; charset=utf-8',
+              'Cache-Control': 'no-store',
+            },
+          });
         }
         return electronNet.fetch(pathToFileURL(filePath).toString());
       }
@@ -1272,7 +1370,7 @@ const maybeShowNativeNotification = (rawInput) => {
   notification.on('click', () => {
     focusForegroundWindow();
     if (sessionId) {
-      emitToAllWindows('openchamber:open-session', { sessionId, directory });
+      emitToPrimaryWindow('openchamber:open-session', { sessionId, directory });
     }
     release();
   });
@@ -1673,6 +1771,15 @@ const computeBootOutcome = ({ envTargetUrl, probe, config, localAvailable }) => 
       : probe?.status === 'wrong-service'
         ? 'wrong-service'
         : 'ok';
+  // A relay-capable host is not a recovery case just because its stored
+  // direct URL failed the http probe — that URL is often the pairing
+  // creator's own loopback (unreachable here, or worse, someone else's
+  // service). The relay leg is activated in the renderer's relay restore,
+  // which cannot run from a recovery screen: boot to main on the local
+  // substrate and let it pick direct-or-relay.
+  if (status !== 'ok' && sanitizeHostRelayForStorage(host.relay)) {
+    return { target: 'remote', status: 'ok', hostId: host.id, url: host.apiUrl || host.url, ...availability };
+  }
   return { target: 'remote', status, hostId: host.id, url: host.apiUrl || host.url, ...availability };
 };
 
@@ -1898,6 +2005,18 @@ const emitToAllWindows = (event, detail) => {
   for (const browserWindow of BrowserWindow.getAllWindows()) {
     emitToWindow(browserWindow, event, detail);
   }
+};
+
+// Session navigation must land in ONE window. Broadcasting it makes every
+// open window adopt the same session, hijacking whatever the other windows
+// were doing.
+const emitToPrimaryWindow = (event, detail) => {
+  const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
+  if (windows.length === 0) return;
+  const target = (state.mainWindow && !state.mainWindow.isDestroyed())
+    ? state.mainWindow
+    : windows.find((window) => window.isFocused()) || windows.find((window) => window.isVisible()) || windows[0];
+  emitToWindow(target, event, detail);
 };
 
 const setTaskbarProgress = (value) => {
@@ -2181,7 +2300,7 @@ const dispatchDeepLink = (link) => {
   }
 
   if (link.type === 'session' && link.value) {
-    emitToAllWindows('openchamber:open-session', { sessionId: link.value });
+    emitToPrimaryWindow('openchamber:open-session', { sessionId: link.value });
     return;
   }
   if (link.type === 'host' && link.value) {
@@ -2382,6 +2501,9 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   browserWindow.__ocRuntimeConfig = { apiBaseUrl: desktopApiBaseUrl, clientToken: desktopClientToken, requestHeaders: desktopRequestHeaders };
   browserWindow.__ocInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
   browserWindow.__ocTitleBarOverlayEnabled = titleBarOverlayEnabled;
+  browserWindow.on('app-command', (event, command) => {
+    if (command === 'browser-backward') event.preventDefault();
+  });
 
   if (useSaved && saved.maximized) {
     browserWindow.maximize();
@@ -2535,6 +2657,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   browserWindow.webContents.on('zoom-changed', () => {
     browserWindow.webContents.setZoomFactor(1);
   });
+  attachRendererRecovery(browserWindow, { log, label: 'window' });
 
   browserWindow.webContents.on('dom-ready', () => {
     if (browserWindow.__ocLabel === 'main') {
@@ -2772,6 +2895,8 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   browserWindow.__ocMiniChatSessionId = sessionWindowKey;
   browserWindow.__ocPinned = false;
 
+  attachRendererRecovery(browserWindow, { log, label: 'mini chat' });
+
   if (sessionWindowKey) {
     state.miniChatWindowsBySession.set(sessionWindowKey, browserWindow);
   }
@@ -2913,12 +3038,24 @@ const resolveInitialUrl = async () => {
     }
   }
 
+  const defaultHostRelayCapable = Boolean(
+    config.defaultHostId
+    && config.defaultHostId !== LOCAL_HOST_ID
+    && sanitizeHostRelayForStorage(config.hosts.find((entry) => entry.id === config.defaultHostId)?.relay),
+  );
   if (apiBaseUrl && apiBaseUrl !== localUrl) {
     remoteProbe = await probeHostWithTimeout(apiBaseUrl, 2_000, clientToken, requestHeaders);
-    if (remoteProbe.status === 'unreachable') {
+    if (remoteProbe.status === 'unreachable' && !defaultHostRelayCapable) {
       remoteProbe = await probeHostWithTimeout(apiBaseUrl, 10_000, clientToken, requestHeaders);
     }
-    if (remoteProbe.status === 'unreachable') {
+    // The renderer's relay restore owns transport selection for relay-capable
+    // hosts; any failed direct probe falls back to the local substrate.
+    if (remoteProbe.status !== 'ok' && defaultHostRelayCapable) {
+      apiBaseUrl = localUrl || '';
+      clientToken = localUrl ? readDesktopLocalClientToken() : '';
+      requestHeaders = {};
+      initialUrl = localUiUrl;
+    } else if (remoteProbe.status === 'unreachable') {
       state.unreachableHosts.add(apiBaseUrl);
       apiBaseUrl = localUrl || '';
       clientToken = localUrl ? readDesktopLocalClientToken() : '';
@@ -3646,6 +3783,28 @@ const runSpecChain = (specs, appName) => {
   throw new Error(`Failed to open in ${appName}: ${failures.join('; ')}`);
 };
 
+// The tunnel client lives in the web package (it already has a WebSocket
+// client) and is loaded only if the user actually previews a remote dev server.
+let devTunnelClientPromise = null;
+const getDevTunnelClient = async () => {
+  if (!devTunnelClientPromise) {
+    devTunnelClientPromise = import('@openchamber/web/server/lib/dev-tunnel/client.js')
+      .then(({ createDevTunnelClient }) => createDevTunnelClient({ logger: log }))
+      .catch((error) => {
+        devTunnelClientPromise = null;
+        throw error;
+      });
+  }
+  return devTunnelClientPromise;
+};
+
+const closeAllDevTunnels = () => {
+  if (!devTunnelClientPromise) return;
+  const pending = devTunnelClientPromise;
+  devTunnelClientPromise = null;
+  pending.then((client) => client.closeAll()).catch(() => {});
+};
+
 const handleInvoke = async (browserWindow, command, args = {}) => {
   switch (command) {
     case 'desktop_start_window_drag':
@@ -3737,11 +3896,131 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return { supported: true, enabled, active };
     }
 
+    // Dev-server tunnels: bind a loopback port here and pipe it to a dev server
+    // on the remote OpenChamber host, so the browser panel loads a real origin
+    // instead of a rewritten page. Deliberately absent from
+    // COMMANDS_SAFE_FOR_REMOTE — a remote page must never open local listeners.
+    case 'desktop_dev_tunnel_open': {
+      const baseUrl = typeof args.baseUrl === 'string' ? args.baseUrl.trim() : '';
+      const port = Number.isFinite(args.port) ? Math.trunc(args.port) : 0;
+      if (!baseUrl) throw new Error('baseUrl is required');
+      if (!(port > 0 && port <= 65535)) throw new Error('A valid port is required');
+
+      const headers = {};
+      const requestHeaders = args.requestHeaders && typeof args.requestHeaders === 'object' ? args.requestHeaders : {};
+      for (const [name, value] of Object.entries(requestHeaders)) {
+        if (typeof value === 'string' && value) headers[name] = value;
+      }
+      if (typeof args.clientToken === 'string' && args.clientToken) {
+        headers.Authorization = `Bearer ${args.clientToken}`;
+      }
+
+      const client = await getDevTunnelClient();
+      const result = await client.open({ baseUrl, port, headers });
+      return { localPort: result.localPort, reused: result.reused, url: `http://127.0.0.1:${result.localPort}/` };
+    }
+
+    case 'desktop_dev_tunnel_close': {
+      const baseUrl = typeof args.baseUrl === 'string' ? args.baseUrl.trim() : '';
+      const port = Number.isFinite(args.port) ? Math.trunc(args.port) : 0;
+      if (!baseUrl || !(port > 0)) return { closed: false };
+      const client = await getDevTunnelClient();
+      return { closed: client.close({ baseUrl, port }) };
+    }
+
+    /**
+     * Forces prefers-color-scheme for one previewed page.
+     *
+     * nativeTheme.themeSource is app-wide and would drag OpenChamber's own
+     * appearance along with it, so this goes through the page's own emulation
+     * instead. The debugger session has to stay attached: emulation is part of
+     * that session and resets the moment it detaches.
+     */
+    case 'desktop_browser_set_color_scheme': {
+      const scheme = args.scheme === 'light' || args.scheme === 'dark' ? args.scheme : 'system';
+      const target = resolveBrowserPanelContents(args.webContentsId);
+
+      if (!target.debugger.isAttached()) {
+        try {
+          target.debugger.attach('1.3');
+        } catch {
+          // DevTools owns the only debugger session a page can have.
+          throw new Error('Close DevTools for this page before changing its appearance');
+        }
+      }
+
+      await target.debugger.sendCommand('Emulation.setEmulatedMedia', scheme === 'system'
+        ? { features: [] }
+        : { features: [{ name: 'prefers-color-scheme', value: scheme }] });
+
+      if (scheme === 'system') {
+        // Nothing left to emulate; give the session back so DevTools can attach.
+        try { target.debugger.detach(); } catch { /* already gone */ }
+      }
+      return { scheme };
+    }
+
+    /**
+     * Fetches a page's favicon for the tab strip.
+     *
+     * Done here, in the panel's own session, rather than by the renderer: the
+     * icon often sits behind the same login as the page, and letting the app's
+     * own origin request it would both fail on those and quietly send traffic
+     * to third-party hosts from OpenChamber itself. The bytes come back as a
+     * data URL so nothing else has to fetch anything.
+     */
+    case 'desktop_browser_fetch_favicon': {
+      const target = typeof args.url === 'string' ? args.url.trim() : '';
+      let parsed;
+      try {
+        parsed = new URL(target);
+      } catch {
+        throw new Error('A favicon URL is required');
+      }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error('Unsupported favicon URL');
+      }
+
+      const response = await electronNet.fetch(parsed.toString(), {
+        session: session.fromPartition(BROWSER_PANEL_PARTITION),
+      });
+      if (!response.ok) throw new Error(`Favicon request failed (${response.status})`);
+
+      const mime = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+      if (!FAVICON_MIME_TYPES.has(mime)) throw new Error('Favicon is not an image');
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      // A tab icon is a few kilobytes; anything of a different order is not one,
+      // and is not worth holding in memory for every tab.
+      if (buffer.length === 0 || buffer.length > MAX_FAVICON_BYTES) {
+        throw new Error('Favicon is not a usable size');
+      }
+      return { dataUrl: `data:${mime};base64,${buffer.toString('base64')}` };
+    }
+
+    // Scoped to the browser panel's own partition, so clearing it can never
+    // touch OpenChamber's session or any other window's storage.
+    case 'desktop_browser_clear_data': {
+      // Exact match, not a prefix: a prefix would also accept a partition that
+      // merely starts with this name, which is not what the comment above
+      // promises and would quietly stop being true if one were ever added.
+      const partition = typeof args.partition === 'string' ? args.partition.trim() : '';
+      if (partition !== BROWSER_PANEL_PARTITION) {
+        throw new Error('Unsupported browser partition');
+      }
+      const storages = [];
+      if (args.cookies === true) storages.push('cookies');
+      if (args.cache === true) storages.push('localstorage', 'indexdb', 'websql', 'serviceworkers', 'cachestorage');
+      if (storages.length === 0) return { cleared: false };
+
+      const browserSession = session.fromPartition(partition);
+      await browserSession.clearStorageData({ storages });
+      if (args.cache === true) await browserSession.clearCache();
+      return { cleared: true };
+    }
+
     case 'desktop_browser_capture_page': {
-      const wcId = Number.isFinite(args.webContentsId) ? Math.trunc(args.webContentsId) : null;
-      if (wcId === null || wcId < 0) throw new Error('webContentsId is required');
-      const wc = webContents.fromId(wcId);
-      if (!wc || wc.isDestroyed()) throw new Error('WebContents not found');
+      const wc = resolveBrowserPanelContents(args.webContentsId);
       const image = await wc.capturePage();
       const buffer = image.toJPEG(82);
       return {
@@ -4398,14 +4677,13 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       }
       return null;
 
+    // Minimize always goes to the taskbar/dock, even with tray background mode
+    // on: hiding the window here would drop the taskbar entry and make the
+    // in-app minimize button behave differently from the native one. Only
+    // closing hands the window to the tray.
     case 'desktop_minimize_current_window':
       if (browserWindow && !browserWindow.isDestroyed()) {
-        if (shouldHideMainWindowToTray(browserWindow)) {
-          debounceWindowStatePersist(browserWindow, true);
-          browserWindow.hide();
-        } else {
-          browserWindow.minimize();
-        }
+        browserWindow.minimize();
       }
       return null;
 
@@ -5081,6 +5359,8 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', (event) => {
   state.quitRequested = true;
+  // Loopback listeners would otherwise outlive the window that needed them.
+  closeAllDevTunnels();
 
   if (state.installingUpdate) {
     return;
@@ -5154,6 +5434,7 @@ app.whenReady().then(async () => {
   });
   nativeTheme.themeSource = readThemeSource();
   registerPackagedUiProtocol();
+  hardenBrowserPanelSession();
   setupAutoUpdater();
 
   if (process.platform === 'darwin') {

@@ -71,13 +71,31 @@ type ZaiLimit = {
   type?: string;
   number?: number;
   unit?: number;
+  usage?: number;
+  currentValue?: number;
+  remaining?: number;
   nextResetTime?: number;
   percentage?: number;
+};
+
+// CREDIT_LIMIT entries carry `usage` (total credits) and `currentValue` (consumed);
+// TOKENS_LIMIT entries only carry a percentage.
+const formatZaiCreditAmount = (value: number): string => {
+  if (value < 1000) return value.toLocaleString('en-US');
+  return `${Math.round(value / 100) / 10}k`;
+};
+
+const formatZaiCreditValueLabel = (limit: ZaiLimit): string | null => {
+  const used = toNumber(limit.currentValue);
+  const total = toNumber(limit.usage);
+  if (used === null || total === null) return null;
+  return `${formatZaiCreditAmount(used)} / ${formatZaiCreditAmount(total)} credits`;
 };
 
 type ZaiPayload = {
   data?: {
     limits?: ZaiLimit[];
+    level?: string;
   };
 };
 
@@ -169,6 +187,7 @@ export type ProviderResult = {
   usage: ProviderUsage | null;
   fetchedAt: number;
   error?: string;
+  planLabel?: string | null;
 };
 
 const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
@@ -409,15 +428,20 @@ const buildResult = (data: {
   configured: boolean;
   usage?: ProviderUsage | null;
   error?: string;
-}): ProviderResult => ({
-  providerId: data.providerId,
-  providerName: data.providerName,
-  ok: data.ok,
-  configured: data.configured,
-  usage: data.usage ?? null,
-  ...(data.error ? { error: data.error } : {}),
-  fetchedAt: Date.now(),
-});
+  planLabel?: string | null;
+}): ProviderResult => {
+  const result: ProviderResult = {
+    providerId: data.providerId,
+    providerName: data.providerName,
+    ok: data.ok,
+    configured: data.configured,
+    usage: data.usage ?? null,
+    ...(data.error ? { error: data.error } : {}),
+    fetchedAt: Date.now(),
+  };
+  if (data.planLabel) result.planLabel = data.planLabel;
+  return result;
+};
 
 const resolveXaiAuth = (): XaiAuthEntry | null => {
   const entry = getProviderAuth('xai');
@@ -1251,6 +1275,112 @@ const fetchGoogleQuota = async (): Promise<ProviderResult> => {
   });
 };
 
+const CLAUDE_DEFAULT_COOLDOWN_MS = 5 * 60 * 1000;
+const CLAUDE_MAX_COOLDOWN_MS = 60 * 60 * 1000;
+let claudeCredentialFingerprint: string | null = null;
+let claudeCachedUsage: ProviderUsage | null = null;
+let claudeCooldownUntil = 0;
+
+const claudeCooldownFromResponse = (response: Response): number => {
+  const raw = response.headers.get('retry-after');
+  const seconds = raw ? Number(raw) : Number.NaN;
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.min(seconds * 1000, CLAUDE_MAX_COOLDOWN_MS);
+  }
+  if (raw) {
+    const retryAt = Date.parse(raw);
+    if (Number.isFinite(retryAt) && retryAt > Date.now()) {
+      return Math.min(retryAt - Date.now(), CLAUDE_MAX_COOLDOWN_MS);
+    }
+  }
+  return CLAUDE_DEFAULT_COOLDOWN_MS;
+};
+
+const buildClaudeRateLimitResult = (): ProviderResult => (
+  claudeCachedUsage
+    ? buildResult({
+        providerId: 'claude',
+        providerName: 'Claude',
+        ok: true,
+        configured: true,
+        usage: claudeCachedUsage,
+      })
+    : buildResult({
+        providerId: 'claude',
+        providerName: 'Claude',
+        ok: false,
+        configured: true,
+        error: 'Rate limited. Retrying soon.',
+      })
+);
+
+const buildClaudeUsage = (payload: Record<string, unknown>): ProviderUsage => {
+  const windows: Record<string, UsageWindow> = {};
+  const models: Record<string, ProviderUsage> = {};
+  const limits = Array.isArray(payload.limits) ? payload.limits : [];
+
+  for (const entry of limits) {
+    const limit = asObject(entry);
+    if (!limit) continue;
+    const usedPercent = toNumber(limit.percent);
+    const resetAt = toTimestamp(limit.resets_at);
+    if (limit.kind === 'session') {
+      windows['5h'] = toUsageWindow({ usedPercent, windowSeconds: 5 * 60 * 60, resetAt });
+    } else if (limit.kind === 'weekly_all') {
+      windows['7d'] = toUsageWindow({ usedPercent, windowSeconds: 7 * 24 * 60 * 60, resetAt });
+    } else if (limit.kind === 'weekly_scoped') {
+      const modelName = asNonEmptyString(asObject(asObject(limit.scope)?.model)?.display_name);
+      if (modelName) {
+        models[modelName] = {
+          windows: {
+            '7d': toUsageWindow({ usedPercent, windowSeconds: 7 * 24 * 60 * 60, resetAt }),
+          },
+        };
+      }
+    }
+  }
+
+  if (!limits.length) {
+    const fiveHour = asObject(payload.five_hour);
+    const sevenDay = asObject(payload.seven_day);
+    if (fiveHour) {
+      windows['5h'] = toUsageWindow({
+        usedPercent: toNumber(fiveHour.utilization),
+        windowSeconds: 5 * 60 * 60,
+        resetAt: toTimestamp(fiveHour.resets_at),
+      });
+    }
+    if (sevenDay) {
+      windows['7d'] = toUsageWindow({
+        usedPercent: toNumber(sevenDay.utilization),
+        windowSeconds: 7 * 24 * 60 * 60,
+        resetAt: toTimestamp(sevenDay.resets_at),
+      });
+    }
+  }
+
+  const spend = asObject(payload.spend);
+  if (spend?.enabled === true) {
+    const usedMoney = asObject(spend.used);
+    const limitMoney = asObject(spend.limit);
+    const usedMinor = toNumber(usedMoney?.amount_minor);
+    const limitMinor = toNumber(limitMoney?.amount_minor);
+    const exponent = toNumber(usedMoney?.exponent) ?? 2;
+    const currency = asNonEmptyString(usedMoney?.currency);
+    const prefix = currency === 'USD' || !currency ? '$' : `${currency} `;
+    const used = usedMinor === null ? null : usedMinor / 10 ** exponent;
+    const limit = limitMinor === null ? null : limitMinor / 10 ** (toNumber(limitMoney?.exponent) ?? 2);
+    windows.extra_usage = toUsageWindow({
+      usedPercent: toNumber(spend.percent),
+      windowSeconds: null,
+      resetAt: null,
+      valueLabel: used === null ? null : `${prefix}${formatMoney(used)}${limit === null ? '' : ` / ${prefix}${formatMoney(limit)}`}`,
+    });
+  }
+
+  return Object.keys(models).length ? { windows, models } : { windows };
+};
+
 const fetchClaudeQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['anthropic', 'claude'])) as Record<string, unknown> | null;
@@ -1266,6 +1396,15 @@ const fetchClaudeQuota = async (): Promise<ProviderResult> => {
     });
   }
 
+  const refreshToken = typeof entry?.refresh === 'string' ? entry.refresh : '';
+  const fingerprint = `${accessToken}\0${refreshToken}`;
+  if (claudeCredentialFingerprint !== fingerprint) {
+    claudeCredentialFingerprint = fingerprint;
+    claudeCachedUsage = null;
+    claudeCooldownUntil = 0;
+  }
+  if (Date.now() < claudeCooldownUntil) return buildClaudeRateLimitResult();
+
   try {
     const response = await fetch('https://api.anthropic.com/api/oauth/usage', {
       method: 'GET',
@@ -1274,6 +1413,21 @@ const fetchClaudeQuota = async (): Promise<ProviderResult> => {
         'anthropic-beta': 'oauth-2025-04-20',
       },
     });
+
+    if (response.status === 429) {
+      claudeCooldownUntil = Date.now() + claudeCooldownFromResponse(response);
+      return buildClaudeRateLimitResult();
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      return buildResult({
+        providerId: 'claude',
+        providerName: 'Claude',
+        ok: false,
+        configured: true,
+        error: 'Claude session expired. Open Claude Code to sign in again.',
+      });
+    }
 
     if (!response.ok) {
       return buildResult({
@@ -1286,47 +1440,14 @@ const fetchClaudeQuota = async (): Promise<ProviderResult> => {
     }
 
     const payload = await response.json() as Record<string, unknown>;
-    const windows: Record<string, UsageWindow> = {};
-    const fiveHour = (payload as Record<string, unknown>).five_hour as Record<string, unknown> | undefined;
-    const sevenDay = (payload as Record<string, unknown>).seven_day as Record<string, unknown> | undefined;
-    const sevenDaySonnet = (payload as Record<string, unknown>).seven_day_sonnet as Record<string, unknown> | undefined;
-    const sevenDayOpus = (payload as Record<string, unknown>).seven_day_opus as Record<string, unknown> | undefined;
-
-    if (fiveHour) {
-      windows['5h'] = toUsageWindow({
-        usedPercent: toNumber(fiveHour.utilization),
-        windowSeconds: null,
-        resetAt: toTimestamp(fiveHour.resets_at),
-      });
-    }
-    if (sevenDay) {
-      windows['7d'] = toUsageWindow({
-        usedPercent: toNumber(sevenDay.utilization),
-        windowSeconds: null,
-        resetAt: toTimestamp(sevenDay.resets_at),
-      });
-    }
-    if (sevenDaySonnet) {
-      windows['7d-sonnet'] = toUsageWindow({
-        usedPercent: toNumber(sevenDaySonnet.utilization),
-        windowSeconds: null,
-        resetAt: toTimestamp(sevenDaySonnet.resets_at),
-      });
-    }
-    if (sevenDayOpus) {
-      windows['7d-opus'] = toUsageWindow({
-        usedPercent: toNumber(sevenDayOpus.utilization),
-        windowSeconds: null,
-        resetAt: toTimestamp(sevenDayOpus.resets_at),
-      });
-    }
-
+    const usage = buildClaudeUsage(payload);
+    claudeCachedUsage = usage;
     return buildResult({
       providerId: 'claude',
       providerName: 'Claude',
       ok: true,
       configured: true,
-      usage: { windows },
+      usage,
     });
   } catch (error) {
     return buildResult({
@@ -1344,14 +1465,35 @@ const buildCopilotWindows = (payload: Record<string, unknown>) => {
   const resetAt = toTimestamp(payload.quota_reset_date);
   const windows: Record<string, UsageWindow> = {};
 
+  // Mirrors the quota semantics of microsoft/vscode-copilot-chat
+  // (CopilotUserQuotaInfo): each snapshot carries entitlement, remaining,
+  // unlimited, and percent_remaining. Unlimited plans report no usable
+  // entitlement; percent_remaining is a server-computed fallback.
   const addWindow = (label: string, snapshot?: Record<string, unknown>) => {
     if (!snapshot) return;
+
+    if (snapshot.unlimited === true) {
+      windows[label] = toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt,
+        valueLabel: 'Unlimited',
+      });
+      return;
+    }
+
     const entitlement = toNumber(snapshot.entitlement);
     const remaining = toNumber(snapshot.remaining);
-    const usedPercent = entitlement && remaining !== null
-      ? Math.max(0, Math.min(100, 100 - (remaining / entitlement) * 100))
+    let usedPercent = entitlement !== null && entitlement > 0 && remaining !== null
+      ? Math.min(100, Math.max(0, 100 - (remaining / entitlement) * 100))
       : null;
-    const valueLabel = entitlement !== null && remaining !== null
+    if (usedPercent === null) {
+      const percentRemaining = toNumber(snapshot.percent_remaining);
+      if (percentRemaining !== null) {
+        usedPercent = Math.min(100, Math.max(0, 100 - percentRemaining));
+      }
+    }
+    const valueLabel = entitlement !== null && entitlement > 0 && remaining !== null
       ? `${remaining.toFixed(0)} / ${entitlement.toFixed(0)} left`
       : null;
     windows[label] = toUsageWindow({
@@ -1362,9 +1504,7 @@ const buildCopilotWindows = (payload: Record<string, unknown>) => {
     });
   };
 
-  addWindow('chat', quota.chat as Record<string, unknown> | undefined);
-  addWindow('completions', quota.completions as Record<string, unknown> | undefined);
-  addWindow('premium', quota.premium_interactions as Record<string, unknown> | undefined);
+  addWindow('premium_interactions', quota.premium_interactions as Record<string, unknown> | undefined);
 
   return windows;
 };
@@ -1461,15 +1601,12 @@ const fetchCopilotAddonQuota = async (): Promise<ProviderResult> => {
     }
 
     const payload = await response.json() as Record<string, unknown>;
-    const windows = buildCopilotWindows(payload);
-    const premium = windows.premium ? { premium: windows.premium } : windows;
-
     return buildResult({
       providerId: 'github-copilot-addon',
       providerName: 'GitHub Copilot Add-on',
       ok: true,
       configured: true,
-      usage: { windows: premium },
+      usage: { windows: buildCopilotWindows(payload) },
     });
   } catch (error) {
     return buildResult({
@@ -1957,16 +2094,19 @@ const fetchZaiQuota = async (): Promise<ProviderResult> => {
     const payload = await response.json() as ZaiPayload;
     const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
     const windows: Record<string, UsageWindow> = {};
-    for (const tokensLimit of limits.filter((limit) => limit?.type === 'TOKENS_LIMIT')) {
-      const windowSeconds = resolveWindowSeconds(tokensLimit as Record<string, unknown>);
+    // The API renamed TOKENS_LIMIT to CREDIT_LIMIT; field semantics stayed the same,
+    // so both limit types map to the same windows.
+    for (const limit of limits.filter((entry) => entry?.type === 'TOKENS_LIMIT' || entry?.type === 'CREDIT_LIMIT')) {
+      const windowSeconds = resolveWindowSeconds(limit as Record<string, unknown>);
       const windowLabel = resolveWindowLabel(windowSeconds);
-      const resetAt = tokensLimit.nextResetTime ? normalizeTimestamp(tokensLimit.nextResetTime) : null;
-      const usedPercent = typeof tokensLimit.percentage === 'number' ? tokensLimit.percentage : null;
+      const resetAt = limit.nextResetTime ? normalizeTimestamp(limit.nextResetTime) : null;
+      const usedPercent = typeof limit.percentage === 'number' ? limit.percentage : null;
 
       windows[windowLabel] = toUsageWindow({
         usedPercent,
         windowSeconds,
         resetAt,
+        valueLabel: formatZaiCreditValueLabel(limit),
       });
     }
 
@@ -1985,6 +2125,7 @@ const fetchZaiQuota = async (): Promise<ProviderResult> => {
       ok: true,
       configured: true,
       usage: { windows },
+      planLabel: payload?.data?.level || null,
     });
   } catch (error) {
     return buildResult({
@@ -2705,7 +2846,7 @@ const fetchXaiQuota = async (): Promise<ProviderResult> => {
   }
 };
 
-export const fetchQuotaForProvider = async (providerId: string): Promise<ProviderResult> => {
+const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<ProviderResult> => {
   switch (providerId) {
     case 'claude':
       return fetchClaudeQuota();
@@ -2765,4 +2906,17 @@ export const fetchQuotaForProvider = async (providerId: string): Promise<Provide
         error: 'Unsupported provider',
       });
   }
+};
+
+const pendingQuotaFetches = new Map<string, Promise<ProviderResult>>();
+
+export const fetchQuotaForProvider = (providerId: string): Promise<ProviderResult> => {
+  const existing = pendingQuotaFetches.get(providerId);
+  if (existing) return existing;
+
+  const pending = fetchQuotaForProviderUncoalesced(providerId).finally(() => {
+    if (pendingQuotaFetches.get(providerId) === pending) pendingQuotaFetches.delete(providerId);
+  });
+  pendingQuotaFetches.set(providerId, pending);
+  return pending;
 };

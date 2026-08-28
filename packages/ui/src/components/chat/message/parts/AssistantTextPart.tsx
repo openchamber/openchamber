@@ -2,7 +2,6 @@ import React from 'react';
 import type { Part } from '@opencode-ai/sdk/v2';
 import { MarkdownRenderer } from '../../MarkdownRenderer';
 import type { StreamPhase, ToolPopupContent } from '../types';
-import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import { resolveAssistantDisplayText, shouldRenderAssistantText } from './assistantTextVisibility';
 import { streamPerfCount, streamPerfObserve } from '@/stores/utils/streamDebug';
@@ -17,7 +16,6 @@ interface AssistantTextPartProps {
     messageId: string;
     streamPhase: StreamPhase;
     chatRenderMode?: 'sorted' | 'live';
-    onContentChange?: (reason?: ContentChangeReason, messageId?: string) => void;
     onShowPopup?: (content: ToolPopupContent) => void;
 }
 

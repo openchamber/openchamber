@@ -6,6 +6,7 @@ import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { startAppearanceAutoSave } from '@/lib/appearanceAutoSave';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import {
   applyPersistedHomeDirectoryToWindow,
   getRuntimeSettingsMirrorStorageKey,
@@ -241,6 +242,47 @@ describe('updateDesktopSettings', () => {
     }
   });
 
+  test('sanitizes a successful fallback settings response before applying it', async () => {
+    const previousFetch = globalThis.fetch;
+    const fallbackFetch: typeof fetch = async () => new Response(JSON.stringify({ terminalShell: 'zsh' }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    try {
+      globalThis.fetch = fallbackFetch;
+      useUIStore.getState().setTerminalShell('fish');
+
+      await updateDesktopSettings({ terminalShell: 'zsh' });
+
+      expect(useUIStore.getState().terminalShell).toBe('zsh');
+      expect(getSettingsSaveState()).toBe('idle');
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  test('reports an error without applying a malformed fallback settings response', async () => {
+    const previousFetch = globalThis.fetch;
+    const fallbackFetch: typeof fetch = async () => new Response(JSON.stringify('ok'), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const states: string[] = [];
+    const unsubscribe = subscribeToSettingsSaveState(() => {
+      states.push(getSettingsSaveState());
+    });
+    try {
+      globalThis.fetch = fallbackFetch;
+      useUIStore.getState().setTerminalShell('fish');
+
+      await updateDesktopSettings({ terminalShell: 'zsh' });
+
+      expect(useUIStore.getState().terminalShell).toBe('fish');
+      expect(states).toEqual(['saving', 'error']);
+    } finally {
+      unsubscribe();
+      globalThis.fetch = previousFetch;
+    }
+  });
+
   test('drains a pending save to the previous runtime and ignores its stale response', async () => {
     switchRuntimeEndpoint({ apiBaseUrl: 'https://settings-a.example', runtimeKey: 'settings-a' });
     const saveResult = deferred<SettingsPayload>();
@@ -400,6 +442,240 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().showReasoningTraces).toBe(false);
     expect(useUIStore.getState().terminalShell).toBe('fish');
     expect(localStorage.getItem('selectedThemeId')).toBe('existing-theme');
+  });
+
+  test('applies authoritative shared sidebar preferences without replacing local-only sidebar state', async () => {
+    getWindow();
+    useSessionDisplayStore.setState({
+      projectDisplayMode: 'all',
+      sessionGroupingMode: 'by-worktree',
+      projectSortOrder: 'manual',
+      showRecentSection: true,
+      singleProjectId: 'local-project',
+      stickyZoneHeaders: false,
+    });
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: {
+        sidebarProjectDisplayMode: 'single',
+        sidebarSessionGroupingMode: 'flat',
+        sidebarProjectSortOrder: 'recent',
+        sidebarShowRecentSection: false,
+        autoSaveEnabled: true,
+        draftStartersCraftGoalAdded: true,
+        draftStartersScheduleTaskAdded: true,
+      },
+      source: 'web',
+    }));
+
+    await syncDesktopSettings();
+
+    const state = useSessionDisplayStore.getState();
+    expect({
+      projectDisplayMode: state.projectDisplayMode,
+      sessionGroupingMode: state.sessionGroupingMode,
+      projectSortOrder: state.projectSortOrder,
+      showRecentSection: state.showRecentSection,
+      singleProjectId: state.singleProjectId,
+      stickyZoneHeaders: state.stickyZoneHeaders,
+    }).toEqual({
+      projectDisplayMode: 'single',
+      sessionGroupingMode: 'flat',
+      projectSortOrder: 'recent',
+      showRecentSection: false,
+      singleProjectId: 'local-project',
+      stickyZoneHeaders: false,
+    });
+  });
+
+  test('seeds missing shared sidebar preferences from the hydrated local cache', async () => {
+    getWindow();
+    const saves: Array<Partial<SettingsPayload>> = [];
+    useSessionDisplayStore.setState({
+      projectDisplayMode: 'single',
+      sessionGroupingMode: 'flat',
+      projectSortOrder: 'a-z',
+      showRecentSection: false,
+    });
+    registerSettingsApi(async (changes) => {
+      saves.push(changes);
+      return changes;
+    }, async () => ({
+      settings: {
+        autoSaveEnabled: true,
+        draftStartersCraftGoalAdded: true,
+        draftStartersScheduleTaskAdded: true,
+      },
+      source: 'web',
+    }));
+
+    await syncDesktopSettings();
+
+    expect(saves).toEqual([{
+      draftStartersCraftGoalAdded: true,
+      draftStartersScheduleTaskAdded: true,
+      sidebarProjectDisplayMode: 'single',
+      sidebarSessionGroupingMode: 'flat',
+      sidebarProjectSortOrder: 'a-z',
+      sidebarShowRecentSection: false,
+    }]);
+  });
+
+  test('preserves local sidebar preferences when the authoritative load fails', async () => {
+    getWindow();
+    useSessionDisplayStore.setState({
+      projectDisplayMode: 'single',
+      sessionGroupingMode: 'flat',
+      projectSortOrder: 'z-a',
+      showRecentSection: false,
+    });
+    registerSettingsApi(async () => ({}), async () => {
+      throw new Error('offline');
+    });
+
+    await syncDesktopSettings();
+
+    const state = useSessionDisplayStore.getState();
+    expect({
+      projectDisplayMode: state.projectDisplayMode,
+      sessionGroupingMode: state.sessionGroupingMode,
+      projectSortOrder: state.projectSortOrder,
+      showRecentSection: state.showRecentSection,
+    }).toEqual({
+      projectDisplayMode: 'single',
+      sessionGroupingMode: 'flat',
+      projectSortOrder: 'z-a',
+      showRecentSection: false,
+    });
+  });
+
+  test('does not broadcast a stale project selection over a newer pending update', async () => {
+    const firstSave = deferred<SettingsPayload>();
+    const savedChanges: Array<Partial<SettingsPayload>> = [];
+    registerSettingsSave(async (changes) => {
+      savedChanges.push(changes);
+      if (savedChanges.length === 1) return firstSave.promise;
+      return changes as SettingsPayload;
+    });
+    const syncedSettings: SettingsPayload[] = [];
+    const handleSettingsSynced = (event: Event) => {
+      syncedSettings.push((event as CustomEvent<{ settings: SettingsPayload }>).detail.settings);
+    };
+    getWindow().addEventListener('openchamber:settings-synced', handleSettingsSynced);
+
+    try {
+      const firstUpdate = updateDesktopSettings({ activeProjectId: 'project-a' });
+      await delay(250);
+      const secondUpdate = updateDesktopSettings({ activeProjectId: 'project-b' });
+
+      firstSave.resolve({ activeProjectId: 'project-a' });
+      await firstUpdate;
+
+      expect(syncedSettings.at(-1)?.activeProjectId).toBe('project-b');
+
+      await secondUpdate;
+    } finally {
+      getWindow().removeEventListener('openchamber:settings-synced', handleSettingsSynced);
+    }
+  });
+
+  test('does not broadcast a stale loaded project selection over a newer pending update', async () => {
+    const loadedSettings = deferred<{ settings: SettingsPayload; source: 'web' | 'vscode' }>();
+    registerSettingsApi(async (changes) => changes as SettingsPayload, () => loadedSettings.promise);
+    invalidateSettingsCache();
+    const syncedSettings: SettingsPayload[] = [];
+    const handleSettingsSynced = (event: Event) => {
+      syncedSettings.push((event as CustomEvent<{ settings: SettingsPayload }>).detail.settings);
+    };
+    getWindow().addEventListener('openchamber:settings-synced', handleSettingsSynced);
+
+    try {
+      const sync = syncDesktopSettings();
+      const update = updateDesktopSettings({ activeProjectId: 'project-b' });
+
+      loadedSettings.resolve({
+        settings: {
+          activeProjectId: 'project-a',
+          draftStartersCraftGoalAdded: true,
+          draftStartersScheduleTaskAdded: true,
+        },
+        source: 'web',
+      });
+      await sync;
+
+      expect(syncedSettings.at(-1)?.activeProjectId).toBe('project-b');
+
+      await update;
+    } finally {
+      getWindow().removeEventListener('openchamber:settings-synced', handleSettingsSynced);
+    }
+  });
+
+  test('does not broadcast a stale load after a newer project update has saved', async () => {
+    const loadedSettings = deferred<{ settings: SettingsPayload; source: 'web' | 'vscode' }>();
+    registerSettingsApi(async (changes) => changes as SettingsPayload, () => loadedSettings.promise);
+    invalidateSettingsCache();
+    const syncedSettings: SettingsPayload[] = [];
+    const handleSettingsSynced = (event: Event) => {
+      syncedSettings.push((event as CustomEvent<{ settings: SettingsPayload }>).detail.settings);
+    };
+    getWindow().addEventListener('openchamber:settings-synced', handleSettingsSynced);
+
+    try {
+      const sync = syncDesktopSettings();
+      const update = updateDesktopSettings({ activeProjectId: 'project-b' });
+      await update;
+
+      loadedSettings.resolve({
+        settings: {
+          activeProjectId: 'project-a',
+          draftStartersCraftGoalAdded: true,
+          draftStartersScheduleTaskAdded: true,
+        },
+        source: 'web',
+      });
+      await sync;
+
+      expect(syncedSettings.at(-1)?.activeProjectId).toBe('project-b');
+    } finally {
+      getWindow().removeEventListener('openchamber:settings-synced', handleSettingsSynced);
+    }
+  });
+
+  test('preserves only the latest settings values across repeated pending updates', async () => {
+    const loadedSettings = deferred<{ settings: SettingsPayload; source: 'web' | 'vscode' }>();
+    registerSettingsApi(async (changes) => changes as SettingsPayload, () => loadedSettings.promise);
+    invalidateSettingsCache();
+    const syncedSettings: SettingsPayload[] = [];
+    const handleSettingsSynced = (event: Event) => {
+      syncedSettings.push((event as CustomEvent<{ settings: SettingsPayload }>).detail.settings);
+    };
+    getWindow().addEventListener('openchamber:settings-synced', handleSettingsSynced);
+
+    try {
+      const sync = syncDesktopSettings();
+      const updates = Array.from({ length: 100 }, (_, index) => updateDesktopSettings({
+        activeProjectId: `project-${index}`,
+        showReasoningTraces: index % 2 === 0,
+      }));
+
+      loadedSettings.resolve({
+        settings: {
+          activeProjectId: 'stale-project',
+          showReasoningTraces: true,
+          draftStartersCraftGoalAdded: true,
+          draftStartersScheduleTaskAdded: true,
+        },
+        source: 'web',
+      });
+      await sync;
+
+      expect(syncedSettings.at(-1)?.activeProjectId).toBe('project-99');
+      expect(syncedSettings.at(-1)?.showReasoningTraces).toBe(false);
+
+      await Promise.all(updates);
+    } finally {
+      getWindow().removeEventListener('openchamber:settings-synced', handleSettingsSynced);
+    }
   });
 
   test('applies model selector settings from server settings', async () => {

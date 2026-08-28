@@ -19,9 +19,8 @@ import { SaveProjectPlanDialog } from '@/components/session/SaveProjectPlanDialo
 import { ForkSessionDialog, type ForkSessionExecution } from '@/components/session/ForkSessionDialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
-import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 
-import { SimpleMarkdownRenderer } from '../MarkdownRenderer';
+import { MarkdownImageGallery, SimpleMarkdownRenderer } from '../MarkdownRenderer';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { flattenAssistantTextParts, suggestPlanTitleFromText } from '@/lib/messages/messageText';
@@ -41,7 +40,7 @@ import { ToolRevealOnMount } from './parts/ToolRevealOnMount';
 import { StaticToolRow } from './parts/ProgressiveGroup';
 import { isExpandableTool, isStandaloneTool } from './parts/toolRenderUtils';
 import TurnActivity from '../components/TurnActivity';
-import { createProjectPlanFile } from '@/lib/openchamberConfig';
+import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
@@ -56,6 +55,7 @@ import {
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 import { useProviderLogo } from '@/hooks/useProviderLogo';
 import { getAgentColor } from '@/lib/agentColors';
+import { isCapacitorMobileApp } from '@/apps/mobileNativeChrome';
 
 
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
@@ -418,20 +418,16 @@ interface MessageBodyProps {
     onShowPopup: (content: ToolPopupContent) => void;
     streamPhase: StreamPhase;
     allowAnimation: boolean;
-    onContentChange?: (reason?: ContentChangeReason, messageId?: string) => void;
-
     shouldShowHeader?: boolean;
     hasTextContent?: boolean;
     onCopyMessage?: () => void | boolean | Promise<void | boolean>;
     copiedMessage?: boolean;
-    onAuxiliaryContentComplete?: () => void;
     showReasoningTraces?: boolean;
     agentMention?: AgentMentionInfo;
     turnGroupingContext?: TurnGroupingContext;
     onRevert?: () => void;
     onFork?: () => void;
     errorMessage?: string;
-    errorVariant?: 'error' | 'info';
     userActionsMode?: 'inline' | 'external-content' | 'external-actions';
     stickyUserHeaderEnabled?: boolean;
     reviewTransferDirection?: ReviewTransferDirection | null;
@@ -488,6 +484,20 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
     const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
     const [copyHintVisible, setCopyHintVisible] = React.useState(false);
     const copyHintTimeoutRef = React.useRef<number | null>(null);
+
+    // One expanded state for the whole message: text parts and context cards
+    // collapse and expand together, with a single collapse control up here
+    // instead of one per part.
+    const collapsibleUserMessages = useUIStore((state) => state.collapsibleUserMessages);
+    const [messageExpanded, setMessageExpanded] = React.useState(false);
+    const expandMessage = React.useCallback(() => setMessageExpanded(true), []);
+    const collapseMessage = React.useCallback((event: React.MouseEvent) => {
+        event.stopPropagation();
+        setMessageExpanded(false);
+    }, []);
+    React.useEffect(() => {
+        if (!collapsibleUserMessages) setMessageExpanded(false);
+    }, [collapsibleUserMessages]);
 
     const userContentParts = React.useMemo(() => {
         return parts.filter((part) => {
@@ -566,7 +576,7 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
         const formatted = formatTimestampForDisplay(messageCreatedAt, timeFormatPreference);
         return formatted.length > 0 ? formatted : null;
     }, [locale, messageCreatedAt, timeFormatPreference]);
-    const actionsBlock = ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork || onToggleContextPin) && showUserActions ? (
+    const actionsBlock = chatSurfaceMode !== 'peek' && ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork || onToggleContextPin) && showUserActions ? (
         <div className={cn(
             'group/user-actions',
             isMobile
@@ -716,6 +726,16 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
             style={CONTAIN_LAYOUT_STYLE}
             onTouchStart={isTouchContext && canCopyMessage && hasCopyableText ? revealCopyHint : undefined}
         >
+            {collapsibleUserMessages && messageExpanded && (
+                <button
+                    type="button"
+                    onClick={collapseMessage}
+                    className="absolute top-0 right-0 z-10 flex items-center justify-center rounded-sm bg-[var(--surface-elevated)] p-0.5 text-[var(--surface-mutedForeground)] transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]"
+                    aria-label={t('chat.message.userText.collapseAria')}
+                >
+                    <Icon name="arrow-up-s" className="h-3.5 w-3.5" />
+                </button>
+            )}
             <div
                 className={cn(
                     'leading-relaxed text-foreground/90 text-base overflow-x-hidden',
@@ -725,10 +745,13 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
                 )}
                 style={useStickyScrollableUserContent ? { maxHeight: 'calc(var(--chat-scroll-height, 100dvh) * 0.4)' } : undefined}
             >
+                {/* Positional keys, not part ids: the server echo of a just-sent
+                    message swaps the optimistic part id, and id-based keys would
+                    remount the text subtree (blank frame + height jump). */}
                 {userContentParts.map((part, index) => {
                     if (isSubtaskPart(part)) {
                         return (
-                            <React.Fragment key={part.id ?? `user-subtask-${index}`}>
+                            <React.Fragment key={`user-subtask-${index}`}>
                                 <UserSubtaskPart part={part} />
                             </React.Fragment>
                         );
@@ -736,7 +759,7 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
 
                     if (isShellActionPart(part)) {
                         return (
-                            <React.Fragment key={part.id ?? `user-shell-${index}`}>
+                            <React.Fragment key={`user-shell-${index}`}>
                                 <UserShellActionPart part={part} />
                             </React.Fragment>
                         );
@@ -751,12 +774,14 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
                         }
                     }
                     return (
-                        <React.Fragment key={part.id ?? `user-text-${index}`}>
+                        <React.Fragment key={`user-text-${index}`}>
                             <UserTextPart
                                 part={part}
                                 messageId={messageId}
                                 isMobile={isMobile}
                                 agentMention={mentionForPart}
+                                messageExpanded={messageExpanded}
+                                onExpandMessage={expandMessage}
                             />
                         </React.Fragment>
                     );
@@ -1083,14 +1108,11 @@ const AssistantMessageBody = React.memo(({
     onShowPopup,
     streamPhase: _streamPhase,
     allowAnimation: _allowAnimation,
-    onContentChange,
     hasTextContent = false,
     onCopyMessage,
-    onAuxiliaryContentComplete,
     showReasoningTraces = false,
     turnGroupingContext,
     errorMessage,
-    errorVariant = 'error',
     reviewTransferDirection = null,
     contextPinned,
     contextPinPending,
@@ -1211,6 +1233,11 @@ const AssistantMessageBody = React.memo(({
     const assistantTextParts = React.useMemo(() => {
         return visibleParts.filter((part) => part.type === 'text');
     }, [visibleParts]);
+    const finalizedAssistantMarkdownContents = React.useMemo(() => (
+        isMessageCompleted
+            ? assistantTextParts.map(extractTextContent).filter((text) => text.trim().length > 0)
+            : []
+    ), [assistantTextParts, isMessageCompleted]);
     const assistantPlanText = React.useMemo(() => flattenAssistantTextParts(assistantTextParts), [assistantTextParts]);
     const suggestedPlanTitle = React.useMemo(() => suggestPlanTitleFromText(assistantPlanText), [assistantPlanText]);
 
@@ -1316,16 +1343,6 @@ const AssistantMessageBody = React.memo(({
         return resolved ? { id: resolved.id, path: resolved.path } : null;
     }, [availableWorktreesByProject, canUseProjectPlanActions, currentSessionId, effectiveDirectory, getDirectoryForSession, projects]);
 
-    const hasTools = toolParts.length > 0;
-
-    const hasPendingTools = React.useMemo(() => {
-        return toolParts.some((toolPart) => {
-            const state = (toolPart as Record<string, unknown>).state as Record<string, unknown> | undefined ?? {};
-            const status = state?.status;
-            return status === 'pending' || status === 'running' || status === 'started';
-        });
-    }, [toolParts]);
-
     const isActiveTool = React.useCallback((toolPart: ToolPartType): boolean => {
         const state = (toolPart as Record<string, unknown>).state as Record<string, unknown> | undefined ?? {};
         const status = state?.status;
@@ -1353,86 +1370,6 @@ const AssistantMessageBody = React.memo(({
     const shouldShowTool = React.useCallback((toolPart: ToolPartType): boolean => {
         return isActiveTool(toolPart) || isToolFinalized(toolPart);
     }, [isActiveTool, isToolFinalized]);
-
-    const allToolsFinalized = React.useMemo(() => {
-        if (toolParts.length === 0) {
-            return true;
-        }
-        if (hasPendingTools) {
-            return false;
-        }
-        return toolParts.every((toolPart) => isToolFinalized(toolPart));
-    }, [toolParts, hasPendingTools, isToolFinalized]);
-
-    const reasoningParts = React.useMemo(() => {
-        return visibleParts.filter((part) => part.type === 'reasoning');
-    }, [visibleParts]);
-
-    const reasoningComplete = React.useMemo(() => {
-        if (reasoningParts.length === 0) {
-            return true;
-        }
-        return reasoningParts.every((part) => {
-            const time = (part as Record<string, unknown>).time as { end?: number } | undefined;
-            return typeof time?.end === 'number';
-        });
-    }, [reasoningParts]);
-
-    // Message is considered to have an "open step" if info.finish is not yet present
-    const hasOpenStep = typeof messageFinish !== 'string';
-
-    const shouldHoldForReasoning =
-        reasoningParts.length > 0 &&
-        hasTools &&
-        (hasPendingTools || hasOpenStep || !allToolsFinalized);
-
-    const shouldHoldTools = awaitingMessageCompletion
-        || (hasTools && (hasPendingTools || hasOpenStep || !allToolsFinalized));
-    const shouldHoldReasoning = awaitingMessageCompletion || shouldHoldForReasoning;
-
-    const hasAuxiliaryContent = hasTools || reasoningParts.length > 0;
-    const isTextlessAssistantMessage = assistantTextParts.length === 0;
-    const auxiliaryContentComplete = hasAuxiliaryContent && isTextlessAssistantMessage && !shouldHoldTools && !shouldHoldReasoning && allToolsFinalized && reasoningComplete;
-    const auxiliaryCompletionAnnouncedRef = React.useRef(false);
-    const soloReasoningScrollTriggeredRef = React.useRef(false);
-
-    React.useEffect(() => {
-        soloReasoningScrollTriggeredRef.current = false;
-    }, [messageId]);
-
-    React.useEffect(() => {
-        if (!auxiliaryContentComplete) {
-            auxiliaryCompletionAnnouncedRef.current = false;
-            return;
-        }
-        if (auxiliaryCompletionAnnouncedRef.current) {
-            return;
-        }
-        auxiliaryCompletionAnnouncedRef.current = true;
-        onAuxiliaryContentComplete?.();
-    }, [auxiliaryContentComplete, onAuxiliaryContentComplete]);
-
-    React.useEffect(() => {
-        if (awaitingMessageCompletion) {
-            soloReasoningScrollTriggeredRef.current = false;
-            return;
-        }
-        if (hasTools) {
-            soloReasoningScrollTriggeredRef.current = false;
-            return;
-        }
-        if (reasoningParts.length === 0) {
-            return;
-        }
-        if (shouldHoldReasoning || !reasoningComplete) {
-            return;
-        }
-        if (soloReasoningScrollTriggeredRef.current) {
-            return;
-        }
-        soloReasoningScrollTriggeredRef.current = true;
-        onContentChange?.('structural');
-    }, [awaitingMessageCompletion, hasTools, onContentChange, reasoningComplete, reasoningParts.length, shouldHoldReasoning]);
 
     const hasCopyableText = Boolean(hasTextContent) && !awaitingMessageCompletion;
 
@@ -1503,7 +1440,7 @@ const AssistantMessageBody = React.memo(({
 
             setIsSavingPlan(true);
             try {
-                const created = await createProjectPlanFile(currentProjectRef, {
+                const created = await useProjectContextStore.getState().createPlan(currentProjectRef, {
                     title,
                     body: assistantPlanText,
                 });
@@ -1511,9 +1448,6 @@ const AssistantMessageBody = React.memo(({
                     toast.error(t('chat.messageBody.toast.savePlanFailed'));
                     return;
                 }
-                window.dispatchEvent(new CustomEvent('openchamber:project-plan-saved', {
-                    detail: { projectId: currentProjectRef.id },
-                }));
                 setIsPlanDialogOpen(false);
                 toast.success(t('chat.messageBody.toast.planSaved'));
             } finally {
@@ -1612,6 +1546,13 @@ const AssistantMessageBody = React.memo(({
                         }
                         throw new Error(payload.error || 'Failed to save image in VS Code');
                     }
+                } else if (isCapacitorMobileApp()) {
+                    const blob = await fetch(dataUrl).then((response) => response.blob());
+                    const file = new File([blob], fileName, { type: blob.type || 'image/png' });
+                    if (!navigator.canShare?.({ files: [file] })) {
+                        throw new Error('Image sharing is unavailable in this mobile runtime');
+                    }
+                    await navigator.share({ files: [file] });
                 } else {
                     const link = document.createElement('a');
                     link.download = fileName;
@@ -1691,9 +1632,9 @@ const AssistantMessageBody = React.memo(({
 
     const shouldDeferSortedInlineText = isSortedRenderMode && !hasStopFinish;
     const showErrorMessage = Boolean(errorMessage);
-    const errorIconName = errorVariant === 'info' ? 'information' : 'error-warning';
-    const shouldShowMessageActions = hasCopyableText;
-    const shouldShowTurnFooter = isLastAssistantInTurn && hasTextContent && (hasStopFinish || Boolean(errorMessage));
+    const isPeekSurface = chatSurfaceMode === 'peek';
+    const shouldShowMessageActions = hasCopyableText && !isPeekSurface;
+    const shouldShowTurnFooter = isLastAssistantInTurn && hasTextContent && (hasStopFinish || Boolean(errorMessage)) && !isPeekSurface;
     const shouldRenderActionsInActivity = isSortedRenderMode;
     const shouldShowStandaloneMessageActions = showSplitAssistantMessageActions && shouldShowMessageActions && !shouldShowTurnFooter && !shouldRenderActionsInActivity;
 
@@ -1784,7 +1725,6 @@ const AssistantMessageBody = React.memo(({
                         expandedTools={expandedTools}
                         onToggleTool={onToggleTool}
                         onShowPopup={onShowPopup}
-                        onContentChange={onContentChange}
                         streamPhase={effectiveStreamPhase}
                         showHeader={true}
                         animateRows={animateActivityRows}
@@ -1861,7 +1801,6 @@ const AssistantMessageBody = React.memo(({
                             messageId={messageId}
                             streamPhase={effectiveStreamPhase}
                             chatRenderMode={chatRenderMode}
-                            onContentChange={onContentChange}
                             onShowPopup={onShowPopup}
                         />
                     </div>
@@ -1896,7 +1835,6 @@ const AssistantMessageBody = React.memo(({
                                 messageId={messageId}
                                 streamPhase={effectiveStreamPhase}
                                 chatRenderMode={chatRenderMode}
-                                onContentChange={onContentChange}
                                 onShowPopup={onShowPopup}
                             />
                         );
@@ -1908,7 +1846,6 @@ const AssistantMessageBody = React.memo(({
                                 part={part}
                                 messageId={messageId}
                                 streamPhase={effectiveStreamPhase}
-                                onContentChange={onContentChange}
                             />
                         );
                     }
@@ -1952,7 +1889,6 @@ const AssistantMessageBody = React.memo(({
                                     onToggle={onToggleTool}
                                     isMobile={isMobile}
                                     alwaysShowActions={alwaysShowMessageActions}
-                                    onContentChange={onContentChange}
                                     onShowPopup={onShowPopup}
                                     animateTailText={animatedToolIdsLookup.has(toolPart.id)}
                                 />
@@ -2024,7 +1960,6 @@ const AssistantMessageBody = React.memo(({
         messageActionButtons,
         renderJustificationActions,
         sessionId,
-        onContentChange,
         onShowPopup,
         onToggleTool,
         shouldRenderActivityGroup,
@@ -2203,17 +2138,9 @@ const AssistantMessageBody = React.memo(({
                     {renderedParts}
                     {showErrorMessage && (
                         <FadeInOnReveal key="assistant-error">
-                            <div className={cn(
-                                'group/assistant-text relative mt-3 p-3 rounded-lg border break-words max-w-full',
-                                errorVariant === 'info'
-                                    ? 'bg-[var(--status-info-background)] border-[var(--status-info-border)]'
-                                    : 'bg-[var(--status-error-background)] border-[var(--status-error-border)]',
-                            )}>
-                                <div className="flex items-center gap-2">
-                                    <Icon name={errorIconName} className={cn(
-                                        'h-4 w-4 shrink-0',
-                                        errorVariant === 'info' ? 'text-[var(--status-info)]' : 'text-[var(--status-error)]',
-                                    )} />
+                            <div className="group/assistant-text relative mt-3 max-w-full break-words rounded-2xl border border-[var(--status-info-border)] bg-[var(--status-info-background)] px-4 py-3 text-base leading-relaxed">
+                                <div className="flex items-center gap-3">
+                                    <Icon name="information" className="size-4 shrink-0 text-[var(--status-info)]" />
                                     <div className="min-w-0 flex-1 break-words">
                                         <SimpleMarkdownRenderer
                                             content={errorMessage ?? ''}
@@ -2228,6 +2155,12 @@ const AssistantMessageBody = React.memo(({
                     )}
                 </div>
                 <MessageFilesDisplay files={parts} onShowPopup={onShowPopup} />
+                <MarkdownImageGallery
+                    sessionId={sessionId}
+                    messageId={messageId}
+                    contents={finalizedAssistantMarkdownContents}
+                    onShowPopup={onShowPopup}
+                />
                 {shouldRenderStandaloneActionsAfterContent && (
                     <div className={INLINE_MESSAGE_ACTIONS_CLASS_NAME} data-message-actions="true">
                         <div className="flex items-center gap-1.5" data-message-action-group="true">

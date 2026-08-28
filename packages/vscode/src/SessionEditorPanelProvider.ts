@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { scheduleCachedStateRetries } from './webviewCachedStateRetry';
 import { handleBridgeMessage, type BridgeRequest, type BridgeResponse } from './bridge';
 import { getThemeKindName } from './theme';
 import type { OpenCodeManager, ConnectionStatus } from './opencode';
@@ -48,6 +49,19 @@ export class SessionEditorPanelProvider {
   private _clearActiveEditorFileTimer: ReturnType<typeof setTimeout> | undefined;
   private _lastActiveEditorFilePayload: ActiveEditorFilePayload | null = null;
   private readonly _webviewDevServerUrl: string | null;
+
+  /**
+   * See webviewCachedStateRetry.ts — a single postMessage can be dropped
+   * before the webview bridge is ready, leaving the loading screen stuck.
+   */
+  private _scheduleCachedStateRetries(panelId: string, entry: SessionPanelState): void {
+    scheduleCachedStateRetries({
+      target: entry.panel,
+      getCurrent: () => this._panels.get(panelId)?.panel,
+      isConnected: () => this._cachedStatus === 'connected',
+      send: () => this._sendCachedStateToPanel(entry),
+    });
+  }
 
   constructor(
     private readonly _context: vscode.ExtensionContext,
@@ -116,6 +130,9 @@ export class SessionEditorPanelProvider {
 
     void this.updateTheme(vscode.window.activeColorTheme.kind);
     this._sendCachedStateToPanel(state);
+    // The webview bridge may not be ready yet; keep re-sending so a dropped
+    // `connectionStatus` can never leave the webview stuck on its loading screen.
+    this._scheduleCachedStateRetries(panelId, state);
     void this._broadcastActiveEditorFile();
 
     panel.onDidDispose(() => {
@@ -186,6 +203,15 @@ export class SessionEditorPanelProvider {
 
     for (const entry of this._panels.values()) {
       this._sendCachedStateToPanel(entry);
+    }
+
+    // When we become connected, keep re-sending at staggered delays so the
+    // webview cannot miss the transition (postMessage is dropped if the
+    // webview bridge is not ready yet).
+    if (status === 'connected') {
+      for (const [panelId, entry] of this._panels.entries()) {
+        this._scheduleCachedStateRetries(panelId, entry);
+      }
     }
   }
 

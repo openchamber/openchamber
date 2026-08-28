@@ -31,7 +31,9 @@ import { languageByExtension, loadLanguageByExtension } from '@/lib/codemirror/l
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
 import { shikiHighlightExtension } from '@/lib/codemirror/shikiHighlight';
 import { getResolvedShikiTheme } from '@/lib/shiki/appThemeRegistry';
-import { File as PierreFile } from '@pierre/diffs/react';
+import { File as PierreFile, VirtualizerContext, WorkerPoolContext } from '@pierre/diffs/react';
+import { useWorkerPool } from '@/contexts/DiffWorkerProvider';
+import { useFileViewVirtualizer, type FileViewVirtualizer } from './useFileViewVirtualizer';
 import {
   Dialog,
   DialogContent,
@@ -43,13 +45,14 @@ import {
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useDeviceInfo } from '@/lib/device';
-import { cn, getModifierLabel, getRevealLabelKey, hasModifier } from '@/lib/utils';
+import { cn, getRevealLabelKey } from '@/lib/utils';
 import { getLanguageFromExtension, getImageMimeType, isBinaryFile, isDrawioFile, isImageFile, isPdfFile, isSvgFile, looksLikeBinaryText } from '@/lib/toolHelpers';
 import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/fileEditorAutosave';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { acquireRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, subscribeRuntimeUrlAuthToken } from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
-import { getOutsideFileGrant } from '@/lib/outsideFileGrants';
+import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
+import { getOutsideFileGrant, resolveOutsideFileReadOptions } from '@/lib/outsideFileGrants';
+import { subscribeToFileContentInvalidation } from '@/lib/fileContentInvalidation';
 import { DiagramEditor } from '@/components/diagram';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { EditorView } from '@codemirror/view';
@@ -59,7 +62,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useGitStatus } from '@/stores/useGitStore';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { buildCodeMirrorCommentWidgets, normalizeLineRange, useInlineCommentController } from '@/components/comments';
+import { buildCodeMirrorCommentWidgets, FilePreviewCommentMenu, normalizeLineRange, useInlineCommentController } from '@/components/comments';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
@@ -72,7 +75,8 @@ import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { isBrowserClientRuntime, openDesktopFileInApp, openDesktopPath } from '@/lib/desktop';
 import { useOpenInAppsStore } from '@/stores/useOpenInAppsStore';
-import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
+import { useKeybind, useKeybinds } from '@/hooks/useKeybind';
+import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { useI18n } from '@/lib/i18n';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { syncScheduledTaskLoops } from '@/lib/scheduledTasksApi';
@@ -309,6 +313,23 @@ const isFileMissingError = (error: unknown): boolean => {
 
 const MAX_VIEW_CHARS = 200_000;
 type FileLineEnding = '\n' | '\r\n';
+
+// Fast cache key for pierre's line/highlight caches: content-derived (not a
+// revision counter) so polling reloads and out-of-view changes can never hit
+// a stale entry. Mirrors the diff viewer's key scheme. Known residual: two
+// files identical in total length and in the first/last 200 characters can
+// collide and briefly show stale content; same profile as PierreDiffViewer.
+function makeContentCacheKey(contents: string): string {
+  const sample = contents.length > 400
+    ? `${contents.slice(0, 200)}${contents.slice(-200)}`
+    : contents;
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < sample.length; i += 1) {
+    hash ^= sample.charCodeAt(i);
+    hash = (hash + ((hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24))) >>> 0;
+  }
+  return `${contents.length}:${hash.toString(16)}`;
+}
 
 const detectFileLineEnding = (content: string): FileLineEnding => {
   let crlf = 0;
@@ -749,8 +770,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [wrapLines, setWrapLines] = React.useState(true);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
   const [isSearchOpen, setIsSearchOpen] = React.useState(false);
-  const [isFloatingToolbarOpen, setIsFloatingToolbarOpen] = React.useState(false);
-  const floatingToolbarRef = React.useRef<HTMLDivElement | null>(null);
   const toolbarDropdownOpenCountRef = React.useRef(0);
 
   const handleToolbarDropdownOpenChange = React.useCallback((open: boolean) => {
@@ -760,23 +779,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     );
   }, []);
 
-  const isClickInsidePortalledMenu = React.useCallback((target: EventTarget | null) => {
-    if (!(target instanceof Element)) return false;
-    return target.closest('[data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-item"]') !== null;
-  }, []);
-
-  React.useEffect(() => {
-    if (!isFloatingToolbarOpen) return;
-    const handler = (event: MouseEvent) => {
-      if (toolbarDropdownOpenCountRef.current > 0) return;
-      if (isClickInsidePortalledMenu(event.target)) return;
-      if (floatingToolbarRef.current && !floatingToolbarRef.current.contains(event.target as Node)) {
-        setIsFloatingToolbarOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [isClickInsidePortalledMenu, isFloatingToolbarOpen]);
   type TextViewMode = 'view' | 'edit';
   type PreviewViewMode = 'preview' | 'edit';
 
@@ -841,6 +843,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   }, [openPaths, selectedPath]);
   const selectedFile = React.useMemo(() => (effectiveSelectedPath ? toFileNode(effectiveSelectedPath) : null), [effectiveSelectedPath, toFileNode]);
   const selectedFilePath = selectedFile?.path ?? '';
+  const [, setOutsideFileGrantRevision] = React.useState(0);
 
   React.useEffect(() => {
     if (!root || !selectedPath) return;
@@ -861,6 +864,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }),
     [mode, selectedFileIsOutsideWorkspace, selectedOutsideFileGrant, root],
   );
+  const resolveFileReadOptions = React.useCallback(async (path: string) => {
+    const previousGrant = getOutsideFileGrant(path);
+    const readOptions = await resolveOutsideFileReadOptions(path, root, mode === 'editor-only');
+    if (readOptions.outsideFileGrant && readOptions.outsideFileGrant !== previousGrant) {
+      setOutsideFileGrantRevision((revision) => revision + 1);
+    }
+    return readOptions;
+  }, [mode, root]);
 
   // Editor tabs horizontal scroll fades
   const editorTabsScrollRef = React.useRef<HTMLDivElement>(null);
@@ -904,7 +915,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [fileLoading, setFileLoading] = React.useState(false);
   const [fileError, setFileError] = React.useState<string | null>(null);
   const [desktopImageSrc, setDesktopImageSrc] = React.useState<string>('');
-  const desktopImageBlobUrlRef = React.useRef<string>('');
 
   const [loadedFilePath, setLoadedFilePath] = React.useState<string | null>(null);
 
@@ -921,6 +931,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const lastLoadedFileStatRef = React.useRef<FileStatSnapshot | null>(null);
   const activeFileLoadIdRef = React.useRef(0);
   const loadingFilePathRef = React.useRef<string | null>(null);
+  const [fileContentRevision, setFileContentRevision] = React.useState(0);
   const [autoSaveStatus, setAutoSaveStatus] = React.useState<'idle' | 'saved'>('idle');
   const [diagramSaved, setDiagramSaved] = React.useState(false);
   const [contentDetectedBinary, setContentDetectedBinary] = React.useState(false);
@@ -929,7 +940,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false);
   const pendingSelectFileRef = React.useRef<FileNode | null>(null);
-  const pendingTabRef = React.useRef<import('@/stores/useUIStore').MainTab | null>(null);
   const pendingClosePathRef = React.useRef<string | null>(null);
   const skipDirtyOnceRef = React.useRef(false);
   const copiedContentTimeoutRef = React.useRef<number | null>(null);
@@ -1019,16 +1029,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [isDragging, setIsDragging] = React.useState(false);
 
   // Session/config for sending comments
-  const setMainTabGuard = useUIStore((state) => state.setMainTabGuard);
   const pendingFileNavigation = useUIStore((state) => state.pendingFileNavigation);
   const setPendingFileNavigation = useUIStore((state) => state.setPendingFileNavigation);
   const pendingFileFocusPath = useUIStore((state) => state.pendingFileFocusPath);
   const setPendingFileFocusPath = useUIStore((state) => state.setPendingFileFocusPath);
-  const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const fileEditorKeymap = useUIStore((state) => state.fileEditorKeymap);
   const settingsDefaultFileViewerPreview = useConfigStore((state) => state.settingsDefaultFileViewerPreview);
   const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
-  const settingsExpandedEditorToolbar = useUIStore((state) => state.expandedEditorToolbar);
 
   // Global mouseup to end drag selection
   React.useEffect(() => {
@@ -1061,6 +1068,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     return lines.slice(startLine - 1, endLine).join('\n');
   }, []);
 
+  const markdownPreviewRef = React.useRef<HTMLDivElement | null>(null);
+
   const fileCommentController = useInlineCommentController<SelectedLineRange>({
     source: 'file',
     fileLabel: selectedFile?.path ?? null,
@@ -1086,10 +1095,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   React.useEffect(() => {
     setLineSelection(null);
     reset();
-    setMainTabGuard(null);
     setDraftContent('');
     setIsSaving(false);
-  }, [selectedFile?.path, reset, setMainTabGuard]);
+  }, [selectedFile?.path, reset]);
 
   React.useEffect(() => {
     setCommentSelection(lineSelection);
@@ -1545,38 +1553,35 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     };
   }, [currentDirectory, debouncedSearchQuery, searchFiles, showHidden, showGitignored]);
 
-  const readFile = React.useCallback(async (path: string, options?: { allowOutsideWorkspace?: boolean; outsideFileGrant?: string; optional?: boolean }): Promise<string> => {
+  const readFile = React.useCallback(async (path: string): Promise<string> => {
+    const options = await resolveFileReadOptions(path);
     if (files.readFile) {
-      const result = await files.readFile(path, { ...(options ?? {}), directory: root || undefined });
+      const result = await files.readFile(path, { ...options, directory: root || undefined });
       return result.content ?? '';
     }
 
     const params = new URLSearchParams({ path });
-    if (options?.allowOutsideWorkspace) {
+    if (options.allowOutsideWorkspace) {
       params.set('allowOutsideWorkspace', 'true');
     }
-    if (options?.outsideFileGrant) {
+    if (options.outsideFileGrant) {
       params.set('outsideFileGrant', options.outsideFileGrant);
-    }
-    if (options?.optional) {
-      params.set('optional', 'true');
     }
     if (root) {
       params.set('directory', root);
     }
-    const response = await runtimeFetch(`/api/fs/read?${params.toString()}`, {
-      cache: options?.optional ? 'no-store' : 'default',
-    });
+    const response = await runtimeFetch(`/api/fs/read?${params.toString()}`);
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }));
       throw new Error((error as { error?: string }).error || t('filesView.error.readFileFailed'));
     }
     return response.text();
-  }, [files, root, t]);
+  }, [files, resolveFileReadOptions, root, t]);
 
-  const readFileStat = React.useCallback(async (path: string, options?: { allowOutsideWorkspace?: boolean; outsideFileGrant?: string }): Promise<FileStatSnapshot | null> => {
+  const readFileStat = React.useCallback(async (path: string): Promise<FileStatSnapshot | null> => {
     if (files.statFile) {
-      const result = await files.statFile(path, { ...(options ?? {}), directory: root || undefined });
+      const options = await resolveFileReadOptions(path);
+      const result = await files.statFile(path, { ...options, directory: root || undefined });
       return {
         path: result.path,
         size: result.size,
@@ -1584,7 +1589,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       };
     }
     return null;
-  }, [files, root]);
+  }, [files, resolveFileReadOptions, root]);
 
   React.useEffect(() => {
     if (!root || !files.statFile || openPaths.length === 0) {
@@ -1596,7 +1601,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     void Promise.all(paths.map(async (path) => {
       try {
-        const stat = await files.statFile?.(path, { directory: root || undefined });
+        const options = await resolveFileReadOptions(path);
+        const stat = await files.statFile?.(path, { ...options, directory: root || undefined });
         if (!cancelled && stat && !stat.isFile) {
           removeOpenPathsByPrefix(root, path);
         }
@@ -1610,7 +1616,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     return () => {
       cancelled = true;
     };
-  }, [files, openPaths, removeOpenPathsByPrefix, root]);
+  }, [files, openPaths, removeOpenPathsByPrefix, resolveFileReadOptions, root]);
 
   const displayedContent = React.useMemo(() =>
     fileContent.length > MAX_VIEW_CHARS
@@ -1702,32 +1708,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   }, [contentDetectedBinary, draftContent, fileContent, fileLoading, files, isDirty, loadedFileLineEnding, loadedFilePath, readFileStat, root, selectedFile, t]);
 
   React.useEffect(() => {
-    if (!isDirty) {
-      setMainTabGuard(null);
-      return;
-    }
-
-    const guard = (_nextTab: import('@/stores/useUIStore').MainTab) => {
-      if (skipDirtyOnceRef.current) {
-        skipDirtyOnceRef.current = false;
-        return true;
-      }
-      setConfirmDiscardOpen(true);
-      pendingTabRef.current = _nextTab;
-      return false;
-    };
-
-    setMainTabGuard(guard);
-
-    return () => {
-      const currentGuard = useUIStore.getState().mainTabGuard;
-      if (currentGuard === guard) {
-        setMainTabGuard(null);
-      }
-    };
-  }, [isDirty, setMainTabGuard]);
-
-  React.useEffect(() => {
     if (autoSaveEnabled) {
       return;
     }
@@ -1779,35 +1759,28 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     setAutoSaveStatus('idle');
   }, [selectedFile?.path]);
 
-  React.useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!hasModifier(e)) {
-        return;
-      }
+  useKeybinds({
+    save_file: (event) => {
+      if (!(event.target instanceof Node) || !editorWrapperRef.current?.contains(event.target)) return false;
 
-      if (e.key.toLowerCase() === 's') {
-        e.preventDefault();
-        // Cancel pending auto-save; user wants immediate save
-        if (autoSaveTimerRef.current) {
-          clearTimeout(autoSaveTimerRef.current);
-          autoSaveTimerRef.current = null;
-        }
-        if (!isSaving) {
-          void saveDraft().then((saved) => {
-            if (!saved) return;
-            setAutoSaveStatus('saved');
-            setTimeout(() => setAutoSaveStatus('idle'), 2000);
-          });
-        }
-      } else if (e.key.toLowerCase() === 'f') {
-        e.preventDefault();
-        setIsSearchOpen(true);
+      // Cancel pending auto-save because the explicit save should run immediately.
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
       }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSaving, saveDraft]);
+      if (!isSaving) {
+        void saveDraft().then((saved) => {
+          if (!saved) return;
+          setAutoSaveStatus('saved');
+          setTimeout(() => setAutoSaveStatus('idle'), 2000);
+        });
+      }
+    },
+    find_in_file: (event) => {
+      if (!(event.target instanceof Node) || !editorWrapperRef.current?.contains(event.target)) return false;
+      setIsSearchOpen(true);
+    },
+  });
 
   const loadSelectedFile = React.useCallback(async (node: FileNode) => {
     const loadId = activeFileLoadIdRef.current + 1;
@@ -1823,6 +1796,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     setDesktopImageSrc('');
     setLoadedFilePath(null);
     setContentDetectedBinary(false);
+    setFileLoading(true);
+
+    // Prime asset URLs; read and stat resolve again immediately before their calls.
+    await resolveFileReadOptions(node.path);
+    if (!isCurrentLoad()) {
+      return;
+    }
 
     const selectedIsImage = isImageFile(node.path);
     const isSvg = isSvgFile(node.path);
@@ -1837,7 +1817,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     if (runtime.isDesktop && selectedIsImage && !isSvg) {
       setFileContent('');
       setDraftContent('');
-      setFileLoading(true);
       return;
     }
 
@@ -1868,15 +1847,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       return;
     }
 
-    setFileLoading(true);
-
-    const outsideFileGrant = getOutsideFileGrant(node.path);
-    const readOptions = {
-      allowOutsideWorkspace: mode === 'editor-only' && Boolean(root) && !isPathWithinRoot(node.path, root),
-      outsideFileGrant,
-    };
-
-    await readFile(node.path, readOptions)
+    await readFile(node.path)
       .then((content) => {
         if (!isCurrentLoad()) {
           return;
@@ -1897,7 +1868,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           ? `${editorContent.slice(0, MAX_VIEW_CHARS)}\n\n… truncated …`
           : editorContent);
         setLoadedFilePath(node.path);
-        void readFileStat(node.path, readOptions)
+        void readFileStat(node.path)
           .then((stat) => {
             if (stat && isCurrentLoad()) {
               lastLoadedFileStatRef.current = stat;
@@ -1962,7 +1933,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           setFileLoading(false);
         }
       });
-  }, [expandPaths, isMobile, loadDirectory, mode, readFile, readFileStat, removeOpenPathsByPrefix, root, runtime.isDesktop, searchQuery, setSelectedPath, t]);
+  }, [expandPaths, isMobile, loadDirectory, readFile, readFileStat, removeOpenPathsByPrefix, resolveFileReadOptions, root, runtime.isDesktop, searchQuery, setSelectedPath, t]);
 
   const ensurePathVisible = React.useCallback(async (targetPath: string, includeTarget: boolean) => {
     if (!root) {
@@ -2047,12 +2018,32 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         loadingFilePathRef.current = null;
       }
     });
-  }, [loadSelectedFile, loadedFilePath, selectedFile]);
+  }, [fileContentRevision, loadSelectedFile, loadedFilePath, selectedFile]);
 
   // Sync isDirty to a ref so the polling interval can read the latest value
   // without isDirty in its dependency array (avoids interval restart on every edit/save).
   const isDirtyRef = React.useRef(isDirty);
   isDirtyRef.current = isDirty;
+
+  React.useEffect(() => subscribeToFileContentInvalidation(({ runtimeKey, paths }) => {
+    const selectedPath = selectedFile?.path;
+    if (
+      runtimeKey !== getRuntimeKey()
+      || !selectedPath
+      || isDirtyRef.current
+      || !paths.includes(normalizePath(selectedPath))
+    ) {
+      return;
+    }
+
+    activeFileLoadIdRef.current += 1;
+    loadingFilePathRef.current = null;
+    lastLoadedFileStatRef.current = null;
+    setDesktopImageSrc('');
+    setFileError(null);
+    setLoadedFilePath(null);
+    setFileContentRevision((revision) => revision + 1);
+  }), [selectedFile?.path]);
 
   // Poll open file for external changes.
   // When a change is detected, reset loadedFilePath so the effect above
@@ -2068,7 +2059,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         return;
       }
 
-      void readFileStat(selectedFile.path, selectedFileReadOptions)
+      void readFileStat(selectedFile.path)
         .then((latestStat) => {
           if (cancelled || !latestStat) {
             return;
@@ -2104,15 +2095,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [loadedFilePath, readFileStat, selectedFile?.path, selectedFileReadOptions]);
+  }, [loadedFilePath, readFileStat, selectedFile?.path]);
 
   const discardAndContinue = React.useCallback(() => {
     const nextFile = pendingSelectFileRef.current;
-    const nextTab = pendingTabRef.current;
     const closePath = pendingClosePathRef.current;
 
     pendingSelectFileRef.current = null;
-    pendingTabRef.current = null;
     pendingClosePathRef.current = null;
 
     // Allow one guarded navigation (tab/file) without re-opening dialog.
@@ -2151,15 +2140,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       return;
     }
 
-    if (nextTab) {
-      setMainTabGuard(null);
-      useUIStore.getState().setActiveMainTab(nextTab);
-    }
-  }, [displayedContent, handleSelectFile, isMobile, removeOpenPath, root, selectedFile?.path, setMainTabGuard, setSelectedPath]);
+  }, [displayedContent, handleSelectFile, isMobile, removeOpenPath, root, selectedFile?.path, setSelectedPath]);
 
   const saveAndContinue = React.useCallback(async () => {
     const nextFile = pendingSelectFileRef.current;
-    const nextTab = pendingTabRef.current;
     const closePath = pendingClosePathRef.current;
 
     const saved = await saveDraft();
@@ -2169,7 +2153,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
 
     pendingSelectFileRef.current = null;
-    pendingTabRef.current = null;
     pendingClosePathRef.current = null;
 
     // We'll proceed after saving; suppress guard reopening.
@@ -2205,11 +2188,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       return;
     }
 
-    if (nextTab) {
-      setMainTabGuard(null);
-      useUIStore.getState().setActiveMainTab(nextTab);
-    }
-  }, [handleSelectFile, isMobile, removeOpenPath, root, saveDraft, selectedFile?.path, setMainTabGuard, setSelectedPath]);
+  }, [handleSelectFile, isMobile, removeOpenPath, root, saveDraft, selectedFile?.path, setSelectedPath]);
 
   const handleCloseFile = React.useCallback((path: string) => {
     const isActive = selectedFile?.path === path;
@@ -2574,12 +2553,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     diagramXmlRef.current = xml;
     diagramSavedXmlRef.current = xml;
     setDraftContent(xml);
-    const stat = await readFileStat(path, selectedFileReadOptions).catch(() => null);
+    const stat = await readFileStat(path).catch(() => null);
     if (stat) {
       lastLoadedFileStatRef.current = stat;
     }
     return true;
-  }, [files, readFileStat, selectedFileReadOptions, t]);
+  }, [files, readFileStat, t]);
 
   React.useEffect(() => {
     return () => {
@@ -2920,42 +2899,21 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     };
   }, [isMobile, nudgeEditorSelectionAboveKeyboard]);
 
-  React.useEffect(() => {
+  useKeybind('open_go_to_line', (event) => {
     if (!canEdit || textViewMode !== 'edit' || isMobile) {
-      return;
+      return false;
     }
 
-    const goToLineCombo = getEffectiveShortcutCombo('open_go_to_line', shortcutOverrides);
+    const target = event.target as Element | null;
+    if (target?.closest('[role="dialog"]')) return false;
+    if (!(target instanceof Node) || !editorWrapperRef.current?.contains(target)) return false;
 
-    const handleKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as Element | null;
-      if (target?.closest('[role="dialog"]')) {
-        return;
-      }
+    const isEditorTarget = Boolean(target?.closest('.cm-editor'));
+    const isTypingTarget = Boolean(target?.closest('input, textarea, [contenteditable="true"], [role="textbox"]'));
+    if (isTypingTarget && !isEditorTarget) return false;
 
-      const isEditorTarget = Boolean(target?.closest('.cm-editor'));
-      const isTypingTarget = Boolean(
-        target?.closest('input, textarea, [contenteditable="true"], [role="textbox"]')
-      );
-      if (isTypingTarget && !isEditorTarget) {
-        return;
-      }
-
-      const activeElement = document.activeElement as Element | null;
-      const editorHasFocus = Boolean(activeElement?.closest('.cm-editor'));
-      if (!editorHasFocus) {
-        return;
-      }
-
-      if (eventMatchesShortcut(event, goToLineCombo)) {
-        event.preventDefault();
-        setIsGoToLineOpen(true);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [canEdit, isMobile, shortcutOverrides, textViewMode]);
+    setIsGoToLineOpen(true);
+  });
 
   const editorFontSize = useUIStore((state) => state.editorFontSize);
 
@@ -3006,46 +2964,32 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     [lightTheme.metadata.id, darkTheme.metadata.id],
   );
 
-  const imageAssetAuthKey = selectedFile?.path && isSelectedImage && !runtime.isDesktop && !isSelectedSvg
-    ? `${selectedFile.path}|${selectedFileReadOptions.allowOutsideWorkspace ? 'outside' : 'workspace'}|${selectedFileReadOptions.outsideFileGrant ?? ''}`
-    : '';
-
-  const pdfAssetAuthKey = selectedFile?.path && isSelectedPdf
-    ? `${selectedFile.path}|${selectedFileReadOptions.allowOutsideWorkspace ? 'outside' : 'workspace'}|${selectedFileReadOptions.outsideFileGrant ?? ''}`
+  const pdfAssetAuthKey = selectedFile?.path
+    && isSelectedPdf
+    && (!selectedFileReadOptions.allowOutsideWorkspace || selectedFileReadOptions.outsideFileGrant)
+    ? `${selectedFile.path}|${selectedFileReadOptions.allowOutsideWorkspace ? 'outside' : 'workspace'}|${selectedFileReadOptions.outsideFileGrant ?? ''}|${fileContentRevision}`
     : '';
 
   const htmlAssetAuthKey = selectedFile?.path && isHtml && htmlViewMode === 'preview' && !runtime.isVSCode
-    ? selectedFile.path
+    ? `${selectedFile.path}|${fileContentRevision}`
     : '';
 
   const assetAuthErrorFallback = t('filesView.error.readFileFailed');
-  const { readyKey: imageAssetAuthReadyKey, nonce: imagePreviewNonce } =
-    useAssetAuthRefresh(imageAssetAuthKey, setFileError, assetAuthErrorFallback);
   const { readyKey: htmlAssetAuthReadyKey, nonce: htmlPreviewNonce } =
     useAssetAuthRefresh(htmlAssetAuthKey, setFileError, assetAuthErrorFallback);
   const { readyKey: pdfAssetAuthReadyKey, nonce: pdfPreviewNonce } =
     useAssetAuthRefresh(pdfAssetAuthKey, setFileError, assetAuthErrorFallback);
 
-  const isImageAssetAuthLoading = Boolean(imageAssetAuthKey && imageAssetAuthReadyKey !== imageAssetAuthKey);
   const isHtmlAssetAuthLoading = Boolean(htmlAssetAuthKey && htmlAssetAuthReadyKey !== htmlAssetAuthKey);
   const isPdfAssetAuthLoading = Boolean(pdfAssetAuthKey && pdfAssetAuthReadyKey !== pdfAssetAuthKey);
 
   const imageSrc = selectedFile?.path && isSelectedImage
-    ? (runtime.isDesktop
-      ? (isSelectedSvg
-        ? `data:${getImageMimeType(selectedFile.path)};utf8,${encodeURIComponent(fileContent)}`
-        : desktopImageSrc)
-      : (isSelectedSvg
-        ? `data:${getImageMimeType(selectedFile.path)};utf8,${encodeURIComponent(fileContent)}`
-        : imageAssetAuthReadyKey === imageAssetAuthKey ? getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', {
-          path: selectedFile.path,
-          allowOutsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace ? 'true' : undefined,
-          outsideFileGrant: selectedFileReadOptions.outsideFileGrant,
-          directory: root || undefined,
-        }) : ''))
+    ? (isSelectedSvg
+      ? `data:${getImageMimeType(selectedFile.path)};utf8,${encodeURIComponent(fileContent)}`
+      : desktopImageSrc)
     : '';
 
-  const pdfSrc = selectedFile?.path && isSelectedPdf && pdfAssetAuthReadyKey === pdfAssetAuthKey
+  const pdfSrc = selectedFile?.path && isSelectedPdf && pdfAssetAuthKey && pdfAssetAuthReadyKey === pdfAssetAuthKey
     ? getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', {
       path: selectedFile.path,
       allowOutsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace ? 'true' : undefined,
@@ -3067,32 +3011,29 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   React.useEffect(() => {
     let cancelled = false;
+    let objectUrl = '';
 
     const resolveDesktopImage = async () => {
-      if (!runtime.isDesktop || !selectedFile?.path || !isSelectedImage || isSelectedSvg) {
-        if (desktopImageBlobUrlRef.current) {
-          URL.revokeObjectURL(desktopImageBlobUrlRef.current);
-          desktopImageBlobUrlRef.current = '';
-        }
+      if (!selectedFile?.path || !isSelectedImage || isSelectedSvg) {
         setDesktopImageSrc('');
         return;
       }
 
       setFileError(null);
 
-      if (desktopImageBlobUrlRef.current) {
-        URL.revokeObjectURL(desktopImageBlobUrlRef.current);
-        desktopImageBlobUrlRef.current = '';
+      const readOptions = await resolveFileReadOptions(selectedFile.path);
+      if (cancelled) {
+        return;
       }
 
       const srcPromise = files.readFileBinary
-        ? files.readFileBinary(selectedFile.path, selectedFileReadOptions).then((result) => result.dataUrl)
+        ? files.readFileBinary(selectedFile.path, readOptions).then((result) => result.dataUrl)
         : (async () => {
           const response = await runtimeFetch('/api/fs/raw', {
             query: {
               path: selectedFile.path,
-              allowOutsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace ? 'true' : undefined,
-              outsideFileGrant: selectedFileReadOptions.outsideFileGrant,
+              allowOutsideWorkspace: readOptions.allowOutsideWorkspace ? 'true' : undefined,
+              outsideFileGrant: readOptions.outsideFileGrant,
               directory: root || undefined,
             },
           });
@@ -3100,13 +3041,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             throw new Error(t('filesView.error.readFileFailed'));
           }
           const blob = await response.blob();
-          const url = URL.createObjectURL(blob);
+          objectUrl = URL.createObjectURL(blob);
           if (cancelled) {
-            URL.revokeObjectURL(url);
+            URL.revokeObjectURL(objectUrl);
+            objectUrl = '';
             return '';
           }
-          desktopImageBlobUrlRef.current = url;
-          return url;
+          return objectUrl;
         })();
 
       await srcPromise
@@ -3117,10 +3058,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           }
         })
         .catch((error) => {
-          if (desktopImageBlobUrlRef.current) {
-            URL.revokeObjectURL(desktopImageBlobUrlRef.current);
-            desktopImageBlobUrlRef.current = '';
-          }
           if (!cancelled) {
             setDesktopImageSrc('');
             setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
@@ -3138,17 +3075,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     return () => {
       cancelled = true;
-    };
-  }, [files, isSelectedImage, isSelectedSvg, root, runtime.isDesktop, selectedFile?.path, selectedFileReadOptions, t]);
-
-  React.useEffect(() => {
-    return () => {
-      if (desktopImageBlobUrlRef.current) {
-        URL.revokeObjectURL(desktopImageBlobUrlRef.current);
-        desktopImageBlobUrlRef.current = '';
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
       }
     };
-  }, []);
+  }, [fileContentRevision, files, isSelectedImage, isSelectedSvg, resolveFileReadOptions, root, selectedFile?.path, selectedFileReadOptions, t]);
 
   const handleCloseDialog = React.useCallback(() => setActiveDialog(null), []);
 
@@ -3176,27 +3107,57 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     });
   }, [cancel, commentText, deleteDraft, editingDraftId, filesFileDrafts, handleSaveComment, isDragging, lineSelection, selectedFile?.path, setCommentText, startEdit]);
 
-  const renderShikiFileView = React.useCallback((file: FileNode, content: string) => {
+  const mainViewVirtualizer = useFileViewVirtualizer();
+  const fullscreenViewVirtualizer = useFileViewVirtualizer();
+  const shikiWorkerPool = useWorkerPool('unified');
+  // Files above the editable size cap are rendered as a read-only preview; give
+  // them the full file content plus pierre's viewport virtualization and the
+  // shared Shiki worker pool so large files stay responsive.
+  const isLargeFile = fileContent.length > MAX_VIEW_CHARS;
+  const largeFileCacheKey = React.useMemo(
+    () => (isLargeFile ? makeContentCacheKey(fileContent) : undefined),
+    [fileContent, isLargeFile],
+  );
+
+  const renderShikiFileView = React.useCallback((file: FileNode, content: string, virtualizer: FileViewVirtualizer) => {
+    const fileContents = {
+      name: file.name,
+      contents: content,
+      lang: getLanguageFromExtension(file.path) || undefined,
+    };
+    const pierreFile = (key: string) => (
+      <PierreFile
+        key={key}
+        file={isLargeFile && largeFileCacheKey ? { ...fileContents, cacheKey: `${file.path}:${largeFileCacheKey}` } : fileContents}
+        options={{
+          disableFileHeader: true,
+          overflow: wrapLines ? 'wrap' : 'scroll',
+          theme: pierreTheme,
+          themeType: currentTheme.metadata.variant === 'dark' ? 'dark' : 'light',
+        }}
+        className={isLargeFile ? 'block w-full' : 'block h-full w-full'}
+        style={isLargeFile ? undefined : { height: '100%' }}
+      />
+    );
+
+    if (!isLargeFile) {
+      return <div className="h-full">{pierreFile(file.path)}</div>;
+    }
+
+    // Large files render through pierre's Virtualizer (viewport-only DOM) and
+    // the shared Shiki worker pool. The pool is created lazily: until it is
+    // ready the key carries a 'pending' suffix so the file remounts with the
+    // worker-backed highlighter instead of silently staying on the main thread.
     return (
       <div className="h-full">
-        <PierreFile
-          file={{
-            name: file.name,
-            contents: content,
-            lang: getLanguageFromExtension(file.path) || undefined,
-          }}
-          options={{
-            disableFileHeader: true,
-            overflow: wrapLines ? 'wrap' : 'scroll',
-            theme: pierreTheme,
-            themeType: currentTheme.metadata.variant === 'dark' ? 'dark' : 'light',
-          }}
-          className="block h-full w-full"
-          style={{ height: '100%' }}
-        />
+        <VirtualizerContext.Provider value={virtualizer.virtualizer}>
+          <WorkerPoolContext.Provider value={shikiWorkerPool}>
+            {pierreFile(`${file.path}:${shikiWorkerPool ? 'pool' : 'pending'}`)}
+          </WorkerPoolContext.Provider>
+        </VirtualizerContext.Provider>
       </div>
     );
-  }, [currentTheme.metadata.variant, pierreTheme, wrapLines]);
+  }, [currentTheme.metadata.variant, isLargeFile, largeFileCacheKey, pierreTheme, shikiWorkerPool, wrapLines]);
 
   const renderFloatingFileControls = ({
     exitFullscreenOnly = false,
@@ -3207,6 +3168,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
 
     const docked = layout === 'docked';
+    const saveShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('save_file'));
     const wrapperCls = docked
       ? 'pointer-events-auto flex flex-wrap items-center gap-1'
       : 'pointer-events-auto flex items-center gap-1 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-1 shadow-sm';
@@ -3236,14 +3198,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 <Icon name="check" className="size-3.5" />
                 {t('filesView.editor.saved')}
               </span>
-            ) : isDirty ? withTooltip(t(autoSaveEnabled ? 'filesView.editor.saveNowTitle' : 'filesView.editor.saveNowManualTitle', { shortcut: `${getModifierLabel()}+S` }),
+            ) : isDirty ? withTooltip(t(autoSaveEnabled ? 'filesView.editor.saveNowTitle' : 'filesView.editor.saveNowManualTitle', { shortcut: saveShortcut }),
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => void saveDraft()}
                 className="h-6 gap-1 px-1 text-muted-foreground opacity-80 hover:bg-transparent hover:opacity-100 focus-visible:bg-transparent active:bg-transparent"
-                title={t(autoSaveEnabled ? 'filesView.editor.saveNowTitle' : 'filesView.editor.saveNowManualTitle', { shortcut: `${getModifierLabel()}+S` })}
-                aria-label={t('filesView.editor.saveAria', { shortcut: `${getModifierLabel()}+S` })}
+                title={t(autoSaveEnabled ? 'filesView.editor.saveNowTitle' : 'filesView.editor.saveNowManualTitle', { shortcut: saveShortcut })}
+                aria-label={t('filesView.editor.saveAria', { shortcut: saveShortcut })}
               >
                 <Icon name="save-3" className="size-4" />
               </Button>
@@ -3781,9 +3743,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         </div>
         ) : null}
 
-        {/* Row 2: Docked editor toolbar (expanded). Desktop opt-in; ALWAYS on
-            for mobile — floating hover controls don't work with touch. */}
-        {(settingsExpandedEditorToolbar || isMobile) && selectedFile ? (
+        {/* Row 2: Docked editor toolbar. */}
+        {selectedFile ? (
           <div className="flex min-w-0 items-center gap-3 border-t border-border/40 bg-[var(--surface-subtle)] px-3 py-1">
             {/* Mobile hosts already show the file name in their own header;
                 a truncated duplicate here just eats toolbar width. */}
@@ -3804,73 +3765,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       </div>
 
       <div className="flex-1 min-h-0 min-w-0 relative">
-        {selectedFile && !isSearchOpen && !(settingsExpandedEditorToolbar || isMobile) && (
-          <div
-            ref={floatingToolbarRef}
-            className="absolute right-3 top-3 z-30"
-            onMouseLeave={() => {
-              if (toolbarDropdownOpenCountRef.current > 0) return;
-              setIsFloatingToolbarOpen(false);
-            }}
-          >
-            {isFloatingToolbarOpen ? (
-              renderFloatingFileControls()
-            ) : (
-              <div className="flex items-center gap-1">
-                {isMarkdown ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="inline-flex">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => saveMdViewMode(getMdViewMode() === 'preview' ? 'edit' : 'preview')}
-                          className={cn(
-                            'size-8 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-0 shadow-sm transition-colors',
-                            getMdViewMode() === 'preview'
-                              ? 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)] hover:bg-[var(--interactive-selection)]'
-                              : 'text-muted-foreground hover:text-foreground'
-                          )}
-                          aria-label={t(getMdViewMode() === 'preview' ? 'filesView.editor.switchToEditMode' : 'filesView.editor.switchToPreviewMode')}
-                          title={t(getMdViewMode() === 'preview' ? 'filesView.editor.switchToEditMode' : 'filesView.editor.switchToPreviewMode')}
-                        >
-                          <Icon name={getMdViewMode() === 'preview' ? 'eye' : 'eye-off'} className="size-4" />
-                        </Button>
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={6}>
-                      {t(getMdViewMode() === 'preview' ? 'filesView.editor.switchToEditMode' : 'filesView.editor.switchToPreviewMode')}
-                    </TooltipContent>
-                  </Tooltip>
-                ) : null}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span
-                      className="inline-flex"
-                      onMouseEnter={() => setIsFloatingToolbarOpen(true)}
-                    >
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setIsFloatingToolbarOpen(true)}
-                        className="size-8 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-0 text-muted-foreground shadow-sm hover:text-foreground"
-                        aria-label={t('filesView.editor.showControlsAria')}
-                        title={t('filesView.editor.controlsTitle')}
-                      >
-                        <Icon name="more-2-fill" className="size-4" />
-                      </Button>
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={6}>{t('filesView.editor.controlsTitle')}</TooltipContent>
-                </Tooltip>
-              </div>
-            )}
-          </div>
-        )}
-        <ScrollableOverlay outerClassName="h-full min-w-0" className="h-full min-w-0">
+        <ScrollableOverlay ref={mainViewVirtualizer.setScroller} outerClassName="h-full min-w-0" className={cn('h-full min-w-0', isLargeFile && '[overflow-anchor:none]')}>
           {!selectedFile ? (
             <div className="p-3 typography-ui text-muted-foreground">{t('filesView.editor.pickFileFromTree')}</div>
-          ) : (fileLoading || isImageAssetAuthLoading || isPdfAssetAuthLoading) ? (
+          ) : (fileLoading || isPdfAssetAuthLoading) ? (
             suppressFileLoadingIndicator
               ? <div className="p-3" />
               : (
@@ -3884,7 +3782,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           ) : isSelectedImage ? (
             <div className="flex h-full items-center justify-center p-3">
               <img
-                key={imagePreviewNonce}
+                key={selectedFile.path}
                 src={imageSrc}
                 alt={selectedFile?.name ?? t('filesView.editor.imageAltFallback')}
                 className="max-w-full max-h-[70vh] object-contain rounded-md border border-border/30 bg-primary/10"
@@ -3944,7 +3842,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               </div>
             </ErrorBoundary>
           ) : selectedFile && isMarkdown && getMdViewMode() === 'preview' ? (
-            <div className="h-full overflow-auto p-3">
+            <div className="oc-file-preview h-full overflow-auto p-3" ref={markdownPreviewRef}>
+              <FilePreviewCommentMenu
+                containerRef={markdownPreviewRef}
+                filePath={selectedFile.path}
+                fileContent={fileContent}
+              />
               {fileContent.length > 500 * 1024 && (
                 <div className="mb-3 rounded-md border border-status-warning/20 bg-status-warning/10 px-3 py-2 text-sm text-status-warning">
                   {t('filesView.warning.largeFilePreviewLimited', { sizeKb: Math.round(fileContent.length / 1024) })}
@@ -3993,7 +3896,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             </div>
             )
           ) : selectedFile && canUseShikiFileView && textViewMode === 'view' ? (
-            renderShikiFileView(selectedFile, draftContent)
+            renderShikiFileView(selectedFile, isLargeFile ? fileContent : draftContent, mainViewVirtualizer)
           ) : (
             <div
               className={cn('relative h-full', shouldMaskEditorForPendingNavigation && 'overflow-hidden')}
@@ -4263,8 +4166,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         <div className="absolute right-4 top-4 z-30">
           {renderFloatingFileControls({ exitFullscreenOnly: true })}
         </div>
-        <ScrollableOverlay outerClassName="h-full min-w-0" className="h-full min-w-0">
-          {(fileLoading || isImageAssetAuthLoading || isPdfAssetAuthLoading) ? (
+        <ScrollableOverlay ref={fullscreenViewVirtualizer.setScroller} outerClassName="h-full min-w-0" className={cn('h-full min-w-0', isLargeFile && '[overflow-anchor:none]')}>
+          {(fileLoading || isPdfAssetAuthLoading) ? (
             suppressFileLoadingIndicator
               ? <div className="p-4" />
               : (
@@ -4278,7 +4181,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           ) : isSelectedImage ? (
             <div className="flex h-full items-center justify-center p-4">
               <img
-                key={imagePreviewNonce}
+                key={selectedFile.path}
                 src={imageSrc}
                 alt={selectedFile.name}
                 className="max-w-full max-h-full object-contain rounded-md border border-border/30 bg-primary/10"
@@ -4310,7 +4213,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               ) : null}
             </div>
           ) : isMarkdown && getMdViewMode() === 'preview' ? (
-            <div className="h-full overflow-auto p-4">
+            <div className="oc-file-preview h-full overflow-auto p-4" ref={markdownPreviewRef}>
+              {selectedFile ? (
+                <FilePreviewCommentMenu
+                  containerRef={markdownPreviewRef}
+                  filePath={selectedFile.path}
+                  fileContent={fileContent}
+                />
+              ) : null}
               {fileContent.length > 500 * 1024 && (
                   <div className="mb-3 rounded-md border border-status-warning/20 bg-status-warning/10 px-3 py-2 text-sm text-status-warning">
                     {t('filesView.warning.largeFilePreviewLimited', { sizeKb: Math.round(fileContent.length / 1024) })}
@@ -4335,7 +4245,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               </ErrorBoundary>
             </div>
           ) : canUseShikiFileView && textViewMode === 'view' ? (
-            renderShikiFileView(selectedFile, draftContent)
+            renderShikiFileView(selectedFile, isLargeFile ? fileContent : draftContent, fullscreenViewVirtualizer)
           ) : (
             <div className={cn('relative h-full', shouldMaskEditorForPendingNavigation && 'overflow-hidden')}>
               <div className={cn('h-full', shouldMaskEditorForPendingNavigation && 'invisible')}>

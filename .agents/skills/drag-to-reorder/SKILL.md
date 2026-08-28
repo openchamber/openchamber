@@ -79,7 +79,7 @@ const onDragEnd = (e: DragEndEvent) => {
 
 IDs must be **stable per item** (derive from the item's identity, e.g. `type:name`), never the array index — index ids break tracking after the first move.
 
-## Minimal working pattern (wrapping, variable width, desktop + touch)
+## Minimal Wiring
 
 ```tsx
 import { DndContext, MouseSensor, TouchSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
@@ -97,41 +97,21 @@ const Item: React.FC<{ id: string; label: string; onClick: () => void }> = ({ id
   );
 };
 
-const Row: React.FC<{ items: Item[]; onReorder: (next: Item[]) => void }> = ({ items, onReorder }) => {
-  const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
-  );
-  const onDragEnd = (e: DragEndEvent) => {
-    const { active, over } = e;
-    if (!over || active.id === over.id) return;
-    const from = items.findIndex(i => i.id === active.id);
-    const to = items.findIndex(i => i.id === over.id);
-    onReorder(arrayMove(items, from, to));
-  };
-  return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-      <SortableContext items={items.map(i => i.id)} strategy={rectSortingStrategy}>
-        <div className="flex flex-wrap gap-2">
-          {items.map(i => <Item key={i.id} id={i.id} label={i.label} onClick={i.onClick} />)}
-        </div>
-      </SortableContext>
-    </DndContext>
-  );
-};
+// Configure sensors per Rule 3, reorder onDragEnd per Rule 5, and choose the
+// SortableContext strategy from Rule 2. This item wiring preserves item width.
 ```
 
 A clickable element can be draggable at the same time: keep `onClick` on the button and the activation constraint (distance/delay) lets a plain click/tap through.
 
-## Pitfalls we already hit (don't repeat)
+## Symptom Index
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Dragged item **stretches** to the target slot width | `CSS.Transform.toString` applies scaleX/scaleY | Use `CSS.Translate.toString` (Rule 1) |
-| On narrow/multi-row: items **don't reflow to other rows, overlap**, unclear drop target | `horizontalListSortingStrategy` on a wrapping row | Use `rectSortingStrategy` (Rule 2) |
+| Dragged item **stretches** to the target slot width | Scale from `CSS.Transform.toString` | Rule 1 |
+| On narrow/multi-row: items **don't reflow to other rows, overlap**, unclear drop target | Single-row strategy on wrapping layout | Rule 2 |
 | **"Maximum update depth exceeded"** during drag + dragged element floats **offset from the cursor** | Live-reorder in `onDragOver` (empty strategy + `setState` each over) oscillates A↔B with variable sizes; the empty `DragOverlay` we paired with it was mispositioned | Don't reorder in `onDragOver`. Reorder once in `onDragEnd` (Rule 5). Only reach for live-reorder if you truly need physical row-reflow, and then guard against oscillation. |
-| Touch drag scrolls the page instead of dragging | Missing `touch-action: none` | Add `touch-none` (Rule 4) |
-| Touch: every finger move drags, or tap doesn't register | Single `PointerSensor` with distance | Split into MouseSensor + TouchSensor(delay) (Rule 3) |
+| Touch drag scrolls the page instead of dragging | Missing touch ownership | Rule 4 |
+| Touch: every finger move drags, or tap doesn't register | One sensor for mouse and touch | Rule 3 |
 
 ## If `rectSortingStrategy` still isn't crisp enough
 
@@ -142,3 +122,7 @@ Reordering variable-width chips across wrapped rows is a documented rough edge i
 - Variable-width wrapping chips: `packages/ui/src/components/chat/DraftPresetChips.tsx`
 - Single-row tab strip: `packages/ui/src/components/ui/sortable-tabs-strip.tsx`
 - Library: `@dnd-kit/core`, `@dnd-kit/sortable`, `@dnd-kit/utilities` (already in `packages/ui/package.json`)
+
+## Completion Criteria
+
+Verify every applicable rule on desktop and touch. Wrapping layouts must preserve item width, reflow across rows, allow taps and scrolling before long-press activation, and reorder exactly once on drag end with stable IDs.

@@ -254,6 +254,12 @@ const normalizeState = (value, fallback) => {
   const nextRunAt = typeof source.nextRunAt === 'number' && Number.isFinite(source.nextRunAt)
     ? Math.max(0, Math.round(source.nextRunAt))
     : undefined;
+  // Absolute ms of the schedule occurrence last claimed for dispatch. Used so
+  // two OpenChamber server instances sharing this config cannot both start a
+  // run for the same daily/weekly/cron/once slot (see issue #2710).
+  const lastScheduledFor = typeof source.lastScheduledFor === 'number' && Number.isFinite(source.lastScheduledFor)
+    ? Math.max(0, Math.round(source.lastScheduledFor))
+    : undefined;
   const lastSessionId = asNonEmptyString(source.lastSessionId);
   const lastErrorRaw = asNonEmptyString(source.lastError);
   const lastError = lastErrorRaw ? clampLength(lastErrorRaw, MAX_LAST_ERROR_LENGTH) : undefined;
@@ -269,6 +275,7 @@ const normalizeState = (value, fallback) => {
     ...(typeof lastRunAt === 'number' ? { lastRunAt } : {}),
     ...(typeof lastDurationMs === 'number' ? { lastDurationMs } : {}),
     ...(typeof nextRunAt === 'number' ? { nextRunAt } : {}),
+    ...(typeof lastScheduledFor === 'number' ? { lastScheduledFor } : {}),
     ...(lastSessionId ? { lastSessionId } : {}),
     ...(lastError ? { lastError } : {}),
   };
@@ -360,6 +367,9 @@ export const createProjectConfigRuntime = (deps) => {
     });
 
   const writeLocks = new Map();
+  const PROJECT_FILE_LOCK_WAIT_MS = 10_000;
+  const PROJECT_FILE_LOCK_STALE_MS = 60_000;
+  const PROJECT_FILE_LOCK_RETRY_MS = 20;
 
   const sanitizeProjectID = (projectID) => {
     const value = asNonEmptyString(projectID);
@@ -375,6 +385,104 @@ export const createProjectConfigRuntime = (deps) => {
   const resolveProjectConfigPath = (projectID) => {
     const safeProjectID = sanitizeProjectID(projectID);
     return path.join(projectsDirPath, `${safeProjectID}.json`);
+  };
+
+  const isProcessAlive = (pid) => {
+    if (!Number.isInteger(pid) || pid <= 0) {
+      return false;
+    }
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      // EPERM: process exists but belongs to another user — treat as alive.
+      return error?.code === 'EPERM';
+    }
+  };
+
+  /**
+   * Cross-process exclusive lock for a project config file.
+   * In-process chaining alone cannot serialize Electron (port 57123) and CLI
+   * serve (port 3000) writers that share the same on-disk projects dir.
+   */
+  const acquireProjectFileLock = async (projectID) => {
+    const configPath = resolveProjectConfigPath(projectID);
+    const lockPath = `${configPath}.lock`;
+    const startedAt = Date.now();
+
+    await fsPromises.mkdir(path.dirname(configPath), { recursive: true });
+
+    while (Date.now() - startedAt < PROJECT_FILE_LOCK_WAIT_MS) {
+      let handle;
+      try {
+        handle = await fsPromises.open(lockPath, 'wx');
+        const lockPayload = {
+          pid: process.pid,
+          at: Date.now(),
+        };
+        await handle.writeFile(JSON.stringify(lockPayload));
+        return {
+          release: async () => {
+            try {
+              await handle.close();
+            } catch {
+            }
+            // Only unlink if we still own the lock. A stale-recovery steal can
+            // replace the file; unlinking blindly would drop the new owner's lock.
+            try {
+              const raw = await fsPromises.readFile(lockPath, 'utf8');
+              const parsed = JSON.parse(raw);
+              if (Number(parsed?.pid) !== process.pid) {
+                return;
+              }
+              await fsPromises.unlink(lockPath);
+            } catch {
+            }
+          },
+        };
+      } catch (error) {
+        if (handle) {
+          try {
+            await handle.close();
+          } catch {
+          }
+        }
+        if (error?.code !== 'EEXIST') {
+          throw error;
+        }
+
+        try {
+          const raw = await fsPromises.readFile(lockPath, 'utf8');
+          const parsed = JSON.parse(raw);
+          const lockPid = Number(parsed?.pid);
+          const lockAt = Number(parsed?.at);
+          const staleByPid = Number.isInteger(lockPid) && lockPid > 0 && !isProcessAlive(lockPid);
+          const staleByAge = Number.isFinite(lockAt) && (Date.now() - lockAt) > PROJECT_FILE_LOCK_STALE_MS;
+          if (staleByPid || staleByAge || !Number.isInteger(lockPid)) {
+            await fsPromises.unlink(lockPath).catch(() => {});
+            continue;
+          }
+        } catch {
+          // Crash between open(wx) and writeFile (or a partial write) leaves an
+          // unparseable lock. Fall back to mtime age so recovery is not wedged.
+          try {
+            const stat = await fsPromises.stat(lockPath);
+            const mtimeMs = Number(stat?.mtimeMs);
+            if (Number.isFinite(mtimeMs) && (Date.now() - mtimeMs) > PROJECT_FILE_LOCK_STALE_MS) {
+              await fsPromises.unlink(lockPath).catch(() => {});
+              continue;
+            }
+          } catch {
+          }
+        }
+
+        await new Promise((resolve) => {
+          setTimeout(resolve, PROJECT_FILE_LOCK_RETRY_MS);
+        });
+      }
+    }
+
+    throw new Error(`timeout acquiring project config lock for ${projectID}`);
   };
 
   const readRawProjectConfigFromDisk = async (projectID) => {
@@ -428,8 +536,13 @@ export const createProjectConfigRuntime = (deps) => {
     };
 
     await fsPromises.mkdir(parentDirectory, { recursive: true });
-    await fsPromises.writeFile(temporaryPath, JSON.stringify(merged, null, 2), 'utf8');
-    await fsPromises.rename(temporaryPath, filePath);
+    try {
+      await fsPromises.writeFile(temporaryPath, JSON.stringify(merged, null, 2), 'utf8');
+      await fsPromises.rename(temporaryPath, filePath);
+    } catch (error) {
+      await fsPromises.rm(temporaryPath, { force: true }).catch(() => {});
+      throw error;
+    }
   };
 
   const withProjectWriteLock = async (projectID, mutate) => {
@@ -443,8 +556,16 @@ export const createProjectConfigRuntime = (deps) => {
     writeLocks.set(key, chained);
 
     await previous;
+    // Acquire sits outside the mutate try — if it throws (10s lock timeout),
+    // we must still release the in-process chain or every later write for this
+    // project hangs forever on await previous.
     try {
-      return await mutate();
+      const fileLock = await acquireProjectFileLock(projectID);
+      try {
+        return await mutate();
+      } finally {
+        await fileLock.release();
+      }
     } finally {
       release();
       const current = writeLocks.get(key);
@@ -533,7 +654,7 @@ export const createProjectConfigRuntime = (deps) => {
       const current = await readProjectConfigFromDisk(projectID);
       const taskIndex = current.scheduledTasks.findIndex((task) => task.id === normalizedTaskID);
       if (taskIndex === -1) {
-        return { task: null, tasks: current.scheduledTasks };
+        return { task: null, tasks: current.scheduledTasks, updated: false };
       }
 
       const currentTask = current.scheduledTasks[taskIndex];
@@ -561,6 +682,68 @@ export const createProjectConfigRuntime = (deps) => {
       return {
         task: nextTask,
         tasks: nextTasks,
+        updated: true,
+      };
+    });
+  };
+
+  /**
+   * Conditionally patch task runtime state under the project write lock.
+   * `predicate(currentTask)` is evaluated after the latest on-disk read; when
+   * it returns false the write is skipped and `{ updated: false }` is returned.
+   * Used by the scheduled-tasks runtime to claim a single schedule occurrence
+   * across concurrent OpenChamber server instances.
+   */
+  const updateScheduledTaskStateIf = async (projectID, taskID, predicate, statePatch) => {
+    return withProjectWriteLock(projectID, async () => {
+      const normalizedTaskID = asNonEmptyString(taskID);
+      if (!normalizedTaskID) {
+        throw new Error('taskId is required');
+      }
+      if (typeof predicate !== 'function') {
+        throw new Error('predicate is required');
+      }
+
+      const current = await readProjectConfigFromDisk(projectID);
+      const taskIndex = current.scheduledTasks.findIndex((task) => task.id === normalizedTaskID);
+      if (taskIndex === -1) {
+        return { task: null, tasks: current.scheduledTasks, updated: false };
+      }
+
+      const currentTask = current.scheduledTasks[taskIndex];
+      if (!predicate(currentTask)) {
+        return {
+          task: currentTask,
+          tasks: current.scheduledTasks,
+          updated: false,
+        };
+      }
+
+      const patchObject = statePatch && typeof statePatch === 'object' ? statePatch : {};
+      const nextTask = {
+        ...currentTask,
+        state: normalizeState(
+          {
+            ...currentTask.state,
+            ...patchObject,
+            updatedAt: Date.now(),
+          },
+          currentTask.state,
+        ),
+      };
+
+      const nextTasks = current.scheduledTasks.slice();
+      nextTasks[taskIndex] = nextTask;
+
+      await writeProjectConfigToDisk(projectID, {
+        version: PROJECT_CONFIG_VERSION,
+        scheduledTasks: nextTasks,
+      });
+
+      return {
+        task: nextTask,
+        tasks: nextTasks,
+        updated: true,
       };
     });
   };
@@ -699,6 +882,7 @@ export const createProjectConfigRuntime = (deps) => {
     upsertScheduledTask,
     deleteScheduledTask,
     updateScheduledTaskState,
+    updateScheduledTaskStateIf,
     reconcileLoopTasks,
     resolveProjectConfigPath,
   };

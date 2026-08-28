@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { AttachedFile } from '@/stores/types/sessionTypes';
+import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
+import { CONTEXT_METADATA_KEY, contextPayloadFromDraft } from '@/lib/messages/contextParts';
 import {
     buildOutgoingMessage,
     type OutgoingMessageDeps,
@@ -26,7 +28,6 @@ const deps = (overrides: Partial<OutgoingMessageDeps> = {}): OutgoingMessageDeps
     },
     sanitizeAttachments: (files) => [...(files ?? [])],
     collectSkillNames: (text) => [...text.matchAll(/\/(\w+)/g)].map((m) => m[1]),
-    appendComments: (text, comments) => `${text}\n[${comments.length} comments]`,
     buildSkillInstruction: (names) => (names.length ? `use: ${names.join(',')}` : null),
     ...overrides,
 });
@@ -37,7 +38,7 @@ const input = (overrides: Partial<OutgoingMessageInput> = {}): OutgoingMessageIn
     composerAttachments: [],
     inlineComments: [],
     syntheticTexts: [],
-    linkedIssueContext: null,
+    linkedIssue: null,
     linkedPr: null,
     ...overrides,
 });
@@ -130,36 +131,51 @@ describe('agent mentions', () => {
     });
 });
 
-describe('inline comments', () => {
-    test('attach to the composer text when nothing was queued', () => {
+const commentDraft = (overrides: Partial<InlineCommentDraft> = {}): InlineCommentDraft => ({
+    id: 'icd-1',
+    sessionKey: 's1',
+    source: 'diff',
+    fileLabel: 'src/app.ts',
+    startLine: 3,
+    endLine: 5,
+    side: 'modified',
+    code: 'const x = 1;',
+    language: 'ts',
+    text: 'fix this',
+    createdAt: 1,
+    ...overrides,
+});
+
+describe('context drafts', () => {
+    test('each becomes a synthetic part carrying structured metadata', () => {
         const result = buildOutgoingMessage(input({
             composerText: 'body',
-            inlineComments: [{}, {}],
+            inlineComments: [commentDraft(), commentDraft({ id: 'icd-2', source: 'file', side: undefined })],
         }), deps());
-        expect(result.primaryText).toBe('body\n[2 comments]');
+        expect(result.primaryText).toBe('body');
+        expect(result.additionalParts).toHaveLength(2);
+        expect(result.additionalParts.every((p) => p.synthetic)).toBe(true);
+        expect(result.additionalParts[0].metadata?.[CONTEXT_METADATA_KEY])
+            .toEqual(contextPayloadFromDraft(commentDraft()));
+        expect(result.additionalParts[1].metadata?.[CONTEXT_METADATA_KEY])
+            .toEqual(contextPayloadFromDraft(commentDraft({ id: 'icd-2', source: 'file', side: undefined })));
+        expect(result.additionalParts[0].text).toContain('Comment on `src/app.ts` lines 3-5 (modified):');
+        expect(result.additionalParts[0].text).toContain('fix this');
     });
 
-    test('attach to the last authored part when messages were queued', () => {
+    test('context parts precede other synthetic context', () => {
         const result = buildOutgoingMessage(input({
-            queued: [{ content: 'queued' }],
-            composerText: 'typed',
-            inlineComments: [{}],
+            composerText: 'body',
+            inlineComments: [commentDraft()],
+            syntheticTexts: ['conflict note'],
         }), deps());
-        expect(result.primaryText).toBe('queued');
-        expect(result.additionalParts[0].text).toBe('typed\n[1 comments]');
+        expect(result.additionalParts.map((p) => p.text.startsWith('Comment on') ? 'comment' : p.text))
+            .toEqual(['comment', 'conflict note']);
     });
 
-    test('fall back to primary when the queue produced no additional parts', () => {
-        const result = buildOutgoingMessage(input({
-            queued: [{ content: 'only queued' }],
-            inlineComments: [{}],
-        }), deps());
-        expect(result.primaryText).toBe('only queued\n[1 comments]');
-    });
-
-    test('no comments changes nothing', () => {
-        expect(buildOutgoingMessage(input({ composerText: 'body' }), deps()).primaryText)
-            .toBe('body');
+    test('no drafts changes nothing', () => {
+        expect(buildOutgoingMessage(input({ composerText: 'body' }), deps()).additionalParts)
+            .toEqual([]);
     });
 });
 
@@ -167,26 +183,31 @@ describe('synthetic context', () => {
     test('a linked PR sends its instructions before its diff', () => {
         const result = buildOutgoingMessage(input({
             composerText: 'review this',
-            linkedPr: { instructions: 'how to read it', context: 'the diff' },
+            linkedPr: { number: 7, title: 'PR', url: 'https://x/pr/7', instructions: 'how to read it', context: 'the diff' },
         }), deps());
         expect(result.additionalParts.map((p) => p.text))
             .toEqual(['how to read it', 'the diff']);
         expect(result.additionalParts.every((p) => p.synthetic)).toBe(true);
+        expect(result.additionalParts[1].metadata?.[CONTEXT_METADATA_KEY])
+            .toEqual({ kind: 'github-pr', number: 7, title: 'PR', url: 'https://x/pr/7' });
     });
 
     test('a linked issue is sent as context', () => {
         const result = buildOutgoingMessage(input({
             composerText: 'fix it',
-            linkedIssueContext: 'issue body',
+            linkedIssue: { number: 3, title: 'Bug', url: 'https://x/issues/3', contextText: 'issue body' },
         }), deps());
-        expect(result.additionalParts).toEqual([{ text: 'issue body', synthetic: true }]);
+        expect(result.additionalParts).toHaveLength(1);
+        expect(result.additionalParts[0].text).toBe('issue body');
+        expect(result.additionalParts[0].metadata?.[CONTEXT_METADATA_KEY])
+            .toEqual({ kind: 'github-issue', number: 3, title: 'Bug', url: 'https://x/issues/3' });
     });
 
     test('synthetic texts precede the linked references', () => {
         const result = buildOutgoingMessage(input({
             composerText: 'x',
             syntheticTexts: ['conflict note'],
-            linkedIssueContext: 'issue body',
+            linkedIssue: { number: 3, title: 'Bug', url: 'https://x/issues/3', contextText: 'issue body' },
         }), deps());
         expect(result.additionalParts.map((p) => p.text))
             .toEqual(['conflict note', 'issue body']);
@@ -211,7 +232,9 @@ describe('synthetic context', () => {
     });
 
     test('context alone is still worth sending', () => {
-        const result = buildOutgoingMessage(input({ linkedIssueContext: 'issue body' }), deps());
+        const result = buildOutgoingMessage(input({
+            linkedIssue: { number: 3, title: 'Bug', url: 'https://x/issues/3', contextText: 'issue body' },
+        }), deps());
         expect(result.isEmpty).toBe(false);
     });
 
@@ -230,8 +253,8 @@ describe('full assembly order', () => {
             queued: [{ content: 'q1' }, { content: 'q2' }],
             composerText: 'typed /deploy',
             syntheticTexts: ['synthetic'],
-            linkedIssueContext: 'issue',
-            linkedPr: { instructions: 'pr-how', context: 'pr-diff' },
+            linkedIssue: { number: 3, title: 'Bug', url: 'https://x/issues/3', contextText: 'issue' },
+            linkedPr: { number: 7, title: 'PR', url: 'https://x/pr/7', instructions: 'pr-how', context: 'pr-diff' },
         }), deps());
 
         expect(result.primaryText).toBe('q1');
