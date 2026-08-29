@@ -412,26 +412,26 @@ describe('openNewSessionDraft project binding', () => {
     useDirectoryStore.getState().setDirectory(projectB.path, { showOverlay: false });
   });
 
-  test('defaults an implicit draft to Chat when active project differs', () => {
+  test('opens an implicit draft in the active project when the current directory differs', () => {
     useSessionUIStore.getState().openNewSessionDraft();
     const draft = useSessionUIStore.getState().newSessionDraft;
 
     expect(draft.open).toBe(true);
-    expect(draft.target).toBe('chat');
-    expect(draft.selectedProjectId).toBeNull();
-    expect(draft.directoryOverride).toBeNull();
+    expect(draft.target).toBe('project');
+    expect(draft.selectedProjectId).toBe('proj-a');
+    expect(draft.directoryOverride).toBe('/projects/alpha');
   });
 
-  test('defaults an implicit draft to Chat when current directory is unmatched', () => {
+  test('opens an implicit draft in the active project when the current directory is unmatched', () => {
     useDirectoryStore.getState().setDirectory('/external/worktree', { showOverlay: false });
 
     useSessionUIStore.getState().openNewSessionDraft();
     const draft = useSessionUIStore.getState().newSessionDraft;
 
     expect(draft.open).toBe(true);
-    expect(draft.selectedProjectId).toBeNull();
-    expect(draft.target).toBe('chat');
-    expect(draft.directoryOverride).toBeNull();
+    expect(draft.selectedProjectId).toBe('proj-a');
+    expect(draft.target).toBe('project');
+    expect(draft.directoryOverride).toBe('/projects/alpha');
   });
 
   test('respects explicit directoryOverride over active project', () => {
@@ -636,7 +636,10 @@ describe('createSession draft lifecycle', () => {
       activeProjectId: 'project-main',
     });
     useDirectoryStore.getState().setDirectory('/private/deleted-worktree', { showOverlay: false });
-    useSessionUIStore.getState().openNewSessionDraft();
+    // A deleted worktree must be an explicit target (an implicit draft with an
+    // active project now binds to the active project, not the stale directory),
+    // so the fallback-not-persisted behavior below is exercised through it.
+    useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: '/private/deleted-worktree' });
     opencodeClient.getDirectoryAvailability = async () => 'missing';
     opencodeClient.createSession = async () => {
       throw new Error('offline');

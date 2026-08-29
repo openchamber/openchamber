@@ -1106,11 +1106,18 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const explicitDirectory = options?.directoryOverride !== undefined
       ? normalizePath(options.directoryOverride)
       : null
+    // Whether the project target was inferred from the active project (no
+    // explicit directory/project option), as opposed to an explicit request.
+    // When inferred, the draft must bind to the active project itself and only
+    // ever fall back to the current directory if that directory actually
+    // resolves to a known project (never to a stale chats/ folder).
     let target = isVSCodeRuntime() ? "project" : options?.target
+    let inferredFromActiveProject = false
     if (!target) {
       const hasExplicitProjectTarget = options?.directoryOverride !== undefined
         || (options?.selectedProjectId !== undefined && options.selectedProjectId !== CHAT_DRAFT_PROJECT_ID)
         || isVSCodeRuntime()
+      inferredFromActiveProject = !hasExplicitProjectTarget && !!activeProject?.path
       target = options?.selectedProjectId === CHAT_DRAFT_PROJECT_ID
         || (!hasExplicitProjectTarget && !activeProject?.path)
         ? "chat"
@@ -1133,20 +1140,24 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const persistedProjectByDir = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, persistedTarget?.directory ?? null)
     const currentDirProject = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, currentDirectory)
 
-    const selectedProject = target === "chat" ? null : (() => {
-      if (explicitProject) return explicitProject
-      if (explicitDirectory !== null) return inferredProjectFromDir
-      if (currentDirectory) return currentDirProject
-      return persistedProjectByDir ?? persistedProjectById ?? fallbackProject
-    })()
+    const selectedProject = target === "chat" ? null
+      : inferredFromActiveProject ? activeProject
+      : (() => {
+        if (explicitProject) return explicitProject
+        if (explicitDirectory !== null) return inferredProjectFromDir
+        if (currentDirectory) return currentDirProject
+        return persistedProjectByDir ?? persistedProjectById ?? fallbackProject
+      })()
 
-    const directory = target === "chat" ? null : (() => {
-      if (explicitDirectory !== null) return explicitDirectory
-      if (explicitProject) return normalizePath(explicitProject.path ?? null)
-      if (currentDirectory) return currentDirectory
-      if (persistedTarget?.directory) return persistedTarget.directory
-      return normalizePath(selectedProject?.path ?? null)
-    })()
+    const directory = target === "chat" ? null
+      : inferredFromActiveProject ? normalizePath(activeProject?.path ?? null)
+      : (() => {
+        if (explicitDirectory !== null) return explicitDirectory
+        if (explicitProject) return normalizePath(explicitProject.path ?? null)
+        if (currentDirectory) return currentDirectory
+        if (persistedTarget?.directory) return persistedTarget.directory
+        return normalizePath(selectedProject?.path ?? null)
+      })()
 
     if (target === "chat") {
       warmChatsRootDirectory()

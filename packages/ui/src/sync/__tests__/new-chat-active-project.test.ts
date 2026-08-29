@@ -353,6 +353,41 @@ describe("openNewSessionDraft targets the active project by default", () => {
     expect(draft.directoryOverride).toBe("/mnt/SSD-for-VMs/opencode/project")
   })
 
+  test("binds an implicit draft to the active project even when the current directory is inside a chats/ folder", () => {
+    // Regression for the reviewer finding: with an active project set while the
+    // current directory lives inside a managed chats/ folder (unresolvable to a
+    // known project), an implicit New chat must land on the active project and
+    // its path, not on the stale chats/ directory.
+    activeProjectMock = { id: "project", path: "/mnt/SSD-for-VMs/opencode/project" }
+    projectsMock = [{ id: "project", path: "/mnt/SSD-for-VMs/opencode/project" }]
+    currentDirectoryMock = "/home/test/.config/openchamber/chats/2026-08-29/session-abc"
+
+    useSessionUIStore.getState().openNewSessionDraft()
+
+    const draft = useSessionUIStore.getState().newSessionDraft
+    expect(draft.target).toBe("project")
+    expect(draft.selectedProjectId).toBe("project")
+    expect(draft.directoryOverride).toBe("/mnt/SSD-for-VMs/opencode/project")
+  })
+
+  test("binds an implicit draft to the active project when the current directory resolves to a different project", () => {
+    // With an active project that has a path, an implicit New chat must target
+    // the active project, not a different project reached via currentDirectory.
+    activeProjectMock = { id: "project", path: "/mnt/SSD-for-VMs/opencode/project" }
+    projectsMock = [
+      { id: "project", path: "/mnt/SSD-for-VMs/opencode/project" },
+      { id: "other", path: "/other/project" },
+    ]
+    currentDirectoryMock = "/other/project"
+
+    useSessionUIStore.getState().openNewSessionDraft()
+
+    const draft = useSessionUIStore.getState().newSessionDraft
+    expect(draft.target).toBe("project")
+    expect(draft.selectedProjectId).toBe("project")
+    expect(draft.directoryOverride).toBe("/mnt/SSD-for-VMs/opencode/project")
+  })
+
   test("falls back to a managed chat when no active project exists", () => {
     activeProjectMock = null
     currentDirectoryMock = null
