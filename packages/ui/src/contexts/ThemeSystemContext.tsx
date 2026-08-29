@@ -32,7 +32,7 @@ import { isValidTheme } from './theme-validation';
 import { getSyncedThemeFromPayload, getSyncedThemeVariant } from './theme-sync-payload';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import {
-  readThemePreferencesForRuntime,
+  adoptThemePreferencesForRuntime,
   resolveThemePreferencesForRuntime,
   resolveThemePreferencesFromStorageEvent,
   writeThemePreferencesForRuntime,
@@ -303,7 +303,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     setCustomThemesLoading(false);
     // Adopt the new instance's last-known theme immediately; the incoming
     // settings sync refines it with the server's authoritative value.
-    setPreferences((prev) => readThemePreferencesForRuntime(detail.runtimeKey) ?? prev);
+    setPreferences((prev) => adoptThemePreferencesForRuntime(detail.runtimeKey, prev));
     void reloadCustomThemes();
   }), [isVSCode, reloadCustomThemes]);
 
@@ -419,7 +419,30 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       lightThemeId: preferences.lightThemeId,
       darkThemeId: preferences.darkThemeId,
     });
-  }, [preferences, receivesParentThemeSync]);
+
+    // Cosmetic last-writer-wins hints for the pre-React splash shells
+    // (packages/web/index.html, mobile.html, mini-chat.html) and the Android
+    // status bar, which run before the scoped key can be read. Not part of the
+    // app's theme authority — the scoped entry and the per-instance server
+    // settings own that.
+    localStorage.setItem('themeMode', preferences.themeMode);
+    localStorage.setItem('lightThemeId', preferences.lightThemeId);
+    localStorage.setItem('darkThemeId', preferences.darkThemeId);
+    localStorage.setItem('useSystemTheme', String(preferences.themeMode === 'system'));
+    localStorage.setItem('selectedThemeId', currentTheme.metadata.id);
+    localStorage.setItem(
+      'selectedThemeVariant',
+      currentTheme.metadata.variant === 'light' ? 'light' : 'dark',
+    );
+
+    const lightTheme = ensureThemeById(preferences.lightThemeId, 'light');
+    const darkTheme = ensureThemeById(preferences.darkThemeId, 'dark');
+
+    localStorage.setItem('splashBgLight', lightTheme.colors.surface.background);
+    localStorage.setItem('splashFgLight', lightTheme.colors.surface.foreground);
+    localStorage.setItem('splashBgDark', darkTheme.colors.surface.background);
+    localStorage.setItem('splashFgDark', darkTheme.colors.surface.foreground);
+  }, [preferences, currentTheme, ensureThemeById, receivesParentThemeSync]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {

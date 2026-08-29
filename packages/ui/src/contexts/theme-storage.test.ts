@@ -3,6 +3,7 @@ import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID } from '@/lib/theme/themes';
 
 import {
+  adoptThemePreferencesForRuntime,
   getThemePreferencesStorageKey,
   readThemePreferencesForRuntime,
   resolveThemePreferencesForRuntime,
@@ -108,7 +109,7 @@ describe('theme preference runtime scoping', () => {
     expect(readThemePreferencesForRuntime('runtime-a')).toBeNull();
   });
 
-  test('removes superseded global theme keys once the scoped key is written', () => {
+  test('leaves the splash-hint and migration-seed globals untouched', () => {
     localStorage.setItem('themeMode', 'dark');
     localStorage.setItem('lightThemeId', 'light-theme');
     localStorage.setItem('darkThemeId', 'dark-theme');
@@ -120,14 +121,17 @@ describe('theme preference runtime scoping', () => {
 
     writeThemePreferencesForRuntime('runtime-a', preferences);
 
-    expect(localStorage.getItem('themeMode')).toBeNull();
-    expect(localStorage.getItem('lightThemeId')).toBeNull();
-    expect(localStorage.getItem('darkThemeId')).toBeNull();
-    expect(localStorage.getItem('useSystemTheme')).toBeNull();
-    expect(localStorage.getItem('selectedThemeId')).toBeNull();
-    expect(localStorage.getItem('selectedThemeVariant')).toBeNull();
-    expect(localStorage.getItem('splashBgDark')).toBeNull();
-    expect(localStorage.getItem('splashFgDark')).toBeNull();
+    // The scoped key owns the app theme; the global keys stay as cosmetic
+    // last-writer-wins hints for the pre-React splash shells and the Android
+    // status bar, and as the one-time migration seed for new runtimes.
+    expect(localStorage.getItem('themeMode')).toBe('dark');
+    expect(localStorage.getItem('lightThemeId')).toBe('light-theme');
+    expect(localStorage.getItem('darkThemeId')).toBe('dark-theme');
+    expect(localStorage.getItem('useSystemTheme')).toBe('false');
+    expect(localStorage.getItem('selectedThemeId')).toBe('dark-theme');
+    expect(localStorage.getItem('selectedThemeVariant')).toBe('dark');
+    expect(localStorage.getItem('splashBgDark')).toBe('#0c0a09');
+    expect(localStorage.getItem('splashFgDark')).toBe('#fafaf9');
     expect(readThemePreferencesForRuntime('runtime-a')).toEqual(preferences);
   });
 });
@@ -170,7 +174,7 @@ describe('theme preference resolution chain', () => {
     });
   });
 
-  test('the migrated seed survives into the scoped key with legacy keys removed', () => {
+  test('the migrated seed survives into the scoped key while the seed globals stay', () => {
     localStorage.setItem('themeMode', 'dark');
     localStorage.setItem('lightThemeId', 'legacy-light');
     localStorage.setItem('darkThemeId', 'legacy-dark');
@@ -182,9 +186,23 @@ describe('theme preference resolution chain', () => {
       lightThemeId: 'legacy-light',
       darkThemeId: 'legacy-dark',
     });
-    expect(localStorage.getItem('themeMode')).toBeNull();
-    expect(localStorage.getItem('lightThemeId')).toBeNull();
-    expect(localStorage.getItem('darkThemeId')).toBeNull();
+    expect(localStorage.getItem('themeMode')).toBe('dark');
+    expect(localStorage.getItem('lightThemeId')).toBe('legacy-light');
+    expect(localStorage.getItem('darkThemeId')).toBe('legacy-dark');
+  });
+});
+
+describe('runtime-switch adoption', () => {
+  const current = { themeMode: 'dark' as const, lightThemeId: 'current-light', darkThemeId: 'current-dark' };
+
+  test('adopts the target runtime stored theme when one exists', () => {
+    writeThemePreferencesForRuntime('runtime-b', preferences);
+
+    expect(adoptThemePreferencesForRuntime('runtime-b', current)).toEqual(preferences);
+  });
+
+  test('keeps the current preferences — same reference — when the target runtime has no entry', () => {
+    expect(adoptThemePreferencesForRuntime('runtime-empty', current)).toBe(current);
   });
 });
 

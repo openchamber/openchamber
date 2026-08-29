@@ -18,22 +18,6 @@ type StoredThemePreferences = {
 // trivial space.
 const THEME_PREFERENCES_KEY_PREFIX = 'openchamber.theme.v2:';
 
-// Superseded by the per-runtime key. Removed once the scoped key is written so
-// theme persistence has a single owner; the pre-React HTML shells that read
-// them (splash theme class and colors) have their own fallbacks.
-const LEGACY_THEME_KEYS = [
-  'themeMode',
-  'lightThemeId',
-  'darkThemeId',
-  'useSystemTheme',
-  'selectedThemeId',
-  'selectedThemeVariant',
-  'splashBgLight',
-  'splashFgLight',
-  'splashBgDark',
-  'splashFgDark',
-] as const;
-
 export const getThemePreferencesStorageKey = (runtimeKey: string): string =>
   `${THEME_PREFERENCES_KEY_PREFIX}${encodeURIComponent(runtimeKey)}`;
 
@@ -82,17 +66,6 @@ export const writeThemePreferencesForRuntime = (runtimeKey: string, preferences:
   } catch {
     // localStorage unavailable (e.g. read-only contextBridge) — the server
     // settings sync remains authoritative and the app still works.
-    return;
-  }
-  // One-time migration: keep the legacy keys only if the scoped write failed,
-  // otherwise remove them (removal is best-effort; a stale key only affects
-  // the pre-React splash, which falls back to system preference and defaults).
-  for (const key of LEGACY_THEME_KEYS) {
-    try {
-      localStorage.removeItem(key);
-    } catch {
-      // ignore — best-effort cleanup
-    }
   }
 };
 
@@ -123,9 +96,11 @@ export const resolveThemePreferencesFromStorageEvent = (
 
 // One-time migration seed: pre-scoped builds persisted theme state in these
 // global keys. They are resolved only while no scoped entry exists — the
-// persist effect then seeds the scoped key from the returned preferences and
-// writeThemePreferencesForRuntime removes the global keys — so no client-only
-// theme state is discarded before the authoritative server sync lands.
+// persist effect then seeds the scoped key from the returned preferences — so
+// no client-only theme state is discarded before the authoritative server sync
+// lands. The keys themselves stay (see ThemeSystemContext's persist effect):
+// the pre-React splash shells and the Android status bar read them as
+// cosmetic last-writer-wins hints.
 const readLegacyThemePreferences = (): StoredThemePreferences => {
   let themeMode: ThemeMode = 'system';
   let lightThemeId: string = DEFAULT_LIGHT_THEME_ID;
@@ -183,3 +158,15 @@ export const resolveThemePreferencesForRuntime = (runtimeKey: string): StoredThe
   const stored = readThemePreferencesForRuntime(runtimeKey);
   return stored ?? readLegacyThemePreferences();
 };
+
+/**
+ * Adopt another runtime's stored preferences when the endpoint switches: the
+ * new runtime's scoped entry when one exists, otherwise the current
+ * preferences unchanged (the same reference — no re-render, no write-through)
+ * until the incoming settings sync refines with the server's authoritative
+ * value.
+ */
+export const adoptThemePreferencesForRuntime = (
+  runtimeKey: string,
+  current: StoredThemePreferences,
+): StoredThemePreferences => readThemePreferencesForRuntime(runtimeKey) ?? current;
