@@ -20,6 +20,12 @@ type PersistedEnvelope = {
   runtimes: Record<string, PersistedEntry>
 }
 
+let lastActiveSessionClearGeneration = 0
+
+export function getLastActiveSessionClearGeneration(): number {
+  return lastActiveSessionClearGeneration
+}
+
 const emptyEnvelope = (): PersistedEnvelope => ({ version: 1, runtimes: {} })
 
 const readEnvelope = (storage: Storage): PersistedEnvelope => {
@@ -97,6 +103,7 @@ export function clearLastActiveSession(
   storage: Storage = getDeferredSafeStorage(),
 ): void {
   if (!runtimeKey) return
+  lastActiveSessionClearGeneration += 1
   const envelope = readEnvelope(storage)
   if (!envelope.runtimes[runtimeKey]) return
   delete envelope.runtimes[runtimeKey]
