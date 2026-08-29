@@ -1,9 +1,10 @@
 import { useCallback, useMemo } from "react"
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
+import { upsertSessionRecord } from "./session-records"
 import { retry } from "./retry"
 import { SESSION_CACHE_LIMIT, type State } from "./types"
-import { pickSessionCacheEvictions } from "./session-cache"
+import { dropSessionCaches, getProtectedSessionCacheIds, pickSessionCacheEvictions } from "./session-cache"
 import {
   dropCachedSessionMessageRecordsSnapshots,
   useChildStoreManager,
@@ -11,9 +12,10 @@ import {
   useSessionMessageLoader,
   useSyncDirectory,
   useSyncSDK,
+  useSyncRuntime,
   resyncBlockingRequestsForDirectory,
+  buildSessionMessageRecordsSnapshot,
 } from "./sync-context"
-import { dropSessionCaches, getProtectedSessionCacheIds } from "./session-cache"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
@@ -46,7 +48,6 @@ const syncSessionInflightByKey = new Map<string, Promise<void>>()
 // to the store. This prevents rapid session switches (e.g. 1→2→3 in the
 // sidebar) from having each completed fetch fight for focus.
 const syncSessionGenerationByKey = new Map<string, number>()
-
 type SdkResult<T> = {
   data?: T
   error?: unknown
@@ -111,10 +112,80 @@ export function shouldFetchSessionForRenderableSync(input: {
   return Boolean(input.force) || !input.hasSession || input.shouldLoadMessages
 }
 
-// ---------------------------------------------------------------------------
-// useSync — message loading, pagination, optimistic updates
-// Message loading, pagination, optimistic updates
-// ---------------------------------------------------------------------------
+function useSessionCacheTouch() {
+  const { childStores, messageLoader, runtimeKey } = useSyncRuntime()
+
+  const evict = useCallback(
+    (directory: string, sessionIDs: string[]) => {
+      if (sessionIDs.length === 0 || getRuntimeKey() !== runtimeKey) return
+      const store = childStores.getChild(directory)
+      if (!store) return
+
+      const current = store.getState()
+      const draft = {
+        message: { ...current.message },
+        part: { ...current.part },
+        session_status: { ...current.session_status },
+        session_diff: { ...current.session_diff },
+        todo: { ...current.todo },
+        permission: { ...current.permission },
+        question: { ...current.question },
+      }
+      dropSessionCaches(draft, sessionIDs)
+      dropCachedSessionMessageRecordsSnapshots(store, sessionIDs)
+      store.setState(draft)
+      for (const sessionID of sessionIDs) messageLoader.invalidateSession({ directory, sessionID })
+      clearSessionPrefetch(directory, sessionIDs)
+    },
+    [childStores, messageLoader, runtimeKey],
+  )
+
+  const seenFor = useCallback((directory: string) => {
+    const cacheKey = `${runtimeKey}\n${directory}`
+    const existing = seenByDirectory.get(cacheKey)
+    if (existing) {
+      seenByDirectory.delete(cacheKey)
+      seenByDirectory.set(cacheKey, existing)
+      return existing.sessions
+    }
+    const created: SeenDirectoryEntry = { runtimeKey, directory, sessions: new Set() }
+    seenByDirectory.set(cacheKey, created)
+    while (seenByDirectory.size > MAX_SEEN_DIRS) {
+      const oldestKey = seenByDirectory.keys().next().value
+      if (!oldestKey) break
+      const oldest = seenByDirectory.get(oldestKey)
+      seenByDirectory.delete(oldestKey)
+      if (oldest?.runtimeKey === runtimeKey) evict(oldest.directory, [...oldest.sessions])
+    }
+    return created.sessions
+  }, [evict, runtimeKey])
+
+  return useCallback((sessionID: string, directory: string) => {
+    if (getRuntimeKey() !== runtimeKey) return
+    const seen = seenFor(directory)
+    const store = childStores.ensureChild(directory, { bootstrap: false })
+    const protectedIds = getProtectedSessionCacheIds(store.getState())
+    const stale = pickSessionCacheEvictions({
+      seen,
+      keep: sessionID,
+      limit: getEffectiveSessionCacheLimit(),
+      preserve: protectedIds,
+    })
+    evict(directory, stale)
+
+    if (!isConstrainedSessionRuntime()) return
+    const state = store.getState()
+    const keep = new Set([sessionID, ...seen, ...protectedIds])
+    const prefetched = Object.keys(state.message).filter((id) => !keep.has(id))
+    evict(directory, prefetched)
+    const afterPrefetchEviction = prefetched.length > 0 ? store.getState() : state
+    const heavyInactive = Object.keys(afterPrefetchEviction.message).filter((id) => (
+      id !== sessionID && !protectedIds.has(id) && isHeavyConstrainedSessionCache(afterPrefetchEviction, id)
+    ))
+    for (const id of heavyInactive) seen.delete(id)
+    evict(directory, heavyInactive)
+  }, [childStores, evict, runtimeKey, seenFor])
+}
 
 export function useSync() {
   const sdk = useSyncSDK()
@@ -123,6 +194,7 @@ export function useSync() {
   const childStores = useChildStoreManager()
   const messageLoader = useSessionMessageLoader()
   const runtimeKey = getRuntimeKey()
+  const touch = useSessionCacheTouch()
 
   const recoverPendingQuestions = useCallback(
     async (sessionID: string, directoryOverride?: string): Promise<boolean> => {
@@ -144,107 +216,6 @@ export function useSync() {
   const keyFor = useCallback(
     (sessionID: string, directoryOverride = directory) => `${runtimeKey}\n${directoryOverride}\n${sessionID}`,
     [directory, runtimeKey],
-  )
-
-  // Session cache eviction — two levels of LRU:
-  // (1) across directories (max 30), (2) within a directory (SESSION_CACHE_LIMIT).
-
-  // Evict all cached session data for given IDs from a directory's store
-  const evict = useCallback(
-    (dir: string, sessionIDs: string[]) => {
-      if (sessionIDs.length === 0 || getRuntimeKey() !== runtimeKey) return
-      const dirStore = childStores.getChild(dir)
-      if (!dirStore) return
-
-      const current = dirStore.getState()
-      const draft = {
-        message: { ...current.message },
-        part: { ...current.part },
-        session_status: { ...current.session_status },
-        session_diff: { ...current.session_diff },
-        todo: { ...current.todo },
-        permission: { ...current.permission },
-        question: { ...current.question },
-      }
-      dropSessionCaches(draft, sessionIDs)
-      dropCachedSessionMessageRecordsSnapshots(dirStore, sessionIDs)
-      dirStore.setState(draft)
-
-      // Clear meta + optimistic + prefetch cache for evicted sessions
-      for (const id of sessionIDs) {
-        messageLoader.invalidateSession({ directory: dir, sessionID: id })
-      }
-      clearSessionPrefetch(dir, sessionIDs)
-    },
-    [childStores, messageLoader, runtimeKey],
-  )
-
-  // Get or create the seen-set for a directory. LRU reorder on access.
-  // When seen directories exceed MAX_SEEN_DIRS, evict the oldest directory's caches.
-  // LRU reorder on access. Evicts oldest directory when exceeding MAX_SEEN_DIRS.
-  const seenFor = useCallback((targetDirectory: string) => {
-    const cacheKey = `${runtimeKey}\n${targetDirectory}`
-    const existing = seenByDirectory.get(cacheKey)
-    if (existing) {
-      // LRU reorder: delete + re-insert moves to end (most recent)
-      seenByDirectory.delete(cacheKey)
-      seenByDirectory.set(cacheKey, existing)
-      return existing.sessions
-    }
-    const created: SeenDirectoryEntry = { runtimeKey, directory: targetDirectory, sessions: new Set() }
-    seenByDirectory.set(cacheKey, created)
-
-    // Evict oldest directories if over limit
-    while (seenByDirectory.size > MAX_SEEN_DIRS) {
-      const first = seenByDirectory.keys().next().value
-      if (!first) break
-      const stale = seenByDirectory.get(first)
-      seenByDirectory.delete(first)
-      if (stale?.runtimeKey === runtimeKey) evict(stale.directory, [...stale.sessions])
-    }
-
-    return created.sessions
-  }, [evict, runtimeKey])
-
-  // Touch a session — triggers both directory-level and session-level eviction
-  const touch = useCallback(
-    (sessionID: string, targetDirectory = directory) => {
-      if (getRuntimeKey() !== runtimeKey) return
-      const s = seenFor(targetDirectory)
-      const targetStore = targetDirectory === directory
-        ? store
-        : childStores.ensureChild(targetDirectory, { bootstrap: false })
-      const protectedIds = getProtectedSessionCacheIds(targetStore.getState())
-      const cacheLimit = getEffectiveSessionCacheLimit()
-      const stale = pickSessionCacheEvictions({
-        seen: s,
-        keep: sessionID,
-        limit: cacheLimit,
-        preserve: protectedIds,
-      })
-      evict(targetDirectory, stale)
-
-      if (isConstrainedSessionRuntime()) {
-        const state = targetStore.getState()
-        const keep = new Set([sessionID, ...s, ...protectedIds])
-        const prefetched = Object.keys(state.message).filter((id) => !keep.has(id))
-        evict(targetDirectory, prefetched)
-
-        // One very large inactive session can create memory/GC pressure that
-        // makes later small-session switches feel slow. Keep it while active,
-        // but do not retain it as a warm cache in constrained shells.
-          const afterPrefetchEviction = prefetched.length > 0 ? targetStore.getState() : state
-        const heavyInactive = Object.keys(afterPrefetchEviction.message).filter((id) => {
-          if (id === sessionID || protectedIds.has(id)) return false
-          return isHeavyConstrainedSessionCache(afterPrefetchEviction, id)
-        })
-        if (heavyInactive.length > 0) {
-          for (const id of heavyInactive) s.delete(id)
-          evict(targetDirectory, heavyInactive)
-        }
-      }
-    },
-    [childStores, directory, seenFor, evict, runtimeKey, store],
   )
 
   // Sync a session (load if not cached)
@@ -289,14 +260,8 @@ export function useSync() {
                   if (result.data && !isStale()) {
                     const nextSession = stripSessionDiffSnapshots(result.data)
                     const s = targetStore.getState()
-                    const sessions = [...s.session]
-                    const idx = Binary.search(sessions, sessionID, (s) => s.id)
-                    if (idx.found) {
-                      sessions[idx.index] = nextSession
-                    } else {
-                      sessions.splice(idx.index, 0, nextSession)
-                    }
-                    if (!isStale()) {
+                    const sessions = upsertSessionRecord(s.session, nextSession)
+                    if (sessions !== s.session && !isStale()) {
                       targetStore.setState({ session: sessions })
                     }
                   }
@@ -435,4 +400,30 @@ export function useSync() {
     }),
     [syncSession, prefetchSession, loadMore, loadCompleteHistory, hasMore, isLoading, isComplete, recoverPendingQuestions, optimisticAdd, optimisticRemove, optimisticConfirm],
   )
+}
+
+export function usePrefetchSessionMessages() {
+  const { messageLoader, runtimeKey } = useSyncRuntime()
+  const touch = useSessionCacheTouch()
+
+  return useCallback(async ({ directory, sessionID }: { directory: string; sessionID: string }) => {
+    if (getRuntimeKey() !== runtimeKey) return
+    await messageLoader.prefetch({ directory, sessionID })
+    if (messageLoader.getSnapshot({ directory, sessionID }).status !== "ready") return
+    touch(sessionID, directory)
+  }, [messageLoader, runtimeKey, touch])
+}
+
+export function useSessionMessageRecordsForExport() {
+  const { childStores, messageLoader, runtimeKey } = useSyncRuntime()
+  const touch = useSessionCacheTouch()
+
+  return useCallback(async ({ directory, sessionID }: { directory: string; sessionID: string }) => {
+    if (getRuntimeKey() !== runtimeKey) return null
+    const store = childStores.ensureChild(directory, { bootstrap: false })
+    touch(sessionID, directory)
+    await messageLoader.loadComplete({ directory, sessionID })
+    if (getRuntimeKey() !== runtimeKey) return null
+    return buildSessionMessageRecordsSnapshot(store.getState(), sessionID).list
+  }, [childStores, messageLoader, runtimeKey, touch])
 }

@@ -6,11 +6,11 @@ import {
 const PROVIDER_INSTALL_INFO = {
   [TUNNEL_PROVIDER_CLOUDFLARE]: {
     dependency: 'cloudflared',
-    installUrl: 'https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflared/downloads/',
+    installUrl: 'https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/',
     commands: {
       darwin: 'brew install cloudflared',
       win32: 'winget install --id Cloudflare.cloudflared',
-      linux: 'Download cloudflared from https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflared/downloads/',
+      linux: 'Download cloudflared from https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/',
     },
   },
   [TUNNEL_PROVIDER_NGROK]: {

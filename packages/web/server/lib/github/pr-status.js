@@ -674,7 +674,16 @@ export async function resolveGitHubPrStatus({ octokit, directory, branch, remote
     };
   }
 
-  const sourceCandidates = resolvedTargets.slice();
+  // Only the repo this branch actually pushes to (the ranked-first remote)
+  // and its fork network can be the SOURCE of the branch's PRs. Other
+  // configured remotes — a maintainer's checkout often carries contributor
+  // forks — are places to look for an open PR, but their `owner:branch`
+  // heads are unrelated branches that merely share a name; treating them as
+  // sources made a fork's closed `main` PR show up on the local main.
+  const primaryRemoteName = resolvedTargets[0]?.remoteName ?? null;
+  const sourceCandidates = resolvedTargets.filter(
+    (target) => target.remoteName === primaryRemoteName,
+  );
   // When every consulted repo list was complete, a no-PR result is
   // authoritative and the expensive Search API fallback is pointless.
   const coverage = { authoritative: true };

@@ -27,13 +27,19 @@ interface AgentMemoryState {
   projectPath: string | null;
   loading: boolean;
   loaded: boolean;
+  /** When the held entries were last read successfully. */
+  loadedAt: number | null;
   /** True once the server has reported the feature switched off. */
   disabled: boolean;
   globalFailed: boolean;
   projectFailed: boolean;
   error: string | null;
 
-  load: (projectPath: string | null) => Promise<void>;
+  /**
+   * `maxAgeMs` skips the read when the same project's entries were loaded
+   * more recently than that; omit it for an unconditional re-read.
+   */
+  load: (projectPath: string | null, options?: { maxAgeMs?: number }) => Promise<void>;
   /** Re-read the store the last load used. */
   refresh: () => Promise<void>;
   saveEntry: (
@@ -55,7 +61,16 @@ const EMPTY_STATE = {
   globalFailed: false,
   projectFailed: false,
   error: null as string | null,
+  loadedAt: null as number | null,
 };
+
+const EMPTY_MEMORY: AgentMemoryEntry[] = [];
+
+/** Never expose one owner's project entries under another owner's heading. */
+export const selectProjectMemoryForPath = (
+  state: AgentMemoryState,
+  projectPath: string | null,
+): AgentMemoryEntry[] => state.projectPath === projectPath ? state.project : EMPTY_MEMORY;
 
 /**
  * Only the newest load may write to the store. Turning the feature back on
@@ -91,20 +106,37 @@ const errorMessage = (error: unknown, fallback: string): string => (
 export const useAgentMemoryStore = create<AgentMemoryState>((set, get) => ({
   ...EMPTY_STATE,
 
-  load: async (projectPath) => {
+  load: async (projectPath, options) => {
+    const previous = get();
+    const ownerChanged = previous.projectPath !== projectPath;
+    if (
+      options?.maxAgeMs !== undefined
+      && !ownerChanged
+      && previous.loaded
+      && previous.loadedAt !== null
+      && Date.now() - previous.loadedAt < options.maxAgeMs
+    ) {
+      return;
+    }
     const requestId = ++loadSequence;
-    set({ loading: true, projectPath });
+    if (ownerChanged) {
+      set({ loading: true, projectPath, project: [], projectFailed: false });
+    } else {
+      set({ loading: true, projectPath });
+    }
     try {
       const snapshot = await fetchAgentMemory(projectPath);
       if (requestId !== loadSequence) return;
+      const current = get();
       set({
-        global: snapshot.global,
-        project: snapshot.project,
+        global: snapshot.globalFailed ? current.global : snapshot.global,
+        project: snapshot.projectFailed ? current.project : snapshot.project,
         projectPath,
         globalFailed: snapshot.globalFailed,
         projectFailed: snapshot.projectFailed,
         loading: false,
         loaded: true,
+        loadedAt: Date.now(),
         disabled: false,
         error: null,
       });
@@ -119,7 +151,12 @@ export const useAgentMemoryStore = create<AgentMemoryState>((set, get) => ({
         return;
       }
       // Whatever was loaded before stays. Only the error is new.
-      set({ loading: false, error: errorMessage(error, 'Failed to load agent memory') });
+      set({
+        loading: false,
+        globalFailed: true,
+        projectFailed: true,
+        error: errorMessage(error, 'Failed to load agent memory'),
+      });
     }
   },
 
@@ -156,4 +193,3 @@ export const useAgentMemoryStore = create<AgentMemoryState>((set, get) => ({
     set({ ...EMPTY_STATE });
   },
 }));
-

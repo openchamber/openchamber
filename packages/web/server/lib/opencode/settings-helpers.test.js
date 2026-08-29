@@ -66,6 +66,28 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ draftStartersVisible: 'false' })).toEqual({});
   });
 
+  it('sanitizes shared sidebar display preferences', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({
+      sidebarProjectDisplayMode: 'single',
+      sidebarSessionGroupingMode: 'flat',
+      sidebarProjectSortOrder: 'z-a',
+      sidebarShowRecentSection: false,
+    })).toEqual({
+      sidebarProjectDisplayMode: 'single',
+      sidebarSessionGroupingMode: 'flat',
+      sidebarProjectSortOrder: 'z-a',
+      sidebarShowRecentSection: false,
+    });
+    expect(helpers.sanitizeSettingsUpdate({
+      sidebarProjectDisplayMode: 'grid',
+      sidebarSessionGroupingMode: 'project',
+      sidebarProjectSortOrder: 'random',
+      sidebarShowRecentSection: 'false',
+    })).toEqual({});
+  });
+
   it('accepts only booleans for wide chat layout', () => {
     const helpers = createTestHelpers();
 
@@ -80,6 +102,16 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ collapsibleUserMessages: true })).toEqual({ collapsibleUserMessages: true });
     expect(helpers.sanitizeSettingsUpdate({ collapsibleUserMessages: false })).toEqual({ collapsibleUserMessages: false });
     expect(helpers.sanitizeSettingsUpdate({ collapsibleUserMessages: 'true' })).toEqual({});
+  });
+
+  it('sanitizes and returns the persisted editor font size', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ editorFontSize: 20.6 })).toEqual({ editorFontSize: 21 });
+    expect(helpers.sanitizeSettingsUpdate({ editorFontSize: 8 })).toEqual({ editorFontSize: 9 });
+    expect(helpers.sanitizeSettingsUpdate({ editorFontSize: 33 })).toEqual({ editorFontSize: 32 });
+    expect(helpers.sanitizeSettingsUpdate({ editorFontSize: Number.NaN })).toEqual({});
+    expect(helpers.formatSettingsResponse({ editorFontSize: 20 })).toMatchObject({ editorFontSize: 20 });
   });
 
   it('accepts messageStreamTransport as a persisted shared setting', () => {

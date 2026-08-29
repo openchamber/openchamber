@@ -3,6 +3,7 @@ import React from 'react';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { DiffViewIcon } from '@/components/icons/DiffIcon';
 import { Button } from '@/components/ui/button';
+import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { PullRequestView } from '@/components/views/PullRequestView';
 import { TerminalView } from '@/components/views/TerminalView';
@@ -452,7 +453,9 @@ export const ContextPanel: React.FC = () => {
 
   // Lets an agent's browser.open create the tab it needs when none is open yet.
   // Registered from the panel because opening a tab is panel state, not
-  // something the browser view itself can do before it exists.
+  // something the browser view itself can do before it exists. Reveal the
+  // panel so Electron gives the webview a composited surface; capturePage()
+  // cannot capture the zero-width webview inside a closed panel.
   React.useEffect(() => {
     if (!effectiveDirectory) return;
     return registerBrowserOpener((url) => openContextBrowser(effectiveDirectory, url));
@@ -940,7 +943,12 @@ export const ContextPanel: React.FC = () => {
             : activeTab?.mode === 'notes'
                 ? <ProjectContextPanel />
         : activeTab?.mode === 'plan'
-            ? <React.Suspense fallback={null}><PlanView targetPath={activeTab.targetPath} projectPlanId={activeTab.projectPlanId} /></React.Suspense>
+            ? <React.Suspense fallback={null}><PlanView
+                targetPath={activeTab.targetPath}
+                savedProjectPlan={activeTab.projectPlanId && activeTab.projectPlanRef
+                  ? { projectRef: activeTab.projectPlanRef, planId: activeTab.projectPlanId }
+                  : null}
+              /></React.Suspense>
             : null;
 
   const browserTabs = React.useMemo(
@@ -972,6 +980,50 @@ export const ContextPanel: React.FC = () => {
 
   const isFileTabActive = activeTab?.mode === 'file';
 
+  const closeContextPanelTabs = useUIStore((state) => state.closeContextPanelTabs);
+  const renderTabContextMenu = React.useCallback(
+    (args: { id: string; index: number; allIds: string[]; close: () => void }): React.ReactNode => {
+      if (!directoryKey) {
+        return null;
+      }
+      const { id, index, allIds, close } = args;
+      const closeOthers = () => closeContextPanelTabs(directoryKey, allIds.filter((tabId) => tabId !== id));
+      const closeToLeft = () => closeContextPanelTabs(directoryKey, allIds.slice(0, index));
+      const closeToRight = () => closeContextPanelTabs(directoryKey, allIds.slice(index + 1));
+      const closeAll = () => closeContextPanelTabs(directoryKey, allIds);
+      const hasOthers = allIds.length > 1;
+      const isFirst = index === 0;
+      const isLast = index === allIds.length - 1;
+      return (
+        <>
+          <ContextMenuItem onClick={close}>
+            <Icon name="close" className="mr-2 size-4" />
+            {t('contextPanel.tab.menu.close')}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={closeOthers} disabled={!hasOthers}>
+            <Icon name="expand-horizontal" className="mr-2 size-4" />
+            {t('contextPanel.tab.menu.closeOthers')}
+          </ContextMenuItem>
+          <ContextMenuItem onClick={closeToLeft} disabled={isFirst}>
+            <Icon name="expand-left" className="mr-2 size-4" />
+            {t('contextPanel.tab.menu.closeToLeft')}
+          </ContextMenuItem>
+          <ContextMenuItem onClick={closeToRight} disabled={isLast}>
+            <Icon name="expand-right" className="mr-2 size-4" />
+            {t('contextPanel.tab.menu.closeToRight')}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={closeAll} disabled={!hasOthers}>
+            <Icon name="close-circle" className="mr-2 size-4" />
+            {t('contextPanel.tab.menu.closeAll')}
+          </ContextMenuItem>
+        </>
+      );
+    },
+    [closeContextPanelTabs, directoryKey, t],
+  );
+
   const header = (
     <header className="flex h-10 items-stretch border-b border-border">
       {isMultiInstanceMode ? (
@@ -998,6 +1050,7 @@ export const ContextPanel: React.FC = () => {
           }}
           layoutMode="scrollable"
           variant="default"
+          tabContextMenu={renderTabContextMenu}
         />
       ) : (
         <div className="flex min-w-0 flex-1 items-center gap-1.5 px-3">

@@ -12,6 +12,7 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Input } from '@/components/ui/input';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { shouldDismissDropdown } from '@/components/ui/dropdown-navigation';
 import {
     Select,
     SelectContent,
@@ -23,8 +24,10 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { useI18n } from '@/lib/i18n';
+import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
+import { useKeybind } from '@/hooks/useKeybind';
 import type { Theme } from '@/types/theme';
 import { normalizePath } from '../attachments/filePaths';
 import { getProjectDisplayLabel, type DraftTargetProject } from '../state/useDraftTarget';
@@ -57,7 +60,9 @@ const getProjectIconColor = (projectColor?: string | null): string | undefined =
 function ProjectLabel({ project, theme }: { project: DraftTargetProject; theme: Theme }) {
     const projectIconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
     const iconColor = getProjectIconColor(project.color);
-    const fallbackIcon = projectIconName ? (
+    const fallbackIcon = project.kind === 'chat' ? (
+        <Icon name="chat-4" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />
+    ) : projectIconName ? (
         <Icon name={projectIconName} className="h-3.5 w-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />
     ) : (
         <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" style={iconColor ? { color: iconColor } : undefined} />
@@ -103,25 +108,61 @@ export function DraftTargetSelectors(props: DraftTargetProps) {
         onDirectoryChange,
         theme,
     } = props;
+    const [openPicker, setOpenPicker] = React.useState<'project' | 'worktree' | null>(null);
+    const projectTriggerRef = React.useRef<HTMLButtonElement>(null);
+    const worktreeTriggerRef = React.useRef<HTMLButtonElement>(null);
+    const handlePickerKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+        if (openPicker === null || !shouldDismissDropdown(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setOpenPicker(null);
+    };
+
+    useKeybind('open_draft_project_picker', () => {
+        projectTriggerRef.current?.focus();
+        setOpenPicker('project');
+    });
+    useKeybind('open_draft_worktree_picker', () => {
+        if (!showBranchSelector) return false;
+        worktreeTriggerRef.current?.focus();
+        setOpenPicker('worktree');
+    });
+
+    const handleProjectChange = (projectId: string) => {
+        onProjectChange(projectId);
+        setOpenPicker(null);
+    };
+
+    const handleDirectoryChange = (directory: string) => {
+        onDirectoryChange(directory);
+        setOpenPicker(null);
+    };
 
     return (
         <div className="mb-1.5 flex min-w-0 items-center gap-1.5 px-0.5">
             <Select
                 value={selectedProject.id}
-                onValueChange={onProjectChange}
+                open={openPicker === 'project'}
+                onOpenChange={(open) => setOpenPicker(open ? 'project' : null)}
+                onValueChange={handleProjectChange}
+                disableGlobalShortcuts
             >
                 <SelectTrigger
+                    ref={projectTriggerRef}
+                    onKeyDown={handlePickerKeyDown}
                     size="sm"
                     className="h-7 min-w-0 w-fit max-w-[42vw] sm:max-w-[18rem] border-transparent bg-transparent px-1.5 hover:bg-transparent data-[popup-open]:bg-transparent"
                 >
                     <SelectValue>
-                        {<ProjectLabel project={selectedProject} theme={theme} />}
+                        {selectedProject.kind === 'chat'
+                            ? <span className="truncate">{t('chat.chatInput.chooseProject')}</span>
+                            : <ProjectLabel project={selectedProject} theme={theme} />}
                     </SelectValue>
                 </SelectTrigger>
-                <SelectContent fitContent>
+                <SelectContent side="top" collisionAvoidance={{ side: 'none' }} constrainToMain fitContent onKeyDown={handlePickerKeyDown}>
                     {projects.map((project) => (
-                        <SelectItem key={project.id} value={project.id} className="max-w-[24rem] truncate">
-                            {<ProjectLabel project={project} theme={theme} />}
+                        <SelectItem key={project.id} value={project.id} showSelectedBackground={false} className="max-w-[24rem] truncate">
+                            <ProjectLabel project={project} theme={theme} />
                         </SelectItem>
                     ))}
                 </SelectContent>
@@ -130,9 +171,14 @@ export function DraftTargetSelectors(props: DraftTargetProps) {
             {showBranchSelector ? (
                 <Select
                     value={selectedDirectory ?? branchItems[0]?.value ?? normalizePath(selectedProject.path) ?? ''}
-                    onValueChange={onDirectoryChange}
+                    open={openPicker === 'worktree'}
+                    onOpenChange={(open) => setOpenPicker(open ? 'worktree' : null)}
+                    onValueChange={handleDirectoryChange}
+                    disableGlobalShortcuts
                 >
                     <SelectTrigger
+                        ref={worktreeTriggerRef}
+                        onKeyDown={handlePickerKeyDown}
                         size="sm"
                         className="h-7 min-w-0 w-fit max-w-[48vw] sm:max-w-[20rem] border-transparent bg-transparent px-1.5 hover:bg-transparent data-[popup-open]:bg-transparent"
                     >
@@ -140,11 +186,11 @@ export function DraftTargetSelectors(props: DraftTargetProps) {
                             {selectedBranchLabel ?? t('chat.chatInput.branch')}
                         </SelectValue>
                     </SelectTrigger>
-                    <SelectContent className="w-max min-w-48">
+                    <SelectContent side="top" collisionAvoidance={{ side: 'none' }} constrainToMain className="w-max min-w-48" onKeyDown={handlePickerKeyDown}>
                         {projectRootBranchOption ? (
                             <SelectGroup>
                                 <SelectLabel>{t('chat.chatInput.projectRoot')}</SelectLabel>
-                                <SelectItem key={projectRootBranchOption.value} value={projectRootBranchOption.value} className="max-w-[24rem] truncate">
+                                <SelectItem key={projectRootBranchOption.value} value={projectRootBranchOption.value} showSelectedBackground={false} className="max-w-[24rem] truncate">
                                     {projectRootBranchOption.label}
                                 </SelectItem>
                             </SelectGroup>
@@ -163,13 +209,13 @@ export function DraftTargetSelectors(props: DraftTargetProps) {
                                 </button>
                             </div>
                             {worktreeBranchOptions.map((option) => (
-                                <SelectItem key={option.value} value={option.value} className="max-w-[24rem] truncate">
+                                <SelectItem key={option.value} value={option.value} showSelectedBackground={false} className="max-w-[24rem] truncate">
                                     {option.pending ? '⏳ ' : ''}{option.label}
                                 </SelectItem>
                             ))}
                         </SelectGroup>
                         {selectedDirectory && !selectedBranchIsKnown ? (
-                            <SelectItem value={selectedDirectory} className="max-w-[24rem] truncate">
+                            <SelectItem value={selectedDirectory} showSelectedBackground={false} className="max-w-[24rem] truncate">
                                 {selectedBranchLabel}
                             </SelectItem>
                         ) : null}
@@ -195,7 +241,9 @@ export function MobileDraftTargetTriggers(
                 className="inline-flex h-7 min-w-0 max-w-[42vw] flex-shrink cursor-pointer items-center gap-1 rounded-lg px-1.5 typography-micro font-medium text-foreground/80 hover:bg-[var(--interactive-hover)]"
                 onClick={() => onOpenPicker('project')}
             >
-                {<ProjectLabel project={selectedProject} theme={theme} />}
+                {selectedProject.kind === 'chat'
+                    ? <span className="truncate">{t('chat.chatInput.chooseProject')}</span>
+                    : <ProjectLabel project={selectedProject} theme={theme} />}
                 <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
             </button>
             {showBranchSelector ? (
@@ -258,13 +306,7 @@ export function MobileDraftTargetSheets(
                         className="h-9"
                     />
                     <div className="flex flex-col">
-                        {projects
-                            .filter((project) => {
-                                const needle = query.trim().toLowerCase();
-                                if (!needle) return true;
-                                return getProjectDisplayLabel(project).toLowerCase().includes(needle)
-                                    || project.path.toLowerCase().includes(needle);
-                            })
+                        {rankByQuery(projects, query, (project) => [getProjectDisplayLabel(project), project.path])
                             .map((project) => (
                                 <button
                                     key={project.id}
@@ -275,7 +317,7 @@ export function MobileDraftTargetSheets(
                                         onOpenPickerChange(null);
                                     }}
                                 >
-                                    <span className="min-w-0 flex-1">{<ProjectLabel project={project} theme={theme} />}</span>
+                                    <span className="min-w-0 flex-1"><ProjectLabel project={project} theme={theme} /></span>
                                     {project.id === selectedProject.id ? (
                                         <Icon name="check" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
                                     ) : null}
@@ -298,8 +340,7 @@ export function MobileDraftTargetSheets(
                     />
                     <div className="flex flex-col">
                         {(() => {
-                            const needle = query.trim().toLowerCase();
-                            const matches = (label: string) => !needle || label.toLowerCase().includes(needle);
+                            const matches = (label: string) => matchesRankQuery([label], query);
                             const selectedValue = selectedDirectory
                                 ?? branchItems[0]?.value
                                 ?? normalizePath(selectedProject.path)
@@ -343,8 +384,7 @@ export function MobileDraftTargetSheets(
                                             {t('chat.chatInput.worktreeNew')}
                                         </button>
                                     </div>
-                                    {worktreeBranchOptions
-                                        .filter((option) => matches(option.label))
+                                    {rankByQuery(worktreeBranchOptions, query, (option) => [option.label])
                                         .map((option) => renderRow(option.value, `${option.pending ? '⏳ ' : ''}${option.label}`))}
                                     {selectedDirectory && !selectedBranchIsKnown && matches(selectedBranchLabel ?? '')
                                         ? renderRow(selectedDirectory, selectedBranchLabel, 'unknown-current')

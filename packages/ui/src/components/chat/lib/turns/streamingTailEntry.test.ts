@@ -64,8 +64,7 @@ describe('buildLiveStreamingEntry', () => {
         const entry = turnEntry(assistant);
 
         const next = buildLiveStreamingEntry(entry, {
-            activeStreamingMessageId: 'assistant_other',
-            liveParts: [textPart('part_live', 'live')],
+            livePartsByMessageId: { assistant_other: [textPart('part_live', 'live')] },
             showTextJustificationActivity: true,
             showTurnChangedFiles: false,
         });
@@ -79,8 +78,7 @@ describe('buildLiveStreamingEntry', () => {
         const liveParts = [reasoningPart('part_1_live', 'thinking')];
 
         const next = buildLiveStreamingEntry(entry, {
-            activeStreamingMessageId: 'assistant_1',
-            liveParts,
+            livePartsByMessageId: { assistant_1: liveParts },
             showTextJustificationActivity: true,
             showTurnChangedFiles: false,
         });
@@ -102,8 +100,7 @@ describe('buildLiveStreamingEntry', () => {
         const liveParts = [textPart('part_1_live', 'live')];
 
         const next = buildLiveStreamingEntry(entry, {
-            activeStreamingMessageId: 'assistant_1',
-            liveParts,
+            livePartsByMessageId: { assistant_1: liveParts },
             showTextJustificationActivity: false,
             showTurnChangedFiles: false,
         });
@@ -121,8 +118,7 @@ describe('buildLiveStreamingEntry', () => {
         const synthetic = syntheticTextPart('part_synthetic', 'hidden while streaming');
 
         const next = buildLiveStreamingEntry(entry, {
-            activeStreamingMessageId: 'assistant_1',
-            liveParts: [synthetic, visible],
+            livePartsByMessageId: { assistant_1: [synthetic, visible] },
             showTextJustificationActivity: true,
             showTurnChangedFiles: false,
         });
@@ -130,5 +126,40 @@ describe('buildLiveStreamingEntry', () => {
         expect(next.kind).toBe('turn');
         if (next.kind !== 'turn') return;
         expect(next.turn.assistantMessages[0]?.parts).toEqual([visible]);
+    });
+
+    test('keeps a finished step message on its live parts after the stream moves on', () => {
+        const finished = message('assistant_1', 'assistant', 'user_1', []);
+        const streaming = message('assistant_2', 'assistant', 'user_1', []);
+        const entry = turnEntry(finished);
+        if (entry.kind !== 'turn') return;
+        entry.turn.assistantMessageIds = ['assistant_1', 'assistant_2'];
+        entry.turn.assistantMessages = [finished, streaming];
+        const finishedLive = [textPart('part_tool_done', 'tool output')];
+        const streamingLive = [textPart('part_streaming', 'streaming')];
+
+        const next = buildLiveStreamingEntry(entry, {
+            livePartsByMessageId: { assistant_1: finishedLive, assistant_2: streamingLive },
+            showTextJustificationActivity: true,
+            showTurnChangedFiles: false,
+        });
+
+        expect(next.kind).toBe('turn');
+        if (next.kind !== 'turn') return;
+        expect(next.turn.assistantMessages[0]?.parts).toEqual(finishedLive);
+        expect(next.turn.assistantMessages[1]?.parts).toEqual(streamingLive);
+    });
+
+    test('never erases record parts with an empty live array', () => {
+        const assistant = message('assistant_1', 'assistant', 'user_1', [textPart('part_1', 'kept')]);
+        const entry = turnEntry(assistant);
+
+        const next = buildLiveStreamingEntry(entry, {
+            livePartsByMessageId: { assistant_1: [] },
+            showTextJustificationActivity: true,
+            showTurnChangedFiles: false,
+        });
+
+        expect(next).toBe(entry);
     });
 });

@@ -1,10 +1,9 @@
 import React, { useRef, useEffect } from 'react';
-import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { Icon } from '@/components/icon/Icon';
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
+import { formatShortcutForDisplay } from '@/lib/shortcuts';
 
 export interface InlineCommentInputProps {
   initialText?: string;
@@ -18,6 +17,12 @@ export interface InlineCommentInputProps {
   maxWidth?: number;
 }
 
+/**
+ * The comment editor shown under selected diff/editor lines. Styled as the
+ * same pill used by chat quote comments and browser annotations: a rounded
+ * auto-growing textarea with a round attach button, and a muted context line
+ * above naming the file and range.
+ */
 export function InlineCommentInput({
   initialText = '',
   onTextChange,
@@ -30,17 +35,25 @@ export function InlineCommentInput({
   maxWidth,
 }: InlineCommentInputProps) {
   const { t } = useI18n();
-  const themeContext = useOptionalThemeSystem();
-  const currentTheme = themeContext?.currentTheme;
   const { isMobile } = useDeviceInfo();
   const [text, setText] = React.useState(initialText);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const saveShortcut = formatShortcutForDisplay('mod+enter');
+  void isEditing;
 
   const handleTextChange = (value: string) => {
     setText(value);
     onTextChange?.(value);
+    resizeTextarea();
   };
-  
+
+  const resizeTextarea = () => {
+    const element = textareaRef.current;
+    if (!element) return;
+    element.style.height = 'auto';
+    element.style.height = `${Math.min(element.scrollHeight, 120)}px`;
+  };
+
   // Stable range snapshot to prevent race with selection clearing
   const stableRangeRef = useRef(lineRange);
   useEffect(() => {
@@ -62,8 +75,9 @@ export function InlineCommentInput({
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
+    resizeTextarea();
 
-    const scrollContainer = textarea.closest('.overlay-scrollbar-container') as HTMLElement | null;
+    const scrollContainer = textarea.closest<HTMLElement>('.overlay-scrollbar-container');
     const prevScrollTop = scrollContainer?.scrollTop ?? window.scrollY;
     const prevScrollLeft = scrollContainer?.scrollLeft ?? window.scrollX;
 
@@ -100,12 +114,18 @@ export function InlineCommentInput({
     });
   }, [isMobile]);
 
+  const save = () => {
+    if (text.trim()) {
+      onSave(text, normalizeRange(stableRangeRef.current));
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // As the placeholder promises: Cmd/Ctrl+Enter attaches, plain Enter
+    // breaks the line, Escape cancels.
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
-      if (text.trim()) {
-        onSave(text, normalizeRange(stableRangeRef.current));
-      }
+      save();
     } else if (e.key === 'Escape') {
       e.preventDefault();
       onCancel();
@@ -115,75 +135,63 @@ export function InlineCommentInput({
   const handleSaveClick = (e: React.MouseEvent | React.TouchEvent | React.PointerEvent) => {
     // Stop propagation to prevent parent selection clearing before save
     e.stopPropagation();
-    if (text.trim()) {
-      onSave(text, normalizeRange(stableRangeRef.current));
-    }
+    save();
   };
 
   return (
     <div
       className={cn(
-        "rounded-lg border shadow-none w-full max-w-[min(100%,calc(var(--oc-context-panel-width,100vw)-var(--oc-editor-gutter-width,0px)))] overflow-hidden animate-in fade-in zoom-in-95 duration-200",
+        'w-full max-w-[min(100%,calc(var(--oc-context-panel-width,100vw)-var(--oc-editor-gutter-width,0px)))] animate-in fade-in zoom-in-95 duration-200',
         className
       )}
       style={{
-        backgroundColor: currentTheme?.colors?.surface?.elevated,
-        borderColor: currentTheme?.colors?.interactive?.border,
         maxWidth: maxWidth ? `${Math.max(200, Math.floor(maxWidth))}px` : undefined,
       }}
       data-comment-input="true"
       onPointerDown={(e) => e.stopPropagation()}
       onTouchStart={(e) => e.stopPropagation()}
     >
-      <div className="p-3">
-        {(fileLabel || lineRange) && (
-          <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground mb-2">
-            {fileLabel && <span className="truncate max-w-[200px]">{fileLabel}</span>}
-            {fileLabel && lineRange && <span>•</span>}
-            {displayRange && (
-              <span>
-                {t('inlineComment.range.lines', { start: displayRange.start, end: displayRange.end })}
-              </span>
-            )}
+      <div className="oc-glass-popover rounded-xl border border-[var(--interactive-border)] shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]">
+        {(fileLabel || displayRange) ? (
+          <div className="flex items-center gap-2 px-3 pt-2 text-xs font-medium text-[var(--surface-mutedForeground)] opacity-60">
+            {fileLabel ? <span className="max-w-[200px] truncate">{fileLabel}</span> : null}
+            {fileLabel && displayRange ? <span>•</span> : null}
+            {displayRange ? (
+              <span>{t('inlineComment.range.lines', { start: displayRange.start, end: displayRange.end })}</span>
+            ) : null}
           </div>
-        )}
-        
-        <Textarea
-          simple
+        ) : null}
+        <div className="flex items-end gap-2 py-1 pl-3 pr-1">
+        <textarea
           ref={textareaRef}
+          rows={1}
           value={text}
           onChange={(e) => handleTextChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={isMobile ? t('inlineComment.input.placeholderShort') : t('inlineComment.input.placeholder')}
-          outerClassName="rounded-[var(--radius-xl)] bg-[var(--surface-subtle)] ring-1 ring-inset ring-border/60 focus-within:ring-2 focus-within:ring-[var(--interactive-focus-ring)]"
-          className="min-h-[80px] px-3 py-2.5 text-sm resize-y"
+          placeholder={isMobile
+            ? t('inlineComment.input.placeholderShort')
+            : t('inlineComment.input.placeholder', { shortcut: saveShortcut })}
+          className={cn(
+            'min-w-0 flex-1 resize-none bg-transparent text-sm leading-5 text-[var(--surface-foreground)] outline-none placeholder:text-[var(--surface-mutedForeground)] placeholder:opacity-60',
+            isMobile ? 'py-1.5 text-base leading-6' : 'py-1.5'
+          )}
+          style={{ minHeight: 0, height: 'auto' }}
         />
-        
-        <div className="flex items-center justify-end gap-2 mt-3">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onCancel}
-            onPointerDown={(e) => e.stopPropagation()}
-            onTouchStart={(e) => e.stopPropagation()}
-            className="h-8 text-muted-foreground hover:text-foreground"
-          >
-            {t('inlineComment.actions.cancel')}
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleSaveClick}
-            onPointerDown={(e) => e.stopPropagation()}
-            onTouchStart={(e) => e.stopPropagation()}
-            disabled={!text.trim()}
-            className="h-8 min-w-[80px]"
-            style={{
-              backgroundColor: currentTheme?.colors?.status?.success,
-              color: currentTheme?.colors?.status?.successForeground,
-            }}
-          >
-            {isEditing ? t('inlineComment.actions.save') : t('inlineComment.actions.comment')}
-          </Button>
+        <button
+          type="button"
+          onClick={handleSaveClick}
+          onPointerDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          disabled={!text.trim()}
+          className={cn(
+            'mb-0.5 flex shrink-0 items-center justify-center rounded-full bg-[var(--primary-base)] text-[var(--primary-foreground)] transition-opacity duration-150 hover:opacity-90 disabled:opacity-40',
+            isMobile ? 'h-9 w-9' : 'h-8 w-8'
+          )}
+          aria-label={t('inlineComment.actions.comment')}
+          title={t('inlineComment.actions.comment')}
+        >
+          <Icon name="attachment-2" className="h-4 w-4" />
+        </button>
         </div>
       </div>
     </div>

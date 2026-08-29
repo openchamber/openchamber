@@ -1,0 +1,62 @@
+---
+title: Sağlayıcılar, Modeller ve Aracılar
+description: Yapay zeka sağlayıcıları bağlayın, model seçin ve aracılar kurun.
+---
+
+# Sağlayıcılar, Modeller ve Aracılar
+
+OpenChamber'ın bir şey yapabilmesi için önce en az bir yapay zeka sağlayıcısı bağlanmış olmalıdır. Bu sayfa bir sağlayıcı bağlamayı, model seçmeyi ve aracıları ayarlamayı anlatır.
+
+## Bir sağlayıcı bağlayın
+
+1. **Settings → Providers** bölümünü açın.
+2. **Add provider** menüsünü açın ve henüz bağlı olmayan bir sağlayıcı seçin ya da OpenAI uyumlu bir uç nokta için **Other / Custom** seçin.
+3. Sağlayıcıya göre iki yoldan biriyle oturum açın:
+   - **API key** — anahtarınızı yapıştırın ve kaydedin.
+   - **Sign-in (device flow)** — OpenChamber size bir bağlantı ve kısa bir kod gösterir. Bağlantıyı açın, kodu girin ve onaylayın. OpenChamber bağlantıyı kendi başına tamamlar.
+
+### Custom / Other sağlayıcılar
+
+Gateway'ler, kampüs LLM'leri, Ollama, LiteLLM ve benzeri OpenAI uyumlu API'ler için:
+
+1. Sağlayıcı listesinde **Other / Custom** seçin.
+2. Bir sağlayıcı kimliği, görünen ad, base URL (`http://` veya `https://`), API anahtarı (`{env:VAR_NAME}` da olabilir) ve en az bir model id/name girin.
+3. İsterseniz istek başlıkları ekleyin.
+4. Kaydedin. OpenChamber sağlayıcı bloğunu OpenCode config'e yazar ve anahtarı OpenCode auth içinde saklar, düz anahtarlar için ya da bir `{env:VAR}` referansı olarak kaydeder.
+5. Mevcut bir custom sağlayıcıyı değiştirmek için onu açın ve **Edit** seçin.
+
+Custom sağlayıcılar, tam bağlı görünmeden önce bir API anahtarı ya da `{env:VAR_NAME}` ister. Kimlik bilgisi yoksa modeller görünse bile sohbet çağrıları başarısız olur.
+
+Bir sağlayıcı bağlı görünürse modelleri sohbette kullanılabilir hale gelir.
+
+Bağlantıyı kesmek için sağlayıcıyı açın ve girişini kaldırmayı seçin.
+
+## Model seçin
+
+Modeli çalıştığınız yerde seçersiniz:
+
+- sohbette, o oturum için sağlayıcı ve modeli ayarlamak üzere mesaj çubuğundaki model seçiciyi kullanın
+- aracı başına, aşağıda bir varsayılan model ayarlayın
+
+## Aracıları ayarlayın
+
+Aracı, adı olan bir ayardır. Bir model, bir kişilik ve ne yapmasına izin verildiği birlikte tanımlanır.
+
+1. **Settings → Agents** bölümünü açın.
+2. Bir aracı seçin ya da yenisini oluşturun.
+3. Şunlardan birini düzenleyin:
+   - **description** — aracının ne için olduğu
+   - **model** — varsayılan modeli
+   - **temperature** — yanıtlarının ne kadar yaratıcı olduğu
+   - **prompt** — her zaman izlediği kalıcı yönergeler
+   - **tool rules** — hangi araçları kullanabileceği
+
+## Oturum açmalarınız nerede tutulur
+
+Sağlayıcı oturum açmaları OpenChamber'da değil OpenCode'da saklanır. Bu yüzden OpenCode CLI ile paylaşılır. Aynı sağlayıcıyı birden fazla yerde ayarlarsanız en özel ayar kazanır. Proje düzeyindeki ayar, kişisel ayarın üzerine yazar.
+
+## İlgili
+
+- [Integrations](/integrations/) — Claude veya Cursor aboneliğini sağlayıcı olarak kullanın
+- [MCP Servers](/mcp/) — aracılar için ek araçlar ekleyin
+- [Usage & Quotas](/usage/) — ne kadar kullandığınızı izleyin

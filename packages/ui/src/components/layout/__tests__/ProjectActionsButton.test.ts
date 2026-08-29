@@ -26,7 +26,8 @@ describe('issue #2723: Auto-discover hidden when no dev server is detectable', (
     const displayActionsIndex = source.indexOf('const displayActions = React.useMemo(');
     expect(displayActionsIndex).toBeGreaterThan(-1);
     const displayActionsMemo = source.slice(displayActionsIndex, displayActionsIndex + 400);
-    expect(displayActionsMemo).toContain('shouldShowAutoDiscover ? [autoDiscoverAction, ...actions] : actions');
+    expect(displayActionsMemo).toContain('canUseAutoDiscover ? [autoDiscoverAction, ...actions] : actions');
+    expect(displayActionsMemo).not.toContain('autoDiscoverRunActive');
   });
 
   test('loadActions resets devServerDetected to null only when the directory changes', () => {
@@ -88,7 +89,7 @@ describe('issue #2723: Auto-discover hidden when no dev server is detectable', (
   test('selection-clearing effect waits while dev-server detection is pending', () => {
     const effectStart = source.indexOf('React.useEffect(() => {\n    if (devServerDetected === null) {');
     expect(effectStart).toBeGreaterThan(-1);
-    const effectEnd = source.indexOf('  }, [actions, devServerDetected, selectedActionId, shouldShowAutoDiscover]);', effectStart);
+    const effectEnd = source.indexOf('  }, [actions, autoDiscoverRunActive, canUseAutoDiscover, devServerDetected, selectedActionId]);', effectStart);
     expect(effectEnd).toBeGreaterThan(effectStart);
     const effect = source.slice(effectStart, effectEnd);
 
@@ -102,8 +103,6 @@ describe('issue #2723: Auto-discover hidden when no dev server is detectable', (
   });
 
   test('active Auto-discover runs keep the stop affordance even when hidden from the menu', () => {
-    expect(source).toContain('const shouldShowAutoDiscover = canUseAutoDiscover || autoDiscoverRunActive;');
-
     const autoDiscoverRunActiveStart = source.indexOf('const autoDiscoverRunActive = React.useMemo(() => {');
     expect(autoDiscoverRunActiveStart).toBeGreaterThan(-1);
     const autoDiscoverRunActiveEnd = source.indexOf('  }, [normalizedDirectory, projectActionRuns]);', autoDiscoverRunActiveStart);
@@ -117,8 +116,26 @@ describe('issue #2723: Auto-discover hidden when no dev server is detectable', (
 
     const effectStart = source.indexOf('React.useEffect(() => {\n    if (devServerDetected === null) {');
     const effect = source.slice(effectStart, effectStart + 600);
-    expect(effect).toContain('selectedActionId === AUTO_DISCOVER_ACTION_ID && shouldShowAutoDiscover');
-    expect(effect).not.toContain('selectedActionId === AUTO_DISCOVER_ACTION_ID && canUseAutoDiscover');
+    expect(effect).toContain('selectedActionId === AUTO_DISCOVER_ACTION_ID && (canUseAutoDiscover || autoDiscoverRunActive)');
+
+    expect(source).toContain('const selectedAutoDiscoverAvailable = selectedActionId === AUTO_DISCOVER_ACTION_ID\n    && (canUseAutoDiscover || autoDiscoverRunActive);');
+    expect(source).toContain(': selectedAction ?? (autoDiscoverRunActive ? autoDiscoverAction : displayActions[0]) ?? null;');
+  });
+
+  test('launching the default primary action preserves it as the selected stop control', () => {
+    const primaryClickStart = source.indexOf('const handlePrimaryClick = React.useCallback(() => {');
+    expect(primaryClickStart).toBeGreaterThan(-1);
+    const primaryClickEnd = source.indexOf('  }, [normalizedDirectory, projectActionRuns, resolvedSelected, runAction, stopAction]);', primaryClickStart);
+    expect(primaryClickEnd).toBeGreaterThan(primaryClickStart);
+    const primaryClick = source.slice(primaryClickStart, primaryClickEnd);
+
+    expect(primaryClick).toContain('const action = resolvedSelected;');
+    const autoDiscoverGuardIndex = primaryClick.indexOf('if (action.id === AUTO_DISCOVER_ACTION_ID) {');
+    const setSelectionIndex = primaryClick.indexOf('setSelectedActionId(action.id);');
+    const runActionIndex = primaryClick.indexOf('void runAction(action);');
+    expect(autoDiscoverGuardIndex).toBeGreaterThan(-1);
+    expect(setSelectionIndex).toBeGreaterThan(autoDiscoverGuardIndex);
+    expect(runActionIndex).toBeGreaterThan(setSelectionIndex);
   });
 
   test('monitor effect keeps watching Auto-discover runs even when the action is hidden from the menu', () => {
@@ -150,7 +167,7 @@ describe('issue #2723: Auto-discover hidden when no dev server is detectable', (
 describe('issue #2743 follow-up: empty project actions keep the dropdown entry', () => {
   test('the early return for an empty actions list is removed and the resolved selection still exists', () => {
     expect(source).not.toContain('if (!resolvedSelected) {');
-    expect(source).toContain('const resolvedSelected = selectedAction ?? displayActions[0] ?? null;');
+    expect(source).toContain('const resolvedSelected = selectedAutoDiscoverAvailable\n    ? autoDiscoverAction\n    : selectedAction ?? (autoDiscoverRunActive ? autoDiscoverAction : displayActions[0]) ?? null;');
   });
 
   test('the resolved-selected downstream values stay null-safe so rendering can continue without an action', () => {
@@ -159,6 +176,12 @@ describe('issue #2743 follow-up: empty project actions keep the dropdown entry',
     expect(source).toContain('const selectedRunKey = resolvedSelected ? toProjectActionRunKey(normalizedDirectory, resolvedSelected.id) : null;');
     expect(source).toContain('const selectedRunning = selectedRunKey ? projectActionRuns[selectedRunKey] : null;');
     expect(source).toContain('const isAutoDiscoverSelected = resolvedSelected?.id === AUTO_DISCOVER_ACTION_ID;');
+
+    const stopIconMarker = '? <Icon name="stop"';
+    const firstStopIconIndex = source.indexOf(stopIconMarker);
+    expect(firstStopIconIndex).toBeGreaterThan(-1);
+    const secondStopIconIndex = source.indexOf(stopIconMarker, firstStopIconIndex + stopIconMarker.length);
+    expect(secondStopIconIndex).toBeGreaterThan(firstStopIconIndex);
   });
 
   test('the primary action button is guarded by the resolved-selected conditional in both variants', () => {

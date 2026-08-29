@@ -17,10 +17,12 @@ import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { sanitizeStarterRefs } from '@/lib/draftStarters';
 import { normalizeMobileKeyboardMode, setStoredMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { isCapacitorApp } from '@/lib/platform';
 import { isTerminalShell } from '@/lib/terminalShell';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID } from '@/lib/theme/themes';
 import { DEFAULT_OPEN_IN_APP_ID } from '@/lib/openInApps';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
 export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void => {
   if (typeof window === 'undefined') {
@@ -63,6 +65,10 @@ const persistRuntimeSettingsMirror = (settings: DesktopSettings, runtimeKey: str
     homeDirectory: settings.homeDirectory,
     projects: settings.projects,
     activeProjectId: settings.activeProjectId,
+    sidebarProjectDisplayMode: settings.sidebarProjectDisplayMode,
+    sidebarSessionGroupingMode: settings.sidebarSessionGroupingMode,
+    sidebarProjectSortOrder: settings.sidebarProjectSortOrder,
+    sidebarShowRecentSection: settings.sidebarShowRecentSection,
     pinnedDirectories: settings.pinnedDirectories,
     gitmojiEnabled: settings.gitmojiEnabled,
     directoryShowHidden: settings.directoryShowHidden,
@@ -194,11 +200,23 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   setOrRemoveLocalStorage('sttLanguage', typeof settings.sttLanguage === 'string' ? settings.sttLanguage : null);
 };
 
-const dispatchSettingsSynced = (settings: DesktopSettings): void => {
+export interface SettingsSyncedDetail {
+  settings: DesktopSettings;
+  /** Whether listeners may adopt cross-window workspace pointers
+      (activeProjectId / lastDirectory). True only for a bootstrap-grade sync:
+      the settings document is shared by every window of this server, so a
+      mid-session reconciliation adopting them would hijack this window's
+      workspace with another window's choice. */
+  adoptWorkspace: boolean;
+}
+
+const dispatchSettingsSynced = (settings: DesktopSettings, adoptWorkspace: boolean): void => {
   if (typeof window === 'undefined') {
     return;
   }
-  window.dispatchEvent(new CustomEvent<DesktopSettings>('openchamber:settings-synced', { detail: settings }));
+  window.dispatchEvent(new CustomEvent<SettingsSyncedDetail>('openchamber:settings-synced', {
+    detail: { settings, adoptWorkspace },
+  }));
 };
 
 type SettingsSaveState = 'idle' | 'saving' | 'error';
@@ -526,6 +544,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     darkThemeId: DEFAULT_DARK_THEME_ID,
     openInAppId: DEFAULT_OPEN_IN_APP_ID,
     showReasoningTraces: defaults.showReasoningTraces,
+    streamingAutoFollowEnabled: defaults.streamingAutoFollowEnabled,
     workStatusPanelEnabled: defaults.workStatusPanelEnabled,
     workStatusHiddenSections: defaults.workStatusHiddenSections,
     sessionRecapEnabled: defaults.sessionRecapEnabled,
@@ -573,7 +592,6 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     messageStreamTransport: 'auto',
     stickyUserHeader: defaults.stickyUserHeader,
     promptNavigatorEnabled: defaults.promptNavigatorEnabled,
-    expandedEditorToolbar: defaults.expandedEditorToolbar,
     wideChatLayoutEnabled: defaults.wideChatLayoutEnabled,
     showSplitAssistantMessageActions: defaults.showSplitAssistantMessageActions,
     draftStartersVisible: defaults.draftStartersVisible,
@@ -632,6 +650,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.showReasoningTraces === 'boolean' && settings.showReasoningTraces !== store.showReasoningTraces) {
     store.setShowReasoningTraces(settings.showReasoningTraces);
+  }
+  if (typeof settings.streamingAutoFollowEnabled === 'boolean' && settings.streamingAutoFollowEnabled !== store.streamingAutoFollowEnabled) {
+    store.setStreamingAutoFollowEnabled(settings.streamingAutoFollowEnabled);
   }
   if (typeof settings.sessionRecapEnabled === 'boolean' && settings.sessionRecapEnabled !== store.sessionRecapEnabled) {
     store.setSessionRecapEnabled(settings.sessionRecapEnabled);
@@ -837,9 +858,6 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.promptNavigatorEnabled === 'boolean' && settings.promptNavigatorEnabled !== store.promptNavigatorEnabled) {
     store.setPromptNavigatorEnabled(settings.promptNavigatorEnabled);
   }
-  if (typeof settings.expandedEditorToolbar === 'boolean' && settings.expandedEditorToolbar !== store.expandedEditorToolbar) {
-    store.setExpandedEditorToolbar(settings.expandedEditorToolbar);
-  }
   if (typeof settings.wideChatLayoutEnabled === 'boolean' && settings.wideChatLayoutEnabled !== store.wideChatLayoutEnabled) {
     store.setWideChatLayoutEnabled(settings.wideChatLayoutEnabled);
   }
@@ -1029,6 +1047,26 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.filesViewShowGitignored === 'boolean') {
     setFilesViewShowGitignored(settings.filesViewShowGitignored, { persist: false });
   }
+  const sessionDisplayChanges: Partial<ReturnType<typeof useSessionDisplayStore.getState>> = {};
+  if (settings.sidebarProjectDisplayMode === 'all' || settings.sidebarProjectDisplayMode === 'single') {
+    sessionDisplayChanges.projectDisplayMode = settings.sidebarProjectDisplayMode;
+  }
+  if (settings.sidebarSessionGroupingMode === 'by-worktree' || settings.sidebarSessionGroupingMode === 'flat') {
+    sessionDisplayChanges.sessionGroupingMode = settings.sidebarSessionGroupingMode;
+  }
+  if (settings.sidebarProjectSortOrder === 'manual'
+    || settings.sidebarProjectSortOrder === 'a-z'
+    || settings.sidebarProjectSortOrder === 'z-a'
+    || settings.sidebarProjectSortOrder === 'date-added'
+    || settings.sidebarProjectSortOrder === 'recent') {
+    sessionDisplayChanges.projectSortOrder = settings.sidebarProjectSortOrder;
+  }
+  if (typeof settings.sidebarShowRecentSection === 'boolean') {
+    sessionDisplayChanges.showRecentSection = settings.sidebarShowRecentSection;
+  }
+  if (Object.keys(sessionDisplayChanges).length > 0) {
+    useSessionDisplayStore.setState(sessionDisplayChanges);
+  }
 };
 
 const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
@@ -1085,6 +1123,22 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.activeProjectId === 'string' && candidate.activeProjectId.length > 0) {
     result.activeProjectId = candidate.activeProjectId;
   }
+  if (candidate.sidebarProjectDisplayMode === 'all' || candidate.sidebarProjectDisplayMode === 'single') {
+    result.sidebarProjectDisplayMode = candidate.sidebarProjectDisplayMode;
+  }
+  if (candidate.sidebarSessionGroupingMode === 'by-worktree' || candidate.sidebarSessionGroupingMode === 'flat') {
+    result.sidebarSessionGroupingMode = candidate.sidebarSessionGroupingMode;
+  }
+  if (candidate.sidebarProjectSortOrder === 'manual'
+    || candidate.sidebarProjectSortOrder === 'a-z'
+    || candidate.sidebarProjectSortOrder === 'z-a'
+    || candidate.sidebarProjectSortOrder === 'date-added'
+    || candidate.sidebarProjectSortOrder === 'recent') {
+    result.sidebarProjectSortOrder = candidate.sidebarProjectSortOrder;
+  }
+  if (typeof candidate.sidebarShowRecentSection === 'boolean') {
+    result.sidebarShowRecentSection = candidate.sidebarShowRecentSection;
+  }
 
   if (Array.isArray(candidate.securityScopedBookmarks)) {
     result.securityScopedBookmarks = candidate.securityScopedBookmarks.filter(
@@ -1120,6 +1174,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.showReasoningTraces === 'boolean') {
     result.showReasoningTraces = candidate.showReasoningTraces;
+  }
+  if (typeof candidate.streamingAutoFollowEnabled === 'boolean') {
+    result.streamingAutoFollowEnabled = candidate.streamingAutoFollowEnabled;
   }
   if (typeof candidate.sessionRecapEnabled === 'boolean') {
     result.sessionRecapEnabled = candidate.sessionRecapEnabled;
@@ -1470,9 +1527,6 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.promptNavigatorEnabled === 'boolean') {
     result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
   }
-  if (typeof candidate.expandedEditorToolbar === 'boolean') {
-    result.expandedEditorToolbar = candidate.expandedEditorToolbar;
-  }
   if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
     result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
   }
@@ -1635,6 +1689,62 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
 };
 
 type SettingsRuntimeContext = { runtimeKey: string; generation: number };
+type SettingsMutation = { revision: number; changes: Partial<DesktopSettings> };
+type SettingsOperation = { revision: number };
+
+class SettingsMutationTracker {
+  private revision = 0;
+  private mutations: SettingsMutation[] = [];
+  private operations = new Set<SettingsOperation>();
+
+  record(changes: Partial<DesktopSettings>): number {
+    this.revision += 1;
+    if (this.operations.size > 0) {
+      const latest = this.mutations.at(-1);
+      // A new segment is only needed when an operation started after the last one.
+      const crossedOperationBoundary = latest
+        ? [...this.operations].some((operation) => operation.revision >= latest.revision)
+        : true;
+      if (latest && !crossedOperationBoundary) {
+        latest.revision = this.revision;
+        latest.changes = { ...latest.changes, ...changes };
+      } else {
+        this.mutations.push({ revision: this.revision, changes });
+      }
+    }
+    return this.revision;
+  }
+
+  begin(revision = this.revision): SettingsOperation {
+    const operation = { revision };
+    this.operations.add(operation);
+    return operation;
+  }
+
+  reconcile(settings: DesktopSettings, operation: SettingsOperation): DesktopSettings {
+    let reconciled = settings;
+    for (const mutation of this.mutations) {
+      if (mutation.revision <= operation.revision) continue;
+      reconciled = { ...reconciled, ...mutation.changes };
+    }
+    return reconciled;
+  }
+
+  finish(operation: SettingsOperation): void {
+    if (!this.operations.delete(operation)) return;
+    if (this.operations.size === 0) {
+      this.mutations = [];
+      return;
+    }
+    const oldestRevision = Math.min(...[...this.operations].map(({ revision }) => revision));
+    this.mutations = this.mutations.filter((mutation) => mutation.revision > oldestRevision);
+  }
+
+  reset(): void {
+    this.mutations = [];
+    this.operations.clear();
+  }
+}
 
 // Short-lived cache + in-flight dedup for settings fetches to avoid repeated GET calls during startup
 let _settingsRuntimeGeneration = 0;
@@ -1645,6 +1755,8 @@ let _pendingSettingsContext: SettingsRuntimeContext | null = null;
 let _settingsFlushTimer: ReturnType<typeof setTimeout> | null = null;
 let _settingsFlushWaiters: Array<() => void> = [];
 let _settingsLifecycleInitialized = false;
+let _pendingSettingsRevision = 0;
+const _settingsMutationTracker = new SettingsMutationTracker();
 const SETTINGS_CACHE_TTL = 2_000; // 2 seconds — covers the startup burst
 const SETTINGS_DEBOUNCE_MS = 200;
 
@@ -1661,6 +1773,26 @@ const isSettingsRuntimeContextCurrent = (context: SettingsRuntimeContext): boole
   context.generation === _settingsRuntimeGeneration && context.runtimeKey === getRuntimeKey()
 );
 
+// Best-effort flush of the pending debounced settings write at a lifecycle
+// boundary. Clearing the timer before flushing means the write happens exactly
+// once — the flush consumes the pending changes, so a timer that already fired
+// cannot double-write. A hard process kill (crash, task-manager kill) can
+// still lose the in-flight request; this narrows the loss window to the
+// request itself instead of the whole debounce interval (#2197).
+const flushPendingSettingsBeforeSuspend = (): void => {
+  if (!_pendingSettingsChanges) return;
+  if (_settingsFlushTimer) {
+    clearTimeout(_settingsFlushTimer);
+    _settingsFlushTimer = null;
+  }
+  // `keepalive` is what makes this flush actually land: a plain fetch started
+  // from pagehide/beforeunload is cancelled with the document. Settings payloads
+  // are a few KB, far under the 64 KB keepalive budget. `navigator.sendBeacon`
+  // is not an option here — it cannot carry the runtime bearer header, so the
+  // write would be rejected as unauthenticated.
+  void _flushSettingsUpdate({ keepalive: true });
+};
+
 const ensureSettingsRuntimeLifecycle = (): void => {
   if (_settingsLifecycleInitialized || typeof window === 'undefined') return;
   _settingsLifecycleInitialized = true;
@@ -1673,9 +1805,38 @@ const ensureSettingsRuntimeLifecycle = (): void => {
   subscribeRuntimeEndpointChanged((detail) => {
     if (detail.runtimeKey === detail.previousRuntimeKey) return;
     _settingsRuntimeGeneration += 1;
+    _settingsMutationTracker.reset();
+    _pendingSettingsRevision = 0;
     _settingsCache = null;
     _settingsInflight = null;
   });
+
+  // Mirror the deferred safe-storage lifecycle: without these listeners, a
+  // settings change made within SETTINGS_DEBOUNCE_MS of closing the window is
+  // silently dropped, and the stale server snapshot wins on next startup.
+  try {
+    window.addEventListener('pagehide', flushPendingSettingsBeforeSuspend, { capture: true });
+    window.addEventListener('beforeunload', flushPendingSettingsBeforeSuspend, { capture: true });
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') flushPendingSettingsBeforeSuspend();
+      });
+      document.addEventListener('freeze', flushPendingSettingsBeforeSuspend);
+    }
+    // Capacitor: iOS/Android suspend the app without firing pagehide or
+    // beforeunload, and `visibilitychange` alone is not dependable in a
+    // WKWebView. `App.appStateChange` is the authoritative foreground signal on
+    // native (same source `usePushVisibilityBeacon` trusts), so flush there too.
+    if (isCapacitorApp()) {
+      void import('@capacitor/app')
+        .then(({ App }) => App.addListener('appStateChange', ({ isActive }) => {
+          if (!isActive) flushPendingSettingsBeforeSuspend();
+        }))
+        .catch(() => undefined);
+    }
+  } catch {
+    // Restricted environments can reject listeners; the debounce timer still flushes.
+  }
 };
 
 const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Promise<DesktopSettings | null> => {
@@ -1740,19 +1901,21 @@ export const invalidateSettingsCache = (): void => {
   _settingsCache = null;
 };
 
-export const syncDesktopSettings = async (): Promise<void> => {
+export const syncDesktopSettings = async (options?: { adoptWorkspace?: boolean }): Promise<void> => {
+  const adoptWorkspace = options?.adoptWorkspace !== false;
   if (typeof window === 'undefined') {
     return;
   }
   ensureSettingsRuntimeLifecycle();
   const context = captureSettingsRuntimeContext();
+  const operation = _settingsMutationTracker.begin();
 
-  const persistApi = getPersistApi();
+  const persistApis = [getPersistApi(), useSessionDisplayStore.persist];
 
   // Wait for Zustand persist hydration before applying server settings.
   // Otherwise `set()`-calls race with hydration: we set X, then hydration
   // reads localStorage and overwrites back to the persisted value.
-  const waitForHydration = (): Promise<void> => {
+  const waitForPersistHydration = (persistApi: PersistApi | undefined): Promise<void> => {
     if (!persistApi?.hasHydrated || persistApi.hasHydrated()) {
       return Promise.resolve();
     }
@@ -1775,12 +1938,29 @@ export const syncDesktopSettings = async (): Promise<void> => {
       if (persistApi.hasHydrated?.()) finish();
     });
   };
+  const waitForHydration = (): Promise<void> => Promise.all(
+    persistApis.map(waitForPersistHydration),
+  ).then(() => undefined);
 
   // Each step is wrapped in try/catch so a failure in one side-effect (e.g.
   // a TypeError from writing to a contextBridge-protected global) doesn't
   // prevent server settings from reaching the Zustand store.
-  const applySettings = async (settings: DesktopSettings) => {
+  // Local changes sitting in the debounce buffer are not yet tracked as
+  // mutations (record() only stores while a request is in flight), so a GET
+  // racing the debounce window would briefly revert them. Reapply the
+  // pending buffer over every reconciled result.
+  const overlayPendingChanges = (settings: DesktopSettings): DesktopSettings => {
+    if (!_pendingSettingsChanges || !_pendingSettingsContext) return settings;
+    if (!isSettingsRuntimeContextCurrent(_pendingSettingsContext)) return settings;
+    return { ...settings, ..._pendingSettingsChanges };
+  };
+
+  const applySettings = async (loadedSettings: DesktopSettings) => {
     if (!isSettingsRuntimeContextCurrent(context)) return;
+    let settings = overlayPendingChanges(_settingsMutationTracker.reconcile(loadedSettings, operation));
+    await waitForHydration();
+    if (!isSettingsRuntimeContextCurrent(context)) return;
+    settings = overlayPendingChanges(_settingsMutationTracker.reconcile(loadedSettings, operation));
     const shouldPersistCraftGoalMigration = settings.draftStartersCraftGoalAdded !== true
       || settings.draftStartersScheduleTaskAdded !== true;
     // `autoSaveEnabled` is new to the settings backend. Until the server has a
@@ -1789,16 +1969,31 @@ export const syncDesktopSettings = async (): Promise<void> => {
     // `openchamber:files:auto-save-enabled`. Prefer the hydrated store value and
     // seed the backend once so later omitted→default authority is correct.
     const shouldSeedAutoSaveEnabled = typeof settings.autoSaveEnabled !== 'boolean';
+    const shouldSeedSidebarProjectDisplayMode = settings.sidebarProjectDisplayMode === undefined;
+    const shouldSeedSidebarSessionGroupingMode = settings.sidebarSessionGroupingMode === undefined;
+    const shouldSeedSidebarProjectSortOrder = settings.sidebarProjectSortOrder === undefined;
+    const shouldSeedSidebarShowRecentSection = settings.sidebarShowRecentSection === undefined;
     const authoritativeSettings = materializeAuthoritativeUiSettings(settings);
     try {
       persistToLocalStorage(settings);
     } catch (error) {
       console.warn('persistToLocalStorage failed:', error);
     }
-    await waitForHydration();
-    if (!isSettingsRuntimeContextCurrent(context)) return;
     if (shouldSeedAutoSaveEnabled) {
       authoritativeSettings.autoSaveEnabled = useUIStore.getState().autoSaveEnabled;
+    }
+    const sessionDisplayState = useSessionDisplayStore.getState();
+    if (shouldSeedSidebarProjectDisplayMode) {
+      authoritativeSettings.sidebarProjectDisplayMode = sessionDisplayState.projectDisplayMode;
+    }
+    if (shouldSeedSidebarSessionGroupingMode) {
+      authoritativeSettings.sidebarSessionGroupingMode = sessionDisplayState.sessionGroupingMode;
+    }
+    if (shouldSeedSidebarProjectSortOrder) {
+      authoritativeSettings.sidebarProjectSortOrder = sessionDisplayState.projectSortOrder;
+    }
+    if (shouldSeedSidebarShowRecentSection) {
+      authoritativeSettings.sidebarShowRecentSection = sessionDisplayState.showRecentSection;
     }
     if (settings.draftStarters === undefined) {
       useUIStore.setState({ globalDraftStarters: null });
@@ -1819,12 +2014,24 @@ export const syncDesktopSettings = async (): Promise<void> => {
     if (shouldSeedAutoSaveEnabled) {
       migrationPatch.autoSaveEnabled = authoritativeSettings.autoSaveEnabled;
     }
+    if (shouldSeedSidebarProjectDisplayMode) {
+      migrationPatch.sidebarProjectDisplayMode = authoritativeSettings.sidebarProjectDisplayMode;
+    }
+    if (shouldSeedSidebarSessionGroupingMode) {
+      migrationPatch.sidebarSessionGroupingMode = authoritativeSettings.sidebarSessionGroupingMode;
+    }
+    if (shouldSeedSidebarProjectSortOrder) {
+      migrationPatch.sidebarProjectSortOrder = authoritativeSettings.sidebarProjectSortOrder;
+    }
+    if (shouldSeedSidebarShowRecentSection) {
+      migrationPatch.sidebarShowRecentSection = authoritativeSettings.sidebarShowRecentSection;
+    }
     if (Object.keys(migrationPatch).length > 0) {
       await updateDesktopSettings(migrationPatch);
       if (!isSettingsRuntimeContextCurrent(context)) return;
     }
 
-    dispatchSettingsSynced(authoritativeSettings);
+    dispatchSettingsSynced(authoritativeSettings, adoptWorkspace);
   };
 
   try {
@@ -1834,16 +2041,22 @@ export const syncDesktopSettings = async (): Promise<void> => {
     }
   } catch (error) {
     console.warn('Failed to synchronise settings:', error);
+  } finally {
+    _settingsMutationTracker.finish(operation);
   }
 };
 
 // Coalesce rapid updateDesktopSettings calls into a single PUT
-async function _flushSettingsUpdate(): Promise<void> {
+// `keepalive` is set only on the lifecycle-suspend path, where the document may
+// be torn down mid-request; the ordinary debounced write uses a plain fetch.
+async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean } = {}): Promise<void> {
   const changes = _pendingSettingsChanges;
   const context = _pendingSettingsContext;
+  const revision = _pendingSettingsRevision;
   const waiters = _settingsFlushWaiters;
   _pendingSettingsChanges = null;
   _pendingSettingsContext = null;
+  _pendingSettingsRevision = 0;
   _settingsFlushTimer = null;
   _settingsFlushWaiters = [];
   try {
@@ -1852,59 +2065,67 @@ async function _flushSettingsUpdate(): Promise<void> {
       dispatchSettingsSaveState('saved');
       return;
     }
+    const operation = _settingsMutationTracker.begin(revision);
 
-    const runtimeSettings = getRuntimeSettingsAPI();
-    if (runtimeSettings) {
+    try {
+      const runtimeSettings = getRuntimeSettingsAPI();
+      if (runtimeSettings) {
+        try {
+          const updated = await runtimeSettings.save(changes);
+          if (!isSettingsRuntimeContextCurrent(context)) return;
+          if (updated) {
+            const reconciled = _settingsMutationTracker.reconcile(updated, operation);
+            applyDesktopUiPreferences(reconciled);
+            dispatchSettingsSynced(reconciled, false);
+            _settingsCache = null;
+          }
+          dispatchSettingsSaveState(updated ? 'saved' : 'error');
+          return;
+        } catch (error) {
+          if (!isSettingsRuntimeContextCurrent(context)) return;
+          console.warn('Failed to update settings via runtime settings API:', error);
+        }
+      }
+
+      if (!isSettingsRuntimeContextCurrent(context)) return;
       try {
-        const updated = await runtimeSettings.save(changes);
+        const response = await runtimeFetch('/api/config/settings', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify(changes),
+          keepalive,
+        });
+
+        if (!isSettingsRuntimeContextCurrent(context)) return;
+        if (!response.ok) {
+          console.warn('Failed to update shared settings via API:', response.status, response.statusText);
+          dispatchSettingsSaveState('error');
+          return;
+        }
+
+        const updated = sanitizeWebSettings(await response.json().catch(() => null));
         if (!isSettingsRuntimeContextCurrent(context)) return;
         if (updated) {
-          applyDesktopUiPreferences(updated);
-          dispatchSettingsSynced(updated);
+          const reconciled = _settingsMutationTracker.reconcile(updated, operation);
+          applyDesktopUiPreferences(reconciled);
+          dispatchSettingsSynced(reconciled, false);
+          dispatchSettingsSaveState('saved');
+          // Invalidate GET cache so next read sees the fresh data
           _settingsCache = null;
+        } else {
+          dispatchSettingsSaveState('error');
         }
-        dispatchSettingsSaveState(updated ? 'saved' : 'error');
-        return;
       } catch (error) {
-        if (!isSettingsRuntimeContextCurrent(context)) return;
-        console.warn('Failed to update settings via runtime settings API:', error);
+        if (isSettingsRuntimeContextCurrent(context)) {
+          console.warn('Failed to update shared settings via API:', error);
+          dispatchSettingsSaveState('error');
+        }
       }
-    }
-
-    if (!isSettingsRuntimeContextCurrent(context)) return;
-    try {
-      const response = await runtimeFetch('/api/config/settings', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify(changes),
-      });
-
-      if (!isSettingsRuntimeContextCurrent(context)) return;
-      if (!response.ok) {
-        console.warn('Failed to update shared settings via API:', response.status, response.statusText);
-        dispatchSettingsSaveState('error');
-        return;
-      }
-
-      const updated = sanitizeWebSettings(await response.json().catch(() => null));
-      if (!isSettingsRuntimeContextCurrent(context)) return;
-      if (updated) {
-        applyDesktopUiPreferences(updated);
-        dispatchSettingsSynced(updated);
-        dispatchSettingsSaveState('saved');
-        // Invalidate GET cache so next read sees the fresh data
-        _settingsCache = null;
-      } else {
-        dispatchSettingsSaveState('error');
-      }
-    } catch (error) {
-      if (isSettingsRuntimeContextCurrent(context)) {
-        console.warn('Failed to update shared settings via API:', error);
-        dispatchSettingsSaveState('error');
-      }
+    } finally {
+      _settingsMutationTracker.finish(operation);
     }
   } finally {
     waiters.forEach((resolve) => resolve());
@@ -1925,6 +2146,7 @@ export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): 
 
   _pendingSettingsChanges = { ...(_pendingSettingsChanges ?? {}), ...changes };
   _pendingSettingsContext = context;
+  _pendingSettingsRevision = _settingsMutationTracker.record(changes);
   dispatchSettingsSaveState('saving');
 
   if (_settingsFlushTimer) {

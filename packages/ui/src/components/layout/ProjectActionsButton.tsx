@@ -223,13 +223,6 @@ export const ProjectActionsButton = ({
     return normalizeProjectActionDirectory(directory || stableProjectRef?.path || '');
   }, [directory, stableProjectRef?.path]);
 
-  const selectedAction = React.useMemo(() => {
-    if (!selectedActionId) {
-      return null;
-    }
-    return actions.find((entry) => entry.id === selectedActionId) ?? null;
-  }, [actions, selectedActionId]);
-
   const autoDiscoverAction = React.useMemo<OpenChamberProjectAction>(() => ({
     id: AUTO_DISCOVER_ACTION_ID,
     name: t('projectActions.actions.autoDiscover'),
@@ -238,6 +231,13 @@ export const ProjectActionsButton = ({
     autoOpenUrl: true,
   }), [t]);
 
+  const selectedAction = React.useMemo(() => {
+    if (!selectedActionId) {
+      return null;
+    }
+    return actions.find((entry) => entry.id === selectedActionId) ?? null;
+  }, [actions, selectedActionId]);
+
   const canUseAutoDiscover = !isMobile && devServerDetected === true;
   const autoDiscoverRunActive = React.useMemo(() => {
     if (!normalizedDirectory) return false;
@@ -245,10 +245,9 @@ export const ProjectActionsButton = ({
     const run = projectActionRuns[runKey];
     return run?.status === 'running' || run?.status === 'waiting-for-preview' || run?.status === 'stopping';
   }, [normalizedDirectory, projectActionRuns]);
-  const shouldShowAutoDiscover = canUseAutoDiscover || autoDiscoverRunActive;
   const displayActions = React.useMemo(
-    () => shouldShowAutoDiscover ? [autoDiscoverAction, ...actions] : actions,
-    [actions, autoDiscoverAction, shouldShowAutoDiscover]
+    () => canUseAutoDiscover ? [autoDiscoverAction, ...actions] : actions,
+    [actions, autoDiscoverAction, canUseAutoDiscover]
   );
 
   React.useEffect(() => {
@@ -284,13 +283,13 @@ export const ProjectActionsButton = ({
     if (!selectedActionId) {
       return;
     }
-    if (selectedActionId === AUTO_DISCOVER_ACTION_ID && shouldShowAutoDiscover) {
+    if (selectedActionId === AUTO_DISCOVER_ACTION_ID && (canUseAutoDiscover || autoDiscoverRunActive)) {
       return;
     }
     if (!actions.some((entry) => entry.id === selectedActionId)) {
       setSelectedActionId(null);
     }
-  }, [actions, devServerDetected, selectedActionId, shouldShowAutoDiscover]);
+  }, [actions, autoDiscoverRunActive, canUseAutoDiscover, devServerDetected, selectedActionId]);
 
   React.useEffect(() => {
     /**
@@ -709,10 +708,19 @@ export const ProjectActionsButton = ({
     delete previewWaitTimeoutByRunKeyRef.current[runKey];
   }, [normalizedDirectory, projectActionRuns, removeProjectActionRun, setTabSessionId, terminal, updateProjectActionRunStatus]);
 
+  const selectedAutoDiscoverAvailable = selectedActionId === AUTO_DISCOVER_ACTION_ID
+    && (canUseAutoDiscover || autoDiscoverRunActive);
+  const resolvedSelected = selectedAutoDiscoverAvailable
+    ? autoDiscoverAction
+    : selectedAction ?? (autoDiscoverRunActive ? autoDiscoverAction : displayActions[0]) ?? null;
+
   const handlePrimaryClick = React.useCallback(() => {
-    const action = selectedAction ?? displayActions[0];
+    const action = resolvedSelected;
     if (!action) {
       return;
+    }
+    if (action.id === AUTO_DISCOVER_ACTION_ID) {
+      setSelectedActionId(action.id);
     }
     const runKey = toProjectActionRunKey(normalizedDirectory, action.id);
     const runningEntry = projectActionRuns[runKey];
@@ -724,7 +732,7 @@ export const ProjectActionsButton = ({
       return;
     }
     void runAction(action);
-  }, [displayActions, normalizedDirectory, runAction, projectActionRuns, selectedAction, stopAction]);
+  }, [normalizedDirectory, projectActionRuns, resolvedSelected, runAction, stopAction]);
 
   const handleSelectAction = React.useCallback((action: OpenChamberProjectAction, toggleStopIfRunning = false) => {
     setSelectedActionId(action.id);
@@ -755,8 +763,7 @@ export const ProjectActionsButton = ({
     setSettingsDialogOpen(true);
   }, [setSettingsDialogOpen, setSettingsPage, setSettingsProjectsSelectedId, stableProjectRef?.id]);
 
-  const previewAction = selectedAction ?? displayActions[0] ?? null;
-  const previewRun = previewAction ? projectActionRuns[toProjectActionRunKey(normalizedDirectory, previewAction.id)] : null;
+  const previewRun = resolvedSelected ? projectActionRuns[toProjectActionRunKey(normalizedDirectory, resolvedSelected.id)] : null;
   const selectedRunPreviewUrl = useTerminalStore((state) => {
     if (!previewRun) return null;
     return state.sessions.get(previewRun.directory)?.tabs.find((tab) => tab.id === previewRun.tabId)?.previewUrl ?? null;
@@ -765,8 +772,6 @@ export const ProjectActionsButton = ({
   if (runtime.isVSCode || (!allowMobile && isMobile) || !stableProjectRef || !normalizedDirectory) {
     return null;
   }
-
-  const resolvedSelected = selectedAction ?? displayActions[0] ?? null;
 
   const selectedIconKey = (resolvedSelected?.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
   const selectedIconName = resolvedSelected?.id === AUTO_DISCOVER_ACTION_ID

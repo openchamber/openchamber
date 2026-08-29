@@ -175,8 +175,8 @@ describe('DictationStreamManager', () => {
       },
     });
     const { manager, messages } = createManager(session);
-    // Force auto-commit after ~0.05s of audio so two segments form.
-    manager.autoCommitSeconds = 0.05;
+    // Force a hard-cap split after ~0.05s of audio so two segments form.
+    manager.segmentMaxSeconds = 0.05;
 
     await manager.handleStart('d1', FORMAT, {});
     manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64(1600) });
@@ -190,5 +190,63 @@ describe('DictationStreamManager', () => {
     expect(final.payload.text).toBe('first part second part');
     const partials = messages.filter((m) => m.type === 'partial');
     expect(partials.length).toBeGreaterThan(0);
+  });
+
+  it('keeps a short dictation as one segment even across pauses', async () => {
+    const session = new FakeSttSession();
+    const { manager } = createManager(session);
+
+    await manager.handleStart('d1', FORMAT, {});
+    manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64(16000) });
+    manager.handleChunk({ dictationId: 'd1', seq: 1, audioBase64: silentChunkBase64(16000) });
+    manager.handleChunk({ dictationId: 'd1', seq: 2, audioBase64: loudChunkBase64(16000) });
+
+    expect(session.commits).toBe(0);
+
+    manager.handleFinish('d1', 2);
+    await waitFor(() => session.commits === 1);
+  });
+
+  it('splits at a pause once the segment passes the minimum length', async () => {
+    const session = new FakeSttSession();
+    const { manager } = createManager(session);
+    manager.segmentMinSeconds = 3;
+
+    await manager.handleStart('d1', FORMAT, {});
+    // 2s of audio: below the minimum, so this pause must not split.
+    manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64(16000) });
+    manager.handleChunk({ dictationId: 'd1', seq: 1, audioBase64: silentChunkBase64(16000) });
+    expect(session.commits).toBe(0);
+
+    // Past the minimum, the next quiet chunk is a segment boundary.
+    manager.handleChunk({ dictationId: 'd1', seq: 2, audioBase64: loudChunkBase64(16000) });
+    expect(session.commits).toBe(0);
+    manager.handleChunk({ dictationId: 'd1', seq: 3, audioBase64: silentChunkBase64(16000) });
+    expect(session.commits).toBe(1);
+  });
+
+  it('splits pauseless speech at the hard cap', async () => {
+    const session = new FakeSttSession();
+    const { manager } = createManager(session);
+    manager.segmentMinSeconds = 60;
+    manager.segmentMaxSeconds = 2;
+
+    await manager.handleStart('d1', FORMAT, {});
+    manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64(16000) });
+    expect(session.commits).toBe(0);
+    manager.handleChunk({ dictationId: 'd1', seq: 1, audioBase64: loudChunkBase64(16000) });
+    expect(session.commits).toBe(1);
+  });
+
+  it('clears a silence-only segment at the hard cap instead of committing it', async () => {
+    const session = new FakeSttSession();
+    const { manager } = createManager(session);
+    manager.segmentMaxSeconds = 1;
+
+    await manager.handleStart('d1', FORMAT, {});
+    manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: silentChunkBase64(16000) });
+
+    expect(session.commits).toBe(0);
+    expect(session.clears).toBe(1);
   });
 });

@@ -1,0 +1,54 @@
+---
+title: 集成
+description: 将你的 Claude 或 Cursor 订阅用作提供商。
+---
+
+# 集成
+
+集成是一个小型插件，它使用你已有的订阅为 OpenChamber 添加一个提供商。你可以在 **Settings → Integrations** 中管理它们。
+
+> **实验性功能。**我们力求遵守提供商的政策，但帐户限制和暂停仍由各提供商决定。请自行承担使用集成的风险。
+
+可用的集成：
+
+- **Claude Code** — 你的 Claude Pro 或 Max 套餐，无需 API 密钥
+- **Cursor** — 你的 Cursor 套餐的模型额度
+
+## 安装集成
+
+1. 打开 **Settings → Integrations**。
+2. 找到所需的集成并选择 **Install**。
+3. 在提示时重启 OpenCode — 重启后提供商就会出现。
+4. 选择 **Set up** 并登录。之后模型会出现在聊天室的模型选择器中。
+
+集成按用户安装，因此在所有项目中都可用。你可以随时在同一张卡片上更新或移除它们。
+
+## Claude Code
+
+Claude Code 使用你的 Claude Pro 或 Max 套餐 — 无需 API 密钥，也无需单独的 Claude 应用。
+
+1. 安装集成（见上文）。
+2. 选择 **Set up** 并登录。如果你还没有 Claude Code CLI，安装向导会先提供安装，然后再登录。
+
+Claude Code 是这里唯一要求安装并登录其提供商 CLI 的集成。Cursor 不需要其 CLI。
+
+**你的 Claude 账户如何受到保护：** 此集成使用 Anthropic 官方的 Claude Agent SDK 和你已安装的 Claude Code CLI。它不会劫持 OAuth，不会提取或重放浏览器令牌，不会冒充不受支持的客户端，也不会绕过 Anthropic 的身份验证。它始终运行在 Anthropic 支持的访问路径上，因此不会带来与令牌劫持或未授权身份验证变通手段相关的封号风险。
+
+## Cursor
+
+Cursor 让你的 Cursor 套餐中包含的模型可以在 OpenChamber 中使用。
+
+1. 安装集成（见上文）。
+2. 选择 **Set up**，打开链接并在浏览器中授权访问。无需 API 密钥。登录后模型列表会自动加载。
+
+## 更新或移除
+
+- **Update** 安装插件的最新发布版本。
+- **Remove** 从你的 OpenCode 配置中删除该插件。OpenCode 重新加载后，该提供商将不再加载。
+
+如果卡片提示条目需要手动管理，请选择 **Manage plugins** 并在那里清理重复项。
+
+## 相关内容
+
+- [提供商、模型与智能体](/zh-cn/providers/) — 连接其他提供商并选择模型
+- [用量与配额](/zh-cn/usage/) — 跟踪你的使用量

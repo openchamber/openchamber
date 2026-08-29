@@ -176,6 +176,11 @@ const createInstantWorktreeDraft = async (options?: {
   initialPrompt?: string;
   title?: string;
 }): Promise<string | null> => {
+  const currentDraft = useSessionUIStore.getState().newSessionDraft;
+  if (currentDraft.open && currentDraft.target === 'chat') {
+    return null;
+  }
+
   if (isCreatingWorktreeSession) {
     return null;
   }

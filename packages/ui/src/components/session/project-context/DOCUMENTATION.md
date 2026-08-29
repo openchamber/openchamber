@@ -60,14 +60,25 @@ Leaving the section or the project closes it, so its editor never sits over a
 list it no longer matches. Hosts that own a fullscreen plan surface (mobile)
 still pass `onOpenPlan` and keep theirs.
 
-## Pins are project state, not a message attachment
+The panel owns the only source of truth for which project a plan belongs to,
+and it never lets the editor guess. `PlanView` receives the owner as
+`savedProjectPlan={{ projectRef, planId }}` — load and autosave both go to that
+exact project. An earlier version let the editor re-derive the project from the
+current directory, which silently opened an empty document for plans stored
+under the managed Chats owner (`openchamber:chats`), for plans opened from a
+worktree the directory lookup missed, and for plan tabs restored after a
+reload. Persisted plan tabs carry `projectPlanRef` for the same reason; a saved-plan
+tab persisted with an id but no owner is dropped on rehydrate rather than
+reopened against a guessed project. A plain session plan tab legitimately has
+neither an id nor an owner and is kept.
 
-Pinning a note or plan writes to the project, not to the session, so it holds
-across every session in that project until it is unpinned. The composer once
-carried a chip for it, from when pinned context was a one-shot attachment to the
-next message; standing state shown permanently above the input reads as
-something being attached to what you are typing, which it is not. What is
-attached, and the control to detach it, live in the work status panel instead.
+## Pins belong to one session
+
+Notes and plans are project data, but attaching one writes its id to the current
+session metadata. Other sessions in the project do not inherit it. A pin made
+while a new-session draft is open lives on that draft and transfers only to the
+session created by its first message. Work status lists and detaches draft pins
+before that first message, then reads them from the created session metadata.
 
 ## Memory is not a fifth kind of note
 
@@ -107,10 +118,16 @@ its own tool. It feeds this panel only — what a session is told about memory i
 decided server-side by `packages/web/server/lib/session-knowledge`, so it
 reaches sessions that have no UI at all and survives compaction.
 
-Both sides resolve a worktree to its project before touching the store — the
-client through `resolveProjectForSessionDirectory`, the server through
-`agent-memory/project-resolution`. Keying by the session directory instead filed
-a worktree's memories under a project nothing reads.
+`useProjectContextOwner` is the client authority shared by this panel and the
+memory sync. It resolves managed chat directories to the Chats root and a
+worktree to its project before either consumer touches a store. The server uses
+`agent-memory/project-resolution` for the same worktree rule. Keying by a
+worktree session directory would file memories under a project nothing reads.
+
+Project memory is rendered only when the store's `projectPath` matches the
+panel owner. An owner switch hides the previous project's entries before the
+new request starts. A failed request marks the new owner unavailable instead of
+presenting that hidden list as authoritative empty memory.
 
 Turning the switch back on re-reads the store only after the setting has
 finished being written. The switch flips the client immediately, which makes the
@@ -211,10 +228,8 @@ matched the old project would silently hide everything in the new one.
 
 ## Pinned context
 
-The pin toggle on a note or plan marks it as standing context for the agent.
-Assembly and delivery live in `packages/ui/src/lib/projectContextPinning.ts`;
-this surface only owns the toggle. `ComposerPinnedContextChip` shows the user
-what is riding along.
+The pin toggle on a note or plan attaches it to the current session or draft.
+Assembly and delivery live in `packages/web/server/lib/session-knowledge`.
 
 ## Related
 

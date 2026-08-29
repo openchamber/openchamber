@@ -13,40 +13,34 @@
 
 import React from 'react';
 
-import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
-import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
+import { useProjectContextOwner } from '@/hooks/useProjectContextOwner';
 
 /**
  * The directory is a parameter rather than read from `useEffectiveDirectory`,
  * because this runs above `SyncProvider` — that hook reads the sync context and
  * throws outside it, which took the whole app down with a blank window.
  */
+const AGENT_MEMORY_FRESH_MS = 60_000;
+
 export const useAgentMemorySync = (directory: string | null): void => {
   const enabled = useUIStore((state) => (
     state.agentMemoryFeatureAvailable && state.agentMemoryToolEnabled
   ));
-  const projects = useProjectsStore((state) => state.projects);
-  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
-  const effectiveDirectory = directory ?? '';
   const load = useAgentMemoryStore((state) => state.load);
+  const owner = useProjectContextOwner(directory);
+  const projectPath = owner?.path ?? null;
 
-  const projectPath = React.useMemo(() => {
-    if (!effectiveDirectory) {
-      return null;
-    }
-    const resolved = resolveProjectForSessionDirectory(projects, availableWorktreesByProject, effectiveDirectory);
-    return resolved?.path ?? null;
-  }, [availableWorktreesByProject, effectiveDirectory, projects]);
-
+  // The owner re-resolves on every directory switch; entries loaded moments
+  // ago for the same project are still current, and the change event below
+  // forces a re-read when the agent writes memory.
   React.useEffect(() => {
     if (!enabled) {
       return;
     }
-    void load(projectPath);
+    void load(projectPath, { maxAgeMs: AGENT_MEMORY_FRESH_MS });
   }, [enabled, load, projectPath]);
 
   // The agent writes memory mid-turn through its own tool, so the index for the

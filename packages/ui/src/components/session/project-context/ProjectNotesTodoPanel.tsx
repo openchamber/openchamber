@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { useI18n } from '@/lib/i18n';
 import { resolveProjectContextId, type ProjectRef, type ProjectTodoItem } from '@/lib/projectContextApi';
 import { cn } from '@/lib/utils';
-import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
+import { selectProjectMemoryForPath, useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
 import { countHighlightedMemories, memoryViewKey } from '@/lib/agentMemoryBadges';
 import { EMPTY_PROJECT_CONTEXT_ENTRY, useProjectContextStore } from '@/stores/useProjectContextStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -17,6 +17,8 @@ import { NotesSection } from './NotesSection';
 import { PlansSection } from './PlansSection';
 import { TodosSection } from './TodosSection';
 import { useProjectTodoSend } from './useProjectTodoSend';
+import { fetchSessionKnowledgeSummary, setSessionProjectContextPin, type SessionProjectContextPins } from '@/lib/sessionKnowledgeApi';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 /** Lazy: the plan editor is a large view, and most panel visits never open it. */
 const PlanView = React.lazy(() => import('@/components/views/PlanView').then((module) => ({ default: module.PlanView })));
@@ -27,8 +29,9 @@ interface ProjectNotesTodoPanelProps {
   canCreateWorktree?: boolean;
   onActionComplete?: () => void;
   /** When provided, opening a plan calls this instead of the desktop context
-      panel tab — hosts without ContextPanel (mobile) render their own viewer. */
-  onOpenPlan?: (plan: { id: string; title: string }) => void;
+      panel tab — hosts without ContextPanel (mobile) render their own viewer.
+      The plan carries its owner so the host's viewer cannot guess wrong. */
+  onOpenPlan?: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
   className?: string;
 }
 
@@ -85,6 +88,43 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   );
   const loadProjectContext = useProjectContextStore((state) => state.load);
   const saveTodos = useProjectContextStore((state) => state.saveTodos);
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
+  const newSessionDraft = useSessionUIStore((state) => state.newSessionDraft);
+  const setDraftProjectContextPin = useSessionUIStore((state) => state.setDraftProjectContextPin);
+  const [sessionPins, setSessionPins] = React.useState<SessionProjectContextPins>({ notes: [], plans: [] });
+
+  React.useEffect(() => {
+    if (newSessionDraft.open) {
+      setSessionPins(newSessionDraft.projectContextPins ?? { notes: [], plans: [] });
+      return;
+    }
+    let cancelled = false;
+    void fetchSessionKnowledgeSummary(currentSessionDirectory, currentSessionId).then((summary) => {
+      if (!cancelled) {
+        setSessionPins({
+          notes: summary.notes.map((note) => note.id),
+          plans: summary.plans.map((plan) => plan.id),
+        });
+      }
+    });
+    return () => { cancelled = true; };
+  }, [currentSessionDirectory, currentSessionId, newSessionDraft.open, newSessionDraft.projectContextPins]);
+
+  const toggleSessionPin = React.useCallback(async (kind: 'note' | 'plan', id: string, pinned: boolean) => {
+    if (newSessionDraft.open) {
+      setDraftProjectContextPin(kind, id, pinned);
+      return true;
+    }
+    if (!currentSessionId || !currentSessionDirectory) return false;
+    const next = await setSessionProjectContextPin(currentSessionDirectory, currentSessionId, kind, id, pinned);
+    if (!next) return false;
+    setSessionPins(next);
+    return true;
+  }, [currentSessionDirectory, currentSessionId, newSessionDraft.open, setDraftProjectContextPin]);
+
+  const pinnedNoteIds = React.useMemo(() => new Set(sessionPins.notes), [sessionPins.notes]);
+  const pinnedPlanIds = React.useMemo(() => new Set(sessionPins.plans), [sessionPins.plans]);
 
   // The whole feature is one switch: with memory off there is nothing for the
   // agent to manage, so showing the user what is stored would be pointless.
@@ -94,8 +134,11 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const memoryDisabledByServer = useAgentMemoryStore((state) => state.disabled);
   const memoryVisible = memoryEnabled && !memoryDisabledByServer;
   const globalMemory = useAgentMemoryStore((state) => state.global);
-  const projectMemory = useAgentMemoryStore((state) => state.project);
+  const projectMemory = useAgentMemoryStore(
+    (state) => selectProjectMemoryForPath(state, projectRef?.path ?? null),
+  );
 
+  const isMobile = useUIStore((state) => state.isMobile);
   const storedTab = useUIStore((state) => state.projectContextTab);
   const setStoredTab = useUIStore((state) => state.setProjectContextTab);
   const requestedTab = TAB_ORDER.includes(storedTab as ProjectContextTab)
@@ -374,6 +417,42 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
 
       </div>
 
+      {/* Mobile: a half-width panel has no room for a side column, so the
+          sections become the same pill strip the mobile drawer's surface
+          tabs use — the active pill carries the label, the rest collapse to
+          icon and count. */}
+      {isMobile ? (
+        <nav
+          className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto px-3 pb-2"
+          aria-label={t('rightSidebar.contextNotesTodo.sections.label')}
+        >
+          {sections.map((section) => {
+            const isActive = activeTab === section.id;
+            return (
+              <button
+                key={section.id}
+                type="button"
+                onClick={() => setStoredTab(section.id)}
+                aria-current={isActive ? 'page' : undefined}
+                className={cn(
+                  'flex flex-shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 transition-colors',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                  isActive
+                    ? 'border-transparent bg-interactive-active text-foreground'
+                    : 'border-[var(--interactive-border)] text-muted-foreground',
+                )}
+              >
+                <Icon name={section.icon} className="h-4 w-4 flex-shrink-0" />
+                {isActive ? (
+                  <span className="whitespace-nowrap typography-meta">{section.label}</span>
+                ) : null}
+                <span className="typography-micro text-muted-foreground">{section.count}</span>
+              </button>
+            );
+          })}
+        </nav>
+      ) : null}
+
       {/* Content first, sidebar on the right — the same order and the same
           drag-to-resize edge the files surface uses, so the two panels do not
           disagree about where navigation lives. */}
@@ -387,6 +466,8 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
             notes={contextEntry.notes}
             disabled={isLoading}
             query={query}
+            pinnedNoteIds={pinnedNoteIds}
+            onTogglePinned={(noteId, pinned) => toggleSessionPin('note', noteId, pinned)}
           />
         ) : null}
 
@@ -413,22 +494,25 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
             projectRef={projectRef}
             plans={contextEntry.plans}
             query={query}
+            pinnedPlanIds={pinnedPlanIds}
+            onTogglePinned={(planId, pinned) => toggleSessionPin('plan', planId, pinned)}
             // Hosts that own a fullscreen plan surface (mobile) keep it; on the
             // desktop panel the plan opens here, in place of the list.
             onOpenPlan={onOpenPlan ?? setOpenPlan}
           />
         ) : null}
 
-        {activeTab === 'plans' && openPlan ? (
+        {activeTab === 'plans' && openPlan && projectRef ? (
           <React.Suspense fallback={null}>
             <PlanView
-              projectPlanId={openPlan.id}
+              savedProjectPlan={{ projectRef, planId: openPlan.id }}
               onNavigatedToChat={() => setOpenPlan(null)}
             />
           </React.Suspense>
         ) : null}
         </div>
 
+        {isMobile ? null : (
         <nav
           className="relative flex flex-shrink-0 flex-col gap-0.5 overflow-y-auto border-l border-[var(--interactive-border)] p-2"
           style={{ width: `${sidebarWidth}px` }}
@@ -471,6 +555,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
             );
           })}
         </nav>
+        )}
       </div>
 
       <TodoSendDialog

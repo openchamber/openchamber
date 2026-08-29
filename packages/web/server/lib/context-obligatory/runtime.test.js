@@ -73,7 +73,10 @@ describe('context obligatory runtime', () => {
       const url = new URL(typeof input === 'string' ? input : input.url);
       requests.push({ path: url.pathname, method: init.method ?? 'GET', body: init.body });
       if (url.pathname === '/session/ses_1' && init.method === 'PATCH') return json({});
-      if (url.pathname === '/session/ses_1') return json({ id: 'ses_1', metadata: {} });
+      if (url.pathname === '/session/ses_1') return json({
+        id: 'ses_1',
+        metadata: { openchamber: { knowledge_context_delivered: 'sig-before-compaction' } },
+      });
       if (url.pathname === '/session/ses_1/message') return json([
         { info: { id: 'msg_agent', role: 'assistant', providerID: 'provider', modelID: 'model', agent: 'build' } },
         { info: { id: 'msg_summary', role: 'assistant', summary: true, time: { completed: 30 } } },
@@ -81,18 +84,30 @@ describe('context obligatory runtime', () => {
       if (url.pathname === '/session/ses_1/prompt_async') return json({});
       throw new Error(`Unexpected ${url.pathname}`);
     }));
+    const resolvePending = vi.fn(async () => ({
+      text: '## Pinned notes\n\n- Remember this.',
+      signature: 'sig-1',
+    }));
     const runtime = createContextObligatoryRuntime({
       buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
       getOpenCodeAuthHeaders: () => ({}),
       sessionKnowledgeRuntime: {
         metadataKey: 'knowledge_context_delivered',
-        readDeliveredSignature: () => '',
-        resolvePending: async () => ({ text: '## Pinned notes\n\n- Remember this.', signature: 'sig-1' }),
+        readPins: () => ({ notes: ['n1'], plans: [] }),
+        resolvePending,
       },
     });
 
-    await runtime.processPayload({ type: 'session.compacted', properties: { sessionID: 'ses_1' } });
+    await runtime.processPayload({
+      type: 'session.compacted',
+      properties: { sessionID: 'ses_1', directory: '/work/project' },
+    });
 
+    expect(resolvePending).toHaveBeenCalledWith(
+      '/work/project',
+      '',
+      { notes: ['n1'], plans: [] },
+    );
     const prompt = requests.find((request) => request.path.endsWith('/prompt_async'));
     expect(JSON.parse(prompt.body).parts[0].text).toContain('Remember this.');
     const patch = requests.find((request) => request.method === 'PATCH');
@@ -123,7 +138,7 @@ describe('context obligatory runtime', () => {
       getOpenCodeAuthHeaders: () => ({}),
       sessionKnowledgeRuntime: {
         metadataKey: 'knowledge_context_delivered',
-        readDeliveredSignature: () => '',
+        readPins: () => ({ notes: ['n1'], plans: [] }),
         resolvePending: async () => ({ text: 'Pinned notes block', signature: 'sig-1' }),
       },
     });
@@ -152,7 +167,7 @@ describe('context obligatory runtime', () => {
       getOpenCodeAuthHeaders: () => ({}),
       sessionKnowledgeRuntime: {
         metadataKey: 'knowledge_context_delivered',
-        readDeliveredSignature: () => 'sig-1',
+        readPins: () => ({ notes: [], plans: [] }),
         resolvePending: async () => ({ text: '', signature: 'sig-1' }),
       },
     });

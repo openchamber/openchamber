@@ -1,3 +1,4 @@
+import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 
 import { toast } from '@/components/ui';
@@ -10,7 +11,7 @@ import { useI18n } from '@/lib/i18n';
 import { AGENT_MEMORY_BODY_MAX_LENGTH, AGENT_MEMORY_TITLE_MAX_LENGTH, type AgentMemoryEntry, type AgentMemoryScope } from '@/lib/agentMemoryApi';
 import { classifyMemory, memoryViewKey, type MemoryBadge } from '@/lib/agentMemoryBadges';
 import { cn } from '@/lib/utils';
-import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
+import { selectProjectMemoryForPath, useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 
 /**
@@ -159,7 +160,7 @@ export const MemorySection: React.FC<{
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
 
   const globalEntries = useAgentMemoryStore((state) => state.global);
-  const projectEntries = useAgentMemoryStore((state) => state.project);
+  const projectEntries = useAgentMemoryStore((state) => selectProjectMemoryForPath(state, projectPath));
   const globalFailed = useAgentMemoryStore((state) => state.globalFailed);
   const projectFailed = useAgentMemoryStore((state) => state.projectFailed);
   const deleteEntry = useAgentMemoryStore((state) => state.deleteEntry);
@@ -186,13 +187,10 @@ export const MemorySection: React.FC<{
     };
   }, [markViewed, viewKey]);
 
-  const visibleEntries = React.useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return entries;
-    return entries.filter((entry) => (
-      entry.title.toLowerCase().includes(needle) || entry.body.toLowerCase().includes(needle)
-    ));
-  }, [entries, query]);
+  const visibleEntries = React.useMemo(
+    () => entries.filter((entry) => matchesRankQuery([entry.title, entry.body], query)),
+    [entries, query],
+  );
 
   const handleDelete = React.useCallback(async (memoryId: string) => {
     if (!await deleteEntry(scope, memoryId)) {

@@ -127,24 +127,13 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
     directoryOverride?: string | null;
     conflictDecisions?: Record<string, ConflictDecision>;
   }) => {
-    // Build selection with clawdhub metadata if present
-    const selection: { skillDir: string; clawdhub?: { slug: string; version: string } } = {
-      skillDir: request.skillDir,
-    };
-    if (item?.clawdhub) {
-      selection.clawdhub = {
-        slug: item.clawdhub.slug,
-        version: item.clawdhub.version,
-      };
-    }
-
     const result = await installSkills({
       source: request.source,
       subpath: request.subpath,
       gitIdentityId: item?.gitIdentityId,
       scope: request.scope,
       targetSource: request.targetSource,
-      selections: [selection],
+      selections: [{ skillDir: request.skillDir }],
       conflictPolicy: 'prompt',
       conflictDecisions: request.conflictDecisions,
     }, { directory: request.directoryOverride ?? null });

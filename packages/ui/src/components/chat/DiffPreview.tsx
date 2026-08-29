@@ -3,17 +3,29 @@ import { cn } from '@/lib/utils';
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { getMarkdownSyntaxVars } from '@/components/chat/markdown/markdownSyntaxVars';
-import { useWorkerHighlightedLines } from '@/components/code/useWorkerHighlightedLines';
+import {
+  useWorkerHighlightedLines,
+  type WorkerHighlightedLinesResult,
+} from '@/components/code/useWorkerHighlightedLines';
 import { parseDiffToUnified } from './message/toolRenderers';
 
-// One highlighted line: swaps in worker-tokenized inner HTML when ready, falls
-// back to plain text while loading or on failure.
-const CodeLineContent: React.FC<{ content: string; html: string | undefined }> = ({ content, html }) =>
-  html !== undefined ? (
-    <span className="whitespace-pre-wrap break-all" dangerouslySetInnerHTML={{ __html: html }} />
-  ) : (
-    <span className="whitespace-pre-wrap break-all">{content}</span>
-  );
+// Keep the line's layout stable while a cold worker request finishes. Plain
+// text appears only if highlighting fails, avoiding a visible color flash.
+interface CodeLineContentProps {
+  content: string;
+  html: string | undefined;
+  status: WorkerHighlightedLinesResult['status'];
+}
+
+const CodeLineContent: React.FC<CodeLineContentProps> = ({ content, html, status }) => {
+  if (status === 'ready' && html !== undefined) {
+    return <span className="whitespace-pre-wrap break-all" dangerouslySetInnerHTML={{ __html: html }} />;
+  }
+  if (status === 'loading') {
+    return <span aria-hidden className="invisible whitespace-pre-wrap break-all">{content}</span>;
+  }
+  return <span className="whitespace-pre-wrap break-all">{content}</span>;
+};
 
 interface DiffPreviewProps {
     diff: string;
@@ -44,7 +56,7 @@ export const DiffPreview: React.FC<DiffPreviewProps> = ({ diff, filePath }) => {
 
                     <div>
                         {hunk.lines.map((line, lineIdx) => {
-                            const html = highlighted?.[lineCursor];
+                            const html = highlighted.lines?.[lineCursor];
                             lineCursor += 1;
                             return (
                                 <div
@@ -67,7 +79,7 @@ export const DiffPreview: React.FC<DiffPreviewProps> = ({ diff, filePath }) => {
                                         {line.lineNumber || ''}
                                     </span>
                                     <div className="flex-1 min-w-0">
-                                        <CodeLineContent content={line.content} html={html} />
+                                        <CodeLineContent content={line.content} html={html} status={highlighted.status} />
                                     </div>
                                 </div>
                             );
@@ -106,7 +118,11 @@ export const WritePreview: React.FC<WritePreviewProps> = ({ content, filePath })
                             {lineIdx + 1}
                         </span>
                         <div className="flex-1 min-w-0">
-                            <CodeLineContent content={line || ' '} html={highlighted?.[lineIdx]} />
+                            <CodeLineContent
+                                content={line || ' '}
+                                html={highlighted.lines?.[lineIdx]}
+                                status={highlighted.status}
+                            />
                         </div>
                     </div>
                 ))}

@@ -130,7 +130,8 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     const now = Date.now();
     const existing = sessionStates.get(sessionId);
     const existingAttentionState = sessionAttentionStates.get(sessionId);
-    if (existing && existing.lastUpdateAt > now - 5000 && status === existing.status) {
+    const isRestartInterruption = metadata.reason === 'opencode-restart';
+    if (existing && existing.lastUpdateAt > now - 5000 && status === existing.status && !isRestartInterruption) {
       return;
     }
 
@@ -145,7 +146,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     const attentionState = sessionAttentionStates.get(sessionId);
     const attentionChanged = !!attentionState && existingAttentionState?.needsAttention !== attentionState.needsAttention;
     const clients = getNotificationClients();
-    if (!existing || existing.status !== status || attentionChanged) {
+    if (!existing || existing.status !== status || attentionChanged || isRestartInterruption) {
       const state = sessionStates.get(sessionId);
       const syntheticPayload = {
         type: 'openchamber:session-status',
@@ -293,6 +294,41 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     }
   };
 
+  const interruptBusySessionsAfterRestart = () => {
+    const interruptedSessionIds = new Set();
+    for (const [sessionId, state] of sessionStates) {
+      if (state.status === 'busy' || state.status === 'retry') {
+        interruptedSessionIds.add(sessionId);
+      }
+    }
+    for (const [sessionId, activity] of sessionActivityPhases) {
+      if (activity.phase === 'busy') {
+        interruptedSessionIds.add(sessionId);
+      }
+    }
+
+    const eventId = `opencode-restart-${Date.now()}`;
+    for (const sessionId of interruptedSessionIds) {
+      updateSessionState(sessionId, 'idle', eventId, {
+        message: 'Interrupted by OpenCode restart',
+        reason: 'opencode-restart',
+      });
+      broadcastEvent?.({
+        type: 'session.error',
+        properties: {
+          sessionID: sessionId,
+          error: {
+            name: 'MessageAbortedError',
+            message: 'The running turn was interrupted when OpenCode restarted.',
+          },
+        },
+      });
+    }
+
+    resetAllSessionActivityToIdle();
+    return { sessionIds: [...interruptedSessionIds] };
+  };
+
   const cleanupOldSessionStates = () => {
     const now = Date.now();
     for (const [sessionId, data] of sessionStates) {
@@ -358,6 +394,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     markSessionUnviewed,
     markUserMessageSent,
     resetAllSessionActivityToIdle,
+    interruptBusySessionsAfterRestart,
     dispose,
   };
 };

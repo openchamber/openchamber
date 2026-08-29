@@ -1,9 +1,11 @@
 import React from 'react';
 import { cn, fuzzyMatch } from '@/lib/utils';
-import { useSkillsStore } from '@/stores/useSkillsStore';
+import { selectSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
+import { AutocompleteRowTooltip } from './composer/ui/AutocompleteRowTooltip';
 
 interface SkillInfo {
   name: string;
@@ -31,19 +33,22 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
 }, ref) => {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const isMobile = useUIStore((state) => state.isMobile);
-  const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, isMobile);
+  const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, true, 240);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const selectedIndexRef = React.useRef(0);
   const keyboardNavigationRef = React.useRef(false);
   const [filteredSkills, setFilteredSkills] = React.useState<SkillInfo[]>([]);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
-  const skills = useSkillsStore((s) => s.skills);
+  // Skills of the directory the composer sends to (session directory, or the
+  // Chats root for a chat draft), not of the project the app was on last.
+  const effectiveDirectory = useEffectiveDirectory();
+  const skills = useSkillsStore((s) => selectSkillsForDirectory(s, effectiveDirectory));
   const loadSkills = useSkillsStore((s) => s.loadSkills);
 
   React.useEffect(() => {
-    // Always trigger loadSkills when autocomplete opens to ensure project context is fresh
-    void loadSkills();
-  }, [loadSkills]);
+    // Always trigger loadSkills when autocomplete opens to ensure the directory's skills are fresh
+    void loadSkills(effectiveDirectory);
+  }, [effectiveDirectory, loadSkills]);
 
   React.useEffect(() => {
     const normalizedQuery = searchQuery.trim();
@@ -126,6 +131,7 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
     const isProject = skill.scope === 'project';
     const source = skill.source || 'opencode';
     return (
+      <AutocompleteRowTooltip description={skill.description} active={!isMobile && index === selectedIndex}>
       <div
         key={`${skill.name}-${skill.scope}`}
         ref={(el) => {
@@ -157,13 +163,9 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
               {source}
             </span>
           </div>
-          {skill.description && !isMobile && (
-            <div className="typography-meta text-muted-foreground mt-0.5 truncate">
-              {skill.description}
-            </div>
-          )}
         </div>
       </div>
+      </AutocompleteRowTooltip>
     );
   };
 

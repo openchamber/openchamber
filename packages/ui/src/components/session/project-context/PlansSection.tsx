@@ -1,10 +1,11 @@
+import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { requestFileAccess } from '@/lib/desktop';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
-import { parsePlanMarkdown, type ProjectPlanLink, type ProjectRef } from '@/lib/projectContextApi';
+import { parsePlanMarkdown, resolveProjectContextId, type ProjectPlanLink, type ProjectRef } from '@/lib/projectContextApi';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { cn } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -22,16 +23,18 @@ export const PlansSection: React.FC<{
   plans: ProjectPlanLink[];
   /** Panel-wide filter, matched against plan titles. */
   query: string;
-  /** Hosts without a ContextPanel (mobile) render their own plan viewer. */
-  onOpenPlan?: (plan: { id: string; title: string }) => void;
-}> = ({ projectRef, plans, query, onOpenPlan }) => {
+  /** Hosts without a ContextPanel (mobile) render their own plan viewer. The
+      plan carries its owner so the host viewer never guesses the project. */
+  onOpenPlan?: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
+  pinnedPlanIds: ReadonlySet<string>;
+  onTogglePinned: (planId: string, pinned: boolean) => Promise<boolean>;
+}> = ({ projectRef, plans, query, onOpenPlan, pinnedPlanIds, onTogglePinned }) => {
   const { t } = useI18n();
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const [isImporting, setIsImporting] = React.useState(false);
   const [deletingPlanId, setDeletingPlanId] = React.useState<string | null>(null);
   const createPlan = useProjectContextStore((state) => state.createPlan);
   const removePlan = useProjectContextStore((state) => state.deletePlan);
-  const setPlanPinned = useProjectContextStore((state) => state.setPlanPinned);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
 
@@ -136,25 +139,24 @@ export const PlansSection: React.FC<{
 
   const handleTogglePinned = React.useCallback(
     async (planId: string, pinned: boolean) => {
-      const ok = await setPlanPinned(projectRef, planId, pinned);
+      const ok = await onTogglePinned(planId, pinned);
       if (!ok) {
         const detail = useProjectContextStore.getState().getEntry(projectRef).error;
         toast.error(t('rightSidebar.contextNotesTodo.toast.updatePlanFailed'), detail ? { description: detail } : undefined);
       }
     },
-    [projectRef, setPlanPinned, t]
+    [onTogglePinned, projectRef, t]
   );
 
-  const visiblePlans = React.useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return plans;
-    return plans.filter((plan) => plan.title.toLowerCase().includes(needle));
-  }, [plans, query]);
+  const visiblePlans = React.useMemo(
+    () => plans.filter((plan) => matchesRankQuery([plan.title], query)),
+    [plans, query],
+  );
 
   const handleOpenPlan = React.useCallback(
     (plan: ProjectPlanLink) => {
       if (onOpenPlan) {
-        onOpenPlan({ id: plan.id, title: plan.title });
+        onOpenPlan({ id: plan.id, title: plan.title, projectRef });
         return;
       }
       const panelDirectory = currentDirectory?.trim() || projectRef.path.trim();
@@ -164,11 +166,15 @@ export const PlansSection: React.FC<{
       openContextPanelTab(panelDirectory, {
         mode: 'plan',
         projectPlanId: plan.id,
-        dedupeKey: `plan:${plan.id}`,
+        projectPlanRef: projectRef,
+        // Storage identity is derived from the project path, not the settings
+        // id, so the tab identity uses the same derivation. Two projects
+        // sharing a settings id but not a path must not merge plan tabs.
+        dedupeKey: `plan:${resolveProjectContextId(projectRef)}:${plan.id}`,
         label: plan.title,
       });
     },
-    [currentDirectory, onOpenPlan, openContextPanelTab, projectRef.path]
+    [currentDirectory, onOpenPlan, openContextPanelTab, projectRef]
   );
 
   return (
@@ -220,16 +226,16 @@ export const PlansSection: React.FC<{
                 </button>
                 <button
                   type="button"
-                  onClick={() => void handleTogglePinned(plan.id, !plan.pinned)}
+                  onClick={() => void handleTogglePinned(plan.id, !pinnedPlanIds.has(plan.id))}
                   className={cn(
                     'inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
-                    plan.pinned ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+                    pinnedPlanIds.has(plan.id) ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
                   )}
-                  aria-pressed={plan.pinned}
-                  aria-label={plan.pinned
+                  aria-pressed={pinnedPlanIds.has(plan.id)}
+                  aria-label={pinnedPlanIds.has(plan.id)
                     ? t('rightSidebar.contextNotesTodo.notes.actions.unpin')
                     : t('rightSidebar.contextNotesTodo.notes.actions.pin')}
-                  title={plan.pinned
+                  title={pinnedPlanIds.has(plan.id)
                     ? t('rightSidebar.contextNotesTodo.notes.actions.unpin')
                     : t('rightSidebar.contextNotesTodo.notes.actions.pin')}
                 >

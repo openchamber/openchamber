@@ -3,6 +3,7 @@ import type {
   GitDiffResponse,
   GetGitDiffOptions,
   GetGitRangeDiffOptions,
+  GetGitRangeFilesOptions,
   GitFileDiffResponse,
   GetGitFileDiffOptions,
   GitBranch,
@@ -37,6 +38,7 @@ import type {
 import { runtimeFetch } from './runtime-fetch';
 import { getRuntimeUrlResolver } from './runtime-url';
 import { getRuntimeKey } from './runtime-switch';
+import { notifyGitStatusInvalidated } from './gitStatusInvalidation';
 
 const API_BASE = '/api/git';
 const GIT_STATUS_CACHE_TTL_MS = 1200;
@@ -65,6 +67,20 @@ const invalidateGitStatusCache = (directory: string): void => {
     gitStatusCache.delete(statusKey);
     gitStatusInFlight.delete(statusKey);
   }
+  notifyGitStatusInvalidated(directory);
+};
+
+// Shared success path for status-affecting mutations. The payload is parsed
+// before invalidating so a failed mutation (non-ok response handled by the
+// caller, or a malformed body) cannot publish a false state change.
+const completeStatusMutation = async <T>(directory: string, response: Response): Promise<T> => {
+  // SAFETY: every caller rejects non-ok responses before reaching here, and on
+  // success each git route returns the body declared by that route's return
+  // type in `./api/types`. The assertion names that per-route contract; there is
+  // no narrower type available at this shared success path.
+  const result = await response.json() as T;
+  invalidateGitStatusCache(directory);
+  return result;
 };
 
 function buildUrl(
@@ -248,6 +264,51 @@ export async function getGitRangeDiff(
   return response.json();
 }
 
+export async function getGitRangeFiles(
+  directory: string,
+  options: GetGitRangeFilesOptions
+): Promise<import('./api/types').GitRangeFileEntry[]> {
+  const { base, head } = options;
+  if (!base || !head) {
+    throw new Error('base and head are required to fetch git range files');
+  }
+
+  const response = await runtimeFetch(
+    buildUrl(`${API_BASE}/range-files`, directory, { base, head })
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to get git range files: ${response.statusText}`);
+  }
+
+  const payload = (await response.json()) as { files?: unknown };
+  if (!Array.isArray(payload.files)) return [];
+  return payload.files.filter((entry): entry is import('./api/types').GitRangeFileEntry => {
+    if (!entry || typeof entry !== 'object') return false;
+    const candidate = entry as { path?: unknown; status?: unknown };
+    return typeof candidate.path === 'string' && typeof candidate.status === 'string';
+  });
+}
+
+export async function getBranchBase(
+  directory: string,
+  branch: string
+): Promise<import('./api/types').GitBranchBaseResponse> {
+  if (!branch) {
+    throw new Error('branch is required to get branch base');
+  }
+
+  const response = await runtimeFetch(
+    buildUrl(`${API_BASE}/branch-base`, directory, { branch })
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to get branch base: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
 export async function getGitFileDiff(directory: string, options: GetGitFileDiffOptions): Promise<GitFileDiffResponse> {
   const { path, staged } = options;
   if (!path) {
@@ -418,7 +479,7 @@ export async function deleteGitBranch(directory: string, payload: GitDeleteBranc
     throw new Error(error.error || 'Failed to delete branch');
   }
 
-  return response.json();
+  return completeStatusMutation(directory, response);
 }
 
 export async function deleteRemoteBranch(directory: string, payload: GitDeleteRemoteBranchPayload): Promise<{ success: boolean }> {
@@ -437,7 +498,7 @@ export async function deleteRemoteBranch(directory: string, payload: GitDeleteRe
     throw new Error(error.error || 'Failed to delete remote branch');
   }
 
-  return response.json();
+  return completeStatusMutation(directory, response);
 }
 
 export async function removeRemote(directory: string, payload: GitRemoveRemotePayload): Promise<{ success: boolean }> {
@@ -457,7 +518,7 @@ export async function removeRemote(directory: string, payload: GitRemoveRemotePa
     throw new Error(error.error || 'Failed to remove remote');
   }
 
-  return response.json();
+  return completeStatusMutation(directory, response);
 }
 
 export async function generateCommitMessage(
@@ -664,9 +725,7 @@ export async function createGitCommit(
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to create commit');
   }
-  const result = await response.json();
-  invalidateGitStatusCache(directory);
-  return result;
+  return completeStatusMutation(directory, response);
 }
 
 export async function gitPush(
@@ -682,9 +741,7 @@ export async function gitPush(
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to push');
   }
-  const result = await response.json();
-  invalidateGitStatusCache(directory);
-  return result;
+  return completeStatusMutation(directory, response);
 }
 
 export async function gitPull(
@@ -700,9 +757,7 @@ export async function gitPull(
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to pull');
   }
-  const result = await response.json();
-  invalidateGitStatusCache(directory);
-  return result;
+  return completeStatusMutation(directory, response);
 }
 
 export async function gitFetch(
@@ -718,9 +773,7 @@ export async function gitFetch(
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to fetch');
   }
-  const result = await response.json();
-  invalidateGitStatusCache(directory);
-  return result;
+  return completeStatusMutation(directory, response);
 }
 
 export async function listGitStashes(directory: string): Promise<{ stashes: GitStashEntry[] }> {
@@ -755,7 +808,7 @@ export async function stashGitChanges(directory: string, options: { message?: st
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to stash changes');
   }
-  return response.json();
+  return completeStatusMutation(directory, response);
 }
 
 const postStashRef = async (directory: string, path: string, options: { ref: string }): Promise<{ success: boolean; ref: string }> => {
@@ -768,7 +821,7 @@ const postStashRef = async (directory: string, path: string, options: { ref: str
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || `Failed to ${path}`);
   }
-  return response.json();
+  return completeStatusMutation(directory, response);
 };
 
 export const applyGitStash = (directory: string, options: { ref: string }) => postStashRef(directory, 'stash/apply', options);
@@ -785,7 +838,7 @@ export async function checkoutBranch(directory: string, branch: string): Promise
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to checkout branch');
   }
-  return response.json();
+  return completeStatusMutation(directory, response);
 }
 
 export async function createBranch(
@@ -802,7 +855,7 @@ export async function createBranch(
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to create branch');
   }
-  return response.json();
+  return completeStatusMutation(directory, response);
 }
 
 export async function renameBranch(
@@ -819,7 +872,7 @@ export async function renameBranch(
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to rename branch');
   }
-  return response.json();
+  return completeStatusMutation(directory, response);
 }
 
 export async function getGitLog(
@@ -1022,7 +1075,7 @@ export async function rebase(
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to rebase');
   }
-  return response.json();
+  return completeStatusMutation(directory, response);
 }
 
 export async function abortRebase(directory: string): Promise<{ success: boolean }> {
@@ -1033,7 +1086,7 @@ export async function abortRebase(directory: string): Promise<{ success: boolean
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to abort rebase');
   }
-  return response.json();
+  return completeStatusMutation(directory, response);
 }
 
 export async function merge(
@@ -1049,7 +1102,7 @@ export async function merge(
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to merge');
   }
-  return response.json();
+  return completeStatusMutation(directory, response);
 }
 
 export async function checkoutCommit(
@@ -1065,7 +1118,7 @@ export async function checkoutCommit(
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to checkout commit');
   }
-  return response.json();
+  return completeStatusMutation(directory, response);
 }
 
 export async function cherryPick(
@@ -1081,7 +1134,7 @@ export async function cherryPick(
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to cherry-pick');
   }
-  return response.json();
+  return completeStatusMutation(directory, response);
 }
 
 export async function revertCommit(
@@ -1097,7 +1150,7 @@ export async function revertCommit(
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to revert commit');
   }
-  return response.json();
+  return completeStatusMutation(directory, response);
 }
 
 export async function resetToCommit(
@@ -1115,7 +1168,7 @@ export async function resetToCommit(
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to reset');
   }
-  return response.json();
+  return completeStatusMutation(directory, response);
 }
 
 export async function abortMerge(directory: string): Promise<{ success: boolean }> {
@@ -1126,7 +1179,7 @@ export async function abortMerge(directory: string): Promise<{ success: boolean 
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to abort merge');
   }
-  return response.json();
+  return completeStatusMutation(directory, response);
 }
 
 export async function continueRebase(directory: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }> {
@@ -1137,7 +1190,7 @@ export async function continueRebase(directory: string): Promise<{ success: bool
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to continue rebase');
   }
-  return response.json();
+  return completeStatusMutation(directory, response);
 }
 
 export async function continueMerge(directory: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }> {
@@ -1148,7 +1201,7 @@ export async function continueMerge(directory: string): Promise<{ success: boole
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to continue merge');
   }
-  return response.json();
+  return completeStatusMutation(directory, response);
 }
 
 export async function stash(

@@ -368,13 +368,9 @@ export function ScheduledTasksDialog() {
       return;
     }
     setOpen(false);
-    if (isMobile) {
-      useFilesViewTabsStore.getState().setSelectedPath(selectedProject.path, task.loopFile, { allowOutsideRoot: true });
-      useUIStore.getState().setActiveMainTab('files');
-      return;
-    }
+    useFilesViewTabsStore.getState().setSelectedPath(selectedProject.path, task.loopFile, { allowOutsideRoot: true });
     useUIStore.getState().openContextFile(selectedProject.path, task.loopFile);
-  }, [isMobile, selectedProject?.path, setOpen]);
+  }, [selectedProject?.path, setOpen]);
 
   const handleRunNow = React.useCallback(async (task: ScheduledTask) => {
     if (!selectedProjectID) {
@@ -397,8 +393,7 @@ export function ScheduledTasksDialog() {
         // this surface (MainLayout closes surfaces on session selection).
         const project = projects.find((entry) => entry.id === selectedProjectID);
         useSessionUIStore.getState().setCurrentSession(sessionId, project?.path ?? null);
-        useUIStore.getState().setActiveMainTab('chat');
-      }
+        }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.runFailed'));
     } finally {

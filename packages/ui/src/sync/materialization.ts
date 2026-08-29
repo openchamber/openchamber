@@ -270,7 +270,21 @@ export function materializeSessionSnapshots(
   const snapshots = nextMessages.map((message) => recordsByMessageID.get(message.id)!)
   const existingMessages = state.message[sessionID]
   const currentMessages = existingMessages ?? []
-  const messages = mergeMessages(currentMessages, nextMessages)
+  const incomingByID = new Map(nextMessages.map((message) => [message.id, message] as const))
+  let reconciledCurrentMessages = currentMessages
+  for (let index = 0; index < currentMessages.length; index += 1) {
+    const existing = currentMessages[index]
+    const incoming = incomingByID.get(existing.id)
+    if (
+      existing.role !== "assistant"
+      || existing.error?.name !== "MessageAbortedError"
+      || incoming?.role !== "assistant"
+      || incoming.time.completed === undefined
+    ) continue
+    if (reconciledCurrentMessages === currentMessages) reconciledCurrentMessages = [...currentMessages]
+    reconciledCurrentMessages[index] = incoming
+  }
+  const messages = mergeMessages(reconciledCurrentMessages, nextMessages)
   const messagesChanged = messages !== currentMessages || (existingMessages === undefined && snapshots.length === 0)
 
   let partsChanged = false

@@ -89,7 +89,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                                 <Icon name="add-circle" className={cn(iconSizeClass, 'text-current')} />
                             </button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start">
+                        <DropdownMenuContent side="top" align="start">
                             <DropdownMenuItem
                                 onSelect={() => {
                                     requestAnimationFrame(handlePickLocalFiles);

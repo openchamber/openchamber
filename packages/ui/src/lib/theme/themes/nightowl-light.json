@@ -133,8 +133,8 @@
       "heading4": "#403F53",
       "link": "#2AA298",
       "linkHover": "#4876D6",
-      "inlineCode": "#2AA298",
-      "inlineCodeBackground": "#F0F0F0",
+      "inlineCode": "#00746A",
+      "inlineCodeBackground": "#EEEEEE",
       "blockquote": "#7A8181",
       "blockquoteBorder": "#D9D9D9",
       "listMarker": "#4876D699"

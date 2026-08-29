@@ -1,10 +1,12 @@
+import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsSection, SETTINGS_CUSTOM_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
+import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,18 +19,23 @@ import {
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
-import { noteDeferredRestartFromPayload, recordDeferredOpenCodeRestart } from '@/lib/opencode/deferredRestart';
+import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
+import type { ConfigChangeScope } from '@/lib/configSync';
+import { recordDeferredOpenCodeRestart } from '@/lib/opencode/deferredRestart';
 import { cn } from '@/lib/utils';
 import type { ModelMetadata } from '@/types';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { opencodeClient } from '@/lib/opencode/client';
-import { shouldLoadAvailableProviders } from './providerAvailability';
+import { requiresProviderAuth, shouldLoadAvailableProviders } from './providerAvailability';
 import {
   getOAuthAuthMethods,
   parseAuthPayload,
+  providerHasCredentials,
   requiresOpenCodeRestartAfterOAuth,
+  shouldAutoOpenAuthPanel,
   shouldShowApiKeyAuth,
+  shouldShowModelsSection,
   type AuthMethod,
   type OAuthAuthMethodEntry,
 } from './providerAuth';
@@ -45,6 +52,14 @@ import {
   type CustomProviderPersistPlan,
   type ProviderConfigScope,
 } from './custom-provider-form';
+
+/**
+ * Providers whose credentials come from several env vars (Bedrock, Azure,
+ * Vertex) never get a single resolved `Provider.key` from OpenCode, so the
+ * declared env list is the only signal that they are configured at all.
+ */
+const providerDeclaresEnv = (provider: { env?: string[] } | undefined): boolean =>
+  Array.isArray(provider?.env) && provider.env.some((name) => name.trim().length > 0);
 
 const formatCompactNumber = (value: number) => new Intl.NumberFormat(getCurrentIntlLocale(), {
   notation: 'compact',
@@ -144,7 +159,10 @@ const parseProvidersPayload = (payload: unknown): ProviderOption[] => {
 
 export const ProvidersPage: React.FC = () => {
   const { t } = useI18n();
-  const providers = useConfigStore((state) => state.providers);
+  // Settings browses whichever project its own selector points at; the app
+  // stays where it is.
+  const settingsDirectory = useSettingsDirectory();
+  const providers = useConfigStore((state) => selectProvidersForDirectory(state, settingsDirectory));
   const selectedProviderId = useConfigStore((state) => state.selectedProviderId);
   const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
   const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
@@ -165,7 +183,11 @@ export const ProvidersPage: React.FC = () => {
   const [providerSearchQuery, setProviderSearchQuery] = React.useState('');
   const [providerDropdownOpen, setProviderDropdownOpen] = React.useState(false);
   const [providerSources, setProviderSources] = React.useState<Record<string, ProviderSources>>({});
+  // Bumped after auth writes so the source snapshot is refetched even when the
+  // selected provider id is unchanged (OAuth/API key success path).
+  const [providerSourcesRevision, setProviderSourcesRevision] = React.useState(0);
   const [showAuthPanel, setShowAuthPanel] = React.useState(false);
+  const [authPanelDismissedForId, setAuthPanelDismissedForId] = React.useState<string | null>(null);
   const [editingCustomProviderId, setEditingCustomProviderId] = React.useState<string | null>(null);
   const [editingCustomFormInitial, setEditingCustomFormInitial] = React.useState<CustomProviderFormState | null>(null);
   const [editingCustomScope, setEditingCustomScope] = React.useState<ProviderConfigScope | null>(null);
@@ -293,6 +315,7 @@ export const ProvidersPage: React.FC = () => {
   React.useEffect(() => {
     if (selectedProviderId === ADD_PROVIDER_ID) {
       setShowAuthPanel(true);
+      setAuthPanelDismissedForId(null);
       setEditingCustomProviderId(null);
       setEditingCustomFormInitial(null);
       setEditingCustomScope(null);
@@ -301,6 +324,7 @@ export const ProvidersPage: React.FC = () => {
     }
 
     setShowAuthPanel(false);
+    setAuthPanelDismissedForId(null);
     if (editingCustomProviderId && editingCustomProviderId !== selectedProviderId) {
       setEditingCustomProviderId(null);
       setEditingCustomFormInitial(null);
@@ -310,7 +334,7 @@ export const ProvidersPage: React.FC = () => {
   }, [selectedProviderId, editingCustomProviderId]);
 
   // Unauthenticated providers (OAuth-only plugins before login) should open the
-  // auth panel instead of a false "Connected" summary.
+  // auth panel instead of a false "Connected" summary. Respect an explicit Hide.
   React.useEffect(() => {
     if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID) {
       return;
@@ -320,14 +344,26 @@ export const ProvidersPage: React.FC = () => {
       return;
     }
     const provider = providers.find((entry) => entry.id === selectedProviderId);
-    const envEntries = Array.isArray(provider?.env)
-      ? provider.env.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-      : [];
-    const hasCreds = Boolean(sources.auth.exists) || envEntries.length > 0;
-    if (!hasCreds) {
+    const hasCreds = providerHasCredentials({
+      key: provider?.key,
+      authSourceExists: sources.auth.exists,
+      optionsApiKey: (provider as { options?: { apiKey?: string | null } } | undefined)?.options?.apiKey ?? null,
+      envDeclared: providerDeclaresEnv(provider),
+    });
+    const isEditableCustomProvider = Boolean(
+      provider && isConfigDefinedCustomProvider(provider, sources)
+    );
+    if (
+      shouldAutoOpenAuthPanel({
+        sourcesLoaded: true,
+        hasCredentials: hasCreds,
+        userDismissed: authPanelDismissedForId === selectedProviderId,
+        isEditableCustomProvider,
+      })
+    ) {
       setShowAuthPanel(true);
     }
-  }, [selectedProviderId, providerSources, providers]);
+  }, [selectedProviderId, providerSources, providers, authPanelDismissedForId]);
 
   React.useEffect(() => {
     if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID) {
@@ -340,7 +376,8 @@ export const ProvidersPage: React.FC = () => {
       try {
         // OpenChamber-only metadata endpoint: the SDK exposes provider data but
         // not local auth/source-file provenance used by this settings UI.
-        const response = await runtimeFetch(`/api/provider/${encodeURIComponent(selectedProviderId)}/source`, {
+        const query = settingsDirectory ? `?directory=${encodeURIComponent(settingsDirectory)}` : '';
+        const response = await runtimeFetch(`/api/provider/${encodeURIComponent(selectedProviderId)}/source${query}`, {
           method: 'GET',
           headers: { Accept: 'application/json' },
         });
@@ -369,8 +406,60 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedProviderId, t]);
+  }, [selectedProviderId, providerSourcesRevision, settingsDirectory, t]);
 
+  const refreshProviderSources = React.useCallback(() => {
+    setProviderSourcesRevision((revision) => revision + 1);
+  }, []);
+
+  const markAuthWriteSucceeded = React.useCallback((providerId: string) => {
+    // Optimistically mark auth present so a providers refresh that has not yet
+    // stamped provider.key cannot reopen the panel / hide models with a stale
+    // "Credentials missing" summary before the source refetch lands.
+    setProviderSources((prev) => {
+      const existing = prev[providerId];
+      return {
+        ...prev,
+        [providerId]: {
+          auth: { exists: true, path: existing?.auth.path ?? null },
+          user: existing?.user ?? { exists: false, path: null },
+          project: existing?.project ?? { exists: false, path: null },
+          ...(existing?.custom ? { custom: existing.custom } : {}),
+        },
+      };
+    });
+    setAuthPanelDismissedForId(null);
+    setShowAuthPanel(false);
+    setSelectedProvider(providerId);
+    refreshProviderSources();
+  }, [refreshProviderSources, setSelectedProvider]);
+
+  // The mutation above already persisted to disk. If OpenCode is externally
+  // managed (e.g. the user is running a separate `opencode serve` they have to
+  // restart themselves), reloadOpenCodeConfiguration throws with
+  // `requiresManualRestart`. Surface the restart guidance instead of a
+  // misleading "mutation failed" toast and ensure the deferred-restart
+  // payload is recorded so the Settings page can show pending-restart
+  // guidance consistently across providers, API keys, custom providers,
+  // and disconnects.
+  const applyConfigReloadOrRecordDeferred = React.useCallback(
+    async (scope: ConfigChangeScope, idForDeferred?: string) => {
+      try {
+        await reloadOpenCodeConfiguration({ scopes: [scope], mode: 'active' });
+        return 'reloaded';
+      } catch (error) {
+        const requiresManual = (error as Error & { requiresManualRestart?: boolean })?.requiresManualRestart === true;
+        if (requiresManual) {
+          if (idForDeferred) {
+            recordDeferredOpenCodeRestart(scope, { id: idForDeferred });
+          }
+          return 'manual-restart';
+        }
+        throw error;
+      }
+    },
+    [],
+  );
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
   const selectedSources = selectedProviderId ? providerSources[selectedProviderId] : undefined;
 
@@ -395,8 +484,12 @@ export const ProvidersPage: React.FC = () => {
 
       toast.success(t('settings.providers.page.toast.apiKeySaved'));
       setApiKeyInputs((prev) => ({ ...prev, [providerId]: '' }));
-      recordDeferredOpenCodeRestart('providers', { id: providerId });
-      setSelectedProvider(providerId);
+      // Mutation succeeded: the auth key is on disk. The reload can fail with
+      // requiresManualRestart when OpenCode is externally managed; the helper
+      // records the deferred-restart payload instead of throwing a misleading
+      // "mutation failed" toast.
+      await applyConfigReloadOrRecordDeferred('providers', providerId);
+      markAuthWriteSucceeded(providerId);
     } catch (error) {
       console.error('Failed to save API key:', error);
       toast.error(t('settings.providers.page.toast.apiKeySaveFailed'));
@@ -430,7 +523,7 @@ export const ProvidersPage: React.FC = () => {
           ? (editingCustomScope ?? resolveProviderConfigScope(providerSources[editingCustomProviderId]))
           : 'user',
       });
-      const response = await runtimeFetch('/api/provider', {
+      const response = await runtimeFetch(`/api/provider${settingsDirectory ? `?directory=${encodeURIComponent(settingsDirectory)}` : ''}`, {
         method: 'PUT',
         headers: {
           Accept: 'application/json',
@@ -453,8 +546,11 @@ export const ProvidersPage: React.FC = () => {
       setEditingCustomScope(null);
       setCustomAuthFailureHint(null);
       setLastCustomPersistId(null);
-      noteDeferredRestartFromPayload(payload, 'providers', { id: plan.providerID });
-      setSelectedProvider(plan.providerID);
+      // Mutation succeeded; route through the helper so an externally managed
+      // OpenCode does not produce a misleading "save failed" toast for a write
+      // that already persisted.
+      await applyConfigReloadOrRecordDeferred('providers', plan.providerID);
+      markAuthWriteSucceeded(plan.providerID);
     } catch (error) {
       console.error('Failed to save custom provider:', error);
       toast.error(
@@ -475,7 +571,9 @@ export const ProvidersPage: React.FC = () => {
     if (requiresOpenCodeRestartAfterOAuth(providerId)) {
       recordDeferredOpenCodeRestart('providers', { id: providerId });
     }
-    setSelectedProvider(providerId);
+    // Optimistic mark + sources refetch so the page does not stick on a stale
+    // "Credentials missing" summary while the providers refresh lands.
+    markAuthWriteSucceeded(providerId);
   };
 
   const handleDisconnectProvider = async (providerId: string) => {
@@ -483,10 +581,13 @@ export const ProvidersPage: React.FC = () => {
     setAuthBusyKey(busyKey);
 
     try {
-      const response = await runtimeFetch(`/api/provider/${encodeURIComponent(providerId)}/auth?scope=all`, {
-        method: 'DELETE',
-        headers: { Accept: 'application/json' },
-      });
+      const response = await runtimeFetch(
+        `/api/provider/${encodeURIComponent(providerId)}/auth?scope=all${settingsDirectory ? `&directory=${encodeURIComponent(settingsDirectory)}` : ''}`,
+        {
+          method: 'DELETE',
+          headers: { Accept: 'application/json' },
+        },
+      );
 
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
@@ -494,9 +595,12 @@ export const ProvidersPage: React.FC = () => {
       }
 
       toast.success(t('settings.providers.page.toast.providerDisconnected'));
-      // Only accumulate when the server actually deferred a restart (e.g. auth removed).
-      // removed:false payloads must not create a phantom pending Apply & Restart.
-      noteDeferredRestartFromPayload(payload, 'providers', { id: providerId });
+      // Use the helper so an externally managed OpenCode that requires a manual
+      // restart records the deferred-restart guidance instead of toasting a
+      // misleading "disconnect failed" for a write that already persisted.
+      await applyConfigReloadOrRecordDeferred('providers', providerId);
+      setAuthPanelDismissedForId(null);
+      refreshProviderSources();
     } catch (error) {
       console.error('Failed to disconnect provider:', error);
       toast.error(t('settings.providers.page.toast.providerDisconnectFailed'));
@@ -594,15 +698,9 @@ export const ProvidersPage: React.FC = () => {
                         </div>
                         <ScrollableOverlay outerClassName="max-h-[240px]" className="p-1">
                           {(() => {
-                            const query = providerSearchQuery.toLowerCase();
                             const customLabel = t('settings.providers.page.custom.optionLabel');
-                            const customMatches = !query
-                              || customLabel.toLowerCase().includes(query)
-                              || 'other'.includes(query)
-                              || 'custom'.includes(query);
-                            const filtered = unconnectedProviders.filter(p => {
-                              return (p.name || p.id).toLowerCase().includes(query) || p.id.toLowerCase().includes(query);
-                            });
+                            const customMatches = matchesRankQuery([customLabel, 'other', 'custom'], providerSearchQuery);
+                            const filtered = rankByQuery(unconnectedProviders, providerSearchQuery, (p) => [p.name || p.id, p.id]);
                             if (filtered.length === 0 && !customMatches) {
                               return <p className="py-4 text-center typography-meta text-muted-foreground">{t('settings.providers.page.connect.noProvidersFound')}</p>;
                             }
@@ -767,25 +865,27 @@ export const ProvidersPage: React.FC = () => {
   const sourcesLoaded = Boolean(selectedSources);
   const isEditableCustomProvider = sourcesLoaded
     && isConfigDefinedCustomProvider(selectedProvider, selectedSources);
-  const providerEnv = Array.isArray(selectedProvider.env)
-    ? selectedProvider.env.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-    : [];
-  const hasStoredAuth = Boolean(selectedSources?.auth.exists);
-  const hasEnvCredentials = providerEnv.length > 0;
-  const hasCredentials = hasStoredAuth || hasEnvCredentials;
-  const authStatusIncomplete = sourcesLoaded && !hasCredentials;
-  const showModelsSection = providerModels.length > 0 && (!sourcesLoaded || hasCredentials);
+  const hasCredentials = providerHasCredentials({
+    key: selectedProvider.key,
+    authSourceExists: selectedSources?.auth.exists,
+    optionsApiKey: (selectedProvider as { options?: { apiKey?: string | null } }).options?.apiKey ?? null,
+    envDeclared: providerDeclaresEnv(selectedProvider),
+  });
+  const authStatusIncomplete = requiresProviderAuth(sourcesLoaded, hasCredentials, isEditableCustomProvider);
+  const showModelsSection = shouldShowModelsSection({
+    modelCount: providerModels.length,
+    sourcesLoaded,
+    hasCredentials,
+    isEditableCustomProvider,
+  });
   const incompleteAuthHint = !showApiKeyAuth && oauthAuthMethods.length > 0
     ? t('settings.providers.page.auth.useReconnectHint')
     : t('settings.providers.page.auth.incompleteHint');
 
-  const filteredModels = providerModels.filter((model) => {
-    const name = typeof model?.name === 'string' ? model.name : '';
-    const id = typeof model?.id === 'string' ? model.id : '';
-    const query = modelQuery.trim().toLowerCase();
-    if (!query) return true;
-    return name.toLowerCase().includes(query) || id.toLowerCase().includes(query);
-  });
+  const filteredModels = rankByQuery(providerModels, modelQuery, (model) => [
+    typeof model?.name === 'string' ? model.name : '',
+    typeof model?.id === 'string' ? model.id : '',
+  ]);
 
   if (isCustomEditMode && isEditableCustomProvider && editingCustomFormInitial) {
     return (
@@ -847,7 +947,11 @@ export const ProvidersPage: React.FC = () => {
               variant="outline"
               size="xs"
               className="!font-normal"
-              onClick={() => setShowAuthPanel((prev) => !prev)}
+              onClick={() => {
+                const nextOpen = !showAuthPanel;
+                setShowAuthPanel(nextOpen);
+                setAuthPanelDismissedForId(nextOpen ? null : selectedProvider.id);
+              }}
             >
               {showAuthPanel ? t('settings.providers.page.actions.hide') : t('settings.providers.page.actions.reconnect')}
             </Button>

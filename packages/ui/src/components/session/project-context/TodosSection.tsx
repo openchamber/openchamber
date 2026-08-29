@@ -1,3 +1,4 @@
+import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import {
   DndContext,
@@ -183,11 +184,10 @@ export const TodosSection: React.FC<{
   const completedTodoCount = todos.reduce((count, todo) => count + (todo.completed ? 1 : 0), 0);
   // Filtering is display-only: every handler above still edits the full list,
   // so reordering or clearing while a filter is active cannot drop hidden items.
-  const visibleTodos = React.useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return todos;
-    return todos.filter((todo) => todo.text.toLowerCase().includes(needle));
-  }, [query, todos]);
+  const visibleTodos = React.useMemo(
+    () => todos.filter((todo) => matchesRankQuery([todo.text], query)),
+    [query, todos],
+  );
 
   return (
     <div className="space-y-2">

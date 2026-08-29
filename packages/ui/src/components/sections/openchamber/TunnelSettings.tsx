@@ -205,7 +205,7 @@ const getFallbackInstallCommand = (provider: string, platform = getClientInstall
   if (platform === 'darwin') {
     return 'brew install cloudflared';
   }
-  return 'https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflared/downloads/';
+  return 'https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/';
 };
 
 const createTunnelDependencyInstallInfo = (provider: string, checkData?: TunnelCheckResponse): TunnelDependencyInstallInfo => {

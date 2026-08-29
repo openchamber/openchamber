@@ -22,7 +22,10 @@ edge (`components/layout/ContextPanelRail.tsx`) and rendered by
   registry's default order and appends any missing surfaces.
 - `getVisibleContextRailSurfaces` is the single visibility filter shared by the
   rail and the global surface-switch shortcut (`switch_context_surface` in
-  `lib/shortcuts.ts`): it drops the plan surface unless plan mode is enabled,
+  `lib/shortcuts`): it drops surfaces the user hid
+  (`useUIStore.contextRailHiddenSurfaces`, edited from the rail's trailing
+  configure button — `ContextRailSurfacesDialog`), drops the plan surface
+  unless plan mode is enabled,
   drops the walkthrough on VS Code and below `WALKTHROUGH_MIN_WIDTH`, and hides
   `has-content` surfaces until a tab of their mode exists. Both consumers use
   it so the digit shown on a rail badge always maps to the same surface the

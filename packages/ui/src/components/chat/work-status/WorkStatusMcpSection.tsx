@@ -13,6 +13,8 @@ type Props = {
   directory: string | null;
 };
 
+const MCP_STATUS_MAX_AGE_MS = 60_000;
+
 /**
  * MCP servers with their connection switches, reusing the dropdown's own
  * connect/disconnect actions.
@@ -23,17 +25,19 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ directory }) => {
   const mcpStatus = useMcpStore(
     React.useCallback((state) => state.getStatusForDirectory(directory), [directory]),
   );
-  const refreshMcp = useMcpStore((state) => state.refresh);
+  const ensureMcpFresh = useMcpStore((state) => state.ensureFresh);
   const connect = useMcpStore((state) => state.connect);
   const disconnect = useMcpStore((state) => state.disconnect);
   const [busyServer, setBusyServer] = React.useState<string | null>(null);
 
   // The panel must not depend on the header dropdown having been mounted or
   // opened to know its MCP servers. Silent and background-gated, so it cannot
-  // compete with chat bootstrap traffic for sockets.
+  // compete with chat bootstrap traffic for sockets. The section remounts on
+  // every session switch, so it only asks for a status that is missing or
+  // older than a minute; connect/disconnect/auth refresh on their own.
   React.useEffect(() => {
-    void runBackgroundNetworkTask(() => refreshMcp({ directory, silent: true }));
-  }, [directory, refreshMcp]);
+    void runBackgroundNetworkTask(() => ensureMcpFresh({ directory, silent: true, maxAgeMs: MCP_STATUS_MAX_AGE_MS }));
+  }, [directory, ensureMcpFresh]);
 
   const mcpServers = React.useMemo(
     () => Object.entries(mcpStatus ?? {}).sort(([left], [right]) => left.localeCompare(right)),
@@ -97,6 +101,7 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ directory }) => {
     >
       {mcpServers.map(([name, entry]) => {
         const connected = entry?.status === 'connected';
+        const busy = busyServer === name;
         const needsAuth = entry?.status === 'needs_auth' || entry?.status === 'needs_client_registration';
         const failed = entry?.status === 'failed';
         return (
@@ -105,8 +110,9 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ directory }) => {
             leading={(
               <Switch
                 checked={connected}
-                disabled={busyServer === name}
-                className="scale-75 data-[checked]:bg-status-info"
+                disabled={busy}
+                loading={busy}
+                className="scale-75 disabled:opacity-100 data-[checked]:bg-status-info"
                 aria-label={t('chat.workStatus.mcp.toggle', { name })}
                 onCheckedChange={(checked) => { void handleToggle(name, checked); }}
               />
@@ -118,7 +124,7 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ directory }) => {
             value={needsAuth ? (
               <WorkStatusRowAction
                 tone="warning"
-                disabled={busyServer === name}
+                disabled={busy}
                 onClick={() => { void handleAuthorize(name); }}
               >
                 {t('chat.workStatus.mcp.needsAuth')}
@@ -126,7 +132,7 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ directory }) => {
             ) : failed ? (
               <WorkStatusRowAction
                 tone="error"
-                disabled={busyServer === name}
+                disabled={busy}
                 onClick={() => { void handleToggle(name, true); }}
               >
                 {t('chat.workStatus.mcp.failed')}

@@ -56,6 +56,12 @@ export const getToolIcon = (toolName: string) => {
     if (tool === 'openchamber') {
         return <Icon name="openchamber" className={iconClass} />;
     }
+    if (tool === 'linear' || tool.startsWith('linear_')) {
+        return <Icon name="linear" className={iconClass} />;
+    }
+    if (tool === 'cloudflare' || tool.startsWith('cloudflare_') || tool === 'claudflare' || tool.startsWith('claudflare_')) {
+        return <Icon name="cloudflare" className={iconClass} />;
+    }
     if (tool === 'openchamber_web') {
         return <Icon name="global" className={iconClass} />;
     }

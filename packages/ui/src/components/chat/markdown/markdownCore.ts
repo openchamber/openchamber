@@ -1,8 +1,10 @@
 import { Marked, marked, type Tokens } from 'marked';
+import markedLinkifyIt from 'marked-linkify-it';
 import remend from 'remend';
 import katex from 'katex';
 import DOMPurify from 'dompurify';
 import { buildAgentMentionUrl, parseAgentHref, parseSkillHref } from '@/lib/messages/inlineMessageLinks';
+import { isAppLinkUrl } from '@/lib/url';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { contentFingerprint, HighlightResultCache, utf16Bytes } from './highlightResultCache';
 import { highlightCodeInWorker } from './markdown-worker';
@@ -177,9 +179,11 @@ type MarkdownBlock = {
   raw: string;
   src: string;
   mode: 'full' | 'live';
-  // When false, skip syntax highlighting for this block. Set for the actively
-  // streaming open code fence so we don't re-tokenize a growing block ~40x/sec
-  // (O(n^2)); it highlights once the fence closes and becomes a stable block.
+  // When false, skip syntax highlighting for this block. Block-level commit
+  // feeds the open fence whole lines at the throttle cadence (<=10/sec), so a
+  // partial fence highlights too and streamed code arrives colored; only a
+  // very large open fence falls back to plain text until it closes, keeping
+  // the repeated worker re-tokenization bounded.
   highlight: boolean;
 };
 
@@ -199,6 +203,11 @@ const hasOpenFence = (raw: string): boolean => {
   const last = raw.trimEnd().split('\n').at(-1)?.trim() ?? '';
   return !new RegExp(`^[\\t ]{0,3}${char}{${size},}[\\t ]*$`).test(last);
 };
+
+// Above this, re-highlighting the still-open fence on every committed line
+// costs more than the colored preview is worth; the block highlights in one
+// pass when the fence closes.
+const OPEN_FENCE_HIGHLIGHT_LINE_LIMIT = 300;
 
 const heal = (text: string): string => {
   try {
@@ -249,11 +258,13 @@ const streamBlocks = (text: string, live: boolean): MarkdownBlock[] => {
     const raw = token.raw ?? '';
     const isLast = i === tail;
     const openFence = token.type === 'code' && hasOpenFence(raw);
+    const openFenceHighlight = openFence
+      && raw.split('\n').length <= OPEN_FENCE_HIGHLIGHT_LINE_LIMIT;
     blocks.push({
       raw,
       src: openFence ? raw : heal(raw),
       mode: isLast ? 'live' : 'full',
-      highlight: !openFence,
+      highlight: !openFence || openFenceHighlight,
     });
   }
 
@@ -321,10 +332,15 @@ const blockMathExtension = {
   },
 };
 
-const createParser = (imageMode: MarkdownImageMode) => new Marked().use({
-  gfm: true,
-  breaks: false,
-  extensions: [inlineMathExtension, blockMathExtension],
+// marked's GFM autolink swallows CJK punctuation after a bare URL, so switch
+// to marked-linkify-it, which treats Unicode punctuation as a URL boundary.
+// Plain CJK characters right after a URL are still consumed, matching GitHub.
+const createParser = (imageMode: MarkdownImageMode) => new Marked().use(
+  markedLinkifyIt({ fuzzyLink: false }),
+  {
+    gfm: true,
+    breaks: false,
+    extensions: [inlineMathExtension, blockMathExtension],
   renderer: {
     // Assistant output is untrusted. Markdown constructs still render as HTML,
     // but raw HTML must remain visible text so it cannot introduce active DOM
@@ -472,7 +488,10 @@ const ensureSanitizeHook = (): void => {
   sanitizeHookInstalled = true;
   DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
     if (!(node instanceof HTMLAnchorElement) || data.attrName !== 'href') return;
-    if (isLocalFileUrl(data.attrValue)) data.forceKeepAttr = true;
+    // DOMPurify's default URI policy strips custom application schemes
+    // (obsidian://, vscode://, ...). Keep them for anchors; dangerous schemes
+    // stay excluded via isAppLinkUrl and clicks go through confirmation.
+    if (isLocalFileUrl(data.attrValue) || isAppLinkUrl(data.attrValue)) data.forceKeepAttr = true;
   });
   DOMPurify.addHook('afterSanitizeAttributes', (node) => {
     if (!(node instanceof HTMLAnchorElement)) return;
@@ -544,6 +563,29 @@ export const __markdownBlockCacheSizesForTests = (): { full: number; live: numbe
   live: liveBlockCache.size,
 });
 
+/**
+ * Read a settled render synchronously when every block is already in the full
+ * cache. Cache reads retain the existing LRU `get` semantics and do not insert
+ * or expand either cache.
+ */
+export const getCachedMarkdownBlocks = (
+  text: string,
+  imageMode: MarkdownImageMode = 'inline',
+): RenderedBlock[] | null => {
+  if (!text) return [];
+
+  const blocks = streamBlocks(text, false);
+  const rendered: RenderedBlock[] = [];
+  for (const block of blocks) {
+    const contentHash = contentFingerprint(block.raw);
+    const id = markdownBlockCacheKey(contentHash, block.mode, block.highlight, imageMode);
+    const html = fullBlockCache.get(id);
+    if (html === undefined) return null;
+    rendered.push({ id, html });
+  }
+  return rendered;
+};
+
 const parseBlock = async (block: MarkdownBlock, imageMode: MarkdownImageMode): Promise<string> => {
   const parser = imageMode === 'label' ? imageLabelParser : inlineImageParser;
   const parsed = await Promise.resolve(parser.parse(block.src));
@@ -561,7 +603,10 @@ const parseBlock = async (block: MarkdownBlock, imageMode: MarkdownImageMode): P
  * is synchronous (marked is not configured `async`), so this never blocks on a
  * worker round-trip.
  */
-export const renderMarkdownSync = (text: string, imageMode: MarkdownImageMode = 'inline'): string => {
+export const renderMarkdownSync = (
+  text: string,
+  imageMode: MarkdownImageMode = 'inline',
+): string => {
   if (!text) return '';
   const parser = imageMode === 'label' ? imageLabelParser : inlineImageParser;
   const parsed = parser.parse(text) as string;

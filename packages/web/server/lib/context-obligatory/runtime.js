@@ -69,7 +69,13 @@ export const createContextObligatoryRuntime = ({
      */
     const knowledge = sessionKnowledgeRuntime
       ? await sessionKnowledgeRuntime
-        .resolvePending(directory, sessionKnowledgeRuntime.readDeliveredSignature(session))
+        .resolvePending(
+          directory,
+          // Compaction removed the previously delivered block, so its stored
+          // signature is no longer evidence that the session still carries it.
+          '',
+          sessionKnowledgeRuntime.readPins(session),
+        )
         .catch(() => ({ text: '', signature: '' }))
       : { text: '', signature: '' };
 
