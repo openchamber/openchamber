@@ -1,3 +1,5 @@
+import { isSessionCookieName, sessionCookieNameForRequest } from '../ui-auth/session-cookie.js';
+
 export const createRequestSecurityRuntime = (deps) => {
   const { readSettingsFromDiskMigrated } = deps;
   // Origins of packaged (non-browser) clients whose WebView origin never
@@ -17,20 +19,27 @@ export const createRequestSecurityRuntime = (deps) => {
     if (!cookieHeader || typeof cookieHeader !== 'string') {
       return null;
     }
-    const segments = cookieHeader.split(';');
-    for (const segment of segments) {
-      const [rawName, ...rest] = segment.split('=');
-      const name = rawName?.trim();
-      if (!name) continue;
-      if (name !== 'oc_ui_session') continue;
-      const value = rest.join('=').trim();
+    // This instance's own cookie name for the host:port the request arrived on.
+    const preferred = sessionCookieNameForRequest(req);
+    const decode = (value) => {
       try {
         return decodeURIComponent(value || '');
       } catch {
         return value || null;
       }
+    };
+    let fallback = null;
+    for (const segment of cookieHeader.split(';')) {
+      const [rawName, ...rest] = segment.split('=');
+      const name = rawName?.trim();
+      if (!name || !isSessionCookieName(name)) continue;
+      const value = decode(rest.join('=').trim());
+      if (name === preferred) return value;
+      // Remember any session cookie as a fallback so single-instance and
+      // port-less (e.g. loopback without an explicit port) flows keep working.
+      fallback ??= value;
     }
-    return null;
+    return fallback;
   };
 
   const rejectWebSocketUpgrade = (socket, statusCode, reason) => {
