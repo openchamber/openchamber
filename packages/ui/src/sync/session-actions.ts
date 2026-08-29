@@ -511,6 +511,9 @@ async function fetchSessionMessages(sessionId: string, directory?: string | null
 }
 
 async function cascadeRevertToDescendants(rootId: string, cutoff: number): Promise<void> {
+  // NOTE: descendants' todo lists are intentionally not cleared/refetched here.
+  // #2813 covers the reverted session's own composer task list; cascading todo
+  // clear/refetch to subagent sessions is a known follow-up.
   for (const { session, directory } of getDescendantSessions(rootId)) {
     try {
       // A running descendant would keep writing messages past the revert

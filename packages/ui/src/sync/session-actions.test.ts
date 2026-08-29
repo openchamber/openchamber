@@ -2277,6 +2277,7 @@ describe("revert/unrevert todo state (issue #2813)", () => {
 
     expect(replyCalls.some((call) => call.method === "session.todo" && call.params.sessionID === "root")).toBe(true)
     expect(store.getState().todo["root"]).toEqual(sessionTodosResult)
+    expect(useTodosPersistStore.getState().getSessionTodos("/tree", "root")).toEqual(sessionTodosResult)
   })
 
   test("unrevert leaves existing todos untouched when the re-fetch fails", async () => {
