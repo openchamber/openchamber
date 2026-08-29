@@ -74,6 +74,8 @@ export function useRouter(): void {
             if (generation !== routeGenerationRef.current) {
               return;
             }
+            // A user selection made while resolving the persisted pointer wins
+            // over the deep link instead of being overwritten on completion.
             const userClearedPointerDuringResolution =
               getLastActiveSessionClearGeneration() !== clearGenerationBeforeResolution;
             if (
