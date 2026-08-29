@@ -235,4 +235,32 @@ describe('settings normalization runtime - case-insensitive filesystem casing (#
     expect(result.changed).toBe(true);
     expect(result.settings.projects[0].path).toBe('/Users/me/Desktop/VcFiles/app');
   });
+
+  it('recovers on-disk casing and drive-letter case on Windows (win32)', () => {
+    const winPath = {
+      resolve: (...args) => args[args.length - 1],
+      sep: '\\',
+      dirname: (p) => p.replace(/\\[^\\]*$/, ''),
+      join: (...parts) => parts.join('\\').replace(/\\+/g, '\\'),
+    };
+    // Tree: C:\Users\me\Desktop\app (true casing on disk).
+    const winListing = {
+      'C:\\': ['Users'],
+      'C:\\Users': ['me'],
+      'C:\\Users\\me': ['Desktop'],
+      'C:\\Users\\me\\Desktop': ['app'],
+    };
+    const runtime = createTestRuntime({
+      path: winPath,
+      processLike: { platform: 'win32', env: {} },
+      realpathSync: (p) => p,
+      readdirSync: (dir) => {
+        if (!Object.prototype.hasOwnProperty.call(winListing, dir)) throw new Error('ENOENT');
+        return winListing[dir];
+      },
+    });
+    // Lowercase drive letter + wrong segment casing come back fully canonical.
+    expect(runtime.normalizePathForPersistence('c:\\users\\me\\desktop\\app'))
+      .toBe('C:\\Users\\me\\Desktop\\app');
+  });
 });
