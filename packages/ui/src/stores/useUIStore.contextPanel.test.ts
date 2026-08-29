@@ -468,6 +468,7 @@ describe('useUIStore persistence migrations', () => {
       contextRailHiddenSurfaces: [],
       contextRailOrder: [],
       fileEditorKeymap: 'default',
+      largeTextPasteBehavior: 'ask',
     });
   });
 });
