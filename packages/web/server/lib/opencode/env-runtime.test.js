@@ -7,6 +7,7 @@ import { createOpenCodeEnvRuntime } from './env-runtime.js';
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
 const originalComSpec = process.env.ComSpec;
 const originalPath = process.env.PATH;
+const originalShell = process.env.SHELL;
 const originalLocalAppData = process.env.LOCALAPPDATA;
 const originalSystemRoot = process.env.SystemRoot;
 const originalBundledOpencodeCliDir = process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR;
@@ -81,6 +82,12 @@ afterEach(() => {
     process.env.PATH = originalPath;
   } else {
     delete process.env.PATH;
+  }
+
+  if (typeof originalShell === 'string') {
+    process.env.SHELL = originalShell;
+  } else {
+    delete process.env.SHELL;
   }
 
   if (typeof originalSystemRoot === 'string') {
@@ -370,7 +377,10 @@ describe('OpenCode env runtime', () => {
   it('bounds every login-shell probe and falls through when one overruns', () => {
     setPlatform('darwin');
     process.env.PATH = createTempDir('openchamber-empty-path-');
-    process.env.SHELL = '/bin/zsh';
+    const shellPath = path.join(createTempDir('openchamber-shell-'), 'probe-shell');
+    fs.writeFileSync(shellPath, '#!/bin/sh\n');
+    fs.chmodSync(shellPath, 0o755);
+    process.env.SHELL = shellPath;
     delete process.env.OPENCODE_BINARY;
     const shellCalls = [];
     const { runtime } = createRuntime({}, {
