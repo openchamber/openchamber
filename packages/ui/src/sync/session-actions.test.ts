@@ -18,6 +18,8 @@ const failingRevertSessionIds = new Set<string>()
 const failingUnrevertSessionIds = new Set<string>()
 let afterUnrevertCall: ((sessionId: string) => void) | null = null
 let sessionDeleteError: unknown | null = null
+let sessionTodosResult: unknown[] = []
+let sessionTodosThrows = false
 let beforeSessionUpdateResolve: ((sessionId: string) => void) | null = null
 let beforeSessionDeleteResolve: ((sessionId: string) => void) | null = null
 const globalUpsertedSessions: unknown[] = []
@@ -142,6 +144,11 @@ mock.module("@/lib/opencode/client", () => ({
     getSessionMessages: mock((sessionId: string, _limit?: number, directory?: string | null) => {
       replyCalls.push({ method: "session.messages", params: { sessionID: sessionId, directory } })
       return Promise.resolve(sessionMessageRecords.get(sessionId) ?? [])
+    }),
+    getSessionTodos: mock((sessionId: string, directory?: string | null) => {
+      replyCalls.push({ method: "session.todo", params: { sessionID: sessionId, directory } })
+      if (sessionTodosThrows) return Promise.reject(new Error("session.todo failed"))
+      return Promise.resolve(sessionTodosResult)
     }),
     replyToPermission: mock((requestId: string, reply: string, options?: { directory?: string | null }) => {
       replyCalls.push({ method: "permission.reply", params: { requestID: requestId, reply, directory: options?.directory } })
@@ -270,6 +277,7 @@ mock.module("./sync-refs", () => ({
 
 import { create, type StoreApi } from "zustand"
 import { INITIAL_STATE } from "./types"
+import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import type { DirectoryStore } from "./child-store"
 import type { Message, OpencodeClient, Part, Session } from "@opencode-ai/sdk/v2/client"
 
@@ -2189,5 +2197,98 @@ describe("dismissOpenPermissionsForSession", () => {
     } finally {
       console.error = originalError
     }
+  })
+})
+
+// issue #2813: reverting a message must clear the session's todo list from both
+// the live sync store and the persist store; unreverting must re-fetch it.
+describe("revert/unrevert todo state (issue #2813)", () => {
+  const todo = { id: "t1", content: "task", status: "pending", priority: "medium" }
+  const revertDir = "/test/project"
+
+  beforeEach(() => {
+    replyCalls.length = 0
+    sessionMessageRecords.clear()
+    failingRevertSessionIds.clear()
+    failingUnrevertSessionIds.clear()
+    sessionRevertResult = {}
+    sessionMessagesResult = { data: [] }
+    sessionTodosResult = []
+    sessionTodosThrows = false
+    useTodosPersistStore.setState({ sessions: {} })
+  })
+
+  const seedSession = (state?: Partial<DirectoryStore>) => {
+    const session = { id: "session-a", time: { created: 1 } } as Session
+    const message = { id: "msg_2", sessionID: "session-a", role: "user", time: { created: 2 } } as Message
+    const part = { id: "prt_2", messageID: "msg_2", type: "text", text: "edit this" } as Part
+    const store = createStore({}, {
+      session: [session],
+      message: { "session-a": [message] },
+      part: { "msg_2": [part] },
+      ...state,
+    })
+    return store
+  }
+
+  test("clears live and persisted todos after a successful revert", async () => {
+    const store = seedSession({ todo: { "session-a": [todo] } as never })
+    useTodosPersistStore.getState().setSessionTodos(revertDir, "session-a", [todo])
+    sessionRevertResult = { data: { id: "session-a", time: { created: 1 }, revert: { messageID: "msg_2" } } }
+
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([[revertDir, store]]), () => revertDir)
+
+    await revertToMessage("session-a", "msg_2")
+
+    expect(store.getState().todo["session-a"]).toBe(undefined)
+    expect(useTodosPersistStore.getState().getSessionTodos(revertDir, "session-a")).toBe(undefined)
+  })
+
+  test("restores the todo list when the revert API call fails", async () => {
+    const store = seedSession({ todo: { "session-a": [todo] } as never })
+    useTodosPersistStore.getState().setSessionTodos(revertDir, "session-a", [todo])
+    sessionRevertResult = { error: { message: "rejected" }, response: { status: 500 } }
+
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([[revertDir, store]]), () => revertDir)
+
+    let thrown: unknown
+    try {
+      await revertToMessage("session-a", "msg_2")
+    } catch (error) {
+      thrown = error
+    }
+    expect(thrown).toBeInstanceOf(Error)
+
+    expect(store.getState().todo["session-a"]).toEqual([todo])
+    expect(useTodosPersistStore.getState().getSessionTodos(revertDir, "session-a")).toEqual([todo])
+  })
+
+  test("unrevert re-fetches todos into the live and persisted stores", async () => {
+    const root = { id: "root", directory: "/tree", time: { created: 1 }, revert: { messageID: "root-target" } } as Session
+    const store = createStore({}, { session: [root] })
+    sessionTodosResult = [{ id: "t2", content: "restored", status: "pending", priority: "medium" }]
+
+    const { setActionRefs, unrevertSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/tree", store]]), () => "/tree")
+
+    await unrevertSession("root")
+
+    expect(replyCalls.some((call) => call.method === "session.todo" && call.params.sessionID === "root")).toBe(true)
+    expect(store.getState().todo["root"]).toEqual(sessionTodosResult)
+  })
+
+  test("unrevert leaves existing todos untouched when the re-fetch fails", async () => {
+    const root = { id: "root", directory: "/tree", time: { created: 1 }, revert: { messageID: "root-target" } } as Session
+    const store = createStore({}, { session: [root], todo: { root: [todo] } as never })
+    sessionTodosThrows = true
+
+    const { setActionRefs, unrevertSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/tree", store]]), () => "/tree")
+
+    await unrevertSession("root")
+
+    expect(store.getState().todo["root"]).toEqual([todo])
   })
 })
