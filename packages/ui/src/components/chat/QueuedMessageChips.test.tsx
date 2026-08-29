@@ -43,7 +43,7 @@ describe('QueuedMessageChips sending state', () => {
         const target = createMessageQueueTarget('session-1', '/repo')!;
         useMessageQueueStore.getState().addToQueue(target, { content: 'queued prompt' });
         const [message] = useMessageQueueStore.getState().getQueueForTarget(target);
-        useMessageQueueStore.getState().markSending(target, message.id);
+        useMessageQueueStore.getState().claimForSend(target, [message.id]);
 
         act(() => root.render(
             <I18nProvider>

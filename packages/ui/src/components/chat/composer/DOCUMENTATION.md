@@ -195,13 +195,15 @@ Remote composer submissions retain their text and attachments while
 `sendMessage()` is pending. The action slot shows a spinner and the composer is
 inert until the request is acknowledged. Success clears only the submitted
 draft and attachment IDs; failure leaves them available for retry. `ChatInput`
-allows one remote submission at a time and owns this pending state locally;
-live session activity remains authoritative in the session stores.
+uses `state/useComposerSubmission.ts` to allow one remote submission per draft
+identity, so switching sessions does not move the spinner or input lock; live
+session activity remains authoritative in the session stores.
 
 Queued prompts transfer ownership to `messageQueueStore` as soon as they are
-enqueued. A queue entry remains visible with a spinner while `sendingIds` marks
-it in flight, is removed only after acknowledgement, and stays queued after a
-failed automatic, manual, or steer delivery.
+enqueued. Every dispatcher must use `claimForSend()`: the returned claim keeps
+entries visible with a spinner, removes only its exact entries after
+acknowledgement, and releases them for retry after a failed automatic, manual,
+or steer delivery.
 
 The global Escape shortcut owns the two-press abort confirmation in
 `session-ui-store`. The composer only renders the armed state as a small

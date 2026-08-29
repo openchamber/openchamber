@@ -147,6 +147,7 @@ import {
 import { useAutocompletePosition } from './composer/state/useAutocompletePosition';
 import { useMessageHistory } from './composer/state/useMessageHistory';
 import { useComposerDraft } from './composer/state/useComposerDraft';
+import { useComposerSubmission } from './composer/state/useComposerSubmission';
 import { useDraftTarget } from './composer/state/useDraftTarget';
 import { useMobileComposerShell } from './composer/state/useMobileComposerShell';
 import { useMobileViewportPin } from './composer/state/useMobileViewportPin';
@@ -185,7 +186,6 @@ const MAX_MOBILE_COMPOSER_LINES = 16;
  */
 const MOBILE_COMPOSER_BOUND_GAP_PX = 4;
 const EMPTY_QUEUE: QueuedMessage[] = [];
-const EMPTY_SENDING_IDS: string[] = [];
 const COMPACT_CHAT_PLACEHOLDER_MAX_WIDTH = 560;
 const renameFileForAttachmentCitation = (file: File, filename: string): File => {
     if (file.name === filename) {
@@ -325,9 +325,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const snippetRef = React.useRef<SnippetAutocompleteHandle>(null);
     // Ref to track current message value without triggering re-renders in effects
     const messageRef = React.useRef(message);
-    const isSubmittingRef = React.useRef(false);
     const isEnqueueingRef = React.useRef(false);
-    const [isSubmitting, setIsSubmitting] = React.useState(false);
     const pendingPastedAttachmentFilenamesRef = React.useRef<Set<string>>(new Set());
     const largeTextPasteToastIdRef = React.useRef<string | number | null>(null);
     const largeTextPasteOfferIdRef = React.useRef(0);
@@ -380,6 +378,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const newSessionDraftOpen = Boolean(newSessionDraft?.open);
     const materializedDraftSessionId = useSessionUIStore((s) => s.materializedDraftSessionId);
+    const composerSubmission = useComposerSubmission(chatDraftIdentity, materializedDraftSessionId);
+    const isSubmitting = composerSubmission.isPending;
     const draftPermissionAutoAcceptEnabled = useSessionUIStore((s) => (
         s.newSessionDraft?.open ? s.newSessionDraft.permissionAutoAcceptEnabled === true : false
     ));
@@ -774,9 +774,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         )
     );
     const addToQueue = useMessageQueueStore((state) => state.addToQueue);
-    const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
-    const markSending = useMessageQueueStore((state) => state.markSending);
-    const clearSending = useMessageQueueStore((state) => state.clearSending);
 
     // Inline comment drafts
     const inlineDraftSessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
@@ -1040,24 +1037,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 hasContent: options.presetText.trim().length > 0 || attachedFiles.length > 0 || hasDrafts,
             }
             : submittedDraft;
-        // A queued item stays in the queue until its own send resolves, so the
-        // auto-send hook may already be delivering one of these. Merging it here
-        // would send the same message twice (the window is seconds over a relay).
-        const sendingIds = messageQueueTarget
-            ? useMessageQueueStore.getState().sendingIds[getMessageQueueKey(messageQueueTarget)] ?? EMPTY_SENDING_IDS
-            : EMPTY_SENDING_IDS;
-        const queuedMessagesToSend = (queuedMessageId
-            ? queuedMessages.filter((message) => message.id === queuedMessageId)
-            : queuedMessages
-        ).filter((message) => !sendingIds.includes(message.id));
-
         if (queuedOnly && autoReviewRunning) {
             return;
         }
 
-        if (queuedOnly) {
-            if (queuedMessagesToSend.length === 0 || !currentSessionId) return;
-        } else if ((!inputSnapshot.hasContent && !hasQueuedMessages) || (!currentSessionId && !newSessionDraftOpen)) {
+        const queueClaim = capturedTarget
+            ? useMessageQueueStore.getState().claimForSend(
+                capturedTarget,
+                queuedMessageId ? [queuedMessageId] : undefined,
+            )
+            : null;
+        const queuedMessagesToSend = queueClaim?.messages ?? EMPTY_QUEUE;
+        const cannotSubmit = queuedOnly
+            ? queuedMessagesToSend.length === 0 || !currentSessionId
+            : (!inputSnapshot.hasContent && queuedMessagesToSend.length === 0)
+                || (!currentSessionId && !newSessionDraftOpen);
+        if (cannotSubmit) {
+            queueClaim?.release();
             return;
         }
 
@@ -1068,22 +1064,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const variantToSend = capturedSendConfig?.variant ?? currentVariant;
 
         if (!providerIdToSend || !modelIdToSend) {
+            queueClaim?.release();
             console.warn('Cannot send message: provider or model not selected');
             toast.error(t('chat.chatInput.toast.noModelSelected'));
             return;
         }
 
-        if (!queuedOnly) {
-            if (isSubmittingRef.current) return;
-            isSubmittingRef.current = true;
-            setIsSubmitting(true);
+        const submission = queuedOnly ? null : composerSubmission.begin();
+        if (!queuedOnly && !submission) {
+            queueClaim?.release();
+            return;
         }
         const submittedDraftIdentity = chatDraftIdentity;
         const submittedAttachmentIds = new Set(attachedFiles.map((attachment) => attachment.id));
-        const queuedMessageIds = queuedMessagesToSend.map((message) => message.id);
-        if (capturedTarget) {
-            for (const messageId of queuedMessageIds) markSending(capturedTarget, messageId);
-        }
 
         const commitSuccessfulSubmission = () => {
             if (!queuedOnly) {
@@ -1097,9 +1090,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 );
             }
 
-            if (capturedTarget) {
-                for (const messageId of queuedMessageIds) removeFromQueue(capturedTarget, messageId);
-            }
+            queueClaim?.acknowledge();
         };
 
         try {
@@ -1259,7 +1250,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
 
         // Local slash commands, normal mode only.
-        const parsedCommand = inputMode === 'normal' ? parseSlashCommand(primaryText) : null;
+        const parsedCommand = inputMode === 'normal' && (queuedOnly || queuedMessagesToSend.length === 0)
+            ? parseSlashCommand(primaryText)
+            : null;
         if (parsedCommand) {
             const { name: commandName, argument } = parsedCommand;
 
@@ -1523,13 +1516,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             composerRef.current?.focus();
         }
         } finally {
-            if (capturedTarget) {
-                for (const messageId of queuedMessageIds) clearSending(capturedTarget, messageId);
-            }
-            if (!queuedOnly) {
-                isSubmittingRef.current = false;
-                setIsSubmitting(false);
-            }
+            queueClaim?.release();
+            submission?.finish();
         }
     };
 

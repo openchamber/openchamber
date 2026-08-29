@@ -51,22 +51,37 @@ describe("message queue runtime ownership", () => {
 })
 
 describe("in-flight queued sends", () => {
-  test("hides a dispatched message from the sendable queue but keeps it visible", () => {
+  test("claims a message atomically while keeping it visible", () => {
     const target = createMessageQueueTarget("session-1", "/repo", "runtime-a")!
     const store = useMessageQueueStore.getState()
     store.addToQueue(target, { content: "first" })
     store.addToQueue(target, { content: "second" })
     const [first] = useMessageQueueStore.getState().getQueueForTarget(target)
 
-    useMessageQueueStore.getState().markSending(target, first.id)
+    const claim = useMessageQueueStore.getState().claimForSend(target, [first.id])!
 
+    expect(claim.messages.map((message) => message.id)).toEqual([first.id])
     expect(useMessageQueueStore.getState().getQueueForTarget(target)).toHaveLength(2)
-    const sendable = useMessageQueueStore.getState().getSendableQueue(target)
-    expect(sendable).toHaveLength(1)
-    expect(sendable[0]?.content).toBe("second")
+    expect(useMessageQueueStore.getState().claimForSend(target, [first.id])).toBeNull()
 
-    useMessageQueueStore.getState().clearSending(target, first.id)
-    expect(useMessageQueueStore.getState().getSendableQueue(target)).toHaveLength(2)
+    claim.release()
+    expect(useMessageQueueStore.getState().claimForSend(target)?.messages).toHaveLength(2)
+  })
+
+  test("acknowledgement removes only the claimed messages while release keeps them", () => {
+    const target = createMessageQueueTarget("session-1", "/repo", "runtime-a")!
+    const store = useMessageQueueStore.getState()
+    store.addToQueue(target, { content: "first" })
+    store.addToQueue(target, { content: "second" })
+    const [first] = useMessageQueueStore.getState().getQueueForTarget(target)
+
+    const released = useMessageQueueStore.getState().claimForSend(target, [first.id])!
+    released.release()
+    expect(useMessageQueueStore.getState().getQueueForTarget(target)).toHaveLength(2)
+
+    const acknowledged = useMessageQueueStore.getState().claimForSend(target, [first.id])!
+    acknowledged.acknowledge()
+    expect(useMessageQueueStore.getState().getQueueForTarget(target).map((message) => message.content)).toEqual(["second"])
     expect(useMessageQueueStore.getState().sendingIds).toEqual({})
   })
 
@@ -76,13 +91,32 @@ describe("in-flight queued sends", () => {
     store.addToQueue(target, { content: "in flight" })
     store.addToQueue(target, { content: "merged by composer" })
     const [inFlight] = useMessageQueueStore.getState().getQueueForTarget(target)
-    useMessageQueueStore.getState().markSending(target, inFlight.id)
+    useMessageQueueStore.getState().claimForSend(target, [inFlight.id])
 
     useMessageQueueStore.getState().clearQueue(target)
 
     const remaining = useMessageQueueStore.getState().getQueueForTarget(target)
     expect(remaining).toHaveLength(1)
     expect(remaining[0]?.id).toBe(inFlight.id)
+  })
+
+  test("queue mutations cannot remove an in-flight claim", () => {
+    const target = createMessageQueueTarget("session-1", "/repo", "runtime-a")!
+    const store = useMessageQueueStore.getState()
+    store.addToQueue(target, { content: "in flight" })
+    store.addToQueue(target, { content: "queued" })
+    const [inFlight, queued] = useMessageQueueStore.getState().getQueueForTarget(target)
+    const claim = useMessageQueueStore.getState().claimForSend(target, [inFlight.id])!
+
+    useMessageQueueStore.getState().removeFromQueue(target, inFlight.id)
+    expect(useMessageQueueStore.getState().popToInput(target, inFlight.id)).toBeNull()
+    useMessageQueueStore.getState().reorderQueue(target, inFlight.id, queued.id)
+    useMessageQueueStore.getState().reorderQueue(target, queued.id, inFlight.id)
+    expect(useMessageQueueStore.getState().getQueueForTarget(target).map((message) => message.id)).toEqual([inFlight.id, queued.id])
+    useMessageQueueStore.getState().clearAllQueues()
+
+    expect(useMessageQueueStore.getState().getQueueForTarget(target).map((message) => message.id)).toEqual([inFlight.id])
+    claim.release()
   })
 
   test("clearQueue drops everything once no send is in flight", () => {
@@ -100,7 +134,7 @@ describe("in-flight queued sends", () => {
       useMessageQueueStore.getState().addToQueue(target, { content: `message-${index}` })
     }
     const [inFlight] = useMessageQueueStore.getState().getQueueForTarget(target)
-    useMessageQueueStore.getState().markSending(target, inFlight.id)
+    useMessageQueueStore.getState().claimForSend(target, [inFlight.id])
 
     useMessageQueueStore.getState().addToQueue(target, { content: "message-20" })
 
@@ -114,7 +148,7 @@ describe("in-flight queued sends", () => {
     const inFlightTarget = createMessageQueueTarget("session-0", "/repo-0", "runtime-a")!
     useMessageQueueStore.getState().addToQueue(inFlightTarget, { content: "in flight" })
     const [inFlight] = useMessageQueueStore.getState().getQueueForTarget(inFlightTarget)
-    useMessageQueueStore.getState().markSending(inFlightTarget, inFlight.id)
+    useMessageQueueStore.getState().claimForSend(inFlightTarget, [inFlight.id])
     for (let index = 1; index <= 50; index += 1) {
       const target = createMessageQueueTarget(`session-${index}`, `/repo-${index}`, "runtime-a")!
       useMessageQueueStore.getState().addToQueue(target, { content: `message-${index}` })
