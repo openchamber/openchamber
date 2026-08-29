@@ -1071,8 +1071,8 @@ export class ElectronSshManager {
     ]);
     const npmPath = await this.resolveRemoteTool(parsed, controlPath, 'npm');
 
-    // bun's global install already targets ~/.bun; npm is pinned to a prefix in
-    // the user's home so it never touches the root-owned global directory.
+    // bun's global install targets `~/.bun` or `${XDG_CACHE_HOME:-~/.cache}/.bun` (bun 1.3.x XDG-aware);
+    // npm is pinned to a prefix in the user's home so it never touches the root-owned global directory.
     const bunCommand = bunPath ? `${shellQuote(bunPath)} add -g @openchamber/web@${version}` : null;
     const npmCommand = npmPath
       ? `mkdir -p "${REMOTE_USER_PREFIX}" && ${shellQuote(npmPath)} install -g --prefix "${REMOTE_USER_PREFIX}" @openchamber/web@${version}`
