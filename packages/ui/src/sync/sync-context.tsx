@@ -53,6 +53,7 @@ import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
+import { recordSessionError, summarizeOpenCodeError, type OpenCodeSessionErrorPayload } from "./session-error-log"
 import {
   applyGlobalSessionStatusEvent,
   applyGlobalSessionStatusEvents,
@@ -1771,8 +1772,12 @@ export function handleEvent(
   // Notification dispatch for session turn-complete and error events.
   // These are NOT handled by the event reducer — only the notification store.
   if (payload.type === "session.idle" || payload.type === "session.error") {
-    const props = payload.properties as { sessionID?: string; error?: { message?: string; code?: string } }
+    const props = payload.properties as { sessionID?: string; error?: OpenCodeSessionErrorPayload }
     const sessionID = props.sessionID
+    const errorSummary = payload.type === "session.error" ? summarizeOpenCodeError(props.error) : null
+    if (errorSummary && sessionID) {
+      recordSessionError({ sessionId: sessionID, directory: resolvedDirectory ?? null, ...errorSummary })
+    }
     // Skip subtask sessions — only top-level sessions generate notifications
     const storeState = getDirectoryEventState(store, batch)
     const session = storeState.session.find((s) => s.id === sessionID)
@@ -1784,8 +1789,8 @@ export function handleEvent(
         session: sessionID,
         time: Date.now(),
         viewed: isViewedInCurrentSession(resolvedDirectory, sessionID),
-        ...(payload.type === "session.error"
-          ? { type: "error" as const, error: props.error }
+        ...(errorSummary
+          ? { type: "error" as const, error: errorSummary }
           : { type: "turn-complete" as const }),
       })
     }
