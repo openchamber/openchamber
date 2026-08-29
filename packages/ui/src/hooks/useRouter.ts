@@ -1,12 +1,8 @@
 import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
-<<<<<<< HEAD
 import { parseRoute, updateBrowserURL, hasRouteParams, RECENT_SESSION_TOKEN } from '@/lib/router';
 import { openSessionFromRoute } from '@/lib/router/openSessionFromRoute';
-=======
-import { parseRoute, updateBrowserURL, hasRouteParams, RECENT_SESSION_TOKEN } from '@/lib/router';
->>>>>>> 80b57c394 (feat(ui): restore recent session from URL token)
 import type { RouteState, AppRouteState } from '@/lib/router';
 import { resolveSettingsSlug } from '@/lib/settings/metadata';
 import { resolveRecentSession, shouldApplyResolvedRecentSession } from '@/lib/recentSession';

@@ -229,44 +229,16 @@ describe('resolveRecentSession', () => {
   }, 10_000);
 });
 
-describe('resolveRouteSessionToken', () => {
-  test('passes a plain session ID through with its directory hint', async () => {
-    const { resolveRouteSessionToken } = await import('./recentSession');
-    const resolved = await resolveRouteSessionToken(
-      'ses_plain',
-      async () => ({ sessionId: 'ses_recent', directory: '/repo/x' }),
-      (sessionId) => (sessionId === 'ses_plain' ? '/repo/plain' : null),
-    );
-    expect(resolved).toEqual({ sessionId: 'ses_plain', directoryHint: '/repo/plain' });
+describe('shouldApplyResolvedRecentSession', () => {
+  test('allows restoration when the current session did not change', async () => {
+    const { shouldApplyResolvedRecentSession } = await import('./recentSession');
+    expect(shouldApplyResolvedRecentSession(null, null)).toBe(true);
+    expect(shouldApplyResolvedRecentSession('session-a', 'session-a')).toBe(true);
   });
 
-  test('resolves the recent token to the last active session', async () => {
-    const { resolveRouteSessionToken } = await import('./recentSession');
-    const resolved = await resolveRouteSessionToken(
-      'recent',
-      async () => ({ sessionId: 'ses_active', directory: '/repo/a' }),
-      () => null,
-    );
-    expect(resolved).toEqual({ sessionId: 'ses_active', directoryHint: '/repo/a' });
-  });
-
-  test('falls through to the draft when the recent token resolves to nothing', async () => {
-    const { resolveRouteSessionToken } = await import('./recentSession');
-    const resolved = await resolveRouteSessionToken('recent', async () => null, () => null);
-    expect(resolved).toBeNull();
-  });
-
-  test('does not resolve the recent token when the route uses a plain session ID', async () => {
-    const { resolveRouteSessionToken } = await import('./recentSession');
-    let recentResolutionAttempted = false;
-    await resolveRouteSessionToken(
-      'ses_plain',
-      async () => {
-        recentResolutionAttempted = true;
-        return null;
-      },
-      () => null,
-    );
-    expect(recentResolutionAttempted).toBe(false);
+  test('preserves a user selection made during restoration', async () => {
+    const { shouldApplyResolvedRecentSession } = await import('./recentSession');
+    expect(shouldApplyResolvedRecentSession(null, 'session-user')).toBe(false);
+    expect(shouldApplyResolvedRecentSession('session-a', 'session-user')).toBe(false);
   });
 });

@@ -1,5 +1,4 @@
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { RECENT_SESSION_TOKEN } from '@/lib/router';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { refreshGlobalSessions, resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { clearLastActiveSession, readLastActiveSession, readMostRecentLastActiveSession } from '@/sync/last-session-cache';
@@ -9,21 +8,11 @@ export type ResolvedRecentSession = {
   directory: string | null;
 };
 
-export type RouteSessionResolution = {
-  sessionId: string;
-  directoryHint: string | null | undefined;
-} | null;
-
-export async function resolveRouteSessionToken(
-  rawSessionId: string,
-  resolveRecent: () => Promise<ResolvedRecentSession | null>,
-  getDirectoryForSession: (sessionId: string) => string | null | undefined,
-): Promise<RouteSessionResolution> {
-  if (rawSessionId !== RECENT_SESSION_TOKEN) {
-    return { sessionId: rawSessionId, directoryHint: getDirectoryForSession(rawSessionId) };
-  }
-  const resolved = await resolveRecent();
-  return resolved ? { sessionId: resolved.sessionId, directoryHint: resolved.directory } : null;
+export function shouldApplyResolvedRecentSession(
+  sessionIdBeforeResolution: string | null,
+  currentSessionId: string | null,
+): boolean {
+  return sessionIdBeforeResolution === currentSessionId;
 }
 
 /**
