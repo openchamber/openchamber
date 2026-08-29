@@ -87,6 +87,21 @@ describe('opencodeClient directory availability', () => {
   });
 });
 
+describe('opencodeClient admission attachment normalization', () => {
+  test('normalizes text attachments to text/plain while preserving the data', async () => {
+    const normalized = await opencodeClient.normalizeAttachmentForAdmission({
+      mime: 'text/markdown',
+      filename: 'notes.md',
+      url: 'data:text/markdown;base64,SGk=',
+    });
+    expect(normalized).toEqual({
+      mime: 'text/plain',
+      filename: 'notes.md',
+      url: 'data:text/plain;base64,SGk=',
+    });
+  });
+});
+
 describe('opencodeClient getConfig cache', () => {
   test('cleared stale in-flight requests do not repopulate cache or delete newer in-flight requests', async () => {
     const first = opencodeClient.getConfig('/workspace/project');

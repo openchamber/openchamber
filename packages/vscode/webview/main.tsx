@@ -1,5 +1,5 @@
 import { createVSCodeAPIs } from './api';
-import { onCommand, onThemeChange, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, startSseProxy, stopSseProxy } from './api/bridge';
+import { onCommand, onThemeChange, proxyApiRequest, proxySessionHistoryRequest, proxySessionMessageRequest, proxySessionPromptRequest, sendBridgeMessage, startSseProxy, stopSseProxy } from './api/bridge';
 import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve } from './api/streamPerf';
 import { extractBodyBase64, extractBodyText, extractJsonBody, hasInitBody } from './requestBodyTransport';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
@@ -1274,6 +1274,14 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 
     const bodyBase64 = await extractBodyBase64(input, init, method);
     const signal = (input instanceof Request ? input.signal : init?.signal) as AbortSignal | undefined;
+    if (method === 'POST' && /^\/api\/session\/[^/]+\/prompt$/.test(targetUrl.pathname)) {
+      const proxied = await proxySessionPromptRequest({ path: `${targetUrl.pathname}${targetUrl.search}`, headers, bodyBase64, signal });
+      return buildProxiedResponse(proxied);
+    }
+    if (method === 'GET' && /^\/api\/session\/[^/]+\/history$/.test(targetUrl.pathname)) {
+      const proxied = await proxySessionHistoryRequest({ path: `${targetUrl.pathname}${targetUrl.search}`, headers, signal });
+      return buildProxiedResponse(proxied);
+    }
     const proxied = await proxyApiRequest({ method, path: suffixPath, headers, bodyBase64, signal });
     const response = buildProxiedResponse(proxied);
     maybeHideLoadingOverlay();

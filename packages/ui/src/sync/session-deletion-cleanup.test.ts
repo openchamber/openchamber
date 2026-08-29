@@ -14,7 +14,7 @@ const todo: Todo = { content: 'persisted', status: 'pending', priority: 'medium'
 
 describe('cleanupPersistedSessionState', () => {
   beforeEach(() => {
-    useMessageQueueStore.setState({ queuedMessages: {}, quarantinedLegacyMessages: {} });
+    useMessageQueueStore.setState({ queuedMessages: {}, quarantinedLegacyMessages: {}, sendingIds: {}, durableTombstones: {} });
     useTodosPersistStore.setState({ sessions: {} });
     useInlineCommentDraftStore.setState({ drafts: {}, touchedAt: {} });
     useSessionPinnedStore.setState({ ids: new Set(), touchedAt: {} });
@@ -74,5 +74,21 @@ describe('cleanupPersistedSessionState', () => {
     cleanupPersistedSessionState({ runtimeKey: `${runtimeKey}-stale`, directory: '/repo', sessionId: 'session-1' });
 
     expect(useTodosPersistStore.getState().getSessionTodos('/repo', 'session-1')).toEqual([todo]);
+  });
+
+  test('hard-deletes durable queue state and rejects stale admission replay', async () => {
+    const runtimeKey = getRuntimeKey();
+    const target = createMessageQueueTarget('session-1', '/repo', runtimeKey)!;
+    const store = useMessageQueueStore.getState();
+    store.addToQueue(target, { content: 'admitted', admissionState: 'admitted', clientMessageId: 'msg-deleted' });
+    store.markSending(target, 'in-flight');
+    store.removeDurableAdmission(target, 'msg-deleted', 20);
+
+    cleanupPersistedSessionState({ runtimeKey, directory: '/repo', sessionId: 'session-1' });
+
+    const key = `${runtimeKey}\n/repo\nsession-1`;
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toBe(undefined);
+    expect(useMessageQueueStore.getState().sendingIds[key]).toBe(undefined);
+    expect(useMessageQueueStore.getState().durableTombstones[key]).toBe(undefined);
   });
 });

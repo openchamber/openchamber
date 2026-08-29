@@ -19,6 +19,11 @@ type ApiSessionMessageRequestPayload = {
   headers?: Record<string, string>;
   bodyText?: string;
 };
+type ApiSessionPromptRequestPayload = {
+  path?: string;
+  headers?: Record<string, string>;
+  bodyBase64?: string;
+};
 
 type ApiProxyAbortPayload = {
   requestID?: string;
@@ -297,6 +302,47 @@ export async function handleProxyBridgeMessage(
         return { id, type, success: true, data };
       } finally {
         timeoutSignal.removeEventListener('abort', onTimeout);
+        proxyAbortControllers.delete(id);
+      }
+    }
+
+    case 'api:session:prompt': {
+      const apiUrl = await waitForApiUrl(ctx?.manager);
+      if (!apiUrl) return { id, type, success: true, data: deps.buildUnavailableApiResponse() };
+      const { path: requestPath, headers, bodyBase64 } = (payload || {}) as ApiSessionPromptRequestPayload;
+      const normalizedPath = typeof requestPath === 'string' ? requestPath.trim() : '';
+      if (!/^\/api\/session\/[^/]+\/prompt(?:\?.*)?$/.test(normalizedPath)) {
+        return { id, type, success: true, data: { status: 400, headers: { 'content-type': 'application/json' }, bodyText: JSON.stringify({ error: 'Invalid session prompt proxy path' }) } };
+      }
+      const targetUrl = `${apiUrl.replace(/\/+$/, '')}${normalizedPath}`;
+      const requestHeaders = { ...deps.sanitizeForwardHeaders(headers), ...ctx?.manager?.getOpenCodeAuthHeaders() };
+      const body = typeof bodyBase64 === 'string' && bodyBase64.length > 0 ? Buffer.from(bodyBase64, 'base64') : undefined;
+      const abortController = new AbortController();
+      proxyAbortControllers.set(id, abortController);
+      try {
+        const data = await performApiProxyFetch(targetUrl, 'POST', requestHeaders, body, abortController.signal, deps);
+        return { id, type, success: true, data };
+      } finally {
+        proxyAbortControllers.delete(id);
+      }
+    }
+
+    case 'api:session:history': {
+      const apiUrl = await waitForApiUrl(ctx?.manager);
+      if (!apiUrl) return { id, type, success: true, data: deps.buildUnavailableApiResponse() };
+      const { path: requestPath, headers } = (payload || {}) as { path?: string; headers?: Record<string, string> };
+      const normalizedPath = typeof requestPath === 'string' ? requestPath.trim() : '';
+      if (!/^\/api\/session\/[^/]+\/history(?:\?.*)?$/.test(normalizedPath)) {
+        return { id, type, success: true, data: { status: 400, headers: { 'content-type': 'application/json' }, bodyText: JSON.stringify({ error: 'Invalid session history proxy path' }) } };
+      }
+      const targetUrl = `${apiUrl.replace(/\/+$/, '')}${normalizedPath}`;
+      const requestHeaders = { ...deps.sanitizeForwardHeaders(headers), ...ctx?.manager?.getOpenCodeAuthHeaders() };
+      const abortController = new AbortController();
+      proxyAbortControllers.set(id, abortController);
+      try {
+        const data = await performApiProxyFetch(targetUrl, 'GET', requestHeaders, undefined, abortController.signal, deps);
+        return { id, type, success: true, data };
+      } finally {
         proxyAbortControllers.delete(id);
       }
     }

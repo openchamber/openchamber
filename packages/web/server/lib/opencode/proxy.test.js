@@ -6,9 +6,22 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createDirectoryQueryCanonicalizer,
+  buildDurableV2ProxyPath,
   createOpenCodeProxyAgent,
   normalizeForwardedDirectoryHeaders,
 } from './proxy.js';
+
+describe('buildDurableV2ProxyPath', () => {
+  it('keeps the v2 API prefix and forwards the full query string', () => {
+    expect(buildDurableV2ProxyPath('/api/session/ses-1/history?directory=%2Frepo&after=7&limit=20'))
+      .toBe('/api/session/ses-1/history?directory=%2Frepo&after=7&limit=20');
+  });
+
+  it('adds the v2 API prefix when called with an Express-mounted path', () => {
+    expect(buildDurableV2ProxyPath('/session/ses-1/prompt?directory=%2Frepo'))
+      .toBe('/api/session/ses-1/prompt?directory=%2Frepo');
+  });
+});
 
 describe('createDirectoryQueryCanonicalizer', () => {
   it('canonicalizes directory query params and preserves other params', async () => {

@@ -1,5 +1,6 @@
 import http from 'node:http';
 import https from 'node:https';
+import { EventEmitter } from 'node:events';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -77,6 +78,55 @@ describe('OpenCode API proxy agent wiring', () => {
       expect(agent).toBeTruthy();
       expect(agent.options?.keepAlive).toBe(true);
     }
+  });
+
+  it('uses only proxyTimeout for upstream deadlines', () => {
+    registerOpenCodeProxy(createStubApp(), createStubDeps(managedState()));
+
+    for (const [options] of createProxyMiddlewareMock.mock.calls) {
+      expect(options).not.toHaveProperty('timeout');
+      expect([1_000, 15 * 60 * 1_000]).toContain(options.proxyTimeout);
+    }
+  });
+
+  it('classifies ECONNRESET after an upstream timeout as 504', () => {
+    registerOpenCodeProxy(createStubApp(), createStubDeps(managedState()));
+
+    const options = createProxyMiddlewareMock.mock.calls
+      .map(([value]) => value)
+      .find((value) => value.proxyTimeout === 1_000);
+    const proxyReq = new EventEmitter();
+    proxyReq.setHeader = () => {};
+    proxyReq.removeHeader = () => {};
+    const req = {};
+    const response = {
+      headersSent: false,
+      writableEnded: false,
+      status: (statusCode) => {
+        response.statusCode = statusCode;
+        return response;
+      },
+      json: (body) => {
+        response.body = body;
+      },
+    };
+
+    options.on.proxyReq(proxyReq, req);
+    proxyReq.emit('timeout');
+    options.on.error({ code: 'ECONNRESET', message: 'socket reset' }, req, response);
+
+    expect(response.statusCode).toBe(504);
+    expect(response.body).toEqual({ error: 'OpenCode upstream timed out' });
+  });
+
+  it('registers the durable prompt proxy with the upstream /api prefix', () => {
+    registerOpenCodeProxy(createStubApp(), createStubDeps(managedState()));
+
+    const promptProxy = createProxyMiddlewareMock.mock.calls
+      .map(([options]) => options)
+      .find((options) => typeof options.pathRewrite === 'function');
+    expect(promptProxy).toBeTruthy();
+    expect(promptProxy.pathRewrite('/session/ses-1/prompt', { originalUrl: '/api/session/ses-1/prompt' })).toBe('/api/session/ses-1/prompt');
   });
 
   it('shares one agent instance across the API and OAuth proxies', () => {

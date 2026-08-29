@@ -59,6 +59,7 @@ import {
   applyGlobalSessionStatusSnapshot,
   useGlobalSessionStatusStore,
 } from "./global-session-status"
+import { applyDurableQueueEvent, replayDurableQueueHistory, durableQueueTarget, resetDurableQueueCursors } from "./durable-queue-events"
 import type { State } from "./types"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { PermissionRequest } from "@/types/permission"
@@ -866,8 +867,19 @@ const normalizeEventDirectory = (rawDirectory: string): string => {
   return normalized.length > 1 ? normalized.replace(/\/+$/, "") : normalized
 }
 
-const getSessionIdFromPayload = (event: Event): string | null => {
+const isDurableQueueEventType = (type: unknown): boolean =>
+  type === "session.next.prompt.admitted"
+  || type === "session.next.prompt.admitted.1"
+  || type === "session.next.prompted"
+  || type === "session.next.prompted.1"
+
+export const getSessionIdFromPayload = (event: Event): string | null => {
   const properties = (event as { properties?: unknown }).properties
+  const data = (event as unknown as { data?: unknown }).data
+  if (isDurableQueueEventType(event.type) && data && typeof data === "object" && !Array.isArray(data)) {
+    const sessionID = (data as { sessionID?: unknown }).sessionID
+    if (typeof sessionID === "string" && sessionID.length > 0) return sessionID
+  }
   if (!properties || typeof properties !== "object") {
     return null
   }
@@ -892,6 +904,10 @@ const getSessionIdFromPayload = (event: Event): string | null => {
     || event.type === "question.asked"
     || event.type === "question.replied"
     || event.type === "question.rejected"
+    || event.type === "session.next.prompt.admitted"
+    || (event.type as string) === "session.next.prompt.admitted.1"
+    || event.type === "session.next.prompted"
+    || (event.type as string) === "session.next.prompted.1"
   ) {
     const sessionID = props.sessionID
     return typeof sessionID === "string" && sessionID.length > 0 ? sessionID : null
@@ -1574,6 +1590,29 @@ export function handleEvent(
 
   const directory = resolveDirectoryFromRoutingIndex(routingIndex, rawDirectory, payload, childStores, batch)
 
+  // Durable v2 queue events are authoritative and intentionally bypass the
+  // normal message projection: an admitted input is not a normal message yet.
+  // Resolve the directory first because global stream frames may not carry the
+  // directory on the outer envelope.
+  const durableEvent = (payload as unknown as { syncEvent?: unknown }).syncEvent
+  const durablePayload = durableEvent && typeof durableEvent === "object"
+    ? durableEvent as Event
+    : payload
+  const durableEventType = (durablePayload as unknown as { type?: string }).type
+  if (durableEventType === "sync" || durableEventType === "session.next.prompt.admitted" || durableEventType === "session.next.prompt.admitted.1" || durableEventType === "session.next.prompted" || durableEventType === "session.next.prompted.1") {
+    const durableData = (durablePayload as unknown as { data?: unknown }).data
+    const sessionID = getSessionIdFromPayload(durablePayload)
+      ?? (durableData && typeof durableData === "object" ? (durableData as { sessionID?: unknown }).sessionID : undefined) as string | undefined
+    const location = (payload as unknown as { location?: unknown }).location
+    const eventDirectory = location && typeof location === "object"
+      ? (location as { directory?: unknown }).directory
+      : undefined
+    const durableDirectory = typeof eventDirectory === "string" ? eventDirectory : directory
+    const canonicalDirectory = useSessionUIStore.getState().getDirectoryForSession(sessionID ?? "") ?? durableDirectory
+    const target = sessionID && durableQueueTarget(sessionID, canonicalDirectory, expectedRuntimeKey)
+    if (target) applyDurableQueueEvent(target, payload as unknown as Parameters<typeof applyDurableQueueEvent>[1])
+  }
+
   if (payload.type === "session.deleted" && expectedRuntimeKey === getRuntimeKey()) {
     const sessionID = getSessionIdFromPayload(payload)
     if (sessionID && directory && directory !== "global") {
@@ -2123,6 +2162,10 @@ export function SyncProvider(props: {
   if (!childStoresRef.current) childStoresRef.current = new ChildStoreManager()
   const childStores = childStoresRef.current
   const runtimeKey = getRuntimeKey()
+  const activeSessionId = useSessionUIStore((state) => state.currentSessionId)
+  const activeSessionDirectory = useSessionUIStore((state) => (
+    state.currentSessionId ? state.getDirectoryForSession(state.currentSessionId) : null
+  ))
   const messageLoaderRef = useRef<SessionMessageLoader | null>(null)
   if (!messageLoaderRef.current) {
     messageLoaderRef.current = new SessionMessageLoader(childStores, {
@@ -2138,6 +2181,11 @@ export function SyncProvider(props: {
   const routingIndex = routingIndexRef.current
   const currentDirectoryRef = useRef(props.directory)
   currentDirectoryRef.current = props.directory
+
+  useEffect(() => {
+    resetDurableQueueCursors()
+    return resetDurableQueueCursors
+  }, [runtimeKey])
   const lastStreamActivityAtRef = useRef(0)
   const lastStatusPollAtByDirectoryRef = useRef(new Map<string, number>())
   const lastFullResyncAtByDirectoryRef = useRef(new Map<string, number>())
@@ -2152,6 +2200,15 @@ export function SyncProvider(props: {
     () => ({ childStores, messageLoader, runtimeKey, sdk: props.sdk }),
     [childStores, messageLoader, props.sdk, runtimeKey],
   )
+  useEffect(() => {
+    const target = activeSessionId
+      ? durableQueueTarget(activeSessionId, activeSessionDirectory ?? currentDirectoryRef.current, runtimeKey)
+      : null
+    if (!target) return
+    const controller = new AbortController()
+    void replayDurableQueueHistory(target, controller.signal)
+    return () => controller.abort()
+  }, [activeSessionId, activeSessionDirectory, props.directory, runtimeKey])
   const system = useMemo<SyncSystem>(
     () => ({ ...runtime, directory: props.directory }),
     [props.directory, runtime],
@@ -2407,6 +2464,12 @@ export function SyncProvider(props: {
         })
         const isFirstConnect = !pipelineHasConnectedRef.current
         pipelineHasConnectedRef.current = true
+        const sessionId = useSessionUIStore.getState().currentSessionId
+        const directory = sessionId
+          ? useSessionUIStore.getState().getDirectoryForSession(sessionId) ?? currentDirectoryRef.current
+          : currentDirectoryRef.current
+        const target = sessionId && durableQueueTarget(sessionId, directory, runtimeKey)
+        if (target) void replayDurableQueueHistory(target)
         if (isFirstConnect && !pipelineDisconnectedBeforeFirstConnectRef.current) {
           return
         }

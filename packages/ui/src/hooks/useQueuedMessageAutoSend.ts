@@ -77,7 +77,7 @@ const getAbortHoldUntil = (sessionId: string): number | null => {
 };
 
 export const buildQueuedAutoSendPayload = (queue: QueuedMessage[]) => {
-  const queued = queue[0];
+  const queued = queue.find((message) => (message.admissionState ?? 'local') === 'local');
   if (!queued) {
     return null;
   }

@@ -187,6 +187,12 @@ Live activity/status indicators must not depend on this cache. They must use the
 
 `SessionMessageLoader` is the shared authority for session message requests. Navigation, reactive chat loading, sidebar prefetch, pagination, reconnect/recovery, and optimistic reconciliation must delegate to it rather than issuing parallel initial requests.
 
+### Durable queue replay
+
+The durable queue admission flow is server-owned after admission. The UI may submit a `pending-admission` item, but it must not resend or locally delete `admitted` history. `admission-failed` and `admission-unknown` remain recoverable until the user dismisses or restores them to input; those operations hard-remove the empty queue target. Hard session deletion removes queue state and tombstones for the exact runtime, directory, and session identity.
+
+Durable queue events are replayed through the ordered event cursor. The sync layer owns cursor advancement, reconnect replay, and stale-event rejection. Queue state owns the latest durable ordering proof and tombstones, so a replayed admission cannot resurrect a prompted item or replace newer live data. The server remains responsible for durable ordering and delivery; the client is responsible for durable replay and cursor continuity.
+
 Rules:
 
 1. Request identity is runtime key + normalized directory + session ID. Session IDs alone are not globally unique across runtimes or directories.

@@ -147,6 +147,14 @@ export const normalizeForwardedDirectoryHeaders = (headers) => {
   return headers;
 };
 
+// The v2 session routes already include /api. The generic proxy strips that
+// prefix for legacy OpenCode routes, so durable prompt/history requests use
+// this path builder instead.
+export const buildDurableV2ProxyPath = (requestUrl) => {
+  const value = typeof requestUrl === 'string' && requestUrl.length > 0 ? requestUrl : '/';
+  return value.startsWith('/api') ? value : `/api${value.startsWith('/') ? value : `/${value}`}`;
+};
+
 const waitForSseDrain = (res, signal) => new Promise((resolve) => {
   if (signal?.aborted || res.writableEnded || res.destroyed) {
     resolve();
@@ -408,6 +416,7 @@ export const registerOpenCodeProxy = (app, deps) => {
 
   const PROXY_REQUEST_TIMEOUT_MS = normalizeProxyTimeout(LONG_REQUEST_TIMEOUT_MS);
   const PROXY_TIMEOUT_MARKER = Symbol('openchamberProxyTimedOut');
+  const UPSTREAM_TIMEOUT_MARKER = Symbol('openchamberUpstreamTimedOut');
 
   // A provider OAuth callback blocks upstream for as long as the user takes to
   // sign in in their browser (device-code polling, or a loopback redirect), so
@@ -881,12 +890,17 @@ export const registerOpenCodeProxy = (app, deps) => {
     },
     changeOrigin: true,
     pathRewrite: { '^/api': '' },
-    timeout: timeoutMs,
     proxyTimeout: timeoutMs,
     // Dynamic target — port can change after restart
     router: () => resolveProxyTarget(),
     on: {
       proxyReq: (proxyReq, req) => {
+        // `timeout` on http-proxy aborts the downstream request. Keep only the
+        // upstream timeout below so the client socket can receive the 504.
+        proxyReq.once('timeout', () => {
+          req[UPSTREAM_TIMEOUT_MARKER] = true;
+        });
+
         // Inject OpenCode auth headers
         const authHeaders = getOpenCodeAuthHeaders();
         if (authHeaders.Authorization) {
@@ -923,13 +937,62 @@ export const registerOpenCodeProxy = (app, deps) => {
         if (req?.[PROXY_TIMEOUT_MARKER]) {
           return;
         }
-        const statusCode = isProxyTimeoutError(err) ? 504 : 503;
+        const statusCode = req?.[UPSTREAM_TIMEOUT_MARKER] || isProxyTimeoutError(err) ? 504 : 503;
         sendProxyErrorResponse(res, statusCode);
       },
     },
   });
 
   const apiProxy = createApiProxy(PROXY_REQUEST_TIMEOUT_MS);
+  // The v2 prompt endpoint lives under /api upstream. Keep this route out of
+  // the legacy generic proxy, whose historical rewrite intentionally removes
+  // that prefix for older OpenCode endpoints.
+  const durablePromptProxy = createProxyMiddleware({
+    target: resolveProxyTarget(),
+    get agent() { return resolveOpenCodeProxyAgent(); },
+    changeOrigin: true,
+    // Express strips the route mount before invoking this middleware. Use the
+    // original URL so the upstream receives the complete v2 route.
+    pathRewrite: (_path, req) => {
+      const originalUrl = typeof req.originalUrl === 'string' ? req.originalUrl : _path;
+      return buildDurableV2ProxyPath(originalUrl);
+    },
+    proxyTimeout: PROXY_REQUEST_TIMEOUT_MS,
+    router: () => resolveProxyTarget(),
+    on: {
+      proxyReq: (proxyReq, req) => {
+        proxyReq.once('timeout', () => {
+          req[UPSTREAM_TIMEOUT_MARKER] = true;
+        });
+
+        const authHeaders = getOpenCodeAuthHeaders();
+        if (authHeaders.Authorization) proxyReq.setHeader('Authorization', authHeaders.Authorization);
+        const encodedDirectory = req.headers?.['x-opencode-directory-encoding'] === 'uri';
+        normalizeForwardedDirectoryHeaders(req.headers);
+        if (req.headers?.['x-opencode-directory']) {
+          proxyReq.setHeader('x-opencode-directory', req.headers['x-opencode-directory']);
+        }
+        if (encodedDirectory) proxyReq.removeHeader?.('x-opencode-directory-encoding');
+        proxyReq.setHeader('accept-encoding', 'identity');
+        replayParsedBody(proxyReq, req);
+      },
+      proxyRes: (proxyRes) => {
+        for (const key of Object.keys(proxyRes.headers || {})) {
+          if (!shouldForwardProxyResponseHeader(key)) {
+            delete proxyRes.headers[key];
+          }
+        }
+      },
+      error: (err, req, res) => {
+        console.error('[proxy] OpenCode durable proxy error:', err.message);
+        if (req?.[PROXY_TIMEOUT_MARKER]) {
+          return;
+        }
+        const statusCode = req?.[UPSTREAM_TIMEOUT_MARKER] || isProxyTimeoutError(err) ? 504 : 503;
+        sendProxyErrorResponse(res, statusCode);
+      },
+    },
+  });
   const interactiveOAuthProxy = createApiProxy(INTERACTIVE_OAUTH_TIMEOUT_MS);
 
   // Best-effort fallback for stale clients still sending symlink paths.
@@ -949,6 +1012,8 @@ export const registerOpenCodeProxy = (app, deps) => {
 
   app.use('/api', applyProxyResponseDeadline);
   app.post('/api/provider/:providerID/oauth/callback', interactiveOAuthProxy);
+  app.post('/api/session/:sessionID/prompt', durablePromptProxy);
+  app.get('/api/session/:sessionID/history', durablePromptProxy);
   // OpenCode's native MCP OAuth flow: the request blocks until the user
   // finishes authorization in the browser (up to OpenCode's 5-minute callback
   // timeout), so it needs the interactive-OAuth deadline, not the default one.

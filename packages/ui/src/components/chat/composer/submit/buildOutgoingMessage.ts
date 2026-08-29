@@ -51,6 +51,8 @@ export interface OutgoingMessageInput {
     inlineComments: readonly InlineCommentDraft[];
     /** Synthetic context produced elsewhere (conflict resolution, and such). */
     syntheticTexts: readonly string[];
+    /** Structured synthetic context produced elsewhere. */
+    syntheticParts?: readonly OutgoingPart[];
     linkedIssue: { number: number; title: string; url: string; contextText: string } | null;
     linkedPr: { number: number; title: string; url: string; instructions: string; context: string } | null;
 }
@@ -144,8 +146,13 @@ export function buildOutgoingMessage(
         additionalParts.push(createContextPart(contextPayloadFromDraft(draft)));
     }
 
-    for (const text of input.syntheticTexts) {
-        additionalParts.push({ text, synthetic: true });
+    if (input.syntheticParts?.length) {
+        additionalParts.push(...input.syntheticParts);
+    } else {
+        // Keep the text-only channel for legacy callers. An empty structured
+        // list means no structured parts were produced, not that legacy text
+        // should be discarded.
+        for (const text of input.syntheticTexts) additionalParts.push({ text, synthetic: true });
     }
 
     if (input.linkedIssue) {

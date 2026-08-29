@@ -67,9 +67,11 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { GitHubIssuePickerDialog } from '@/components/session/GitHubIssuePickerDialog';
 import { GitHubPrPickerDialog } from '@/components/session/GitHubPrPickerDialog';
 import { Icon } from "@/components/icon/Icon";
+import { copyTextToClipboard } from '@/lib/clipboard';
 import { DraftPresetChips } from './DraftPresetChips';
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
 import { opencodeClient } from '@/lib/opencode/client';
+import { admitToDurableQueue } from '@/lib/opencode/queueAdmission';
 import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
@@ -137,6 +139,8 @@ import {
     toServerFileUrl,
 } from './composer/attachments/filePaths';
 import { buildOutgoingMessage } from './composer/submit/buildOutgoingMessage';
+import { restoreComposerPayload } from './composer/submit/restoreComposerPayload';
+import { contextPayloadFromDraft, createContextPart } from '@/lib/messages/contextParts';
 import {
     buildCommandVariables,
     canRunCommand,
@@ -759,6 +763,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const addToQueue = useMessageQueueStore((state) => state.addToQueue);
     const clearQueue = useMessageQueueStore((state) => state.clearQueue);
     const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
+    const markAdmissionPending = useMessageQueueStore((state) => state.markAdmissionPending);
+    const markAdmissionLocal = useMessageQueueStore((state) => state.markAdmissionLocal);
+    const markAdmissionAdmitted = useMessageQueueStore((state) => state.markAdmissionAdmitted);
+    const markAdmissionFailed = useMessageQueueStore((state) => state.markAdmissionFailed);
+    const markAdmissionUnknown = useMessageQueueStore((state) => state.markAdmissionUnknown);
+    const recoverAdmissionToInput = useMessageQueueStore((state) => state.recoverAdmissionToInput);
+    const dismissAdmissionUnknown = useMessageQueueStore((state) => state.dismissAdmissionUnknown);
+    const admissionInFlightRef = React.useRef<Map<string, object>>(new Map());
 
     // Inline comment drafts
     const inlineDraftSessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
@@ -779,6 +791,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         )
     );
     const consumeDrafts = useInlineCommentDraftStore((state) => state.consumeDrafts);
+    const clearInlineDrafts = useInlineCommentDraftStore((state) => state.clearDrafts);
     const hasDrafts = draftCount > 0;
 
     // User message history for up/down arrow navigation.
@@ -878,7 +891,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, [pendingInputText, consumePendingInputText]);
 
     const hasContent = message.trim().length > 0 || attachedFiles.length > 0 || hasDrafts;
-    const hasQueuedMessages = queuedMessages.length > 0;
+    const hasQueuedMessages = queuedMessages.some((item) => (item.admissionState ?? 'local') === 'local');
     const canSend = hasContent || hasQueuedMessages;
 
     const canAbort = sessionPhase !== 'idle';
@@ -904,18 +917,33 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
 
     // Add message to queue instead of sending
-    const handleQueueMessage = React.useCallback(() => {
+    const handleQueueMessage = React.useCallback(async () => {
         const inputSnapshot = getCurrentInputSnapshot();
         if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
 
-        // Context drafts stay in their store: the send that later delivers the
-        // queue consumes them and attaches them as structured context parts.
         const messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
+        const parsedMention = parseAgentMentions(messageToQueue, agents);
+        // Keep the original mention in the local fallback. Its existing drain
+        // parses mentions itself; only the v2 prompt text is sanitized.
+        const admissionText = parsedMention.sanitizedText;
         const attachmentsToQueue = sanitizeAttachmentsForSend(attachedFiles);
+        const admissionKey = `${messageQueueTarget.runtimeKey}\n${messageQueueTarget.sessionId}\n${messageToQueue}\n${attachmentsToQueue.map((file) => file.id).join(',')}`;
+        if (admissionInFlightRef.current.has(admissionKey)) return;
+        const admissionToken = {};
+        admissionInFlightRef.current.set(admissionKey, admissionToken);
+        const drafts = inlineDraftTarget ? consumeDrafts(inlineDraftTarget) : [];
+        const contextParts = drafts.map((draft) => createContextPart(contextPayloadFromDraft(draft)));
 
-        addToQueue(messageQueueTarget, {
+        // The id is part of the v2 request and is stable for the lifetime of
+        // this queued item. Never generate a replacement after an uncertain
+        // response: the v2 write is irreversible.
+        const clientMessageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        const queuedId = addToQueue(messageQueueTarget, {
             content: messageToQueue,
             attachments: attachmentsToQueue.length > 0 ? attachmentsToQueue : undefined,
+            contextParts,
+            admissionState: 'pending-admission',
+            clientMessageId,
             sendConfig: currentProviderId && currentModelId ? {
                 providerID: currentProviderId,
                 modelID: currentModelId,
@@ -923,6 +951,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 variant: currentVariant ?? undefined,
             } : undefined,
         });
+        markAdmissionPending(messageQueueTarget, queuedId, clientMessageId);
 
         // Sending while the agent works must still take the reader to the
         // live edge — a queued message produces no user row yet, so the
@@ -942,7 +971,39 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (!isMobile) {
             composerRef.current?.focus();
         }
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, attachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, currentProviderId, currentModelId, currentAgentName, currentVariant, scrollToLatest]);
+        try {
+            const admission = contextParts.length
+                ? { outcome: 'unsupported' as const, error: new Error('Durable queue does not support structured context') }
+                : await admitToDurableQueue({
+                runtimeKey: messageQueueTarget.runtimeKey,
+                sessionId: messageQueueTarget.sessionId,
+                directory: messageQueueTarget.directory,
+                text: admissionText,
+                files: attachmentsToQueue,
+                agentMentionName: parsedMention.mention?.name,
+                clientMessageId,
+                });
+            if (admission.outcome === 'admitted') {
+                markAdmissionAdmitted(messageQueueTarget, queuedId, {
+                    admittedSeq: admission.acknowledgement.admittedSeq,
+                    timeCreated: admission.acknowledgement.timeCreated,
+                    promotedSeq: admission.acknowledgement.promotedSeq,
+                });
+            } else if (admission.outcome === 'unsupported') {
+                // Explicitly downgrade to the existing local drain. This is the
+                // only outcome that preserves the old client-awake semantics.
+                markAdmissionLocal(messageQueueTarget, queuedId);
+            } else if (admission.outcome === 'ambiguous') {
+                markAdmissionUnknown(messageQueueTarget, queuedId);
+            } else {
+                markAdmissionFailed(messageQueueTarget, queuedId);
+            }
+        } finally {
+            if (admissionInFlightRef.current.get(admissionKey) === admissionToken) {
+                admissionInFlightRef.current.delete(admissionKey);
+            }
+        }
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inlineDraftTarget, attachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, currentProviderId, currentModelId, currentAgentName, currentVariant, markAdmissionPending, markAdmissionLocal, markAdmissionAdmitted, markAdmissionFailed, markAdmissionUnknown, agents, scrollToLatest]);
 
     const handleQueuedMessageEdit = React.useCallback((content: string) => {
         setMessage(content);
@@ -952,9 +1013,71 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, []);
 
     const handleQueuedMessageSend = React.useCallback((messageId: string) => {
-        // Force-sending from the queue during a busy session counts as steer
+        const queued = queuedMessages.find((item) => item.id === messageId);
+        if (!queued || (queued.admissionState ?? 'local') !== 'local') return;
         void handleSubmitRef.current({ queuedOnly: true, queuedMessageId: messageId, delivery: 'steer' });
-    }, []);
+    }, [queuedMessages]);
+
+    const handleCopyAdmission = React.useCallback((queuedMessage: QueuedMessage) => {
+        void copyTextToClipboard(queuedMessage.content).then((result) => {
+            if (!result.ok) toast.error(t('chat.queuedMessage.copyFailed'));
+        }).catch(() => toast.error(t('chat.queuedMessage.copyFailed')));
+    }, [t]);
+
+    const handleDismissAdmission = React.useCallback((queuedMessage: QueuedMessage) => {
+        if (messageQueueTarget) dismissAdmissionUnknown(messageQueueTarget, queuedMessage.id);
+    }, [dismissAdmissionUnknown, messageQueueTarget]);
+
+    const handleRetryAdmission = React.useCallback(async (queuedMessage: QueuedMessage) => {
+        if (!messageQueueTarget || queuedMessage.admissionState !== 'admission-failed') return;
+        const clientMessageId = queuedMessage.clientMessageId ?? `msg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        const retryKey = `${messageQueueTarget.runtimeKey}\n${messageQueueTarget.sessionId}\n${clientMessageId}`;
+        if (admissionInFlightRef.current.has(retryKey)) return;
+        const retryToken = {};
+        admissionInFlightRef.current.set(retryKey, retryToken);
+        markAdmissionPending(messageQueueTarget, queuedMessage.id, clientMessageId);
+        try {
+            if (queuedMessage.contextParts?.length) {
+                markAdmissionLocal(messageQueueTarget, queuedMessage.id);
+                return;
+            }
+            const parsedMention = parseAgentMentions(queuedMessage.content, agents);
+            const result = await admitToDurableQueue({
+                runtimeKey: messageQueueTarget.runtimeKey,
+                sessionId: messageQueueTarget.sessionId,
+                directory: messageQueueTarget.directory,
+                text: parsedMention.sanitizedText,
+                files: queuedMessage.attachments,
+                agentMentionName: parsedMention.mention?.name,
+                clientMessageId,
+            });
+            if (result.outcome === 'admitted') markAdmissionAdmitted(messageQueueTarget, queuedMessage.id, {
+                admittedSeq: result.acknowledgement.admittedSeq,
+                timeCreated: result.acknowledgement.timeCreated,
+                promotedSeq: result.acknowledgement.promotedSeq,
+            });
+            else if (result.outcome === 'unsupported') markAdmissionLocal(messageQueueTarget, queuedMessage.id);
+            else if (result.outcome === 'ambiguous') markAdmissionUnknown(messageQueueTarget, queuedMessage.id);
+            else markAdmissionFailed(messageQueueTarget, queuedMessage.id);
+        } finally {
+            if (admissionInFlightRef.current.get(retryKey) === retryToken) {
+                admissionInFlightRef.current.delete(retryKey);
+            }
+        }
+    }, [messageQueueTarget, markAdmissionPending, markAdmissionLocal, markAdmissionAdmitted, markAdmissionFailed, markAdmissionUnknown, agents]);
+
+    const handleRestoreAdmission = React.useCallback((queuedMessage: QueuedMessage) => {
+        if (!messageQueueTarget || !inlineDraftTarget) return;
+        const restored = recoverAdmissionToInput(messageQueueTarget, queuedMessage.id);
+        if (!restored) return;
+        restoreComposerPayload(inlineDraftTarget, restored, {
+            clearInlineDrafts,
+            setMessage,
+            setAttachedFiles: useInputStore.getState().setAttachedFiles,
+            setPendingSyntheticParts: useInputStore.getState().setPendingSyntheticParts,
+        });
+        composerRef.current?.focus();
+    }, [clearInlineDrafts, inlineDraftTarget, messageQueueTarget, recoverAdmissionToInput]);
 
     const handleOpenAgentPanel = React.useCallback(() => {
         setMobileControlsPanel('agent');
@@ -1011,7 +1134,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const queuedMessagesToSend = (queuedMessageId
             ? queuedMessages.filter((message) => message.id === queuedMessageId)
             : queuedMessages
-        ).filter((message) => !sendingIds.includes(message.id));
+        ).filter((message) => !sendingIds.includes(message.id)
+            && (message.admissionState ?? 'local') === 'local');
 
         if (queuedOnly && autoReviewRunning) {
             return;
@@ -1045,7 +1169,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // rejected turn winds down and the session returns to idle. This avoids
         // aborting the turn (which would surface an "aborted" notice).
         if (currentSessionId && !queuedOnly && autoReviewRunning && !isBtwActive) {
-            handleQueueMessage();
+            void handleQueueMessage();
             return;
         }
 
@@ -1067,7 +1191,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 sessionActions.dismissOpenQuestionsForSession(currentSessionId),
             ]);
             if (deniedPermissions || dismissedQuestions) {
-                handleQueueMessage();
+                void handleQueueMessage();
                 return;
             }
         }
@@ -1148,9 +1272,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             composerText: !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : null,
             composerAttachments: attachedFiles,
             inlineComments: drafts,
-            syntheticTexts: [
-                ...buildBtwSyntheticTexts({ isBtwActive, isPromotedBtwSession }),
-                ...(syntheticParts?.map((part) => part.text) ?? []),
+            // Structured parts already carry their text. Keep the legacy text
+            // channel empty here so each context item is sent once.
+            syntheticTexts: [],
+            syntheticParts: [
+                ...buildBtwSyntheticTexts({ isBtwActive, isPromotedBtwSession }).map((text) => ({ text, synthetic: true })),
+                ...(syntheticParts ?? []),
             ],
             linkedIssue: linkedIssue
                 ? { number: linkedIssue.number, title: linkedIssue.title, url: linkedIssue.url, contextText: linkedIssue.contextText }
@@ -1490,7 +1617,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const inputSnapshot = getCurrentInputSnapshot();
         const canQueue = !isBtwActive && inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && (currentSessionPhase !== 'idle' || autoReviewRunning);
         if (followUpBehavior === 'queue' && canQueue) {
-            handleQueueMessage();
+            void handleQueueMessage();
         } else if (followUpBehavior === 'steer' && canQueue) {
             void handleSubmitRef.current({ delivery: 'steer' });
         } else {
@@ -1695,16 +1822,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
             if (followUpBehavior === 'queue') {
                 if (isCtrlEnter || !canQueue) {
-                    handleSubmit();
+                    void handleSubmit();
                 } else {
-                    handleQueueMessage();
+                    void handleQueueMessage();
                 }
             } else {
                 // steer: Enter steers into the running turn, Ctrl+Enter sends now.
                 if (isCtrlEnter || !canQueue) {
-                    handleSubmit();
+                    void handleSubmit();
                 } else {
-                    handleSubmit({ delivery: 'steer' });
+                    void handleSubmit({ delivery: 'steer' });
                 }
             }
         }
@@ -2740,6 +2867,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 <QueuedMessageChips
                     onEditMessage={handleQueuedMessageEdit}
                     onSendMessage={handleQueuedMessageSend}
+                    onRetryAdmission={handleRetryAdmission}
+                    onRestoreAdmission={handleRestoreAdmission}
+                    onCopyAdmission={handleCopyAdmission}
+                    onDismissAdmission={handleDismissAdmission}
                 />
                 <AutoReviewBanner />
                 {hasDrafts ? (

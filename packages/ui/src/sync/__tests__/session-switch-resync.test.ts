@@ -73,6 +73,7 @@ const {
   resyncBlockingRequestsForActiveDirectory,
   resyncBlockingRequestsForDirectory,
   setActiveSession,
+  getSessionIdFromPayload,
 } = await import("../sync-context")
 
 function buildQuestion(overrides: Partial<QuestionRequest> = {}): QuestionRequest {
@@ -339,5 +340,31 @@ describe("resyncBlockingRequestsForDirectory", () => {
     expect(storeWrites).toBe(1)
     unsubscribe()
     childStores.disposeAll()
+  })
+})
+
+describe("getSessionIdFromPayload", () => {
+  test("keeps session.deleted legacy properties ahead of unrelated data", () => {
+    expect(getSessionIdFromPayload({
+      type: "session.deleted",
+      properties: { sessionID: "deleted-properties" },
+      data: { sessionID: "wrong-data" },
+    } as unknown as Event)).toBe("deleted-properties")
+  })
+
+  test("uses v2 data for durable admitted events ahead of legacy properties", () => {
+    expect(getSessionIdFromPayload({
+      type: "session.next.prompt.admitted.1",
+      properties: { sessionID: "wrong-properties" },
+      data: { sessionID: "admitted-data" },
+    } as unknown as Event)).toBe("admitted-data")
+  })
+
+  test("uses v2 data for durable prompted events ahead of legacy properties", () => {
+    expect(getSessionIdFromPayload({
+      type: "session.next.prompted.1",
+      properties: { sessionID: "wrong-properties" },
+      data: { sessionID: "prompted-data" },
+    } as unknown as Event)).toBe("prompted-data")
   })
 })

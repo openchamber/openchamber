@@ -854,6 +854,11 @@ class OpencodeService {
     };
   }
 
+  /** Shared attachment normalization for transports that use the v2 prompt shape. */
+  async normalizeAttachmentForAdmission(file: { mime: string; filename?: string; url: string }): Promise<{ mime: string; filename?: string; url: string }> {
+    return this.normalizeFilePart(file);
+  }
+
   async sendMessage(params: {
     runtimeKey?: string;
     id: string;
