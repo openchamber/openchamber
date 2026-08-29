@@ -53,8 +53,3 @@ export const sessionCookieNameForRequest = (req, base = SESSION_COOKIE_BASE) => 
   if (!Number.isFinite(portNumber) || portNumber <= 0) return base;
   return `${base}_${port}`;
 };
-
-/** True when `name` is a session cookie for `base` (bare or a numeric-port variant). */
-export const isSessionCookieName = (name, base = SESSION_COOKIE_BASE) =>
-  name === base
-  || (name.startsWith(`${base}_`) && /^\d+$/.test(name.slice(base.length + 1)));

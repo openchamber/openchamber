@@ -1,4 +1,4 @@
-import { isSessionCookieName, sessionCookieNameForRequest } from '../ui-auth/session-cookie.js';
+import { sessionCookieNameForRequest } from '../ui-auth/session-cookie.js';
 
 export const createRequestSecurityRuntime = (deps) => {
   const { readSettingsFromDiskMigrated } = deps;
@@ -19,27 +19,23 @@ export const createRequestSecurityRuntime = (deps) => {
     if (!cookieHeader || typeof cookieHeader !== 'string') {
       return null;
     }
-    // This instance's own cookie name for the host:port the request arrived on.
-    const preferred = sessionCookieNameForRequest(req);
-    const decode = (value) => {
+    // Match the exact slot for the host:port this request arrived on. A browser
+    // shares one jar across ports on a host, so reading by the request's own
+    // port is what keeps two LAN instances (issue #2377) from consuming each
+    // other's session. This mirrors ui-auth's per-request cookie resolution,
+    // so the set side, this CSRF read, and ui-auth never diverge.
+    const expected = sessionCookieNameForRequest(req);
+    for (const segment of cookieHeader.split(';')) {
+      const [rawName, ...rest] = segment.split('=');
+      if (rawName?.trim() !== expected) continue;
+      const value = rest.join('=').trim();
       try {
         return decodeURIComponent(value || '');
       } catch {
         return value || null;
       }
-    };
-    let fallback = null;
-    for (const segment of cookieHeader.split(';')) {
-      const [rawName, ...rest] = segment.split('=');
-      const name = rawName?.trim();
-      if (!name || !isSessionCookieName(name)) continue;
-      const value = decode(rest.join('=').trim());
-      if (name === preferred) return value;
-      // Remember any session cookie as a fallback so single-instance and
-      // port-less (e.g. loopback without an explicit port) flows keep working.
-      fallback ??= value;
     }
-    return fallback;
+    return null;
   };
 
   const rejectWebSocketUpgrade = (socket, statusCode, reason) => {

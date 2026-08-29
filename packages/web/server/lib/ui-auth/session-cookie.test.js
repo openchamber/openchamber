@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import {
   SESSION_COOKIE_BASE,
   sessionCookieNameForRequest,
-  isSessionCookieName,
 } from './session-cookie.js';
 
 const req = (host, forwarded) => ({
@@ -43,18 +42,5 @@ describe('sessionCookieNameForRequest', () => {
   test('honours a custom base name', () => {
     expect(sessionCookieNameForRequest(req('127.0.0.1:3000'), 'my_app')).toBe('my_app_3000');
     expect(sessionCookieNameForRequest(req('127.0.0.1'), 'my_app')).toBe('my_app');
-  });
-});
-
-describe('isSessionCookieName', () => {
-  test('matches the bare name and any port variant', () => {
-    expect(isSessionCookieName('oc_ui_session')).toBe(true);
-    expect(isSessionCookieName('oc_ui_session_3000')).toBe(true);
-  });
-
-  test('rejects unrelated cookie names', () => {
-    expect(isSessionCookieName('oc_url_token_123')).toBe(false);
-    expect(isSessionCookieName('theme')).toBe(false);
-    expect(isSessionCookieName('oc_ui_session_extra_bad')).toBe(false);
   });
 });
