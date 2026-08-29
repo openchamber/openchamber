@@ -1108,9 +1108,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       : null
     // Whether the project target was inferred from the active project (no
     // explicit directory/project option), as opposed to an explicit request.
-    // When inferred, the draft must bind to the active project itself and only
-    // ever fall back to the current directory if that directory actually
-    // resolves to a known project (never to a stale chats/ folder).
+    // When inferred, the draft binds to the active project itself (id and
+    // path); the current directory is deliberately ignored entirely, so a
+    // managed chats/ session never hijacks the target regardless of where the
+    // user is sitting.
     let target = isVSCodeRuntime() ? "project" : options?.target
     let inferredFromActiveProject = false
     if (!target) {

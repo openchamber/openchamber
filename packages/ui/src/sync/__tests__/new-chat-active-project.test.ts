@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test"
-import { togglePermissionAutoAccept } from "../../components/chat/permissionAutoAccept"
 
 const storage = new Map<string, string>()
 const createSessionCalls: Array<{ title?: string; directory: string | null; parentID: string | null; metadata?: unknown }> = []
@@ -10,8 +9,6 @@ let configVariantOverride: string | null | undefined
 // resolution reads it as the authoritative source, so the mock has to keep one.
 const sessionDirectoryRegistry = new Map<string, string>()
 let createdSessionDirectory: string | undefined
-
-const getMockCalls = (fn: unknown): unknown[][] => ((fn as { mock?: { calls: unknown[][] } }).mock?.calls ?? [])
 
 mock.module("zustand", () => ({
   create: () => (initializer: (
@@ -306,7 +303,7 @@ mock.module("../session-actions", () => ({
   abortCurrentOperation: mock(async () => undefined),
 }))
 
-const { materializeOpenDraftSession, useSessionUIStore } = await import("../session-ui-store")
+const { useSessionUIStore } = await import("../session-ui-store")
 describe("openNewSessionDraft targets the active project by default", () => {
   /**
    * Regression for the Web UI: the top "New chat" button calls
