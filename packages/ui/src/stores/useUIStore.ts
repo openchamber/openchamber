@@ -40,7 +40,7 @@ function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
   return value === 'vim' ? 'vim' : 'default';
 }
 
-type ContextPanelTab = {
+export type ContextPanelTab = {
   id: string;
   mode: ContextPanelMode;
   targetPath: string | null;
@@ -74,7 +74,7 @@ type ContextPanelTabDescriptor = {
   diffScope?: PendingDiffScope | null;
 };
 
-type ContextPanelDirectoryState = {
+export type ContextPanelDirectoryState = {
   isOpen: boolean;
   expanded: boolean;
   tabs: ContextPanelTab[];

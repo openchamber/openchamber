@@ -27,13 +27,13 @@ import { usePrefetchSessionMessages, useSessionMessageRecordsForExport } from '@
 import { getSyncSessionMaterializationStatus } from '@/sync/sync-refs';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from '../folders/sessionFolderDnd';
-import { canShowSessionWorktreeMenu, getSessionWorktreeMenuDisabled, nodeContainsSessionId, nodeHasPinnedMembershipChange, selectQuestionBadgeSessionScopes, selectRowBadgeVisibilityClass } from './sessionNodeItemUtils';
+import { canShowSessionWorktreeMenu, getSessionWorktreeMenuDisabled, isSessionActiveInContextPanel, nodeContainsSessionId, nodeHasPinnedMembershipChange, selectQuestionBadgeSessionScopes, selectRowBadgeVisibilityClass } from './sessionNodeItemUtils';
 import type { SessionNode } from '../types';
 import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from '../utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { getGitHubPrStatusKey, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
-import { useSessionUnseenCount } from '@/sync/notification-store';
+import { useSessionUnseenCount, markSessionViewed, markSessionUnread } from '@/sync/notification-store';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
@@ -56,13 +56,14 @@ import {
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
-import { useUIStore } from '@/stores/useUIStore';
+import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import type { WorktreeMetadata } from '@/types/worktree';
 import {
   getSessionWorktreeMenuState,
   type SessionWorktreeMenuTarget,
   type StartSessionWorktreeMenuLoadResult,
 } from '../sessionWorktreeMenu';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 
 type SecondaryMeta = {
   projectLabel?: string | null;
@@ -402,6 +403,14 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const isActive = useSessionUIStore((state) => state.currentSessionId === session.id);
 
   const sessionDirectory = normalizePath(session.directory ?? null) ?? normalizePath(groupDirectory ?? null);
+  const effectiveDirectory = useEffectiveDirectory();
+  const isActiveInContextPanel = useUIStore(
+    React.useCallback((state) => {
+      if (!effectiveDirectory) return false;
+      const directoryKey = normalizeContextPanelDirectoryKey(effectiveDirectory);
+      return isSessionActiveInContextPanel(state.contextPanelByDirectory[directoryKey], session.id);
+    }, [effectiveDirectory, session.id]),
+  );
   // Multi-select scope: sessions are flat per project, so selection groups by
   // project (falling back to the directory when no project is known) — a
   // selection must survive mixing sessions from different worktrees.
@@ -1003,6 +1012,19 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         {isPinnedSession ? <Icon name="unpin" className="mr-1 h-4 w-4" /> : <Icon name="pushpin" className="mr-1 h-4 w-4" />}
         {isPinnedSession ? t('sessions.sidebar.session.menu.unpin') : t('sessions.sidebar.session.menu.pin')}
       </Item>
+      {!isActive && !isActiveInContextPanel ? (
+        unseenCount > 0 ? (
+          <Item onClick={() => markSessionViewed(session.id)} className="[&>svg]:mr-1">
+            <Icon name="checkbox-circle" className="mr-1 h-4 w-4" />
+            {t('sessions.sidebar.session.menu.markRead')}
+          </Item>
+        ) : (
+          <Item onClick={() => markSessionUnread(session.id, sessionDirectory ?? undefined)} className="[&>svg]:mr-1">
+            <Icon name="record-circle" className="mr-1 h-4 w-4" />
+            {t('sessions.sidebar.session.menu.markUnread')}
+          </Item>
+        )
+      ) : null}
       {!resolvedSession.share ? (
         <Item onClick={() => handleShareSession(resolvedSession)} className="[&>svg]:mr-1">
           <Icon name="share-2" className="mr-1 h-4 w-4" />

@@ -6,11 +6,13 @@ import {
   computeNodeStructureKey,
   canShowSessionWorktreeMenu,
   getSessionWorktreeMenuDisabled,
+  isSessionActiveInContextPanel,
   nodeHasPinnedMembershipChange,
   selectFolderRootNodes,
   selectQuestionBadgeSessionScopes,
   selectRowBadgeVisibilityClass,
 } from './sessionNodeItemUtils';
+import type { ContextPanelSessionState } from './sessionNodeItemUtils';
 import type { SessionNode } from '../types';
 
 const session = (id: string, title: string): Session => ({
@@ -37,6 +39,39 @@ describe('computeNodeStructureKey', () => {
     const next = { ...previous, title: 'After' };
 
     expect(computeNodeStructureKey(rootWithChild(previous))).not.toBe(computeNodeStructureKey(rootWithChild(next)));
+  });
+});
+
+describe('isSessionActiveInContextPanel', () => {
+  const panel: ContextPanelSessionState = {
+    isOpen: true,
+    activeTabId: 'chat:session:session-1',
+    tabs: [
+      { id: 'chat:session:session-1', mode: 'chat', dedupeKey: 'session:session-1' },
+      { id: 'chat:session:session-2', mode: 'chat', dedupeKey: 'session:session-2' },
+    ],
+  };
+
+  test('matches the active chat session', () => {
+    expect(isSessionActiveInContextPanel(panel, 'session-1')).toBe(true);
+    expect(isSessionActiveInContextPanel(panel, 'session-2')).toBe(false);
+  });
+
+  test('ignores a closed panel', () => {
+    expect(isSessionActiveInContextPanel({ ...panel, isOpen: false }, 'session-1')).toBe(false);
+  });
+
+  test('ignores missing and stale panel state', () => {
+    expect(isSessionActiveInContextPanel(undefined, 'session-1')).toBe(false);
+    expect(isSessionActiveInContextPanel({ ...panel, activeTabId: 'missing' }, 'session-1')).toBe(false);
+  });
+
+  test('ignores an active non-chat tab', () => {
+    expect(isSessionActiveInContextPanel({
+      ...panel,
+      activeTabId: 'git',
+      tabs: [...panel.tabs, { id: 'git', mode: 'git', dedupeKey: 'git' }],
+    }, 'session-1')).toBe(false);
   });
 });
 

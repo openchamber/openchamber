@@ -4,6 +4,7 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
+import type { ContextPanelDirectoryState, ContextPanelTab } from '@/stores/useUIStore';
 import type { SessionNode } from '../types';
 
 /**
@@ -78,6 +79,19 @@ export const nodeContainsSessionId = (node: SessionNode, sessionId: string | nul
   }
 
   return false;
+};
+
+export type ContextPanelSessionState = Pick<ContextPanelDirectoryState, 'isOpen' | 'activeTabId'> & {
+  tabs: Array<Pick<ContextPanelTab, 'id' | 'mode' | 'dedupeKey'>>;
+};
+
+export const isSessionActiveInContextPanel = (
+  panel: ContextPanelSessionState | undefined,
+  sessionId: string,
+): boolean => {
+  if (!panel?.isOpen || !panel.activeTabId) return false;
+  const activeTab = panel.tabs.find((tab) => tab.id === panel.activeTabId);
+  return activeTab?.mode === 'chat' && activeTab.dedupeKey === `session:${sessionId}`;
 };
 
 export type QuestionBadgeSessionScope = {

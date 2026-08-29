@@ -466,6 +466,8 @@ export const dict = {
   'sessions.sidebar.session.rename.cancel': 'Umbenennung abbrechen',
   'sessions.sidebar.session.menu.unpin': 'Sitzung lösen',
   'sessions.sidebar.session.menu.pin': 'Sitzung anheften',
+  'sessions.sidebar.session.menu.markUnread': 'Als ungelesen markieren',
+  'sessions.sidebar.session.menu.markRead': 'Als gelesen markieren',
   'sessions.sidebar.session.menu.share': 'Teilen',
   'sessions.sidebar.session.menu.copied': 'Kopiert',
   'sessions.sidebar.session.menu.copyLink': 'Link kopieren',

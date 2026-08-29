@@ -514,6 +514,8 @@ export const dict = {
   'sessions.sidebar.session.rename.cancel': 'Session yeniden adlandırmayı iptal et',
   'sessions.sidebar.session.menu.unpin': 'Session\'ın sabitlemesini kaldır',
   'sessions.sidebar.session.menu.pin': 'Session\'ı sabitle',
+  'sessions.sidebar.session.menu.markUnread': 'Okunmadı olarak işaretle',
+  'sessions.sidebar.session.menu.markRead': 'Okundu olarak işaretle',
   'sessions.sidebar.session.menu.share': 'Paylaş',
   'sessions.sidebar.session.menu.copied': 'Kopyalandı',
   'sessions.sidebar.session.menu.copyLink': 'Bağlantıyı kopyala',
