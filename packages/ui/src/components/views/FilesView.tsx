@@ -77,6 +77,7 @@ import { getDefaultTheme } from '@/lib/theme/themes';
 import { isBrowserClientRuntime, openDesktopFileInApp, openDesktopPath } from '@/lib/desktop';
 import { useOpenInAppsStore } from '@/stores/useOpenInAppsStore';
 import { useKeybind, useKeybinds } from '@/hooks/useKeybind';
+import { isEditableEventTarget } from '@/hooks/keyboard-shortcut-dom';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { useI18n } from '@/lib/i18n';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -973,6 +974,19 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [mdPreviewFindOpen, setMdPreviewFindOpen] = React.useState(false);
   const [mdPreviewFindFocusNonce, setMdPreviewFindFocusNonce] = React.useState(0);
   const mdPreviewContainerRef = React.useRef<HTMLDivElement | null>(null);
+  // Give the rendered preview keyboard focus (without scrolling it) unless the
+  // user is typing somewhere else, so Cmd/Ctrl+F opens the preview find bar
+  // right after a Markdown file opens and after any click inside it.
+  const focusMdPreviewContainer = React.useCallback((event?: React.MouseEvent<HTMLDivElement>) => {
+    const container = event?.currentTarget ?? mdPreviewContainerRef.current;
+    if (!container) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== container) {
+      if (isEditableEventTarget(active)) return;
+      if (container.contains(active)) return;
+    }
+    container.focus({ preventScroll: true });
+  }, []);
   const mdFullscreenPreviewContainerRef = React.useRef<HTMLDivElement | null>(null);
 
   const canCreateFile = Boolean(files.writeFile);
@@ -2506,6 +2520,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     return mdViewMode;
   }, [mdViewMode]);
 
+  const mdPreviewFocusTargetPath = selectedFile && isMarkdown && getMdViewMode() === 'preview' && !fileLoading
+    ? selectedFile.path
+    : null;
+  React.useEffect(() => {
+    if (!mdPreviewFocusTargetPath || isMobile) return;
+    focusMdPreviewContainer();
+  }, [focusMdPreviewContainer, isFullscreen, isMobile, mdPreviewFocusTargetPath]);
+
   const saveJsonViewMode = React.useCallback((mode: 'tree' | 'text') => {
     setJsonViewMode(mode);
     try {
@@ -3884,7 +3906,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           ) : selectedFile && isMarkdown && getMdViewMode() === 'preview' ? (
             <div className="relative h-full min-h-0">
               <div
-                className="oc-file-preview h-full overflow-auto p-3"
+                className="oc-file-preview h-full overflow-auto p-3 outline-none"
+                // Focusable so Cmd/Ctrl+F reaches the find bar: the keybind only
+                // fires when the event target sits inside this container, and a
+                // plain div never holds focus. -1 keeps it out of the tab order.
+                tabIndex={-1}
+                onMouseDown={focusMdPreviewContainer}
                 ref={(node) => {
                   markdownPreviewRef.current = node;
                   mdPreviewContainerRef.current = node;
@@ -4274,7 +4301,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             // highlighted by the search it drives.
             <div className="relative h-full min-h-0">
             <div
-              className="oc-file-preview h-full overflow-auto p-4"
+              className="oc-file-preview h-full overflow-auto p-4 outline-none"
+              tabIndex={-1}
+              onMouseDown={focusMdPreviewContainer}
               ref={(node) => {
                 markdownPreviewRef.current = node;
                 mdFullscreenPreviewContainerRef.current = node;

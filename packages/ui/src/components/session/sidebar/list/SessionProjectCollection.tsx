@@ -232,6 +232,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     availableWorktreesByProject: topology.availableWorktreesByProject,
     projectRepoStatus: topology.projectRepoStatus,
     projectRootBranches: topology.projectRootBranches,
+    gitBranches: topology.gitBranches,
     lastRepoStatus: topology.lastRepoStatus,
     buildGroupedSessions,
     hasSessionSearchQuery: view.hasSessionSearchQuery,

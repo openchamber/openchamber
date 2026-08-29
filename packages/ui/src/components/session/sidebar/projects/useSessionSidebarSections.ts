@@ -29,10 +29,22 @@ type ProjectSectionCacheEntry = {
   archivedSessions: Session[];
   availableWorktrees: WorktreeMetadata[];
   rootBranch: string | null;
+  /** Current branch of every worktree directory the section renders. */
+  worktreeBranchesKey: string;
   isRepo: boolean;
   buildGroupedSessions: Args['buildGroupedSessions'];
   section: ProjectSection;
 };
+
+const worktreeBranchesKeyFor = (
+  worktrees: WorktreeMetadata[],
+  gitBranches: ReadonlyMap<string, string | null>,
+): string => worktrees
+  .map((worktree) => {
+    const directory = normalizePath(worktree.path) ?? worktree.path;
+    return `${directory}=${gitBranches.get(directory) ?? ''}`;
+  })
+  .join('\n');
 
 const EMPTY_WORKTREES: WorktreeMetadata[] = [];
 
@@ -43,6 +55,7 @@ type Args = {
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>;
   projectRepoStatus: Map<string, boolean | null>;
   projectRootBranches: Map<string, string | null>;
+  gitBranches: ReadonlyMap<string, string | null>;
   lastRepoStatus: boolean;
   buildGroupedSessions: (
     sessions: Session[],
@@ -73,6 +86,7 @@ export const useSessionSidebarSections = (args: Args) => {
     availableWorktreesByProject,
     projectRepoStatus,
     projectRootBranches,
+    gitBranches,
     lastRepoStatus,
     buildGroupedSessions,
     hasSessionSearchQuery,
@@ -101,6 +115,7 @@ export const useSessionSidebarSections = (args: Args) => {
         ? Boolean(projectRepoStatus.get(project.id))
         : lastRepoStatus;
       const rootBranch = projectRootBranches.get(project.id) ?? null;
+      const worktreeBranchesKey = worktreeBranchesKeyFor(worktreesForProject, gitBranches);
       const cached = previousCache.get(project.id);
       if (
         cached
@@ -109,6 +124,7 @@ export const useSessionSidebarSections = (args: Args) => {
         && sameSessions(cached.archivedSessions, archivedSessions)
         && cached.availableWorktrees === worktreesForProject
         && cached.rootBranch === rootBranch
+        && cached.worktreeBranchesKey === worktreeBranchesKey
         && cached.isRepo === isRepo
         && cached.buildGroupedSessions === buildGroupedSessions
       ) {
@@ -118,6 +134,19 @@ export const useSessionSidebarSections = (args: Args) => {
       }
 
       rebuiltSections += 1;
+      if (cached) {
+        // Diagnostic: name what invalidated the cached section so a sidebar
+        // that rebuilds on every session switch can be traced to its input.
+        const reason = cached.project !== project ? 'project'
+          : !sameSessions(cached.activeSessions, activeSessions) ? 'sessions'
+          : !sameSessions(cached.archivedSessions, archivedSessions) ? 'archived'
+          : cached.availableWorktrees !== worktreesForProject ? 'worktrees'
+          : cached.rootBranch !== rootBranch ? 'branch'
+          : cached.worktreeBranchesKey !== worktreeBranchesKey ? 'worktreeBranches'
+          : cached.isRepo !== isRepo ? 'repo'
+          : 'builder';
+        streamPerfCount(`ui.sidebar.project_section.rebuilt_reason.${reason}`);
+      }
       const projectSessions = dedupeSessionsById([...activeSessions, ...archivedSessions]);
       const groups = buildGroupedSessions(
         projectSessions,
@@ -133,6 +162,7 @@ export const useSessionSidebarSections = (args: Args) => {
         archivedSessions,
         availableWorktrees: worktreesForProject,
         rootBranch,
+        worktreeBranchesKey,
         isRepo,
         buildGroupedSessions,
         section,
@@ -152,6 +182,7 @@ export const useSessionSidebarSections = (args: Args) => {
     lastRepoStatus,
     buildGroupedSessions,
     projectRootBranches,
+    gitBranches,
   ]);
 
   const visibleProjectSections = React.useMemo(() => {

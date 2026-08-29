@@ -67,7 +67,26 @@ interface OpenChamberDefaults {
     sttLanguage?: string;
 }
 
-const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
+// Directory activation re-reads the OpenChamber defaults, which are global,
+// not per directory: one request serves the switches that land inside this
+// window, and concurrent activations share the in-flight one.
+const OPENCHAMBER_DEFAULTS_FRESH_MS = 15_000;
+let openChamberDefaultsCache: { at: number; request: Promise<OpenChamberDefaults> } | null = null;
+
+const fetchOpenChamberDefaults = (): Promise<OpenChamberDefaults> => {
+    const now = Date.now();
+    if (openChamberDefaultsCache && now - openChamberDefaultsCache.at < OPENCHAMBER_DEFAULTS_FRESH_MS) {
+        return openChamberDefaultsCache.request;
+    }
+    const request = requestOpenChamberDefaults();
+    openChamberDefaultsCache = { at: now, request };
+    request.catch(() => {
+        if (openChamberDefaultsCache?.request === request) openChamberDefaultsCache = null;
+    });
+    return request;
+};
+
+const requestOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
     markStartupTrace('config.defaults:start');
     const started = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const finish = (source: string, result: OpenChamberDefaults) => {

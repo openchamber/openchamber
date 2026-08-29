@@ -87,7 +87,8 @@
     "release:test:arm": "./scripts/test-release-build.sh aarch64",
     "profile:idle": "node scripts/profile-idle.mjs",
     "profile:session": "node scripts/profile-session.mjs",
-    "profile:animation": "node scripts/profile-animation.mjs"
+    "profile:animation": "node scripts/profile-animation.mjs",
+    "profile:switch": "node scripts/profile-switch.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.0",

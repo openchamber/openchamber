@@ -55,6 +55,7 @@ const renderSections = (group: SessionGroup, query: string): Sections => {
       availableWorktreesByProject: new Map(),
       projectRepoStatus: new Map(),
       projectRootBranches: new Map(),
+      gitBranches: new Map(),
       lastRepoStatus: false,
       buildGroupedSessions: grouping.buildGroupedSessions,
       hasSessionSearchQuery: query.length > 0,

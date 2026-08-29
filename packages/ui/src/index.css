@@ -1389,12 +1389,21 @@ html:not(.dark) .chat-scroll {
   }
 }
 
-.oc-chat-hydration-reveal {
+.oc-chat-hydration-reveal,
+[data-timeline-reveal='fading'] {
   animation: oc-chat-hydration-reveal 180ms ease-out both;
 }
 
+/* Timeline root while a freshly opened session still has provisional first
+   paints (see timelineRevealGate.ts): hidden until every hold releases, then
+   revealed as a whole. */
+[data-timeline-reveal='pending'] {
+  opacity: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .oc-chat-hydration-reveal {
+  .oc-chat-hydration-reveal,
+  [data-timeline-reveal='fading'] {
     animation: none;
   }
 }

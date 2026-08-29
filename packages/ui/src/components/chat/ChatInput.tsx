@@ -72,8 +72,8 @@ import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useSkillsStore } from '@/stores/useSkillsStore';
-import { useCommandsStore } from '@/stores/useCommandsStore';
+import { selectSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
+import { selectCommandsForDirectory, useCommandsStore } from '@/stores/useCommandsStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { usePermissionStore } from '@/stores/permissionStore';
@@ -602,8 +602,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     // Known slash-invocations (commands + skills + built-ins) used to highlight
     // matching /tokens in the composer, the same way confirmed @files are.
-    const availableCommands = useCommandsStore((s) => s.commands);
-    const availableSkills = useSkillsStore((s) => s.skills);
+    const availableCommands = useCommandsStore((s) => selectCommandsForDirectory(s, currentDirectory));
+    const availableSkills = useSkillsStore((s) => selectSkillsForDirectory(s, currentDirectory));
     const knownSlashNames = React.useMemo(() => {
         const names = new Set<string>([
             'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'btw', 'summary', 'workspace-review', 'plan-feature', 'craft-goal', 'schedule-task', 'catch-up', 'debug', 'weigh', 'explore',
@@ -1140,7 +1140,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             : [];
 
         const availableSkillNames = new Set(
-            useSkillsStore.getState().skills.map((skill) => skill.name),
+            selectSkillsForDirectory(useSkillsStore.getState(), currentDirectory).map((skill) => skill.name),
         );
 
         const outgoing = buildOutgoingMessage({
@@ -2262,10 +2262,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     };
 
     React.useEffect(() => {
-
-        if (active && currentSessionId && composerRef.current && !isMobile) {
-            composerRef.current.focus();
-        }
+        if (!active || !currentSessionId || isMobile) return;
+        // Focusing forces layout. Right after a session switch the layout is
+        // dirty from the whole timeline mounting, so the focus call would pay
+        // for that layout inside the commit; a frame later it is nearly free.
+        const frame = window.requestAnimationFrame(() => {
+            composerRef.current?.focus();
+        });
+        return () => window.cancelAnimationFrame(frame);
     }, [active, currentSessionId, isMobile]);
 
     React.useEffect(() => {

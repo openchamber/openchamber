@@ -639,8 +639,12 @@ export const useGitStore = create<GitStore>()(
 
           try {
             const now = Date.now();
+            // A known answer — repo or not — is cached for the stale window.
+            // Re-probing every non-repo directory (managed chats live in one)
+            // made each switch into such a directory cost a git check.
             const shouldProbeRepository =
-              dirState.isGitRepo !== true ||
+              dirState.isGitRepo === null ||
+              dirState.isGitRepo === undefined ||
               now - (dirState.lastRepoCheckAt || 0) > REPO_CHECK_STALE_THRESHOLD;
 
             let isRepo = dirState.isGitRepo === true;

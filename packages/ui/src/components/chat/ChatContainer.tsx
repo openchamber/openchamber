@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import ChatEmptyState from './ChatEmptyState';
 import { useGlobalSyncStore } from '@/sync/global-sync-store';
 import MessageList, { type MessageListHandle } from './MessageList';
+import { createTimelineRevealGate, TIMELINE_REVEAL_CAP_MS, TimelineRevealGateContext } from './timelineRevealGate';
 import { PermissionCard } from './PermissionCard';
 import { QuestionCard } from './QuestionCard';
 import { hasActiveQuestionToolInCurrentTurn, recoverPendingQuestionWithRetry } from '@/sync/question-recovery';
@@ -175,9 +176,6 @@ type ChatViewportProps = {
     } | null;
     scrollToBottom: () => void;
     endPinningReleased: boolean;
-    // One-shot fade for content that replaced the hydration skeleton;
-    // cached sessions render instantly without it.
-    revealContent: boolean;
     sessionQuestions: QuestionRequest[];
     sessionPermissions: PermissionRequest[];
     isProgrammaticFollowActive: boolean;
@@ -214,7 +212,6 @@ const ChatViewport = React.memo(({
     retryOverlay,
     scrollToBottom,
     endPinningReleased,
-    revealContent,
     sessionQuestions,
     sessionPermissions,
     isProgrammaticFollowActive,
@@ -368,6 +365,45 @@ const ChatViewport = React.memo(({
         </>
     ), [currentSessionId, directory, isMobile, sessionPermissions, sessionQuestions]);
 
+    // Opening a session paints the timeline as one finished picture: the root
+    // stays invisible while any renderer holds a provisional first paint, then
+    // everything appears together. A warm switch, where nothing is held,
+    // reveals in the same frame; a cold open fades in once as a whole.
+    const timelineRootRef = React.useRef<HTMLDivElement | null>(null);
+    const revealGate = React.useMemo(() => createTimelineRevealGate(), [currentSessionKey]);
+    React.useLayoutEffect(() => {
+        const root = timelineRootRef.current;
+        if (!root) return;
+        root.setAttribute('data-timeline-reveal', 'pending');
+        let finished = false;
+        let timer: number | null = null;
+        const reveal = (fade: boolean) => {
+            if (finished) return;
+            finished = true;
+            if (timer !== null) window.clearTimeout(timer);
+            if (fade) root.setAttribute('data-timeline-reveal', 'fading');
+            else root.removeAttribute('data-timeline-reveal');
+        };
+        // Holds are taken in layout effects, including those of rows the list
+        // mounts in a nested synchronous pass; a microtask runs after all of
+        // them and still before the browser paints this commit.
+        queueMicrotask(() => {
+            if (finished) return;
+            revealGate.close();
+            if (revealGate.holds === 0) {
+                reveal(false);
+                return;
+            }
+            revealGate.onEmpty = () => reveal(true);
+            timer = window.setTimeout(() => reveal(true), TIMELINE_REVEAL_CAP_MS);
+        });
+        return () => {
+            finished = true;
+            if (timer !== null) window.clearTimeout(timer);
+            revealGate.onEmpty = null;
+        };
+    }, [revealGate]);
+
     const scrollContainerProps = React.useMemo(() => ({
         className: 'absolute inset-0 overflow-y-auto overflow-x-hidden z-0 chat-scroll overlay-scrollbar-target',
         style: CHAT_SCROLL_STYLE,
@@ -385,11 +421,12 @@ const ChatViewport = React.memo(({
                 isDesktopExpandedInput
                     ? 'absolute inset-0 opacity-0 pointer-events-none'
                     : 'flex-1',
-                revealContent && !isDesktopExpandedInput && 'oc-chat-hydration-reveal',
             )}
+            ref={timelineRootRef}
             aria-hidden={isDesktopExpandedInput}
         >
             <div className="absolute inset-0">
+              <TimelineRevealGateContext.Provider value={revealGate}>
                 <MessageList
                     key={currentSessionKey}
                     ref={messageListRef}
@@ -417,6 +454,7 @@ const ChatViewport = React.memo(({
                     listFooter={listFooter}
                     scrollContainerProps={scrollContainerProps}
                 />
+              </TimelineRevealGateContext.Provider>
                 <OverlayScrollbar containerRef={scrollRef} disableHorizontal suppressVisibility={isProgrammaticFollowActive} userIntentOnly observeMutations={false} />
                 {showPromptNavigator && promptTurnIds.length >= 2 ? (
                     <PromptNavigatorRail
@@ -448,7 +486,6 @@ const ChatViewport = React.memo(({
         && prev.retryOverlay === next.retryOverlay
         && prev.scrollToBottom === next.scrollToBottom
         && prev.endPinningReleased === next.endPinningReleased
-        && prev.revealContent === next.revealContent
         && prev.sessionQuestions === next.sessionQuestions
         && prev.sessionPermissions === next.sessionPermissions
         && prev.isProgrammaticFollowActive === next.isProgrammaticFollowActive
@@ -824,9 +861,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         return () => setWorkStatusPanelVisible(false);
     }, [setWorkStatusPanelVisible, showWorkStatusPanel]);
     const messageListRef = React.useRef<MessageListHandle | null>(null);
-    // Session keys that showed the hydration skeleton this app run; their
-    // content gets a one-shot reveal fade once it replaces the skeleton.
-    const hydrationRevealKeyRef = React.useRef<string | null>(null);
 
     const currentSession = useSession(currentSessionId, effectiveSessionDirectory);
     const parentSession = useParentSession(currentSessionId, effectiveSessionDirectory);
@@ -1163,15 +1197,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const isSessionHydrating =
         Boolean(currentSessionId)
         && !hasRenderableSessionSnapshot;
-    React.useEffect(() => {
-        if (isSessionHydrating || hydrationRevealKeyRef.current === null) return;
-        // One-shot: forget the key after the reveal animation has played so a
-        // later (now cached) visit to the same session opens instantly.
-        const timer = setTimeout(() => {
-            hydrationRevealKeyRef.current = null;
-        }, 400);
-        return () => clearTimeout(timer);
-    }, [isSessionHydrating, currentSessionKey]);
     const retrySessionLoad = React.useCallback(() => {
         if (!messagesEnabled || !currentSessionId) return;
         void sync.ensureSessionRenderable(currentSessionId, true, effectiveSessionDirectory);
@@ -1311,9 +1336,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 
         const showHydrationSkeleton = isSessionHydrating && sessionMessages.length === 0 && !sessionIsWorking;
         if (showHydrationSkeleton) {
-            hydrationRevealKeyRef.current = currentSessionKey ?? currentSessionId ?? null;
-        }
-        if (showHydrationSkeleton) {
             if (sessionMessageLoadState.status === 'error') {
                 return (
                     <div className="flex min-h-0 flex-1 items-center justify-center px-6">
@@ -1415,7 +1437,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 retryOverlay={retryOverlay}
                 scrollToBottom={resumeToLatestInstant}
                 endPinningReleased={userOwnsScroll}
-                revealContent={hydrationRevealKeyRef.current !== null && hydrationRevealKeyRef.current === (currentSessionKey ?? currentSessionId ?? null)}
                 sessionQuestions={sessionQuestions}
                 sessionPermissions={sessionPermissions}
                 isProgrammaticFollowActive={isFollowingProgrammatically}

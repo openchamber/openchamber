@@ -51,6 +51,7 @@ import {
 import { fileReferenceExists } from './fileReferenceStat';
 import { streamPerfCount, streamPerfObserve } from '@/stores/utils/streamDebug';
 import { detachedMarkdownDomCache, type DetachedMarkdownDomKey } from './markdown/detachedMarkdownDomCache';
+import { TimelineRevealGateContext } from './timelineRevealGate';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 const useCurrentMermaidTheme = () => {
@@ -692,6 +693,30 @@ const useMermaidInlineInteractions = ({
 const MERMAID_RENDER_CACHE = new Map<string, MermaidRender>();
 const MERMAID_RENDER_CACHE_MAX = 100;
 const MARKDOWN_DECORATION_ID_ATTR = 'data-md-decoration-id';
+
+// True when the container already holds exactly these settled blocks with the
+// current decoration. The first paint of a remounted message is served from
+// the block cache; when that paint is already final, the async render would
+// only parse, highlight, sanitize, and morph the same HTML into place again.
+const domMatchesRenderedBlocks = (
+  target: HTMLElement,
+  blocks: ReadonlyArray<{ id: string }>,
+  decorationId: string,
+): boolean => {
+  const children = target.children;
+  if (children.length !== blocks.length) return false;
+  for (let index = 0; index < blocks.length; index += 1) {
+    const child = children[index];
+    if (
+      !child
+      || child.getAttribute('data-md-id') !== blocks[index]?.id
+      || child.getAttribute(MARKDOWN_DECORATION_ID_ATTR) !== decorationId
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
 const MARKDOWN_DECORATION_IDS = new WeakMap<DecorateContext, string>();
 let nextMarkdownDecorationId = 0;
 const MARKDOWN_DOM_CACHE_MAX_SOURCE_CHARS = 200_000;
@@ -804,6 +829,16 @@ const useMorphdomMarkdown = ({
 
   const mermaidViewerRef = React.useRef<ReturnType<typeof createMermaidViewerRegistry> | null>(null);
   const renderRevisionRef = React.useRef(0);
+  // A provisional first paint (blocks not in the settled cache) holds the
+  // timeline reveal until the async render lands, so the session opens with
+  // final code highlighting instead of a visible restyle.
+  const revealGate = React.useContext(TimelineRevealGateContext);
+  const releaseRevealHoldRef = React.useRef<(() => void) | null>(null);
+  const releaseRevealHold = React.useCallback(() => {
+    releaseRevealHoldRef.current?.();
+    releaseRevealHoldRef.current = null;
+  }, []);
+  React.useEffect(() => releaseRevealHold, [releaseRevealHold]);
   // Only DOM that was actually restored or completed by the async pipeline is
   // eligible for capture. A fallback from an earlier content revision is not.
   const mountedDomRef = React.useRef<{
@@ -909,6 +944,9 @@ const useMorphdomMarkdown = ({
         }
         if (hasMermaidBlock) refreshMermaidViewers();
       } else {
+        if (!streaming && !releaseRevealHoldRef.current) {
+          releaseRevealHoldRef.current = revealGate?.hold() ?? null;
+        }
         const block = document.createElement('div');
         block.setAttribute('data-md-block', '');
         block.style.display = 'contents';
@@ -938,6 +976,18 @@ const useMorphdomMarkdown = ({
     let active = true;
     const renderRevision = renderRevisionRef.current;
     const decorationId = getMarkdownDecorationId(ctx);
+
+    if (!streaming) {
+      const cachedBlocks = getCachedMarkdownBlocks(text, imageMode);
+      if (cachedBlocks && domMatchesRenderedBlocks(target, cachedBlocks, decorationId)) {
+        mountedDomRef.current = domCacheKey
+          ? { key: domCacheKey, copiedLabel: ctx.labels.copied }
+          : null;
+        streamPerfCount('ui.markdown_renderer.settled_paint.reused');
+        releaseRevealHold();
+        return;
+      }
+    }
 
     void renderMarkdownBlocks(text, streaming, imageMode).then((blocks) => {
       if (!active || renderRevisionRef.current !== renderRevision) return;
@@ -1028,12 +1078,13 @@ const useMorphdomMarkdown = ({
       mountedDomRef.current = domCacheKey
         ? { key: domCacheKey, copiedLabel: ctx.labels.copied }
         : null;
+      releaseRevealHold();
     });
 
     return () => {
       active = false;
     };
-  }, [containerRef, ctx, domCacheKey, imageMode, refreshMermaidViewers, streaming, text]);
+  }, [containerRef, ctx, domCacheKey, imageMode, refreshMermaidViewers, releaseRevealHold, streaming, text]);
 
   React.useEffect(() => {
     const container = containerRef.current;

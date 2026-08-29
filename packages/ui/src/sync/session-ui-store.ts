@@ -954,6 +954,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       )
       : null
 
+    // Start the message fetch before publishing the selection. React flushes
+    // the discrete-event render in a microtask queued by `set`, so a fetch
+    // started after it would only leave the browser once that whole render
+    // finished. Started first, the request is on the wire while the render
+    // runs. Fire-and-forget: any transient failure is retried by the reactive
+    // path in ChatContainer.
+    if (id) {
+      void fetchMessagesForSession(id, resolvedDir)
+    }
+
     // Set the directory together with the session id so chat hooks read the
     // same child store that send/SSE events will update during startup races.
     set({
@@ -968,13 +978,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // a draft intentionally does not erase it.
     if (id) {
       persistLastActiveSession(key, { sessionId: id, directory: rememberedDir })
-    }
-
-    // Kick off the message fetch on the same tick, before React commits the
-    // state change and fires ChatContainer.useEffect. The fetch is
-    // fire-and-forget — any transient failure gets retried by the reactive path.
-    if (id) {
-      void fetchMessagesForSession(id, resolvedDir)
     }
 
     try {
