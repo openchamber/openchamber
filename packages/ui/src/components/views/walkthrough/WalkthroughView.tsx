@@ -4,12 +4,14 @@ import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n, type Locale } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
@@ -19,6 +21,7 @@ import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { deriveBaseBranch, hasResolvableBaseBranch } from '@/components/views/git/baseBranch';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { gitBaseBranchEntryKey, useGitBaseBranchStore } from '@/stores/useGitBaseBranchStore';
 import { useGitBranches, useGitStatus, useGitStore } from '@/stores/useGitStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import {
@@ -72,6 +75,70 @@ const TOC_MAX_FRACTION = 0.5;
 // scale rather than a number picked here. Three heights in one row (28px
 // pickers, 32px action, 36px arrows) read as misalignment, not hierarchy.
 const HEADER_COMPACT_WIDTH = 680;
+
+// The branch scope needs a base to compare against. When nothing can be
+// derived, this picker takes the panel body until the user names one or backs
+// out to another scope. The search is local: every time the picker opens it
+// starts clean, which is what a fresh choice wants.
+const BaseBranchPicker = ({
+  candidates,
+  onPick,
+  onCancel,
+}: {
+  candidates: string[];
+  onPick: (candidate: string) => void;
+  onCancel: () => void;
+}) => {
+  const { t } = useI18n();
+  const [search, setSearch] = useState('');
+  const searchTerm = search.trim().toLowerCase();
+  const visibleCandidates = searchTerm
+    ? candidates.filter((name) => name.toLowerCase().includes(searchTerm))
+    : candidates;
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-8 text-center">
+      <Icon name="git-branch" className="size-6 text-muted-foreground" />
+      <h3 className="typography-ui-label font-semibold text-foreground">
+        {t('walkthrough.scope.basePickerTitle')}
+      </h3>
+      <p className="typography-micro max-w-sm text-muted-foreground">
+        {t('walkthrough.scope.basePickerDescription')}
+      </p>
+      <input
+        type="text"
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+        placeholder={t('gitView.branch.searchPlaceholder')}
+        aria-label={t('gitView.branch.searchPlaceholder')}
+        className="w-full max-w-sm rounded-md border border-border/60 bg-[var(--surface-elevated)] px-2.5 py-1.5 typography-meta text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
+      />
+      <ScrollableOverlay outerClassName="max-h-48 w-full max-w-sm min-h-0" className="px-1 py-1">
+        {visibleCandidates.length === 0 ? (
+          <div className="px-2 py-3 typography-meta text-muted-foreground">
+            {t('gitView.branch.empty')}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-0.5">
+            {visibleCandidates.map((branch) => (
+              <button
+                key={branch}
+                type="button"
+                onClick={() => onPick(branch)}
+                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
+              >
+                <Icon name="git-branch" className="size-3.5 text-primary" />
+                <span className="truncate typography-ui-label text-foreground" title={branch}>{branch}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </ScrollableOverlay>
+      <Button type="button" variant="ghost" size="xs" onClick={onCancel}>
+        {t('walkthrough.action.cancel')}
+      </Button>
+    </div>
+  );
+};
 
 export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
   const { t, locale, locales, label } = useI18n();
@@ -171,33 +238,83 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
   // base. Three-dot semantics server-side mean merges from the base are
   // already excluded.
   const currentBranch = status?.current ?? null;
+
+  // The same per-branch override the branch diff uses: a base picked here is
+  // remembered for this branch, and a pick made in the diff surface is honored
+  // too. Subscribed by key rather than through `getOverride`: a callback
+  // selector keeps this panel re-rendering when the override changes.
+  const baseOverride = useGitBaseBranchStore(
+    useCallback(
+      (state) => (directory && currentBranch
+        ? state.overrides[gitBaseBranchEntryKey(directory, currentBranch)] ?? null
+        : null),
+      [currentBranch, directory]
+    )
+  );
+  const setBaseOverride = useGitBaseBranchStore((state) => state.setOverride);
+
+  const localBranches = useMemo(
+    () => (branches?.all ?? []).filter((name) => !name.startsWith('remotes/')),
+    [branches]
+  );
+  const remoteBranches = useMemo(
+    () => (branches?.all ?? [])
+      .filter((name) => name.startsWith('remotes/'))
+      .map((name) => name.slice('remotes/'.length)),
+    [branches]
+  );
+  const remoteNames = useMemo(
+    () => new Set(remoteBranches.map((name) => name.split('/')[0]).filter(Boolean)),
+    [remoteBranches]
+  );
+
+  // A candidate picked from the list is either a local branch, which keeps its
+  // name, or a remote-tracking branch with the remote name dropped, so the
+  // base matches what `hasResolvableBaseBranch` can find again.
+  const normalizeBaseCandidate = useCallback(
+    (name: string): string => {
+      if (localBranches.includes(name)) return name;
+      const slashIndex = name.indexOf('/');
+      if (slashIndex > 0 && remoteNames.has(name.slice(0, slashIndex))) {
+        return name.slice(slashIndex + 1);
+      }
+      return name;
+    },
+    [localBranches, remoteNames]
+  );
+
+  // An explicit pick outranks the derived base. When neither resolves, the
+  // source stays null and the picker takes over instead of the menu item
+  // vanishing.
   const branchSource = useMemo<WalkthroughSource | null>(() => {
     const headRef = currentBranch;
     if (!headRef) return null;
-    const all = branches?.all ?? [];
-    const localBranches = all.filter((name) => !name.startsWith('remotes/'));
-    const remoteBranches = all
-      .filter((name) => name.startsWith('remotes/'))
-      .map((name) => name.slice('remotes/'.length));
-    const remoteNames = new Set(
-      remoteBranches
-        .map((name) => name.split('/')[0])
-        .filter(Boolean)
-    );
     const trackingRemote = status?.tracking?.split('/')[0];
     const defaultBranch = (trackingRemote && branches?.defaultBranches?.[trackingRemote])
       ?? branches?.defaultBranches?.origin;
-    const baseRef = deriveBaseBranch({
+    const baseRef = normalizeBaseCandidate(baseOverride ?? deriveBaseBranch({
       remoteNames,
       localBranches,
       defaultBranch,
       headBranch: headRef,
-    });
+    }));
     if (!baseRef || baseRef === headRef || !hasResolvableBaseBranch({ baseBranch: baseRef, localBranches, remoteBranches })) {
       return null;
     }
     return { kind: 'branch', baseRef, headRef };
-  }, [branches, currentBranch, status?.tracking]);
+  }, [baseOverride, branches, currentBranch, localBranches, normalizeBaseCandidate, remoteBranches, remoteNames, status?.tracking]);
+
+  // Offered while a base exists or while there is anything to pick from: a
+  // branch whose base cannot be derived must not disappear from the menu — the
+  // picker exists exactly for that case.
+  const branchCandidates = useMemo(() => {
+    if (!currentBranch) return [];
+    return (branches?.all ?? [])
+      .map((name) => name.replace(/^remotes\//, ''))
+      .filter((name) => name !== currentBranch && !name.endsWith(`/${currentBranch}`))
+      .sort();
+  }, [branches, currentBranch]);
+  const branchPickable = Boolean(currentBranch) && (Boolean(branchSource) || branchCandidates.length > 0);
 
   // The pull request for this branch used to appear only after visiting the PR
   // panel, because nothing else asked GitHub about it. Ask here too: the status
@@ -266,6 +383,16 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
   const generate = useWalkthroughStore((state) => state.generate);
   const cancel = useWalkthroughStore((state) => state.cancel);
   const requestSource = useWalkthroughStore((state) => state.requestSource);
+  const handlePickBase = useCallback(
+    (candidate: string) => {
+      if (!directory || !currentBranch) return;
+      const baseRef = normalizeBaseCandidate(candidate);
+      setBaseOverride(directory, currentBranch, baseRef);
+      setIsPickingBase(false);
+      requestSource(directory, { kind: 'branch', baseRef, headRef: currentBranch });
+    },
+    [currentBranch, directory, normalizeBaseCandidate, requestSource, setBaseOverride]
+  );
   const selectModel = useWalkthroughStore((state) => state.selectModel);
   const selectedModel = useWalkthroughStore((state) => state.getSelectedModel(directory, source));
   const selectLanguage = useWalkthroughStore((state) => state.selectLanguage);
@@ -334,8 +461,13 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
 
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
   const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
-  const sourceValue = source.kind === 'working-tree' ? source.scope : source.kind;
-  const sourceLabel = source.kind === 'branch'
+  // Waiting on the user to name a base for the branch scope. The menu stays
+  // selected on "This branch" while the picker is on screen.
+  const [isPickingBase, setIsPickingBase] = useState(false);
+  const sourceValue = isPickingBase ? 'branch'
+    : source.kind === 'working-tree' ? source.scope
+    : source.kind;
+  const sourceLabel = (isPickingBase || source.kind === 'branch')
     ? t('walkthrough.scope.branch')
     : source.kind === 'pr'
       ? t('walkthrough.scope.pullRequest', { number: source.number })
@@ -503,8 +635,10 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
               value={sourceValue}
               onValueChange={(value) => {
                 setSourceMenuOpen(false);
+                setIsPickingBase(false);
                 if (value === 'branch') {
                   if (branchSource) requestSource(directory, branchSource);
+                  else setIsPickingBase(true);
                   return;
                 }
                 if (value === 'pr') {
@@ -529,7 +663,7 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
                       : t('walkthrough.scope.working')}
                 </DropdownMenuRadioItem>
               ))}
-              {(branchSource || prSource) && (
+              {(branchPickable || prSource) && (
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuLabel className={SCOPE_GROUP_LABEL_CLASS}>
@@ -537,7 +671,7 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
                   </DropdownMenuLabel>
                 </>
               )}
-              {branchSource && (
+              {branchPickable && (
                 <DropdownMenuRadioItem value="branch">
                   {t('walkthrough.scope.branch')}
                 </DropdownMenuRadioItem>
@@ -548,6 +682,19 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
                 </DropdownMenuRadioItem>
               )}
             </DropdownMenuRadioGroup>
+            {source.kind === 'branch' && !isPickingBase && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={() => {
+                    setSourceMenuOpen(false);
+                    setIsPickingBase(true);
+                  }}
+                >
+                  {t('walkthrough.scope.changeBase')}
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -770,7 +917,13 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
       )}
 
       <div className={cn('flex min-h-0 flex-1', showToc ? 'flex-row' : 'flex-col')}>
-        {blockedReason ? (
+        {isPickingBase ? (
+          <BaseBranchPicker
+            candidates={branchCandidates}
+            onPick={handlePickBase}
+            onCancel={() => setIsPickingBase(false)}
+          />
+        ) : blockedReason ? (
           <WalkthroughBlocker
             reason={blockedReason}
             model={blockedModel}
