@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import type { GitStatus } from '@/lib/api/types';
 import { useGitStore } from './useGitStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { notifyGitStatusInvalidated } from '@/lib/gitStatusInvalidation';
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -124,6 +125,85 @@ describe('useGitStore', () => {
     requests[0].resolve(createStatus({ 'src/index.ts': { insertions: 1, deletions: 0 } }));
     const [fullResult, lightResult] = await Promise.all([fullPromise, lightPromise]);
     expect(lightResult).toBe(fullResult);
+  });
+
+  test('deduplicates concurrent status requests when no mutation occurs', async () => {
+    setDirectoryStatus(createStatus());
+    let statusCalls = 0;
+    const request = createDeferred<GitStatus>();
+    const git = createGitApi(() => {
+      statusCalls += 1;
+      return request.promise;
+    });
+
+    const first = useGitStore.getState().fetchStatus('/repo', git, { silent: true });
+    const second = useGitStore.getState().fetchStatus('/repo', git, { silent: true });
+    await Promise.resolve();
+
+    expect(statusCalls).toBe(1);
+
+    request.resolve(createStatus());
+    await Promise.all([first, second]);
+    expect(statusCalls).toBe(1);
+  });
+
+  test('a refresh after a mutation does not join the pre-mutation in-flight status request', async () => {
+    setDirectoryStatus(createStatus());
+    const requests: Deferred<GitStatus>[] = [];
+    let statusCalls = 0;
+    const git = createGitApi(() => {
+      statusCalls += 1;
+      const request = createDeferred<GitStatus>();
+      requests.push(request);
+      return request.promise;
+    });
+
+    const preMutation = useGitStore.getState().fetchStatus('/repo', git, { silent: true });
+    await Promise.resolve();
+    expect(statusCalls).toBe(1);
+
+    // A successful git mutation invalidates the adapter status cache, which
+    // notifies the store that the in-flight request predates the mutation.
+    notifyGitStatusInvalidated('/repo');
+
+    const postMutation = useGitStore.getState().fetchStatus('/repo', git, { silent: true });
+    await Promise.resolve();
+    expect(statusCalls).toBe(2);
+
+    requests[1].resolve({ ...createStatus(), current: 'feature' });
+    await postMutation;
+    expect(useGitStore.getState().getDirectoryState('/repo')?.status?.current).toBe('feature');
+
+    // The late pre-mutation response cannot overwrite the newer authoritative one.
+    requests[0].resolve(createStatus());
+    await preMutation;
+    expect(useGitStore.getState().getDirectoryState('/repo')?.status?.current).toBe('feature');
+  });
+
+  test('fetchAll({ force: true }) forces a fresh status fetch past the in-flight dedup', async () => {
+    setDirectoryStatus(createStatus());
+    const requests: Deferred<GitStatus>[] = [];
+    let statusCalls = 0;
+    const git = createGitApi(() => {
+      statusCalls += 1;
+      const request = createDeferred<GitStatus>();
+      requests.push(request);
+      return request.promise;
+    });
+
+    const inFlight = useGitStore.getState().fetchStatus('/repo', git, { silent: true });
+    await Promise.resolve();
+    expect(statusCalls).toBe(1);
+
+    const all = useGitStore.getState().fetchAll('/repo', git, { force: true });
+    await Promise.resolve();
+    expect(statusCalls).toBe(2);
+
+    requests[1].resolve({ ...createStatus(), current: 'feature' });
+    requests[0].resolve(createStatus());
+    await Promise.allSettled([inFlight, all]);
+
+    expect(useGitStore.getState().getDirectoryState('/repo')?.status?.current).toBe('feature');
   });
 
   test('does not let an older status fetch undo an optimistic mutation', async () => {

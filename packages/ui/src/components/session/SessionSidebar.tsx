@@ -40,6 +40,14 @@ import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { buildKnownSessionDirectories } from './sidebar/list/sessionListDirectories';
 import { z } from 'zod';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
+import {
+  commitDiscoveredRawWorktreesByProject,
+  ensureRawWorktreesByProjectScope,
+  startSessionWorktreeMenuLoad,
+  type RawWorktreesByProjectScope,
+  type StartSessionWorktreeMenuLoadArgs,
+} from './sidebar/sessionWorktreeMenu';
+import { resolveProjectRef } from '@/lib/worktreeSessionCreator';
 
 const PROJECT_ACTIVE_SESSION_STORAGE_KEY = 'oc.sessions.activeSessionByProject';
 const EMPTY_STRING_ARRAY: string[] = [];
@@ -69,6 +77,8 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const { t } = useI18n();
   const [isSessionSearchOpen, setIsSessionSearchOpen] = React.useState(false);
   const [sessionSearchQuery, setSessionSearchQuery] = React.useState('');
+  // Reported by the session list below: the header cannot see what matched.
+  const [searchMatchCount, setSearchMatchCount] = React.useState(0);
   const sessionSearchContainerRef = React.useRef<HTMLDivElement | null>(null);
   const sessionSearchInputRef = React.useRef<HTMLInputElement | null>(null);
   const [editingProjectDialogId, setEditingProjectDialogId] = React.useState<string | null>(null);
@@ -189,6 +199,11 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const [worktreeDiscoveryRevision, requestWorktreeDiscovery] = React.useReducer((revision) => revision + 1, 0);
   const isWorktreeTopologyLoading = !isVSCode && resolvedWorktreeTopologyKey !== projectWorktreeDiscoveryKey;
   const [unresolvedWorktreeProjectPaths, setUnresolvedWorktreeProjectPaths] = React.useState<ReadonlySet<string>>(new Set());
+  const rawWorktreesByProjectRef = React.useRef<RawWorktreesByProjectScope>({
+    runtimeKey: null,
+    revision: 0,
+    worktreesByProject: new Map(),
+  });
 
   React.useEffect(() => {
     let cancelled = false;
@@ -198,14 +213,25 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       const projectEntries = useProjectsStore.getState().projects;
       if (projectEntries.length === 0 || isVSCode) {
         if (!cancelled) {
+          rawWorktreesByProjectRef.current = {
+            runtimeKey: null,
+            revision: 0,
+            worktreesByProject: new Map(),
+          };
           setUnresolvedWorktreeProjectPaths(new Set());
           setResolvedWorktreeTopologyKey(projectWorktreeDiscoveryKey);
         }
         return;
       }
 
-      const knownWorktreesByProject = useSessionUIStore.getState().availableWorktreesByProject;
-      const worktreesByProject = new Map(knownWorktreesByProject);
+      const knownPublishedWorktreesByProject = useSessionUIStore.getState().availableWorktreesByProject;
+      const seededRawScope = ensureRawWorktreesByProjectScope({
+        rawWorktreesByProjectRef,
+        publishedWorktreesByProject: knownPublishedWorktreesByProject,
+        runtimeKey: discoveryRuntimeKey,
+      });
+      const capturedRawRevision = seededRawScope.revision;
+      const worktreesByProject = new Map(seededRawScope.worktreesByProject);
       const unresolvedProjectPaths = new Set<string>();
 
       // Constrain fanout: previously `Promise.all(projects.map(...))` could
@@ -258,18 +284,26 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
           worktreesByProject.delete(projectPath);
         }
       }
-      const partitionedWorktreesByProject = partitionWorktreesByRegisteredProject(projectEntries, worktreesByProject);
-      const allWorktrees = [...partitionedWorktreesByProject.values()].flat();
-      // Newly appearing worktrees sort to the top of their project's
-      // worktree list (see worktreeFirstSeen.ts).
-      recordWorktreesSeen(allWorktrees.map((worktree) => worktree.path), Date.now());
-
-      // Skip update if nothing changed — see worktreeMapsEqual JSDoc.
-      if (!worktreeMapsEqual(partitionedWorktreesByProject, knownWorktreesByProject)) {
-        useSessionUIStore.setState({
-          availableWorktrees: allWorktrees,
-          availableWorktreesByProject: partitionedWorktreesByProject,
-        });
+      const committed = commitDiscoveredRawWorktreesByProject({
+        rawWorktreesByProjectRef,
+        runtimeKey: discoveryRuntimeKey,
+        capturedRevision: capturedRawRevision,
+        nextRawWorktreesByProject: worktreesByProject,
+        publishedWorktreesByProject: knownPublishedWorktreesByProject,
+        partitionWorktreesByRegisteredProject,
+        projects: projectEntries,
+        worktreeMapsEqual,
+        recordWorktreesSeen,
+        publishTopology: (next) => {
+          useSessionUIStore.setState(next);
+        },
+        requestRediscovery: () => {
+          requestWorktreeDiscovery();
+        },
+        now: () => Date.now(),
+      });
+      if (!committed) {
+        return;
       }
       setUnresolvedWorktreeProjectPaths(unresolvedProjectPaths);
       setResolvedWorktreeTopologyKey(projectWorktreeDiscoveryKey);
@@ -365,7 +399,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const handleOpenDirectoryDialog = React.useCallback(() => {
     sessionEvents.requestDirectoryDialog();
   }, []);
-
 
 
   const normalizedProjects = React.useMemo(() => {
@@ -527,6 +560,29 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     openMultiRunLauncher();
   }, [mobileVariant, openMultiRunLauncher, setSessionSwitcherOpen]);
 
+  const handleSessionWorktreeMenuLoad = React.useCallback((args: StartSessionWorktreeMenuLoadArgs) => {
+    const resolvedProject = args.projectId
+      ? (projects.find((candidate) => candidate.id === args.projectId) ?? null)
+      : (args.sourceDirectory ? resolveProjectRef(args.sourceDirectory) : null);
+    return startSessionWorktreeMenuLoad(args, {
+      projects,
+      getCurrentProjects: () => useProjectsStore.getState().projects,
+      rawWorktreesByProjectRef,
+      getPublishedWorktreesByProject: () => useSessionUIStore.getState().availableWorktreesByProject,
+      resolveProject: (directory) => resolveProjectRef(directory),
+      listProjectWorktrees,
+      partitionWorktreesByRegisteredProject,
+      worktreeMapsEqual,
+      recordWorktreesSeen,
+      publishTopology: (next) => {
+        useSessionUIStore.setState(next);
+      },
+      getRuntimeKey,
+      now: () => Date.now(),
+      projectRootBranch: resolvedProject ? (projectRootBranches.get(resolvedProject.id) ?? null) : null,
+    });
+  }, [projectRootBranches, projects]);
+
   const handleOpenNewSessionDraftFromHeader = React.useCallback(() => {
     useUIStore.getState().closeMainSurfaces();
     if (mobileVariant) {
@@ -577,7 +633,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         sessionSearchQuery={sessionSearchQuery}
         setSessionSearchQuery={setSessionSearchQuery}
         hasSessionSearchQuery={hasSessionSearchQuery}
-        searchMatchCount={0}
+        searchMatchCount={searchMatchCount}
         collapseAllProjects={projectView.actions.collapseAllProjects}
         expandAllProjects={projectView.actions.expandAllProjects}
       />
@@ -614,6 +670,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
           isWorktreeTopologyLoading,
           unresolvedWorktreeProjectPaths,
           projectView: projectView.state,
+          onSearchMatchCountChange: setSearchMatchCount,
         }}
         actions={{
           rowActions: {
@@ -637,6 +694,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
           openProjectEditDialog: setEditingProjectDialogId,
           removeProject,
           reorderProjects,
+          startSessionWorktreeMenuLoad: handleSessionWorktreeMenuLoad,
           initialActiveSessionByProject,
           persistActiveSessionByProject,
           projectViewActions: projectView.actions,

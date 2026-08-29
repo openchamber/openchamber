@@ -698,6 +698,79 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentModelId).toBe('model-a');
   });
 
+  test('[issue-2531] setAgent keeps the manual model when switching to an agent without an override', () => {
+    const sessionId = 'ses_2531_mode_switch';
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('deepseek', 'deepseek-v4-pro'), provider('kimi', 'kimi-k3')],
+      agents: [testAgent('build'), testAgent('plan')],
+      settingsDefaultModel: 'deepseek/deepseek-v4-pro',
+      currentProviderId: 'kimi',
+      currentModelId: 'kimi-k3',
+      currentAgentName: 'build',
+      selectionSource: 'manual',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setAgent('plan');
+
+    const state = useConfigStore.getState();
+    expect(state.currentAgentName).toBe('plan');
+    expect(state.currentProviderId).toBe('kimi');
+    expect(state.currentModelId).toBe('kimi-k3');
+  });
+
+  test('[issue-2690] setAgent persists the kept manual model for the session and agent', () => {
+    const sessionId = 'ses_2690_persist_kept_model';
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('deepseek', 'deepseek-v4-pro'), provider('kimi', 'kimi-k3')],
+      agents: [testAgent('build'), testAgent('plan')],
+      settingsDefaultModel: 'deepseek/deepseek-v4-pro',
+      currentProviderId: 'kimi',
+      currentModelId: 'kimi-k3',
+      currentAgentName: 'build',
+      selectionSource: 'manual',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setAgent('plan');
+
+    // Keeping the pair only in memory loses it on reload; the write is what
+    // makes the choice survive.
+    const selection = useSelectionStore.getState();
+    expect(selection.getSessionModelSelection(sessionId)).toEqual({ providerId: 'kimi', modelId: 'kimi-k3' });
+    expect(selection.getAgentModelForSession(sessionId, 'plan')).toEqual({ providerId: 'kimi', modelId: 'kimi-k3' });
+  });
+
+  test('[issue-2690] setAgent falls back to the settings default when the kept model is gone', () => {
+    const sessionId = 'ses_2690_stale_model';
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('deepseek', 'deepseek-v4-pro')],
+      agents: [testAgent('build'), testAgent('plan')],
+      settingsDefaultModel: 'deepseek/deepseek-v4-pro',
+      // The provider still exists but this model was removed from it.
+      currentProviderId: 'deepseek',
+      currentModelId: 'retired-model',
+      currentAgentName: 'build',
+      selectionSource: 'manual',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setAgent('plan');
+
+    const state = useConfigStore.getState();
+    expect(state.currentProviderId).toBe('deepseek');
+    expect(state.currentModelId).toBe('deepseek-v4-pro');
+  });
+
   test('loadAgents does not fetch OpenCode config directly', async () => {
     useConfigStore.setState({
       activeDirectoryKey: DIRECTORY,

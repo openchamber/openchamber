@@ -6,6 +6,7 @@ import {
     contextPayloadFromDraft,
     createContextPart,
     formatContextText,
+    hasContextParts,
     readContextPart,
     type ContextPartPayload,
 } from './contextParts';
@@ -125,5 +126,12 @@ describe('round-trip through part metadata', () => {
             type: 'text',
             metadata: { [CONTEXT_METADATA_KEY]: { kind: 'github-issue', number: 0, title: 't', url: 'u' } },
         })).toBeNull();
+    });
+
+    test('hasContextParts detects user-attached context in a message', () => {
+        const quote = asPart(contextPayloadFromDraft(draft({ source: 'chat-quote', fileLabel: 'msg_1' })));
+        expect(hasContextParts([quote])).toBe(true);
+        expect(hasContextParts([{ type: 'text' }])).toBe(false);
+        expect(hasContextParts([])).toBe(false);
     });
 });

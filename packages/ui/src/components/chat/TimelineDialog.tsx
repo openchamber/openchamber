@@ -301,7 +301,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                         </div>
                     ) : (
                         filteredMessages.map(({ message }, index) => {
-                            const preview = getMessagePreview(message.parts);
+                            const preview = getMessagePreview(message.parts, undefined, t);
                             const timestamp = message.info.time.created;
                             const dateGroup = formatDateGroup(timestamp);
                             const previous = filteredMessages[index - 1];

@@ -2435,6 +2435,9 @@ export const useConfigStore = create<ConfigStore>()(
                         currentProviderId,
                         currentModelId,
                     } = get();
+                    // Captured before the first set below, which unconditionally
+                    // marks the selection as manual.
+                    const hadManualSelection = get().selectionSource === "manual";
 
                     set((state) => {
                         const directoryKey = state.activeDirectoryKey;
@@ -2554,8 +2557,7 @@ export const useConfigStore = create<ConfigStore>()(
                         // Prefer a session-level manual override for this agent over the
                         // agent's configured default. Re-applying setAgent after subtask
                         // completion / rematerialization must not clobber the override
-                        // (issue #2404). Explicit agent-picker switches still force the
-                        // agent default via ModelControls' shouldPreferAgentModel path.
+                        // (issue #2404).
                         if (currentSessionId) {
                             const existingAgentModel = useSelectionStore.getState().getAgentModelForSession(currentSessionId, agentName);
                             if (existingAgentModel && hasProviderModel(providers, existingAgentModel.providerId, existingAgentModel.modelId)) {
@@ -2582,6 +2584,27 @@ export const useConfigStore = create<ConfigStore>()(
                                 applyResolvedModelSelection(providerID, modelID, resolveVariantForModel(providerID, modelID, agent?.variant));
                                 return;
                             }
+                        }
+
+                        // The user has a live manual model selection and the target
+                        // agent configures no model of its own. Switching modes or
+                        // agents must not reset the selection to the settings default
+                        // (issue #2531) — mode switches are not model changes.
+                        if (
+                            hadManualSelection
+                            && currentProviderId
+                            && currentModelId
+                            && hasProviderModel(providers, currentProviderId, currentModelId)
+                        ) {
+                            // Keeping the pair in memory is not enough: without a write
+                            // the settings default wins again after a reload. The removed
+                            // ModelControls path persisted here, so this must too.
+                            if (currentSessionId) {
+                                const selection = useSelectionStore.getState();
+                                selection.saveSessionModelSelection(currentSessionId, currentProviderId, currentModelId);
+                                selection.saveAgentModelForSession(currentSessionId, agentName, currentProviderId, currentModelId);
+                            }
+                            return;
                         }
 
                         // If the agent has no preferred model, use settings default.

@@ -267,6 +267,27 @@ const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProject
     return resolved;
   }
 
+  // The active project directory is validated with fs.realpath, so the base is
+  // canonical while the client (and the file tree) addresses files under the
+  // user-visible root, which may itself be a symlink. Retry against the raw
+  // directory the client asked for so those paths stay addressable. Symlink
+  // resolution still happens afterwards, and the routes that need canonical
+  // containment re-check it against this base.
+  const requestedBase = resolvedProject.requestedDirectory;
+  if (typeof requestedBase === 'string' && requestedBase && requestedBase !== resolvedProject.directory) {
+    const lexical = resolveWorkspacePath({
+      targetPath,
+      baseDirectory: requestedBase,
+      path,
+      os,
+      normalizeDirectoryPath,
+      openchamberUserConfigRoot,
+    });
+    if (lexical.ok) {
+      return lexical;
+    }
+  }
+
   return resolveWorkspacePathFromWorktrees({
     targetPath,
     baseDirectory: resolvedProject.directory,

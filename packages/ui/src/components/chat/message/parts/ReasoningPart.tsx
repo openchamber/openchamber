@@ -261,7 +261,11 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
         };
     }, []);
 
-    if (!text || text.trim().length === 0) {
+    // While genuinely streaming, the busy header must appear as soon as
+    // reasoning starts even before the block-level reveal (commitStreamedText)
+    // has committed a first complete line — otherwise "Thinking…" never shows
+    // for the first moments of a short, single-paragraph response.
+    if (!isStreaming && (!text || text.trim().length === 0)) {
         return null;
     }
 
@@ -430,8 +434,12 @@ const ReasoningPart = React.memo(({
     const rawText = partWithText.text || partWithText.content || '';
     const textContent = React.useMemo(() => cleanReasoningText(rawText), [rawText]);
     const time = partWithText.time;
-    const canBeStreaming = streamPhase === undefined || streamPhase !== 'completed';
-    const isStreaming = chatRenderMode === 'live' && canBeStreaming && typeof time?.end !== 'number';
+    // Live activity derives from the live stream phase, never from the absence
+    // of persisted timing data: cached parts may lack `time.end` even though
+    // the message finished long ago (issue #2020). A part that has ended is
+    // never streaming, even while the rest of the message still streams.
+    const isLiveStreamPhase = streamPhase === 'streaming' || streamPhase === 'cooldown';
+    const isStreaming = chatRenderMode === 'live' && isLiveStreamPhase && typeof time?.end !== 'number';
     const throttledTextRaw = useStreamingTextThrottle({
         text: textContent,
         isStreaming,
@@ -441,9 +449,11 @@ const ReasoningPart = React.memo(({
     // never mutates in place.
     const throttledText = isStreaming ? commitStreamedText(throttledTextRaw) : throttledTextRaw;
 
-    // Show reasoning even if time.end isn't set yet (during streaming)
-    // Only hide if there's no text content
-    if (!throttledText || throttledText.trim().length === 0) {
+    // Show reasoning even if time.end isn't set yet (during streaming).
+    // While genuinely streaming, keep the block mounted even before the
+    // block-level reveal commits a first line, so the busy header appears
+    // immediately instead of waiting on committed text.
+    if (!isStreaming && (!throttledText || throttledText.trim().length === 0)) {
         return null;
     }
 

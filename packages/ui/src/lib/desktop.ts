@@ -5,6 +5,7 @@ import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { isVSCodeBootstrapPresent } from '@/lib/vscodeBootstrap';
 
 type ManagedRemoteTunnelPreset = {
   id: string;
@@ -573,6 +574,12 @@ export const startDesktopWindowDrag = async (): Promise<boolean> => {
 };
 
 export const isVSCodeRuntime = (): boolean => {
+  // Prefer extension-host bootstrap config: it is injected in webview HTML
+  // before any store module evaluates, so startup does not depend on
+  // RuntimeAPIs registration order (see #2359).
+  if (isVSCodeBootstrapPresent()) {
+    return true;
+  }
   const apis = getRegisteredRuntimeAPIs();
   return apis?.runtime?.isVSCode === true;
 };
@@ -810,7 +817,11 @@ export const restartToApplyUpdate = async (): Promise<boolean> => {
     return false;
   }
 
-  return restartDesktopApp();
+  // Unlike a plain restart, an install failure (rejected signature, disabled
+  // updater session) must reach the update dialog instead of being reduced to
+  // a boolean the caller cannot explain.
+  await invokeDesktop('desktop_restart');
+  return true;
 };
 
 export const restartDesktopApp = async (): Promise<boolean> => {

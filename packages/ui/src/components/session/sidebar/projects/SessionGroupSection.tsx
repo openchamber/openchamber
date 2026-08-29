@@ -108,6 +108,7 @@ export type SessionGroupSectionProps = {
   | 'setDeleteSessionConfirm'
   | 'startFolderRename'
   | 'setCopiedSessionId'
+  | 'startSessionWorktreeMenuLoad'
 >;
 
 const CollapsedFolderActivity: React.FC<{
@@ -253,6 +254,7 @@ const areGroupPropsEqual = (prev: SessionGroupSectionProps, next: SessionGroupSe
     && prev.setDeleteSessionConfirm === next.setDeleteSessionConfirm
     && prev.startFolderRename === next.startFolderRename
     && prev.setCopiedSessionId === next.setCopiedSessionId
+    && prev.startSessionWorktreeMenuLoad === next.startSessionWorktreeMenuLoad
     && prev.setFolderRenameDraft === next.setFolderRenameDraft
     && prev.clearFolderRename === next.clearFolderRename
   );
@@ -852,10 +854,11 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                setSessionSearchQuery={props.setSessionSearchQuery}
                setIsSessionSearchOpen={props.setIsSessionSearchOpen}
                deleteSessionConfirm={props.deleteSessionConfirm}
-               setDeleteSessionConfirm={props.setDeleteSessionConfirm}
-               startFolderRename={props.startFolderRename}
-               setCopiedSessionId={props.setCopiedSessionId}
-            />)}
+              setDeleteSessionConfirm={props.setDeleteSessionConfirm}
+              startFolderRename={props.startFolderRename}
+              setCopiedSessionId={props.setCopiedSessionId}
+              startSessionWorktreeMenuLoad={props.startSessionWorktreeMenuLoad}
+             />)}
           </SessionFolderItem>
         )}
       </DroppableFolderWrapper>
@@ -962,7 +965,8 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
      setDeleteSessionConfirm={props.setDeleteSessionConfirm}
      startFolderRename={props.startFolderRename}
      setCopiedSessionId={props.setCopiedSessionId}
-  />;
+     startSessionWorktreeMenuLoad={props.startSessionWorktreeMenuLoad}
+   />;
 
   const body = (
     <SessionFolderDndScope

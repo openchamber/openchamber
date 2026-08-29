@@ -295,7 +295,9 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                   <DropdownMenuContent align="start" className="max-h-[70vh] min-w-[220px] overflow-y-auto">
                     {projectPickerOptions?.map((option) => (
                       <DropdownMenuItem key={option.id} onClick={() => onProjectSelect?.(option.id)} className="flex items-center justify-between gap-3" title={option.projectDescription}>
-                        <ProjectHeaderIdentity {...option} />
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <ProjectHeaderIdentity {...option} />
+                        </span>
                         {option.id === id ? <Icon name="check" className="h-4 w-4 flex-shrink-0 text-primary" /> : null}
                       </DropdownMenuItem>
                     ))}

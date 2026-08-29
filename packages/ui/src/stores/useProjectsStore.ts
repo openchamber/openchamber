@@ -13,7 +13,8 @@ import { PROJECT_COLORS } from '@/lib/projectMeta';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
-import { getVSCodeBootstrapConfig, isVSCodeRuntime } from './utils/vscodeRuntime';
+import { getVSCodeBootstrapConfig } from '@/lib/vscodeBootstrap';
+import { isVSCodeRuntime } from './utils/vscodeRuntime';
 
 /** Pick a color key that's least used among existing projects */
 const pickAutoColor = (projects: ProjectEntry[]): string => {
@@ -50,6 +51,7 @@ interface ProjectsStore {
   manualProjectOrder: string[];
 
   addProject: (path: string, options?: { label?: string; id?: string }) => Promise<ProjectEntry | null>;
+  addProjects: (paths: string[]) => Promise<ProjectEntry[]>;
   removeProject: (id: string) => void;
   setActiveProject: (id: string) => void;
   setActiveProjectIdOnly: (id: string) => void;
@@ -651,6 +653,69 @@ export const useProjectsStore = create<ProjectsStore>()(
       get().setActiveProject(entry.id);
       void get().discoverProjectIcon(entry.id);
       return entry;
+    },
+
+    addProjects: async (paths: string[]) => {
+      if (isVSCodeProjectsRuntime) {
+        // VS Code paths are added via runtimeApis.vscode.addWorkspaceFolder,
+        // which is reached only by addProject. Iterate so valid selections
+        // succeed instead of silently returning []. Dedupe by path so the
+        // returned array mirrors the non-VS Code contract.
+        const added: ProjectEntry[] = [];
+        const seen = new Set<string>();
+        for (const path of paths) {
+          if (seen.has(path)) continue;
+          seen.add(path);
+          const project = await get().addProject(path);
+          if (project) {
+            added.push(project);
+          }
+        }
+        return added;
+      }
+      const current = get();
+      const existingPaths = new Set(current.projects.map((project) => project.path));
+      const now = Date.now();
+      const entries: ProjectEntry[] = [];
+      const seenPaths = new Set<string>();
+
+      for (const rawPath of paths) {
+        const validation = get().validateProjectPath(rawPath);
+        if (!validation.ok || !validation.normalizedPath) {
+          continue;
+        }
+        const normalizedPath = validation.normalizedPath;
+        if (existingPaths.has(normalizedPath) || seenPaths.has(normalizedPath)) {
+          continue;
+        }
+        seenPaths.add(normalizedPath);
+        entries.push({
+          id: createProjectIdFromPath(normalizedPath),
+          path: normalizedPath,
+          label: deriveProjectLabel(normalizedPath),
+          color: pickAutoColor([...current.projects, ...entries]),
+          addedAt: now,
+          lastOpenedAt: now,
+        });
+      }
+
+      if (entries.length === 0) {
+        return [];
+      }
+
+      const nextProjects = [...current.projects, ...entries];
+      set({ projects: nextProjects });
+
+      if (streamDebugEnabled()) {
+        console.info('[ProjectsStore] Added projects', entries);
+      }
+
+      // Mirror addProject: the first newly added project becomes active.
+      get().setActiveProject(entries[0].id);
+      for (const entry of entries) {
+        void get().discoverProjectIcon(entry.id);
+      }
+      return entries;
     },
 
     removeProject: (id: string) => {

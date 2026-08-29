@@ -133,4 +133,44 @@ describe('issue #2582: addProject in the VS Code runtime', () => {
     expect(added).toBeNull();
     expect(useProjectsStore.getState().projects.find((p) => p.path === '/other/path')).toBeFalsy();
   });
+
+  test('addProjects iterates addProject in the VS Code runtime so valid selections succeed', async () => {
+    // Regression: addProjects used to return [] unconditionally for the
+    // VS Code runtime, which made the batch-add path toast "Failed to
+    // add project" even for valid selections. The fix calls
+    // addWorkspaceFolder per path; we assert the host is invoked once
+    // per selection (not skipped) and that any successful add returns
+    // a non-null entry.
+    const added = await useProjectsStore.getState().addProjects([
+      '/home/user/project-a',
+      '/home/user/project-b',
+    ]);
+
+    expect(addWorkspaceFolderCalls).toEqual([
+      '/home/user/project-a',
+      '/home/user/project-b',
+    ]);
+    // The mock's addWorkspaceFolder returns the second entry keyed by
+    // `path`, so project-a lands; project-b is not reflected in
+    // projects because the mock's hardcoded return array doesn't
+    // include it. The point of the test is the call sequence, not the
+    // final projects state (covered by the dedicated addProject tests).
+    expect(added.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('addProjects dedupes paths within a single batch in the VS Code runtime', async () => {
+    // A path repeated within one batch must hit the extension host once,
+    // not twice — mirrors the non-VS Code contract (seenPaths Set).
+    addWorkspaceFolderCalls.length = 0;
+    await useProjectsStore.getState().addProjects([
+      '/home/user/project-a',
+      '/home/user/project-a',
+      '/home/user/project-b',
+    ]);
+
+    expect(addWorkspaceFolderCalls).toEqual([
+      '/home/user/project-a',
+      '/home/user/project-b',
+    ]);
+  });
 });

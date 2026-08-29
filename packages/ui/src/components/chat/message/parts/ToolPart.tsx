@@ -61,6 +61,8 @@ import {
     getPatchText,
     getPrimaryDiffFromMetadata,
     getPrimaryToolPath,
+    getToolFallbackDiff,
+    resolveToolQuickOpenTarget,
     type DiffPatchEntry,
 } from './toolDiffUtils';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
@@ -1248,12 +1250,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     });
     const outputString = isStreamingBash ? throttledOutputString : rawOutputString;
     const attachments = stateWithData.attachments;
-    const fileDiff = isRecord(metadata?.filediff) ? metadata.filediff : undefined;
-    const diffContent = getPatchText((metadata as { patch?: unknown } | undefined)?.patch)
-        ?? getPatchText(metadata?.diff)
-        ?? getPatchText(fileDiff?.patch)
-        ?? getPatchText(fileDiff?.diff)
-        ?? null;
+    const diffContent = getToolFallbackDiff(metadata) ?? null;
     const diffEntries = React.useMemo(
         () => getDiffPatchEntries(metadata, diffContent ?? undefined, (path) => getRelativePath(path, currentDirectory)),
         [currentDirectory, diffContent, metadata]
@@ -2055,16 +2052,14 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const quickOpenTarget = React.useMemo<{ absolutePath: string; line?: number; toolDiff?: string; toolName: string } | null>(() => {
         if (isTaskTool) return null;
         const toolName = normalizedPartTool || part.tool;
-        const filePath = getPrimaryToolPath(toolName, input, metadata);
-        if (typeof filePath !== 'string') return null;
-        const absolutePath = toAbsoluteFilePath(currentDirectory, filePath);
-        let line: number | undefined;
-        let toolDiff: string | undefined;
-        if (toolName === 'edit' || toolName === 'multiedit' || toolName === 'apply_patch') {
-            line = getFirstChangedLineFromMetadata(toolName, metadata, filePath);
-            toolDiff = getPrimaryDiffFromMetadata(toolName, metadata, filePath);
-        }
-        return { absolutePath, line, toolDiff, toolName };
+        const target = resolveToolQuickOpenTarget(toolName, input, metadata);
+        if (!target) return null;
+        return {
+            absolutePath: toAbsoluteFilePath(currentDirectory, target.filePath),
+            line: target.line,
+            toolDiff: target.patch,
+            toolName,
+        };
     }, [isTaskTool, normalizedPartTool, part.tool, input, metadata, currentDirectory]);
 
     const openQuickTarget = () => {
@@ -2202,9 +2197,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                         onClick={handleQuickOpen}
                                         className={cn(
                                             'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-[var(--surface-hover)]',
-                                            // Coarse pointers never hover, so the icon has to rest visible
-                                            // there or it stays invisible while remaining tappable.
-                                            'opacity-0 group-hover/tool:opacity-60 hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-60',
+                                            'opacity-60 hover:opacity-100 focus-visible:opacity-100',
                                         )}
                                         style={{ color: 'var(--tools-icon)' }}
                                         title={t('chat.toolPart.openFile')}

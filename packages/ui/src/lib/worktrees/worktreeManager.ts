@@ -374,9 +374,10 @@ export const partitionWorktreesByRegisteredProject = (
 
 // Cache worktree listings to avoid repeated git worktree list + rev-parse calls
 const _worktreeListCache = new Map<string, { value: WorktreeMetadata[]; at: number }>();
-const _worktreeListInflight = new Map<string, Promise<WorktreeMetadata[]>>();
+const _worktreeListInflight = new Map<string, { generation: number; promise: Promise<WorktreeMetadata[]> }>();
 const _worktreeListGeneration = new Map<string, number>();
 const WORKTREE_LIST_CACHE_TTL = 30_000; // 30 seconds
+const WORKTREE_LIST_MAX_CONVERGENCE_ATTEMPTS = 3;
 
 const getWorktreeListGeneration = (projectDirectory: string): number => {
   return _worktreeListGeneration.get(projectDirectory) ?? 0;
@@ -391,7 +392,7 @@ const readProjectWorktrees = async (projectDirectory: string): Promise<WorktreeM
   const metadataProjectDirectory = await resolveProjectRoot(projectDirectory).catch(() => projectDirectory);
   const normalizedProjectDirectory = normalizePath(projectDirectory);
 
-  const worktrees = await git.worktree.list(projectDirectory).catch(() => []);
+  const worktrees = await git.worktree.list(projectDirectory);
   const results: WorktreeMetadata[] = worktrees
     .filter((entry) => typeof entry.path === 'string' && entry.path.trim().length > 0)
     .map((entry) => {
@@ -424,38 +425,64 @@ const readProjectWorktrees = async (projectDirectory: string): Promise<WorktreeM
   });
 };
 
-const readStableProjectWorktrees = async (projectDirectory: string): Promise<WorktreeMetadata[]> => {
-  while (true) {
+const readStableProjectWorktrees = async (
+  projectDirectory: string,
+  minimumGeneration = getWorktreeListGeneration(projectDirectory),
+): Promise<WorktreeMetadata[]> => {
+  for (let attempt = 0; attempt < WORKTREE_LIST_MAX_CONVERGENCE_ATTEMPTS; attempt += 1) {
     const generation = getWorktreeListGeneration(projectDirectory);
     const worktrees = await readProjectWorktrees(projectDirectory);
 
-    if (generation === getWorktreeListGeneration(projectDirectory)) {
+    if (generation >= minimumGeneration && generation === getWorktreeListGeneration(projectDirectory)) {
       _worktreeListCache.set(projectDirectory, { value: worktrees, at: Date.now() });
       return worktrees;
     }
   }
+
+  throw new Error(
+    `Worktree list did not converge after ${WORKTREE_LIST_MAX_CONVERGENCE_ATTEMPTS} attempts`
+  );
 };
 
-export async function listProjectWorktrees(project: ProjectRef): Promise<WorktreeMetadata[]> {
+export async function listProjectWorktrees(project: ProjectRef, options?: { force?: boolean }): Promise<WorktreeMetadata[]> {
   const projectDirectory = normalizePath(project.path);
+  const force = options?.force === true;
+  const previousCache = force ? _worktreeListCache.get(projectDirectory) : undefined;
+
+  if (force) {
+    invalidateWorktreeList(projectDirectory);
+  }
+
+  const generation = getWorktreeListGeneration(projectDirectory);
 
   // Return cached if fresh
   const cached = _worktreeListCache.get(projectDirectory);
-  if (cached && Date.now() - cached.at < WORKTREE_LIST_CACHE_TTL) {
+  if (!force && cached && Date.now() - cached.at < WORKTREE_LIST_CACHE_TTL) {
     return cached.value;
   }
 
   // Dedup in-flight requests
   const inflight = _worktreeListInflight.get(projectDirectory);
-  if (inflight) return inflight;
+  if (inflight && inflight.generation === generation) return inflight.promise;
 
-  const promise = readStableProjectWorktrees(projectDirectory).finally(() => {
-    if (_worktreeListInflight.get(projectDirectory) === promise) {
-      _worktreeListInflight.delete(projectDirectory);
-    }
-  });
+  const promise = readStableProjectWorktrees(projectDirectory, generation)
+    .catch((error) => {
+      if (
+        previousCache
+        && !_worktreeListCache.has(projectDirectory)
+        && getWorktreeListGeneration(projectDirectory) === generation
+      ) {
+        _worktreeListCache.set(projectDirectory, previousCache);
+      }
+      throw error;
+    })
+    .finally(() => {
+      if (_worktreeListInflight.get(projectDirectory)?.promise === promise) {
+        _worktreeListInflight.delete(projectDirectory);
+      }
+    });
 
-  _worktreeListInflight.set(projectDirectory, promise);
+  _worktreeListInflight.set(projectDirectory, { generation, promise });
   return promise;
 }
 

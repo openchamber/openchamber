@@ -6,6 +6,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import simpleGit from 'simple-git';
 
 import {
+  checkoutBranch,
   checkoutCommit,
   cherryPick,
   createWorktree,
@@ -1053,6 +1054,92 @@ describe('checkoutCommit', () => {
 });
 
 // ---------------------------------------------------------------------------
+// checkoutBranch
+// ---------------------------------------------------------------------------
+
+describe('checkoutBranch', () => {
+  it('checks out a local branch by name', async () => {
+    const { repository } = createRepositoryWithRemote();
+    runGit(repository, ['branch', 'feature']);
+
+    const result = await checkoutBranch(repository, 'feature');
+
+    expect(result).toEqual({ success: true, branch: 'feature' });
+    expect(runGit(repository, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('feature');
+  });
+
+  it('creates a tracking local branch instead of detaching HEAD on a remote branch', async () => {
+    const { repository } = createRepositoryWithRemote({ defaultBranch: 'react' });
+
+    const result = await checkoutBranch(repository, 'origin/react');
+
+    expect(result).toEqual({ success: true, branch: 'react' });
+    expect(runGit(repository, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('react');
+    expect(runGit(repository, ['rev-parse', '--abbrev-ref', 'react@{upstream}']).trim()).toBe('origin/react');
+  });
+
+  it('checks out the existing local branch when a remote branch is picked', async () => {
+    const { repository } = createRepositoryWithRemote({ defaultBranch: 'react' });
+    runGit(repository, ['branch', 'react', 'origin/react']);
+
+    const result = await checkoutBranch(repository, 'origin/react');
+
+    expect(result).toEqual({ success: true, branch: 'react' });
+    expect(runGit(repository, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('react');
+  });
+
+  it('accepts the remotes/ prefixed form of a remote branch', async () => {
+    const { repository } = createRepositoryWithRemote({ defaultBranch: 'react' });
+
+    const result = await checkoutBranch(repository, 'remotes/origin/react');
+
+    expect(result).toEqual({ success: true, branch: 'react' });
+    expect(runGit(repository, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('react');
+  });
+
+  it('prefers a local branch whose name looks like a remote ref', async () => {
+    const { repository } = createRepositoryWithRemote({ defaultBranch: 'react' });
+    runGit(repository, ['branch', 'origin/react']);
+
+    const result = await checkoutBranch(repository, 'origin/react');
+
+    expect(result).toEqual({ success: true, branch: 'origin/react' });
+    expect(runGit(repository, ['symbolic-ref', 'HEAD']).trim()).toBe('refs/heads/origin/react');
+  });
+
+  it('rejects an unknown branch', async () => {
+    const { repository } = createRepositoryWithRemote();
+    await expect(checkoutBranch(repository, 'does-not-exist')).rejects.toThrow();
+  });
+
+  it('fetches a remote-only branch that was never fetched locally (#2735)', async () => {
+    const { repository, remote } = createRepositoryWithRemote({ defaultBranch: 'react' });
+    // A collaborator pushes straight to the remote; this repository never
+    // fetches, so `remotes/origin/collab` is listed (#2098) with no local ref.
+    const collaborator = createTempDir();
+    runGit(collaborator, ['clone', remote, '.']);
+    runGit(collaborator, ['config', 'user.email', 'test@example.com']);
+    runGit(collaborator, ['config', 'user.name', 'Test']);
+    runGit(collaborator, ['checkout', '-b', 'collab']);
+    runGit(collaborator, ['push', 'origin', 'collab']);
+
+    const result = await checkoutBranch(repository, 'remotes/origin/collab');
+
+    expect(result).toEqual({ success: true, branch: 'collab' });
+    expect(runGit(repository, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('collab');
+    expect(runGit(repository, ['rev-parse', '--abbrev-ref', 'collab@{upstream}']).trim()).toBe('origin/collab');
+  });
+
+  it('reports a clear failure when the remote branch no longer exists', async () => {
+    const { repository } = createRepositoryWithRemote({ defaultBranch: 'react' });
+
+    await expect(checkoutBranch(repository, 'remotes/origin/never-pushed')).rejects.toThrow(
+      /Failed to fetch never-pushed from origin/
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // cherryPick
 // ---------------------------------------------------------------------------
 
@@ -1368,6 +1455,47 @@ describe.runIf(canRunGit())('getBranches', () => {
     // decide whether a base branch exists at all.
     expect(branches.all).toContain('remotes/origin/react');
   });
+
+  it('includes remote branches with no local tracking ref and prunes refs deleted on the remote (#2098)', async () => {
+    const remote = createTempDir();
+    runGit(remote, ['init', '--bare', '--initial-branch=main']);
+
+    const repository = createTempDir();
+    runGit(repository, ['init', '-b', 'main']);
+    runGit(repository, ['config', 'user.email', 'test@example.com']);
+    runGit(repository, ['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(repository, 'README.md'), '# Test\n');
+    runGit(repository, ['add', 'README.md']);
+    runGit(repository, ['commit', '-m', 'init']);
+    runGit(repository, ['remote', 'add', 'origin', remote]);
+    runGit(repository, ['push', '-u', 'origin', 'main']);
+    runGit(repository, ['checkout', '-b', 'feature-known']);
+    runGit(repository, ['push', '-u', 'origin', 'feature-known']);
+    // This tracking ref will go stale: the collaborator deletes the branch on
+    // the remote below, and the list must prune it.
+    runGit(repository, ['checkout', '-b', 'feature-stale']);
+    runGit(repository, ['push', '-u', 'origin', 'feature-stale']);
+    runGit(repository, ['checkout', 'main']);
+    runGit(repository, ['branch', '-D', 'feature-stale']);
+
+    // A collaborator pushes a branch straight to the remote and deletes
+    // another; this repository never fetches, so it has no local
+    // remote-tracking ref for feature-remote-only.
+    const collaborator = createTempDir();
+    runGit(collaborator, ['clone', remote, '.']);
+    runGit(collaborator, ['config', 'user.email', 'test@example.com']);
+    runGit(collaborator, ['config', 'user.name', 'Test']);
+    runGit(collaborator, ['checkout', '-b', 'feature-remote-only']);
+    runGit(collaborator, ['push', 'origin', 'feature-remote-only']);
+    runGit(collaborator, ['push', 'origin', ':feature-stale']);
+
+    const branches = await getBranches(repository);
+
+    expect(branches.all).toContain('remotes/origin/feature-remote-only');
+    expect(branches.all).toContain('remotes/origin/feature-known');
+    expect(branches.all).toContain('feature-known');
+    expect(branches.all).not.toContain('remotes/origin/feature-stale');
+  });
 });
 
 describe.runIf(canRunGit())('getRangeDiff', () => {
@@ -1382,6 +1510,14 @@ describe.runIf(canRunGit())('getRangeDiff', () => {
     const diff = await getRangeDiff(repository, { base: 'react', head: 'next' });
 
     expect(diff).toContain('feature.txt');
+  });
+
+  it('names an unfetched remote-only ref instead of failing with git\'s ambiguous argument (#2735)', async () => {
+    const { repository } = createRepositoryWithRemote({ defaultBranch: 'react' });
+
+    await expect(
+      getRangeDiff(repository, { base: 'remotes/origin/never-fetched', head: 'next' })
+    ).rejects.toThrow(/is not available locally/);
   });
 });
 

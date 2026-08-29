@@ -13,6 +13,7 @@ import { opencodeClient } from "@/lib/opencode/client"
 import { mergeSessionDirectoryMetadata, resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { registerSessionDirectory } from "./sync-refs"
+import { useGlobalSessionStatusStore } from "./global-session-status"
 import { recordSendFailure } from "./send-failure-log"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
 import { materializeSessionSnapshots } from "./materialization"
@@ -31,7 +32,8 @@ import { withLinkedIssue, type LinkedIssue } from "@/lib/linkedIssues"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { getRuntimeKey } from "@/lib/runtime-switch"
-import { isAmbiguousTransportFailure } from "@/lib/relay/transport-error"
+import { markAmbiguousTransportFailure } from "@/lib/relay/transport-error"
+import { getErrorStatus, isAmbiguousSendFailure } from "./send-failure-classification"
 import { getStaleRunningToolMessageID } from "./materialization"
 import { normalizePath } from "@/lib/pathNormalization"
 import { mergeMessages } from "./optimistic"
@@ -135,7 +137,11 @@ function assertSdkSuccess<T>(result: SdkResult<T>, operation: string): T | undef
   const status = result.response?.status
   const error = new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`) as Error & { status?: number }
   if (status !== undefined) error.status = status
-  throw error
+  // Wrapping loses the original error's identity: the transport's
+  // "dispatched, outcome unknown" tag, a DOMException abort, a TypeError from
+  // fetch. Re-tag the wrapper so `isAmbiguousSendFailure` still classifies it
+  // as ambiguous instead of reading it as a definite server rejection.
+  throw isAmbiguousSendFailure(result.error) ? markAmbiguousTransportFailure(error) : error
 }
 
 function assertSdkData<T>(result: SdkResult<T>, operation: string): T {
@@ -374,43 +380,6 @@ function connectionLostError(): Error {
   return new Error(`Connection lost${suffix}. Please wait for reconnection.`)
 }
 
-function getErrorStatus(error: unknown): number | null {
-  if (!error || typeof error !== "object") return null
-  const direct = (error as { status?: unknown }).status
-  if (typeof direct === "number") return direct
-  const response = (error as { response?: { status?: unknown } }).response
-  return typeof response?.status === "number" ? response.status : null
-}
-
-function isAmbiguousSendFailure(error: unknown): boolean {
-  // Authoritative first: the transport that lost the request says whether it
-  // had already been dispatched. The text matching below only covers direct
-  // fetch/HTTP failures, whose wording we do not control either — relay tunnel
-  // aborts ("stream aborted by host", "relay keepalive timeout", …) match none
-  // of those patterns and used to be misread as definite failures.
-  if (isAmbiguousTransportFailure(error)) return true
-
-  const status = getErrorStatus(error)
-  if (status === 503 || status === 504 || status === 408) return true
-  if (error instanceof TypeError) return true
-  if (error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError")) return true
-
-  const message = error instanceof Error
-    ? error.message.toLowerCase()
-    : typeof error === "string"
-      ? error.toLowerCase()
-      : ""
-
-  return message.includes("timeout")
-    || message.includes("timed out")
-    || message.includes("failed to fetch")
-    || message.includes("networkerror")
-    || message.includes("network error")
-    || message.includes("gateway timeout")
-    || message.includes("econnreset")
-    || message.includes("socket hang up")
-}
-
 // Wait briefly for the pipeline to re-establish connection before failing a
 // send. Transient reconnects (heartbeat race, WS→SSE fallback, brief network
 // blip) otherwise surface as a hard "Connection lost" toast even though the
@@ -443,21 +412,54 @@ type DescendantSession = {
   directory: string
 }
 
+/** "unknown" means no live source covers this session right now, so no caller
+ *  may treat it as idle on this answer. "idle" requires positive coverage. */
+export type SessionLiveActivity = "unknown" | "idle" | "active"
+
 /**
  * A session's live status can live in a different child store than the one that
  * wins the directory dedup, so any store reporting a non-idle status counts.
  * Read at the moment of use: a descendant can start working after the subtree
  * snapshot was taken.
+ *
+ * Absence of a non-idle status is not proof of idleness. Child stores are
+ * evicted for background directories, and the global status index keeps only
+ * non-idle entries, so "no report" and "idle" are different answers: report
+ * "idle" only when a child store actually covers the session's directory.
  */
-function isSessionBusyNow(sessionId: string): boolean {
+export function getSessionLiveActivity(sessionId: string): SessionLiveActivity {
   const stores = _childStores
-  if (!stores) return false
 
-  for (const [, store] of stores.children) {
-    const status = store.getState().session_status?.[sessionId]
-    if (status && status.type !== "idle") return true
+  if (stores) {
+    for (const [, store] of stores.children) {
+      const status = store.getState().session_status?.[sessionId]
+      if (status && status.type !== "idle") return "active"
+    }
   }
-  return false
+
+  // Cross-directory live index: populated by global events and authoritative
+  // per-directory status snapshots, and it survives child-store eviction.
+  if (useGlobalSessionStatusStore.getState().statusById.has(sessionId)) return "active"
+
+  if (!stores) return "unknown"
+  return isSessionCoveredByChildStore(sessionId, stores) ? "idle" : "unknown"
+}
+
+function isSessionCoveredByChildStore(sessionId: string, stores: ChildStoreManager): boolean {
+  if (findSessionDirectoryInChildStores(sessionId)) return true
+  const directory = useSessionUIStore.getState().getDirectoryForSession(sessionId)
+    ?? resolveKnownSessionDirectory(sessionId)
+  if (!directory) return false
+  return stores.children.has(normalizePath(directory) ?? directory)
+}
+
+function resolveKnownSessionDirectory(sessionId: string): string | null {
+  const globalSession = getGlobalSessionSnapshot(sessionId)
+  return globalSession ? resolveGlobalSessionDirectory(globalSession) : null
+}
+
+export function isSessionBusyNow(sessionId: string): boolean {
+  return getSessionLiveActivity(sessionId) === "active"
 }
 
 async function abortDescendantIfBusy(sessionId: string, directory: string): Promise<void> {

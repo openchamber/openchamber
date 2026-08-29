@@ -312,3 +312,8 @@ export function readContextPart(part: ContextCarrierPart): ContextPartPayload | 
     const parsed = contextPayloadSchema.safeParse(part.metadata?.[CONTEXT_METADATA_KEY]);
     return parsed.success ? parsed.data : null;
 }
+
+/** Whether a message carries any user-attached context part. */
+export function hasContextParts(parts: ContextCarrierPart[]): boolean {
+    return parts.some((part) => readContextPart(part) !== null);
+}

@@ -56,6 +56,7 @@ import { WorkStatusPanel } from './work-status/WorkStatusPanel';
 import { useWorkStatusVisibility } from './work-status/useWorkStatusVisibility';
 import { getEmbeddedSessionChatOriginSessionId } from '@/components/layout/contextPanelEmbeddedChat';
 import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
+import { hasContextParts } from '@/lib/messages/contextParts';
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
 import { findShellCommandForMessage, isUserShellMarkerMessage } from './lib/shellBridge';
 import { resolveChatPromptReadOnly } from './chatPromptReadOnly';
@@ -262,7 +263,10 @@ const ChatViewport = React.memo(({
             // Other fully synthetic user messages (loop continuations,
             // plan-mode injections) are not prompts the user typed — keep
             // them out of the navigator entirely.
-            if (isFullySyntheticMessage(message.parts)) {
+            // Attached context (a quoted message, a terminal selection) is
+            // synthetic transport-wise but is a turn the user sent, so a
+            // context-only message stays navigable.
+            if (isFullySyntheticMessage(message.parts) && !hasContextParts(message.parts)) {
                 continue;
             }
             let displayParts = normalizedPromptPartsCache.current.get(message.parts);
