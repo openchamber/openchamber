@@ -31,13 +31,14 @@ export async function resolveRecentSession(): Promise<ResolvedRecentSession | nu
   }
 
   void refreshGlobalSessions().catch(() => null);
+  // Never strand the caller: the router holds route application while this
+  // resolves, so the total wait is bounded regardless of connection state.
   const deadline = Date.now() + 6_000;
-  const cap = Date.now() + 30_000;
   let retriedAfterConnect = false;
   for (;;) {
     const state = useGlobalSessionsStore.getState();
     const connected = useConfigStore.getState().isConnected;
-    if (Date.now() >= cap) {
+    if (Date.now() >= deadline) {
       return null;
     }
     if (state.status === 'error') {
@@ -63,9 +64,6 @@ export async function resolveRecentSession(): Promise<ResolvedRecentSession | nu
         sessionId: session.id,
         directory: resolveGlobalSessionDirectory(session) ?? persisted.directory,
       };
-    }
-    if (Date.now() >= deadline && connected) {
-      return null;
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
