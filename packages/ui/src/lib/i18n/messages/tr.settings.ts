@@ -1990,8 +1990,6 @@ export const settingsDict = {
   'settings.openchamber.visual.option.chatMessageWidth.narrow.label': 'Dar',
   'settings.openchamber.visual.option.chatMessageWidth.wide.label': 'Geniş',
   'settings.openchamber.visual.option.chatMessageWidth.fluid.label': 'Tam genişlik',
-  'settings.openchamber.visual.field.wideChatLayoutAria': 'Geniş sohbet yerleşimi',
-  'settings.openchamber.visual.field.wideChatLayout': 'Geniş Sohbet Yerleşimi',
   'settings.openchamber.visual.field.codeBlockLineWrapAria': 'Kod bloğu satırlarını kaydır',
   'settings.openchamber.visual.field.codeBlockLineWrap': 'Kod Bloğu Satırlarını Kaydır',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': 'Satır içi asistan eylemleri',

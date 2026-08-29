@@ -1984,8 +1984,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.stickyUserHeader': 'Fixierter Benutzerkopf',
   'settings.openchamber.visual.field.promptNavigatorEnabledAria': 'Prompt-Navigator',
   'settings.openchamber.visual.field.promptNavigatorEnabled': 'Prompt-Navigator',
-  'settings.openchamber.visual.field.expandedEditorToolbarAria': 'Editor-Werkzeugleiste immer anzeigen',
-  'settings.openchamber.visual.field.expandedEditorToolbar': 'Editor-Werkzeugleiste immer anzeigen (unter den Datei-Reitern angeheftet)',
   'settings.openchamber.visual.section.chatMessageWidth': 'Nachrichtenbreite',
   'settings.openchamber.visual.section.chatMessageWidthAria': 'Nachrichtenbreite',
   'settings.openchamber.visual.field.chatMessageWidthAria': 'Nachrichtenbreite: {option}',
