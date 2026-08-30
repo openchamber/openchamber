@@ -5,6 +5,7 @@ import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID } from '@/lib/theme/theme
 import {
   adoptThemePreferencesForRuntime,
   getThemePreferencesStorageKey,
+  isTransientRuntimeKey,
   readThemePreferencesForRuntime,
   resolveThemePreferencesForRuntime,
   resolveThemePreferencesFromStorageEvent,
@@ -203,6 +204,49 @@ describe('runtime-switch adoption', () => {
 
   test('keeps the current preferences — same reference — when the target runtime has no entry', () => {
     expect(adoptThemePreferencesForRuntime('runtime-empty', current)).toBe(current);
+  });
+});
+
+describe('transient runtime keys', () => {
+  test('uninitialized and disconnected runtime keys are transient', () => {
+    expect(isTransientRuntimeKey('url:default')).toBe(true);
+    expect(isTransientRuntimeKey('mobile-disconnected')).toBe(true);
+    expect(isTransientRuntimeKey('')).toBe(true);
+    expect(isTransientRuntimeKey('local')).toBe(false);
+    expect(isTransientRuntimeKey('url:https://host.example')).toBe(false);
+  });
+
+  test('writes are skipped for transient runtimes — no stale cold-boot theme gets pinned', () => {
+    writeThemePreferencesForRuntime('url:default', preferences);
+    writeThemePreferencesForRuntime('mobile-disconnected', preferences);
+
+    expect(readThemePreferencesForRuntime('url:default')).toBeNull();
+    expect(readThemePreferencesForRuntime('mobile-disconnected')).toBeNull();
+    expect(localStorage.getItem(getThemePreferencesStorageKey('url:default'))).toBeNull();
+  });
+
+  test('reads never surface an entry under a transient key', () => {
+    localStorage.setItem(getThemePreferencesStorageKey('url:default'), JSON.stringify(preferences));
+
+    expect(readThemePreferencesForRuntime('url:default')).toBeNull();
+  });
+
+  test('boot resolution falls back to the global splash hints for transient runtimes', () => {
+    localStorage.setItem('themeMode', 'light');
+    localStorage.setItem('lightThemeId', 'legacy-light');
+    localStorage.setItem('darkThemeId', 'legacy-dark');
+
+    expect(resolveThemePreferencesForRuntime('url:default')).toEqual({
+      themeMode: 'light',
+      lightThemeId: 'legacy-light',
+      darkThemeId: 'legacy-dark',
+    });
+  });
+
+  test('endpoint-switch adoption keeps current preferences for transient runtimes', () => {
+    const current = { themeMode: 'light' as const, lightThemeId: 'light-theme', darkThemeId: 'dark-theme' };
+
+    expect(adoptThemePreferencesForRuntime('mobile-disconnected', current)).toBe(current);
   });
 });
 

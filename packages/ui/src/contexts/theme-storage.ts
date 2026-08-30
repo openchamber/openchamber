@@ -21,8 +21,20 @@ const THEME_PREFERENCES_KEY_PREFIX = 'openchamber.theme.v2:';
 export const getThemePreferencesStorageKey = (runtimeKey: string): string =>
   `${THEME_PREFERENCES_KEY_PREFIX}${encodeURIComponent(runtimeKey)}`;
 
+// Runtime keys that mean "no instance connected" — the uninitialized default
+// and the mobile disconnect state. They carry no instance theme, so scoped
+// storage must not read or write them: a write would pin whatever theme was
+// current at that moment (e.g. cold-boot defaults) to a key every future
+// launch resolves before connecting, and a read would surface that stale
+// entry on the mobile connect splash. The global splash hints are the right
+// fallback for those phases.
+const TRANSIENT_RUNTIME_KEYS = new Set(['', 'url:default', 'mobile-disconnected']);
+
+export const isTransientRuntimeKey = (runtimeKey: string): boolean =>
+  TRANSIENT_RUNTIME_KEYS.has(runtimeKey);
+
 export const readThemePreferencesForRuntime = (runtimeKey: string): StoredThemePreferences | null => {
-  if (typeof window === 'undefined') {
+  if (typeof window === 'undefined' || isTransientRuntimeKey(runtimeKey)) {
     return null;
   }
   let raw: string | null = null;
@@ -58,7 +70,7 @@ export const readThemePreferencesForRuntime = (runtimeKey: string): StoredThemeP
 };
 
 export const writeThemePreferencesForRuntime = (runtimeKey: string, preferences: StoredThemePreferences): void => {
-  if (typeof window === 'undefined') {
+  if (typeof window === 'undefined' || isTransientRuntimeKey(runtimeKey)) {
     return;
   }
   try {
