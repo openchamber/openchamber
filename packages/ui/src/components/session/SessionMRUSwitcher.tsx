@@ -137,13 +137,21 @@ export function SessionMRUSwitcher(): React.ReactElement | null {
   const commitCycle = React.useCallback(() => {
     const currentCycleState = cycleStateRef.current;
     if (!currentCycleState) return;
+
+    const { currentSessionId } = useSessionUIStore.getState();
     const selectedSessionId =
       currentCycleState.frozenSessionIds[currentCycleState.previewIndex];
-    const selectedSession = useGlobalSessionsStore
-      .getState()
-      .entityById.get(selectedSessionId);
+    if (!selectedSessionId || selectedSessionId === currentSessionId) return;
+
+    const globalSessions = useGlobalSessionsStore.getState();
+    if (!globalSessions.structure.activeSessionIds.includes(selectedSessionId))
+      return;
+
+    const selectedSession = globalSessions.entityById.get(selectedSessionId);
     updateCycleState(null);
+
     if (!selectedSession || selectedSession.time?.archived) return;
+
     useSessionUIStore
       .getState()
       .setCurrentSession(
