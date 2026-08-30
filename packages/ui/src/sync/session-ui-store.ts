@@ -1821,9 +1821,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     if (!targetMessage) return
 
-    // Read target message parts BEFORE calling revertToMessage.
-    // revertToMessage optimistically deletes messages from the sync store
-    // before the API call, so getSyncParts must run first.
     const targetParts = getSyncParts(targetMessage.id)
     const textPart = targetParts.find((p: Part) => p.type === "text") as TextPart | undefined
     const preview = textPart?.text
@@ -1897,6 +1894,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       console.error("Failed to fork session:", error)
       const { toast } = await import("sonner")
       toast.error("Failed to fork session")
+      throw error
     }
   },
 

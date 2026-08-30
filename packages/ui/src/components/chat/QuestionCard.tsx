@@ -16,6 +16,15 @@ import { useI18n } from '@/lib/i18n';
 import { serializeQuestionAsJson, serializeQuestionAsMarkdown } from './questionSerializers';
 import { QUESTION_CUSTOM_TEXTAREA_MIN_HEIGHT, getQuestionCustomTextareaHeight } from './questionTextareaSizing';
 import { QuestionMarkdown } from './QuestionMarkdown';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import {
+  beginQuestionAnswerSubmission,
+  clearQuestionAnswerDraft,
+  getQuestionAnswerDraft,
+  getQuestionAnswerDraftKey,
+  setQuestionAnswerDraft,
+  useQuestionAnswerPending,
+} from '@/sync/question-answer-draft';
 
 interface QuestionCardProps {
   question: QuestionRequest;
@@ -88,7 +97,7 @@ const CustomAnswerTextarea = React.memo(function CustomAnswerTextarea({
   );
 });
 
-export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
+const QuestionCardContent: React.FC<QuestionCardProps & { actionKey: string }> = ({ question, actionKey }) => {
   const { t } = useI18n();
   const respondToQuestion = sessionActions.respondToQuestion;
   const rejectQuestion = sessionActions.rejectQuestion;
@@ -101,13 +110,16 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
     return Boolean(sourceSession?.parentID && sourceSession.parentID === currentSessionId);
   }, [question.sessionID, currentSessionId, sessions]);
   const [activeTab, setActiveTab] = React.useState<TabKey>('0');
-  const [isResponding, setIsResponding] = React.useState(false);
+  const isResponding = useQuestionAnswerPending(actionKey);
   const [hasResponded, setHasResponded] = React.useState(false);
 
-  const [selectedOptions, setSelectedOptions] = React.useState<Record<number, string[]>>({});
-  const [customMode, setCustomMode] = React.useState<Record<number, boolean>>({});
-  const customTextRef = React.useRef<Record<number, string>>({});
-  const [customTextFilled, setCustomTextFilled] = React.useState<Record<number, boolean>>({});
+  const initialDraft = React.useState(() => getQuestionAnswerDraft(actionKey))[0];
+  const [selectedOptions, setSelectedOptions] = React.useState<Record<number, string[]>>(initialDraft?.selectedOptions ?? {});
+  const [customMode, setCustomMode] = React.useState<Record<number, boolean>>(initialDraft?.customMode ?? {});
+  const [customText, setCustomText] = React.useState<Record<number, string>>(initialDraft?.customText ?? {});
+  const [customTextFilled, setCustomTextFilled] = React.useState<Record<number, boolean>>(() => Object.fromEntries(
+    Object.entries(initialDraft?.customText ?? {}).map(([index, value]) => [index, value.trim().length > 0]),
+  ));
 
   const questions = React.useMemo(() => question.questions ?? [], [question.questions]);
   const isSummaryTab = activeTab === SUMMARY_TAB;
@@ -118,15 +130,6 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
     const header = activeQuestion?.header?.trim();
     return header && header.length > 0 ? header : null;
   }, [activeQuestion?.header, isSummaryTab]);
-
-  React.useEffect(() => {
-    setActiveTab('0');
-    setSelectedOptions({});
-    setCustomMode({});
-    customTextRef.current = {};
-    setCustomTextFilled({});
-    setHasResponded(false);
-  }, [question.id]);
 
   const tabs = React.useMemo(() => {
     const questionTabs = questions.map((q, index) => ({
@@ -144,12 +147,12 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   const getAnswerDisplay = React.useCallback((index: number): string => {
     const isCustom = Boolean(customMode[index]);
     if (isCustom) {
-      const value = (customTextRef.current[index] ?? '').trim();
+      const value = (customText[index] ?? '').trim();
       return value || t('chat.questionCard.noAnswer');
     }
     const answers = selectedOptions[index] ?? [];
     return answers.length > 0 ? answers.join(', ') : t('chat.questionCard.noAnswer');
-  }, [customMode, selectedOptions, t]);
+  }, [customMode, customText, selectedOptions, t]);
 
   const isMultiple = Boolean(activeQuestion?.multiple);
   const selectedForActive = selectedOptions[activeIndex] ?? [];
@@ -198,7 +201,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
     for (let index = 0; index < questions.length; index += 1) {
       const isCustom = Boolean(customMode[index]);
       if (isCustom) {
-        const value = (customTextRef.current[index] ?? '').trim();
+        const value = (customText[index] ?? '').trim();
         answers.push(value ? [value] : []);
         continue;
       }
@@ -207,7 +210,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
     }
 
     return answers;
-  }, [customMode, questions.length, selectedOptions]);
+  }, [customMode, customText, questions.length, selectedOptions]);
 
   const handleToggleOption = React.useCallback(
     (label: string) => {
@@ -232,12 +235,12 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   const handleSelectCustom = React.useCallback(() => {
     setCustomMode((prev) => ({ ...prev, [activeIndex]: true }));
     setSelectedOptions((prev) => ({ ...prev, [activeIndex]: [] }));
-    const hasValue = (customTextRef.current[activeIndex] ?? '').trim().length > 0;
+    const hasValue = (customText[activeIndex] ?? '').trim().length > 0;
     setCustomTextFilled((prev) => (prev[activeIndex] === hasValue ? prev : { ...prev, [activeIndex]: hasValue }));
-  }, [activeIndex]);
+  }, [activeIndex, customText]);
 
   const handleCustomValueChange = React.useCallback((value: string) => {
-    customTextRef.current[activeIndex] = value;
+    setCustomText((prev) => ({ ...prev, [activeIndex]: value }));
     const hasValue = value.trim().length > 0;
     setCustomTextFilled((prev) => (prev[activeIndex] === hasValue ? prev : { ...prev, [activeIndex]: hasValue }));
   }, [activeIndex]);
@@ -245,14 +248,18 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   const handleConfirm = React.useCallback(async () => {
     if (!requiredSatisfied) return;
 
-    setIsResponding(true);
+    const transaction = beginQuestionAnswerSubmission(actionKey);
+    if (!transaction) return;
+    setQuestionAnswerDraft(actionKey, { selectedOptions, customMode, customText });
     try {
       const answers = buildAnswersPayload();
       await respondToQuestion(question.sessionID, question.id, answers);
+      clearQuestionAnswerDraft(actionKey);
       setHasResponded(true);
     } catch (error) {
       if (sessionActions.isQuestionRequestNotFoundError(error)) {
         toast.info(t('chat.questionCard.noLongerPending'));
+        clearQuestionAnswerDraft(actionKey);
         setHasResponded(true);
       } else {
         toast.error(t('chat.questionCard.submitFailed'), {
@@ -260,9 +267,9 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
         });
       }
     } finally {
-      setIsResponding(false);
+      transaction.finish();
     }
-  }, [buildAnswersPayload, question.id, question.sessionID, requiredSatisfied, respondToQuestion, t]);
+  }, [actionKey, buildAnswersPayload, customMode, customText, question.id, question.sessionID, requiredSatisfied, respondToQuestion, selectedOptions, t]);
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -281,13 +288,16 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   );
 
   const handleDismiss = React.useCallback(async () => {
-    setIsResponding(true);
+    const transaction = beginQuestionAnswerSubmission(actionKey);
+    if (!transaction) return;
     try {
       await rejectQuestion(question.sessionID, question.id);
+      clearQuestionAnswerDraft(actionKey);
       setHasResponded(true);
     } catch (error) {
       if (sessionActions.isQuestionRequestNotFoundError(error)) {
         toast.info(t('chat.questionCard.noLongerPending'));
+        clearQuestionAnswerDraft(actionKey);
         setHasResponded(true);
       } else {
         toast.error(t('chat.questionCard.dismissFailed'), {
@@ -295,9 +305,9 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
         });
       }
     } finally {
-      setIsResponding(false);
+      transaction.finish();
     }
-  }, [question.id, question.sessionID, rejectQuestion, t]);
+  }, [actionKey, question.id, question.sessionID, rejectQuestion, t]);
 
   const handleCopyMarkdown = React.useCallback(async () => {
     const text = serializeQuestionAsMarkdown(question);
@@ -519,7 +529,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
                   {isCustomActive ? (
                     <div className="pl-6 pr-1 pt-0.5">
                       <CustomAnswerTextarea
-                        value={customTextRef.current[activeIndex] ?? ''}
+                        value={customText[activeIndex] ?? ''}
                         onValueChange={handleCustomValueChange}
                         placeholder={t('chat.questionCard.yourAnswer')}
                         disabled={isResponding}
@@ -572,4 +582,9 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
       </div>
     </div>
   );
+};
+
+export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
+  const actionKey = getQuestionAnswerDraftKey(getRuntimeKey(), question.sessionID, question.id);
+  return <QuestionCardContent key={actionKey} question={question} actionKey={actionKey} />;
 };
