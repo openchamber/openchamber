@@ -7,6 +7,7 @@ import { shortcutRegistry } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { useSessionMRUStore } from "@/stores/useSessionMRUStore";
+import { useUIStore } from "@/stores/useUIStore";
 import {
   resolveGlobalSessionDirectory,
   useGlobalSessionsStore,
@@ -70,6 +71,8 @@ export function SessionMRUSwitcher(): React.ReactElement | null {
    */
   const beginCycle = React.useCallback(
     (cycleDirection: CycleDirection): boolean => {
+      if (!useUIStore.getState().recentSessionCyclingEnabled) return false;
+
       const globalSessions = useGlobalSessionsStore.getState();
       const activeSessionIdSet = new Set(
         globalSessions.structure.activeSessionIds,

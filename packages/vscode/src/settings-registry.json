@@ -262,6 +262,9 @@
       "scope": "profile",
       "perSurface": true
     },
+    "recentSessionCyclingEnabled": {
+      "scope": "profile"
+    },
     "wideChatLayoutEnabled": {
       "scope": "profile",
       "perSurface": true

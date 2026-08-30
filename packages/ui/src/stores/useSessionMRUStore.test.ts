@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { buildGlobalSessionStructure } from './globalSessionStructure';
 import { MAX_MRU_SIZE, useSessionMRUStore } from './useSessionMRUStore';
 import { useGlobalSessionsStore } from './useGlobalSessionsStore';
+import { useUIStore } from './useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
 describe('useSessionMRUStore', () => {
   beforeEach(() => {
     useSessionMRUStore.getState().reset();
+    useUIStore.getState().setRecentSessionCyclingEnabled(true);
     useSessionUIStore.setState({ currentSessionId: null });
     useGlobalSessionsStore.setState({
       structure: buildGlobalSessionStructure([]),
@@ -20,6 +22,15 @@ describe('useSessionMRUStore', () => {
     useSessionUIStore.setState({ currentSessionId: 'b' });
 
     expect(useSessionMRUStore.getState().sessionIds).toEqual(['a', 'c', 'b']);
+  });
+
+  test('keeps recording visits while keyboard cycling is disabled', () => {
+    useUIStore.getState().setRecentSessionCyclingEnabled(false);
+
+    useSessionUIStore.setState({ currentSessionId: 'a' });
+    useSessionUIStore.setState({ currentSessionId: 'b' });
+
+    expect(useSessionMRUStore.getState().sessionIds).toEqual(['a', 'b']);
   });
 
   test('keeps a newly selected unresolved session until active membership changes', () => {
