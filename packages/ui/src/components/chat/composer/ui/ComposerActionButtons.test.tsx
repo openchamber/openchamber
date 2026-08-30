@@ -38,6 +38,7 @@ describe('ComposerActionButtons action states', () => {
                     canAbort
                     hasContent
                     isSubmitting={false}
+                    showAbortHint={false}
                     currentSessionId="session-1"
                     newSessionDraftOpen={false}
                     onPrimaryAction={() => undefined}
@@ -60,6 +61,13 @@ describe('ComposerActionButtons action states', () => {
         const button = host.querySelector('button');
         expect(button?.getAttribute('aria-busy')).toBe('true');
         expect(button?.querySelector('use')?.getAttribute('href')).toBe('#oc-loader-4');
+    });
+
+    test('shows the second-Escape hint above the stop action', () => {
+        renderButtons({ showAbortHint: true });
+
+        expect(host.textContent).toContain('Press Esc again');
+        expect(host.querySelector('button')?.getAttribute('aria-label')).toBe('Stop generating');
     });
 
 });

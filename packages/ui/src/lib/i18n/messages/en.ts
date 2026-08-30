@@ -2302,6 +2302,7 @@ export const dict = {
   'chat.chatInput.actions.modelAgentSettings': 'Model and agent settings',
   'chat.chatInput.actions.sendMessageAria': 'Send message',
   'chat.chatInput.actions.sendingMessageAria': 'Sending message',
+  'chat.chatInput.actions.abortConfirmationHint': 'Press Esc again',
   'chat.chatInput.actions.queueMessageAria': 'Queue message',
   'chat.chatInput.actions.stopGeneratingAria': 'Stop generating',
   'chat.chatInput.focusMode.toggleAria': 'Toggle focus mode',

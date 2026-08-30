@@ -198,13 +198,18 @@ draft and attachment IDs; failure leaves them available for retry. `ChatInput`
 allows one remote submission at a time and owns this pending state locally;
 live session activity remains authoritative in the session stores.
 
+The global Escape shortcut owns the two-press abort confirmation in
+`session-ui-store`. The composer only renders the armed state as a small
+"Press Esc again" hint above its action slot. The first press must not surface
+the completed "Aborted" status.
+
 ## Testing
 
 Most coverage stays at the state and logic layers: the language, submit
 assembly, path and drop handling, text splicing, large-paste detection,
 paste-offer invalidation, message history, draft submission transitions, and
 the CodeMirror language extension at the `EditorState` level. A small
-happy-dom test covers the action slot's spinner.
+happy-dom test covers the action slot's spinner and abort hint states.
 
 Focus, global keyboard behavior, IME and WKWebView are **not covered by tests**
 and are verified by hand. Do not report a change to them as validated on the

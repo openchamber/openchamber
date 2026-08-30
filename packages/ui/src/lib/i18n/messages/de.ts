@@ -2085,6 +2085,7 @@ export const dict = {
   'chat.chatInput.actions.modelAgentSettings': 'Modell- und Agenteneinstellungen',
   'chat.chatInput.actions.sendMessageAria': 'Nachricht senden',
   'chat.chatInput.actions.sendingMessageAria': 'Nachricht wird gesendet',
+  'chat.chatInput.actions.abortConfirmationHint': 'Esc erneut drücken',
   'chat.chatInput.actions.queueMessageAria': 'Nachricht in die Warteschlange stellen',
   'chat.chatInput.actions.stopGeneratingAria': 'Generierung stoppen',
   'chat.chatInput.focusMode.toggleAria': 'Fokusmodus umschalten',

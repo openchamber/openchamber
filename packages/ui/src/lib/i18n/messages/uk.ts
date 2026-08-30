@@ -2280,6 +2280,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.actions.modelAgentSettings": "Параметри моделі та агента",
   "chat.chatInput.actions.sendMessageAria": "Надіслати повідомлення",
   "chat.chatInput.actions.sendingMessageAria": "Надсилання повідомлення",
+  "chat.chatInput.actions.abortConfirmationHint": "Натисніть Esc ще раз",
   "chat.chatInput.actions.queueMessageAria": "Поставити повідомлення в чергу",
   "chat.chatInput.actions.stopGeneratingAria": "Припинити генерацію",
   "chat.chatInput.focusMode.toggleAria": "Перемкнути режим фокусування",

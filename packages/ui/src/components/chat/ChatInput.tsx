@@ -402,7 +402,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         void prepareChatDraftDirectory();
     }, [message, newSessionDraft.target, newSessionDraftOpen, prepareChatDraftDirectory]);
     const consumePendingSyntheticParts = useInputStore((s) => s.consumePendingSyntheticParts);
-    const acknowledgeSessionAbort = useSessionUIStore((s) => s.acknowledgeSessionAbort);
     const abortCurrentOperation = React.useCallback(
         (sessionIdOverride?: string) => sessionActions.abortCurrentOperation(sessionIdOverride ?? currentSessionId ?? ''),
         [currentSessionId],
@@ -727,7 +726,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             attachments,
         };
     }, [resolveInlineFileMention]);
-    const prevWasAbortedRef = React.useRef(false);
 
     // Issue linking state
     const [issuePickerOpen, setIssuePickerOpen] = React.useState(false);
@@ -897,6 +895,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const canSend = hasContent || hasQueuedMessages;
 
     const canAbort = sessionPhase !== 'idle';
+    const showAbortHint = Boolean(
+        abortPromptSessionId
+        && abortPromptSessionId === currentSessionId
+        && sessionPhase !== 'idle',
+    );
 
     const getCurrentInputSnapshot = React.useCallback(() => {
         const currentMessage = composerRef.current?.getValue() ?? message;
@@ -2329,12 +2332,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, [isMobile]);
 
     React.useEffect(() => {
-        if (abortPromptSessionId && abortPromptSessionId !== currentSessionId) {
-            clearAbortPrompt();
-        }
-    }, [abortPromptSessionId, currentSessionId, clearAbortPrompt]);
-
-    React.useEffect(() => {
         canAcceptDropRef.current = Boolean(currentSessionId || newSessionDraftOpen);
     }, [currentSessionId, newSessionDraftOpen]);
 
@@ -2756,16 +2753,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         handlePermissionAutoAcceptToggle();
     });
 
-    // Acknowledging the abort record is what lets the working chip resume for
-    // the next run; the old "Aborted" banner that used to accompany it is gone.
-    React.useEffect(() => {
-        const pendingAbort = Boolean(abortPromptSessionId) && abortPromptSessionId === currentSessionId;
-        if (!prevWasAbortedRef.current && pendingAbort && currentSessionId) {
-            acknowledgeSessionAbort(currentSessionId);
-        }
-        prevWasAbortedRef.current = pendingAbort;
-    }, [abortPromptSessionId, acknowledgeSessionAbort, currentSessionId]);
-
     return (
         <>
         <form
@@ -2900,6 +2887,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         isVSCode={isVSCode}
                         canAbort={canAbort}
                         isSubmitting={isSubmitting}
+                        showAbortHint={showAbortHint}
                         footerIconButtonClass={footerIconButtonClass}
                         iconSizeClass={iconSizeClass}
                         stopIconSizeClass={stopIconSizeClass}
@@ -3085,6 +3073,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         canAbort={canAbort}
                         hasContent={Boolean(hasContent)}
                         isSubmitting={isSubmitting}
+                        showAbortHint={showAbortHint}
                         isExpandedInput={isExpandedInput}
                         permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                         isPermissionAutoAcceptInteractive={isPermissionAutoAcceptInteractive}

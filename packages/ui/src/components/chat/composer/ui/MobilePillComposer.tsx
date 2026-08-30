@@ -29,6 +29,7 @@ export interface MobilePillComposerProps {
     isVSCode: boolean;
     canAbort: boolean;
     isSubmitting: boolean;
+    showAbortHint: boolean;
     footerIconButtonClass: string;
     iconSizeClass: string;
     stopIconSizeClass: string;
@@ -57,6 +58,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
         isVSCode,
         canAbort,
         isSubmitting,
+        showAbortHint,
         footerIconButtonClass,
         iconSizeClass,
         stopIconSizeClass,
@@ -139,6 +141,12 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                     end slot and the mic shifts one slot left. Instant swap —
                     no shape animation (WKWebView). */}
                 {isSubmitting || canAbort ? (
+                    <div className="relative">
+                    {showAbortHint ? (
+                        <span className="pointer-events-none absolute bottom-full right-0 z-30 mb-1 whitespace-nowrap typography-micro text-muted-foreground">
+                            {t('chat.chatInput.actions.abortConfirmationHint')}
+                        </span>
+                    ) : null}
                     <button
                         type="button"
                         className={cn(
@@ -167,6 +175,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                             ? <Icon name="loader-4" className={cn(stopIconSizeClass, 'animate-spin text-primary')} />
                             : <StopIcon className={cn(stopIconSizeClass)} />}
                     </button>
+                    </div>
                 ) : null}
             </div>
             {/* New-session button: fades/shrinks away when the draft is
