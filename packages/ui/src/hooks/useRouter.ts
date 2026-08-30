@@ -95,6 +95,11 @@ export function useRouter(): void {
           }
         }
 
+        // A newer route may have won while the session lookup was pending.
+        if (generation !== routeGenerationRef.current) {
+          return;
+        }
+
         // 2. Handle settings first because it is a full-screen overlay.
         if (route.settingsPath) {
           setSettingsPage(resolveSettingsSlug(route.settingsPath));
