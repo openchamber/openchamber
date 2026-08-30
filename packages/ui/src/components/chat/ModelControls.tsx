@@ -845,14 +845,20 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
 
+        const previousMessageStillPresent = !previousRestore
+            || previousRestore.messageId === latestLoadedUserChoice.id
+            || currentSessionMessagesFromSync.some((message) => message.id === previousRestore.messageId);
+
         // Manual session override wins over initial history and late updates to
-        // the same message. A new real message is authoritative for a
-        // server-driven agent transition.
+        // the same message. A new real message is authoritative only while the
+        // previous message remains present, so removal cannot expose older
+        // history and roll back the selection.
         const savedSessionModel = getSessionModelSelection(currentSessionId);
         if (shouldPreserveManualModelOverride({
             selectionSource: useConfigStore.getState().selectionSource,
             savedSessionModel,
             previousMessageId: previousRestore?.messageId,
+            previousMessageStillPresent,
             candidate: latestLoadedUserChoice,
         })) {
             if (savedSessionModel) {
@@ -910,6 +916,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         contextHydrated,
         providers,
         hasRenderableCurrentSessionSnapshot,
+        currentSessionMessagesFromSync,
         latestLoadedUserChoice,
         setAgent,
         applyModelSelectionWithVariant,

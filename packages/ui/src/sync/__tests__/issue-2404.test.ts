@@ -118,6 +118,7 @@ describe('issue #2404 model override persistence across delegated subtask', () =
       selectionSource,
       savedSessionModel: saved,
       previousMessageId: latestChoice?.id,
+      previousMessageStillPresent: true,
       candidate: {
         id: latestChoice?.id ?? '',
         providerID: agentDefault.providerID,
@@ -196,6 +197,7 @@ describe('issue #2404 model override persistence across delegated subtask', () =
       selectionSource: 'auto',
       savedSessionModel: sessionModelSelections.get(sessionId),
       previousMessageId: latestChoice?.id,
+      previousMessageStillPresent: true,
       candidate: latestChoice,
     })).toBe(false)
     expect(currentModelId).toBe(agentDefault.modelID)

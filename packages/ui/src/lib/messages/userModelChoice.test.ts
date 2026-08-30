@@ -106,6 +106,7 @@ describe('shouldPreserveManualModelOverride', () => {
       selectionSource: 'manual',
       savedSessionModel: { providerId: 'provider', modelId: 'model-b' },
       previousMessageId: 'u1',
+      previousMessageStillPresent: true,
       candidate: { id: 'u1', providerID: 'provider', modelID: 'model-a' },
     })).toBe(true)
   })
@@ -128,8 +129,28 @@ describe('shouldPreserveManualModelOverride', () => {
       selectionSource: 'manual',
       savedSessionModel: { providerId: 'provider', modelId: 'model-plan' },
       previousMessageId: 'u-plan',
+      previousMessageStillPresent: true,
       candidate: latestChoice,
     })).toBe(false)
+  })
+
+  test('preserves manual override when removal exposes an older real user message', () => {
+    const planPrompt = userMessage('u-plan', { providerID: 'provider', modelID: 'model-plan' }, 'plan')
+    const buildPrompt = userMessage('u-build', { providerID: 'provider', modelID: 'model-build' }, 'build')
+    const partsById = new Map([
+      ['u-plan', [textPart('p-plan', 'Create a plan')]],
+      ['u-build', [textPart('p-build', 'Execute the approved plan')]],
+    ])
+    const latestAfterRemoval = findLatestUserModelChoice([planPrompt], (id) => partsById.get(id))
+
+    expect(latestAfterRemoval?.id).toBe('u-plan')
+    expect(shouldPreserveManualModelOverride({
+      selectionSource: 'manual',
+      savedSessionModel: { providerId: 'provider', modelId: 'model-build' },
+      previousMessageId: buildPrompt.id,
+      previousMessageStillPresent: false,
+      candidate: latestAfterRemoval,
+    })).toBe(true)
   })
 
   test('preserves manual override when no previous message has been observed', () => {
@@ -137,6 +158,7 @@ describe('shouldPreserveManualModelOverride', () => {
       selectionSource: 'manual',
       savedSessionModel: { providerId: 'provider', modelId: 'model-b' },
       previousMessageId: undefined,
+      previousMessageStillPresent: false,
       candidate: { id: 'u1', providerID: 'provider', modelID: 'model-a' },
     })).toBe(true)
   })
@@ -146,6 +168,7 @@ describe('shouldPreserveManualModelOverride', () => {
       selectionSource: 'manual',
       savedSessionModel: { providerId: 'provider', modelId: 'model-b' },
       previousMessageId: 'u1',
+      previousMessageStillPresent: true,
       candidate: { id: 'u1', providerID: 'provider', modelID: 'model-b' },
     })).toBe(false)
   })
@@ -155,6 +178,7 @@ describe('shouldPreserveManualModelOverride', () => {
       selectionSource: 'auto',
       savedSessionModel: { providerId: 'provider', modelId: 'model-b' },
       previousMessageId: 'u1',
+      previousMessageStillPresent: true,
       candidate: { id: 'u1', providerID: 'provider', modelID: 'model-a' },
     })).toBe(false)
   })
@@ -164,6 +188,7 @@ describe('shouldPreserveManualModelOverride', () => {
       selectionSource: 'manual',
       savedSessionModel: { providerId: 'provider', modelId: 'model-b' },
       previousMessageId: 'u1',
+      previousMessageStillPresent: true,
       candidate: { id: 'u1', providerID: undefined, modelID: undefined },
     })).toBe(true)
   })
