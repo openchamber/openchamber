@@ -2869,6 +2869,8 @@ export const dict: Record<I18nKey, string> = {
   'header.actions.newMiniChatAria': '새 Mini Chat 창 열기',
   'header.actions.openSessionMiniChat': 'Mini Chat에서 세션 열기',
   'header.actions.openSessionMiniChatAria': '현재 세션을 Mini Chat에서 열기',
+  'header.actions.openTimelineSearch': '메시지 검색',
+  'header.actions.openTimelineSearchAria': '메시지 검색 열기',
   'header.windowControls.groupAria': '창 컨트롤',
   'header.windowControls.minimize': '창 최소화',
   'header.windowControls.maximize': '창 최대화',

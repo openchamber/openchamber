@@ -2835,6 +2835,8 @@ export const dict: Record<I18nKey, string> = {
   "header.actions.newMiniChatAria": "Відкрити нове вікно Mini Chat",
   "header.actions.openSessionMiniChat": "Відкрити сесію в Mini Chat",
   "header.actions.openSessionMiniChatAria": "Відкрити поточну сесію в Mini Chat",
+  "header.actions.openTimelineSearch": "Шукати повідомлення",
+  "header.actions.openTimelineSearchAria": "Відкрити пошук повідомлень",
   "header.windowControls.groupAria": "Елементи керування вікном",
   "header.windowControls.minimize": "Згорнути вікно",
   "header.windowControls.maximize": "Розгорнути вікно",

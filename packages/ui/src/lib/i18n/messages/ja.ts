@@ -2868,6 +2868,8 @@ export const dict: Record<I18nKey, string> = {
   'header.actions.newMiniChatAria': '新しいMini Chatウィンドウを開く',
   'header.actions.openSessionMiniChat': 'Mini Chatでセッションを開く',
   'header.actions.openSessionMiniChatAria': '現在のセッションをMini Chatで開く',
+  'header.actions.openTimelineSearch': 'メッセージを検索',
+  'header.actions.openTimelineSearchAria': 'メッセージ検索を開く',
   'header.windowControls.groupAria': 'ウィンドウコントロール',
   'header.windowControls.minimize': 'ウィンドウを最小化',
   'header.windowControls.maximize': 'ウィンドウを最大化',

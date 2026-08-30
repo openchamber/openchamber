@@ -2568,6 +2568,8 @@ export const dict = {
   'header.actions.newMiniChatAria': 'Ouvrir une nouvelle fenêtre de mini-chat',
   'header.actions.openSessionMiniChat': 'Session ouverte dans le mini-chat',
   'header.actions.openSessionMiniChatAria': 'Ouvrir la session en cours dans Mini Chat',
+  'header.actions.openTimelineSearch': 'Rechercher des messages',
+  'header.actions.openTimelineSearchAria': 'Ouvrir la recherche de messages',
   'header.windowControls.groupAria': 'Champs de fenêtre',
   'header.windowControls.minimize': 'Réduire la fenêtre',
   'header.windowControls.maximize': 'Agrandir la fenêtre',

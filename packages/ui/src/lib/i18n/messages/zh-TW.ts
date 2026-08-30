@@ -2836,6 +2836,8 @@ export const dict: Record<I18nKey, string> = {
   'header.actions.newMiniChatAria': '開啟新的 Mini Chat 視窗',
   'header.actions.openSessionMiniChat': '在 Mini Chat 中開啟會話',
   'header.actions.openSessionMiniChatAria': '在 Mini Chat 中開啟目前會話',
+  'header.actions.openTimelineSearch': '搜尋訊息',
+  'header.actions.openTimelineSearchAria': '開啟訊息搜尋',
   'header.windowControls.groupAria': '視窗控制項',
   'header.windowControls.minimize': '最小化視窗',
   'header.windowControls.maximize': '最大化視窗',

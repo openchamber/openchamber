@@ -2835,6 +2835,8 @@ export const dict: Record<I18nKey, string> = {
   "header.actions.newMiniChatAria": "Abrir uma nova janela Mini Chat",
   "header.actions.openSessionMiniChat": "Abrir sessão no Mini Chat",
   "header.actions.openSessionMiniChatAria": "Abrir a sessão atual no Mini Chat",
+  "header.actions.openTimelineSearch": "Buscar mensagens",
+  "header.actions.openTimelineSearchAria": "Abrir busca de mensagens",
   "header.windowControls.groupAria": "Controles da janela",
   "header.windowControls.minimize": "Minimizar janela",
   "header.windowControls.maximize": "Maximizar janela",

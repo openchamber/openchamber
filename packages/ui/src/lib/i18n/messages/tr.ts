@@ -2792,6 +2792,8 @@ export const dict = {
   'header.actions.newMiniChatAria': 'Yeni bir Mini Sohbet penceresi aç',
   'header.actions.openSessionMiniChat': 'Session\'ı Mini Sohbet\'te Aç',
   'header.actions.openSessionMiniChatAria': 'Mevcut session\'ı Mini Sohbet\'te aç',
+  'header.actions.openTimelineSearch': 'Mesajları ara',
+  'header.actions.openTimelineSearchAria': 'Mesaj aramayı aç',
   'header.windowControls.groupAria': 'Pencere denetimleri',
   'header.windowControls.minimize': 'Pencereyi küçült',
   'header.windowControls.maximize': 'Pencereyi büyüt',
