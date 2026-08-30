@@ -73,3 +73,6 @@ workspaces/
 .maintenance-clone
 test-results/
 artifacts/
+
+# open-mem local memory db
+.open-mem/
