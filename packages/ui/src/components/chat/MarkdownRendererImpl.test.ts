@@ -640,6 +640,7 @@ describe('MarkdownRenderer warm settled path', () => {
 
             const root = rendererRoot(beginRendererRender());
             runRendererLayoutEffects();
+            runRendererPassiveEffects();
             const block = findBlock(root, 'full:context');
             const firstDecorationId = block?.getAttribute('data-md-decoration-id');
             expect(firstDecorationId).not.toBeNull();
