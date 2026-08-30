@@ -49,6 +49,33 @@ describe('shortcut schema', () => {
     ))).toBe(true);
   });
 
+  test('declares configurable chat input send and newline bindings', () => {
+    const sendMessage = getShortcutAction('send_message');
+    expect(sendMessage?.category).toBe('session');
+    expect(sendMessage?.defaultBinding).toBe('enter');
+    expect(sendMessage?.customizable).toBe(true);
+    const insertNewline = getShortcutAction('insert_newline');
+    expect(insertNewline?.category).toBe('session');
+    expect(insertNewline?.defaultBinding).toBe('shift+enter');
+    expect(insertNewline?.customizable).toBe(true);
+    // The pair must not overlap: one Enter presses sends, the other newline.
+    expect(getShortcutBindingConflicts('send_message', 'enter')).toEqual([]);
+    expect(getShortcutBindingConflicts('insert_newline', 'shift+enter')).toEqual([]);
+  });
+
+  test('chat input bindings resolve overrides and block rebinds onto each other', () => {
+    expect(getEffectiveShortcutCombo('send_message', { send_message: 'mod+enter' })).toBe('mod+enter');
+    expect(getEffectiveShortcutCombo('insert_newline', { insert_newline: 'enter' })).toBe('enter');
+    expect(getEffectiveShortcutCombo('send_message')).toBe('enter');
+    expect(getEffectiveShortcutCombo('insert_newline')).toBe('shift+enter');
+    // Rebinding another action onto Enter collides with the send binding.
+    expect(
+      getShortcutBindingConflicts('new_chat', 'enter').some(
+        (conflict) => conflict.action.id === 'send_message' && conflict.kind === 'exact',
+      ),
+    ).toBe(true);
+  });
+
   test('keeps the mod+k leader for open/go actions', () => {
     expect(getShortcutAction('open_draft_project_picker')?.defaultBinding).toBe('mod+k p');
     expect(getShortcutAction('open_draft_worktree_picker')?.defaultBinding).toBe('mod+k g');

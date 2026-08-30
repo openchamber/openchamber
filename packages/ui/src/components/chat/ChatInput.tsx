@@ -88,7 +88,7 @@ import { sessionEvents } from '@/lib/sessionEvents';
 import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
 import { wrapSystemReminder } from '@/lib/systemReminder';
 import { getSyncMessages } from '@/sync/sync-refs';
-import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
+import { eventMatchesShortcut, getEffectiveShortcutCombo, keyToShortcutToken, normalizeCombo, parseShortcut, resolveShortcutEventKey } from '@/lib/shortcuts';
 import {
     assignImageAttachmentFilenames,
     buildAttachmentCitationText,
@@ -440,6 +440,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const cycleAgentShortcut = React.useMemo(() => (
         getEffectiveShortcutCombo('cycle_agent', cycleAgentShortcutOverride ? { cycle_agent: cycleAgentShortcutOverride } : undefined)
     ), [cycleAgentShortcutOverride]);
+    const sendMessageShortcutOverride = useUIStore((state) => state.shortcutOverrides.send_message);
+    const sendMessageShortcut = React.useMemo(() => (
+        getEffectiveShortcutCombo('send_message', sendMessageShortcutOverride ? { send_message: sendMessageShortcutOverride } : undefined)
+    ), [sendMessageShortcutOverride]);
+    const insertNewlineShortcutOverride = useUIStore((state) => state.shortcutOverrides.insert_newline);
+    const insertNewlineShortcut = React.useMemo(() => (
+        getEffectiveShortcutCombo('insert_newline', insertNewlineShortcutOverride ? { insert_newline: insertNewlineShortcutOverride } : undefined)
+    ), [insertNewlineShortcutOverride]);
     const { currentTheme } = useThemeSystem();
     const chatSearchDirectory = useChatSearchDirectory();
     const isGitRepo = useIsGitRepo(currentDirectory);
@@ -1720,12 +1728,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
 
-        // Handle Enter/Ctrl+Enter based on selected follow-up behavior. On
-        // mobile, and in desktop focus mode, plain Enter writes a newline and
-        // only Cmd/Ctrl+Enter sends: both are surfaces for composing long
+        // Handle send vs newline from the configurable chat input bindings.
+        // Defaults preserve the classic behavior: Enter sends, Shift+Enter
+        // writes a newline. On mobile, and in desktop focus mode, a bare send
+        // binding (plain Enter) writes a newline instead and only the primary
+        // modifier variant (Ctrl/Cmd+Enter) sends — both surfaces compose long
         // prompts, where an accidental send costs more than an extra keypress.
         const requiresModifierToSend = isMobile || isDesktopExpanded;
-        if (e.key === 'Enter' && !e.shiftKey && (!requiresModifierToSend || e.ctrlKey || e.metaKey)) {
+        const sendChord = parseShortcut(sendMessageShortcut)?.chords[0];
+        const sendIsBare = sendChord !== undefined && sendChord.modifiers.size === 0;
+        const isSendBinding = eventMatchesShortcut(e, sendMessageShortcut)
+            && (!sendIsBare || !requiresModifierToSend);
+        const isModifierSend = sendIsBare && (e.ctrlKey || e.metaKey)
+            && keyToShortcutToken(resolveShortcutEventKey(e)) === keyToShortcutToken(sendChord?.key ?? '');
+        const isNewlineBinding = eventMatchesShortcut(e, insertNewlineShortcut);
+
+        if ((isSendBinding || isModifierSend) && !isNewlineBinding) {
             e.preventDefault();
 
             const isCtrlEnter = e.ctrlKey || e.metaKey;
@@ -1749,6 +1767,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 }
             }
         }
+        // Any other Enter — including the insert-newline binding — falls
+        // through to the editor, which inserts the newline.
     };
 
     // Focus mode places the open picker at the caret; elsewhere each picker

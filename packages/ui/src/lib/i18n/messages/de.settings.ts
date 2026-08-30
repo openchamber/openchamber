@@ -1076,6 +1076,8 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_go_to_line.label': 'Gehe zu Zeile (Datei-Editor)',
   'settings.openchamber.keyboardShortcuts.action.open_command_palette.label': 'Befehlspalette öffnen',
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': 'Eingabe fokussieren',
+  'settings.openchamber.keyboardShortcuts.action.send_message.label': 'Nachricht senden',
+  'settings.openchamber.keyboardShortcuts.action.insert_newline.label': 'Neue Zeile einfügen',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': 'Einstellungen öffnen',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': 'Terminal-Dock umschalten',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': 'Terminal erweitert umschalten',

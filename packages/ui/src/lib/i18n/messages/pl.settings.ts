@@ -824,6 +824,8 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.expand_input.label': 'Rozwiń pole wprowadzania',
   'settings.openchamber.keyboardShortcuts.action.toggle_prompt_navigator.label': 'Przełącz nawigator promptów',
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': 'Skup pole wprowadzania',
+  'settings.openchamber.keyboardShortcuts.action.send_message.label': 'Wyślij wiadomość',
+  'settings.openchamber.keyboardShortcuts.action.insert_newline.label': 'Wstaw nową linię',
   'settings.openchamber.keyboardShortcuts.action.new_chat.label': 'Nowa sesja',
   'settings.openchamber.keyboardShortcuts.action.switch_session_previous.label': 'Poprzednia sesja',
   'settings.openchamber.keyboardShortcuts.action.switch_session_next.label': 'Następna sesja',
