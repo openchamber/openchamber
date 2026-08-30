@@ -216,7 +216,8 @@ const fakeJsx = (_type: string, props: FakeJsxProps | null, ...children: FakeEle
     // evaluated; this branch only supplies its fake element factory.
     const fakeDocument = activeFakeDocument;
     if (!fakeDocument) throw new Error('Renderer fake document is not installed');
-    const element = ref?.current ?? makeFakeElement(fakeDocument);
+    const existingElement = ref?.current;
+    const element = existingElement ?? makeFakeElement(fakeDocument);
     if (props) {
         if (ref) ref.current = element;
         if (props.className) element.setAttribute('class', props.className);
@@ -224,7 +225,25 @@ const fakeJsx = (_type: string, props: FakeJsxProps | null, ...children: FakeEle
     }
     const jsxChildren = props?.children;
     const allChildren = jsxChildren === undefined ? children : Array.isArray(jsxChildren) ? jsxChildren : [jsxChildren];
-    element.replaceChildren(...allChildren.filter((child): child is FakeElement => Boolean(child)));
+    const nextChildren = allChildren.filter((child): child is FakeElement => Boolean(child));
+    const previousChildren = existingElement?.children ?? [];
+    const reconciledChildren = nextChildren.map((child, index) => {
+        const previousChild = previousChildren[index];
+        if (
+            !previousChild
+            || previousChild.getAttribute('data-markdown-content') !== ''
+            || child.getAttribute('data-markdown-content') !== ''
+        ) {
+            return child;
+        }
+
+        // React reuses this host on a rerender. Its descendants are managed by
+        // the renderer's effects, so reconciliation must not clear them just
+        // because JSX produced a fresh description of the empty host.
+        for (const [name, value] of child.attributes) previousChild.setAttribute(name, value);
+        return previousChild;
+    });
+    element.replaceChildren(...reconciledChildren);
     return element;
 };
 
