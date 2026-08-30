@@ -313,6 +313,26 @@ interface ModelControlsProps {
     onMobilePanelChange?: (panel: MobileControlsPanel) => void;
 }
 
+type LoadedUserChoiceRestore = {
+    messageId: string;
+    restoreKey: string;
+};
+
+const MAX_LOADED_USER_CHOICE_RESTORES = 150;
+
+const rememberLoadedUserChoiceRestore = (
+    restores: Map<string, LoadedUserChoiceRestore>,
+    sessionId: string,
+    restore: LoadedUserChoiceRestore,
+) => {
+    restores.delete(sessionId);
+    restores.set(sessionId, restore);
+    if (restores.size <= MAX_LOADED_USER_CHOICE_RESTORES) return;
+
+    const oldestSessionId = restores.keys().next().value;
+    if (oldestSessionId) restores.delete(oldestSessionId);
+};
+
 export const ModelControls: React.FC<ModelControlsProps> = ({
     className,
     mobilePanel,
@@ -633,7 +653,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     ];
 
     const prevAgentNameRef = React.useRef<string | undefined>(undefined);
-    const latestLoadedUserChoiceRestoreRef = React.useRef<string | null>(null);
+    const loadedUserChoiceRestoreBySessionRef = React.useRef(new Map<string, LoadedUserChoiceRestore>());
 
     const currentSessionDirectory = currentSessionId ? getDirectoryForSession(currentSessionId) : undefined;
     const hasRenderableCurrentSessionSnapshot = useSessionRenderable(
@@ -804,7 +824,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     React.useEffect(() => {
         if (!currentSessionId) {
-            latestLoadedUserChoiceRestoreRef.current = null;
             return;
         }
 
@@ -820,16 +839,20 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             latestLoadedUserChoice.modelID,
             latestLoadedUserChoice.variant ?? '',
         ].join('|');
+        const previousRestore = loadedUserChoiceRestoreBySessionRef.current.get(currentSessionId);
 
-        if (latestLoadedUserChoiceRestoreRef.current === restoreKey) {
+        if (previousRestore?.restoreKey === restoreKey) {
             return;
         }
 
-        // Manual session override wins over historical / synthetic message metadata.
+        // Manual session override wins over initial history and late updates to
+        // the same message. A new real message is authoritative for a
+        // server-driven agent transition.
         const savedSessionModel = getSessionModelSelection(currentSessionId);
         if (shouldPreserveManualModelOverride({
             selectionSource: useConfigStore.getState().selectionSource,
             savedSessionModel,
+            previousMessageId: previousRestore?.messageId,
             candidate: latestLoadedUserChoice,
         })) {
             if (savedSessionModel) {
@@ -840,7 +863,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     currentAgentName || undefined,
                 );
             }
-            latestLoadedUserChoiceRestoreRef.current = restoreKey;
+            rememberLoadedUserChoiceRestore(loadedUserChoiceRestoreBySessionRef.current, currentSessionId, {
+                messageId: latestLoadedUserChoice.id,
+                restoreKey,
+            });
             return;
         }
 
@@ -873,7 +899,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             );
         }
         saveSessionModelSelection(currentSessionId, latestLoadedUserChoice.providerID, latestLoadedUserChoice.modelID);
-        latestLoadedUserChoiceRestoreRef.current = restoreKey;
+        rememberLoadedUserChoiceRestore(loadedUserChoiceRestoreBySessionRef.current, currentSessionId, {
+            messageId: latestLoadedUserChoice.id,
+            restoreKey,
+        });
 
     }, [
         currentSessionId,
@@ -894,7 +923,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     React.useEffect(() => {
         if (!currentSessionId) {
-            latestLoadedUserChoiceRestoreRef.current = null;
             return;
         }
 

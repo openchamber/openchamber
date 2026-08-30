@@ -101,11 +101,43 @@ describe('findLatestUserModelChoice', () => {
 })
 
 describe('shouldPreserveManualModelOverride', () => {
-  test('preserves manual override when it differs from the candidate message model', () => {
+  test('preserves manual override when a late update to the same message differs', () => {
     expect(shouldPreserveManualModelOverride({
       selectionSource: 'manual',
       savedSessionModel: { providerId: 'provider', modelId: 'model-b' },
-      candidate: { providerID: 'provider', modelID: 'model-a' },
+      previousMessageId: 'u1',
+      candidate: { id: 'u1', providerID: 'provider', modelID: 'model-a' },
+    })).toBe(true)
+  })
+
+  test('[issue-3236] lets a new real user prompt replace the manual agent model', () => {
+    const messages = [
+      userMessage('u-plan', { providerID: 'provider', modelID: 'model-plan' }, 'plan'),
+      userMessage('u-build', { providerID: 'provider', modelID: 'model-build' }, 'build'),
+    ]
+    const partsById = new Map([
+      ['u-plan', [textPart('p-plan', 'Create a plan')]],
+      ['u-build', [textPart('p-build', 'Execute the approved plan')]],
+    ])
+
+    const latestChoice = findLatestUserModelChoice(messages, (id) => partsById.get(id))
+
+    expect(latestChoice?.id).toBe('u-build')
+    expect(latestChoice?.agent).toBe('build')
+    expect(shouldPreserveManualModelOverride({
+      selectionSource: 'manual',
+      savedSessionModel: { providerId: 'provider', modelId: 'model-plan' },
+      previousMessageId: 'u-plan',
+      candidate: latestChoice,
+    })).toBe(false)
+  })
+
+  test('preserves manual override when no previous message has been observed', () => {
+    expect(shouldPreserveManualModelOverride({
+      selectionSource: 'manual',
+      savedSessionModel: { providerId: 'provider', modelId: 'model-b' },
+      previousMessageId: undefined,
+      candidate: { id: 'u1', providerID: 'provider', modelID: 'model-a' },
     })).toBe(true)
   })
 
@@ -113,7 +145,8 @@ describe('shouldPreserveManualModelOverride', () => {
     expect(shouldPreserveManualModelOverride({
       selectionSource: 'manual',
       savedSessionModel: { providerId: 'provider', modelId: 'model-b' },
-      candidate: { providerID: 'provider', modelID: 'model-b' },
+      previousMessageId: 'u1',
+      candidate: { id: 'u1', providerID: 'provider', modelID: 'model-b' },
     })).toBe(false)
   })
 
@@ -121,7 +154,8 @@ describe('shouldPreserveManualModelOverride', () => {
     expect(shouldPreserveManualModelOverride({
       selectionSource: 'auto',
       savedSessionModel: { providerId: 'provider', modelId: 'model-b' },
-      candidate: { providerID: 'provider', modelID: 'model-a' },
+      previousMessageId: 'u1',
+      candidate: { id: 'u1', providerID: 'provider', modelID: 'model-a' },
     })).toBe(false)
   })
 
@@ -129,7 +163,8 @@ describe('shouldPreserveManualModelOverride', () => {
     expect(shouldPreserveManualModelOverride({
       selectionSource: 'manual',
       savedSessionModel: { providerId: 'provider', modelId: 'model-b' },
-      candidate: { providerID: undefined, modelID: undefined },
+      previousMessageId: 'u1',
+      candidate: { id: 'u1', providerID: undefined, modelID: undefined },
     })).toBe(true)
   })
 })
