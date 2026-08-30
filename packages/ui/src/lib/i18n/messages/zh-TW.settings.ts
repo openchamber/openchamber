@@ -1,3 +1,4 @@
+import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 用量追蹤',
@@ -1745,7 +1746,10 @@ export const settingsDict = {
   'settings.voice.page.provider.server': '伺服器',
   'settings.voice.page.provider.local': '本機',
   'settings.voice.page.tooltip.sttLocal': '在 OpenChamber 伺服器上本機轉寫。模型會自動下載，無需 API 金鑰。',
-  'settings.voice.page.tooltip.localTts': '在 OpenChamber 伺服器上本機合成語音（Kokoro，英文）。模型會自動下載，無需 API 金鑰。',
+  'settings.voice.page.tooltip.localTts': '在 OpenChamber 伺服器上本機合成語音（英文使用 Kokoro；其他語言的模型在首次使用時下載）。不需要 API 金鑰。',
+  'settings.voice.page.field.followTextLanguage': '依文字語言選擇語音',
+  'settings.voice.page.field.followTextLanguageAria': '依文字語言選擇語音',
+  'settings.voice.page.field.followTextLanguageInfo': '當回覆使用其他語言時，會使用該語言的語音：相符的 macOS 語音，或首次使用時下載的本機模型。',
   'settings.voice.page.stt.model.parakeetV2': 'Parakeet v2（英文）',
   'settings.voice.page.stt.model.parakeetV3': 'Parakeet v3（25 種歐洲語言）',
   'settings.voice.page.stt.model.whisperBase': 'Whisper base（多語言）',
@@ -2227,5 +2231,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  ...linearIntegrationI18n['zh-TW'],
   ...thirdPartyIntegrationI18n['zh-TW'],
 } as const;

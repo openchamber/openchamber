@@ -26,6 +26,8 @@ type ComposerAttachmentControlsProps = {
     handlePickLocalFiles: () => void;
     openIssuePicker: () => void;
     openPrPicker: () => void;
+    showLinearPicker?: boolean;
+    openLinearPicker?: () => void;
     onOpenSettings?: () => void;
     onMenuOpenChange?: (open: boolean) => void;
     /** Mobile: open the attachment bottom sheet instead of the dropdown menu. */
@@ -41,6 +43,8 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
         handlePickLocalFiles,
         openIssuePicker,
         openPrPicker,
+        showLinearPicker,
+        openLinearPicker,
         onOpenSettings,
     } = props;
 
@@ -114,6 +118,16 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                                 <Icon name="git-pull-request"/>
                                 {t('chat.chatInput.actions.linkGithubPr')}
                             </DropdownMenuItem>
+                            {showLinearPicker && openLinearPicker ? (
+                                <DropdownMenuItem
+                                    onSelect={() => {
+                                        requestAnimationFrame(openLinearPicker);
+                                    }}
+                                >
+                                    <Icon name="linear"/>
+                                    {t('chat.chatInput.actions.linkLinearIssue')}
+                                </DropdownMenuItem>
+                            ) : null}
                         </DropdownMenuContent>
                     </DropdownMenu>
                 )}
@@ -136,6 +150,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
     prev.isVSCode === next.isVSCode
     && prev.footerIconButtonClass === next.footerIconButtonClass
     && prev.iconSizeClass === next.iconSizeClass
+    && prev.showLinearPicker === next.showLinearPicker
     && prev.onOpenSettings === next.onOpenSettings
     && prev.onMenuOpenChange === next.onMenuOpenChange
     && prev.onOpenMobileSheet === next.onOpenMobileSheet

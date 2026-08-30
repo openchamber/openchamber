@@ -17,7 +17,7 @@ import {
 } from '@/sync/attachment-files';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
-import { buildLinkedIssue } from '@/lib/linkedIssues';
+import { buildLinkedIssue, buildLinkedLinearIssue } from '@/lib/linkedIssues';
 import { useUserMessageHistory } from "@/sync/sync-context";
 import { getInlineCommentDraftKey, useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
@@ -66,6 +66,7 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { GitHubIssuePickerDialog } from '@/components/session/GitHubIssuePickerDialog';
 import { GitHubPrPickerDialog } from '@/components/session/GitHubPrPickerDialog';
+import { LinearIssuePickerDialog } from '@/components/session/LinearIssuePickerDialog';
 import { Icon } from "@/components/icon/Icon";
 import { DraftPresetChips } from './DraftPresetChips';
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
@@ -426,7 +427,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
     const setExpandedInput = useUIStore((state) => state.setExpandedInput);
     const setTimelineDialogOpen = useUIStore((state) => state.setTimelineDialogOpen);
-    const { git: runtimeGit, vscode: vscodeApi } = useRuntimeAPIs();
+    const { git: runtimeGit, vscode: vscodeApi, linear: runtimeLinear } = useRuntimeAPIs();
     const cycleAgentShortcutOverride = useUIStore((state) => state.shortcutOverrides.cycle_agent);
     const cycleAgentShortcut = React.useMemo(() => (
         getEffectiveShortcutCombo('cycle_agent', cycleAgentShortcutOverride ? { cycle_agent: cycleAgentShortcutOverride } : undefined)
@@ -722,6 +723,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // Issue linking state
     const [issuePickerOpen, setIssuePickerOpen] = React.useState(false);
     const [prPickerOpen, setPrPickerOpen] = React.useState(false);
+    const [linearPickerOpen, setLinearPickerOpen] = React.useState(false);
     const [linkedIssue, setLinkedIssue] = React.useState<{ 
         number: number; 
         title: string; 
@@ -737,6 +739,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         base: string;
         includeDiff: boolean;
         instructionsText: string;
+        contextText: string;
+        author?: { login: string; avatarUrl?: string };
+    } | null>(null);
+    const [linkedLinearIssue, setLinkedLinearIssue] = React.useState<{
+        identifier: string;
+        title: string;
+        url: string;
         contextText: string;
         author?: { login: string; avatarUrl?: string };
     } | null>(null);
@@ -972,6 +981,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         setPrPickerOpen(true);
     }, []);
 
+    const openLinearPicker = React.useCallback(() => {
+        setLinearPickerOpen(true);
+    }, []);
+
     const getSubmitErrorMessage = (error: unknown, fallback: string) => {
         const message = error instanceof Error ? error.message : '';
         return message.toLowerCase().includes('runtime changed')
@@ -1157,6 +1170,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 : null,
             linkedPr: linkedPr
                 ? { number: linkedPr.number, title: linkedPr.title, url: linkedPr.url, instructions: linkedPr.instructionsText, context: linkedPr.contextText }
+                : null,
+            linkedLinearIssue: linkedLinearIssue
+                ? { identifier: linkedLinearIssue.identifier, title: linkedLinearIssue.title, url: linkedLinearIssue.url, contextText: linkedLinearIssue.contextText }
                 : null,
         }, {
             parseAgentMention: (text) => {
@@ -1395,6 +1411,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     true,
                 ).catch(() => undefined);
             }
+            if (linkedLinearIssue && linkTargetSessionId) {
+                void sessionActions.setLinkedIssue(
+                    linkTargetSessionId,
+                    linkTargetDirectory,
+                    buildLinkedLinearIssue({
+                        identifier: linkedLinearIssue.identifier,
+                        title: linkedLinearIssue.title,
+                        url: linkedLinearIssue.url,
+                        author: linkedLinearIssue.author,
+                        linkedAt: Date.now(),
+                    }),
+                    true,
+                ).catch(() => undefined);
+            }
 
             // Clear linked issue after successful message send
             if (linkedIssue) {
@@ -1402,6 +1432,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             }
             if (linkedPr) {
                 setLinkedPr(null);
+            }
+            if (linkedLinearIssue) {
+                setLinkedLinearIssue(null);
             }
         }).catch((error: unknown) => {
             const rawMessage =
@@ -2528,6 +2561,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     const footerGapClass = 'gap-x-1.5 gap-y-0';
     const isVSCode = isVSCodeRuntime();
+    const showLinearPicker = Boolean(runtimeLinear) && !isVSCode;
     // The work-status panel carries the agent's todos and the changed-file
     // count, but only on the desktop/web layout — VS Code and mobile have no
     // panel, so these keep their place above the composer there.
@@ -2608,6 +2642,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             draftPickerOpen: mobileDraftPicker !== null,
             issuePickerOpen,
             prPickerOpen,
+            linearPickerOpen,
             isDragging,
         },
     });
@@ -2778,6 +2813,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onRemove={() => setLinkedPr(null)}
                     />
                 ) : null}
+                {linkedLinearIssue && !isVSCode ? (
+                    <LinkedReferenceRow
+                        numberLabel={linkedLinearIssue.identifier}
+                        title={linkedLinearIssue.title}
+                        url={linkedLinearIssue.url}
+                        author={linkedLinearIssue.author}
+                        openInBrowserLabel={t('chat.chatInput.linked.linearIssue.openInBrowserAria')}
+                        removeLabel={t('chat.chatInput.linked.linearIssue.removeAria')}
+                        onReopenPicker={() => setLinearPickerOpen(true)}
+                        onRemove={() => setLinkedLinearIssue(null)}
+                    />
+                ) : null}
                 <RevertedMessageDock
                     sessionId={currentSessionId}
                     directory={currentSessionDirectoryForSync ?? currentDirectory}
@@ -2843,6 +2890,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onPickLocalFiles={handlePickLocalFiles}
                         onOpenIssuePicker={openIssuePicker}
                         onOpenPrPicker={openPrPicker}
+                        showLinearPicker={showLinearPicker}
+                        onOpenLinearPicker={openLinearPicker}
                         onOpenAttachSheet={openMobileAttachSheet}
                         onStartDictation={toggleDictation}
                         onAbort={handleAbort}
@@ -3023,6 +3072,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onPickLocalFiles={handlePickLocalFiles}
                         onOpenIssuePicker={openIssuePicker}
                         onOpenPrPicker={openPrPicker}
+                        showLinearPicker={showLinearPicker}
+                        onOpenLinearPicker={openLinearPicker}
                         onOpenAttachSheet={openMobileAttachSheet}
                         onToggleExpandedInput={handleToggleExpandedInput}
                         onTogglePermissionAutoAccept={handlePermissionAutoAcceptToggle}
@@ -3087,6 +3138,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             onSelect={(issue) => {
                 setLinkedIssue(issue);
                 setLinkedPr(null);
+                setLinkedLinearIssue(null);
             }}
         />
         <GitHubPrPickerDialog
@@ -3095,6 +3147,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             onSelect={(pr) => {
                 setLinkedPr(pr);
                 setLinkedIssue(null);
+                setLinkedLinearIssue(null);
+            }}
+        />
+        <LinearIssuePickerDialog
+            open={linearPickerOpen}
+            onOpenChange={setLinearPickerOpen}
+            mode="select"
+            onSelect={(issue) => {
+                setLinkedLinearIssue(issue);
+                setLinkedIssue(null);
+                setLinkedPr(null);
             }}
         />
         <ReviewFlowDialog
@@ -3178,6 +3241,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         <Icon name="git-pull-request" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
                         {t('chat.chatInput.actions.linkGithubPr')}
                     </button>
+                    {showLinearPicker ? (
+                        <button
+                            type="button"
+                            className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                            onClick={() => {
+                                mobileShell.skipNextOverlayCloseRestore();
+                                setMobileAttachMenuOpen(false);
+                                requestAnimationFrame(openLinearPicker);
+                            }}
+                        >
+                            <Icon name="linear" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                            {t('chat.chatInput.actions.linkLinearIssue')}
+                        </button>
+                    ) : null}
                 </div>
             </MobileOverlayPanel>
         ) : null}

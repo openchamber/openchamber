@@ -35,6 +35,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitStatus } from '@/stores/useGitStore';
+import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { ContextRailSurfacesDialog } from './ContextRailSurfacesDialog';
 
@@ -165,8 +166,11 @@ export const ContextPanelRail: React.FC = () => {
   const contextRailHiddenSurfaces = useUIStore((state) => state.contextRailHiddenSurfaces);
   const setContextRailOrder = useUIStore((state) => state.setContextRailOrder);
   const openContextSurface = useUIStore((state) => state.openContextSurface);
+  const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
+  const linearAuthChecked = useLinearAuthStore((state) => state.hasChecked);
+  const linearConnected = useLinearAuthStore((state) => state.status?.connected === true);
   const { screenWidth } = useDeviceInfo();
   const gitStatus = useGitStatus(directoryKey || null);
 
@@ -263,8 +267,16 @@ export const ContextPanelRail: React.FC = () => {
       isVSCode: isVSCodeRuntime(),
       screenWidth,
       tabs,
+      linearConnected,
     });
-  }, [contextRailHiddenSurfaces, contextRailOrder, planModeEnabled, screenWidth, tabs]);
+  }, [contextRailHiddenSurfaces, contextRailOrder, linearConnected, planModeEnabled, screenWidth, tabs]);
+
+  React.useEffect(() => {
+    if (!directoryKey || !linearAuthChecked || linearConnected || activeMode !== 'linear') {
+      return;
+    }
+    closeContextPanel(directoryKey);
+  }, [activeMode, closeContextPanel, directoryKey, linearAuthChecked, linearConnected]);
 
   const [isSurfacesDialogOpen, setIsSurfacesDialogOpen] = React.useState(false);
 

@@ -985,6 +985,38 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
 
   {
+    id: 'integrations.first-party',
+    page: 'integrations',
+    titleKey: 'settings.integrations.firstParty.title',
+    descriptionKey: 'settings.integrations.firstParty.info',
+    keywords: ['built-in', 'first-party', 'native', 'linear'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'integrations.linear',
+    page: 'integrations',
+    titleKey: 'settings.integrations.linear.title',
+    descriptionKey: 'settings.integrations.linear.description',
+    keywords: ['linear', 'issues', 'oauth', 'connect', 'workspace'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'integrations.linear.add-workspace',
+    page: 'integrations',
+    titleKey: 'settings.integrations.linear.actions.addWorkspace',
+    descriptionKey: 'settings.integrations.linear.description',
+    keywords: ['linear', 'workspace', 'add', 'connect', 'oauth'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'integrations.linear.mapping',
+    page: 'integrations',
+    titleKey: 'settings.integrations.linear.mapping.defaultProject',
+    descriptionKey: 'settings.integrations.linear.mapping.defaultProject.info',
+    keywords: ['linear', 'project', 'team', 'map', 'workspace', 'directory'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'integrations.third-party',
     page: 'integrations',
     titleKey: 'settings.integrations.thirdParty.title',

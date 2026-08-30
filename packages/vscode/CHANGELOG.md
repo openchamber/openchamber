@@ -1,6 +1,8 @@
 ## [Unreleased]
 
 - Switching sessions is faster: the clicked session highlights at once, and its conversation appears as one finished view — text, tool cards, and the recap together — instead of arriving in pieces with a moment of unstyled code blocks.
+- Chat: a turn that OpenCode stopped no longer ends with nothing on screen — what OpenCode reported shows under the last message, and a message an idle session has left unanswered is named as such. The status report (Ctrl/Cmd+Shift+L) now lists the last session errors and rejected sends.
+- Chat: a session opened from the sidebar lands at its end and stays there, instead of landing above the bottom or snapping up a moment later.
 
 ## [1.21.1] - 2026-08-29
 

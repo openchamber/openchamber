@@ -1,7 +1,11 @@
 import { settingsDict } from './fr.settings';
+import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
+import { linearPanelI18n } from './linear-panel.i18n';
 
 export const dict = {
   ...settingsDict,
+  ...linearIssuePickerI18n.fr,
+  ...linearPanelI18n.fr,
   'terminalView.actions.attachSelection': 'Joindre la sortie sélectionnée',
   'terminalView.actions.restart': 'Redémarrer le terminal',
   'chat.message.terminalContext': '{terminal}, lignes {start}-{end}',

@@ -4,9 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Linear integration:** connect a Linear workspace in Settings → Integrations, browse its issues in the context rail with status, priority, assignee, and team filters, and start a session or worktree straight from an issue. Sessions started that way post started, completed, and failed comments on the issue, each linking back to the session; chat can also attach an issue to the next send (thanks to @AlexKutas).
+- **Voice: the voice follows the language of the text.** With "Match the voice to the language of the text" (Settings → Voice, on by default) the local provider switches to a model for the reply's language — Kokoro for Chinese/English and Piper models for Ukrainian, German, French, Spanish, Italian, Portuguese, Polish, Russian, Dutch, Czech, Turkish, and Swedish, downloaded on first use — and macOS say switches to an installed voice of that language. The local voice picker lists every installed model's voices.
 - **Chat:** switching sessions is now near-instant. The clicked session highlights at once, and its conversation appears as one finished view — text, tool cards, and the recap together — instead of arriving in pieces with a moment of unstyled code blocks and links. Header session tabs switch without a crossfade, and the tab title no longer jumps when a tab becomes active.
 - Chat: command and skill autocomplete in a Chat (a session that belongs to no project) lists that chat's own commands and skills instead of the project last selected in the sidebar, and file mentions in a new chat draft no longer search the previous project.
 - Files: Ctrl/Cmd+F opens the find bar in the Markdown preview even when nothing inside the preview has focus.
+- Chat: a turn that OpenCode stopped no longer ends with nothing on screen — what OpenCode reported shows under the last message, and a message an idle session has left unanswered is named as such. The status report (Ctrl/Cmd+Shift+L) now lists the last session errors, rejected sends, the managed OpenCode process's last error, and where the log files are.
+- Chat: a session opened from the sidebar lands at its end and stays there, instead of landing above the bottom or snapping up a moment later while the recap and subagent cards finish measuring.
+- Git: the commit graph no longer leaves a gap in a lane when the same branch is merged twice (thanks to @Naputt1).
+- Desktop: on Windows and Linux the close button sits flush against the window edge, so the exact top-right corner closes the window, and its hover color follows the theme (thanks to @kydorn).
 
 ## [1.21.1] - 2026-08-29
 
@@ -35,6 +41,8 @@ All notable changes to this project will be documented in this file.
 - Small model: requests send the provider's configured headers, such as an API-gateway subscription key (thanks to @dmitrii-galantsev); a configured Anthropic endpoint is used without a doubled `/v1`, and Google models without reasoning no longer receive a thinking option (thanks to @mpeter and @IngTian).
 - Projects: the folder picker can select several directories at once and add them together (thanks to @herjarsa).
 - Files: files reached through a symlink inside the workspace, or under a project root that is itself a symlink, open again instead of failing with an access error (thanks to @herjarsa).
+- Sidebar: searching sessions now also finds Chats — sessions that belong to no project — which used to vanish from the list as soon as anything was typed (thanks to @yulia-ivashko).
+- Chat: a message made only of quoted context fragments now appears in the prompt navigator; opening or closing the context panel no longer leaves a blank tail under the last message.
 - Settings/Providers: after saving an API key or signing in, the provider no longer shows "Credentials missing" with its models hidden until you switch away and back (thanks to @herjarsa).
 - Projects: the folder picker can enter a directory that is already a project to browse from there (thanks to @weixiang1862), and sending, forking, and image attachments work in projects whose path has non-ASCII characters, such as `Masaüstü` (thanks to @fitzgpt).
 - Git: the status panel refreshes from real repository state after checkout, branch, stash, merge, rebase, or reset, and remote branches that were never fetched appear in branch lists (thanks to @makeittech); the Branch diff scope no longer compares against the wrong base for branches created from the current branch (thanks to @gaojunran); picking `origin/main` in the branch selector checks out the local branch instead of a detached `HEAD` (thanks to @yulia-ivashko); branch search hides non-matching branches (thanks to @bashrusakh).

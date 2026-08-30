@@ -57,6 +57,8 @@ const contextSummary = (payload: ContextPartPayload, t: Translate): string => {
             return `#${payload.number} ${payload.title}`;
         case 'github-pr':
             return `#${payload.number} ${payload.title}`;
+        case 'linear-issue':
+            return `${payload.identifier} ${payload.title}`;
     }
 };
 
@@ -78,6 +80,7 @@ const contextBody = (payload: ContextPartPayload): string => {
             return payload.quote;
         case 'github-issue':
         case 'github-pr':
+        case 'linear-issue':
             return '';
     }
 };

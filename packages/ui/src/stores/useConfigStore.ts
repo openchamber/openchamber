@@ -1067,6 +1067,10 @@ interface ConfigStore {
     sayVoice: string;
     browserVoice: string;
     localTtsVoiceId: number;
+    /** Local TTS model the chosen voice belongs to (catalog id). */
+    localTtsModelId: string;
+    /** Local and macOS voices follow the language of the text being read. */
+    ttsFollowTextLanguage: boolean;
     openaiVoice: string;
     openaiApiKey: string;
     openaiCompatibleUrl: string;
@@ -1094,6 +1098,8 @@ interface ConfigStore {
     setSayVoice: (voice: string) => void;
     setBrowserVoice: (voice: string) => void;
     setLocalTtsVoiceId: (voiceId: number) => void;
+    setLocalTtsModelId: (modelId: string) => void;
+    setTtsFollowTextLanguage: (enabled: boolean) => void;
     setOpenaiVoice: (voice: string) => void;
     setOpenaiApiKey: (apiKey: string) => void;
     setOpenaiCompatibleUrl: (url: string) => void;
@@ -1276,6 +1282,21 @@ export const useConfigStore = create<ConfigStore>()(
                         }
                     }
                     return 0;
+                })(),
+                localTtsModelId: (() => {
+                    if (typeof window !== 'undefined') {
+                        const saved = localStorage.getItem('localTtsModelId');
+                        if (saved) return saved;
+                    }
+                    return 'kokoro-en-v0_19';
+                })(),
+
+                ttsFollowTextLanguage: (() => {
+                    if (typeof window !== 'undefined') {
+                        const saved = localStorage.getItem('ttsFollowTextLanguage');
+                        if (saved !== null) return saved === 'true';
+                    }
+                    return true;
                 })(),
                 // Browser voice - load from localStorage or default to empty (auto-select)
                 browserVoice: (() => {
@@ -2959,6 +2980,20 @@ export const useConfigStore = create<ConfigStore>()(
                     set({ localTtsVoiceId: voiceId });
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('localTtsVoiceId', String(voiceId));
+                    }
+                },
+
+                setLocalTtsModelId: (modelId: string) => {
+                    set({ localTtsModelId: modelId });
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem('localTtsModelId', modelId);
+                    }
+                },
+
+                setTtsFollowTextLanguage: (enabled: boolean) => {
+                    set({ ttsFollowTextLanguage: enabled });
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem('ttsFollowTextLanguage', String(enabled));
                     }
                 },
 

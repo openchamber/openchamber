@@ -1,3 +1,4 @@
+import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go kullanım takibi',
@@ -1786,7 +1787,10 @@ export const settingsDict = {
   'settings.voice.page.provider.server': 'Sunucu',
   'settings.voice.page.provider.local': 'Yerel',
   'settings.voice.page.tooltip.sttLocal': 'OpenChamber sunucusunda cihaz üstü transkripsiyon. Modeller otomatik indirilir; API anahtarı gerekmez.',
-  'settings.voice.page.tooltip.localTts': 'OpenChamber sunucusunda cihaz üstü sentez (Kokoro, İngilizce). Model otomatik indirilir; API anahtarı gerekmez.',
+  'settings.voice.page.tooltip.localTts': 'OpenChamber sunucusunda yerel sentez (İngilizce için Kokoro; diğer dillerin modelleri ilk kullanımda indirilir). API anahtarı gerekmez.',
+  'settings.voice.page.field.followTextLanguage': 'Sesi metnin diline göre seç',
+  'settings.voice.page.field.followTextLanguageAria': 'Sesi metnin diline göre seç',
+  'settings.voice.page.field.followTextLanguageInfo': 'Yanıt başka bir dildeyse o dil için bir ses kullanılır: uygun bir macOS sesi veya ilk kullanımda indirilen yerel bir model.',
   'settings.voice.page.stt.model.parakeetV2': 'Parakeet v2 (İngilizce)',
   'settings.voice.page.stt.model.parakeetV3': 'Parakeet v3 (25 Avrupa dili)',
   'settings.voice.page.stt.model.whisperBase': 'Whisper base (çok dilli)',
@@ -2218,4 +2222,5 @@ export const settingsDict = {
   'settings.openchamber.visual.field.sessionTabsAria': 'Başlıktaki session sekmelerini aç/kapat',
   'settings.openchamber.visual.field.sessionTabsInfo': 'Açtığınız session\'lar başlıkta sekmeler olarak dizilir. Kapatırsanız düz session başlığına döner.',
   ...thirdPartyIntegrationI18n.tr,
+  ...linearIntegrationI18n.tr,
 };

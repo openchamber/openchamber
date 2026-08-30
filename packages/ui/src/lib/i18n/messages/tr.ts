@@ -1,7 +1,11 @@
 import { settingsDict } from './tr.settings';
+import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
+import { linearPanelI18n } from './linear-panel.i18n';
 
 export const dict = {
   ...settingsDict,
+  ...linearIssuePickerI18n.tr,
+  ...linearPanelI18n.tr,
   'terminalView.actions.attachSelection': 'Seçili çıktıyı ekle',
   'terminalView.actions.restart': 'Terminali yeniden başlat',
   'chat.message.terminalContext': '{terminal}, {start}-{end}. satırlar',
