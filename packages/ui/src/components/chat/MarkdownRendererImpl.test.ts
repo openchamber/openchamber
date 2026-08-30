@@ -217,10 +217,6 @@ const fakeJsx = (_type: string, props: FakeJsxProps | null, ...children: FakeEle
     const fakeDocument = activeFakeDocument;
     if (!fakeDocument) throw new Error('Renderer fake document is not installed');
     const element = ref?.current ?? makeFakeElement(fakeDocument);
-    if (!ref?.current) {
-        element.childNodes.length = 0;
-        element.children.length = 0;
-    }
     if (props) {
         if (ref) ref.current = element;
         if (props.className) element.setAttribute('class', props.className);
@@ -228,9 +224,7 @@ const fakeJsx = (_type: string, props: FakeJsxProps | null, ...children: FakeEle
     }
     const jsxChildren = props?.children;
     const allChildren = jsxChildren === undefined ? children : Array.isArray(jsxChildren) ? jsxChildren : [jsxChildren];
-    for (const child of allChildren) {
-        if (child) element.appendChild(child);
-    }
+    element.replaceChildren(...allChildren.filter((child): child is FakeElement => Boolean(child)));
     return element;
 };
 
