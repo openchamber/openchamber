@@ -40,6 +40,7 @@ const input = (overrides: Partial<OutgoingMessageInput> = {}): OutgoingMessageIn
     syntheticTexts: [],
     linkedIssue: null,
     linkedPr: null,
+    linkedLinearIssue: null,
     ...overrides,
 });
 
@@ -203,6 +204,17 @@ describe('synthetic context', () => {
             .toEqual({ kind: 'github-issue', number: 3, title: 'Bug', url: 'https://x/issues/3' });
     });
 
+    test('a linked Linear issue is sent as context', () => {
+        const result = buildOutgoingMessage(input({
+            composerText: 'fix it',
+            linkedLinearIssue: { identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12', contextText: 'linear body' },
+        }), deps());
+        expect(result.additionalParts).toHaveLength(1);
+        expect(result.additionalParts[0].text).toBe('linear body');
+        expect(result.additionalParts[0].metadata?.[CONTEXT_METADATA_KEY])
+            .toEqual({ kind: 'linear-issue', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12' });
+    });
+
     test('synthetic texts precede the linked references', () => {
         const result = buildOutgoingMessage(input({
             composerText: 'x',
@@ -255,6 +267,7 @@ describe('full assembly order', () => {
             syntheticTexts: ['synthetic'],
             linkedIssue: { number: 3, title: 'Bug', url: 'https://x/issues/3', contextText: 'issue' },
             linkedPr: { number: 7, title: 'PR', url: 'https://x/pr/7', instructions: 'pr-how', context: 'pr-diff' },
+            linkedLinearIssue: { identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12', contextText: 'linear' },
         }), deps());
 
         expect(result.primaryText).toBe('q1');
@@ -265,6 +278,7 @@ describe('full assembly order', () => {
             'issue',
             'pr-how',
             'pr-diff',
+            'linear',
             'use: deploy',
         ]);
     });

@@ -1,7 +1,11 @@
 import { settingsDict } from './fr.settings';
+import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
+import { linearPanelI18n } from './linear-panel.i18n';
 
 export const dict = {
   ...settingsDict,
+  ...linearIssuePickerI18n.fr,
+  ...linearPanelI18n.fr,
   'terminalView.actions.attachSelection': 'Joindre la sortie sélectionnée',
   'terminalView.actions.restart': 'Redémarrer le terminal',
   'chat.message.terminalContext': '{terminal}, lignes {start}-{end}',
@@ -1507,6 +1511,9 @@ export const dict = {
   'header.actions.terminalPanelWithShortcut': 'Panneau à bornes ({shortcut})',
   'chat.recap.aria': 'Récapitulatif de la session',
   'chat.recap.label': 'Récap :',
+  'chat.sessionError.title': 'OpenCode a interrompu cette réponse',
+  'chat.sessionError.noDetails': 'OpenCode n\'a fourni aucun détail. Ouvrez le rapport d\'état (Ctrl/Cmd+Maj+L) pour voir les erreurs récentes.',
+  'chat.sessionError.noReply': 'OpenCode n\'a pas commencé de réponse à ce message.',
   'chat.goal.dialog.titleCreate': 'Définir un objectif de session',
   'chat.goal.dialog.titleManage': 'Objectif de session',
   'chat.goal.dialog.objectiveLabel': 'Objectif',

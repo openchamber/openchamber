@@ -558,15 +558,27 @@ interface FilePart {
 
 const GITHUB_ISSUE_LINK_MIME = 'application/vnd.github.issue-link';
 const GITHUB_PR_LINK_MIME = 'application/vnd.github.pull-request-link';
+const LINEAR_ISSUE_LINK_MIME = 'application/vnd.openchamber.linear-issue-link';
 
-const getGitHubLinkKind = (file: FilePart): 'issue' | 'pr' | null => {
+type IssueLinkKind = 'github-issue' | 'github-pr' | 'linear-issue';
+
+const getIssueLinkKind = (file: FilePart): IssueLinkKind | null => {
   if (file.mime === GITHUB_ISSUE_LINK_MIME) {
-    return 'issue';
+    return 'github-issue';
   }
   if (file.mime === GITHUB_PR_LINK_MIME) {
-    return 'pr';
+    return 'github-pr';
+  }
+  if (file.mime === LINEAR_ISSUE_LINK_MIME) {
+    return 'linear-issue';
   }
   return null;
+};
+
+const issueLinkIcon = (kind: IssueLinkKind): 'github' | 'git-pull-request' | 'linear' => {
+  if (kind === 'github-pr') return 'git-pull-request';
+  if (kind === 'linear-issue') return 'linear';
+  return 'github';
 };
 
 interface MessageFilesDisplayProps {
@@ -591,7 +603,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
   };
 
   const resolveDisplayName = React.useCallback((file: FilePart): string => {
-    const isGitHubLink = getGitHubLinkKind(file) !== null;
+    const isGitHubLink = getIssueLinkKind(file) !== null;
     if (isGitHubLink && typeof file.filename === 'string' && file.filename.trim().length > 0) {
       return file.filename.trim();
     }
@@ -665,11 +677,11 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
               const fileName = resolveDisplayName(file);
               const ext = fileName.split('.').pop() || '';
               const sizeText = formatFileSize(file.size);
-              const githubLinkKind = getGitHubLinkKind(file);
+              const issueLinkKind = getIssueLinkKind(file);
               return (
                 <Tooltip key={`file-${file.url || file.filename || index}`}>
                   <TooltipTrigger asChild>
-                    {githubLinkKind && file.url ? (
+                    {issueLinkKind && file.url ? (
                       <button
                         type="button"
                         onClick={() => {
@@ -677,11 +689,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
                         }}
                         className="inline-flex items-center bg-muted/30 border border-border/30 typography-meta gap-1 px-2 py-0.5 rounded-lg text-foreground hover:text-primary transition-colors"
                       >
-                        {githubLinkKind === 'pr' ? (
-                          <Icon name="git-pull-request" className="text-muted-foreground h-3.5 w-3.5" />
-                        ) : (
-                          <Icon name="github" className="text-muted-foreground h-3.5 w-3.5" />
-                        )}
+                        <Icon name={issueLinkIcon(issueLinkKind)} className="text-muted-foreground h-3.5 w-3.5" />
                         <div className="overflow-hidden max-w-[220px]">
                           <span className="truncate block" title={fileName}>{fileName}</span>
                         </div>
@@ -764,7 +772,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
         const fileName = resolveDisplayName(file);
         const isImage = file.mime?.startsWith('image/');
         const sizeText = formatFileSize(file.size);
-        const githubLinkKind = getGitHubLinkKind(file);
+        const issueLinkKind = getIssueLinkKind(file);
 
         if (isImage && file.url) {
           return (
@@ -787,7 +795,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
           );
         }
 
-        if (githubLinkKind && file.url) {
+        if (issueLinkKind && file.url) {
           return (
             <Tooltip key={file.url || `${fileName}-${index}`}>
               <TooltipTrigger asChild>
@@ -802,11 +810,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
                   )}
                 >
                   <div className="flex-shrink-0">
-                    {githubLinkKind === 'pr' ? (
-                      <Icon name="git-pull-request" className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
-                    ) : (
-                      <Icon name="github" className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
-                    )}
+                    <Icon name={issueLinkIcon(issueLinkKind)} className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-medium truncate">{fileName}</p>

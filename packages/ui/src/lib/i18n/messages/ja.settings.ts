@@ -1,3 +1,4 @@
+import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 使用量追跡',
@@ -1871,7 +1872,10 @@ export const settingsDict = {
   'settings.voice.page.provider.server': 'サーバー',
   'settings.voice.page.provider.local': 'ローカル',
   'settings.voice.page.tooltip.sttLocal': 'OpenChamber サーバー上でローカルに文字起こしします。モデルは自動でダウンロードされ、API キーは不要です。',
-  'settings.voice.page.tooltip.localTts': 'OpenChamber サーバー上でローカルに音声合成します（Kokoro、英語）。モデルは自動でダウンロードされ、API キーは不要です。',
+  'settings.voice.page.tooltip.localTts': 'OpenChamber サーバー上でローカルに音声合成します（英語は Kokoro、他の言語のモデルは初回使用時にダウンロード）。API キーは不要です。',
+  'settings.voice.page.field.followTextLanguage': 'テキストの言語に合わせて音声を選ぶ',
+  'settings.voice.page.field.followTextLanguageAria': 'テキストの言語に合わせて音声を選ぶ',
+  'settings.voice.page.field.followTextLanguageInfo': '返答が別の言語の場合、その言語の音声を使います。対応する macOS の音声、または初回使用時にダウンロードされるローカルモデルです。',
   'settings.voice.page.stt.model.parakeetV2': 'Parakeet v2（英語）',
   'settings.voice.page.stt.model.parakeetV3': 'Parakeet v3（ヨーロッパ25言語）',
   'settings.voice.page.stt.model.whisperBase': 'Whisper base（多言語）',
@@ -2227,5 +2231,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'エージェントが応答している間にフォローアップメッセージで Enter を押したときの動作を選択します。',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'ステア',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'キュー',
+  ...linearIntegrationI18n.ja,
   ...thirdPartyIntegrationI18n.ja,
 } as const;

@@ -1,6 +1,7 @@
 import React from 'react';
 import { useSessionAssistState } from '@/hooks/useSessionAssist';
 import { useI18n } from '@/lib/i18n';
+import { TimelineRevealGateContext } from '@/components/chat/timelineRevealGate';
 
 interface SessionRecapNoteProps {
   sessionId: string;
@@ -12,8 +13,17 @@ interface SessionRecapNoteProps {
 // the last message (above the reserved bottom gap). Appears only after the
 // 1-minute quiet window, so the layout shift happens off-screen in practice.
 export const SessionRecapNote: React.FC<SessionRecapNoteProps> = React.memo(({ sessionId, directory, isMobile }) => {
-  const { visibleRecap } = useSessionAssistState(sessionId, directory);
+  const { visibleRecap, sessionKnown } = useSessionAssistState(sessionId, directory);
   const { t } = useI18n();
+  // The recap is part of the opened session's finished picture: until the
+  // session record is in memory it cannot be decided, and appearing a commit
+  // later would grow the footer under a viewport already pinned to the end.
+  const revealGate = React.useContext(TimelineRevealGateContext);
+  React.useLayoutEffect(() => {
+    if (sessionKnown) return undefined;
+    const release = revealGate?.hold();
+    return release ?? undefined;
+  }, [revealGate, sessionKnown]);
 
   if (!visibleRecap) {
     return null;

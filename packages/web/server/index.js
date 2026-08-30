@@ -77,6 +77,7 @@ import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
+import { createLinearSessionStatusRuntime } from './lib/linear/status-runtime.js';
 import { createSessionKnowledgeRuntime } from './lib/session-knowledge/runtime.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
@@ -856,6 +857,8 @@ const contextObligatoryRuntime = createContextObligatoryRuntime({
   sessionKnowledgeRuntime,
 });
 
+const linearSessionStatusRuntime = createLinearSessionStatusRuntime();
+
 const globalMessageStreamHub = createGlobalMessageStreamHub({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -901,6 +904,7 @@ globalMessageStreamHub.subscribeEvent((event) => {
   sessionAssistRuntime.processPayload(payload, directory);
   sessionGoalRuntime.processPayload(payload, directory);
   contextObligatoryRuntime.processPayload(payload, directory);
+  linearSessionStatusRuntime.processPayload(payload);
 });
 
 const processForwardedEventPayload = (payload, emitSyntheticEvent) => {

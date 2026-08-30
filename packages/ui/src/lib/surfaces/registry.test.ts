@@ -12,6 +12,7 @@ const baseOptions = {
   isVSCode: false,
   screenWidth: 1200,
   tabs: [],
+  linearConnected: true,
 } as const;
 
 describe('getVisibleContextRailSurfaces', () => {
@@ -62,5 +63,18 @@ describe('getVisibleContextRailSurfaces', () => {
   test('respects the persisted user rail order', () => {
     const surfaces = getVisibleContextRailSurfaces({ ...baseOptions, railOrder: ['git', 'context'] });
     expect(surfaces.slice(0, 2).map((surface) => surface.id)).toEqual(['git', 'context']);
+  });
+
+  test('places Linear after Pull Request in the default order', () => {
+    const ids = getVisibleContextRailSurfaces(baseOptions).map((surface) => surface.id);
+    const pr = ids.indexOf('pr');
+    const linear = ids.indexOf('linear');
+    expect(pr).toBeGreaterThanOrEqual(0);
+    expect(linear).toBe(pr + 1);
+  });
+
+  test('hides Linear until a workspace is connected', () => {
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, linearConnected: false }).some((s) => s.id === 'linear')).toBe(false);
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, linearConnected: true }).some((s) => s.id === 'linear')).toBe(true);
   });
 });

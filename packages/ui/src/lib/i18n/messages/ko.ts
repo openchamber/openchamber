@@ -1,8 +1,12 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './ko.settings';
+import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
+import { linearPanelI18n } from './linear-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
+  ...linearIssuePickerI18n.ko,
+  ...linearPanelI18n.ko,
   'terminalView.actions.attachSelection': '선택한 출력 첨부',
   'terminalView.actions.restart': '터미널 다시 시작',
   'chat.message.terminalContext': '{terminal}, {start}-{end}행',
@@ -1752,6 +1756,9 @@ export const dict: Record<I18nKey, string> = {
   'header.actions.terminalPanelWithShortcut': '터미널 패널 ({shortcut})',
   'chat.recap.aria': '세션 요약',
   'chat.recap.label': '요약:',
+  'chat.sessionError.title': 'OpenCode가 이 응답을 중단했습니다',
+  'chat.sessionError.noDetails': 'OpenCode가 세부 정보를 보고하지 않았습니다. 상태 보고서(Ctrl/Cmd+Shift+L)에서 최근 오류를 확인하세요.',
+  'chat.sessionError.noReply': 'OpenCode가 이 메시지에 대한 응답을 시작하지 않았습니다.',
   'chat.goal.dialog.titleCreate': '세션 목표 설정',
   'chat.goal.dialog.titleManage': '세션 목표',
   'chat.goal.dialog.objectiveLabel': '목표',

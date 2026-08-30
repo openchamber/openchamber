@@ -1,3 +1,4 @@
+import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'Monitoramento de uso do OpenCode Go',
@@ -1838,7 +1839,10 @@ export const settingsDict = {
   "settings.voice.page.provider.server": "Servidor",
   "settings.voice.page.provider.local": "Local",
   "settings.voice.page.tooltip.sttLocal": "Transcrição local no servidor do OpenChamber. Os modelos são baixados automaticamente; não é necessária chave de API.",
-  "settings.voice.page.tooltip.localTts": "Síntese local no servidor do OpenChamber (Kokoro, inglês). O modelo é baixado automaticamente; não é necessária chave de API.",
+  "settings.voice.page.tooltip.localTts": "Síntese local no servidor do OpenChamber (Kokoro para inglês; modelos de outros idiomas são baixados no primeiro uso). Não requer chave de API.",
+  "settings.voice.page.field.followTextLanguage": "Ajustar a voz ao idioma do texto",
+  "settings.voice.page.field.followTextLanguageAria": "Ajustar a voz ao idioma do texto",
+  "settings.voice.page.field.followTextLanguageInfo": "Se uma resposta estiver em outro idioma, uma voz desse idioma é usada: uma voz do macOS correspondente ou um modelo local baixado no primeiro uso.",
   "settings.voice.page.stt.model.parakeetV2": "Parakeet v2 (inglês)",
   "settings.voice.page.stt.model.parakeetV3": "Parakeet v3 (25 idiomas europeus)",
   "settings.voice.page.stt.model.whisperBase": "Whisper base (multilíngue)",
@@ -2227,5 +2231,6 @@ export const settingsDict = {
   "settings.openchamber.visual.field.followUpBehaviorDescription": "Choose what happens when you press Enter on a follow-up message while the agent is still responding.",
   "settings.openchamber.visual.option.followUpBehavior.steer.label": "Steer",
   "settings.openchamber.visual.option.followUpBehavior.queue.label": "Queue",
+  ...linearIntegrationI18n['pt-BR'],
   ...thirdPartyIntegrationI18n['pt-BR'],
 } as const;

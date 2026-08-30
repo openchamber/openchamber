@@ -1391,7 +1391,7 @@ html:not(.dark) .chat-scroll {
 
 .oc-chat-hydration-reveal,
 [data-timeline-reveal='fading'] {
-  animation: oc-chat-hydration-reveal 180ms ease-out both;
+  animation: oc-chat-hydration-reveal 100ms ease-out both;
 }
 
 /* Timeline root while a freshly opened session still has provisional first

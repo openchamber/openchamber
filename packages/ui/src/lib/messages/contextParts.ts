@@ -96,6 +96,13 @@ type GitHubPrContext = {
     url: string;
 };
 
+type LinearIssueContext = {
+    kind: 'linear-issue';
+    identifier: string;
+    title: string;
+    url: string;
+};
+
 export type ContextPartPayload =
     | CodeCommentContext
     | TerminalContextPayload
@@ -105,7 +112,8 @@ export type ContextPartPayload =
     | FileQuoteContext
     | ChatQuoteContext
     | GitHubIssueContext
-    | GitHubPrContext;
+    | GitHubPrContext
+    | LinearIssueContext;
 
 export type ContextPartMetadata = { [K in typeof CONTEXT_METADATA_KEY]: ContextPartPayload };
 
@@ -154,6 +162,7 @@ export function formatContextText(payload: ContextPartPayload): string {
             return `Attached failed GitHub PR check (${payload.label}):\n\`\`\`\n${payload.output}\n\`\`\`${payload.text ? `\n\n${payload.text}` : ''}`;
         case 'github-issue':
         case 'github-pr':
+        case 'linear-issue':
             // Linked issues/PRs carry server-fetched context text built by
             // their pickers; there is no default text to derive here.
             return '';
@@ -162,8 +171,9 @@ export function formatContextText(payload: ContextPartPayload): string {
 
 /**
  * Build the synthetic part for one context payload. `text` overrides the
- * derived text; github-issue/github-pr payloads require it because their
- * model-facing context is fetched by the picker, not derived from metadata.
+ * derived text; github-issue/github-pr/linear-issue payloads require it
+ * because their model-facing context is fetched by the picker, not derived
+ * from metadata.
  */
 export function createContextPart(payload: ContextPartPayload, text?: string): ContextPart {
     const resolvedText = text ?? formatContextText(payload);
@@ -294,6 +304,12 @@ const contextPayloadSchema = z.discriminatedUnion('kind', [
     z.object({
         kind: z.literal('github-pr'),
         number: z.number().int().positive(),
+        title: z.string(),
+        url: z.string(),
+    }),
+    z.object({
+        kind: z.literal('linear-issue'),
+        identifier: z.string().min(1),
         title: z.string(),
         url: z.string(),
     }),

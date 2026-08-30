@@ -56,4 +56,12 @@ describe('messagePreview', () => {
     const parts = [contextPart(chatQuote('quoted bit'), 'raw model text')]
     expect(getPromptPreviewText(parts)).toBe('raw model text')
   })
+
+  test('labels a Linear issue attachment from its identifier and title', () => {
+    const parts = [contextPart(
+      { kind: 'linear-issue', identifier: 'ENG-12', title: 'Fix login', url: 'https://linear.app/eng-12' },
+      'fetched issue body',
+    )]
+    expect(getPromptPreviewText(parts, t)).toBe('ENG-12 Fix login')
+  })
 })

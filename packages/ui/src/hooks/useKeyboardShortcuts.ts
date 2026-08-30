@@ -30,6 +30,7 @@ import { readEmbeddedThemeSearchParams } from '@/contexts/theme-embedded-bootstr
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
@@ -505,6 +506,7 @@ export const useKeyboardShortcuts = () => {
             isVSCode: isVSCodeRuntime(),
             screenWidth: window.innerWidth,
             tabs: panel?.tabs ?? [],
+            linearConnected: useLinearAuthStore.getState().status?.connected === true,
           });
           const target = visibleSurfaces[switchSurfaceDigit - 1];
           if (target) {

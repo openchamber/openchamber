@@ -1,8 +1,12 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './uk.settings';
+import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
+import { linearPanelI18n } from './linear-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
+  ...linearIssuePickerI18n.uk,
+  ...linearPanelI18n.uk,
   'terminalView.actions.attachSelection': 'Прикріпити вибраний вивід',
   'terminalView.actions.restart': 'Перезапустити термінал',
   'chat.message.terminalContext': '{terminal}, рядки {start}-{end}',
@@ -1728,6 +1732,9 @@ export const dict: Record<I18nKey, string> = {
   "header.actions.terminalPanelWithShortcut": "Термінальна панель ({shortcut})",
   "chat.recap.aria": "Підсумок сесії",
   "chat.recap.label": "Підсумок:",
+  "chat.sessionError.title": "OpenCode зупинив цю відповідь",
+  "chat.sessionError.noDetails": "OpenCode не повідомив деталей. Відкрий звіт про стан (Ctrl/Cmd+Shift+L), щоб побачити останні помилки.",
+  "chat.sessionError.noReply": "OpenCode не почав відповідь на це повідомлення.",
   "chat.goal.dialog.titleCreate": "Встановити ціль сесії",
   "chat.goal.dialog.titleManage": "Ціль сесії",
   "chat.goal.dialog.objectiveLabel": "Ціль",

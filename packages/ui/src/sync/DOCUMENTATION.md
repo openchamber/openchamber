@@ -202,6 +202,22 @@ Rules:
 
 Initial loads use smaller pages on constrained VS Code/mobile surfaces. Prefetch resolves only the initial renderable page; it does not eagerly download older history. The mounted chat timeline requests older pages when its viewport is underfilled or the user scrolls toward history, while mobile uses its explicit load-older action. Timeline caches, pending work, prepend snapshots, and stale checks use runtime + directory + session identity so equal session IDs in different worktrees cannot share lifecycle state. Older pages are fetched through the same loader and merged with optimistic records before publication. The same chronology contract applies in the VS Code webview because it consumes this shared loader and sync store; the extension bridge must transport OpenCode records without introducing its own ID-based ordering.
 
+## Failed-turn diagnostics
+
+A `session.error` event is the only account of a turn OpenCode stopped, and
+it can arrive with no assistant message to attach to. `session-error-log.ts`
+keeps the last 20 of them in memory (`recordSessionError`, fed from the
+event pipeline next to the error notification) and `summarizeOpenCodeError`
+reads the `{ name, data: { message } }` payload. The chat shows the newest
+error for the open session under its last message while that turn is the
+latest one (`SessionErrorNotice`), and also names a user message that an idle
+session has left unanswered for five seconds, since an accepted send that
+produced neither a message nor an error would otherwise look like nothing
+happened. Both buffers — session errors and rejected sends — appear in the
+status report (`buildOpenCodeStatusReport`, Ctrl/Cmd+Shift+L or
+`__opencodeDebug.statusReport()`) together with the managed OpenCode
+process's last error and stderr tail and the expected log file locations.
+
 ## Loading diagnostics
 
 Session loading instrumentation is disabled by default. Set `localStorage.openchamber_session_load_perf` to `"1"`, reproduce the interaction, then inspect `window.__openchamberSessionLoadPerformance.events`.
@@ -441,6 +457,13 @@ in a transition behind it. Selection *policy* inside `ChatContainer` (auto-
 opening a draft when nothing is selected) reads the live store value, because
 the deferred one still names the previous session for one commit.
 
+A session whose messages are not in memory at the click keeps the previous
+timeline on screen while they load (up to 400ms), then swaps straight to the
+finished view; the skeleton appears only when loading takes longer. A session
+the user waited for fades in (100ms); one that was ready appears in the same
+frame. The sidebar prefetches the two rows on either side of the open session
+shortly after it settles, so most neighbouring switches are warm.
+
 The timeline's first paint for a session is atomic. `ChatContainer` owns a
 `TimelineRevealGate` per session key (`components/chat/timelineRevealGate.ts`):
 a markdown renderer whose first paint is provisional (blocks not yet in the
@@ -453,6 +476,16 @@ module has loaded, `MarkdownRenderer` mounts it synchronously instead of
 through `Suspense`: a suspended boundary shows its fallback for a tick and
 React then throttles later-resolving boundaries by ~300ms, which staggered
 user and assistant text on a cold open.
+
+An opened session is shown already at its end. The scroll hook holds the gate
+until the viewport is pinned; the recap note holds it until the session record
+is in memory, because it cannot decide whether it renders before that and would
+otherwise grow the footer under a pinned viewport. The reveal itself runs on
+the next frame after the last hold releases, with one exact pin against the
+final content height. Afterwards "at the end" is an invariant, not a scroll:
+while the reader sits on the end of a session that is not producing output,
+content growth re-pins with one instant write; output growth belongs to the
+follow logic, which glides only while the session is working.
 
 `bun run profile:switch` measures both moments; see `scripts/perf/DOCUMENTATION.md`.
 

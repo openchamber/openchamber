@@ -1,8 +1,12 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './zh-CN.settings';
+import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
+import { linearPanelI18n } from './linear-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
+  ...linearIssuePickerI18n['zh-CN'],
+  ...linearPanelI18n['zh-CN'],
   'terminalView.actions.attachSelection': '附加所选输出',
   'terminalView.actions.restart': '重启终端',
   'chat.message.terminalContext': '{terminal}，第 {start}-{end} 行',
@@ -1716,6 +1720,9 @@ export const dict: Record<I18nKey, string> = {
   'header.actions.terminalPanelWithShortcut': '终端面板（{shortcut}）',
   'chat.recap.aria': '会话回顾',
   'chat.recap.label': '回顾：',
+  'chat.sessionError.title': 'OpenCode 停止了本次回复',
+  'chat.sessionError.noDetails': 'OpenCode 未报告任何详情。打开状态报告（Ctrl/Cmd+Shift+L）查看最近的错误。',
+  'chat.sessionError.noReply': 'OpenCode 没有开始回复这条消息。',
   'chat.goal.dialog.titleCreate': '设置会话目标',
   'chat.goal.dialog.titleManage': '会话目标',
   'chat.goal.dialog.objectiveLabel': '目标',

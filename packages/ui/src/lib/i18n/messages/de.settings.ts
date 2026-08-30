@@ -1,3 +1,4 @@
+import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go Nutzungsverfolgung',
@@ -1794,7 +1795,10 @@ export const settingsDict = {
   'settings.voice.page.provider.server': 'Server',
   'settings.voice.page.provider.local': 'Lokal',
   'settings.voice.page.tooltip.sttLocal': 'On-device Transkription auf dem OpenChamber-Server. Modelle werden automatisch heruntergeladen; kein API-Schlüssel erforderlich.',
-  'settings.voice.page.tooltip.localTts': 'On-device Synthese auf dem OpenChamber-Server (Kokoro, Englisch). Das Modell wird automatisch heruntergeladen; kein API-Schlüssel erforderlich.',
+  'settings.voice.page.tooltip.localTts': 'On-Device-Synthese auf dem OpenChamber-Server (Kokoro für Englisch; Modelle für andere Sprachen werden beim ersten Einsatz geladen). Kein API-Schlüssel nötig.',
+  'settings.voice.page.field.followTextLanguage': 'Stimme an die Sprache des Textes anpassen',
+  'settings.voice.page.field.followTextLanguageAria': 'Stimme an die Sprache des Textes anpassen',
+  'settings.voice.page.field.followTextLanguageInfo': 'Ist eine Antwort in einer anderen Sprache, wird eine Stimme für diese Sprache verwendet: eine passende macOS-Stimme oder ein lokales Modell, das beim ersten Einsatz geladen wird.',
   'settings.voice.page.stt.model.parakeetV2': 'Parakeet v2 (Englisch)',
   'settings.voice.page.stt.model.parakeetV3': 'Parakeet v3 (25 europäische Sprachen)',
   'settings.voice.page.stt.model.whisperBase': 'Whisper base (mehrsprachig)',
@@ -2218,5 +2222,6 @@ export const settingsDict = {
   'settings.openchamber.visual.option.themeMode.light.description': 'Immer helles Erscheinungsbild verwenden',
   'settings.openchamber.visual.option.themeMode.dark.description': 'Immer dunkles Erscheinungsbild verwenden',
   'chat.message.userText.collapseAria': 'Benutzernachricht einklappen',
+  ...linearIntegrationI18n.de,
   ...thirdPartyIntegrationI18n.de,
 };

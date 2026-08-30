@@ -33,6 +33,7 @@ export interface MobileComposerHolders {
     draftPickerOpen: boolean;
     issuePickerOpen: boolean;
     prPickerOpen: boolean;
+    linearPickerOpen: boolean;
     isDragging: boolean;
 }
 
@@ -204,7 +205,8 @@ export function useMobileComposerShell(
         || holders.controlsPanelOpen
         || holders.attachMenuOpen
         || holders.issuePickerOpen
-        || holders.prPickerOpen;
+        || holders.prPickerOpen
+        || holders.linearPickerOpen;
 
     // Installed PWA (standalone): a focus() from a bare timeout is outside the
     // user gesture and iOS refuses to raise the keyboard for it (Safari
@@ -212,7 +214,7 @@ export function useMobileComposerShell(
     // 'oc:mobile-overlay-closed' synchronously from the same React flush as the
     // click that closed it — refocus right there, while the gesture is live.
     const pickerDialogsOpenRef = React.useRef(false);
-    pickerDialogsOpenRef.current = holders.issuePickerOpen || holders.prPickerOpen;
+    pickerDialogsOpenRef.current = holders.issuePickerOpen || holders.prPickerOpen || holders.linearPickerOpen;
     const skipNextCloseRestoreRef = React.useRef(false);
     const openSheetCountRef = React.useRef(0);
     const holdFocusUntilRef = React.useRef(0);
@@ -307,6 +309,7 @@ export function useMobileComposerShell(
         || holders.draftPickerOpen
         || holders.issuePickerOpen
         || holders.prPickerOpen
+        || holders.linearPickerOpen
         || holders.isDragging;
 
     React.useEffect(() => {

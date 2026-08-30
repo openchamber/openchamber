@@ -6,6 +6,7 @@ export type ContextSurfaceId =
   | 'editor'
   | 'git'
   | 'pr'
+  | 'linear'
   | 'diff'
   | 'walkthrough'
   | 'terminal'
@@ -63,6 +64,15 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     mode: 'pr',
     icon: 'github',
     labelKey: 'contextPanel.mode.pr',
+    availability: 'always',
+  },
+  {
+    id: 'linear',
+    descriptionKey: 'contextRail.surface.linear.description',
+    defaultWidthFraction: 0.45,
+    mode: 'linear',
+    icon: 'linear',
+    labelKey: 'contextPanel.mode.linear',
     availability: 'always',
   },
   {
@@ -194,6 +204,8 @@ type VisibleRailSurfacesOptions = {
   isVSCode: boolean;
   screenWidth: number;
   tabs: readonly { mode: ContextPanelMode }[];
+  /** Linear's rail icon stays off until a workspace is connected. */
+  linearConnected: boolean;
 };
 
 /**
@@ -223,6 +235,9 @@ export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOption
     // not have. Offering the surface anyway would promise the panel people see
     // on the desktop.
     if (surface.id === 'browser' && options.isVSCode) {
+      return false;
+    }
+    if (surface.id === 'linear' && !options.linearConnected) {
       return false;
     }
     if (surface.availability === 'has-content') {

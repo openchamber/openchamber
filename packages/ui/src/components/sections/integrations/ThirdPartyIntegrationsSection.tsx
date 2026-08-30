@@ -414,6 +414,12 @@ export const ThirdPartyIntegrationsSection: React.FC<ThirdPartyIntegrationsSecti
         settingsItem="integrations.third-party"
         contentClassName="space-y-3"
       >
+        <div role="alert" className="flex items-start gap-2 rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] p-3">
+          <Icon name="error-warning" className="mt-0.5 size-4 shrink-0 text-[var(--status-warning)]" />
+          <p className="typography-meta text-[var(--status-warning)]">
+            {t('settings.integrations.experimentalWarning')}
+          </p>
+        </div>
         {THIRD_PARTY_PLUGINS.map(renderPlugin)}
       </SettingsSection>
 

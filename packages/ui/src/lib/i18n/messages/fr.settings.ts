@@ -1,3 +1,4 @@
+import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'Suivi de l’utilisation d’OpenCode Go',
@@ -1756,7 +1757,10 @@ export const settingsDict = {
   'settings.voice.page.provider.server': 'Serveur',
   'settings.voice.page.provider.local': 'Local',
   'settings.voice.page.tooltip.sttLocal': 'Transcription locale sur le serveur OpenChamber. Les modèles se téléchargent automatiquement ; aucune clé d\'API requise.',
-  'settings.voice.page.tooltip.localTts': 'Synthèse locale sur le serveur OpenChamber (Kokoro, anglais). Le modèle se télécharge automatiquement ; aucune clé d’API requise.',
+  'settings.voice.page.tooltip.localTts': 'Synthèse locale sur le serveur OpenChamber (Kokoro pour l’anglais ; les modèles des autres langues sont téléchargés à la première utilisation). Aucune clé API requise.',
+  'settings.voice.page.field.followTextLanguage': 'Adapter la voix à la langue du texte',
+  'settings.voice.page.field.followTextLanguageAria': 'Adapter la voix à la langue du texte',
+  'settings.voice.page.field.followTextLanguageInfo': 'Si une réponse est dans une autre langue, une voix pour cette langue est utilisée : une voix macOS adaptée ou un modèle local téléchargé à la première utilisation.',
   'settings.voice.page.stt.model.parakeetV2': 'Parakeet v2 (anglais)',
   'settings.voice.page.stt.model.parakeetV3': 'Parakeet v3 (25 langues européennes)',
   'settings.voice.page.stt.model.whisperBase': 'Whisper base (multilingue)',
@@ -2227,5 +2231,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  ...linearIntegrationI18n.fr,
   ...thirdPartyIntegrationI18n.fr,
 } as const;

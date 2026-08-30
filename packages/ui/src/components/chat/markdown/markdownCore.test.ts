@@ -318,3 +318,41 @@ describe('CJK-aware link parsing', () => {
     expect(hrefOf(renderMarkdownSync('[a](url "title")'))).toBe('url');
   });
 });
+
+describe('Escaped brackets versus display math', () => {
+  // `\[...\]` is display math in LaTeX and an escaped bracket pair in
+  // CommonMark. Prose escapes brackets far more often than it opens display
+  // math mid-sentence, so math only wins when it owns its line.
+  test('keeps escaped brackets inside a link as link text', () => {
+    const html = renderMarkdownSync(
+      '[OpenChamber session completed: OPE-316 \\[Bug\\] Opening files](https://example.com/?session=ses_1)',
+    );
+    expect(html).toContain('href="https://example.com/?session=ses_1"');
+    expect(html).toContain('[Bug]');
+    expect(html).not.toContain('katex');
+  });
+
+  test('leaves escaped brackets in prose as literal brackets', () => {
+    const html = renderMarkdownSync('Release \\[Bug\\] fixed in v2.');
+    expect(html).toContain('[Bug]');
+    expect(html).not.toContain('katex');
+  });
+
+  // Verbatim body of a Linear status comment, which Linear itself renders as
+  // one link while we used to split it into three blocks.
+  test('renders a Linear comment with an escaped-bracket title as one link', () => {
+    const html = renderMarkdownSync(
+      '[OpenChamber session completed: OPE-316 \\[Bug\\] Opening files with template-literal'
+      + ' code triggers catastrophic backtracking → renderer OOM → black/frozen desktop app'
+      + ' (v1.17.2)](http://127.0.0.1:63418/?session=ses_fb0bb916effe26bQ1Ofr6Rv4Ei)',
+    );
+    expect(html.match(/<a /g)).toHaveLength(1);
+    expect(html).toContain('[Bug]');
+    expect(html).not.toContain('katex');
+  });
+
+  test('still renders display math that owns its line', () => {
+    expect(renderMarkdownSync('\\[x = y\\]')).toContain('katex');
+    expect(renderMarkdownSync('Before\n\n\\[\nx = y\n\\]\n\nAfter')).toContain('katex');
+  });
+});

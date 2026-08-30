@@ -13,7 +13,7 @@ import React from 'react';
  * A hold that never releases must not hide the chat forever, so the owner
  * reveals after `TIMELINE_REVEAL_CAP_MS` regardless.
  */
-type TimelineRevealGate = {
+export type TimelineRevealGate = {
   /** Take a hold; returns the release. Returns null once the gate is closed. */
   hold: () => (() => void) | null;
   /** Stops accepting holds. Existing holds still count. */
