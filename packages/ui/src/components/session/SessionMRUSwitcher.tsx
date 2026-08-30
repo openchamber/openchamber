@@ -253,6 +253,7 @@ export function SessionMRUSwitcher(): React.ReactElement | null {
       <DialogContent
         initialFocus={false}
         showCloseButton={false}
+        onContextMenu={(event) => event.preventDefault()}
         className="oc-glass-popover oc-glass-floating w-[min(44rem,calc(100vw-2rem))] max-w-none gap-1 overflow-hidden rounded-2xl p-2"
       >
         <DialogTitle className="px-3 pb-1 pt-2 typography-ui-label font-normal text-muted-foreground">
