@@ -138,6 +138,8 @@ export function SessionMRUSwitcher(): React.ReactElement | null {
     const currentCycleState = cycleStateRef.current;
     if (!currentCycleState) return;
 
+    updateCycleState(null);
+
     const { currentSessionId } = useSessionUIStore.getState();
     const selectedSessionId =
       currentCycleState.frozenSessionIds[currentCycleState.previewIndex];
@@ -148,7 +150,6 @@ export function SessionMRUSwitcher(): React.ReactElement | null {
       return;
 
     const selectedSession = globalSessions.entityById.get(selectedSessionId);
-    updateCycleState(null);
 
     if (!selectedSession || selectedSession.time?.archived) return;
 
