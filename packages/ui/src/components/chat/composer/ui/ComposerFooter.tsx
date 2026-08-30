@@ -46,6 +46,7 @@ export interface ComposerFooterProps {
     canSend: boolean;
     canAbort: boolean;
     hasContent: boolean;
+    isSubmitting: boolean;
     isExpandedInput: boolean;
     permissionAutoAcceptEnabled: boolean;
     isPermissionAutoAcceptInteractive: boolean;
@@ -88,6 +89,7 @@ export function ComposerFooter(props: ComposerFooterProps) {
         canSend,
         canAbort,
         hasContent,
+        isSubmitting,
         isExpandedInput,
         permissionAutoAcceptEnabled,
         isPermissionAutoAcceptInteractive,
@@ -185,6 +187,7 @@ export function ComposerFooter(props: ComposerFooterProps) {
                                     canSend={canSend}
                                     canAbort={canAbort}
                                     hasContent={hasContent}
+                                    isSubmitting={isSubmitting}
                                     currentSessionId={currentSessionId}
                                     newSessionDraftOpen={newSessionDraftOpen}
                                     onPrimaryAction={onPrimaryAction}
@@ -254,6 +257,7 @@ export function ComposerFooter(props: ComposerFooterProps) {
                             canSend={canSend}
                             canAbort={canAbort}
                             hasContent={hasContent}
+                            isSubmitting={isSubmitting}
                             currentSessionId={currentSessionId}
                             newSessionDraftOpen={newSessionDraftOpen}
                             onPrimaryAction={onPrimaryAction}

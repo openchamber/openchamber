@@ -28,7 +28,6 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import {
     createChatDraftIdentity,
     readChatDraft,
-    writeChatDraft,
     type ChatDraftIdentity,
     type ChatDraftSnapshot,
 } from '@/lib/chatDraftPersistence';
@@ -326,7 +325,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const snippetRef = React.useRef<SnippetAutocompleteHandle>(null);
     // Ref to track current message value without triggering re-renders in effects
     const messageRef = React.useRef(message);
-    const currentChatDraftIdentityRef = React.useRef<ChatDraftIdentity | null>(initialDraftIdentityRef.current);
+    const isSubmittingRef = React.useRef(false);
+    const [isSubmitting, setIsSubmitting] = React.useState(false);
     const pendingPastedAttachmentFilenamesRef = React.useRef<Set<string>>(new Set());
     const largeTextPasteToastIdRef = React.useRef<string | number | null>(null);
     const largeTextPasteOfferIdRef = React.useRef(0);
@@ -378,6 +378,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     );
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const newSessionDraftOpen = Boolean(newSessionDraft?.open);
+    const materializedDraftSessionId = useSessionUIStore((s) => s.materializedDraftSessionId);
     const draftPermissionAutoAcceptEnabled = useSessionUIStore((s) => (
         s.newSessionDraft?.open ? s.newSessionDraft.permissionAutoAcceptEnabled === true : false
     ));
@@ -807,19 +808,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         messageRef.current = message;
     }, [message]);
 
-    React.useEffect(() => {
-        currentChatDraftIdentityRef.current = chatDraftIdentity;
-    }, [chatDraftIdentity]);
-
     // Draft persistence: identity switching, debounced writes and the
     // flush-on-hide edges live in the hook.
-    const { persistNow: persistDraftImmediately } = useComposerDraft({
+    const { clearSubmittedDraft, restoreFailedDraft } = useComposerDraft({
         message,
         messageRef,
         setMessage,
         confirmedMentionsRef,
         identity: chatDraftIdentity,
         persistEnabled: persistChatDraft,
+        submittedDraftSessionId: materializedDraftSessionId,
         initialDraft: {
             text: initialDraftRef.current ?? '',
             identity: initialDraftIdentityRef.current,
@@ -1017,12 +1015,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // Snapshot the draft and current-session identity before the first
         // async gap so a later sidebar selection cannot reroute the send.
         const capturedDraftSnapshot = newSessionDraftOpen ? { ...newSessionDraft } : null;
+        const submittedDraft = getCurrentInputSnapshot();
+        const submittedMentions = new Set(confirmedMentionsRef.current);
         const inputSnapshot = options?.presetText != null
             ? {
                 message: options.presetText,
                 hasContent: options.presetText.trim().length > 0 || attachedFiles.length > 0 || hasDrafts,
             }
-            : getCurrentInputSnapshot();
+            : submittedDraft;
         // A queued item stays in the queue until its own send resolves, so the
         // auto-send hook may already be delivering one of these. Merging it here
         // would send the same message twice (the window is seconds over a relay).
@@ -1055,6 +1055,29 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             toast.error(t('chat.chatInput.toast.noModelSelected'));
             return;
         }
+
+        if (!queuedOnly) {
+            if (isSubmittingRef.current) return;
+            isSubmittingRef.current = true;
+            setIsSubmitting(true);
+        }
+        const submittedDraftIdentity = chatDraftIdentity;
+        const submittedAttachmentIds = new Set(attachedFiles.map((attachment) => attachment.id));
+
+        const commitSuccessfulSubmission = () => {
+            if (queuedOnly) return;
+
+            if (clearSubmittedDraft(submittedDraftIdentity, submittedDraft.message, submittedMentions)) {
+                messageHistory.reset();
+                setExpandedInput(false);
+            }
+
+            useInputStore.getState().setAttachedFiles(
+                useInputStore.getState().attachedFiles.filter((attachment) => !submittedAttachmentIds.has(attachment.id)),
+            );
+        };
+
+        try {
 
         // Sending is authoritative: if a question prompt is open, dismiss it
         // so the prompt cannot linger or strand the session. The dismiss clears
@@ -1159,6 +1182,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const drafts: InlineCommentDraft[] = consumedDraftTarget
             ? consumeDrafts(consumedDraftTarget)
             : [];
+        const restoreConsumedDrafts = () => {
+            if (consumedDraftTarget && drafts.length > 0) {
+                useInlineCommentDraftStore.getState().restoreDrafts(consumedDraftTarget, drafts);
+            }
+        };
 
         const availableSkillNames = new Set(
             selectSkillsForDirectory(useSkillsStore.getState(), currentDirectory).map((skill) => skill.name),
@@ -1201,25 +1229,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         if (outgoing.isEmpty) return;
 
-        // Clear queue and input
+        // Queue entries already have durable local ownership, so they can be
+        // removed before dispatch. Composer content stays visible until the
+        // remote request acknowledges it.
         if (capturedTarget && queuedMessageId) {
             removeFromQueue(capturedTarget, queuedMessageId);
         } else if (capturedTarget && hasQueuedMessages) {
             clearQueue(capturedTarget);
         }
-        if (!queuedOnly) {
-            setMessage('');
-            confirmedMentionsRef.current.clear();
-            // Clear per-session draft on submit
-            persistDraftImmediately(chatDraftIdentity, '');
-            messageHistory.reset();
-            if (attachedFiles.length > 0) {
-                clearAttachedFiles();
-            }
-            // Close expanded input overlay when submitting
-            setExpandedInput(false);
-        }
-
         if (isMobile) {
             composerRef.current?.blur();
         }
@@ -1233,20 +1250,24 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             // sending a message.
             if (commandName === 'undo' && currentSessionId) {
                 await useSessionUIStore.getState().handleSlashUndo(currentSessionId);
+                commitSuccessfulSubmission();
                 scrollToBottom?.();
                 return;
             }
             if (commandName === 'redo' && currentSessionId) {
                 await useSessionUIStore.getState().handleSlashRedo(currentSessionId);
+                commitSuccessfulSubmission();
                 scrollToBottom?.();
                 return;
             }
             if (commandName === 'timeline' && currentSessionId) {
                 setTimelineDialogOpen(true);
+                commitSuccessfulSubmission();
                 return;
             }
             if (commandName === 'handoff-review' && currentSessionId && !isMobile && !isVSCodeRuntime()) {
                 setReviewDialogOpen(true);
+                commitSuccessfulSubmission();
                 return;
             }
             if (commandName === 'compact' && currentSessionId) {
@@ -1254,6 +1275,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     await sessionActions.waitForConnectionOrThrow();
                     const compactDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || undefined;
                     await opencodeClient.summarizeSession(currentSessionId, currentProviderId, currentModelId, compactDirectory);
+                    commitSuccessfulSubmission();
                 } catch (error) {
                     toast.error(getSubmitErrorMessage(error, t('chat.chatInput.toast.compactFailed')));
                 }
@@ -1287,6 +1309,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         agent: agentNameToSend,
                         variant: variantToSend,
                     });
+                    commitSuccessfulSubmission();
                     scrollToBottom?.();
                 } catch (error) {
                     toast.error(getSubmitErrorMessage(error, t('chat.btw.toast.createFailed')));
@@ -1319,6 +1342,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         inputMode,
                         sendMessageOptions,
                     );
+                    commitSuccessfulSubmission();
                     scrollToBottom?.();
                 } catch (error) {
                     toast.error(getSubmitErrorMessage(error, t(command.errorToastKey)));
@@ -1362,25 +1386,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // never claims the new message.
         scrollToBottom?.();
 
-        const sendPromise = sendMessage(
-            primaryText,
-            providerIdToSend,
-            modelIdToSend,
-            agentNameToSend,
-            primaryAttachments,
-            agentMentionName,
-            additionalParts.length > 0 ? additionalParts : undefined,
-            variantToSend,
-            inputMode,
-            sendMessageOptions,
-        );
-        const restoreConsumedDrafts = () => {
-            if (consumedDraftTarget && drafts.length > 0) {
-                useInlineCommentDraftStore.getState().restoreDrafts(consumedDraftTarget, drafts);
-            }
-        };
+        try {
+            await sendMessage(
+                primaryText,
+                providerIdToSend,
+                modelIdToSend,
+                agentNameToSend,
+                primaryAttachments,
+                agentMentionName,
+                additionalParts.length > 0 ? additionalParts : undefined,
+                variantToSend,
+                inputMode,
+                sendMessageOptions,
+            );
 
-        void sendPromise.then(() => {
+            commitSuccessfulSubmission();
+
             // Record what this session was pointed at, so the work-status panel
             // can show it as a context source long after the message scrolled
             // away. A snapshot only — never re-fetched, never authoritative.
@@ -1444,7 +1465,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (linkedLinearIssue) {
                 setLinkedLinearIssue(null);
             }
-        }).catch((error: unknown) => {
+        } catch (error: unknown) {
             const rawMessage =
                 error instanceof Error
                     ? error.message
@@ -1455,26 +1476,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
             console.error('Message send failed:', rawMessage || error);
             restoreConsumedDrafts();
-
-            // A failed send returns the typed prompt no matter WHY it failed —
-            // auth, network, server, anything. Losing a long prompt to a toast
-            // is the one outcome this handler must never produce.
-            if (inputSnapshot.message) {
-                if (currentChatDraftIdentityRef.current !== chatDraftIdentity) {
-                    // The user switched sessions mid-send: restore into that
-                    // session's persisted draft, not the visible composer.
-                    writeChatDraft(chatDraftIdentity, inputSnapshot.message, confirmedMentionsRef.current);
-                } else {
-                    const currentInput = composerRef.current?.getValue() ?? messageRef.current;
-                    if (!currentInput || currentInput === inputSnapshot.message) {
-                        setMessage(inputSnapshot.message);
-                        writeChatDraft(chatDraftIdentity, inputSnapshot.message, confirmedMentionsRef.current);
-                    } else {
-                        // New typing already lives in the composer; the failed
-                        // prompt joins it instead of clobbering either text.
-                        useInputStore.getState().setPendingInputText(inputSnapshot.message, 'append');
-                    }
-                }
+            if (!queuedOnly) {
+                restoreFailedDraft(submittedDraftIdentity, submittedDraft.message, submittedMentions);
             }
 
             const isSoftNetworkError =
@@ -1490,14 +1493,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
             if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
                 toast.error(t('chat.chatInput.toast.attachmentsTooLarge'));
-                if (allAttachments.length > 0) {
+                if (queuedOnly && allAttachments.length > 0) {
                     useInputStore.getState().setAttachedFiles(allAttachments);
                 }
                 return;
             }
 
             if (isSoftNetworkError) {
-                if (allAttachments.length > 0) {
+                if (queuedOnly && allAttachments.length > 0) {
                     useInputStore.getState().setAttachedFiles(allAttachments);
                     toast.error(t('chat.chatInput.toast.sendAttachmentsFailed'));
                 }
@@ -1505,21 +1508,27 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             }
 
             if (normalized.includes('runtime changed')) {
-                if (allAttachments.length > 0) {
+                if (queuedOnly && allAttachments.length > 0) {
                     useInputStore.getState().setAttachedFiles(allAttachments);
                 }
                 toast.error(t('chat.chatInput.toast.messageSendFailed'));
                 return;
             }
 
-            if (allAttachments.length > 0) {
+            if (queuedOnly && allAttachments.length > 0) {
                 useInputStore.getState().setAttachedFiles(allAttachments);
             }
             toast.error(rawMessage || t('chat.chatInput.toast.messageSendFailed'));
-        });
+        }
 
         if (!isMobile) {
             composerRef.current?.focus();
+        }
+        } finally {
+            if (!queuedOnly) {
+                isSubmittingRef.current = false;
+                setIsSubmitting(false);
+            }
         }
     };
 
@@ -2768,6 +2777,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 isMobileExpanded && 'flex h-full min-h-0 flex-col pt-2',
                 isMobile && 'bottom-safe-area oc-mobile-composer'
             )}
+            aria-busy={isSubmitting}
+            inert={isSubmitting}
             style={isMobile && inputBarOffset > 0 ? { marginBottom: `${inputBarOffset}px` } : undefined}
         >
             {showDesktopDraftPresentation ? (
@@ -2888,6 +2899,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         hasContent={Boolean(hasContent)}
                         isVSCode={isVSCode}
                         canAbort={canAbort}
+                        isSubmitting={isSubmitting}
                         footerIconButtonClass={footerIconButtonClass}
                         iconSizeClass={iconSizeClass}
                         stopIconSizeClass={stopIconSizeClass}
@@ -3072,6 +3084,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         canSend={canSend}
                         canAbort={canAbort}
                         hasContent={Boolean(hasContent)}
+                        isSubmitting={isSubmitting}
                         isExpandedInput={isExpandedInput}
                         permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                         isPermissionAutoAcceptInteractive={isPermissionAutoAcceptInteractive}

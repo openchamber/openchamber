@@ -2297,6 +2297,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.linkGithubPr': 'GitHub PRをリンク',
   'chat.chatInput.actions.modelAgentSettings': 'モデルとエージェント設定',
   'chat.chatInput.actions.sendMessageAria': 'メッセージを送信',
+  'chat.chatInput.actions.sendingMessageAria': 'メッセージを送信中',
   'chat.chatInput.actions.queueMessageAria': 'メッセージをキュー',
   'chat.chatInput.actions.stopGeneratingAria': '生成を停止',
   'chat.chatInput.focusMode.toggleAria': 'フォーカスモードの切り替え',

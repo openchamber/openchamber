@@ -21,6 +21,7 @@ type ComposerActionButtonsProps = {
     canSend: boolean;
     canAbort: boolean;
     hasContent: boolean;
+    isSubmitting: boolean;
     currentSessionId: string | null;
     newSessionDraftOpen: boolean;
     onPrimaryAction: () => void;
@@ -37,6 +38,7 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
         canSend,
         canAbort,
         hasContent,
+        isSubmitting,
         currentSessionId,
         newSessionDraftOpen,
         onPrimaryAction,
@@ -44,6 +46,20 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
         onAbort,
     } = props;
     const { t } = useI18n();
+
+    if (isSubmitting) {
+        return (
+            <button
+                type="button"
+                disabled
+                aria-busy="true"
+                aria-label={t('chat.chatInput.actions.sendingMessageAria')}
+                className={cn(footerIconButtonClass, 'text-primary')}
+            >
+                <Icon name="loader-4" className={cn(sendIconSizeClass, 'animate-spin')} />
+            </button>
+        );
+    }
 
     const sendButton = (
         <button
@@ -116,6 +132,7 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
     && prev.canSend === next.canSend
     && prev.canAbort === next.canAbort
     && prev.hasContent === next.hasContent
+    && prev.isSubmitting === next.isSubmitting
     && prev.currentSessionId === next.currentSessionId
     && prev.newSessionDraftOpen === next.newSessionDraftOpen
     && prev.onPrimaryAction === next.onPrimaryAction

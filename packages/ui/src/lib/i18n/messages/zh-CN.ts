@@ -2267,6 +2267,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.linkGithubPr': '关联 GitHub PR',
   'chat.chatInput.actions.modelAgentSettings': '模型与智能体设置',
   'chat.chatInput.actions.sendMessageAria': '发送消息',
+  'chat.chatInput.actions.sendingMessageAria': '正在发送消息',
   'chat.chatInput.actions.queueMessageAria': '将消息加入队列',
   'chat.chatInput.actions.stopGeneratingAria': '停止生成',
   'chat.chatInput.focusMode.toggleAria': '切换专注模式',

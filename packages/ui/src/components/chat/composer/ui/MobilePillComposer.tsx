@@ -28,6 +28,7 @@ export interface MobilePillComposerProps {
     hasContent: boolean;
     isVSCode: boolean;
     canAbort: boolean;
+    isSubmitting: boolean;
     footerIconButtonClass: string;
     iconSizeClass: string;
     stopIconSizeClass: string;
@@ -55,6 +56,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
         hasContent,
         isVSCode,
         canAbort,
+        isSubmitting,
         footerIconButtonClass,
         iconSizeClass,
         stopIconSizeClass,
@@ -136,10 +138,15 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                     while a turn is running the stop button takes the mic's
                     end slot and the mic shifts one slot left. Instant swap —
                     no shape animation (WKWebView). */}
-                {canAbort ? (
+                {isSubmitting || canAbort ? (
                     <button
                         type="button"
-                        className={cn(footerIconButtonClass, 'text-[var(--status-error)] hover:text-[var(--status-error)]')}
+                        className={cn(
+                            footerIconButtonClass,
+                            !isSubmitting && 'text-[var(--status-error)] hover:text-[var(--status-error)]',
+                        )}
+                        disabled={isSubmitting}
+                        aria-busy={isSubmitting || undefined}
                         // The pill shows only while the keyboard is down — the
                         // tap must abort in place, never focus/expand the
                         // composer or raise the keyboard.
@@ -151,12 +158,14 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                         }}
                         onClick={(event) => {
                             event.stopPropagation();
-                            onAbort();
+                            if (!isSubmitting) onAbort();
                         }}
-                        title={t('chat.chatInput.actions.stopGeneratingAria')}
-                        aria-label={t('chat.chatInput.actions.stopGeneratingAria')}
+                        title={t(isSubmitting ? 'chat.chatInput.actions.sendingMessageAria' : 'chat.chatInput.actions.stopGeneratingAria')}
+                        aria-label={t(isSubmitting ? 'chat.chatInput.actions.sendingMessageAria' : 'chat.chatInput.actions.stopGeneratingAria')}
                     >
-                        <StopIcon className={cn(stopIconSizeClass)} />
+                        {isSubmitting
+                            ? <Icon name="loader-4" className={cn(stopIconSizeClass, 'animate-spin text-primary')} />
+                            : <StopIcon className={cn(stopIconSizeClass)} />}
                     </button>
                 ) : null}
             </div>
