@@ -180,7 +180,7 @@ export function SessionMRUSwitcher(): React.ReactElement | null {
       event.preventDefault();
       event.stopPropagation();
 
-      // Throttle to prevent agressive preview movement speed when the user holds Tab
+      // Throttle to prevent aggressive preview movement speed when the user holds Tab
       // because some devices can have excessive key repeat rates.
       // The first movement happens immediately,
       // rapid repeats are ignored for PREVIEW_MOVE_THROTTLE_MS.
