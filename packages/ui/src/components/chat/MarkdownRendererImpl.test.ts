@@ -719,6 +719,39 @@ describe('MarkdownRenderer warm settled path', () => {
         });
     });
 
+    test('preserves pipeline-rendered DOM when streaming settles without a cache key', async () => {
+        await withRendererDom(async () => {
+            resetRendererTestState();
+            rendererStreaming = true;
+            rendererContent = 'streaming pipeline';
+            renderedRendererBlocks = [{ id: 'pipeline:rendered', html: '<p>pipeline</p>' }];
+
+            const root = rendererRoot(beginRendererRender());
+            runRendererLayoutEffects();
+            runRendererPassiveEffects();
+            await Promise.resolve();
+
+            const target = root.querySelector('[data-markdown-content]');
+            const pipelineBlock = target?.children[0];
+            expect(pipelineBlock?.getAttribute('data-md-id')).toBe('pipeline:rendered');
+            expect(syncRenderCalls).toBe(1);
+
+            rendererStreaming = false;
+            renderedRendererBlocks = [{ id: 'pipeline:settled', html: '<p>settled pipeline</p>' }];
+            beginRendererRender();
+            runRendererLayoutEffects();
+
+            expect(syncRenderCalls).toBe(1);
+            expect(target?.children).toHaveLength(1);
+            expect(target?.children[0]).toBe(pipelineBlock);
+
+            runRendererPassiveEffects();
+            await Promise.resolve();
+            expect(target?.children[0]).toBe(pipelineBlock);
+            expect(target?.children[0]?.getAttribute('data-md-id')).toBe('pipeline:settled');
+        });
+    });
+
     test('keeps streaming fallback first-mount-only behavior', async () => {
         await withRendererDom(async () => {
             resetRendererTestState();

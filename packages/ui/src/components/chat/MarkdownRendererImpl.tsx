@@ -719,6 +719,14 @@ const domMatchesRenderedBlocks = (
   }
   return true;
 };
+
+const isProvisionalSyncFallbackDom = (target: HTMLElement): boolean => {
+  const blocks = Array.from(target.children);
+  return blocks.length > 0
+    && blocks.length === target.childNodes.length
+    && blocks.every((block) => block.getAttribute('data-md-id')?.startsWith('sync:') === true);
+};
+
 const MARKDOWN_DECORATION_IDS = new WeakMap<DecorateContext, string>();
 let nextMarkdownDecorationId = 0;
 const MARKDOWN_DOM_CACHE_MAX_SOURCE_CHARS = 200_000;
@@ -977,6 +985,7 @@ const useMorphdomMarkdown = ({
       !streaming
       && target.childNodes.length > 0
       && !mountedDomRef.current
+      && isProvisionalSyncFallbackDom(target)
       && (!cachedBlocks || !domMatchesRenderedBlocks(target, cachedBlocks, decorationId))
     ) {
       // Viewer controllers own transient state on old nodes; clean them up
