@@ -47,7 +47,9 @@ export function SessionMRUSwitcher(): React.ReactElement | null {
   const [cycleState, setCycleState] = React.useState<SessionCycleState | null>(
     null,
   );
+  const listboxId = React.useId();
   const cycleStateRef = React.useRef<SessionCycleState | null>(null);
+  const listboxRef = React.useRef<HTMLDivElement | null>(null);
   const selectedRowRef = React.useRef<HTMLButtonElement | null>(null);
   const nextPreviewMoveAllowedAtRef = React.useRef(0);
 
@@ -251,6 +253,9 @@ export function SessionMRUSwitcher(): React.ReactElement | null {
       projectLabel: project?.label?.trim() || null,
     });
   }
+  const selectedRow = rowsToRender.find(
+    ({ previewIndex }) => previewIndex === cycleState.previewIndex,
+  );
 
   return (
     <Dialog
@@ -260,7 +265,7 @@ export function SessionMRUSwitcher(): React.ReactElement | null {
       }}
     >
       <DialogContent
-        initialFocus={false}
+        initialFocus={listboxRef}
         showCloseButton={false}
         onContextMenu={(event) => event.preventDefault()}
         className="oc-glass-popover oc-glass-floating w-[min(44rem,calc(100vw-2rem))] max-w-none gap-1 overflow-hidden rounded-2xl p-2"
@@ -268,12 +273,24 @@ export function SessionMRUSwitcher(): React.ReactElement | null {
         <DialogTitle className="px-3 pb-1 pt-2 typography-ui-label font-normal text-muted-foreground">
           {t("sessions.mruSwitcher.title")}
         </DialogTitle>
-        <div className="max-h-[min(24rem,60vh)] overflow-y-auto" role="listbox">
+        <div
+          ref={listboxRef}
+          id={listboxId}
+          className="max-h-[min(24rem,60vh)] overflow-y-auto outline-none"
+          role="listbox"
+          tabIndex={-1}
+          aria-activedescendant={
+            selectedRow
+              ? `${listboxId}-option-${selectedRow.previewIndex}`
+              : undefined
+          }
+        >
           {rowsToRender.map(({ session, previewIndex, projectLabel }) => {
             const selected = previewIndex === cycleState.previewIndex;
             return (
               <button
                 key={session.id}
+                id={`${listboxId}-option-${previewIndex}`}
                 ref={selected ? selectedRowRef : undefined}
                 type="button"
                 role="option"
