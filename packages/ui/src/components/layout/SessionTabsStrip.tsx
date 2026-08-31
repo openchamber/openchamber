@@ -159,8 +159,11 @@ const SessionTabItem: React.FC<{
                   }}
                   data-controls-open={overlayVisible ? 'true' : 'false'}
                   className={cn(
+                    // No color transition: activation must snap. A crossfade
+                    // here reads as the switch itself being slow, since the
+                    // old and new tab trade colors over several frames right
+                    // after the click.
                     'session-tab group/session-tab relative flex h-7 w-full min-w-0 select-none items-center rounded-md px-2',
-                    'transition-colors duration-75',
                     isActive
                       ? 'bg-interactive-selection'
                       : cn(
@@ -180,8 +183,15 @@ const SessionTabItem: React.FC<{
                       !suppressControls && 'session-tab-title',
                     )}
                     >
+                      {/* Same box as the active content the header renders
+                          (a centered column with a block title), so the
+                          title sits at the same height before and after
+                          activation and does not jump when the tab swaps
+                          its content. */}
                       {isActive ? children : (
-                        <span className="text-[13px] font-medium leading-4">{title}</span>
+                        <div className="flex min-w-0 flex-col justify-center">
+                          <span className="block max-w-full overflow-hidden whitespace-nowrap text-[13px] font-medium leading-4">{title}</span>
+                        </div>
                       )}
                     </div>
                     {showDot ? (

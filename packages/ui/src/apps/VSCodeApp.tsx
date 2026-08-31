@@ -14,6 +14,7 @@ import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useGlobalSessionsPolling } from '@/hooks/useGlobalSessionsPolling';
 import { useRouter } from '@/hooks/useRouter';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
+import { useRootScrollLock } from '@/hooks/useRootScrollLock';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -57,6 +58,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
   useAppFontEffects();
   usePushVisibilityBeacon({ enabled: true });
   useWindowTitle();
+  useRootScrollLock();
   useRouter();
   useGlobalSessionsPolling(panelType !== 'agentManager');
 

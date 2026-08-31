@@ -1,3 +1,4 @@
+import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'Відстеження використання OpenCode Go',
@@ -1838,7 +1839,10 @@ export const settingsDict = {
   "settings.voice.page.provider.server": "Сервер",
   "settings.voice.page.provider.local": "Локальний",
   "settings.voice.page.tooltip.sttLocal": "Локальна розшифровка на сервері OpenChamber. Моделі завантажуються автоматично; ключ API не потрібен.",
-  "settings.voice.page.tooltip.localTts": "Локальний синтез на сервері OpenChamber (Kokoro, англійська). Модель завантажується автоматично; ключ API не потрібен.",
+  "settings.voice.page.tooltip.localTts": "Локальний синтез на сервері OpenChamber (Kokoro для англійської; моделі для інших мов завантажуються при першому використанні). Ключ API не потрібен.",
+  "settings.voice.page.field.followTextLanguage": "Підбирати голос під мову тексту",
+  "settings.voice.page.field.followTextLanguageAria": "Підбирати голос під мову тексту",
+  "settings.voice.page.field.followTextLanguageInfo": "Якщо відповідь іншою мовою, використовується голос цієї мови: відповідний голос macOS або локальна модель, яка завантажується при першому використанні.",
   "settings.voice.page.stt.model.parakeetV2": "Parakeet v2 (англійська)",
   "settings.voice.page.stt.model.parakeetV3": "Parakeet v3 (25 європейських мов)",
   "settings.voice.page.stt.model.whisperBase": "Whisper base (мультимовна)",
@@ -1932,7 +1936,7 @@ export const settingsDict = {
   "settings.openchamber.visual.section.streaming": "Стримінг",
   "settings.openchamber.visual.field.streamingAutoFollow": "Слідкувати за новим вмістом під час стримінгу",
   "settings.openchamber.visual.field.streamingAutoFollowAria": "Автоматично слідкувати за новим вмістом під час стримінгу відповіді",
-  "settings.openchamber.visual.field.streamingAutoFollowInfo": "Поки відповідь надходить, вигляд плавно рухається до найновішого вмісту. Вимкніть, щоб вигляд залишався нерухомим і гортати вручну.",
+  "settings.openchamber.visual.field.streamingAutoFollowInfo": "Поки відповідь надходить, вигляд плавно рухається до найновішого вмісту. Вимкніть, щоб вигляд залишався нерухомим і гортати вручну; тоді й надсилання повідомлення з середини чату не зсуватиме вигляд.",
   "settings.openchamber.visual.section.messageAppearance": "Вигляд повідомлень",
   "settings.openchamber.visual.section.toolsAndFiles": "Інструменти та файли",
   "settings.openchamber.visual.section.composer": "Поле вводу",
@@ -2062,6 +2066,13 @@ export const settingsDict = {
   "settings.openchamber.visual.field.persistDraftMessages": "Зберігати чернетки повідомлень",
   "settings.openchamber.visual.field.enableSpellcheckInTextInputsAria": "Увімкнути перевірку орфографії під час введення тексту",
   "settings.openchamber.visual.field.enableSpellcheckInTextInputs": "Увімкнути перевірку орфографії в текстових полях",
+  "settings.openchamber.visual.field.largeTextPaste": "Вставлення великого тексту",
+  "settings.openchamber.visual.field.largeTextPasteHint": "Під час вставлення понад приблизно 2000 символів або 25 рядків виберіть, чи долучити текст як файл, вставити його в повідомлення чи запитувати щоразу.",
+  "settings.openchamber.visual.field.largeTextPasteAria": "Поведінка вставлення великого тексту",
+  "settings.openchamber.visual.field.largeTextPasteOptionAria": "Вставлення великого тексту: {option}",
+  "settings.openchamber.visual.option.largeTextPaste.ask.label": "Запитувати щоразу",
+  "settings.openchamber.visual.option.largeTextPaste.attach.label": "Долучити як файл",
+  "settings.openchamber.visual.option.largeTextPaste.inline.label": "Вставити в повідомлення",
   "settings.openchamber.visual.field.sendAnonymousUsageReportsAria": "Надсилати анонімні звіти про використання",
   "settings.openchamber.visual.field.sendAnonymousUsageReports": "Надсилати анонімні звіти про використання",
   "settings.openchamber.visual.field.sendAnonymousUsageReportsHint": "Допомагає нам зрозуміти, які версії застосунків активно використовуються, щоб ми могли визначити пріоритети покращень. Збираються лише версія застосунку, платформа та середовище виконання – без особистих даних чи коду.",
@@ -2220,5 +2231,6 @@ export const settingsDict = {
   "settings.openchamber.visual.field.followUpBehaviorDescription": "Choose what happens when you press Enter on a follow-up message while the agent is still responding.",
   "settings.openchamber.visual.option.followUpBehavior.steer.label": "Steer",
   "settings.openchamber.visual.option.followUpBehavior.queue.label": "Queue",
+  ...linearIntegrationI18n.uk,
   ...thirdPartyIntegrationI18n.uk,
 } as const;

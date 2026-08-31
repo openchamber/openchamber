@@ -90,7 +90,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
               icon inset inside the 24px buttons so the first glyph lines up
               with the New-session icon above (16px from the sidebar edge). */}
           <div className="ml-[3px] flex items-center gap-1.5">
-            <Tooltip delayDuration={500}>
+            <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -104,7 +104,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
               <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.addProject')}</p></TooltipContent>
             </Tooltip>
 
-            <Tooltip delayDuration={500}>
+            <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -118,7 +118,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
               <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.scheduledTasks')}</p></TooltipContent>
             </Tooltip>
 
-            <Tooltip delayDuration={500}>
+            <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -133,7 +133,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
               <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.newMultiRun')}</p></TooltipContent>
             </Tooltip>
 
-            <Tooltip delayDuration={500}>
+            <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -149,7 +149,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
           </div>
 
           <div className="flex items-center gap-1.5">
-            <Tooltip delayDuration={500}>
+            <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -164,7 +164,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
               <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.searchSessions')}</p></TooltipContent>
             </Tooltip>
 
-            <Tooltip delayDuration={500}>
+            <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -186,7 +186,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
             </Tooltip>
 
             <DropdownMenu>
-              <Tooltip delayDuration={500}>
+              <Tooltip>
                 <TooltipTrigger asChild>
                   <DropdownMenuTrigger asChild>
                     <button

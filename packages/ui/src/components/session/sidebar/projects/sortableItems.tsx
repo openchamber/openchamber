@@ -295,7 +295,9 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                   <DropdownMenuContent align="start" className="max-h-[70vh] min-w-[220px] overflow-y-auto">
                     {projectPickerOptions?.map((option) => (
                       <DropdownMenuItem key={option.id} onClick={() => onProjectSelect?.(option.id)} className="flex items-center justify-between gap-3" title={option.projectDescription}>
-                        <ProjectHeaderIdentity {...option} />
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <ProjectHeaderIdentity {...option} />
+                        </span>
                         {option.id === id ? <Icon name="check" className="h-4 w-4 flex-shrink-0 text-primary" /> : null}
                       </DropdownMenuItem>
                     ))}
@@ -340,7 +342,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                 showCreateButtons ? 'right-7' : 'right-0.5',
               )}>
                 {showCreateButtons && isRepo && !hideDirectoryControls && onNewWorktreeSession ? (
-                  <Tooltip delayDuration={500}>
+                  <Tooltip>
                     <TooltipTrigger asChild>
                       <button
                         type="button"
@@ -396,7 +398,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
 
               {showCreateButtons && onNewSession ? (
                 <div className="absolute right-0.5 top-1/2 z-10 -translate-y-1/2">
-                  <Tooltip delayDuration={500}>
+                  <Tooltip>
                     <TooltipTrigger asChild>
                       <button
                         type="button"

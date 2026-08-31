@@ -33,6 +33,7 @@ import {
 } from './linux-autostart.mjs';
 import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.mjs';
 import { shouldAllowBrowserPanelCertificateError } from './browser-panel-security.mjs';
+import { attachRendererRecovery } from './renderer-recovery.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 
 const execFileAsync = promisify(execFile);
@@ -2656,6 +2657,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   browserWindow.webContents.on('zoom-changed', () => {
     browserWindow.webContents.setZoomFactor(1);
   });
+  attachRendererRecovery(browserWindow, { log, label: 'window' });
 
   browserWindow.webContents.on('dom-ready', () => {
     if (browserWindow.__ocLabel === 'main') {
@@ -2892,6 +2894,8 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   browserWindow.__ocMiniChat = true;
   browserWindow.__ocMiniChatSessionId = sessionWindowKey;
   browserWindow.__ocPinned = false;
+
+  attachRendererRecovery(browserWindow, { log, label: 'mini chat' });
 
   if (sessionWindowKey) {
     state.miniChatWindowsBySession.set(sessionWindowKey, browserWindow);
@@ -3144,6 +3148,59 @@ const setupAutoUpdater = () => {
     log.error('[electron] autoUpdater error', err);
   });
 };
+
+// quitAndInstall() reports failures (rejected code signature, a Squirrel
+// session already disabled by an earlier failure) asynchronously on the
+// 'error' event, long after the call returns. Give the install that long to
+// either take the app down or report why it did not.
+const UPDATE_INSTALL_GRACE_MS = 15_000;
+
+/**
+ * Hand the downloaded update to the platform installer and keep the IPC call
+ * open until the app quits or the updater reports a failure, so a rejected
+ * install reaches the renderer instead of dying in the log. Restores the
+ * quit/install flags when the install never happens.
+ */
+const installDownloadedUpdate = () => new Promise((resolve, reject) => {
+  let settled = false;
+
+  const rollbackQuitState = () => {
+    state.quitRequested = false;
+    state.installingUpdate = false;
+  };
+
+  const fail = (error) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(graceTimer);
+    autoUpdater.off('error', fail);
+    rollbackQuitState();
+    log.error('[electron] update install failed', error);
+    reject(error instanceof Error ? error : new Error(String(error)));
+  };
+
+  // Still running after the grace period: the install is underway and the app
+  // is shutting down, so release the pending IPC reply.
+  const graceTimer = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    autoUpdater.off('error', fail);
+    resolve(null);
+  }, UPDATE_INSTALL_GRACE_MS);
+
+  autoUpdater.on('error', fail);
+
+  // Defer so the renderer's invoke channel is idle before the app starts
+  // shutting down.
+  setImmediate(() => {
+    try {
+      killSidecar();
+      autoUpdater.quitAndInstall();
+    } catch (error) {
+      fail(error);
+    }
+  });
+});
 
 const parseRelevantChangelogNotes = async (fromVersion, toVersion) => {
   try {
@@ -4482,9 +4539,20 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
             const onError = (error) => finish(reject, error);
             autoUpdater.on('update-downloaded', onDownloaded);
             autoUpdater.on('error', onError);
-            Promise.resolve(autoUpdater.downloadUpdate()).catch((error) => finish(reject, error));
+            // downloadUpdate() resolves once the payload is on disk. It stays
+            // the authoritative signal: when the file was already cached the
+            // updater emits no 'update-downloaded', and waiting only for the
+            // event left this promise pending and its listeners attached on
+            // every retry.
+            Promise.resolve(autoUpdater.downloadUpdate())
+              .then(() => finish(resolve, null))
+              .catch((error) => finish(reject, error));
           });
         }
+        // The 'update-downloaded' event does not fire for an already cached
+        // payload, so record the payload as ready here too; otherwise restart
+        // would relaunch without installing anything.
+        state.pendingUpdate.downloaded = true;
         emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
           event: 'Finished',
           data: {},
@@ -4521,20 +4589,16 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           } catch {
           }
         }
+        return await installDownloadedUpdate();
       }
       // Defer so the IPC reply flushes before the app starts shutting down.
-      // Without this, quitAndInstall() can race with the renderer's pending
-      // invoke and the restart appears to do nothing from the UI side.
+      // Without this, relaunch can race with the renderer's pending invoke and
+      // the restart appears to do nothing from the UI side.
       setImmediate(() => {
         try {
-          if (applyUpdate) {
-            killSidecar();
-            autoUpdater.quitAndInstall();
-          } else {
-            prepareForQuit();
-            app.relaunch();
-            app.exit(0);
-          }
+          prepareForQuit();
+          app.relaunch();
+          app.exit(0);
         } catch (err) {
           log.error('[electron] desktop_restart failed', err);
         }

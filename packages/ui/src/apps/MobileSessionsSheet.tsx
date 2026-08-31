@@ -41,6 +41,8 @@ import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { toast } from '@/components/ui';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { getProjectLabel, normalizePath } from './mobilePaths';
+import { CHAT_DRAFT_PROJECT_ID, isChatDirectoryPath } from '@/lib/chatDirectories';
+import { partitionSidebarSessions } from '@/components/session/sidebar/list/sessionCollection';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
@@ -1022,6 +1024,27 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     return merged.filter((session) => !session.time?.archived);
   }, [globalActiveSessions, liveSessions]);
 
+  // Managed Chats (sessions under ~/.config/openchamber/chats) are not owned
+  // by any registered project; they get their own section above the project
+  // tree, the same split the desktop sidebar makes. Temporary /btw forks are
+  // dropped here as well.
+  const { projectSessions, chatSessions } = React.useMemo(
+    () => partitionSidebarSessions(sessions, false),
+    [sessions],
+  );
+  const chatsBucket = React.useMemo<WorktreeBucket>(() => ({
+    key: CHAT_DRAFT_PROJECT_ID,
+    label: '',
+    path: '',
+    worktree: null,
+    sessions: orderSessionsByLifecycleScopes(chatSessions, pinnedSessionIds, sessionOrderRanks),
+  }), [chatSessions, pinnedSessionIds, sessionOrderRanks]);
+  const chatsBucketKey = `${CHAT_DRAFT_PROJECT_ID}::${CHAT_DRAFT_PROJECT_ID}`;
+  const chatRootCount = React.useMemo(
+    () => chatSessions.filter((session) => !getParentId(session)).length,
+    [chatSessions],
+  );
+
   const normalizedQuery = query.trim().toLowerCase();
 
   // On open, bring the current session (or at least its project) into view —
@@ -1070,7 +1093,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       for (const worktree of node.project.worktrees) ensureBucket(node, worktree.path, worktree);
     }
 
-    for (const session of sessions) {
+    for (const session of projectSessions) {
       const directory = getSessionDirectory(session);
       if (!directory) continue;
       const normalizedDirectory = normalizePath(directory);
@@ -1093,7 +1116,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     }
 
     return nodes;
-  }, [activeProjectId, pinnedSessionIds, projectsMeta, sessionOrderRanks, sessions]);
+  }, [activeProjectId, pinnedSessionIds, projectSessions, projectsMeta, sessionOrderRanks]);
 
   const normalizedDirectory = normalizePath(currentDirectory);
 
@@ -1149,8 +1172,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   // Paginated, tree-aware list of a bucket's sessions: top-level sessions paginate,
   // and a parent with subsessions can be expanded to reveal its children (nested,
   // recursively). Pagination counts only top-level sessions.
-  const renderBucketSessions = (node: ProjectNode, bucket: WorktreeBucket, indent: number) => {
-    const bucketKey = `${node.project.id}::${bucket.key}`;
+  const renderBucketSessions = (bucketKey: string, bucket: WorktreeBucket, indent: number) => {
 
     // Group children by parent within this bucket, and treat sessions whose parent
     // is not in this bucket as top-level so nothing is hidden.
@@ -1336,13 +1358,14 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const buildSessionContextLabel = React.useCallback(
     (session: Session): string => {
       const directory = getSessionDirectory(session);
+      if (isChatDirectoryPath(directory)) return t('mobile.sessions.section.chats');
       const project = findExactProjectMatch(projectsMeta, directory);
       if (!project) return getProjectLabel(directory) || directory;
       const matchedWorktree = findExactWorktreeMatch(project, normalizePath(directory));
       if (matchedWorktree?.branch) return `${project.label} · ${matchedWorktree.branch}`;
       return project.label;
     },
-    [projectsMeta],
+    [projectsMeta, t],
   );
 
   const handleSelectProject = (project: ProjectMeta) => {
@@ -1481,7 +1504,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
               ) : null}
             </div>
           </div>
-          {projectsMeta.length === 0 ? (
+          {projectsMeta.length === 0 && chatSessions.length === 0 ? (
             <MobileSessionsEmpty
               title={t('mobile.sessions.empty.noProjectsTitle')}
               description={t('mobile.sessions.empty.noProjectsDescription')}
@@ -1601,7 +1624,56 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             </div>
           ) : (
             <div className="flex flex-col">
-              {orderedNodes.map((node, nodeIndex) => {
+              {(() => {
+                const chatsExpanded = projectExpandedMap[CHAT_DRAFT_PROJECT_ID] ?? true;
+                const chatsLabel = t('mobile.sessions.section.chats');
+                return (
+                  <section>
+                    <div className="flex min-h-12 w-full items-center">
+                      <button
+                        type="button"
+                        className="flex min-h-12 min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+                        onClick={() => {
+                          if (revealedRowId) {
+                            handleRowKeyRevealedChange(revealedRowId, false);
+                            return;
+                          }
+                          toggleProject(CHAT_DRAFT_PROJECT_ID, chatsExpanded);
+                        }}
+                        aria-expanded={chatsExpanded}
+                        aria-label={
+                          chatsExpanded
+                            ? t('sessions.sidebar.group.collapseAria', { label: chatsLabel })
+                            : t('sessions.sidebar.group.expandAria', { label: chatsLabel })
+                        }
+                        style={{ touchAction: 'manipulation' }}
+                      >
+                        <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--surface-muted)] text-muted-foreground">
+                          <Icon name="chat-4" className="size-4" />
+                        </span>
+                        <span className="block min-w-0 flex-1 truncate typography-ui-label font-semibold text-foreground">
+                          {chatsLabel}
+                        </span>
+                        <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">
+                          {chatRootCount}
+                        </span>
+                      </button>
+                    </div>
+                    {chatsExpanded ? (
+                      <div className="pb-2">
+                        {chatsBucket.sessions.length > 0 ? (
+                          renderBucketSessions(chatsBucketKey, chatsBucket, PROJECT_SESSION_INDENT)
+                        ) : (
+                          <p className="px-3 pb-1 typography-micro text-muted-foreground" style={{ paddingLeft: PROJECT_SESSION_INDENT }}>
+                            {t('sessions.sidebar.activity.chatsEmpty')}
+                          </p>
+                        )}
+                      </div>
+                    ) : null}
+                  </section>
+                );
+              })()}
+              {orderedNodes.map((node) => {
                 const projectExpanded = isProjectExpanded(node);
                 const buckets = normalizedQuery
                   ? node.buckets.filter((bucket) =>
@@ -1614,7 +1686,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                 return (
                   <section
                     key={node.project.id}
-                    className={cn(nodeIndex > 0 && 'border-t border-border/70')}
+                    className="border-t border-border/70"
                   >
                     <MobileSwipeActionsRow
                       actionsWidth={96}
@@ -1712,7 +1784,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                           return (
                             <>
                               {rootBucket && rootBucket.sessions.length > 0
-                                ? renderBucketSessions(node, rootBucket, PROJECT_SESSION_INDENT)
+                                ? renderBucketSessions(`${node.project.id}::${rootBucket.key}`, rootBucket, PROJECT_SESSION_INDENT)
                                 : null}
                               {worktreeBuckets.map((bucket) => {
                                 const worktreeExpanded = isWorktreeExpanded(node, bucket);
@@ -1787,7 +1859,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                                     </button>
                                     </MobileSwipeActionsRow>
                                     {worktreeExpanded
-                                      ? renderBucketSessions(node, bucket, PROJECT_SESSION_INDENT)
+                                      ? renderBucketSessions(`${node.project.id}::${bucket.key}`, bucket, PROJECT_SESSION_INDENT)
                                       : null}
                                   </div>
                                 );

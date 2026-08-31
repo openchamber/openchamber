@@ -1,6 +1,6 @@
 ---
 name: communication-style
-description: Use it always.
+description: Load when writing or editing any human-facing text — documentation, UI copy, PR/issue comments, release notes, READMEs — to strip AI-generated patterns and keep a human voice.
 author: poteto (pstack)
 ---
 

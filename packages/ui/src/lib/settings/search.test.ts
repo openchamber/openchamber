@@ -38,4 +38,30 @@ describe('settings search', () => {
 
     expect(results.some((result) => result.id === 'integrations.third-party.opencode-cursor-oauth')).toBe(true);
   });
+
+  test('finds Linear connect on the integrations page', () => {
+    const results = buildSettingsSearchResults({
+      query: 'linear',
+      runtimeCtx,
+      t,
+      getPageTitle: (page) => page,
+    });
+
+    expect(results.some((result) => result.id === 'integrations.linear')).toBe(true);
+    expect(results.some((result) => result.id === 'integrations.linear.add-workspace')).toBe(true);
+    expect(results.some((result) => result.id === 'integrations.linear.mapping')).toBe(true);
+  });
+
+  test('hides Linear connect in VS Code', () => {
+    const results = buildSettingsSearchResults({
+      query: 'linear',
+      runtimeCtx: { ...runtimeCtx, isVSCode: true },
+      t,
+      getPageTitle: (page) => page,
+    });
+
+    expect(results.some((result) => result.id === 'integrations.linear')).toBe(false);
+    expect(results.some((result) => result.id === 'integrations.linear.add-workspace')).toBe(false);
+    expect(results.some((result) => result.id === 'integrations.linear.mapping')).toBe(false);
+  });
 });

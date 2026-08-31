@@ -17,7 +17,7 @@ import {
 } from '@/sync/attachment-files';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
-import { buildLinkedIssue } from '@/lib/linkedIssues';
+import { buildLinkedIssue, buildLinkedLinearIssue } from '@/lib/linkedIssues';
 import { useUserMessageHistory } from "@/sync/sync-context";
 import { getInlineCommentDraftKey, useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
@@ -35,7 +35,8 @@ import {
 import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session/ReviewFlowDialog';
 import { BtwPanel } from './btw/BtwPanel';
 import { useBtwPanelState } from './btw/useBtwPanelState';
-import { destroyBtwSession, startBtwSession, type BtwSessionRef } from '@/lib/btw';
+import { wasPromotedBtwSession } from '@/lib/sessionBtwMetadata';
+import { buildBtwSyntheticTexts, destroyBtwSession, startBtwSession, type BtwSessionRef } from '@/lib/btw';
 import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import type { ToolPopupContent } from './message/types';
@@ -50,6 +51,7 @@ import { ModelControls } from './ModelControls';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
 import { ComposerStatusBar } from './ComposerStatusBar';
 import { PendingChangesBar } from './PendingChangesBar';
+import { useChatColumnSession } from './chatColumnSession';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { MobileAgentButton } from './MobileAgentButton';
 import { MobileModelButton } from './MobileModelButton';
@@ -65,14 +67,15 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { GitHubIssuePickerDialog } from '@/components/session/GitHubIssuePickerDialog';
 import { GitHubPrPickerDialog } from '@/components/session/GitHubPrPickerDialog';
+import { LinearIssuePickerDialog } from '@/components/session/LinearIssuePickerDialog';
 import { Icon } from "@/components/icon/Icon";
 import { DraftPresetChips } from './DraftPresetChips';
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useSkillsStore } from '@/stores/useSkillsStore';
-import { useCommandsStore } from '@/stores/useCommandsStore';
+import { selectSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
+import { selectCommandsForDirectory, useCommandsStore } from '@/stores/useCommandsStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { usePermissionStore } from '@/stores/permissionStore';
@@ -89,7 +92,18 @@ import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from 
 import {
     assignImageAttachmentFilenames,
     buildAttachmentCitationText,
+    nextPastedContextFilename,
 } from './attachmentCitations';
+import {
+    createPastedContextFile,
+    isLargePlainTextPaste,
+} from './composer/largeTextPaste';
+import {
+    LARGE_TEXT_PASTE_TOAST_CLASSNAME,
+    beginLargeTextPasteOffer,
+    resolveLargeTextPasteOffer,
+} from './composer/largeTextPasteOffer';
+import type { LargeTextPasteBehavior } from '@/stores/useUIStore';
 import type { FileMentionAutocompleteInputSource } from './fileMentionAutocompleteState';
 import {
     classifyMention,
@@ -104,10 +118,12 @@ import {
     type ComposerEditorHandle,
 } from './composer/editor/ComposerEditor';
 import { createComposerEditorViewStore } from './composer/editor/viewStore';
+import { composerAutoCorrect } from './composer/editor/autocorrect';
 import {
     appendInlineText,
     appendWithLineBreaks,
     buildImagePasteInsertion,
+    getMarkdownAutoPairEdit,
     shouldWrapSelectionAsLink,
     withInlineInsertionBoundaries,
 } from './composer/text';
@@ -312,15 +328,24 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const messageRef = React.useRef(message);
     const currentChatDraftIdentityRef = React.useRef<ChatDraftIdentity | null>(initialDraftIdentityRef.current);
     const pendingPastedAttachmentFilenamesRef = React.useRef<Set<string>>(new Set());
+    const largeTextPasteToastIdRef = React.useRef<string | number | null>(null);
+    const largeTextPasteOfferIdRef = React.useRef(0);
 
     // TODO: port sendMessage to session-actions (complex — creates sessions, handles attachments, etc.)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sendMessage = React.useRef((...args: any[]) =>
         Promise.resolve((useSessionUIStore.getState().sendMessage as (...a: unknown[]) => unknown)(...args)),
     ).current;
-    const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+    // Inside the chat column the composer follows the session the timeline is
+    // showing (see chatColumnSession.ts); elsewhere it follows the live one.
+    const liveSessionId = useSessionUIStore((s) => s.currentSessionId);
+    const chatColumnSession = useChatColumnSession();
+    const currentSessionId = chatColumnSession ? chatColumnSession.sessionId : liveSessionId;
     const fallbackDirectory = useDirectoryStore((s) => s.currentDirectory);
-    const currentDirectory = useEffectiveDirectory() ?? fallbackDirectory;
+    const liveEffectiveDirectory = useEffectiveDirectory();
+    const currentDirectory = (chatColumnSession?.sessionId ? chatColumnSession.directory : null)
+        ?? liveEffectiveDirectory
+        ?? fallbackDirectory;
     const currentSessionDirectoryForSync = useSessionUIStore(
         React.useCallback((s) => currentSessionId ? s.getDirectoryForSession(currentSessionId) : null, [currentSessionId]),
     );
@@ -338,6 +363,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         [btwDirectory, btwSessionId, currentSessionId],
     );
     const isBtwActive = Boolean(btwSessionRef) && !btwPanel.collapsed;
+    // A session promoted out of `/btw` keeps the boundary instructions in its
+    // transcript — there is no way to delete a message part — so it has to say
+    // they no longer apply.
+    const isPromotedBtwSession = wasPromotedBtwSession(btwPanel.parentSession);
     const activeRuntimeKey = getRuntimeKey();
     const chatDraftIdentity = React.useMemo(
         () => createChatDraftIdentity(
@@ -402,10 +431,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
     const persistChatDraft = useUIStore((state) => state.persistChatDraft);
     const inputSpellcheckEnabled = useUIStore((state) => state.inputSpellcheckEnabled);
+    const largeTextPasteBehavior = useUIStore((state) => state.largeTextPasteBehavior);
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
     const setExpandedInput = useUIStore((state) => state.setExpandedInput);
     const setTimelineDialogOpen = useUIStore((state) => state.setTimelineDialogOpen);
-    const { git: runtimeGit, vscode: vscodeApi } = useRuntimeAPIs();
+    const { git: runtimeGit, vscode: vscodeApi, linear: runtimeLinear } = useRuntimeAPIs();
     const cycleAgentShortcutOverride = useUIStore((state) => state.shortcutOverrides.cycle_agent);
     const cycleAgentShortcut = React.useMemo(() => (
         getEffectiveShortcutCombo('cycle_agent', cycleAgentShortcutOverride ? { cycle_agent: cycleAgentShortcutOverride } : undefined)
@@ -581,8 +611,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     // Known slash-invocations (commands + skills + built-ins) used to highlight
     // matching /tokens in the composer, the same way confirmed @files are.
-    const availableCommands = useCommandsStore((s) => s.commands);
-    const availableSkills = useSkillsStore((s) => s.skills);
+    const availableCommands = useCommandsStore((s) => selectCommandsForDirectory(s, currentDirectory));
+    const availableSkills = useSkillsStore((s) => selectSkillsForDirectory(s, currentDirectory));
     const knownSlashNames = React.useMemo(() => {
         const names = new Set<string>([
             'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'btw', 'summary', 'workspace-review', 'plan-feature', 'craft-goal', 'schedule-task', 'catch-up', 'debug', 'weigh', 'explore',
@@ -701,6 +731,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // Issue linking state
     const [issuePickerOpen, setIssuePickerOpen] = React.useState(false);
     const [prPickerOpen, setPrPickerOpen] = React.useState(false);
+    const [linearPickerOpen, setLinearPickerOpen] = React.useState(false);
     const [linkedIssue, setLinkedIssue] = React.useState<{ 
         number: number; 
         title: string; 
@@ -716,6 +747,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         base: string;
         includeDiff: boolean;
         instructionsText: string;
+        contextText: string;
+        author?: { login: string; avatarUrl?: string };
+    } | null>(null);
+    const [linkedLinearIssue, setLinkedLinearIssue] = React.useState<{
+        identifier: string;
+        title: string;
+        url: string;
         contextText: string;
         author?: { login: string; avatarUrl?: string };
     } | null>(null);
@@ -951,6 +989,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         setPrPickerOpen(true);
     }, []);
 
+    const openLinearPicker = React.useCallback(() => {
+        setLinearPickerOpen(true);
+    }, []);
+
     const getSubmitErrorMessage = (error: unknown, fallback: string) => {
         const message = error instanceof Error ? error.message : '';
         return message.toLowerCase().includes('runtime changed')
@@ -1010,6 +1052,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         if (!providerIdToSend || !modelIdToSend) {
             console.warn('Cannot send message: provider or model not selected');
+            toast.error(t('chat.chatInput.toast.noModelSelected'));
             return;
         }
 
@@ -1118,7 +1161,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             : [];
 
         const availableSkillNames = new Set(
-            useSkillsStore.getState().skills.map((skill) => skill.name),
+            selectSkillsForDirectory(useSkillsStore.getState(), currentDirectory).map((skill) => skill.name),
         );
 
         const outgoing = buildOutgoingMessage({
@@ -1126,12 +1169,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             composerText: !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : null,
             composerAttachments: attachedFiles,
             inlineComments: drafts,
-            syntheticTexts: syntheticParts?.map((part) => part.text) ?? [],
+            syntheticTexts: [
+                ...buildBtwSyntheticTexts({ isBtwActive, isPromotedBtwSession }),
+                ...(syntheticParts?.map((part) => part.text) ?? []),
+            ],
             linkedIssue: linkedIssue
                 ? { number: linkedIssue.number, title: linkedIssue.title, url: linkedIssue.url, contextText: linkedIssue.contextText }
                 : null,
             linkedPr: linkedPr
                 ? { number: linkedPr.number, title: linkedPr.title, url: linkedPr.url, instructions: linkedPr.instructionsText, context: linkedPr.contextText }
+                : null,
+            linkedLinearIssue: linkedLinearIssue
+                ? { identifier: linkedLinearIssue.identifier, title: linkedLinearIssue.title, url: linkedLinearIssue.url, contextText: linkedLinearIssue.contextText }
                 : null,
         }, {
             parseAgentMention: (text) => {
@@ -1370,6 +1419,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     true,
                 ).catch(() => undefined);
             }
+            if (linkedLinearIssue && linkTargetSessionId) {
+                void sessionActions.setLinkedIssue(
+                    linkTargetSessionId,
+                    linkTargetDirectory,
+                    buildLinkedLinearIssue({
+                        identifier: linkedLinearIssue.identifier,
+                        title: linkedLinearIssue.title,
+                        url: linkedLinearIssue.url,
+                        author: linkedLinearIssue.author,
+                        linkedAt: Date.now(),
+                    }),
+                    true,
+                ).catch(() => undefined);
+            }
 
             // Clear linked issue after successful message send
             if (linkedIssue) {
@@ -1377,6 +1440,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             }
             if (linkedPr) {
                 setLinkedPr(null);
+            }
+            if (linkedLinearIssue) {
+                setLinkedLinearIssue(null);
             }
         }).catch((error: unknown) => {
             const rawMessage =
@@ -1620,38 +1686,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             const selEnd = ta?.getSelection().end ?? -1;
 
             if (ta && selStart >= 0) {
-                const applyEdit = (next: string, caretStart: number, caretEnd: number) => {
+                const edit = getMarkdownAutoPairEdit(message, e.key, selStart, selEnd);
+                if (edit) {
                     e.preventDefault();
-                    setMessage(next);
-                    composerRef.current?.setSelection(caretStart, caretEnd);
-                    updateAutocompleteState(next, caretEnd);
-                };
-
-                // Wrap the current selection: select text, press ` * _ ~ ( [ { " '
-                const WRAP_PAIRS: Record<string, [string, string]> = {
-                    '`': ['`', '`'], '*': ['*', '*'], '_': ['_', '_'], '~': ['~', '~'],
-                    '(': ['(', ')'], '[': ['[', ']'], '{': ['{', '}'],
-                    '"': ['"', '"'], "'": ["'", "'"],
-                };
-                if (selEnd > selStart && WRAP_PAIRS[e.key]) {
-                    const [open, close] = WRAP_PAIRS[e.key];
-                    const selected = message.slice(selStart, selEnd);
-                    const next = `${message.slice(0, selStart)}${open}${selected}${close}${message.slice(selEnd)}`;
-                    applyEdit(next, selStart + open.length, selEnd + open.length);
+                    ta.replaceRange(
+                        edit.from,
+                        edit.to,
+                        edit.insert,
+                        edit.selectionStart,
+                        edit.selectionEnd,
+                    );
                     return;
-                }
-
-                // Typing the third backtick at line start expands into a fenced
-                // code block with the caret on the empty middle line (Slack-like).
-                if (e.key === '`' && selStart === selEnd) {
-                    const before = message.slice(0, selStart);
-                    if (/(^|\n)``$/.test(before)) {
-                        const after = message.slice(selEnd);
-                        const next = `${before}\`\n\n\`\`\`${after}`;
-                        const caret = before.length + 2; // after the completed ``` and first newline
-                        applyEdit(next, caret, caret);
-                        return;
-                    }
                 }
             }
         }
@@ -1776,21 +1821,24 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (!editor) {
             // No mounted editor (collapsed mobile pill): append to the state
             // the editor will be seeded from.
-            const nextValue = message + text;
+            const nextValue = messageRef.current + text;
             setMessage(nextValue);
             updateAutocompleteState(nextValue, nextValue.length, inputSource, text);
             return;
         }
 
         const { start, end } = editor.getSelection();
-        const nextValue = `${message.substring(0, start)}${text}${message.substring(end)}`;
+        // Read the live document — delayed toast actions must not use a
+        // paste-time React `message` closure.
+        const currentMessage = editor.getValue();
+        const nextValue = `${currentMessage.substring(0, start)}${text}${currentMessage.substring(end)}`;
         const cursorPosition = start + text.length;
 
         // One dispatch places both the text and the caret, so there is no
         // frame where the caret sits at a stale offset.
         editor.insertText(text);
         updateAutocompleteState(nextValue, cursorPosition, inputSource, text);
-    }, [message, updateAutocompleteState]);
+    }, [updateAutocompleteState]);
 
     const clearDropTextSuppression = React.useCallback(() => {
         suppressNextFileDropTextInsertRef.current = false;
@@ -1931,14 +1979,131 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         const imageFiles = Array.from(fileMap.values());
         const pastedText = e.clipboardData.getData('text');
+        const sessionReady = Boolean(currentSessionId || newSessionDraftOpen);
+
         if (imageFiles.length === 0) {
-            if (pastedText.includes('@')) {
-                markFileMentionPasteSuppression();
+            const behavior: LargeTextPasteBehavior = largeTextPasteBehavior;
+            const shouldOfferLargePaste = sessionReady
+                && inputMode === 'normal'
+                && behavior !== 'inline'
+                && isLargePlainTextPaste(pastedText);
+
+            if (!shouldOfferLargePaste) {
+                if (pastedText.includes('@')) {
+                    markFileMentionPasteSuppression();
+                }
+                return;
             }
+
+            // Must run synchronously — ComposerEditor does not consume paste.
+            e.preventDefault();
+
+            const pasteInline = () => {
+                if (pastedText.includes('@')) {
+                    markFileMentionPasteSuppression();
+                }
+                insertTextAtSelection(
+                    pastedText,
+                    getFileMentionInputSourceForInsertedText(pastedText),
+                );
+            };
+
+            const attachAsFile = async () => {
+                // Read live attachment + composer state at action time — the ask
+                // toast can outlive the paste while the user types or attaches more.
+                const liveAttachedFiles = useInputStore.getState().attachedFiles;
+                const filename = nextPastedContextFilename([
+                    ...liveAttachedFiles.map((file) => file.filename),
+                    ...pendingPastedAttachmentFilenamesRef.current,
+                ]);
+                const citationText = buildAttachmentCitationText([filename]);
+                const editor = composerRef.current;
+                const currentMessage = editor?.getValue() ?? messageRef.current;
+                const selectionStart = editor?.getSelection().start ?? currentMessage.length;
+                const selectionEnd = editor?.getSelection().end ?? currentMessage.length;
+                const insertionText = withInlineInsertionBoundaries(
+                    citationText,
+                    currentMessage.slice(0, selectionStart),
+                    currentMessage.slice(selectionEnd),
+                );
+
+                insertTextAtSelection(
+                    insertionText,
+                    getFileMentionInputSourceForInsertedText(insertionText),
+                );
+
+                const file = createPastedContextFile(pastedText, filename);
+                pendingPastedAttachmentFilenamesRef.current.add(filename);
+                try {
+                    await addAttachedFile(file);
+                } catch (error) {
+                    console.error('Clipboard text attach failed', error);
+                    toast.error(
+                        error instanceof Error
+                            ? error.message
+                            : t('chat.chatInput.toast.clipboardTextAttachFailed'),
+                    );
+                } finally {
+                    pendingPastedAttachmentFilenamesRef.current.delete(filename);
+                }
+            };
+
+            if (behavior === 'attach') {
+                await attachAsFile();
+                return;
+            }
+
+            const offerId = beginLargeTextPasteOffer(largeTextPasteOfferIdRef.current);
+            largeTextPasteOfferIdRef.current = offerId;
+
+            if (largeTextPasteToastIdRef.current !== null) {
+                // Invalidate first so a synchronous onDismiss from dismiss()
+                // cannot apply the superseded paste.
+                toast.dismiss(largeTextPasteToastIdRef.current);
+                largeTextPasteToastIdRef.current = null;
+            }
+
+            const resolveLargePaste = (action: 'attach' | 'inline') => {
+                const resolution = resolveLargeTextPasteOffer(
+                    largeTextPasteOfferIdRef.current,
+                    offerId,
+                );
+                largeTextPasteOfferIdRef.current = resolution.nextOfferId;
+                if (!resolution.accepted) {
+                    return;
+                }
+                largeTextPasteToastIdRef.current = null;
+                if (action === 'attach') {
+                    void attachAsFile();
+                    return;
+                }
+                pasteInline();
+            };
+
+            largeTextPasteToastIdRef.current = toast.info(
+                t('chat.chatInput.toast.largeTextPaste.title'),
+                {
+                    duration: Infinity,
+                    className: LARGE_TEXT_PASTE_TOAST_CLASSNAME,
+                    action: {
+                        label: t('chat.chatInput.toast.largeTextPaste.attach'),
+                        onClick: () => resolveLargePaste('attach'),
+                    },
+                    cancel: {
+                        label: t('chat.chatInput.toast.largeTextPaste.inline'),
+                        onClick: () => resolveLargePaste('inline'),
+                    },
+                    onDismiss: () => {
+                        // Dismissing without a choice keeps the paste — insert inline
+                        // so clipboard content is not lost.
+                        resolveLargePaste('inline');
+                    },
+                },
+            );
             return;
         }
 
-        if (!currentSessionId && !newSessionDraftOpen) {
+        if (!sessionReady) {
             if (pastedText.includes('@')) {
                 markFileMentionPasteSuppression();
             }
@@ -1979,7 +2144,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 pendingPastedAttachmentFilenamesRef.current.delete(filename);
             }
         }
-    }, [addAttachedFile, attachedFiles, currentSessionId, inputMode, markFileMentionPasteSuppression, message, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState]);
+    }, [addAttachedFile, attachedFiles, currentSessionId, inputMode, largeTextPasteBehavior, markFileMentionPasteSuppression, message, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState]);
 
     const handleFileSelect = (file: { name: string; path: string; relativePath?: string }) => {
 
@@ -2138,10 +2303,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     };
 
     React.useEffect(() => {
-
-        if (active && currentSessionId && composerRef.current && !isMobile) {
-            composerRef.current.focus();
-        }
+        if (!active || !currentSessionId || isMobile) return;
+        // Focusing forces layout. Right after a session switch the layout is
+        // dirty from the whole timeline mounting, so the focus call would pay
+        // for that layout inside the commit; a frame later it is nearly free.
+        const frame = window.requestAnimationFrame(() => {
+            composerRef.current?.focus();
+        });
+        return () => window.cancelAnimationFrame(frame);
     }, [active, currentSessionId, isMobile]);
 
     React.useEffect(() => {
@@ -2400,6 +2569,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     const footerGapClass = 'gap-x-1.5 gap-y-0';
     const isVSCode = isVSCodeRuntime();
+    const showLinearPicker = Boolean(runtimeLinear) && !isVSCode;
     // The work-status panel carries the agent's todos and the changed-file
     // count, but only on the desktop/web layout — VS Code and mobile have no
     // panel, so these keep their place above the composer there.
@@ -2480,6 +2650,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             draftPickerOpen: mobileDraftPicker !== null,
             issuePickerOpen,
             prPickerOpen,
+            linearPickerOpen,
             isDragging,
         },
     });
@@ -2650,6 +2821,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onRemove={() => setLinkedPr(null)}
                     />
                 ) : null}
+                {linkedLinearIssue && !isVSCode ? (
+                    <LinkedReferenceRow
+                        numberLabel={linkedLinearIssue.identifier}
+                        title={linkedLinearIssue.title}
+                        url={linkedLinearIssue.url}
+                        author={linkedLinearIssue.author}
+                        openInBrowserLabel={t('chat.chatInput.linked.linearIssue.openInBrowserAria')}
+                        removeLabel={t('chat.chatInput.linked.linearIssue.removeAria')}
+                        onReopenPicker={() => setLinearPickerOpen(true)}
+                        onRemove={() => setLinkedLinearIssue(null)}
+                    />
+                ) : null}
                 <RevertedMessageDock
                     sessionId={currentSessionId}
                     directory={currentSessionDirectoryForSync ?? currentDirectory}
@@ -2715,6 +2898,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onPickLocalFiles={handlePickLocalFiles}
                         onOpenIssuePicker={openIssuePicker}
                         onOpenPrPicker={openPrPicker}
+                        showLinearPicker={showLinearPicker}
+                        onOpenLinearPicker={openLinearPicker}
                         onOpenAttachSheet={openMobileAttachSheet}
                         onStartDictation={toggleDictation}
                         onAbort={handleAbort}
@@ -2851,7 +3036,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                                             : t(useCompactChatPlaceholder ? 'chat.chatInput.placeholder.chatCompact' : 'chat.chatInput.placeholder.chat')
                                         : t('chat.chatInput.placeholder.selectSession')}
                                 editable={Boolean(currentSessionId || newSessionDraftOpen)}
-                                autoCorrect={isMobile}
+                                autoCorrect={composerAutoCorrect({ isMobile })}
                                 autoCapitalize={isMobile ? 'sentences' : 'none'}
                                 spellCheck={isMobile || inputSpellcheckEnabled}
                                 fillContainer={isComposerExpanded}
@@ -2895,6 +3080,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onPickLocalFiles={handlePickLocalFiles}
                         onOpenIssuePicker={openIssuePicker}
                         onOpenPrPicker={openPrPicker}
+                        showLinearPicker={showLinearPicker}
+                        onOpenLinearPicker={openLinearPicker}
                         onOpenAttachSheet={openMobileAttachSheet}
                         onToggleExpandedInput={handleToggleExpandedInput}
                         onTogglePermissionAutoAccept={handlePermissionAutoAcceptToggle}
@@ -2959,6 +3146,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             onSelect={(issue) => {
                 setLinkedIssue(issue);
                 setLinkedPr(null);
+                setLinkedLinearIssue(null);
             }}
         />
         <GitHubPrPickerDialog
@@ -2967,6 +3155,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             onSelect={(pr) => {
                 setLinkedPr(pr);
                 setLinkedIssue(null);
+                setLinkedLinearIssue(null);
+            }}
+        />
+        <LinearIssuePickerDialog
+            open={linearPickerOpen}
+            onOpenChange={setLinearPickerOpen}
+            mode="select"
+            onSelect={(issue) => {
+                setLinkedLinearIssue(issue);
+                setLinkedIssue(null);
+                setLinkedPr(null);
             }}
         />
         <ReviewFlowDialog
@@ -3050,6 +3249,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         <Icon name="git-pull-request" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
                         {t('chat.chatInput.actions.linkGithubPr')}
                     </button>
+                    {showLinearPicker ? (
+                        <button
+                            type="button"
+                            className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                            onClick={() => {
+                                mobileShell.skipNextOverlayCloseRestore();
+                                setMobileAttachMenuOpen(false);
+                                requestAnimationFrame(openLinearPicker);
+                            }}
+                        >
+                            <Icon name="linear" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                            {t('chat.chatInput.actions.linkLinearIssue')}
+                        </button>
+                    ) : null}
                 </div>
             </MobileOverlayPanel>
         ) : null}

@@ -1,4 +1,5 @@
 import { Marked, marked, type Tokens } from 'marked';
+import markedLinkifyIt from 'marked-linkify-it';
 import remend from 'remend';
 import katex from 'katex';
 import DOMPurify from 'dompurify';
@@ -313,15 +314,25 @@ const inlineMathExtension = {
   },
 };
 
+// `\[` is display math in LaTeX, but it is also CommonMark's escape for a
+// literal `[`, and prose escapes brackets far more often than it opens display
+// math. Reading every `\[` as math turned text like
+// `[title \[Bug\] more](url)` into a KaTeX block that split the paragraph and
+// tore the link apart. Display math therefore has to own its line: it must
+// start one and its `\]` must end one. Anything mid-sentence stays an escape.
+const BLOCK_MATH_RE = /^[ \t]*\\\[([\s\S]+?)\\\][ \t]*(?:\n|$)/;
+const BLOCK_MATH_LINE_START_RE = /(?:^|\n)[ \t]*\\\[/;
+
 const blockMathExtension = {
   name: 'blockMath',
   level: 'block' as const,
   start(src: string) {
-    const index = src.indexOf('\\[');
-    return index < 0 ? undefined : index;
+    const match = BLOCK_MATH_LINE_START_RE.exec(src);
+    // Point marked at the `\[` itself, never at the newline before it.
+    return match ? match.index + match[0].length - 2 : undefined;
   },
   tokenizer(src: string): MathToken | undefined {
-    const match = /^\\\[([\s\S]+?)\\\]/.exec(src);
+    const match = BLOCK_MATH_RE.exec(src);
     if (!match) return undefined;
     return { type: 'blockMath', raw: match[0], text: match[1] ?? '' };
   },
@@ -331,10 +342,15 @@ const blockMathExtension = {
   },
 };
 
-const createParser = (imageMode: MarkdownImageMode) => new Marked().use({
-  gfm: true,
-  breaks: false,
-  extensions: [inlineMathExtension, blockMathExtension],
+// marked's GFM autolink swallows CJK punctuation after a bare URL, so switch
+// to marked-linkify-it, which treats Unicode punctuation as a URL boundary.
+// Plain CJK characters right after a URL are still consumed, matching GitHub.
+const createParser = (imageMode: MarkdownImageMode) => new Marked().use(
+  markedLinkifyIt({ fuzzyLink: false }),
+  {
+    gfm: true,
+    breaks: false,
+    extensions: [inlineMathExtension, blockMathExtension],
   renderer: {
     // Assistant output is untrusted. Markdown constructs still render as HTML,
     // but raw HTML must remain visible text so it cannot introduce active DOM

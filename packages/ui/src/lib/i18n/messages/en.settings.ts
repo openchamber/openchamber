@@ -1,3 +1,4 @@
+import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go usage tracking',
@@ -1861,7 +1862,10 @@ export const settingsDict = {
   'settings.voice.page.provider.server': 'Server',
   'settings.voice.page.provider.local': 'Local',
   'settings.voice.page.tooltip.sttLocal': 'On-device transcription on the OpenChamber server. Models download automatically; no API key needed.',
-  'settings.voice.page.tooltip.localTts': 'On-device synthesis on the OpenChamber server (Kokoro, English). The model downloads automatically; no API key needed.',
+  'settings.voice.page.tooltip.localTts': 'On-device synthesis on the OpenChamber server (Kokoro for English; models for other languages download on first use). No API key needed.',
+  'settings.voice.page.field.followTextLanguage': 'Match the voice to the language of the text',
+  'settings.voice.page.field.followTextLanguageAria': 'Match the voice to the language of the text',
+  'settings.voice.page.field.followTextLanguageInfo': 'When a reply is in another language, a voice for that language is used: a matching macOS voice, or a local model that downloads on first use.',
   'settings.voice.page.stt.model.parakeetV2': 'Parakeet v2 (English)',
   'settings.voice.page.stt.model.parakeetV3': 'Parakeet v3 (25 European languages)',
   'settings.voice.page.stt.model.whisperBase': 'Whisper base (multilingual)',
@@ -1955,7 +1959,7 @@ export const settingsDict = {
   'settings.openchamber.visual.section.streaming': 'Streaming',
   'settings.openchamber.visual.field.streamingAutoFollow': 'Follow new content while streaming',
   'settings.openchamber.visual.field.streamingAutoFollowAria': 'Automatically follow new content while a response streams',
-  'settings.openchamber.visual.field.streamingAutoFollowInfo': 'While a reply streams in, the view keeps gliding to the newest content. Turn this off to keep the view still and scroll manually.',
+  'settings.openchamber.visual.field.streamingAutoFollowInfo': 'While a reply streams in, the view keeps gliding to the newest content. Turn this off to keep the view still and scroll manually; sending a message while scrolled up then also leaves the view where it is.',
   'settings.openchamber.visual.section.messageAppearance': 'Message Appearance',
   'settings.openchamber.visual.section.toolsAndFiles': 'Tools & Files',
   'settings.openchamber.visual.section.composer': 'Composer',
@@ -2085,6 +2089,13 @@ export const settingsDict = {
   'settings.openchamber.visual.field.persistDraftMessages': 'Persist Draft Messages',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': 'Enable spellcheck in text inputs',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'Enable Spellcheck in Text Inputs',
+  'settings.openchamber.visual.field.largeTextPaste': 'Large text paste',
+  'settings.openchamber.visual.field.largeTextPasteHint': 'When pasting more than about 2,000 characters or 25 lines, choose whether to attach the text as a file, paste it inline, or ask each time.',
+  'settings.openchamber.visual.field.largeTextPasteAria': 'Large text paste behavior',
+  'settings.openchamber.visual.field.largeTextPasteOptionAria': 'Large text paste: {option}',
+  'settings.openchamber.visual.option.largeTextPaste.ask.label': 'Ask each time',
+  'settings.openchamber.visual.option.largeTextPaste.attach.label': 'Attach as file',
+  'settings.openchamber.visual.option.largeTextPaste.inline.label': 'Paste inline',
   'settings.openchamber.visual.field.sendAnonymousUsageReportsAria': 'Send anonymous usage reports',
   'settings.openchamber.visual.field.sendAnonymousUsageReports': 'Send anonymous usage reports',
   'settings.openchamber.visual.field.sendAnonymousUsageReportsHint': 'Helps us understand which app versions are actively used so we can prioritize improvements. Only app version, platform, and runtime are collected - no personal data or code.',
@@ -2210,5 +2221,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  ...linearIntegrationI18n.en,
   ...thirdPartyIntegrationI18n.en,
 } as const;

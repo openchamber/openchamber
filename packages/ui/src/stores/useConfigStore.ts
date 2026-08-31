@@ -67,7 +67,26 @@ interface OpenChamberDefaults {
     sttLanguage?: string;
 }
 
-const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
+// Directory activation re-reads the OpenChamber defaults, which are global,
+// not per directory: one request serves the switches that land inside this
+// window, and concurrent activations share the in-flight one.
+const OPENCHAMBER_DEFAULTS_FRESH_MS = 15_000;
+let openChamberDefaultsCache: { at: number; request: Promise<OpenChamberDefaults> } | null = null;
+
+const fetchOpenChamberDefaults = (): Promise<OpenChamberDefaults> => {
+    const now = Date.now();
+    if (openChamberDefaultsCache && now - openChamberDefaultsCache.at < OPENCHAMBER_DEFAULTS_FRESH_MS) {
+        return openChamberDefaultsCache.request;
+    }
+    const request = requestOpenChamberDefaults();
+    openChamberDefaultsCache = { at: now, request };
+    request.catch(() => {
+        if (openChamberDefaultsCache?.request === request) openChamberDefaultsCache = null;
+    });
+    return request;
+};
+
+const requestOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
     markStartupTrace('config.defaults:start');
     const started = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const finish = (source: string, result: OpenChamberDefaults) => {
@@ -1048,6 +1067,10 @@ interface ConfigStore {
     sayVoice: string;
     browserVoice: string;
     localTtsVoiceId: number;
+    /** Local TTS model the chosen voice belongs to (catalog id). */
+    localTtsModelId: string;
+    /** Local and macOS voices follow the language of the text being read. */
+    ttsFollowTextLanguage: boolean;
     openaiVoice: string;
     openaiApiKey: string;
     openaiCompatibleUrl: string;
@@ -1075,6 +1098,8 @@ interface ConfigStore {
     setSayVoice: (voice: string) => void;
     setBrowserVoice: (voice: string) => void;
     setLocalTtsVoiceId: (voiceId: number) => void;
+    setLocalTtsModelId: (modelId: string) => void;
+    setTtsFollowTextLanguage: (enabled: boolean) => void;
     setOpenaiVoice: (voice: string) => void;
     setOpenaiApiKey: (apiKey: string) => void;
     setOpenaiCompatibleUrl: (url: string) => void;
@@ -1257,6 +1282,21 @@ export const useConfigStore = create<ConfigStore>()(
                         }
                     }
                     return 0;
+                })(),
+                localTtsModelId: (() => {
+                    if (typeof window !== 'undefined') {
+                        const saved = localStorage.getItem('localTtsModelId');
+                        if (saved) return saved;
+                    }
+                    return 'kokoro-en-v0_19';
+                })(),
+
+                ttsFollowTextLanguage: (() => {
+                    if (typeof window !== 'undefined') {
+                        const saved = localStorage.getItem('ttsFollowTextLanguage');
+                        if (saved !== null) return saved === 'true';
+                    }
+                    return true;
                 })(),
                 // Browser voice - load from localStorage or default to empty (auto-select)
                 browserVoice: (() => {
@@ -2435,6 +2475,9 @@ export const useConfigStore = create<ConfigStore>()(
                         currentProviderId,
                         currentModelId,
                     } = get();
+                    // Captured before the first set below, which unconditionally
+                    // marks the selection as manual.
+                    const hadManualSelection = get().selectionSource === "manual";
 
                     set((state) => {
                         const directoryKey = state.activeDirectoryKey;
@@ -2554,8 +2597,7 @@ export const useConfigStore = create<ConfigStore>()(
                         // Prefer a session-level manual override for this agent over the
                         // agent's configured default. Re-applying setAgent after subtask
                         // completion / rematerialization must not clobber the override
-                        // (issue #2404). Explicit agent-picker switches still force the
-                        // agent default via ModelControls' shouldPreferAgentModel path.
+                        // (issue #2404).
                         if (currentSessionId) {
                             const existingAgentModel = useSelectionStore.getState().getAgentModelForSession(currentSessionId, agentName);
                             if (existingAgentModel && hasProviderModel(providers, existingAgentModel.providerId, existingAgentModel.modelId)) {
@@ -2582,6 +2624,27 @@ export const useConfigStore = create<ConfigStore>()(
                                 applyResolvedModelSelection(providerID, modelID, resolveVariantForModel(providerID, modelID, agent?.variant));
                                 return;
                             }
+                        }
+
+                        // The user has a live manual model selection and the target
+                        // agent configures no model of its own. Switching modes or
+                        // agents must not reset the selection to the settings default
+                        // (issue #2531) — mode switches are not model changes.
+                        if (
+                            hadManualSelection
+                            && currentProviderId
+                            && currentModelId
+                            && hasProviderModel(providers, currentProviderId, currentModelId)
+                        ) {
+                            // Keeping the pair in memory is not enough: without a write
+                            // the settings default wins again after a reload. The removed
+                            // ModelControls path persisted here, so this must too.
+                            if (currentSessionId) {
+                                const selection = useSelectionStore.getState();
+                                selection.saveSessionModelSelection(currentSessionId, currentProviderId, currentModelId);
+                                selection.saveAgentModelForSession(currentSessionId, agentName, currentProviderId, currentModelId);
+                            }
+                            return;
                         }
 
                         // If the agent has no preferred model, use settings default.
@@ -2917,6 +2980,20 @@ export const useConfigStore = create<ConfigStore>()(
                     set({ localTtsVoiceId: voiceId });
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('localTtsVoiceId', String(voiceId));
+                    }
+                },
+
+                setLocalTtsModelId: (modelId: string) => {
+                    set({ localTtsModelId: modelId });
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem('localTtsModelId', modelId);
+                    }
+                },
+
+                setTtsFollowTextLanguage: (enabled: boolean) => {
+                    set({ ttsFollowTextLanguage: enabled });
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem('ttsFollowTextLanguage', String(enabled));
                     }
                 },
 

@@ -15,6 +15,7 @@ import * as sessionActions from '@/sync/session-actions';
 import { useI18n } from '@/lib/i18n';
 import { serializeQuestionAsJson, serializeQuestionAsMarkdown } from './questionSerializers';
 import { QUESTION_CUSTOM_TEXTAREA_MIN_HEIGHT, getQuestionCustomTextareaHeight } from './questionTextareaSizing';
+import { QuestionMarkdown } from './QuestionMarkdown';
 
 interface QuestionCardProps {
   question: QuestionRequest;
@@ -423,7 +424,11 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
               </div>
             ) : activeQuestion ? (
               <>
-                <div className="typography-meta font-medium text-foreground mb-1.5">{activeQuestion.question}</div>
+                <QuestionMarkdown
+                  content={activeQuestion.question}
+                  size="meta"
+                  className="font-medium text-foreground mb-1.5"
+                />
 
                 {isMultiple ? (
                   <div className="typography-micro text-muted-foreground mb-1.5">{t('chat.questionCard.selectMultiple')}</div>

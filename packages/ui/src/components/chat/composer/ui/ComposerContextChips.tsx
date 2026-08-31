@@ -136,7 +136,7 @@ const DraftPreviewEntry: React.FC<{
                     aria-label={t('chat.chatInput.contextPreview.remove')}
                     title={t('chat.chatInput.contextPreview.remove')}
                 >
-                    <Icon name="close" className="h-3 w-3" />
+                    <Icon name="delete-bin" className="h-3 w-3" />
                 </button>
             </div>
             <div className="space-y-2 px-3 py-2">

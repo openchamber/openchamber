@@ -22,11 +22,12 @@ import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { RuntimeAPIs } from '@/lib/api/types';
+import type { ProjectRef } from '@/lib/projectContextApi';
 import { readTabletLayout, useOrientation, useTabletLayout } from '@/lib/device';
 import { useHardwareKeyboard } from '@/lib/hardwareKeyboard';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint, MOBILE_DISCONNECTED_RUNTIME_KEY } from '@/lib/runtime-switch';
 import { refreshGlobalSessions, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { clearLastActiveSession, readLastActiveSession } from '@/sync/last-session-cache';
 import { cn } from '@/lib/utils';
@@ -34,6 +35,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { useGitStore } from '@/stores/useGitStore';
 import { useMcpConfigStore, type McpDraft } from '@/stores/useMcpConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -111,7 +113,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const [workspaceTab, setWorkspaceTab] = React.useState<MobileWorkspaceTab>('changes');
   // A plan opened from the workspace drawer's Notes tab, shown as a fullscreen
   // layer on top of it (back returns to the notes).
-  const [openPlan, setOpenPlan] = React.useState<{ id: string; title: string } | null>(null);
+  const [openPlan, setOpenPlan] = React.useState<{ id: string; title: string; projectRef: ProjectRef } | null>(null);
   const [settingsInitialMobileStage, setSettingsInitialMobileStage] = React.useState<'nav' | 'page-content'>('nav');
   // When set, the Changes surface opens directly into the per-file diff for this path.
   const [pendingChangesDiff, setPendingChangesDiff] = React.useState<{ path: string; staged: boolean } | null>(null);
@@ -542,7 +544,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           >
             <ErrorBoundary>
               <PlanView
-                projectPlanId={openPlan.id}
+                savedProjectPlan={{ projectRef: openPlan.projectRef, planId: openPlan.id }}
                 onNavigatedToChat={() => {
                   closeSurface();
                   closeWorkspace();
@@ -629,6 +631,7 @@ export function MobileApp({ apis }: MobileAppProps) {
   const clearError = useSessionUIStore((state) => state.clearError);
   const setIsMobile = useUIStore((state) => state.setIsMobile);
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
+  const refreshLinearAuthStatus = useLinearAuthStore((state) => state.refreshStatus);
   const setPlanModeEnabled = useFeatureFlagsStore((state) => state.setPlanModeEnabled);
   const projects = useProjectsStore((state) => state.projects);
   const [connectionEpoch, setConnectionEpoch] = React.useState(0);
@@ -677,12 +680,13 @@ export function MobileApp({ apis }: MobileAppProps) {
     const refreshInPlace = () => {
       void initializeApp();
       void refreshGitHubAuthStatus(apis.github, { force: true });
+      void refreshLinearAuthStatus(apis.linear, { force: true });
       if (providersCount === 0) void loadProviders({ source: 'mobileApp:nativeResume' });
       if (agentsCount === 0) void loadAgents({ source: 'mobileApp:nativeResume' });
     };
     const disconnect = (reason: string) => {
       logMobileConnectEvent('resume:disconnect', { reason });
-      switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
+      switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: MOBILE_DISCONNECTED_RUNTIME_KEY });
       setConnectionEpoch((value) => value + 1);
     };
 
@@ -745,7 +749,7 @@ export function MobileApp({ apis }: MobileAppProps) {
       lastNativeResumeSyncEventAtRef.current = now;
       window.dispatchEvent(new Event('openchamber:system-resume'));
     }
-  }, [agentsCount, apis.github, initializeApp, loadAgents, loadProviders, providersCount, refreshGitHubAuthStatus]);
+  }, [agentsCount, apis.github, apis.linear, initializeApp, loadAgents, loadProviders, providersCount, refreshGitHubAuthStatus, refreshLinearAuthStatus]);
 
   useNativeMobileChrome();
   useNativeMobileLifecycle(handleNativeResume);
@@ -892,7 +896,7 @@ export function MobileApp({ apis }: MobileAppProps) {
     const dropToConnectScreen = (notice: MobileConnectionNotice | null) => {
       logMobileConnectEvent('cold-launch:drop', { kind: notice?.kind ?? 'unknown' });
       if (notice) setAutoConnectNotice(notice);
-      switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
+      switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: MOBILE_DISCONNECTED_RUNTIME_KEY });
       setConnectionEpoch((value) => value + 1);
     };
     void reprobeActiveConnection().then(async (outcome) => {
@@ -1030,7 +1034,8 @@ export function MobileApp({ apis }: MobileAppProps) {
   React.useEffect(() => {
     if (!isConnected) return;
     void refreshGitHubAuthStatus(apis.github, { force: true });
-  }, [apis.github, isConnected, refreshGitHubAuthStatus]);
+    void refreshLinearAuthStatus(apis.linear, { force: true });
+  }, [apis.github, apis.linear, isConnected, refreshGitHubAuthStatus, refreshLinearAuthStatus]);
 
   // Discover all worktrees for every known project so the draft session's
   // worktree/branch dropdown can list every available branch — not only the
@@ -1191,7 +1196,7 @@ export function MobileApp({ apis }: MobileAppProps) {
                   type="button"
                   variant="outline"
                   onClick={() => {
-                    switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
+                    switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: MOBILE_DISCONNECTED_RUNTIME_KEY });
                     setConnectionEpoch((value) => value + 1);
                   }}
                 >
@@ -1274,7 +1279,7 @@ export function MobileApp({ apis }: MobileAppProps) {
               <OpenCodeUpdateToast />
               <MobileAppUpdateToast />
               <MobileShell onActiveConnectionDeleted={() => {
-                switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
+                switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: MOBILE_DISCONNECTED_RUNTIME_KEY });
                 setConnectionEpoch((value) => value + 1);
               }} />
               <AppLinkConfirmDialog />

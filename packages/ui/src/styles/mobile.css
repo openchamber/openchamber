@@ -41,6 +41,10 @@
     font-size: var(--text-code) !important;
   }
 
+  :root.mobile-pointer:not(.desktop-runtime) .question-markdown > .markdown-content.markdown-tool {
+    font-size: inherit !important;
+  }
+
   /* Improve touch targets for mobile */
   :root.mobile-pointer:not(.desktop-runtime) button:not([role="radio"]):not([role="checkbox"]):not([role="switch"]),
   :root.mobile-pointer:not(.desktop-runtime) .btn,

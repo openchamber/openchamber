@@ -19,7 +19,7 @@ import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { deriveBaseBranch, hasResolvableBaseBranch } from '@/components/views/git/baseBranch';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useGitBranches, useGitStatus, useGitStore } from '@/stores/useGitStore';
+import { useGitBranches, useGitStatus, useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import {
   getFreshestPrStatusForBranch,
@@ -27,6 +27,7 @@ import {
   useGitHubPrStatusStore,
 } from '@/stores/useGitHubPrStatusStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { cn } from '@/lib/utils';
@@ -36,9 +37,17 @@ import { WalkthroughStages } from './WalkthroughStages';
 import { useWalkthroughStageProgress } from './useWalkthroughStageProgress';
 import { WalkthroughStream } from './WalkthroughStream';
 import { WalkthroughToc } from './WalkthroughToc';
+import { NestedRepoResolutionStates } from '@/components/views/git/NestedRepoResolutionStates';
+import { NestedRepoPicker } from '@/components/views/git/NestedRepoPicker';
 
 interface WalkthroughViewProps {
   directory: string;
+  /**
+   * The context panel keeps this view mounted but hidden via CSS, so work
+   * that should only run for a visible consumer has to be told. Defaults to
+   * true for mounts that have no visibility signal.
+   */
+  visible?: boolean;
 }
 
 const SCOPES: WalkthroughWorkingTreeScope[] = ['all', 'staged', 'working'];
@@ -73,10 +82,16 @@ const TOC_MAX_FRACTION = 0.5;
 // pickers, 32px action, 36px arrows) read as misalignment, not hierarchy.
 const HEADER_COMPACT_WIDTH = 680;
 
-export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
+export const WalkthroughView = ({ directory: rootDirectory, visible = true }: WalkthroughViewProps) => {
   const { t, locale, locales, label } = useI18n();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [panelWidth, setPanelWidth] = useState(0);
+
+  // The walkthrough documents one repository. When the root is not itself a
+  // repository, that is the resolved nested repository; everything below keys
+  // off `directory`.
+  const { rootIsGitRepo, gitDirectory, nestedRepos } = useNestedGitDirectory(rootDirectory || null, { enabled: visible });
+  const directory = gitDirectory ?? rootDirectory;
 
   // Panel width, not viewport width: this surface is resizable independently of
   // the window.
@@ -484,9 +499,38 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
     [activeLanguage, directory, generate, generateDisabled, source]
   );
 
+  const isGitRepo = useIsGitRepo(gitDirectory || null);
+  const ensureNestedRepos = useGitStore((state) => state.ensureNestedRepos);
+  const selectNestedRepo = useGitStore((state) => state.selectNestedRepo);
+  // Non-repo root: surface nested-repository resolution while the operating
+  // directory has not proven to be a repository (discovering, failed,
+  // unsupported, none found, or settling on the auto-selected one).
+  if (rootIsGitRepo === false && isGitRepo !== true) {
+    return (
+      <NestedRepoResolutionStates
+        rootIsGitRepo={rootIsGitRepo}
+        resolvedIsGitRepo={isGitRepo}
+        nestedRepos={nestedRepos}
+        onRetryDiscovery={() => {
+          if (rootDirectory) void ensureNestedRepos(rootDirectory, { force: true });
+        }}
+      />
+    );
+  }
+
   return (
     <div ref={rootRef} className="flex h-full min-h-0 flex-col">
       <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/60 px-3 py-2">
+        {rootIsGitRepo === false && Array.isArray(nestedRepos) && nestedRepos.length > 0 ? (
+          <NestedRepoPicker
+            repositories={nestedRepos}
+            selectedRepository={gitDirectory ?? null}
+            onSelectRepository={(repository) => {
+              if (rootDirectory) selectNestedRepo(rootDirectory, repository);
+            }}
+            repositoryRoot={rootDirectory ?? undefined}
+          />
+        ) : null}
         <DropdownMenu open={sourceMenuOpen} onOpenChange={setSourceMenuOpen}>
           <DropdownMenuTrigger asChild>
             <button

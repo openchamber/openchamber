@@ -1,3 +1,4 @@
+import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 用量跟踪',
@@ -1838,7 +1839,10 @@ export const settingsDict = {
   'settings.voice.page.provider.server': '服务器',
   'settings.voice.page.provider.local': '本地',
   'settings.voice.page.tooltip.sttLocal': '在 OpenChamber 服务器上本地转写。模型自动下载，无需 API 密钥。',
-  'settings.voice.page.tooltip.localTts': '在 OpenChamber 服务器上本地合成语音（Kokoro，英语）。模型自动下载，无需 API 密钥。',
+  'settings.voice.page.tooltip.localTts': '在 OpenChamber 服务器上本地合成语音（英语使用 Kokoro；其他语言的模型在首次使用时下载）。无需 API 密钥。',
+  'settings.voice.page.field.followTextLanguage': '根据文本语言匹配语音',
+  'settings.voice.page.field.followTextLanguageAria': '根据文本语言匹配语音',
+  'settings.voice.page.field.followTextLanguageInfo': '当回复使用其他语言时，将使用该语言的语音：匹配的 macOS 语音，或首次使用时下载的本地模型。',
   'settings.voice.page.stt.model.parakeetV2': 'Parakeet v2（英语）',
   'settings.voice.page.stt.model.parakeetV3': 'Parakeet v3（25 种欧洲语言）',
   'settings.voice.page.stt.model.whisperBase': 'Whisper base（多语言）',
@@ -1932,7 +1936,7 @@ export const settingsDict = {
   'settings.openchamber.visual.section.streaming': '流式输出',
   'settings.openchamber.visual.field.streamingAutoFollow': '流式输出时跟随新内容',
   'settings.openchamber.visual.field.streamingAutoFollowAria': '在回复流式输出时自动跟随新内容',
-  'settings.openchamber.visual.field.streamingAutoFollowInfo': '回复流式输出时，视图会持续滚动到最新内容。关闭后视图保持不动，可手动滚动。',
+  'settings.openchamber.visual.field.streamingAutoFollowInfo': '回复流式输出时，视图会持续滚动到最新内容。关闭后视图保持不动，可手动滚动；此时从聊天中间发送消息也不会移动视图。',
   'settings.openchamber.visual.section.messageAppearance': '消息外观',
   'settings.openchamber.visual.section.toolsAndFiles': '工具和文件',
   'settings.openchamber.visual.section.composer': '输入框',
@@ -2062,6 +2066,13 @@ export const settingsDict = {
   'settings.openchamber.visual.field.persistDraftMessages': '保留草稿消息',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': '在文本输入框启用拼写检查',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': '在文本输入框启用拼写检查',
+  'settings.openchamber.visual.field.largeTextPaste': '粘贴大段文本',
+  'settings.openchamber.visual.field.largeTextPasteHint': '粘贴超过约 2000 个字符或 25 行时，可选择附加为文件、直接粘贴到输入框，或每次询问。',
+  'settings.openchamber.visual.field.largeTextPasteAria': '大段文本粘贴行为',
+  'settings.openchamber.visual.field.largeTextPasteOptionAria': '大段文本粘贴：{option}',
+  'settings.openchamber.visual.option.largeTextPaste.ask.label': '每次询问',
+  'settings.openchamber.visual.option.largeTextPaste.attach.label': '附加为文件',
+  'settings.openchamber.visual.option.largeTextPaste.inline.label': '直接粘贴',
   'settings.openchamber.visual.field.sendAnonymousUsageReportsAria': '发送匿名使用报告',
   'settings.openchamber.visual.field.sendAnonymousUsageReports': '发送匿名使用报告',
   'settings.openchamber.visual.field.sendAnonymousUsageReportsHint': '帮助我们了解哪些应用版本正在被积极使用，以便优先改进。仅收集应用版本、平台和运行时信息，不收集个人数据或代码。',
@@ -2220,5 +2231,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  ...linearIntegrationI18n['zh-CN'],
   ...thirdPartyIntegrationI18n['zh-CN'],
 } as const;

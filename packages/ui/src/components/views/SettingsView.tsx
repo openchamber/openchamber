@@ -214,6 +214,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const [pendingSearchItemId, setPendingSearchItemId] = React.useState<string | null>(null);
   const [activeSearchResultIndex, setActiveSearchResultIndex] = React.useState(0);
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const shouldFocusMobilePageContentRef = React.useRef(false);
   const searchResultRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
   const activeSearchResultIndexRef = React.useRef(0);
   const keyboardSearchNavigationRef = React.useRef(false);
@@ -764,11 +765,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, [runtimeCtx.isVSCode]);
 
   const handleMobilePageSidebarItemSelect = React.useCallback(() => {
+    shouldFocusMobilePageContentRef.current = true;
     setMobileStage('page-content');
     if (settingsSlug === 'skills.installed') {
       pushMobileSplitDetailHistory(settingsSlug);
     }
   }, [pushMobileSplitDetailHistory, settingsSlug]);
+
+  React.useEffect(() => {
+    if (!isMobile || mobileStage !== 'page-content' || !shouldFocusMobilePageContentRef.current) {
+      return;
+    }
+
+    shouldFocusMobilePageContentRef.current = false;
+    const frame = window.requestAnimationFrame(() => {
+      containerRef.current
+        ?.querySelector<HTMLElement>('[data-settings-page-heading]')
+        ?.focus({ preventScroll: true });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [isMobile, mobileStage, settingsSlug]);
 
   const handleBack = React.useCallback(() => {
     if (backButtonTargetsPageSidebar) {
@@ -945,7 +964,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                               : <Icon name={iconName!} className="h-[18px] w-[18px] shrink-0 sm:h-4 sm:w-4" />}
                             <span className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden transition-opacity duration-150 opacity-100">
                               <span className="typography-ui-label font-normal truncate">{getPageTitle(page.slug)}</span>
-                              {(page.slug === 'tunnel' || page.slug === 'integrations') && (
+                              {page.slug === 'tunnel' && (
                                 <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">
                                   {t('settings.view.badge.beta')}
                                 </span>

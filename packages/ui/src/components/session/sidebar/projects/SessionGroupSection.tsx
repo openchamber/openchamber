@@ -108,6 +108,7 @@ export type SessionGroupSectionProps = {
   | 'setDeleteSessionConfirm'
   | 'startFolderRename'
   | 'setCopiedSessionId'
+  | 'startSessionWorktreeMenuLoad'
 >;
 
 const CollapsedFolderActivity: React.FC<{
@@ -253,6 +254,7 @@ const areGroupPropsEqual = (prev: SessionGroupSectionProps, next: SessionGroupSe
     && prev.setDeleteSessionConfirm === next.setDeleteSessionConfirm
     && prev.startFolderRename === next.startFolderRename
     && prev.setCopiedSessionId === next.setCopiedSessionId
+    && prev.startSessionWorktreeMenuLoad === next.startSessionWorktreeMenuLoad
     && prev.setFolderRenameDraft === next.setFolderRenameDraft
     && prev.clearFolderRename === next.clearFolderRename
   );
@@ -852,10 +854,11 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                setSessionSearchQuery={props.setSessionSearchQuery}
                setIsSessionSearchOpen={props.setIsSessionSearchOpen}
                deleteSessionConfirm={props.deleteSessionConfirm}
-               setDeleteSessionConfirm={props.setDeleteSessionConfirm}
-               startFolderRename={props.startFolderRename}
-               setCopiedSessionId={props.setCopiedSessionId}
-            />)}
+              setDeleteSessionConfirm={props.setDeleteSessionConfirm}
+              startFolderRename={props.startFolderRename}
+              setCopiedSessionId={props.setCopiedSessionId}
+              startSessionWorktreeMenuLoad={props.startSessionWorktreeMenuLoad}
+             />)}
           </SessionFolderItem>
         )}
       </DroppableFolderWrapper>
@@ -962,7 +965,8 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
      setDeleteSessionConfirm={props.setDeleteSessionConfirm}
      startFolderRename={props.startFolderRename}
      setCopiedSessionId={props.setCopiedSessionId}
-  />;
+     startSessionWorktreeMenuLoad={props.startSessionWorktreeMenuLoad}
+   />;
 
   const body = (
     <SessionFolderDndScope
@@ -1196,7 +1200,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
         </div>
         {group.isArchivedBucket && allGroupSessions.length > 0 ? (
           <div className={cn('absolute right-0.5 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
-            <Tooltip delayDuration={500}>
+            <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -1219,7 +1223,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
         ) : null}
         {group.directory && !group.isMain && group.worktree ? (
           <div className={cn('absolute right-7 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
-            <Tooltip delayDuration={500}>
+            <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -1243,7 +1247,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
         ) : null}
         {group.directory ? (
           <div className={cn('absolute right-0.5 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
-            <Tooltip delayDuration={500}>
+            <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"

@@ -20,6 +20,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from "@/components/icon/Icon";
+import { GitHubAccountControl } from '@/components/github/GitHubAccountControl';
 import { useUIStore } from '@/stores/useUIStore';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { WALKTHROUGH_ACTION_CLASS } from '@/components/views/walkthrough/walkthroughAction';
@@ -102,6 +103,10 @@ const getPrVisualState = (status: GitHubPullRequestStatus | null): 'draft' | 'op
 };
 
 const PR_ACTION_REFRESH_DELAYS_MS = [2_000, 5_000] as const;
+// A manual refresh keeps its spinner visible at least this long: the request
+// often answers from the server cache within a few milliseconds, and a
+// spinner that never reaches the screen reads as "the button did nothing".
+const PR_MANUAL_REFRESH_MIN_SPIN_MS = 600;
 
 const branchToTitle = (branch: string): string => {
   return branch
@@ -337,7 +342,7 @@ export const PullRequestSection: React.FC<{
   const showWalkthroughAction = !isMobile && screenWidth >= 768 && !isVSCodeRuntime();
 
   const openGitHubSettings = React.useCallback(() => {
-    setSettingsPage('github');
+    setSettingsPage('integrations');
     setSettingsDialogOpen(true);
   }, [setSettingsDialogOpen, setSettingsPage]);
 
@@ -1040,6 +1045,31 @@ export const PullRequestSection: React.FC<{
     await refreshPrStatus(prStatusKey, options);
   }, [prStatusKey, refreshPrStatus]);
 
+  const [isManualRefreshing, setIsManualRefreshing] = React.useState(false);
+  const manualRefreshMountedRef = React.useRef(true);
+  React.useEffect(() => {
+    manualRefreshMountedRef.current = true;
+    return () => {
+      manualRefreshMountedRef.current = false;
+    };
+  }, []);
+  const refreshManually = React.useCallback(async () => {
+    if (isManualRefreshing) return;
+    setIsManualRefreshing(true);
+    const startedAt = Date.now();
+    try {
+      await refresh({ force: true });
+    } finally {
+      const remaining = PR_MANUAL_REFRESH_MIN_SPIN_MS - (Date.now() - startedAt);
+      if (remaining > 0) {
+        await new Promise((resolve) => window.setTimeout(resolve, remaining));
+      }
+      if (manualRefreshMountedRef.current) {
+        setIsManualRefreshing(false);
+      }
+    }
+  }, [isManualRefreshing, refresh]);
+
   const scheduleActionRefresh = React.useCallback(() => {
     pendingActionRefreshTimersRef.current.forEach((timerId) => {
       window.clearTimeout(timerId);
@@ -1406,7 +1436,10 @@ export const PullRequestSection: React.FC<{
     return (
       <section className="border-0 bg-transparent rounded-none">
         <div className="space-y-1 pt-3">
-          <div className="typography-ui-header font-semibold text-foreground">{t('gitView.pullRequest.title')}</div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="typography-ui-header font-semibold text-foreground">{t('gitView.pullRequest.title')}</div>
+            <GitHubAccountControl />
+          </div>
           <div className="typography-micro text-muted-foreground">
             {t('gitView.pullRequest.availableOnFeatureBranches')}
           </div>
@@ -1450,7 +1483,7 @@ export const PullRequestSection: React.FC<{
   return (
     <section className={containerClassName}>
       <div className={headerClassName}>
-        <div className="flex items-start justify-between gap-2">
+        <div className="@container/pr-actions flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
             {pr ? (
               <Button
@@ -1472,27 +1505,47 @@ export const PullRequestSection: React.FC<{
               <span className="typography-meta text-muted-foreground truncate">#{pr.number}</span>
             ) : null}
           </div>
-          <div className="flex shrink-0 items-center gap-1">
-            {isLoading ? <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" /> : null}
+          <div className="flex shrink-0 items-center gap-1.5">
+            {pr && showWalkthroughAction ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className={cn('pr-actions__walkthrough-button h-7 shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}
+                onClick={() => {
+                  requestWalkthroughSource(directory, { kind: 'pr', number: pr.number });
+                  openContextSurface(directory, 'walkthrough');
+                }}
+                aria-label={t('walkthrough.action.open')}
+              >
+                <Icon name="route" className="size-4" />
+                <span className="pr-actions__walkthrough-label typography-ui-label">
+                  {t('walkthrough.action.open')}
+                </span>
+              </Button>
+            ) : null}
             <Tooltip>
               <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  className="inline-flex size-5 items-center justify-center rounded hover:bg-interactive-hover/60 disabled:opacity-40"
-                  disabled={isLoading}
-                  onClick={() => void refresh({ force: true })}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 px-0"
+                  disabled={isLoading || isManualRefreshing}
+                  onClick={() => void refreshManually()}
                   aria-label={t('gitView.pr.actions.refreshAria')}
                 >
-                  <Icon name="refresh" className="size-3.5 text-muted-foreground" />
-                </button>
+                  {isLoading || isManualRefreshing
+                    ? <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" />
+                    : <Icon name="refresh" className="size-4 text-muted-foreground" />}
+                </Button>
               </TooltipTrigger>
               <TooltipContent><p>{t('gitView.pr.actions.refresh')}</p></TooltipContent>
             </Tooltip>
+            <GitHubAccountControl className="h-7 w-7" />
           </div>
         </div>
 
         {pr ? (
-          <div className="@container/pr-actions flex min-w-0 items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center justify-between gap-2">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 typography-micro text-muted-foreground">
               <span style={{ color: prColorVar }}>{prStatusText}</span>
               {checks ? (
@@ -1508,23 +1561,6 @@ export const PullRequestSection: React.FC<{
               ) : null}
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
-              {showWalkthroughAction ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={cn('pr-actions__walkthrough-button h-7 shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}
-                  onClick={() => {
-                    requestWalkthroughSource(directory, { kind: 'pr', number: pr.number });
-                    openContextSurface(directory, 'walkthrough');
-                  }}
-                  aria-label={t('walkthrough.action.open')}
-                >
-                  <Icon name="route" className="size-4" />
-                  <span className="pr-actions__walkthrough-label typography-ui-label">
-                    {t('walkthrough.action.open')}
-                  </span>
-                </Button>
-              ) : null}
               {canMerge && pr.draft && pr.state === 'open' ? (
                 <Tooltip>
                   <TooltipTrigger asChild>

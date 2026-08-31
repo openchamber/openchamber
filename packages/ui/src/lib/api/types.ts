@@ -807,6 +807,8 @@ export interface VSCodeAPI {
   pickFiles?(options?: { extensions?: string[] }): Promise<unknown>;
   saveImage?(payload: unknown): Promise<unknown>;
   saveMarkdown?(payload: unknown): Promise<unknown>;
+  /** Add a directory as a VS Code workspace folder; resolves with the full folder list after the add. */
+  addWorkspaceFolder?(path: string): Promise<Array<{ name: string; path: string }>>;
 }
 
 export interface PushSubscribePayload {
@@ -1143,6 +1145,199 @@ export type GitHubDeviceFlowComplete =
   | { connected: true; user: GitHubUserSummary; scope?: string }
   | { connected: false; status?: string; error?: string };
 
+export type LinearUserSummary = {
+  id: string;
+  name: string | null;
+  displayName: string | null;
+  email: string | null;
+  avatarUrl: string | null;
+};
+
+export type LinearOrganizationSummary = {
+  id: string;
+  name: string;
+  urlKey: string | null;
+};
+
+export type LinearWorkspaceSummary = {
+  id: string;
+  name: string | null;
+  urlKey: string | null;
+  current: boolean;
+  user?: LinearUserSummary | null;
+  authorizedAt?: number | null;
+};
+
+export type LinearAuthStatus = {
+  connected: boolean;
+  user?: LinearUserSummary | null;
+  organization?: LinearOrganizationSummary | null;
+  scope?: string;
+  workspaces?: LinearWorkspaceSummary[];
+};
+
+export type LinearAuthStart = {
+  authorizationUrl: string;
+  expiresIn: number;
+  scope: string;
+};
+
+export type LinearAuthOrigin = 'desktop' | 'web';
+
+export type LinearIssueState = {
+  id: string | null;
+  name: string | null;
+  type: string | null;
+};
+
+export type LinearWorkflowState = {
+  id: string;
+  name: string;
+  type: string | null;
+  position: number;
+};
+
+export type LinearIssueAssignee = {
+  name: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+};
+
+export type LinearIssueTeam = {
+  id: string;
+  key: string;
+  name: string;
+};
+
+export type LinearIssuePriority = 0 | 1 | 2 | 3 | 4;
+
+export type LinearIssueLabel = {
+  id: string;
+  name: string;
+  color: string | null;
+};
+
+export type LinearIssueSummary = {
+  id: string;
+  identifier: string;
+  title: string;
+  url: string;
+  state?: LinearIssueState | null;
+  assignee?: LinearIssueAssignee | null;
+  team?: LinearIssueTeam | null;
+  priority?: LinearIssuePriority | null;
+  labels?: LinearIssueLabel[];
+};
+
+export type LinearIssueComment = {
+  id: string;
+  body: string;
+  createdAt: string | null;
+  user?: { name: string | null; displayName: string | null; avatarUrl?: string | null } | null;
+};
+
+export type LinearIssue = LinearIssueSummary & {
+  description?: string | null;
+  comments?: LinearIssueComment[];
+};
+
+export type LinearIssueListStatus = 'all' | 'backlog' | 'todo' | 'started' | 'inReview' | 'completed' | 'canceled' | 'duplicate';
+export type LinearIssueListAssignee = 'any' | 'me';
+export type LinearIssueListPriority = 'all' | 'none' | 'urgent' | 'high' | 'medium' | 'low';
+
+export type LinearIssuesListOptions = {
+  query?: string;
+  cursor?: string;
+  status?: LinearIssueListStatus;
+  assignee?: LinearIssueListAssignee;
+  teamId?: string;
+  priority?: LinearIssueListPriority;
+};
+
+export type LinearIssuesListResult = {
+  connected: boolean;
+  issues?: LinearIssueSummary[];
+  cursor?: string | null;
+  hasMore?: boolean;
+};
+
+export type LinearIssueGetResult = {
+  connected: boolean;
+  issue?: LinearIssue | null;
+};
+
+export type LinearIssueStatesResult = {
+  connected: boolean;
+  states?: LinearWorkflowState[];
+};
+
+export type LinearIssueUpdateInput = {
+  id: string;
+  stateId: string;
+};
+
+export type LinearIssueUpdateResult = {
+  connected: boolean;
+  issue?: LinearIssue | null;
+};
+
+export type LinearTeamMapping = {
+  id: string;
+  key: string;
+  name: string;
+  projectPath: string | null;
+};
+
+export type LinearMappingResult = {
+  connected: boolean;
+  defaultProjectPath?: string | null;
+  teams?: LinearTeamMapping[];
+};
+
+export type LinearMappingWrite = {
+  defaultProjectPath: string | null;
+  teamProjectPaths: { [teamId: string]: string };
+};
+
+export type LinearSessionStatusKind = 'started' | 'completed' | 'failure';
+
+export type LinearSessionStatusPostInput = {
+  kind: LinearSessionStatusKind;
+  sessionId: string;
+  issueIdentifier?: string;
+  sessionOrigin?: string;
+};
+
+export type LinearSessionStatusPostResult =
+  | { connected: false }
+  | { connected: true; posted: true; commentId: string | null }
+  | {
+    connected: true;
+    posted: false;
+    skipped: 'already-posted' | 'issue-not-found' | 'not-started' | 'disabled' | 'origin-not-public';
+  };
+
+export type LinearPreferences = {
+  /** Status comments are off until the user opts in. */
+  sessionComments: boolean;
+};
+
+export interface LinearAPI {
+  authStatus(): Promise<LinearAuthStatus>;
+  authStart(origin?: LinearAuthOrigin): Promise<LinearAuthStart>;
+  authDisconnect(): Promise<{ removed: boolean }>;
+  authActivate(organizationId: string): Promise<LinearAuthStatus>;
+  issuesList(options?: LinearIssuesListOptions): Promise<LinearIssuesListResult>;
+  issueGet(id: string): Promise<LinearIssueGetResult>;
+  issueStates(teamId: string): Promise<LinearIssueStatesResult>;
+  issueUpdate(input: LinearIssueUpdateInput): Promise<LinearIssueUpdateResult>;
+  mappingGet(): Promise<LinearMappingResult>;
+  mappingSet(mapping: LinearMappingWrite): Promise<LinearMappingResult>;
+  sessionStatusPost(input: LinearSessionStatusPostInput): Promise<LinearSessionStatusPostResult>;
+  preferencesGet(): Promise<LinearPreferences>;
+  preferencesSet(preferences: LinearPreferences): Promise<LinearPreferences>;
+}
+
 export interface GitHubAPI {
   authStatus(): Promise<GitHubAuthStatus>;
   authStart(): Promise<GitHubDeviceFlowStart>;
@@ -1267,6 +1462,7 @@ export interface RuntimeAPIs {
   permissions: PermissionsAPI;
   notifications: NotificationsAPI;
   github?: GitHubAPI;
+  linear?: LinearAPI;
   push?: PushAPI;
   diagnostics?: DiagnosticsAPI;
   clientAuth?: ClientAuthAPI;

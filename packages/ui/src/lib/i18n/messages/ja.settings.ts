@@ -1,3 +1,4 @@
+import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 使用量追跡',
@@ -1871,7 +1872,10 @@ export const settingsDict = {
   'settings.voice.page.provider.server': 'サーバー',
   'settings.voice.page.provider.local': 'ローカル',
   'settings.voice.page.tooltip.sttLocal': 'OpenChamber サーバー上でローカルに文字起こしします。モデルは自動でダウンロードされ、API キーは不要です。',
-  'settings.voice.page.tooltip.localTts': 'OpenChamber サーバー上でローカルに音声合成します（Kokoro、英語）。モデルは自動でダウンロードされ、API キーは不要です。',
+  'settings.voice.page.tooltip.localTts': 'OpenChamber サーバー上でローカルに音声合成します（英語は Kokoro、他の言語のモデルは初回使用時にダウンロード）。API キーは不要です。',
+  'settings.voice.page.field.followTextLanguage': 'テキストの言語に合わせて音声を選ぶ',
+  'settings.voice.page.field.followTextLanguageAria': 'テキストの言語に合わせて音声を選ぶ',
+  'settings.voice.page.field.followTextLanguageInfo': '返答が別の言語の場合、その言語の音声を使います。対応する macOS の音声、または初回使用時にダウンロードされるローカルモデルです。',
   'settings.voice.page.stt.model.parakeetV2': 'Parakeet v2（英語）',
   'settings.voice.page.stt.model.parakeetV3': 'Parakeet v3（ヨーロッパ25言語）',
   'settings.voice.page.stt.model.whisperBase': 'Whisper base（多言語）',
@@ -1965,7 +1969,7 @@ export const settingsDict = {
   'settings.openchamber.visual.section.streaming': 'ストリーミング',
   'settings.openchamber.visual.field.streamingAutoFollow': '応答のストリーミング中に新しい内容を追従',
   'settings.openchamber.visual.field.streamingAutoFollowAria': '応答のストリーミング中に新しい内容へ自動スクロールする',
-  'settings.openchamber.visual.field.streamingAutoFollowInfo': '応答の受信中、ビューは常に最新の内容へスクロールします。オフにするとビューは動かず、手動でスクロールできます。',
+  'settings.openchamber.visual.field.streamingAutoFollowInfo': '応答の受信中、ビューは常に最新の内容へスクロールします。オフにするとビューは動かず、手動でスクロールできます。その場合、チャットの途中からメッセージを送信してもビューは移動しません。',
   'settings.openchamber.visual.section.messageAppearance': 'メッセージの外観',
   'settings.openchamber.visual.section.toolsAndFiles': 'ツールとファイル',
   'settings.openchamber.visual.section.composer': '入力欄',
@@ -2095,6 +2099,13 @@ export const settingsDict = {
   'settings.openchamber.visual.field.persistDraftMessages': '下書きメッセージを保持',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': 'テキスト入力のスペルチェックを有効化',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'テキスト入力のスペルチェックを有効化',
+  'settings.openchamber.visual.field.largeTextPaste': '大きなテキストの貼り付け',
+  'settings.openchamber.visual.field.largeTextPasteHint': '約 2,000 文字または 25 行を超えるテキストを貼り付けるとき、ファイルとして添付するか、そのまま貼り付けるか、毎回確認するかを選べます。',
+  'settings.openchamber.visual.field.largeTextPasteAria': '大きなテキスト貼り付けの動作',
+  'settings.openchamber.visual.field.largeTextPasteOptionAria': '大きなテキストの貼り付け: {option}',
+  'settings.openchamber.visual.option.largeTextPaste.ask.label': '毎回確認する',
+  'settings.openchamber.visual.option.largeTextPaste.attach.label': 'ファイルとして添付',
+  'settings.openchamber.visual.option.largeTextPaste.inline.label': 'そのまま貼り付け',
   'settings.openchamber.visual.field.sendAnonymousUsageReportsAria': '匿名使用状況レポートを送信',
   'settings.openchamber.visual.field.sendAnonymousUsageReports': '匿名使用状況レポートを送信',
   'settings.openchamber.visual.field.sendAnonymousUsageReportsHint': 'どのアプリバージョンがアクティブに使用されているかを把握し、改善の優先順位を決めるのに役立ちます。収集されるのはアプリバージョン、プラットフォーム、ランタイムのみで、個人データやコードは収集されません。',
@@ -2220,5 +2231,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'エージェントが応答している間にフォローアップメッセージで Enter を押したときの動作を選択します。',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'ステア',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'キュー',
+  ...linearIntegrationI18n.ja,
   ...thirdPartyIntegrationI18n.ja,
 } as const;

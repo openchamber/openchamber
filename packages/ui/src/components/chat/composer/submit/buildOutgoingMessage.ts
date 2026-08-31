@@ -53,6 +53,7 @@ export interface OutgoingMessageInput {
     syntheticTexts: readonly string[];
     linkedIssue: { number: number; title: string; url: string; contextText: string } | null;
     linkedPr: { number: number; title: string; url: string; instructions: string; context: string } | null;
+    linkedLinearIssue: { identifier: string; title: string; url: string; contextText: string } | null;
 }
 
 /**
@@ -159,6 +160,11 @@ export function buildOutgoingMessage(
         const { number, title, url, instructions, context } = input.linkedPr;
         additionalParts.push({ text: instructions, synthetic: true });
         additionalParts.push(createContextPart({ kind: 'github-pr', number, title, url }, context));
+    }
+
+    if (input.linkedLinearIssue) {
+        const { identifier, title, url, contextText } = input.linkedLinearIssue;
+        additionalParts.push(createContextPart({ kind: 'linear-issue', identifier, title, url }, contextText));
     }
 
     const skillInstruction = deps.buildSkillInstruction(skillNames);

@@ -1,3 +1,4 @@
+import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'Monitoramento de uso do OpenCode Go',
@@ -1838,7 +1839,10 @@ export const settingsDict = {
   "settings.voice.page.provider.server": "Servidor",
   "settings.voice.page.provider.local": "Local",
   "settings.voice.page.tooltip.sttLocal": "Transcrição local no servidor do OpenChamber. Os modelos são baixados automaticamente; não é necessária chave de API.",
-  "settings.voice.page.tooltip.localTts": "Síntese local no servidor do OpenChamber (Kokoro, inglês). O modelo é baixado automaticamente; não é necessária chave de API.",
+  "settings.voice.page.tooltip.localTts": "Síntese local no servidor do OpenChamber (Kokoro para inglês; modelos de outros idiomas são baixados no primeiro uso). Não requer chave de API.",
+  "settings.voice.page.field.followTextLanguage": "Ajustar a voz ao idioma do texto",
+  "settings.voice.page.field.followTextLanguageAria": "Ajustar a voz ao idioma do texto",
+  "settings.voice.page.field.followTextLanguageInfo": "Se uma resposta estiver em outro idioma, uma voz desse idioma é usada: uma voz do macOS correspondente ou um modelo local baixado no primeiro uso.",
   "settings.voice.page.stt.model.parakeetV2": "Parakeet v2 (inglês)",
   "settings.voice.page.stt.model.parakeetV3": "Parakeet v3 (25 idiomas europeus)",
   "settings.voice.page.stt.model.whisperBase": "Whisper base (multilíngue)",
@@ -1932,7 +1936,7 @@ export const settingsDict = {
   "settings.openchamber.visual.section.streaming": "Streaming",
   "settings.openchamber.visual.field.streamingAutoFollow": "Seguir o novo conteúdo durante o streaming",
   "settings.openchamber.visual.field.streamingAutoFollowAria": "Seguir automaticamente o novo conteúdo enquanto uma resposta é transmitida",
-  "settings.openchamber.visual.field.streamingAutoFollowInfo": "Enquanto uma resposta chega, a visualização acompanha o conteúdo mais recente. Desative para manter a visualização parada e rolar manualmente.",
+  "settings.openchamber.visual.field.streamingAutoFollowInfo": "Enquanto uma resposta chega, a visualização acompanha o conteúdo mais recente. Desative para manter a visualização parada e rolar manualmente; enviar uma mensagem do meio da conversa também deixará a visualização onde está.",
   "settings.openchamber.visual.section.messageAppearance": "Aparência das mensagens",
   "settings.openchamber.visual.section.toolsAndFiles": "Ferramentas e arquivos",
   "settings.openchamber.visual.section.composer": "Campo de mensagem",
@@ -2062,6 +2066,13 @@ export const settingsDict = {
   "settings.openchamber.visual.field.persistDraftMessages": "Manter rascunhos de mensagens",
   "settings.openchamber.visual.field.enableSpellcheckInTextInputsAria": "Ativar ortografia em campos de texto",
   "settings.openchamber.visual.field.enableSpellcheckInTextInputs": "Ativar ortografia em campos de texto",
+  "settings.openchamber.visual.field.largeTextPaste": "Colagem de texto grande",
+  "settings.openchamber.visual.field.largeTextPasteHint": "Ao colar mais de cerca de 2.000 caracteres ou 25 linhas, escolha anexar o texto como arquivo, colar no corpo da mensagem ou perguntar sempre.",
+  "settings.openchamber.visual.field.largeTextPasteAria": "Comportamento da colagem de texto grande",
+  "settings.openchamber.visual.field.largeTextPasteOptionAria": "Colagem de texto grande: {option}",
+  "settings.openchamber.visual.option.largeTextPaste.ask.label": "Perguntar sempre",
+  "settings.openchamber.visual.option.largeTextPaste.attach.label": "Anexar como arquivo",
+  "settings.openchamber.visual.option.largeTextPaste.inline.label": "Colar no corpo",
   "settings.openchamber.visual.field.sendAnonymousUsageReportsAria": "Enviar relatórios anônimos de uso",
   "settings.openchamber.visual.field.sendAnonymousUsageReports": "Enviar relatórios anônimos de uso",
   "settings.openchamber.visual.field.sendAnonymousUsageReportsHint": "Ajuda-nos a entender quais versões do aplicativo são usadas ativamente para priorizar melhorias. Coletamos apenas a versão do aplicativo, a plataforma e o ambiente de execução; não coletamos dados pessoais nem código.",
@@ -2220,5 +2231,6 @@ export const settingsDict = {
   "settings.openchamber.visual.field.followUpBehaviorDescription": "Choose what happens when you press Enter on a follow-up message while the agent is still responding.",
   "settings.openchamber.visual.option.followUpBehavior.steer.label": "Steer",
   "settings.openchamber.visual.option.followUpBehavior.queue.label": "Queue",
+  ...linearIntegrationI18n['pt-BR'],
   ...thirdPartyIntegrationI18n['pt-BR'],
 } as const;

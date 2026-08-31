@@ -1,8 +1,11 @@
 import React from 'react';
-import { Icon } from '@/components/icon/Icon';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
-import { SETTINGS_DESCRIPTION_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { useI18n } from '@/lib/i18n';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { GitHubIntegration } from './GitHubIntegration';
+import { LinearSettings } from './LinearSettings';
 import { ThirdPartyIntegrationsSection } from './ThirdPartyIntegrationsSection';
 
 interface IntegrationsPageProps {
@@ -15,25 +18,32 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({
   onOpenPluginManager,
 }) => {
   const { t } = useI18n();
+  // GitHub sign-in is an OpenChamber server feature; the VS Code extension
+  // uses the editor's own GitHub session instead.
+  const hasGitHub = !isVSCodeRuntime();
+  const hasLinear = Boolean(getRegisteredRuntimeAPIs()?.linear);
+  const hasBuiltIn = hasGitHub || hasLinear;
 
   return (
     <SettingsPageLayout
       title={t('settings.page.integrations.title')}
-      description={(
-        <div className="space-y-3">
-          <p className={SETTINGS_DESCRIPTION_CLASS}>{t('settings.page.integrations.description')}</p>
-          <div role="alert" className="flex items-start gap-2 rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] p-3">
-            <Icon name="error-warning" className="mt-0.5 size-4 shrink-0 text-[var(--status-warning)]" />
-            <p className="typography-meta text-[var(--status-warning)]">
-              {t('settings.integrations.experimentalWarning')}
-            </p>
-          </div>
-        </div>
-      )}
-      showSaveStatus={false}
+      description={t('settings.page.integrations.description')}
+      showSaveStatus
     >
+      {hasBuiltIn ? (
+        <SettingsSection
+          title={t('settings.integrations.firstParty.title')}
+          info={t('settings.integrations.firstParty.info')}
+          divider={false}
+          settingsItem="integrations.first-party"
+          contentClassName="space-y-3"
+        >
+          {hasGitHub ? <GitHubIntegration /> : null}
+          {hasLinear ? <LinearSettings /> : null}
+        </SettingsSection>
+      ) : null}
       <ThirdPartyIntegrationsSection
-        divider={false}
+        divider={hasBuiltIn}
         onOpenProviderSetup={onOpenProviderSetup}
         onOpenPluginManager={onOpenPluginManager}
       />

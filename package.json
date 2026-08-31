@@ -1,6 +1,6 @@
 {
   "name": "openchamber-monorepo",
-  "version": "1.21.0",
+  "version": "1.22.0",
   "description": "OpenChamber monorepo workspace for web, ui, and desktop runtimes",
   "private": true,
   "type": "module",
@@ -87,7 +87,8 @@
     "release:test:arm": "./scripts/test-release-build.sh aarch64",
     "profile:idle": "node scripts/profile-idle.mjs",
     "profile:session": "node scripts/profile-session.mjs",
-    "profile:animation": "node scripts/profile-animation.mjs"
+    "profile:animation": "node scripts/profile-animation.mjs",
+    "profile:switch": "node scripts/profile-switch.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.0",
@@ -115,7 +116,7 @@
     "@heroui/theme": "^2.4.23",
     "@lezer/highlight": "^1.2.3",
     "@octokit/rest": "^22.0.1",
-    "@opencode-ai/sdk": "1.18.23",
+    "@opencode-ai/sdk": "1.18.25",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",

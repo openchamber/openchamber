@@ -103,18 +103,24 @@ other runtime API.
     `https://chatgpt.com/backend-api/codex/responses` with
     `ChatGPT-Account-Id`; expired tokens are refreshed against
     `auth.openai.com` (single-flight) and written back to `auth.json`.
-  - **Anthropic** (`type: api`): `/v1/messages` with `x-api-key`.
+  - **Anthropic** (`type: api`): `/messages` with `x-api-key`, against
+    `provider.anthropic.options.baseURL` when configured (used as-is, matching
+    `@ai-sdk/anthropic` — no `/v1` is inserted) or `https://api.anthropic.com/v1`
+    otherwise.
   - **Google** (`type: api`): `generateContent` with `x-goog-api-key`; Gemini 3
-    uses `thinkingLevel` while older Flash models use `thinkingBudget: 0`.
+    uses `thinkingLevel`, Gemini 2.x uses `thinkingBudget: 0`, and all other
+    models omit `thinkingConfig` entirely.
   - Everything else: OpenAI-compatible `/chat/completions` against the
     provider's base URL, resolved from (1) `provider.<id>.options.baseURL`
     in the OpenCode config, (2) the hardcoded `https://api.openai.com/v1`
      endpoint, (3) the endpoint OpenCode resolved at runtime, or (4) the
     provider's `api` field from the models.dev catalog. The credential follows
     the same shape: config `options.apiKey`, then the runtime credential, then
-    the auth.json entry. Configured API keys honor OpenCode's `{env:NAME}` and
-    `{file:path}` substitutions; file contents and resolved credentials remain
-    server-side.
+    the auth.json entry. `provider.<id>.options.headers` is sent with the
+    request and overrides the bearer default, so gateways that authenticate on
+    their own header work here exactly as they do in a chat turn. Configured API
+    keys and header values honor OpenCode's `{env:NAME}` and `{file:path}`
+    substitutions; file contents and resolved credentials remain server-side.
   - The runtime credential is refused for providers listed in
     `OWN_CREDENTIAL_HANDLING`. Their branches need the stored entry rather than
     a bearer token: the clearest case is the ChatGPT-plan `openai` login, whose

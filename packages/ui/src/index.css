@@ -1039,6 +1039,18 @@ html:not(.dark) .chat-scroll {
   font-size: var(--text-code) !important;
 }
 
+.question-markdown > .markdown-content.markdown-tool {
+  font-size: inherit !important;
+}
+
+.question-markdown > .markdown-content > [data-md-block]:first-child > :first-child {
+  margin-top: 0;
+}
+
+.question-markdown > .markdown-content > [data-md-block]:last-child > :last-child {
+  margin-bottom: 0;
+}
+
 /* Reasoning markdown renders at meta size, dimmed. */
 .markdown-content.markdown-reasoning {
   font-size: var(--text-markdown);
@@ -1138,8 +1150,10 @@ html:not(.dark) .chat-scroll {
 
 /* Override Streamdown's hardcoded bg-muted for inline code - use theme colors instead */
 .markdown-content code[data-markdown="inline-code"] {
-  background-color: var(--markdown-inline-code-bg, var(--surface-muted)) !important;
+  background-color: var(--markdown-inline-code-bg, var(--surface-subtle)) !important;
   color: var(--markdown-inline-code, var(--foreground)) !important;
+  padding: 0.125rem 0.3125rem;
+  border-radius: 0.375rem;
   word-break: break-all;
   overflow-wrap: break-word;
 }
@@ -1375,12 +1389,21 @@ html:not(.dark) .chat-scroll {
   }
 }
 
-.oc-chat-hydration-reveal {
-  animation: oc-chat-hydration-reveal 180ms ease-out both;
+.oc-chat-hydration-reveal,
+[data-timeline-reveal='fading'] {
+  animation: oc-chat-hydration-reveal 100ms ease-out both;
+}
+
+/* Timeline root while a freshly opened session still has provisional first
+   paints (see timelineRevealGate.ts): hidden until every hold releases, then
+   revealed as a whole. */
+[data-timeline-reveal='pending'] {
+  opacity: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .oc-chat-hydration-reveal {
+  .oc-chat-hydration-reveal,
+  [data-timeline-reveal='fading'] {
     animation: none;
   }
 }
@@ -1430,6 +1453,10 @@ html:not(.dark) .chat-scroll {
   text-align: right;
   user-select: none;
   white-space: nowrap;
+}
+
+.markdown-content [data-md-code-line-number]::before {
+  content: attr(data-md-code-line-number);
 }
 
 .markdown-content [data-md-code-line-content] {

@@ -105,6 +105,8 @@ interface SpeakOptions {
   voice?: string;
   /** Speech rate in words per minute (defaults to 200) */
   rate?: number;
+  /** `'auto'`: the server switches to a voice that speaks the text's language. */
+  language?: 'auto';
   /** Callback when playback starts */
   onStart?: () => void;
   /** Callback when playback ends */
@@ -229,6 +231,7 @@ export function useSayTTS(options: UseSayTTSOptions = {}): UseSayTTSReturn {
           text: text.trim(),
           voice: options?.voice || 'Samantha',
           rate: options?.rate || 200,
+          language: options?.language,
         }),
         signal: abortControllerRef.current.signal,
       });

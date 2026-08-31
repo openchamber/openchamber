@@ -9,7 +9,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -30,8 +29,6 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 
-import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
-import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
@@ -45,10 +42,11 @@ import {
 
 import {
 } from '@/components/ui/collapsible';
-import type { GitHubAuthStatus } from '@/lib/api/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
+import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
+import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { SessionTabsStrip, type SessionTabMenuArgs } from './SessionTabsStrip';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag, type UpdateInfo } from '@/lib/desktop';
@@ -71,7 +69,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { startSessionTreeWorktreeMove, useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
+import { buildSessionTreeMoveMessages, requestSessionTreeMove, useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
 
 const DESKTOP_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50 hover:bg-interactive-hover transition-colors';
 
@@ -120,132 +118,6 @@ const HeaderIconActionButton = React.memo(function HeaderIconActionButton({
         <p>{title}</p>
       </TooltipContent>
     </Tooltip>
-  );
-});
-
-type DesktopGitHubControlProps = {
-  isMobile: boolean;
-  githubAuthStatus: GitHubAuthStatus | null;
-  githubAccounts: Array<NonNullable<GitHubAuthStatus['accounts']>[number]>;
-  githubAvatarUrl: string | null;
-  githubLogin: string | null;
-  isSwitchingGitHubAccount: boolean;
-  handleGitHubAccountSwitch: (accountId: string) => Promise<void>;
-};
-
-const DesktopGitHubControl = React.memo(function DesktopGitHubControl({
-  isMobile,
-  githubAuthStatus,
-  githubAccounts,
-  githubAvatarUrl,
-  githubLogin,
-  isSwitchingGitHubAccount,
-  handleGitHubAccountSwitch,
-}: DesktopGitHubControlProps) {
-  const { t } = useI18n();
-  if (!githubAuthStatus?.connected || isMobile) {
-    return null;
-  }
-
-  if (githubAccounts.length > 1) {
-    return (
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className={cn(
-              DESKTOP_HEADER_ICON_BUTTON_CLASS,
-              'h-7 w-7 overflow-hidden rounded-full border border-border/60 bg-muted/80 p-0'
-            )}
-            title={githubLogin ? t('header.github.connectedWithLogin', { login: githubLogin }) : t('header.github.connected')}
-            disabled={isSwitchingGitHubAccount}
-          >
-            {githubAvatarUrl ? (
-              <img
-                src={githubAvatarUrl}
-                alt={githubLogin ? t('header.github.avatarWithLogin', { login: githubLogin }) : t('header.github.avatar')}
-                className="h-full w-full object-cover"
-                loading="lazy"
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <Icon name="github-fill" className="h-3.5 w-3.5 text-foreground" />
-            )}
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-64">
-          <DropdownMenuLabel className="typography-ui-header font-semibold text-foreground">
-            {t('header.github.accountsTitle')}
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          {githubAccounts.map((account) => {
-            const accountUser = account.user;
-            const isCurrent = Boolean(account.current);
-            const sourceLabel = account.source === 'gh-cli'
-              ? t('header.github.accountSource.cli')
-              : t('header.github.accountSource.oauth');
-            return (
-              <DropdownMenuItem
-                key={account.id}
-                className="gap-2"
-                disabled={isSwitchingGitHubAccount}
-                onSelect={() => {
-                  if (!isCurrent) {
-                    void handleGitHubAccountSwitch(account.id);
-                  }
-                }}
-              >
-                {accountUser?.avatarUrl ? (
-                  <img
-                    src={accountUser.avatarUrl}
-                    alt={accountUser.login ? t('header.github.avatarWithLogin', { login: accountUser.login }) : t('header.github.avatar')}
-                    className="h-6 w-6 rounded-full border border-border/60 bg-muted object-cover"
-                    loading="lazy"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className="flex h-6 w-6 items-center justify-center rounded-full border border-border/60 bg-muted">
-                    <Icon name="github-fill" className="h-3 w-3 text-muted-foreground" />
-                  </div>
-                )}
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate typography-ui-label text-foreground">
-                    {accountUser?.name?.trim() || accountUser?.login || 'GitHub'}
-                  </span>
-                  {accountUser?.login ? (
-                    <span className="truncate typography-micro text-muted-foreground">
-                      <span className="font-mono">{accountUser.login}</span>
-                      <span className="mx-1 opacity-50">·</span>
-                      <span>{sourceLabel}</span>
-                    </span>
-                  ) : null}
-                </span>
-                {isCurrent ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-              </DropdownMenuItem>
-            );
-          })}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    );
-  }
-
-  return (
-    <div
-      className="app-region-no-drag flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border border-border/60 bg-muted/80"
-      title={githubLogin ? t('header.github.connectedWithLogin', { login: githubLogin }) : t('header.github.connected')}
-    >
-      {githubAvatarUrl ? (
-        <img
-          src={githubAvatarUrl}
-          alt={githubLogin ? t('header.github.avatarWithLogin', { login: githubLogin }) : t('header.github.avatar')}
-          className="h-full w-full object-cover"
-          loading="lazy"
-          referrerPolicy="no-referrer"
-        />
-      ) : (
-        <Icon name="github-fill" className="h-3.5 w-3.5 text-foreground" />
-      )}
-    </div>
   );
 });
 
@@ -439,7 +311,6 @@ export const Header: React.FC = () => {
   const sessionTabsEnabled = useUIStore((state) => state.sessionTabsEnabled);
 
   const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
-  const runtimeApis = useRuntimeAPIs();
 
   const getContextUsage = useSessionUIStore((state) => state.getContextUsage);
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
@@ -488,8 +359,6 @@ export const Header: React.FC = () => {
   const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
 
   const { isMobile } = useDeviceInfo();
-  const githubAuthStatus = useGitHubAuthStore((state) => state.status);
-  const setGitHubAuthStatus = useGitHubAuthStore((state) => state.setStatus);
 
   const headerRef = React.useRef<HTMLElement | null>(null);
 
@@ -571,10 +440,6 @@ export const Header: React.FC = () => {
     }
   }, [contextUsage, currentSessionId, isContextUsageResolvedForSession]);
 
-  const githubAvatarUrl = githubAuthStatus?.connected ? (githubAuthStatus.user?.avatarUrl ?? null) : null;
-  const githubLogin = githubAuthStatus?.connected ? (githubAuthStatus.user?.login ?? null) : null;
-  const githubAccounts = githubAuthStatus?.accounts ?? [];
-  const [isSwitchingGitHubAccount, setIsSwitchingGitHubAccount] = React.useState(false);
   const [isDesktopServicesOpen, setIsDesktopServicesOpen] = React.useState(false);
   const [currentInstanceLabel, setCurrentInstanceLabel] = React.useState('Local');
   const [currentInstanceIsLocal, setCurrentInstanceIsLocal] = React.useState(true);
@@ -1059,12 +924,15 @@ export const Header: React.FC = () => {
       }
     }
 
-    startSessionTreeWorktreeMove({
+    requestSessionTreeMove({
+      kind: 'quick',
       root,
       descendants,
       sourceDirectory: sessionDirectory,
-      successMessage: t('sessions.sidebar.session.moveToWorktree.success'),
-      failureMessage: t('sessions.sidebar.session.moveToWorktree.failed'),
+      messages: buildSessionTreeMoveMessages(t, {
+        success: 'sessions.sidebar.session.moveToWorktree.success',
+        failure: 'sessions.sidebar.session.moveToWorktree.failed',
+      }),
     });
   }, [currentSessionId, isCurrentSessionActive, isCurrentSessionMovingToWorktree, sessionDirectory, t]);
 
@@ -1131,27 +999,9 @@ export const Header: React.FC = () => {
     return normalize(openDirectory || activeProject?.path || '');
   }, [activeProject?.path, openDirectory]);
 
-  const activeProjectRef = React.useMemo(() => {
-    if (!activeProject) {
-      return null;
-    }
-    return { id: activeProject.id, path: activeProject.path };
-  }, [activeProject]);
-
-  const lastProjectActionsContextRef = React.useRef<{
-    projectRef: { id: string; path: string };
-    directory: string;
-  } | null>(null);
-
-  React.useEffect(() => {
-    if (!activeProjectRef || !actionDirectory) {
-      return;
-    }
-    lastProjectActionsContextRef.current = {
-      projectRef: activeProjectRef,
-      directory: actionDirectory,
-    };
-  }, [actionDirectory, activeProjectRef]);
+  // Same resolution the titlebar overlay used to own: worktree → session →
+  // draft → project path, sticky across session switches.
+  const projectActionsContext = useProjectActionsContext();
 
 
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
@@ -1180,37 +1030,6 @@ export const Header: React.FC = () => {
     sessionDirectory,
   ]);
 
-  const handleGitHubAccountSwitch = React.useCallback(async (accountId: string) => {
-    if (!accountId || isSwitchingGitHubAccount) return;
-    setIsSwitchingGitHubAccount(true);
-    try {
-      const payload = runtimeApis.github
-        ? await runtimeApis.github.authActivate(accountId)
-        : await (async () => {
-          const response = await runtimeFetch('/api/github/auth/activate', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Accept: 'application/json',
-            },
-            body: JSON.stringify({ accountId }),
-          });
-          const body = (await response.json().catch(() => null)) as
-            | (GitHubAuthStatus & { error?: string })
-            | null;
-          if (!response.ok || !body) {
-            throw new Error(body?.error || response.statusText);
-          }
-          return body;
-        })();
-
-      setGitHubAuthStatus(payload);
-    } catch (error) {
-      console.error('Failed to switch GitHub account:', error);
-    } finally {
-      setIsSwitchingGitHubAccount(false);
-    }
-  }, [isSwitchingGitHubAccount, runtimeApis.github, setGitHubAuthStatus]);
 
 
 
@@ -1353,6 +1172,14 @@ export const Header: React.FC = () => {
       return undefined;
     }
 
+    // Custom in-window controls (frameless Electron, right side) own the right
+    // edge: no inline padding, so the pr-0 class applies and the close button
+    // sits flush with the window corner per Windows conventions. Only the
+    // browser's native window-controls overlay reserves padding + right inset.
+    if (usesFramelessChrome && windowControlsSide === 'right') {
+      return undefined;
+    }
+
     return {
       // Left inset is handled by the no-drag spacer (see renderDesktop); only
       // the right inset / titlebar height are owned by the window-controls overlay.
@@ -1360,7 +1187,7 @@ export const Header: React.FC = () => {
       minHeight: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
       height: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
     };
-  }, [isDesktopApp, isVSCode, usesFramelessChrome]);
+  }, [isDesktopApp, isVSCode, usesFramelessChrome, windowControlsSide]);
 
   const updateHeaderHeight = React.useCallback(() => {
     if (typeof document === 'undefined') {
@@ -1451,6 +1278,13 @@ export const Header: React.FC = () => {
 
   const desktopSidebarActions = (
     <>
+      {projectActionsContext ? (
+        <ProjectActionsButton
+          projectRef={projectActionsContext.projectRef}
+          directory={projectActionsContext.directory}
+          className="mr-2"
+        />
+      ) : null}
       <OpenInAppButton directory={actionDirectory} className="mr-1" />
       {/* Instances only exist in the desktop app. On web the menu was left
           holding a single dev-only shutdown action, which is not a reason to
@@ -1471,15 +1305,6 @@ export const Header: React.FC = () => {
         onOpenRemoteUpdate={openRemoteInstanceUpdate}
       />
       ) : null}
-      <DesktopGitHubControl
-        isMobile={isMobile}
-        githubAuthStatus={githubAuthStatus}
-        githubAccounts={githubAccounts}
-        githubAvatarUrl={githubAvatarUrl}
-        githubLogin={githubLogin}
-        isSwitchingGitHubAccount={isSwitchingGitHubAccount}
-        handleGitHubAccountSwitch={handleGitHubAccountSwitch}
-      />
     </>
   );
 

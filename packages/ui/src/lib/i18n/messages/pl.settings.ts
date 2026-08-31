@@ -1,3 +1,4 @@
+import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'Śledzenie użycia OpenCode Go',
@@ -1066,6 +1067,13 @@ export const settingsDict = {
 
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'Włącz sprawdzanie pisowni w polach tekstowych',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': 'Włącz sprawdzanie pisowni w polach tekstowych',
+  'settings.openchamber.visual.field.largeTextPaste': 'Wklejanie dużego tekstu',
+  'settings.openchamber.visual.field.largeTextPasteHint': 'Przy wklejaniu ponad około 2000 znaków lub 25 wierszy wybierz, czy dołączyć tekst jako plik, wkleić go w treści, czy pytać za każdym razem.',
+  'settings.openchamber.visual.field.largeTextPasteAria': 'Zachowanie przy wklejaniu dużego tekstu',
+  'settings.openchamber.visual.field.largeTextPasteOptionAria': 'Wklejanie dużego tekstu: {option}',
+  'settings.openchamber.visual.option.largeTextPaste.ask.label': 'Pytaj za każdym razem',
+  'settings.openchamber.visual.option.largeTextPaste.attach.label': 'Dołącz jako plik',
+  'settings.openchamber.visual.option.largeTextPaste.inline.label': 'Wklej w treści',
   'settings.openchamber.visual.field.fontSizePercentageAria': 'Procentowy rozmiar czcionki',
   'settings.openchamber.visual.field.inputBarOffset': 'Przesunięcie paska wpisywania',
   'settings.openchamber.visual.field.inputBarOffsetTooltip': 'Podnieś pasek wpisywania, aby uniknąć zasłaniania przez systemowe elementy ekranu, takie jak pasek gestów.',
@@ -1236,7 +1244,7 @@ export const settingsDict = {
   'settings.openchamber.visual.section.streaming': 'Streaming',
   'settings.openchamber.visual.field.streamingAutoFollow': 'Podążaj za nową treścią podczas streamingu',
   'settings.openchamber.visual.field.streamingAutoFollowAria': 'Automatycznie podążaj za nową treścią podczas streamowania odpowiedzi',
-  'settings.openchamber.visual.field.streamingAutoFollowInfo': 'Podczas napływania odpowiedzi widok płynnie podąża za najnowszą treścią. Wyłącz, aby widok pozostał nieruchomy i przewijać ręcznie.',
+  'settings.openchamber.visual.field.streamingAutoFollowInfo': 'Podczas napływania odpowiedzi widok płynnie podąża za najnowszą treścią. Wyłącz, aby widok pozostał nieruchomy i przewijać ręcznie; wysłanie wiadomości ze środka czatu również nie przesunie wtedy widoku.',
   'settings.openchamber.visual.section.messageAppearance': 'Wygląd wiadomości',
   'settings.openchamber.visual.section.toolsAndFiles': 'Narzędzia i pliki',
   'settings.openchamber.visual.section.composer': 'Pole wiadomości',
@@ -2168,7 +2176,10 @@ export const settingsDict = {
   'settings.voice.page.provider.server': 'Serwer',
   'settings.voice.page.provider.local': 'Lokalny',
   'settings.voice.page.tooltip.sttLocal': 'Transkrypcja lokalna na serwerze OpenChamber. Modele pobierają się automatycznie; klucz API nie jest potrzebny.',
-  'settings.voice.page.tooltip.localTts': 'Lokalna synteza na serwerze OpenChamber (Kokoro, angielski). Model pobiera się automatycznie; klucz API nie jest potrzebny.',
+  'settings.voice.page.tooltip.localTts': 'Lokalna synteza na serwerze OpenChamber (Kokoro dla angielskiego; modele innych języków pobierane przy pierwszym użyciu). Klucz API nie jest potrzebny.',
+  'settings.voice.page.field.followTextLanguage': 'Dopasuj głos do języka tekstu',
+  'settings.voice.page.field.followTextLanguageAria': 'Dopasuj głos do języka tekstu',
+  'settings.voice.page.field.followTextLanguageInfo': 'Gdy odpowiedź jest w innym języku, używany jest głos dla tego języka: pasujący głos macOS albo lokalny model pobierany przy pierwszym użyciu.',
   'settings.voice.page.stt.model.parakeetV2': 'Parakeet v2 (angielski)',
   'settings.voice.page.stt.model.parakeetV3': 'Parakeet v3 (25 języków europejskich)',
   'settings.voice.page.stt.model.whisperBase': 'Whisper base (wielojęzyczny)',
@@ -2213,5 +2224,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  ...linearIntegrationI18n.pl,
   ...thirdPartyIntegrationI18n.pl,
 };

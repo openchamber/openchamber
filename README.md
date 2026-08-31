@@ -5,6 +5,9 @@
 [![Discord](https://img.shields.io/badge/Discord-join.svg?style=flat&labelColor=100F0F&color=8B7EC8&logo=discord&logoColor=FFFCF0)](https://discord.gg/ZYRSdnwwKA)
 [![Support the project](https://img.shields.io/badge/Support-Project-black?style=flat&labelColor=100F0F&color=EC8B49&logo=patreon&logoColor=FFFCF0)](https://www.patreon.com/openchamber)
 
+> [!IMPORTANT]
+> 🏖️ I'm on vacation from 31 Aug to 4 Sep. I'll review issues and PRs when I'm back. Thanks for your patience.
+
 ## Run agent work. Keep control. Ship from anywhere.
 
 **OpenChamber is an open-source workspace for running, supervising, and reviewing AI coding work across desktop, browser, editor, and mobile.**

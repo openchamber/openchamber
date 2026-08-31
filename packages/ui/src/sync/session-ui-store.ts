@@ -954,6 +954,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       )
       : null
 
+    // Start the message fetch before publishing the selection. React flushes
+    // the discrete-event render in a microtask queued by `set`, so a fetch
+    // started after it would only leave the browser once that whole render
+    // finished. Started first, the request is on the wire while the render
+    // runs. Fire-and-forget: any transient failure is retried by the reactive
+    // path in ChatContainer.
+    if (id) {
+      void fetchMessagesForSession(id, resolvedDir)
+    }
+
     // Set the directory together with the session id so chat hooks read the
     // same child store that send/SSE events will update during startup races.
     set({
@@ -968,13 +978,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // a draft intentionally does not erase it.
     if (id) {
       persistLastActiveSession(key, { sessionId: id, directory: rememberedDir })
-    }
-
-    // Kick off the message fetch on the same tick, before React commits the
-    // state change and fires ChatContainer.useEffect. The fetch is
-    // fire-and-forget — any transient failure gets retried by the reactive path.
-    if (id) {
-      void fetchMessagesForSession(id, resolvedDir)
     }
 
     try {
@@ -996,7 +999,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // skeleton to render and reads messages which can be expensive.
     if (previousSessionId && previousSessionId !== id) {
       const prevId = previousSessionId
-      setTimeout(() => {
+      const newId = id
+      // queueMicrotask runs after the current synchronous call stack (and
+      // before the next macrotask / setTimeout(0) / paint), so the previous
+      // session's anchor is saved before the new session's restoreSnapshot
+      // effect fires. This eliminates the race where save and restore
+      // interleave against the same viewport store entry.
+      queueMicrotask(() => {
+        // Bail if the user already switched again — save is now stale.
+        const current = get().currentSessionId
+        if (current !== newId) return
         const memState = getViewportSessionMemory(prevId)
         if (!memState?.isStreaming) {
           const prevMessages = getSyncMessages(prevId)
@@ -1004,7 +1016,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             useViewportStore.getState().updateViewportAnchor(prevId, prevMessages.length - 1)
           }
         }
-      }, 0)
+      });
     }
 
     // Mark session viewed in notification store + update active session ref

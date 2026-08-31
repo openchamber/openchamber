@@ -1,3 +1,4 @@
+import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'Seguimiento de uso de OpenCode Go',
@@ -1838,7 +1839,10 @@ export const settingsDict = {
   "settings.voice.page.provider.server": "Servidor",
   "settings.voice.page.provider.local": "Local",
   "settings.voice.page.tooltip.sttLocal": "Transcripción local en el servidor de OpenChamber. Los modelos se descargan automáticamente; no se necesita clave de API.",
-  "settings.voice.page.tooltip.localTts": "Síntesis local en el servidor de OpenChamber (Kokoro, inglés). El modelo se descarga automáticamente; no se necesita clave de API.",
+  "settings.voice.page.tooltip.localTts": "Síntesis local en el servidor de OpenChamber (Kokoro para inglés; los modelos de otros idiomas se descargan en el primer uso). No requiere clave de API.",
+  "settings.voice.page.field.followTextLanguage": "Ajustar la voz al idioma del texto",
+  "settings.voice.page.field.followTextLanguageAria": "Ajustar la voz al idioma del texto",
+  "settings.voice.page.field.followTextLanguageInfo": "Si una respuesta está en otro idioma, se usa una voz para ese idioma: una voz de macOS adecuada o un modelo local que se descarga en el primer uso.",
   "settings.voice.page.stt.model.parakeetV2": "Parakeet v2 (inglés)",
   "settings.voice.page.stt.model.parakeetV3": "Parakeet v3 (25 idiomas europeos)",
   "settings.voice.page.stt.model.whisperBase": "Whisper base (multilingüe)",
@@ -1932,7 +1936,7 @@ export const settingsDict = {
   "settings.openchamber.visual.section.streaming": "Streaming",
   "settings.openchamber.visual.field.streamingAutoFollow": "Seguir el contenido nuevo durante el streaming",
   "settings.openchamber.visual.field.streamingAutoFollowAria": "Seguir automáticamente el contenido nuevo mientras se transmite una respuesta",
-  "settings.openchamber.visual.field.streamingAutoFollowInfo": "Mientras llega una respuesta, la vista se desplaza hacia el contenido más reciente. Desactívalo para mantener la vista quieta y desplazarte manualmente.",
+  "settings.openchamber.visual.field.streamingAutoFollowInfo": "Mientras llega una respuesta, la vista se desplaza hacia el contenido más reciente. Desactívalo para mantener la vista quieta y desplazarte manualmente; enviar un mensaje desde la mitad del chat tampoco moverá la vista.",
   "settings.openchamber.visual.section.messageAppearance": "Apariencia de los mensajes",
   "settings.openchamber.visual.section.toolsAndFiles": "Herramientas y archivos",
   "settings.openchamber.visual.section.composer": "Compositor",
@@ -2062,6 +2066,13 @@ export const settingsDict = {
   "settings.openchamber.visual.field.persistDraftMessages": "Conservar borradores de mensajes",
   "settings.openchamber.visual.field.enableSpellcheckInTextInputsAria": "Habilitar ortografía en campos de texto",
   "settings.openchamber.visual.field.enableSpellcheckInTextInputs": "Habilitar ortografía en campos de texto",
+  "settings.openchamber.visual.field.largeTextPaste": "Pegado de texto grande",
+  "settings.openchamber.visual.field.largeTextPasteHint": "Al pegar más de unos 2000 caracteres o 25 líneas, elige si adjuntar el texto como archivo, pegarlo en línea o preguntar cada vez.",
+  "settings.openchamber.visual.field.largeTextPasteAria": "Comportamiento del pegado de texto grande",
+  "settings.openchamber.visual.field.largeTextPasteOptionAria": "Pegado de texto grande: {option}",
+  "settings.openchamber.visual.option.largeTextPaste.ask.label": "Preguntar cada vez",
+  "settings.openchamber.visual.option.largeTextPaste.attach.label": "Adjuntar como archivo",
+  "settings.openchamber.visual.option.largeTextPaste.inline.label": "Pegar en línea",
   "settings.openchamber.visual.field.sendAnonymousUsageReportsAria": "Enviar informes anónimos de uso",
   "settings.openchamber.visual.field.sendAnonymousUsageReports": "Enviar informes anónimos de uso",
   "settings.openchamber.visual.field.sendAnonymousUsageReportsHint": "Nos ayuda a entender qué versiones de la aplicación se usan activamente para priorizar mejoras. Solo se recopilan la versión de la aplicación, la plataforma y el entorno de ejecución ; no se recopilan datos personales ni código.",
@@ -2220,5 +2231,6 @@ export const settingsDict = {
   "settings.openchamber.visual.field.followUpBehaviorDescription": "Choose what happens when you press Enter on a follow-up message while the agent is still responding.",
   "settings.openchamber.visual.option.followUpBehavior.steer.label": "Steer",
   "settings.openchamber.visual.option.followUpBehavior.queue.label": "Queue",
+  ...linearIntegrationI18n.es,
   ...thirdPartyIntegrationI18n.es,
 } as const;

@@ -31,6 +31,12 @@ import {
 import { isValidTheme } from './theme-validation';
 import { getSyncedThemeFromPayload, getSyncedThemeVariant } from './theme-sync-payload';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import {
+  adoptThemePreferencesForRuntime,
+  resolveThemePreferencesForRuntime,
+  resolveThemePreferencesFromStorageEvent,
+  writeThemePreferencesForRuntime,
+} from './theme-storage';
 
 type ThemePreferences = {
   themeMode: ThemeMode;
@@ -87,46 +93,27 @@ const buildInitialPreferences = (defaultThemeId?: string): ThemePreferences => {
     const embeddedMode = embeddedParams?.get('themeMode');
     const embeddedLightId = embeddedParams?.get('lightThemeId');
     const embeddedDarkId = embeddedParams?.get('darkThemeId');
-    const storedMode = localStorage.getItem('themeMode');
-    const storedLightId = localStorage.getItem('lightThemeId');
-    const storedDarkId = localStorage.getItem('darkThemeId');
-    const legacyUseSystem = localStorage.getItem('useSystemTheme');
-    const legacyThemeId = localStorage.getItem('selectedThemeId');
-    const legacyVariant = localStorage.getItem('selectedThemeVariant');
+    // Scoped entry when present; otherwise a one-time seed from the superseded
+    // global keys (see resolveThemePreferencesForRuntime), so the first scoped
+    // write carries the last-known theme instead of defaults.
+    const resolvedPreferences = resolveThemePreferencesForRuntime(getRuntimeKey());
 
     if (embeddedMode === 'light' || embeddedMode === 'dark' || embeddedMode === 'system') {
       themeMode = embeddedMode;
-    } else if (storedMode === 'light' || storedMode === 'dark' || storedMode === 'system') {
-      themeMode = storedMode;
-    } else if (legacyUseSystem !== null) {
-      const useSystem = legacyUseSystem === 'true';
-      if (useSystem) {
-        themeMode = 'system';
-      } else if (legacyThemeId) {
-        const legacyTheme = getThemeById(legacyThemeId);
-        if (legacyTheme) {
-          themeMode = legacyTheme.metadata.variant === 'dark' ? 'dark' : 'light';
-          if (legacyTheme.metadata.variant === 'dark') {
-            darkThemeId = legacyTheme.metadata.id;
-          } else {
-            lightThemeId = legacyTheme.metadata.id;
-          }
-        }
-      }
-    } else if (legacyVariant === 'light' || legacyVariant === 'dark') {
-      themeMode = legacyVariant;
+    } else {
+      themeMode = resolvedPreferences.themeMode;
     }
 
     if (typeof embeddedLightId === 'string' && embeddedLightId.trim().length > 0) {
       lightThemeId = embeddedLightId.trim();
-    } else if (typeof storedLightId === 'string' && storedLightId.trim().length > 0) {
-      lightThemeId = storedLightId.trim();
+    } else {
+      lightThemeId = resolvedPreferences.lightThemeId;
     }
 
     if (typeof embeddedDarkId === 'string' && embeddedDarkId.trim().length > 0) {
       darkThemeId = embeddedDarkId.trim();
-    } else if (typeof storedDarkId === 'string' && storedDarkId.trim().length > 0) {
-      darkThemeId = storedDarkId.trim();
+    } else {
+      darkThemeId = resolvedPreferences.darkThemeId;
     }
   }
 
@@ -314,6 +301,9 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     customThemesRequestRef.current += 1;
     setCustomThemes([]);
     setCustomThemesLoading(false);
+    // Adopt the new instance's last-known theme immediately; the incoming
+    // settings sync refines it with the server's authoritative value.
+    setPreferences((prev) => adoptThemePreferencesForRuntime(detail.runtimeKey, prev));
     void reloadCustomThemes();
   }), [isVSCode, reloadCustomThemes]);
 
@@ -424,6 +414,17 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       return;
     }
 
+    writeThemePreferencesForRuntime(getRuntimeKey(), {
+      themeMode: preferences.themeMode,
+      lightThemeId: preferences.lightThemeId,
+      darkThemeId: preferences.darkThemeId,
+    });
+
+    // Cosmetic last-writer-wins hints for the pre-React splash shells
+    // (packages/web/index.html, mobile.html, mini-chat.html) and the Android
+    // status bar, which run before the scoped key can be read. Not part of the
+    // app's theme authority — the scoped entry and the per-instance server
+    // settings own that.
     localStorage.setItem('themeMode', preferences.themeMode);
     localStorage.setItem('lightThemeId', preferences.lightThemeId);
     localStorage.setItem('darkThemeId', preferences.darkThemeId);
@@ -434,8 +435,6 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       currentTheme.metadata.variant === 'light' ? 'light' : 'dark',
     );
 
-    // Splash screen (packages/web/index.html) runs before the theme CSS vars load.
-    // Persist just enough to theme it on next boot.
     const lightTheme = ensureThemeById(preferences.lightThemeId, 'light');
     const darkTheme = ensureThemeById(preferences.darkThemeId, 'dark');
 
@@ -459,37 +458,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
         return;
       }
 
-      if (event.key !== 'themeMode' && event.key !== 'lightThemeId' && event.key !== 'darkThemeId') {
-        return;
-      }
-
-      setPreferences((prev) => {
-        const nextModeRaw = localStorage.getItem('themeMode');
-        const nextMode: ThemeMode =
-          nextModeRaw === 'light' || nextModeRaw === 'dark' || nextModeRaw === 'system'
-            ? nextModeRaw
-            : prev.themeMode;
-
-        const nextLightRaw = localStorage.getItem('lightThemeId');
-        const nextLight = typeof nextLightRaw === 'string' && nextLightRaw.trim().length > 0
-          ? nextLightRaw.trim()
-          : prev.lightThemeId;
-
-        const nextDarkRaw = localStorage.getItem('darkThemeId');
-        const nextDark = typeof nextDarkRaw === 'string' && nextDarkRaw.trim().length > 0
-          ? nextDarkRaw.trim()
-          : prev.darkThemeId;
-
-        if (nextMode === prev.themeMode && nextLight === prev.lightThemeId && nextDark === prev.darkThemeId) {
-          return prev;
-        }
-
-        return {
-          themeMode: nextMode,
-          lightThemeId: nextLight,
-          darkThemeId: nextDark,
-        };
-      });
+      setPreferences((prev) => resolveThemePreferencesFromStorageEvent(event.key, getRuntimeKey(), prev) ?? prev);
     };
 
     window.addEventListener('storage', handleStorage);

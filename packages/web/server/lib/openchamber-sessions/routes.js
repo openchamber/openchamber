@@ -83,7 +83,10 @@ const resolveVariant = (providers, providerID, modelID, variant) => {
 const parseConfigModel = (value) => splitModel(value);
 
 const buildDirectoryHeaders = (directory) => ({
-  ...(directory ? { 'x-opencode-directory': directory } : {}),
+  // OpenCode rejects non-ASCII header values; the official SDK sends this
+  // header percent-encoded, so match that wire format (non-ASCII checkout
+  // paths such as "Masaüstü" otherwise fail every dispatched prompt).
+  ...(directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : {}),
 });
 
 const fetchJson = async (url, authHeaders, fallback, directory) => {

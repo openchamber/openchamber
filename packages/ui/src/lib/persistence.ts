@@ -17,6 +17,7 @@ import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { sanitizeStarterRefs } from '@/lib/draftStarters';
 import { normalizeMobileKeyboardMode, setStoredMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { isCapacitorApp } from '@/lib/platform';
 import { isTerminalShell } from '@/lib/terminalShell';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID } from '@/lib/theme/themes';
@@ -105,11 +106,6 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   }
 
   persistRuntimeSettingsMirror(settings, getRuntimeKey());
-  setOrRemoveLocalStorage('selectedThemeId', settings.themeId || null);
-  setOrRemoveLocalStorage('selectedThemeVariant', settings.themeVariant || null);
-  setOrRemoveLocalStorage('lightThemeId', settings.lightThemeId || null);
-  setOrRemoveLocalStorage('darkThemeId', settings.darkThemeId || null);
-  setOrRemoveLocalStorage('useSystemTheme', typeof settings.useSystemTheme === 'boolean' ? String(settings.useSystemTheme) : null);
   setOrRemoveLocalStorage('lastDirectory', settings.lastDirectory || null);
   if (settings.homeDirectory) {
     localStorage.setItem('homeDirectory', settings.homeDirectory);
@@ -1772,6 +1768,26 @@ const isSettingsRuntimeContextCurrent = (context: SettingsRuntimeContext): boole
   context.generation === _settingsRuntimeGeneration && context.runtimeKey === getRuntimeKey()
 );
 
+// Best-effort flush of the pending debounced settings write at a lifecycle
+// boundary. Clearing the timer before flushing means the write happens exactly
+// once — the flush consumes the pending changes, so a timer that already fired
+// cannot double-write. A hard process kill (crash, task-manager kill) can
+// still lose the in-flight request; this narrows the loss window to the
+// request itself instead of the whole debounce interval (#2197).
+const flushPendingSettingsBeforeSuspend = (): void => {
+  if (!_pendingSettingsChanges) return;
+  if (_settingsFlushTimer) {
+    clearTimeout(_settingsFlushTimer);
+    _settingsFlushTimer = null;
+  }
+  // `keepalive` is what makes this flush actually land: a plain fetch started
+  // from pagehide/beforeunload is cancelled with the document. Settings payloads
+  // are a few KB, far under the 64 KB keepalive budget. `navigator.sendBeacon`
+  // is not an option here — it cannot carry the runtime bearer header, so the
+  // write would be rejected as unauthenticated.
+  void _flushSettingsUpdate({ keepalive: true });
+};
+
 const ensureSettingsRuntimeLifecycle = (): void => {
   if (_settingsLifecycleInitialized || typeof window === 'undefined') return;
   _settingsLifecycleInitialized = true;
@@ -1789,6 +1805,33 @@ const ensureSettingsRuntimeLifecycle = (): void => {
     _settingsCache = null;
     _settingsInflight = null;
   });
+
+  // Mirror the deferred safe-storage lifecycle: without these listeners, a
+  // settings change made within SETTINGS_DEBOUNCE_MS of closing the window is
+  // silently dropped, and the stale server snapshot wins on next startup.
+  try {
+    window.addEventListener('pagehide', flushPendingSettingsBeforeSuspend, { capture: true });
+    window.addEventListener('beforeunload', flushPendingSettingsBeforeSuspend, { capture: true });
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') flushPendingSettingsBeforeSuspend();
+      });
+      document.addEventListener('freeze', flushPendingSettingsBeforeSuspend);
+    }
+    // Capacitor: iOS/Android suspend the app without firing pagehide or
+    // beforeunload, and `visibilitychange` alone is not dependable in a
+    // WKWebView. `App.appStateChange` is the authoritative foreground signal on
+    // native (same source `usePushVisibilityBeacon` trusts), so flush there too.
+    if (isCapacitorApp()) {
+      void import('@capacitor/app')
+        .then(({ App }) => App.addListener('appStateChange', ({ isActive }) => {
+          if (!isActive) flushPendingSettingsBeforeSuspend();
+        }))
+        .catch(() => undefined);
+    }
+  } catch {
+    // Restricted environments can reject listeners; the debounce timer still flushes.
+  }
 };
 
 const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Promise<DesktopSettings | null> => {
@@ -1999,7 +2042,9 @@ export const syncDesktopSettings = async (options?: { adoptWorkspace?: boolean }
 };
 
 // Coalesce rapid updateDesktopSettings calls into a single PUT
-async function _flushSettingsUpdate(): Promise<void> {
+// `keepalive` is set only on the lifecycle-suspend path, where the document may
+// be torn down mid-request; the ordinary debounced write uses a plain fetch.
+async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean } = {}): Promise<void> {
   const changes = _pendingSettingsChanges;
   const context = _pendingSettingsContext;
   const revision = _pendingSettingsRevision;
@@ -2046,6 +2091,7 @@ async function _flushSettingsUpdate(): Promise<void> {
             Accept: 'application/json',
           },
           body: JSON.stringify(changes),
+          keepalive,
         });
 
         if (!isSettingsRuntimeContextCurrent(context)) return;

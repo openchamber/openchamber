@@ -7,6 +7,7 @@ import { Toaster } from '@/components/ui/sonner';
 import { Button } from '@/components/ui/button';
 import { MemoryDebugPanel } from '@/components/ui/MemoryDebugPanel';
 import { setStreamPerfEnabled } from '@/stores/utils/streamDebug';
+import { setRequestsInFlightTrackingEnabled } from '@/stores/utils/requestsInFlight';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 // useEventStream removed — replaced by SyncProvider + SyncBridge
 import { useMenuActions } from '@/hooks/useMenuActions';
@@ -19,6 +20,7 @@ import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
 import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
 import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
+import { useRootScrollLock } from '@/hooks/useRootScrollLock';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop } from '@/lib/desktop';
 import {
@@ -47,6 +49,7 @@ import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -245,6 +248,7 @@ function App({ apis }: AppProps) {
   const isSwitchingDirectory = useDirectoryStore((state) => state.isSwitchingDirectory);
   const [showMemoryDebug, setShowMemoryDebug] = React.useState(false);
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
+  const refreshLinearAuthStatus = useLinearAuthStore((state) => state.refreshStatus);
   const [isVSCodeRuntime, setIsVSCodeRuntime] = React.useState<boolean>(() => apis.runtime.isVSCode);
   // Embedded chats start inactive until the parent panel identifies the active
   // tab. Otherwise a newly loaded background tab can focus its composer first
@@ -276,6 +280,13 @@ function App({ apis }: AppProps) {
     setStreamPerfEnabled(showMemoryDebug);
     return () => {
       setStreamPerfEnabled(false);
+    };
+  }, [showMemoryDebug]);
+
+  React.useEffect(() => {
+    setRequestsInFlightTrackingEnabled(showMemoryDebug);
+    return () => {
+      setRequestsInFlightTrackingEnabled(false);
     };
   }, [showMemoryDebug]);
 
@@ -336,7 +347,8 @@ function App({ apis }: AppProps) {
     }
 
     void refreshGitHubAuthStatus(apis.github, { force: true });
-  }, [apis.github, embeddedSessionChat, refreshGitHubAuthStatus]);
+    void refreshLinearAuthStatus(apis.linear, { force: true });
+  }, [apis.github, apis.linear, embeddedSessionChat, refreshGitHubAuthStatus, refreshLinearAuthStatus]);
 
   useAppFontEffects();
 
@@ -708,6 +720,8 @@ function App({ apis }: AppProps) {
   usePwaInstallPrompt();
 
   useWindowTitle();
+
+  useRootScrollLock();
 
   useRouter();
 

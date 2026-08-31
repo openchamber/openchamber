@@ -1,3 +1,4 @@
+import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'Suivi de l’utilisation d’OpenCode Go',
@@ -1756,7 +1757,10 @@ export const settingsDict = {
   'settings.voice.page.provider.server': 'Serveur',
   'settings.voice.page.provider.local': 'Local',
   'settings.voice.page.tooltip.sttLocal': 'Transcription locale sur le serveur OpenChamber. Les modèles se téléchargent automatiquement ; aucune clé d\'API requise.',
-  'settings.voice.page.tooltip.localTts': 'Synthèse locale sur le serveur OpenChamber (Kokoro, anglais). Le modèle se télécharge automatiquement ; aucune clé d’API requise.',
+  'settings.voice.page.tooltip.localTts': 'Synthèse locale sur le serveur OpenChamber (Kokoro pour l’anglais ; les modèles des autres langues sont téléchargés à la première utilisation). Aucune clé API requise.',
+  'settings.voice.page.field.followTextLanguage': 'Adapter la voix à la langue du texte',
+  'settings.voice.page.field.followTextLanguageAria': 'Adapter la voix à la langue du texte',
+  'settings.voice.page.field.followTextLanguageInfo': 'Si une réponse est dans une autre langue, une voix pour cette langue est utilisée : une voix macOS adaptée ou un modèle local téléchargé à la première utilisation.',
   'settings.voice.page.stt.model.parakeetV2': 'Parakeet v2 (anglais)',
   'settings.voice.page.stt.model.parakeetV3': 'Parakeet v3 (25 langues européennes)',
   'settings.voice.page.stt.model.whisperBase': 'Whisper base (multilingue)',
@@ -1846,7 +1850,7 @@ export const settingsDict = {
   'settings.openchamber.visual.section.streaming': 'Streaming',
   'settings.openchamber.visual.field.streamingAutoFollow': 'Suivre le nouveau contenu pendant le streaming',
   'settings.openchamber.visual.field.streamingAutoFollowAria': 'Suivre automatiquement le nouveau contenu pendant la diffusion d’une réponse',
-  'settings.openchamber.visual.field.streamingAutoFollowInfo': 'Pendant qu’une réponse arrive, la vue glisse vers le contenu le plus récent. Désactivez pour garder la vue immobile et défiler manuellement.',
+  'settings.openchamber.visual.field.streamingAutoFollowInfo': 'Pendant qu’une réponse arrive, la vue glisse vers le contenu le plus récent. Désactivez pour garder la vue immobile et défiler manuellement ; envoyer un message depuis le milieu de la conversation laisse alors aussi la vue en place.',
   'settings.openchamber.visual.section.messageAppearance': 'Apparence des messages',
   'settings.openchamber.visual.section.toolsAndFiles': 'Outils et fichiers',
   'settings.openchamber.visual.section.composer': 'Zone de saisie',
@@ -1967,6 +1971,13 @@ export const settingsDict = {
   'settings.openchamber.visual.field.persistDraftMessages': 'Conserver les brouillons de messages',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': 'Activer la vérification orthographique dans les saisies de texte',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'Activer la vérification orthographique dans les entrées de texte',
+  'settings.openchamber.visual.field.largeTextPaste': 'Collage de texte volumineux',
+  'settings.openchamber.visual.field.largeTextPasteHint': 'Lors d’un collage de plus d’environ 2 000 caractères ou 25 lignes, choisir de joindre le texte comme fichier, de le coller en ligne ou de demander à chaque fois.',
+  'settings.openchamber.visual.field.largeTextPasteAria': 'Comportement du collage de texte volumineux',
+  'settings.openchamber.visual.field.largeTextPasteOptionAria': 'Collage de texte volumineux : {option}',
+  'settings.openchamber.visual.option.largeTextPaste.ask.label': 'Demander à chaque fois',
+  'settings.openchamber.visual.option.largeTextPaste.attach.label': 'Joindre comme fichier',
+  'settings.openchamber.visual.option.largeTextPaste.inline.label': 'Coller en ligne',
   'settings.openchamber.visual.field.sendAnonymousUsageReportsAria': 'Envoyer des rapports d\'utilisation anonymes',
   'settings.openchamber.visual.field.sendAnonymousUsageReports': 'Envoyer des rapports d\'utilisation anonymes',
   'settings.openchamber.visual.field.sendAnonymousUsageReportsHint': 'Nous aide à comprendre quelles versions de l\'application sont activement utilisées afin que nous puissions prioriser les améliorations. Seules la version de l’application, la plate-forme et le runtime sont collectés – aucune donnée personnelle ni code.',
@@ -2220,5 +2231,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  ...linearIntegrationI18n.fr,
   ...thirdPartyIntegrationI18n.fr,
 } as const;

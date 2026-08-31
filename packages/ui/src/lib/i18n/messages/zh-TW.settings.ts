@@ -1,3 +1,4 @@
+import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 用量追蹤',
@@ -1745,7 +1746,10 @@ export const settingsDict = {
   'settings.voice.page.provider.server': '伺服器',
   'settings.voice.page.provider.local': '本機',
   'settings.voice.page.tooltip.sttLocal': '在 OpenChamber 伺服器上本機轉寫。模型會自動下載，無需 API 金鑰。',
-  'settings.voice.page.tooltip.localTts': '在 OpenChamber 伺服器上本機合成語音（Kokoro，英文）。模型會自動下載，無需 API 金鑰。',
+  'settings.voice.page.tooltip.localTts': '在 OpenChamber 伺服器上本機合成語音（英文使用 Kokoro；其他語言的模型在首次使用時下載）。不需要 API 金鑰。',
+  'settings.voice.page.field.followTextLanguage': '依文字語言選擇語音',
+  'settings.voice.page.field.followTextLanguageAria': '依文字語言選擇語音',
+  'settings.voice.page.field.followTextLanguageInfo': '當回覆使用其他語言時，會使用該語言的語音：相符的 macOS 語音，或首次使用時下載的本機模型。',
   'settings.voice.page.stt.model.parakeetV2': 'Parakeet v2（英文）',
   'settings.voice.page.stt.model.parakeetV3': 'Parakeet v3（25 種歐洲語言）',
   'settings.voice.page.stt.model.whisperBase': 'Whisper base（多語言）',
@@ -1839,7 +1843,7 @@ export const settingsDict = {
   'settings.openchamber.visual.section.streaming': '串流',
   'settings.openchamber.visual.field.streamingAutoFollow': '串流時跟隨新內容',
   'settings.openchamber.visual.field.streamingAutoFollowAria': '回覆串流時自動跟隨新內容',
-  'settings.openchamber.visual.field.streamingAutoFollowInfo': '回覆串流時，畫面會持續捲動到最新內容。關閉後畫面保持不動，可手動捲動。',
+  'settings.openchamber.visual.field.streamingAutoFollowInfo': '回覆串流時，畫面會持續捲動到最新內容。關閉後畫面保持不動，可手動捲動；此時從聊天中間傳送訊息也不會移動畫面。',
   'settings.openchamber.visual.section.messageAppearance': '訊息外觀',
   'settings.openchamber.visual.section.toolsAndFiles': '工具與檔案',
   'settings.openchamber.visual.section.composer': '輸入框',
@@ -1969,6 +1973,13 @@ export const settingsDict = {
   'settings.openchamber.visual.field.persistDraftMessages': '保留草稿訊息',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': '在文字輸入方塊啟用拼寫檢查',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': '在文字輸入方塊啟用拼寫檢查',
+  'settings.openchamber.visual.field.largeTextPaste': '貼上大段文字',
+  'settings.openchamber.visual.field.largeTextPasteHint': '貼上超過約 2000 個字元或 25 行時，可選擇附加為檔案、直接貼到輸入框，或每次詢問。',
+  'settings.openchamber.visual.field.largeTextPasteAria': '大段文字貼上行為',
+  'settings.openchamber.visual.field.largeTextPasteOptionAria': '大段文字貼上：{option}',
+  'settings.openchamber.visual.option.largeTextPaste.ask.label': '每次詢問',
+  'settings.openchamber.visual.option.largeTextPaste.attach.label': '附加為檔案',
+  'settings.openchamber.visual.option.largeTextPaste.inline.label': '直接貼上',
   'settings.openchamber.visual.field.sendAnonymousUsageReportsAria': '送出匿名使用報告',
   'settings.openchamber.visual.field.sendAnonymousUsageReports': '送出匿名使用報告',
   'settings.openchamber.visual.field.sendAnonymousUsageReportsHint': '協助我們了解哪些應用程式版本仍在被積極使用，以便優先改進。僅收集應用程式版本、平台與執行階段資訊，不收集個人資料或程式碼。',
@@ -2220,5 +2231,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  ...linearIntegrationI18n['zh-TW'],
   ...thirdPartyIntegrationI18n['zh-TW'],
 } as const;

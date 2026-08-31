@@ -5,6 +5,7 @@ import {
     getAnchoredTurnMetrics,
     getRowBottom,
     resolveChatListAnchoredEndSpace,
+    resolveRealContentEndOffset,
     resolveTimelineIsAtEnd,
     type TimelineListMeasurementState,
 } from './timelineScrollAnchoring';
@@ -180,6 +181,58 @@ describe('getAnchoredTurnMetrics', () => {
 
         expect(metrics?.anchorTop).toBe(300);
         expect(metrics?.turnHeight).toBe(80);
+    });
+});
+
+describe('resolveRealContentEndOffset', () => {
+    test('puts the last row bottom just above the composer overlay', () => {
+        const state = buildState({
+            positions: [0, 1000],
+            sizes: [1000, 200],
+            scroll: 0,
+            scrollLength: 700,
+        });
+
+        expect(resolveRealContentEndOffset({ state, composerOverlayHeight: 180 })).toBe(680);
+    });
+
+    test('ignores content length inflated by reserved end space or stale sizes', () => {
+        // The list still reports a far larger content length than the measured
+        // rows; the end offset must follow the rows, not that length.
+        const state = buildState({
+            positions: [0, 300],
+            sizes: [300, 100],
+            scroll: 900,
+            scrollLength: 700,
+        });
+
+        expect(resolveRealContentEndOffset({ state, composerOverlayHeight: 180 })).toBe(0);
+    });
+
+    test('reserves extra slack below the content when asked', () => {
+        const state = buildState({
+            positions: [0, 1000],
+            sizes: [1000, 200],
+            scrollLength: 700,
+        });
+
+        expect(resolveRealContentEndOffset({
+            state,
+            composerOverlayHeight: 180,
+            extraInset: CHAT_LIST_ANCHOR_OFFSET,
+        })).toBe(696);
+    });
+
+    test('returns null for an empty timeline and for unmeasured last rows', () => {
+        expect(resolveRealContentEndOffset({
+            state: buildState({ positions: [], sizes: [] }),
+            composerOverlayHeight: 180,
+        })).toBeNull();
+
+        expect(resolveRealContentEndOffset({
+            state: buildState({ positions: [0, 100], sizes: [100] }),
+            composerOverlayHeight: 180,
+        })).toBeNull();
     });
 });
 

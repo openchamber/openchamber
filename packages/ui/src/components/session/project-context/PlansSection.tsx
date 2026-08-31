@@ -5,7 +5,7 @@ import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { requestFileAccess } from '@/lib/desktop';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
-import { parsePlanMarkdown, type ProjectPlanLink, type ProjectRef } from '@/lib/projectContextApi';
+import { parsePlanMarkdown, resolveProjectContextId, type ProjectPlanLink, type ProjectRef } from '@/lib/projectContextApi';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { cn } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -23,8 +23,9 @@ export const PlansSection: React.FC<{
   plans: ProjectPlanLink[];
   /** Panel-wide filter, matched against plan titles. */
   query: string;
-  /** Hosts without a ContextPanel (mobile) render their own plan viewer. */
-  onOpenPlan?: (plan: { id: string; title: string }) => void;
+  /** Hosts without a ContextPanel (mobile) render their own plan viewer. The
+      plan carries its owner so the host viewer never guesses the project. */
+  onOpenPlan?: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
   pinnedPlanIds: ReadonlySet<string>;
   onTogglePinned: (planId: string, pinned: boolean) => Promise<boolean>;
 }> = ({ projectRef, plans, query, onOpenPlan, pinnedPlanIds, onTogglePinned }) => {
@@ -155,7 +156,7 @@ export const PlansSection: React.FC<{
   const handleOpenPlan = React.useCallback(
     (plan: ProjectPlanLink) => {
       if (onOpenPlan) {
-        onOpenPlan({ id: plan.id, title: plan.title });
+        onOpenPlan({ id: plan.id, title: plan.title, projectRef });
         return;
       }
       const panelDirectory = currentDirectory?.trim() || projectRef.path.trim();
@@ -165,11 +166,15 @@ export const PlansSection: React.FC<{
       openContextPanelTab(panelDirectory, {
         mode: 'plan',
         projectPlanId: plan.id,
-        dedupeKey: `plan:${plan.id}`,
+        projectPlanRef: projectRef,
+        // Storage identity is derived from the project path, not the settings
+        // id, so the tab identity uses the same derivation. Two projects
+        // sharing a settings id but not a path must not merge plan tabs.
+        dedupeKey: `plan:${resolveProjectContextId(projectRef)}:${plan.id}`,
         label: plan.title,
       });
     },
-    [currentDirectory, onOpenPlan, openContextPanelTab, projectRef.path]
+    [currentDirectory, onOpenPlan, openContextPanelTab, projectRef]
   );
 
   return (

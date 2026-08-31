@@ -1,3 +1,4 @@
+import { linearIntegrationI18n } from './linear-integration.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 사용량 추적',
@@ -1838,7 +1839,10 @@ export const settingsDict = {
   'settings.voice.page.provider.server': '서버',
   'settings.voice.page.provider.local': '로컬',
   'settings.voice.page.tooltip.sttLocal': 'OpenChamber 서버에서 로컬로 변환합니다. 모델은 자동으로 다운로드되며 API 키가 필요 없습니다.',
-  'settings.voice.page.tooltip.localTts': 'OpenChamber 서버에서 로컬로 음성을 합성합니다(Kokoro, 영어). 모델은 자동으로 다운로드되며 API 키가 필요 없습니다.',
+  'settings.voice.page.tooltip.localTts': 'OpenChamber 서버에서 로컬로 음성을 합성합니다(영어는 Kokoro, 다른 언어 모델은 처음 사용할 때 다운로드). API 키가 필요 없습니다.',
+  'settings.voice.page.field.followTextLanguage': '텍스트 언어에 맞는 음성 사용',
+  'settings.voice.page.field.followTextLanguageAria': '텍스트 언어에 맞는 음성 사용',
+  'settings.voice.page.field.followTextLanguageInfo': '응답이 다른 언어이면 해당 언어의 음성을 사용합니다. 일치하는 macOS 음성 또는 처음 사용할 때 다운로드되는 로컬 모델입니다.',
   'settings.voice.page.stt.model.parakeetV2': 'Parakeet v2 (영어)',
   'settings.voice.page.stt.model.parakeetV3': 'Parakeet v3 (유럽 25개 언어)',
   'settings.voice.page.stt.model.whisperBase': 'Whisper base (다국어)',
@@ -1932,7 +1936,7 @@ export const settingsDict = {
   'settings.openchamber.visual.section.streaming': '스트리밍',
   'settings.openchamber.visual.field.streamingAutoFollow': '스트리밍 중 새 내용 따라가기',
   'settings.openchamber.visual.field.streamingAutoFollowAria': '응답 스트리밍 중 새 내용으로 자동 스크롤',
-  'settings.openchamber.visual.field.streamingAutoFollowInfo': '응답이 스트리밍되는 동안 화면이 최신 내용으로 계속 이동합니다. 끄면 화면이 고정되어 직접 스크롤할 수 있습니다.',
+  'settings.openchamber.visual.field.streamingAutoFollowInfo': '응답이 스트리밍되는 동안 화면이 최신 내용으로 계속 이동합니다. 끄면 화면이 고정되어 직접 스크롤할 수 있으며, 채팅 중간에서 메시지를 보내도 화면이 이동하지 않습니다.',
   'settings.openchamber.visual.section.messageAppearance': '메시지 모양',
   'settings.openchamber.visual.section.toolsAndFiles': '도구 및 파일',
   'settings.openchamber.visual.section.composer': '입력창',
@@ -2062,6 +2066,13 @@ export const settingsDict = {
   'settings.openchamber.visual.field.persistDraftMessages': '초안 메시지 유지',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': '텍스트 입력에서 맞춤법 검사 활성화',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': '텍스트 입력에서 맞춤법 검사 활성화',
+  'settings.openchamber.visual.field.largeTextPaste': '긴 텍스트 붙여넣기',
+  'settings.openchamber.visual.field.largeTextPasteHint': '약 2,000자 또는 25줄을 넘는 텍스트를 붙여넣을 때 파일로 첨부할지, 본문에 붙여넣을지, 매번 물어볼지 선택합니다.',
+  'settings.openchamber.visual.field.largeTextPasteAria': '긴 텍스트 붙여넣기 동작',
+  'settings.openchamber.visual.field.largeTextPasteOptionAria': '긴 텍스트 붙여넣기: {option}',
+  'settings.openchamber.visual.option.largeTextPaste.ask.label': '매번 묻기',
+  'settings.openchamber.visual.option.largeTextPaste.attach.label': '파일로 첨부',
+  'settings.openchamber.visual.option.largeTextPaste.inline.label': '본문에 붙여넣기',
   'settings.openchamber.visual.field.sendAnonymousUsageReportsAria': '익명 사용량 보고서 보내기',
   'settings.openchamber.visual.field.sendAnonymousUsageReports': '익명 사용량 보고서 보내기',
   'settings.openchamber.visual.field.sendAnonymousUsageReportsHint': '활성 사용 앱 버전을 파악해 개선 우선순위를 정하는 데 도움이 됩니다. 앱 버전, 플랫폼, 런타임만 수집되며 개인 데이터나 코드는 수집되지 않습니다.',
@@ -2220,5 +2231,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  ...linearIntegrationI18n.ko,
   ...thirdPartyIntegrationI18n.ko,
 } as const;
