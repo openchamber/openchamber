@@ -2492,9 +2492,15 @@ export function SyncProvider(props: {
     ) => {
       if (parentSessionIds.length === 0) return
       try {
-        const scopedClient = opencodeClient.getScopedSdkClient(directory)
-        const result: unknown = await runBackgroundNetworkTask(() => scopedClient.session.list({ directory, limit: 200 }))
-        const allSessions = ((result as { data?: unknown }).data ?? []) as Session[]
+        // Paginated so directories with > pageSize sessions are fully
+        // discovered; a single 200-record page silently truncated the list and
+        // left subagent children beyond it undiscovered.
+        const allSessions = await listGlobalSessionPages(props.sdk, {
+          directory,
+          archived: false,
+          roots: false,
+          pageSize: 200,
+        })
         const state = store.getState()
         const existingIds = new Set(state.session.map((s) => s.id))
         const parentIdSet = new Set(parentSessionIds)
