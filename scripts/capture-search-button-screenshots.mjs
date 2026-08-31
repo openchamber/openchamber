@@ -18,18 +18,27 @@ const VIEWPORT = { width: 1280, height: 720 };
 async function locateSearchButton(page) {
   // Strategy 1: aria-label from i18n (English "Open message search")
   const byAria = page.getByRole("button", { name: "Open message search" });
-  if (await byAria.count()) return byAria.first();
+  try {
+    await byAria.first().waitFor({ state: "visible", timeout: 15000 });
+    return byAria.first();
+  } catch {}
 
   // Strategy 2: explicit testid (future-proof if header gains one)
   const byTestId = page.getByTestId("chat-header-search-button");
-  if (await byTestId.count()) return byTestId.first();
+  try {
+    await byTestId.first().waitFor({ state: "visible", timeout: 5000 });
+    return byTestId.first();
+  } catch {}
 
   // Strategy 3: SVG search icon in the header toolbar (last resort)
   const magnifier = page
     .locator("header button svg, [class*=header] button svg")
     .filter({ has: page.locator("[data-icon=search], path[d*=\"M15.5\"]") })
     .first();
-  if (await magnifier.count()) return magnifier;
+  try {
+    await magnifier.waitFor({ state: "visible", timeout: 5000 });
+    return magnifier;
+  } catch {}
 
   throw new Error(
     "Search button not found — Header did not render (auth gate still blocking?)"
