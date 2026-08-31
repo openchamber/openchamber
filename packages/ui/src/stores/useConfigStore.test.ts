@@ -504,6 +504,51 @@ describe('useConfigStore provider persistence', () => {
     expect(persisted.state.directoryScoped[DIRECTORY].selectedProviderId).toBe('');
   });
 
+  test('[issue-1801] round-trips a manual model selection through restart hydration', async () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [
+        provider('opencode', 'big-pickle'),
+        provider('deepseek', 'deepseek-v4-pro', { low: {}, high: {} }),
+      ],
+      agents: [testAgent('build')],
+      currentProviderId: 'opencode',
+      currentModelId: 'big-pickle',
+      currentAgentName: 'build',
+      settingsDefaultModel: 'opencode/big-pickle',
+      directoryScoped: {},
+    });
+    useConfigStore.getState().setProvider('deepseek');
+    useConfigStore.getState().setCurrentVariantOverride('low', 'high');
+
+    const persisted = storage.get(STORAGE_KEY);
+    expect(JSON.parse(persisted ?? '{}').state.selectionSource).toBe('manual');
+
+    useConfigStore.setState({
+      providers: [],
+      agents: [],
+      currentProviderId: '',
+      currentModelId: '',
+      currentVariant: undefined,
+      currentVariantSelection: { override: undefined, inherited: undefined },
+      currentAgentName: undefined,
+      selectionSource: 'auto',
+      directoryScoped: {},
+    });
+    if (persisted) {
+      storage.set(STORAGE_KEY, persisted);
+    }
+
+    await useConfigStore.persist.rehydrate();
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+
+    const restarted = useConfigStore.getState();
+    expect(restarted.currentProviderId).toBe('deepseek');
+    expect(restarted.currentModelId).toBe('deepseek-v4-pro');
+    expect(restarted.currentVariant).toBe('low');
+    expect(restarted.selectionSource).toBe('manual');
+  });
+
   test('setAgent applies settings default variant for an agent configured model', () => {
     useSessionUIStore.setState({ currentSessionId: 'ses_agent_default_variant' });
     useConfigStore.setState({
@@ -828,7 +873,7 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentVariant).toBe('high');
   });
 
-  test('a fresh session applies the settings thinking level instead of the previous override', () => {
+  test('an automatic fresh session applies the settings thinking level instead of the previous override', () => {
     useConfigStore.setState({
       activeDirectoryKey: DIRECTORY,
       providers: [provider('openai', 'gpt-5.5', { low: {}, high: {} })],
@@ -839,7 +884,7 @@ describe('useConfigStore provider persistence', () => {
       currentVariantSelection: { override: 'low', inherited: 'high' },
       settingsDefaultModel: 'openai/gpt-5.5',
       settingsDefaultVariant: 'high',
-      selectionSource: 'manual',
+      selectionSource: 'auto',
       directoryScoped: {},
     });
 
@@ -849,6 +894,60 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentVariant).toBe('high');
     expect(state.currentVariantSelection).toEqual({ override: 'high', inherited: 'high' });
     expect(state.directoryScoped[DIRECTORY]?.currentVariant).toBe('high');
+  });
+
+  test('[issue-1801] a fresh draft preserves a valid manual model selection', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [
+        provider('opencode', 'big-pickle'),
+        provider('deepseek', 'deepseek-v4-pro', { low: {}, high: {} }),
+      ],
+      agents: [testAgent('build')],
+      currentProviderId: 'deepseek',
+      currentModelId: 'deepseek-v4-pro',
+      currentVariant: 'low',
+      currentVariantSelection: { override: 'low', inherited: 'high' },
+      currentAgentName: 'build',
+      selectionSource: 'manual',
+      settingsDefaultModel: 'opencode/big-pickle',
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+
+    const state = useConfigStore.getState();
+    expect(state.currentProviderId).toBe('deepseek');
+    expect(state.currentModelId).toBe('deepseek-v4-pro');
+    expect(state.currentVariant).toBe('low');
+    expect(state.currentVariantSelection).toEqual({ override: 'low', inherited: 'high' });
+    expect(state.selectionSource).toBe('manual');
+    expect(state.directoryScoped[DIRECTORY]?.currentModelId).toBe('deepseek-v4-pro');
+    expect(state.directoryScoped[DIRECTORY]?.selectionSource).toBe('manual');
+  });
+
+  test('[issue-1801] a fresh draft falls back when the manual model is unavailable', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('opencode', 'big-pickle')],
+      agents: [testAgent('build')],
+      currentProviderId: 'deepseek',
+      currentModelId: 'retired-model',
+      currentVariant: 'low',
+      currentVariantSelection: { override: 'low', inherited: 'low' },
+      currentAgentName: 'build',
+      selectionSource: 'manual',
+      settingsDefaultModel: 'opencode/big-pickle',
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+
+    const state = useConfigStore.getState();
+    expect(state.currentProviderId).toBe('opencode');
+    expect(state.currentModelId).toBe('big-pickle');
+    expect(state.currentVariant).toBe(undefined);
+    expect(state.selectionSource).toBe('manual');
   });
 
   test('a thinking level the project model does not offer is ignored', async () => {
