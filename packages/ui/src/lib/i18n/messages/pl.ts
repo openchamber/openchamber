@@ -817,6 +817,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.revert.toast.undo': 'Cofnięte do {preview}',
   'chat.revert.toast.redo': 'Ponowione',
   'chat.revert.toast.restored': 'Przywrócono wszystkie wiadomości',
+  'chat.revert.toast.failed': 'Nie udało się cofnąć wiadomości',
   'chat.toast.opencodeRestartInterrupted.title': 'Czat został przerwany',
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode uruchomił się ponownie podczas generowania odpowiedzi. Wyślij wiadomość, aby kontynuować.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Otwórz sesję',

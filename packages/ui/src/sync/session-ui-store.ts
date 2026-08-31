@@ -1793,10 +1793,19 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // revertToMessage — delegates to session-actions (single implementation)
   // ---------------------------------------------------------------------------
   revertToMessage: async (sessionId, messageId) => {
-    // Ensure the complete message range is present before applying the revert
-    // marker. Reverted UI is derived from session.revert + stored messages.
-    await refetchSessionMessages(sessionId)
-    await revertToMessageAction(sessionId, messageId)
+    try {
+      // Ensure the complete message range is present before applying the revert
+      // marker. Reverted UI is derived from session.revert + stored messages.
+      await refetchSessionMessages(sessionId)
+      await revertToMessageAction(sessionId, messageId)
+    } catch (error) {
+      console.error("Failed to revert session:", error)
+      const { toast } = await import("sonner")
+      const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
+      const { dictionary } = useI18nStore.getState()
+      toast.error(formatMessage(dictionary, "chat.revert.toast.failed"))
+      throw error
+    }
   },
 
   // ---------------------------------------------------------------------------

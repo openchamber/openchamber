@@ -2122,6 +2122,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.revert.toast.undo": "Відкочено до {preview}",
   "chat.revert.toast.redo": "Повторено",
   "chat.revert.toast.restored": "Всі повідомлення відновлено",
+  "chat.revert.toast.failed": "Не вдалося відкотити повідомлення",
   "chat.toast.opencodeRestartInterrupted.title": "Чат перервано",
   "chat.toast.opencodeRestartInterrupted.description": "OpenCode перезапустився, поки відповідь ще формувалася. Надішліть повідомлення, щоб продовжити.",
   "chat.toast.opencodeRestartInterrupted.openSession": "Відкрити сесію",

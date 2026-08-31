@@ -2146,6 +2146,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.revert.toast.undo': '{preview}(으)로 되돌림',
   'chat.revert.toast.redo': '다시 실행',
   'chat.revert.toast.restored': '모든 메시지 복원됨',
+  'chat.revert.toast.failed': '메시지를 되돌리지 못했습니다',
   'chat.toast.opencodeRestartInterrupted.title': '채팅이 중단되었습니다',
   'chat.toast.opencodeRestartInterrupted.description': '응답이 진행 중인 동안 OpenCode가 다시 시작되었습니다. 계속하려면 메시지를 보내세요.',
   'chat.toast.opencodeRestartInterrupted.openSession': '세션 열기',
