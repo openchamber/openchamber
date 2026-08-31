@@ -18,6 +18,7 @@ import {
 import { useI18n, type I18nKey } from "@/lib/i18n";
 import { isVSCodeRuntime } from "@/lib/desktop";
 import type { IconName } from "@/components/icon/icons";
+import { ScrollableOverlay } from "@/components/ui/ScrollableOverlay";
 
 type ShortcutItem = {
   id?: ShortcutActionId;
@@ -219,7 +220,11 @@ export const HelpDialog: React.FC = () => {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto mt-3 pr-1">
+        <ScrollableOverlay
+          outerClassName="flex-1 min-h-0"
+          className="mt-3 pr-1"
+          disableHorizontal
+        >
           <div className="space-y-4">
             {shortcuts.map((section) => (
               <div key={section.categoryKey}>
@@ -308,7 +313,7 @@ export const HelpDialog: React.FC = () => {
               </div>
             </div>
           </div>
-        </div>
+        </ScrollableOverlay>
       </DialogContent>
     </Dialog>
   );

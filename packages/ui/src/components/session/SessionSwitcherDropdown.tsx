@@ -22,6 +22,7 @@ import { formatSessionCompactDateLabel } from './sidebar/utils';
 import type { SessionNode } from './sidebar/types';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type SecondaryMeta = SwitcherItem['secondaryMeta'];
 
@@ -127,7 +128,11 @@ function SwitcherContent({ onSelect, variant, scopeProjectId }: SwitcherContentP
   }, [expandedParents, initialTarget, items]);
 
   return (
-    <div ref={contentRef} className="max-h-[60vh] overflow-y-auto">
+    <ScrollableOverlay
+      ref={contentRef as unknown as React.Ref<HTMLElement>}
+      outerClassName="max-h-[60vh]"
+      disableHorizontal
+    >
       <div className="space-y-0.5">
         <BaseMenu.Item
           data-switcher-item-id={NEW_SESSION_SWITCHER_TARGET}
@@ -160,7 +165,7 @@ function SwitcherContent({ onSelect, variant, scopeProjectId }: SwitcherContentP
           ))
         )}
       </div>
-    </div>
+    </ScrollableOverlay>
   );
 }
 

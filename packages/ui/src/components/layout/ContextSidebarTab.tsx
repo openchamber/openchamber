@@ -20,6 +20,7 @@ import {
 } from './rawMessagePreview';
 import type { TimeFormatPreference } from '@/stores/useUIStore';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type SessionMessage = { info: Message; parts: Part[] };
 
@@ -410,7 +411,7 @@ export const ContextPanelContent: React.FC = () => {
   ];
 
   return (
-    <div className="h-full overflow-y-auto bg-background">
+    <ScrollableOverlay outerClassName="h-full" className="bg-background">
       <div className="mx-auto w-full max-w-[52rem] px-5 py-6">
 
         {/* ── Session header ── */}
@@ -644,6 +645,6 @@ export const ContextPanelContent: React.FC = () => {
           </div>
         </div>
       </div>
-    </div>
+    </ScrollableOverlay>
   );
 };
