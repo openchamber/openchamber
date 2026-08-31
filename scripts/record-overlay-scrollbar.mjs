@@ -67,30 +67,39 @@ async function main() {
     await ensureOverflow(page);
     await wait(400);
 
-    const targetBox = await page
-      .locator(".overlay-scrollbar-target")
-      .first()
-      .boundingBox();
-    if (!targetBox) {
-      throw new Error("no .overlay-scrollbar-target mounted on the page");
-    }
-
     // Idle state: thumb should be hidden.
     const idleVisible = await isThumbVisible(page);
     console.log(`thumb visible at idle: ${idleVisible}`);
 
-    // Move pointer INTO the container -> thumb appears.
-    await page.mouse.move(
-      targetBox.x + targetBox.width / 2,
-      targetBox.y + targetBox.height / 2,
-      { steps: 8 }
-    );
-    await wait(900);
+    // Hover-reveal is only meaningful on a container whose overlay thumb can
+    // appear. Try each .overlay-scrollbar-target in DOM order until the thumb
+    // shows; layout/hydration order can vary between runs, so this removes the
+    // flakiness of "the first target is the wrong one".
+    const targets = await page.locator(".overlay-scrollbar-target").all();
+    if (targets.length === 0) {
+      throw new Error("no .overlay-scrollbar-target mounted on the page");
+    }
 
-    const visibleAfterHover = await isThumbVisible(page);
+    let revealed = false;
+    for (const t of targets) {
+      const box = await t.boundingBox();
+      if (!box) continue;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 8 });
+      await wait(700);
+      if (await isThumbVisible(page)) {
+        revealed = true;
+        console.log(
+          `hover revealed thumb on target ${targets.indexOf(t)} ` +
+          `(box ${Math.round(box.x)},${Math.round(box.y)} ${Math.round(box.width)}x${Math.round(box.height)})`
+        );
+        break;
+      }
+    }
+
+    const visibleAfterHover = revealed;
     console.log(`thumb visible after hover: ${visibleAfterHover}`);
     if (!visibleAfterHover) {
-      throw new Error("hover did not reveal the thumb — check selector");
+      throw new Error("hover did not reveal the thumb on any target — check selector");
     }
 
     // Hold the hover for a moment so the GIF has a "thumb-shown" plateau.
