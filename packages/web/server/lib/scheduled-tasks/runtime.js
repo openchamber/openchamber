@@ -255,7 +255,6 @@ export const createScheduledTasksRuntime = (deps) => {
     waitForOpenCodeReady,
     emitTaskRunEvent,
     setSessionAutoAccept,
-<<<<<<< HEAD
     sessionKnowledgeRuntime = null,
     preflight,
     logger = console,
