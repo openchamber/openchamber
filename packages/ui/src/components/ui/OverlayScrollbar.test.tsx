@@ -358,6 +358,12 @@ describe('OverlayScrollbar', () => {
     scroller.dispatchEvent(new window.PointerEvent('pointerleave', { bubbles: false, pointerType: 'mouse' }));
     await flushFrames();
 
+    // The hide path is a setTimeout (hideDelayMs: 0 still schedules a 0ms
+    // timer). happy-dom runs real timers, so we must let the macrotask fire
+    // before asserting; rAF frames alone are not enough.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await flushFrames();
+
     expect(scrollbar.dataset.visible).toBe('false');
   });
 
