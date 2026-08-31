@@ -27,7 +27,7 @@ async function locateSearchButton(page) {
   // Strategy 3: SVG search icon in the header toolbar (last resort)
   const magnifier = page
     .locator("header button svg, [class*=header] button svg")
-    .filter({ has: page.locator("[data-icon=search], path[d*=M15.5]") })
+    .filter({ has: page.locator("[data-icon=search], path[d*=\"M15.5\"]") })
     .first();
   if (await magnifier.count()) return magnifier;
 
