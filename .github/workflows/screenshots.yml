@@ -35,6 +35,7 @@ jobs:
         run: |
           npm init -y >/dev/null
           npm install playwright@1.48.0 --no-audit --no-fund --silent
+          npx playwright install chromium
 
       - name: Start server (auth disabled) and capture screenshots
         env:
