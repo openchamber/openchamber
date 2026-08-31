@@ -34,6 +34,8 @@ function mountTransferredDraft() {
         submittedMentions: ReadonlySet<string>,
     ) => boolean = () => false;
     let restoreFailedDraft: typeof clearSubmittedDraft = () => false;
+    const identityChanges: Array<'switch' | 'submitted-draft'> = [];
+    let attachmentsCleared = false;
 
     function Probe(props: { currentIdentity: ChatDraftIdentity; materializedSessionId: string | null }) {
         ({ clearSubmittedDraft, restoreFailedDraft } = useComposerDraft({
@@ -45,6 +47,10 @@ function mountTransferredDraft() {
             persistEnabled: true,
             initialDraft: { text: message, identity: draftIdentity },
             submittedDraftSessionId: props.materializedSessionId,
+            onIdentityChange: (change) => {
+                identityChanges.push(change);
+                if (change === 'switch') attachmentsCleared = true;
+            },
         }));
         return null;
     }
@@ -67,6 +73,8 @@ function mountTransferredDraft() {
         fail: () => restoreFailedDraft(draftIdentity, 'important prompt', new Set()),
         getMessage: () => message,
         getMentions: () => mentionsRef.current,
+        getIdentityChanges: () => identityChanges,
+        areAttachmentsCleared: () => attachmentsCleared,
         replaceDraft: (text: string, mentions: Set<string>) => {
             message = text;
             messageRef.current = text;
@@ -94,6 +102,8 @@ describe('submitted composer drafts', () => {
     test('clears an unchanged transferred draft after acknowledgement', () => {
         const draft = mountTransferredDraft();
 
+        expect(draft.getIdentityChanges()).toEqual(['submitted-draft']);
+        expect(draft.areAttachmentsCleared()).toBe(false);
         expect(draft.acknowledge()).toBe(true);
         expect(draft.getMessage()).toBe('');
 
@@ -136,6 +146,8 @@ describe('submitted composer drafts', () => {
         const mentionsRef = { current: new Set<string>() };
         let message = messageRef.current;
         let acknowledgementResult: boolean | null = null;
+        const identityChanges: Array<'switch' | 'submitted-draft'> = [];
+        let attachmentsCleared = false;
 
         function Probe(props: { currentIdentity: ChatDraftIdentity; acknowledge?: boolean }) {
             const controls = useComposerDraft({
@@ -146,6 +158,10 @@ describe('submitted composer drafts', () => {
                 identity: props.currentIdentity,
                 persistEnabled: true,
                 initialDraft: { text: message, identity: sourceIdentity },
+                onIdentityChange: (change) => {
+                    identityChanges.push(change);
+                    if (change === 'switch') attachmentsCleared = true;
+                },
             });
             React.useLayoutEffect(() => {
                 if (props.acknowledge) {
@@ -162,6 +178,8 @@ describe('submitted composer drafts', () => {
         })));
 
         expect(acknowledgementResult).toBe(true);
+        expect(identityChanges).toEqual(['switch']);
+        expect(attachmentsCleared).toBe(true);
         expect(message).toBe('');
         expect(messageRef.current).toBe('');
 

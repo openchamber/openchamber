@@ -819,7 +819,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             text: initialDraftRef.current ?? '',
             identity: initialDraftIdentityRef.current,
         },
-        onIdentityChange: () => setInputMode('normal'),
+        onIdentityChange: (kind) => {
+            setInputMode('normal');
+            if (kind === 'switch') clearAttachedFiles();
+        },
         onDraftRestored: () => composerRef.current?.selectAll(),
     });
 

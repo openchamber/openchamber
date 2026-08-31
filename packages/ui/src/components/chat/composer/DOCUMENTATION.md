@@ -168,7 +168,10 @@ and the send path reading the same grammar.
   while a draft is being restored, and a deleted draft's empty signature is
   recorded before a queued write could resurrect it. A submitted new-session
   draft transfers to the materialized session identity without replacing the
-  visible prompt while its send awaits acknowledgement.
+  visible prompt while its send awaits acknowledgement. Local attachments
+  belong to that visible identity. An ordinary session/runtime/directory switch
+  clears them and invalidates unfinished file reads. The submitted
+  draft-to-session transition retains them until send acknowledgement.
 - `state/useDraftTarget.ts` — the draft can target a directory that does not
   exist yet (a worktree being created). It must survive not appearing in the
   branch list, or the selector snaps back to the project root mid-creation.

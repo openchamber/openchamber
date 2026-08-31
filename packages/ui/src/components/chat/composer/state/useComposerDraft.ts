@@ -29,6 +29,8 @@ type SubmittedDraftTransfer = {
     to: ChatDraftIdentity;
 };
 
+type ComposerDraftIdentityChange = 'switch' | 'submitted-draft';
+
 /**
  * Identifies a stored draft's content. Comparing signatures lets a repeated
  * save of unchanged text skip the write entirely.
@@ -78,7 +80,7 @@ export interface ComposerDraftOptions {
     /** Session created from the new-session draft currently on screen. */
     submittedDraftSessionId?: string | null;
     /** Called when the composer switches to a different draft identity. */
-    onIdentityChange?: () => void;
+    onIdentityChange?: (change: ComposerDraftIdentityChange) => void;
     /** Called after a non-empty draft is restored, to select its text. */
     onDraftRestored?: () => void;
 }
@@ -252,13 +254,13 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         if (sameDraftIdentity(previous, identity)) return;
 
         previousIdentityRef.current = identity;
-        callbacksRef.current.onIdentityChange?.();
         clearPending();
         // The incoming draft is being written into state right now; the
         // debounced effect must not immediately write it back out.
         skipNextPersistRef.current = true;
 
         if (identity && isSubmittedDraftTransition(previous, identity, submittedDraftSessionId)) {
+            callbacksRef.current.onIdentityChange?.('submitted-draft');
             submittedDraftTransferRef.current = { from: previous, to: identity };
             if (persistEnabled) {
                 persistNow(identity, messageRef.current);
@@ -270,6 +272,8 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
             currentIdentityRef.current = identity;
             return;
         }
+
+        callbacksRef.current.onIdentityChange?.('switch');
 
         if (!persistEnabled) {
             messageRef.current = '';
