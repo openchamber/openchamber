@@ -225,13 +225,15 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const [worktreeDiscoveryRevision, requestWorktreeDiscovery] = React.useReducer((revision) => revision + 1, 0);
   const isWorktreeTopologyLoading = !isVSCode && resolvedWorktreeTopologyKey !== projectWorktreeDiscoveryKey;
   const [unresolvedWorktreeProjectPaths, setUnresolvedWorktreeProjectPaths] = React.useState<ReadonlySet<string>>(new Set());
+  const worktreeDiscoveryProjectsRef = React.useRef(worktreeDiscoveryProjects);
+  worktreeDiscoveryProjectsRef.current = worktreeDiscoveryProjects;
 
   React.useEffect(() => {
     let cancelled = false;
 
     const discoverWorktrees = async () => {
       const discoveryRuntimeKey = runtimeKey;
-      const projectEntries = worktreeDiscoveryProjects;
+      const projectEntries = worktreeDiscoveryProjectsRef.current;
       if (projectEntries.length === 0 || isVSCode) {
         if (!cancelled) {
           setUnresolvedWorktreeProjectPaths((current) => current.size === 0 ? current : new Set());
@@ -316,7 +318,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [isVSCode, projectWorktreeDiscoveryKey, runtimeKey, worktreeDiscoveryProjects, worktreeDiscoveryRevision]);
+  }, [isVSCode, projectWorktreeDiscoveryKey, runtimeKey, worktreeDiscoveryRevision]);
 
   React.useEffect(() => {
     if (isVSCode) return;
