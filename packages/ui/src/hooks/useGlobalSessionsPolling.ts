@@ -1,7 +1,7 @@
 import React from 'react';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useKnownSessionDirectoriesStore } from '@/stores/useKnownSessionDirectoriesStore';
-import { refreshGlobalSessionsForDirectories } from '@/stores/useGlobalSessionsStore';
+import { ensureGlobalSessionsLoaded, refreshGlobalSessionsForDirectories } from '@/stores/useGlobalSessionsStore';
 
 /** Minimum spacing between two unscoped global refreshes, however many signals arrive. */
 export const GLOBAL_SESSIONS_REFRESH_COOLDOWN_MS = 30_000;
@@ -80,6 +80,7 @@ export const useGlobalSessionsPolling = (enabled: boolean): void => {
     if (!enabled) return;
 
     return startGlobalSessionsPolling({
+      initialLoad: () => { void ensureGlobalSessionsLoaded(getAllSyncSessions()); },
       refresh: () => {
         const directories = [...useKnownSessionDirectoriesStore.getState().directories];
         if (directories.length === 0) return;
