@@ -19,9 +19,21 @@ async function locateSearchButton(page) {
   // Strategy 1: aria-label from i18n (English "Open message search")
   const byAria = page.getByRole("button", { name: "Open message search" });
   try {
-    await byAria.first().waitFor({ state: "visible", timeout: 15000 });
+    await byAria.first().waitFor({ state: "visible", timeout: 20000 });
     return byAria.first();
-  } catch {}
+  } catch (e) {
+    console.log("[locate] aria strategy failed:", e.message.split("\n")[0]);
+    const headerButtons = await page
+      .locator("header button")
+      .count()
+      .catch(() => "ERR");
+    const bodyText = await page
+      .locator("body")
+      .innerText()
+      .catch(() => "ERR");
+    console.log("[locate] header button count:", headerButtons);
+    console.log("[locate] body text (first 200):", bodyText.slice(0, 200));
+  }
 
   // Strategy 2: explicit testid (future-proof if header gains one)
   const byTestId = page.getByTestId("chat-header-search-button");
@@ -54,9 +66,20 @@ async function captureVariant(browser, theme, open) {
     // Set theme via localStorage before reload so the UI matches the requested variant.
     await page.evaluate((t) => localStorage.setItem("theme", t), theme);
     await page.reload({ waitUntil: "load", timeout: 60000 });
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(8000);
 
-    const button = await locateSearchButton(page);
+    let button = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        button = await locateSearchButton(page);
+        break;
+      } catch (err) {
+        console.log(`[capture] attempt ${attempt} failed: ${err.message}`);
+        if (attempt === 3) throw err;
+        await page.reload({ waitUntil: "load", timeout: 60000 });
+        await page.waitForTimeout(4000);
+      }
+    }
     await button.scrollIntoViewIfNeeded();
     if (open) {
       await button.click();
