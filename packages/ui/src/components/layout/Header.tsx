@@ -1679,7 +1679,6 @@ export const Header: React.FC = () => {
             Icon={'picture-in-picture-2'}
           />
           <HeaderIconActionButton
-            visible={Boolean(currentSessionId)}
             title={t('header.actions.openTimelineSearch')}
             ariaLabel={t('header.actions.openTimelineSearchAria')}
             onClick={handleOpenTimelineSearch}
