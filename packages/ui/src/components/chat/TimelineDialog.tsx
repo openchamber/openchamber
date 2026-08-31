@@ -38,6 +38,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
     isLoadingEarlier = false,
     onLoadEarlier,
 }) => {
+    if (!open) return null;
     const { t } = useI18n();
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
     const messages = useSessionMessageRecords(currentSessionId ?? '');
