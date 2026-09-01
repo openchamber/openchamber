@@ -45,6 +45,50 @@ async function ensureOverflow(page) {
   });
 }
 
+// On a fresh data dir the web build can render onboarding modals
+// (ChooserScreen / LocalSetupScreen / AboutDialog / ConfigUpdateOverlay)
+// that float above the MainLayout with a blurred backdrop. They do NOT
+// block the DOM the thumb is mounted on, so isThumbVisible() returns true
+// while the GIF is being recorded, but the captured frame is dominated
+// by the modal — the user sees "dialog in front, blurred background"
+// instead of the scrollbar reveal. We hide every plausible overlay root
+// before recording. Hidden overlays have no effect on the thumb's
+// visibility (which is independent of its parents' display).
+async function hideOverlayChrome(page) {
+  await page.addStyleTag({
+    content: `
+      [data-slot="dialog-overlay"],
+      [data-slot="dialog-content"],
+      [role="dialog"],
+      [data-state="open"][data-slot="dialog-overlay"],
+      .oc-glass-backdrop,
+      .fixed.inset-0.z-50,
+      .fixed.inset-0.z-\\[9999\\] {
+        display: none !important;
+      }
+      body * { animation: none !important; }
+    `,
+  });
+  await page.evaluate(() => {
+    try {
+      const w = /** @type {any} */ (window);
+      const store = w.__OPENCHAMBER_UI_STORE__;
+      if (store && typeof store.setState === "function") {
+        store.setState({
+          isAboutDialogOpen: false,
+          isHelpDialogOpen: false,
+          isSettingsDialogOpen: false,
+          isOpenCodeStatusDialogOpen: false,
+          isSessionCreateDialogOpen: false,
+          isScheduledTasksDialogOpen: false,
+          isNewWorktreeDialogOpen: false,
+          isTimelineDialogOpen: false,
+        });
+      }
+    } catch { /* ignore */ }
+  });
+}
+
 async function isThumbVisible(page) {
   return page.evaluate(() => {
     const thumb = document.querySelector(
@@ -65,6 +109,7 @@ async function main() {
     await page.goto(BASE_URL, { waitUntil: "load", timeout: 60000 });
     await wait(1500);
     await ensureOverflow(page);
+    await hideOverlayChrome(page);
     await wait(400);
 
     // Idle state: thumb should be hidden.
