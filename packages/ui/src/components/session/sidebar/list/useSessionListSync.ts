@@ -6,6 +6,7 @@ import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useKnownSessionDirectoriesStore } from '@/stores/useKnownSessionDirectoriesStore';
+import { useProjectCollapseStore } from '@/stores/useProjectCollapseStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { buildSessionBootstrapDemands } from './sessionBootstrapDemands';
 import { buildKnownSessionDirectories } from './sessionListDirectories';
@@ -46,16 +47,20 @@ export const useSessionListSync = ({
     () => new Set(liveSessions.map((session) => session.id)),
     [liveSessions],
   );
+  const collapsedProjectIds = useProjectCollapseStore((state) => state.collapsedProjectIds);
+  // Read collapse from the shared store, not `project.sidebarCollapsed`: that
+  // settings-synced field is never written for VS Code, so it would report
+  // every VS Code project as expanded and defeat this eligibility check.
   const eligibleProjects = React.useMemo(
     () => selectWorktreeDiscoveryProjects(
-      projects,
+      projects.map((project) => ({ ...project, sidebarCollapsed: collapsedProjectIds.has(project.id) })),
       activeProjectId,
       eligibilitySessions,
       availableWorktreesByProject,
       isVSCode,
       liveSessionIds,
     ),
-    [activeProjectId, availableWorktreesByProject, eligibilitySessions, isVSCode, liveSessionIds, projects],
+    [activeProjectId, availableWorktreesByProject, collapsedProjectIds, eligibilitySessions, isVSCode, liveSessionIds, projects],
   );
   // Eligibility tracks live sessions, so keying the set on its contents keeps the
   // demand/refresh effects from re-running on every session tick.

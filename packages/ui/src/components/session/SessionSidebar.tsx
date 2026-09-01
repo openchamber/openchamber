@@ -33,6 +33,7 @@ import {
 import { checkIsGitRepository } from '@/lib/gitApi';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useProjectCollapseStore } from '@/stores/useProjectCollapseStore';
 import { useAllLiveSessions } from '@/sync/sync-context';
 import { normalizePath } from './sidebar/utils';
 import { recordWorktreesSeen } from './sidebar/projects/worktreeFirstSeen';
@@ -206,9 +207,12 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     () => new Set(liveSessions.map((session) => session.id)),
     [liveSessions],
   );
+  const collapsedProjectIds = useProjectCollapseStore((state) => state.collapsedProjectIds);
+  // Read collapse from the shared store, not `project.sidebarCollapsed` — see
+  // the matching note in `useSessionListSync.ts`.
   const worktreeDiscoveryProjects = React.useMemo(
     () => selectWorktreeDiscoveryProjects(
-      projects,
+      projects.map((project) => ({ ...project, sidebarCollapsed: collapsedProjectIds.has(project.id) })),
       activeProjectId,
       worktreeDiscoverySessions,
       availableWorktreesByProject,
@@ -217,7 +221,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       false,
       liveSessionIds,
     ),
-    [activeProjectId, availableWorktreesByProject, liveSessionIds, projects, worktreeDiscoverySessions],
+    [activeProjectId, availableWorktreesByProject, collapsedProjectIds, liveSessionIds, projects, worktreeDiscoverySessions],
   );
   const worktreeDiscoveryProjectIds = React.useMemo(
     () => new Set(worktreeDiscoveryProjects.map((project) => project.id)),

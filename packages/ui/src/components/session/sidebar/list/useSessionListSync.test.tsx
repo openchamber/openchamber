@@ -4,6 +4,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { installHookTestDom } from '../test-utils/testDom';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useProjectCollapseStore } from '@/stores/useProjectCollapseStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -110,6 +111,7 @@ describe('useSessionListSync', () => {
     useProjectsStore.setState({ projects, activeProjectId: 'project' });
     useDirectoryStore.setState({ currentDirectory: '/project' });
     useSessionUIStore.setState({ currentSessionDirectory: null, availableWorktreesByProject: new Map() });
+    useProjectCollapseStore.setState({ collapsedProjectIds: new Set() });
   });
 
   afterEach(() => {
@@ -162,10 +164,11 @@ describe('useSessionListSync', () => {
     useProjectsStore.setState({
       projects: [
         { id: 'project', path: '/project' },
-        { id: 'closed', path: '/closed', sidebarCollapsed: true },
+        { id: 'closed', path: '/closed' },
       ],
       activeProjectId: 'project',
     });
+    useProjectCollapseStore.setState({ collapsedProjectIds: new Set(['closed']) });
     globalSessions.activeSessions = [{ id: 'historical', directory: '/closed' }];
 
     act(() => root.render(<LifecycleProbe isVSCode={false} />));
@@ -177,10 +180,11 @@ describe('useSessionListSync', () => {
     useProjectsStore.setState({
       projects: [
         { id: 'project', path: '/project' },
-        { id: 'closed', path: '/closed', sidebarCollapsed: true },
+        { id: 'closed', path: '/closed' },
       ],
       activeProjectId: 'project',
     });
+    useProjectCollapseStore.setState({ collapsedProjectIds: new Set(['closed']) });
     globalSessions.activeSessions = [{ id: 'historical', directory: '/closed' }];
     liveSessions.current = [{ id: 'running', directory: '/closed' }];
 
@@ -191,11 +195,29 @@ describe('useSessionListSync', () => {
 
   test('keeps the active project when it is collapsed', () => {
     useProjectsStore.setState({
-      projects: [{ id: 'project', path: '/project', sidebarCollapsed: true }],
+      projects: [{ id: 'project', path: '/project' }],
       activeProjectId: 'project',
     });
+    useProjectCollapseStore.setState({ collapsedProjectIds: new Set(['project']) });
 
     act(() => root.render(<LifecycleProbe isVSCode={false} />));
+
+    expect(state.demands[0]?.directories).toEqual(['/project']);
+  });
+
+  test('drops a collapsed VS Code project whose sessions are only historical, even though sidebarCollapsed settings sync never reaches VS Code', () => {
+    useProjectsStore.setState({
+      projects: [
+        { id: 'project', path: '/project' },
+        // No `sidebarCollapsed` field: VS Code never persists collapse there.
+        { id: 'closed', path: '/closed' },
+      ],
+      activeProjectId: 'project',
+    });
+    useProjectCollapseStore.setState({ collapsedProjectIds: new Set(['closed']) });
+    globalSessions.activeSessions = [{ id: 'historical', directory: '/closed' }];
+
+    act(() => root.render(<LifecycleProbe isVSCode />));
 
     expect(state.demands[0]?.directories).toEqual(['/project']);
   });

@@ -1,11 +1,11 @@
 import React from 'react';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { PROJECT_COLLAPSE_STORAGE_KEY, useProjectCollapseStore } from '@/stores/useProjectCollapseStore';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { z } from 'zod';
 import { useGroupOrdering } from './useGroupOrdering';
 
-const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
 const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
 
@@ -96,6 +96,16 @@ export const useSessionProjectViewState = ({
       pendingCollapsedProjects.current = null;
     };
   }, []);
+
+  // Publish this hook's collapse state to the shared cross-mount store (same
+  // pattern as `useSessionListSync` publishing to `useKnownSessionDirectoriesStore`).
+  // `useSessionListSync` and `SessionSidebar`'s worktree discovery run at Layout
+  // level, above this hook, and need the real collapse state on every runtime —
+  // including VS Code, where `flushCollapsedProjectsPersist` intentionally skips
+  // syncing collapse into the settings-backed `project.sidebarCollapsed` field.
+  React.useEffect(() => {
+    useProjectCollapseStore.getState().setCollapsedProjectIds(collapsedProjects);
+  }, [collapsedProjects]);
 
   React.useEffect(() => {
     if (!groupOrderDirty.current) return;
