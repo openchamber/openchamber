@@ -96,7 +96,7 @@ export const ProjectHeaderIdentity: React.FC<ProjectHeaderIdentityProps> = ({
           <Icon name="folder" className={cn('h-3.5 w-3.5 text-muted-foreground/80', iconVisibilityClassName)} style={iconColor ? { color: iconColor } : undefined} />
         )}
       </span>
-      <span className="truncate typography-ui-label font-semibold lowercase text-foreground">{projectLabel}</span>
+      <span className="truncate typography-ui-label font-semibold text-foreground">{projectLabel}</span>
     </>
   );
 };

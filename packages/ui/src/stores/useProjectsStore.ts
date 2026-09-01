@@ -57,7 +57,7 @@ interface ProjectsStore {
   setActiveProjectIdOnly: (id: string) => void;
   renameProject: (id: string, label: string) => void;
   updateProjectMeta: (id: string, meta: {
-    label?: string;
+    label?: string | null;
     icon?: string | null;
     color?: string | null;
     iconBackground?: string | null;
@@ -280,9 +280,10 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
 
     if (typeof candidate.label === 'string' && candidate.label.trim().length > 0) {
       const storedLabel = candidate.label.trim();
-      project.label = storedLabel === legacyAutoProjectLabel(normalizedPath)
-        ? deriveProjectLabel(normalizedPath)
-        : storedLabel;
+      const defaultLabel = deriveProjectLabel(normalizedPath);
+      if (storedLabel !== defaultLabel && storedLabel !== legacyAutoProjectLabel(normalizedPath)) {
+        project.label = storedLabel;
+      }
     }
     if (typeof candidate.icon === 'string' && candidate.icon.trim().length > 0) {
       project.icon = candidate.icon.trim();
@@ -632,12 +633,12 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       const now = Date.now();
-      const label = options?.label?.trim() || deriveProjectLabel(normalizedPath);
+      const label = options?.label?.trim();
       const id = createProjectIdFromPath(normalizedPath);
       const entry: ProjectEntry = {
         id,
         path: normalizedPath,
-        label,
+        ...(label ? { label } : {}),
         color: pickAutoColor(get().projects),
         addedAt: now,
         lastOpenedAt: now,
@@ -692,7 +693,6 @@ export const useProjectsStore = create<ProjectsStore>()(
         entries.push({
           id: createProjectIdFromPath(normalizedPath),
           path: normalizedPath,
-          label: deriveProjectLabel(normalizedPath),
           color: pickAutoColor([...current.projects, ...entries]),
           addedAt: now,
           lastOpenedAt: now,
@@ -816,7 +816,7 @@ export const useProjectsStore = create<ProjectsStore>()(
     },
 
     updateProjectMeta: (id: string, meta: {
-      label?: string;
+      label?: string | null;
       icon?: string | null;
       color?: string | null;
       iconBackground?: string | null;
@@ -831,8 +831,9 @@ export const useProjectsStore = create<ProjectsStore>()(
         if (project.id !== id) return project;
         const updated = { ...project };
         if (meta.label !== undefined) {
-          const trimmed = meta.label.trim();
+          const trimmed = meta.label?.trim() ?? '';
           if (trimmed) updated.label = trimmed;
+          else delete updated.label;
         }
         if (meta.icon !== undefined) updated.icon = meta.icon;
         if (meta.color !== undefined) updated.color = meta.color;
