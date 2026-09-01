@@ -2088,6 +2088,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.timeline.description": "Navega hasta cualquier punto de la conversación o crea una nueva sesión",
   "chat.timeline.searchPlaceholder": "Buscar mensajes...",
   'chat.timeline.search.noMatches': '0 matches',
+  "chat.timeline.search.previousMatch": "Coincidencia anterior",
+  "chat.timeline.search.nextMatch": "Coincidencia siguiente",
   "chat.timeline.empty.search": "No se encontraron mensajes",
   "chat.timeline.empty.session": "No hay mensajes en esta sesión aún",
   "chat.timeline.noTextContent": "[No hay contenido de texto]",

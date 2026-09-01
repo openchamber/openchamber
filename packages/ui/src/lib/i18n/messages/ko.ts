@@ -2112,6 +2112,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.timeline.description': '대화의 원하는 지점으로 이동하거나 새 세션으로 분기하세요',
   'chat.timeline.searchPlaceholder': '메시지 검색…',
   'chat.timeline.search.noMatches': '0 matches',
+  'chat.timeline.search.previousMatch': '이전 일치 항목',
+  'chat.timeline.search.nextMatch': '다음 일치 항목',
   'chat.timeline.empty.search': '메시지 없음',
   'chat.timeline.empty.session': '아직 이 세션에 메시지 없음',
   'chat.timeline.noTextContent': '[텍스트 내용 없음]',

@@ -253,6 +253,18 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
         onOpenChange(false);
     }, [onOpenChange, onScrollToMessage]);
 
+    // Shared by the chevron buttons and the ArrowUp/ArrowDown keyboard shortcuts,
+    // so the two entry points can never drift into different wrap-around behavior.
+    const goToNextMatch = React.useCallback(() => {
+        if (totalMatches === 0) return;
+        setCurrentMatchIndex((current) => (current + 1) % totalMatches);
+    }, [totalMatches]);
+
+    const goToPreviousMatch = React.useCallback(() => {
+        if (totalMatches === 0) return;
+        setCurrentMatchIndex((current) => (current - 1 + totalMatches) % totalMatches);
+    }, [totalMatches]);
+
     const handleSearchKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
         // Next/prev match across the whole filter, not per-message navigation.
         if (totalMatches === 0) {
@@ -261,13 +273,13 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
 
         if (event.key === 'ArrowDown') {
             event.preventDefault();
-            setCurrentMatchIndex((current) => (current + 1) % totalMatches);
+            goToNextMatch();
             return;
         }
 
         if (event.key === 'ArrowUp') {
             event.preventDefault();
-            setCurrentMatchIndex((current) => (current - 1 + totalMatches) % totalMatches);
+            goToPreviousMatch();
             return;
         }
 
@@ -280,7 +292,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                 void navigateToMessage(selected.message.info.id);
             }
         }
-    }, [totalMatches, matchMap, filteredMessages, navigateToMessage, currentMatchIndex]);
+    }, [totalMatches, matchMap, filteredMessages, navigateToMessage, currentMatchIndex, goToNextMatch, goToPreviousMatch]);
 
     // Handle fork with loading state and session refresh
     const handleFork = async (messageId: string) => {
@@ -326,32 +338,33 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-2xl max-h-[70vh] max-md:max-h-[85dvh] flex flex-col overflow-y-auto">
-                <DialogHeader className="shrink-0">
-                    <DialogTitle className="flex items-center gap-2">
-                        <Icon name="time" className="h-5 w-5" />
-                        {t('chat.timeline.title')}
-                    </DialogTitle>
-                    {!isMobile && (
-                        <DialogDescription>
-                            {t('chat.timeline.description')}
-                        </DialogDescription>
-                    )}
-                </DialogHeader>
-
-                <div className="relative mt-2 shrink-0">
-                    <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            {/* Title/description stay for accessibility (Base UI's Dialog requires
+                one) but render nothing visible: the find-bar below carries the
+                dialog's whole visible chrome, so a second title row would be
+                redundant with it. */}
+            <DialogHeader className="sr-only">
+                <DialogTitle>{t('chat.timeline.title')}</DialogTitle>
+                <DialogDescription>{t('chat.timeline.description')}</DialogDescription>
+            </DialogHeader>
+            <DialogContent
+                showCloseButton={false}
+                className="max-w-2xl max-h-[70vh] max-md:max-h-[85dvh] flex flex-col overflow-y-auto"
+            >
+                {/* Browser find-in-page style: icon, input, match counter, prev/next
+                    chevrons, close — all in one row instead of a modal header. */}
+                <div className="flex shrink-0 items-center gap-1 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] pl-2 pr-1">
+                    <Icon name="search" className="h-4 w-4 shrink-0 text-muted-foreground" />
                     <Input
                         autoFocus
                         placeholder={t('chat.timeline.searchPlaceholder')}
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         onKeyDown={handleSearchKeyDown}
-                        className="pl-9 pr-16 w-full"
+                        className="h-8 flex-1 min-w-0 border-0 bg-transparent px-1.5 shadow-none focus-visible:ring-0"
                     />
                     {searchQuery && (
                         <span
-                            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground tabular-nums"
+                            className="shrink-0 px-1 text-xs text-muted-foreground tabular-nums"
                             aria-live="polite"
                         >
                             {totalMatches === 0
@@ -359,6 +372,34 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                                 : ((currentMatchIndex % totalMatches) + totalMatches) % totalMatches + 1 + '/' + totalMatches}
                         </span>
                     )}
+                    <div className="flex shrink-0 items-center gap-0.5 border-l border-[var(--interactive-border)] pl-1">
+                        <button
+                            type="button"
+                            aria-label={t('chat.timeline.search.previousMatch')}
+                            disabled={totalMatches === 0}
+                            onClick={goToPreviousMatch}
+                            className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                        >
+                            <Icon name="arrow-up-s" className="h-4 w-4" />
+                        </button>
+                        <button
+                            type="button"
+                            aria-label={t('chat.timeline.search.nextMatch')}
+                            disabled={totalMatches === 0}
+                            onClick={goToNextMatch}
+                            className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                        >
+                            <Icon name="arrow-down-s" className="h-4 w-4" />
+                        </button>
+                        <button
+                            type="button"
+                            aria-label={t('dialog.common.actions.close')}
+                            onClick={() => onOpenChange(false)}
+                            className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground"
+                        >
+                            <Icon name="close" className="h-4 w-4" />
+                        </button>
+                    </div>
                 </div>
 
                 {canLoadEarlier && onLoadEarlier && (

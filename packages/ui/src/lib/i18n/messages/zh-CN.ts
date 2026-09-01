@@ -2076,6 +2076,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.timeline.description': '跳转到会话中的任意位置，或从该处分叉新会话',
   'chat.timeline.searchPlaceholder': '搜索消息...',
   'chat.timeline.search.noMatches': '0 matches',
+  'chat.timeline.search.previousMatch': '上一个匹配项',
+  'chat.timeline.search.nextMatch': '下一个匹配项',
   'chat.timeline.empty.search': '未找到消息',
   'chat.timeline.empty.session': '当前会话还没有消息',
   'chat.timeline.noTextContent': '[无文本内容]',

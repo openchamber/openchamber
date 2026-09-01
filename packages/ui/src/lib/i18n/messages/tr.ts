@@ -2070,6 +2070,8 @@ export const dict = {
   'chat.timeline.description': 'Konuşmadaki herhangi bir noktaya git veya yeni bir session fork\'la',
   'chat.timeline.searchPlaceholder': 'Mesajlarda ara...',
   'chat.timeline.search.noMatches': '0 matches',
+  'chat.timeline.search.previousMatch': 'Önceki eşleşme',
+  'chat.timeline.search.nextMatch': 'Sonraki eşleşme',
   'chat.timeline.empty.search': 'Mesaj bulunamadı',
   'chat.timeline.empty.session': 'Bu session\'da henüz mesaj yok',
   'chat.timeline.noTextContent': '[Metin içeriği yok]',

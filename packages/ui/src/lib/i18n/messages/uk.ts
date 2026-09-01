@@ -2088,6 +2088,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.timeline.description": "Перейдіть до будь-якої точки розмови або створіть нову сесію",
   "chat.timeline.searchPlaceholder": "Пошук повідомлень...",
   'chat.timeline.search.noMatches': '0 matches',
+  "chat.timeline.search.previousMatch": "Попередній збіг",
+  "chat.timeline.search.nextMatch": "Наступний збіг",
   "chat.timeline.empty.search": "Повідомлень не знайдено",
   "chat.timeline.empty.session": "У цьому сесії ще немає повідомлень",
   "chat.timeline.noTextContent": "[Немає текстового вмісту]",
