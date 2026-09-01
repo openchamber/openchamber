@@ -920,7 +920,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         // Local commands need composer-owned execution or prompt expansion.
         // Never persist their raw slash text for the generic queue dispatcher.
-        if (planLocalSlashCommand(inputSnapshot.message, inputMode, hasDrafts)) {
+        if (planLocalSlashCommand(inputSnapshot.message, inputMode, hasDrafts, true)) {
             void handleSubmitRef.current();
             return;
         }
@@ -1026,7 +1026,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             : getCurrentInputSnapshot();
         const confirmedMentionsSnapshot = new Set(confirmedMentionsRef.current);
         const composerCommandPlan = !queuedOnly && inputSnapshot.hasContent
-            ? planLocalSlashCommand(inputSnapshot.message, inputMode, hasDrafts)
+            ? planLocalSlashCommand(inputSnapshot.message, inputMode, hasDrafts, Boolean(currentSessionId))
             : null;
         // A queued item stays in the queue until its own send resolves, so the
         // auto-send hook may already be delivering one of these. Merging it here
@@ -1090,6 +1090,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 queuedMessagesToSend[0]?.content ?? '',
                 inputMode,
                 Boolean(queuedMessagesToSend[0]?.contextParts?.length),
+                Boolean(currentSessionId),
             )
             : composerCommandPlan;
         const clearLocalCommandText = () => {
@@ -1170,10 +1171,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
 
         if (commandPlan?.kind === 'action') {
-            if (!currentSessionId) {
-                releaseQueuedMessages();
-                return;
-            }
             const { name: commandName } = commandPlan.command;
             if ((commandName === 'undo' || commandName === 'redo') && currentSessionId) {
                 clearLocalCommandText();

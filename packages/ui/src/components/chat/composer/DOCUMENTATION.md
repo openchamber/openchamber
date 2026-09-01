@@ -170,7 +170,9 @@ and the send path reading the same grammar.
   that produce a prompt, including `/btw` and magic prompts, send that context
   with the produced prompt. Local commands execute through the composer even
   when follow-ups are configured to queue; their raw slash text is never stored
-  for the generic queue dispatcher. A failed prompt command restores every
+  for the generic queue dispatcher. Session actions are planned locally only
+  when a session exists; manually entered actions in a new-session draft stay
+  on the normal send path. A failed prompt command restores every
   consumed composer input: text, confirmed mentions, files, comment drafts, and
   pending synthetic context.
 - `state/useComposerDraft.ts` — a draft belongs to a (runtime, directory,

@@ -177,12 +177,15 @@ export function planLocalSlashCommand(
     text: string,
     inputMode: 'normal' | 'shell' | undefined,
     hasAttachedContext: boolean,
+    hasSession: boolean,
 ): LocalSlashCommandPlan | null {
     if (inputMode !== 'normal') return null;
     const command = parseSlashCommand(text);
     if (!command) return null;
 
     if (LOCAL_ACTION_COMMANDS.has(command.name)) {
+        if (!hasSession) return null;
+
         return {
             command,
             kind: 'action',
@@ -220,7 +223,7 @@ export function canRunCommand(
 export function buildCommandVariables(
     command: MagicPromptCommand,
     argument: string,
-): { visible: Record<string, string>; instructions: Record<string, string> } {
+) {
     const built = command.buildVariables?.(argument) ?? {};
     return {
         visible: built.visible ?? {},

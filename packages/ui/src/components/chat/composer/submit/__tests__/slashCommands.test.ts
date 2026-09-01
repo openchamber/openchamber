@@ -65,7 +65,7 @@ describe('findMagicPromptCommand', () => {
 
 describe('planLocalSlashCommand', () => {
     test('an action command retains an attached inline comment', () => {
-        expect(planLocalSlashCommand('/compact', 'normal', true)).toEqual({
+        expect(planLocalSlashCommand('/compact', 'normal', true, true)).toEqual({
             command: { name: 'compact', argument: '' },
             kind: 'action',
             attachedContext: 'retain',
@@ -73,17 +73,23 @@ describe('planLocalSlashCommand', () => {
     });
 
     test('prompt commands send attached context instead of disabling command parsing', () => {
-        expect(planLocalSlashCommand('/summary auth', 'normal', true)).toEqual({
+        expect(planLocalSlashCommand('/summary auth', 'normal', true, true)).toEqual({
             command: { name: 'summary', argument: 'auth' },
             kind: 'prompt',
             attachedContext: 'send',
         });
-        expect(planLocalSlashCommand('/btw why?', 'normal', true)?.kind).toBe('prompt');
+        expect(planLocalSlashCommand('/btw why?', 'normal', true, true)?.kind).toBe('prompt');
+    });
+
+    test('session actions stay on the normal send path for a new-session draft', () => {
+        for (const command of ['compact', 'undo', 'redo', 'timeline']) {
+            expect(planLocalSlashCommand(`/${command}`, 'normal', false, false)).toBeNull();
+        }
     });
 
     test('shell mode and server-owned commands stay outside local planning', () => {
-        expect(planLocalSlashCommand('/compact', 'shell', true)).toBeNull();
-        expect(planLocalSlashCommand('/project-command', 'normal', true)).toBeNull();
+        expect(planLocalSlashCommand('/compact', 'shell', true, true)).toBeNull();
+        expect(planLocalSlashCommand('/project-command', 'normal', true, true)).toBeNull();
     });
 });
 
