@@ -1,5 +1,6 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   formatShortcutForDisplay,
   getEffectiveShortcutCombo,
@@ -864,7 +865,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         </div>
 
         {/* Scrollable nav items */}
-        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+        <ScrollableOverlay outerClassName="flex-1 min-h-0" disableHorizontal>
           <div className="flex flex-col gap-0.5 px-4 pt-4 pb-2">
             {hasSearchQuery ? (
               settingsSearchResults.length > 0 ? (() => {
@@ -979,7 +980,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               ));
             })()}
           </div>
-        </div>
+        </ScrollableOverlay>
 
         {/* Footer */}
         <div className="overflow-hidden transition-opacity duration-150 opacity-100">
@@ -1013,17 +1014,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         // No sidebar available; fall back to direct content.
         const fallback = renderPageContent(settingsSlug);
         return (
-          <div className="flex-1 min-h-0 overflow-y-scroll overflow-x-hidden bg-background">
+          <ScrollableOverlay outerClassName="flex-1 min-h-0" className="bg-background">
             <ErrorBoundary>{fallback}</ErrorBoundary>
-          </div>
+          </ScrollableOverlay>
         );
       }
       return (
-        <div className="flex-1 min-h-0 overflow-y-scroll overflow-x-hidden bg-background">
+        <ScrollableOverlay outerClassName="flex-1 min-h-0" className="bg-background">
           <ErrorBoundary>
             {renderPageSidebar(settingsSlug, { onItemSelect: handleMobilePageSidebarItemSelect })}
           </ErrorBoundary>
-        </div>
+        </ScrollableOverlay>
       );
     }
 
@@ -1031,9 +1032,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     const content = renderPageContent(settingsSlug);
 
     return (
-      <div className="flex-1 min-h-0 overflow-y-scroll overflow-x-hidden bg-background">
+      <ScrollableOverlay outerClassName="flex-1 min-h-0" className="bg-background">
         <ErrorBoundary>{content}</ErrorBoundary>
-      </div>
+      </ScrollableOverlay>
     );
   };
 
@@ -1048,9 +1049,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
           <div className={cn('border-r', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')} style={{ width: SETTINGS_SPLIT_SIDEBAR_WIDTH, minWidth: SETTINGS_SPLIT_SIDEBAR_WIDTH, borderColor: 'var(--interactive-border)' }}>
             <ErrorBoundary>{renderPageSidebar(settingsSlug, {})}</ErrorBoundary>
           </div>
-          <div className="flex-1 min-h-0 overflow-y-scroll overflow-x-hidden bg-background">
+          <ScrollableOverlay outerClassName="flex-1 min-h-0" className="bg-background">
             <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
-          </div>
+          </ScrollableOverlay>
         </div>
       );
     }

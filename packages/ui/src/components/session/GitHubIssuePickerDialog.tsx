@@ -1,3 +1,4 @@
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import React from 'react';
 import {
   Dialog,
@@ -514,7 +515,7 @@ export function GitHubIssuePickerDialog({
         />
       </div>
 
-      <div className={cn(isMobile ? 'min-h-0 mt-2' : 'flex-1 overflow-y-auto mt-2')}>
+      <ScrollableOverlay outerClassName={cn(isMobile ? 'min-h-0 mt-2' : 'flex-1 mt-2')} disableHorizontal>
           {!projectDirectory ? (
             <div className="text-center text-muted-foreground py-8">{t('session.githubIssuePicker.empty.noActiveProject')}</div>
           ) : null}
@@ -636,7 +637,7 @@ export function GitHubIssuePickerDialog({
               </button>
             </div>
           ) : null}
-      </div>
+      </ScrollableOverlay>
 
       {mode !== 'select' && (
         <div className="mt-4 p-3 bg-muted/30 rounded-lg">

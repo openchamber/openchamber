@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   Dialog,
   DialogContent,
@@ -362,7 +363,7 @@ export function GitHubIntegrationDialog({
 
           {/* List Content */}
           <div className="mt-2 h-[300px] overflow-hidden">
-            <div className="h-full overflow-y-auto">
+            <ScrollableOverlay outerClassName="h-full" disableHorizontal>
               {/* Loading */}
               {loading && (
                 <div className="flex items-center justify-center h-full">
@@ -505,7 +506,7 @@ export function GitHubIntegrationDialog({
                   )}
                 </div>
               )}
-            </div>
+            </ScrollableOverlay>
           </div>
         </>
       )}
