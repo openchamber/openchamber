@@ -1850,6 +1850,7 @@ export const dict = {
   'chat.timeline.title': 'Chronologie des conversations',
   'chat.timeline.description': 'Accédez à n’importe quel point de la conversation ou créez une nouvelle session',
   'chat.timeline.searchPlaceholder': 'Rechercher des messages...',
+  'chat.timeline.search.noMatches': '0 matches',
   'chat.timeline.empty.search': 'Aucun message trouvé',
   'chat.timeline.empty.session': 'Aucun message dans cette session pour le moment',
   'chat.timeline.noTextContent': '[Aucun contenu textuel]',

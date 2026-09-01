@@ -782,6 +782,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.timeline.title': 'Oś Czasu Rozmowy',
   'chat.timeline.description': 'Nawiguj do dowolnego punktu w rozmowie lub rozwidl nową sesję',
   'chat.timeline.searchPlaceholder': 'Szukaj wiadomości...',
+  'chat.timeline.search.noMatches': '0 matches',
   'chat.timeline.empty.search': 'Nie znaleziono wiadomości',
   'chat.timeline.empty.session': 'Brak wiadomości w tej sesji',
   'chat.timeline.noTextContent': '[Brak treści tekstowej]',

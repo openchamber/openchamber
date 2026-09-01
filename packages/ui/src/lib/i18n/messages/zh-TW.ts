@@ -2079,6 +2079,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.timeline.title': '會話時間線',
   'chat.timeline.description': '跳轉到會話中的任意位置，或從該處分支新會話',
   'chat.timeline.searchPlaceholder': '搜尋訊息...',
+  'chat.timeline.search.noMatches': '0 matches',
   'chat.timeline.empty.search': '找不到訊息',
   'chat.timeline.empty.session': '目前會話還沒有訊息',
   'chat.timeline.noTextContent': '[無文字內容]',

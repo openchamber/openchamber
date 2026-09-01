@@ -1907,6 +1907,7 @@ export const dict = {
   'chat.timeline.title': 'Konversations-Zeitleiste',
   'chat.timeline.description': 'Navigieren Sie zu einem beliebigen Punkt in der Konversation oder erstellen Sie eine neue Sitzung',
   'chat.timeline.searchPlaceholder': 'Nachrichten durchsuchen...',
+  'chat.timeline.search.noMatches': '0 matches',
   'chat.timeline.empty.search': 'Keine Nachrichten gefunden',
   'chat.timeline.empty.session': 'Noch keine Nachrichten in dieser Sitzung',
   'chat.timeline.noTextContent': '[Kein Textinhalt]',

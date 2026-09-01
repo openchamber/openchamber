@@ -2109,6 +2109,7 @@ export const dict = {
   'chat.timeline.title': 'Conversation Timeline',
   'chat.timeline.description': 'Navigate to any point in the conversation or fork a new session',
   'chat.timeline.searchPlaceholder': 'Search messages...',
+  'chat.timeline.search.noMatches': '0 matches',
   'chat.timeline.empty.search': 'No messages found',
   'chat.timeline.empty.session': 'No messages in this session yet',
   'chat.timeline.noTextContent': '[No text content]',

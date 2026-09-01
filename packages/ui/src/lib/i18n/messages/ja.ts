@@ -2105,6 +2105,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.timeline.title': '会話タイムライン',
   'chat.timeline.description': '会話の任意の時点に移動するか、新しいセッションをフォーク',
   'chat.timeline.searchPlaceholder': 'メッセージを検索...',
+  'chat.timeline.search.noMatches': '0 matches',
   'chat.timeline.empty.search': 'メッセージが見つかりません',
   'chat.timeline.empty.session': 'このセッションにはまだメッセージがありません',
   'chat.timeline.noTextContent': '[テキストなし]',
