@@ -6,6 +6,8 @@ import { useBtwStore } from '@/stores/useBtwStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getSyncChildStores, getSyncMessages, registerSessionDirectory } from '@/sync/sync-refs';
 import { Binary } from '@/sync/binary';
+import type { ContextPartMetadata } from '@/lib/messages/contextParts';
+import type { AttachedFile } from '@/stores/types/sessionTypes';
 
 /**
  * `/btw <question>`: fork the main session into a temporary session and send
@@ -28,6 +30,13 @@ export type StartBtwInput = {
   modelID: string;
   agent?: string;
   variant?: string;
+  attachments?: AttachedFile[];
+  additionalParts?: Array<{
+    text: string;
+    attachments?: AttachedFile[];
+    synthetic?: boolean;
+    metadata?: ContextPartMetadata;
+  }>;
 };
 
 /**
@@ -196,12 +205,12 @@ export async function startBtwSession(input: StartBtwInput): Promise<Session> {
           input.providerID,
           input.modelID,
           input.agent,
-          [],
+          input.attachments ?? [],
           undefined,
           // The very first question already needs the boundary: the fork is at
           // its most dangerous here, with the parent's in-flight plan as the
           // newest thing in its context.
-          btwBoundaryParts(),
+          [...btwBoundaryParts(), ...(input.additionalParts ?? [])],
           input.variant,
           'normal',
           { sessionId: forked.id, directory: sessionDirectory },

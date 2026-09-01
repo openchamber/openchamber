@@ -127,7 +127,7 @@ export function expandSlashCommandGoalObjective(content: string, commands: GoalC
 // Send routing — shell mode, slash commands, or normal prompt
 // ---------------------------------------------------------------------------
 
-export function routeMessage(params: {
+export async function routeMessage(params: {
   runtimeKey?: string
   sessionId: string
   directory?: string | null
@@ -139,21 +139,22 @@ export function routeMessage(params: {
   variant?: string
   inputMode?: "normal" | "shell"
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
-  additionalParts?: Array<{ text: string; synthetic?: boolean; metadata?: ContextPartMetadata; files?: Array<{ type: "file"; mime: string; url: string; filename: string }> }>
+  additionalParts?: Array<{ text: string; synthetic?: boolean; metadata?: ContextPartMetadata; files?: Array<{ type: "file"; mime: string; url: string; filename: string }>; systemContext?: 'session-knowledge' }>
   delivery?: 'steer'
-}): Promise<void> {
+}): Promise<'command' | 'prompt' | 'shell'> {
   const requestDirectory = params.directory ?? undefined
   let promptContent = params.content
   let promptAdditionalParts = params.additionalParts
   if (params.inputMode === "shell") {
-    return opencodeClient.shellSession({
+    await opencodeClient.shellSession({
       runtimeKey: params.runtimeKey,
       sessionId: params.sessionId,
       directory: requestDirectory,
       agent: params.agent ?? "",
       model: { providerID: params.providerID, modelID: params.modelID },
       command: params.content,
-    }).then(() => undefined)
+    })
+    return 'shell'
   }
 
   // Slash commands — fire and forget, SSE delivers messages and status
@@ -174,8 +175,14 @@ export function routeMessage(params: {
     const matchedSkill = useSkillsStore.getState().skills.find((s) => s.name === cmdName)
 
     if (matchedCommand || matchedSkill) {
-      if (!params.additionalParts?.length) {
-        return optimisticSend({
+      // Pinned project knowledge is the only additional part that does not
+      // change command semantics. Other synthetic parts may carry prepared
+      // user work (for example conflict instructions) and must not be dropped.
+      const additionalPartsRequirePrompt = params.additionalParts?.some((part) => (
+        part.systemContext !== 'session-knowledge'
+      )) ?? false
+      if (!additionalPartsRequirePrompt) {
+        await optimisticSend({
           runtimeKey: params.runtimeKey,
           sessionId: params.sessionId,
           content: params.content,
@@ -198,6 +205,7 @@ export function routeMessage(params: {
             directory: requestDirectory,
           }).then(() => {}),
         })
+        return 'command'
       }
 
       // session.command accepts file parts only. Keep structured context on
@@ -208,7 +216,7 @@ export function routeMessage(params: {
       }
       if (matchedSkill) {
         promptAdditionalParts = [
-          ...params.additionalParts,
+          ...(params.additionalParts ?? []),
           {
             text: `The user explicitly invoked the ${cmdName} skill. Use the corresponding skill tool to handle this request.`,
             synthetic: true,
@@ -219,7 +227,7 @@ export function routeMessage(params: {
   }
 
   // Normal prompt — optimistic insert so message appears instantly
-  return optimisticSend({
+  await optimisticSend({
     runtimeKey: params.runtimeKey,
     sessionId: params.sessionId,
     content: params.content,
@@ -238,12 +246,18 @@ export function routeMessage(params: {
       agentMentions: params.agentMentionName ? [{ name: params.agentMentionName }] : undefined,
       variant: params.variant,
       files: params.files,
-      additionalParts: promptAdditionalParts,
+      additionalParts: promptAdditionalParts?.map((part) => ({
+        text: part.text,
+        synthetic: part.synthetic,
+        metadata: part.metadata,
+        files: part.files,
+      })),
       delivery: params.delivery,
       messageId: messageID,
       directory: requestDirectory,
     }).then(() => {}),
   })
+  return 'prompt'
 }
 
 type CapturedSendTarget = {
@@ -377,7 +391,7 @@ export type SessionUIState = {
     agent?: string,
     attachments?: AttachedFile[],
     agentMentionName?: string,
-    additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata }>,
+    additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata; systemContext?: 'session-knowledge' }>,
     variant?: string,
     inputMode?: "normal" | "shell",
     options?: SendMessageOptions,
@@ -1527,7 +1541,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     agent?: string,
     attachments?: AttachedFile[],
     agentMentionName?: string,
-    additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata }>,
+    additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata; systemContext?: 'session-knowledge' }>,
     variant?: string,
     inputMode?: "normal" | "shell",
     options?: SendMessageOptions,
@@ -1606,7 +1620,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }, options?.draftSnapshot)
       if (!createdDraftSession) throw new Error("Failed to create session")
 
-      const draftParts = createdDraftSession.syntheticParts?.length
+      const draftParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata; systemContext?: 'session-knowledge' }> | undefined = createdDraftSession.syntheticParts?.length
         ? [...(additionalParts || []), ...createdDraftSession.syntheticParts]
         : additionalParts
       // The server decides what this session still owes and assembles it; the
@@ -1615,8 +1629,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         createdDraftSession.directory,
         createdDraftSession.sessionId,
       )
-      const draftPrefixParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata }> =
-        draftKnowledge.text ? [{ text: draftKnowledge.text, synthetic: true }] : []
+      const draftPrefixParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata; systemContext?: 'session-knowledge' }> =
+        draftKnowledge.text ? [{ text: draftKnowledge.text, synthetic: true, systemContext: 'session-knowledge' }] : []
       // Left undefined when nothing was added, as before: an empty array is not
       // the same as no additional parts to everything downstream.
       const mergedAdditionalParts = draftPrefixParts.length > 0
@@ -1635,7 +1649,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }))
 
       await applyArmedGoal(createdDraftSession.sessionId, createdDraftSession.directory)
-      await routeMessage({
+      const messageRoute = await routeMessage({
         sessionId: createdDraftSession.sessionId,
         directory: createdDraftSession.directory,
         content,
@@ -1651,6 +1665,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           text: p.text,
           synthetic: p.synthetic,
           metadata: p.metadata,
+          systemContext: p.systemContext,
           files: p.attachments?.map((a: AttachedFile) => ({
             type: "file" as const,
             mime: a.mimeType,
@@ -1661,7 +1676,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       })
       // Recorded only after the send resolves: a failed send must carry the
       // pinned context again rather than assume the agent already saw it.
-      if (draftKnowledge.text) {
+      if (draftKnowledge.text && messageRoute === 'prompt') {
         void reportSessionKnowledgeDelivered(
           createdDraftSession.directory,
           createdDraftSession.sessionId,
@@ -1732,13 +1747,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // Prepended so it reads as background before the message it accompanies,
     // and empty unless the session is actually missing it.
     const knowledge = await fetchSessionKnowledge(currentSessionDirectory, targetSessionId || "")
-    const prefixParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata }> =
-      knowledge.text ? [{ text: knowledge.text, synthetic: true }] : []
+    const prefixParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata; systemContext?: 'session-knowledge' }> =
+      knowledge.text ? [{ text: knowledge.text, synthetic: true, systemContext: 'session-knowledge' }] : []
     const partsWithPinnedContext = prefixParts.length > 0
       ? [...prefixParts, ...(additionalParts || [])]
       : additionalParts
 
-    await routeMessage({
+    const messageRoute = await routeMessage({
       runtimeKey: capturedTarget?.runtimeKey,
       sessionId: targetSessionId || "",
       directory: currentSessionDirectory,
@@ -1755,6 +1770,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         text: p.text,
         synthetic: p.synthetic,
         metadata: p.metadata,
+        systemContext: p.systemContext,
         files: p.attachments?.map((a) => ({
           type: "file" as const,
           mime: a.mimeType,
@@ -1763,7 +1779,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         })),
       })),
     })
-    if (knowledge.text) {
+    if (knowledge.text && messageRoute === 'prompt') {
       void reportSessionKnowledgeDelivered(currentSessionDirectory, targetSessionId || "", knowledge.signature)
     }
   },

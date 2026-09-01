@@ -11,6 +11,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { createContextPart } from '@/lib/messages/contextParts';
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -875,7 +876,16 @@ describe('routeMessage skill invocation', () => {
     useSkillsStore.setState({
       skills: [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }],
     });
-    const additionalParts = [{ text: 'Comment on `src/auth.ts` line 4:\ncheck this', synthetic: true }];
+    const additionalParts = [createContextPart({
+      kind: 'code-comment',
+      source: 'file',
+      fileLabel: 'src/auth.ts',
+      startLine: 4,
+      endLine: 4,
+      language: 'ts',
+      code: 'auth();',
+      text: 'check this',
+    })];
 
     await routeMessage({
       sessionId: 'session-skill',
@@ -904,13 +914,91 @@ describe('routeMessage skill invocation', () => {
       content: '/inspect auth flow',
       providerID: 'provider-a',
       modelID: 'model-a',
-      additionalParts: [{ text: 'attached context', synthetic: true }],
+      additionalParts: [createContextPart({
+        kind: 'code-comment',
+        source: 'file',
+        fileLabel: 'src/auth.ts',
+        startLine: 4,
+        endLine: 4,
+        language: 'ts',
+        code: 'auth();',
+        text: 'check this',
+      })],
     });
 
     expect(sendCommandCalls).toHaveLength(0);
     expect(sendMessageCalls).toHaveLength(1);
     expect(sendMessageCalls[0].text).toBe('Inspect auth flow carefully.');
-    expect(sendMessageCalls[0].additionalParts).toEqual([{ text: 'attached context', synthetic: true }]);
+    expect(sendMessageCalls[0].additionalParts[0].metadata.openchamberContext.kind).toBe('code-comment');
+  });
+
+  test('keeps session.command when the only extra part is pinned knowledge', async () => {
+    useSkillsStore.setState({
+      skills: [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }],
+    });
+
+    const route = await routeMessage({
+      sessionId: 'session-skill',
+      directory: '/skills/project',
+      content: '/grill-with-docs focus on auth',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+      additionalParts: [{ text: 'Pinned project knowledge', synthetic: true, systemContext: 'session-knowledge' }],
+    });
+
+    expect(sendCommandCalls).toHaveLength(1);
+    expect(sendCommandCalls[0].command).toBe('grill-with-docs');
+    expect(sendCommandCalls[0].arguments).toBe('focus on auth');
+    expect(sendMessageCalls).toHaveLength(0);
+    expect(route).toBe('command');
+  });
+
+  test('keeps primary file attachments on the command route', async () => {
+    useSkillsStore.setState({
+      skills: [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }],
+    });
+    const files = [{
+      type: 'file',
+      mime: 'text/plain',
+      url: 'file:///projects/alpha/auth.txt',
+      filename: 'auth.txt',
+    }];
+
+    const route = await routeMessage({
+      sessionId: 'session-skill',
+      directory: '/skills/project',
+      content: '/grill-with-docs focus on auth',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+      files,
+      additionalParts: [{ text: 'Pinned project knowledge', synthetic: true, systemContext: 'session-knowledge' }],
+    });
+
+    expect(route).toBe('command');
+    expect(sendCommandCalls).toHaveLength(1);
+    expect(sendCommandCalls[0].files).toEqual(files);
+    expect(sendMessageCalls).toHaveLength(0);
+  });
+
+  test('keeps unmarked synthetic instructions on the prompt route', async () => {
+    useSkillsStore.setState({
+      skills: [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }],
+    });
+    const instructions = [{ text: 'Resolve the prepared conflict first.', synthetic: true }];
+
+    const route = await routeMessage({
+      sessionId: 'session-skill',
+      directory: '/skills/project',
+      content: '/grill-with-docs focus on auth',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+      additionalParts: instructions,
+    });
+
+    expect(route).toBe('prompt');
+    expect(sendCommandCalls).toHaveLength(0);
+    expect(sendMessageCalls).toHaveLength(1);
+    expect(sendMessageCalls[0].additionalParts[0]).toEqual(instructions[0]);
   });
 
   test('sends an unknown slash token as a plain message', async () => {

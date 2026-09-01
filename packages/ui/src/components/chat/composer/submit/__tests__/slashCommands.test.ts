@@ -6,6 +6,7 @@ import {
     findMagicPromptCommand,
     MAGIC_PROMPT_COMMANDS,
     parseSlashCommand,
+    planLocalSlashCommand,
 } from '../slashCommands';
 
 describe('parseSlashCommand', () => {
@@ -59,6 +60,30 @@ describe('findMagicPromptCommand', () => {
 
     test('an unknown name finds nothing', () => {
         expect(findMagicPromptCommand('nope')).toBeNull();
+    });
+});
+
+describe('planLocalSlashCommand', () => {
+    test('an action command retains an attached inline comment', () => {
+        expect(planLocalSlashCommand('/compact', 'normal', true)).toEqual({
+            command: { name: 'compact', argument: '' },
+            kind: 'action',
+            attachedContext: 'retain',
+        });
+    });
+
+    test('prompt commands send attached context instead of disabling command parsing', () => {
+        expect(planLocalSlashCommand('/summary auth', 'normal', true)).toEqual({
+            command: { name: 'summary', argument: 'auth' },
+            kind: 'prompt',
+            attachedContext: 'send',
+        });
+        expect(planLocalSlashCommand('/btw why?', 'normal', true)?.kind).toBe('prompt');
+    });
+
+    test('shell mode and server-owned commands stay outside local planning', () => {
+        expect(planLocalSlashCommand('/compact', 'shell', true)).toBeNull();
+        expect(planLocalSlashCommand('/project-command', 'normal', true)).toBeNull();
     });
 });
 
