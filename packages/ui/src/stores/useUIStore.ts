@@ -2772,7 +2772,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 21,
+        version: 22,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -2958,9 +2958,10 @@ export const useUIStore = create<UIStore>()(
           delete state.rightSidebarWidth;
           delete state.rightSidebarTab;
 
-          // v13 -> v14: canonicalize context-panel directory keys and merge
-          // historical variants that now identify the same directory.
-          if (version < 14) {
+          // v21 -> v22: canonicalize context-panel directory keys and merge
+          // historical variants that now identify the same directory. This
+          // deliberately follows the older preview-to-browser migration.
+          if (version < 22) {
             state.contextPanelByDirectory = sanitizeContextPanelByDirectory(state.contextPanelByDirectory);
           }
 

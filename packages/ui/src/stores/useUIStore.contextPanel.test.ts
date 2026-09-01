@@ -628,8 +628,43 @@ describe('useUIStore openContextSurface', () => {
 });
 
 describe('useUIStore context-panel persistence migration', () => {
-  test('registers the canonical-key migration after persisted version 13', () => {
-    expect(useUIStore.persist.getOptions().version).toBe(18);
+  test('registers the canonical-key migration after persisted version 21', () => {
+    expect(useUIStore.persist.getOptions().version).toBe(22);
+  });
+
+  test('rehydrates a version-18 snapshot through the canonical-key migration', async () => {
+    const originalStorage = useUIStore.persist.getOptions().storage;
+    useUIStore.persist.setOptions({
+      storage: {
+        getItem: () => ({
+          state: {
+            contextPanelByDirectory: {
+              'c:/repo': {
+                isOpen: true,
+                expanded: false,
+                tabs: [{ mode: 'diff', touchedAt: 20 }],
+                activeTabId: 'diff',
+                widthByMode: { diff: 640 },
+                touchedAt: 20,
+              },
+            },
+          },
+          version: 18,
+        }),
+        setItem: () => undefined,
+        removeItem: () => undefined,
+      },
+    });
+
+    try {
+      await useUIStore.persist.rehydrate();
+
+      expect(Object.keys(useUIStore.getState().contextPanelByDirectory)).toEqual(['C:/repo']);
+      expect(useUIStore.getState().contextPanelByDirectory['C:/repo']?.isOpen).toBe(true);
+    } finally {
+      useUIStore.persist.setOptions({ storage: originalStorage });
+      useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [] });
+    }
   });
 
   test('rehydrates a version-13 snapshot through the canonical-key migration', async () => {
