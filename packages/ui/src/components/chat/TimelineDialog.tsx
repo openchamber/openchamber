@@ -436,8 +436,14 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                                             "flex-1 min-w-0 typography-small truncate",
                                             isSelected ? "text-interactive-selection-foreground" : "text-foreground"
                                         )}>
-                                            {snippet ?? (previewHtml ?? (preview || t('chat.timeline.noTextContent')))}
-                                            {!snippet && preview && preview.length >= 80 && '…'}
+                                            {previewHtml ? (
+                                                <span dangerouslySetInnerHTML={previewHtml} />
+                                            ) : (
+                                                <>
+                                                    {snippet ?? (preview || t('chat.timeline.noTextContent'))}
+                                                    {!snippet && preview && preview.length >= 80 && '…'}
+                                                </>
+                                            )}
                                         </p>
 
                                         <div className="flex-shrink-0 h-5 flex items-center mr-2">
