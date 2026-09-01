@@ -63,8 +63,24 @@ async function captureVariant(browser, theme, open) {
     await page.goto(BASE_URL, { waitUntil: "load", timeout: 60000 });
     await page.waitForTimeout(2500);
 
-    // Set theme via localStorage before reload so the UI matches the requested variant.
-    await page.evaluate((t) => localStorage.setItem("theme", t), theme);
+    // Reset theme + any persisted dialog state before reload so each capture
+    // starts from a known-closed baseline (the dark/closed capture was
+    // inheriting isTimelineDialogOpen=true from the prior light/open run).
+    await page.evaluate((t) => {
+      localStorage.setItem("theme", t);
+      // zustand persist key is "ui-store"; force isTimelineDialogOpen=false
+      // without nuking other persisted prefs.
+      try {
+        const raw = localStorage.getItem("ui-store");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.state) {
+            parsed.state.isTimelineDialogOpen = false;
+            localStorage.setItem("ui-store", JSON.stringify(parsed));
+          }
+        }
+      } catch {}
+    }, theme);
     await page.reload({ waitUntil: "load", timeout: 60000 });
     await page.waitForTimeout(8000);
 
