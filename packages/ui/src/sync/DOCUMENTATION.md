@@ -66,7 +66,11 @@ The composer compares normalized attachment MIME types with the selected model's
 
 ### Layout-mounted session-list lifecycle
 
-`MainLayout` and `VSCodeLayout` each call `useSessionListSync({ isVSCode })` directly and unconditionally, outside Sidebar visibility, responsive, editor, settings, and compact-view branches. The hook selects the real topology inputs, publishes complete directory bootstrap demand through `ChildStoreManager`, refreshes topology additions (including all VS Code directories on its first mount), coalesces OpenChamber control events for 500ms, and supplies a memoized complete global active+archived input to authoritative cleanup. The root-level global poller owns the initial global refresh. MainLayout includes available worktrees; VS Code intentionally excludes them. Sidebar-local `session-created` worktree discovery is separate and full-app-only.
+`MainLayout` and `VSCodeLayout` each call `useSessionListSync({ isVSCode })` directly and unconditionally, outside Sidebar visibility, responsive, editor, settings, and compact-view branches. The hook selects the real topology inputs, restricts them to background-eligible directories (the active project, plus any project owning a live or historical session — see "Background discovery eligibility" below), and publishes that eligible set as background bootstrap demand through `ChildStoreManager`. It refreshes newly eligible directories on mount and whenever the eligible set grows, coalesces OpenChamber control events for 500ms, and supplies a memoized complete global active+archived input to authoritative cleanup. The root-level global poller owns the initial global refresh. MainLayout includes available worktrees; VS Code intentionally excludes them. Sidebar-local `session-created` worktree discovery is separate and full-app-only.
+
+### Background discovery eligibility
+
+A project is eligible for background bootstrap demand, worktree discovery, and global-refresh scoping when it is the active project, or when it owns at least one known session. A collapsed project additionally requires that owned session to still be live — a collapsed project whose sessions are all historical is dropped, since ownership alone would keep every project the user ever touched permanently eligible. `worktreeDiscoveryProjects.ts` (`isProjectEligibleForBackgroundDiscovery`) is the single implementation; `useSessionListSync`, `SessionSidebar`'s worktree discovery, and `SessionProjectCollection`'s bootstrap-demand filtering all call it with the same collapse source — the shared collapsed-project-ID store (`useProjectCollapseStore`), not the settings-only `sidebarCollapsed` project field, because VS Code never persists collapse state to that field.
 
 ### Directory bootstrap scheduling
 
@@ -75,7 +79,7 @@ The composer compares normalized attachment MIME types with the selected model's
 - The scheduler runs at most two directory bootstraps concurrently.
 - Selected session/current directory demand outranks active-project, expanded, visible, and background demand.
 - Demand is deduplicated by normalized directory and can be promoted while queued.
-- The complete known project/worktree set is always published. Collapsed and off-screen directories remain background demand, so they refresh eventually rather than waiting for expansion.
+- The background-eligible known project/worktree set (see "Background discovery eligibility" above) is always published for those directories. Off-screen directories within that eligible set remain background demand, so they refresh eventually rather than waiting for expansion; directories excluded from eligibility are not bootstrapped until they become eligible (gain a live session or become active).
 - A bootstrap holds its scheduler slot through critical state and the authoritative directory session-list fetch. Deferrable command/MCP/LSP/VCS/question/permission enrichment starts afterward without extending slot ownership or competing with the initial session-list request.
 - A system-resume signal, including Capacitor foreground resume, refreshes pending questions and permissions only for the active materialized directory. The refresh is deduplicated while in flight, preserves existing state on fetch failure, and leaves unopened directories untouched; normal stream reconnect recovery remains the broader catch-up path.
 - When a materialized current turn contains a pending/running question tool but that session's pending question record is missing, the mounted chat performs a question-only recovery scoped to that session. It tries at most three times with delays of 0, 500, and 1,500 ms, stops when the chat unmounts or changes sessions, and guards every attempt against runtime changes. This closes cold-start races without adding requests to ordinary session opens or scanning unrelated sessions and directories.
@@ -120,16 +124,27 @@ Use `useGlobalSessionsStore` when the UI needs a **shared global session cache**
 
 Each full app root owns one global polling lifecycle through
 `useGlobalSessionsPolling`. The web/desktop root and VS Code chat root load the
-full list once when mounted. After that the live event stream is the primary
-discovery path, and the unscoped refresh runs only when this window may have
-missed events: the document becoming visible, window focus, `pageshow`, or
-`openchamber:system-resume`. Those signals share a 30-second minimum spacing, and
-a 10-minute backstop interval covers a window that stays visible and focused, so
-a session created by another OpenCode process is still discovered without the
-sidebar or native tray being visible. Enumerating every project root is
-expensive for the OpenCode server, so this path must stay signal-driven rather
-than returning to a short blind interval. Embedded chats and the VS Code
-agent-manager panel do not poll.
+full, unscoped list once when mounted (`ensureGlobalSessionsLoaded`), which is
+what arms `status: 'ready'` for authoritative cleanup, archived auto-folders,
+and other global-cache consumers. After that the live event stream is the
+primary discovery path, and the recovery refresh runs only when this window
+may have missed events: the document becoming visible, window focus,
+`pageshow`, or `openchamber:system-resume`. That refresh is scoped to
+`useKnownSessionDirectoriesStore` — the same background-eligible directory set
+`useSessionListSync` publishes — rather than re-enumerating every project root,
+because that enumeration is expensive for the OpenCode server. Those signals
+share a 30-second minimum spacing, and a 10-minute backstop interval covers a
+window that stays visible and focused, so a session created by another
+OpenCode process in an eligible directory is still discovered without the
+sidebar or native tray being visible. A session created in a directory outside
+the eligible set (for example, a collapsed project with no live session) is
+not covered by this scoped refresh; it surfaces at the next full/unscoped
+load — a fresh mount of the polling root, or a `scheduled-task-ran` control
+event, which still forces a full `refreshGlobalSessions()`. `ArchiveView` also
+calls `ensureGlobalSessionsLoaded` on open, but that call is a no-op once the
+store has already loaded once, so it only helps the cold-start race where
+Archive opens before the root poller's initial load resolves. Embedded chats
+and the VS Code agent-manager panel do not poll.
 The sidebar and tray consume the same store and must not start their own
 full-list timers. Surface-specific refreshes, such as opening the mobile session
 sheet or returning from suspension, may still request freshness at their
