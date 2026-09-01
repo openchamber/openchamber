@@ -2,12 +2,6 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
-
-- **Scheduled Tasks:** an optional local preflight command can now block an
-  automatic or manual task before it creates an agent session; blocked tasks
-  show as Denied with the policy reason instead of appearing to have succeeded.
-
 ## [1.22.0] - 2026-08-30
 
 - **Linear integration:** connect a workspace in Settings → Integrations, browse and filter issues, and start a session or worktree from an issue. OpenChamber reports session progress back to Linear and can attach an issue to the next chat message (thanks to @AlexKutas).
