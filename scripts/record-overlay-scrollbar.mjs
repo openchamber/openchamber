@@ -130,7 +130,7 @@ async function main() {
       const box = await t.boundingBox();
       if (!box) continue;
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 8 });
-      await wait(700);
+      await wait(1500);
       if (await isThumbVisible(page)) {
         revealed = true;
         console.log(
