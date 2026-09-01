@@ -1,6 +1,6 @@
 import { runtimeFetch } from './runtime-fetch';
 
-export type ScheduledTaskStatus = 'idle' | 'running' | 'success' | 'error';
+export type ScheduledTaskStatus = 'idle' | 'running' | 'success' | 'error' | 'denied';
 
 export type ScheduledTask = {
   id: string;
