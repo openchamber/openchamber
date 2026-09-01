@@ -23,6 +23,7 @@ import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import type { ToolPopupContent } from '../types';
 import { PlainDiffFallback } from './PlainDiffFallback';
+import { isToolDiffPreviewOversized } from './toolDiffPreview';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
 import {
@@ -1210,11 +1211,15 @@ const renderAnimatedPathWithIcon = (path: string, animate = true, grow = true, s
 // Suspense fallback, mirroring the preview's own error fallback.
 const LazyToolPartDiffPreview = lazyWithChunkRecovery(() => import('./ToolPartDiffPreview'));
 
-const DiffPreview: React.FC<{ diff: string; diffViewMode: DiffViewMode }> = ({ diff, diffViewMode }) => (
-    <React.Suspense fallback={<PlainDiffFallback diff={diff} />}>
-        <LazyToolPartDiffPreview diff={diff} diffViewMode={diffViewMode} />
-    </React.Suspense>
-);
+const DiffPreview: React.FC<{ diff: string; diffViewMode: DiffViewMode }> = ({ diff, diffViewMode }) => {
+    if (isToolDiffPreviewOversized(diff)) return <PlainDiffFallback diff={diff} />;
+
+    return (
+        <React.Suspense fallback={<PlainDiffFallback diff={diff} />}>
+            <LazyToolPartDiffPreview diff={diff} diffViewMode={diffViewMode} />
+        </React.Suspense>
+    );
+};
 
 interface ToolExpandedContentProps {
     part: ToolPartType;
