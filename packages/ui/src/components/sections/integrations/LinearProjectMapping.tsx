@@ -1,4 +1,5 @@
 import React from 'react';
+import { getProjectDisplayLabel, getProjectPathLabel } from '@/lib/projectDisplayLabel';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   SettingsControlGroup,
@@ -103,7 +104,7 @@ export function LinearProjectMapping({
 
   const projectLabel = (path: string) => {
     const project = projects.find((entry) => entry.path === path);
-    return project?.label?.trim() || path;
+    return project ? getProjectDisplayLabel(project) : getProjectPathLabel(path);
   };
 
   const defaultProjectLabel = (value: string | undefined) => {
