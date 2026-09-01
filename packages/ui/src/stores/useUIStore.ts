@@ -35,6 +35,38 @@ export type DesktopWindowControlsStyle = 'classic' | 'traffic-lights';
 export type FileEditorKeymap = 'default' | 'vim';
 export type LargeTextPasteBehavior = 'ask' | 'attach' | 'inline';
 
+const CONTEXT_PANEL_MODES: ReadonlySet<string> = new Set<ContextPanelMode>([
+  'diff',
+  'walkthrough',
+  'file',
+  'context',
+  'plan',
+  'chat',
+  'browser',
+  'git',
+  'pr',
+  'linear',
+  'notes',
+  'terminal',
+]);
+
+const LEGACY_CONTEXT_PANEL_MODES: ReadonlySet<string> = new Set<ContextPanelMode>([
+  'diff',
+  'file',
+  'context',
+  'plan',
+  'chat',
+  'terminal',
+]);
+
+const isContextPanelMode = (value: unknown): value is ContextPanelMode => (
+  typeof value === 'string' && CONTEXT_PANEL_MODES.has(value)
+);
+
+const isPersistedContextPanelWidthMode = (value: string): value is ContextPanelMode => (
+  CONTEXT_PANEL_MODES.has(value)
+);
+
 export const DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR: LargeTextPasteBehavior = 'ask';
 
 export const normalizeLargeTextPasteBehavior = (value: unknown): LargeTextPasteBehavior => {
@@ -222,7 +254,7 @@ const LEFT_SIDEBAR_DEFAULT_WIDTH = 280;
 let browserTabSequence = 0;
 
 // Shared with rail/panel consumers so contextPanelByDirectory lookups agree on keys.
-export const normalizeContextPanelDirectoryKey = (value: string): string => normalizeDirectoryPath(value);
+export const normalizeContextPanelDirectoryKey = (value: string): string => normalizeDirectoryPath(value.trim());
 
 const normalizeDirectoryPath = (value: string): string => {
   if (!value) return '';
@@ -240,7 +272,40 @@ const normalizeDirectoryPath = (value: string): string => {
     return raw.startsWith('/') ? '/' : '';
   }
 
-  return normalized;
+  return normalized.replace(/^([a-z]):/, (_, drive: string) => `${drive.toUpperCase()}:`);
+};
+
+const mergeContextPanelDirectoryStates = (
+  existing: ContextPanelDirectoryState,
+  incoming: ContextPanelDirectoryState,
+): ContextPanelDirectoryState => {
+  const incomingWins = incoming.touchedAt >= existing.touchedAt;
+  const preferred = incomingWins ? incoming : existing;
+  const older = incomingWins ? existing : incoming;
+  const newer = incomingWins ? incoming : existing;
+  const tabsByID = new Map<string, ContextPanelTab>();
+
+  for (const tab of [...older.tabs, ...newer.tabs]) {
+    const current = tabsByID.get(tab.id);
+    if (!current || tab.touchedAt >= current.touchedAt) {
+      tabsByID.set(tab.id, tab);
+    }
+  }
+
+  const tabs = clampContextPanelTabs(
+    Array.from(tabsByID.values()),
+    CONTEXT_PANEL_MAX_TABS,
+    preferred.activeTabId,
+  );
+
+  return {
+    isOpen: preferred.isOpen,
+    expanded: preferred.expanded,
+    tabs,
+    activeTabId: resolveActiveContextPanelTabID(tabs, preferred.activeTabId),
+    widthByMode: { ...older.widthByMode, ...newer.widthByMode },
+    touchedAt: Math.max(existing.touchedAt, incoming.touchedAt),
+  };
 };
 
 const clampContextPanelWidth = (width: number): number => {
@@ -429,10 +494,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       touchedAt?: unknown;
     };
 
-    // Legacy 'preview' tabs are converted to 'browser' by the v14 migration;
-    // anything still carrying an unknown mode here is discarded rather than
-    // resurrected into a tab the panel cannot render.
-    if (candidate.mode !== 'diff' && candidate.mode !== 'walkthrough' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'browser' && candidate.mode !== 'git' && candidate.mode !== 'pr' && candidate.mode !== 'linear' && candidate.mode !== 'notes' && candidate.mode !== 'terminal') {
+    if (!isContextPanelMode(candidate.mode)) {
       continue;
     }
 
@@ -669,8 +731,12 @@ const sanitizeContextPanelByDirectory = (
   const source = value as Record<string, unknown>;
   const next: Record<string, ContextPanelDirectoryState> = {};
 
-  for (const [rawDirectory, rawState] of Object.entries(source)) {
-    const directory = normalizeDirectoryPath(rawDirectory);
+  const entries = Object.entries(source).sort(([left], [right]) => (
+    left < right ? -1 : left > right ? 1 : 0
+  ));
+
+  for (const [rawDirectory, rawState] of entries) {
+    const directory = normalizeContextPanelDirectoryKey(rawDirectory);
     if (!directory || !rawState || typeof rawState !== 'object') {
       continue;
     }
@@ -696,7 +762,7 @@ const sanitizeContextPanelByDirectory = (
     // no owner and cannot be migrated into an openable saved-plan tab — that
     // combination is dropped by sanitize above. A generic filesystem plan tab
     // (no plan id) revives fine from the descriptor alone.
-    if (tabs.length === 0 && (candidate.mode === 'diff' || candidate.mode === 'file' || candidate.mode === 'context' || candidate.mode === 'plan' || candidate.mode === 'chat' || candidate.mode === 'terminal')) {
+    if (tabs.length === 0 && isContextPanelMode(candidate.mode) && LEGACY_CONTEXT_PANEL_MODES.has(candidate.mode)) {
       tabs = [createContextPanelTab({
         mode: candidate.mode,
         targetPath: typeof candidate.targetPath === 'string' ? candidate.targetPath : null,
@@ -722,7 +788,7 @@ const sanitizeContextPanelByDirectory = (
       if (fraction !== undefined) widthFractionByMode[mode] = fraction;
     }
 
-    next[directory] = {
+    const sanitizedState: ContextPanelDirectoryState = {
       isOpen: candidate.isOpen === true,
       expanded: candidate.expanded === true,
       tabs: clampedTabs,
@@ -733,6 +799,9 @@ const sanitizeContextPanelByDirectory = (
         ? candidate.touchedAt
         : Date.now(),
     };
+    next[directory] = next[directory]
+      ? mergeContextPanelDirectoryStates(next[directory], sanitizedState)
+      : sanitizedState;
   }
 
   return next;
@@ -1428,7 +1497,7 @@ export const useUIStore = create<UIStore>()(
         },
 
         openContextPanelTab: (directory, tab, options) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedDirectory = normalizeContextPanelDirectoryKey(directory || '');
           if (!normalizedDirectory) {
             return;
           }
@@ -1529,7 +1598,7 @@ export const useUIStore = create<UIStore>()(
         // Always a new tab, never the existing one: the whole point of asking
         // for one is to keep what is already open.
         openNewContextBrowserTab: (directory) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedDirectory = normalizeContextPanelDirectoryKey(directory || '');
           if (!normalizedDirectory || isVSCodeRuntime()) return;
           browserTabSequence += 1;
           get().openContextPanelTab(normalizedDirectory, {
@@ -1540,7 +1609,7 @@ export const useUIStore = create<UIStore>()(
           });
         },
         openContextBrowser: (directory, url = '', options) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedDirectory = normalizeContextPanelDirectoryKey(directory || '');
           if (!normalizedDirectory || isVSCodeRuntime()) return;
           const targetUrl = typeof url === 'string' && url.trim().length > 0 ? url.trim() : '';
           get().openContextPanelTab(normalizedDirectory, {
@@ -1636,7 +1705,7 @@ export const useUIStore = create<UIStore>()(
         },
 
         closeContextPanelTabs: (directory, tabIds) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedDirectory = normalizeContextPanelDirectoryKey(directory || '');
           const normalizedTabIds = (tabIds ?? [])
             .map((id) => (id || '').trim())
             .filter((id) => id.length > 0);
@@ -2889,7 +2958,11 @@ export const useUIStore = create<UIStore>()(
           delete state.rightSidebarWidth;
           delete state.rightSidebarTab;
 
-          state.contextPanelByDirectory = sanitizeContextPanelByDirectory(state.contextPanelByDirectory);
+          // v13 -> v14: canonicalize context-panel directory keys and merge
+          // historical variants that now identify the same directory.
+          if (version < 14) {
+            state.contextPanelByDirectory = sanitizeContextPanelByDirectory(state.contextPanelByDirectory);
+          }
 
           if (version < 5) {
             if (!state.shortcutOverrides || typeof state.shortcutOverrides !== 'object') {
