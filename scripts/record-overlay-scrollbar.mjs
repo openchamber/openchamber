@@ -126,31 +126,17 @@ async function main() {
     }
 
     let revealed = false;
-    for (let i = 0; i < targets.length; i++) {
-      const t = targets[i];
+    for (const t of targets) {
       const box = await t.boundingBox();
-      if (!box) { console.log(`target ${i}: no bounding box`); continue; }
-      const cx = box.x + box.width / 2;
-      const cy = box.y + box.height / 2;
-      console.log(`target ${i}: box=(${Math.round(box.x)},${Math.round(box.y)} ${Math.round(box.width)}x${Math.round(box.height)}) hover=(${Math.round(cx)},${Math.round(cy)})`);
-      await page.mouse.move(cx, cy, { steps: 8 });
-      // Debug: inspect thumb + scrollHeight after each wait
-      for (const w of [200, 500, 1500, 3000]) {
-        await wait(w);
-        const info = await page.evaluate(() => {
-          const thumb = document.querySelector('[data-overlay-scrollbar-thumb="vertical"]');
-          const ts = Array.from(document.querySelectorAll('.overlay-scrollbar-target'));
-          return {
-            thumbExists: !!thumb,
-            thumbHidden: thumb ? thumb.hasAttribute('hidden') : null,
-            targets: ts.map(x => ({sh: x.scrollHeight, ch: x.clientHeight, ov: x.style.overflow || 'default'})),
-          };
-        });
-        console.log(`  after ${w}ms: thumb=${info.thumbExists}/${info.thumbHidden === null ? 'n/a' : (info.thumbHidden ? 'hidden' : 'visible')} targets=${JSON.stringify(info.targets)}`);
-        if (info.thumbExists && !info.thumbHidden) { revealed = true; break; }
-      }
-      if (revealed) {
-        console.log(`hover revealed thumb on target ${i}`);
+      if (!box) continue;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 8 });
+      await wait(1500);
+      if (await isThumbVisible(page)) {
+        revealed = true;
+        console.log(
+          `hover revealed thumb on target ${targets.indexOf(t)} ` +
+          `(box ${Math.round(box.x)},${Math.round(box.y)} ${Math.round(box.width)}x${Math.round(box.height)})`
+        );
         break;
       }
     }
