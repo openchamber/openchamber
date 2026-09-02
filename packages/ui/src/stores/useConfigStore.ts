@@ -1,27 +1,28 @@
-import { create } from "zustand";
+import type { Agent, Config, Provider } from "@opencode-ai/sdk/v2";
 import type { StoreApi, UseBoundStore } from "zustand";
+import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
-import type { Provider, Agent, Config } from "@opencode-ai/sdk/v2";
-import { opencodeClient } from "@/lib/opencode/client";
-import { scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
-import type { ModelMetadata } from "@/types";
-import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
-import { filterVisibleAgents } from "./useAgentsStore";
 import { isPrimaryMode } from "@/components/chat/mobileControlsUtils";
-import { useSessionUIStore } from "@/sync/session-ui-store";
-import { useSelectionStore } from "@/sync/selection-store";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
+import { scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
+import { isDesktopShell } from "@/lib/desktop";
+import { parseModelIdentifier } from "@/lib/modelIdentifier";
+import { opencodeClient } from "@/lib/opencode/client";
+import { normalizePath } from "@/lib/pathNormalization";
 import { updateDesktopSettings } from "@/lib/persistence";
+import { resolveProjectForSessionDirectory } from "@/lib/projectResolution";
+import { runtimeFetch } from "@/lib/runtime-fetch";
+import { getRuntimeKey } from "@/lib/runtime-switch";
+import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
 import { useDirectoryStore } from "@/stores/useDirectoryStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
-import { resolveProjectForSessionDirectory } from "@/lib/projectResolution";
 import { streamDebugEnabled } from "@/stores/utils/streamDebug";
-import { parseModelIdentifier } from "@/lib/modelIdentifier";
-import { runtimeFetch } from "@/lib/runtime-fetch";
-import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
-import { normalizePath } from "@/lib/pathNormalization";
+import { useSelectionStore } from "@/sync/selection-store";
+import { useSessionUIStore } from "@/sync/session-ui-store";
 import { getSyncConfig, subscribeToSyncConfigChanges } from "@/sync/sync-refs";
-import { getRuntimeKey } from "@/lib/runtime-switch";
+import type { ModelMetadata } from "@/types";
+import { filterVisibleAgents } from "./useAgentsStore";
+import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
@@ -883,6 +884,20 @@ const _providersLoadedAt = new Map<string, number>();
 const _agentsLoadedAt = new Map<string, number>();
 const CONFIG_REFRESH_TTL_MS = 30_000;
 const PROJECT_CONFIG_PREWARM_DELAY_MS = 1_000;
+
+/**
+ * Desktop covers inactive projects' config on demand only. Prewarming asks the
+ * OpenCode server for every registered project's providers and agents, which on
+ * a local machine is real sustained filesystem work — a 30s sample caught 390
+ * reads under unrelated projects' `.opencode`/`.agents` trees, and the antivirus
+ * backlog behind them cost more CPU than OpenCode. Spacing the loads a second
+ * apart moved that cost across startup without removing it, and going to a
+ * project already loads its config. Web and VS Code address a server they do not
+ * own, so they keep the prewarm, the same split `shouldLoadInitialGlobalSnapshot`
+ * makes for the first global snapshot.
+ */
+const shouldPrewarmInactiveProjectConfigs = (): boolean => !isDesktopShell();
+
 const isConfigFresh = (loadedAt: Map<string, number>, key: string): boolean => {
     const at = loadedAt.get(key);
     return typeof at === 'number' && Date.now() - at < CONFIG_REFRESH_TTL_MS;
@@ -3323,6 +3338,11 @@ export const useConfigStore = create<ConfigStore>()(
 
                 prewarmProjectConfigs: async (initialDirectory?: string | null) => {
                     if (!get().isConnected) {
+                        return;
+                    }
+
+                    if (!shouldPrewarmInactiveProjectConfigs()) {
+                        markStartupTrace('prewarmProjectConfigs:skipped', { reason: 'inactiveProjectPrewarmDisabled' });
                         return;
                     }
 

@@ -245,6 +245,18 @@ the chat, the session list and the file tree.
 Failure is still not empty: a failed load restores that directory's previous
 list rather than clearing it.
 
+Startup does not warm the projects nobody opened. `initializeApp` loads the
+active project's config, then `prewarmProjectConfigs` used to walk every other
+registered project one second apart. On Desktop that is local filesystem work: a
+30s sample caught 390 reads under unrelated projects' `.opencode` and `.agents`
+trees, with an antivirus scan backlog behind them.
+`shouldPrewarmInactiveProjectConfigs` turns the inactive-project prewarm off
+there, the same demand-only split `shouldLoadInitialGlobalSnapshot` makes for the
+first global sessions snapshot. Web and VS Code address a server they do not own,
+so they keep it. Everything that asks for a directory still gets it:
+`activateDirectory` loads a project when the user goes there, and Settings loads
+the directory it is showing.
+
 ## Selector Rules
 
 Use leaf selectors.
