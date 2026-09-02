@@ -15,6 +15,11 @@ import { dropSessionCaches } from "./session-cache"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
 import { shouldSkipStaleSessionEvent } from "./session-event-freshness"
+import {
+  compareMessagesChronologically,
+  findMessageIndex,
+  insertMessageChronologically,
+} from "./message-ordering"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const DELTA_OVERLAP_FIELDS = ["text", "output"] as const
@@ -180,7 +185,7 @@ function hasMessage(draft: State, sessionID: string | undefined, messageID: stri
   if (!sessionID) return false
   const messages = draft.message[sessionID]
   if (!messages) return false
-  return Binary.search(messages, messageID, (message) => message.id).found
+  return messages.some((message) => message.id === messageID)
 }
 
 export function reduceGlobalEvent(event: Event): GlobalEventResult {
@@ -353,21 +358,26 @@ export function applyDirectoryEvent(
         draft.message[info.sessionID] = [info]
         return true
       }
-      const result = Binary.search(messages, info.id, (m) => m.id)
-      if (result.found) {
+      const messageIndex = findMessageIndex(messages, info.id)
+      if (messageIndex >= 0) {
         // Skip message replacement if unchanged — preserves reference, avoids re-render
-        const existing = messages[result.index]
+        const existing = messages[messageIndex]
         const unchanged = areMessageUpdateFieldsEqual(existing, info)
         if (unchanged) {
           syncDebug.reducer.messageUpdatedUnchanged(info.sessionID, info.id, info.role, (info as { finish?: unknown }).finish, (info.time as { completed?: number })?.completed)
           return false
         }
         const next = [...messages]
-        next[result.index] = info
+        if (compareMessagesChronologically(existing, info) === 0) {
+          next[messageIndex] = info
+        } else {
+          next.splice(messageIndex, 1)
+          insertMessageChronologically(next, info)
+        }
         draft.message[info.sessionID] = next
       } else {
         const next = [...messages]
-        next.splice(result.index, 0, info)
+        insertMessageChronologically(next, info)
         draft.message[info.sessionID] = next
       }
       return true
@@ -378,9 +388,9 @@ export function applyDirectoryEvent(
       const messages = draft.message[props.sessionID]
       if (messages) {
         const next = [...messages]
-        const result = Binary.search(next, props.messageID, (m) => m.id)
-        if (result.found) {
-          next.splice(result.index, 1)
+        const messageIndex = findMessageIndex(next, props.messageID)
+        if (messageIndex >= 0) {
+          next.splice(messageIndex, 1)
           draft.message[props.sessionID] = next
         }
       }
@@ -411,14 +421,14 @@ export function applyDirectoryEvent(
           : true
       }
       const next = [...parts]
-      const result = Binary.search(next, part.id, (p) => p.id)
-      if (result.found) {
-        const previous = next[result.index]
+      const partIndex = next.findIndex((candidate) => candidate.id === part.id)
+      if (partIndex >= 0) {
+        const previous = next[partIndex]
         if (shouldPreserveExistingPart(previous, part)) {
           return false
         }
         const dedupeFields = getUpdatedDeltaFields(previous, part)
-        next[result.index] = dedupeFields.length > 0
+        next[partIndex] = dedupeFields.length > 0
           ? { ...part, __dedupeNextDeltaFields: dedupeFields } as unknown as Part
           : part
       } else {
@@ -427,14 +437,16 @@ export function applyDirectoryEvent(
         // always inserted first). Assistant messages never have optimistic parts,
         // so this check is effectively free during streaming.
         const hasOptimistic = next.length > 0 && !(next[0] as { sessionID?: string }).sessionID
-        const optimisticIdx = hasOptimistic && (part.type === "text" || part.type === "file")
+        const optimisticIndex = hasOptimistic && (part.type === "text" || part.type === "file")
           ? next.findIndex((p) => p.type === part.type && !(p as { sessionID?: string }).sessionID)
           : -1
-        if (optimisticIdx >= 0) {
-          next.splice(optimisticIdx, 1)
+        if (optimisticIndex >= 0) {
+          // Replace in place: pushing to the end reorders text/file parts of a
+          // just-sent message and remounts its rendered subtree.
+          next[optimisticIndex] = part
+        } else {
+          next.push(part)
         }
-        const insertResult = Binary.search(next, part.id, (p) => p.id)
-        next.splice(insertResult.index, 0, part)
       }
       draft.part[messageID] = next
       return missingOwningMessage
@@ -449,10 +461,10 @@ export function applyDirectoryEvent(
       const props = event.properties as { messageID: string; partID: string }
       const parts = draft.part[props.messageID]
       if (!parts) return false
-      const result = Binary.search(parts, props.partID, (p) => p.id)
-      if (result.found) {
+      const partIndex = parts.findIndex((part) => part.id === props.partID)
+      if (partIndex >= 0) {
         const next = [...parts]
-        next.splice(result.index, 1)
+        next.splice(partIndex, 1)
         if (next.length === 0) {
           delete draft.part[props.messageID]
         } else {
@@ -479,21 +491,21 @@ export function applyDirectoryEvent(
           materialization: { type: "incomplete-session-snapshot", reason: "orphan-delta", sessionID: props.sessionID, messageID: props.messageID, partID: props.partID },
         }
       }
-      const result = Binary.search(parts, props.partID, (p) => p.id)
-      if (!result.found) {
+      const partIndex = parts.findIndex((part) => part.id === props.partID)
+      if (partIndex < 0) {
         syncDebug.reducer.partDeltaNotFound(props.messageID, props.partID)
         return {
           changed: false,
           materialization: { type: "incomplete-session-snapshot", reason: "missing-delta-part", sessionID: props.sessionID, messageID: props.messageID, partID: props.partID },
         }
       }
-      const existing = parts[result.index] as Record<string, unknown>
+      const existing = parts[partIndex] as Record<string, unknown>
       const existingValue = existing[props.field] as string | undefined
       const dedupeFields = (existing as DedupeMetadata).__dedupeNextDeltaFields ?? []
       const shouldDedupe = dedupeFields.includes(props.field)
       // Create new Part object + new array so React detects the change
       const next = [...parts]
-      next[result.index] = {
+      next[partIndex] = {
         ...existing,
         [props.field]: shouldDedupe ? appendNonOverlappingDelta(existingValue, props.delta) : (existingValue ?? "") + props.delta,
         __dedupeNextDeltaFields: dedupeFields.filter((field) => field !== props.field),

@@ -9,6 +9,7 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import { TerminalView } from '@/components/views/TerminalView';
 import { useI18n } from '@/lib/i18n';
+import type { ProjectRef } from '@/lib/projectContextApi';
 import { cn } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
@@ -105,7 +106,7 @@ export const MobileWorkspaceDrawer: React.FC<{
   /** When set, the Changes tab opens directly into the per-file diff. */
   pendingChangesDiff: { path: string; staged: boolean } | null;
   /** Notes tab: opens a plan fullscreen (layered above the drawer). */
-  onOpenPlan: (plan: { path: string; title: string }) => void;
+  onOpenPlan: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
   /** MCP tab: jump to the MCP settings page pre-seeded with a new server draft. */
   onOpenMcpSettings: () => void;
   variant?: 'drawer' | 'panel';

@@ -292,9 +292,21 @@ describe('usePluginsStore', () => {
   test('loadRegistryInfo skips empty specs and clears loading flag', async () => {
     usePluginsStore.setState({ isLoadingRegistry: true });
 
-    await usePluginsStore.getState().loadRegistryInfo({ specs: [] });
+    const result = await usePluginsStore.getState().loadRegistryInfo({ specs: [] });
 
+    expect(result).toBe(true);
     expect(fetchCalls).toHaveLength(0);
+    expect(usePluginsStore.getState().isLoadingRegistry).toBe(false);
+  });
+
+  test('loadRegistryInfo reports a failed request without clearing prior registry data', async () => {
+    usePluginsStore.setState({ registryInfo: { [entry.spec]: registryOk } });
+    queueFetchResponses([jsonResponse({ error: 'registry unavailable' }, { status: 500 })]);
+
+    const result = await usePluginsStore.getState().loadRegistryInfo({ specs: [entry.spec] });
+
+    expect(result).toBe(false);
+    expect(usePluginsStore.getState().registryInfo).toEqual({ [entry.spec]: registryOk });
     expect(usePluginsStore.getState().isLoadingRegistry).toBe(false);
   });
 

@@ -9,8 +9,10 @@ import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { ChatView } from '@/components/views/ChatView';
 import { PlanView } from '@/components/views/PlanView';
 import { SettingsView } from '@/components/views/SettingsView';
+import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
+import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
@@ -20,11 +22,12 @@ import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { RuntimeAPIs } from '@/lib/api/types';
+import type { ProjectRef } from '@/lib/projectContextApi';
 import { readTabletLayout, useOrientation, useTabletLayout } from '@/lib/device';
 import { useHardwareKeyboard } from '@/lib/hardwareKeyboard';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint, MOBILE_DISCONNECTED_RUNTIME_KEY } from '@/lib/runtime-switch';
 import { refreshGlobalSessions, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { clearLastActiveSession, readLastActiveSession } from '@/sync/last-session-cache';
 import { cn } from '@/lib/utils';
@@ -32,6 +35,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { useGitStore } from '@/stores/useGitStore';
 import { useMcpConfigStore, type McpDraft } from '@/stores/useMcpConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -54,7 +58,7 @@ import { MobileSessionsSheet } from './MobileSessionsSheet';
 import { MobileFullscreenSurface } from './MobileFullscreenSurface';
 import { MobileWorkspaceDrawer, type MobileWorkspaceTab } from './MobileWorkspaceDrawer';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
-import { autoConnectLastInstance, getAutoConnectTargetLabel, reprobeActiveConnection, type AutoConnectOutcome } from './mobileConnections';
+import { autoConnectLastInstance, getAutoConnectTargetLabel, logMobileConnectEvent, reprobeActiveConnection, type AutoConnectOutcome } from './mobileConnections';
 import { isCapacitorMobileApp, useNativeAndroidBackButton, useNativeMobileChrome, useNativeMobileLifecycle } from './mobileNativeChrome';
 import { reconnectAppForTransportSwitch, resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
 import { useAppFontEffects } from './useAppFontEffects';
@@ -83,6 +87,7 @@ const MOBILE_SETTINGS_PAGES = [
   'providers',
   'usage',
   'voice',
+  'integrations',
   'about',
 ] as const;
 
@@ -108,7 +113,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const [workspaceTab, setWorkspaceTab] = React.useState<MobileWorkspaceTab>('changes');
   // A plan opened from the workspace drawer's Notes tab, shown as a fullscreen
   // layer on top of it (back returns to the notes).
-  const [openPlan, setOpenPlan] = React.useState<{ path: string; title: string } | null>(null);
+  const [openPlan, setOpenPlan] = React.useState<{ id: string; title: string; projectRef: ProjectRef } | null>(null);
   const [settingsInitialMobileStage, setSettingsInitialMobileStage] = React.useState<'nav' | 'page-content'>('nav');
   // When set, the Changes surface opens directly into the per-file diff for this path.
   const [pendingChangesDiff, setPendingChangesDiff] = React.useState<{ path: string; staged: boolean } | null>(null);
@@ -539,7 +544,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           >
             <ErrorBoundary>
               <PlanView
-                targetPath={openPlan.path}
+                savedProjectPlan={{ projectRef: openPlan.projectRef, planId: openPlan.id }}
                 onNavigatedToChat={() => {
                   closeSurface();
                   closeWorkspace();
@@ -626,6 +631,7 @@ export function MobileApp({ apis }: MobileAppProps) {
   const clearError = useSessionUIStore((state) => state.clearError);
   const setIsMobile = useUIStore((state) => state.setIsMobile);
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
+  const refreshLinearAuthStatus = useLinearAuthStore((state) => state.refreshStatus);
   const setPlanModeEnabled = useFeatureFlagsStore((state) => state.setPlanModeEnabled);
   const projects = useProjectsStore((state) => state.projects);
   const [connectionEpoch, setConnectionEpoch] = React.useState(0);
@@ -660,9 +666,11 @@ export function MobileApp({ apis }: MobileAppProps) {
       // saved instance instead of dead-ending on the connect screen until the
       // user restarts the app. Success fires runtime-endpoint-changed, which
       // re-bootstraps everything.
+      logMobileConnectEvent('resume:auto-connect', {});
       void autoConnectLastInstance();
       return;
     }
+    logMobileConnectEvent('resume:reprobe', {});
 
     // Re-probe the active device's transports on resume: the network may have
     // changed while the app slept, so hot-switch LAN⇄relay if a better transport
@@ -672,47 +680,63 @@ export function MobileApp({ apis }: MobileAppProps) {
     const refreshInPlace = () => {
       void initializeApp();
       void refreshGitHubAuthStatus(apis.github, { force: true });
+      void refreshLinearAuthStatus(apis.linear, { force: true });
       if (providersCount === 0) void loadProviders({ source: 'mobileApp:nativeResume' });
       if (agentsCount === 0) void loadAgents({ source: 'mobileApp:nativeResume' });
     };
-    const disconnect = () => {
-      switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
+    const disconnect = (reason: string) => {
+      logMobileConnectEvent('resume:disconnect', { reason });
+      switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: MOBILE_DISCONNECTED_RUNTIME_KEY });
       setConnectionEpoch((value) => value + 1);
     };
 
     void reprobeActiveConnection().then((outcome) => {
       if (nativeResumeValidationSeqRef.current !== validationSeq) return;
       if (outcome === 'no-connection') {
-        disconnect();
+        disconnect('no-connection');
         return;
       }
       if (outcome === 'needs-login') {
         // Token explicitly rejected (revoked/expired) — tell the user why they
         // land back on the connect screen instead of silently bouncing them.
         setAutoConnectNotice({ kind: 'auth-expired', label: getAutoConnectTargetLabel() ?? '' });
-        disconnect();
+        disconnect('needs-login');
         return;
       }
       if (outcome === 'unreachable') {
         // Right after a resume or Wi-Fi switch the network is often still
-        // settling (on Android without a SIM there is NO connectivity at all for
-        // a few seconds), so a single fast probe races the network coming up.
-        // Retry once after a grace period before tearing the connection down.
-        window.setTimeout(() => {
-          if (nativeResumeValidationSeqRef.current !== validationSeq) return;
-          void reprobeActiveConnection().then((retry) => {
+        // settling (Android without a SIM has NO connectivity for a few
+        // seconds; a WireGuard tunnel re-handshakes; a relay cold start pays
+        // TLS + WS + E2EE before it can answer), so a single fast probe races
+        // the network coming up. Retry on a widening grace ladder before
+        // tearing the connection down — the last attempt runs with the full
+        // connect budget so slow-but-alive transports get a real chance.
+        const retryDelaysMs = [4000, 10000];
+        const retryAt = (attempt: number) => {
+          window.setTimeout(() => {
             if (nativeResumeValidationSeqRef.current !== validationSeq) return;
-            if (retry === 'switched') return;
-            if (retry === 'unchanged') {
-              refreshInPlace();
-              return;
-            }
-            if (retry === 'needs-login') {
-              setAutoConnectNotice({ kind: 'auth-expired', label: getAutoConnectTargetLabel() ?? '' });
-            }
-            disconnect();
-          });
-        }, 4000);
+            const lastAttempt = attempt === retryDelaysMs.length - 1;
+            void reprobeActiveConnection({ fast: !lastAttempt }).then((retry) => {
+              if (nativeResumeValidationSeqRef.current !== validationSeq) return;
+              if (retry === 'switched') return;
+              if (retry === 'unchanged') {
+                refreshInPlace();
+                return;
+              }
+              if (retry === 'needs-login') {
+                setAutoConnectNotice({ kind: 'auth-expired', label: getAutoConnectTargetLabel() ?? '' });
+                disconnect('retry-needs-login');
+                return;
+              }
+              if (!lastAttempt) {
+                retryAt(attempt + 1);
+                return;
+              }
+              disconnect(`retry-${retry}`);
+            });
+          }, retryDelaysMs[attempt]);
+        };
+        retryAt(0);
         return;
       }
       if (outcome === 'switched') return;
@@ -725,7 +749,7 @@ export function MobileApp({ apis }: MobileAppProps) {
       lastNativeResumeSyncEventAtRef.current = now;
       window.dispatchEvent(new Event('openchamber:system-resume'));
     }
-  }, [agentsCount, apis.github, initializeApp, loadAgents, loadProviders, providersCount, refreshGitHubAuthStatus]);
+  }, [agentsCount, apis.github, apis.linear, initializeApp, loadAgents, loadProviders, providersCount, refreshGitHubAuthStatus, refreshLinearAuthStatus]);
 
   useNativeMobileChrome();
   useNativeMobileLifecycle(handleNativeResume);
@@ -753,6 +777,23 @@ export function MobileApp({ apis }: MobileAppProps) {
     };
   }, [isNativeMobileApp, handleNativeResume]);
 
+  // A confirmed mid-session auth expiry (classified centrally from live 401
+  // traffic) runs the same seq-guarded re-probe the resume path uses: it ends
+  // in needs-login → the native welcome screen with the auth-expired notice.
+  // The shared web banner never renders on native (the session gate is not
+  // mounted here), so this is the only surface reacting to the signal.
+  React.useEffect(() => {
+    if (!isNativeMobileApp) return;
+    return useAuthSessionStore.subscribe((store, previous) => {
+      if (store.state === 'expired' && previous.state !== 'expired') {
+        handleNativeResume();
+        // The probe ladder owns the outcome from here; the shared store goes
+        // back to 'ok' so a later expiry can signal again.
+        useAuthSessionStore.getState().markAuthenticated();
+      }
+    });
+  }, [isNativeMobileApp, handleNativeResume]);
+
   React.useEffect(() => {
     registerRuntimeAPIs(apis);
     return () => registerRuntimeAPIs(null);
@@ -764,6 +805,15 @@ export function MobileApp({ apis }: MobileAppProps) {
   // stale. The SyncProvider is keyed by runtimeEndpointEpoch so it remounts too.
   React.useEffect(() => {
     return subscribeRuntimeEndpointChanged((detail) => {
+      // Catch-all trail entry: EVERY endpoint change lands here regardless of
+      // which code path triggered it, so a "kicked to the connect screen"
+      // report always shows what dropped the runtime even when the trigger
+      // itself is not instrumented.
+      logMobileConnectEvent('endpoint:changed', {
+        runtimeKey: detail.runtimeKey || 'none',
+        previousRuntimeKey: detail.previousRuntimeKey || 'none',
+        connected: Boolean(detail.apiBaseUrl),
+      });
       // A LAN⇄relay swap for the SAME device keeps the runtime key stable. Treat
       // that as a transport-only change: rebind the sync layer to the new
       // transport but keep the user's session/connection state — no reconnecting
@@ -800,19 +850,30 @@ export function MobileApp({ apis }: MobileAppProps) {
     }
     let cancelled = false;
     setAutoConnectPhase('attempting');
-    void autoConnectLastInstance()
-      .catch((): AutoConnectOutcome => ({ status: 'no-candidate' }))
-      .then((outcome) => {
-        if (cancelled) return;
-        // Landing on the connect screen silently reads as data loss — say WHY
-        // the saved instance didn't come back (unreachable vs revoked auth).
-        if (outcome.status === 'unreachable') {
-          setAutoConnectNotice({ kind: 'unreachable', label: outcome.label });
-        } else if (outcome.status === 'needs-login') {
-          setAutoConnectNotice({ kind: 'auth-expired', label: outcome.label });
-        }
-        setAutoConnectPhase('done');
-      });
+    void (async () => {
+      const outcome = await autoConnectLastInstance()
+        .catch((): AutoConnectOutcome => ({ status: 'no-candidate' }));
+      if (cancelled) return;
+      // Landing on the connect screen silently reads as data loss — say WHY
+      // the saved instance didn't come back (unreachable vs revoked auth).
+      if (outcome.status === 'unreachable') {
+        setAutoConnectNotice({ kind: 'unreachable', label: outcome.label });
+      } else if (outcome.status === 'needs-login') {
+        setAutoConnectNotice({ kind: 'auth-expired', label: outcome.label });
+      }
+      // Release the splash on the fast verdict — a dead server must not pin
+      // the logo for the full connect budget. The fast probe races a
+      // just-woken network/relay (WireGuard re-handshake, relay TLS + WS +
+      // E2EE cold start), so a false "unreachable" is common right after
+      // launch: retry once IN THE BACKGROUND with the full budget. A success
+      // switches the runtime and the app moves in from the connect screen on
+      // its own; a manual connect the user started meanwhile wins via
+      // skipIfConnected.
+      setAutoConnectPhase('done');
+      if (outcome.status === 'unreachable') {
+        void autoConnectLastInstance({ fast: false, skipIfConnected: true }).catch(() => null);
+      }
+    })();
     return () => {
       cancelled = true;
     };
@@ -833,8 +894,9 @@ export function MobileApp({ apis }: MobileAppProps) {
     if (!isNativeMobileApp || !getRuntimeApiBaseUrl()) return;
     let cancelled = false;
     const dropToConnectScreen = (notice: MobileConnectionNotice | null) => {
+      logMobileConnectEvent('cold-launch:drop', { kind: notice?.kind ?? 'unknown' });
       if (notice) setAutoConnectNotice(notice);
-      switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
+      switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: MOBILE_DISCONNECTED_RUNTIME_KEY });
       setConnectionEpoch((value) => value + 1);
     };
     void reprobeActiveConnection().then(async (outcome) => {
@@ -847,7 +909,14 @@ export function MobileApp({ apis }: MobileAppProps) {
         return;
       }
       if (outcome === 'unreachable') {
+        // A fast probe racing the just-woken network/relay produces false
+        // "unreachable" verdicts (seen in the field: the same LAN candidate
+        // refuses on launch and answers 200 two minutes later). Show the
+        // connect screen on the fast verdict — no splash hostage — and retry
+        // once in the background with the full budget; a success reconnects
+        // the app from the connect screen on its own.
         dropToConnectScreen(label ? { kind: 'unreachable', label } : null);
+        void autoConnectLastInstance({ fast: false, skipIfConnected: true }).catch(() => null);
         return;
       }
       // 'no-connection': at cold start the runtime key may not map to a saved
@@ -965,7 +1034,8 @@ export function MobileApp({ apis }: MobileAppProps) {
   React.useEffect(() => {
     if (!isConnected) return;
     void refreshGitHubAuthStatus(apis.github, { force: true });
-  }, [apis.github, isConnected, refreshGitHubAuthStatus]);
+    void refreshLinearAuthStatus(apis.linear, { force: true });
+  }, [apis.github, apis.linear, isConnected, refreshGitHubAuthStatus, refreshLinearAuthStatus]);
 
   // Discover all worktrees for every known project so the draft session's
   // worktree/branch dropdown can list every available branch — not only the
@@ -1126,7 +1196,7 @@ export function MobileApp({ apis }: MobileAppProps) {
                   type="button"
                   variant="outline"
                   onClick={() => {
-                    switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
+                    switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: MOBILE_DISCONNECTED_RUNTIME_KEY });
                     setConnectionEpoch((value) => value + 1);
                   }}
                 >
@@ -1209,9 +1279,10 @@ export function MobileApp({ apis }: MobileAppProps) {
               <OpenCodeUpdateToast />
               <MobileAppUpdateToast />
               <MobileShell onActiveConnectionDeleted={() => {
-                switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
+                switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: MOBILE_DISCONNECTED_RUNTIME_KEY });
                 setConnectionEpoch((value) => value + 1);
               }} />
+              <AppLinkConfirmDialog />
               <Toaster position="top-center" offset="calc(var(--oc-safe-area-top, 0px) + 16px)" />
               {isInitialized ? <ConfigUpdateOverlay /> : null}
             </div>

@@ -3,7 +3,7 @@
  * process dies mid-turn, the persisted turn never settles — the trailing
  * assistant message has no time.completed and its tool parts stay running.
  * Once the session is authoritatively settled, `interruptedTurnToolParts`
- * finalizes the orphaned parts locally.
+ * completes the assistant message as aborted and finalizes orphaned parts.
  */
 import { describe, expect, test } from "bun:test"
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
@@ -74,10 +74,15 @@ describe("interruptedTurnToolParts (#2577)", () => {
 
     const result = interruptedTurnToolParts(store, "ses_1", 5000)
     expect(result).not.toBeNull()
-    const part = result!.parts[0] as { state: { status: string; error: string; time: { end: number } } }
+    const part = result!.parts![0] as { state: { status: string; error: string; time: { end: number } } }
     expect(part.state.status).toBe("error")
     expect(part.state.error).toBe("Interrupted")
     expect(part.state.time.end).toBe(5000)
+    expect(result!.messages[0]).toEqual({
+      ...unfinishedAssistantMessage("msg_1"),
+      time: { created: 10, completed: 5000 },
+      error: { name: "MessageAbortedError", data: { message: "aborted" }, message: "aborted" },
+    })
   })
 
   test("busy session is never marked (live work)", () => {
@@ -137,16 +142,43 @@ describe("interruptedTurnToolParts (#2577)", () => {
 
     const result = interruptedTurnToolParts(store, "ses_1", 5000)
     expect(result).not.toBeNull()
-    const statuses = result!.parts.map((part) => (part as { state: { status: string } }).state.status)
+    const statuses = result!.parts!.map((part) => (part as { state: { status: string } }).state.status)
     expect(statuses).toEqual(["error", "completed", "error"])
   })
 
-  test("no active parts → no change", () => {
+  test("unfinished assistant with no tools is completed as aborted", () => {
     const store = state({
       session_status: { ses_1: { type: "idle" } },
       message: { ses_1: [unfinishedAssistantMessage("msg_1")] },
-      part: { msg_1: [completedTool("tool_2", "msg_1")] },
+      part: {},
     })
-    expect(interruptedTurnToolParts(store, "ses_1")).toBeNull()
+
+    const result = interruptedTurnToolParts(store, "ses_1", 5000)
+    expect(result).not.toBeNull()
+    expect(result!.parts).toBe(undefined)
+    expect(result!.messages[0]).toEqual({
+      ...unfinishedAssistantMessage("msg_1"),
+      time: { created: 10, completed: 5000 },
+      error: { name: "MessageAbortedError", data: { message: "aborted" }, message: "aborted" },
+    })
+  })
+
+  test("completed tools are untouched while the unfinished assistant is aborted", () => {
+    const completed = completedTool("tool_2", "msg_1")
+    const store = state({
+      session_status: { ses_1: { type: "idle" } },
+      message: { ses_1: [unfinishedAssistantMessage("msg_1")] },
+      part: { msg_1: [completed] },
+    })
+
+    const result = interruptedTurnToolParts(store, "ses_1", 5000)
+    expect(result).not.toBeNull()
+    expect(result!.parts).toBe(undefined)
+    expect(store.part.msg_1[0]).toBe(completed)
+    expect(result!.messages[0]).toEqual({
+      ...unfinishedAssistantMessage("msg_1"),
+      time: { created: 10, completed: 5000 },
+      error: { name: "MessageAbortedError", data: { message: "aborted" }, message: "aborted" },
+    })
   })
 })

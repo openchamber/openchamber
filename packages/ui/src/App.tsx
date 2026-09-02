@@ -1,23 +1,27 @@
 import React from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ChatView } from '@/components/views/ChatView';
+import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { FireworksProvider } from '@/contexts/FireworksContext';
 import { Toaster } from '@/components/ui/sonner';
 import { Button } from '@/components/ui/button';
 import { MemoryDebugPanel } from '@/components/ui/MemoryDebugPanel';
 import { setStreamPerfEnabled } from '@/stores/utils/streamDebug';
+import { setRequestsInFlightTrackingEnabled } from '@/stores/utils/requestsInFlight';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 // useEventStream removed — replaced by SyncProvider + SyncBridge
 import { useMenuActions } from '@/hooks/useMenuActions';
 import { useSessionStatusBootstrap } from '@/hooks/useSessionStatusBootstrap';
 import { useTraySync } from '@/hooks/useTraySync';
+import { useGlobalSessionsPolling } from '@/hooks/useGlobalSessionsPolling';
 import { useRouter } from '@/hooks/useRouter';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
+import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
 import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
+import { useRootScrollLock } from '@/hooks/useRootScrollLock';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { hasModifier } from '@/lib/utils';
 import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop } from '@/lib/desktop';
 import {
   getInjectedBootOutcome,
@@ -32,7 +36,6 @@ import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionR
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { markSessionViewed } from '@/sync/notification-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
@@ -46,6 +49,7 @@ import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -54,7 +58,11 @@ import { MCP_OAUTH_CALLBACK_PATH } from '@/components/sections/mcp/mcpOAuth';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { useI18n } from '@/lib/i18n';
 import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
-import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
+import {
+  EMBEDDED_VISIBILITY_UPDATE,
+  isEmbeddedSessionChat,
+  requestEmbeddedSessionVisibility,
+} from '@/components/layout/contextPanelEmbeddedChat';
 import { SyncAppEffects } from '@/apps/AppEffects';
 import { resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
@@ -106,6 +114,7 @@ type EmbeddedSessionChatConfig = {
   sessionId: string;
   directory: string | null;
   readOnly: boolean;
+  allowPromptingSubagentSessions?: boolean;
 };
 
 type EmbeddedVisibilityPayload = {
@@ -138,6 +147,9 @@ const readEmbeddedSessionChatConfig = (): EmbeddedSessionChatConfig | null => {
     sessionId,
     directory,
     readOnly: params.get('readOnly') === '1' || params.get('readOnly') === 'true',
+    allowPromptingSubagentSessions: params.has('allowPromptingSubagentSessions')
+      ? params.get('allowPromptingSubagentSessions') === '1'
+      : undefined,
   };
 };
 
@@ -199,7 +211,16 @@ const EmbeddedSessionChatContent: React.FC<{
     <>
       <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
       <OpenCodeUpdateToast />
-      <ChatView readOnly={embeddedSessionChat.readOnly} />
+      <ChatView
+        active={embeddedBackgroundWorkEnabled}
+        // Always subscribe to message history in the mounted session-chat
+        // iframe. Visibility still gates composer focus and background work so
+        // a boot-inactive / lost-handshake race cannot leave a busy subagent
+        // showing only its status row (#2903 / #2892).
+        messagesEnabled={true}
+        readOnly={embeddedSessionChat.readOnly}
+        initialAllowPromptingSubagentSessions={embeddedSessionChat.allowPromptingSubagentSessions}
+      />
       <Toaster />
     </>
   );
@@ -227,8 +248,12 @@ function App({ apis }: AppProps) {
   const isSwitchingDirectory = useDirectoryStore((state) => state.isSwitchingDirectory);
   const [showMemoryDebug, setShowMemoryDebug] = React.useState(false);
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
+  const refreshLinearAuthStatus = useLinearAuthStore((state) => state.refreshStatus);
   const [isVSCodeRuntime, setIsVSCodeRuntime] = React.useState<boolean>(() => apis.runtime.isVSCode);
-  const [isEmbeddedVisible, setIsEmbeddedVisible] = React.useState(true);
+  // Embedded chats start inactive until the parent panel identifies the active
+  // tab. Otherwise a newly loaded background tab can focus its composer first
+  // and steal keyboard input from the main chat.
+  const [isEmbeddedVisible, setIsEmbeddedVisible] = React.useState(false);
   const [initRetryExhausted, setInitRetryExhausted] = React.useState(false);
   const [initRetryEpoch, setInitRetryEpoch] = React.useState(0);
   const [runtimeEndpointEpoch, setRuntimeEndpointEpoch] = React.useState(0);
@@ -255,6 +280,13 @@ function App({ apis }: AppProps) {
     setStreamPerfEnabled(showMemoryDebug);
     return () => {
       setStreamPerfEnabled(false);
+    };
+  }, [showMemoryDebug]);
+
+  React.useEffect(() => {
+    setRequestsInFlightTrackingEnabled(showMemoryDebug);
+    return () => {
+      setRequestsInFlightTrackingEnabled(false);
     };
   }, [showMemoryDebug]);
 
@@ -315,7 +347,8 @@ function App({ apis }: AppProps) {
     }
 
     void refreshGitHubAuthStatus(apis.github, { force: true });
-  }, [apis.github, embeddedSessionChat, refreshGitHubAuthStatus]);
+    void refreshLinearAuthStatus(apis.linear, { force: true });
+  }, [apis.github, apis.linear, embeddedSessionChat, refreshGitHubAuthStatus, refreshLinearAuthStatus]);
 
   useAppFontEffects();
 
@@ -527,17 +560,16 @@ function App({ apis }: AppProps) {
     }
 
     const applyVisibility = (payload?: EmbeddedVisibilityPayload) => {
-      const nextVisible = payload?.visible === true;
-      setIsEmbeddedVisible(nextVisible);
+      setIsEmbeddedVisible(payload?.visible === true);
     };
 
     const handleMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) {
+      if (event.origin !== window.location.origin || event.source !== window.parent) {
         return;
       }
 
       const data = event.data as { type?: unknown; payload?: EmbeddedVisibilityPayload };
-      if (data?.type !== 'openchamber:embedded-visibility') {
+      if (data?.type !== EMBEDDED_VISIBILITY_UPDATE) {
         return;
       }
 
@@ -550,6 +582,7 @@ function App({ apis }: AppProps) {
 
     scopedWindow.__openchamberSetEmbeddedVisibility = applyVisibility;
     window.addEventListener('message', handleMessage);
+    requestEmbeddedSessionVisibility();
 
     return () => {
       window.removeEventListener('message', handleMessage);
@@ -604,7 +637,6 @@ function App({ apis }: AppProps) {
       const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
         ? detail.directory.trim()
         : null;
-      useUIStore.getState().setActiveMainTab('chat');
       void useSessionUIStore.getState().setCurrentSession(sessionId, directory);
     };
 
@@ -618,12 +650,9 @@ function App({ apis }: AppProps) {
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
     const onOpenMiniChat = () => {
-      const currentDir = useDirectoryStore.getState().currentDirectory;
-      const { activeProjectId, projects } = useProjectsStore.getState();
-      const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
       void invokeDesktop('desktop_open_draft_mini_chat_window', {
-        directory: currentDir || activeProject?.path || '',
-        projectId: activeProject?.id ?? null,
+        directory: '',
+        projectId: null,
       });
     };
     window.addEventListener('openchamber:open-mini-chat', onOpenMiniChat);
@@ -655,11 +684,12 @@ function App({ apis }: AppProps) {
       const projectId = typeof detail?.projectId === 'string' && detail.projectId.trim().length > 0
         ? detail.projectId.trim()
         : null;
-      useUIStore.getState().setActiveMainTab('chat');
+      const hasProjectTarget = Boolean(directory || projectId);
       useUIStore.getState().setSessionSwitcherOpen(false);
       useSessionUIStore.getState().openNewSessionDraft({
-        selectedProjectId: projectId,
-        directoryOverride: directory,
+        target: hasProjectTarget ? 'project' : 'chat',
+        selectedProjectId: hasProjectTarget ? projectId : null,
+        directoryOverride: hasProjectTarget ? directory : null,
         preserveDirectoryOverride: Boolean(directory),
       });
     };
@@ -683,9 +713,15 @@ function App({ apis }: AppProps) {
 
   usePushVisibilityBeacon({ enabled: embeddedBackgroundWorkEnabled });
   useWebNotificationStream({ enabled: embeddedBackgroundWorkEnabled });
+  // Loaded here rather than by the Memory tab: the session index is built from
+  // this snapshot, so leaving it to the panel meant a user who never opened
+  // Project notes sent every message with no memory index at all.
+  useAgentMemorySync(currentDirectory || null);
   usePwaInstallPrompt();
 
   useWindowTitle();
+
+  useRootScrollLock();
 
   useRouter();
 
@@ -696,28 +732,16 @@ function App({ apis }: AppProps) {
   useMenuActions(handleToggleMemoryDebug);
 
   useTraySync();
+  useGlobalSessionsPolling(!embeddedSessionChat);
 
   useSessionStatusBootstrap({ enabled: embeddedBackgroundWorkEnabled });
 
+  // Palette-only action: the memory debug panel has no keyboard shortcut.
   React.useEffect(() => {
-    if (embeddedSessionChat) {
-      return;
-    }
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const isDebugShortcut = hasModifier(e)
-        && e.shiftKey
-        && !e.altKey
-        && (e.code === 'KeyD' || e.key.toLowerCase() === 'd');
-
-      if (isDebugShortcut) {
-        e.preventDefault();
-        setShowMemoryDebug(prev => !prev);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
+    if (embeddedSessionChat) return;
+    const handleToggle = () => setShowMemoryDebug((previous) => !previous);
+    window.addEventListener('openchamber:memory-debug-toggle', handleToggle);
+    return () => window.removeEventListener('openchamber:memory-debug-toggle', handleToggle);
   }, [embeddedSessionChat]);
 
   React.useEffect(() => {
@@ -883,6 +907,7 @@ function App({ apis }: AppProps) {
                   isVSCodeRuntime={isVSCodeRuntime}
                   embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled}
                 />
+                <AppLinkConfirmDialog />
               </div>
             </TooltipProvider>
           </RuntimeAPIProvider>
@@ -926,6 +951,7 @@ function App({ apis }: AppProps) {
                   <OpenCodeUpdateToast />
                   <MainLayout />
                   <Toaster />
+                  <AppLinkConfirmDialog />
                   {!isBootShell && (
                     <>
                       <ConfigUpdateOverlay />

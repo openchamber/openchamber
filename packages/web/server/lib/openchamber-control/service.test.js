@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs/promises';
+
 import { createOpenChamberControlService } from './service.js';
 
 const createService = (overrides = {}) => {
@@ -259,5 +263,56 @@ describe('OpenChamber control service', () => {
   it('rejects actions outside the fixed contract', async () => {
     const { service } = createService();
     await expect(service.execute('session.delete')).rejects.toThrow('Unsupported OpenChamber action');
+  });
+});
+
+describe('browser capture', () => {
+  const pixel = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+  const createBrowserService = async (capture) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-capture-'));
+    const request = vi.fn(async () => capture);
+    const { service } = createService({ browserControl: { request } });
+    return { service, directory, request };
+  };
+
+  it('saves the image beside the code and hands back a path the answer can use', async () => {
+    const { service, directory } = await createBrowserService({
+      base64: pixel,
+      mime: 'image/png',
+      url: 'http://localhost:3000/',
+      title: 'App',
+      viewport: { mode: 'mobile', width: 390, height: 844 },
+      width: 390,
+      height: 844,
+    });
+
+    const result = await service.execute('browser.capture', { label: 'After fix' }, directory);
+
+    expect(result.path.startsWith('.openchamber/screenshots/after-fix-')).toBe(true);
+    expect(result.path.endsWith('.png')).toBe(true);
+    expect(result.url).toBe('http://localhost:3000/');
+    expect(result.viewport).toEqual({ mode: 'mobile', width: 390, height: 844 });
+    // The bytes stay on disk; a tool result is not a place to carry an image.
+    expect('base64' in result).toBe(false);
+    const written = await fs.readFile(path.join(directory, result.path));
+    expect(written.length > 0).toBe(true);
+  });
+
+  it('tells the agent how to actually show the image', async () => {
+    const { service, directory } = await createBrowserService({ base64: pixel, mime: 'image/png' });
+    const result = await service.execute('browser.capture', {}, directory);
+    expect(result.hint).toContain(`![](${result.path})`);
+  });
+
+  it('refuses to capture with no project to save into', async () => {
+    const { service } = await createBrowserService({ base64: pixel, mime: 'image/png' });
+    await expect(service.execute('browser.capture', {})).rejects.toThrow(/directory is required/);
+  });
+
+  it('passes a label through to the browser and leaves other actions untouched', async () => {
+    const { service, directory, request } = await createBrowserService({ base64: pixel, mime: 'image/png' });
+    await service.execute('browser.capture', { label: 'before' }, directory);
+    expect(request).toHaveBeenCalledWith('browser.capture', { label: 'before' }, expect.anything());
   });
 });

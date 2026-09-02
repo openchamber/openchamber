@@ -4,3 +4,4 @@ export * from './useInlineCommentController';
 export * from './CodeMirrorCommentWidgets';
 export * from './PierreDiffCommentUtils';
 export * from './PierreDiffCommentOverlays';
+export * from './FilePreviewCommentMenu';

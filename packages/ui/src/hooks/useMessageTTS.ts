@@ -12,7 +12,7 @@ import { useSayTTS } from './useSayTTS';
 import { useLocalTTS } from './useLocalTTS';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
 import { sanitizeForTTS } from '@/lib/voice/summarize';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { requestSmallModel } from '@/lib/smallModelRequest';
 
 // Below this length the reply is comfortable to listen to as-is; summarizing
 // would only add latency.
@@ -25,7 +25,7 @@ async function summarizeForSpeech(
     preferred: { providerID?: string; modelID?: string },
 ): Promise<string | null> {
     try {
-        const response = await runtimeFetch('/api/small-model/generate', {
+        const response = await requestSmallModel({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -61,6 +61,8 @@ export function useMessageTTS(): UseMessageTTSReturn {
     const speechVolume = useConfigStore((state) => state.speechVolume);
     const sayVoice = useConfigStore((state) => state.sayVoice);
     const localTtsVoiceId = useConfigStore((state) => state.localTtsVoiceId);
+    const localTtsModelId = useConfigStore((state) => state.localTtsModelId);
+    const ttsFollowTextLanguage = useConfigStore((state) => state.ttsFollowTextLanguage);
     const browserVoice = useConfigStore((state) => state.browserVoice);
     const openaiVoice = useConfigStore((state) => state.openaiVoice);
     const openaiCompatibleVoice = useConfigStore((state) => state.openaiCompatibleVoice);
@@ -135,8 +137,10 @@ export function useMessageTTS(): UseMessageTTSReturn {
                 });
             } else if (voiceProvider === 'local') {
                 await speakLocalTTS(sanitizedText, {
+                    model: localTtsModelId,
                     speakerId: localTtsVoiceId,
                     speed: speechRate,
+                    language: ttsFollowTextLanguage ? 'auto' : undefined,
                     onEnd: () => setIsPlaying(false),
                     onError: () => setIsPlaying(false),
                 });
@@ -145,6 +149,7 @@ export function useMessageTTS(): UseMessageTTSReturn {
                 await speakSayTTS(sanitizedText, {
                     voice: sayVoice,
                     rate: wordsPerMinute,
+                    language: ttsFollowTextLanguage ? 'auto' : undefined,
                     onEnd: () => setIsPlaying(false),
                     onError: () => setIsPlaying(false),
                 });
@@ -187,6 +192,8 @@ export function useMessageTTS(): UseMessageTTSReturn {
         speakSayTTS,
         speakLocalTTS,
         localTtsVoiceId,
+        localTtsModelId,
+        ttsFollowTextLanguage,
         stop,
     ]);
     

@@ -1,3 +1,4 @@
+import { rankByQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { Icon } from '@/components/icon/Icon';
@@ -27,7 +28,6 @@ export function ArchiveView(): React.ReactNode {
   const { t } = useI18n();
   const open = useUIStore((state) => state.isArchivePageOpen);
   const setOpen = useUIStore((state) => state.setArchivePageOpen);
-  const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const unarchiveSession = useSessionUIStore((state) => state.unarchiveSession);
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
@@ -67,7 +67,7 @@ export function ArchiveView(): React.ReactNode {
   // while not searching.
   const filteredSessions = React.useMemo(() => {
     if (normalizedQuery) {
-      return sortedSessions.filter((session) => (session.title ?? '').toLowerCase().includes(normalizedQuery));
+      return rankByQuery(sortedSessions, normalizedQuery, (session) => [session.title]);
     }
     if (selectedDirectory === null) return sortedSessions;
     return buckets.find((bucket) => bucket.directory === selectedDirectory)?.sessions ?? [];
@@ -85,9 +85,8 @@ export function ArchiveView(): React.ReactNode {
   const openSession = React.useCallback((session: Session) => {
     const directory = normalizePath(resolveGlobalSessionDirectory(session));
     setCurrentSession(session.id, directory ?? undefined);
-    setActiveMainTab('chat');
     setOpen(false);
-  }, [setActiveMainTab, setCurrentSession, setOpen]);
+  }, [setCurrentSession, setOpen]);
 
   const restoreSession = React.useCallback((session: Session) => {
     void unarchiveSession(session.id).then((success) => {

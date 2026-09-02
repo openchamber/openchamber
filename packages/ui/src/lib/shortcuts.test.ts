@@ -8,8 +8,8 @@ import {
 } from './shortcuts';
 
 describe('getEffectiveShortcutPrefix', () => {
-  test('falls back to the action default (bare mod) when unset', () => {
-    expect(getEffectiveShortcutPrefix('switch_context_surface', {})).toBe('mod');
+  test('falls back to the action default (bare mod+alt) when unset', () => {
+    expect(getEffectiveShortcutPrefix('switch_context_surface', {})).toBe('mod+alt');
   });
 
   test('honors modifier + key overrides', () => {

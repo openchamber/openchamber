@@ -261,6 +261,15 @@ export const getPrimaryDiffFromMetadata = (
     return getPatchText(metadata.patch) ?? getPatchText(metadata.diff);
 };
 
+/** Top-level patch a tool card falls back to when metadata carries no per-file entries. */
+export const getToolFallbackDiff = (metadata: Record<string, unknown> | undefined): string | undefined => {
+    const fileDiff = isRecord(metadata?.filediff) ? metadata.filediff : undefined;
+    return getPatchText(metadata?.patch)
+        ?? getPatchText(metadata?.diff)
+        ?? getPatchText(fileDiff?.patch)
+        ?? getPatchText(fileDiff?.diff);
+};
+
 export const extractFirstChangedLineFromDiff = (diffText: string): number | undefined => {
     if (!diffText) {
         return undefined;
@@ -328,6 +337,33 @@ export const getFirstChangedLineFromMetadata = (
     const firstFile = getMetadataFileForPath(metadata);
     const firstPatch = getPatchText(firstFile?.patch) ?? getPatchText(firstFile?.diff);
     return firstPatch ? extractFirstChangedLineFromDiff(firstPatch) : undefined;
+};
+
+/**
+ * Quick-open target for a tool card: the primary mutated file plus the diff
+ * entry the expanded card renders for it. Both the collapsed header icon and
+ * the expanded "open file" button resolve their line from the same entry
+ * patch, so they always land on the same line.
+ */
+export const resolveToolQuickOpenTarget = (
+    toolName: string,
+    input: Record<string, unknown> | undefined,
+    metadata: Record<string, unknown> | undefined,
+): { filePath: string; line?: number; patch?: string } | null => {
+    const filePath = getPrimaryToolPath(toolName, input, metadata);
+    if (!filePath) {
+        return null;
+    }
+
+    const entries = getDiffPatchEntries(metadata, getToolFallbackDiff(metadata), (path) => path);
+    const matchedEntry = entries.find((entry) => entry.filePath === filePath)
+        ?? (entries.length === 1 ? entries[0] : undefined);
+    const patch = matchedEntry?.patch;
+    return {
+        filePath,
+        line: patch ? extractFirstChangedLineFromDiff(patch) : undefined,
+        patch,
+    };
 };
 
 const normalizeParsedPath = (path: string | undefined): string => {

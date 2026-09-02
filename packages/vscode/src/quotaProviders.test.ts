@@ -1,6 +1,12 @@
-import { afterEach, beforeEach, describe, test } from 'node:test';
+import { after, afterEach, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const previousQuotaDataDirectory = process.env.OPENCHAMBER_DATA_DIR;
+const temporaryQuotaDataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-quota-'));
+process.env.OPENCHAMBER_DATA_DIR = temporaryQuotaDataDirectory;
 
 // readAuthFile reads ~/.local/share/opencode/auth.json via fs.readFileSync.
 // Stub fs to serve a known auth entry so the providers treat themselves as
@@ -10,8 +16,11 @@ const AUTH = JSON.stringify({
   openai: { access: 'test-token' },
   crof: { key: 'test-token' },
   neuralwatt: { key: 'test-token' },
+  'opencode-go': { key: 'test-token' },
   'zai-coding-plan': { key: 'test-token' },
   deepseek: { key: 'test-token' },
+  'github-copilot': { access: 'test-token' },
+  anthropic: { access: 'test-token', refresh: 'test-refresh' },
 });
 ((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
 ((fs as unknown) as { readFileSync: () => string }).readFileSync = () => AUTH;
@@ -19,6 +28,12 @@ const AUTH = JSON.stringify({
 import { fetchQuotaForProvider } from './quotaProviders';
 
 type MockResponseInit = { ok?: boolean; status?: number };
+
+after(() => {
+  if (previousQuotaDataDirectory === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+  else process.env.OPENCHAMBER_DATA_DIR = previousQuotaDataDirectory;
+  fs.rmSync(temporaryQuotaDataDirectory, { recursive: true, force: true });
+});
 
 const mockResponse = (body: unknown, init: MockResponseInit = {}): Response => ({
   ok: 'ok' in init ? init.ok! : true,
@@ -69,6 +84,27 @@ const stubFetchFailing = (json: () => Promise<unknown>, init: MockResponseInit):
   globalThis.fetch = (async () => ({ json, ...init }) as unknown as Response) as typeof fetch;
 };
 
+describe('OpenCode Go quota provider (VS Code parity)', () => {
+  test('uses the opencode-go key from auth.json', async () => {
+    let request: RequestInit | undefined;
+    const legacyPath = path.join(temporaryQuotaDataDirectory, 'quota', 'opencode-go.json');
+    fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
+    fs.writeFileSync(legacyPath, '{not valid json');
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      request = init;
+      return mockResponse({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } });
+    }) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('opencode-go');
+
+    assert.equal(result.ok, true);
+    assert.equal((request?.headers as Record<string, string>).Authorization, 'Bearer test-token');
+    assert.equal(result.usage!.windows['5h']!.usedPercent, 25);
+    assert.throws(() => fs.statSync(legacyPath));
+  });
+});
+
+
 describe('Crof quota provider (VS Code parity)', () => {
   test('reports credits balance as valueLabel with null percent', async () => {
     stubFetchReturning(() => Promise.resolve(mockResponse({ usable_requests: 450, credits: 12.3456 })));
@@ -116,6 +152,27 @@ describe('Crof quota provider (VS Code parity)', () => {
 });
 
 describe('Codex quota provider (VS Code parity)', () => {
+  test('coalesces concurrent refreshes for the same provider', async () => {
+    let resolveResponse: ((response: Response) => void) | undefined;
+    let requestCount = 0;
+    globalThis.fetch = (() => {
+      requestCount += 1;
+      return new Promise<Response>((resolve) => {
+        resolveResponse = resolve;
+      });
+    }) as typeof fetch;
+
+    const first = fetchQuotaForProvider('codex');
+    const second = fetchQuotaForProvider('codex');
+    resolveResponse?.(mockResponse({ rate_limit: null }));
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    assert.equal(firstResult.ok, true);
+    assert.equal(secondResult.ok, true);
+    assert.equal(requestCount, 1);
+  });
+
   test('surfaces spend_control individual limit for business accounts', async () => {
     stubFetchReturning(() => Promise.resolve(mockResponse({
       plan_type: 'business',
@@ -137,6 +194,125 @@ describe('Codex quota provider (VS Code parity)', () => {
     assert.equal(result.ok, true);
     assert.equal(result.usage!.windows.credits!.usedPercent, 36);
     assert.equal(result.usage!.windows.credits!.valueLabel, '2675 / 7500 used');
+  });
+});
+
+describe('GitHub Copilot quota provider (VS Code parity)', () => {
+  test('exposes only premium interactions as the primary usage window', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      quota_reset_date: '2026-09-01T00:00:00Z',
+      quota_snapshots: {
+        chat: { entitlement: 100, remaining: 80 },
+        completions: { entitlement: 1000, remaining: 900 },
+        premium_interactions: { entitlement: 300, remaining: 225 },
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('github-copilot');
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(Object.keys(result.usage!.windows), ['premium_interactions']);
+    assert.equal(result.usage!.windows.premium_interactions!.usedPercent, 25);
+    assert.equal(result.usage!.windows.premium_interactions!.valueLabel, '225 / 300 left');
+  });
+
+  test('add-on path mirrors the primary window shaping', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      quota_reset_date: '2026-09-01T00:00:00Z',
+      quota_snapshots: {
+        premium_interactions: { entitlement: 300, remaining: 225 },
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('github-copilot-addon');
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(Object.keys(result.usage!.windows), ['premium_interactions']);
+    assert.equal(result.usage!.windows.premium_interactions!.usedPercent, 25);
+  });
+
+  test('reports unlimited plans without a percent', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      quota_reset_date: '2026-09-01T00:00:00Z',
+      quota_snapshots: {
+        premium_interactions: { unlimited: true, entitlement: -1, remaining: -1 },
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('github-copilot');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.premium_interactions!.usedPercent, null);
+    assert.equal(result.usage!.windows.premium_interactions!.valueLabel, 'Unlimited');
+  });
+
+  test('falls back to percent_remaining when entitlement is unusable', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      quota_reset_date: '2026-09-01T00:00:00Z',
+      quota_snapshots: {
+        premium_interactions: { entitlement: 0, remaining: 0, percent_remaining: 75.5 },
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('github-copilot');
+
+    assert.equal(result.ok, true);
+    assert.ok(Math.abs(result.usage!.windows.premium_interactions!.usedPercent! - 24.5) < 1e-9);
+    assert.equal(result.usage!.windows.premium_interactions!.valueLabel, undefined);
+  });
+});
+
+describe('Claude quota provider (VS Code parity)', () => {
+  test('parses current limits, model-scoped limits, and extra usage', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      limits: [
+        { kind: 'session', percent: 12, resets_at: '2026-08-20T12:00:00Z', scope: null },
+        { kind: 'weekly_all', percent: 34, resets_at: '2026-08-24T12:00:00Z', scope: null },
+        { kind: 'weekly_scoped', percent: 56, resets_at: '2026-08-24T12:00:00Z', scope: { model: { display_name: 'Sonnet' } } },
+      ],
+      spend: {
+        enabled: true,
+        percent: 25,
+        used: { amount_minor: 2500, exponent: 2, currency: 'USD' },
+        limit: { amount_minor: 10000, exponent: 2, currency: 'USD' },
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('claude');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage?.windows['5h']?.usedPercent, 12);
+    assert.equal(result.usage?.windows['7d']?.usedPercent, 34);
+    assert.equal(result.usage?.models?.Sonnet?.windows['7d']?.usedPercent, 56);
+    assert.equal(result.usage?.windows.extra_usage?.valueLabel, '$25.00 / $100.00');
+  });
+
+  test('keeps serving the last good values while Anthropic rate limits', async () => {
+    const responses = [
+      mockResponse({ five_hour: { utilization: 12, resets_at: '2026-08-20T12:00:00Z' } }),
+      {
+        ok: false,
+        status: 429,
+        headers: new Headers({ 'retry-after': '120' }),
+        json: async () => ({}),
+      } as Response,
+    ];
+    let requestCount = 0;
+    globalThis.fetch = (async () => {
+      const response = responses[requestCount];
+      requestCount += 1;
+      return response;
+    }) as typeof fetch;
+
+    const initial = await fetchQuotaForProvider('claude');
+    const rateLimited = await fetchQuotaForProvider('claude');
+    const duringCooldown = await fetchQuotaForProvider('claude');
+
+    assert.equal(initial.ok, true);
+    assert.equal(rateLimited.ok, true);
+    assert.equal(duringCooldown.ok, true);
+    assert.equal(duringCooldown.usage?.windows['5h']?.usedPercent, 12);
+    assert.equal(requestCount, 2);
   });
 });
 
@@ -164,6 +340,33 @@ describe('Z.ai quota provider (VS Code parity)', () => {
     assert.equal(windows['MCP Tools']!.usedPercent, 0);
     assert.equal(windows['MCP Tools']!.windowSeconds, 30 * 24 * 60 * 60);
     assert.equal(windows['MCP Tools']!.resetAt, 1787128459979);
+  });
+
+  test('maps CREDIT_LIMIT entries to windows with credit value labels and plan level', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      code: 200,
+      data: {
+        limits: [
+          { type: 'CREDIT_LIMIT', unit: 3, number: 5, usage: 12000, currentValue: 65, remaining: 11934, percentage: 1, nextResetTime: 1787257978907 },
+          { type: 'CREDIT_LIMIT', unit: 6, number: 1, usage: 60000, currentValue: 65, remaining: 59934, percentage: 1, nextResetTime: 1787844668997 },
+        ],
+        level: 'pro',
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('zai-coding-plan');
+    const windows = result.usage!.windows;
+
+    assert.equal(result.ok, true);
+    assert.equal(result.planLabel, 'pro');
+    assert.equal(windows['5h']!.usedPercent, 1);
+    assert.equal(windows['5h']!.windowSeconds, 5 * 60 * 60);
+    assert.equal(windows['5h']!.resetAt, 1787257978907);
+    assert.equal(windows['5h']!.valueLabel, '65 / 12k credits');
+    assert.equal(windows.weekly!.usedPercent, 1);
+    assert.equal(windows.weekly!.windowSeconds, 7 * 24 * 60 * 60);
+    assert.equal(windows.weekly!.resetAt, 1787844668997);
+    assert.equal(windows.weekly!.valueLabel, '65 / 60k credits');
   });
 });
 

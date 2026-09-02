@@ -14,6 +14,7 @@ type ManifestSyncWindow = Window & {
 };
 
 const MAX_RECENT_SHORTCUTS = 3;
+const MANIFEST_UPDATE_DELAY_MS = 2_000;
 
 const normalizeRecentTitle = (value: string | undefined, fallback: string): string => {
   if (typeof value !== 'string') {
@@ -86,7 +87,13 @@ export const usePwaManifestSync = () => {
       return;
     }
 
-    const win = window as ManifestSyncWindow;
-    win.__OPENCHAMBER_UPDATE_PWA_MANIFEST__?.();
+    // Rebuilding the manifest fetches it from the server. Shortcuts only
+    // matter to the installed-app menu, so the rebuild waits until the switch
+    // that changed them has settled instead of adding a request to it.
+    const timer = window.setTimeout(() => {
+      const win = window as ManifestSyncWindow;
+      win.__OPENCHAMBER_UPDATE_PWA_MANIFEST__?.();
+    }, MANIFEST_UPDATE_DELAY_MS);
+    return () => window.clearTimeout(timer);
   }, [hasRecentShortcuts, signature]);
 };

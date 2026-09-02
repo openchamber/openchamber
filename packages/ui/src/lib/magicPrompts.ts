@@ -13,6 +13,8 @@ export type MagicPromptId =
   | 'github.pr.review.instructions'
   | 'github.issue.review.visible'
   | 'github.issue.review.instructions'
+  | 'linear.issue.review.visible'
+  | 'linear.issue.review.instructions'
   | 'github.pr.checks.review.visible'
   | 'github.pr.checks.review.instructions'
   | 'github.pr.comments.review.visible'
@@ -56,7 +58,7 @@ export interface MagicPromptDefinition {
   id: MagicPromptId;
   title: string;
   description: string;
-  group: 'Git' | 'GitHub' | 'Planning' | 'Session';
+  group: 'Git' | 'GitHub' | 'Linear' | 'Planning' | 'Session';
   template: string;
   placeholders?: Array<{ key: string; description: string }>;
 }
@@ -83,6 +85,7 @@ const MAGIC_PROMPT_DEFINITIONS: readonly MagicPromptDefinition[] = [
     description: 'Hidden instructions for commit message generation.',
     placeholders: [
       { key: 'selected_files', description: 'Bullet list of currently selected file paths.' },
+      { key: 'recent_commits', description: 'Subjects of the most recent commits on the current branch.' },
     ],
     template: `Return exactly one JSON object and nothing else. Do not include prose, markdown, explanations, or code fences.
 
@@ -90,13 +93,16 @@ The JSON object must have exactly this shape:
 {"subject": string, "highlights": string[]}
 
 Rules:
-- subject format: <type>: <summary>
-- allowed types: feat, fix, refactor, perf, docs, test, build, ci, chore, style, revert
-- no scope in subject
+- match the style of the recent commits below: their language, capitalization, use or absence of a type prefix or scope, and typical length
+- if the recent commits are written in a language other than English, write the subject and highlights in that language
+- when the recent commits show no consistent style, use the format <type>: <summary> with one of: feat, fix, refactor, perf, docs, test, build, ci, chore, style, revert, and no scope
 - keep subject concise and user-facing
 - highlights: 0-3 concise user-facing points
 - use double quotes for all JSON strings
 - do not include trailing commas or comments
+
+Recent commits on this branch (newest first):
+{{recent_commits}}
 
 Selected files:
 {{selected_files}}`,
@@ -119,6 +125,7 @@ Selected files:
       { key: 'commits', description: 'Bullet list of commits in base...head.' },
       { key: 'changed_files', description: 'Bullet list of changed files in base...head.' },
       { key: 'additional_context_block', description: 'Optional Additional context block (already formatted).' },
+      { key: 'pr_template_block', description: 'Optional repository pull request template block (already formatted, empty when the repo has none).' },
     ],
     template: `Return exactly one JSON object and nothing else. Do not include prose, markdown outside JSON, explanations, or code fences.
 
@@ -127,7 +134,8 @@ The JSON object must have exactly this shape:
 
 Rules:
 - title: concise, outcome-first, conventional style
-- body: markdown with sections: ## Summary, ## Why, ## Testing
+- body, when a repository pull request template is included below: reuse the template as the body. Keep its headings, their order, its wording and its checklists, drop its HTML comments, and fill every section from the commits and changed files. Leave a section empty rather than inventing content for it
+- body, when no template is included: markdown with sections ## Summary, ## Why, ## Testing
 - keep output concrete and user-facing
 - put all markdown inside the body string
 - use double quotes for all JSON strings and escape newlines as \\n
@@ -140,7 +148,7 @@ Commits in range (base...head):
 {{commits}}
 
 Files changed across these commits:
-{{changed_files}}{{additional_context_block}}`,
+{{changed_files}}{{additional_context_block}}{{pr_template_block}}`,
   },
   {
     id: 'github.pr.review.visible',
@@ -218,6 +226,61 @@ Nice-to-have:
     group: 'GitHub',
     description: 'Hidden instructions attached when generating an issue review response.',
     template: `Review this issue using the provided issue context.
+
+Process:
+- First classify the issue type (bug / feature request / question/support / refactor / ops) and state it as: Type: <one label>.
+- Gather any needed repository context (code, config, docs) to validate assumptions.
+- After gathering, if anything is still unclear or cannot be verified, do not speculate — state what's missing and ask targeted questions.
+
+Mode selection by type:
+- Bug / Question/Support / Ops: deliver the response directly using the matching template below. Do not bombard me with questions for straightforward diagnosis; use "Missing info" / "Repro/diagnostics needed" fields instead.
+- Feature request / Refactor with substantive unknowns: this is effectively a planning session. Do not emit the Feature template on the first turn. Instead, ask me focused clarifying questions in batches of at most 3, one topic at a time (scope, constraints, tradeoffs, UX, etc.), wait for answers, drop questions that became irrelevant, and repeat until you have no more substantive questions. Only then emit the Feature template.
+
+Output rules:
+- Compact output; pick ONE template below and omit the others.
+- No emojis. No code snippets. No fenced blocks.
+- Short inline code identifiers allowed.
+- Reference evidence with file paths and line ranges when applicable; if exact lines are not available, cite the file and say "approx" + why.
+- Keep the entire response under ~300 words (applies to the final template output, not to clarifying-question turns).
+
+Templates (choose one):
+Bug:
+- Summary (1-2 sentences)
+- Likely cause (max 2)
+- Repro/diagnostics needed (max 3)
+- Fix approach (max 4 steps)
+- Verification (max 3)
+
+Feature:
+- Summary (1-2 sentences)
+- Requirements (max 4)
+- Unknowns/questions (max 4)
+- Proposed plan (max 5 steps)
+- Verification (max 3)
+
+Question/Support:
+- Summary (1-2 sentences)
+- Answer/guidance (max 6 lines)
+- Missing info (max 4)
+
+Do not implement changes until I confirm; end with: "Next actions: <1 sentence>".`,
+  },
+  {
+    id: 'linear.issue.review.visible',
+    title: 'Linear Issue Review Visible Prompt',
+    group: 'Linear',
+    description: 'Visible user message when creating a session from a Linear issue.',
+    placeholders: [
+      { key: 'identifier', description: 'Linear issue identifier, such as ENG-12.' },
+    ],
+    template: 'Review this Linear issue {{identifier}} using the provided issue context',
+  },
+  {
+    id: 'linear.issue.review.instructions',
+    title: 'Linear Issue Review Instructions',
+    group: 'Linear',
+    description: 'Hidden instructions attached when generating a Linear issue review response.',
+    template: `Review this Linear issue using the provided issue context.
 
 Process:
 - First classify the issue type (bug / feature request / question/support / refactor / ops) and state it as: Type: <one label>.

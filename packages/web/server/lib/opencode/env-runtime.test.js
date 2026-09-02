@@ -200,6 +200,39 @@ describe('OpenCode env runtime', () => {
     expect(state.resolvedOpencodeBinarySource).toBe('settings');
   });
 
+  it('keeps an env-provided OPENCODE_BINARY when the setting is an empty-string sentinel', async () => {
+    const dir = createTempDir('openchamber-env-opencode-');
+    const binary = path.join(dir, 'opencode');
+    fs.writeFileSync(binary, '#!/bin/sh\nexit 0\n');
+    if (process.platform !== 'win32') fs.chmodSync(binary, 0o755);
+    process.env.OPENCODE_BINARY = binary;
+    const { runtime, state } = createRuntime({ opencodeBinary: '' });
+
+    await expect(runtime.applyOpencodeBinaryFromSettings()).resolves.toBeNull();
+    expect(process.env.OPENCODE_BINARY).toBe(binary);
+    expect(state.resolvedOpencodeBinary).toBeNull();
+    expect(state.resolvedOpencodeBinarySource).toBeNull();
+  });
+
+  it('drops a previously applied settings override when the setting is cleared to an empty string', async () => {
+    const dir = createTempDir('openchamber-settings-opencode-');
+    const binary = path.join(dir, 'opencode');
+    fs.writeFileSync(binary, '#!/bin/sh\nexit 0\n');
+    if (process.platform !== 'win32') fs.chmodSync(binary, 0o755);
+    const settings = { opencodeBinary: binary };
+    const { runtime, state } = createRuntime(settings);
+
+    await expect(runtime.applyOpencodeBinaryFromSettings()).resolves.toBe(binary);
+    expect(process.env.OPENCODE_BINARY).toBe(binary);
+    expect(state.resolvedOpencodeBinarySource).toBe('settings');
+
+    settings.opencodeBinary = '';
+    await expect(runtime.applyOpencodeBinaryFromSettings()).resolves.toBeNull();
+    expect(process.env.OPENCODE_BINARY).toBeUndefined();
+    expect(state.resolvedOpencodeBinary).toBeNull();
+    expect(state.resolvedOpencodeBinarySource).toBeNull();
+  });
+
   it('prefers the bundled CLI over a user-installed OpenCode from PATH', () => {
     const bundledDir = createTempDir('openchamber-bundled-opencode-');
     const bundledBinary = path.join(bundledDir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
@@ -299,6 +332,29 @@ describe('OpenCode env runtime', () => {
       code: 'OPENCODE_BINARY_INVALID',
       message: expect.stringContaining('Windows desktop app install'),
     });
+  });
+
+  it('bounds every login-shell probe and falls through when one overruns', () => {
+    setPlatform('darwin');
+    process.env.PATH = createTempDir('openchamber-empty-path-');
+    process.env.SHELL = '/bin/zsh';
+    delete process.env.OPENCODE_BINARY;
+    const shellCalls = [];
+    const { runtime } = createRuntime({}, {
+      homedir: () => createTempDir('openchamber-empty-home-'),
+      spawnSync: (command, args, options) => {
+        shellCalls.push({ command, args, options });
+        // What spawnSync reports when `timeout` fires: no status, an error.
+        return { status: null, signal: 'SIGTERM', error: new Error('spawnSync ETIMEDOUT'), stdout: '', stderr: '' };
+      },
+    });
+
+    expect(runtime.resolveOpencodeCliPath()).toBeNull();
+    expect(shellCalls.length).toBeGreaterThan(0);
+    for (const call of shellCalls) {
+      expect(call.args).toContain('-lic');
+      expect(call.options.timeout).toBe(5_000);
+    }
   });
 
   it('does not auto-detect the Windows OpenCode desktop app as a CLI', () => {

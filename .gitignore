@@ -24,6 +24,7 @@ changelog-*.png
 /openchamber@*
 local-dev*
 .tmp/
+/tmp/
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -67,6 +68,8 @@ data/
 workspaces/
 *.pid
 .worktrees/
+
+# Marks a disposable clone dedicated to unattended maintenance tasks.
+.maintenance-clone
 test-results/
 artifacts/
-

@@ -70,6 +70,27 @@ export const useNativeMobileChrome = (): void => {
       const retry = window.setTimeout(() => void applyStatusBar(), 400);
       cleanup.push(() => window.clearTimeout(retry));
 
+      // Theme toggles must reach the status bar without an app restart: re-run
+      // whenever the root dark/light class flips — the one signal every theme
+      // path converges on (settings toggle, synced settings, storage events,
+      // system-preference changes while in system mode). splashBg* colors are
+      // per-variant values, so they are stable across mode toggles.
+      if (platform === 'android') {
+        let wasDark = root.classList.contains('dark');
+        const themeClassObserver = new MutationObserver(() => {
+          const isDark = root.classList.contains('dark');
+          if (isDark === wasDark) return;
+          wasDark = isDark;
+          void applyStatusBar();
+        });
+        themeClassObserver.observe(root, { attributes: true, attributeFilter: ['class'] });
+        if (disposed) {
+          themeClassObserver.disconnect();
+          return;
+        }
+        cleanup.push(() => themeClassObserver.disconnect());
+      }
+
       const { App } = await import('@capacitor/app');
       const stateHandle = await App.addListener('appStateChange', ({ isActive }) => {
         if (isActive) void applyStatusBar();

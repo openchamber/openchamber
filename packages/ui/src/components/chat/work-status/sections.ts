@@ -25,7 +25,7 @@ type WorkStatusSectionId = (typeof WORK_STATUS_SECTION_IDS)[number];
 
 export const WORK_STATUS_SECTION_LABEL_KEYS: Record<WorkStatusSectionId, I18nKey> = {
   session: 'chat.workStatus.section.session',
-  repository: 'chat.workStatus.section.repository',
+  repository: 'chat.workStatus.section.project',
   usage: 'chat.workStatus.section.usage',
   subagents: 'chat.workStatus.section.subagents',
   tasks: 'chat.workStatus.section.tasks',
@@ -48,6 +48,32 @@ export const isWorkStatusSectionVisible = (
   hidden: readonly string[] | null | undefined,
   id: WorkStatusSectionId,
 ): boolean => !hidden?.includes(id);
+
+/**
+ * True when every known section id appears in the hidden set.
+ *
+ * Uses `.every()` instead of a length comparison so that stale ids left over
+ * from a removed section cannot inflate the count past the current list length.
+ */
+export const areAllWorkStatusSectionsHidden = (
+  hidden: readonly string[] | null | undefined,
+): boolean =>
+  hidden != null && WORK_STATUS_SECTION_IDS.every((id) => hidden.includes(id));
+
+export const getWorkStatusPanelPresentation = ({
+  visible,
+  contentMounted,
+  renderedSections,
+  allSectionsHidden,
+}: {
+  visible: boolean;
+  contentMounted: boolean;
+  renderedSections: number;
+  allSectionsHidden: boolean;
+}): { interactive: boolean; showEmptyState: boolean } => ({
+  interactive: visible && (renderedSections > 0 || allSectionsHidden),
+  showEmptyState: contentMounted && allSectionsHidden,
+});
 
 export const sanitizeWorkStatusHiddenSections = (value: unknown): WorkStatusSectionId[] => {
   if (!Array.isArray(value)) return [];

@@ -1,6 +1,11 @@
 import React from 'react';
-import { cn, getModifierLabel } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+import {
+  formatShortcutForDisplay,
+  getEffectiveShortcutCombo,
+} from '@/lib/shortcuts';
 import { useUIStore } from '@/stores/useUIStore';
+import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
@@ -34,6 +39,7 @@ import { MagicPromptsPage } from '@/components/sections/magic-prompts/MagicPromp
 import { SnippetsSidebar } from '@/components/sections/snippets/SnippetsSidebar';
 import { SnippetsPage } from '@/components/sections/snippets/SnippetsPage';
 import { GitPage } from '@/components/sections/git-identities/GitPage';
+import { IntegrationsPage } from '@/components/sections/integrations/IntegrationsPage';
 import type { OpenChamberSection } from '@/components/sections/openchamber/types';
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
 import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
@@ -94,6 +100,7 @@ const pageOrder: SettingsPageSlug[] = [
   'sessions',
   'shortcuts',
   'voice',
+  'integrations',
   'usage',
   'about',
   // 'projects' group — Workspace
@@ -184,6 +191,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const settingsPageRaw = useUIStore((state) => state.settingsPage);
   const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
+  const openSettingsShortcutOverride = useUIStore((state) => state.shortcutOverrides.open_settings);
   const settingsSlug = resolveSettingsSlug(settingsPageRaw);
 
   const [mobileStage, setMobileStage] = React.useState<MobileStage>(initialMobileStage);
@@ -206,6 +214,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const [pendingSearchItemId, setPendingSearchItemId] = React.useState<string | null>(null);
   const [activeSearchResultIndex, setActiveSearchResultIndex] = React.useState(0);
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const shouldFocusMobilePageContentRef = React.useRef(false);
   const searchResultRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
   const activeSearchResultIndexRef = React.useRef(0);
   const keyboardSearchNavigationRef = React.useRef(false);
@@ -252,23 +261,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, [visiblePages]);
 
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
+  const settingsDirectory = useSettingsDirectory();
 
-  // Load stores when project changes or when a page becomes active.
+  // Load stores when the settings project changes or a page becomes active.
   React.useEffect(() => {
     if (!isSettingsDialogOpen && !runtimeCtx.isVSCode && !isWindowed) {
       return;
     }
 
     if (settingsSlug === 'agents') {
-      void useAgentsStore.getState().loadAgents();
+      void useAgentsStore.getState().loadAgents(settingsDirectory);
       return;
     }
     if (settingsSlug === 'commands') {
-      void useCommandsStore.getState().loadCommands();
+      void useCommandsStore.getState().loadCommands(settingsDirectory);
       return;
     }
     if (settingsSlug === 'mcp') {
-      void useMcpConfigStore.getState().loadMcpConfigs();
+      void useMcpConfigStore.getState().loadMcpConfigs({ directory: settingsDirectory });
       return;
     }
     if (settingsSlug === 'plugins') {
@@ -276,13 +286,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       return;
     }
     if (settingsSlug === 'skills.installed' || settingsSlug === 'skills.catalog') {
-      void useSkillsStore.getState().loadSkills();
+      void useSkillsStore.getState().loadSkills(settingsDirectory);
       void useSkillsCatalogStore.getState().loadCatalog();
     }
     if (settingsSlug === 'snippets') {
       void useSnippetsStore.getState().loadSnippets();
     }
-  }, [activeProjectId, isSettingsDialogOpen, isWindowed, runtimeCtx.isVSCode, settingsSlug]);
+    // `activeProjectId` still matters: the settings directory follows the active
+    // project until the user picks another one in the Settings selector.
+  }, [activeProjectId, isSettingsDialogOpen, isWindowed, runtimeCtx.isVSCode, settingsDirectory, settingsSlug]);
 
   const openPage = React.useCallback((slug: SettingsPageSlug) => {
     setSettingsPage(slug);
@@ -297,6 +309,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     }
     setMobileStage(def.kind === 'split' ? 'page-sidebar' : 'page-content');
   }, [isMobile, setSettingsPage]);
+
+  const openThirdPartyProviderSetup = React.useCallback(async (providerId: string): Promise<boolean> => {
+    const configStore = useConfigStore.getState();
+    await configStore.loadProviders({ source: 'settings:third-party-provider-setup' });
+    const providerAvailable = useConfigStore.getState().providers.some(
+      (provider) => provider.id === providerId,
+    );
+    if (!providerAvailable) {
+      return false;
+    }
+
+    configStore.setSelectedProvider(providerId);
+    openPage('providers');
+    if (isMobile) {
+      setMobileStage('page-content');
+    }
+    return true;
+  }, [isMobile, openPage]);
 
   const activePageMeta = React.useMemo(() => {
     return getSettingsPageMeta(settingsSlug);
@@ -343,6 +373,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.skillsCatalog.title');
       case 'git':
         return t('settings.page.git.title');
+      case 'integrations':
+        return t('settings.page.integrations.title');
       case 'appearance':
         return t('settings.page.appearance.title');
       case 'chat':
@@ -646,6 +678,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <SnippetsPage />;
       case 'git':
         return <GitPage />;
+      case 'integrations':
+        return (
+          <IntegrationsPage
+            onOpenProviderSetup={openThirdPartyProviderSetup}
+            onOpenPluginManager={() => openPage('plugins')}
+          />
+        );
       case 'general':
       case 'appearance':
       case 'chat':
@@ -661,7 +700,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       default:
         return null;
     }
-  }, [openChamberSectionBySlug, renderUnavailable, runtimeCtx, t]);
+  }, [openChamberSectionBySlug, openPage, openThirdPartyProviderSetup, renderUnavailable, runtimeCtx, t]);
 
   // Mobile: if opened via deep-link / palette to a non-home page, jump into it once.
   React.useEffect(() => {
@@ -695,7 +734,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     : showBackButton
       ? t('settings.view.actions.backToSettings')
       : t('settings.view.actions.closeSettings');
-  const shortcutKey = getModifierLabel();
+  const openSettingsCombo = getEffectiveShortcutCombo(
+    'open_settings',
+    openSettingsShortcutOverride === undefined ? undefined : { open_settings: openSettingsShortcutOverride },
+  );
+  const closeSettingsTitle = openSettingsCombo
+    ? t('settings.view.actions.closeSettingsWithShortcut', {
+        shortcut: formatShortcutForDisplay(openSettingsCombo),
+      })
+    : t('settings.view.actions.closeSettings');
 
   const pushMobileSplitDetailHistory = React.useCallback((slug: SettingsPageSlug) => {
     if (typeof window === 'undefined' || runtimeCtx.isVSCode) {
@@ -718,11 +765,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, [runtimeCtx.isVSCode]);
 
   const handleMobilePageSidebarItemSelect = React.useCallback(() => {
+    shouldFocusMobilePageContentRef.current = true;
     setMobileStage('page-content');
     if (settingsSlug === 'skills.installed') {
       pushMobileSplitDetailHistory(settingsSlug);
     }
   }, [pushMobileSplitDetailHistory, settingsSlug]);
+
+  React.useEffect(() => {
+    if (!isMobile || mobileStage !== 'page-content' || !shouldFocusMobilePageContentRef.current) {
+      return;
+    }
+
+    shouldFocusMobilePageContentRef.current = false;
+    const frame = window.requestAnimationFrame(() => {
+      containerRef.current
+        ?.querySelector<HTMLElement>('[data-settings-page-heading]')
+        ?.focus({ preventScroll: true });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [isMobile, mobileStage, settingsSlug]);
 
   const handleBack = React.useCallback(() => {
     if (backButtonTargetsPageSidebar) {
@@ -1044,7 +1109,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               type="button"
               onClick={onClose}
               aria-label={t('settings.view.actions.closeSettings')}
-              title={t('settings.view.actions.closeSettingsWithShortcut', { shortcut: shortcutKey })}
+              title={closeSettingsTitle}
               className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <Icon name="close" className="h-5 w-5" />
@@ -1072,7 +1137,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
             type="button"
             onClick={onClose}
             aria-label={t('settings.view.actions.closeSettings')}
-            title={t('settings.view.actions.closeSettingsWithShortcut', { shortcut: shortcutKey })}
+            title={closeSettingsTitle}
             className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             <Icon name="close" className="h-5 w-5" />

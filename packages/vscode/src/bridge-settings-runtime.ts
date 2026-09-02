@@ -173,17 +173,20 @@ const readSharedSettingsFromDisk = (): Record<string, unknown> => {
 };
 
 const writeSharedSettingsToDisk = async (changes: Record<string, unknown>): Promise<void> => {
+  let tmp: string | null = null;
   try {
     await fs.promises.mkdir(path.dirname(OPENCHAMBER_SHARED_SETTINGS_PATH), { recursive: true });
     const current = readSharedSettingsFromDisk();
     const next: Record<string, unknown> = { ...current, ...changes };
     // Atomic write: tmp file + rename. Readers never see a partial/truncated
     // JSON that would fail to parse and silently get coerced to {}.
-    const tmp = `${OPENCHAMBER_SHARED_SETTINGS_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    tmp = `${OPENCHAMBER_SHARED_SETTINGS_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     await fs.promises.writeFile(tmp, JSON.stringify(next, null, 2), 'utf8');
     await fs.promises.rename(tmp, OPENCHAMBER_SHARED_SETTINGS_PATH);
   } catch {
-    // ignore
+    if (tmp) {
+      await fs.promises.rm(tmp, { force: true }).catch(() => {});
+    }
   }
 };
 
@@ -324,20 +327,6 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
     if (typeof budget !== 'number' || !Number.isFinite(budget) || budget <= 0) {
       delete restChanges.sessionGoalDefaultBudget;
     }
-  }
-
-  if (typeof restChanges.usageAutoRefresh !== 'boolean') {
-    delete restChanges.usageAutoRefresh;
-  }
-
-  if (typeof restChanges.usageShowPredValues !== 'boolean') {
-    delete restChanges.usageShowPredValues;
-  }
-
-  if (typeof restChanges.usageRefreshIntervalMs === 'number' && Number.isFinite(restChanges.usageRefreshIntervalMs)) {
-    restChanges.usageRefreshIntervalMs = Math.max(30000, Math.min(300000, Math.round(restChanges.usageRefreshIntervalMs)));
-  } else {
-    delete restChanges.usageRefreshIntervalMs;
   }
 
   if (typeof restChanges.opencodeBinary === 'string') {

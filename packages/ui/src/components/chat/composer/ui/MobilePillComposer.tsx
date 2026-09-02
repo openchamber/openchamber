@@ -38,6 +38,8 @@ export interface MobilePillComposerProps {
     onPickLocalFiles: () => void;
     onOpenIssuePicker: () => void;
     onOpenPrPicker: () => void;
+    showLinearPicker?: boolean;
+    onOpenLinearPicker?: () => void;
     onOpenAttachSheet: () => void;
     onStartDictation: () => void;
     onAbort: () => void;
@@ -63,6 +65,8 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
         onPickLocalFiles,
         onOpenIssuePicker,
         onOpenPrPicker,
+        showLinearPicker,
+        onOpenLinearPicker,
         onOpenAttachSheet,
         onStartDictation,
         onAbort,
@@ -84,7 +88,8 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
         />
         <div className="flex items-center gap-2">
             <div
-                className="flex h-11 min-w-0 flex-1 items-center gap-x-0.5 rounded-full border border-border/80 pl-2 pr-1 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
+                data-mobile-composer-pill="true"
+            className="flex h-11 min-w-0 flex-1 items-center gap-x-0.5 rounded-full border border-border/80 pl-2 pr-1 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
                 style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
             >
                 <ComposerAttachmentControls
@@ -94,6 +99,8 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                     handlePickLocalFiles={onPickLocalFiles}
                     openIssuePicker={onOpenIssuePicker}
                     openPrPicker={onOpenPrPicker}
+                    showLinearPicker={showLinearPicker}
+                    openLinearPicker={onOpenLinearPicker}
                     onOpenMobileSheet={onOpenAttachSheet}
                 />
                 <button

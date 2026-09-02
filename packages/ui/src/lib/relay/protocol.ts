@@ -61,6 +61,11 @@ export interface TunnelHttpRequestPayload {
   path: string;
   query: string;
   headers: Record<string, string>;
+  /** True when the client had a request body to send. The host uses this to
+   * distinguish a genuine bodyless request from one whose body frames were lost
+   * through the tunnel (which it must abort as an ambiguous transport failure
+   * instead of forwarding an empty body the loopback server rejects with 400). */
+  hasBody?: boolean;
 }
 
 export interface TunnelHttpResponsePayload {
@@ -76,10 +81,6 @@ export interface TunnelWsOpenPayload {
   path: string;
   query: string;
   protocols?: string[];
-}
-
-export interface TunnelWsOpenedPayload {
-  protocol?: string;
 }
 
 export interface TunnelWsClosePayload {
@@ -105,13 +106,6 @@ export interface E2eeReadyMessage {
   // advertised it. Batching is enabled for the session only if both agree.
   batch?: boolean;
 }
-
-// Layer 1 control messages (relay <-> host control socket).
-export type RelayControlMessage =
-  | { type: 'sync'; connectionIds: string[] }
-  | { type: 'connected'; connectionId: string }
-  | { type: 'disconnected'; connectionId: string }
-  | { type: 'limit'; reason: string };
 
 // Relay-assigned WebSocket close codes.
 export const RelayCloseCode = {

@@ -1,20 +1,113 @@
-## [Unreleased]
+## [1.22.0] - 2026-08-30
+
+- Switching sessions is now visually stable, without conversation jumps or partial rendering.
+- Chat: a turn that OpenCode stopped no longer ends with nothing on screen — what OpenCode reported shows under the last message, and a message an idle session has left unanswered is named as such. The status report (Ctrl/Cmd+Shift+L) now lists the last session errors and rejected sends.
+- Chat: a session opened from the sidebar lands at its end and stays there, instead of landing above the bottom or snapping up a moment later.
+
+## [1.21.1] - 2026-08-29
+
+- **Turkish interface:** OpenChamber can now be used in Turkish (thanks to @fitzgpt).
+- `/btw` side questions: a btw session now answers the side question instead of carrying on with the parent's plan, and forks at the last completed turn so a reply that is still streaming is never inherited (thanks to @pocharlies).
+- Chat scrolling: with "Follow new content while streaming" off, sending while scrolled up leaves the view where it is; a middle-button pan or Shift+Space stops auto-follow like the wheel does (thanks to @pascalandr); PageUp/PageDown in the prompt box no longer shifts the whole panel up.
+- Chat no longer crashes or freezes on: very large tool results, which are capped before rendering (thanks to @JSap0914); a code block with JavaScript template strings that sent the highlighter into endless backtracking (thanks to @makeittech); a diff with a truncated header (thanks to @pascalandr); and a draft or recalled message with Windows line endings, which threw "Selection points outside of document" on every visit (thanks to @yulia-ivashko).
+- Chat: a session no longer looks frozen after the webview reloads or is opened late — pending permission and question cards come back (thanks to @yangyaofei) — nor after dismissing the agent's questions and sending a new task (thanks to @bashrusakh).
+- Context usage now reports the session cost including everything its subagents spent (thanks to @igorvelho), and undoing or redoing a parent session keeps its subagents at the same point in history (thanks to @alexandrereyes).
+- Chat rendering: question prompts render Markdown (thanks to @pascalandr); bare links next to CJK or full-width punctuation no longer absorb it (thanks to @gaojunran); inline code, chips, and model-picker highlights stay readable in high-contrast themes (thanks to @difagume and @bashrusakh); a completed reasoning block shows in full instead of replaying, the text-selection menu stays inside the viewport, and the sticky user-message header no longer fades over the reply (thanks to @makeittech).
+- Chat actions: tool cards with a file path get a quick-open button that opens the file in the editor (thanks to @robertoberto); sending without a selected model explains what is missing (thanks to @rvaldemar); `/init` stays in slash-command autocomplete after the conversation starts (thanks to @Dawnfz-Lenfeng); copying a message keeps Markdown spacing (thanks to @ChangeHow); a manually chosen model survives switching between Build and Plan (thanks to @makeittech).
+- Composer: pasting a large block of text now offers to attach it as a `pasted-context-N.txt` file instead of flooding the input, with a reference left at the caret; Settings → Chat can make it always attach or always paste inline (thanks to @makeittech).
+- Chat: the text the model writes before asking a question is shown right away instead of staying hidden until the turn ends (thanks to @makeittech).
+- Chat: when the turn-ending signal from OpenCode is lost, the working spinner now clears within about a second instead of up to ten (thanks to @makeittech).
+- Composer: typing three backticks leaves the caret inside the completed code fence, empty inputs keep a visible caret, and platform autocorrect behavior is preserved (thanks to @franzudev, @TTTPOB, and @IbrahimKhan12).
+- GitHub Copilot usage now shows a single AI Credits window, matching Copilot's token-based quota (thanks to @jakoss).
+- Updating OpenCode no longer fails with a bare "Bad Request": the extension names the release to install and shows OpenCode's own reason when an update is refused (thanks to @mdatsev and @yulia-ivashko).
+- "Add Project" now adds the chosen folder to the workspace instead of failing (thanks to @bashrusakh), and the extension starts in the current workspace folder instead of one restored from storage (thanks to @makeittech).
+- Multi-Run groups can now contain more than five models (thanks to @tomzx).
+- Sidebar: pending permission and question badges are no longer covered by the hover actions (thanks to @makeittech); worktree branch search hides non-matching branches (thanks to @bashrusakh).
+- Settings/Providers: after saving an API key or signing in, the provider no longer shows "Credentials missing" with its models hidden until you switch away and back (thanks to @herjarsa).
+- Settings: number fields and selects no longer clip at large font sizes (thanks to @makeittech), and Windows skill paths are classified correctly, so disabled and duplicate skills are hidden as intended (thanks to @Ttungx).
+- Windows: closing VS Code now stops the managed OpenCode process instead of leaving it running (thanks to @a0000001).
+- The extension reuses its OpenCode output channel across managed-server restarts instead of creating duplicates (thanks to @TTTPOB).
+
+## [1.21.0] - 2026-08-26
+
+- **Chat context attachments:** diff and file comments, terminal selections, and linked issues/PRs now show in the conversation as compact context cards — source header, captured content behind an expander, your comment below — instead of raw text inside the message.
+- **Chat: comment on a reply.** Select text in a chat message and choose Comment to attach that quote with your note to the next message; the selection stays highlighted while you type.
+- Chat: the view no longer stays stuck on its loading screen on slow or remote connections, including code-server behind a reverse proxy (thanks to @VinciYan).
+- Composer: hovering a context chip above the input opens a stacked preview of everything attached, where comments can be edited in place or items removed before sending.
+- Chat: @ file mentions now rank files and directories together by how well they match, so the file you typed is at the top instead of below unrelated directories. Multi-word queries match in any order, and long paths keep the folder next to the file name visible.
+- Search: Ctrl/Cmd+P now matches the whole file path, not just the file name — searching a folder name finds the files inside it.
+- Search in dropdowns: searchable pickers (agents, models, providers, branches) now put the best matches first, match multi-word queries in any order, and ignore punctuation (so "gpt4o" finds "gpt-4o").
+- Permissions: cards answer to the keyboard with Alt+Enter to allow once, Alt+Shift+Enter to allow always, and Alt+Backspace to deny; the keys are printed on the buttons.
+- Keyboard: dropdown menus and pickers answer Ctrl+N/Ctrl+P for down/up, the session switcher opens focused on your current session, and shortcut labels in tooltips and menus show the binding you actually have set (thanks to @ChangeHow).
+- Chat: Cmd/Ctrl+Shift+T now cycles through every thinking level offered by the selected model instead of skipping levels after reaching the end (thanks to @nimobeeren).
+- Chat: OpenCode notices now share one style.
+- Chat: the timeline dialog now fits small windows instead of squeezing the message list to a couple of rows (thanks to @gaojunran).
+
+## [1.20.0] - 2026-08-23
+
+- **/btw side questions:** type `/btw` followed by your question to ask something off-topic in a temporary session forked from the current conversation. The answer streams into a panel above the composer; collapse it, keep it as a full session, or discard it without touching the chat (thanks to @jaygupta17).
+- **Skills catalog:** browse curated GitHub skill collections in a card-based catalog with cross-source search and direct links to each skill's repository.
+- Settings: the workspace selector on Providers, Agents, MCP, Commands and Skills now only changes what those pages show instead of moving the chat, session list and file tree to another workspace.
+- Settings/Projects: a project can now pin a thinking level next to its model, for models that offer levels.
+- Settings/General: changing the default model, variant or agent no longer repoints an open chat that already carries a model you picked for it. Chats following the default still switch immediately.
+- Settings/Providers: the provider you select no longer jumps to a different one when the chat selection or provider data changes.
+- Settings/Integrations: the experimental page now only lists integrations that can be installed; unavailable and Coming soon entries were removed.
+- Providers: expanded support for custom providers.
+- Sessions created outside OpenChamber now appear in the sidebar and Recent list without a page refresh (thanks to @tomzx).
+- If OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
+- Usage: Z.ai credit limits now appear alongside its other quota windows.
+- Chat: file paths in messages now open from the session's workspace, even if you last browsed files in another workspace (thanks to @tomzx).
+- Chat: app links such as `spotify://` now ask for confirmation before opening another app. You can trust an app link type on one device and manage trusted links in Settings.
+- While a reply streams, the model status line under the last message now turns into the finished message's info row in place, instead of jumping when the reply completes.
+- Chat: newly sent messages and syntax-highlighted code blocks no longer briefly flicker. Bash output can also grow with its content instead of being cut off.
+- Chat: long user messages can be expanded even when their final layout finishes after they first appear.
+- UI: the default dialog close button is easier to click or tap (thanks to @rockinrimmer).
+
+## [1.19.0] - 2026-08-19
+
+- **Settings/Integrations:** a new Integrations settings page lists Claude Code, Command Code, and Cursor plugins with install, update, setup, and remove actions, plus Discord and Telegram Coming soon placeholders.
+- **Chat:** an open conversation no longer keeps re-coloring the same code blocks in the background, preventing high CPU use while the chat is idle (thanks to @makeittech).
+- Settings: OpenChamber no longer replaces a full OpenCode config with an empty `$schema`-only stub when the file uses JSON5-style unquoted keys; Settings changes now fail instead of wiping plugins, MCP servers, and providers (thanks to @makeittech).
+- Usage: Command Code plan limits now appear in the Usage page and work status panel.
+- Chat: new chats no longer start against a deleted last worktree directory; they fall back to the active project instead of saving the first message and never starting.
+- Chat: typing with Chinese, Japanese, or Korean input methods no longer interrupts composition or jumps the cursor to the end of the composer (thanks to @makeittech).
+- The context usage readout no longer climbs over 100% after turns with many tool calls and no longer jumps when reopening an older session; it now shows what the window actually holds (thanks to @pocharlies).
+- Usage: the context usage readout in the chat header now also shows the session's cost in its tooltip (thanks to @YunFeng0817).
+- Attachments: extracted Office and OpenDocument content is now capped and presented more compactly, preventing large documents and their images from overwhelming the message context.
+- Projects: project names now match the folder name exactly, so `.ssh` and `opencode-claude` are no longer shown as `.Ssh` and `Opencode Claude`; names you renamed yourself are kept.
+- Skills Catalog: the source is now named ClawHub instead of "ClawdHub" (thanks to @makeittech).
+- Add Project now adds the chosen folder to the workspace instead of showing a "Failed to add project" toast.
+- The model selection menu no longer shows white text on a white highlight when a high-contrast theme is active, so the hovered or selected model stays legible (thanks to @bashrusakh).
+
+## [1.18.4] - 2026-08-14
+
+- **Chat:** new messages now remain at the end of the conversation instead of jumping before older messages after the message ID sequence rolls over; history loading, revert, and redo follow the same chronological order.
+
+## [1.18.3] - 2026-08-14
+
+- Chat images: completed assistant replies now collect Markdown images into a compact gallery with thumbnails and full-screen previews, including workspace-local images across multi-root workspaces (thanks to @ChangeHow).
+- Sessions: switching projects now selects a session owned by the new workspace, and a message already being prepared stays with the session where it was submitted instead of being rerouted by a later project switch (thanks to @makeittech).
+- Usage: quota limits enabled for display now refresh every three minutes, with a manual refresh action available at any time.
+- Usage: OpenCode Go quota tracking now uses the existing OpenCode API key instead of requiring separate browser cookies and a workspace ID.
+- Chat: the Focus Chat command and Add to Context action now place the cursor in the chat input so typing can continue immediately.
+- Chat: typing `!` to enter shell mode no longer inserts the trigger into the command or moves the caret to the wrong side of it (thanks to @RyderAsKing).
+- Chat: line numbers with three or more digits no longer wrap in code blocks (thanks to @ChangeHow).
+
+## [1.18.2] - 2026-08-10
 
 - **Settings:** OpenCode configuration changes now accumulate behind a single Apply & Restart action instead of restarting OpenCode after every edit; the confirmation warns when active chats will be stopped (thanks to @makeittech).
-- Git/Worktrees: prompts now wait for a new worktree to finish checkout before sending, and sessions resolve to the worktree that owns them instead of occasionally opening or sending against the parent workspace (thanks to @ftzi).
-- Git/Worktrees: setup now runs the repository's `post-checkout` hook after creating a worktree, and deeply nested worktrees no longer fail with “Filename too long” on Windows (thanks to @ftzi, @makeittech).
 - Chat: messages submitted before switching sessions stay with the session and workspace they were sent from, and are cancelled rather than crossing into a different runtime (thanks to @Wsyjq).
 - Chat: queued messages no longer send into a response that is still streaming, and tool cards left running by an interrupted response settle instead of remaining stuck (thanks to @makeittech).
 - Chat: shell command output is expanded by default, and adding a message to context returns focus to the composer (thanks to @pascalandr, @makeittech).
 - Chat: fresh messages no longer replay their entry animation after they have already been shown (thanks to @makeittech).
+- Chat: the composer caret is now easier to see.
 - MCP: authorization now handles browser callbacks more reliably, settings distinguish available and unavailable servers more clearly, and failed connections expose a retry action.
 - Usage: added xAI quota reporting (thanks to @iamhenry).
-- Terminal: default tab names remain unique after tabs are closed, and Escape reaches terminal applications instead of closing the context panel (thanks to @makeittech).
-- UI: overlay scrollbars auto-hide again after scrolling instead of remaining permanently visible.
 - Attachments: removing an attached Office or OpenDocument file also removes the images extracted from that document (thanks to @chiamsun).
 - Notebooks: notebook links now open in the notebook editor when a compatible extension is installed (thanks to @TTTPOB).
 - Settings: rapid edits to notification templates no longer overwrite one another, and the collapsed-user-message preference now persists correctly (thanks to @AmanTahiliani, @pascalandr).
 - Security: updated archive extraction to address GHSA-xcpc-8h2w-3j85 (thanks to @mel0nyrame).
+- UI: dialogs, dropdowns, popovers, and tooltips now use consistent glass styling.
 
 ## [1.18.1] - 2026-08-04
 

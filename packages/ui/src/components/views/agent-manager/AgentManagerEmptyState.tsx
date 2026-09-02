@@ -22,8 +22,6 @@ import { useI18n } from '@/lib/i18n';
 
 /** Max file size in bytes (10MB) */
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
-/** Max number of concurrent runs */
-const MAX_MODELS = 5;
 
 /** Attached file for agent manager */
 interface AttachedFile {
@@ -132,11 +130,8 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
   }, [projectRef]);
 
   const handleAddModel = React.useCallback((model: ModelSelectionWithId) => {
-    if (selectedModels.length >= MAX_MODELS) {
-      return;
-    }
     setSelectedModels((prev) => [...prev, model]);
-  }, [selectedModels.length]);
+  }, []);
 
   const handleRemoveModel = React.useCallback((index: number) => {
     setSelectedModels((prev) => prev.filter((_, i) => i !== index));
@@ -529,7 +524,6 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
             onUpdate={handleUpdateModel}
             minModels={1}
             addButtonLabel={t('agentManager.empty.models.addModel')}
-            maxModels={5}
           />
         </div>
 

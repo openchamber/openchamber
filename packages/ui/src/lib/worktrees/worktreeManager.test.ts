@@ -11,6 +11,10 @@ type WorktreeListEntry = {
 
 const listCalls: string[] = [];
 const listResolvers: Array<(value: WorktreeListEntry[]) => void> = [];
+const listRejecters: Array<(reason: Error) => void> = [];
+let listImplementation: ((directory: string) => Promise<WorktreeListEntry[]>) | undefined;
+const createPayloads: unknown[] = [];
+const validatePayloads: unknown[] = [];
 const createdWorktree = {
   head: 'abc123',
   name: 'feature',
@@ -76,11 +80,22 @@ mock.module('@/lib/gitApi', () => ({
     worktree: {
       list: (directory: string) => {
         listCalls.push(directory);
-        return new Promise<WorktreeListEntry[]>((resolve) => {
+        if (listImplementation) {
+          return listImplementation(directory);
+        }
+        return new Promise<WorktreeListEntry[]>((resolve, reject) => {
           listResolvers.push(resolve);
+          listRejecters.push((reason: Error) => reject(reason));
         });
       },
-      create: mock(() => Promise.resolve(createdWorktreeResult)),
+      create: mock((_directory: string, payload: unknown) => {
+        createPayloads.push(payload);
+        return Promise.resolve(createdWorktreeResult);
+      }),
+      validate: mock((_directory: string, payload: unknown) => {
+        validatePayloads.push(payload);
+        return Promise.resolve({ ok: true, errors: [] });
+      }),
       remove: mock(() => Promise.resolve({ success: true })),
     },
   },
@@ -91,6 +106,7 @@ const {
   getLatestWorktreeMetadata,
   listProjectWorktrees,
   partitionWorktreesByRegisteredProject,
+  validateWorktreeCreate,
   worktreeMapsEqual,
 } = await import('./worktreeManager');
 
@@ -108,6 +124,10 @@ describe('worktreeManager list invalidation', () => {
   beforeEach(() => {
     listCalls.length = 0;
     listResolvers.length = 0;
+    listRejecters.length = 0;
+    listImplementation = undefined;
+    createPayloads.length = 0;
+    validatePayloads.length = 0;
     bootstrapWatcherCalls.length = 0;
     bootstrapWatcherOptions.length = 0;
     createdWorktreeResult = createdWorktree;
@@ -138,6 +158,143 @@ describe('worktreeManager list invalidation', () => {
 
     expect(listCalls).toEqual(['/repo', '/repo']);
     expect(result.map((entry) => entry.path)).toEqual(['/repo-feature']);
+  });
+
+  test('forced refresh bypasses a fresh cached result', async () => {
+    const project = { id: 'project-force-cache', path: '/repo-force-cache' };
+
+    const initialListing = listProjectWorktrees(project);
+    await waitForListCallCount(1);
+    listResolvers[0]([]);
+    const initialResult = await initialListing;
+    expect(initialResult).toEqual([]);
+
+    const cachedResult = await listProjectWorktrees(project);
+    expect(cachedResult).toEqual([]);
+    expect(listCalls).toEqual(['/repo-force-cache']);
+
+    const forcedListing = listProjectWorktrees(project, { force: true });
+    await waitForListCallCount(2);
+    listResolvers[1]([createdWorktree]);
+
+    const forcedResult = await forcedListing;
+    expect(forcedResult.map((entry) => entry.path)).toEqual(['/repo-feature']);
+    expect(listCalls).toEqual(['/repo-force-cache', '/repo-force-cache']);
+    const refreshedCachedResult = await listProjectWorktrees(project);
+    expect(refreshedCachedResult.map((entry) => entry.path)).toEqual(['/repo-feature']);
+    expect(listCalls).toEqual(['/repo-force-cache', '/repo-force-cache']);
+  });
+
+  test('forced refresh starts a new request instead of joining an older in-flight list', async () => {
+    const project = { id: 'project-force-inflight', path: '/repo-force-inflight' };
+
+    const initialListing = listProjectWorktrees(project);
+    await waitForListCallCount(1);
+
+    const forcedListing = listProjectWorktrees(project, { force: true });
+    await waitForListCallCount(2);
+
+    listResolvers[1]([createdWorktree]);
+    const forcedResult = await forcedListing;
+    expect(forcedResult.map((entry) => entry.path)).toEqual(['/repo-feature']);
+
+    listResolvers[0]([]);
+    await waitForListCallCount(3);
+    listResolvers[2]([createdWorktree]);
+    const initialResult = await initialListing;
+    expect(initialResult.map((entry) => entry.path)).toEqual(['/repo-feature']);
+    expect(listCalls).toEqual([
+      '/repo-force-inflight',
+      '/repo-force-inflight',
+      '/repo-force-inflight',
+    ]);
+  });
+
+  test('older completions do not replace a forced refresh result with stale topology', async () => {
+    const project = { id: 'project-force-stale', path: '/repo-force-stale' };
+
+    void listProjectWorktrees(project);
+    await waitForListCallCount(1);
+
+    const forcedListing = listProjectWorktrees(project, { force: true });
+    await waitForListCallCount(2);
+    listResolvers[1]([createdWorktree]);
+    const forcedResult = await forcedListing;
+    expect(forcedResult.map((entry) => entry.path)).toEqual(['/repo-feature']);
+
+    listResolvers[0]([{ path: '/repo-stale', branch: 'stale', name: 'stale' }]);
+    await waitForListCallCount(3);
+
+    const cachedResult = await listProjectWorktrees(project);
+    expect(cachedResult.map((entry) => entry.path)).toEqual(['/repo-feature']);
+  });
+
+  test('rejects when git worktree listing fails', async () => {
+    const project = { id: 'project-force-failure', path: '/repo-force-failure' };
+
+    const listing = listProjectWorktrees(project);
+    await waitForListCallCount(1);
+    listRejecters[0](new Error('git failed'));
+
+    await expect(listing).rejects.toThrow('git failed');
+  });
+
+  test('rejects sustained invalidation explicitly, preserves the last cached result, and allows a later retry', async () => {
+    const project = { id: 'project-force-convergence', path: '/repo-force-convergence' };
+    const oldWorktree = [{ path: '/repo-old', branch: 'old', name: 'old' } satisfies WorktreeListEntry];
+    const scriptedResolvers = new Map<number, (value: WorktreeListEntry[]) => void>();
+    let recoveryReadsAllowed = false;
+
+    listImplementation = () => {
+      const callNumber = listCalls.length;
+      if (callNumber === 8 && !recoveryReadsAllowed) {
+        return Promise.reject(new Error('unexpected extra read'));
+      }
+      return new Promise<WorktreeListEntry[]>((resolve) => {
+        scriptedResolvers.set(callNumber, resolve);
+      });
+    };
+
+    const seededListing = listProjectWorktrees(project);
+    await waitForListCallCount(1);
+    scriptedResolvers.get(1)?.(oldWorktree);
+    expect((await seededListing).map((entry) => entry.path)).toEqual(['/repo-old']);
+
+    const unstableListing = listProjectWorktrees(project, { force: true });
+    await waitForListCallCount(2);
+
+    const forcedRefreshA = listProjectWorktrees(project, { force: true });
+    await waitForListCallCount(3);
+    scriptedResolvers.get(3)?.([createdWorktree]);
+    expect((await forcedRefreshA).map((entry) => entry.path)).toEqual(['/repo-feature']);
+    scriptedResolvers.get(2)?.([{ path: '/repo-stale-a', branch: 'stale-a', name: 'stale-a' }]);
+    await waitForListCallCount(4);
+
+    const forcedRefreshB = listProjectWorktrees(project, { force: true });
+    await waitForListCallCount(5);
+    scriptedResolvers.get(5)?.([createdWorktree]);
+    expect((await forcedRefreshB).map((entry) => entry.path)).toEqual(['/repo-feature']);
+    scriptedResolvers.get(4)?.([{ path: '/repo-stale-b', branch: 'stale-b', name: 'stale-b' }]);
+    await waitForListCallCount(6);
+
+    const forcedRefreshC = listProjectWorktrees(project, { force: true });
+    await waitForListCallCount(7);
+    scriptedResolvers.get(7)?.([createdWorktree]);
+    expect((await forcedRefreshC).map((entry) => entry.path)).toEqual(['/repo-feature']);
+    scriptedResolvers.get(6)?.([{ path: '/repo-stale-c', branch: 'stale-c', name: 'stale-c' }]);
+
+    await expect(unstableListing).rejects.toThrow('Worktree list did not converge');
+    expect(listCalls).toHaveLength(7);
+
+    const cachedResult = await listProjectWorktrees(project);
+    expect(cachedResult.map((entry) => entry.path)).toEqual(['/repo-feature']);
+    expect(listCalls).toHaveLength(7);
+
+    recoveryReadsAllowed = true;
+    const recoveredListing = listProjectWorktrees(project, { force: true });
+    await waitForListCallCount(8);
+    scriptedResolvers.get(8)?.([createdWorktree]);
+    expect((await recoveredListing).map((entry) => entry.path)).toEqual(['/repo-feature']);
   });
 
   test('marks fast-created worktrees pending until bootstrap settles', async () => {
@@ -370,5 +527,59 @@ describe('partitionWorktreesByRegisteredProject', () => {
 
     expect([...result.keys()]).toEqual(['/repo']);
     expect(result.get('/repo')?.map((entry) => entry.path)).toEqual(['/worktrees/loose']);
+  });
+});
+
+describe('worktreeManager fork remote payload wiring', () => {
+  beforeEach(() => {
+    listCalls.length = 0;
+    listResolvers.length = 0;
+    listRejecters.length = 0;
+    createPayloads.length = 0;
+    validatePayloads.length = 0;
+    bootstrapWatcherCalls.length = 0;
+    bootstrapWatcherOptions.length = 0;
+    createdWorktreeResult = createdWorktree;
+    sessionState.availableWorktreesByProject = new Map();
+    sessionState.availableWorktrees = [];
+    sessionState.worktreeMetadata = new Map();
+    attachmentState.attachments = new Map();
+  });
+
+  test('validate and create forward ensureRemoteName/Url for a fork head', async () => {
+    const project = { id: 'project-1', path: '/repo' };
+    const args = {
+      mode: 'existing' as const,
+      branchName: 'feature/login',
+      worktreeName: 'pr-42',
+      existingBranch: 'remotes/pr-alice/feature/login',
+      setUpstream: true as const,
+      upstreamRemote: 'pr-alice',
+      upstreamBranch: 'feature/login',
+      ensureRemoteName: 'pr-alice',
+      ensureRemoteUrl: 'https://github.com/alice/openchamber.git',
+    };
+
+    const validation = await validateWorktreeCreate(project, args);
+    expect(validation.ok).toBe(true);
+    expect(validatePayloads).toHaveLength(1);
+    const validated = validatePayloads[0] as Record<string, unknown>;
+    expect(validated.mode).toBe('existing');
+    expect(validated.existingBranch).toBe('remotes/pr-alice/feature/login');
+    expect(validated.ensureRemoteName).toBe('pr-alice');
+    expect(validated.ensureRemoteUrl).toBe('https://github.com/alice/openchamber.git');
+    expect('pullRequest' in validated).toBe(false);
+
+    await createWorktree(project, {
+      ...args,
+      returnAfterDirectoryCreated: true,
+    });
+    expect(createPayloads).toHaveLength(1);
+    const created = createPayloads[0] as Record<string, unknown>;
+    expect(created.existingBranch).toBe('remotes/pr-alice/feature/login');
+    expect(created.ensureRemoteName).toBe('pr-alice');
+    expect(created.ensureRemoteUrl).toBe('https://github.com/alice/openchamber.git');
+    expect(created.setUpstream).toBe(true);
+    expect('pullRequest' in created).toBe(false);
   });
 });

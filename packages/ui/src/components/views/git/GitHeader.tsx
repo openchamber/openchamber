@@ -12,6 +12,7 @@ import type { IconName } from "@/components/icon/icons";
 import { BranchSelector } from './BranchSelector';
 import { WorktreeBranchDisplay } from './WorktreeBranchDisplay';
 import { SyncActions } from './SyncActions';
+import { NestedRepoPicker } from './NestedRepoPicker';
 import type {
   GitStatus,
   GitIdentityProfile,
@@ -51,6 +52,13 @@ interface GitHeaderProps {
   pullRequest?: GitHubPullRequest | null;
   prChecks?: GitHubChecksSummary | null;
   onOpenPullRequest?: () => void;
+  // Nested repository picker: shown when the Git tab operates on a repository
+  // nested inside a non-repository root. Options are absolute repository
+  // paths; `repositoryRoot` is the root those paths are relative to.
+  repositoryOptions?: string[];
+  selectedRepository?: string | null;
+  onSelectRepository?: (repository: string) => void;
+  repositoryRoot?: string;
 }
 
 const IDENTITY_ICON_MAP: Record<string, IconName> = {
@@ -258,11 +266,17 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   pullRequest,
   prChecks,
   onOpenPullRequest,
+  repositoryOptions,
+  selectedRepository,
+  onSelectRepository,
+  repositoryRoot,
 }) => {
   const { t } = useI18n();
   if (!status) {
     return null;
   }
+
+  const repositoryOptionsForPicker = (repositoryOptions ?? []).filter(Boolean);
 
   const managementButtons = (
     <div className="flex items-center gap-1 shrink-0">
@@ -410,7 +424,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   return (
     <header className="@container/git-header px-3 py-2 bg-transparent">
       <div className="flex items-center justify-between gap-2 min-w-0">
-        <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-1 items-center gap-1">
           {isWorktreeMode ? (
             <WorktreeBranchDisplay
               currentBranch={status.current}
@@ -427,6 +441,14 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
               remotes={remotes}
             />
           )}
+          {repositoryOptionsForPicker.length > 0 && onSelectRepository ? (
+            <NestedRepoPicker
+              repositories={repositoryOptionsForPicker}
+              selectedRepository={selectedRepository ?? null}
+              onSelectRepository={onSelectRepository}
+              repositoryRoot={repositoryRoot}
+            />
+          ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {identityControl}

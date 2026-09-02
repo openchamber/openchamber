@@ -1,9 +1,11 @@
+import { z } from 'zod';
 import type { ProjectEntry, RuntimeAPIs, TerminalShell } from '@/lib/api/types';
 import { getInjectedBootOutcome } from '@/lib/desktopBoot';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { isVSCodeBootstrapPresent } from '@/lib/vscodeBootstrap';
 
 type ManagedRemoteTunnelPreset = {
   id: string;
@@ -65,6 +67,10 @@ export type DesktopSettings = {
   desktopUiPassword?: string;
   projects?: ProjectEntry[];
   activeProjectId?: string;
+  sidebarProjectDisplayMode?: 'all' | 'single';
+  sidebarSessionGroupingMode?: 'by-worktree' | 'flat';
+  sidebarProjectSortOrder?: 'manual' | 'a-z' | 'z-a' | 'date-added' | 'recent';
+  sidebarShowRecentSection?: boolean;
   securityScopedBookmarks?: string[];
   pinnedDirectories?: string[];
   showReasoningTraces?: boolean;
@@ -97,10 +103,7 @@ export type DesktopSettings = {
   summaryLength?: number;
   maxLastMessageLength?: number;
 
-  usageAutoRefresh?: boolean;
-  usageRefreshIntervalMs?: number;
   usageDisplayMode?: 'usage' | 'remaining';
-  usageShowPredValues?: boolean;
   usageDropdownProviders?: string[];
   usageSelectedModels?: Record<string, string[]>;  // Map of providerId -> selected model names
   usageCollapsedFamilies?: Record<string, string[]>;  // Map of providerId -> collapsed family IDs (UsagePage)
@@ -129,6 +132,7 @@ export type DesktopSettings = {
   defaultVariant?: string;
   defaultAgent?: string;
   smallModelUseDefault?: boolean;
+  streamingAutoFollowEnabled?: boolean;
   sessionRecapEnabled?: boolean;
   sessionSuggestionEnabled?: boolean;
   sessionGoalEnabled?: boolean;
@@ -157,6 +161,9 @@ export type DesktopSettings = {
   inputSpellcheckEnabled?: boolean;
   showOpenCodeUpdateNotifications?: boolean;
   agentControlToolEnabled?: boolean;
+  agentWebToolEnabled?: boolean;
+  agentMemoryToolEnabled?: boolean;
+  agentMemoryFeatureAvailable?: boolean;
   optimizeSystemPrompt?: boolean;
   openCodeUpdateToastDismissedVersion?: string;
   showToolFileIcons?: boolean;
@@ -176,7 +183,6 @@ export type DesktopSettings = {
   collapsibleUserMessages?: boolean;
   stickyUserHeader?: boolean;
   promptNavigatorEnabled?: boolean;
-  expandedEditorToolbar?: boolean;
   wideChatLayoutEnabled?: boolean;
   showSplitAssistantMessageActions?: boolean;
   fontSize?: number;
@@ -243,8 +249,6 @@ type DesktopBridgeGlobal = {
 type ElectronRuntimeGlobal = {
   runtime?: string;
   arch?: string;
-  macVibrancy?: boolean;
-  macVibrancySupported?: boolean;
   trayEnabled?: boolean;
 };
 
@@ -260,7 +264,7 @@ const getDesktopBridge = (): DesktopBridgeGlobal | null => {
 
 export const isElectronShell = (): boolean => getElectronRuntime()?.runtime === 'electron';
 
-export const getElectronPlatform = (): string | null => {
+const getElectronPlatform = (): string | null => {
   if (typeof window === 'undefined') return null;
   const platform = (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__;
   return typeof platform === 'string' ? platform : null;
@@ -572,6 +576,12 @@ export const startDesktopWindowDrag = async (): Promise<boolean> => {
 };
 
 export const isVSCodeRuntime = (): boolean => {
+  // Prefer extension-host bootstrap config: it is injected in webview HTML
+  // before any store module evaluates, so startup does not depend on
+  // RuntimeAPIs registration order (see #2359).
+  if (isVSCodeBootstrapPresent()) {
+    return true;
+  }
   const apis = getRegisteredRuntimeAPIs();
   return apis?.runtime?.isVSCode === true;
 };
@@ -640,6 +650,12 @@ const isDesktopFileGrantResult = (
   value !== null && typeof value === 'object' && !Array.isArray(value)
 );
 
+const desktopExistingFileGrantSchema = z.object({
+  path: z.string().min(1),
+  outsideFileGrant: z.string().min(1),
+  expiresAt: z.number().finite(),
+});
+
 export const requestFileAccess = async (
   options?: { filters?: Array<{ name: string; extensions: string[] }>; defaultPath?: string }
 ): Promise<{ success: boolean; path?: string; outsideFileGrant?: string; error?: string }> => {
@@ -682,7 +698,10 @@ export const requestFileAccess = async (
 
 export const requestExistingFileAccess = async (
   path: string
-): Promise<{ success: boolean; path?: string; outsideFileGrant?: string; error?: string }> => {
+): Promise<
+  | { success: true; path: string; outsideFileGrant: string; expiresAt: number }
+  | { success: false; error: string }
+> => {
   const targetPath = typeof path === 'string' ? path.trim() : '';
   if (!targetPath) {
     return { success: false, error: 'Path is required' };
@@ -693,15 +712,14 @@ export const requestExistingFileAccess = async (
 
   try {
     const selected = await getDesktopBridge()?.grantFileAccess?.(targetPath);
-    if (!isDesktopFileGrantResult(selected)) {
+    const parsed = desktopExistingFileGrantSchema.safeParse(selected);
+    if (!parsed.success) {
       return { success: false, error: 'File access was not granted' };
     }
-    const grantedPath = typeof selected.path === 'string' ? selected.path : '';
-    const outsideFileGrant = typeof selected.outsideFileGrant === 'string' ? selected.outsideFileGrant : '';
-    if (!grantedPath || !outsideFileGrant) {
-      return { success: false, error: 'File access was not granted' };
-    }
-    return { success: true, path: grantedPath, outsideFileGrant };
+    return {
+      success: true,
+      ...parsed.data,
+    };
   } catch (error) {
     console.warn('Failed to request existing file access', error);
     return { success: false, error: error instanceof Error ? error.message : String(error) };
@@ -801,7 +819,11 @@ export const restartToApplyUpdate = async (): Promise<boolean> => {
     return false;
   }
 
-  return restartDesktopApp();
+  // Unlike a plain restart, an install failure (rejected signature, disabled
+  // updater session) must reach the update dialog instead of being reduced to
+  // a boolean the caller cannot explain.
+  await invokeDesktop('desktop_restart');
+  return true;
 };
 
 export const restartDesktopApp = async (): Promise<boolean> => {

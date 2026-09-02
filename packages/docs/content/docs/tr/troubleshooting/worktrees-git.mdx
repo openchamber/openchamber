@@ -1,0 +1,35 @@
+---
+title: Worktree'ler ve Git
+description: Yaygın worktree ve git sorunlarını düzeltin.
+---
+
+# Worktree'ler ve Git
+
+[worktree sessions](/worktrees/) ve [git view](/git/) ile ortaya çıkan sorunlar ve bunları nasıl temizleyeceğiniz.
+
+## Bir worktree'nin bakıma ihtiyacı var
+
+OpenChamber, bir şey yolunda olmadığında worktree'yi işaretler:
+
+- **folder missing** — worktree'nin klasörü OpenChamber dışında silinmiş ya da taşınmış. Oturumu kaldırın ve yeni bir worktree oluşturun
+- **detached or unborn branch** — worktree normal bir branch üzerinde değil. Onu bir branch'e checkout edin
+- **merge, rebase, or cherry-pick in progress** — bir işlem yarım kalmış. Git görünümünden bitirin ya da iptal edin
+
+## Worktree oluşturulamıyor
+
+- **branch already exists** — başka bir branch adı seçin ya da mevcut branch seçeneğini kullanın
+- **name already in use** — başka bir worktree adı seçin
+
+## Commit veya PR üretimi başarısız oluyor
+
+Commit mesajı ya da PR açıklaması üretmek, aktif oturumunuz içinde çalışır. Bu yüzden açık bir oturum ve seçili çalışan bir model gerekir. Bir oturum açın ya da seçin ve tekrar deneyin.
+
+## SSH veya Windows yol sorunları
+
+- repo'nun kullandığı SSH anahtarının, [git identity](/git-identities/) içinde ayarladığınız anahtar olduğundan emin olun
+- Windows'ta git Unix tarzı yollar kullanır. Örneğin `/c/Users/...`. OpenChamber bunu ele alır, ama özel SSH anahtarı yolları da aynı biçimi izlemelidir
+
+## İlgili
+
+- [Worktree Sessions](/worktrees/) — worktree'lerin nasıl oluşturulup kaldırıldığı
+- [Git Identities](/git-identities/) — her repo için doğru anahtarı ve kimliği ayarlayın

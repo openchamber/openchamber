@@ -32,3 +32,26 @@ describe('useSessionDisplayStore project sorting', () => {
     expect(migrated.showArchivedSessions).toBe(true);
   });
 });
+
+describe('useSessionDisplayStore project display', () => {
+  test('defaults to showing all projects without a selected single project', () => {
+    expect(useSessionDisplayStore.getState().projectDisplayMode).toBe('all');
+    expect(useSessionDisplayStore.getState().singleProjectId).toBeNull();
+  });
+
+  test('stores the single-project mode independently from session grouping', () => {
+    useSessionDisplayStore.getState().setProjectDisplayMode('single');
+    useSessionDisplayStore.getState().setSingleProjectId('project-alpha');
+    useSessionDisplayStore.getState().setSessionGroupingMode('flat');
+
+    expect(useSessionDisplayStore.getState().projectDisplayMode).toBe('single');
+    expect(useSessionDisplayStore.getState().singleProjectId).toBe('project-alpha');
+    expect(useSessionDisplayStore.getState().sessionGroupingMode).toBe('flat');
+
+    useSessionDisplayStore.setState({
+      projectDisplayMode: 'all',
+      singleProjectId: null,
+      sessionGroupingMode: 'by-worktree',
+    });
+  });
+});

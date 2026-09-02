@@ -8,8 +8,65 @@ import {
 } from '@/components/chat/message/selectionMarkdown';
 import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
+import { shortcutRegistry } from '@/lib/shortcuts';
 
 const CHAT_INPUT_HOST_SELECTOR = '[data-chat-input="true"]';
+
+interface ActiveSelectionToolbarActions {
+  addToChat: () => void;
+  dismiss: () => void;
+}
+
+interface ActiveSelectionToolbarRegistration extends ActiveSelectionToolbarActions {
+  resumeGlobalShortcuts: () => void;
+}
+
+const activeSelectionToolbarRegistrations: ActiveSelectionToolbarRegistration[] = [];
+let activeSelectionToolbarVersion = 0;
+
+const releaseSelectionToolbar = (registration: ActiveSelectionToolbarRegistration): void => {
+  const index = activeSelectionToolbarRegistrations.indexOf(registration);
+  if (index === -1) return;
+
+  activeSelectionToolbarRegistrations.splice(index, 1);
+  registration.resumeGlobalShortcuts();
+  activeSelectionToolbarVersion += 1;
+};
+
+export const registerActiveSelectionToolbar = (
+  actions: ActiveSelectionToolbarActions,
+): (() => void) => {
+  const registration: ActiveSelectionToolbarRegistration = {
+    ...actions,
+    resumeGlobalShortcuts: shortcutRegistry.suspend(),
+  };
+  activeSelectionToolbarRegistrations.push(registration);
+  activeSelectionToolbarVersion += 1;
+
+  return () => releaseSelectionToolbar(registration);
+};
+
+export const hasActiveSelectionToolbar = (): boolean => activeSelectionToolbarRegistrations.length > 0;
+
+export const getActiveSelectionToolbarVersion = (): number => activeSelectionToolbarVersion;
+
+export const invokeActiveSelectionAddToChat = (): boolean => {
+  const registration = activeSelectionToolbarRegistrations.at(-1);
+  if (!registration) return false;
+
+  releaseSelectionToolbar(registration);
+  registration.addToChat();
+  return true;
+};
+
+export const dismissActiveSelectionToolbar = (): boolean => {
+  const registration = activeSelectionToolbarRegistrations.at(-1);
+  if (!registration) return false;
+
+  releaseSelectionToolbar(registration);
+  registration.dismiss();
+  return true;
+};
 
 const isInsideChatComposer = (node: Node | null): boolean => {
   if (!node) {
@@ -151,7 +208,6 @@ export const captureSelectionMarkdownForChat = (): string | null => {
 export const addSelectionToChat = (): boolean => {
   const markdown = captureSelectionMarkdownForChat();
 
-  useUIStore.getState().setActiveMainTab('chat');
   useUIStore.getState().setSessionSwitcherOpen(false);
 
   if (markdown) {

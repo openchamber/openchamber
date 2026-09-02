@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { scheduleCachedStateRetries } from './webviewCachedStateRetry';
 import { handleBridgeMessage, type BridgeRequest, type BridgeResponse } from './bridge';
 import { getThemeKindName } from './theme';
 import type { OpenCodeManager, ConnectionStatus } from './opencode';
@@ -58,6 +59,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly _MESSAGE_TIMEOUT = 5000; // 5 seconds
   private readonly _MAX_RETRIES = 3;
 
+  /**
+   * See webviewCachedStateRetry.ts — a single postMessage can be dropped
+   * before the webview bridge is ready, leaving the loading screen stuck.
+   */
+  private _scheduleCachedStateRetries(targetView: vscode.WebviewView | undefined): void {
+    scheduleCachedStateRetries({
+      target: targetView ?? this._view,
+      getCurrent: () => this._view,
+      isConnected: () => this._cachedStatus === 'connected',
+      send: () => this._sendCachedState(),
+    });
+  }
+
   private _createMessageId(): string {
     return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   }
@@ -102,6 +116,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     // Send cached connection status and API URL (may have been set before webview was resolved)
     this._sendCachedState();
+    // The webview bridge may not be ready yet; keep re-sending so a dropped
+    // `connectionStatus` can never leave the webview stuck on its loading screen.
+    this._scheduleCachedStateRetries(webviewView);
 
     // Send current active editor file state to the new webview
     this._lastActiveEditorFilePayload = null;
@@ -185,6 +202,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     
     // Send to webview if it exists
     this._sendCachedState();
+
+    // When we become connected, keep re-sending at staggered delays so the
+    // webview cannot miss the transition (postMessage is dropped if the
+    // webview bridge is not ready yet).
+    if (status === 'connected') {
+      this._scheduleCachedStateRetries(this._view);
+    }
   }
 
   public addTextToInput(text: string) {
@@ -198,6 +222,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         payload: { text }
       });
     }
+  }
+
+  public focusChatInput(): void {
+    if (!this._view) {
+      return;
+    }
+
+    this._view.show(true);
+    void this._view.webview.postMessage({
+      type: 'command',
+      command: 'focusChatInput',
+    });
   }
 
   public addContextSelection(selection: { filePath: string; filename: string; text: string }) {

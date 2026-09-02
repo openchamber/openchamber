@@ -17,6 +17,7 @@ import { createClientPairingRuntime } from '../../server/lib/client-auth/pairing
 import { createRelayIdentityRuntime } from '../../server/lib/relay/identity.js';
 import { DEFAULT_RELAY_URL } from '../../server/lib/relay/service.js';
 import { bytesToBase64Url } from '../../server/lib/relay/e2ee.js';
+import { createSettingsAccessors as createSettingsAccessorsModule } from './cli-settings-accessors.js';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -28,7 +29,6 @@ import {
 } from '../cli-output.js';
 
 const REMOTE_CLIENTS_FILE_NAME = 'remote-clients.json';
-const SETTINGS_FILE_NAME = 'settings.json';
 const PAIRING_SESSIONS_FILE_NAME = 'client-pairing-sessions.json';
 
 function isValidRelayUrl(value) {
@@ -55,20 +55,18 @@ function resolveRelayUrl(settings) {
 // Minimal settings.json read/write for the relay identity runtime. It reads the
 // whole object and writes it back with the relay keys added, so other settings
 // are preserved. Enough for the CLI without wiring the full settings runtime.
+//
+// Mirrors the settings runtime's guarantees: atomic writes (tmp + rename) so
+// concurrent readers in the running app never observe a half-written file, and
+// a STRICT reader gating relay identity regeneration so a swallowed read
+// failure can never mint a new serverId and orphan paired devices.
 function createSettingsAccessors() {
-  const settingsPath = path.join(getOpenChamberDataDir(), SETTINGS_FILE_NAME);
-  const readSettingsFromDiskMigrated = async () => {
-    try {
-      return JSON.parse(await fs.promises.readFile(settingsPath, 'utf8'));
-    } catch {
-      return {};
-    }
-  };
-  const writeSettingsToDisk = async (settings) => {
-    await fs.promises.mkdir(path.dirname(settingsPath), { recursive: true });
-    await fs.promises.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
-  };
-  return { readSettingsFromDiskMigrated, writeSettingsToDisk };
+  return createSettingsAccessorsModule({
+    fsPromises: fs.promises,
+    path,
+    dataDir: getOpenChamberDataDir(),
+    settingsFileName: 'settings.json',
+  });
 }
 
 // Resolves the instance's relay identity (serverId + encryption public key,

@@ -20,7 +20,33 @@ type SessionCreatedEvent = {
   dispatchedAsCommand: boolean;
 };
 
-type OpenChamberEvent = ScheduledTaskRanEvent | SessionCreatedEvent;
+/**
+ * One in-app browser action requested by the agent tool. Broadcast to every
+ * connected client; only the one owning a browser view answers.
+ */
+type BrowserControlRequestEvent = {
+  type: 'browser-control-request';
+  requestId: string;
+  action: string;
+  parameters: Record<string, unknown>;
+};
+
+/**
+ * The agent changed what it remembers. Carries only which store moved, not the
+ * entries: listeners re-read from the server, so the event cannot go stale
+ * between being sent and being handled.
+ */
+type AgentMemoryChangedEvent = {
+  type: 'agent-memory-changed';
+  scope: 'global' | 'project';
+  projectId?: string;
+};
+
+type OpenChamberEvent =
+  | ScheduledTaskRanEvent
+  | SessionCreatedEvent
+  | BrowserControlRequestEvent
+  | AgentMemoryChangedEvent;
 type Listener = (event: OpenChamberEvent) => void;
 
 let eventSource: EventSource | null = null;
@@ -107,6 +133,22 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     return;
   }
 
+  if (envelope.type === 'openchamber:agent-memory-changed') {
+    const properties = getEventProperties(envelope.properties);
+    const scope = properties?.scope === 'project' ? 'project' : 'global';
+    const nextEvent: AgentMemoryChangedEvent = {
+      type: 'agent-memory-changed',
+      scope,
+      ...(typeof properties?.projectId === 'string' && properties.projectId.length > 0
+        ? { projectId: properties.projectId }
+        : {}),
+    };
+    for (const listener of listeners) {
+      listener(nextEvent);
+    }
+    return;
+  }
+
   if (envelope.type === 'openchamber:session-created') {
     const properties = getEventProperties(envelope.properties);
     const sessionId = typeof properties?.sessionId === 'string' ? properties.sessionId : '';
@@ -125,6 +167,29 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
       ...(typeof properties?.projectId === 'string' && properties.projectId.length > 0
         ? { projectId: properties.projectId }
         : {}),
+    };
+    for (const listener of listeners) {
+      listener(nextEvent);
+    }
+    return;
+  }
+
+  if (envelope.type === 'openchamber:browser-control-request') {
+    const properties = getEventProperties(envelope.properties);
+    const requestId = typeof properties?.requestId === 'string' ? properties.requestId : '';
+    const action = typeof properties?.action === 'string' ? properties.action : '';
+    if (!requestId || !action) {
+      return;
+    }
+
+    const rawParameters = properties?.parameters;
+    const nextEvent: BrowserControlRequestEvent = {
+      type: 'browser-control-request',
+      requestId,
+      action,
+      parameters: rawParameters && typeof rawParameters === 'object' && !Array.isArray(rawParameters)
+        ? rawParameters as Record<string, unknown>
+        : {},
     };
     for (const listener of listeners) {
       listener(nextEvent);
@@ -175,7 +240,15 @@ const connect = () => {
 
   cleanupSource();
 
-  const source = new EventSource(getRuntimeUrlResolver().sse('/api/openchamber/events'));
+  // Tell the server what this client can do while the connection lasts. Only a
+  // Chromium host can drive a page; a browser tab can display one but not be
+  // driven, and the agent tool needs to know which it is talking to without a
+  // setting anyone has to remember to change.
+  const canControlBrowser = typeof window !== 'undefined' && Boolean(window.__OPENCHAMBER_ELECTRON__);
+  const source = new EventSource(getRuntimeUrlResolver().sse(
+    '/api/openchamber/events',
+    canControlBrowser ? { browser: '1' } : undefined,
+  ));
   source.onopen = () => {
     resetHeartbeatTimer();
   };

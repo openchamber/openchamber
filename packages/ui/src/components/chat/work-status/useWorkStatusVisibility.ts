@@ -1,6 +1,6 @@
 import React from 'react';
-import { useUIStore } from '@/stores/useUIStore';
-import { normalizePath } from '@/lib/pathNormalization';
+import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 
 /**
  * Fixed panel width. The panel is not user-resizable: it is an object inside
@@ -23,7 +23,6 @@ export const WORK_STATUS_REQUIRED_ROW_WIDTH =
   WORK_STATUS_PANEL_WIDTH + WORK_STATUS_PANEL_GUTTER + WORK_STATUS_MIN_CHAT_WIDTH;
 
 type Options = {
-  directory: string | null | undefined;
   isMobile: boolean;
   isVSCode: boolean;
 };
@@ -52,12 +51,20 @@ type Result = {
  * panel, oscillating forever. The row width is independent of the panel, so it
  * is the only stable input.
  */
-export const useWorkStatusVisibility = ({ directory, isMobile, isVSCode }: Options): Result => {
+export const useWorkStatusVisibility = ({ isMobile, isVSCode }: Options): Result => {
   const [rowNode, setRowNode] = React.useState<HTMLDivElement | null>(null);
   const [rowWidth, setRowWidth] = React.useState<number | null>(null);
   const rowRef = React.useCallback((node: HTMLDivElement | null) => { setRowNode(node); }, []);
 
-  const directoryKey = React.useMemo(() => normalizePath(directory ?? null), [directory]);
+  // Keyed exactly like the rail and the panel itself: whichever directory the
+  // app is effectively on, not the directory this panel reports about. A chat
+  // with no project reports on nothing, and looking the context panel up under
+  // that empty key answered "closed" while it was plainly open on screen.
+  const effectiveDirectory = useEffectiveDirectory();
+  const directoryKey = React.useMemo(
+    () => (effectiveDirectory ? normalizeContextPanelDirectoryKey(effectiveDirectory) : ''),
+    [effectiveDirectory],
+  );
 
   // Mirrors ContextPanel's own derivation: a panel with `isOpen` but no
   // resolvable active tab renders nothing, and must not displace this panel.

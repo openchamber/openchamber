@@ -2,15 +2,21 @@ import React from 'react';
 import { useI18n } from '@/lib/i18n';
 import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
-import { getGitHubPrStatusKey, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
-import { useSession, useSessionMessages } from '@/sync/sync-context';
+import { useFreshestPrVisualSummaryForBranch } from '@/stores/useGitHubPrStatusStore';
+import { useSessionMessages } from '@/sync/sync-context';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { normalizeProjectPath } from '@/lib/projectResolution';
+import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resolveUsageTone } from '@/lib/quota';
+import { sessionEvents } from '@/lib/sessionEvents';
+import { normalizePath } from '@/lib/pathNormalization';
 import { computeContextUsage } from './contextUsage';
+import { formatCost } from './subagentCost';
+import { useSubagentCostRollup } from './useSubagentCostRollup';
 import {
   WorkStatusCallout,
   WorkStatusMeter,
@@ -30,11 +36,6 @@ type Props = {
   showRepository: boolean;
 };
 
-// Spend is read against a budget, so it keeps its real precision instead of
-// collapsing to two decimals. Trailing zeros are dropped so exact values stay
-// short.
-const trimZeros = (value: string): string => (value.includes('.') ? value.replace(/0+$/, '').replace(/\.$/, '') : value);
-const formatCost = (cost: number): string => `$${trimZeros(cost.toFixed(4))}`;
 // Matches the header readout exactly: one decimal, capped the same way, so the
 // two places that report context fill never disagree by a rounding step.
 const formatPercent = (percent: number): string => `${Math.min(percent, 999).toFixed(1)}%`;
@@ -46,57 +47,81 @@ const formatPercent = (percent: number): string => `${Math.min(percent, 999).toF
  */
 export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, goalRow, showSession, showRepository }) => {
   const { t } = useI18n();
-  const session = useSession(sessionId ?? '', directory ?? undefined);
   const { git } = useRuntimeAPIs();
   const ensureStatus = useGitStore((state) => state.ensureStatus);
+  const fetchStatus = useGitStore((state) => state.fetchStatus);
+  const clearDiffCache = useGitStore((state) => state.clearDiffCache);
+
+  // The repository the readouts describe. Same resolution as the Git tab: the
+  // session directory itself when it is a repository, otherwise the nested
+  // repository selected (or auto-selected) for it, so a session in a plain
+  // folder of repositories still reports the branch and changes the Git tab
+  // shows. Navigation below stays keyed on `directory` — context-panel tabs
+  // are per project root.
+  const { gitDirectory } = useNestedGitDirectory(directory, { enabled: showRepository });
 
   const gitStatus = useGitStore(
     React.useCallback(
-      (state) => (directory ? state.directories.get(directory)?.status ?? null : null),
-      [directory],
+      (state) => (gitDirectory ? state.directories.get(gitDirectory)?.status ?? null : null),
+      [gitDirectory],
     ),
   );
 
   // Warm the shared git cache through the background-network gate so the panel
   // never competes with the chat's own bootstrap traffic for sockets.
   React.useEffect(() => {
-    if (!directory || !git) return;
-    void runBackgroundNetworkTask(() => ensureStatus(directory, git));
-  }, [directory, git, ensureStatus]);
+    if (!showRepository || !gitDirectory || !git) return;
+    void runBackgroundNetworkTask(() => ensureStatus(gitDirectory, git));
+  }, [gitDirectory, git, ensureStatus, showRepository]);
+
+  // Own the live invalidation for the repository readout. The desktop
+  // composer's changed-files row no longer renders, so this panel must not
+  // depend on ChatInput (or an opened Git surface) to refresh the shared cache
+  // on its behalf.
+  React.useEffect(() => {
+    if (!showRepository || !gitDirectory || !git) return;
+    return sessionEvents.onGitRefreshHint((hint) => {
+      if (normalizePath(hint.directory) !== normalizePath(gitDirectory)) return;
+      if (hint.paths?.length) {
+        clearDiffCache(gitDirectory, hint.paths);
+      }
+      void fetchStatus(gitDirectory, git, { silent: true });
+    });
+  }, [clearDiffCache, gitDirectory, fetchStatus, git, showRepository]);
 
   const branch = gitStatus?.current?.trim() || null;
 
-  // The panel's directory can be a worktree, so the project is the registered
-  // one whose path contains it — longest match wins, since projects can nest.
+  // Which repository under the project the branch belongs to. Only meaningful
+  // when the readouts come from a nested repository; for a project that is a
+  // repository itself the section header already names it.
+  const nestedRepoLabel = React.useMemo(() => {
+    if (!directory || !gitDirectory || gitDirectory === directory) return null;
+    const rootPrefix = `${directory}/`;
+    return gitDirectory.startsWith(rootPrefix) ? gitDirectory.slice(rootPrefix.length) : gitDirectory;
+  }, [directory, gitDirectory]);
+
+  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+  // Worktrees normally sit beside rather than beneath their project directory,
+  // so a prefix match alone cannot find their owning project. Reuse the shared
+  // session-directory resolver, which consults the discovered worktree map.
   const projectLabel = useProjectsStore(
     React.useCallback((state) => {
-      const normalizedDirectory = normalizeProjectPath(directory ?? null);
-      if (!normalizedDirectory) return null;
-      let best: { path: string; label: string } | null = null;
-      for (const project of state.projects) {
-        const projectPath = normalizeProjectPath(project.path);
-        if (!projectPath) continue;
-        const contains = normalizedDirectory === projectPath
-          || normalizedDirectory.startsWith(`${projectPath}/`);
-        if (!contains) continue;
-        if (best && best.path.length >= projectPath.length) continue;
-        const label = project.label?.trim()
-          || projectPath.split('/').filter(Boolean).pop()
-          || projectPath;
-        best = { path: projectPath, label };
-      }
-      return best?.label ?? null;
-    }, [directory]),
+      const project = resolveProjectForSessionDirectory(
+        state.projects,
+        availableWorktreesByProject,
+        directory,
+      );
+      if (!project) return null;
+      return project.label?.trim()
+        || project.path.split('/').filter(Boolean).pop()
+        || project.path;
+    }, [availableWorktreesByProject, directory]),
   );
 
   // Read-only: PR watching is owned by the background tracker. Starting a watch
   // here would multiply GitHub requests per open session, which is exactly the
   // fan-out the PR-status concurrency gate exists to prevent.
-  const prKey = React.useMemo(
-    () => (directory && branch ? getGitHubPrStatusKey(directory, branch) : null),
-    [directory, branch],
-  );
-  const prSummary = usePrVisualSummary(prKey);
+  const prSummary = useFreshestPrVisualSummaryForBranch(gitDirectory, branch);
 
   // `getCurrentModel` is an imperative getter: its reference never changes, so
   // calling it in render subscribes to nothing. Subscribe to the selected model
@@ -184,7 +209,16 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
     : usageTone === 'warn' ? 'var(--status-warning)'
       : 'var(--status-success)';
 
-  const cost = typeof session?.cost === 'number' && session.cost > 0 ? session.cost : null;
+  // Rollup total: own cost plus every descendant subagent's cost, recursively
+  // (see useSubagentCostRollup). Shown here instead of session.cost alone, so
+  // spend that ran in a spawned subagent doesn't hide from the reader.
+  const { totalCost, ownCost, subagentCost, subagentCount } = useSubagentCostRollup(sessionId);
+  const cost = totalCost !== null && totalCost > 0 ? totalCost : null;
+  // The total answers "what has this cost"; the split answers "why is it more
+  // than the session I am looking at". Only worth a line once subagents exist —
+  // without them the total *is* the session's own cost and the row would
+  // restate the number directly above it.
+  const showCostBreakdown = cost !== null && subagentCount > 0 && subagentCost > 0;
   const hasSession = showSession && (usagePercent !== null || cost !== null || Boolean(goalRow));
   const hasRepository = showRepository && Boolean(branch || changed || prSummary || attentionLabel);
 
@@ -213,6 +247,17 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                 )}
               />
               <WorkStatusMeter percent={usagePercent} color={meterColor} />
+              {/* Caption, not a row: it explains the figure above it rather
+                  than reporting a reading of its own, so it carries no icon
+                  and no label column. */}
+              {showCostBreakdown ? (
+                <p className="mx-1 mb-1 truncate text-[11px] leading-4 text-muted-foreground tabular-nums">
+                  {t('chat.workStatus.cost.breakdown', {
+                    session: formatCost(ownCost),
+                    subagents: formatCost(subagentCost),
+                  })}
+                </p>
+              ) : null}
             </>
           ) : null}
           {/* Below the context readout: the goal is a standing instruction,
@@ -223,7 +268,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
 
       {hasRepository ? (
         <WorkStatusSection
-          title={t('chat.workStatus.section.repository')}
+          title={t('chat.workStatus.section.project')}
           summary={projectLabel}
         >
           {attentionLabel ? <WorkStatusCallout>{attentionLabel}</WorkStatusCallout> : null}
@@ -244,6 +289,16 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                     ? <WorkStatusValue tone="muted">{`↓${gitStatus?.behind}`}</WorkStatusValue> : null}
                 </>
               ) : undefined}
+            />
+          ) : null}
+
+          {nestedRepoLabel ? (
+            <WorkStatusRow
+              icon="folder"
+              onClick={directory ? () => openSurface('git') : undefined}
+              ariaLabel={t('chat.workStatus.action.openGit')}
+              label={nestedRepoLabel}
+              muted
             />
           ) : null}
 

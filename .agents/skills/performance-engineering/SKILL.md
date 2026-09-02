@@ -11,6 +11,8 @@ Optimize the amount and frequency of work before optimizing individual operation
 
 **Core principle:** Make expensive work structurally unnecessary. A fast inner function still freezes the app when called millions of times on the main thread.
 
+Load `sync-state-invariants` when an optimization changes state authority, reconciliation, optimistic data, event ordering, cache lifecycle, or destructive cleanup. This skill owns measured cost; `sync-state-invariants` owns state correctness.
+
 ## Start With A Performance Contract
 
 Define before editing:
@@ -26,6 +28,8 @@ Define before editing:
 Do not optimize against a toy fixture when the report provides production scale.
 
 ## Workflow
+
+Complete the numbered workflow in order. An optimization is complete only when the exact measured scenario meets its budget and separate correctness checks preserve every applicable state, identity, layout, and lifecycle transition.
 
 ### 0. Trust The Measurement Before Trusting The Number
 
@@ -64,6 +68,8 @@ validity checks ran.
 - Capture a baseline before changing code.
 
 Do not infer a bottleneck from code appearance when a trace or counter can identify it.
+
+Treat every proposed optimization as a hypothesis. Memoization, caches, indexes, workers, scheduling, retries, and lifecycle machinery must address an observed cost or failure in the measured path; “could be slow” or “might race” is not evidence. Keep only the smallest mechanism that meets the contract, except where an inherent security, data-loss, destructive-operation, or concurrency invariant requires proactive protection.
 
 **Never accept an "after" without a "before" on the identical scenario and
 build.** Measuring a fixed build against a remembered number, a different
@@ -193,6 +199,8 @@ Add a cache only when all are explicit:
 - runtime/project/user isolation where identities can collide;
 - proof that caching removes enough work to meet the budget.
 
+Do not introduce a cache merely to make an abstraction reusable or prepare for future consumers. First prove repeated work in the real path; then place the cache with the narrowest owner and lifetime that can invalidate it correctly.
+
 A cache inside an `O(consumers × entities × candidates)` loop is a mitigation, not automatically a complete fix.
 
 ## Repository Tooling
@@ -202,7 +210,7 @@ command, how to stand up a production build to measure against, how to read the
 artifacts, and the validity guarantees these scripts enforce. Read it before
 measuring.
 
-Four unattended capture commands exist; prefer them over ad-hoc timing code,
+Five unattended capture commands exist; prefer them over ad-hoc timing code,
 and extend them when a scenario is missing rather than measuring by hand.
 
 | Command | Answers |
@@ -210,6 +218,8 @@ and extend them when a scenario is missing rather than measuring by hand.
 | `bun run profile:idle` | What the app does while nobody interacts with it. Supports `--session`, `--tab`, `--then-tab`, `--panel`, `--expand-projects` to reach a specific mounted state, plus `--baseline` and `--budget-*` for regression gating. |
 | `bun run profile:session` | What a streaming assistant response costs. Creates a session, dispatches a prompt through the `openchamber session` CLI, and records until the session reports idle. Reports the long-task distribution, a timeline-trace breakdown, running animations, and output-normalised metrics. |
 | `bun run profile:animation` | What a CSS animation costs, isolated from the app. Animate only `transform` and `opacity`; everything else recalculates style every frame. |
+| `bun run profile:switch` | How long switching sessions from the sidebar takes: `ack` (the clicked row highlights) and `content` (the target session's messages are on screen), cold and warm, plus the requests each switch fires. Use it as the regression gate for any change in the sidebar, header, chat container, or markdown first paint. |
+| `bun run profile:switch` | How long switching sessions from the sidebar takes: `ack` (the clicked row highlights) and `content` (the target session's messages are on screen), cold and warm, plus the requests each switch fires. Use it as the regression gate for any change in the sidebar, header, chat container, or markdown first paint. |
 | `bun run profile:browser` | A manually driven capture when the interaction cannot be scripted. |
 
 Both automated commands fail loudly rather than reporting a clean result when
@@ -275,24 +285,6 @@ Ship a bounded cache-only or local mitigation under deadline pressure only when:
 - remaining complexity is documented as follow-up work.
 
 If the interaction remains above budget, do not call the mitigation the completed performance fix.
-
-## Common Rationalizations
-
-| Rationalization | Reality |
-|---|---|
-| "The helper is cheap" | Multiply it by events, entities, candidates, and consumers. |
-| "No component rerendered" | Selectors and equality comparisons may still burn CPU. |
-| "`useMemo` fixes it" | Memoization does not help when dependencies churn or consumers duplicate work. |
-| "The cache made it 10× faster" | Compare the result with the interaction budget, not only the baseline. |
-| "Projects are few" | Identify the dimension that is large and the dimensions multiplying it. |
-| "Move it to a worker" | Moving waste changes responsiveness, not total cost or data correctness. |
-| "Empty means nothing exists" | Empty after failure or partial loading is not authoritative absence. |
-| "We can optimize later" | Add a scale regression now or the multiplier will return. |
-| "The profile is clean" | Prove the instrument fired and the renderer was not throttled. A disabled instrument looks identical to a fast app. |
-| "It is much faster now" | Against which baseline, on which build, in which scenario? Re-run the unchanged build. |
-| "Most of the time is `(program)`" | The sampler cannot see native work. Read the timeline trace. |
-| "It does not reproduce here" | Compare your scale to the reporter's on the dimension the code keys on. |
-| "It cannot hurt to keep the change" | An unmeasured change is unvalidated complexity that hides the path from the next investigation. |
 
 ## Exit Checklist
 

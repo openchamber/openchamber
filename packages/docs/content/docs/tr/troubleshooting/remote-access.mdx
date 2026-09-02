@@ -1,0 +1,47 @@
+---
+title: Uzaktan Erişim
+description: Tünelleri, uzak instance'ları ve OpenChamber'a başka bir cihazdan erişmeyi düzeltin.
+---
+
+# Uzaktan Erişim
+
+OpenChamber'a telefonunuzdan ya da başka bir makineden ulaşamıyorsanız, çözüm bağlantı biçiminize göre değişir.
+
+## Önce temel kontrolleri yapın
+
+- önce aynı bilgisayarda `http://localhost:3000` adresini açın. Bu da başarısız olursa sorun uzak bağlantı değildir. Bkz. [OpenCode connection](/troubleshooting/opencode-connection/)
+- sunucunun çalıştığını `openchamber status` ile doğrulayın
+
+## Eşlenmiş cihaz bağlanmıyor
+
+- QR kod / eşleştirme bağlantısı **tek kullanımlıktır**. Daha önce tarandıysa ya da süresi dolduysa, **Add a device** üzerinden yenisini oluşturun
+- cihaz **Home network only** ile eşleştirildiyse o ağın dışından bağlanamaz. Tekrar **Anywhere** ile eşleştirin
+- **Anywhere** eşleştirmesi için sunucudaki **Settings → Remote Instances → OpenChamber Relay** ayarını kontrol edin. **Connected** yazmalı. Değilse devre dışı bırakıp yeniden etkinleştirin
+- bir cihaz **revoked** edildiyse token kalıcı olarak silinmiştir. Yeni bir QR kod ile tekrar eşleştirin
+
+Bu bağlantıların nasıl çalıştığı için [Connect a Device](/connect-devices/) ve [Private Relay](/private-relay/) bölümlerine bakın.
+
+## Tunnel bağlantısı çalışmıyor
+
+- `openchamber tunnel status --all` çalıştırın
+- tüneli aynı instance ve porttan yeniden başlatın
+- önceki bağlantı zaten kullanıldıysa bağlantı linkini yeniden oluşturun
+
+Tam kurulum için [Tunnels](/tunnels/) bölümüne bakın.
+
+## Uzak instance bağlanmıyor (desktop)
+
+Bir [remote instance](/remote-instances/) takılırsa, OpenChamber hangi adımın başarısız olduğunu söyler:
+
+- **auth** — SSH ya da UI parolanız reddedildi. Tekrar girin
+- **install / start** — OpenChamber uzak makinede sunucuyu kuramadı ya da başlatamadı. O makinenin gereksinimlerini kontrol edin
+- **forwarding** — bağlantı kuruludur ama port size ulaşmıyordur. Farklı bir local port deneyin
+
+## Kendi sunucunuzun arkasında
+
+OpenChamber'ı bir reverse proxy arkasına koyduysanız ve garip açılıyorsa ya da bağlanmıyorsa, [Reverse Proxy](/reverse-proxy/) bölümüne bakın.
+
+## İlgili
+
+- [Connect a Device](/connect-devices/) · [Private Relay](/private-relay/) · [Tunnels](/tunnels/) · [Remote Instances](/remote-instances/) · [Reverse Proxy](/reverse-proxy/)
+- [Security](/security/) — UI'ı dışarı açmadan önce koruyun
