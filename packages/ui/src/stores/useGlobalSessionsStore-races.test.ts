@@ -154,3 +154,50 @@ describe("global session mutation reconciliation", () => {
     expect(useGlobalSessionsStore.getState().archivedSessions).toEqual([])
   })
 })
+
+describe("global snapshot authority", () => {
+  beforeEach(() => {
+    listRequest = deferred<Session[]>()
+    opencodeClient.getSdkClient = () => sdk
+    useGlobalSessionsStore.getState().resetForRuntimeSwitch()
+  })
+
+  afterEach(() => {
+    opencodeClient.getSdkClient = originalGetSdkClient
+  })
+
+  test("a scoped directory refresh never claims global authority", async () => {
+    // SAFETY: `directory` is an additive server field the local Session type omits.
+    const scoped = { ...session("scoped"), directory: "/source" } as Session
+    const refreshing = useGlobalSessionsStore.getState().refreshSessionsForDirectories(["/source"])
+
+    listRequest.resolve([scoped])
+    await refreshing
+
+    expect(useGlobalSessionsStore.getState().activeSessions.map((item) => item.id)).toEqual(["scoped"])
+    expect(useGlobalSessionsStore.getState().status).toBe("idle")
+    expect(useGlobalSessionsStore.getState().hasLoaded).toBe(false)
+  })
+
+  test("only a successful complete snapshot arms ready authority", async () => {
+    expect(useGlobalSessionsStore.getState().status).toBe("idle")
+
+    const loading = useGlobalSessionsStore.getState().loadSessions()
+    listRequest.resolve([session("everything")])
+    await loading
+
+    expect(useGlobalSessionsStore.getState().status).toBe("ready")
+  })
+
+  test("a failed complete snapshot preserves prior sessions and withholds authority", async () => {
+    const known = session("known")
+    useGlobalSessionsStore.getState().applySnapshot([known], [])
+
+    const loading = useGlobalSessionsStore.getState().loadSessions()
+    listRequest.reject(new Error("opencode unreachable"))
+    await loading
+
+    expect(useGlobalSessionsStore.getState().activeSessions.map((item) => item.id)).toEqual(["known"])
+    expect(useGlobalSessionsStore.getState().status).toBe("error")
+  })
+})

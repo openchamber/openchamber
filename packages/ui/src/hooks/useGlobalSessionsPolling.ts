@@ -1,4 +1,5 @@
 import React from 'react';
+import { isDesktopShell } from '@/lib/desktop';
 import { ensureGlobalSessionsLoaded, refreshGlobalSessionsForDirectories } from '@/stores/useGlobalSessionsStore';
 import { useKnownSessionDirectoriesStore } from '@/stores/useKnownSessionDirectoriesStore';
 import { getAllSyncSessions, subscribeToInitialScopedDirectoryLoad } from '@/sync/sync-refs';
@@ -25,7 +26,18 @@ type WaitForInitialScopedLoad = (onSettled: () => void) => () => void;
 /** Defers work to idle time and returns its canceller. */
 type ScheduleIdleWork = (callback: () => void, timeoutMs: number) => () => void;
 
+/**
+ * Desktop covers the global cache on demand only. The complete snapshot walks
+ * every project the OpenCode server knows, which on a local machine is real
+ * sustained filesystem work — a 60s sample caught the managed process reading
+ * three unrelated project trees, and the antivirus backlog cost more CPU than
+ * OpenCode. Idle deferral moved when that ran without removing it. Web and
+ * VS Code address a server they do not own, so they keep the eager load.
+ */
+export const shouldLoadInitialGlobalSnapshot = (): boolean => !isDesktopShell();
+
 export type GlobalSessionsPollingRuntime = {
+  /** Omitted, this surface has no automatic snapshot: nothing waits, nothing queues. */
   initialLoad?: () => void;
   /** Sequences the first unscoped load after scoped startup; omitted, it runs on start. */
   waitForInitialScopedLoad?: WaitForInitialScopedLoad;
@@ -105,12 +117,13 @@ export const startGlobalSessionsPolling = (
     cancelIdleLoad = runtime.scheduleIdleWork(runInitialLoad, GLOBAL_SESSIONS_IDLE_LOAD_TIMEOUT_MS);
   };
 
-  let cancelInitialLoadWait: () => void = () => {};
-  if (runtime.waitForInitialScopedLoad) {
-    cancelInitialLoadWait = runtime.waitForInitialScopedLoad(scheduleInitialLoad);
-  } else {
+  const startInitialLoadSequence = (): (() => void) => {
+    if (!runtime.initialLoad) return () => {};
+    if (runtime.waitForInitialScopedLoad) return runtime.waitForInitialScopedLoad(scheduleInitialLoad);
     scheduleInitialLoad();
-  }
+    return () => {};
+  };
+  const cancelInitialLoadWait = startInitialLoadSequence();
 
   const requestRefresh = () => {
     const requestedAt = runtime.now();
@@ -140,7 +153,9 @@ export const useGlobalSessionsPolling = (enabled: boolean): void => {
     if (!enabled) return;
 
     return startGlobalSessionsPolling({
-      initialLoad: () => { void ensureGlobalSessionsLoaded(getAllSyncSessions()); },
+      initialLoad: shouldLoadInitialGlobalSnapshot()
+        ? () => { void ensureGlobalSessionsLoaded(getAllSyncSessions()); }
+        : undefined,
       waitForInitialScopedLoad: subscribeToInitialScopedDirectoryLoad,
       scheduleIdleWork: scheduleBrowserIdleWork,
       refresh: () => {

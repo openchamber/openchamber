@@ -68,6 +68,10 @@ These stores coordinate persistent project/session metadata across multiple view
 
 `useGlobalSessionsStore.ts` owns cold/global active and archived session coverage. Its entity map and active root, parent/child, and directory indexes are maintained in the same transaction as the compatibility arrays and `sessionsByDirectory`. Full authoritative snapshots may rebuild those indexes once; direct create, update, move, archive, and delete mutations update only affected hierarchy and directory buckets. Metadata-only updates preserve the structure reference. It is complementary to directory child stores: it is not the source of live busy/retry status or session messages.
 
+`status: 'ready'` is the store's only claim of complete global coverage, and only a **successful** `loadSessions()` — the unscoped snapshot — sets it. `refreshSessionsForDirectories()` deliberately writes no `status` or `hasLoaded`: it knows about the directories it asked for and nothing else, so however many scoped refreshes land, the cache stays unauthoritative. A failed full load leaves `status: 'error'` with the prior sessions intact, which withholds authority and lets `ensureGlobalSessionsLoaded` retry rather than publishing an empty list as truth. Consumers that delete, archive, or otherwise act destructively on absence must gate on `status === 'ready'`; treating a populated-but-unauthoritative cache as complete is how unrelated sessions get cleaned up.
+
+Coverage is therefore surface-dependent. On Desktop the store is populated but never authoritative until something asks for the full snapshot — see the Global session list section in `sync/DOCUMENTATION.md`. Anything reading this store must work correctly from partial coverage.
+
 User-visible session ordering is also not owned by the global cache array order. `sync/session-ordering.ts` combines lifecycle rank with timestamp fallbacks, and session surfaces must use that shared comparator instead of independently sorting global sessions by `time.updated`.
 
 Global refresh rules:

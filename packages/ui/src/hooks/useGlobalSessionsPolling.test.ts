@@ -8,6 +8,7 @@ import {
   GLOBAL_SESSIONS_REFRESH_COOLDOWN_MS,
   type GlobalSessionsPollingRuntime,
   scheduleBrowserIdleWork,
+  shouldLoadInitialGlobalSnapshot,
   startGlobalSessionsPolling,
   subscribeToBrowserRecoverySignals,
 } from './useGlobalSessionsPolling';
@@ -32,6 +33,7 @@ type PendingInterval = {
 
 type PollingHarness = {
   runtime: GlobalSessionsPollingRuntime;
+  withoutInitialLoad: () => GlobalSessionsPollingRuntime;
   advanceClock: (durationMs: number) => void;
   emitRecoverySignal: () => void;
   initialLoads: () => number;
@@ -168,6 +170,7 @@ const createPollingHarness = (
 
   return {
     runtime,
+    withoutInitialLoad: () => ({ ...runtime, initialLoad: undefined }),
     advanceClock,
     emitRecoverySignal,
     initialLoads: () => initialLoads,
@@ -399,6 +402,47 @@ describe('global sessions polling lifecycle', () => {
 
     expect(harness.initialLoads()).toBe(1);
     expect(harness.refreshes()).toBe(0);
+  });
+
+  test('a demand-only surface neither waits on the scoped gate nor queues idle work', () => {
+    const gate = createScopedLoadGate();
+    const idle = createIdleHarness();
+    const harness = createPollingHarness(gate.waitForInitialScopedLoad, idle.scheduleIdleWork);
+
+    startGlobalSessionsPolling(harness.withoutInitialLoad());
+
+    expect(gate.liveWaiters()).toBe(0);
+    expect(idle.requestedTimeouts()).toEqual([]);
+    expect(idle.pendingIdleWork()).toBe(0);
+    expect(harness.initialLoads()).toBe(0);
+  });
+
+  test('a demand-only surface still arms recovery signals and the backstop', () => {
+    const gate = createScopedLoadGate();
+    const idle = createIdleHarness();
+    const harness = createPollingHarness(gate.waitForInitialScopedLoad, idle.scheduleIdleWork);
+
+    startGlobalSessionsPolling(harness.withoutInitialLoad());
+
+    expect(harness.scheduledDelays()).toEqual([GLOBAL_SESSIONS_BACKSTOP_INTERVAL_MS]);
+    expect(harness.liveSignalListeners()).toBe(1);
+
+    harness.advanceClock(GLOBAL_SESSIONS_BACKSTOP_INTERVAL_MS);
+
+    expect(harness.refreshes()).toBe(1);
+    expect(harness.initialLoads()).toBe(0);
+  });
+
+  test('a demand-only surface never loads even after the scoped gate settles and idle drains', () => {
+    const gate = createScopedLoadGate();
+    const idle = createIdleHarness();
+    const harness = createPollingHarness(gate.waitForInitialScopedLoad, idle.scheduleIdleWork);
+
+    startGlobalSessionsPolling(harness.withoutInitialLoad());
+    gate.settle();
+    idle.runIdleWork();
+
+    expect(harness.initialLoads()).toBe(0);
   });
 
   test('stops listening and clears the backstop on disposal', () => {
@@ -639,5 +683,45 @@ describe('browser idle scheduler', () => {
     await nextTask();
 
     expect(runs).toBe(0);
+  });
+});
+
+describe('initial global snapshot surface policy', () => {
+  const setElectronRuntime = (runtime: string | undefined) => {
+    Object.defineProperty(browserWindow, '__OPENCHAMBER_ELECTRON__', {
+      configurable: true,
+      writable: true,
+      value: runtime === undefined ? undefined : { runtime },
+    });
+  };
+
+  afterEach(() => {
+    setElectronRuntime(undefined);
+  });
+
+  test('Desktop declines the automatic snapshot', () => {
+    setElectronRuntime('electron');
+
+    expect(shouldLoadInitialGlobalSnapshot()).toBe(false);
+  });
+
+  test('Web keeps the automatic snapshot', () => {
+    setElectronRuntime(undefined);
+
+    expect(shouldLoadInitialGlobalSnapshot()).toBe(true);
+  });
+
+  test('a VS Code webview keeps the automatic snapshot', () => {
+    // The extension host never injects the Electron shell descriptor, so the
+    // webview is not a desktop shell even though VS Code itself runs on Electron.
+    setElectronRuntime(undefined);
+
+    expect(shouldLoadInitialGlobalSnapshot()).toBe(true);
+  });
+
+  test('a non-electron shell descriptor keeps the automatic snapshot', () => {
+    setElectronRuntime('capacitor');
+
+    expect(shouldLoadInitialGlobalSnapshot()).toBe(true);
   });
 });

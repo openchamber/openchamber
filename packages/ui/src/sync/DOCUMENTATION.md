@@ -123,15 +123,43 @@ Session materialization recency is keyed by runtime and directory. Foreground lo
 Use `useGlobalSessionsStore` when the UI needs a **shared global session cache**.
 
 Each full app root owns one global polling lifecycle through
-`useGlobalSessionsPolling`. The web/desktop root and VS Code chat root load the
-full, unscoped list exactly once (`ensureGlobalSessionsLoaded`), which is
-what arms `status: 'ready'` for authoritative cleanup, archived auto-folders,
+`useGlobalSessionsPolling`. The full, unscoped list (`ensureGlobalSessionsLoaded`)
+is what arms `status: 'ready'` for authoritative cleanup, archived auto-folders,
 and other global-cache consumers. Only that complete unscoped snapshot
-establishes global authority; the scoped refreshes below never do.
+establishes global authority; the scoped refreshes below never do, and a failed
+load leaves `status: 'error'` rather than publishing an empty list as truth.
 
-That first load is sequenced behind scoped startup rather than fired on mount,
-and then handed to idle time rather than run on the interactive path. There are
-two stages, and both are required.
+**Whether the root loads it automatically depends on the surface**
+(`shouldLoadInitialGlobalSnapshot`). Web and VS Code do. **Desktop does not**:
+it schedules nothing and starts nothing, not on mount, not after the scoped
+gate, not at idle. On a local machine that snapshot is real sustained
+filesystem work — a 60s sample of the managed process caught it reading three
+unrelated project trees and their `.opencode`/`.omo`/`.agents` directories, and
+the antivirus backlog it created (45% scan extension, 18% CryptoGuard) cost
+more CPU than OpenCode's own 5%. Idle deferral only moved when that ran.
+`isDesktopShell()` is the detection; a Capacitor or browser client is not a
+desktop shell and keeps the automatic load.
+
+So on Desktop the global cache starts **partial and unloaded**: persisted
+managed-chat rows plus whatever live events and scoped refreshes add, with
+`hasLoaded: false` and `status: 'idle'`. It becomes complete only when a surface
+asks. Those demand edges are unchanged and each load the full snapshot
+explicitly, sharing the store's in-flight dedupe: `ArchiveView` on open, a
+direct session route (`openSessionFromRoute`), retention/manual cleanup
+(`useSessionAutoCleanup`, before any destructive pass), and the
+`scheduled-task-ran` control event in `useSessionListSync` via
+`refreshGlobalSessions()`.
+
+Consumers must therefore tolerate partial coverage. Destructive ones already
+do: `useAuthoritativeSessionCleanup` returns early unless
+`hasAuthoritativeGlobalSessions` (`status === 'ready'`), so on Desktop it simply
+never runs until a demand edge has produced a complete snapshot. Withholding
+authority is the safe direction — the alternative is deleting sessions because
+an incomplete cache did not mention them.
+
+When a surface does load automatically, that first load is sequenced behind
+scoped startup rather than fired on mount, and then handed to idle time rather
+than run on the interactive path. There are two stages, and both are required.
 
 Stage one is the scoped gate. `subscribeToInitialScopedDirectoryLoad` (in
 `sync-refs.ts`) waits while the scheduler reports the current directory as
@@ -153,11 +181,9 @@ load runs inline.
 Both stages are one-shot and cancellable. Idle work is requested at most once
 however often the gate settles, disposal cancels a pending request, and the load
 itself re-checks disposal, so a scheduler that ignores cancellation still cannot
-fire a request after unmount. This is the same eventual coverage as before, only
-later: nothing about `status: 'ready'` authority changes, and a surface that
-needs the snapshot sooner — `ArchiveView`, a direct session route, retention
-cleanup — still calls `ensureGlobalSessionsLoaded` itself and shares the store's
-in-flight load.
+fire a request after unmount. A runtime with no automatic snapshot skips both
+stages outright: it takes no scoped-gate subscription and queues no idle work,
+rather than scheduling work that later decides to do nothing.
 
 Waiting keys on that positive pending signal, never on the absence of a
 bootstrap state. Absence means no demand was scheduled, so nothing would ever
