@@ -1,8 +1,8 @@
 import type { OpencodeClient, PermissionRequest, Project, QuestionRequest } from "@opencode-ai/sdk/v2/client"
-import { retry } from "./retry"
-import type { GlobalState, State } from "./types"
 import { runtimeFetch } from "../lib/runtime-fetch"
+import { retry } from "./retry"
 import { emitSyncConfigChanged } from "./sync-refs"
+import type { GlobalState, State } from "./types"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
@@ -64,6 +64,12 @@ function projectID(directory: string, projects: Project[]) {
 // Bootstrap global state
 // ---------------------------------------------------------------------------
 
+/**
+ * Deliberately does not call `project.list()`: it enumerates every project the
+ * OpenCode server knows about while the visible directory is still
+ * bootstrapping. `bootstrapDirectory` resolves its own project and
+ * `project.updated` events keep `projects` current.
+ */
 export async function bootstrapGlobal(
   sdk: OpencodeClient,
   set: (patch: Partial<GlobalState>) => void,
@@ -71,16 +77,6 @@ export async function bootstrapGlobal(
   const results = await Promise.allSettled([
     retry(() => sdk.path.get().then((x) => set({ path: unwrap(x, "path.get") }))),
     retry(() => sdk.global.config.get().then((x) => set({ config: unwrap(x, "global.config.get") }))),
-    retry(() =>
-      sdk.project.list().then((x) => {
-        const data = unwrap(x, "project.list")
-        const projects = data
-          .filter((p): p is Project => !!p?.id)
-          .filter((p) => !!p.worktree && !p.worktree.includes("opencode-test"))
-          .sort((a, b) => cmp(a.id, b.id))
-        set({ projects })
-      }),
-    ),
   ])
 
   const errors = results
