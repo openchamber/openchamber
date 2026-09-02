@@ -26,6 +26,7 @@ const createdWorktree = {
 let createdWorktreeResult: GitWorktreeCreateResult = createdWorktree;
 const bootstrapWatcherCalls: string[] = [];
 const bootstrapWatcherOptions: Array<{ onReady?: () => void }> = [];
+const warningToasts: string[] = [];
 
 const sessionState = {
   availableWorktreesByProject: new Map<string, WorktreeMetadata[]>(),
@@ -38,6 +39,17 @@ const attachmentState = {
 
 mock.module('@/lib/openchamberConfig', () => ({
   substituteCommandVariables: (command: string) => command,
+}));
+
+mock.module('@/components/ui', () => ({
+  toast: {
+    warning: (message: string) => warningToasts.push(message),
+  },
+}));
+
+mock.module('@/lib/i18n', () => ({
+  formatMessage: () => 'session.newWorktree.toast.fetchSourceFailed',
+  useI18nStore: { getState: () => ({ dictionary: {} }) },
 }));
 
 mock.module('@/lib/worktrees/worktreeBootstrap', () => ({
@@ -130,11 +142,23 @@ describe('worktreeManager list invalidation', () => {
     validatePayloads.length = 0;
     bootstrapWatcherCalls.length = 0;
     bootstrapWatcherOptions.length = 0;
+    warningToasts.length = 0;
     createdWorktreeResult = createdWorktree;
     sessionState.availableWorktreesByProject = new Map();
     sessionState.availableWorktrees = [];
     sessionState.worktreeMetadata = new Map();
     attachmentState.attachments = new Map();
+  });
+
+  test('warns when worktree creation falls back after a source fetch failure', async () => {
+    createdWorktreeResult = { ...createdWorktree, sourceFetchFailed: true };
+
+    await createWorktree({ id: 'project-fetch-fallback', path: '/repo' }, {
+      branchName: 'feature',
+      worktreeName: 'feature',
+    });
+
+    expect(warningToasts).toEqual(['session.newWorktree.toast.fetchSourceFailed']);
   });
 
   test('retries an in-flight list when a worktree is created before it resolves', async () => {

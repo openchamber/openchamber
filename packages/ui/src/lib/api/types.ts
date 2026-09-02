@@ -438,6 +438,7 @@ export interface GitWorktreeCreateResult {
   path: string;
   directoryCreated?: true;
   bootstrapStatus?: GitWorktreeBootstrapStatus;
+  sourceFetchFailed?: true;
 }
 
 export interface RemoveGitWorktreePayload {

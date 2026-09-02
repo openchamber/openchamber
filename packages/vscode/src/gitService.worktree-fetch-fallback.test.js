@@ -58,7 +58,7 @@ afterEach(() => {
 });
 
 describe('VS Code worktree create from a remote start ref', () => {
-  it('creates from the existing remote-tracking ref when the refresh fetch fails', async () => {
+  it('falls back to the tracked local branch when the source fetch fails', async () => {
     if (!canRunGit()) return;
 
     const previousXdgDataHome = process.env.XDG_DATA_HOME;
@@ -66,6 +66,7 @@ describe('VS Code worktree create from a remote start ref', () => {
 
     try {
       const { repository } = createRepositoryWithRemote();
+      runGit(repository, ['branch', '--set-upstream-to=origin/main', 'next']);
       runGit(repository, ['remote', 'set-url', 'origin', '/nonexistent/openchamber-unreachable.git']);
 
       const created = await createWorktree(repository, {
@@ -76,7 +77,8 @@ describe('VS Code worktree create from a remote start ref', () => {
       });
 
       expect(created.branch).toBe('openchamber/stale-ref-wt');
-      const expectedHead = runGit(repository, ['rev-parse', 'refs/remotes/origin/main']).trim();
+      expect(created.sourceFetchFailed).toBe(true);
+      const expectedHead = runGit(repository, ['rev-parse', 'next']).trim();
       expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(expectedHead);
     } finally {
       if (previousXdgDataHome === undefined) {

@@ -608,12 +608,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['worktree', 'setup commands', 'bootstrap', 'wait'],
   },
   {
-    id: 'behavior.worktree-fetch-source',
-    page: 'behavior',
-    titleKey: 'settings.behavior.page.section.worktrees',
-    keywords: ['worktree', 'fetch', 'remote', 'source branch', 'stale'],
-  },
-  {
     id: 'remote-instances.client-auth',
     page: 'remote-instances',
     titleKey: 'settings.remoteInstances.clientAuth.title',
