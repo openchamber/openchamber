@@ -1,5 +1,5 @@
 import React from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/components/ui/toast';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { useSessionGoal } from '@/hooks/useSessionGoal';

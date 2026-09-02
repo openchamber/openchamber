@@ -770,6 +770,14 @@ export const createSettingsRuntime = (deps) => {
     let changed = false;
     const next = { ...settings };
 
+    if (typeof settings.notificationSoundEnabled !== 'boolean') {
+      next.notificationSoundEnabled = true;
+      changed = true;
+    }
+    if (typeof settings.notificationInboxEnabled !== 'boolean') {
+      next.notificationInboxEnabled = true;
+      changed = true;
+    }
     if (typeof settings.notifyOnSubtasks !== 'boolean') {
       next.notifyOnSubtasks = true;
       changed = true;
@@ -784,6 +792,28 @@ export const createSettingsRuntime = (deps) => {
     }
     if (typeof settings.notifyOnQuestion !== 'boolean') {
       next.notifyOnQuestion = true;
+      changed = true;
+    }
+    const inbox = settings.notificationInboxFilter && typeof settings.notificationInboxFilter === 'object'
+      ? settings.notificationInboxFilter
+      : {};
+    const inboxDefaults = {
+      sessionFinished: true,
+      sessionError: true,
+      sessionSubtask: false,
+      permissionQuestion: true,
+      appErrorWarning: true,
+      info: false,
+      success: false,
+    };
+    let inboxChanged = false;
+    const nextInbox = { ...inboxDefaults };
+    for (const key of Object.keys(inboxDefaults)) {
+      if (typeof inbox[key] === 'boolean') nextInbox[key] = inbox[key];
+      else inboxChanged = true;
+    }
+    if (inboxChanged || !settings.notificationInboxFilter) {
+      next.notificationInboxFilter = nextInbox;
       changed = true;
     }
 

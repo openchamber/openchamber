@@ -12,6 +12,10 @@ import type { ProjectRef } from '@/lib/projectContextApi';
 import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { isWindowsArm64 } from '@/lib/platform';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import {
+  DEFAULT_NOTIFICATION_INBOX_FILTER,
+  type NotificationInboxFilter,
+} from '@/lib/notificationInboxFilter';
 
 export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'branch';
 export type ContextPanelMode = 'diff' | 'walkthrough' | 'file' | 'context' | 'plan' | 'chat' | 'browser' | 'git' | 'pr' | 'linear' | 'notes' | 'terminal';
@@ -828,6 +832,8 @@ interface UIStore {
   isPromptNavigatorPanelOpen: boolean;
   isImagePreviewOpen: boolean;
   nativeNotificationsEnabled: boolean;
+  notificationSoundEnabled: boolean;
+  notificationInboxEnabled: boolean;
   notificationMode: 'always' | 'hidden-only';
   notifyOnSubtasks: boolean;
   // Desktop dock badge showing the count of sessions with unseen activity (macOS).
@@ -837,6 +843,7 @@ interface UIStore {
   notifyOnCompletion: boolean;
   notifyOnError: boolean;
   notifyOnQuestion: boolean;
+  notificationInboxFilter: NotificationInboxFilter;
 
   // Per-event notification templates
   notificationTemplates: {
@@ -1032,6 +1039,8 @@ interface UIStore {
   togglePromptNavigatorPanel: () => void;
   setImagePreviewOpen: (open: boolean) => void;
   setNativeNotificationsEnabled: (value: boolean) => void;
+  setNotificationSoundEnabled: (value: boolean) => void;
+  setNotificationInboxEnabled: (value: boolean) => void;
   setNotificationMode: (mode: 'always' | 'hidden-only') => void;
   setShowTerminalQuickKeysOnDesktop: (value: boolean) => void;
   setSessionTabsEnabled: (value: boolean) => void;
@@ -1040,6 +1049,7 @@ interface UIStore {
   setNotifyOnCompletion: (value: boolean) => void;
   setNotifyOnError: (value: boolean) => void;
   setNotifyOnQuestion: (value: boolean) => void;
+  setNotificationInboxFilter: (value: Partial<NotificationInboxFilter>) => void;
   setNotificationTemplates: (
     templates: UIStore['notificationTemplates'] | ((current: UIStore['notificationTemplates']) => UIStore['notificationTemplates']),
   ) => void;
@@ -1192,6 +1202,8 @@ export const useUIStore = create<UIStore>()(
         isPromptNavigatorPanelOpen: false,
         isImagePreviewOpen: false,
         nativeNotificationsEnabled: false,
+        notificationSoundEnabled: true,
+        notificationInboxEnabled: true,
         notificationMode: 'hidden-only',
         notifyOnSubtasks: true,
         dockBadgeEnabled: true,
@@ -1200,6 +1212,7 @@ export const useUIStore = create<UIStore>()(
         notifyOnCompletion: true,
         notifyOnError: true,
         notifyOnQuestion: true,
+        notificationInboxFilter: { ...DEFAULT_NOTIFICATION_INBOX_FILTER },
         notificationTemplates: {
           completion: { ...EMPTY_NOTIFICATION_TEMPLATES.completion },
           error: { ...EMPTY_NOTIFICATION_TEMPLATES.error },
@@ -2410,6 +2423,14 @@ export const useUIStore = create<UIStore>()(
           set({ nativeNotificationsEnabled: value });
         },
 
+        setNotificationSoundEnabled: (value) => {
+          set({ notificationSoundEnabled: value });
+        },
+
+        setNotificationInboxEnabled: (value) => {
+          set({ notificationInboxEnabled: value });
+        },
+
         setNotificationMode: (mode) => {
           set({ notificationMode: mode });
         },
@@ -2433,6 +2454,11 @@ export const useUIStore = create<UIStore>()(
         setNotifyOnCompletion: (value) => { set({ notifyOnCompletion: value }); },
         setNotifyOnError: (value) => { set({ notifyOnError: value }); },
         setNotifyOnQuestion: (value) => { set({ notifyOnQuestion: value }); },
+        setNotificationInboxFilter: (value) => {
+          set((state) => ({
+            notificationInboxFilter: { ...state.notificationInboxFilter, ...value },
+          }));
+        },
         setNotificationTemplates: (templates) => {
           set((state) => ({
             notificationTemplates: typeof templates === 'function'
@@ -2809,6 +2835,10 @@ export const useUIStore = create<UIStore>()(
             ? (state.contextRailOrder as unknown[]).filter((id): id is string => typeof id === 'string' && id.trim() !== '')
             : [];
 
+          if (typeof state.notificationInboxEnabled !== 'boolean') {
+            state.notificationInboxEnabled = true;
+          }
+
           return state;
         },
         partialize: (state) => ({
@@ -2877,6 +2907,8 @@ export const useUIStore = create<UIStore>()(
           linearIssueListTeamId: state.linearIssueListTeamId,
           linearIssueListPriority: state.linearIssueListPriority,
           nativeNotificationsEnabled: state.nativeNotificationsEnabled,
+          notificationSoundEnabled: state.notificationSoundEnabled,
+          notificationInboxEnabled: state.notificationInboxEnabled,
           notificationMode: state.notificationMode,
           showTerminalQuickKeysOnDesktop: state.showTerminalQuickKeysOnDesktop,
           sessionTabsEnabled: state.sessionTabsEnabled,
@@ -2885,6 +2917,7 @@ export const useUIStore = create<UIStore>()(
           notifyOnCompletion: state.notifyOnCompletion,
           notifyOnError: state.notifyOnError,
           notifyOnQuestion: state.notifyOnQuestion,
+          notificationInboxFilter: state.notificationInboxFilter,
           notificationTemplates: state.notificationTemplates,
           summarizeLastMessage: state.summarizeLastMessage,
           summaryThreshold: state.summaryThreshold,

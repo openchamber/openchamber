@@ -81,6 +81,8 @@ export type DesktopSettings = {
   collapsibleThinkingBlocks?: boolean;
   showDeletionDialog?: boolean;
   nativeNotificationsEnabled?: boolean;
+  notificationSoundEnabled?: boolean;
+  notificationInboxEnabled?: boolean;
   notificationMode?: 'always' | 'hidden-only';
   notifyOnSubtasks?: boolean;
 
@@ -88,6 +90,15 @@ export type DesktopSettings = {
   notifyOnCompletion?: boolean;
   notifyOnError?: boolean;
   notifyOnQuestion?: boolean;
+  notificationInboxFilter?: {
+    sessionFinished: boolean;
+    sessionError: boolean;
+    sessionSubtask: boolean;
+    permissionQuestion: boolean;
+    appErrorWarning: boolean;
+    info: boolean;
+    success: boolean;
+  };
 
   // Per-event notification templates
   notificationTemplates?: {

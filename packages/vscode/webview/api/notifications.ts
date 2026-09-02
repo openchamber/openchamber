@@ -21,7 +21,7 @@ const showWebviewNotification = async (payload?: NotificationPayload): Promise<b
     : 'OpenChamber';
   const body = typeof payload?.body === 'string' ? payload.body : '';
 
-  new Notification(title, { body });
+  new Notification(title, { body, silent: payload?.silent === true });
   return true;
 };
 

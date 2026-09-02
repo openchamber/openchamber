@@ -59,6 +59,7 @@ import {
 } from '@/lib/desktopCurrentHost';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { NotificationCenter } from '@/components/notifications/NotificationCenter';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
@@ -1672,6 +1673,10 @@ export const Header: React.FC = () => {
             onClick={handleOpenCurrentMiniChat}
             className={cn(desktopHeaderIconButtonClass, 'mr-1')}
             Icon={'picture-in-picture-2'}
+          />
+          <NotificationCenter
+            variant="dropdown"
+            triggerClassName={cn(DESKTOP_HEADER_ICON_BUTTON_CLASS, 'mr-1')}
           />
           {!isVSCode ? (
             <Tooltip>

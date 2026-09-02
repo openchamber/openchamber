@@ -346,6 +346,12 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.nativeNotificationsEnabled === 'boolean') {
       result.nativeNotificationsEnabled = candidate.nativeNotificationsEnabled;
     }
+    if (typeof candidate.notificationSoundEnabled === 'boolean') {
+      result.notificationSoundEnabled = candidate.notificationSoundEnabled;
+    }
+    if (typeof candidate.notificationInboxEnabled === 'boolean') {
+      result.notificationInboxEnabled = candidate.notificationInboxEnabled;
+    }
     if (typeof candidate.notificationMode === 'string') {
       const mode = candidate.notificationMode.trim();
       if (mode === 'always' || mode === 'hidden-only') {
@@ -363,6 +369,30 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.notifyOnQuestion === 'boolean') {
       result.notifyOnQuestion = candidate.notifyOnQuestion;
+    }
+    if (candidate.notificationInboxFilter && typeof candidate.notificationInboxFilter === 'object') {
+      const source = candidate.notificationInboxFilter;
+      const keys = ['sessionFinished', 'sessionError', 'sessionSubtask', 'permissionQuestion', 'appErrorWarning', 'info', 'success'];
+      const next = {};
+      let found = false;
+      for (const key of keys) {
+        if (typeof source[key] === 'boolean') {
+          next[key] = source[key];
+          found = true;
+        }
+      }
+      if (found) {
+        result.notificationInboxFilter = {
+          sessionFinished: true,
+          sessionError: true,
+          sessionSubtask: false,
+          permissionQuestion: true,
+          appErrorWarning: true,
+          info: false,
+          success: false,
+          ...next,
+        };
+      }
     }
     if (candidate.notificationTemplates && typeof candidate.notificationTemplates === 'object') {
       result.notificationTemplates = candidate.notificationTemplates;

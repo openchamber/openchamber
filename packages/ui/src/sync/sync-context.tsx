@@ -34,7 +34,7 @@ import { touchStreamingSession, updateChangedStreamingSessions, updateStreamingS
 import { countSyncPerformance } from "./performance-diagnostics"
 import { runBackgroundNetworkTask } from "@/lib/background-network"
 import { setActionRefs } from "./session-actions"
-import { setSyncRefs, getAllSyncSessions } from "./sync-refs"
+import { setSyncRefs, getAllSyncSessionMap, getAllSyncSessions } from "./sync-refs"
 import { useSessionUIStore } from "./session-ui-store"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { upsertSessionRecord } from "./session-records"
@@ -52,7 +52,11 @@ import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
+import { maybePlayNotificationSound, resolveOsNotificationSilent } from "@/lib/notificationSound"
 import { appendNotification } from "./notification-store"
+import { usableSessionNotificationTitle } from "./notification-session-context"
+import { resolveNotificationProjectLabel } from "./notification-session-context"
+import { useProjectsStore } from "@/stores/useProjectsStore"
 import { recordSessionError, summarizeOpenCodeError, type OpenCodeSessionErrorPayload } from "./session-error-log"
 import {
   applyGlobalSessionStatusEvent,
@@ -501,6 +505,24 @@ const getQuestionToastKey = (sessionID?: string, requestID?: string) => {
   return `${sessionID}:${requestID}`
 }
 
+const permissionToastCopy = () => {
+  const dictionary = useI18nStore.getState().dictionary
+  return {
+    title: formatMessage(dictionary, 'layout.notifications.permissionNeeded'),
+    actionLabel: formatMessage(dictionary, 'layout.notifications.openSession'),
+    fallbackDescription: formatMessage(dictionary, 'layout.notifications.permissionFallback'),
+  }
+}
+
+const questionToastCopy = () => {
+  const dictionary = useI18nStore.getState().dictionary
+  return {
+    title: formatMessage(dictionary, 'layout.notifications.inputNeeded'),
+    description: formatMessage(dictionary, 'layout.notifications.questionFallback'),
+    actionLabel: formatMessage(dictionary, 'layout.notifications.openSession'),
+  }
+}
+
 type UiNotificationPayload = {
   title?: unknown
   body?: unknown
@@ -509,6 +531,7 @@ type UiNotificationPayload = {
   sessionId?: unknown
   directory?: unknown
   requireHidden?: unknown
+  silent?: unknown
   desktopNotificationDelivered?: unknown
   desktopStdoutActive?: unknown
 }
@@ -546,6 +569,10 @@ const handleUiNotificationEvent = (payload: Event, fallbackDirectory: string): b
     if (sessionId && directory) {
       toast.info(title, {
         ...options,
+        session: sessionId,
+        directory,
+        actionRecord: { type: 'open-session', sessionId, directory },
+        dedupeKey: 'opencode-restart-interrupted',
         action: {
           label: formatMessage(dictionary, "chat.toast.opencodeRestartInterrupted.openSession"),
           onClick: () => openSessionFromToast(sessionId, directory),
@@ -573,6 +600,11 @@ const handleUiNotificationEvent = (payload: Event, fallbackDirectory: string): b
     sessionId,
     directory: directory || undefined,
     requireHidden: notification.requireHidden === true,
+    silent: resolveOsNotificationSilent(
+      notification.silent === true || notification.silent === false
+        ? { silent: notification.silent }
+        : undefined,
+    ),
   }).catch((error) => {
     console.warn("[notifications] failed to dispatch UI notification", error)
   })
@@ -1393,13 +1425,19 @@ export async function resyncBlockingRequestsForDirectory(
         if (!toastKey || pendingQuestionToastIds.has(toastKey)) continue
         pendingQuestionToastIds.add(toastKey)
         const firstQuestion = question.questions?.[0]
-        const title = firstQuestion?.header?.trim() || "Input needed"
-        const description = firstQuestion?.question?.trim() || "Agent is waiting for your response"
+        const copy = questionToastCopy()
+        const title = firstQuestion?.header?.trim() || copy.title
+        const description = firstQuestion?.question?.trim() || copy.description
         toast.info(title, {
           id: `question-${toastKey}`,
           description,
+          source: 'question',
+          session: sessionId,
+          directory,
+          actionRecord: { type: 'open-session', sessionId, directory },
+          dedupeKey: `question:${toastKey}`,
           action: {
-            label: "Open session",
+            label: copy.actionLabel,
             onClick: () => openSessionFromToast(sessionId, directory),
           },
         })
@@ -1470,14 +1508,17 @@ export async function resyncBlockingRequestsForDirectory(
       if (isViewed) continue
       for (const permission of permissions) {
         if (knownIds.has(permission.id)) continue
-        showPermissionNeededToast({
+        if (showPermissionNeededToast({
           permission,
           directory,
           isViewed,
           pendingIds: pendingPermissionToastIds,
+          ...permissionToastCopy(),
           show: (title, options) => toast.info(title, options),
           openSession: openSessionFromToast,
-        })
+        })) {
+          maybePlayNotificationSound('permission', { viewingSession: isViewed })
+        }
       }
     }
 
@@ -1718,14 +1759,17 @@ export function handleEvent(
     }
 
     const isViewed = isViewedInCurrentSession(resolvedDirectory, permission.sessionID)
-    showPermissionNeededToast({
+    if (showPermissionNeededToast({
       permission,
       directory: resolvedDirectory,
       isViewed,
       pendingIds: pendingPermissionToastIds,
+      ...permissionToastCopy(),
       show: (title, options) => toast.info(title, options),
       openSession: openSessionFromToast,
-    })
+    })) {
+      maybePlayNotificationSound('permission', { viewingSession: isViewed })
+    }
   }
 
   if (payload.type === "permission.replied") {
@@ -1747,16 +1791,23 @@ export function handleEvent(
     if (!isViewed && toastKey && !pendingQuestionToastIds.has(toastKey)) {
       pendingQuestionToastIds.add(toastKey)
       const firstQuestion = question.questions?.[0]
-      const title = firstQuestion?.header?.trim() || "Input needed"
-      const description = firstQuestion?.question?.trim() || "Agent is waiting for your response"
+      const copy = questionToastCopy()
+      const title = firstQuestion?.header?.trim() || copy.title
+      const description = firstQuestion?.question?.trim() || copy.description
       toast.info(title, {
         id: `question-${toastKey}`,
         description,
+        source: 'question',
+        session: sessionID,
+        directory: resolvedDirectory,
+        actionRecord: { type: 'open-session', sessionId: sessionID, directory: resolvedDirectory },
+        dedupeKey: `question:${toastKey}`,
         action: {
-          label: "Open session",
+          label: copy.actionLabel,
           onClick: () => openSessionFromToast(sessionID, resolvedDirectory),
         },
       })
+      maybePlayNotificationSound('question', { viewingSession: isViewed })
     }
   }
 
@@ -1778,21 +1829,37 @@ export function handleEvent(
     if (errorSummary && sessionID) {
       recordSessionError({ sessionId: sessionID, directory: resolvedDirectory ?? null, ...errorSummary })
     }
-    // Skip subtask sessions — only top-level sessions generate notifications
     const storeState = getDirectoryEventState(store, batch)
     const session = storeState.session.find((s) => s.id === sessionID)
-    if (session && (session as { parentID?: string }).parentID) {
-      // subtask — skip notification
-    } else if (sessionID) {
+    if (sessionID) {
+      const indexedTitle = getAllSyncSessionMap().get(sessionID)?.title
+      const sessionTitle = usableSessionNotificationTitle(session?.title, sessionID)
+        ?? usableSessionNotificationTitle(indexedTitle, sessionID)
+      const isSubtask = Boolean(session?.parentID)
+      const viewingSession = isViewedInCurrentSession(resolvedDirectory, sessionID)
       appendNotification({
         directory: resolvedDirectory,
         session: sessionID,
+        sessionTitle,
+        projectLabel: resolveNotificationProjectLabel(
+          resolvedDirectory,
+          useProjectsStore.getState().projects,
+        ),
+        subtask: isSubtask,
         time: Date.now(),
-        viewed: isViewedInCurrentSession(resolvedDirectory, sessionID),
+        viewed: viewingSession,
         ...(errorSummary
           ? { type: "error" as const, error: errorSummary }
           : { type: "turn-complete" as const }),
       })
+      maybePlayNotificationSound(
+        payload.type === "session.error"
+          ? "error"
+          : isSubtask
+            ? "subtask"
+            : "completion",
+        { viewingSession },
+      )
     }
   }
 

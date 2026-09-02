@@ -2,6 +2,7 @@ import React from 'react';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isDesktopShell, isWebRuntime } from '@/lib/desktop';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+import { resolveOsNotificationSilent } from '@/lib/notificationSound';
 import { useUIStore } from '@/stores/useUIStore';
 import type { NotificationPayload } from '@/lib/api/types';
 
@@ -23,6 +24,11 @@ const toNotificationPayload = (value: unknown): NotificationPayload | null => {
     title: typeof properties.title === 'string' ? properties.title : undefined,
     body: typeof properties.body === 'string' ? properties.body : undefined,
     tag: typeof properties.tag === 'string' ? properties.tag : undefined,
+    silent: resolveOsNotificationSilent(
+      properties.silent === true || properties.silent === false
+        ? { silent: properties.silent }
+        : undefined,
+    ),
   };
 };
 

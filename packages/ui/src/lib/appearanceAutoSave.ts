@@ -4,6 +4,7 @@ import type { DesktopSettings } from '@/lib/desktop';
 import type { MonoFontOption, UiFontOption } from '@/lib/fontOptions';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import type { TerminalShell } from '@/lib/api/types';
+import type { NotificationInboxFilter } from '@/lib/notificationInboxFilter';
 
 type AppearanceSlice = {
   showReasoningTraces: boolean;
@@ -18,11 +19,14 @@ type AppearanceSlice = {
   collapsibleThinkingBlocks: boolean;
   showDeletionDialog: boolean;
   nativeNotificationsEnabled: boolean;
+  notificationSoundEnabled: boolean;
+  notificationInboxEnabled: boolean;
   notificationMode: 'always' | 'hidden-only';
   notifyOnSubtasks: boolean;
   notifyOnCompletion: boolean;
   notifyOnError: boolean;
   notifyOnQuestion: boolean;
+  notificationInboxFilter: NotificationInboxFilter;
   notificationTemplates: {
     completion: { title: string; message: string };
     error: { title: string; message: string };
@@ -74,11 +78,14 @@ export const startAppearanceAutoSave = (): void => {
     collapsibleThinkingBlocks: useUIStore.getState().collapsibleThinkingBlocks,
     showDeletionDialog: useUIStore.getState().showDeletionDialog,
     nativeNotificationsEnabled: useUIStore.getState().nativeNotificationsEnabled,
+    notificationSoundEnabled: useUIStore.getState().notificationSoundEnabled,
+    notificationInboxEnabled: useUIStore.getState().notificationInboxEnabled,
     notificationMode: useUIStore.getState().notificationMode,
     notifyOnSubtasks: useUIStore.getState().notifyOnSubtasks,
     notifyOnCompletion: useUIStore.getState().notifyOnCompletion,
     notifyOnError: useUIStore.getState().notifyOnError,
     notifyOnQuestion: useUIStore.getState().notifyOnQuestion,
+    notificationInboxFilter: useUIStore.getState().notificationInboxFilter,
     notificationTemplates: useUIStore.getState().notificationTemplates,
     summarizeLastMessage: useUIStore.getState().summarizeLastMessage,
     summaryThreshold: useUIStore.getState().summaryThreshold,
@@ -117,11 +124,14 @@ export const startAppearanceAutoSave = (): void => {
       collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
       showDeletionDialog: state.showDeletionDialog,
       nativeNotificationsEnabled: state.nativeNotificationsEnabled,
+      notificationSoundEnabled: state.notificationSoundEnabled,
+      notificationInboxEnabled: state.notificationInboxEnabled,
       notificationMode: state.notificationMode,
       notifyOnSubtasks: state.notifyOnSubtasks,
       notifyOnCompletion: state.notifyOnCompletion,
       notifyOnError: state.notifyOnError,
       notifyOnQuestion: state.notifyOnQuestion,
+      notificationInboxFilter: state.notificationInboxFilter,
       notificationTemplates: state.notificationTemplates,
       summarizeLastMessage: state.summarizeLastMessage,
       summaryThreshold: state.summaryThreshold,
@@ -186,6 +196,12 @@ export const startAppearanceAutoSave = (): void => {
     if (current.nativeNotificationsEnabled !== previous.nativeNotificationsEnabled) {
       diff.nativeNotificationsEnabled = current.nativeNotificationsEnabled;
     }
+    if (current.notificationSoundEnabled !== previous.notificationSoundEnabled) {
+      diff.notificationSoundEnabled = current.notificationSoundEnabled;
+    }
+    if (current.notificationInboxEnabled !== previous.notificationInboxEnabled) {
+      diff.notificationInboxEnabled = current.notificationInboxEnabled;
+    }
     if (current.notificationMode !== previous.notificationMode) {
       diff.notificationMode = current.notificationMode;
     }
@@ -200,6 +216,9 @@ export const startAppearanceAutoSave = (): void => {
     }
     if (current.notifyOnQuestion !== previous.notifyOnQuestion) {
       diff.notifyOnQuestion = current.notifyOnQuestion;
+    }
+    if (JSON.stringify(current.notificationInboxFilter) !== JSON.stringify(previous.notificationInboxFilter)) {
+      diff.notificationInboxFilter = current.notificationInboxFilter;
     }
     if (JSON.stringify(current.notificationTemplates) !== JSON.stringify(previous.notificationTemplates)) {
       diff.notificationTemplates = current.notificationTemplates;

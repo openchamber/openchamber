@@ -110,7 +110,59 @@ describe('web notifications API', () => {
     await expect(api.notifyAgentCompletion({ title: 'Ready', body: 'Done', tag: 'ready-session' })).resolves.toBe(true);
 
     expect(showNotification).toHaveBeenCalledTimes(1);
-    expect(showNotification).toHaveBeenCalledWith('Ready', expect.objectContaining({ body: 'Done', tag: 'ready-session' }));
+    expect(showNotification).toHaveBeenCalledWith('Ready', expect.objectContaining({
+      body: 'Done',
+      tag: 'ready-session',
+      data: expect.objectContaining({ url: '/' }),
+    }));
     expect(created).toHaveLength(0);
+  });
+
+  it('puts session identity on the service-worker notification so a click can open it', async () => {
+    installWindowMock();
+    installNotificationMock(() => undefined);
+    const showNotification = vi.fn(async () => undefined);
+
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: {
+        visibilityState: 'visible',
+        hasFocus: () => true,
+      },
+    });
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: {
+        serviceWorker: {
+          getRegistration: vi.fn(async () => ({
+            active: {},
+            showNotification,
+            pushManager: {
+              getSubscription: vi.fn(async () => null),
+            },
+          })),
+        },
+      },
+    });
+
+    const { createWebNotificationsAPI } = await import('./notifications');
+    const api = createWebNotificationsAPI();
+
+    await expect(api.notifyAgentCompletion({
+      title: 'Ready',
+      body: 'Done',
+      tag: 'ready-s1',
+      sessionId: 's1',
+      directory: '/proj',
+    })).resolves.toBe(true);
+
+    expect(showNotification).toHaveBeenCalledWith('Ready', expect.objectContaining({
+      silent: false,
+      data: {
+        url: '/?session=s1',
+        sessionId: 's1',
+        directory: '/proj',
+      },
+    }));
   });
 });

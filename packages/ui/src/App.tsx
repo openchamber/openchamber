@@ -20,6 +20,7 @@ import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
 import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
 import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
+import { useOpenSessionEvent } from '@/hooks/useOpenSessionEvent';
 import { useRootScrollLock } from '@/hooks/useRootScrollLock';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop } from '@/lib/desktop';
@@ -627,22 +628,7 @@ function App({ apis }: AppProps) {
     };
   }, [embeddedSessionChat]);
 
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string }>).detail;
-      const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId.trim() : '';
-      if (!sessionId) return;
-      const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
-        ? detail.directory.trim()
-        : null;
-      void useSessionUIStore.getState().setCurrentSession(sessionId, directory);
-    };
-
-    window.addEventListener('openchamber:open-session', handler as EventListener);
-    return () => window.removeEventListener('openchamber:open-session', handler as EventListener);
-  }, []);
+  useOpenSessionEvent();
 
   // Open a draft Mini Chat window from the native File menu / tray. Uses a
   // dedicated single-fire event (not the menu-action channel) because draft

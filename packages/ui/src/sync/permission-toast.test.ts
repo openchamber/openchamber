@@ -8,6 +8,12 @@ const permission = {
   permission: 'bash',
 } as PermissionRequest;
 
+const labels = {
+  title: 'Permission needed',
+  actionLabel: 'Open session',
+  fallbackDescription: 'Agent needs your approval',
+};
+
 describe('permission needed toast', () => {
   test('shows for an inactive session and opens that session', () => {
     const shown: Array<{ title: string; options: Parameters<Parameters<typeof showPermissionNeededToast>[0]['show']>[1] }> = [];
@@ -21,6 +27,7 @@ describe('permission needed toast', () => {
       directory: '/project',
       isViewed: false,
       pendingIds,
+      ...labels,
       show,
       openSession,
     })).toBe(true);
@@ -29,6 +36,7 @@ describe('permission needed toast', () => {
     const { options } = shown[0];
     expect(options.id).toBe('permission-inactive-session:permission-1');
     expect(options.description).toBe('bash');
+    expect(options.source).toBe('permission');
     options.action.onClick();
     expect(opened).toEqual([['inactive-session', '/project']]);
   });
@@ -38,7 +46,7 @@ describe('permission needed toast', () => {
     const show: Parameters<typeof showPermissionNeededToast>[0]['show'] = (title) => { shown.push(title); };
     const openSession: Parameters<typeof showPermissionNeededToast>[0]['openSession'] = () => {};
     const pendingIds = new Set<string>();
-    const base = { permission, directory: '/project', pendingIds, show, openSession };
+    const base = { permission, directory: '/project', pendingIds, show, openSession, ...labels };
 
     expect(showPermissionNeededToast({ ...base, isViewed: true })).toBe(false);
     expect(showPermissionNeededToast({ ...base, isViewed: false })).toBe(true);

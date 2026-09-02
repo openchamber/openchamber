@@ -1484,7 +1484,7 @@ const getNotificationClaimKey = (payload: { title?: unknown; body?: unknown; ses
     .join('|');
 };
 
-const claimOpenChamberNotification = async (payload: { title?: unknown; body?: unknown; sessionId?: unknown; tag?: unknown } | undefined): Promise<boolean> => {
+const claimOpenChamberNotification = async (payload: { title?: unknown; body?: unknown; sessionId?: unknown; tag?: unknown; directory?: unknown } | undefined): Promise<boolean> => {
   const key = getNotificationClaimKey(payload);
   if (!key) return true;
   try {
@@ -1495,7 +1495,7 @@ const claimOpenChamberNotification = async (payload: { title?: unknown; body?: u
   }
 };
 
-const showOpenChamberNotification = (payload: { title?: unknown; body?: unknown; sessionId?: unknown; tag?: unknown; requireHidden?: unknown } | undefined) => {
+const showOpenChamberNotification = (payload: { title?: unknown; body?: unknown; sessionId?: unknown; tag?: unknown; directory?: unknown; requireHidden?: unknown; silent?: unknown } | undefined) => {
   if (typeof Notification === 'undefined') {
     return false;
   }
@@ -1516,16 +1516,19 @@ const showOpenChamberNotification = (payload: { title?: unknown; body?: unknown;
     const sessionId = typeof payload?.sessionId === 'string' && payload.sessionId.trim().length > 0
       ? payload.sessionId.trim()
       : '';
+    const directory = typeof payload?.directory === 'string' && payload.directory.trim().length > 0
+      ? payload.directory.trim()
+      : '';
     if (!await claimOpenChamberNotification({ ...payload, title, body, sessionId })) {
       return false;
     }
 
-    const notification = new Notification(title, { body });
+    const notification = new Notification(title, { body, silent: payload?.silent === true });
     notification.onclick = () => {
       if (sessionId) {
-        import('@/sync/session-ui-store').then(({ useSessionUIStore }) => {
-          useSessionUIStore.getState().setCurrentSession(sessionId);
-        });
+        window.dispatchEvent(new CustomEvent('openchamber:open-session', {
+          detail: { sessionId, directory },
+        }));
       }
       window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'chat' } }));
     };

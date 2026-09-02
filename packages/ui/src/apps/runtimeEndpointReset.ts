@@ -18,6 +18,7 @@ import { resetStreamingState } from '@/sync/streaming';
 import { replaceGlobalSessionStatusById } from '@/sync/global-session-status';
 import { resetSessionOrdering } from '@/sync/session-ordering';
 import { resetSessionActivityTiming } from '@/sync/session-activity-timing';
+import { activateNotificationRuntime } from '@/sync/notification-store';
 import { syncDesktopSettings } from '@/lib/persistence';
 
 // Same-device transport switch (LAN⇄relay for one paired device): rebind the SDK
@@ -62,6 +63,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   // Turn timings belong to the previous instance's sessions, and the reset also
   // restarts the resume window so the switch is treated as a fresh load.
   resetSessionActivityTiming();
+  activateNotificationRuntime(detail.runtimeKey);
   usePermissionStore.getState().reset();
   useFileSearchStore.getState().resetForRuntimeSwitch();
   useGitStore.getState().resetForRuntimeSwitch(detail.runtimeKey);

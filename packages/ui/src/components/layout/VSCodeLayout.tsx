@@ -30,6 +30,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
+import { NotificationCenter } from '@/components/notifications/NotificationCenter';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
 import { Icon } from "@/components/icon/Icon";
@@ -886,6 +887,15 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           headerIconButtonClass="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         />
       )}
+      <NotificationCenter
+        variant="dropdown"
+        triggerClassName="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        iconClassName="h-5 w-5"
+        onOpenSettings={() => {
+          useUIStore.getState().setSettingsPage('notifications');
+          window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'settings' } }));
+        }}
+      />
       {showRateLimits && (
         <DropdownMenu
           onOpenChange={(open) => {

@@ -31,7 +31,7 @@ import { FadeInOnReveal } from './message/FadeInOnReveal';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { areOptionalRenderRelevantMessagesEqual, areRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual } from './message/renderCompare';
 import type { ReviewTransferDirection } from '@/lib/reviewFlow';
-import { toast } from 'sonner';
+import { toast } from '@/components/ui/toast';
 import { useI18n } from '@/lib/i18n';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { getContextObligatoryMessages } from '@/lib/contextObligatoryMessages';

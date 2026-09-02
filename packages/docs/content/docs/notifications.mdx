@@ -25,9 +25,19 @@ Notifications tell you when something needs your attention so you don't have to 
 
 Sessions set to auto-accept won't nag you with permission notifications.
 
+In-app history can play a sound when a notice lands in the list, including when the window is in the background.
+
 ## Customize the wording
 
 Each kind of notification has a title and message template you can edit, using fields like the agent name and model. There's also a limit on how much of the last message is included, so notifications stay short.
+
+## In-app history
+
+The bell in the header keeps a local list of toasts and session events on this device. If a toast disappears before you tap it, it stays unread in the center. Opening a row, or tapping OK or Copy, marks it read. The row stays until you clear the list or it ages out. Clear all empties every stored row for this host, including kinds the filter is hiding. Mark all as read also dismisses any leftover toasts.
+
+Clicking a system or push notification opens that session when the payload includes a session id.
+
+Settings → OpenChamber → Notifications has an In-app history section. It starts on. Turn the whole list off to hide the bell. Uncheck a kind to hide it from the list and the badge. The rows are still saved, so turning the kind back on brings them back. Info, success, and subtasks start off so those rows do not fill the badge. Subtask OS banners stay on their own Events toggle. Notification Events and templates stay with Notification Delivery.
 
 ## Related
 

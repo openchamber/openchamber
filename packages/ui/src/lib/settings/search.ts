@@ -962,7 +962,28 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     id: 'notifications.delivery',
     page: 'notifications',
     titleKey: 'settings.notifications.page.delivery.title',
+    descriptionKey: 'settings.notifications.page.delivery.info',
     keywords: ['desktop notifications', 'system notifications'],
+  },
+  {
+    id: 'notifications.inbox',
+    page: 'notifications',
+    titleKey: 'settings.notifications.page.inbox.title',
+    descriptionKey: 'settings.notifications.page.inbox.info',
+    keywords: ['history', 'inbox', 'toast', 'badge', 'unread', 'subtask'],
+  },
+  {
+    id: 'notifications.inbox.enable',
+    page: 'notifications',
+    titleKey: 'settings.notifications.page.inbox.enableLabel',
+    keywords: ['inbox', 'history', 'enable', 'disable', 'off'],
+  },
+  {
+    id: 'notifications.sound',
+    page: 'notifications',
+    titleKey: 'settings.notifications.page.inbox.soundLabel',
+    descriptionKey: 'settings.notifications.page.inbox.soundInfo',
+    keywords: ['sound', 'chime', 'audio', 'beep', 'tone', 'bell', 'center', 'background'],
   },
   {
     id: 'notifications.events',

@@ -191,6 +191,7 @@ mock.module("@/lib/runtime-switch", () => ({
   getRuntimeKey: () => "test-runtime",
   initializeRuntimeEndpoint: () => undefined,
   subscribeRuntimeEndpointChanged: () => () => undefined,
+  subscribeRuntimeEndpointWillChange: () => () => undefined,
   switchRuntimeEndpoint: () => undefined,
 }))
 
@@ -204,6 +205,8 @@ mock.module("../sync-context", () => ({
 
 mock.module("../notification-store", () => ({
   markSessionViewed: () => undefined,
+  markNotificationRead: () => undefined,
+  appendNotification: () => null,
 }))
 
 mock.module("../session-navigation", () => ({

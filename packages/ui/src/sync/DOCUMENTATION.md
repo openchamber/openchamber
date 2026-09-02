@@ -55,6 +55,7 @@ So:
 | `input-store.ts` | Draft input state, attached files, synthetic parts | App UI state |
 | `selection-store.ts` | Model/agent/variant selections | App UI state |
 | `voice-store.ts` | Voice state | App UI state |
+| `notification-store.ts` | Durable in-app notification history, unread/read, runtime-partitioned persist, and the session-attention index used by sidebar/tray badges | Visible list for the active runtime; persisted lists keyed by `runtimeKey` |
 
 Local chat attachments are normalized by `attachment-files.ts` before entering `input-store.ts`. PNG, JPEG, GIF, WebP, and PDF retain their media type; HEIC/HEIF is converted to JPEG; recognized text/code formats and unknown files whose first 4 KB are text are sent as `text/plain`; binary files outside the supported media types are rejected. Jupyter notebooks become readable markdown with non-text outputs omitted. HAR credentials, cookies, and sensitive URL parameters are redacted, while request/response body text is omitted. SVG and Draw.io files are attached as source text, not executable/rendered content. Browser and VS Code pickers expose the same allowlist, while drag-and-drop may still accept an unknown extension after content inspection. Large plain-text clipboard pastes can become in-memory `text/plain` attachments named `pasted-context-N.txt` through the composer paste path; they use the same normalization and send pipeline as manually attached `.txt` files.
 
@@ -508,6 +509,14 @@ useDirectorySync((s) => s.permission[sessionID] ?? EMPTY)
 ```
 
 Same applies to `useStreamingStore` — select `.get(key)` not the Map itself.
+
+## Notification history
+
+`notification-store.ts` owns the in-app history. Session idle/error (top-level and child/subtask), permission/question toasts, and every call through `packages/ui/src/components/ui/toast.ts` append a sanitized record: plain title and body, truncated, with credentials and raw error objects dropped. A session error row also keeps the OpenCode name and message so `useLatestSessionError` can show the newest one under the last message. Session rows store the session title and project label in the body, never a raw session id. The list rewrites an id-shaped stored title to the live session name, or untitled if the session still has no name. Subtask rows use `source === 'subtask'` and do not feed the sidebar/dock session-attention index. Records persist locally as `openchamber-notifications.v1` via deferred safe JSON storage, partitioned by `runtimeKey`. Switching runtime shows that runtime's list and leaves other namespaces on disk.
+
+A new row starts unread. Toast timeout leaves it unread. OK, Copy, a stored action, or swipe-dismiss marks that row read and keeps it. Clear all empties the current runtime's stored list, including kinds the inbox filter is hiding, and dismisses matching live toasts. Other runtime buckets stay. Mark-all-read also dismisses matching live toasts. Opening the related session still runs `markSessionViewed` for `source === 'session'` rows, which is what sidebar dots and the dock badge use. The header bell shows a dot when any unread row passes `notificationInboxFilter`. The accessible label still carries the unread count. `notificationInboxEnabled` defaults on. Turning it off hides the bell, the list, and the badge. Stored rows stay. Unchecking a kind hides it from the center and badge immediately; the stored rows stay. Subtasks start hidden in the inbox; the OS Events toggle for subtasks is separate. The in-app sound switch lives under In-app history and only controls the chime. It plays for those same Events even when the window is in the background. It stays quiet when a system banner would also sound, and when the user is already watching that session in a focused window. System banners keep their own OS sound.
+
+Malformed persist JSON is missing at the storage layer, not an empty success. Individual malformed rows are dropped. An empty list is valid empty success. Retention is a 500-row cap and a 30-day TTL, with unread duplicates collapsed by `dedupeKey` inside a 60-second window. Record ids stay unique in a runtime bucket: a reused caller toast id after that window, or a colliding persisted id, gets a fresh id so mark-read and React keys touch one row.
 
 ## Store splitting pattern
 

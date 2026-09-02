@@ -20,6 +20,7 @@ import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useRouter } from '@/hooks/useRouter';
 import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
+import { useOpenSessionEvent } from '@/hooks/useOpenSessionEvent';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import type { ProjectRef } from '@/lib/projectContextApi';
@@ -443,6 +444,10 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           <MobileHeader
             onOpenSessions={() => (isTabletLayout ? toggleSidebar() : setSessionsSheetOpen(true))}
             onOpenWorkspace={() => setWorkspaceOpen(true)}
+            onOpenSettings={() => {
+              setSettingsPage('notifications');
+              openSettingsSurface('page-content');
+            }}
             compactTitle={isTabletLayout}
           />
           <main ref={chatMainRef} className="relative min-h-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
@@ -1139,6 +1144,7 @@ export function MobileApp({ apis }: MobileAppProps) {
   usePushVisibilityBeacon({ enabled: true });
   useUpdatePolling();
   useWindowTitle();
+  useOpenSessionEvent();
   useRouter();
   // APNs is the only notification channel on the native app (background-capable,
   // focus-suppressed server-side via the visibility beacon). Local notifications are

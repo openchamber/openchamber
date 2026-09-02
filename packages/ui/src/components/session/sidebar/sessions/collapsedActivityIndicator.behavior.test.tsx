@@ -18,6 +18,7 @@ describe('collapsed activity scalar selector', () => {
     replaceGlobalSessionStatusById(new Map());
     useNotificationStore.setState({
       list: [],
+      listsByRuntime: {},
       index: { session: { unseenCount: {}, unseenHasError: {} }, project: { unseenCount: {}, unseenHasError: {} } },
     });
     type ActivityCapture = { renders: number; state: string | null };
@@ -49,6 +50,7 @@ describe('collapsed activity scalar selector', () => {
       replaceGlobalSessionStatusById(new Map());
       useNotificationStore.setState({
         list: [],
+        listsByRuntime: {},
         index: { session: { unseenCount: {}, unseenHasError: {} }, project: { unseenCount: {}, unseenHasError: {} } },
       });
       dom.restore();

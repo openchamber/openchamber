@@ -103,9 +103,16 @@ const notifyWithServiceWorker = async (payload?: NotificationPayload): Promise<b
   }
 
   try {
+    const sessionId = payload?.sessionId?.trim();
     await registration.showNotification(payload?.title ?? 'OpenChamber', {
       body: payload?.body,
       tag: payload?.tag,
+      silent: payload?.silent === true,
+      data: {
+        url: sessionId ? `/?session=${encodeURIComponent(sessionId)}` : '/',
+        sessionId,
+        directory: payload?.directory,
+      },
     });
     return true;
   } catch (error) {
@@ -168,10 +175,20 @@ const notifyWithWebAPI = async (payload?: NotificationPayload): Promise<boolean>
       return true;
     }
 
-    new Notification(payload?.title ?? 'OpenChamber', {
+    const sessionId = payload?.sessionId?.trim();
+    const directory = payload?.directory?.trim();
+    const notification = new Notification(payload?.title ?? 'OpenChamber', {
       body: payload?.body,
       tag: payload?.tag,
+      silent: payload?.silent === true,
     });
+    notification.onclick = () => {
+      window.focus();
+      if (!sessionId) return;
+      window.dispatchEvent(new CustomEvent('openchamber:open-session', {
+        detail: { sessionId, directory: directory || '' },
+      }));
+    };
     return true;
   } catch (error) {
     console.warn('Failed to send notification', error);
@@ -199,6 +216,7 @@ const notifyWithDesktop = async (payload?: NotificationPayload): Promise<boolean
         sessionId: payload?.sessionId,
         directory: payload?.directory,
         requireHidden: payload?.requireHidden,
+        silent: payload?.silent === true,
       },
     });
     return true;

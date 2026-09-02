@@ -1,4 +1,4 @@
-import { toast } from 'sonner';
+import { toast } from '@/components/ui/toast';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const SMALL_MODEL_TOAST_ID = 'small-model-unavailable';

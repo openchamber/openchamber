@@ -1357,11 +1357,12 @@ const maybeShowNativeNotification = (rawInput) => {
     ? payload.directory.trim()
     : null;
 
+  const silent = payload.silent === true;
   const notification = new Notification({
     title,
     body,
-    silent: false,
-    ...(process.platform === 'darwin' ? { sound: 'Glass' } : {}),
+    silent,
+    ...(process.platform === 'darwin' && !silent ? { sound: 'Glass' } : {}),
   });
 
   activeNotifications.add(notification);

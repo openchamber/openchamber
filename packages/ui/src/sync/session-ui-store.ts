@@ -1833,7 +1833,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // revertToMessage handles the redo stack push internally
     await get().revertToMessage(sessionId, targetMessage.id)
 
-    const { toast } = await import("sonner")
+    const { toast } = await import("@/components/ui/toast")
     const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
     const { dictionary } = useI18nStore.getState()
     toast.success(formatMessage(dictionary, "chat.revert.toast.undo", { preview }))
@@ -1846,7 +1846,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     if (options?.fullUnrevert) {
       const { unrevertSession } = await import("./session-actions")
       await unrevertSession(sessionId)
-      const { toast } = await import("sonner")
+      const { toast } = await import("@/components/ui/toast")
       const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
       const { dictionary } = useI18nStore.getState()
       toast.success(formatMessage(dictionary, "chat.revert.toast.restored"))
@@ -1866,7 +1866,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     if (targetMessage) {
       await get().revertToMessage(sessionId, targetMessage.id, { skipRedoPush: true })
-      const { toast } = await import("sonner")
+      const { toast } = await import("@/components/ui/toast")
       const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
       const { dictionary } = useI18nStore.getState()
       toast.success(formatMessage(dictionary, "chat.revert.toast.redo"))
@@ -1874,7 +1874,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
 
     await unrevertSessionAction(sessionId)
-    const { toast } = await import("sonner")
+    const { toast } = await import("@/components/ui/toast")
     const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
     const { dictionary } = useI18nStore.getState()
     toast.success(formatMessage(dictionary, "chat.revert.toast.restored"))
@@ -1891,11 +1891,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     try {
       await forkFromMessageAction(sessionId, messageId)
 
-      const { toast } = await import("sonner")
+      const { toast } = await import("@/components/ui/toast")
       toast.success(`Forked from ${existingSession.title}`)
     } catch (error) {
       console.error("Failed to fork session:", error)
-      const { toast } = await import("sonner")
+      const { toast } = await import("@/components/ui/toast")
       toast.error("Failed to fork session")
     }
   },

@@ -9,15 +9,17 @@ import { useSession } from '@/sync/sync-context';
 
 import { MobileSessionMetadataButton } from './MobileSessionMetadata';
 import { MobileSessionSwitcher } from './MobileSessionSwitcher';
+import { NotificationCenter } from '@/components/notifications/NotificationCenter';
 
 export const MobileHeader: React.FC<{
   onOpenSessions: () => void;
   /** Opens the right workspace drawer (Changes / Files / Terminal / Notes / MCP). */
   onOpenWorkspace: () => void;
+  onOpenSettings?: () => void;
   /** Tablet: size the title trigger to its text instead of the free width, so
       a wide header doesn't turn the switcher into a full-width tap target. */
   compactTitle?: boolean;
-}> = ({ onOpenSessions, onOpenWorkspace, compactTitle = false }) => {
+}> = ({ onOpenSessions, onOpenWorkspace, onOpenSettings, compactTitle = false }) => {
   const { t } = useI18n();
   const [metadataOpen, setMetadataOpen] = React.useState(false);
   const [switcherOpen, setSwitcherOpen] = React.useState(false);
@@ -120,6 +122,13 @@ export const MobileHeader: React.FC<{
             currentSessionId={currentSessionId}
             effectiveDirectory={effectiveDirectory}
             isNewSessionDraftOpen={isNewSessionDraftOpen}
+          />
+
+          <NotificationCenter
+            variant="dialog"
+            triggerClassName="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            iconClassName="size-5"
+            onOpenSettings={onOpenSettings}
           />
 
           <button

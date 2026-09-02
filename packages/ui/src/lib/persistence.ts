@@ -18,6 +18,10 @@ import { sanitizeStarterRefs } from '@/lib/draftStarters';
 import { normalizeMobileKeyboardMode, setStoredMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { isCapacitorApp } from '@/lib/platform';
+import {
+  NOTIFICATION_INBOX_KIND_KEYS,
+  parseNotificationInboxFilter,
+} from '@/lib/notificationInboxFilter';
 import { isTerminalShell } from '@/lib/terminalShell';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID } from '@/lib/theme/themes';
@@ -555,11 +559,14 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     followUpBehavior: DEFAULT_FOLLOW_UP_BEHAVIOR,
     showDeletionDialog: defaults.showDeletionDialog,
     nativeNotificationsEnabled: defaults.nativeNotificationsEnabled,
+    notificationSoundEnabled: defaults.notificationSoundEnabled,
+    notificationInboxEnabled: defaults.notificationInboxEnabled,
     notificationMode: defaults.notificationMode,
     notifyOnSubtasks: defaults.notifyOnSubtasks,
     notifyOnCompletion: defaults.notifyOnCompletion,
     notifyOnError: defaults.notifyOnError,
     notifyOnQuestion: defaults.notifyOnQuestion,
+    notificationInboxFilter: defaults.notificationInboxFilter,
     notificationTemplates: defaults.notificationTemplates,
     summarizeLastMessage: defaults.summarizeLastMessage,
     summaryThreshold: defaults.summaryThreshold,
@@ -701,6 +708,12 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.nativeNotificationsEnabled === 'boolean' && settings.nativeNotificationsEnabled !== store.nativeNotificationsEnabled) {
     store.setNativeNotificationsEnabled(settings.nativeNotificationsEnabled);
   }
+  if (typeof settings.notificationSoundEnabled === 'boolean' && settings.notificationSoundEnabled !== store.notificationSoundEnabled) {
+    store.setNotificationSoundEnabled(settings.notificationSoundEnabled);
+  }
+  if (typeof settings.notificationInboxEnabled === 'boolean' && settings.notificationInboxEnabled !== store.notificationInboxEnabled) {
+    store.setNotificationInboxEnabled(settings.notificationInboxEnabled);
+  }
   if (typeof settings.notificationMode === 'string' && (settings.notificationMode === 'always' || settings.notificationMode === 'hidden-only')) {
     if (settings.notificationMode !== store.notificationMode) {
       store.setNotificationMode(settings.notificationMode);
@@ -717,6 +730,13 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.notifyOnQuestion === 'boolean' && settings.notifyOnQuestion !== store.notifyOnQuestion) {
     store.setNotifyOnQuestion(settings.notifyOnQuestion);
+  }
+  const inboxFilter = parseNotificationInboxFilter(settings.notificationInboxFilter);
+  if (inboxFilter) {
+    const current = store.notificationInboxFilter;
+    if (NOTIFICATION_INBOX_KIND_KEYS.some((key) => inboxFilter[key] !== current[key])) {
+      store.setNotificationInboxFilter(inboxFilter);
+    }
   }
   if (settings.notificationTemplates && typeof settings.notificationTemplates === 'object') {
     store.setNotificationTemplates(settings.notificationTemplates);
@@ -1284,6 +1304,12 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.nativeNotificationsEnabled === 'boolean') {
     result.nativeNotificationsEnabled = candidate.nativeNotificationsEnabled;
   }
+  if (typeof candidate.notificationSoundEnabled === 'boolean') {
+    result.notificationSoundEnabled = candidate.notificationSoundEnabled;
+  }
+  if (typeof candidate.notificationInboxEnabled === 'boolean') {
+    result.notificationInboxEnabled = candidate.notificationInboxEnabled;
+  }
   if (typeof candidate.notificationMode === 'string' && (candidate.notificationMode === 'always' || candidate.notificationMode === 'hidden-only')) {
     result.notificationMode = candidate.notificationMode;
   }
@@ -1298,6 +1324,10 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.notifyOnQuestion === 'boolean') {
     result.notifyOnQuestion = candidate.notifyOnQuestion;
+  }
+  const inboxFilter = parseNotificationInboxFilter(candidate.notificationInboxFilter);
+  if (inboxFilter) {
+    result.notificationInboxFilter = inboxFilter;
   }
   if (candidate.notificationTemplates && typeof candidate.notificationTemplates === 'object') {
     const templates = candidate.notificationTemplates as Record<string, unknown>;

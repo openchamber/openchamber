@@ -21,7 +21,7 @@ import { computeMcpHealth, useMcpStore } from '@/stores/useMcpStore';
 import { McpIcon } from '@/components/icons/McpIcon';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
-import { toast } from 'sonner';
+import { toast } from '@/components/ui/toast';
 import { startMcpAuthorization } from '@/components/sections/mcp/startMcpAuthorization';
 
 const statusTooltip = (
