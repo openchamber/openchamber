@@ -1,12 +1,12 @@
 import express from 'express';
 import { createProjectIdFromPath } from '../projects/project-id.js';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import {
   buildDeferredRestartResponse,
 } from './config-mutation-response.js';
 import { getClaudeCliAuthStatus } from './claude-cli-auth.js';
+import { OPENCODE_CONFIG_DIR } from './shared.js';
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
@@ -807,7 +807,7 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
   });
 
   // Behavior / Global AGENTS.md endpoints
-  const AGENTS_MD_PATH = path.join(os.homedir(), '.config', 'opencode', 'AGENTS.md');
+  const AGENTS_MD_PATH = path.join(OPENCODE_CONFIG_DIR, 'AGENTS.md');
   const MAX_BEHAVIOR_PROMPT_SIZE = 1024 * 1024; // 1 MB
 
   app.get('/api/behavior/agents-md', async (_req, res) => {

@@ -9,6 +9,7 @@ import {
   getProviderSources,
   removeProviderConfig,
 } from './providers.js';
+import { OPENCODE_CONFIG_DIR } from './shared.js';
 
 let projectDir;
 
@@ -230,8 +231,8 @@ describe('custom provider config persistence', () => {
     expect(sources.sources.custom.exists).toBe(false);
 
     for (const userPath of [
-      path.join(os.homedir(), '.config', 'opencode', 'opencode.json'),
-      path.join(os.homedir(), '.config', 'opencode', 'config.json'),
+      path.join(OPENCODE_CONFIG_DIR, 'opencode.json'),
+      path.join(OPENCODE_CONFIG_DIR, 'config.json'),
     ]) {
       if (!fs.existsSync(userPath)) continue;
       const userConfig = readJson(userPath);
@@ -269,8 +270,8 @@ describe('custom provider config persistence', () => {
       expect(sources.sources.project.exists).toBe(false);
 
       for (const userPath of [
-        path.join(os.homedir(), '.config', 'opencode', 'opencode.json'),
-        path.join(os.homedir(), '.config', 'opencode', 'config.json'),
+        path.join(OPENCODE_CONFIG_DIR, 'opencode.json'),
+        path.join(OPENCODE_CONFIG_DIR, 'config.json'),
       ]) {
         if (!fs.existsSync(userPath)) continue;
         const userConfig = readJson(userPath);
