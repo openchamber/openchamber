@@ -74,7 +74,7 @@ before touching the filesystem). Rationale: metadata rides every
 
 1. `createSessionGoalRuntime` subscribes to the global SSE hub (same pattern
    as session-assist — it needs the envelope's `directory`).
-2. `session.status: idle` arms a 15s per-session timer; `busy`/`retry` clears
+2. `session.status: idle` or the equivalent `session.idle` event arms a 15s per-session timer; `busy`/`retry` clears
    it. A `session.updated` carrying a fresh active goal (`turnsUsed === 0` or
    `statusReason === 'resumed'`) arms a kickoff timer — 3s for fresh goals,
    ~250ms for an explicit Resume so the nudge feels immediate — since setting

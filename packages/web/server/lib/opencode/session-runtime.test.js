@@ -98,6 +98,37 @@ describe('session runtime', () => {
     });
   });
 
+  it('accepts normalized session.idle payloads', () => {
+    const events = [];
+    const runtime = createSessionRuntime({
+      writeSseEvent() {
+        throw new Error('SSE fallback should not be used when broadcastEvent is provided');
+      },
+      getNotificationClients: () => new Set(),
+      broadcastEvent: (payload) => {
+        events.push(payload);
+      },
+    });
+    runtimes.push(runtime);
+
+    runtime.processOpenCodeSsePayload({
+      type: 'session.idle',
+      properties: {
+        sessionID: 'idle-session-1',
+        directory: '/workspace',
+      },
+    });
+
+    expect(runtime.getSessionState('idle-session-1')).toEqual(expect.objectContaining({ status: 'idle' }));
+    expect(events).toContainEqual({
+      type: 'openchamber:session-status',
+      properties: expect.objectContaining({
+        sessionID: 'idle-session-1',
+        status: 'idle',
+      }),
+    });
+  });
+
   it('broadcasts idle activity when cooldown expires', () => {
     vi.useFakeTimers();
     const events = [];

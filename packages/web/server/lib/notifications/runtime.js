@@ -313,6 +313,8 @@ export const createNotificationTriggerRuntime = (deps) => {
       const error = payload.properties?.error;
       const errorText = typeof error?.message === 'string'
         ? error.message
+        : typeof error?.data?.message === 'string'
+          ? error.data.message
         : typeof error === 'string' ? error : '';
       await maybeSendPushForTrigger({
         ...payload,

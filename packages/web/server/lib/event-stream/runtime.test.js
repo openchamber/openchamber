@@ -139,7 +139,7 @@ describe('message stream websocket runtime', () => {
         signal: options.signal,
         holdOpen: true,
         blocks: [
-          'data: {"id":"evt-v2","type":"session.updated","data":{"info":{"id":"ses-1"}},"location":{"directory":"/tmp/project"}}\n\n',
+          'data: {"id":"evt-v2","type":"session.execution.succeeded","data":{"sessionID":"ses-1"},"location":{"directory":"/tmp/project"}}\n\n',
         ],
       }),
     });
@@ -162,8 +162,8 @@ describe('message stream websocket runtime', () => {
     expect(socket.sent).toContainEqual({
       type: 'event',
       payload: {
-        type: 'session.updated',
-        properties: { info: { id: 'ses-1' } },
+        type: 'session.idle',
+        properties: { sessionID: 'ses-1', directory: '/tmp/project' },
       },
       eventId: 'evt-v2',
       directory: '/tmp/project',

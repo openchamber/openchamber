@@ -44,7 +44,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/settings-normalization-runtime.js`: path/settings/tunnel normalization and sanitization helpers runtime used by settings/routes/config wiring.
 - `packages/web/server/lib/opencode/theme-runtime.js`: custom theme JSON validation and theme directory loading runtime for settings utility routes.
 - `packages/web/server/lib/opencode/proxy.js`: OpenCode API/SSE forwarding and readiness-gate route registration.
-- `packages/web/server/lib/opencode/session-runtime.js`: session status/attention/activity runtime for OpenCode SSE events.
+- `packages/web/server/lib/opencode/session-runtime.js`: session status/attention/activity runtime for OpenCode SSE events, including the legacy `session.idle` equivalent used by opencode2 normalization.
 - `packages/web/server/lib/opencode/watcher.js`: global SSE watcher runtime for push/session event fanout.
 - `packages/web/server/lib/opencode/shared.js`: shared utilities for config, markdown, skills, and git helpers.
 - `packages/web/server/lib/ui-auth/ui-auth.js`: UI session authentication runtime (outside OpenCode module).

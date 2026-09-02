@@ -5,7 +5,8 @@ const SESSION_ACTIVITY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SESSION_STATE_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
 const extractSessionStatusUpdate = (payload) => {
-  if (!payload || payload.type !== 'session.status') {
+  const isIdleEvent = payload?.type === 'session.idle';
+  if (!payload || (!isIdleEvent && payload.type !== 'session.status')) {
     return null;
   }
 
@@ -14,9 +15,11 @@ const extractSessionStatusUpdate = (payload) => {
   const info = properties.info && typeof properties.info === 'object' ? properties.info : {};
   const sessionId = typeof properties.sessionID === 'string' ? properties.sessionID.trim() : '';
   // Canonical OpenCode schema uses properties.status.type. Keep legacy info.type fallback for compatibility.
-  const type = typeof status.type === 'string'
-    ? status.type.trim()
-    : (typeof info.type === 'string' ? info.type.trim() : '');
+  const type = isIdleEvent
+    ? 'idle'
+    : typeof status.type === 'string'
+      ? status.type.trim()
+      : (typeof info.type === 'string' ? info.type.trim() : '');
 
   if (!sessionId || !type) {
     return null;

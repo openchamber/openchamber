@@ -110,14 +110,17 @@ const extractJsonObject = (value) => {
 };
 
 const extractSessionStatus = (payload) => {
-  if (!payload || payload.type !== 'session.status') return null;
+  const isIdleEvent = payload?.type === 'session.idle';
+  if (!payload || (!isIdleEvent && payload.type !== 'session.status')) return null;
   const properties = payload.properties && typeof payload.properties === 'object' ? payload.properties : {};
   const status = properties.status && typeof properties.status === 'object' ? properties.status : {};
   const info = properties.info && typeof properties.info === 'object' ? properties.info : {};
   const sessionId = typeof properties.sessionID === 'string' ? properties.sessionID.trim() : '';
-  const type = typeof status.type === 'string'
-    ? status.type.trim()
-    : (typeof info.type === 'string' ? info.type.trim() : '');
+  const type = isIdleEvent
+    ? 'idle'
+    : typeof status.type === 'string'
+      ? status.type.trim()
+      : (typeof info.type === 'string' ? info.type.trim() : '');
   if (!sessionId || !type) return null;
   const directory = typeof properties.directory === 'string' && properties.directory
     ? properties.directory

@@ -931,7 +931,7 @@ const processForwardedEventPayload = (payload, emitSyntheticEvent) => {
 
   maybeCacheSessionInfoFromEvent(payload);
 
-  if (payload.type !== 'session.status') {
+  if (payload.type !== 'session.status' && payload.type !== 'session.idle') {
     return;
   }
 
@@ -939,9 +939,11 @@ const processForwardedEventPayload = (payload, emitSyntheticEvent) => {
   const statusInfo = properties.status && typeof properties.status === 'object' ? properties.status : {};
   const info = properties.info && typeof properties.info === 'object' ? properties.info : {};
   const sessionId = typeof properties.sessionID === 'string' ? properties.sessionID.trim() : '';
-  const status = typeof statusInfo.type === 'string'
-    ? statusInfo.type.trim()
-    : (typeof info.type === 'string' ? info.type.trim() : '');
+  const status = payload.type === 'session.idle'
+    ? 'idle'
+    : typeof statusInfo.type === 'string'
+      ? statusInfo.type.trim()
+      : (typeof info.type === 'string' ? info.type.trim() : '');
 
   if (!sessionId || !status) {
     return;
