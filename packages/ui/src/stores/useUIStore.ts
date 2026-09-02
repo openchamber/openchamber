@@ -2733,8 +2733,8 @@ export const useUIStore = create<UIStore>()(
             }
           }
 
-          // v14 -> v15: replace the old boolean wide layout toggle with a width mode.
-          if (version < 15) {
+          // v18 -> v19: replace the old boolean wide layout toggle with a width mode.
+          if (version < 19) {
             if (state.chatMessageWidthMode !== 'wide' && state.chatMessageWidthMode !== 'fluid') {
               state.chatMessageWidthMode = state.wideChatLayoutEnabled === true ? 'wide' : 'narrow';
             }

@@ -457,9 +457,9 @@ describe('context panel tab limits', () => {
 });
 
 describe('useUIStore persistence migrations', () => {
-  test('migrates the legacy chat width toggle from a version 14 snapshot', async () => {
+  test('migrates the legacy chat width toggle from a version 18 snapshot', async () => {
     const migrate = useUIStore.persist.getOptions().migrate;
-    const migrated = await migrate?.({ wideChatLayoutEnabled: true }, 14);
+    const migrated = await migrate?.({ wideChatLayoutEnabled: true }, 18);
 
     expect(migrated).toEqual({
       autoSaveEnabled: true,
@@ -469,6 +469,10 @@ describe('useUIStore persistence migrations', () => {
       contextRailOrder: [],
       fileEditorKeymap: 'default',
       largeTextPasteBehavior: 'ask',
+      linearIssueListAssignee: 'any',
+      linearIssueListPriority: 'all',
+      linearIssueListStatus: 'all',
+      linearIssueListTeamId: 'all',
     });
   });
 });
