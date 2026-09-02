@@ -85,8 +85,14 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
     ...stateOverrides,
   };
 
+  const registry = {
+    registerManagedOpenCodeProcess: vi.fn(async () => {}),
+    unregisterManagedOpenCodeProcess: vi.fn(async () => {}),
+  };
+
   const runtime = createOpenCodeLifecycleRuntime({
     state,
+    ...registry,
     env: {
       ENV_CONFIGURED_OPENCODE_PORT: 45678,
       ENV_CONFIGURED_OPENCODE_HOST: null,
@@ -122,6 +128,7 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
     ...overrides,
   });
   runtime.testState = state;
+  runtime.testRegistry = registry;
   return runtime;
 };
 
@@ -236,6 +243,43 @@ describe('OpenCode lifecycle', () => {
       'http://127.0.0.1:45678/session/status?directory=%2Ftmp%2Fworktree-a',
       'http://127.0.0.1:45678/session/status?directory=%2Ftmp%2Fproject-b',
     ]);
+  });
+
+  it('warms only the most recent directory on the Desktop runtime', async () => {
+    const previousRuntime = process.env.OPENCHAMBER_RUNTIME;
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ healthy: true }),
+    }));
+    globalThis.fetch = fetchMock;
+
+    try {
+      const runtime = createRuntime({
+        env: {
+          ENV_CONFIGURED_OPENCODE_PORT: 45678,
+          ENV_CONFIGURED_OPENCODE_HOST: null,
+          ENV_EFFECTIVE_PORT: 45678,
+          ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+          ENV_SKIP_OPENCODE_START: true,
+        },
+        reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+        getWarmupDirectories: vi.fn(async () => ['/tmp/worktree-a', '/tmp/project-b', '/tmp/project-c']),
+      });
+
+      await runtime.bootstrapOpenCodeAtStartup();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const warmupUrls = fetchMock.mock.calls
+        .map(([url]) => String(url))
+        .filter((url) => url.includes('/session/status'));
+      expect(warmupUrls).toEqual([
+        'http://127.0.0.1:45678/session/status?directory=%2Ftmp%2Fworktree-a',
+      ]);
+    } finally {
+      if (previousRuntime === undefined) delete process.env.OPENCHAMBER_RUNTIME;
+      else process.env.OPENCHAMBER_RUNTIME = previousRuntime;
+    }
   });
 
   it('records an authoritative error terminal event when bootstrap fails', async () => {
@@ -610,6 +654,83 @@ describe('OpenCode lifecycle', () => {
 
     await server.close();
     expect(server.signalCode).toBe('SIGTERM');
+  });
+
+  it('removes the registry entry when a managed child exits on its own', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+
+    const runtime = createRuntime();
+    const server = await runtime.startOpenCode();
+    const { registerManagedOpenCodeProcess, unregisterManagedOpenCodeProcess } = runtime.testRegistry;
+
+    expect(registerManagedOpenCodeProcess).toHaveBeenCalledWith(
+      expect.objectContaining({ pid: 12345, ownerPid: process.pid, port: 45678 }),
+    );
+    expect(unregisterManagedOpenCodeProcess).not.toHaveBeenCalled();
+
+    child.exitCode = 7;
+    child.emit('exit', 7, null);
+    await Promise.resolve();
+
+    expect(unregisterManagedOpenCodeProcess).toHaveBeenCalledWith(12345);
+
+    await server.close();
+
+    expect(unregisterManagedOpenCodeProcess).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes the registry entry once for an explicitly closed managed child', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+
+    const runtime = createRuntime();
+    const server = await runtime.startOpenCode();
+    const { unregisterManagedOpenCodeProcess } = runtime.testRegistry;
+
+    await server.close();
+
+    expect(server.signalCode).toBe('SIGTERM');
+    expect(unregisterManagedOpenCodeProcess).toHaveBeenCalledTimes(1);
+    expect(unregisterManagedOpenCodeProcess).toHaveBeenCalledWith(12345);
+  });
+
+  it('removes the registry entry when the child exits while it is being registered', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+
+    const runtime = createRuntime({
+      registerManagedOpenCodeProcess: vi.fn(async () => {
+        child.exitCode = 7;
+        child.emit('exit', 7, null);
+      }),
+    });
+    const server = await runtime.startOpenCode();
+    const { unregisterManagedOpenCodeProcess } = runtime.testRegistry;
+
+    expect(unregisterManagedOpenCodeProcess).toHaveBeenCalledWith(12345);
+
+    await server.close();
+
+    expect(unregisterManagedOpenCodeProcess).toHaveBeenCalledTimes(1);
   });
 
   it('launches managed OpenCode on the configured bind hostname', async () => {

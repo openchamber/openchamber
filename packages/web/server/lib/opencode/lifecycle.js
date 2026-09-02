@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
 import { stripAppImageArgv0Leak } from '../inherited-env.js';
-import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
+import { reapOrphanedProcesses, registerManagedProcess, unregisterManagedProcess } from './managed-process-registry.js';
 import { applyProviderEnvAliases } from './provider-env-aliases.js';
 import { recordStartupPerformance } from './startup-performance.js';
 
@@ -21,6 +21,11 @@ const OPENCODE_HEALTH_PATH = '/global/health';
 // Last-used directory plus the three most recently opened projects — deeper
 // tails are unlikely to be the user's first click and just add background work.
 const WARMUP_DIRECTORY_LIMIT = 4;
+// Desktop runs the UI against this same in-process server and bootstraps the
+// directories it actually shows, in its own priority order. Warming the
+// historical tail there competes with that bootstrap instead of getting ahead
+// of it, so Desktop warms the last-used directory only.
+const DESKTOP_WARMUP_DIRECTORY_LIMIT = 1;
 const WARMUP_REQUEST_TIMEOUT_MS = 30000;
 const MANAGED_STDERR_TAIL_MAX_BYTES = 32 * 1024;
 const HEALTH_FAILURE_DETAIL_MAX_LENGTH = 256;
@@ -107,6 +112,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     getManagedOpenCodeEnv = async () => ({}),
     getActiveSessionCount = () => 0,
     reapManagedOrphanedProcesses = reapOrphanedProcesses,
+    registerManagedOpenCodeProcess = registerManagedProcess,
+    unregisterManagedOpenCodeProcess = unregisterManagedProcess,
     getWarmupDirectories = async () => [],
     onOpenCodeRestarted = null,
     now = Date.now,
@@ -353,15 +360,14 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     await waitForChildProcessClose(child, 1000);
   };
 
-  const closeManagedOpenCodeChild = async (child) => {
-    const pid = child?.pid;
+  const closeManagedOpenCodeChild = async (child, dropRegistration) => {
     try {
       await terminateChildProcess(child);
     } finally {
       // Drop it from the registry only once it has actually exited, so a child
       // that survived teardown stays eligible for the next run's reaper.
-      if (Number.isInteger(pid) && hasChildProcessExited(child)) {
-        await unregisterManagedProcess(pid);
+      if (hasChildProcessExited(child)) {
+        await dropRegistration();
       }
     }
   };
@@ -514,13 +520,32 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     // actual host (Electron sets OPENCHAMBER_RUNTIME='desktop'; the standalone
     // web CLI leaves it unset → 'web'; SSH remote → 'ssh-remote') rather than a
     // hardcoded label, matching the server's existing runtimeName convention.
-    await registerManagedProcess({
+    await registerManagedOpenCodeProcess({
       pid: child.pid,
       ownerPid: process.pid,
       port,
       binary,
       runtime: process.env.OPENCHAMBER_RUNTIME || 'web',
     });
+
+    let registrationDropped = false;
+    const dropManagedProcessRegistration = async () => {
+      if (registrationDropped) return;
+      registrationDropped = true;
+      if (!Number.isInteger(child.pid)) return;
+      await unregisterManagedOpenCodeProcess(child.pid);
+    };
+
+    // A child that ends on its own (crash, external kill, OpenCode stopping
+    // itself) never reaches teardown, so nothing else prunes its entry. Both
+    // the listener and the immediate check are attached AFTER the registry
+    // write, so a removal can never overtake the write that creates the file.
+    child.on('exit', () => {
+      void dropManagedProcessRegistration();
+    });
+    if (hasChildProcessExited(child)) {
+      await dropManagedProcessRegistration();
+    }
 
     return {
       url,
@@ -535,7 +560,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         return getManagedProcessSnapshot().stderrTail;
       },
       async close() {
-        await closeManagedOpenCodeChild(child);
+        await closeManagedOpenCodeChild(child, dropManagedProcessRegistration);
       },
     };
   };
@@ -1160,7 +1185,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     if (!Array.isArray(directories) || directories.length === 0) return;
 
     const warmedPort = state.openCodePort;
-    for (const directory of directories.slice(0, WARMUP_DIRECTORY_LIMIT)) {
+    const limit = process.env.OPENCHAMBER_RUNTIME === 'desktop'
+      ? DESKTOP_WARMUP_DIRECTORY_LIMIT
+      : WARMUP_DIRECTORY_LIMIT;
+    for (const directory of directories.slice(0, limit)) {
       if (typeof directory !== 'string' || !directory) continue;
       if (!state.isOpenCodeReady || state.openCodePort !== warmedPort) return;
       let timeout = null;
