@@ -1,11 +1,13 @@
 ---
 name: changelog-authoring
-description: Use when drafting or updating user-facing CHANGELOG.md entries for the OpenChamber `[Unreleased]` section, including the VS Code extension changelog, summarizing changes since the latest git tag.
+description: Use only when the maintainer explicitly asks to update the changelog — then draft the OpenChamber `[Unreleased]` entries (main app and VS Code extension) summarizing changes since the latest git tag.
 license: MIT
 compatibility: opencode
 ---
 
 ## Overview
+
+**Gate: an explicit maintainer request.** The changelog is written once per release, by the maintainer, as a single story. Both `CHANGELOG.md` files stay untouched by fixes, features, PR merges, de-slop follow-ups, and every other task — a change lands without a changelog line, and the maintainer folds it in later. Proceed past this point only when the current message asks to update the changelog; otherwise stop and leave both files as they are.
 
 Draft user-facing bullet points for the `## [Unreleased]` section that summarize changes since the latest git tag up to `HEAD`.
 
@@ -55,6 +57,7 @@ Use `gh pr view <number> --json number,title,body,author,mergedAt` for PR eviden
 ## Highlights and Ordering
 
 - Sort bullets by user impact, not commit order. Breaking changes first, then significant new capabilities or broad user-visible improvements, then smaller features, fixes, and visual polish.
+- Keep the opening highlight block contiguous. Place every bold highlight before the first regular bullet; a regular bullet marks the end of the highlight block.
 - Mark only the strongest highlights with a bold area prefix, such as `- **Chat attachments:** ...`. Usually the first 1–3 bullets; fewer when the release lacks substantial changes, more only when clearly justified.
 - Treat a change as a highlight only when it introduces a substantial user-facing capability, materially changes a common workflow, or fixes a severe/widespread problem. Do not bold merely because a bullet is first, has a large diff, or was hard to implement.
 - Keep related platform bullets together only when that does not push a more important change too far down.
@@ -63,6 +66,7 @@ Use `gh pr view <number> --json number,title,body,author,mergedAt` for PR eviden
 ## VS Code Changelog Rules
 
 - Craft entries only for behavior present in the VS Code extension. Exclude Desktop, Web, Mobile/PWA, and main-app-only UI.
+- **Reachability check before every entry.** A change touching shared UI or the VS Code bridge earns a VS Code changelog entry only when the surface is actually mounted from the VS Code entrypoint (`packages/vscode/webview/main.tsx` → `VSCodeApp` → `VSCodeLayout` — which mounts only a subset of shared surfaces; consult the surface map in `packages/vscode/src/DOCUMENTATION.md` when present, trace the mount when not). Shared code that VS Code never mounts is dead there — an entry for it is a false claim users will file bugs about. When in doubt, leave the entry out of the VS Code changelog.
 - Do not copy shared/main bullets here unless changed files or code paths show the feature exists in the extension.
 - Focus on core UI improvements and VS Code integration.
 - Do NOT use "VSCode:" or "VS Code:" prefixes in this file.

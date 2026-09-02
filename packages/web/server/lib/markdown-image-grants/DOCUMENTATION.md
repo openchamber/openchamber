@@ -34,3 +34,7 @@ server implementation. VS Code does not call this route for workspace images;
 those use its local filesystem bridge. If called, the grant route returns an
 explicit unsupported response because OpenCode temporary images are not
 supported there.
+
+Requests to OpenCode carry the directory in a percent-encoded
+`x-opencode-directory` header, matching the SDK wire format; OpenCode rejects
+raw non-ASCII header values.

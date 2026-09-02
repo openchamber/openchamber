@@ -1,10 +1,11 @@
 import { create } from 'zustand';
+import { z } from 'zod';
 import { devtools, persist } from 'zustand/middleware';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { normalizePath } from '@/lib/pathNormalization';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 
-export type InlineCommentSource = 'diff' | 'plan' | 'file' | 'preview-console' | 'preview-annotation' | 'terminal' | 'pr-comment' | 'pr-check';
+export type InlineCommentSource = 'diff' | 'plan' | 'file' | 'preview-annotation' | 'terminal' | 'pr-comment' | 'pr-check' | 'chat-quote' | 'file-quote';
 
 export type InlineCommentDraftTarget = {
   directory: string;
@@ -22,6 +23,8 @@ export interface InlineCommentDraft {
   code: string;
   language: string;
   text: string;
+  /** Owning terminal session; set only for `source: 'terminal'`. */
+  terminalId?: string;
   createdAt: number;
 }
 
@@ -162,6 +165,63 @@ const boundState = (
   return { drafts: retainedDrafts, touchedAt: retainedTouchedAt };
 };
 
+const EMPTY_PERSISTED_STATE: InlineCommentDraftState = { drafts: {}, touchedAt: {} };
+
+const persistedDraftSchema = z.object({
+  id: z.string(),
+  sessionKey: z.string(),
+  source: z.enum(['diff', 'plan', 'file', 'preview-annotation', 'terminal', 'pr-comment', 'pr-check', 'chat-quote', 'file-quote']),
+  fileLabel: z.string(),
+  startLine: z.number(),
+  endLine: z.number(),
+  side: z.enum(['original', 'modified']).optional(),
+  code: z.string(),
+  language: z.string(),
+  text: z.string(),
+  terminalId: z.string().optional(),
+  createdAt: z.number(),
+});
+
+export const persistedDraftEnvelopeSchema = z.object({
+  drafts: z.record(z.string(), z.array(z.unknown())),
+  touchedAt: z.record(z.string(), z.number()).optional(),
+});
+
+type PersistedDraftEnvelopeResult = z.ZodSafeParseResult<z.infer<typeof persistedDraftEnvelopeSchema>>;
+
+/**
+ * v2 → v3: terminal drafts carried their terminal id in `language`; move it to
+ * the dedicated `terminalId` field. Drafts from the removed 'preview-console'
+ * source are dropped, as are malformed entries. Pre-v2 or unreadable payloads
+ * reset entirely (the pre-v3 behavior).
+ */
+export const migratePersistedDrafts = (envelope: PersistedDraftEnvelopeResult, version: number): InlineCommentDraftState => {
+  if (version < 2) return EMPTY_PERSISTED_STATE;
+  if (!envelope.success) return EMPTY_PERSISTED_STATE;
+
+  const drafts: Record<string, InlineCommentDraft[]> = {};
+  for (const [key, bucket] of Object.entries(envelope.data.drafts)) {
+    const migrated: InlineCommentDraft[] = [];
+    for (const entry of bucket) {
+      const parsed = persistedDraftSchema.safeParse(entry);
+      if (!parsed.success) continue;
+      const draft = parsed.data;
+      if (draft.source === 'terminal' && !draft.terminalId) {
+        migrated.push({ ...draft, terminalId: draft.language, language: '' });
+      } else {
+        migrated.push(draft);
+      }
+    }
+    if (migrated.length > 0) drafts[key] = migrated;
+  }
+
+  const touchedAt: Record<string, number> = {};
+  for (const [key, value] of Object.entries(envelope.data.touchedAt ?? {})) {
+    if (key in drafts) touchedAt[key] = value;
+  }
+  return { drafts, touchedAt };
+};
+
 const removeDraftKey = (state: InlineCommentDraftState, key: string): InlineCommentDraftState => {
   if (!(key in state.drafts)) return state;
 
@@ -281,9 +341,9 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
       {
         name: 'openchamber-inline-comment-drafts',
         storage: createDeferredSafeJSONStorage(),
-        version: 2,
+        version: 3,
         partialize: (state) => ({ drafts: state.drafts, touchedAt: state.touchedAt }),
-        migrate: () => ({ drafts: {}, touchedAt: {} }),
+        migrate: (persisted, version) => migratePersistedDrafts(persistedDraftEnvelopeSchema.safeParse(persisted), version),
       },
     ),
     { name: 'inline-comment-draft-store' },

@@ -1,0 +1,138 @@
+---
+title: Environment Değişkenleri
+description: Environment değişkenleriyle OpenChamber ve OpenCode entegrasyonunu yapılandırın.
+---
+
+# Environment Değişkenleri
+
+OpenChamber bu environment değişkenlerini başlangıçta okur. Başlangıç servisleri için `openchamber startup enable` varsayılan olarak mevcut environment'ı anlık görüntü olarak kaydeder. Servisin kullanmasını istediğiniz değişkenleri değiştirdikten sonra bunu yeniden çalıştırın.
+
+## OpenChamber sunucusu
+
+### `OPENCHAMBER_HOST`
+
+OpenChamber web sunucusu için bind adresi. Diğer makinelerden erişime izin vermek için `0.0.0.0` kullanın.
+
+### `OPENCHAMBER_UI_PASSWORD`
+
+Tarayıcı arayüzü için parola. Bunu localhost dışına bind ederken, tünel kullanırken ya da reverse proxy arkasında çalıştırırken kullanın.
+
+### `OPENCHAMBER_API_ONLY`
+
+`true` ya da `1` olarak ayarlandığında OpenChamber'ı headless modda başlatır. API rotaları masaüstü ve mobil istemciler için açık kalır, ama tarayıcı arayüzü sunulmaz.
+
+### `OPENCHAMBER_DATA_DIR`
+
+OpenChamber veri dizinini geçersiz kılar. Varsayılan `~/.config/openchamber`.
+
+### `OPENCHAMBER_COMPRESS_API`
+
+API yanıt sıkıştırmasını kontrol eder. `true` ya da `1` ile zorla açın, `false` ya da `0` ile zorla kapatın.
+
+### `OPENCHAMBER_SKIP_API_COMPRESSION`
+
+`true` ya da `1` olarak ayarlandığında API yanıt sıkıştırmasını kapatır. Bu ayar `OPENCHAMBER_COMPRESS_API`'ye göre önceliklidir.
+
+### `OPENCHAMBER_VERBOSE_REQUEST_LOGS`
+
+`true` ya da `1` olarak ayarlandığında ayrıntılı HTTP istek günlüklerini açar.
+
+### `OPENCHAMBER_UPDATE_API_URL`
+
+Güncelleme kontrolü API uç noktasını geçersiz kılar. Çoğu kullanıcı bunu boş bırakmalıdır.
+
+### `OPENCHAMBER_PACKAGE_MANAGER`
+
+Otomatik algılama yanlışsa, güncelleme işlemlerinin kullandığı package manager'ı zorlar.
+
+## OpenCode sunucusu
+
+### `OPENCODE_HOST`
+
+OpenChamber'ı mevcut bir OpenCode sunucusuna bağlar. Değer, açık bir port içeren ve path, query ya da hash içermeyen bir `http` ya da `https` origin'i olmalıdır. `OPENCODE_HOST`, `OPENCODE_PORT`'a göre önceliklidir.
+
+### `OPENCODE_PORT`
+
+OpenCode sunucu portunu ayarlar. Yönetilen OpenCode ile bu, yönetilen portu ister. `OPENCODE_SKIP_START=true` ile harici bir sunucuya o port üzerinden bağlanır.
+
+### `OPENCODE_SKIP_START`
+
+`true` olarak ayarlandığında OpenChamber'ın kendi OpenCode sunucusunu başlatmasını engeller.
+
+### `OPENCHAMBER_OPENCODE_HOSTNAME`
+
+OpenChamber'ın yönettiği OpenCode sunucusu için bind hostname'i. Varsayılan `127.0.0.1`.
+
+### `OPENCODE_BINARY`
+
+OpenChamber'ın çalıştırması gereken `opencode` yürütülebilir dosyasının yolu.
+
+### `OPENCODE_CONFIG`
+
+Belirli bir OpenCode yapılandırma dosyasının yolu.
+
+### `OPENCODE_CONFIG_DIR`
+
+Agent'lar, skills, snippets ve config keşfi için belirli bir OpenCode yapılandırma dizininin yolu.
+
+### `OPENCODE_DATA_DIR`
+
+Yönetilen OpenCode sunucusu için özel veri dizini.
+
+### `OPENCODE_WSL_DISTRO`
+
+Windows'ta OpenCode entegrasyonu için kullanılan WSL dağıtımını seçer.
+
+### `OPENCHAMBER_OPENCODE_WSL_DISTRO`
+
+WSL dağıtımını seçmek için OpenChamber'a özel takma ad. İkisi de ayarlıysa `OPENCODE_WSL_DISTRO` önceliklidir.
+
+### `OPENCODE_JWT_SECRET`
+
+UI kimlik doğrulama token'larını imzalamak için kullanılan gizli değer. Kalıcı servis dağıtımlarında uzun ve rastgele bir değer kullanın.
+
+## Terminal ve Git
+
+### `OPENCHAMBER_TERMINAL_SHELL`
+
+OpenChamber terminal oturumları için kullanılan shell yürütülebilir dosyası.
+
+### `OPENCHAMBER_GIT_BINARY`
+
+OpenChamber Git özelliklerinin kullandığı Git yürütülebilir dosyası.
+
+### `GIT_BINARY`
+
+Alternatif Git yürütülebilir dosyası geçersiz kılma değeri. OpenChamber'a özel yapılandırma için `OPENCHAMBER_GIT_BINARY` tercih edin.
+
+### `OPENCHAMBER_GIT_READ_CACHE_TTL_MS`
+
+Git destekli dosya okumaları için önbelleğin milisaniye cinsinden yaşam süresi. Hata ayıklarken bu önbelleği kapatmak için `0` verin.
+
+## Voice ve tunnels
+
+### `OPENAI_API_KEY`
+
+OpenAI uyumlu servisleri çağıran OpenChamber voice özellikleri tarafından kullanılan API anahtarı.
+
+### `OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
+
+`true` ya da `1` olarak ayarlandığında voice özellikleri için uzak OpenAI uyumlu base URL'lere izin verir.
+
+### `NGROK_AUTHTOKEN`
+
+OpenChamber tunnel komutlarının kullandığı ngrok auth token. `ngrok config add-authtoken <token>` ile de yapılandırabilirsiniz.
+
+## Runtime yardımcıları
+
+### `BUN_BINARY`
+
+Daemon süreçleri başlatılırken OpenChamber'ın kullanması gereken Bun yürütülebilir dosyası.
+
+### `BUN_INSTALL`
+
+Bun kurulum kökü. OpenChamber bunu daemon başlangıcı ve güncellemeleri için `bin/bun` bulmakta kullanır.
+
+### `VITE_OPENCODE_URL`
+
+Vite ile derlenen web uygulaması için derleme zamanı API base URL'i. Çoğu kullanıcı bunu normal CLI ya da masaüstü kullanımında ayarlamamalıdır.

@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { readAuthFile, writeAuthFile } from '../opencode/auth.js';
-import { readConfig, readConfigLayers } from '../opencode/shared.js';
+import { readConfig, readConfigLayers, isPlainObject } from '../opencode/shared.js';
 import { getCatalogProvider } from './catalog.js';
 import { getAuthEntryForProvider } from './resolve.js';
 import { getRuntimeProvider } from './runtime-providers.js';
@@ -18,6 +18,18 @@ const COPILOT_MODELS_TIMEOUT_MS = 5_000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 4_000;
 
 const USER_AGENT = 'opencode/1.0 openchamber';
+
+const mergeHeadersCaseInsensitive = (base, overrides) => {
+  const merged = { ...base };
+  for (const [name, value] of Object.entries(overrides || {})) {
+    const existingName = Object.keys(merged).find((key) => key.toLowerCase() === name.toLowerCase());
+    if (existingName) {
+      delete merged[existingName];
+    }
+    merged[name] = value;
+  }
+  return merged;
+};
 
 const CODEX_TOKEN_URL = 'https://auth.openai.com/oauth/token';
 const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
@@ -157,11 +169,10 @@ const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system,
   });
   const response = await fetch(`${trimmedBase}/chat/completions`, {
     method: 'POST',
-    headers: {
+    headers: mergeHeadersCaseInsensitive({
       'Content-Type': 'application/json',
       Accept: 'application/json',
-      ...headers,
-    },
+    }, headers),
     body: JSON.stringify({
       model: modelID,
       messages: [
@@ -340,8 +351,11 @@ const callMessages = async ({ url, headers, modelID, prompt, system, maxOutputTo
   return text;
 };
 
-const callAnthropic = async ({ apiKey, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) => callMessages({
-  url: 'https://api.anthropic.com/v1/messages',
+const callAnthropic = async ({ apiKey, baseURL, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) => callMessages({
+  // Matches @ai-sdk/anthropic: baseURL is the full API prefix (commonly
+  // already ending in /v1), so it gets /messages appended as-is rather than
+  // having /v1/messages appended, which would double up a configured /v1.
+  url: `${(baseURL || 'https://api.anthropic.com/v1').replace(/\/+$/, '')}/messages`,
   headers: {
     'x-api-key': apiKey,
     'anthropic-version': '2023-06-01',
@@ -403,9 +417,10 @@ const getCopilotEndpoint = async ({ baseURL, headers, modelID }) => {
 
 const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) => {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelID)}:generateContent`;
-  const thinkingConfig = modelID.toLowerCase().startsWith('gemini-3')
-    ? { thinkingLevel: modelID.toLowerCase().includes('flash') ? 'minimal' : 'low' }
-    : { thinkingBudget: 0 };
+  const lowerModelID = modelID.toLowerCase();
+  const thinkingConfig = lowerModelID.startsWith('gemini-3')
+    ? { thinkingLevel: lowerModelID.includes('flash') ? 'minimal' : 'low' }
+    : lowerModelID.startsWith('gemini-2') ? { thinkingBudget: 0 } : null;
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -415,13 +430,11 @@ const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens, re
     },
     body: JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+      ...(system && { systemInstruction: { parts: [{ text: system }] } }),
       generationConfig: {
         maxOutputTokens,
-        thinkingConfig,
-        ...(responseSchema
-          ? { responseMimeType: 'application/json', responseSchema: toGoogleSchema(responseSchema) }
-          : {}),
+        ...(thinkingConfig && { thinkingConfig }),
+        ...(responseSchema && { responseMimeType: 'application/json', responseSchema: toGoogleSchema(responseSchema) }),
       },
     }),
     signal: requestSignal(timeoutMs, signal),
@@ -508,7 +521,7 @@ const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, sys
 // Custom provider configuration support
 // ---------------------------------------------------------------------------
 
-const resolveConfigApiKey = (value, workingDirectory, providerID) => {
+const resolveConfigValue = (value, workingDirectory, providerID, headerName = null) => {
   const envMatch = value.match(/^\{env:([^}]+)\}$/i);
   if (envMatch) {
     return process.env[envMatch[1].trim()]?.trim() || null;
@@ -529,7 +542,12 @@ const resolveConfigApiKey = (value, workingDirectory, providerID) => {
       { config: layers.customConfig, filePath: layers.paths.customPath },
       { config: layers.projectConfig, filePath: layers.paths.projectPath },
       { config: layers.userConfig, filePath: layers.paths.userPath },
-    ].find(({ config }) => config?.provider?.[providerID]?.options?.apiKey === value);
+    ].find(({ config }) => {
+      const options = config?.provider?.[providerID]?.options;
+      return headerName
+        ? options?.headers?.[headerName] === value
+        : options?.apiKey === value;
+    });
     resolvedPath = path.resolve(source?.filePath ? path.dirname(source.filePath) : workingDirectory || process.cwd(), configuredPath);
   }
 
@@ -538,8 +556,31 @@ const resolveConfigApiKey = (value, workingDirectory, providerID) => {
     if (!key) throw new Error('empty file');
     return key;
   } catch {
-    throw new Error(`Failed to resolve configured apiKey file for provider "${providerID}"`);
+    throw new Error(`Failed to resolve configured ${headerName ? `header "${headerName}"` : 'apiKey'} file for provider "${providerID}"`);
   }
+};
+
+/**
+ * `options.headers` from the provider config, with the same `{env:…}`/`{file:…}`
+ * substitutions the API key gets.
+ *
+ * OpenCode sends these on every request, so dropping them here would have the
+ * small model authenticating differently from the request path against the same
+ * URL. Gateways fronted by an API-management layer reject a bearer-only request
+ * outright, because the header is the credential rather than a supplement to it.
+ */
+const readConfiguredHeaders = (providerCfg, workingDirectory, providerID) => {
+  const configured = providerCfg?.options?.headers;
+  if (!isPlainObject(configured)) return null;
+  const headers = {};
+  for (const [name, value] of Object.entries(configured)) {
+    // Config headers are strings; a malformed entry is skipped rather than
+    // stringified into a header the gateway would reject.
+    if (String(value) !== value) continue;
+    const resolved = resolveConfigValue(value.trim(), workingDirectory, providerID, name);
+    if (resolved) headers[name] = resolved;
+  }
+  return Object.keys(headers).length ? headers : null;
 };
 
 const readProviderConfig = (workingDirectory, providerID) => {
@@ -549,9 +590,10 @@ const readProviderConfig = (workingDirectory, providerID) => {
     if (!providerCfg || typeof providerCfg !== 'object') return null;
     const baseURL = typeof providerCfg?.options?.baseURL === 'string' ? providerCfg.options.baseURL.trim() : null;
     const rawApiKey = typeof providerCfg?.options?.apiKey === 'string' ? providerCfg.options.apiKey.trim() : null;
-    const apiKey = rawApiKey ? resolveConfigApiKey(rawApiKey, workingDirectory, providerID) : null;
+    const apiKey = rawApiKey ? resolveConfigValue(rawApiKey, workingDirectory, providerID) : null;
     return {
       baseURL,
+      headers: readConfiguredHeaders(providerCfg, workingDirectory, providerID),
       // Shape the config-supplied key as a regular api-key auth entry so it
       // can win the precedence check below and flow through the dispatch's
       // `entry.type === 'api' ? entry.key : ...` branch unchanged.
@@ -706,7 +748,7 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
   }
 
   if (providerID === 'anthropic') {
-    return callAnthropic({ apiKey, modelID, prompt, system, maxOutputTokens: tokens, responseSchema, timeoutMs, signal });
+    return callAnthropic({ apiKey, baseURL: providerConfig?.baseURL, modelID, prompt, system, maxOutputTokens: tokens, responseSchema, timeoutMs, signal });
   }
   if (providerID === 'google') {
     return callGoogle({ apiKey, modelID, prompt, system, maxOutputTokens: tokens, responseSchema, timeoutMs, signal });
@@ -751,7 +793,9 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
 
   return callOpenaiCompatible({
     baseURL,
-    headers: { Authorization: `Bearer ${apiKey}` },
+    // Configured headers last: a gateway that authenticates on its own header
+    // must be able to override the bearer default rather than sit beside it.
+    headers: mergeHeadersCaseInsensitive({ Authorization: `Bearer ${apiKey}` }, providerConfig?.headers),
     modelID,
     prompt,
     system,

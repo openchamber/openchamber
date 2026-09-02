@@ -1,3 +1,4 @@
+import { rankByQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import QRCode from 'qrcode';
 import { Button } from '@/components/ui/button';
@@ -28,6 +29,7 @@ import {
   SETTINGS_SECTION_TITLE_CLASS,
   SETTINGS_FIELD_LABEL_CLASS,
   SETTINGS_SELECT_SIZE,
+  SETTINGS_NUMBER_INPUT_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
@@ -1255,13 +1257,10 @@ export const RemoteInstancesPage: React.FC = () => {
     [createImportedInstance],
   );
 
-  const filteredImportCandidates = React.useMemo(() => {
-    const query = sshHostSearch.trim().toLowerCase();
-    if (!query) return importCandidates;
-    return importCandidates.filter((candidate) => {
-      return candidate.host.toLowerCase().includes(query) || candidate.sshCommand.toLowerCase().includes(query);
-    });
-  }, [importCandidates, sshHostSearch]);
+  const filteredImportCandidates = React.useMemo(
+    () => rankByQuery(importCandidates, sshHostSearch, (candidate) => [candidate.host, candidate.sshCommand]),
+    [importCandidates, sshHostSearch],
+  );
 
   // Opening a ready instance means pointing this window at the forwarded local
   // URL — the same navigation the host switcher performs after its own connect.
@@ -2324,7 +2323,7 @@ export const RemoteInstancesPage: React.FC = () => {
               min={5}
               max={240}
               step={1}
-              className="w-16 tabular-nums"
+              className={cn(SETTINGS_NUMBER_INPUT_CLASS, 'tabular-nums')}
               value={draft.connectionTimeoutSec}
               onValueChange={(next) => {
                 updateDraft((current) => ({
@@ -2352,7 +2351,7 @@ export const RemoteInstancesPage: React.FC = () => {
               min={1}
               max={65535}
               step={1}
-              className="w-20 tabular-nums"
+              className={cn(SETTINGS_NUMBER_INPUT_CLASS, 'tabular-nums')}
               value={draft.remoteOpenchamber.preferredPort}
               onValueChange={(next) => {
                 updateDraft((current) => ({
@@ -2519,7 +2518,7 @@ export const RemoteInstancesPage: React.FC = () => {
                 min={1}
                 max={65535}
                 step={1}
-                className="w-20 tabular-nums"
+                className={cn(SETTINGS_NUMBER_INPUT_CLASS, 'tabular-nums')}
                 value={draft.localForward.preferredLocalPort}
                 onValueChange={(next) => {
                   updateDraft((current) => ({
@@ -2777,7 +2776,7 @@ export const RemoteInstancesPage: React.FC = () => {
                           min={1}
                           max={65535}
                           step={1}
-                          className="w-16 tabular-nums"
+                          className={cn(SETTINGS_NUMBER_INPUT_CLASS, 'tabular-nums')}
                           value={forward.localPort}
                           onValueChange={(next) => {
                             updateForward((item) => ({
@@ -2819,7 +2818,7 @@ export const RemoteInstancesPage: React.FC = () => {
                             min={1}
                             max={65535}
                             step={1}
-                            className="w-16 tabular-nums"
+                            className={cn(SETTINGS_NUMBER_INPUT_CLASS, 'tabular-nums')}
                             value={forward.remotePort}
                             onValueChange={(next) => {
                               updateForward((item) => ({

@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { create } from 'zustand';
 import { getSafeStorage } from '@/stores/utils/safeStorage';
+import { countSyncPerformance } from './performance-diagnostics';
 
 // Per-session turn timing behind the sidebar activity readout.
 //
@@ -50,6 +51,14 @@ import { getSafeStorage } from '@/stores/utils/safeStorage';
 
 type SessionActivityPhase = 'active' | 'settled';
 
+export type SessionActivityTimingMutation =
+  | { type: 'observe'; sessionId: string; phase: SessionActivityPhase }
+  | { type: 'remove'; sessionId: string };
+
+type ActivityTimingDraft = {
+  startedAt: Map<string, number> | null;
+  settledMs: Map<string, number> | null;
+};
 
 type SessionActivityTimingState = {
   startedAt: ReadonlyMap<string, number>;
@@ -87,13 +96,13 @@ const RESTORE_ADOPTION_WINDOW_MS = 90_000;
 // page did not write to looks exactly like "no turn was running".
 const STORAGE_KEY = 'oc.session-activity.v1';
 
-const EMPTY_ACTIVE: ReadonlySet<string> = new Set();
 const EMPTY_RESTORED: ReadonlyMap<string, PersistedStart> = new Map();
 
 export const useSessionActivityTimingStore = create<SessionActivityTimingState>(() => ({
   startedAt: new Map(),
   settledMs: new Map(),
 }));
+useSessionActivityTimingStore.subscribe(() => countSyncPerformance('timingPublications'));
 
 /** Last moment each live start was observed active, for the liveness stamp. */
 const liveSeen = new Map<string, number>();
@@ -355,11 +364,66 @@ export const observeSessionActivityTiming = (
   sessionId: string,
   phase: SessionActivityPhase,
 ): void => {
-  if (phase === 'active') {
-    applyTransitions(new Set([sessionId]), null);
-    return;
+  applySessionActivityTimingMutations([{ type: 'observe', sessionId, phase }]);
+};
+
+export const applySessionActivityTimingMutations = (
+  mutations: readonly SessionActivityTimingMutation[],
+): void => {
+  if (mutations.length === 0) return;
+  const now = Date.now();
+  const restored = getAdoptableStarts(now);
+  const state = useSessionActivityTimingStore.getState();
+  const next: ActivityTimingDraft = { startedAt: null, settledMs: null };
+  let restoredChanged = false;
+  let sawActive = false;
+  const currentStarted = (): ReadonlyMap<string, number> => next.startedAt ?? state.startedAt;
+  const currentSettled = (): ReadonlyMap<string, number> => next.settledMs ?? state.settledMs;
+  const draftStarted = (): Map<string, number> => (next.startedAt ??= new Map(state.startedAt));
+  const draftSettled = (): Map<string, number> => (next.settledMs ??= new Map(state.settledMs));
+
+  for (const mutation of mutations) {
+    if (mutation.type === 'remove') {
+      if (getRestoredStarts().delete(mutation.sessionId)) restoredChanged = true;
+      liveSeen.delete(mutation.sessionId);
+      if (currentStarted().has(mutation.sessionId)) draftStarted().delete(mutation.sessionId);
+      if (currentSettled().has(mutation.sessionId)) draftSettled().delete(mutation.sessionId);
+      continue;
+    }
+
+    if (mutation.phase === 'active') {
+      sawActive = true;
+      liveSeen.set(mutation.sessionId, now);
+      if (!currentStarted().has(mutation.sessionId)) {
+        draftStarted().set(mutation.sessionId, restored.get(mutation.sessionId)?.start ?? now);
+      }
+      if (currentSettled().has(mutation.sessionId)) draftSettled().delete(mutation.sessionId);
+      continue;
+    }
+
+    if (getRestoredStarts().delete(mutation.sessionId)) restoredChanged = true;
+    const start = currentStarted().get(mutation.sessionId);
+    if (start === undefined) continue;
+    draftStarted().delete(mutation.sessionId);
+    liveSeen.delete(mutation.sessionId);
+    draftSettled().set(mutation.sessionId, Math.max(0, now - start));
   }
-  applyTransitions(EMPTY_ACTIVE, { source: 'event', sessionId });
+
+  if (next.settledMs) trimSettled(next.settledMs);
+  if (next.startedAt || next.settledMs) {
+    useSessionActivityTimingStore.setState({
+      startedAt: next.startedAt ?? state.startedAt,
+      settledMs: next.settledMs ?? state.settledMs,
+    });
+  }
+  if (next.startedAt) {
+    if (next.startedAt.size > 0) ensureLivenessStampOnHide();
+    persistStarts(next.startedAt, now);
+  } else if (restoredChanged) {
+    persistStarts(state.startedAt, now);
+  } else if (sawActive && state.startedAt.size > 0 && now - lastPersistAt >= LIVENESS_PERSIST_INTERVAL_MS) {
+    persistStarts(state.startedAt, now);
+  }
 };
 
 /**
@@ -377,32 +441,7 @@ export const reconcileSessionActivityTiming = (
 };
 
 export const removeSessionActivityTiming = (sessionId: string): void => {
-  const restoredChanged = getRestoredStarts().delete(sessionId);
-  const state = useSessionActivityTimingStore.getState();
-  const hadStart = state.startedAt.has(sessionId);
-  const hadSettled = state.settledMs.has(sessionId);
-  liveSeen.delete(sessionId);
-
-  if (!hadStart && !hadSettled) {
-    if (restoredChanged) persistStarts(state.startedAt, Date.now());
-    return;
-  }
-
-  let startedAt = state.startedAt;
-  if (hadStart) {
-    const draft = new Map(state.startedAt);
-    draft.delete(sessionId);
-    startedAt = draft;
-  }
-  let settledMs = state.settledMs;
-  if (hadSettled) {
-    const draft = new Map(state.settledMs);
-    draft.delete(sessionId);
-    settledMs = draft;
-  }
-
-  useSessionActivityTimingStore.setState({ startedAt, settledMs });
-  if (hadStart || restoredChanged) persistStarts(startedAt, Date.now());
+  applySessionActivityTimingMutations([{ type: 'remove', sessionId }]);
 };
 
 /**

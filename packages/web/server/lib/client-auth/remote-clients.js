@@ -157,6 +157,7 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
 
   const createClient = async ({
     label,
+    fallbackLabel,
     expiresAt,
     clientKind,
     dedupeKey,
@@ -172,9 +173,16 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
       const store = await readStore();
       const normalizedDedupeKey = normalizeOptionalString(dedupeKey);
       const token = generateToken();
+      // A dedupe-keyed mint REPLACES the previous record for the same device,
+      // so an operator-visible name must survive the replacement: an explicit
+      // label wins, otherwise the replaced record's label is kept, and only a
+      // first-ever mint falls back to the client-reported default.
+      const existing = normalizedDedupeKey
+        ? store.clients.find((entry) => entry.dedupeKey === normalizedDedupeKey)
+        : null;
       const client = {
         id: generateId(),
-        label: normalizeLabel(label),
+        label: normalizeLabel(normalizeOptionalString(label) || existing?.label || fallbackLabel),
         tokenHash: hashToken(token),
         createdAt: nowIso(),
         lastUsedAt: null,

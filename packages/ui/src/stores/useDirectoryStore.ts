@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { opencodeClient } from '@/lib/opencode/client';
 import { getDesktopHomeDirectory, isVSCodeRuntime } from '@/lib/desktop';
+import { getVSCodeBootstrapConfig } from '@/lib/vscodeBootstrap';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
@@ -227,7 +228,7 @@ const getVsCodeWorkspaceFolder = (): string | null => {
   if (!isVSCodeRuntime()) {
     return null;
   }
-  const workspaceFolder = (window as unknown as { __VSCODE_CONFIG__?: { workspaceFolder?: unknown } }).__VSCODE_CONFIG__?.workspaceFolder;
+  const workspaceFolder = getVSCodeBootstrapConfig()?.workspaceFolder;
   if (typeof workspaceFolder !== 'string' || workspaceFolder.trim().length === 0) {
     return null;
   }

@@ -22,6 +22,9 @@ export function useSessionGoal(sessionId: string, directory?: string): SessionGo
   };
 }
 
+const OBJECTIVE_CONTENT_CACHE_MAX = 64;
+const objectiveContentByFetchKey = new Map<string, Promise<string | null>>();
+
 // Effective objective text for display. Inline goals return the metadata
 // text directly; file-backed goals fetch the server-side file once per
 // goal edit (keyed by id + updatedAt). Display-only: a failed fetch yields
@@ -37,7 +40,18 @@ export function useGoalObjectiveContent(sessionId: string, goal: SessionGoalPayl
       return undefined;
     }
     let alive = true;
-    void fetchGoalObjectiveContent(sessionId).then((content) => {
+    // The key already names the goal edit, so a remount (every session switch
+    // remounts the strip) reuses the text instead of fetching the file again.
+    let request = objectiveContentByFetchKey.get(fetchKey);
+    if (!request) {
+      request = fetchGoalObjectiveContent(sessionId);
+      objectiveContentByFetchKey.set(fetchKey, request);
+      if (objectiveContentByFetchKey.size > OBJECTIVE_CONTENT_CACHE_MAX) {
+        const oldest = objectiveContentByFetchKey.keys().next().value;
+        if (oldest !== undefined) objectiveContentByFetchKey.delete(oldest);
+      }
+    }
+    void request.then((content) => {
       if (alive) setFetched(content);
     });
     return () => {

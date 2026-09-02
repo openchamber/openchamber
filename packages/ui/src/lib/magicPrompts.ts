@@ -13,6 +13,8 @@ export type MagicPromptId =
   | 'github.pr.review.instructions'
   | 'github.issue.review.visible'
   | 'github.issue.review.instructions'
+  | 'linear.issue.review.visible'
+  | 'linear.issue.review.instructions'
   | 'github.pr.checks.review.visible'
   | 'github.pr.checks.review.instructions'
   | 'github.pr.comments.review.visible'
@@ -56,7 +58,7 @@ export interface MagicPromptDefinition {
   id: MagicPromptId;
   title: string;
   description: string;
-  group: 'Git' | 'GitHub' | 'Planning' | 'Session';
+  group: 'Git' | 'GitHub' | 'Linear' | 'Planning' | 'Session';
   template: string;
   placeholders?: Array<{ key: string; description: string }>;
 }
@@ -224,6 +226,61 @@ Nice-to-have:
     group: 'GitHub',
     description: 'Hidden instructions attached when generating an issue review response.',
     template: `Review this issue using the provided issue context.
+
+Process:
+- First classify the issue type (bug / feature request / question/support / refactor / ops) and state it as: Type: <one label>.
+- Gather any needed repository context (code, config, docs) to validate assumptions.
+- After gathering, if anything is still unclear or cannot be verified, do not speculate — state what's missing and ask targeted questions.
+
+Mode selection by type:
+- Bug / Question/Support / Ops: deliver the response directly using the matching template below. Do not bombard me with questions for straightforward diagnosis; use "Missing info" / "Repro/diagnostics needed" fields instead.
+- Feature request / Refactor with substantive unknowns: this is effectively a planning session. Do not emit the Feature template on the first turn. Instead, ask me focused clarifying questions in batches of at most 3, one topic at a time (scope, constraints, tradeoffs, UX, etc.), wait for answers, drop questions that became irrelevant, and repeat until you have no more substantive questions. Only then emit the Feature template.
+
+Output rules:
+- Compact output; pick ONE template below and omit the others.
+- No emojis. No code snippets. No fenced blocks.
+- Short inline code identifiers allowed.
+- Reference evidence with file paths and line ranges when applicable; if exact lines are not available, cite the file and say "approx" + why.
+- Keep the entire response under ~300 words (applies to the final template output, not to clarifying-question turns).
+
+Templates (choose one):
+Bug:
+- Summary (1-2 sentences)
+- Likely cause (max 2)
+- Repro/diagnostics needed (max 3)
+- Fix approach (max 4 steps)
+- Verification (max 3)
+
+Feature:
+- Summary (1-2 sentences)
+- Requirements (max 4)
+- Unknowns/questions (max 4)
+- Proposed plan (max 5 steps)
+- Verification (max 3)
+
+Question/Support:
+- Summary (1-2 sentences)
+- Answer/guidance (max 6 lines)
+- Missing info (max 4)
+
+Do not implement changes until I confirm; end with: "Next actions: <1 sentence>".`,
+  },
+  {
+    id: 'linear.issue.review.visible',
+    title: 'Linear Issue Review Visible Prompt',
+    group: 'Linear',
+    description: 'Visible user message when creating a session from a Linear issue.',
+    placeholders: [
+      { key: 'identifier', description: 'Linear issue identifier, such as ENG-12.' },
+    ],
+    template: 'Review this Linear issue {{identifier}} using the provided issue context',
+  },
+  {
+    id: 'linear.issue.review.instructions',
+    title: 'Linear Issue Review Instructions',
+    group: 'Linear',
+    description: 'Hidden instructions attached when generating a Linear issue review response.',
+    template: `Review this Linear issue using the provided issue context.
 
 Process:
 - First classify the issue type (bug / feature request / question/support / refactor / ops) and state it as: Type: <one label>.

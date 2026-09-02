@@ -77,6 +77,7 @@ import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
+import { createLinearSessionStatusRuntime } from './lib/linear/status-runtime.js';
 import { createSessionKnowledgeRuntime } from './lib/session-knowledge/runtime.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
@@ -856,6 +857,8 @@ const contextObligatoryRuntime = createContextObligatoryRuntime({
   sessionKnowledgeRuntime,
 });
 
+const linearSessionStatusRuntime = createLinearSessionStatusRuntime();
+
 const globalMessageStreamHub = createGlobalMessageStreamHub({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -901,6 +904,7 @@ globalMessageStreamHub.subscribeEvent((event) => {
   sessionAssistRuntime.processPayload(payload, directory);
   sessionGoalRuntime.processPayload(payload, directory);
   contextObligatoryRuntime.processPayload(payload, directory);
+  linearSessionStatusRuntime.processPayload(payload);
 });
 
 const processForwardedEventPayload = (payload, emitSyntheticEvent) => {
@@ -1162,8 +1166,8 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
     return [...new Set(directories)];
   },
   // A managed restart can move OpenCode to a NEW port (the old one may stay
-  // occupied by an orphaned process, e.g. killProcessOnPort is a no-op on
-  // Windows). Rebind the message-stream upstream readers to the current port
+  // occupied if killProcessOnPort/waitForPortRelease didn't free it in time,
+  // on any platform). Rebind the message-stream upstream readers to the current port
   // so the UI keeps receiving events instead of staying pinned to the old
   // process (#2638). The runtime is created later by the startup pipeline;
   // by the time any restart runs, it is assigned.
@@ -1815,6 +1819,14 @@ async function main(options = {}) {
       fs,
       process,
     }),
+    // Dev/debug instances share the data dir (and thus the relay identity) with
+    // the production instance, so they must not host the relay on their own —
+    // paired devices would land on them. OPENCHAMBER_RELAY_HOST=off disables
+    // passive hosting explicitly (dev scripts set it); the Electron dev shell is
+    // covered via OPENCHAMBER_ELECTRON_DEV. OPENCHAMBER_RELAY_HOST=on overrides
+    // both. Explicit enable/pairing on the instance still hosts regardless.
+    allowPassiveHost: process.env.OPENCHAMBER_RELAY_HOST === 'on'
+      || (process.env.OPENCHAMBER_RELAY_HOST !== 'off' && process.env.OPENCHAMBER_ELECTRON_DEV !== '1'),
     // Relay demand = any paired device or pending pairing session that uses the
     // relay transport. Drives the auto on/off lifecycle.
     hasRelayDemand: async () => {

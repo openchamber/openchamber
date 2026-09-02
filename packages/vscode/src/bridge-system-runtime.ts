@@ -10,6 +10,8 @@ import { credentialStatus, deleteCredential, importCursorCredential, normalizeCr
 import { getSessionActivitySnapshot } from './sessionActivityWatcher';
 import { getOpenCodeUpgradeStatus, upgradeManagedOpenCode } from './opencode-upgrade-runtime';
 import { buildDeferredRestartResponse } from './config-mutation-response';
+import { normalizeWindowsDriveLetter } from './pathUtils';
+import { resolveWorkspaceFolders } from './workspaceResolver';
 import type { BridgeContext, BridgeResponse } from './bridge';
 
 type BridgeMessageInput = {
@@ -588,6 +590,41 @@ export async function handleSystemBridgeMessage(
       try {
         const result = await fetchQuotaForProvider(providerId);
         return { id, type, success: true, data: result };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:workspace:addFolder': {
+      try {
+        // SAFETY: bridge payloads are untrusted JSON from the webview; the
+        // cast only reads the optional path field, and non-string values fail
+        // the emptiness check below (or throw inside the try, which the catch
+        // converts into a clean failure response).
+        const { path: targetPath } = (payload || {}) as { path?: string };
+        if (!targetPath || targetPath.trim().length === 0) {
+          return { id, type, success: false, error: 'Directory path is required' };
+        }
+        const folders = vscode.workspace.workspaceFolders ?? [];
+        const uri = vscode.Uri.file(normalizeWindowsDriveLetter(targetPath.trim()));
+        // VS Code reports workspace folder paths with lowercase Windows drive
+        // letters (see pathUtils), so normalize both sides before comparing.
+        const alreadyAdded = folders.some(
+          (folder) => normalizeWindowsDriveLetter(folder.uri.fsPath) === uri.fsPath,
+        );
+        if (!alreadyAdded) {
+          const updated = await vscode.workspace.updateWorkspaceFolders(folders.length, null, { uri });
+          if (!updated) {
+            return { id, type, success: false, error: 'Failed to add workspace folder' };
+          }
+        }
+        return {
+          id,
+          type,
+          success: true,
+          data: { workspaceFolders: resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []) },
+        };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { id, type, success: false, error: errorMessage };

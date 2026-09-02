@@ -616,6 +616,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.terminalFontSize === 'number' && Number.isFinite(candidate.terminalFontSize)) {
       result.terminalFontSize = Math.max(9, Math.min(52, Math.round(candidate.terminalFontSize)));
     }
+    if (typeof candidate.editorFontSize === 'number' && Number.isFinite(candidate.editorFontSize)) {
+      result.editorFontSize = Math.max(9, Math.min(32, Math.round(candidate.editorFontSize)));
+    }
     if (typeof candidate.terminalShell === 'string') {
       const shell = candidate.terminalShell.trim().toLowerCase();
       if (TERMINAL_SHELL_VALUES.has(shell)) result.terminalShell = shell;

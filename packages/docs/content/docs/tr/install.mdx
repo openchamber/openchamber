@@ -1,0 +1,33 @@
+---
+title: Kurulum
+description: OpenChamber'ı masaüstü, web ya da VS Code için kurun.
+---
+
+# Kurulum
+
+OpenChamber'ı çalıştırmanın üç yolu vardır:
+
+- macOS için masaüstü uygulaması
+- CLI tarafından barındırılan web uygulaması, bunu telefon uygulaması gibi yükleyebilirsiniz, yani PWA
+- VS Code eklentisi
+
+## Gereksinim
+
+Önce [OpenCode](https://opencode.ai) kurun. OpenChamber onun üzerinde çalışır.
+
+## Web + PWA
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/openchamber/openchamber/main/scripts/install.sh | bash
+openchamber --ui-password be-creative-here
+```
+
+CLI'nın yazdırdığı URL'yi açın. Genellikle `http://localhost:3000` olur. OpenChamber oturum listesini görmelisiniz. El altında tutmak için tarayıcınızın adres çubuğundaki "Install" seçeneğini kullanıp uygulama olarak ekleyin.
+
+## Masaüstü
+
+En son masaüstü sürümünü GitHub releases sayfasından ya da OpenChamber indirme sayfasından indirin. Açın ve alışık olduğunuz OpenCode akışına giriş yapın.
+
+## VS Code
+
+VS Code Marketplace'ten yükleyin ve alışık olduğunuz OpenCode akışına giriş yapın. Sonra OpenChamber görünümü kenar çubuğunda açılır.

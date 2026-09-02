@@ -25,6 +25,13 @@ export default defineConfig(({ mode }) => ({
   },
   worker: {
     format: 'es',
+    // VS Code webviews cannot load module imports from inside a web worker.
+    // Keep the Shiki worker self-contained instead of emitting grammar chunks.
+    rollupOptions: {
+      output: {
+        inlineDynamicImports: true,
+      },
+    },
   },
   define: {
     'process.env.NODE_ENV': JSON.stringify(mode === 'production' ? 'production' : 'development'),

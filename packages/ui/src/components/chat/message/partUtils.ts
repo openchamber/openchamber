@@ -1,4 +1,5 @@
 import type { Part } from '@opencode-ai/sdk/v2';
+import { readContextPart } from '@/lib/messages/contextParts';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -52,6 +53,13 @@ export const filterVisibleParts = (parts: Part[], options: VisibleFilterOptions 
             if (text.includes('<system-reminder>')) {
                 return false;
             }
+        }
+
+        // User-attached context (inline comments, terminal selections, and
+        // such) is synthetic transport-wise but is user content: it renders
+        // as a context block and must survive alongside regular text.
+        if (isSynthetic && readContextPart(part)) {
+            return true;
         }
 
         // Only filter out synthetic parts if there are non-synthetic parts present

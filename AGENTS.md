@@ -42,6 +42,7 @@ Shared contracts must define intentional behavior for every applicable runtime: 
 - Do not add dependencies unless explicitly requested.
 - Never add or log secrets, bearer tokens, pairing credentials, or sensitive user data.
 - Keep changes minimal and preserve unrelated worktree changes.
+- `CHANGELOG.md` and `packages/vscode/CHANGELOG.md` are the maintainer's release-time work: they get written once, as one story, when the maintainer asks to update the changelog. Until that request, treat both files as read-only — a fix, feature, or merged PR lands without a changelog line.
 - Enforce security and correctness in core/runtime logic, not only UI visibility or prompts.
 - Keep entrypoints and bridges thin; place domain logic in focused owning modules.
 - Update owning documentation when module ownership, contracts, or invariants change.
@@ -55,6 +56,12 @@ Shared contracts must define intentional behavior for every applicable runtime: 
 - Make partial results, rollback, cleanup, and stale-data behavior explicit.
 - One failed entity must not erase or block unrelated complete entities.
 - Runtime-specific differences must be intentional and visible in code.
+
+## Communication
+
+You and the maintainer are two people solving a problem together — talk like a trusted colleague, not a report generator. Plain words, short sentences, mechanisms explained through what the user experiences. Warm and direct, never familiar. A reply is something read in minutes, not a separate reading task: put the conclusion first and stand behind it. Answer in the language the maintainer addressed you in; code, comments, and docs stay in English.
+
+When writing or editing user-facing text — docs, UI copy, PR/issue comments, READMEs — load `.agents/skills/communication-style/SKILL.md` and apply its checklist.
 
 ## Documentation Discovery
 
@@ -79,9 +86,6 @@ task-required reference named by those skills. Skills are canonical for their
 detailed workflows and checklists. Treating this table as optional advice is a
 process violation.
 
-**Always load `.agents/skills/communication-style/SKILL.md` at the start of
-every task, before any analysis, tool call, or response. Apply its guidance to
-all messages and written output, not only to user-facing copy or documentation.**
 
 | Trigger | Required skill |
 |---|---|
@@ -97,8 +101,11 @@ all messages and written output, not only to user-facing copy or documentation.*
 | Settings UI, settings dialogs, configuration surfaces, or settings search | `settings-ui-patterns` |
 | Sortable or drag-to-reorder behavior, especially `@dnd-kit` and touch/wrapping layouts | `drag-to-reorder` |
 | iOS Simulator build, launch, preview, gestures, or `serve-sim` control | `serve-sim` |
-| Drafting or updating user-facing CHANGELOG entries for the `[Unreleased]` section (main app or VS Code extension) | `changelog-authoring` |
+| The maintainer explicitly asks to update the changelog (main app or VS Code extension) — the only time either CHANGELOG is edited | `changelog-authoring` |
 | Creating or editing skills, `AGENTS.md`, or docs reached through agent instructions/context pointers | `writing-for-agents` |
+| Reviewing a single pull request or drafting a PR verdict/close/review comment | `pr-review` |
+| Triaging, cleaning up, or batch-processing the open PR queue | `triage-prs` |
+| Triaging, cleaning up, or batch-processing the issue backlog | `triage-issues` |
 
 Pure code-reading or explanation does not require implementation skills unless needed to interpret a specialized subsystem.
 

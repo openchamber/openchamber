@@ -250,6 +250,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       disable: draftAgent.disable,
     });
     setSelectedAgent(newName);
+    onItemSelect?.();
 
   };
 

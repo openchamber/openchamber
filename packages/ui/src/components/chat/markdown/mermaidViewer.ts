@@ -22,6 +22,18 @@ type MermaidViewerController = {
   cleanup: () => void;
 };
 
+type InternalMermaidViewerController = MermaidViewerController & {
+  viewport: HTMLElement;
+  fitToViewport: (viewport: MermaidViewport) => void;
+};
+
+type MermaidViewerRegistryState = {
+  container: HTMLElement;
+  controllers: Map<HTMLElement, InternalMermaidViewerController>;
+  signatures: Map<HTMLElement, string>;
+  disposed: boolean;
+};
+
 type MermaidSvgBoundsSource = {
   viewBox?: string | null;
   width?: string | number | null;
@@ -36,13 +48,8 @@ type MermaidViewerSignatureSource = MermaidSvgBoundsSource & {
 const isPositiveFinite = (value: number): boolean => Number.isFinite(value) && value > 0;
 
 const parseSvgNumber = (value: string | number | null | undefined): number | null => {
-  if (typeof value === 'number') {
-    return isPositiveFinite(value) ? value : null;
-  }
-  if (typeof value !== 'string') {
-    return null;
-  }
-  const match = value.trim().match(/^([+-]?(?:(?:\d+\.?\d*)|(?:\.\d+))(?:[eE][+-]?\d+)?)(?:px)?$/);
+  if (value === null || value === undefined) return null;
+  const match = String(value).trim().match(/^([+-]?(?:(?:\d+\.?\d*)|(?:\.\d+))(?:[eE][+-]?\d+)?)(?:px)?$/);
   if (!match) {
     return null;
   }
@@ -233,10 +240,14 @@ export const zoomMermaidViewBoxAtPoint = ({
 };
 
 const controllerByBlock = new WeakMap<HTMLElement, MermaidViewerController>();
-
-export const getMermaidViewerController = (block: Element | null): MermaidViewerController | null => (
-  block instanceof HTMLElement ? controllerByBlock.get(block) ?? null : null
-);
+const controllerByViewport = new WeakMap<HTMLElement, InternalMermaidViewerController>();
+const activeControllers = new Set<InternalMermaidViewerController>();
+const pendingRegistries = new Set<MermaidViewerRegistryState>();
+// Controllers are non-essential for the static SVG. Initialize all renderers
+// from one post-presentation batch so geometry reads precede every SVG write.
+let sharedResizeObserver: ResizeObserver | null = null;
+let pendingRegistryFlushFrame: number | null = null;
+let pendingResizeFrame: number | null = null;
 
 const getSvgViewport = (block: HTMLElement): HTMLElement | null => (
   block.querySelector<HTMLElement>('[data-markdown="mermaid-viewport"]')
@@ -272,7 +283,62 @@ const isPanExcludedTarget = (target: EventTarget | null): boolean => (
   target instanceof Element && Boolean(target.closest('button, a, [role="button"]'))
 );
 
-const createMermaidViewerController = (block: HTMLElement): MermaidViewerController | null => {
+const fitControllers = (controllers: readonly InternalMermaidViewerController[]): void => {
+  const viewportSizes = controllers.map((controller) => getViewportSize(controller.viewport));
+  controllers.forEach((controller, index) => {
+    const viewport = viewportSizes[index];
+    if (viewport) controller.fitToViewport(viewport);
+  });
+};
+
+const scheduleActiveControllerFit = (): void => {
+  if (pendingResizeFrame !== null || activeControllers.size === 0) return;
+  pendingResizeFrame = window.requestAnimationFrame(() => {
+    pendingResizeFrame = null;
+    fitControllers(Array.from(activeControllers));
+  });
+};
+
+const ensureSharedResizeObserver = (): ResizeObserver | null => {
+  if (sharedResizeObserver) return sharedResizeObserver;
+  const ResizeObserverConstructor = globalThis.ResizeObserver;
+  if (!ResizeObserverConstructor) return null;
+  sharedResizeObserver = new ResizeObserverConstructor((entries) => {
+    for (const entry of entries) {
+      if (!(entry.target instanceof HTMLElement)) continue;
+      controllerByViewport.get(entry.target)?.fitToViewport({
+        width: entry.contentRect.width,
+        height: entry.contentRect.height,
+      });
+    }
+  });
+  return sharedResizeObserver;
+};
+
+const registerController = (controller: InternalMermaidViewerController): void => {
+  if (activeControllers.has(controller)) return;
+  const wasEmpty = activeControllers.size === 0;
+  activeControllers.add(controller);
+  controllerByViewport.set(controller.viewport, controller);
+  ensureSharedResizeObserver()?.observe(controller.viewport);
+  if (wasEmpty) window.addEventListener('resize', scheduleActiveControllerFit);
+};
+
+const unregisterController = (controller: InternalMermaidViewerController): void => {
+  if (!activeControllers.delete(controller)) return;
+  sharedResizeObserver?.unobserve(controller.viewport);
+  controllerByViewport.delete(controller.viewport);
+  if (activeControllers.size > 0) return;
+  sharedResizeObserver?.disconnect();
+  sharedResizeObserver = null;
+  window.removeEventListener('resize', scheduleActiveControllerFit);
+  if (pendingResizeFrame !== null) {
+    window.cancelAnimationFrame(pendingResizeFrame);
+    pendingResizeFrame = null;
+  }
+};
+
+const createMermaidViewerController = (block: HTMLElement): InternalMermaidViewerController | null => {
   const viewport = getSvgViewport(block);
   const svg = block.querySelector<SVGSVGElement>('[data-markdown="mermaid"] svg');
   if (!viewport || !svg) {
@@ -301,8 +367,12 @@ const createMermaidViewerController = (block: HTMLElement): MermaidViewerControl
     svg.removeAttribute('height');
   };
 
+  const fitToViewport = (size: MermaidViewport): void => {
+    applyViewBox(fitMermaidViewBox(contentBox, size));
+  };
+
   const fit = (): void => {
-    applyViewBox(fitMermaidViewBox(contentBox, getViewportSize(viewport)));
+    fitToViewport(getViewportSize(viewport));
   };
 
   const zoomAt = (pointer: MermaidPoint, zoomFactor: number): void => {
@@ -390,32 +460,24 @@ const createMermaidViewerController = (block: HTMLElement): MermaidViewerControl
     }
   };
 
-  const onResize = (): void => {
-    fit();
-  };
-
   viewport.addEventListener('wheel', onWheel, { passive: false });
   viewport.addEventListener('pointerdown', onPointerDown);
   viewport.addEventListener('pointermove', onPointerMove);
   viewport.addEventListener('pointerup', stopPan);
   viewport.addEventListener('pointercancel', stopPan);
-  window.addEventListener('resize', onResize);
-  const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(onResize);
-  observer?.observe(viewport);
-  fit();
-
-  return {
+  const controller: InternalMermaidViewerController = {
+    viewport,
     zoomIn,
     zoomOut,
     fit,
+    fitToViewport,
     cleanup: () => {
+      unregisterController(controller);
       viewport.removeEventListener('wheel', onWheel);
       viewport.removeEventListener('pointerdown', onPointerDown);
       viewport.removeEventListener('pointermove', onPointerMove);
       viewport.removeEventListener('pointerup', stopPan);
       viewport.removeEventListener('pointercancel', stopPan);
-      window.removeEventListener('resize', onResize);
-      observer?.disconnect();
       if (clearClickSuppressionTimer !== null) {
         window.clearTimeout(clearClickSuppressionTimer);
       }
@@ -424,42 +486,97 @@ const createMermaidViewerController = (block: HTMLElement): MermaidViewerControl
       controllerByBlock.delete(block);
     },
   };
+  return controller;
 };
 
-export const createMermaidViewerRegistry = (container: HTMLElement): { refresh: () => void; cleanup: () => void } => {
-  const controllers = new Map<HTMLElement, MermaidViewerController>();
-  const signatures = new Map<HTMLElement, string>();
-
-  const refresh = (): void => {
-    for (const [block, controller] of Array.from(controllers.entries())) {
-      const signature = getBlockViewerSignature(block);
-      if (!container.contains(block) || signature !== signatures.get(block)) {
-        controller.cleanup();
-        controllers.delete(block);
-        signatures.delete(block);
-      }
+const removeStaleControllers = (state: MermaidViewerRegistryState): void => {
+  for (const [block, controller] of state.controllers) {
+    const signature = getBlockViewerSignature(block);
+    if (!state.container.contains(block) || signature !== state.signatures.get(block)) {
+      controller.cleanup();
+      state.controllers.delete(block);
+      state.signatures.delete(block);
     }
+  }
+};
 
-    for (const block of Array.from(container.querySelectorAll<HTMLElement>(MERMAID_BLOCK_SELECTOR))) {
-      if (controllers.has(block) || block.querySelector('[data-markdown="mermaid"] svg') === null) {
-        continue;
-      }
-      const controller = createMermaidViewerController(block);
-      if (!controller) {
-        continue;
-      }
-      controllers.set(block, controller);
-      signatures.set(block, getBlockViewerSignature(block));
-      controllerByBlock.set(block, controller);
-    }
+const collectNewControllers = (state: MermaidViewerRegistryState): InternalMermaidViewerController[] => {
+  if (state.disposed) return [];
+  const newControllers: InternalMermaidViewerController[] = [];
+  for (const block of Array.from(state.container.querySelectorAll<HTMLElement>(MERMAID_BLOCK_SELECTOR))) {
+    if (state.controllers.has(block) || block.querySelector('[data-markdown="mermaid"] svg') === null) continue;
+    const controller = createMermaidViewerController(block);
+    if (!controller) continue;
+    state.controllers.set(block, controller);
+    state.signatures.set(block, getBlockViewerSignature(block));
+    controllerByBlock.set(block, controller);
+    newControllers.push(controller);
+  }
+  return newControllers;
+};
+
+const flushPendingRegistries = (): void => {
+  const registries = Array.from(pendingRegistries);
+  pendingRegistries.clear();
+  const newControllers: InternalMermaidViewerController[] = [];
+  for (const state of registries) {
+    if (state.disposed) continue;
+    removeStaleControllers(state);
+    newControllers.push(...collectNewControllers(state));
+  }
+  fitControllers(newControllers);
+  for (const controller of newControllers) registerController(controller);
+};
+
+const schedulePendingRegistryFlush = (): void => {
+  if (pendingRegistryFlushFrame !== null) return;
+  pendingRegistryFlushFrame = window.requestAnimationFrame(() => {
+    pendingRegistryFlushFrame = null;
+    pendingRegistryFlushFrame = window.requestAnimationFrame(() => {
+      pendingRegistryFlushFrame = null;
+      flushPendingRegistries();
+    });
+  });
+};
+
+const scheduleRegistryRefresh = (state: MermaidViewerRegistryState): void => {
+  if (state.disposed) return;
+  removeStaleControllers(state);
+  pendingRegistries.add(state);
+  schedulePendingRegistryFlush();
+};
+
+export const getMermaidViewerController = (block: Element | null): MermaidViewerController | null => {
+  if (!(block instanceof HTMLElement)) return null;
+  const existing = controllerByBlock.get(block);
+  if (existing) return existing;
+
+  for (const state of pendingRegistries) {
+    if (!state.container.contains(block)) continue;
+    flushPendingRegistries();
+    return controllerByBlock.get(block) ?? null;
+  }
+  return null;
+};
+
+export const createMermaidViewerRegistry = (container: HTMLElement) => {
+  const state: MermaidViewerRegistryState = {
+    container,
+    controllers: new Map(),
+    signatures: new Map(),
+    disposed: false,
   };
 
+  const refresh = (): void => scheduleRegistryRefresh(state);
+
   const cleanup = (): void => {
-    for (const controller of controllers.values()) {
+    state.disposed = true;
+    pendingRegistries.delete(state);
+    for (const controller of state.controllers.values()) {
       controller.cleanup();
     }
-    controllers.clear();
-    signatures.clear();
+    state.controllers.clear();
+    state.signatures.clear();
   };
 
   refresh();

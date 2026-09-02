@@ -4,9 +4,8 @@ import type { SessionFolder } from '@/stores/useSessionFoldersStore';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import type { SessionNodeChildRenderExtras, SessionNodeRenderExtras } from './sidebar/sessionNodeItemUtils';
-import { CollapsedActivityIndicator } from './sidebar/collapsedActivityIndicator';
-import type { CollapsedActivityState } from './sidebar/collapsedActivityState';
+import { CollapsedActivityIndicator } from './sidebar/sessions/collapsedActivityIndicator';
+import type { CollapsedActivityState } from './sidebar/sessions/collapsedActivityState';
 
 interface SessionFolderItemProps<TSessionNode> {
   folder: SessionFolder;
@@ -24,23 +23,7 @@ interface SessionFolderItemProps<TSessionNode> {
   onToggle: () => void;
   onRename: (name: string) => void;
   onDelete: () => void;
-  renderSessionNode: (
-    node: TSessionNode,
-    depth?: number,
-    groupDir?: string | null,
-    projectId?: string | null,
-    archivedBucket?: boolean,
-    secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null,
-    renderContext?: 'project' | 'recent',
-    renderExtras?: SessionNodeChildRenderExtras,
-  ) => React.ReactNode;
-  /**
-   * Returns the precomputed per-row render extras for a given node. The
-   * group precomputes subtree-contains lookups once, then resolves a
-   * per-node structure key here so SessionNodeItem's React.memo comparator
-   * can answer with a single string compare instead of a recursive walk.
-   */
-  getRenderExtras?: (node: TSessionNode) => SessionNodeRenderExtras<TSessionNode> | undefined;
+  children?: React.ReactNode;
   groupDirectory?: string | null;
   projectId?: string | null;
   mobileVariant?: boolean;
@@ -74,10 +57,7 @@ const SessionFolderItemBase = <TSessionNode,>({
   onToggle,
   onRename,
   onDelete,
-  renderSessionNode,
-  getRenderExtras,
-  groupDirectory,
-  projectId,
+  children,
   mobileVariant = false,
   alwaysShowActions = mobileVariant,
   isRenaming = false,
@@ -96,6 +76,7 @@ const SessionFolderItemBase = <TSessionNode,>({
   const [localRenaming, setLocalRenaming] = React.useState(false);
   const [localDraft, setLocalDraft] = React.useState('');
   const inputRef = React.useRef<HTMLInputElement | null>(null);
+
 
   const renaming = isRenaming || localRenaming;
   const draft = isRenaming ? renameDraft : localDraft;
@@ -167,6 +148,7 @@ const SessionFolderItemBase = <TSessionNode,>({
           isDropTarget && 'bg-primary/10 ring-1 ring-inset ring-primary/30',
         )}
         onClick={renaming ? undefined : (event) => {
+          // SAFETY: this handler is attached to the div rendered directly above.
           (event.currentTarget as HTMLElement).blur();
           onToggle();
         }}
@@ -346,11 +328,7 @@ const SessionFolderItemBase = <TSessionNode,>({
           {subFolderItems}
           {/* Then sessions */}
           {sessions.length > 0 ? (
-            <div className="pl-3">
-              {sessions.map((node) =>
-                renderSessionNode(node, 0, groupDirectory ?? null, projectId ?? null, archivedBucket, undefined, 'project', getRenderExtras?.(node)),
-              )}
-            </div>
+            children
           ) : !subFolderItems ? (
             <div className="py-1 pl-1.5 text-left typography-micro text-muted-foreground/70">
               {t('sessions.sidebar.folderItem.emptyFolder')}
@@ -362,6 +340,9 @@ const SessionFolderItemBase = <TSessionNode,>({
   );
 };
 
-export const SessionFolderItem = React.memo(SessionFolderItemBase) as <TSessionNode>(
+export const SessionFolderItem = (
+  /* SAFETY: React.memo preserves the generic component's props and return type. */
+  React.memo(SessionFolderItemBase) as <TSessionNode>(
   props: SessionFolderItemProps<TSessionNode>,
-) => React.ReactElement;
+  ) => React.ReactElement
+);

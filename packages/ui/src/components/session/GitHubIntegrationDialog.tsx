@@ -284,7 +284,7 @@ export function GitHubIntegrationDialog({
   const isGitHubConnected = githubAuthChecked && githubAuthStatus?.connected === true;
 
   const openGitHubSettings = () => {
-    setSettingsPage('github');
+    setSettingsPage('integrations');
     setSettingsDialogOpen(true);
   };
 

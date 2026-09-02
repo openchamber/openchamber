@@ -4,6 +4,7 @@
  */
 
 import { create } from "zustand"
+import type { ContextPartMetadata } from '@/lib/messages/contextParts'
 import type { AttachedFile } from "@/stores/types/sessionTypes"
 import { prepareAttachmentFiles } from "./attachment-files"
 
@@ -115,6 +116,7 @@ export type SyntheticContextPart = {
   text: string
   attachments?: AttachedFile[]
   synthetic?: boolean
+  metadata?: ContextPartMetadata
 }
 
 export type VSCodeActiveEditorFile = {

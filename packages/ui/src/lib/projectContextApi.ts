@@ -57,6 +57,17 @@ export interface ProjectRef {
   path: string;
 }
 
+/**
+ * A saved project plan plus the project that owns it, carried as one value so
+ * a viewer can never end up with a plan id whose owner it has to guess.
+ * PlanView resolves no owner on its own: the panel (or the persisted tab,
+ * or the mobile surface) that opened the plan knows the owner exactly.
+ */
+export interface SavedProjectPlanTarget {
+  projectRef: ProjectRef;
+  planId: string;
+}
+
 export const PROJECT_NOTE_BODY_MAX_LENGTH = 3000;
 export const PROJECT_TODO_TEXT_MAX_LENGTH = 120;
 

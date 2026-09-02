@@ -21,6 +21,64 @@ Niektóre prompty mają część widoczną (wiadomość, którą zobaczysz) i cz
 
 Zmieniłeś zdanie? Każdy prompt ma **reset to default**, a jest też **reset all**, jeśli chcesz zacząć wszystko od nowa.
 
+## Gdzie używany jest każdy prompt
+
+Dla każdego prompta poniżej podano, gdzie się wykonuje i co go uruchamia. Sprawdź wyzwalacz przed edycją, żeby wiedzieć, który przepływ zmieniasz.
+
+### Git
+
+| Prompt | Gdzie się wykonuje | Kiedy się uruchamia |
+| --- | --- | --- |
+| Generowanie commita | Przycisk generowania w polu commita w widoku git oraz ekran Changes na mobile | Generujesz komunikat commita. Wstawiane są wybrane pliki i tematy ostatnich commitów gałęzi, dzięki czemu komunikat trzyma styl twojego repozytorium. |
+| Generowanie PR | Formularz tworzenia pull requesta w zakładce PR widoku git | Generujesz tytuł i treść PR. Wstawiane są gałęzie base i head, commity i zmienione pliki między nimi, twój dodatkowy kontekst oraz szablon PR repozytorium, jeśli istnieje. |
+| Rozwiązywanie konfliktu merge/rebase | Okno konfliktów w widoku git, gdy merge lub rebase zatrzyma się na konfliktach | Wybierasz "Resolve in current session" albo "Resolve in new session". Agent czyta pliki z konfliktem, proponuje strategię dla każdego pliku i czeka na twoje potwierdzenie przed edycją, stage'owaniem lub kontynuowaniem operacji. |
+| Rozwiązywanie konfliktu cherry-pick | Sekcja "Re-integrate commits" sesji w worktree | Przenoszenie commitów sesji na gałąź docelową trafia na konflikt i przekazujesz go agentowi. Agent rozwiązuje konflikty w tymczasowym worktree, robi stage plików i kontynuuje cherry-pick. |
+
+### GitHub
+
+| Prompt | Gdzie się wykonuje | Kiedy się uruchamia |
+| --- | --- | --- |
+| Review PR | Selektor "Link GitHub PR" w menu załączników kompozytora oraz okno nowego worktree | Dwa wyzwalacze. Przypięcie PR jako kontekstu przygotowuje instrukcje, które wychodzą z twoją następną wiadomością. Utworzenie sesji worktree z PR używa prompta jako pierwszej wiadomości tej sesji, z pełnym kontekstem PR w załączeniu. |
+| Review issue | Okno nowego worktree, gdy worktree startuje z issue | Pierwsza wiadomość nowej sesji przegląda issue, z jej treścią i komentarzami jako kontekstem. |
+| Review nieudanych checków PR / komentarzy PR / pojedynczego komentarza PR | — | Dziś żaden przepływ ich nie wysyła. Widok PR uruchamiał je kiedyś akcjami review jednym kliknięciem; teraz nieudane checki i komentarze są przypinane jako szkice kontekstu czatu. Zostają edytowalne, aby istniejące nadpisania dalej działały. |
+
+### Planning
+
+| Prompt | Gdzie się wykonuje | Kiedy się uruchamia |
+| --- | --- | --- |
+| Planowanie z todo | Panel Todos w pasku bocznym projektu | Wysyłasz todo do sesji albo nowej sesji w worktree. Tekst todo staje się widoczną wiadomością; instrukcje zamieniają go w planistyczny dialog oparty na pytaniach, zamiast skakać od razu do implementacji. |
+| Ulepsz plan | Akcja "Improve" na zapisanym planie w widoku Plans | Wysyłasz zapisany plan do przepływu ulepszania. Agent najpierw czyta plik planu, potem proponuje zmiany zakorzenione w aktualnym stanie repozytorium i proponuje edycję tego samego pliku. |
+| Zaimplementuj plan | Akcja "Implement" na zapisanym planie | Wysyłasz zapisany plan do przepływu implementacji. Agent czyta plik planu i implementuje go od początku do końca bez rozszerzania zakresu, zapisując korekty planu z powrotem do pliku, gdy sam plan okaże się błędny. |
+
+### Session
+
+Większość z nich zasila komendy z ukośnikiem wpisywane w kompozytorze. Większość pojawia się też jako startowe chipy na szkicu nowej sesji.
+
+| Prompt | Gdzie się wykonuje | Kiedy się uruchamia |
+| --- | --- | --- |
+| Tour po kodzie | `/explore` | Prosisz o ogólną orientację w bazie kodu. |
+| Podsumowanie sesji | `/summary`, opcjonalnie `/summary <temat>` | Podsumowujesz dotychczasową rozmowę — przydatne do przekazania do nowej sesji. Wymaga istniejącej sesji. |
+| Review workspace | `/workspace-review` | Prosisz agenta o przegląd aktualnego diffu workspace pod kątem intencji, poprawności i bezpieczeństwa. |
+| Planowanie funkcji | `/plan-feature` | Zamieniasz surowy pomysł na funkcję w plan implementacji przez prowadzony dialog pytań i odpowiedzi. |
+| Formułowanie Goal | `/craft-goal`, opcjonalnie `/craft-goal <pomysł>` | Zamieniasz pomysł w weryfikowalny cel Goal do okna Goal. |
+| Nadrobienie bieżące | `/catch-up` | Wracasz do projektu i pytasz, na czym stanęło i co dalej. |
+| Debugowanie | `/debug` | Badasz buga: agent stawia hipotezy, potwierdza przyczynę źródłową w kodzie i dopiero wtedy proponuje poprawkę. |
+| Ważenie opcji | `/weigh` | Wiesz, co zbudować, ale nie jak. Agent porównuje dwa-trzy podejścia i poleca jedno. |
+| Fusion | Akcja "Run fusion" na grupie multi-run | Łączysz wyniki kilku uruchomień w jedną odpowiedź. Wyniki uruchomień są doklejane po instrukcjach. |
+
+### Prompty bez strony w Settings
+
+Kilka promptów uruchamia się automatycznie i nie ma edytowalnej strony w Settings:
+
+| Prompt | Kiedy się uruchamia |
+| --- | --- |
+| Zaplanowane zadanie | `/schedule-task`, opcjonalnie z początkowym pomysłem. Prowadzi dialog, który definiuje zaplanowane zadanie. |
+| Handoff do review | `/handoff-review` albo przycisk Review w widoku diff z włączonym handoffem. Generuje handoff w sesji roboczej. |
+| Wiadomość startowa sesji review | Pierwsza wiadomość wygenerowanej sesji review — z handoffem, gdy powstał, bez niego w przeciwnym razie. |
+| Feedback z review / odpowiedź implementacji | Przenoszą wiadomości między dwiema sesjami: feedback recenzenta wraca do sesji implementującej, a odpowiedź implementatora wraca do sesji review. |
+
 ## Powiązane
 
 - [Przepływy Git i GitHub](/pl/git/) — wiele z tych promptów napędza przepływy git
+- [Notatki, todo i plany](/pl/notes-todos-plans/) — todo i plany stojące za promptami Planning
+- [Multi-run](/pl/multi-run/) — grupy uruchomień i fusion
