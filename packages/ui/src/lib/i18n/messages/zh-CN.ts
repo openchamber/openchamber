@@ -2017,6 +2017,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.error.worktreeDirectoryRequired': '工作树目录为必填项',
   'session.newWorktree.error.sendGitHubContextFailed': '发送 GitHub 上下文失败',
   'session.newWorktree.error.createWorktreeFailed': '创建工作树失败',
+  'session.newWorktree.error.pullRequestUnavailable': '无法访问此拉取请求。请检查仓库访问权限和网络连接，然后重试。',
   'session.newWorktree.toast.sessionFromIssue': '已从 Issue 创建会话',
   'session.newWorktree.toast.sessionFromPr': '已从 PR 创建会话',
   'session.newWorktree.toast.worktreeCreated': '工作树已创建',

@@ -76,6 +76,15 @@
         "*.{js,cjs,mjs,ts}",
         "scripts/**/*.{js,cjs,mjs,ts}"
       ]
+    },
+    "packages/git-core": {
+      "entry": [
+        "src/index.ts",
+        "__tests__/**/*.{js,cjs,mjs,ts,tsx}"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx}"
+      ]
     }
   }
 }

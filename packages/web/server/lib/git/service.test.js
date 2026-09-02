@@ -9,6 +9,7 @@ import {
   checkoutBranch,
   checkoutCommit,
   cherryPick,
+  clearBranchTracking,
   createWorktree,
   getWorktreeBootstrapStatus,
   getBranches,
@@ -18,6 +19,7 @@ import {
   getWorktrees,
   isGitRepository,
   populateWorktreeWithLockRecovery,
+  renameBranch,
   removeWorktree,
   resolvePrimaryWorktreeRoot,
   resolveWorktreeTopLevel,
@@ -27,10 +29,10 @@ import {
   setLocalIdentity,
   stageFiles,
   unstageFiles,
+  validateWorktreeCreate,
   applyHunk,
   getDiff,
   getFileDiff,
-  validateWorktreeCreate,
   parseBranchCreationSource,
   getRangeFiles,
 } from './service.js';
@@ -84,6 +86,17 @@ const canRunGit = () => {
   } catch {
     return false;
   }
+};
+
+const waitForCondition = async (condition, timeout = 5_000) => {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (await condition()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('Timed out waiting for condition');
 };
 
 afterEach(() => {
@@ -563,17 +576,14 @@ describe('createWorktree', () => {
         error: null,
       });
 
-      await expect.poll(() => fs.existsSync(setupMarker), { timeout: 5_000 }).toBe(true);
+      await waitForCondition(() => fs.existsSync(setupMarker));
       await expect(getWorktreeBootstrapStatus(created.path)).resolves.toMatchObject({
         status: 'pending',
         phase: 'git-ready',
         error: null,
       });
 
-      await expect.poll(
-        async () => (await getWorktreeBootstrapStatus(created.path)).phase,
-        { timeout: 5_000 },
-      ).toBe('setup-ready');
+      await waitForCondition(async () => (await getWorktreeBootstrapStatus(created.path)).phase === 'setup-ready');
       await expect(getWorktreeBootstrapStatus(created.path)).resolves.toMatchObject({
         status: 'ready',
         phase: 'setup-ready',
@@ -768,7 +778,7 @@ describe('createWorktree', () => {
         startCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(setupScript)}`,
       });
 
-      await expect.poll(() => fs.existsSync(setupStarted), { timeout: 5_000 }).toBe(true);
+      await waitForCondition(() => fs.existsSync(setupStarted));
       let removalCompleted = false;
       const removal = removeWorktree(repo, { directory: created.path }).then(() => {
         removalCompleted = true;
@@ -858,131 +868,406 @@ describe('createWorktree', () => {
 });
 
 // ---------------------------------------------------------------------------
-// createWorktree from a forked GitHub PR head (issue #2422)
+// linked pull request worktrees
 // ---------------------------------------------------------------------------
 
-describe('createWorktree from a forked GitHub PR', () => {
-  const withDataHome = async (test) => {
-    const previousXdgDataHome = process.env.XDG_DATA_HOME;
-    const dataHome = createTempDir();
-    process.env.XDG_DATA_HOME = dataHome;
-    try {
-      await test(dataHome);
-    } finally {
-      if (previousXdgDataHome === undefined) {
-        delete process.env.XDG_DATA_HOME;
-      } else {
-        process.env.XDG_DATA_HOME = previousXdgDataHome;
-      }
+const configureRepository = (directory) => {
+  runGit(directory, ['init', '-b', 'main']);
+  runGit(directory, ['config', 'user.email', 'test@example.com']);
+  runGit(directory, ['config', 'user.name', 'Test User']);
+  fs.writeFileSync(path.join(directory, 'README.md'), '# Test\n');
+  runGit(directory, ['add', 'README.md']);
+  runGit(directory, ['commit', '-m', 'Initial commit']);
+};
+
+const getGitConfig = (directory, key) => {
+  try {
+    return runGit(directory, ['config', '--get', key]).trim() || null;
+  } catch {
+    return null;
+  }
+};
+
+const withTestDataHome = async (callback) => {
+  const previousXdgDataHome = process.env.XDG_DATA_HOME;
+  const dataHome = createTempDir();
+  process.env.XDG_DATA_HOME = dataHome;
+
+  try {
+    return await callback(dataHome);
+  } finally {
+    if (previousXdgDataHome === undefined) {
+      delete process.env.XDG_DATA_HOME;
+    } else {
+      process.env.XDG_DATA_HOME = previousXdgDataHome;
     }
-  };
+  }
+};
 
-  const publishForkHead = (repository, forkBare, branchName) => {
-    fs.writeFileSync(path.join(repository, 'FORK.md'), `# ${branchName}\n`);
-    runGit(repository, ['add', 'FORK.md']);
-    runGit(repository, ['commit', '-m', `fork ${branchName}`]);
-    const sha = runGit(repository, ['rev-parse', 'HEAD']).trim();
-    runGit(repository, ['push', forkBare, `HEAD:refs/heads/${branchName}`]);
-    return sha;
-  };
+const createPullRequestFixture = ({ baseRemoteName = 'base' } = {}) => {
+  const repository = createTempDir();
+  const baseRemote = createTempDir();
+  const forkRemote = createTempDir();
+  const forkClone = createTempDir();
+  const prNumber = 42;
 
-  const getBranchTrackingRemote = (directory, branch) => {
-    try {
-      return runGit(directory, ['config', '--get', `branch.${branch}.remote`]).trim();
-    } catch {
-      return '';
+  configureRepository(repository);
+  runGit(baseRemote, ['init', '--bare']);
+  runGit(forkRemote, ['init', '--bare']);
+  runGit(repository, ['remote', 'add', baseRemoteName, baseRemote]);
+  runGit(repository, ['push', baseRemoteName, 'main']);
+  runGit(baseRemote, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
+
+  fs.rmSync(forkClone, { recursive: true, force: true });
+  runGit(repository, ['clone', baseRemote, forkClone]);
+  runGit(forkClone, ['config', 'user.email', 'test@example.com']);
+  runGit(forkClone, ['config', 'user.name', 'Test User']);
+  runGit(forkClone, ['checkout', '-b', 'feature/fork']);
+  fs.writeFileSync(path.join(forkClone, 'fork.txt'), 'fork source\n');
+  runGit(forkClone, ['add', 'fork.txt']);
+  runGit(forkClone, ['commit', '-m', 'Fork pull request head']);
+  const forkHead = runGit(forkClone, ['rev-parse', 'HEAD']).trim();
+  runGit(forkClone, ['remote', 'add', 'fork', forkRemote]);
+  runGit(forkClone, ['push', 'fork', 'feature/fork']);
+
+  runGit(repository, ['checkout', '-b', 'feature/base-pr']);
+  fs.writeFileSync(path.join(repository, 'base-pr.txt'), 'base pull request source\n');
+  runGit(repository, ['add', 'base-pr.txt']);
+  runGit(repository, ['commit', '-m', 'Base pull request head']);
+  const baseHead = runGit(repository, ['rev-parse', 'HEAD']).trim();
+  runGit(repository, ['push', baseRemoteName, `feature/base-pr:refs/pull/${prNumber}/head`]);
+  runGit(repository, ['checkout', 'main']);
+
+  return { repository, baseRemote, baseRemoteName, forkRemote, forkHead, baseHead, prNumber };
+};
+
+const waitForWorktreeBootstrap = async (directory) => {
+  await waitForCondition(async () => {
+    const status = await getWorktreeBootstrapStatus(directory);
+    if (status.status === 'failed') {
+      throw new Error(status.error || 'Worktree bootstrap failed');
     }
-  };
+    return status.status === 'ready';
+  });
+};
 
-  const forkWorktreeInput = ({ fork, worktreeName }) => ({
-    mode: 'existing',
-    branchName: 'feature/login',
-    worktreeName,
-    existingBranch: 'remotes/pr-alice/feature/login',
-    setUpstream: true,
-    upstreamRemote: 'pr-alice',
-    upstreamBranch: 'feature/login',
-    ensureRemoteName: 'pr-alice',
-    ensureRemoteUrl: fork,
+describe('linked pull request worktrees', () => {
+  it('provisions and checks out a reachable fork before considering the base pull request ref', async () => {
+    if (!canRunGit()) return;
+
+    await withTestDataHome(async () => {
+      const fixture = createPullRequestFixture();
+      const input = {
+        mode: 'existing',
+        worktreeName: 'fork-wins',
+        branchName: 'pr/fork-wins',
+        existingBranch: 'remotes/pr-fork/feature/fork',
+        prNumber: fixture.prNumber,
+        baseRemote: 'base',
+        setUpstream: true,
+        upstreamRemote: 'pr-fork',
+        upstreamBranch: 'feature/fork',
+        ensureRemoteName: 'pr-fork',
+        ensureRemoteUrl: fixture.forkRemote,
+        returnAfterDirectoryCreated: true,
+      };
+
+      await expect(validateWorktreeCreate(fixture.repository, input)).resolves.toMatchObject({ ok: true });
+      expect(() => runGit(fixture.repository, ['remote', 'get-url', 'pr-fork'])).toThrow();
+
+      const created = await createWorktree(fixture.repository, input);
+
+      await waitForWorktreeBootstrap(created.path);
+
+      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(fixture.forkHead);
+      expect(runGit(fixture.repository, ['remote', 'get-url', 'pr-fork']).trim()).toBe(fixture.forkRemote);
+      expect(getGitConfig(created.path, 'branch.pr/fork-wins.remote')).toBe('pr-fork');
+      expect(getGitConfig(created.path, 'branch.pr/fork-wins.merge')).toBe('refs/heads/feature/fork');
+    });
   });
 
-  it('creates a worktree from a reachable fork head remote', async () => {
+  it('uses a collision-safe fork remote without changing the base remote, then falls back through that base remote', async () => {
     if (!canRunGit()) return;
 
-    await withDataHome(async () => {
-      const { repository } = createRepositoryWithRemote();
-      const fork = createTempDir();
-      runGit(fork, ['init', '--bare']);
-      const sha = publishForkHead(repository, fork, 'feature/login');
-
-      const created = await createWorktree(repository, forkWorktreeInput({
-        fork,
-        worktreeName: 'pr-42',
-      }));
-
-      expect(created.branch).toBe('feature/login');
-      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(sha);
-      await expect.poll(() => fs.existsSync(path.join(created.path, 'FORK.md')), { timeout: 5_000 }).toBe(true);
-      expect(runGit(repository, ['remote', 'get-url', 'pr-alice']).trim()).toBe(fork);
-      await expect.poll(
-        () => getBranchTrackingRemote(created.path, 'feature/login') === 'pr-alice',
-        { timeout: 5_000 }
-      ).toBe(true);
-    });
-  }, 30_000);
-
-  it('rejects an unreachable fork with an actionable error and no worktree', async () => {
-    if (!canRunGit()) return;
-
-    await withDataHome(async () => {
-      const { repository } = createRepositoryWithRemote();
-      const missingFork = path.join(createTempDir(), 'missing-fork.git');
-      const before = runGit(repository, ['worktree', 'list', '--porcelain']);
-
-      await expect(createWorktree(repository, forkWorktreeInput({
-        fork: missingFork,
-        worktreeName: 'pr-42-unreachable',
-      }))).rejects.toThrow(/Unable to (reach|fetch)/i);
-
-      expect(runGit(repository, ['worktree', 'list', '--porcelain'])).toBe(before);
-
-      const validation = await validateWorktreeCreate(repository, forkWorktreeInput({
-        fork: missingFork,
-        worktreeName: 'pr-42-unreachable',
-      }));
-      expect(validation.ok).toBe(false);
-      expect(validation.errors.some((error) => /Unable to (reach|fetch)/i.test(error.message))).toBe(true);
-    });
-  }, 30_000);
-
-  it('does not write upstream tracking when the upstream ref cannot be fetched', async () => {
-    if (!canRunGit()) return;
-
-    await withDataHome(async () => {
-      const { repository } = createRepositoryWithRemote();
-      runGit(repository, ['branch', 'feature/tracking']);
-      const emptyRemote = createTempDir();
-      runGit(emptyRemote, ['init', '--bare']);
-      runGit(repository, ['remote', 'add', 'broken-upstream', emptyRemote]);
-
-      const created = await createWorktree(repository, {
+    await withTestDataHome(async () => {
+      const fixture = createPullRequestFixture({ baseRemoteName: 'pr-fork' });
+      const input = {
         mode: 'existing',
-        branchName: 'feature/tracking-wt',
-        worktreeName: 'feature-tracking-wt',
-        existingBranch: 'feature/tracking',
+        worktreeName: 'fork-remote-collision',
+        branchName: 'pr/fork-remote-collision',
+        existingBranch: 'remotes/pr-fork/feature/fork',
+        prNumber: fixture.prNumber,
+        baseRemote: fixture.baseRemoteName,
         setUpstream: true,
-        upstreamRemote: 'broken-upstream',
-        upstreamBranch: 'does-not-exist',
+        upstreamRemote: 'pr-fork',
+        upstreamBranch: 'feature/fork',
+        ensureRemoteName: 'pr-fork',
+        ensureRemoteUrl: fixture.forkRemote,
+        returnAfterDirectoryCreated: true,
+      };
+
+      await expect(validateWorktreeCreate(fixture.repository, input)).resolves.toMatchObject({ ok: true });
+      expect(runGit(fixture.repository, ['remote', 'get-url', fixture.baseRemoteName]).trim()).toBe(fixture.baseRemote);
+      expect(() => runGit(fixture.repository, ['remote', 'get-url', 'pr-fork-pr-42'])).toThrow();
+
+      const forkCreated = await createWorktree(fixture.repository, input);
+      await waitForWorktreeBootstrap(forkCreated.path);
+
+      expect(runGit(forkCreated.path, ['rev-parse', 'HEAD']).trim()).toBe(fixture.forkHead);
+      expect(runGit(fixture.repository, ['remote', 'get-url', fixture.baseRemoteName]).trim()).toBe(fixture.baseRemote);
+      expect(runGit(fixture.repository, ['remote', 'get-url', 'pr-fork-pr-42']).trim()).toBe(fixture.forkRemote);
+      expect(getGitConfig(forkCreated.path, 'branch.pr/fork-remote-collision.remote')).toBe('pr-fork-pr-42');
+
+      const unavailableFork = path.join(createTempDir(), 'missing-fork.git');
+      const fallbackCreated = await createWorktree(fixture.repository, {
+        ...input,
+        worktreeName: 'fork-remote-collision-fallback',
+        branchName: 'pr/fork-remote-collision-fallback',
+        ensureRemoteUrl: unavailableFork,
+      });
+      await waitForWorktreeBootstrap(fallbackCreated.path);
+
+      expect(runGit(fallbackCreated.path, ['rev-parse', 'HEAD']).trim()).toBe(fixture.baseHead);
+      expect(runGit(fixture.repository, ['remote', 'get-url', fixture.baseRemoteName]).trim()).toBe(fixture.baseRemote);
+      expect(getGitConfig(fallbackCreated.path, 'branch.pr/fork-remote-collision-fallback.remote')).toBeNull();
+      expect(getGitConfig(fallbackCreated.path, 'branch.pr/fork-remote-collision-fallback.merge')).toBeNull();
+    });
+  }, 15_000);
+
+  it('uses the base pull request head when the fork URL is missing', async () => {
+    if (!canRunGit()) return;
+
+    await withTestDataHome(async () => {
+      const fixture = createPullRequestFixture();
+      const created = await createWorktree(fixture.repository, {
+        mode: 'existing',
+        worktreeName: 'base-pr-ref',
+        branchName: 'pr/base-ref',
+        existingBranch: 'feature/base-pr',
+        prNumber: fixture.prNumber,
+        baseRemote: 'base',
+        setUpstream: false,
+        returnAfterDirectoryCreated: true,
       });
 
-      await expect.poll(
-        () => getWorktreeBootstrapStatus(created.path).then((status) => status.status === 'ready' || status.status === 'failed'),
-        { timeout: 5_000 }
-      ).toBe(true);
+      await waitForWorktreeBootstrap(created.path);
 
-      expect(getBranchTrackingRemote(created.path, 'feature/tracking-wt')).toBe('');
+      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(fixture.baseHead);
+      expect(getGitConfig(created.path, 'branch.pr/base-ref.remote')).toBeNull();
+      expect(getGitConfig(created.path, 'branch.pr/base-ref.merge')).toBeNull();
     });
-  }, 30_000);
+  });
+
+  it('falls back to the base pull request head during real attachment when the fork fetch fails', async () => {
+    if (!canRunGit()) return;
+
+    await withTestDataHome(async () => {
+      const fixture = createPullRequestFixture();
+      const unavailableFork = path.join(createTempDir(), 'missing-fork.git');
+      const created = await createWorktree(fixture.repository, {
+        mode: 'existing',
+        worktreeName: 'fork-fetch-fallback',
+        branchName: 'pr/fork-fetch-fallback',
+        existingBranch: 'remotes/pr-fork/feature/fork',
+        prNumber: fixture.prNumber,
+        baseRemote: 'base',
+        setUpstream: true,
+        upstreamRemote: 'pr-fork',
+        upstreamBranch: 'feature/fork',
+        ensureRemoteName: 'pr-fork',
+        ensureRemoteUrl: unavailableFork,
+      });
+
+      await waitForWorktreeBootstrap(created.path);
+
+      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(fixture.baseHead);
+      expect(getGitConfig(created.path, 'branch.pr/fork-fetch-fallback.remote')).toBeNull();
+      expect(getGitConfig(created.path, 'branch.pr/fork-fetch-fallback.merge')).toBeNull();
+    });
+  });
+
+  it('does not leave candidates for synchronous or fast creation when neither pull request source is accessible', async () => {
+    if (!canRunGit()) return;
+
+    await withTestDataHome(async (dataHome) => {
+      const fixture = createPullRequestFixture();
+      const unavailableFork = path.join(createTempDir(), 'missing-fork.git');
+      const projectID = runGit(fixture.repository, ['rev-list', '--max-parents=0', '--all']).trim();
+      const synchronousCandidate = path.join(dataHome, 'opencode', 'worktree', projectID, 'double-source-failure-sync');
+      const fastCandidate = path.join(dataHome, 'opencode', 'worktree', projectID, 'double-source-failure');
+
+      await expect(createWorktree(fixture.repository, {
+        mode: 'existing',
+        worktreeName: 'double-source-failure-sync',
+        branchName: 'pr/double-source-failure-sync',
+        existingBranch: 'remotes/pr-fork/feature/fork',
+        prNumber: fixture.prNumber + 1,
+        baseRemote: 'base',
+        setUpstream: true,
+        upstreamRemote: 'pr-fork',
+        upstreamBranch: 'feature/fork',
+        ensureRemoteName: 'pr-fork',
+        ensureRemoteUrl: unavailableFork,
+      })).rejects.toMatchObject({ code: 'pull_request_unavailable' });
+
+      expect(fs.existsSync(synchronousCandidate)).toBe(false);
+
+      await expect(createWorktree(fixture.repository, {
+        mode: 'existing',
+        worktreeName: 'double-source-failure',
+        branchName: 'pr/double-source-failure',
+        existingBranch: 'remotes/pr-fork/feature/fork',
+        prNumber: fixture.prNumber + 1,
+        baseRemote: 'base',
+        setUpstream: true,
+        upstreamRemote: 'pr-fork',
+        upstreamBranch: 'feature/fork',
+        ensureRemoteName: 'pr-fork',
+        ensureRemoteUrl: unavailableFork,
+        returnAfterDirectoryCreated: true,
+      })).rejects.toThrow('pull_request_unavailable');
+
+      expect(fs.existsSync(fastCandidate)).toBe(false);
+    });
+  });
+
+  it('does not configure tracking when a deferred upstream fetch fails', async () => {
+    if (!canRunGit()) return;
+
+    await withTestDataHome(async () => {
+      const repository = createTempDir();
+      configureRepository(repository);
+      const unavailableRemote = path.join(createTempDir(), 'missing-upstream.git');
+      runGit(repository, ['remote', 'add', 'broken', unavailableRemote]);
+
+      const created = await createWorktree(repository, {
+        mode: 'new',
+        worktreeName: 'broken-upstream',
+        branchName: 'feature/broken-upstream',
+        setUpstream: true,
+        upstreamRemote: 'broken',
+        upstreamBranch: 'main',
+        returnAfterDirectoryCreated: true,
+      });
+
+      await waitForWorktreeBootstrap(created.path);
+
+      expect(getGitConfig(created.path, 'branch.feature/broken-upstream.remote')).toBeNull();
+      expect(getGitConfig(created.path, 'branch.feature/broken-upstream.merge')).toBeNull();
+    });
+  });
+
+  it('configures tracking after a deferred upstream fetch succeeds', async () => {
+    if (!canRunGit()) return;
+
+    await withTestDataHome(async () => {
+      const fixture = createPullRequestFixture();
+      const created = await createWorktree(fixture.repository, {
+        mode: 'new',
+        worktreeName: 'deferred-upstream',
+        branchName: 'feature/deferred-upstream',
+        setUpstream: true,
+        upstreamRemote: 'base',
+        upstreamBranch: 'main',
+        returnAfterDirectoryCreated: true,
+      });
+
+      await waitForWorktreeBootstrap(created.path);
+
+      expect(getGitConfig(created.path, 'branch.feature/deferred-upstream.remote')).toBe('base');
+      expect(getGitConfig(created.path, 'branch.feature/deferred-upstream.merge')).toBe('refs/heads/main');
+    });
+  });
+
+  it('does not check out a stale fork ref after a fresh fork fetch fails', async () => {
+    if (!canRunGit()) return;
+
+    await withTestDataHome(async () => {
+      const fixture = createPullRequestFixture();
+      runGit(fixture.repository, ['remote', 'add', 'pr-fork', fixture.forkRemote]);
+      runGit(fixture.repository, [
+        'fetch',
+        'pr-fork',
+        '+refs/heads/feature/fork:refs/remotes/pr-fork/feature/fork',
+      ]);
+      expect(runGit(fixture.repository, ['rev-parse', 'refs/remotes/pr-fork/feature/fork']).trim()).toBe(fixture.forkHead);
+
+      const unavailableFork = path.join(createTempDir(), 'missing-fork.git');
+      const created = await createWorktree(fixture.repository, {
+        mode: 'existing',
+        worktreeName: 'stale-fork-ref',
+        branchName: 'pr/stale-fork-ref',
+        existingBranch: 'remotes/pr-fork/feature/fork',
+        prNumber: fixture.prNumber,
+        baseRemote: 'base',
+        setUpstream: true,
+        upstreamRemote: 'pr-fork',
+        upstreamBranch: 'feature/fork',
+        ensureRemoteName: 'pr-fork',
+        ensureRemoteUrl: unavailableFork,
+      });
+
+      await waitForWorktreeBootstrap(created.path);
+
+      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(fixture.baseHead);
+      expect(getGitConfig(created.path, 'branch.pr/stale-fork-ref.remote')).toBeNull();
+      expect(getGitConfig(created.path, 'branch.pr/stale-fork-ref.merge')).toBeNull();
+    });
+  });
+});
+
+describe('renameBranch', () => {
+  it('clears inherited tracking when the renamed branch cannot refresh its upstream', async () => {
+    if (!canRunGit()) return;
+
+    const repository = createTempDir();
+    configureRepository(repository);
+    const unavailableRemote = path.join(createTempDir(), 'missing-upstream.git');
+    runGit(repository, ['checkout', '-b', 'feature/tracked-old']);
+    runGit(repository, ['remote', 'add', 'broken', unavailableRemote]);
+    runGit(repository, ['config', 'branch.feature/tracked-old.remote', 'broken']);
+    runGit(repository, ['config', 'branch.feature/tracked-old.merge', 'refs/heads/main']);
+
+    await expect(renameBranch(repository, 'feature/tracked-old', 'feature/tracked-new')).resolves.toMatchObject({
+      success: true,
+      branch: 'feature/tracked-new',
+    });
+
+    expect(getGitConfig(repository, 'branch.feature/tracked-new.remote')).toBeNull();
+    expect(getGitConfig(repository, 'branch.feature/tracked-new.merge')).toBeNull();
+  });
+
+});
+
+describe('branch tracking cleanup', () => {
+  it('ignores only an absent config key while clearing inherited tracking', async () => {
+    const calls = [];
+    await clearBranchTracking('/repo', 'feature/new', async (_directory, args) => {
+      calls.push(args);
+      if (args.at(-1) === 'branch.feature/new.remote') {
+        return { success: false, exitCode: 5, stdout: '', stderr: '', message: 'Command failed' };
+      }
+      return { success: true, exitCode: 0, stdout: '', stderr: '' };
+    });
+
+    expect(calls).toEqual([
+      ['config', '--unset-all', 'branch.feature/new.remote'],
+      ['config', '--unset-all', 'branch.feature/new.merge'],
+    ]);
+  });
+
+  it('propagates unexpected tracking config failures', async () => {
+    const configLockFailure = {
+      success: false,
+      exitCode: 128,
+      stdout: '',
+      stderr: 'fatal: could not lock config file .git/config: File exists',
+      message: 'fatal: could not lock config file .git/config: File exists',
+    };
+
+    await expect(clearBranchTracking('/repo', 'feature/new', async () => configLockFailure))
+      .rejects.toThrow('could not lock config file');
+  });
 });
 
 // ---------------------------------------------------------------------------

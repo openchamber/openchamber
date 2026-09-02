@@ -3,7 +3,8 @@
   "references": [
     { "path": "./packages/ui/tsconfig.json" },
     { "path": "./packages/web/tsconfig.json" },
-    { "path": "./packages/electron/tsconfig.json" }
+    { "path": "./packages/electron/tsconfig.json" },
+    { "path": "./packages/git-core/tsconfig.json" }
   ],
   "compilerOptions": {
     "baseUrl": ".",

@@ -54,4 +54,55 @@ describe('VS Code webview bridge requests', () => {
       Object.defineProperty(globalThis, 'acquireVsCodeApi', { configurable: true, value: originalAcquire });
     }
   });
+
+  test('preserves structured worktree failure codes from the extension host', async () => {
+    const originalWindow = globalThis.window;
+    const originalAcquire = (globalThis as typeof globalThis & { acquireVsCodeApi?: unknown }).acquireVsCodeApi;
+    const messages: Array<{ id?: string; type?: string }> = [];
+    const windowTarget = new EventTarget();
+
+    try {
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        value: windowTarget,
+      });
+      Object.defineProperty(globalThis, 'acquireVsCodeApi', {
+        configurable: true,
+        value: () => ({
+          postMessage: (message: { id?: string; type?: string }) => messages.push(message),
+          getState: () => undefined,
+          setState: () => undefined,
+        }),
+      });
+
+      const { sendBridgeMessage } = await import(`./bridge?structured-worktree-error-${Date.now()}`);
+      const pending = sendBridgeMessage('api:git/worktrees', {
+        directory: '/repo',
+        method: 'POST',
+      }).then(
+        () => null,
+        (error: unknown) => error,
+      );
+
+      const request = messages[0];
+      assert.ok(request?.id);
+      windowTarget.dispatchEvent(new MessageEvent('message', {
+        data: {
+          id: request.id,
+          type: 'api:git/worktrees',
+          success: false,
+          error: 'pull_request_unavailable',
+          code: 'pull_request_unavailable',
+        },
+      }));
+
+      const error = await pending;
+      assert.ok(error instanceof Error);
+      assert.equal((error as Error & { code?: string }).code, 'pull_request_unavailable');
+      assert.equal(error.message, 'pull_request_unavailable');
+    } finally {
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
+      Object.defineProperty(globalThis, 'acquireVsCodeApi', { configurable: true, value: originalAcquire });
+    }
+  });
 });

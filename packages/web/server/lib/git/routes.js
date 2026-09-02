@@ -1131,7 +1131,11 @@ export function registerGitRoutes(app) {
       res.json(created);
     } catch (error) {
       console.error('Failed to create worktree:', error);
-      res.status(500).json({ error: error.message || 'Failed to create worktree' });
+      const code = typeof error?.code === 'string' ? error.code : undefined;
+      res.status(500).json({
+        error: error.message || 'Failed to create worktree',
+        ...(code ? { code } : {}),
+      });
     }
   });
 

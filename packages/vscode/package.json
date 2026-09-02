@@ -246,6 +246,7 @@
   "dependencies": {
     "@openchamber/ui": "workspace:*",
     "@opencode-ai/sdk": "1.18.25",
+    "@openchamber/git-core": "workspace:*",
     "adm-zip": "^0.6.0",
     "jsonc-parser": "^3.3.1",
     "react": "^19.1.1",

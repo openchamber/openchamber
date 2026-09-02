@@ -1850,6 +1850,7 @@ export const dict = {
   'session.newWorktree.error.worktreeDirectoryRequired': 'Worktree-Verzeichnis ist erforderlich',
   'session.newWorktree.error.sendGitHubContextFailed': 'Fehler beim Senden des GitHub-Kontexts',
   'session.newWorktree.error.createWorktreeFailed': 'Fehler beim Erstellen des Worktrees',
+  'session.newWorktree.error.pullRequestUnavailable': 'Auf diesen Pull Request konnte nicht zugegriffen werden. Prüfen Sie den Repository-Zugriff und die Netzwerkverbindung und versuchen Sie es erneut.',
   'session.newWorktree.toast.sessionFromIssue': 'Sitzung aus Problem erstellt',
   'session.newWorktree.toast.sessionFromPr': 'Sitzung aus Pull Request erstellt',
   'session.newWorktree.toast.worktreeCreated': 'Worktree erstellt',

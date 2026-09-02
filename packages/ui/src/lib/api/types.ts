@@ -403,6 +403,8 @@ export interface GitWorktreeBootstrapStatus {
   status: 'pending' | 'ready' | 'failed';
   phase?: 'directory-created' | 'git-ready' | 'setup-ready';
   error: string | null;
+  /** Stable machine-readable failure code when bootstrap cannot complete. */
+  code?: string | null;
   updatedAt: number;
 }
 
@@ -427,6 +429,10 @@ export interface CreateGitWorktreePayload {
   /** Optional remote provisioning (used for fork PR workflows). */
   ensureRemoteName?: string;
   ensureRemoteUrl?: string;
+  /** Linked GitHub pull request number used to resolve its current head source. */
+  prNumber?: number;
+  /** Root tracking remote used to fetch a linked pull request from its base repository. */
+  baseRemote?: string;
   /** Return once the target directory exists and finish Git worktree setup in the background. */
   returnAfterDirectoryCreated?: boolean;
 }

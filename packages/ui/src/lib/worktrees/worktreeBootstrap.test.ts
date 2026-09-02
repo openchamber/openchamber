@@ -214,6 +214,37 @@ describe('worktreeBootstrap.waitForWorktreeBootstrap', () => {
     expect(toastErrors).toEqual([{ title: 'worktree.bootstrap.toast.failed', description: 'setup failed' }]);
   });
 
+  test('preserves and localizes structured pull-request bootstrap failures', async () => {
+    bootstrapStatusResult = {
+      status: 'failed',
+      error: 'pull_request_unavailable',
+      code: 'pull_request_unavailable',
+      updatedAt: 2,
+    };
+    markWorktreeBootstrapPending('/repo-wt');
+
+    const error = await waitForWorktreeBootstrap('/repo-wt').then(
+      () => null,
+      (reason: unknown) => reason,
+    ) as Error & { code?: string };
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe('pull_request_unavailable');
+    expect(error.code).toBe('pull_request_unavailable');
+
+    clearWorktreeBootstrapState('/repo-wt');
+    markWorktreeBootstrapPending('/repo-wt');
+    startWorktreeBootstrapWatcher('/repo-wt', { pollIntervalMs: 0 });
+
+    await waitFor(() => toastErrors.length === 1);
+    const state = getWorktreeBootstrapState('/repo-wt');
+    expect(state?.status).toBe('failed');
+    expect(state?.code).toBe('pull_request_unavailable');
+    expect(toastErrors).toEqual([{
+      title: 'worktree.bootstrap.toast.failed',
+      description: 'session.newWorktree.error.pullRequestUnavailable',
+    }]);
+  });
+
   test('background watcher marks failed and toasts when bootstrap times out', async () => {
     bootstrapStatusResult = { status: 'pending', error: null, updatedAt: 2 };
     markWorktreeBootstrapPending('/repo-wt');

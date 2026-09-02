@@ -2029,6 +2029,7 @@ export const dict: Record<I18nKey, string> = {
   "session.newWorktree.error.worktreeDirectoryRequired": "Se requiere el directorio del worktree",
   "session.newWorktree.error.sendGitHubContextFailed": "No se pudo enviar el contexto de GitHub",
   "session.newWorktree.error.createWorktreeFailed": "No se pudo crear el worktree",
+  "session.newWorktree.error.pullRequestUnavailable": "No se pudo acceder a esta solicitud de extracción. Comprueba el acceso al repositorio y la conexión de red e inténtalo de nuevo.",
   "session.newWorktree.toast.sessionFromIssue": "Sesión creada desde issue",
   "session.newWorktree.toast.sessionFromPr": "Sesión creada desde PR",
   "session.newWorktree.toast.worktreeCreated": "Worktree creado",

@@ -2021,6 +2021,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.error.worktreeDirectoryRequired': 'Worktree 目錄是必填項',
   'session.newWorktree.error.sendGitHubContextFailed': '傳送 GitHub 上下文失敗',
   'session.newWorktree.error.createWorktreeFailed': '建立 Worktree 失敗',
+  'session.newWorktree.error.pullRequestUnavailable': '無法存取此提取請求。請檢查您的儲存庫存取權限和網路連線，然後再試一次。',
   'session.newWorktree.toast.sessionFromIssue': '已從 Issue 建立會話',
   'session.newWorktree.toast.sessionFromPr': '已從 PR 建立會話',
   'session.newWorktree.toast.worktreeCreated': 'Worktree 已建立',

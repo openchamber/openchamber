@@ -2011,6 +2011,7 @@ export const dict = {
   'session.newWorktree.error.worktreeDirectoryRequired': 'Worktree dizini gerekli',
   'session.newWorktree.error.sendGitHubContextFailed': 'GitHub bağlamı gönderilemedi',
   'session.newWorktree.error.createWorktreeFailed': 'Worktree oluşturulamadı',
+  'session.newWorktree.error.pullRequestUnavailable': 'Bu pull request\'e erişilemedi. Depo erişiminizi ve ağ bağlantınızı kontrol edip tekrar deneyin.',
   'session.newWorktree.toast.sessionFromIssue': 'Issue\'dan session oluşturuldu',
   'session.newWorktree.toast.sessionFromPr': 'PR\'dan session oluşturuldu',
   'session.newWorktree.toast.worktreeCreated': 'Worktree oluşturuldu',

@@ -3,6 +3,7 @@ import type { GitWorktreeBootstrapStatus } from '@/lib/api/types';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { toast } from '@/components/ui';
 import { formatMessage, useI18nStore, type I18nKey, type I18nParams } from '@/lib/i18n';
+import { getWorktreeErrorPresentationKey } from '@/components/session/worktreeErrorPresentation';
 
 type WorktreeBootstrapState = GitWorktreeBootstrapStatus;
 type WorktreeBootstrapFailureHandler = (status: GitWorktreeBootstrapStatus) => void;
@@ -138,6 +139,21 @@ const createFailedStatus = (error: string): GitWorktreeBootstrapStatus => ({
   updatedAt: Date.now(),
 });
 
+const createBootstrapFailureError = (status: GitWorktreeBootstrapStatus): Error & { code?: string } => {
+  const error = new Error(status.error || 'Worktree bootstrap failed') as Error & { code?: string };
+  if (typeof status.code === 'string') {
+    error.code = status.code;
+  }
+  return error;
+};
+
+const getBootstrapFailureDescription = (status: GitWorktreeBootstrapStatus): string => {
+  const presentationKey = getWorktreeErrorPresentationKey(status);
+  return presentationKey
+    ? t(presentationKey)
+    : status.error || t('worktree.bootstrap.toast.failedDescription');
+};
+
 const markBootstrapFailed = (
   directory: string,
   error: string,
@@ -176,7 +192,7 @@ const pollWorktreeBootstrapUntilSettled = async (
     }
 
     if (current.status === 'failed') {
-      throw new Error(current.error || 'Worktree bootstrap failed');
+      throw createBootstrapFailureError(current);
     }
 
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
@@ -215,7 +231,7 @@ const pollWorktreeBootstrapInBackground = async (
     if (current.status === 'failed') {
       onFailed?.(current);
       toast.error(t('worktree.bootstrap.toast.failed'), {
-        description: current.error || t('worktree.bootstrap.toast.failedDescription'),
+        description: getBootstrapFailureDescription(current),
       });
       return;
     }
@@ -305,7 +321,7 @@ const waitForWorktreePhase = async (
     return;
   }
   if (current?.status === 'failed') {
-    throw new Error(current.error || 'Worktree bootstrap failed');
+    throw createBootstrapFailureError(current);
   }
 
   const waiterKey = getWaiterKey(key, target);

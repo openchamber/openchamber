@@ -119,6 +119,7 @@ describe('bridge git runtime index mutations', () => {
       status: 'pending',
       phase: 'git-ready',
       error: null,
+      code: null,
       updatedAt: 123,
     };
     gitService.getWorktreeBootstrapStatus.mockResolvedValue(bootstrapStatus);
@@ -136,6 +137,22 @@ describe('bridge git runtime index mutations', () => {
       data: bootstrapStatus,
     });
     expect(gitService.getWorktreeBootstrapStatus).toHaveBeenCalledWith('/repo-worktree');
+  });
+
+  it('preserves structured worktree failures for the extension-host bridge', async () => {
+    gitService.createWorktree.mockRejectedValue(Object.assign(
+      new Error('pull_request_unavailable'),
+      { code: 'pull_request_unavailable' },
+    ));
+
+    await expect(handleStandardGitBridgeMessage({
+      id: 'create-worktree-failure',
+      type: 'api:git/worktrees',
+      payload: { directory: '/repo', method: 'POST', worktreeName: 'pr-race' },
+    })).rejects.toMatchObject({
+      message: 'pull_request_unavailable',
+      code: 'pull_request_unavailable',
+    });
   });
 
   it('preserves the directory-created phase in fast create responses', async () => {

@@ -9,6 +9,7 @@ import {
   markWorktreeBootstrapPending,
   setWorktreeBootstrapState,
   startWorktreeBootstrapWatcher,
+  waitForWorktreeBootstrap,
 } from '@/lib/worktrees/worktreeBootstrap';
 import { invalidateResolvedProjectRootCache, resolveProjectRoot } from '@/lib/worktrees/worktreeStatus';
 import type {
@@ -222,6 +223,8 @@ const toCreatePayload = (args: {
   upstreamBranch?: string;
   ensureRemoteName?: string;
   ensureRemoteUrl?: string;
+  prNumber?: number;
+  baseRemote?: string;
   returnAfterDirectoryCreated?: boolean;
 }, projectDirectory: string): CreateGitWorktreePayload => {
   const mode = args.mode === 'existing' ? 'existing' : 'new';
@@ -248,11 +251,13 @@ const toCreatePayload = (args: {
     ...(existingBranch ? { existingBranch } : {}),
     ...(startRef ? { startRef } : {}),
     ...(startCommand ? { startCommand } : {}),
-    ...(args.setUpstream ? { setUpstream: true } : {}),
+    ...(args.setUpstream !== undefined ? { setUpstream: args.setUpstream } : {}),
     ...(args.upstreamRemote ? { upstreamRemote: args.upstreamRemote } : {}),
     ...(args.upstreamBranch ? { upstreamBranch: args.upstreamBranch } : {}),
     ...(args.ensureRemoteName ? { ensureRemoteName: args.ensureRemoteName } : {}),
     ...(args.ensureRemoteUrl ? { ensureRemoteUrl: args.ensureRemoteUrl } : {}),
+    ...(typeof args.prNumber === 'number' ? { prNumber: args.prNumber } : {}),
+    ...(args.baseRemote ? { baseRemote: args.baseRemote } : {}),
     ...(args.returnAfterDirectoryCreated ? { returnAfterDirectoryCreated: true } : {}),
   };
 };
@@ -499,6 +504,8 @@ export type CreateWorktreeArgs = {
   upstreamBranch?: string;
   ensureRemoteName?: string;
   ensureRemoteUrl?: string;
+  prNumber?: number;
+  baseRemote?: string;
   returnAfterDirectoryCreated?: boolean;
 };
 
@@ -541,6 +548,13 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
       onFailed: () => setStoredWorktreeStatus(metadata.path, 'invalid'),
       onReady: () => setStoredWorktreeStatus(metadata.path, 'ready'),
     });
+  }
+
+  // A linked PR's source is attached during fast bootstrap. Do not publish the
+  // worktree to callers (which may immediately create a linked session) until
+  // that source and the rest of bootstrap have completed successfully.
+  if (typeof payload.prNumber === 'number') {
+    await waitForWorktreeBootstrap(metadata.path);
   }
 
   invalidateWorktreeList(projectDirectory);
