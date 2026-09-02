@@ -1,11 +1,13 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
+import { ChildStoreManager } from '@/sync/child-store';
+import { setSyncRefs, subscribeToInitialScopedDirectoryLoad } from '@/sync/sync-refs';
 import {
   GLOBAL_SESSIONS_BACKSTOP_INTERVAL_MS,
   GLOBAL_SESSIONS_REFRESH_COOLDOWN_MS,
+  type GlobalSessionsPollingRuntime,
   startGlobalSessionsPolling,
   subscribeToBrowserRecoverySignals,
-  type GlobalSessionsPollingRuntime,
 } from './useGlobalSessionsPolling';
 
 const browserWindow = new Window();
@@ -37,7 +39,31 @@ type PollingHarness = {
   liveSignalListeners: () => number;
 };
 
-const createPollingHarness = (): PollingHarness => {
+type WaitForInitialScopedLoad = NonNullable<GlobalSessionsPollingRuntime['waitForInitialScopedLoad']>;
+
+type ScopedLoadGate = {
+  waitForInitialScopedLoad: WaitForInitialScopedLoad;
+  settle: () => void;
+  liveWaiters: () => number;
+};
+
+const createScopedLoadGate = (): ScopedLoadGate => {
+  const waiters = new Set<() => void>();
+  return {
+    waitForInitialScopedLoad: (onSettled) => {
+      waiters.add(onSettled);
+      return () => {
+        waiters.delete(onSettled);
+      };
+    },
+    settle: () => {
+      for (const waiter of [...waiters]) waiter();
+    },
+    liveWaiters: () => waiters.size,
+  };
+};
+
+const createPollingHarness = (waitForInitialScopedLoad?: WaitForInitialScopedLoad): PollingHarness => {
   let currentTime = 0;
   let nextIntervalId = 1;
   let initialLoads = 0;
@@ -50,6 +76,7 @@ const createPollingHarness = (): PollingHarness => {
     initialLoad: () => {
       initialLoads += 1;
     },
+    waitForInitialScopedLoad,
     refresh: () => {
       refreshes += 1;
     },
@@ -173,6 +200,72 @@ describe('global sessions polling lifecycle', () => {
     expect(harness.refreshes()).toBe(1);
   });
 
+  test('holds the first unscoped load until scoped startup settles', () => {
+    const gate = createScopedLoadGate();
+    const harness = createPollingHarness(gate.waitForInitialScopedLoad);
+
+    startGlobalSessionsPolling(harness.runtime);
+    expect(harness.initialLoads()).toBe(0);
+
+    gate.settle();
+
+    expect(harness.initialLoads()).toBe(1);
+  });
+
+  test('loads once however often the scoped gate settles', () => {
+    const gate = createScopedLoadGate();
+    const harness = createPollingHarness(gate.waitForInitialScopedLoad);
+
+    startGlobalSessionsPolling(harness.runtime);
+    gate.settle();
+    gate.settle();
+
+    expect(harness.initialLoads()).toBe(1);
+  });
+
+  test('anchors the refresh cooldown to the deferred load, not to start', () => {
+    const gate = createScopedLoadGate();
+    const harness = createPollingHarness(gate.waitForInitialScopedLoad);
+
+    startGlobalSessionsPolling(harness.runtime);
+    harness.advanceClock(GLOBAL_SESSIONS_REFRESH_COOLDOWN_MS);
+    gate.settle();
+    harness.emitRecoverySignal();
+
+    expect(harness.initialLoads()).toBe(1);
+    expect(harness.refreshes()).toBe(0);
+
+    harness.advanceClock(GLOBAL_SESSIONS_REFRESH_COOLDOWN_MS);
+    harness.emitRecoverySignal();
+
+    expect(harness.refreshes()).toBe(1);
+  });
+
+  test('drops a pending scoped wait on disposal and never loads afterwards', () => {
+    const gate = createScopedLoadGate();
+    const harness = createPollingHarness(gate.waitForInitialScopedLoad);
+
+    const dispose = startGlobalSessionsPolling(harness.runtime);
+    dispose();
+
+    expect(gate.liveWaiters()).toBe(0);
+
+    gate.settle();
+
+    expect(harness.initialLoads()).toBe(0);
+  });
+
+  test('still schedules recovery and the backstop while the first load waits', () => {
+    const gate = createScopedLoadGate();
+    const harness = createPollingHarness(gate.waitForInitialScopedLoad);
+
+    startGlobalSessionsPolling(harness.runtime);
+
+    expect(harness.scheduledDelays()).toEqual([GLOBAL_SESSIONS_BACKSTOP_INTERVAL_MS]);
+    expect(harness.liveSignalListeners()).toBe(1);
+    expect(harness.initialLoads()).toBe(0);
+  });
+
   test('stops listening and clears the backstop on disposal', () => {
     const harness = createPollingHarness();
 
@@ -246,5 +339,58 @@ describe('browser recovery signals', () => {
     dispatchOnWindow('openchamber:system-resume');
 
     expect(signals).toBe(0);
+  });
+});
+
+describe('polling composed with the real scoped-startup gate', () => {
+  const DIRECTORY = '/workspace';
+  const managers: ChildStoreManager[] = [];
+
+  const scopeDirectory = (directory: string): ChildStoreManager => {
+    const manager = new ChildStoreManager();
+    managers.push(manager);
+    // SAFETY: setSyncRefs stores the SDK for other readers and never calls it here.
+    setSyncRefs({} as never, manager, directory);
+    return manager;
+  };
+
+  const flushMicrotasks = async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  };
+
+  afterEach(() => {
+    for (const manager of managers.splice(0)) manager.disposeAll();
+    // SAFETY: same unused SDK slot; clears the scoped directory between tests.
+    setSyncRefs({} as never, new ChildStoreManager(), '');
+  });
+
+  test('arms global authority only after the scoped bootstrap finishes', async () => {
+    const manager = scopeDirectory(DIRECTORY);
+    let finishBootstrap!: () => void;
+    const bootstrapping = new Promise<void>((resolve) => {
+      finishBootstrap = resolve;
+    });
+    manager.configure({ onBootstrap: () => bootstrapping });
+    manager.requestBootstrap({ directory: DIRECTORY, priority: 'selected', reason: 'current-directory' });
+
+    const harness = createPollingHarness(subscribeToInitialScopedDirectoryLoad);
+    startGlobalSessionsPolling(harness.runtime);
+    expect(harness.initialLoads()).toBe(0);
+
+    finishBootstrap();
+    await flushMicrotasks();
+
+    expect(harness.initialLoads()).toBe(1);
+  });
+
+  test('loads on start when no directory is scoped', () => {
+    scopeDirectory('');
+
+    const harness = createPollingHarness(subscribeToInitialScopedDirectoryLoad);
+    startGlobalSessionsPolling(harness.runtime);
+
+    expect(harness.initialLoads()).toBe(1);
   });
 });

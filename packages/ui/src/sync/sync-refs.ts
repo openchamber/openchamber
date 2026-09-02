@@ -50,6 +50,51 @@ export function getSyncChildStores(): ChildStoreManager {
   return _childStores
 }
 
+/**
+ * Notify once, as soon as no bootstrap is pending for the current directory.
+ *
+ * Waiting is keyed on the scheduler reporting `queued` or `running`, never on
+ * the absence of a bootstrap state: absence means no demand was scheduled, and
+ * nothing would ever notify. `status: "complete"` is deliberately not consulted,
+ * because bootstrap sets it after the critical phase while the authoritative
+ * session-list request this sequencing protects is still in flight.
+ *
+ * Every exit from pending notifies: a finished run records `complete`/`failed`,
+ * withdrawn demand drops the queue entry, and `disposeAll` clears the states.
+ * A directory cannot be disposed while queued or running.
+ */
+export function subscribeToInitialScopedDirectoryLoad(onSettled: () => void): () => void {
+  const stores = _childStores
+  const directory = _directory
+  if (!stores || !directory) {
+    onSettled()
+    return () => {}
+  }
+
+  const isBootstrapPending = (): boolean => {
+    const bootstrapState = stores.getBootstrapState(directory)
+    return bootstrapState === "queued" || bootstrapState === "running"
+  }
+
+  if (!isBootstrapPending()) {
+    onSettled()
+    return () => {}
+  }
+
+  let settled = false
+  let unsubscribe: () => void = () => {}
+  const cancel = () => {
+    settled = true
+    unsubscribe()
+  }
+  unsubscribe = stores.subscribeBootstrap(() => {
+    if (settled || isBootstrapPending()) return
+    cancel()
+    onSettled()
+  })
+  return cancel
+}
+
 /** Read current directory's child store state. Returns undefined if not bootstrapped. */
 export function getDirectoryState(directory?: string): State | undefined {
   const stores = _childStores

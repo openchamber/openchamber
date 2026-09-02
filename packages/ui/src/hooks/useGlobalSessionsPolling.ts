@@ -1,7 +1,7 @@
 import React from 'react';
-import { getAllSyncSessions } from '@/sync/sync-refs';
-import { useKnownSessionDirectoriesStore } from '@/stores/useKnownSessionDirectoriesStore';
 import { ensureGlobalSessionsLoaded, refreshGlobalSessionsForDirectories } from '@/stores/useGlobalSessionsStore';
+import { useKnownSessionDirectoriesStore } from '@/stores/useKnownSessionDirectoriesStore';
+import { getAllSyncSessions, subscribeToInitialScopedDirectoryLoad } from '@/sync/sync-refs';
 
 /** Minimum spacing between two unscoped global refreshes, however many signals arrive. */
 export const GLOBAL_SESSIONS_REFRESH_COOLDOWN_MS = 30_000;
@@ -15,9 +15,12 @@ export const GLOBAL_SESSIONS_BACKSTOP_INTERVAL_MS = 600_000;
 type ScheduleInterval = (callback: () => void, delay: number) => number;
 type ClearScheduledInterval = (intervalId: number) => void;
 type SubscribeToRecoverySignals = (onSignal: () => void) => () => void;
+type WaitForInitialScopedLoad = (onSettled: () => void) => () => void;
 
 export type GlobalSessionsPollingRuntime = {
   initialLoad?: () => void;
+  /** Sequences the first unscoped load after scoped startup; omitted, it runs on start. */
+  waitForInitialScopedLoad?: WaitForInitialScopedLoad;
   refresh: () => void;
   now: () => number;
   scheduleInterval: ScheduleInterval;
@@ -50,10 +53,24 @@ export const subscribeToBrowserRecoverySignals: SubscribeToRecoverySignals = (on
 export const startGlobalSessionsPolling = (
   runtime: GlobalSessionsPollingRuntime,
 ): (() => void) => {
-  runtime.initialLoad?.();
-
   // The initial load is the first refresh, so signals it races with are redundant.
   let lastRefreshAt = runtime.now();
+  let disposed = false;
+  let initialLoadStarted = false;
+
+  const runInitialLoad = () => {
+    if (disposed || initialLoadStarted) return;
+    initialLoadStarted = true;
+    lastRefreshAt = runtime.now();
+    runtime.initialLoad?.();
+  };
+
+  let cancelInitialLoadWait: () => void = () => {};
+  if (runtime.waitForInitialScopedLoad) {
+    cancelInitialLoadWait = runtime.waitForInitialScopedLoad(runInitialLoad);
+  } else {
+    runInitialLoad();
+  }
 
   const requestRefresh = () => {
     const requestedAt = runtime.now();
@@ -69,6 +86,8 @@ export const startGlobalSessionsPolling = (
   );
 
   return () => {
+    disposed = true;
+    cancelInitialLoadWait();
     unsubscribe();
     runtime.clearScheduledInterval(backstopId);
   };
@@ -81,6 +100,7 @@ export const useGlobalSessionsPolling = (enabled: boolean): void => {
 
     return startGlobalSessionsPolling({
       initialLoad: () => { void ensureGlobalSessionsLoaded(getAllSyncSessions()); },
+      waitForInitialScopedLoad: subscribeToInitialScopedDirectoryLoad,
       refresh: () => {
         const directories = [...useKnownSessionDirectoriesStore.getState().directories];
         if (directories.length === 0) return;

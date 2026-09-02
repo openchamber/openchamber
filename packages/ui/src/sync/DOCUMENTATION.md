@@ -124,9 +124,43 @@ Use `useGlobalSessionsStore` when the UI needs a **shared global session cache**
 
 Each full app root owns one global polling lifecycle through
 `useGlobalSessionsPolling`. The web/desktop root and VS Code chat root load the
-full, unscoped list once when mounted (`ensureGlobalSessionsLoaded`), which is
+full, unscoped list exactly once (`ensureGlobalSessionsLoaded`), which is
 what arms `status: 'ready'` for authoritative cleanup, archived auto-folders,
-and other global-cache consumers. After that the live event stream is the
+and other global-cache consumers. Only that complete unscoped snapshot
+establishes global authority; the scoped refreshes below never do.
+
+That first load is sequenced behind scoped startup rather than fired on mount.
+`subscribeToInitialScopedDirectoryLoad` (in `sync-refs.ts`) waits while the
+scheduler reports the current directory as `queued` or `running`, and the poller
+loads as soon as it does not.
+
+Waiting keys on that positive pending signal, never on the absence of a
+bootstrap state. Absence means no demand was scheduled, so nothing would ever
+notify and global coverage would be stranded — a loading store with no demand,
+no directory scoped, and SyncProvider not mounted all load immediately.
+`status: 'complete'` is deliberately not consulted: bootstrap sets it after the
+critical phase, while the authoritative session-list request this sequencing
+keeps off the same connection pool is still in flight.
+
+Every exit from pending notifies bootstrap subscribers, so the one-shot gate
+always resolves: a finished run records `complete` or `failed`, withdrawn demand
+drops the queue entry, and `disposeAll` clears the states. A directory cannot be
+disposed while queued or running. A failed scoped bootstrap settles the gate
+like a successful one, and disposal drops a pending wait so a remounted root
+starts its own.
+
+Ordering is structural, not timed. React commits descendant effects before
+ancestor ones, so `useSessionListSync` (in `MainLayout`/`VSCodeLayout`) has
+published its eligible-directory demand and `SyncProvider` has run both
+`ensureChild(props.directory)` and `setSyncRefs` — declared in that order —
+before the root poller's effect runs. A non-empty `_directory` therefore implies
+the current-directory demand was already published in the same commit.
+
+Global bootstrap (`bootstrapGlobal`) likewise does not call `project.list()`;
+directory bootstrap resolves its own project and `project.updated` events keep
+`GlobalState.projects` current.
+
+After that the live event stream is the
 primary discovery path, and the recovery refresh runs only when this window
 may have missed events: the document becoming visible, window focus,
 `pageshow`, or `openchamber:system-resume`. That refresh is scoped to
