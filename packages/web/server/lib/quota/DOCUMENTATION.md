@@ -116,6 +116,17 @@ snapshot carries `entitlement`, `remaining`, `unlimited`, and
 - When entitlement/remaining are unusable, fall back to `100 - percent_remaining`.
 - Snapshots other than `premium_interactions` (legacy annual plans) yield zero windows.
 
+## Cursor quota semantics
+
+The primary path reads `GetCurrentPeriodUsage` `planUsage` (Pro/Ultra). Enterprise team members get a sparse payload without `planUsage`, and the provider falls back to the endpoints the Cursor dashboard uses:
+
+1. `GET /auth/full_stripe_profile` resolves the member's `teamId`.
+2. `GET /auth/usage` provides included request counts. Buckets use legacy names (`gpt-4`, `gpt-4o`, ...); the provider scans them dynamically, skips `startOfMonth`, and picks the bucket with the highest `maxRequestUsage`, mapped to the `billing_cycle` window.
+3. `POST GetHardLimit` with `{ teamId }` returns `hardLimitPerUser` (dollars) for the `on_demand` window. Without `teamId` the response omits the per-user cap and only carries the team pool (`hardLimit`), which is not the user's limit.
+4. `POST GetMe` resolves the current `userId` from the access token, and `POST GetTeamSpend` with `{ teamId }` returns per-member spend; the member whose `userId` matches supplies the `on_demand` window's used value (`spendCents`). There is no per-user spend endpoint and no email dependency; if either call fails the window shows the cap with `$0` used.
+
+`GetAggregatedUsageEvents` dollar totals are deliberately not used for the UI; they reflect internal token cost, not the dashboard request/on-demand meters. `spendCents` from `GetTeamSpend` is the member's on-demand spend and matches the dashboard meter; `includedSpendCents` from the same response is the internal included-pool usage and is not shown. `packages/web/server/lib/quota/providers/cursor.js` and `packages/vscode/src/quotaProviders.ts` implement the same fallback chain and verified-meter semantics — keep them in sync.
+
 ## Notes for contributors
 - Keep provider IDs stable; clients use them directly.
 - Avoid adding alias-based dispatch in `fetchQuotaForProvider`; dispatch currently expects exact provider IDs.

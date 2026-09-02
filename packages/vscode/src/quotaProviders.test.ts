@@ -706,6 +706,121 @@ describe('DeepSeek quota provider (VS Code parity)', () => {
     assert.equal(result.ok, true);
     assert.equal(result.usage!.windows.credits_balance!.valueLabel, '$0.00');
   });
+});
+
+describe('Cursor quota provider (VS Code parity)', () => {
+  // Serves a cursor credential to readCredential without disturbing the
+  // auth.json stub other providers rely on. Reinstalled per test because
+  // earlier describes restore the real fs in their teardown tests.
+  beforeEach(() => {
+    ((fs as unknown) as { readFileSync: (filePath: unknown) => string }).readFileSync = (filePath: unknown) => (
+      String(filePath).endsWith('cursor.json')
+        ? JSON.stringify({ accessToken: 'test-token' })
+        : AUTH
+    );
+  });
+
+  const routeCursorApi = (routes: Record<string, { status?: number; body?: unknown }>, capture?: (url: string, body: string) => void): void => {
+    globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+      const target = String(url);
+      const match = Object.entries(routes).find(([fragment]) => target.includes(fragment));
+      capture?.(target, typeof init?.body === 'string' ? init.body : '');
+      if (!match) return mockResponse({}, { status: 404 });
+      const { status = 200, body = {} } = match[1];
+      return mockResponse(body, { status });
+    }) as typeof fetch;
+  };
+
+  const sparseEnterpriseUsage = { billingCycleStart: '1787932328088', billingCycleEnd: '1787932328088', displayThreshold: 100 };
+
+  const enterpriseRoutes: Record<string, { status?: number; body?: unknown }> = {
+    GetCurrentPeriodUsage: { body: sparseEnterpriseUsage },
+    GetPlanInfo: { body: { planInfo: { planName: 'Enterprise', price: 'Custom', billingCycleEnd: '1788220800000' } } },
+    GetCreditGrantsBalance: { body: {} },
+    full_stripe_profile: { body: { teamId: 424242, isTeamMember: true, membershipType: 'enterprise' } },
+    'auth/usage': { body: { 'gpt-4': { numRequests: 590, maxRequestUsage: 1000 } } },
+    GetHardLimit: { body: { hardLimit: 12500, hardLimitPerUser: 250 } },
+    GetTeamSpend: { body: { teamMemberSpend: [] } },
+    GetMe: { body: { userId: 424242, teamId: 424242, isEnterpriseUser: true } },
+  };
+
+  test('keeps the planUsage path for Pro accounts', async () => {
+    const urls: string[] = [];
+    routeCursorApi({ GetCurrentPeriodUsage: { body: { enabled: true, planUsage: { totalPercentUsed: 42 }, billingCycleEnd: '1788220800000' } } }, (url) => { urls.push(url); });
+
+    const result = await fetchQuotaForProvider('cursor');
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(urls.sort(), [
+      `${'https://api2.cursor.sh'}/aiserver.v1.DashboardService/GetCreditGrantsBalance`,
+      `${'https://api2.cursor.sh'}/aiserver.v1.DashboardService/GetCurrentPeriodUsage`,
+      `${'https://api2.cursor.sh'}/aiserver.v1.DashboardService/GetPlanInfo`,
+    ]);
+    assert.equal(result.usage!.windows.billing_cycle!.usedPercent, 42);
+  });
+
+  test('falls back to auth/usage and team-scoped GetHardLimit for enterprise accounts', async () => {
+    let hardLimitBody = '';
+    routeCursorApi(enterpriseRoutes, (url, body) => {
+      if (url.includes('GetHardLimit')) hardLimitBody = body;
+    });
+
+    const result = await fetchQuotaForProvider('cursor');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.providerName, 'Cursor Enterprise');
+    assert.equal(result.usage!.windows.billing_cycle!.valueLabel, '590 / 1000');
+    assert.equal(result.usage!.windows.billing_cycle!.usedPercent, 59);
+    assert.equal(result.usage!.windows.on_demand, undefined);
+    assert.equal(hardLimitBody, JSON.stringify({ teamId: '424242' }));
+  });
+
+  test('reports on-demand spend from GetTeamSpend matched by userId', async () => {
+    routeCursorApi({
+      ...enterpriseRoutes,
+      GetTeamSpend: { body: { teamMemberSpend: [{ userId: 999999, spendCents: 100 }, { userId: 424242, spendCents: 672 }] } },
+    });
+
+    const result = await fetchQuotaForProvider('cursor');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.on_demand!.valueLabel, '$6.72 / $250.00');
+    assert.equal(result.usage!.windows.on_demand!.usedPercent, 2.688);
+  });
+
+  test('picks the largest request bucket and skips metadata', async () => {
+    routeCursorApi({
+      ...enterpriseRoutes,
+      'auth/usage': { body: { startOfMonth: '2026-08-01', 'gpt-4o': { numRequests: 120, maxRequestUsage: 500 }, 'gpt-4': { numRequests: 829, maxRequestUsage: 1000 } } },
+    });
+
+    const result = await fetchQuotaForProvider('cursor');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.billing_cycle!.valueLabel, '829 / 1000');
+  });
+
+  test('does not report success from plan name alone', async () => {
+    routeCursorApi({
+      GetCurrentPeriodUsage: { body: sparseEnterpriseUsage },
+      GetPlanInfo: { body: { planInfo: { planName: 'Enterprise', billingCycleEnd: '1788220800000' } } },
+      full_stripe_profile: { body: { teamId: 424242, isTeamMember: true } },
+    });
+
+    const result = await fetchQuotaForProvider('cursor');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'No active Cursor subscription');
+  });
+
+  test('reports a disabled subscription as an error', async () => {
+    routeCursorApi({ GetCurrentPeriodUsage: { body: { enabled: false } } });
+
+    const result = await fetchQuotaForProvider('cursor');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'No active Cursor subscription');
+  });
 
   test('teardown: restore fs', () => {
     const fsMock = fs as unknown as { existsSync: unknown; readFileSync: unknown };
