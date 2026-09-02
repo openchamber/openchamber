@@ -12,20 +12,45 @@ export const GLOBAL_SESSIONS_REFRESH_COOLDOWN_MS = 30_000;
  */
 export const GLOBAL_SESSIONS_BACKSTOP_INTERVAL_MS = 600_000;
 
+/**
+ * Ceiling on how long the first unscoped snapshot may sit in idle time, so a
+ * permanently busy main thread cannot strand global-cache consumers.
+ */
+export const GLOBAL_SESSIONS_IDLE_LOAD_TIMEOUT_MS = 5_000;
+
 type ScheduleInterval = (callback: () => void, delay: number) => number;
 type ClearScheduledInterval = (intervalId: number) => void;
 type SubscribeToRecoverySignals = (onSignal: () => void) => () => void;
 type WaitForInitialScopedLoad = (onSettled: () => void) => () => void;
+/** Defers work to idle time and returns its canceller. */
+type ScheduleIdleWork = (callback: () => void, timeoutMs: number) => () => void;
 
 export type GlobalSessionsPollingRuntime = {
   initialLoad?: () => void;
   /** Sequences the first unscoped load after scoped startup; omitted, it runs on start. */
   waitForInitialScopedLoad?: WaitForInitialScopedLoad;
+  /** Defers the first unscoped load off the interactive path; omitted, it runs inline. */
+  scheduleIdleWork?: ScheduleIdleWork;
   refresh: () => void;
   now: () => number;
   scheduleInterval: ScheduleInterval;
   clearScheduledInterval: ClearScheduledInterval;
   subscribeToRecoverySignals: SubscribeToRecoverySignals;
+};
+
+/**
+ * Falls back to the next task, not a delay: a runtime without
+ * `requestIdleCallback` should yield the current frame rather than wait out a
+ * guessed interval.
+ */
+export const scheduleBrowserIdleWork: ScheduleIdleWork = (callback, timeoutMs) => {
+  const requestIdle = window.requestIdleCallback;
+  if (requestIdle) {
+    const handle = requestIdle.call(window, callback, { timeout: timeoutMs });
+    return () => window.cancelIdleCallback(handle);
+  }
+  const timeoutId = window.setTimeout(callback, 0);
+  return () => window.clearTimeout(timeoutId);
 };
 
 /**
@@ -56,7 +81,9 @@ export const startGlobalSessionsPolling = (
   // The initial load is the first refresh, so signals it races with are redundant.
   let lastRefreshAt = runtime.now();
   let disposed = false;
+  let initialLoadScheduled = false;
   let initialLoadStarted = false;
+  let cancelIdleLoad: () => void = () => {};
 
   const runInitialLoad = () => {
     if (disposed || initialLoadStarted) return;
@@ -65,11 +92,24 @@ export const startGlobalSessionsPolling = (
     runtime.initialLoad?.();
   };
 
+  // A settled scoped bootstrap only stops the snapshot competing with bootstrap
+  // requests. It still enumerates every project the server knows, which pinned
+  // the managed OpenCode process while the app became interactive.
+  const scheduleInitialLoad = () => {
+    if (disposed || initialLoadScheduled) return;
+    initialLoadScheduled = true;
+    if (!runtime.scheduleIdleWork) {
+      runInitialLoad();
+      return;
+    }
+    cancelIdleLoad = runtime.scheduleIdleWork(runInitialLoad, GLOBAL_SESSIONS_IDLE_LOAD_TIMEOUT_MS);
+  };
+
   let cancelInitialLoadWait: () => void = () => {};
   if (runtime.waitForInitialScopedLoad) {
-    cancelInitialLoadWait = runtime.waitForInitialScopedLoad(runInitialLoad);
+    cancelInitialLoadWait = runtime.waitForInitialScopedLoad(scheduleInitialLoad);
   } else {
-    runInitialLoad();
+    scheduleInitialLoad();
   }
 
   const requestRefresh = () => {
@@ -88,6 +128,7 @@ export const startGlobalSessionsPolling = (
   return () => {
     disposed = true;
     cancelInitialLoadWait();
+    cancelIdleLoad();
     unsubscribe();
     runtime.clearScheduledInterval(backstopId);
   };
@@ -101,6 +142,7 @@ export const useGlobalSessionsPolling = (enabled: boolean): void => {
     return startGlobalSessionsPolling({
       initialLoad: () => { void ensureGlobalSessionsLoaded(getAllSyncSessions()); },
       waitForInitialScopedLoad: subscribeToInitialScopedDirectoryLoad,
+      scheduleIdleWork: scheduleBrowserIdleWork,
       refresh: () => {
         const directories = [...useKnownSessionDirectoriesStore.getState().directories];
         if (directories.length === 0) return;

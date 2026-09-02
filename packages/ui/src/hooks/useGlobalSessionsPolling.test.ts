@@ -4,8 +4,10 @@ import { ChildStoreManager } from '@/sync/child-store';
 import { setSyncRefs, subscribeToInitialScopedDirectoryLoad } from '@/sync/sync-refs';
 import {
   GLOBAL_SESSIONS_BACKSTOP_INTERVAL_MS,
+  GLOBAL_SESSIONS_IDLE_LOAD_TIMEOUT_MS,
   GLOBAL_SESSIONS_REFRESH_COOLDOWN_MS,
   type GlobalSessionsPollingRuntime,
+  scheduleBrowserIdleWork,
   startGlobalSessionsPolling,
   subscribeToBrowserRecoverySignals,
 } from './useGlobalSessionsPolling';
@@ -63,7 +65,48 @@ const createScopedLoadGate = (): ScopedLoadGate => {
   };
 };
 
-const createPollingHarness = (waitForInitialScopedLoad?: WaitForInitialScopedLoad): PollingHarness => {
+type ScheduleIdleWork = NonNullable<GlobalSessionsPollingRuntime['scheduleIdleWork']>;
+
+type IdleHarness = {
+  scheduleIdleWork: ScheduleIdleWork;
+  runIdleWork: () => void;
+  pendingIdleWork: () => number;
+  idleCancels: () => number;
+  requestedTimeouts: () => number[];
+};
+
+const createIdleHarness = (): IdleHarness => {
+  const pending = new Map<number, () => void>();
+  const requestedTimeouts: number[] = [];
+  let nextHandle = 1;
+  let idleCancels = 0;
+
+  return {
+    scheduleIdleWork: (callback, timeoutMs) => {
+      const handle = nextHandle;
+      nextHandle += 1;
+      requestedTimeouts.push(timeoutMs);
+      pending.set(handle, callback);
+      return () => {
+        if (pending.delete(handle)) idleCancels += 1;
+      };
+    },
+    runIdleWork: () => {
+      for (const [handle, callback] of [...pending]) {
+        pending.delete(handle);
+        callback();
+      }
+    },
+    pendingIdleWork: () => pending.size,
+    idleCancels: () => idleCancels,
+    requestedTimeouts: () => [...requestedTimeouts],
+  };
+};
+
+const createPollingHarness = (
+  waitForInitialScopedLoad?: WaitForInitialScopedLoad,
+  scheduleIdleWork?: ScheduleIdleWork,
+): PollingHarness => {
   let currentTime = 0;
   let nextIntervalId = 1;
   let initialLoads = 0;
@@ -77,6 +120,7 @@ const createPollingHarness = (waitForInitialScopedLoad?: WaitForInitialScopedLoa
       initialLoads += 1;
     },
     waitForInitialScopedLoad,
+    scheduleIdleWork,
     refresh: () => {
       refreshes += 1;
     },
@@ -266,6 +310,97 @@ describe('global sessions polling lifecycle', () => {
     expect(harness.initialLoads()).toBe(0);
   });
 
+  test('does not run the full snapshot until idle work runs', () => {
+    const gate = createScopedLoadGate();
+    const idle = createIdleHarness();
+    const harness = createPollingHarness(gate.waitForInitialScopedLoad, idle.scheduleIdleWork);
+
+    startGlobalSessionsPolling(harness.runtime);
+    gate.settle();
+
+    expect(harness.initialLoads()).toBe(0);
+    expect(idle.pendingIdleWork()).toBe(1);
+
+    idle.runIdleWork();
+
+    expect(harness.initialLoads()).toBe(1);
+  });
+
+  test('schedules no idle work while the scoped bootstrap is still running', () => {
+    const gate = createScopedLoadGate();
+    const idle = createIdleHarness();
+    const harness = createPollingHarness(gate.waitForInitialScopedLoad, idle.scheduleIdleWork);
+
+    startGlobalSessionsPolling(harness.runtime);
+
+    expect(idle.requestedTimeouts()).toEqual([]);
+    expect(idle.pendingIdleWork()).toBe(0);
+    expect(harness.initialLoads()).toBe(0);
+  });
+
+  test('waits for idle even when no directory is scoped', () => {
+    const idle = createIdleHarness();
+    const harness = createPollingHarness(undefined, idle.scheduleIdleWork);
+
+    startGlobalSessionsPolling(harness.runtime);
+
+    expect(harness.initialLoads()).toBe(0);
+    expect(idle.pendingIdleWork()).toBe(1);
+
+    idle.runIdleWork();
+
+    expect(harness.initialLoads()).toBe(1);
+  });
+
+  test('forwards the idle timeout ceiling and requests idle work once', () => {
+    const gate = createScopedLoadGate();
+    const idle = createIdleHarness();
+    const harness = createPollingHarness(gate.waitForInitialScopedLoad, idle.scheduleIdleWork);
+
+    startGlobalSessionsPolling(harness.runtime);
+    gate.settle();
+    gate.settle();
+    gate.settle();
+
+    expect(idle.requestedTimeouts()).toEqual([GLOBAL_SESSIONS_IDLE_LOAD_TIMEOUT_MS]);
+
+    idle.runIdleWork();
+
+    expect(harness.initialLoads()).toBe(1);
+  });
+
+  test('cancels pending idle work on disposal and never loads afterwards', () => {
+    const gate = createScopedLoadGate();
+    const idle = createIdleHarness();
+    const harness = createPollingHarness(gate.waitForInitialScopedLoad, idle.scheduleIdleWork);
+
+    const dispose = startGlobalSessionsPolling(harness.runtime);
+    gate.settle();
+    dispose();
+
+    expect(idle.idleCancels()).toBe(1);
+    expect(idle.pendingIdleWork()).toBe(0);
+
+    idle.runIdleWork();
+
+    expect(harness.initialLoads()).toBe(0);
+  });
+
+  test('anchors the refresh cooldown to the idle load, not to the scoped gate', () => {
+    const gate = createScopedLoadGate();
+    const idle = createIdleHarness();
+    const harness = createPollingHarness(gate.waitForInitialScopedLoad, idle.scheduleIdleWork);
+
+    startGlobalSessionsPolling(harness.runtime);
+    gate.settle();
+    harness.advanceClock(GLOBAL_SESSIONS_REFRESH_COOLDOWN_MS);
+    idle.runIdleWork();
+    harness.emitRecoverySignal();
+
+    expect(harness.initialLoads()).toBe(1);
+    expect(harness.refreshes()).toBe(0);
+  });
+
   test('stops listening and clears the backstop on disposal', () => {
     const harness = createPollingHarness();
 
@@ -360,13 +495,26 @@ describe('polling composed with the real scoped-startup gate', () => {
     await Promise.resolve();
   };
 
+  const nextTask = () => new Promise<void>((resolve) => {
+    browserWindow.setTimeout(resolve, 0);
+  });
+
+  const withoutRequestIdleCallback = () => {
+    Object.defineProperty(browserWindow, 'requestIdleCallback', {
+      configurable: true,
+      writable: true,
+      value: undefined,
+    });
+  };
+
   afterEach(() => {
     for (const manager of managers.splice(0)) manager.disposeAll();
     // SAFETY: same unused SDK slot; clears the scoped directory between tests.
     setSyncRefs({} as never, new ChildStoreManager(), '');
   });
 
-  test('arms global authority only after the scoped bootstrap finishes', async () => {
+  test('arms global authority only after the scoped bootstrap finishes and idle arrives', async () => {
+    withoutRequestIdleCallback();
     const manager = scopeDirectory(DIRECTORY);
     let finishBootstrap!: () => void;
     const bootstrapping = new Promise<void>((resolve) => {
@@ -375,22 +523,121 @@ describe('polling composed with the real scoped-startup gate', () => {
     manager.configure({ onBootstrap: () => bootstrapping });
     manager.requestBootstrap({ directory: DIRECTORY, priority: 'selected', reason: 'current-directory' });
 
-    const harness = createPollingHarness(subscribeToInitialScopedDirectoryLoad);
+    const harness = createPollingHarness(subscribeToInitialScopedDirectoryLoad, scheduleBrowserIdleWork);
     startGlobalSessionsPolling(harness.runtime);
     expect(harness.initialLoads()).toBe(0);
 
     finishBootstrap();
     await flushMicrotasks();
+    expect(harness.initialLoads()).toBe(0);
+
+    await nextTask();
 
     expect(harness.initialLoads()).toBe(1);
   });
 
-  test('loads on start when no directory is scoped', () => {
+  test('still defers to idle when no directory is scoped', async () => {
+    withoutRequestIdleCallback();
     scopeDirectory('');
 
-    const harness = createPollingHarness(subscribeToInitialScopedDirectoryLoad);
+    const harness = createPollingHarness(subscribeToInitialScopedDirectoryLoad, scheduleBrowserIdleWork);
     startGlobalSessionsPolling(harness.runtime);
+    expect(harness.initialLoads()).toBe(0);
+
+    await nextTask();
 
     expect(harness.initialLoads()).toBe(1);
+  });
+
+  test('never loads when disposed before idle arrives', async () => {
+    withoutRequestIdleCallback();
+    scopeDirectory('');
+
+    const harness = createPollingHarness(subscribeToInitialScopedDirectoryLoad, scheduleBrowserIdleWork);
+    const dispose = startGlobalSessionsPolling(harness.runtime);
+    dispose();
+
+    await nextTask();
+
+    expect(harness.initialLoads()).toBe(0);
+  });
+});
+
+describe('browser idle scheduler', () => {
+  type FakeIdleRequest = (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+
+  const defineWindowIdleApi = (request: FakeIdleRequest | undefined, cancel: ((handle: number) => void) | undefined) => {
+    Object.defineProperty(browserWindow, 'requestIdleCallback', { configurable: true, writable: true, value: request });
+    Object.defineProperty(browserWindow, 'cancelIdleCallback', { configurable: true, writable: true, value: cancel });
+  };
+
+  const nextTask = () => new Promise<void>((resolve) => {
+    browserWindow.setTimeout(resolve, 0);
+  });
+
+  afterEach(() => {
+    defineWindowIdleApi(undefined, undefined);
+  });
+
+  test('requests idle time with the forwarded timeout', () => {
+    let capturedTimeout: number | undefined;
+    let capturedCallback: IdleRequestCallback | undefined;
+    defineWindowIdleApi((callback, options) => {
+      capturedCallback = callback;
+      capturedTimeout = options?.timeout;
+      return 7;
+    }, undefined);
+    let runs = 0;
+
+    scheduleBrowserIdleWork(() => {
+      runs += 1;
+    }, GLOBAL_SESSIONS_IDLE_LOAD_TIMEOUT_MS);
+
+    expect(capturedTimeout).toBe(GLOBAL_SESSIONS_IDLE_LOAD_TIMEOUT_MS);
+    expect(runs).toBe(0);
+
+    capturedCallback?.({ didTimeout: true, timeRemaining: () => 0 });
+
+    expect(runs).toBe(1);
+  });
+
+  test('cancels the idle request through cancelIdleCallback', () => {
+    const cancelledHandles: number[] = [];
+    defineWindowIdleApi(() => 42, (handle) => {
+      cancelledHandles.push(handle);
+    });
+
+    const cancel = scheduleBrowserIdleWork(() => {}, GLOBAL_SESSIONS_IDLE_LOAD_TIMEOUT_MS);
+    cancel();
+
+    expect(cancelledHandles).toEqual([42]);
+  });
+
+  test('falls back to the next task when requestIdleCallback is unavailable', async () => {
+    defineWindowIdleApi(undefined, undefined);
+    let runs = 0;
+
+    scheduleBrowserIdleWork(() => {
+      runs += 1;
+    }, GLOBAL_SESSIONS_IDLE_LOAD_TIMEOUT_MS);
+    expect(runs).toBe(0);
+
+    await nextTask();
+
+    expect(runs).toBe(1);
+  });
+
+  test('cancels the next-task fallback', async () => {
+    defineWindowIdleApi(undefined, undefined);
+    let runs = 0;
+
+    const cancel = scheduleBrowserIdleWork(() => {
+      runs += 1;
+    }, GLOBAL_SESSIONS_IDLE_LOAD_TIMEOUT_MS);
+    cancel();
+
+    await nextTask();
+
+    expect(runs).toBe(0);
   });
 });

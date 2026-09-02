@@ -129,10 +129,35 @@ what arms `status: 'ready'` for authoritative cleanup, archived auto-folders,
 and other global-cache consumers. Only that complete unscoped snapshot
 establishes global authority; the scoped refreshes below never do.
 
-That first load is sequenced behind scoped startup rather than fired on mount.
-`subscribeToInitialScopedDirectoryLoad` (in `sync-refs.ts`) waits while the
-scheduler reports the current directory as `queued` or `running`, and the poller
-loads as soon as it does not.
+That first load is sequenced behind scoped startup rather than fired on mount,
+and then handed to idle time rather than run on the interactive path. There are
+two stages, and both are required.
+
+Stage one is the scoped gate. `subscribeToInitialScopedDirectoryLoad` (in
+`sync-refs.ts`) waits while the scheduler reports the current directory as
+`queued` or `running`, and releases as soon as it does not.
+
+Stage two is idle deferral. Releasing the gate only stops the snapshot competing
+with bootstrap *requests*; the snapshot still enumerates every project the
+OpenCode server knows, and measurement showed the managed process pinned near
+61% CPU opening unrelated project roots while the app was becoming interactive.
+So the poller **schedules** the load through `scheduleIdleWork` instead of
+calling it. `scheduleBrowserIdleWork` uses `requestIdleCallback` with a
+`GLOBAL_SESSIONS_IDLE_LOAD_TIMEOUT_MS` (5s) timeout, and falls back to a
+next-task `setTimeout(0)` — the next task, not a guessed delay, so a runtime
+without `requestIdleCallback` still yields the current frame. The timeout is a
+ceiling, so a permanently busy main thread cannot strand global-cache consumers.
+The scheduler is injected through `GlobalSessionsPollingRuntime`; omitted, the
+load runs inline.
+
+Both stages are one-shot and cancellable. Idle work is requested at most once
+however often the gate settles, disposal cancels a pending request, and the load
+itself re-checks disposal, so a scheduler that ignores cancellation still cannot
+fire a request after unmount. This is the same eventual coverage as before, only
+later: nothing about `status: 'ready'` authority changes, and a surface that
+needs the snapshot sooner — `ArchiveView`, a direct session route, retention
+cleanup — still calls `ensureGlobalSessionsLoaded` itself and shares the store's
+in-flight load.
 
 Waiting keys on that positive pending signal, never on the absence of a
 bootstrap state. Absence means no demand was scheduled, so nothing would ever
