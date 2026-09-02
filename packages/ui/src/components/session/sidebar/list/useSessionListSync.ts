@@ -1,15 +1,18 @@
 import React from 'react';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { refreshGlobalSessions, refreshGlobalSessionsForDirectories, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { useChildStoreManager } from '@/sync/sync-context';
+import { useAllLiveSessions, useChildStoreManager } from '@/sync/sync-context';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useKnownSessionDirectoriesStore } from '@/stores/useKnownSessionDirectoriesStore';
+import { useProjectCollapseStore } from '@/stores/useProjectCollapseStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { buildSessionBootstrapDemands } from './sessionBootstrapDemands';
 import { buildKnownSessionDirectories } from './sessionListDirectories';
 import { useAuthoritativeSessionCleanup } from './useAuthoritativeSessionCleanup';
 import { normalizePath } from '../utils';
+import { selectWorktreeDiscoveryProjects } from '../sessions/worktreeDiscoveryProjects';
 
 const EMPTY_WORKTREES_BY_PROJECT = new Map();
 
@@ -26,14 +29,57 @@ export const useSessionListSync = ({
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
   const availableWorktreesByProject = useSessionUIStore((state) => isVSCode ? EMPTY_WORKTREES_BY_PROJECT : state.availableWorktreesByProject);
-  const knownDirectories = React.useMemo(
-    () => buildKnownSessionDirectories(projects, availableWorktreesByProject, { includeWorktrees: !isVSCode }),
-    [availableWorktreesByProject, isVSCode, projects],
-  );
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
   const hasAuthoritativeGlobalSessions = useGlobalSessionsStore((state) => state.status === 'ready');
+  const liveSessions = useAllLiveSessions();
+  const eligibilitySessions = React.useMemo(() => {
+    const sessions = [...globalActiveSessions];
+    const sessionIds = new Set(sessions.map((session) => session.id));
+    for (const session of liveSessions) {
+      if (sessionIds.has(session.id)) continue;
+      sessionIds.add(session.id);
+      sessions.push(session);
+    }
+    return sessions;
+  }, [globalActiveSessions, liveSessions]);
+  const liveSessionIds = React.useMemo(
+    () => new Set(liveSessions.map((session) => session.id)),
+    [liveSessions],
+  );
+  const collapsedProjectIds = useProjectCollapseStore((state) => state.collapsedProjectIds);
+  // Read collapse from the shared store, not `project.sidebarCollapsed`: that
+  // settings-synced field is never written for VS Code, so it would report
+  // every VS Code project as expanded and defeat this eligibility check.
+  const eligibleProjects = React.useMemo(
+    () => selectWorktreeDiscoveryProjects(
+      projects.map((project) => ({ ...project, sidebarCollapsed: collapsedProjectIds.has(project.id) })),
+      activeProjectId,
+      eligibilitySessions,
+      availableWorktreesByProject,
+      isVSCode,
+      liveSessionIds,
+    ),
+    [activeProjectId, availableWorktreesByProject, collapsedProjectIds, eligibilitySessions, isVSCode, liveSessionIds, projects],
+  );
+  // Eligibility tracks live sessions, so keying the set on its contents keeps the
+  // demand/refresh effects from re-running on every session tick.
+  const knownDirectoriesSignature = React.useMemo(
+    () => [...buildKnownSessionDirectories(eligibleProjects, availableWorktreesByProject, { includeWorktrees: !isVSCode })].join('\u0000'),
+    [availableWorktreesByProject, eligibleProjects, isVSCode],
+  );
+  const knownDirectories = React.useMemo(
+    () => new Set(knownDirectoriesSignature === '' ? [] : knownDirectoriesSignature.split('\u0000')),
+    [knownDirectoriesSignature],
+  );
+  const setKnownSessionDirectories = useKnownSessionDirectoriesStore((state) => state.setDirectories);
+  const clearKnownSessionDirectories = useKnownSessionDirectoriesStore((state) => state.clearDirectories);
   const bootstrapDemandOwner = `session-list-sync:${React.useId()}`;
+
+  React.useEffect(() => {
+    setKnownSessionDirectories(knownDirectories);
+    return clearKnownSessionDirectories;
+  }, [clearKnownSessionDirectories, knownDirectories, setKnownSessionDirectories]);
 
   React.useEffect(() => {
     childStores.setBootstrapDemand(bootstrapDemandOwner, buildSessionBootstrapDemands({
@@ -53,9 +99,9 @@ export const useSessionListSync = ({
     const directories = new Set(knownDirectories);
     const previous = knownProjectSessionDirectoriesRef.current;
     knownProjectSessionDirectoriesRef.current = directories;
-    const added = previous ? [...directories].filter((directory) => !previous.has(directory)) : isVSCode ? [...directories] : [];
+    const added = previous ? [...directories].filter((directory) => !previous.has(directory)) : [...directories];
     if (added.length) void refreshGlobalSessionsForDirectories(added, getAllSyncSessions());
-  }, [isVSCode, knownDirectories]);
+  }, [knownDirectories]);
 
   React.useEffect(() => {
     let timeout: ReturnType<typeof setTimeout> | null = null;

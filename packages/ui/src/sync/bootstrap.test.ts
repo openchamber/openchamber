@@ -1,12 +1,34 @@
 import { describe, expect, test } from "bun:test"
 import type { OpencodeClient, Project } from "@opencode-ai/sdk/v2/client"
-import { bootstrapDirectory } from "./bootstrap"
-import { INITIAL_STATE, type State } from "./types"
+import { bootstrapDirectory, bootstrapGlobal } from "./bootstrap"
+import { type GlobalState, INITIAL_STATE, type State } from "./types"
 
-const createSdk = (options?: { commandList?: () => Promise<{ data: unknown[] }> }) => ({
-  project: { current: async () => ({ data: { id: "project-a" } }) },
+const createSdk = (options?: {
+  commandList?: () => Promise<{ data: unknown[] }>
+  recordCall?: (endpoint: string) => void
+}) => ({
+  project: {
+    current: async () => ({ data: { id: "project-a" } }),
+    list: async () => {
+      options?.recordCall?.("project.list")
+      return { data: [project] }
+    },
+  },
   config: { get: async () => ({ data: {} }) },
-  path: { get: async () => ({ data: { state: "", config: "", worktree: "/repo", directory: "/repo", home: "/home" } }) },
+  global: {
+    config: {
+      get: async () => {
+        options?.recordCall?.("global.config.get")
+        return { data: {} }
+      },
+    },
+  },
+  path: {
+    get: async () => {
+      options?.recordCall?.("path.get")
+      return { data: { state: "", config: "", worktree: "/repo", directory: "/repo", home: "/home" } }
+    },
+  },
   session: { status: async () => ({ data: {} }) },
   command: { list: options?.commandList ?? (async () => ({ data: [] })) },
   mcp: { status: async () => ({ data: {} }) },
@@ -23,6 +45,21 @@ const createState = (): State => ({
 })
 
 const project = { id: "project-a", worktree: "/repo" } as Project
+
+describe("bootstrapGlobal", () => {
+  test("never enumerates projects while the visible directory is still loading", async () => {
+    const calls: string[] = []
+    const patches: Array<Partial<GlobalState>> = []
+
+    await bootstrapGlobal(
+      createSdk({ recordCall: (endpoint) => calls.push(endpoint) }),
+      (patch) => patches.push(patch),
+    )
+
+    expect(calls.sort()).toEqual(["global.config.get", "path.get"])
+    expect(patches.at(-1)).toEqual({ ready: true, error: undefined })
+  })
+})
 
 describe("bootstrapDirectory", () => {
   test("prioritizes session loading without waiting for deferred fields", async () => {

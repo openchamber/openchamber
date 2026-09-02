@@ -4,6 +4,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { installHookTestDom } from '../test-utils/testDom';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useProjectCollapseStore } from '@/stores/useProjectCollapseStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -38,11 +39,14 @@ const childStores = {
   },
   clearBootstrapDemand: (owner: string) => state.clearedOwners.push(owner),
 };
-type GlobalSessionsState = { activeSessions: never[]; archivedSessions: never[]; status: 'ready' };
+type Session = { id: string; directory: string };
+type GlobalSessionsState = { activeSessions: Session[]; archivedSessions: Session[]; status: 'ready' };
 const globalSessions: GlobalSessionsState = { activeSessions: [], archivedSessions: [], status: 'ready' };
+const liveSessions: { current: Session[] } = { current: [] };
 
 mock.module('@/sync/sync-context', () => ({
   useChildStoreManager: () => childStores,
+  useAllLiveSessions: () => liveSessions.current,
 }));
 mock.module('@/sync/sync-refs', () => ({ getAllSyncSessions: () => [] }));
 mock.module('@/stores/useGlobalSessionsStore', () => ({
@@ -99,11 +103,15 @@ describe('useSessionListSync', () => {
     state.listener = null;
     state.subscriptions = 0;
     state.unsubscriptions = 0;
+    globalSessions.activeSessions = [];
+    globalSessions.archivedSessions = [];
+    liveSessions.current = [];
     dom = installHookTestDom();
     root = createRoot(dom.container);
     useProjectsStore.setState({ projects, activeProjectId: 'project' });
     useDirectoryStore.setState({ currentDirectory: '/project' });
     useSessionUIStore.setState({ currentSessionDirectory: null, availableWorktreesByProject: new Map() });
+    useProjectCollapseStore.setState({ collapsedProjectIds: new Set() });
   });
 
   afterEach(() => {
@@ -111,23 +119,122 @@ describe('useSessionListSync', () => {
     dom.restore();
   });
 
-  test('leaves initial global refresh to the root poller while publishing complete demand', () => {
+  test('refreshes eligible directories on first mount while publishing complete demand', () => {
     act(() => useSessionUIStore.setState({ availableWorktreesByProject: new Map([['/project', [worktree]]]) }));
     act(() => root.render(<LifecycleProbe isVSCode={false} />));
 
     expect(state.globalRefreshes).toBe(0);
     expect(state.demands).toHaveLength(1);
     expect(state.demands[0]?.directories).toEqual(['/project', '/worktree']);
-    expect(state.directoryRefreshes).toEqual([]);
+    expect(state.directoryRefreshes).toEqual([['/project', '/worktree']]);
     expect(state.subscriptions).toBe(1);
     expect(state.cleanupInputs.at(-1)).toEqual({ enabled: true, hasAuthoritativeGlobalSessions: true, sessionCount: 0, sessions: [] });
   });
 
+  test('limits background demands to active and session-owning projects', () => {
+    useProjectsStore.setState({
+      projects: [
+        { id: 'project', path: '/project' },
+        { id: 'inactive', path: '/inactive' },
+      ],
+      activeProjectId: 'project',
+    });
+
+    act(() => root.render(<LifecycleProbe isVSCode={false} />));
+
+    expect(state.demands[0]?.directories).toEqual(['/project']);
+  });
+
+  test('keeps a non-active project with an active session', () => {
+    useProjectsStore.setState({
+      projects: [
+        { id: 'project', path: '/project' },
+        { id: 'session-owner', path: '/session-owner' },
+      ],
+      activeProjectId: 'project',
+    });
+    globalSessions.activeSessions = [{ id: 'session', directory: '/session-owner' }];
+
+    act(() => root.render(<LifecycleProbe isVSCode={false} />));
+
+    expect(state.demands[0]?.directories).toEqual(['/project', '/session-owner']);
+  });
+
+  test('drops a collapsed project whose sessions are only historical', () => {
+    useProjectsStore.setState({
+      projects: [
+        { id: 'project', path: '/project' },
+        { id: 'closed', path: '/closed' },
+      ],
+      activeProjectId: 'project',
+    });
+    useProjectCollapseStore.setState({ collapsedProjectIds: new Set(['closed']) });
+    globalSessions.activeSessions = [{ id: 'historical', directory: '/closed' }];
+
+    act(() => root.render(<LifecycleProbe isVSCode={false} />));
+
+    expect(state.demands[0]?.directories).toEqual(['/project']);
+  });
+
+  test('keeps a collapsed project that owns a live session', () => {
+    useProjectsStore.setState({
+      projects: [
+        { id: 'project', path: '/project' },
+        { id: 'closed', path: '/closed' },
+      ],
+      activeProjectId: 'project',
+    });
+    useProjectCollapseStore.setState({ collapsedProjectIds: new Set(['closed']) });
+    globalSessions.activeSessions = [{ id: 'historical', directory: '/closed' }];
+    liveSessions.current = [{ id: 'running', directory: '/closed' }];
+
+    act(() => root.render(<LifecycleProbe isVSCode={false} />));
+
+    expect(state.demands[0]?.directories).toEqual(['/project', '/closed']);
+  });
+
+  test('keeps the active project when it is collapsed', () => {
+    useProjectsStore.setState({
+      projects: [{ id: 'project', path: '/project' }],
+      activeProjectId: 'project',
+    });
+    useProjectCollapseStore.setState({ collapsedProjectIds: new Set(['project']) });
+
+    act(() => root.render(<LifecycleProbe isVSCode={false} />));
+
+    expect(state.demands[0]?.directories).toEqual(['/project']);
+  });
+
+  test('drops a collapsed VS Code project whose sessions are only historical, even though sidebarCollapsed settings sync never reaches VS Code', () => {
+    useProjectsStore.setState({
+      projects: [
+        { id: 'project', path: '/project' },
+        // No `sidebarCollapsed` field: VS Code never persists collapse there.
+        { id: 'closed', path: '/closed' },
+      ],
+      activeProjectId: 'project',
+    });
+    useProjectCollapseStore.setState({ collapsedProjectIds: new Set(['closed']) });
+    globalSessions.activeSessions = [{ id: 'historical', directory: '/closed' }];
+
+    act(() => root.render(<LifecycleProbe isVSCode />));
+
+    expect(state.demands[0]?.directories).toEqual(['/project']);
+  });
+
   test('refreshes every VS Code directory on first mount and only topology additions afterward', () => {
     act(() => root.render(<LifecycleProbe isVSCode />));
+    globalSessions.activeSessions = [{ id: 'session', directory: '/added' }];
     act(() => useProjectsStore.setState({ projects: [...projects, { id: 'added', path: '/added' }] }));
 
     expect(state.directoryRefreshes).toEqual([['/project'], ['/added']]);
+  });
+
+  test('ignores VS Code topology additions that own no session and are not active', () => {
+    act(() => root.render(<LifecycleProbe isVSCode />));
+    act(() => useProjectsStore.setState({ projects: [...projects, { id: 'added', path: '/added' }] }));
+
+    expect(state.directoryRefreshes).toEqual([['/project']]);
   });
 
   test('coalesces control events and clears the listener, timeout, and demand on unmount', async () => {
@@ -138,7 +245,7 @@ describe('useSessionListSync', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 550));
     expect(state.globalRefreshes).toBe(1);
-    expect(state.directoryRefreshes).toEqual([]);
+    expect(state.directoryRefreshes).toEqual([['/project']]);
 
     const owner = state.demands[0]?.owner;
     act(() => root.unmount());
@@ -169,7 +276,7 @@ describe('useSessionListSync', () => {
     act(() => root.unmount());
 
     await new Promise((resolve) => setTimeout(resolve, 550));
-    expect(state.directoryRefreshes).toEqual([]);
+    expect(state.directoryRefreshes).toEqual([['/project']]);
     expect(state.unsubscriptions).toBe(1);
   });
 

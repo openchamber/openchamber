@@ -28,11 +28,14 @@ kept at this root in `types.ts` and `utils.tsx`.
   Existing destinations are never removed; they get the same guidance.
 
 `MainLayout` and `VSCodeLayout` call `useSessionListSync({ isVSCode })`
-unconditionally. The hook publishes complete directory bootstrap demand,
-refreshes newly added topology, coalesces control events, and performs
-authoritative cleanup. Root-level `useGlobalSessionsPolling` remains the only
-initial and 45-second global poller. `useSessionListSync` must not create a
-second global polling lifecycle.
+unconditionally. The hook publishes background bootstrap demand scoped to
+background-eligible directories (see `packages/ui/src/sync/DOCUMENTATION.md`,
+"Background discovery eligibility"), refreshes newly eligible topology,
+coalesces control events, and performs authoritative cleanup. Root-level
+`useGlobalSessionsPolling` remains the only owner of the initial global load
+and its recovery-signal refresh, which is scoped to the same eligible
+directory set. `useSessionListSync` must not create a second global polling
+lifecycle.
 
 The global sessions cache is the complete source for active and archived
 coverage. Initialized directory stores only supply sessions missing from that

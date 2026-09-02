@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { buildSessionBootstrapDemands } from "./sessionBootstrapDemands"
+import { buildSessionBootstrapDemands, filterBackgroundEligibleSections } from "./sessionBootstrapDemands"
 
 const sections = [{
   project: { id: "project-a", normalizedPath: "/repo" },
@@ -61,5 +61,38 @@ describe("buildSessionBootstrapDemands", () => {
       ["/repo/wt-a", "background"],
       ["/repo/wt-b", "background"],
     ])
+  })
+})
+
+describe("filterBackgroundEligibleSections", () => {
+  test("keeps eligible sections even when they are collapsed", () => {
+    const filtered = filterBackgroundEligibleSections(sections, new Set(["project-a"]), new Set(["project-a"]))
+
+    expect(filtered.map((section) => section.project.id)).toEqual(["project-a"])
+  })
+
+  test("drops collapsed inactive projects but keeps explicitly expanded projects", () => {
+    const inactive = { project: { id: "project-b", normalizedPath: "/other" }, groups: [] }
+    const expanded = { project: { id: "project-c", normalizedPath: "/expanded" }, groups: [] }
+
+    const filtered = filterBackgroundEligibleSections(
+      [...sections, inactive, expanded],
+      new Set(["project-c"]),
+      new Set(["project-b"]),
+    )
+
+    expect(filtered.map((section) => section.project.id)).toEqual(["project-a", "project-c"])
+  })
+
+  test("keeps collapsed projects that own an active session", () => {
+    const inactive = { project: { id: "project-b", normalizedPath: "/other" }, groups: [] }
+
+    const filtered = filterBackgroundEligibleSections(
+      [...sections, inactive],
+      new Set(["project-b"]),
+      new Set(["project-b"]),
+    )
+
+    expect(filtered.map((section) => section.project.id)).toEqual(["project-a", "project-b"])
   })
 })

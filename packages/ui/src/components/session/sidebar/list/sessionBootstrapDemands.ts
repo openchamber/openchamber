@@ -11,6 +11,16 @@ type BootstrapProjectSection = {
   }>
 }
 
+export const filterBackgroundEligibleSections = <TSection extends BootstrapProjectSection>(
+  sections: TSection[],
+  backgroundEligibleProjectIds: ReadonlySet<string>,
+  collapsedProjects: ReadonlySet<string>,
+): TSection[] => {
+  return sections.filter((section) => (
+    backgroundEligibleProjectIds.has(section.project.id) || !collapsedProjects.has(section.project.id)
+  ));
+};
+
 const PRIORITY_RANK = {
   selected: 0,
   "active-project": 1,

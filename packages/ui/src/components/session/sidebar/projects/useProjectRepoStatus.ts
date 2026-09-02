@@ -31,7 +31,7 @@ export const useProjectRepoStatus = (args: Args): void => {
   // Derive repo status from centralized Git store
   React.useEffect(() => {
     if (!enabled || !git || normalizedProjects.length === 0) {
-      setProjectRepoStatus(new Map());
+      setProjectRepoStatus((current) => current.size === 0 ? current : new Map());
       return;
     }
 
@@ -48,7 +48,12 @@ export const useProjectRepoStatus = (args: Args): void => {
     normalizedProjects.forEach((project) => {
       next.set(project.id, gitRepoStatus.get(project.normalizedPath)?.isGitRepo ?? null);
     });
-    setProjectRepoStatus(next);
+    setProjectRepoStatus((current) => {
+      if (current.size === next.size && [...next].every(([id, status]) => current.get(id) === status)) {
+        return current;
+      }
+      return next;
+    });
   }, [enabled, normalizedProjects, gitRepoStatus, setProjectRepoStatus]);
 
   const projectGitBranchesKey = React.useMemo(() => {

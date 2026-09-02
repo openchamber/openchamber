@@ -66,7 +66,11 @@ The composer compares normalized attachment MIME types with the selected model's
 
 ### Layout-mounted session-list lifecycle
 
-`MainLayout` and `VSCodeLayout` each call `useSessionListSync({ isVSCode })` directly and unconditionally, outside Sidebar visibility, responsive, editor, settings, and compact-view branches. The hook selects the real topology inputs, publishes complete directory bootstrap demand through `ChildStoreManager`, refreshes topology additions (including all VS Code directories on its first mount), coalesces OpenChamber control events for 500ms, and supplies a memoized complete global active+archived input to authoritative cleanup. The root-level global poller owns the initial global refresh. MainLayout includes available worktrees; VS Code intentionally excludes them. Sidebar-local `session-created` worktree discovery is separate and full-app-only.
+`MainLayout` and `VSCodeLayout` each call `useSessionListSync({ isVSCode })` directly and unconditionally, outside Sidebar visibility, responsive, editor, settings, and compact-view branches. The hook selects the real topology inputs, restricts them to background-eligible directories (the active project, plus any project owning a live or historical session — see "Background discovery eligibility" below), and publishes that eligible set as background bootstrap demand through `ChildStoreManager`. It refreshes newly eligible directories on mount and whenever the eligible set grows, coalesces OpenChamber control events for 500ms, and supplies a memoized complete global active+archived input to authoritative cleanup. The root-level global poller owns the initial global refresh. MainLayout includes available worktrees; VS Code intentionally excludes them. Sidebar-local `session-created` worktree discovery is separate and full-app-only.
+
+### Background discovery eligibility
+
+A project is eligible for background bootstrap demand, worktree discovery, and global-refresh scoping when it is the active project, or when it owns at least one known session. A collapsed project additionally requires that owned session to still be live — a collapsed project whose sessions are all historical is dropped, since ownership alone would keep every project the user ever touched permanently eligible. `worktreeDiscoveryProjects.ts` (`isProjectEligibleForBackgroundDiscovery`) is the single implementation; `useSessionListSync`, `SessionSidebar`'s worktree discovery, and `SessionProjectCollection`'s bootstrap-demand filtering all call it with the same collapse source — the shared collapsed-project-ID store (`useProjectCollapseStore`), not the settings-only `sidebarCollapsed` project field, because VS Code never persists collapse state to that field.
 
 ### Directory bootstrap scheduling
 
@@ -75,7 +79,7 @@ The composer compares normalized attachment MIME types with the selected model's
 - The scheduler runs at most two directory bootstraps concurrently.
 - Selected session/current directory demand outranks active-project, expanded, visible, and background demand.
 - Demand is deduplicated by normalized directory and can be promoted while queued.
-- The complete known project/worktree set is always published. Collapsed and off-screen directories remain background demand, so they refresh eventually rather than waiting for expansion.
+- The background-eligible known project/worktree set (see "Background discovery eligibility" above) is always published for those directories. Off-screen directories within that eligible set remain background demand, so they refresh eventually rather than waiting for expansion; directories excluded from eligibility are not bootstrapped until they become eligible (gain a live session or become active).
 - A bootstrap holds its scheduler slot through critical state and the authoritative directory session-list fetch. Deferrable command/MCP/LSP/VCS/question/permission enrichment starts afterward without extending slot ownership or competing with the initial session-list request.
 - A system-resume signal, including Capacitor foreground resume, refreshes pending questions and permissions only for the active materialized directory. The refresh is deduplicated while in flight, preserves existing state on fetch failure, and leaves unopened directories untouched; normal stream reconnect recovery remains the broader catch-up path.
 - When a materialized current turn contains a pending/running question tool but that session's pending question record is missing, the mounted chat performs a question-only recovery scoped to that session. It tries at most three times with delays of 0, 500, and 1,500 ms, stops when the chat unmounts or changes sessions, and guards every attempt against runtime changes. This closes cold-start races without adding requests to ordinary session opens or scanning unrelated sessions and directories.
@@ -119,10 +123,113 @@ Session materialization recency is keyed by runtime and directory. Foreground lo
 Use `useGlobalSessionsStore` when the UI needs a **shared global session cache**.
 
 Each full app root owns one global polling lifecycle through
-`useGlobalSessionsPolling`. The web/desktop root and VS Code chat root load once
-when mounted and refresh every 45 seconds so sessions created by another
-OpenCode process are discovered without relying on the sidebar or native tray
-being visible. Embedded chats and the VS Code agent-manager panel do not poll.
+`useGlobalSessionsPolling`. The full, unscoped list (`ensureGlobalSessionsLoaded`)
+is what arms `status: 'ready'` for authoritative cleanup, archived auto-folders,
+and other global-cache consumers. Only that complete unscoped snapshot
+establishes global authority; the scoped refreshes below never do, and a failed
+load leaves `status: 'error'` rather than publishing an empty list as truth.
+
+**Whether the root loads it automatically depends on the surface**
+(`shouldLoadInitialGlobalSnapshot`). Web and VS Code do. **Desktop does not**:
+it schedules nothing and starts nothing, not on mount, not after the scoped
+gate, not at idle. On a local machine that snapshot is real sustained
+filesystem work — a 60s sample of the managed process caught it reading three
+unrelated project trees and their `.opencode`/`.omo`/`.agents` directories, and
+the antivirus backlog it created (45% scan extension, 18% CryptoGuard) cost
+more CPU than OpenCode's own 5%. Idle deferral only moved when that ran.
+`isDesktopShell()` is the detection; a Capacitor or browser client is not a
+desktop shell and keeps the automatic load.
+
+So on Desktop the global cache starts **partial and unloaded**: persisted
+managed-chat rows plus whatever live events and scoped refreshes add, with
+`hasLoaded: false` and `status: 'idle'`. It becomes complete only when a surface
+asks. Those demand edges are unchanged and each load the full snapshot
+explicitly, sharing the store's in-flight dedupe: `ArchiveView` on open, a
+direct session route (`openSessionFromRoute`), retention/manual cleanup
+(`useSessionAutoCleanup`, before any destructive pass), and the
+`scheduled-task-ran` control event in `useSessionListSync` via
+`refreshGlobalSessions()`.
+
+Consumers must therefore tolerate partial coverage. Destructive ones already
+do: `useAuthoritativeSessionCleanup` returns early unless
+`hasAuthoritativeGlobalSessions` (`status === 'ready'`), so on Desktop it simply
+never runs until a demand edge has produced a complete snapshot. Withholding
+authority is the safe direction — the alternative is deleting sessions because
+an incomplete cache did not mention them.
+
+When a surface does load automatically, that first load is sequenced behind
+scoped startup rather than fired on mount, and then handed to idle time rather
+than run on the interactive path. There are two stages, and both are required.
+
+Stage one is the scoped gate. `subscribeToInitialScopedDirectoryLoad` (in
+`sync-refs.ts`) waits while the scheduler reports the current directory as
+`queued` or `running`, and releases as soon as it does not.
+
+Stage two is idle deferral. Releasing the gate only stops the snapshot competing
+with bootstrap *requests*; the snapshot still enumerates every project the
+OpenCode server knows, and measurement showed the managed process pinned near
+61% CPU opening unrelated project roots while the app was becoming interactive.
+So the poller **schedules** the load through `scheduleIdleWork` instead of
+calling it. `scheduleBrowserIdleWork` uses `requestIdleCallback` with a
+`GLOBAL_SESSIONS_IDLE_LOAD_TIMEOUT_MS` (5s) timeout, and falls back to a
+next-task `setTimeout(0)` — the next task, not a guessed delay, so a runtime
+without `requestIdleCallback` still yields the current frame. The timeout is a
+ceiling, so a permanently busy main thread cannot strand global-cache consumers.
+The scheduler is injected through `GlobalSessionsPollingRuntime`; omitted, the
+load runs inline.
+
+Both stages are one-shot and cancellable. Idle work is requested at most once
+however often the gate settles, disposal cancels a pending request, and the load
+itself re-checks disposal, so a scheduler that ignores cancellation still cannot
+fire a request after unmount. A runtime with no automatic snapshot skips both
+stages outright: it takes no scoped-gate subscription and queues no idle work,
+rather than scheduling work that later decides to do nothing.
+
+Waiting keys on that positive pending signal, never on the absence of a
+bootstrap state. Absence means no demand was scheduled, so nothing would ever
+notify and global coverage would be stranded — a loading store with no demand,
+no directory scoped, and SyncProvider not mounted all load immediately.
+`status: 'complete'` is deliberately not consulted: bootstrap sets it after the
+critical phase, while the authoritative session-list request this sequencing
+keeps off the same connection pool is still in flight.
+
+Every exit from pending notifies bootstrap subscribers, so the one-shot gate
+always resolves: a finished run records `complete` or `failed`, withdrawn demand
+drops the queue entry, and `disposeAll` clears the states. A directory cannot be
+disposed while queued or running. A failed scoped bootstrap settles the gate
+like a successful one, and disposal drops a pending wait so a remounted root
+starts its own.
+
+Ordering is structural, not timed. React commits descendant effects before
+ancestor ones, so `useSessionListSync` (in `MainLayout`/`VSCodeLayout`) has
+published its eligible-directory demand and `SyncProvider` has run both
+`ensureChild(props.directory)` and `setSyncRefs` — declared in that order —
+before the root poller's effect runs. A non-empty `_directory` therefore implies
+the current-directory demand was already published in the same commit.
+
+Global bootstrap (`bootstrapGlobal`) likewise does not call `project.list()`;
+directory bootstrap resolves its own project and `project.updated` events keep
+`GlobalState.projects` current.
+
+After that the live event stream is the
+primary discovery path, and the recovery refresh runs only when this window
+may have missed events: the document becoming visible, window focus,
+`pageshow`, or `openchamber:system-resume`. That refresh is scoped to
+`useKnownSessionDirectoriesStore` — the same background-eligible directory set
+`useSessionListSync` publishes — rather than re-enumerating every project root,
+because that enumeration is expensive for the OpenCode server. Those signals
+share a 30-second minimum spacing, and a 10-minute backstop interval covers a
+window that stays visible and focused, so a session created by another
+OpenCode process in an eligible directory is still discovered without the
+sidebar or native tray being visible. A session created in a directory outside
+the eligible set (for example, a collapsed project with no live session) is
+not covered by this scoped refresh; it surfaces at the next full/unscoped
+load — a fresh mount of the polling root, or a `scheduled-task-ran` control
+event, which still forces a full `refreshGlobalSessions()`. `ArchiveView` also
+calls `ensureGlobalSessionsLoaded` on open, but that call is a no-op once the
+store has already loaded once, so it only helps the cold-start race where
+Archive opens before the root poller's initial load resolves. Embedded chats
+and the VS Code agent-manager panel do not poll.
 The sidebar and tray consume the same store and must not start their own
 full-list timers. Surface-specific refreshes, such as opening the mobile session
 sheet or returning from suspension, may still request freshness at their
