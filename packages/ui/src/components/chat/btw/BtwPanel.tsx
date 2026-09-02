@@ -26,9 +26,6 @@ import { QuestionCard } from '../QuestionCard';
 
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 
-/** Stable no-op so ChatMessage memoization keeps working in the read-only peek. */
-const NOOP_CONTENT_CHANGE = (): void => {};
-
 /**
  * The `/btw` peek panel.
  *
@@ -233,7 +230,7 @@ const BtwFrame: React.FC<{
         role="dialog"
         aria-label="btw"
     >
-        <div className="oc-glass-popover oc-glass-floating w-full overflow-hidden rounded-xl">
+        <div className="oc-glass-popover w-full overflow-hidden rounded-xl border border-[var(--interactive-border)] shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]">
             <div className="flex items-center gap-2 px-3 py-1.5">
                 {onTitleClick ? (
                     <button
@@ -446,7 +443,6 @@ const BtwMessages: React.FC<{
                         message={record}
                         previousMessage={data.messageRecords[index - 1]}
                         nextMessage={data.messageRecords[index + 1]}
-                        onContentChange={NOOP_CONTENT_CHANGE}
                         isInActiveTurn={index === data.messageRecords.length - 1}
                         activeStreamingPhase={
                             record.info.id === data.streamingMessageId ? data.activeStreamingPhase : null

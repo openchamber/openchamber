@@ -1,3 +1,4 @@
+import type { ContextPartMetadata } from '@/lib/messages/contextParts';
 import { createOpencodeClient, OpencodeClient } from "@opencode-ai/sdk/v2";
 import type { PermissionV2Request, PermissionV2Effect, PermissionV2Source } from "@opencode-ai/sdk/v2/client";
 import type { FilesAPI } from "../api/types";
@@ -199,10 +200,86 @@ const createTimeoutSignal = (timeoutMs: number): { signal: AbortSignal; cleanup:
   };
 };
 
-const createRuntimeOpencodeClient = (config: { baseUrl: string; directory?: string }): OpencodeClient => {
+/**
+ * Upper bound for non-streaming OpenCode read requests. Without it, a socket
+ * that neither resolves nor rejects (the half-open state described in #2470)
+ * keeps the bootstrap concurrency slot busy forever and the UI stays on
+ * "loading sessions". Long-lived streams (POST prompts, the /event SSE) are
+ * explicitly excluded in {@link createRuntimeOpencodeClient}.
+ */
+const OPENCODE_REQUEST_TIMEOUT_MS = 30_000;
+
+const isEventStreamUrl = (input: string | URL | Request): boolean => {
+  const url = typeof input === 'string'
+    ? input
+    : input instanceof URL
+      ? input.toString()
+      : input.url;
+  return url.includes('/event');
+};
+
+type RuntimeOpencodeClientConfig = {
+  baseUrl: string;
+  directory?: string;
+  /** Read-request timeout in ms. Overridable so tests can use short value. */
+  requestTimeoutMs?: number;
+};
+
+export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig): OpencodeClient => {
+  const requestTimeoutMs = config.requestTimeoutMs ?? OPENCODE_REQUEST_TIMEOUT_MS;
   return createOpencodeClient({
     ...config,
-    fetch: runtimeFetch,
+    fetch: async (input: string | URL | Request, init?: RequestInit) => {
+      const method = String(
+        init?.method ?? (input instanceof Request ? input.method : 'GET'),
+      ).toUpperCase();
+      if (isEventStreamUrl(input) || method === 'POST') {
+        return runtimeFetch(input, init);
+      }
+      const timeout = createTimeoutSignal(requestTimeoutMs);
+      const callerSignal = init?.signal;
+      const supportsAny = typeof AbortSignal !== 'undefined'
+        && typeof (AbortSignal as { any?: unknown }).any === 'function';
+      let signal: AbortSignal;
+      let detachFallback: (() => void) | null = null;
+      if (callerSignal && supportsAny) {
+        signal = (AbortSignal as typeof AbortSignal & { any: (signals: AbortSignal[]) => AbortSignal })
+          .any([callerSignal, timeout.signal]);
+      } else if (callerSignal) {
+        // No AbortSignal.any: compose manually. Silently dropping the timeout
+        // here would disable the fix on exactly the bootstrap reads it
+        // targets, since those carry a cancellation signal.
+        const controller = new AbortController();
+        const abortFromCaller = () => controller.abort(callerSignal.reason);
+        const abortFromTimeout = () => controller.abort(timeout.signal.reason);
+        if (callerSignal.aborted) {
+          abortFromCaller();
+        } else if (timeout.signal.aborted) {
+          abortFromTimeout();
+        } else {
+          callerSignal.addEventListener('abort', abortFromCaller, { once: true });
+          timeout.signal.addEventListener('abort', abortFromTimeout, { once: true });
+          detachFallback = () => {
+            callerSignal.removeEventListener('abort', abortFromCaller);
+            timeout.signal.removeEventListener('abort', abortFromTimeout);
+          };
+        }
+        signal = controller.signal;
+      } else {
+        signal = timeout.signal;
+      }
+      try {
+        return await runtimeFetch(input, { ...init, signal });
+      } catch (error) {
+        if (timeout.signal.aborted && !callerSignal?.aborted) {
+          throw new Error(`OpenCode request timed out after ${requestTimeoutMs}ms`);
+        }
+        throw error;
+      } finally {
+        detachFallback?.();
+        timeout.cleanup();
+      }
+    },
   });
 };
 
@@ -792,6 +869,7 @@ class OpencodeService {
     additionalParts?: Array<{
       text: string;
       synthetic?: boolean;
+      metadata?: ContextPartMetadata;
       files?: Array<FileInputLite>;
     }>;
     messageId?: string;
@@ -842,11 +920,10 @@ class OpencodeService {
     if (params.additionalParts && params.additionalParts.length > 0) {
       for (const additional of params.additionalParts) {
         if (additional.text && additional.text.trim()) {
-          parts.push({
-            type: 'text',
-            text: additional.text,
-            ...(additional.synthetic ? { synthetic: true } : {}),
-          });
+          const additionalTextPart: TextPartInput = { type: 'text', text: additional.text };
+          if (additional.synthetic) additionalTextPart.synthetic = true;
+          if (additional.metadata) additionalTextPart.metadata = additional.metadata;
+          parts.push(additionalTextPart);
         }
         if (additional.files && additional.files.length > 0) {
           for (const file of additional.files) {
@@ -1193,7 +1270,7 @@ class OpencodeService {
     options?: {
       id?: string;
       save?: string[];
-      metadata?: Record<string, unknown>;
+      metadata?: ContextPartMetadata;
       source?: PermissionV2Source;
       agent?: string;
     }

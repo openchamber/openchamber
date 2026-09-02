@@ -4,8 +4,6 @@ import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
-import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
-import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { invokeDesktop } from '@/lib/desktop';
@@ -15,7 +13,7 @@ const ICON_BUTTON_CLASS =
   'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary hover:bg-interactive-hover transition-colors';
 
 /**
- * Persistent top-left titlebar controls (sidebar toggle + project actions).
+ * Persistent top-left titlebar controls (app menu on frameless chrome + sidebar toggle).
  *
  * Rendered exactly once as an absolutely-positioned overlay above both the
  * sidebar and the header, so the buttons never migrate / re-mount between the
@@ -29,7 +27,6 @@ export const TitlebarLeftControls: React.FC = () => {
   const { t } = useI18n();
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
-  const projectActionsContext = useProjectActionsContext();
   const clusterRef = React.useRef<HTMLDivElement | null>(null);
 
   const toggleShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_sidebar', shortcutOverrides));
@@ -123,13 +120,6 @@ export const TitlebarLeftControls: React.FC = () => {
             <p>{t('header.actions.openSessionsWithShortcut', { shortcut: toggleShortcut })}</p>
           </TooltipContent>
         </Tooltip>
-
-        {projectActionsContext ? (
-          <ProjectActionsButton
-            projectRef={projectActionsContext.projectRef}
-            directory={projectActionsContext.directory}
-          />
-        ) : null}
       </div>
     </div>
   );

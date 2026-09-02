@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+    extractFirstChangedLineFromDiff,
     getApplyPatchFilePath,
     getDiffPatchEntries,
     getFirstChangedLineFromMetadata,
@@ -8,6 +9,7 @@ import {
     getPrimaryDiffFromMetadata,
     getPrimaryToolPath,
     getRenderablePatchInfo,
+    resolveToolQuickOpenTarget,
 } from './toolDiffUtils';
 
 const identity = (path: string) => path;
@@ -202,5 +204,53 @@ describe('toolDiffUtils', () => {
         expect(entries).toHaveLength(1);
         expect(entries[0]?.renderMode).toBe('text');
         expect(entries[0]?.patch).toContain('@@');
+    });
+    test('resolves the quick-open target from the same entry the expanded card renders', () => {
+        const patch = [
+            '--- a/src/file.ts',
+            '+++ b/src/file.ts',
+            '@@ -10,3 +12,4 @@',
+            ' context',
+            '+added',
+        ].join('\n');
+        const metadata = {
+            files: [{
+                filePath: '/workspace/project/src/file.ts',
+                relativePath: 'src/file.ts',
+                patch,
+                type: 'update',
+            }],
+        };
+        const entries = getDiffPatchEntries(metadata, undefined, identity);
+
+        expect(resolveToolQuickOpenTarget('apply_patch', undefined, metadata)).toEqual({
+            filePath: '/workspace/project/src/file.ts',
+            line: extractFirstChangedLineFromDiff(entries[0]?.patch ?? ''),
+            patch: entries[0]?.patch,
+        });
+    });
+
+    test('picks the entry matching the primary path in a multi-file apply_patch', () => {
+        const firstPatch = ['--- a/src/a.ts', '+++ b/src/a.ts', '@@ -1,2 +1,3 @@', ' a', '+first'].join('\n');
+        const secondPatch = ['--- a/src/b.ts', '+++ b/src/b.ts', '@@ -30,2 +40,3 @@', ' b', '+second'].join('\n');
+        const metadata = {
+            files: [
+                { filePath: '/workspace/project/src/a.ts', relativePath: 'src/a.ts', patch: firstPatch, type: 'delete' },
+                { filePath: '/workspace/project/src/b.ts', relativePath: 'src/b.ts', patch: secondPatch, type: 'update' },
+            ],
+        };
+        const target = resolveToolQuickOpenTarget('apply_patch', undefined, metadata);
+
+        expect(target?.filePath).toBe('/workspace/project/src/b.ts');
+        expect(target?.line).toBe(41);
+    });
+
+    test('reports no line when the tool has no diff entry', () => {
+        expect(resolveToolQuickOpenTarget('write', { filePath: '/workspace/project/src/new.ts' }, undefined))
+            .toEqual({ filePath: '/workspace/project/src/new.ts', line: undefined, patch: undefined });
+    });
+
+    test('returns no quick-open target without a primary path', () => {
+        expect(resolveToolQuickOpenTarget('bash', { command: 'ls' }, undefined)).toBeNull();
     });
 });

@@ -217,7 +217,7 @@ export function GitHubPrPickerDialog({
   const connected = githubAuthChecked ? result?.connected !== false : true;
 
   const openGitHubSettings = React.useCallback(() => {
-    setSettingsPage('github');
+    setSettingsPage('integrations');
     setSettingsDialogOpen(true);
   }, [setSettingsDialogOpen, setSettingsPage]);
 

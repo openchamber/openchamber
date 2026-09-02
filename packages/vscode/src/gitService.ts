@@ -768,7 +768,7 @@ async function getGitBranchesRaw(directory: string): Promise<GitBranchResult> {
  */
 export async function checkoutBranch(directory: string, branch: string): Promise<{ success: boolean; branch: string }> {
   const repo = await getRepository(directory);
-  
+
   if (repo) {
     try {
       await repo.checkout(branch);

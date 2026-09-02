@@ -41,6 +41,10 @@
     font-size: var(--text-code) !important;
   }
 
+  :root.mobile-pointer:not(.desktop-runtime) .question-markdown > .markdown-content.markdown-tool {
+    font-size: inherit !important;
+  }
+
   /* Improve touch targets for mobile */
   :root.mobile-pointer:not(.desktop-runtime) button:not([role="radio"]):not([role="checkbox"]):not([role="switch"]),
   :root.mobile-pointer:not(.desktop-runtime) .btn,
@@ -142,6 +146,23 @@
     min-height: 0;
   }
 
+  /* -webkit-fill-available above is a pre-dvh iOS Safari fix. On Android
+     Chrome it freezes the root at the pre-keyboard height: when
+     interactive-widget=resizes-content shrinks the viewport, the document
+     stays taller than the screen and (with overflow hidden) the composer's
+     bottom is clipped behind the keyboard with no way to scroll to it.
+     Every dvh-capable browser gets the dynamic height instead; the legacy
+     fallback above keeps serving browsers without dvh. */
+  @supports (height: 100dvh) {
+    :root.mobile-pointer:not(.desktop-runtime) {
+      height: 100dvh;
+    }
+
+    :root.mobile-pointer:not(.desktop-runtime) .flex.flex-col.h-screen {
+      height: 100dvh;
+    }
+  }
+
   /* Fix main content area */
   :root.mobile-pointer:not(.desktop-runtime) .flex-1.overflow-hidden {
     min-height: 0;
@@ -214,6 +235,16 @@
     :root.mobile-pointer:not(.desktop-runtime) .flex.flex-col.h-screen {
       min-height: 100vh;
       min-height: -webkit-fill-available;
+    }
+
+    /* Same Android-keyboard clipping fix as above: dvh-capable browsers
+       must not keep a frozen -webkit-fill-available minimum. */
+    @supports (min-height: 100dvh) {
+      :root.device-mobile:not(.desktop-runtime) .flex.flex-col.h-screen,
+      :root.device-tablet:not(.desktop-runtime) .flex.flex-col.h-screen,
+      :root.mobile-pointer:not(.desktop-runtime) .flex.flex-col.h-screen {
+        min-height: 100dvh;
+      }
     }
 
     /* Prevent content overlap in iOS */
@@ -473,7 +504,7 @@
    choreography driven by useNativeMobileChrome:
 
      show: shell keeps its full height for the whole 0.25s; the composer (and, when
-           pinned, the chat scroll container — see useChatAutoFollow) slides up via
+           pinned, the chat scroll container — see useChatTimelineScroll) slides up via
            inline transforms in sync with the keyboard; at the end the shell snaps to
            its final height (--oc-kb-layout, one reflow) and the shift is removed
            in the same frame — visually identical, so the swap is invisible.
@@ -500,6 +531,26 @@
    any input above the keyboard instead of hiding it underneath. The opacity term
    preserves the scrim's enter fade (Tailwind's `transition-opacity` would otherwise
    be overridden by this rule's `transition` shorthand). */
+/* The chat comment bar (quote-and-comment input) is a body-level portal, so it
+   does not inherit the shell's keyboard inset. Anchor it against the same
+   keyboard vars with the same curve so it rides the keyboard exactly like the
+   composer does, and sits at the composer's own gap above it. */
+.oc-chat-comment-bar {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--oc-safe-area-bottom-visual, 0.5rem));
+}
+
+:root.oc-capacitor-app .oc-chat-comment-bar {
+  /* The composer keeps --oc-safe-area-bottom-visual of padding above the
+     keyboard (see .bottom-safe-area); using the same term here makes the
+     comment bar land exactly on the compact composer pill. */
+  bottom: calc(
+    var(--oc-keyboard-inset, 0px)
+    + max(0px, calc(env(safe-area-inset-bottom, 0px) - var(--oc-keyboard-inset, 0px)))
+    + var(--oc-safe-area-bottom-visual, 0.5rem)
+  );
+  transition: bottom 0.25s cubic-bezier(0.38, 0.7, 0.125, 1);
+}
+
 :root.oc-capacitor-app .oc-keyboard-inset-surface {
   bottom: var(--oc-keyboard-inset, 0px);
   transition: bottom 0.25s cubic-bezier(0.38, 0.7, 0.125, 1), opacity 0.2s ease-out;

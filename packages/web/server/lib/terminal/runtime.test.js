@@ -179,6 +179,32 @@ describe('terminal runtime', () => {
     } finally { await harness.runtime.shutdown(); }
   });
 
+  it('lists sessions scoped to a working directory and refreshes activity via touch', async () => {
+    const harness = createHarness();
+    try {
+      await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-a', cwd: '/repo' } }, createResponse());
+      await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-b', cwd: '/other' } }, createResponse());
+
+      const all = createResponse();
+      harness.routes.get.get('/api/terminal/sessions')({ query: {} }, all);
+      expect(all.body.sessions.map((s) => s.sessionId).sort()).toEqual(['term-a', 'term-b']);
+
+      const scoped = createResponse();
+      harness.routes.get.get('/api/terminal/sessions')({ query: { cwd: '/repo' } }, scoped);
+      expect(scoped.body.sessions).toEqual([
+        { sessionId: 'term-a', cwd: '/repo', status: 'running', createdAt: expect.any(Number) },
+      ]);
+
+      const touch = createResponse();
+      harness.routes.post.get('/api/terminal/touch')({ body: { sessionIds: ['term-a', 'missing', 42] } }, touch);
+      expect(touch.body).toEqual({ touched: 1 });
+
+      const malformed = createResponse();
+      harness.routes.post.get('/api/terminal/touch')({ body: {} }, malformed);
+      expect(malformed.body).toEqual({ touched: 0 });
+    } finally { await harness.runtime.shutdown(); }
+  });
+
   it('strips AppImage ARGV0 from PTY child environments', async () => {
     const previousArgv0 = process.env.ARGV0;
     process.env.ARGV0 = '/path/to/OpenChamber/OpenChamber-1.17.2-linux-x86_64.AppImage';

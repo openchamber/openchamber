@@ -13,6 +13,10 @@ let permissionReplyError: unknown | null = null
 let sessionShareResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 let sessionUpdateResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 let sessionMessagesResult: { data?: unknown; error?: unknown; response?: { status?: number } } = { data: [] }
+const sessionMessageRecords = new Map<string, Array<{ info: Message; parts: Part[] }>>()
+const failingRevertSessionIds = new Set<string>()
+const failingUnrevertSessionIds = new Set<string>()
+let afterUnrevertCall: ((sessionId: string) => void) | null = null
 let sessionDeleteError: unknown | null = null
 let beforeSessionUpdateResolve: ((sessionId: string) => void) | null = null
 let beforeSessionDeleteResolve: ((sessionId: string) => void) | null = null
@@ -67,6 +71,14 @@ const mockSdk = {
     revert: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "session.revert", params })
       return Promise.resolve(sessionRevertResult)
+    }),
+    unrevert: mock((params: Record<string, unknown>) => {
+      replyCalls.push({ method: "session.unrevert", params })
+      afterUnrevertCall?.(String(params.sessionID))
+      if (failingUnrevertSessionIds.has(String(params.sessionID))) {
+        return Promise.resolve({ error: { message: "rejected" }, response: { status: 500 } })
+      }
+      return Promise.resolve({ data: { id: params.sessionID, time: { created: 1 } } })
     }),
     abort: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "session.abort", params })
@@ -127,6 +139,10 @@ mock.module("@/lib/opencode/client", () => ({
     getDirectory: () => "/test/project",
     getFilesystemHome: mock(async () => "/home/test"),
     getSdkClient: () => mockSdk,
+    getSessionMessages: mock((sessionId: string, _limit?: number, directory?: string | null) => {
+      replyCalls.push({ method: "session.messages", params: { sessionID: sessionId, directory } })
+      return Promise.resolve(sessionMessageRecords.get(sessionId) ?? [])
+    }),
     replyToPermission: mock((requestId: string, reply: string, options?: { directory?: string | null }) => {
       replyCalls.push({ method: "permission.reply", params: { requestID: requestId, reply, directory: options?.directory } })
       return Promise.resolve(true)
@@ -140,11 +156,11 @@ mock.module("@/lib/opencode/client", () => ({
         method: "session.revert",
         params: { sessionID: sessionId, messageID: messageId, partID: partId, directory },
       })
-      if (sessionRevertResult.error) {
+      if (sessionRevertResult.error || failingRevertSessionIds.has(sessionId)) {
         const status = sessionRevertResult.response?.status
         throw new Error(`session.revert failed${status ? ` (${status})` : ""}: rejected`)
       }
-      return Promise.resolve(sessionRevertResult.data)
+      return Promise.resolve(sessionRevertResult.data ?? { id: sessionId, time: { created: 1 }, revert: { messageID: messageId } })
     }),
     updateSession: mock((sessionId: string, changes: Record<string, unknown>, directory?: string | null) => {
       replyCalls.push({ method: "session.update", params: { sessionID: sessionId, ...changes, directory } })
@@ -1293,6 +1309,8 @@ describe("revertToMessage passes session directory", () => {
     replyCalls.length = 0
     scopedClientDirectories.length = 0
     sessionRevertResult = {}
+    sessionMessageRecords.clear()
+    failingRevertSessionIds.clear()
     Object.assign(inputState, {
       pendingInputText: "previous draft",
       pendingInputMode: "normal" as const,
@@ -1353,6 +1371,229 @@ describe("revertToMessage passes session directory", () => {
     expect((thrown as Error).message).toContain("session.revert failed (500)")
     expect((sessionStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert).toBe(undefined)
     expect(inputState.pendingInputText).toBe("previous draft")
+  })
+
+  test("reverts recursive descendants at their first user message on or after the parent cutoff", async () => {
+    const rootMessage = { id: "root-cutoff", sessionID: "root", role: "user", time: { created: 20 } } as Message
+    const sessions = [
+      { id: "root", directory: "/tree", time: { created: 1 } },
+      { id: "child", parentID: "root", directory: "/tree", time: { created: 2 } },
+      { id: "grandchild", parentID: "child", directory: "/tree", time: { created: 3 } },
+      { id: "old-child", parentID: "root", directory: "/tree", time: { created: 4 } },
+    ] as Session[]
+    const store = createStore({}, { session: sessions, message: { root: [rootMessage] } })
+    sessionMessageRecords.set("child", [
+      { info: { id: "child-before", sessionID: "child", role: "user", time: { created: 10 } } as Message, parts: [] },
+      { info: { id: "child-boundary", sessionID: "child", role: "user", time: { created: 20 } } as Message, parts: [] },
+      { info: { id: "child-later", sessionID: "child", role: "user", time: { created: 30 } } as Message, parts: [] },
+    ])
+    sessionMessageRecords.set("grandchild", [
+      { info: { id: "grandchild-assistant", sessionID: "grandchild", role: "assistant", time: { created: 20 } } as Message, parts: [] },
+      { info: { id: "grandchild-user", sessionID: "grandchild", role: "user", time: { created: 21 } } as Message, parts: [] },
+    ])
+    sessionMessageRecords.set("old-child", [
+      { info: { id: "old-child-user", sessionID: "old-child", role: "user", time: { created: 19 } } as Message, parts: [] },
+    ])
+
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/tree", store]]), () => "/tree")
+
+    await revertToMessage("root", "root-cutoff")
+
+    expect(replyCalls.filter((call) => call.method === "session.revert").map((call) => [
+      call.params.sessionID,
+      call.params.messageID,
+    ])).toEqual([
+      ["child", "child-boundary"],
+      ["grandchild", "grandchild-user"],
+      ["root", "root-cutoff"],
+    ])
+  })
+
+  test("continues reverting other descendants and the parent when one child fails", async () => {
+    const rootMessage = { id: "root-cutoff", sessionID: "root", role: "user", time: { created: 20 } } as Message
+    const sessions = [
+      { id: "root", directory: "/tree", time: { created: 1 } },
+      { id: "failing-child", parentID: "root", directory: "/tree", time: { created: 2 } },
+      { id: "healthy-child", parentID: "root", directory: "/tree", time: { created: 3 } },
+    ] as Session[]
+    const store = createStore({}, { session: sessions, message: { root: [rootMessage] } })
+    for (const id of ["failing-child", "healthy-child"]) {
+      sessionMessageRecords.set(id, [{
+        info: { id: `${id}-target`, sessionID: id, role: "user", time: { created: 20 } } as Message,
+        parts: [],
+      }])
+    }
+    failingRevertSessionIds.add("failing-child")
+
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/tree", store]]), () => "/tree")
+
+    await revertToMessage("root", "root-cutoff")
+
+    expect(replyCalls.filter((call) => call.method === "session.revert").map((call) => call.params.sessionID)).toEqual([
+      "failing-child",
+      "healthy-child",
+      "root",
+    ])
+  })
+
+  test("aborts a busy descendant before reverting it", async () => {
+    const rootMessage = { id: "root-cutoff", sessionID: "root", role: "user", time: { created: 20 } } as Message
+    const sessions = [
+      { id: "root", directory: "/tree", time: { created: 1 } },
+      { id: "busy-child", parentID: "root", directory: "/tree", time: { created: 2 } },
+      { id: "idle-child", parentID: "root", directory: "/tree", time: { created: 3 } },
+    ] as Session[]
+    const store = createStore({}, {
+      session: sessions,
+      message: { root: [rootMessage] },
+      session_status: { "busy-child": { type: "busy" }, "idle-child": { type: "idle" } },
+    })
+    for (const id of ["busy-child", "idle-child"]) {
+      sessionMessageRecords.set(id, [{
+        info: { id: `${id}-target`, sessionID: id, role: "user", time: { created: 20 } } as Message,
+        parts: [],
+      }])
+    }
+
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/tree", store]]), () => "/tree")
+
+    await revertToMessage("root", "root-cutoff")
+
+    expect(replyCalls.filter((call) => call.method === "session.abort").map((call) => call.params.sessionID))
+      .toEqual(["busy-child"])
+    const busyAbortIndex = replyCalls.findIndex((call) => call.method === "session.abort")
+    const busyRevertIndex = replyCalls.findIndex(
+      (call) => call.method === "session.revert" && call.params.sessionID === "busy-child",
+    )
+    expect(busyAbortIndex).toBeLessThan(busyRevertIndex)
+    expect(replyCalls.filter((call) => call.method === "session.revert").map((call) => call.params.sessionID)).toEqual([
+      "busy-child",
+      "idle-child",
+      "root",
+    ])
+  })
+})
+
+describe("unrevertSession descendant cascade", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    sessionMessagesResult = { data: [] }
+    failingUnrevertSessionIds.clear()
+    afterUnrevertCall = null
+  })
+
+  test("unreverts only marked descendants before the parent", async () => {
+    const sessions = [
+      { id: "root", directory: "/tree", time: { created: 1 }, revert: { messageID: "root-target" } },
+      { id: "marked-child", parentID: "root", directory: "/tree", time: { created: 2 }, revert: { messageID: "child-target" } },
+      { id: "plain-child", parentID: "root", directory: "/tree", time: { created: 3 } },
+      { id: "marked-grandchild", parentID: "plain-child", directory: "/tree", time: { created: 4 }, revert: { messageID: "grandchild-target" } },
+    ] as Session[]
+    const store = createStore({}, { session: sessions })
+
+    const { setActionRefs, unrevertSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/tree", store]]), () => "/tree")
+
+    await unrevertSession("root")
+
+    expect(replyCalls.filter((call) => call.method === "session.unrevert").map((call) => call.params.sessionID)).toEqual([
+      "marked-child",
+      "marked-grandchild",
+      "root",
+    ])
+  })
+
+  test("continues after a descendant unrevert fails", async () => {
+    const sessions = [
+      { id: "root", directory: "/tree", time: { created: 1 }, revert: { messageID: "root-target" } },
+      { id: "failing-child", parentID: "root", directory: "/tree", time: { created: 2 }, revert: { messageID: "first-target" } },
+      { id: "healthy-child", parentID: "root", directory: "/tree", time: { created: 3 }, revert: { messageID: "second-target" } },
+    ] as Session[]
+    const store = createStore({}, { session: sessions })
+    failingUnrevertSessionIds.add("failing-child")
+
+    const { setActionRefs, unrevertSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/tree", store]]), () => "/tree")
+
+    await unrevertSession("root")
+
+    expect(replyCalls.filter((call) => call.method === "session.unrevert").map((call) => call.params.sessionID)).toEqual([
+      "failing-child",
+      "healthy-child",
+      "root",
+    ])
+  })
+
+  test("aborts a busy descendant before unreverting it", async () => {
+    const sessions = [
+      { id: "root", directory: "/tree", time: { created: 1 }, revert: { messageID: "root-target" } },
+      { id: "busy-child", parentID: "root", directory: "/tree", time: { created: 2 }, revert: { messageID: "busy-target" } },
+      { id: "idle-child", parentID: "root", directory: "/tree", time: { created: 3 }, revert: { messageID: "idle-target" } },
+    ] as Session[]
+    const store = createStore({}, {
+      session: sessions,
+      session_status: { "busy-child": { type: "busy" }, "idle-child": { type: "idle" } },
+    })
+
+    const { setActionRefs, unrevertSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/tree", store]]), () => "/tree")
+
+    await unrevertSession("root")
+
+    expect(replyCalls.filter((call) => call.method === "session.abort").map((call) => call.params.sessionID))
+      .toEqual(["busy-child"])
+    const abortIndex = replyCalls.findIndex((call) => call.method === "session.abort")
+    const unrevertIndex = replyCalls.findIndex(
+      (call) => call.method === "session.unrevert" && call.params.sessionID === "busy-child",
+    )
+    expect(abortIndex).toBeLessThan(unrevertIndex)
+  })
+
+  test("treats a descendant as busy when any child store reports a non-idle status", async () => {
+    const sessions = [
+      { id: "root", directory: "/tree", time: { created: 1 }, revert: { messageID: "root-target" } },
+      { id: "busy-child", parentID: "root", directory: "/tree", time: { created: 2 }, revert: { messageID: "busy-target" } },
+    ] as Session[]
+    // The session list is deduped onto /tree, but the live status arrived in the
+    // store for another directory.
+    const treeStore = createStore({}, { session: sessions })
+    const statusStore = createStore({}, { session_status: { "busy-child": { type: "busy" } } })
+
+    const { setActionRefs, unrevertSession } = await import("./session-actions")
+    setActionRefs(
+      mockSdk as unknown as OpencodeClient,
+      createChildStores([["/tree", treeStore], ["/other", statusStore]]),
+      () => "/tree",
+    )
+
+    await unrevertSession("root")
+
+    expect(replyCalls.filter((call) => call.method === "session.abort").map((call) => call.params.sessionID))
+      .toEqual(["busy-child"])
+  })
+
+  test("aborts a descendant that turns busy after the subtree snapshot", async () => {
+    const sessions = [
+      { id: "root", directory: "/tree", time: { created: 1 }, revert: { messageID: "root-target" } },
+      { id: "first-child", parentID: "root", directory: "/tree", time: { created: 2 }, revert: { messageID: "first-target" } },
+      { id: "second-child", parentID: "root", directory: "/tree", time: { created: 3 }, revert: { messageID: "second-target" } },
+    ] as Session[]
+    const store = createStore({}, { session: sessions, session_status: {} })
+    afterUnrevertCall = (sessionId) => {
+      if (sessionId !== "first-child") return
+      store.getState().patch({ session_status: { "second-child": { type: "busy" } } })
+    }
+
+    const { setActionRefs, unrevertSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/tree", store]]), () => "/tree")
+
+    await unrevertSession("root")
+
+    expect(replyCalls.filter((call) => call.method === "session.abort").map((call) => call.params.sessionID))
+      .toEqual(["second-child"])
   })
 })
 
@@ -1459,6 +1700,99 @@ describe("rejectQuestion passes directory", () => {
     expect(replyCalls.length).toBe(1)
     expect(replyCalls[0].params.requestID).toBe("q-2")
     expect(replyCalls[0].params.directory).toBe("/test/project")
+  })
+})
+
+function sessionFixture(id: string): Session {
+  // SAFETY: the question flow only reads session id/time; the fixture is
+  // intentionally minimal and matches the existing fixtures in this file.
+  return { id, time: { created: 1 } } as Session
+}
+
+function actionsSdk(): OpencodeClient {
+  // SAFETY: mockSdk implements the question/permission/session surface that
+  // session-actions uses; this cast is the established pattern in this file.
+  return mockSdk as never
+}
+
+describe("question dismissal clears pending state without the SSE echo (issues #2911, #2448)", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    scopedClientDirectories.length = 0
+    questionReplyError = null
+    questionRejectError = null
+  })
+
+  test("rejectQuestion clears the question from the child store on success", async () => {
+    const question = buildQuestion("q-1", "session-a")
+    const store = createStore({}, {
+      session: [sessionFixture("session-a")],
+      question: { "session-a": [question] },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, rejectQuestion } = await import("./session-actions")
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    await rejectQuestion("session-a", "q-1")
+
+    // The backend confirmed the rejection. The local pending state must be gone
+    // even if the SSE `question.rejected` event is lost (SSE gap), otherwise the
+    // session stays in "waiting for answer" and the next task never renders
+    // thinking/final response (issues #2911, #2448).
+    expect(store.getState().question["session-a"]).toBe(undefined)
+  })
+
+  test("respondToQuestion clears the question from the child store on success", async () => {
+    const question = buildQuestion("q-1", "session-a")
+    const store = createStore({}, {
+      session: [sessionFixture("session-a")],
+      question: { "session-a": [question] },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, respondToQuestion } = await import("./session-actions")
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    await respondToQuestion("session-a", "q-1", [["Yes"]])
+
+    expect(store.getState().question["session-a"]).toBe(undefined)
+  })
+
+  test("dismissOpenQuestionsForSession leaves the store cleared when the reject succeeds", async () => {
+    const question = buildQuestion("q-root", "session-a")
+    const store = createStore({}, {
+      session: [sessionFixture("session-a")],
+      question: { "session-a": [question] },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, dismissOpenQuestionsForSession } = await import("./session-actions")
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    const dismissed = await dismissOpenQuestionsForSession("session-a")
+
+    expect(dismissed).toBe(true)
+    // The optimistic clear already removed it before the round-trip; the
+    // successful reject must not resurrect it.
+    expect(store.getState().question["session-a"]).toBe(undefined)
+  })
+
+  test("reply/reject actions on an already-cleared store stay no-ops (SSE echo equivalent)", async () => {
+    // A later (or duplicated) SSE echo for an already-cleared request must not
+    // error or resurrect state — the reducer only removes when present.
+    const store = createStore({}, {
+      session: [sessionFixture("session-a")],
+      question: {},
+    })
+
+    const { setActionRefs, rejectQuestion, respondToQuestion } = await import("./session-actions")
+    setActionRefs(actionsSdk(), createChildStores([["/test/project", store]]), () => "/test/project")
+
+    await respondToQuestion("session-a", "q-gone", [["Yes"]])
+    await rejectQuestion("session-a", "q-gone")
+
+    expect(store.getState().question["session-a"]).toBe(undefined)
   })
 })
 

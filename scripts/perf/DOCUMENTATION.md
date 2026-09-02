@@ -12,6 +12,7 @@ or extending these scripts. The methodology rules they enforce come from
 | `bun run profile:idle` | What the app does while nobody interacts with it. |
 | `bun run profile:session` | What receiving and rendering a live assistant response costs. |
 | `bun run profile:animation` | What a CSS animation costs, isolated from the app. |
+| `bun run profile:switch` | How long switching sessions from the sidebar takes, cold and warm. |
 | `bun run profile:browser` | A manually driven capture, for interactions that cannot be scripted. |
 
 All of them measure a real browser over CDP. Pass `--help` to any of them for
@@ -105,6 +106,30 @@ top. Note that `rotate: 360deg` is *not* equivalent to
 
 Add a variant to `animation-fixture.html` to measure a property or technique
 that is not listed.
+
+## profile:switch
+
+Clicks sidebar session rows with real mouse input and measures, per click, the
+two moments a user feels: `ack`, when the clicked row is highlighted as active
+(the first visible reaction), and `content`, when the timeline shows messages
+that were not on screen before. It also reports the longest main-thread task
+inside each switch and every request the switch triggered, so fan-out
+regressions show up next to the latency they cause.
+
+Every session in the plan is visited twice. The first visit is usually cold
+(a network round trip for messages); the second is warm, served from the
+in-memory session store. They have different budgets and are reported
+separately.
+
+```bash
+bun run profile:switch -- --url http://127.0.0.1:4599 --output artifacts/switch-before
+bun run profile:switch -- --url http://127.0.0.1:4599 --baseline artifacts/switch-before --budget-ack 32 --budget-content 100
+```
+
+`--sessions a,b,c` picks the rows to click; the default is the first rows in
+the sidebar, so pass explicit ids to compare runs across days. The row must be
+present in the sidebar; the command fails rather than measuring a click on
+nothing.
 
 ## Reading The Results
 

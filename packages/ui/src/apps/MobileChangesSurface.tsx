@@ -10,6 +10,7 @@ import { SyncActions } from '@/components/views/git/SyncActions';
 import { PierreDiffViewer } from '@/components/views/PierreDiffViewer';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
 import type { GitStatus } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { generateCommitMessage, stageGitFile, stageGitFiles, unstageGitFile, unstageGitFiles } from '@/lib/gitApi';
@@ -21,6 +22,8 @@ import {
   useIsGitRepo,
   useGitLoadingStatus,
 } from '@/stores/useGitStore';
+import { NestedRepoResolutionStates } from '@/components/views/git/NestedRepoResolutionStates';
+import { NestedRepoPicker } from '@/components/views/git/NestedRepoPicker';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;
@@ -56,12 +59,18 @@ type MobileChangesSurfaceProps = {
 export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onClose, initialDiffPath, initialDiffStaged = false }) => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
-  const currentDirectory = normalizePath(useEffectiveDirectory() ?? null);
+  const rootDirectory = normalizePath(useEffectiveDirectory() ?? null);
+  // When the root is not itself a repository, changes come from the resolved
+  // nested repository instead.
+  const { rootIsGitRepo, gitDirectory, nestedRepos } = useNestedGitDirectory(rootDirectory || null);
+  const currentDirectory = gitDirectory ?? rootDirectory;
   const status = useGitStatus(currentDirectory || null);
   const isGitRepo = useIsGitRepo(currentDirectory || null);
   const isLoadingStatus = useGitLoadingStatus(currentDirectory || null);
   const setActiveDirectory = useGitStore((state) => state.setActiveDirectory);
   const ensureAll = useGitStore((state) => state.ensureAll);
+  const ensureNestedRepos = useGitStore((state) => state.ensureNestedRepos);
+  const selectNestedRepo = useGitStore((state) => state.selectNestedRepo);
   const fetchStatus = useGitStore((state) => state.fetchStatus);
   const fetchBranches = useGitStore((state) => state.fetchBranches);
   const prefetchDiffs = useGitStore((state) => state.prefetchDiffs);
@@ -465,6 +474,16 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
             {status?.current || currentDirectory || ''}
           </p>
         </div>
+        {rootIsGitRepo === false && Array.isArray(nestedRepos) && nestedRepos.length > 0 ? (
+          <NestedRepoPicker
+            repositories={nestedRepos}
+            selectedRepository={gitDirectory ?? null}
+            onSelectRepository={(repository) => {
+              if (rootDirectory) selectNestedRepo(rootDirectory, repository);
+            }}
+            repositoryRoot={rootDirectory ?? undefined}
+          />
+        ) : null}
       </header>
       <div className="min-h-0 flex-1">{state}</div>
     </div>
@@ -474,12 +493,24 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
     return renderListState(<MobileChangesState message={t('gitView.empty.selectSessionOrDirectory')} />);
   }
 
-  if (isLoadingStatus && isGitRepo === null) {
-    return renderListState(<MobileChangesState loading message={t('gitView.loading.checkingRepository')} />);
+  // Non-repo root: surface nested-repository resolution while the operating
+  // directory has not proven to be a repository (discovering, failed,
+  // unsupported, none found, or settling on the auto-selected one).
+  if (rootIsGitRepo === false && isGitRepo !== true) {
+    return renderListState(
+      <NestedRepoResolutionStates
+        rootIsGitRepo={rootIsGitRepo}
+        resolvedIsGitRepo={isGitRepo}
+        nestedRepos={nestedRepos}
+        onRetryDiscovery={() => {
+          if (rootDirectory) void ensureNestedRepos(rootDirectory, { force: true });
+        }}
+      />
+    );
   }
 
-  if (isGitRepo === false) {
-    return renderListState(<MobileChangesState icon message={t('gitView.empty.notGitRepository')} description={t('gitView.empty.notGitRepositoryDescription')} />);
+  if (isLoadingStatus && isGitRepo === null) {
+    return renderListState(<MobileChangesState loading message={t('gitView.loading.checkingRepository')} />);
   }
 
   if (route.type === 'diff') {

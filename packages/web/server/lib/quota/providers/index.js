@@ -9,7 +9,6 @@ import { buildResult } from '../utils/index.js';
 
 import * as claude from './claude/index.js';
 import * as codex from './codex.js';
-import * as commandCode from './command-code.js';
 import * as copilot from './copilot.js';
 import * as crof from './crof.js';
 import * as cursor from './cursor.js';
@@ -30,12 +29,6 @@ import * as opencodeGo from './opencode-go.js';
 import * as xai from './xai.js';
 
 const registry = {
-  'command-code': {
-    providerId: commandCode.providerId,
-    providerName: commandCode.providerName,
-    isConfigured: commandCode.isConfigured,
-    fetchQuota: commandCode.fetchQuota
-  },
   claude: {
     providerId: claude.providerId,
     providerName: claude.providerName,
@@ -160,12 +153,6 @@ const registry = {
 
 const pendingFetches = new Map();
 
-const normalizeQuotaProviderId = (providerId) => {
-  if (typeof providerId !== 'string') return providerId;
-  return ['command-code', 'commandcode', 'command_code', 'command code'].includes(providerId.trim().toLowerCase())
-    ? 'command-code'
-    : providerId;
-};
 
 export const listConfiguredQuotaProviders = () => {
   const configured = [];
@@ -210,14 +197,13 @@ const fetchQuotaForProviderUncoalesced = async (providerId) => {
 };
 
 export const fetchQuotaForProvider = (providerId) => {
-  const normalizedProviderId = normalizeQuotaProviderId(providerId);
-  const existing = pendingFetches.get(normalizedProviderId);
+  const existing = pendingFetches.get(providerId);
   if (existing) return existing;
 
-  const pending = fetchQuotaForProviderUncoalesced(normalizedProviderId).finally(() => {
-    if (pendingFetches.get(normalizedProviderId) === pending) pendingFetches.delete(normalizedProviderId);
+  const pending = fetchQuotaForProviderUncoalesced(providerId).finally(() => {
+    if (pendingFetches.get(providerId) === pending) pendingFetches.delete(providerId);
   });
-  pendingFetches.set(normalizedProviderId, pending);
+  pendingFetches.set(providerId, pending);
   return pending;
 };
 

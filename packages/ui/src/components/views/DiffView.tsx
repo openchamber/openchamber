@@ -2,12 +2,15 @@ import React from 'react';
 
 import { useUIStore } from '@/stores/useUIStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
+import { NestedRepoPicker } from '@/components/views/git/NestedRepoPicker';
 import { useGitStore, useGitStatus, useIsGitRepo, useGitLoadingStatus } from '@/stores/useGitStore';
 import { useGitBaseBranchStore, gitBaseBranchEntryKey } from '@/stores/useGitBaseBranchStore';
 import { coerceDiffScope, branchRangeKey, isBranchScopeAvailable, isBranchScopeDefinitelyUnavailable, useRangeKeyedCache, useBoundedDirectoryRetry } from './branchDiffScope';
 import { getBranchBase, getGitRangeDiff, getGitRangeFiles } from '@/lib/gitApi';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { cn } from '@/lib/utils';
+import { rankByQuery } from '@/lib/search/fuzzySearch';
 import type { GitStatus, GitRangeFileEntry } from '@/lib/api/types';
 import {
     DropdownMenu,
@@ -996,7 +999,11 @@ export const DiffView: React.FC<DiffViewProps> = ({
 }) => {
     const { t } = useI18n();
     const { git, files } = useRuntimeAPIs();
-    const effectiveDirectory = useEffectiveDirectory();
+    const rootDirectory = useEffectiveDirectory();
+    // Diffs belong to the repository being diffed: when the root is not
+    // itself a repository, operate on the resolved nested repository instead.
+    const { rootIsGitRepo, gitDirectory: nestedGitDirectory, nestedRepos: nestedRepoOptions } = useNestedGitDirectory(rootDirectory ?? null);
+    const effectiveDirectory = nestedGitDirectory ?? rootDirectory;
     const openContextSurface = useUIStore((state) => state.openContextSurface);
     const requestWalkthroughSource = useWalkthroughStore((state) => state.requestSource);
     const { screenWidth, isMobile } = useDeviceInfo();
@@ -1006,6 +1013,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const isLoadingStatus = useGitLoadingStatus(effectiveDirectory ?? null);
     const setActiveDirectory = useGitStore((state) => state.setActiveDirectory);
     const ensureStatus = useGitStore((state) => state.ensureStatus);
+    const selectNestedRepo = useGitStore((state) => state.selectNestedRepo);
     const fetchStatus = useGitStore((state) => state.fetchStatus);
     const fetchBranches = useGitStore((state) => state.fetchBranches);
     const clearDiffCache = useGitStore((state) => state.clearDiffCache);
@@ -1037,7 +1045,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const setDiffWrapLines = useUIStore((state) => state.setDiffWrapLines);
     const openContextFileAtLine = useUIStore((state) => state.openContextFileAtLine);
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-    const sessionMessages = useSessionMessages(currentSessionId ?? '', effectiveDirectory ?? undefined);
+    const sessionMessages = useSessionMessages(currentSessionId ?? '', rootDirectory ?? undefined);
     const diffWrapLines = diffWrapLinesStore;
     const forcedStaged = activeDiffScope === 'staged' ? true : activeDiffScope === 'working' ? false : null;
     const activeDiffStaged = forcedStaged ?? displayFileStaged;
@@ -1644,7 +1652,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
 
     const handleStartReviewFlow = React.useCallback(async (execution: ReviewFlowExecution) => {
         if (!currentSessionId) return;
-        const directory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || effectiveDirectory || '';
+        const directory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || rootDirectory || '';
         if (!directory) {
             toast.error(t('diffView.reviewDialog.toast.noSessionDirectory'));
             return;
@@ -1670,7 +1678,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         } finally {
             setReviewFlowSubmitting(false);
         }
-    }, [currentSessionId, effectiveDirectory, t]);
+    }, [currentSessionId, rootDirectory, t]);
 
     const scrollToFile = React.useCallback((path: string): boolean => {
         const node = fileSectionRefs.current.get(path);
@@ -1766,6 +1774,37 @@ export const DiffView: React.FC<DiffViewProps> = ({
         setScrollRequestNonce((nonce) => nonce + 1);
         scrollToFile(value);
     }, [cancelPendingScrollAlignment, expandStackedFile, scrollToFile]);
+
+    // Step review to the adjacent changed file (alt+arrow): selects, expands
+    // a collapsed section, and scrolls to it. Window-level because the diff
+    // surface has no persistent focus target; guarded off editable fields.
+    React.useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (!event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return;
+            if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+            const target = event.target;
+            if (target instanceof HTMLElement && (
+                target.isContentEditable
+                || target.tagName === 'INPUT'
+                || target.tagName === 'TEXTAREA'
+                || target.closest('[role="dialog"]')
+            )) {
+                return;
+            }
+            if (changedFiles.length === 0) return;
+            const delta = event.key === 'ArrowDown' ? 1 : -1;
+            const index = displayFile ? changedFiles.findIndex((file) => file.path === displayFile) : -1;
+            const nextIndex = index === -1
+                ? (delta > 0 ? 0 : changedFiles.length - 1)
+                : index + delta;
+            const next = changedFiles[nextIndex];
+            if (!next) return;
+            event.preventDefault();
+            handleSelectFileAndScroll(next.path);
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [changedFiles, displayFile, handleSelectFileAndScroll]);
 
     const handleHeaderLayoutChange = React.useCallback((mode: DiffViewMode) => {
         const nextLayout: 'inline' | 'side-by-side' =
@@ -1953,12 +1992,11 @@ export const DiffView: React.FC<DiffViewProps> = ({
             }
 
             if (!branchBase) {
-                const searchTerm = basePickerSearch.trim().toLowerCase();
-                const candidateBranches = (branches?.all ?? [])
+                const eligibleBranches = (branches?.all ?? [])
                     .map((name: string) => name.replace(/^remotes\//, ''))
                     .filter((name: string) => name !== currentBranch && !name.endsWith(`/${currentBranch}`))
-                    .filter((name: string) => !searchTerm || name.toLowerCase().includes(searchTerm))
                     .sort();
+                const candidateBranches = rankByQuery(eligibleBranches, basePickerSearch, (name) => [name]);
                 return (
                     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
                         <Icon name="git-branch" className="size-6 text-muted-foreground" />
@@ -2039,6 +2077,16 @@ export const DiffView: React.FC<DiffViewProps> = ({
     return (
         <div className="flex h-full flex-col overflow-hidden bg-background">
             <div className="@container/diff-toolbar flex min-w-0 items-center gap-2 px-3 py-2 bg-background">
+                {rootIsGitRepo === false && Array.isArray(nestedRepoOptions) && nestedRepoOptions.length > 0 ? (
+                    <NestedRepoPicker
+                        repositories={nestedRepoOptions}
+                        selectedRepository={nestedGitDirectory ?? null}
+                        onSelectRepository={(repository) => {
+                            if (rootDirectory) selectNestedRepo(rootDirectory, repository);
+                        }}
+                        repositoryRoot={rootDirectory ?? undefined}
+                    />
+                ) : null}
                 {!isMobile && (
                     activeDiffScope === 'working' || activeDiffScope === 'staged' || activeDiffScope === 'turn' || activeDiffScope === 'branch' ? (
                         <ChangeScopeSelector

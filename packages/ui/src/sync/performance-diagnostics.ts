@@ -16,6 +16,15 @@ export type SyncPerformanceCounters = {
   reducerEvents: number
   reducerChangedEvents: number
   directoryStorePublications: number
+  globalSessionPublications: number
+  globalStatusPublications: number
+  orderingPublications: number
+  timingPublications: number
+  liveSessionAggregateRuns: number
+  sidebarStructureBuilds: number
+  sidebarOrderBuilds: number
+  sidebarOrderMetadataEntries: number
+  recentCandidatesVisited: number
   streamingFullReconciliations: number
   streamingIncrementalReconciliations: number
   streamingStatusEntriesVisited: number
@@ -50,6 +59,15 @@ const createCounters = (): SyncPerformanceCounters => ({
   reducerEvents: 0,
   reducerChangedEvents: 0,
   directoryStorePublications: 0,
+  globalSessionPublications: 0,
+  globalStatusPublications: 0,
+  orderingPublications: 0,
+  timingPublications: 0,
+  liveSessionAggregateRuns: 0,
+  sidebarStructureBuilds: 0,
+  sidebarOrderBuilds: 0,
+  sidebarOrderMetadataEntries: 0,
+  recentCandidatesVisited: 0,
   streamingFullReconciliations: 0,
   streamingIncrementalReconciliations: 0,
   streamingStatusEntriesVisited: 0,

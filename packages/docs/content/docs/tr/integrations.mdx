@@ -1,0 +1,54 @@
+---
+title: Entegrasyonlar
+description: Claude ya da Cursor aboneliğinizi bir provider olarak kullanın.
+---
+
+# Entegrasyonlar
+
+Integration, sahip olduğunuz bir aboneliği kullanarak OpenChamber'a bir provider ekleyen küçük bir eklentidir. Bunları **Settings → Integrations** altında yönetirsiniz.
+
+> **Experimental feature.** Provider politikalarına uymaya çalışıyoruz, ama hesap kısıtlamaları ve askıya alma kararları yine her provider'ın kendi kararıdır. Integrations'ı kendi sorumluluğunuzda kullanın.
+
+Kullanılabilir integrations:
+
+- **Claude Code** — Claude Pro ya da Max planınız, API anahtarı gerekmez
+- **Cursor** — Cursor planınızın model limitleri
+
+## Bir entegrasyon kurun
+
+1. **Settings → Integrations** bölümünü açın.
+2. Integration'ı bulun ve **Install** seçin.
+3. İstenince OpenCode'u yeniden başlatın. Provider yeniden başlatmadan sonra görünür.
+4. **Set up** seçin ve giriş yapın. Modeller sonra sohbet model seçicisinde görünür.
+
+Integration'lar kullanıcı düzeyinde kurulur, bu yüzden her projede çalışır. Aynı karttan istediğiniz zaman güncelleyebilir ya da kaldırabilirsiniz.
+
+## Claude Code
+
+Claude Code, Claude Pro ya da Max planınızı kullanır. API anahtarı yoktur ve ayrı bir Claude uygulaması gerekmez.
+
+1. Integration'ı kurun. Yukarıya bakın.
+2. **Set up** seçin ve giriş yapın. Henüz Claude Code CLI'nız yoksa kurulum önce onu yüklemeyi önerir, sonra giriş yaptırır.
+
+Claude Code, burada provider CLI'sının kurulu ve giriş yapılmış olmasını gerektiren tek integration'dır. Cursor CLI gerektirmez.
+
+**Claude hesabınız nasıl güvende kalır:** Bu integration, Anthropic'in resmi Claude Agent SDK'sını ve kurulu Claude Code CLI'nızı kullanır. OAuth'u kaçırmaz, tarayıcı token'larını çıkarmaz ya da yeniden oynatmaz, desteklenmeyen bir istemciyi taklit etmez ve Anthropic'in kimlik doğrulama akışını atlamaz. Anthropic'in desteklediği erişim yolunda kalır. Bu yüzden token kaçırma ya da yetkisiz kimlik doğrulama kestirmelerinin hesap banı riskini taşımaz.
+
+## Cursor
+
+Cursor, Cursor planınıza dahil modelleri OpenChamber'da kullanılabilir hale getirir.
+
+1. Integration'ı kurun. Yukarıya bakın.
+2. **Set up** seçin, bağlantıyı açın ve tarayıcınızda erişimi onaylayın. API anahtarı gerekmez. Giriş yaptıktan sonra model listesi otomatik yüklenir.
+
+## Güncelleme ya da kaldırma
+
+- **Update** eklentinin en son yayımlanmış sürümünü kurar.
+- **Remove** eklentiyi OpenCode config'inizden siler. OpenCode yenilendikten sonra provider yüklenmeyi bırakır.
+
+Bir kartta girdilerin elle yönetilmesi gerektiği yazıyorsa, **Manage plugins** seçin ve kopyaları orada temizleyin.
+
+## İlgili
+
+- [Providers, Models & Agents](/providers/) — diğer provider'ları bağlayın ve model seçin
+- [Usage & Quotas](/usage/) — ne kadar kullandığınızı izleyin

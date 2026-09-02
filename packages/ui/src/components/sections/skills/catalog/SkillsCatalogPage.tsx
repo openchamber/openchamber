@@ -1,3 +1,4 @@
+import { rankByQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
@@ -265,14 +266,12 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
   const isSearching = search.trim().length > 0;
 
   const filtered = React.useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const matches = (item: SkillsCatalogItem) =>
-      item.skillName.toLowerCase().includes(q)
-      || (item.description || '').toLowerCase().includes(q)
-      || (item.frontmatterName || '').toLowerCase().includes(q);
-
     if (isSearching) {
-      return sources.flatMap((src) => (itemsBySource[src.id] || []).filter(matches));
+      return rankByQuery(
+        sources.flatMap((src) => itemsBySource[src.id] || []),
+        search,
+        (item) => [item.skillName, item.frontmatterName, item.description],
+      );
     }
     if (!selectedSourceId) {
       return [];

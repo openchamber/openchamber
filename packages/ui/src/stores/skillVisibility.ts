@@ -35,8 +35,12 @@ const AGENTS_ROOT = /(^|\/)\.agents\//;
 type SkillRoot = 'claude' | 'agents' | 'opencode';
 
 export const resolveSkillRoot = (skillPath: string): SkillRoot => {
-  if (CLAUDE_ROOT.test(skillPath)) return 'claude';
-  if (AGENTS_ROOT.test(skillPath)) return 'agents';
+  // Server discovery joins paths with the platform separator, so Windows
+  // skill paths arrive with backslashes. Normalize before matching the
+  // root regexes, which are expressed with forward slashes.
+  const normalized = skillPath.replace(/\\/g, '/');
+  if (CLAUDE_ROOT.test(normalized)) return 'claude';
+  if (AGENTS_ROOT.test(normalized)) return 'agents';
   return 'opencode';
 };
 

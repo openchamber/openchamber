@@ -149,17 +149,18 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['editor', 'autosave', 'auto-save', 'files', 'save'],
   },
   {
-    id: 'appearance.expanded-editor-toolbar',
-    page: 'general',
-    titleKey: 'settings.openchamber.visual.field.expandedEditorToolbar',
-    keywords: ['editor', 'toolbar', 'tabs', 'docked', 'files'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
     id: 'appearance.file-editor-keymap',
     page: 'general',
     titleKey: 'settings.openchamber.visual.field.fileEditorKeymap',
     keywords: ['editor', 'vim', 'keymap'],
+  },
+  {
+    id: 'appearance.session-tabs',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.sessionTabsGroup',
+    descriptionKey: 'settings.openchamber.visual.field.sessionTabsInfo',
+    keywords: ['session', 'tabs', 'header', 'working set'],
+    isAvailable: (ctx) => !ctx.isMobile && !ctx.isVSCode,
   },
   {
     id: 'appearance.terminal-quick-keys',
@@ -238,6 +239,19 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'chat',
     titleKey: 'settings.openchamber.visual.section.reasoning',
     keywords: ['thinking', 'traces'],
+  },
+  {
+    id: 'chat.streaming',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.section.streaming',
+    keywords: ['stream', 'scroll'],
+  },
+  {
+    id: 'chat.streaming-auto-follow',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.streamingAutoFollow',
+    descriptionKey: 'settings.openchamber.visual.field.streamingAutoFollowInfo',
+    keywords: ['autoscroll', 'auto-scroll', 'follow', 'stick to bottom', 'streaming'],
   },
   {
     id: 'chat.sticky-user-header',
@@ -337,7 +351,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     id: 'chat.composer',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.section.composer',
-    keywords: ['input', 'draft', 'spellcheck'],
+    keywords: ['input', 'draft', 'spellcheck', 'paste'],
   },
   {
     id: 'chat.spellcheck',
@@ -345,6 +359,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.visual.field.enableSpellcheckInTextInputs',
     keywords: ['spelling', 'input'],
     isAvailable: (ctx) => !ctx.isMobile,
+  },
+  {
+    id: 'chat.large-text-paste',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.largeTextPaste',
+    descriptionKey: 'settings.openchamber.visual.field.largeTextPasteHint',
+    keywords: ['paste', 'clipboard', 'attachment', 'large', 'text', 'file'],
   },
   {
     id: 'sessions.default-model',
@@ -505,12 +526,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     // Unreleased: searching for a setting that is not rendered would take the
     // user to an empty spot on the page.
     isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentMemoryFeatureAvailable,
-  },
-  {
-    id: 'git.github-account',
-    page: 'git',
-    titleKey: 'settings.github.page.actions.connect',
-    keywords: ['github', 'account', 'oauth', 'prs', 'issues'],
   },
   {
     id: 'git.identities',
@@ -963,6 +978,46 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => ctx.isWeb && !ctx.isDesktop && !ctx.isVSCode,
   },
 
+  {
+    id: 'integrations.first-party',
+    page: 'integrations',
+    titleKey: 'settings.integrations.firstParty.title',
+    descriptionKey: 'settings.integrations.firstParty.info',
+    keywords: ['built-in', 'first-party', 'native', 'github', 'linear'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'integrations.github',
+    page: 'integrations',
+    titleKey: 'settings.integrations.github.title',
+    descriptionKey: 'settings.integrations.github.description',
+    keywords: ['github', 'account', 'oauth', 'gh', 'cli', 'prs', 'pull request', 'issues', 'connect'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'integrations.linear',
+    page: 'integrations',
+    titleKey: 'settings.integrations.linear.title',
+    descriptionKey: 'settings.integrations.linear.description',
+    keywords: ['linear', 'issues', 'oauth', 'connect', 'workspace'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'integrations.linear.add-workspace',
+    page: 'integrations',
+    titleKey: 'settings.integrations.linear.actions.addWorkspace',
+    descriptionKey: 'settings.integrations.linear.description',
+    keywords: ['linear', 'workspace', 'add', 'connect', 'oauth'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'integrations.linear.mapping',
+    page: 'integrations',
+    titleKey: 'settings.integrations.linear.mapping.defaultProject',
+    descriptionKey: 'settings.integrations.linear.mapping.defaultProject.info',
+    keywords: ['linear', 'project', 'team', 'map', 'workspace', 'directory'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
   {
     id: 'integrations.third-party',
     page: 'integrations',

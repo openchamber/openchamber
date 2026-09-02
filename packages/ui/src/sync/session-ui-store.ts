@@ -12,6 +12,7 @@
  * SDK-calling actions that need domain data read it from sync-refs.
  */
 
+import type { ContextPartMetadata } from "@/lib/messages/contextParts"
 import { create } from "zustand"
 import type { Session, Part, Message, TextPart } from "@opencode-ai/sdk/v2/client"
 import type { AttachedFile, SessionContextUsage, SessionWorktreeAttachment } from "@/stores/types/sessionTypes"
@@ -138,7 +139,7 @@ export function routeMessage(params: {
   variant?: string
   inputMode?: "normal" | "shell"
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
-  additionalParts?: Array<{ text: string; synthetic?: boolean; files?: Array<{ type: "file"; mime: string; url: string; filename: string }> }>
+  additionalParts?: Array<{ text: string; synthetic?: boolean; metadata?: ContextPartMetadata; files?: Array<{ type: "file"; mime: string; url: string; filename: string }> }>
   delivery?: 'steer'
 }): Promise<void> {
   const requestDirectory = params.directory ?? undefined
@@ -357,7 +358,7 @@ export type SessionUIState = {
     agent?: string,
     attachments?: AttachedFile[],
     agentMentionName?: string,
-    additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>,
+    additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata }>,
     variant?: string,
     inputMode?: "normal" | "shell",
     options?: SendMessageOptions,
@@ -839,13 +840,18 @@ export async function materializeOpenDraftSession(selection: {
   })
 
   const effectiveDraftAgent = trimmedAgent ?? configState.currentAgentName
+  const variantOverride = configState.currentProviderId === selection.providerID
+    && configState.currentModelId === selection.modelID
+    && configState.currentAgentName === effectiveDraftAgent
+    ? configState.currentVariantSelection.override ?? undefined
+    : selection.variant
 
   useSelectionStore.getState().saveSessionModelSelection(created.id, selection.providerID, selection.modelID)
 
   if (effectiveDraftAgent) {
     useSelectionStore.getState().saveSessionAgentSelection(created.id, effectiveDraftAgent)
     useSelectionStore.getState().saveAgentModelForSession(created.id, effectiveDraftAgent, selection.providerID, selection.modelID)
-    useSelectionStore.getState().saveAgentModelVariantForSession(created.id, effectiveDraftAgent, selection.providerID, selection.modelID, selection.variant)
+    useSelectionStore.getState().saveAgentModelVariantForSession(created.id, effectiveDraftAgent, selection.providerID, selection.modelID, variantOverride)
   }
 
   store.initializeNewOpenChamberSession(created.id, configState.agents ?? [])
@@ -948,6 +954,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       )
       : null
 
+    // Start the message fetch before publishing the selection. React flushes
+    // the discrete-event render in a microtask queued by `set`, so a fetch
+    // started after it would only leave the browser once that whole render
+    // finished. Started first, the request is on the wire while the render
+    // runs. Fire-and-forget: any transient failure is retried by the reactive
+    // path in ChatContainer.
+    if (id) {
+      void fetchMessagesForSession(id, resolvedDir)
+    }
+
     // Set the directory together with the session id so chat hooks read the
     // same child store that send/SSE events will update during startup races.
     set({
@@ -962,13 +978,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // a draft intentionally does not erase it.
     if (id) {
       persistLastActiveSession(key, { sessionId: id, directory: rememberedDir })
-    }
-
-    // Kick off the message fetch on the same tick, before React commits the
-    // state change and fires ChatContainer.useEffect. The fetch is
-    // fire-and-forget — any transient failure gets retried by the reactive path.
-    if (id) {
-      void fetchMessagesForSession(id, resolvedDir)
     }
 
     try {
@@ -990,7 +999,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // skeleton to render and reads messages which can be expensive.
     if (previousSessionId && previousSessionId !== id) {
       const prevId = previousSessionId
-      setTimeout(() => {
+      const newId = id
+      // queueMicrotask runs after the current synchronous call stack (and
+      // before the next macrotask / setTimeout(0) / paint), so the previous
+      // session's anchor is saved before the new session's restoreSnapshot
+      // effect fires. This eliminates the race where save and restore
+      // interleave against the same viewport store entry.
+      queueMicrotask(() => {
+        // Bail if the user already switched again — save is now stale.
+        const current = get().currentSessionId
+        if (current !== newId) return
         const memState = getViewportSessionMemory(prevId)
         if (!memState?.isStreaming) {
           const prevMessages = getSyncMessages(prevId)
@@ -998,7 +1016,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             useViewportStore.getState().updateViewportAnchor(prevId, prevMessages.length - 1)
           }
         }
-      }, 0)
+      });
     }
 
     // Mark session viewed in notification store + update active session ref
@@ -1490,7 +1508,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     agent?: string,
     attachments?: AttachedFile[],
     agentMentionName?: string,
-    additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>,
+    additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata }>,
     variant?: string,
     inputMode?: "normal" | "shell",
     options?: SendMessageOptions,
@@ -1578,7 +1596,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         createdDraftSession.directory,
         createdDraftSession.sessionId,
       )
-      const draftPrefixParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }> =
+      const draftPrefixParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata }> =
         draftKnowledge.text ? [{ text: draftKnowledge.text, synthetic: true }] : []
       // Left undefined when nothing was added, as before: an empty array is not
       // the same as no additional parts to everything downstream.
@@ -1613,6 +1631,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         additionalParts: mergedAdditionalParts?.map((p) => ({
           text: p.text,
           synthetic: p.synthetic,
+          metadata: p.metadata,
           files: p.attachments?.map((a: AttachedFile) => ({
             type: "file" as const,
             mime: a.mimeType,
@@ -1694,7 +1713,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // Prepended so it reads as background before the message it accompanies,
     // and empty unless the session is actually missing it.
     const knowledge = await fetchSessionKnowledge(currentSessionDirectory, targetSessionId || "")
-    const prefixParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }> =
+    const prefixParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata }> =
       knowledge.text ? [{ text: knowledge.text, synthetic: true }] : []
     const partsWithPinnedContext = prefixParts.length > 0
       ? [...prefixParts, ...(additionalParts || [])]
@@ -1716,6 +1735,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       additionalParts: partsWithPinnedContext?.map((p) => ({
         text: p.text,
         synthetic: p.synthetic,
+        metadata: p.metadata,
         files: p.attachments?.map((a) => ({
           type: "file" as const,
           mime: a.mimeType,

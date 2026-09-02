@@ -116,7 +116,7 @@ export const createThemeRuntime = (dependencies) => {
       const seen = new Set();
 
       for (const entry of entries) {
-        if (!entry.isFile()) continue;
+        if (!entry.isFile() && !entry.isSymbolicLink()) continue;
         if (!entry.name.toLowerCase().endsWith('.json')) continue;
 
         const filePath = path.join(themesDir, entry.name);

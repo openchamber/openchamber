@@ -17,6 +17,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import type { GitRemote } from '@/lib/api/types';
+import { rankByQuery } from '@/lib/search/fuzzySearch';
 import { useI18n } from '@/lib/i18n';
 
 interface BranchInfo {
@@ -78,17 +79,15 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
     [newBranchName]
   );
 
-  const filteredLocal = React.useMemo(() => {
-    const term = search.toLowerCase();
-    if (!term) return localBranches;
-    return localBranches.filter((b) => b.toLowerCase().includes(term));
-  }, [search, localBranches]);
+  const filteredLocal = React.useMemo(
+    () => rankByQuery(localBranches, search, (branch) => [branch]),
+    [search, localBranches]
+  );
 
-  const filteredRemote = React.useMemo(() => {
-    const term = search.toLowerCase();
-    if (!term) return remoteBranches;
-    return remoteBranches.filter((b) => b.toLowerCase().includes(term));
-  }, [search, remoteBranches]);
+  const filteredRemote = React.useMemo(
+    () => rankByQuery(remoteBranches, search, (branch) => [branch]),
+    [search, remoteBranches]
+  );
 
   const handleCheckout = (branch: string) => {
     if (branch === currentBranch) {
@@ -184,7 +183,9 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
       </Tooltip>
 
       <DropdownMenuContent align="start" className="w-72 p-0 max-h-[60vh] flex flex-col">
-        <Command className="h-full min-h-0">
+        {/* Filtering and ordering are owned by rankByQuery above; cmdk's own
+            filter would re-filter and reorder the already-ranked rows. */}
+        <Command className="h-full min-h-0" shouldFilter={false}>
           <CommandInput
             placeholder={t('gitView.branch.searchPlaceholder')}
             value={search}

@@ -1,5 +1,9 @@
 import React from 'react';
-import { cn, getModifierLabel } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+import {
+  formatShortcutForDisplay,
+  getEffectiveShortcutCombo,
+} from '@/lib/shortcuts';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -187,6 +191,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const settingsPageRaw = useUIStore((state) => state.settingsPage);
   const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
+  const openSettingsShortcutOverride = useUIStore((state) => state.shortcutOverrides.open_settings);
   const settingsSlug = resolveSettingsSlug(settingsPageRaw);
 
   const [mobileStage, setMobileStage] = React.useState<MobileStage>(initialMobileStage);
@@ -209,6 +214,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const [pendingSearchItemId, setPendingSearchItemId] = React.useState<string | null>(null);
   const [activeSearchResultIndex, setActiveSearchResultIndex] = React.useState(0);
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const shouldFocusMobilePageContentRef = React.useRef(false);
   const searchResultRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
   const activeSearchResultIndexRef = React.useRef(0);
   const keyboardSearchNavigationRef = React.useRef(false);
@@ -728,7 +734,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     : showBackButton
       ? t('settings.view.actions.backToSettings')
       : t('settings.view.actions.closeSettings');
-  const shortcutKey = getModifierLabel();
+  const openSettingsCombo = getEffectiveShortcutCombo(
+    'open_settings',
+    openSettingsShortcutOverride === undefined ? undefined : { open_settings: openSettingsShortcutOverride },
+  );
+  const closeSettingsTitle = openSettingsCombo
+    ? t('settings.view.actions.closeSettingsWithShortcut', {
+        shortcut: formatShortcutForDisplay(openSettingsCombo),
+      })
+    : t('settings.view.actions.closeSettings');
 
   const pushMobileSplitDetailHistory = React.useCallback((slug: SettingsPageSlug) => {
     if (typeof window === 'undefined' || runtimeCtx.isVSCode) {
@@ -751,11 +765,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, [runtimeCtx.isVSCode]);
 
   const handleMobilePageSidebarItemSelect = React.useCallback(() => {
+    shouldFocusMobilePageContentRef.current = true;
     setMobileStage('page-content');
     if (settingsSlug === 'skills.installed') {
       pushMobileSplitDetailHistory(settingsSlug);
     }
   }, [pushMobileSplitDetailHistory, settingsSlug]);
+
+  React.useEffect(() => {
+    if (!isMobile || mobileStage !== 'page-content' || !shouldFocusMobilePageContentRef.current) {
+      return;
+    }
+
+    shouldFocusMobilePageContentRef.current = false;
+    const frame = window.requestAnimationFrame(() => {
+      containerRef.current
+        ?.querySelector<HTMLElement>('[data-settings-page-heading]')
+        ?.focus({ preventScroll: true });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [isMobile, mobileStage, settingsSlug]);
 
   const handleBack = React.useCallback(() => {
     if (backButtonTargetsPageSidebar) {
@@ -932,7 +964,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                               : <Icon name={iconName!} className="h-[18px] w-[18px] shrink-0 sm:h-4 sm:w-4" />}
                             <span className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden transition-opacity duration-150 opacity-100">
                               <span className="typography-ui-label font-normal truncate">{getPageTitle(page.slug)}</span>
-                              {(page.slug === 'tunnel' || page.slug === 'integrations') && (
+                              {page.slug === 'tunnel' && (
                                 <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">
                                   {t('settings.view.badge.beta')}
                                 </span>
@@ -1077,7 +1109,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               type="button"
               onClick={onClose}
               aria-label={t('settings.view.actions.closeSettings')}
-              title={t('settings.view.actions.closeSettingsWithShortcut', { shortcut: shortcutKey })}
+              title={closeSettingsTitle}
               className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <Icon name="close" className="h-5 w-5" />
@@ -1105,7 +1137,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
             type="button"
             onClick={onClose}
             aria-label={t('settings.view.actions.closeSettings')}
-            title={t('settings.view.actions.closeSettingsWithShortcut', { shortcut: shortcutKey })}
+            title={closeSettingsTitle}
             className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             <Icon name="close" className="h-5 w-5" />

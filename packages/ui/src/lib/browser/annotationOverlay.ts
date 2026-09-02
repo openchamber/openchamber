@@ -222,7 +222,8 @@ export const buildAnnotationOverlayScript = (
     '.editor{position:fixed;left:0;top:0;display:none;align-items:center;gap:8px;width:min(420px,calc(100vw - 24px));padding:6px;padding-left:16px;border-radius:22px;border:1px solid ' + THEME.border + ';background:' + THEME.glassSurface + ';-webkit-backdrop-filter:' + THEME.glassFilter + ';backdrop-filter:' + THEME.glassFilter + ';box-shadow:0 8px 28px rgba(0,0,0,.3);pointer-events:auto}',
     '.editor textarea{flex:1;min-width:0;resize:none;border:none;background:transparent;color:' + THEME.text + ';font-size:13px;line-height:20px;outline:none;padding:6px 0;min-height:32px;max-height:104px;display:block}',
     '.editor textarea::placeholder{color:' + THEME.mutedText + '}',
-    '.editor button{appearance:none;border:none;background:' + THEME.primary + ';color:' + THEME.primaryContrast + ';border-radius:999px;padding:8px 18px;font-size:12px;line-height:18px;font-weight:600;cursor:pointer;white-space:nowrap}',
+    '.editor button{appearance:none;border:none;background:' + THEME.primary + ';color:' + THEME.primaryContrast + ';border-radius:999px;width:32px;height:32px;padding:0;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer}',
+    '.editor button svg{width:16px;height:16px;display:block}',
     '.editor button[disabled]{opacity:.5;cursor:default}'
   ].join('');
   shadow.appendChild(style);
@@ -278,7 +279,11 @@ export const buildAnnotationOverlayScript = (
   comment.placeholder = LABELS.commentPlaceholder;
   var submit = document.createElement('button');
   submit.type = 'button';
-  submit.textContent = LABELS.submit;
+  // Icon-only attach button (Remix attachment-2), matching the chat comment
+  // input; the localized label stays available to assistive tech.
+  submit.setAttribute('aria-label', LABELS.submit);
+  submit.title = LABELS.submit;
+  submit.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.8287 7.75737L9.1718 13.4142C8.78127 13.8047 8.78127 14.4379 9.1718 14.8284C9.56232 15.219 10.1955 15.219 10.586 14.8284L16.2429 9.17158C17.4144 8.00001 17.4144 6.10052 16.2429 4.92894C15.0713 3.75737 13.1718 3.75737 12.0002 4.92894L6.34337 10.5858C4.39075 12.5384 4.39075 15.7042 6.34337 17.6569C8.29599 19.6095 11.4618 19.6095 13.4144 17.6569L19.0713 12L20.4855 13.4142L14.8287 19.0711C12.095 21.8047 7.66283 21.8047 4.92916 19.0711C2.19549 16.3374 2.19549 11.9053 4.92916 9.17158L10.586 3.51473C12.5386 1.56211 15.7045 1.56211 17.6571 3.51473C19.6097 5.46735 19.6097 8.63317 17.6571 10.5858L12.0002 16.2427C10.8287 17.4142 8.92916 17.4142 7.75759 16.2427C6.58601 15.0711 6.58601 13.1716 7.75759 12L13.4144 6.34316L14.8287 7.75737Z" fill="currentColor"/></svg>';
   editor.append(comment, submit);
 
   /**

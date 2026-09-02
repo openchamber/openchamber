@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   ChildStoreManager,
+  type DirectoryBootstrapContext,
   markDirectorySessionPartChanged,
   subscribeDirectoryPermission,
   subscribeDirectoryQuestion,
@@ -555,6 +556,57 @@ describe('ChildStoreManager directory bootstrap scheduler', () => {
     expect(started).toEqual(['stale', 'current']);
     expect(manager.getBootstrapState('/workspace')).toBe('complete');
     cleanupCurrent();
+    manager.disposeAll();
+  });
+});
+
+describe('ChildStoreManager bootstrap context liveness', () => {
+  test('isCurrent stays true after the run settles so deferred recovery work can commit', async () => {
+    const manager = new ChildStoreManager();
+    let captured: DirectoryBootstrapContext | undefined;
+    const cleanup = manager.configure({
+      onBootstrap: (context) => {
+        captured = context;
+      },
+    });
+    manager.requestBootstrap({ directory: '/workspace', priority: 'selected', reason: 'current-directory' });
+    await settle();
+    expect(manager.getBootstrapState('/workspace')).toBe('complete');
+
+    // bootstrapDirectory schedules deferred recovery pulls (permission.list
+    // and friends) from a setTimeout(0), which always runs after the pump's
+    // .finally() has cleaned up the run entry. isCurrent must remain true
+    // there, or those pulls and every commit they make get skipped.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(captured?.isCurrent()).toBe(true);
+
+    cleanup();
+    expect(captured?.isCurrent()).toBe(false);
+    manager.disposeAll();
+  });
+
+  test('a newer same-directory run invalidates the previous context', async () => {
+    const manager = new ChildStoreManager();
+    const contexts: DirectoryBootstrapContext[] = [];
+    const cleanup = manager.configure({
+      onBootstrap: (context) => {
+        contexts.push(context);
+      },
+    });
+    manager.requestBootstrap({ directory: '/workspace', priority: 'selected', reason: 'current-directory' });
+    await settle();
+    expect(contexts[0]?.isCurrent()).toBe(true);
+
+    // A forced rerun for the same directory must retire the previous
+    // context: its in-flight deferred responses may no longer commit over
+    // whatever the newer run synchronizes.
+    manager.requestBootstrap({ directory: '/workspace', priority: 'selected', reason: 'server-connected', force: true });
+    await settle();
+    expect(contexts).toHaveLength(2);
+    expect(contexts[0]?.isCurrent()).toBe(false);
+    expect(contexts[1]?.isCurrent()).toBe(true);
+
+    cleanup();
     manager.disposeAll();
   });
 });

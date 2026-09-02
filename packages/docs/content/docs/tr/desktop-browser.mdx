@@ -1,0 +1,59 @@
+---
+title: Tarayıcı Paneli
+description: Uygulama içinde herhangi bir sayfayı açın, üzerine not alın ve agent'ın onu kontrol etmesine izin verin.
+---
+
+# Tarayıcı Paneli
+
+Tarayıcı paneli, herhangi bir sayfayı sohbetinizin hemen yanına açar. Uygulama başlığındaki dünya düğmesinden açın.
+
+Masaüstü uygulamasında bu gerçek bir tarayıcıdır. Oturumlarınız kalıcıdır, hot reload çalışır ve geliştirici araçları tek tık uzağındadır. Bir web tarayıcı sekmesinde panel yine de bir sayfa gösterebilir, ama içine bakamaz. Aşağıdaki açıklama araçları yalnızca masaüstünde çalışır. VS Code eklentisinde ise hiç tarayıcı paneli yoktur. Çünkü VS Code zaten yanında bir tarayıcı bulunan bir editördür ve bu paneli değerli yapan şeylerin hepsi masaüstü uygulamasını ister.
+
+Burada açılan sayfalar kameranızı, mikrofonunuzu ya da konumunuzu kullanamaz. Bu istekler reddedilir.
+
+## Araç çubuğu
+
+Adres çubuğu, bu projede daha önce açtığınız sayfaları hatırlar ve siz yazdıkça bunları önerir. Adresin bir kısmıyla ya da sayfa başlığıyla eşleşir. Ok tuşları listede gezinir, Enter vurgulu girdiyi açar ve satırdaki düğme onu listeden siler.
+
+**Reload** düğmesi onun yanındadır. Yanında, bir değişiklik görünmeyi reddettiğinde önbelleği umursamayan bir **hard reload** ve yalnızca sayfayı ölçekleyen yakınlaştırma denetimleri vardır.
+
+**Clear cookies** ve **Clear cached data** yalnızca bu panele uygulanır. OpenChamber oturumunuza ve diğer pencerelere dokunulmaz.
+
+## Bir sayfaya not ekleme
+
+**Annotate** düğmesine basın. Sayfanın üstünde üç araç içeren bir çubuk görünür:
+
+- **Element** — bir öğeye tıklayın. Başka bir öğeye tıklamak seçimi değiştirir. Aynı öğeye tekrar tıklamak seçimi temizler.
+- **Region** — bir alanın etrafına kutu çizin. Birden çok öğeyi kapsadığında bunu kullanın.
+- **Draw** — sayfanın üzerine serbestçe çizim yapın.
+
+İşaretinizin yanındaki kutuya ne istediğinizi yazın ve **Attach** düğmesine basın. Ya da sadece Enter'a basın. Sohbet mesajınıza, işaretlediğiniz her şeyi, notunuzu ve işaretlerinizin çizildiği görünür sayfanın bir ekran görüntüsünü içeren bir kart eklenir. Böylece konumu tarif etmek yerine "şu düğme, biraz daha yuvarlak" diyebilirsiniz.
+
+Sayfanın kendisi asla değiştirilmez. Not eklemek yalnızca orada olanı işaretler. `Esc` işlemi iptal eder ve araç çubuğunu kapatır.
+
+## Agent'ın kullanmasına izin verin
+
+Agent, tarayıcı panelinin kendisini kullanabilir. Bir sayfa açar, üzerindeki metni okur, tıklar, yazar, kaydırır ve mobile, tablet, desktop düzenleri arasında geçiş yapar. Böylece sizden istemek yerine kendi işini kontrol eder. Bunu panelde olurken görürsünüz.
+
+Agent, sayfanın içinde keyfi kod çalıştıramaz. Tarayıcı gerçek oturumlarınızı tuttuğu için yukarıdaki belirli eylemlerle sınırlıdır.
+
+Ayrıca baktığı şeyin bir resmini proje içindeki `.openchamber/screenshots/` klasörüne kaydedip yanıtında size gösterebilir. Öncesi ve sonrası karşılaştırmasını mümkün kılan şey budur ve dosya sonrasında bir pull request'e eklemek için orada kalır.
+
+Tarayıcı eylemleri **OpenChamber Web tool**'dur. Bunu **Settings → General → OpenChamber Tools** altında ayrı ayrı açıp kapatabilirsiniz.
+
+Bu masaüstü uygulamasını gerektirir. Bir web tarayıcı sekmesinde gösterilen sayfa kontrol edilemez.
+
+## Boyut ve görünüm
+
+Cihaz çubuğunu açmak için telefon düğmesine basın. Bir hazır ayar seçin ya da genişlik ve yükseklik girin. Sayfa o boyutta yerleşir. Panelden büyükse sığacak şekilde küçültülür, ama yine de sizden istediğiniz boyutta ölçüm yapar.
+
+Aynı çubuk sayfayı açık ya da koyu temaya zorlar. Böylece makinenizde hiçbir şeyi değiştirmeden bir tema kontrol edilebilir. DevTools'a dokunmaz. Bir sayfanın yalnızca bir debugger bağlantısı olabilir, bu yüzden açıkse önce DevTools'u kapatın.
+
+## Geliştirici araçları
+
+Sayfa için Chromium'un kendi geliştirici araçlarını açmak üzere araç çubuğundaki terminal düğmesine basın. Console, network, elements, beklediğiniz her şey oradadır.
+
+## İlgili
+
+- [Preview & Dev Servers](/preview/) — çalışan uygulamanızı, uzak bir makinedekiler dahil, açma
+- [Agent Control Tool](/agent-control-tool/) — sohbetten oturumlar, worktree'ler ve zamanlanmış görevler

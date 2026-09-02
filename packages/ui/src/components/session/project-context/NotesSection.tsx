@@ -1,3 +1,4 @@
+import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 
 import { toast } from '@/components/ui';
@@ -178,11 +179,10 @@ export const NotesSection: React.FC<{
   const saveNoteBody = useProjectContextStore((state) => state.saveNoteBody);
   const deleteNote = useProjectContextStore((state) => state.deleteNote);
 
-  const visibleNotes = React.useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return notes;
-    return notes.filter((note) => note.body.toLowerCase().includes(needle));
-  }, [notes, query]);
+  const visibleNotes = React.useMemo(
+    () => notes.filter((note) => matchesRankQuery([note.body], query)),
+    [notes, query],
+  );
 
   // The store keeps the failure reason; without passing it through, every
   // failure looks identical to the user and tells them nothing about the cause.

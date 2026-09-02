@@ -229,12 +229,11 @@ export function WorkingPlaceholder({
 
   return (
     <div
-      // Styled to mirror the turn footer's model row (text-sm,
-      // muted-foreground/60, no left inset): when the turn completes this row
-      // disappears and the footer appears in the same visual spot, so the two
-      // must read as the same line swapping its text.
+      // Full muted-foreground, matching the scroll-to-bottom pill's status
+      // text: the row and the pill hand off to each other in the same spot
+      // and must read as one element changing chrome.
       className={
-        'flex h-full items-center text-muted-foreground/60'
+        'flex h-full items-center text-muted-foreground'
       }
       role="status"
       aria-live={displayedPermission ? 'assertive' : 'polite'}

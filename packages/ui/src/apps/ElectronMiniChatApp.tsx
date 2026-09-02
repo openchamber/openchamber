@@ -8,6 +8,7 @@ import { MiniChatLayout } from '@/components/mini-chat/MiniChatLayout';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
+import { useRootScrollLock } from '@/hooks/useRootScrollLock';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -318,6 +319,7 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
   useMiniChatKeyboardShortcuts();
   usePushVisibilityBeacon({ enabled: true });
   useWindowTitle();
+  useRootScrollLock();
 
   return (
     <ErrorBoundary>
