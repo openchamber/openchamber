@@ -976,7 +976,7 @@ export const dict = {
   'gitView.empty.notGitRepository': 'Bu dizin bir Git repository\'si değil',
   'gitView.empty.notGitRepositoryDescription': 'Bu dizinde Git\'i başlatın veya bir repository açın.',
   'gitView.empty.retryDiscovery': 'Yeniden dene',
-  'gitView.empty.selectRepositoryPlaceholder': 'Bir repository seç...',
+  'gitView.empty.selectRepositoryPlaceholder': 'Bir repository seçin...',
   'gitView.empty.selectSessionOrDirectory': 'Git durumunu görüntülemek için bir session veya dizin seçin',
   'gitView.empty.worktreeFeaturesUnavailable': 'Bu çalışma alanı modunda worktree özellikleri kullanılamıyor.',
   'gitView.empty.worktreeSetupDescription': 'Worktree kurulumu tamamlanıyor ve repository durumu hazırlanıyor.',
