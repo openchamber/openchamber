@@ -1591,7 +1591,7 @@ export function handleEvent(
   if (payload.type === "session.deleted" && expectedRuntimeKey === getRuntimeKey()) {
     const sessionID = getSessionIdFromPayload(payload)
     if (sessionID && directory && directory !== "global") {
-      cleanupPersistedSessionState({ runtimeKey: expectedRuntimeKey, directory, sessionId: sessionID })
+      void cleanupPersistedSessionState({ runtimeKey: expectedRuntimeKey, directory, sessionId: sessionID })
     }
   }
 

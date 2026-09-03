@@ -1053,11 +1053,11 @@ function cleanupSessionWorktreeMetadata(sessionId: string): void {
  * it meaningful. Callers must still reject a stale runtime themselves, because
  * the in-memory live/global/UI stores mutated below are not runtime-scoped.
  */
-function finalizeConfirmedSessionDeletion(
+async function finalizeConfirmedSessionDeletion(
   sessionId: string,
   sessionDirectory?: string,
   expectedRuntimeKey = getRuntimeKey(),
-): void {
+): Promise<void> {
   const snapshots = removeSessionFromLiveStores(sessionId, sessionDirectory)
   invalidateSessionLoads(sessionId, [...snapshots.map((snapshot) => snapshot.directory), sessionDirectory])
   useGlobalSessionsStore.getState().removeSessions([sessionId])
@@ -1065,7 +1065,7 @@ function finalizeConfirmedSessionDeletion(
   if (ui.currentSessionId === sessionId) ui.setCurrentSession(null)
   cleanupSessionWorktreeMetadata(sessionId)
   if (sessionDirectory) {
-    cleanupPersistedSessionState({
+    await cleanupPersistedSessionState({
       runtimeKey: expectedRuntimeKey,
       directory: sessionDirectory,
       sessionId,
@@ -1120,7 +1120,7 @@ export async function deleteSession(sessionId: string, options?: DeleteSessionOp
     if (deleted !== true) {
       throw new Error("session.delete failed: server did not confirm deletion")
     }
-    finalizeConfirmedSessionDeletion(sessionId, sessionDirectory, expectedRuntimeKey)
+    await finalizeConfirmedSessionDeletion(sessionId, sessionDirectory, expectedRuntimeKey)
     await cleanupDeletedChatDirectory(sessionDirectory, deleteManagedDirectory)
     return true
   } catch (error) {
@@ -1130,7 +1130,7 @@ export async function deleteSession(sessionId: string, options?: DeleteSessionOp
     // success since the session was already deleted by the cascade.
     if ((error as { status?: number })?.status === 404) {
       if (isStaleRuntime(expectedRuntimeKey)) return false
-      finalizeConfirmedSessionDeletion(sessionId, sessionDirectory, expectedRuntimeKey)
+      await finalizeConfirmedSessionDeletion(sessionId, sessionDirectory, expectedRuntimeKey)
       await cleanupDeletedChatDirectory(sessionDirectory, deleteManagedDirectory)
       return true
     }
@@ -1155,14 +1155,14 @@ export async function deleteSessionInDirectory(
     if (deleted !== true) {
       throw new Error("session.delete failed: server did not confirm deletion")
     }
-    finalizeConfirmedSessionDeletion(sessionId, directory, expectedRuntimeKey)
+    await finalizeConfirmedSessionDeletion(sessionId, directory, expectedRuntimeKey)
     await cleanupDeletedChatDirectory(directory, deleteManagedDirectory)
     return true
   } catch (error) {
     console.error("[session-actions] deleteSessionInDirectory failed", error)
     if ((error as { status?: number })?.status === 404) {
       if (isStaleRuntime(expectedRuntimeKey)) return false
-      finalizeConfirmedSessionDeletion(sessionId, directory, expectedRuntimeKey)
+      await finalizeConfirmedSessionDeletion(sessionId, directory, expectedRuntimeKey)
       await cleanupDeletedChatDirectory(directory, deleteManagedDirectory)
       return true
     }
@@ -1453,8 +1453,10 @@ export async function optimisticSend(input: {
   agent?: string
   directory?: string | null
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
+  messageID?: string
   onOptimisticInsert?: () => void
-  onMessageID?: (messageID: string) => void
+  onMessageID?: (messageID: string) => void | Promise<void>
+  onSendFailure?: (ambiguous: boolean) => void
   beforeOptimisticInsert?: () => void
   /** The actual API call — receives the optimistic messageID so the server can use the same ID */
   send: (messageID: string) => Promise<void>
@@ -1473,7 +1475,9 @@ export async function optimisticSend(input: {
   }
 
   assertRuntimeUnchanged()
+  const messageID = input.messageID ?? ascendingId("msg")
   await waitForConnectionOrThrow()
+  await input.onMessageID?.(messageID)
   input.beforeOptimisticInsert?.()
   assertRuntimeUnchanged()
 
@@ -1512,8 +1516,6 @@ export async function optimisticSend(input: {
     }
   }
 
-  const messageID = ascendingId("msg")
-  input.onMessageID?.(messageID)
   const textPartId = ascendingId("prt")
 
   const optimisticParts: Part[] = [
@@ -1576,6 +1578,8 @@ export async function optimisticSend(input: {
       })
       return
     }
+
+    input.onSendFailure?.(ambiguousFailure)
 
     // The rollback below makes the user's message disappear with no other
     // trace, and the composer intentionally stays silent for transport-level

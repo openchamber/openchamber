@@ -141,6 +141,10 @@ export function routeMessage(params: {
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
   additionalParts?: Array<{ text: string; synthetic?: boolean; metadata?: ContextPartMetadata; files?: Array<{ type: "file"; mime: string; url: string; filename: string }> }>
   delivery?: 'steer'
+  messageID?: string
+  onMessageID?: (messageID: string) => void | Promise<void>
+  beforeSend?: () => void | Promise<void>
+  onSendFailure?: (ambiguous: boolean) => void
 }): Promise<void> {
   const requestDirectory = params.directory ?? undefined
   if (params.inputMode === "shell") {
@@ -182,6 +186,9 @@ export function routeMessage(params: {
         agent: params.agent,
         directory: requestDirectory,
         files: params.files,
+        messageID: params.messageID,
+        onMessageID: params.onMessageID,
+        onSendFailure: params.onSendFailure,
         send: (messageID) => opencodeClient.sendCommand({
           runtimeKey: params.runtimeKey,
           id: params.sessionId,
@@ -194,6 +201,7 @@ export function routeMessage(params: {
           files: params.files,
           messageId: messageID,
           directory: requestDirectory,
+          beforeDispatch: params.beforeSend,
         }).then(() => {}),
       })
     }
@@ -209,6 +217,9 @@ export function routeMessage(params: {
     agent: params.agent,
     directory: requestDirectory,
     files: params.files,
+    messageID: params.messageID,
+    onMessageID: params.onMessageID,
+    onSendFailure: params.onSendFailure,
     send: (messageID) => opencodeClient.sendMessage({
       runtimeKey: params.runtimeKey,
       id: params.sessionId,
@@ -223,6 +234,7 @@ export function routeMessage(params: {
       delivery: params.delivery,
       messageId: messageID,
       directory: requestDirectory,
+      beforeDispatch: params.beforeSend,
     }).then(() => {}),
   })
 }
@@ -240,6 +252,10 @@ type SendMessageOptions = {
   /** Immutable copy of the new-session draft at submit time; used instead of the live draft. */
   draftSnapshot?: NewSessionDraftState
   delivery?: 'steer'
+  messageID?: string
+  onMessageID?: (messageID: string) => void | Promise<void>
+  beforeSend?: () => void | Promise<void>
+  onSendFailure?: (ambiguous: boolean) => void
 }
 
 type AssistantMessageSessionExecution = {
@@ -1732,6 +1748,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       inputMode,
       files,
       delivery: options?.delivery,
+      messageID: options?.messageID,
+      onMessageID: options?.onMessageID,
+      beforeSend: options?.beforeSend,
+      onSendFailure: options?.onSendFailure,
       additionalParts: partsWithPinnedContext?.map((p) => ({
         text: p.text,
         synthetic: p.synthetic,

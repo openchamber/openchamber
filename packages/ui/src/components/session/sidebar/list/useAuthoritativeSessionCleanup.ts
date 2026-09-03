@@ -28,7 +28,7 @@ export const useAuthoritativeSessionCleanup = (args: {
       : null;
 
     for (const identity of findRemovedAuthoritativeSessions(previous, current)) {
-      cleanupPersistedSessionState({ runtimeKey, ...identity });
+      void cleanupPersistedSessionState({ runtimeKey, ...identity });
     }
     baselineRef.current = { runtimeKey, identities: current };
   }, [enabled, hasAuthoritativeGlobalSessions, sessions]);

@@ -102,7 +102,9 @@ function unwrapSdkOptional<T>(result: SdkResult<T>, operation: string): T | unde
     const status = result.response?.status;
     const error = new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`) as Error & { status?: number };
     if (status !== undefined) error.status = status;
-    throw error;
+    throw isAmbiguousTransportFailure(result.error)
+      ? markAmbiguousTransportFailure(error)
+      : error;
   }
   return result.data;
 }
@@ -689,6 +691,19 @@ class OpencodeService {
     return unwrapSdkData(response, 'session.messages');
   }
 
+  async findSessionMessage(
+    id: string,
+    messageId: string,
+    directory?: string | null,
+  ): Promise<{ info: Message; parts: Part[] } | null> {
+    const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
+    const response = requestDirectory
+      ? await this.client.session.message({ sessionID: id, messageID: messageId, directory: requestDirectory })
+      : await this.client.session.message({ sessionID: id, messageID: messageId });
+    if (response.error && response.response?.status === 404) return null;
+    return unwrapSdkData(response, 'session.message');
+  }
+
   async getSessionTodos(sessionId: string): Promise<Array<{ id: string; content: string; status: string; priority: string }>> {
     try {
       const response = await this.client.session.todo({
@@ -881,6 +896,7 @@ class OpencodeService {
       retryCount?: number;
     };
     directory?: string | null;
+    beforeDispatch?: () => void | Promise<void>;
   }): Promise<string> {
     this.assertRuntimeUnchanged(params.runtimeKey);
 
@@ -967,6 +983,8 @@ class OpencodeService {
 
     assertProviderCircuitClosed(params.providerID);
     this.assertRuntimeUnchanged(params.runtimeKey);
+    await params.beforeDispatch?.();
+    this.assertRuntimeUnchanged(params.runtimeKey);
 
     let response: Response;
 
@@ -1044,6 +1062,7 @@ class OpencodeService {
     files?: Array<FileInputLite>;
     messageId?: string;
     directory?: string | null;
+    beforeDispatch?: () => void | Promise<void>;
   }): Promise<string> {
     this.assertRuntimeUnchanged(params.runtimeKey);
 
@@ -1057,6 +1076,8 @@ class OpencodeService {
     }
 
     const requestDirectory = this.normalizeCandidatePath(params.directory ?? null) ?? this.currentDirectory;
+    this.assertRuntimeUnchanged(params.runtimeKey);
+    await params.beforeDispatch?.();
     this.assertRuntimeUnchanged(params.runtimeKey);
 
     const response = await this.client.session.command({

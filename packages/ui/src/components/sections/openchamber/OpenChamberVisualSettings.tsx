@@ -1734,7 +1734,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                     <SettingsRadioOption
                                                         key={option.id}
                                                         selected={followUpBehavior === option.id}
-                                                        onSelect={() => setFollowUpBehavior(option.id)}
+                                                        onSelect={() => void setFollowUpBehavior(option.id)}
                                                         label={tUnsafe(option.labelKey)}
                                                         ariaLabel={t('settings.openchamber.visual.field.followUpBehaviorAria', { option: tUnsafe(option.labelKey) })}
                                                     />

@@ -32,7 +32,15 @@ interface QueuedMessageChipProps {
 const QueuedMessageChip = memo(({ message, target, onEdit, onSend }: QueuedMessageChipProps) => {
     const { t } = useI18n();
     const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: message.id });
+    const isSending = useMessageQueueStore((state) => (
+        state.sendingIds[getMessageQueueKey(target)] ?? []
+    ).includes(message.id));
+    const isProtected = isSending || message.sendAttempt !== undefined;
+    const canEdit = !isProtected;
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+        id: message.id,
+        disabled: isProtected,
+    });
 
     // Get first line of message, truncated
     const firstLine = React.useMemo(() => {
@@ -58,7 +66,8 @@ const QueuedMessageChip = memo(({ message, target, onEdit, onSend }: QueuedMessa
                 type="button"
                 {...attributes}
                 {...listeners}
-                className="flex flex-shrink-0 cursor-grab touch-none select-none items-center justify-center text-muted-foreground hover:text-foreground active:cursor-grabbing"
+                disabled={isProtected}
+                className="flex flex-shrink-0 cursor-grab touch-none select-none items-center justify-center text-muted-foreground hover:text-foreground active:cursor-grabbing disabled:cursor-default disabled:opacity-50"
                 aria-label={t('chat.queuedMessage.reorderAria')}
             >
                 <Icon name="draggable" className="h-4 w-4" aria-hidden="true" />
@@ -73,6 +82,7 @@ const QueuedMessageChip = memo(({ message, target, onEdit, onSend }: QueuedMessa
                 type="button"
                 variant="secondary"
                 size="xs"
+                disabled={!canEdit}
                 onClick={() => onEdit(message)}
             >
                 <Icon name="edit" className="h-3 w-3" aria-hidden="true" />
@@ -82,6 +92,7 @@ const QueuedMessageChip = memo(({ message, target, onEdit, onSend }: QueuedMessa
                 type="button"
                 variant="secondary"
                 size="xs"
+                disabled={isSending}
                 onClick={() => onSend(message)}
             >
                 <Icon name="send-plane" className="h-3 w-3" aria-hidden="true" />
@@ -89,7 +100,8 @@ const QueuedMessageChip = memo(({ message, target, onEdit, onSend }: QueuedMessa
             </Button>
             <button
                 type="button"
-                onClick={() => removeFromQueue(target, message.id)}
+                disabled={isSending}
+                onClick={() => void removeFromQueue(target, message.id)}
                 className="flex items-center justify-center h-6 w-6 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
                 aria-label={t('chat.queuedMessage.removeAria')}
             >
@@ -144,13 +156,13 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
     const handleDragEnd = React.useCallback((event: DragEndEvent) => {
         const { active, over } = event;
         if (!over || active.id === over.id || !target) return;
-        reorderQueue(target, String(active.id), String(over.id));
+        void reorderQueue(target, String(active.id), String(over.id));
     }, [target, reorderQueue]);
 
-    const handleEdit = React.useCallback((message: QueuedMessage) => {
+    const handleEdit = React.useCallback(async (message: QueuedMessage) => {
         if (!target) return;
         
-        const popped = popToInput(target, message.id);
+        const popped = await popToInput(target, message.id);
         if (popped) {
             if (popped.attachments && popped.attachments.length > 0) {
                 const currentAttachments = useInputStore.getState().attachedFiles;
