@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
-const gitService = {
+const gitExecutionService = {
   stageGitFiles: mock(),
   unstageGitFiles: mock(),
   checkoutCommit: mock(),
@@ -11,20 +11,20 @@ const gitService = {
   getWorktreeBootstrapStatus: mock(),
 };
 
-mock.module('./gitService', () => gitService);
+mock.module('./git-execution-service', () => gitExecutionService);
 
 const { handleStandardGitBridgeMessage } = await import('./bridge-git-runtime');
 
 describe('bridge git runtime index mutations', () => {
   beforeEach(() => {
-    gitService.stageGitFiles.mockReset();
-    gitService.unstageGitFiles.mockReset();
-    gitService.checkoutCommit.mockReset();
-    gitService.cherryPick.mockReset();
-    gitService.revertCommit.mockReset();
-    gitService.resetToCommit.mockReset();
-    gitService.createWorktree.mockReset();
-    gitService.getWorktreeBootstrapStatus.mockReset();
+    gitExecutionService.stageGitFiles.mockReset();
+    gitExecutionService.unstageGitFiles.mockReset();
+    gitExecutionService.checkoutCommit.mockReset();
+    gitExecutionService.cherryPick.mockReset();
+    gitExecutionService.revertCommit.mockReset();
+    gitExecutionService.resetToCommit.mockReset();
+    gitExecutionService.createWorktree.mockReset();
+    gitExecutionService.getWorktreeBootstrapStatus.mockReset();
   });
 
   it('accepts legacy stage path payloads', async () => {
@@ -35,7 +35,7 @@ describe('bridge git runtime index mutations', () => {
     });
 
     expect(response).toEqual({ id: '1', type: 'api:git/stage', success: true, data: { success: true } });
-    expect(gitService.stageGitFiles).toHaveBeenCalledWith('/repo', ['a.ts']);
+    expect(gitExecutionService.stageGitFiles).toHaveBeenCalledWith('/repo', ['a.ts']);
   });
 
   it('accepts bulk stage paths payloads', async () => {
@@ -46,7 +46,7 @@ describe('bridge git runtime index mutations', () => {
     });
 
     expect(response?.success).toBe(true);
-    expect(gitService.stageGitFiles).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts']);
+    expect(gitExecutionService.stageGitFiles).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts']);
   });
 
   it('accepts legacy unstage path payloads', async () => {
@@ -57,7 +57,7 @@ describe('bridge git runtime index mutations', () => {
     });
 
     expect(response).toEqual({ id: '1', type: 'api:git/unstage', success: true, data: { success: true } });
-    expect(gitService.unstageGitFiles).toHaveBeenCalledWith('/repo', ['a.ts']);
+    expect(gitExecutionService.unstageGitFiles).toHaveBeenCalledWith('/repo', ['a.ts']);
   });
 
   it('accepts bulk unstage paths payloads', async () => {
@@ -68,7 +68,7 @@ describe('bridge git runtime index mutations', () => {
     });
 
     expect(response?.success).toBe(true);
-    expect(gitService.unstageGitFiles).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts']);
+    expect(gitExecutionService.unstageGitFiles).toHaveBeenCalledWith('/repo', ['a.ts', 'b.ts']);
   });
 
   it('rejects invalid path payloads', async () => {
@@ -79,7 +79,7 @@ describe('bridge git runtime index mutations', () => {
     });
 
     expect(response?.success).toBe(false);
-    expect(gitService.stageGitFiles).not.toHaveBeenCalled();
+    expect(gitExecutionService.stageGitFiles).not.toHaveBeenCalled();
   });
 
   it('rejects invalid commit hashes before commit actions reach git service', async () => {
@@ -108,10 +108,10 @@ describe('bridge git runtime index mutations', () => {
     expect(cherryPickResponse).toEqual({ id: '2', type: 'api:git/cherry-pick', success: false, error: 'Invalid commit hash' });
     expect(revertResponse).toEqual({ id: '3', type: 'api:git/revert-commit', success: false, error: 'Invalid commit hash' });
     expect(resetResponse).toEqual({ id: '4', type: 'api:git/reset-to-commit', success: false, error: 'Invalid commit hash' });
-    expect(gitService.checkoutCommit).not.toHaveBeenCalled();
-    expect(gitService.cherryPick).not.toHaveBeenCalled();
-    expect(gitService.revertCommit).not.toHaveBeenCalled();
-    expect(gitService.resetToCommit).not.toHaveBeenCalled();
+    expect(gitExecutionService.checkoutCommit).not.toHaveBeenCalled();
+    expect(gitExecutionService.cherryPick).not.toHaveBeenCalled();
+    expect(gitExecutionService.revertCommit).not.toHaveBeenCalled();
+    expect(gitExecutionService.resetToCommit).not.toHaveBeenCalled();
   });
 
   it('preserves bootstrap phases in status responses', async () => {
@@ -121,7 +121,7 @@ describe('bridge git runtime index mutations', () => {
       error: null,
       updatedAt: 123,
     };
-    gitService.getWorktreeBootstrapStatus.mockResolvedValue(bootstrapStatus);
+    gitExecutionService.getWorktreeBootstrapStatus.mockResolvedValue(bootstrapStatus);
 
     const response = await handleStandardGitBridgeMessage({
       id: 'bootstrap-status',
@@ -135,7 +135,7 @@ describe('bridge git runtime index mutations', () => {
       success: true,
       data: bootstrapStatus,
     });
-    expect(gitService.getWorktreeBootstrapStatus).toHaveBeenCalledWith('/repo-worktree');
+    expect(gitExecutionService.getWorktreeBootstrapStatus).toHaveBeenCalledWith('/repo-worktree');
   });
 
   it('preserves the directory-created phase in fast create responses', async () => {
@@ -152,7 +152,7 @@ describe('bridge git runtime index mutations', () => {
         updatedAt: 123,
       },
     };
-    gitService.createWorktree.mockResolvedValue(created);
+    gitExecutionService.createWorktree.mockResolvedValue(created);
 
     const response = await handleStandardGitBridgeMessage({
       id: 'create-worktree',
@@ -171,8 +171,11 @@ describe('bridge git runtime index mutations', () => {
       success: true,
       data: created,
     });
-    expect(gitService.createWorktree).toHaveBeenCalledWith('/repo', expect.objectContaining({
-      returnAfterDirectoryCreated: true,
-    }));
+    expect(gitExecutionService.createWorktree).toHaveBeenCalledWith(
+      '/repo',
+      expect.objectContaining({
+        returnAfterDirectoryCreated: true,
+      }),
+    );
   });
 });

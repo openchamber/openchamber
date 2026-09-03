@@ -1,4 +1,6 @@
-import { getDiff, getRangeDiff, getUntrackedDiffs, listUntrackedPaths } from '../git/service.js';
+import { getDiff, getRangeDiff, getUntrackedDiffs, listUntrackedPaths } from '../git/execution-service.js';
+
+const defaultGit = Object.freeze({ getDiff, getRangeDiff, getUntrackedDiffs, listUntrackedPaths });
 
 // A walkthrough source resolves to one or more diff *sections*. A section is a
 // patch plus the scope its hunk ids live in; keeping staged and working-tree
@@ -64,11 +66,11 @@ export function sourceKey(source) {
 // `git diff` never reports untracked files, so a brand-new file would be
 // invisible in a walkthrough of local work. The batch helper resolves the
 // repository once and bounds how many diff processes run at a time.
-const untrackedSections = async (directory) => {
-  const untracked = await listUntrackedPaths(directory);
+const untrackedSections = async (directory, git) => {
+  const untracked = await git.listUntrackedPaths(directory);
   if (untracked.length === 0) return [];
 
-  const patches = await getUntrackedDiffs(directory, untracked);
+  const patches = await git.getUntrackedDiffs(directory, untracked);
   return patches.filter((patch) => typeof patch === 'string' && patch.trim());
 };
 
@@ -77,18 +79,18 @@ const untrackedSections = async (directory) => {
  *
  * @returns {Promise<{sections: Array<{scope: string, patch: string}>, meta: object}>}
  */
-export async function loadSourceSections(directory, source, { getPullRequestDiff } = {}) {
+export async function loadSourceSections(directory, source, { getPullRequestDiff, git = defaultGit } = {}) {
   if (source.kind === 'working-tree') {
     const sections = [];
 
     if (source.scope === 'all' || source.scope === 'staged') {
-      const patch = await getDiff(directory, { staged: true });
+      const patch = await git.getDiff(directory, { staged: true });
       if (patch && patch.trim()) sections.push({ scope: 'staged', patch });
     }
 
     if (source.scope === 'all' || source.scope === 'working') {
-      const patch = await getDiff(directory, { staged: false });
-      const untracked = await untrackedSections(directory);
+      const patch = await git.getDiff(directory, { staged: false });
+      const untracked = await untrackedSections(directory, git);
       const combined = [patch, ...untracked].filter((value) => value && value.trim()).join('\n');
       if (combined.trim()) sections.push({ scope: 'working', patch: combined });
     }
@@ -97,7 +99,7 @@ export async function loadSourceSections(directory, source, { getPullRequestDiff
   }
 
   if (source.kind === 'branch') {
-    const patch = await getRangeDiff(directory, { base: source.baseRef, head: source.headRef });
+    const patch = await git.getRangeDiff(directory, { base: source.baseRef, head: source.headRef });
     return {
       sections: patch && patch.trim() ? [{ scope: 'branch', patch }] : [],
       meta: { baseRef: source.baseRef, headRef: source.headRef },

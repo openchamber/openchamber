@@ -17,6 +17,7 @@ import {
   resetAllMagicPromptOverrides,
 } from './bridge-settings-runtime';
 import { execGit } from './bridge-git-process-runtime';
+import { gitExecutionRuntime } from './git-execution-runtime';
 import {
   parseDroppedFileReference,
   readUriAsAttachment,
@@ -99,6 +100,7 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
         resolveFileReadPath,
         parseDroppedFileReference,
         readUriAsAttachment,
+        runGitRead: gitExecutionRuntime.withRawRead,
       }
     );
     if (fsResponse) {

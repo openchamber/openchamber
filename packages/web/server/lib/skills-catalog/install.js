@@ -2,7 +2,12 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { assertGitAvailable, looksLikeAuthError, runGit } from './git.js';
+import {
+  assertGitAvailable,
+  looksLikeAuthError,
+  runGit,
+  runWithGitCloneReservation,
+} from './git.js';
 import { parseSkillRepoSource } from './source.js';
 
 const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
@@ -89,14 +94,15 @@ async function copyDirectoryNoSymlinks(srcDir, dstDir) {
   await walk(srcDir, dstDir);
 }
 
-async function cloneRepo({ cloneUrl, identity, tempDir }) {
+async function cloneRepo({ cloneUrl, identity, tempDir, runGitCommand }) {
   const preferred = ['clone', '--depth', '1', '--filter=blob:none', '--no-checkout', cloneUrl, tempDir];
   const fallback = ['clone', '--depth', '1', '--no-checkout', cloneUrl, tempDir];
 
-  const result = await runGit(preferred, { identity, timeoutMs: 90_000 });
+  const result = await runGitCommand(preferred, { identity, timeoutMs: 90_000 });
   if (result.ok) return { ok: true };
 
-  const fallbackResult = await runGit(fallback, { identity, timeoutMs: 90_000 });
+  await safeRm(tempDir);
+  const fallbackResult = await runGitCommand(fallback, { identity, timeoutMs: 90_000 });
   if (fallbackResult.ok) return { ok: true };
 
   return {
@@ -138,12 +144,16 @@ export async function installSkillsFromRepository({
   selections,
   conflictPolicy,
   conflictDecisions,
+  gitExecutionService,
+  resolveGitBinaryForSpawn,
+  runGit: runGitCommand = runGit,
 } = {}) {
-  const gitCheck = await assertGitAvailable();
-  if (!gitCheck.ok) {
-    return { ok: false, error: gitCheck.error };
-  }
-
+  const runConfiguredGit = (args, options) => runGitCommand(
+    args,
+    resolveGitBinaryForSpawn
+      ? { ...options, resolveGitBinaryForSpawn }
+      : options,
+  );
   const normalizedUserSkillDir = normalizeUserSkillDir(userSkillDir);
   if (normalizedUserSkillDir) {
     userSkillDir = normalizedUserSkillDir;
@@ -214,81 +224,110 @@ export async function installSkillsFromRepository({
   }
 
   const tempBase = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-skills-install-'));
+  let cleaned = false;
+  const cleanup = async () => {
+    if (cleaned) return;
+    cleaned = true;
+    await safeRm(tempBase);
+  };
+
+  const installRepository = async () => {
+    try {
+      const gitCheck = await assertGitAvailable(runConfiguredGit);
+      if (!gitCheck.ok) {
+        return { ok: false, error: gitCheck.error };
+      }
+
+      const cloned = await cloneRepo({
+        cloneUrl,
+        identity,
+        tempDir: tempBase,
+        runGitCommand: runConfiguredGit,
+      });
+      if (!cloned.ok) {
+        const msg = `${cloned.error?.stderr || ''}\n${cloned.error?.message || ''}`.trim();
+        if (looksLikeAuthError(msg)) {
+          return { ok: false, error: { kind: 'authRequired', message: 'Authentication required to access this repository', sshOnly: true } };
+        }
+        return { ok: false, error: { kind: 'networkError', message: msg || 'Failed to clone repository' } };
+      }
+
+      // Selective checkout for only requested skill dirs.
+      await runConfiguredGit(['-C', tempBase, 'sparse-checkout', 'init', '--cone'], { identity, timeoutMs: 15_000 });
+      const setResult = await runConfiguredGit(['-C', tempBase, 'sparse-checkout', 'set', ...requestedDirs], { identity, timeoutMs: 30_000 });
+      if (!setResult.ok) {
+        return { ok: false, error: { kind: 'unknown', message: setResult.stderr || setResult.message || 'Failed to configure sparse checkout' } };
+      }
+
+      const checkoutResult = await runConfiguredGit(['-C', tempBase, 'checkout', '--force', 'HEAD'], { identity, timeoutMs: 60_000 });
+      if (!checkoutResult.ok) {
+        return { ok: false, error: { kind: 'unknown', message: checkoutResult.stderr || checkoutResult.message || 'Failed to checkout repository' } };
+      }
+
+      const installed = [];
+      const skipped = [];
+
+      for (const plan of skillPlans) {
+        if (!plan.installable) {
+          skipped.push({ skillName: plan.skillName, reason: 'Invalid skill name (directory basename)' });
+          continue;
+        }
+
+        const srcDir = toFsPath(tempBase, plan.skillDirPosix);
+        const skillMdPath = path.join(srcDir, 'SKILL.md');
+        if (!fs.existsSync(skillMdPath)) {
+          skipped.push({ skillName: plan.skillName, reason: 'SKILL.md not found in selected directory' });
+          continue;
+        }
+
+        const targetDir = getTargetSkillDir({ scope, targetSource, workingDirectory, userSkillDir, skillName: plan.skillName });
+        const exists = fs.existsSync(targetDir);
+
+        let decision = conflictDecisions?.[plan.skillName] || null;
+        if (!decision) {
+          if (exists && conflictPolicy === 'skipAll') decision = 'skip';
+          if (exists && conflictPolicy === 'overwriteAll') decision = 'overwrite';
+          if (!exists) decision = 'overwrite'; // no conflict, proceed
+        }
+
+        if (exists && decision === 'skip') {
+          skipped.push({ skillName: plan.skillName, reason: 'Already installed (skipped)' });
+          continue;
+        }
+
+        if (exists && decision === 'overwrite') {
+          await safeRm(targetDir);
+        }
+
+        // Ensure project parent directories exist
+        await ensureDir(path.dirname(targetDir));
+
+        try {
+          await copyDirectoryNoSymlinks(srcDir, targetDir);
+          installed.push({ skillName: plan.skillName, scope, source: targetSource === 'agents' ? 'agents' : 'opencode' });
+        } catch (error) {
+          await safeRm(targetDir);
+          skipped.push({
+            skillName: plan.skillName,
+            reason: error instanceof Error ? error.message : 'Failed to copy skill files',
+          });
+        }
+      }
+
+      return { ok: true, installed, skipped };
+    } finally {
+      await cleanup();
+    }
+  };
 
   try {
-    const cloned = await cloneRepo({ cloneUrl, identity, tempDir: tempBase });
-    if (!cloned.ok) {
-      const msg = `${cloned.error?.stderr || ''}\n${cloned.error?.message || ''}`.trim();
-      if (looksLikeAuthError(msg)) {
-        return { ok: false, error: { kind: 'authRequired', message: 'Authentication required to access this repository', sshOnly: true } };
-      }
-      return { ok: false, error: { kind: 'networkError', message: msg || 'Failed to clone repository' } };
-    }
-
-    // Selective checkout for only requested skill dirs.
-    await runGit(['-C', tempBase, 'sparse-checkout', 'init', '--cone'], { identity, timeoutMs: 15_000 });
-    const setResult = await runGit(['-C', tempBase, 'sparse-checkout', 'set', ...requestedDirs], { identity, timeoutMs: 30_000 });
-    if (!setResult.ok) {
-      return { ok: false, error: { kind: 'unknown', message: setResult.stderr || setResult.message || 'Failed to configure sparse checkout' } };
-    }
-
-    const checkoutResult = await runGit(['-C', tempBase, 'checkout', '--force', 'HEAD'], { identity, timeoutMs: 60_000 });
-    if (!checkoutResult.ok) {
-      return { ok: false, error: { kind: 'unknown', message: checkoutResult.stderr || checkoutResult.message || 'Failed to checkout repository' } };
-    }
-
-    const installed = [];
-    const skipped = [];
-
-    for (const plan of skillPlans) {
-      if (!plan.installable) {
-        skipped.push({ skillName: plan.skillName, reason: 'Invalid skill name (directory basename)' });
-        continue;
-      }
-
-      const srcDir = toFsPath(tempBase, plan.skillDirPosix);
-      const skillMdPath = path.join(srcDir, 'SKILL.md');
-      if (!fs.existsSync(skillMdPath)) {
-        skipped.push({ skillName: plan.skillName, reason: 'SKILL.md not found in selected directory' });
-        continue;
-      }
-
-      const targetDir = getTargetSkillDir({ scope, targetSource, workingDirectory, userSkillDir, skillName: plan.skillName });
-      const exists = fs.existsSync(targetDir);
-
-      let decision = conflictDecisions?.[plan.skillName] || null;
-      if (!decision) {
-        if (exists && conflictPolicy === 'skipAll') decision = 'skip';
-        if (exists && conflictPolicy === 'overwriteAll') decision = 'overwrite';
-        if (!exists) decision = 'overwrite'; // no conflict, proceed
-      }
-
-      if (exists && decision === 'skip') {
-        skipped.push({ skillName: plan.skillName, reason: 'Already installed (skipped)' });
-        continue;
-      }
-
-      if (exists && decision === 'overwrite') {
-        await safeRm(targetDir);
-      }
-
-      // Ensure project parent directories exist
-      await ensureDir(path.dirname(targetDir));
-
-      try {
-        await copyDirectoryNoSymlinks(srcDir, targetDir);
-        installed.push({ skillName: plan.skillName, scope, source: targetSource === 'agents' ? 'agents' : 'opencode' });
-      } catch (error) {
-        await safeRm(targetDir);
-        skipped.push({
-          skillName: plan.skillName,
-          reason: error instanceof Error ? error.message : 'Failed to copy skill files',
-        });
-      }
-    }
-
-    return { ok: true, installed, skipped };
+    return await runWithGitCloneReservation({
+      destination: tempBase,
+      label: 'skills-catalog/clone-repository',
+      queueTimeoutMs: 90_000,
+      gitExecutionService,
+    }, installRepository);
   } finally {
-    await safeRm(tempBase);
+    await cleanup();
   }
 }

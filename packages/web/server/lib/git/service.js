@@ -6,6 +6,8 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { createRequire } from 'module';
 
+import { getGitExecutionEnv } from './execution-scope.js';
+
 const fsp = fs.promises;
 const require = createRequire(import.meta.url);
 const execFileAsync = promisify(execFile);
@@ -236,7 +238,7 @@ const resolveGitBinary = () => {
   return resolvedGitBinary;
 };
 
-const getGitBinary = () => resolveGitBinary();
+export const getGitBinary = () => resolveGitBinary();
 
 /**
  * Escape an SSH key path for use in core.sshCommand.
@@ -254,7 +256,7 @@ function escapeSshKeyPath(sshKeyPath) {
   // Validate: reject paths with characters that could enable injection
   // Allow only alphanumeric, path separators, dots, dashes, underscores, spaces, and colons (for Windows drives)
   // Note: backslash is not in this list since we've already normalized Windows paths
-  const dangerousChars = /[`$!"';&|<>(){}[\]*?#~]/;
+  const dangerousChars = /[\u0000\r\n`$!"';&|<>(){}[\]*?#~%^]/;
   if (dangerousChars.test(normalizedPath)) {
     throw new Error(`SSH key path contains invalid characters: ${sshKeyPath}`);
   }
@@ -281,7 +283,7 @@ function escapeSshKeyPath(sshKeyPath) {
 /**
  * Build the SSH command string for git config
  */
-function buildSshCommand(sshKeyPath) {
+export function buildSshCommand(sshKeyPath) {
   const escapedPath = escapeSshKeyPath(sshKeyPath);
   return `ssh -i ${escapedPath} -o IdentitiesOnly=yes`;
 }
@@ -341,8 +343,12 @@ const resolveSshAuthSock = async () => {
   return null;
 };
 
-const buildGitEnv = async () => {
-  const env = { ...process.env };
+const buildGitEnv = async (envOverrides = undefined) => {
+  const env = {
+    ...process.env,
+    ...(envOverrides || {}),
+    ...getGitExecutionEnv(),
+  };
   if (!env.SSH_AUTH_SOCK || !env.SSH_AUTH_SOCK.trim()) {
     const resolved = await resolveSshAuthSock();
     if (resolved) {
@@ -352,8 +358,11 @@ const buildGitEnv = async () => {
   return env;
 };
 
-const createGit = async (directory, { allowUnsafeSshCommand = false } = {}) => {
-  const env = await buildGitEnv();
+export const createGit = async (
+  directory,
+  { allowUnsafeSshCommand = false, envOverrides = undefined, signal = undefined } = {},
+) => {
+  const env = await buildGitEnv(envOverrides);
   const spawnOptions = { windowsHide: true };
   const binary = getGitBinary();
   const hasCustomBinary = typeof binary === 'string' && binary.trim() && binary !== 'git' && binary !== 'git.exe';
@@ -372,13 +381,17 @@ const createGit = async (directory, { allowUnsafeSshCommand = false } = {}) => {
   if (typeof baseDir !== 'string' || !baseDir.trim()) {
     throw new Error('Git directory is required');
   }
-  return createSimpleGit({
+  const gitOptions = {
     baseDir,
     env,
     spawnOptions,
     binary,
     unsafe,
-  });
+  };
+  if (signal) {
+    gitOptions.abort = signal;
+  }
+  return createSimpleGit(gitOptions);
 };
 
 // Global config reads do not need a repository; use the home directory as a
@@ -483,14 +496,16 @@ const resolveGitRepositoryRoot = async (directoryPath, git) => {
     : path.resolve(directoryPath, normalizedTopLevel);
 };
 
-const createRepositoryGitContext = async (directory) => {
+const createRepositoryGitContext = async (directory, { signal = undefined } = {}) => {
   const directoryPath = normalizeDirectoryPath(directory);
   if (typeof directoryPath !== 'string' || !directoryPath.trim()) {
     throw new Error('Git directory is required');
   }
-  const directoryGit = await createGit(directoryPath);
+  const directoryGit = await createGit(directoryPath, { signal });
   const repoRoot = await resolveGitRepositoryRoot(directoryPath, directoryGit);
-  const git = path.resolve(directoryPath) === repoRoot ? directoryGit : await createGit(repoRoot);
+  const git = path.resolve(directoryPath) === repoRoot
+    ? directoryGit
+    : await createGit(repoRoot, { signal });
   return { directoryPath, directoryGit, repoRoot, git };
 };
 
@@ -807,6 +822,15 @@ const parseGitErrorText = (error) => {
     .trim();
 };
 
+const GIT_NOT_A_REPOSITORY_ERROR_CODE = 'GIT_NOT_A_REPOSITORY';
+
+const isExecutionFailureCode = (value) => {
+  const code = String(value || '').toUpperCase();
+  return code === 'EACCES' || code === 'EPERM' || code === 'ENOENT';
+};
+
+const isExecutionFailureText = (value) => /\b(?:eacces|eperm|enoent)\b|access is denied|command not found|cannot execute|failed to spawn|no such file or directory|permission denied/i.test(value);
+
 const parseAheadBehindCounts = (value) => {
   const [aheadRaw, behindRaw] = String(value || '').trim().split(/\s+/);
   const ahead = parseInt(aheadRaw, 10);
@@ -898,8 +922,23 @@ const getRemoteBranchComparison = async (git, remoteName, branchName) => {
 };
 
 const isNotGitRepositoryError = (error) => {
+  if (error && typeof error === 'object') {
+    if (error.code === GIT_NOT_A_REPOSITORY_ERROR_CODE || error.reason === 'not-a-repository') {
+      return true;
+    }
+    if (isExecutionFailureCode(error.code) || isExecutionFailureCode(error.error?.code)) {
+      return false;
+    }
+  }
   const text = parseGitErrorText(error);
-  return /not a git repository/i.test(text);
+  return !isExecutionFailureText(text) && /not a git repository/i.test(text);
+};
+
+const createNotGitRepositoryError = () => {
+  const error = new Error('fatal: not a git repository (or any of the parent directories): .git');
+  error.code = GIT_NOT_A_REPOSITORY_ERROR_CODE;
+  error.reason = 'not-a-repository';
+  return error;
 };
 
 // A directory that no longer exists (e.g. a worktree deleted while something
@@ -915,13 +954,14 @@ const isMissingDirectoryError = (error) => {
   return /directory that does not exist|does not exist|no such file or directory/i.test(text);
 };
 
-const runGitCommand = async (cwd, args) => {
+const runGitCommand = async (cwd, args, { envOverrides = undefined, signal = undefined } = {}) => {
   try {
     const { stdout, stderr } = await execFileAsync(getGitBinary(), args, {
       cwd,
-      env: await buildGitEnv(),
+      env: await buildGitEnv(envOverrides),
       windowsHide: true,
       maxBuffer: 20 * 1024 * 1024,
+      signal,
     });
     return {
       success: true,
@@ -933,6 +973,7 @@ const runGitCommand = async (cwd, args) => {
     return {
       success: false,
       exitCode: typeof error?.code === 'number' ? error.code : 1,
+      code: typeof error?.code === 'string' ? error.code : undefined,
       stdout: String(error?.stdout || ''),
       stderr: String(error?.stderr || ''),
       message: parseGitErrorText(error),
@@ -1811,9 +1852,9 @@ const queueWorktreeBootstrap = (args) => {
     ensureRemoteName,
     ensureRemoteUrl,
     startCommand,
+    scheduleBackground,
   } = args;
-  const task = new Promise((resolve) => setTimeout(resolve, 0))
-    .then(async () => {
+  const bootstrap = async () => {
       await populateWorktreeWithLockRecovery(directory);
       await runPostCheckoutHook(directory);
       if (setUpstream) {
@@ -1843,7 +1884,14 @@ const queueWorktreeBootstrap = (args) => {
         WORKTREE_BOOTSTRAP_READY,
         WORKTREE_BOOTSTRAP_PHASE_SETUP_READY
       );
-    })
+  };
+  const task = (scheduleBackground
+    ? Promise.resolve(scheduleBackground({
+      operation: 'worktreeBootstrap',
+      contextDirectory: directory,
+      network: Boolean(setUpstream || (ensureRemoteName && ensureRemoteUrl)),
+    }, bootstrap))
+    : new Promise((resolve) => setTimeout(resolve, 0)).then(bootstrap))
     .catch((error) => {
       setWorktreeBootstrapState(
         directory,
@@ -2048,13 +2096,13 @@ const applyUpstreamConfiguration = async (args) => {
   );
 };
 
-export async function isGitRepository(directory) {
+export async function isGitRepository(directory, { signal = undefined } = {}) {
   const directoryPath = normalizeDirectoryPath(directory);
   if (!directoryPath || !fs.existsSync(directoryPath)) {
     return false;
   }
 
-  const result = await runGitCommand(directoryPath, ['rev-parse', '--git-dir']);
+  const result = await runGitCommand(directoryPath, ['rev-parse', '--git-dir'], { signal });
   return result.success;
 }
 
@@ -2187,11 +2235,13 @@ export async function getStatus(directory, options = {}) {
   try {
     // Prefer an explicit non-repo check before simple-git status so a missing
     // repository never depends on process.cwd() or an opaque GitError shape.
-    if (!(await isGitRepository(normalizedDirectory))) {
+    if (!(await isGitRepository(normalizedDirectory, { signal: options.signal }))) {
       throw new Error('fatal: not a git repository (or any of the parent directories): .git');
     }
 
-    const { directoryPath, repoRoot, git } = await createRepositoryGitContext(normalizedDirectory);
+    const { directoryPath, repoRoot, git } = await createRepositoryGitContext(normalizedDirectory, {
+      signal: options.signal,
+    });
 
     // Use -uall to show all untracked files individually, not just directories
     const status = await git.status(['-uall']);
@@ -2448,7 +2498,7 @@ export async function getStatus(directory, options = {}) {
     if (isNotGitRepositoryError(error) || isMissingDirectoryError(error)) {
       // Re-throw a plain Error so route/session callers can match reliably and
       // continue enumerating other projects instead of treating GitError as 500.
-      throw new Error('fatal: not a git repository (or any of the parent directories): .git');
+      throw createNotGitRepositoryError();
     }
     console.error('Failed to get Git status:', error);
     throw error;
@@ -2924,6 +2974,7 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
         const { stdout } = await execFileAsync(getGitBinary(), ['show', `HEAD:${repoPath}`], {
           cwd: repoRoot,
           encoding: 'buffer',
+          env: await buildGitEnv(),
           windowsHide: true,
           maxBuffer: 50 * 1024 * 1024, // 50MB max
         });
@@ -2947,6 +2998,7 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
         const { stdout } = await execFileAsync(getGitBinary(), ['show', `:${repoPath}`], {
           cwd: repoRoot,
           encoding: 'buffer',
+          env: await buildGitEnv(),
           windowsHide: true,
           maxBuffer: 50 * 1024 * 1024,
         });
@@ -3749,19 +3801,15 @@ async function getRemoteDefaultBranches(git) {
     const missing = remotes.filter((remote) => remote?.name && !defaults[remote.name]);
     if (missing.length === 0) return defaults;
 
-    const resolved = await Promise.all(missing.map(async (remote) => {
+    for (const remote of missing) {
       try {
         const output = await git.raw(['ls-remote', '--symref', remote.name, 'HEAD']);
         const match = String(output || '').match(/^ref:\s+refs\/heads\/(.+?)\s+HEAD$/m);
-        return match ? [remote.name, match[1]] : null;
+        if (match) defaults[remote.name] = match[1];
       } catch {
         // Unreachable or refusing: no answer is better than a guessed one.
-        return null;
+        continue;
       }
-    }));
-
-    for (const entry of resolved) {
-      if (entry) defaults[entry[0]] = entry[1];
     }
   } catch {
     // Remote list unavailable; the local symrefs are still valid.
@@ -3782,7 +3830,7 @@ async function filterActiveRemoteBranches(git, remoteBranches) {
     // against the local remote-tracking refs.
     const unreachableRemotes = new Set();
 
-    await Promise.all(remotes.map(async (remote) => {
+    for (const remote of remotes) {
       try {
         const lsRemoteResult = await git.raw(['ls-remote', '--heads', remote.name]);
         const actualRemoteBranches = new Set();
@@ -3797,7 +3845,7 @@ async function filterActiveRemoteBranches(git, remoteBranches) {
       } catch {
         unreachableRemotes.add(remote.name);
       }
-    }));
+    }
 
     const activeBranches = remoteBranches.filter(remoteBranch => {
       const match = remoteBranch.match(/^remotes\/[^\/]+\/(.+)$/);
@@ -4240,7 +4288,7 @@ export async function previewWorktreeCreate(directory, input = {}) {
   };
 }
 
-async function attachGitWorktreeToCandidate(context, candidate, input = {}) {
+async function attachGitWorktreeToCandidate(context, candidate, input = {}, options = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const startRef = normalizeStartRef(input?.startRef);
   let ensureRemoteName = String(input?.ensureRemoteName || '').trim();
@@ -4351,6 +4399,7 @@ async function attachGitWorktreeToCandidate(context, candidate, input = {}) {
     ensureRemoteName,
     ensureRemoteUrl,
     startCommand: input?.startCommand,
+    scheduleBackground: options.scheduleBackground,
   });
 
   const headResult = await runGitCommand(candidate.directory, ['rev-parse', 'HEAD']);
@@ -4366,7 +4415,7 @@ async function attachGitWorktreeToCandidate(context, candidate, input = {}) {
   };
 }
 
-export async function createWorktree(directory, input = {}) {
+export async function createWorktree(directory, input = {}, options = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
 
@@ -4398,7 +4447,14 @@ export async function createWorktree(directory, input = {}) {
       ? cleanBranchName(String(input?.branchName || input?.existingBranch || candidate.branch || '').trim())
       : candidate.branch;
 
-    const task = attachGitWorktreeToCandidate(context, candidate, input).catch(async (error) => {
+    const attach = () => attachGitWorktreeToCandidate(context, candidate, input, options);
+    const task = (options.scheduleBackground
+      ? Promise.resolve(options.scheduleBackground({
+        operation: 'worktreeAttachment',
+        contextDirectory: context.primaryWorktree,
+        network: Boolean(input?.setUpstream || (input?.ensureRemoteName && input?.ensureRemoteUrl)),
+      }, attach))
+      : attach()).catch(async (error) => {
       setWorktreeBootstrapState(
         candidate.directory,
         WORKTREE_BOOTSTRAP_FAILED,
@@ -4420,7 +4476,7 @@ export async function createWorktree(directory, input = {}) {
     };
   }
 
-  return attachGitWorktreeToCandidate(context, candidate, input);
+  return attachGitWorktreeToCandidate(context, candidate, input, options);
 }
 
 export async function getWorktreeBootstrapStatus(directory) {

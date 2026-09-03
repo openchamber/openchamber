@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import { spawn, execFile } from 'child_process';
 import { promisify } from 'util';
 import type { API as GitAPI, Repository, GitExtension, Status } from './git.d';
+import { getGitExecutionEnv } from './git-execution-scope';
 
 let gitApi: GitAPI | null = null;
 let gitExtensionEnabled = false;
@@ -234,6 +235,12 @@ async function getGitApi(): Promise<GitAPI | null> {
   return initGitExtension();
 }
 
+export async function getGitExecutablePath(): Promise<string | undefined> {
+  const api = await getGitApi();
+  const configuredPath = api?.git.path;
+  return typeof configuredPath === 'string' && configuredPath.trim() ? configuredPath : undefined;
+}
+
 /**
  * Get repository for a given directory
  */
@@ -304,23 +311,73 @@ function cleanBranchName(branch: string): string {
   return branch;
 }
 
+type GitProcessExecutionOptions = {
+  signal?: AbortSignal;
+};
+
+export type GitRangeExecutionOptions = {
+  signal?: AbortSignal;
+  queueTimeoutMs?: number;
+};
+
 /**
  * Execute a raw git command and return the output
  */
-async function execGit(args: string[], cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+async function execGit(
+  args: string[],
+  cwd: string,
+  options: GitProcessExecutionOptions = {},
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const normalizedCwd = normalizePath(cwd);
   return new Promise((resolve) => {
-    const normalizedCwd = normalizePath(cwd);
-    const gitPath = gitApi?.git.path || 'git';
-
-    buildGitEnv().then((env) => {
-      const proc = spawn(gitPath, args, {
-        cwd: normalizedCwd,
-        env,
-        windowsHide: true,
-      });
-
+    Promise.all([buildGitEnv(), getGitExecutablePath()]).then(([env, configuredPath]) => {
+      const gitPath = configuredPath?.trim() || 'git';
       let stdout = '';
       let stderr = '';
+      let settled = false;
+      let terminationRequested = false;
+
+      if (options.signal?.aborted) {
+        resolve({
+          stdout,
+          stderr: options.signal.reason instanceof Error
+            ? options.signal.reason.message
+            : String(options.signal.reason || 'Git process was cancelled'),
+          exitCode: 1,
+        });
+        return;
+      }
+
+      let proc: ReturnType<typeof spawn>;
+      try {
+        proc = spawn(gitPath, args, {
+          cwd: normalizedCwd,
+          env: { ...env, ...getGitExecutionEnv() },
+          windowsHide: true,
+        });
+      } catch (error) {
+        resolve({ stdout: '', stderr: error instanceof Error ? error.message : String(error), exitCode: 1 });
+        return;
+      }
+
+      const cleanup = () => {
+        options.signal?.removeEventListener('abort', onAbort);
+      };
+      const finish = (result: { stdout: string; stderr: string; exitCode: number }) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(result);
+      };
+      const onAbort = () => {
+        if (settled || terminationRequested) return;
+        terminationRequested = true;
+        try {
+          proc.kill('SIGKILL');
+        } catch {
+          // The process may already have exited.
+        }
+      };
 
       proc.stdout?.on('data', (data) => {
         stdout += data.toString();
@@ -331,16 +388,31 @@ async function execGit(args: string[], cwd: string): Promise<{ stdout: string; s
       });
 
       proc.on('close', (exitCode) => {
-        resolve({ stdout, stderr, exitCode: exitCode ?? 0 });
+        finish({ stdout, stderr, exitCode: exitCode ?? (terminationRequested ? 1 : 0) });
       });
 
       proc.on('error', (error) => {
-        resolve({ stdout: '', stderr: error.message, exitCode: 1 });
+        finish({
+          stdout,
+          stderr: `${stderr}\n${error.message}`.trim(),
+          exitCode: 1,
+        });
       });
+
+      if (options.signal?.aborted) {
+        onAbort();
+        return;
+      }
+      options.signal?.addEventListener('abort', onAbort, { once: true });
     }).catch((error) => {
       resolve({ stdout: '', stderr: error instanceof Error ? error.message : String(error), exitCode: 1 });
     });
   });
+}
+
+function createGitCommandFailure(operation: string, directory: string, args: string[], result: { stderr: string; exitCode: number }): Error {
+  const detail = result.stderr.trim() || `Git exited with code ${result.exitCode}`;
+  return new Error(`${operation} failed in ${directory}: ${detail} (git ${args.join(' ')})`);
 }
 
 function isValidCommitHash(hash: string): boolean {
@@ -433,6 +505,8 @@ export interface GitStatusResult {
 
 type GitStatusOptions = {
   mode?: 'light';
+  signal?: AbortSignal;
+  queueTimeoutMs?: number;
 };
 
 /**
@@ -474,12 +548,11 @@ function getRepositoryRelativePath(repo: Repository, uri: vscode.Uri): string {
 export async function getGitStatus(directory: string, options?: GitStatusOptions): Promise<GitStatusResult> {
   // The VS Code Git API path does not compute heavyweight diff stats today,
   // but accepts the shared options contract so callers can rely on parity.
-  void options;
   const repo = await getRepository(directory);
-  
+
   if (!repo) {
     // Fallback to raw git
-    return getGitStatusRaw(directory);
+    return getGitStatusRaw(directory, options);
   }
 
   const state = repo.state;
@@ -592,8 +665,10 @@ async function checkInProgressOperations(directory: string): Promise<{
 /**
  * Fallback: Get git status using raw git commands
  */
-async function getGitStatusRaw(directory: string): Promise<GitStatusResult> {
-  const statusResult = await execGit(['status', '--porcelain=v1', '-b', '-uall'], directory);
+async function getGitStatusRaw(directory: string, options: GitStatusOptions = {}): Promise<GitStatusResult> {
+  const statusResult = await execGit(['status', '--porcelain=v1', '-b', '-uall'], directory, {
+    signal: options.signal,
+  });
   
   if (statusResult.exitCode !== 0) {
     return {
@@ -898,6 +973,19 @@ export interface CreateGitWorktreePayload {
   ensureRemoteUrl?: string;
   returnAfterDirectoryCreated?: boolean;
 }
+
+export type GitWorktreeBackgroundOperation = 'worktreeAttachment' | 'worktreeBootstrap';
+
+export type GitWorktreeExecutionOptions = {
+  scheduleBackground?: <T>(
+    request: {
+      operation: GitWorktreeBackgroundOperation;
+      contextDirectory: string;
+      network?: boolean;
+    },
+    task: () => Promise<T>,
+  ) => Promise<T> | void;
+};
 
 export interface RemoveGitWorktreePayload {
   directory: string;
@@ -1576,6 +1664,7 @@ const queueWorktreeBootstrap = (args: {
   ensureRemoteName: string;
   ensureRemoteUrl: string;
   startCommand: string | undefined;
+  scheduleBackground?: GitWorktreeExecutionOptions['scheduleBackground'];
 }) => {
   const {
     directory,
@@ -1588,31 +1677,38 @@ const queueWorktreeBootstrap = (args: {
     ensureRemoteName,
     ensureRemoteUrl,
     startCommand,
+    scheduleBackground,
   } = args;
-  const task = new Promise<void>((resolve) => setTimeout(resolve, 0))
-    .then(async () => {
-      await populateWorktreeWithLockRecovery(directory);
-      await runPostCheckoutHook(directory);
-      if (setUpstream) {
-        await applyUpstreamConfiguration({
-          primaryWorktree,
-          worktreeDirectory: directory,
-          localBranch,
-          setUpstream,
-          upstreamRemote,
-          upstreamBranch,
-          ensureRemoteName,
-          ensureRemoteUrl,
-        }).catch((error) => {
-          console.warn('[GitService] Worktree upstream configuration failed:', error instanceof Error ? error.message : String(error));
-        });
-      }
-      setWorktreeBootstrapState(directory, WORKTREE_BOOTSTRAP_PENDING, WORKTREE_PHASE_GIT_READY);
-      await runWorktreeStartScripts(directory, projectID, startCommand).catch((error) => {
-        console.warn('[GitService] Worktree start script task failed:', error instanceof Error ? error.message : String(error));
+  const bootstrap = async () => {
+    await populateWorktreeWithLockRecovery(directory);
+    await runPostCheckoutHook(directory);
+    if (setUpstream) {
+      await applyUpstreamConfiguration({
+        primaryWorktree,
+        worktreeDirectory: directory,
+        localBranch,
+        setUpstream,
+        upstreamRemote,
+        upstreamBranch,
+        ensureRemoteName,
+        ensureRemoteUrl,
+      }).catch((error) => {
+        console.warn('[GitService] Worktree upstream configuration failed:', error instanceof Error ? error.message : String(error));
       });
-      setWorktreeBootstrapState(directory, WORKTREE_BOOTSTRAP_READY, WORKTREE_PHASE_SETUP_READY);
-    })
+    }
+    setWorktreeBootstrapState(directory, WORKTREE_BOOTSTRAP_PENDING, WORKTREE_PHASE_GIT_READY);
+    await runWorktreeStartScripts(directory, projectID, startCommand).catch((error) => {
+      console.warn('[GitService] Worktree start script task failed:', error instanceof Error ? error.message : String(error));
+    });
+    setWorktreeBootstrapState(directory, WORKTREE_BOOTSTRAP_READY, WORKTREE_PHASE_SETUP_READY);
+  };
+  const task = (scheduleBackground
+    ? Promise.resolve(scheduleBackground({
+      operation: 'worktreeBootstrap',
+      contextDirectory: directory,
+      network: Boolean(setUpstream || (ensureRemoteName && ensureRemoteUrl)),
+    }, bootstrap))
+    : new Promise<void>((resolve) => setTimeout(resolve, 0)).then(bootstrap))
     .catch((error) => {
       setWorktreeBootstrapFailure(directory, error);
       console.warn('[GitService] Worktree bootstrap task failed:', error instanceof Error ? error.message : String(error));
@@ -1926,6 +2022,7 @@ async function attachGitWorktreeToCandidate(
   context: Awaited<ReturnType<typeof resolveWorktreeProjectContext>>,
   candidate: { name: string; directory: string; branch: string },
   input: CreateGitWorktreePayload = {},
+  options: GitWorktreeExecutionOptions = {},
 ): Promise<GitWorktreeInfo> {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
@@ -2044,6 +2141,7 @@ async function attachGitWorktreeToCandidate(
     ensureRemoteName,
     ensureRemoteUrl,
     startCommand: input?.startCommand,
+    scheduleBackground: options.scheduleBackground,
   });
 
   const headResult = await runGitCommand(candidate.directory, ['rev-parse', 'HEAD']);
@@ -2059,7 +2157,11 @@ async function attachGitWorktreeToCandidate(
   };
 }
 
-export async function createWorktree(directory: string, input: CreateGitWorktreePayload = {}): Promise<GitWorktreeInfo> {
+export async function createWorktree(
+  directory: string,
+  input: CreateGitWorktreePayload = {},
+  options: GitWorktreeExecutionOptions = {},
+): Promise<GitWorktreeInfo> {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
 
@@ -2096,7 +2198,14 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
       ? cleanBranchName(String(input?.branchName || input?.existingBranch || candidate.branch || '').trim())
       : candidate.branch;
 
-    const task = attachGitWorktreeToCandidate(context, candidate, input).catch(async (error) => {
+    const attach = () => attachGitWorktreeToCandidate(context, candidate, input, options);
+    const task = (options.scheduleBackground
+      ? Promise.resolve(options.scheduleBackground({
+        operation: 'worktreeAttachment',
+        contextDirectory: context.primaryWorktree,
+        network: Boolean(input?.setUpstream || (input?.ensureRemoteName && input?.ensureRemoteUrl)),
+      }, attach))
+      : attach()).catch(async (error) => {
       setWorktreeBootstrapFailure(candidate.directory, error);
       await cleanupFailedFastWorktreeCreate(context, candidate);
       console.warn('[GitService] Background worktree creation failed:', error instanceof Error ? error.message : String(error));
@@ -2113,7 +2222,7 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
     };
   }
 
-  return attachGitWorktreeToCandidate(context, candidate, input);
+  return attachGitWorktreeToCandidate(context, candidate, input, options);
 }
 
 export async function getWorktreeBootstrapStatus(directory: string): Promise<WorktreeBootstrapStatus> {
@@ -2227,7 +2336,8 @@ export async function getGitRangeDiff(
   base: string,
   head: string,
   filePath: string,
-  contextLines = 3
+  contextLines = 3,
+  options: GitRangeExecutionOptions = {},
 ): Promise<{ diff: string }> {
   const baseRef = (base || '').trim();
   const headRef = (head || '').trim();
@@ -2237,7 +2347,9 @@ export async function getGitRangeDiff(
 
   let resolvedBase = baseRef;
   try {
-    const verify = await execGit(['rev-parse', '--verify', `refs/remotes/origin/${baseRef}`], directory);
+    const verify = await execGit(['rev-parse', '--verify', `refs/remotes/origin/${baseRef}`], directory, {
+      signal: options.signal,
+    });
     if (verify.exitCode === 0) {
       resolvedBase = `origin/${baseRef}`;
     }
@@ -2246,7 +2358,10 @@ export async function getGitRangeDiff(
   }
 
   const args = ['diff', '--no-color', `-U${Math.max(0, contextLines)}`, `${resolvedBase}...${headRef}`, '--', filePath];
-  const result = await execGit(args, directory);
+  const result = await execGit(args, directory, { signal: options.signal });
+  if (result.exitCode !== 0) {
+    throw createGitCommandFailure('Git range diff', directory, args, result);
+  }
   return { diff: result.stdout };
 }
 
@@ -2256,7 +2371,8 @@ export async function getGitRangeDiff(
 export async function getGitRangeFiles(
   directory: string,
   base: string,
-  head: string
+  head: string,
+  options: GitRangeExecutionOptions = {},
 ): Promise<string[]> {
   const baseRef = (base || '').trim();
   const headRef = (head || '').trim();
@@ -2266,7 +2382,9 @@ export async function getGitRangeFiles(
 
   let resolvedBase = baseRef;
   try {
-    const verify = await execGit(['rev-parse', '--verify', `refs/remotes/origin/${baseRef}`], directory);
+    const verify = await execGit(['rev-parse', '--verify', `refs/remotes/origin/${baseRef}`], directory, {
+      signal: options.signal,
+    });
     if (verify.exitCode === 0) {
       resolvedBase = `origin/${baseRef}`;
     }
@@ -2275,8 +2393,10 @@ export async function getGitRangeFiles(
   }
 
   const args = ['diff', '--name-only', `${resolvedBase}...${headRef}`];
-  const result = await execGit(args, directory);
-  if (result.exitCode !== 0) return [];
+  const result = await execGit(args, directory, { signal: options.signal });
+  if (result.exitCode !== 0) {
+    throw createGitCommandFailure('Git range file discovery', directory, args, result);
+  }
   return String(result.stdout || '')
     .split('\n')
     .map((l) => l.trim())

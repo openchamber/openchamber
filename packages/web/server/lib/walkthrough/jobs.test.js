@@ -6,28 +6,28 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 const TEMP_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'walkthrough-jobs-'));
 process.env.OPENCHAMBER_DATA_DIR = TEMP_DATA_DIR;
 
-// Mocking git rather than this module's own source loading: fewer of our own
-// seams faked means the test exercises the real digest and prompt path.
-vi.mock('../git/service.js', () => ({
-  getRepositoryRoot: vi.fn(async () => '/repo'),
-  getDiff: vi.fn(),
-  getRangeDiff: vi.fn(),
-  getUntrackedDiffs: vi.fn(async () => []),
-  listUntrackedPaths: vi.fn(async () => []),
-}));
-vi.mock('../small-model/index.js', () => ({
-  describeSmallModel: vi.fn(),
-  generateSmallModelText: vi.fn(),
-}));
+const getRepositoryRoot = vi.fn(async () => '/repo');
+const getDiff = vi.fn();
+const getRangeDiff = vi.fn();
+const getUntrackedDiffs = vi.fn(async () => []);
+const listUntrackedPaths = vi.fn(async () => []);
+const describeSmallModel = vi.fn();
+const generateSmallModelText = vi.fn();
+const walkthroughDeps = {
+  getRepositoryRoot,
+  describeSmallModel,
+  generateSmallModelText,
+  git: { getDiff, getRangeDiff, getUntrackedDiffs, listUntrackedPaths },
+};
 const {
-  generateWalkthrough,
-  cancelWalkthroughGeneration,
+  generateWalkthrough: generateWalkthroughImpl,
+  cancelWalkthroughGeneration: cancelWalkthroughGenerationImpl,
   isGenerating,
   getGenerationStage,
   __testing: walkthroughTesting,
 } = await import('./index.js');
-const { describeSmallModel, generateSmallModelText } = await import('../small-model/index.js');
-const { getDiff } = await import('../git/service.js');
+const generateWalkthrough = (options) => generateWalkthroughImpl(options, walkthroughDeps);
+const cancelWalkthroughGeneration = (options) => cancelWalkthroughGenerationImpl(options, walkthroughDeps);
 
 // bun's vitest shim has no `vi.waitFor`.
 const waitFor = async (predicate, { timeout = 2_000, interval = 5 } = {}) => {

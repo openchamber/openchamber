@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { mintOutsideFileGrant, registerFsRoutes } from './routes.js';
 import { createProjectDirectoryRuntime } from '../opencode/project-directory-runtime.js';
+import { createGitExecutionCoordinator } from '../git/execution-coordinator.js';
+import { createGitExecutionService } from '../git/execution-service.js';
 
 const createRouteRegistry = () => {
   const routes = new Map();
@@ -303,6 +305,372 @@ const callReveal = async (handler, body) => {
   await handler({ body }, res);
   return res;
 };
+
+const createCloneFs = ({ destinationExists = () => false, statDestination = false, onClone } = {}) => ({
+  realpath: async (targetPath) => targetPath,
+  stat: vi.fn(async (targetPath) => {
+    if (statDestination && destinationExists(targetPath)) return { isDirectory: () => true };
+    throw Object.assign(new Error('not found'), { code: 'ENOENT' });
+  }),
+  mkdir: vi.fn(async () => undefined),
+  access: vi.fn(async (targetPath) => {
+    if (destinationExists(targetPath)) return undefined;
+    throw Object.assign(new Error('not found'), { code: 'ENOENT' });
+  }),
+  rm: vi.fn(async (targetPath) => onClone?.('removed', targetPath)),
+});
+
+const registerClone = ({ fsPromises, spawn, gitExecutionService, resolveCloneGitIdentity } = {}) => {
+  const { app, getRoute } = createRouteRegistry();
+  registerFsRoutes(app, {
+    os: { homedir: () => '/home/user' },
+    path: path.posix,
+    fsPromises: fsPromises || createCloneFs(),
+    spawn: spawn || vi.fn(),
+    crypto: { randomUUID: () => 'job-0' },
+    normalizeDirectoryPath: (value) => value,
+    resolveProjectDirectory: async () => ({ directory: '/repo' }),
+    buildAugmentedPath: () => '/usr/bin',
+    resolveGitBinaryForSpawn: () => 'git',
+    gitExecutionService,
+    resolveCloneGitIdentity,
+    openchamberUserConfigRoot: '/home/user/.config',
+  });
+  return getRoute('POST', '/api/fs/clone');
+};
+
+const createCloneRequest = (body) => {
+  const req = new EventEmitter();
+  req.body = body;
+  req.aborted = false;
+  return req;
+};
+
+const beginClone = (handler, body) => {
+  const req = createCloneRequest(body);
+  const res = createMockResponse();
+  return { req, res, promise: handler(req, res) };
+};
+
+const waitForCloneSpawn = async (deferred) => {
+  for (let attempt = 0; attempt < 20 && deferred.pending.length === 0; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+};
+
+const createDeferredCloneSpawn = ({ onClose } = {}) => {
+  const pending = [];
+  const spawn = vi.fn((command, args, options) => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = vi.fn();
+    pending.push({ child, command, args, options });
+    return child;
+  });
+  const close = (index, code = 0, stderr = '') => {
+    const entry = pending.splice(index, 1)[0];
+    if (!entry) throw new Error(`No pending clone at index ${index}`);
+    if (stderr) entry.child.stderr.emit('data', stderr);
+    onClose?.(entry);
+    entry.child.emit('close', code, null);
+  };
+  return { spawn, pending, close };
+};
+
+describe('fs clone', () => {
+  const cloneBody = (destinationPath = '/tmp/repository') => ({
+    remoteUrl: 'https://github.com/owner/repository.git',
+    destinationPath,
+  });
+
+  it('returns a conflict for an existing destination without starting Git', async () => {
+    const fsPromises = createCloneFs({ destinationExists: (targetPath) => targetPath === '/tmp/repository' });
+    const spawn = vi.fn();
+    const handler = registerClone({ fsPromises, spawn, resolveCloneGitIdentity: async () => null });
+    const res = createMockResponse();
+
+    await handler(createCloneRequest(cloneBody()), res);
+
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual({ error: 'Destination path already exists' });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('coalesces canonical destination aliases while allowing a distinct destination', async () => {
+    const canonical = (value) => value.replace('/alias-parent/', '/real-parent/');
+    const destinations = new Set();
+    const fsPromises = createCloneFs({
+      destinationExists: (targetPath) => destinations.has(canonical(targetPath)),
+    });
+    const deferred = createDeferredCloneSpawn({
+      onClose: ({ options, args }) => destinations.add(canonical(path.posix.join(options.cwd, args.at(-1)))),
+    });
+    const coordinator = createGitExecutionCoordinator({
+      globalConcurrency: 4,
+      canonicalizeCloneDestination: async (destination) => canonical(destination),
+    });
+    const handler = registerClone({
+      fsPromises,
+      spawn: deferred.spawn,
+      gitExecutionService: { coordinator },
+      resolveCloneGitIdentity: async () => null,
+    });
+
+    const first = beginClone(handler, cloneBody('/real-parent/clone'));
+    await waitForCloneSpawn(deferred);
+    const alias = beginClone(handler, cloneBody('/alias-parent/clone'));
+    const distinct = beginClone(handler, cloneBody('/real-parent/other-clone'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(deferred.spawn).toHaveBeenCalledTimes(2);
+    deferred.close(1);
+    await expect(distinct.promise).resolves.toBeUndefined();
+    expect(alias.res.writableEnded).not.toBe(true);
+
+    deferred.close(0);
+    await expect(first.promise).resolves.toBeUndefined();
+    await expect(alias.promise).resolves.toBeUndefined();
+    expect(first.res.body).toMatchObject({ success: true, path: '/real-parent/clone' });
+    expect(alias.res.statusCode).toBe(409);
+    expect(alias.res.body).toEqual({ error: 'Destination path already exists' });
+  });
+
+  it('cancels the Git process and removes a partial destination', async () => {
+    const removed = [];
+    const fsPromises = createCloneFs({ onClone: (_event, targetPath) => removed.push(targetPath) });
+    const deferred = createDeferredCloneSpawn();
+    const coordinator = createGitExecutionCoordinator({
+      globalConcurrency: 1,
+      globalNetworkConcurrency: 1,
+      canonicalizeCloneDestination: async (destination) => path.resolve(destination),
+    });
+    const handler = registerClone({
+      fsPromises,
+      spawn: deferred.spawn,
+      gitExecutionService: { coordinator },
+      resolveCloneGitIdentity: async () => null,
+    });
+    const request = beginClone(handler, cloneBody());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const child = deferred.pending[0].child;
+
+    request.req.emit('aborted');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fsPromises.rm).not.toHaveBeenCalled();
+    expect(request.res.body).toBeNull();
+    expect(coordinator.getStats()).toMatchObject({
+      active: 1,
+      activeNetwork: 1,
+      clonePending: 0,
+      cloneDestinations: 1,
+    });
+    deferred.close(0, 137);
+    await request.promise;
+
+    expect(request.res.statusCode).toBe(500);
+    expect(request.res.body).toEqual({ error: 'Git clone was cancelled' });
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+    expect(removed).toEqual(['/tmp/repository']);
+    expect(coordinator.getStats()).toMatchObject({
+      active: 0,
+      activeNetwork: 0,
+      clonePending: 0,
+      cloneDestinations: 0,
+    });
+  });
+
+  it('waits for a timed-out Git child to exit before cleanup', async () => {
+    const previous = process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS;
+    process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS = '5';
+    try {
+      const fsPromises = createCloneFs();
+      const deferred = createDeferredCloneSpawn();
+      const handler = registerClone({
+        fsPromises,
+        spawn: deferred.spawn,
+        resolveCloneGitIdentity: async () => null,
+      });
+      const request = beginClone(handler, cloneBody());
+      await waitForCloneSpawn(deferred);
+      await new Promise((resolve) => setTimeout(resolve, 15));
+
+      expect(deferred.pending[0].child.kill).toHaveBeenCalledWith('SIGKILL');
+      expect(fsPromises.rm).not.toHaveBeenCalled();
+      deferred.close(0, 137);
+      await request.promise;
+
+      expect(request.res.body).toEqual({ error: 'Git clone timed out after 5ms' });
+      expect(fsPromises.rm).toHaveBeenCalledWith('/tmp/repository', { recursive: true, force: true });
+    } finally {
+      if (previous === undefined) delete process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS;
+      else process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS = previous;
+    }
+  });
+
+  it('does not remove a destination claimed by another process after the access check', async () => {
+    const alreadyExists = Object.assign(new Error('destination created concurrently'), { code: 'EEXIST' });
+    const fsPromises = createCloneFs();
+    fsPromises.mkdir.mockImplementation(async (_targetPath, options) => {
+      if (options?.recursive) return undefined;
+      throw alreadyExists;
+    });
+    const spawn = vi.fn();
+    const handler = registerClone({
+      fsPromises,
+      spawn,
+      resolveCloneGitIdentity: async () => null,
+    });
+
+    const request = beginClone(handler, cloneBody());
+    await request.promise;
+
+    expect(request.res.statusCode).toBe(409);
+    expect(request.res.body).toEqual({ error: 'Destination path already exists' });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(fsPromises.rm).not.toHaveBeenCalled();
+  });
+
+  it('returns the queue timeout and does not start a queued clone', async () => {
+    const previous = process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS;
+    process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS = '100';
+    try {
+      const deferred = createDeferredCloneSpawn();
+      const coordinator = createGitExecutionCoordinator({ globalConcurrency: 1, globalNetworkConcurrency: 1 });
+      const handler = registerClone({
+        fsPromises: createCloneFs(),
+        spawn: deferred.spawn,
+        gitExecutionService: {
+          coordinator: {
+            runClone: (options, task) => coordinator.runClone({ ...options, queueTimeoutMs: 1 }, task),
+          },
+        },
+        resolveCloneGitIdentity: async () => null,
+      });
+      const first = beginClone(handler, cloneBody('/tmp/first'));
+      await waitForCloneSpawn(deferred);
+      const queued = beginClone(handler, cloneBody('/tmp/second'));
+
+      await expect(queued.promise).resolves.toBe(queued.res);
+      expect(queued.res.statusCode).toBe(500);
+      expect(queued.res.body).toEqual({ error: 'Git clone queue wait timed out' });
+      expect(deferred.spawn).toHaveBeenCalledTimes(1);
+      deferred.close(0);
+      await expect(first.promise).resolves.toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS;
+      else process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS = previous;
+    }
+  });
+
+  it('cleans a partial clone after Git exits with an error', async () => {
+    const fsPromises = createCloneFs();
+    const deferred = createDeferredCloneSpawn();
+    const handler = registerClone({ fsPromises, spawn: deferred.spawn, resolveCloneGitIdentity: async () => null });
+    const request = beginClone(handler, cloneBody());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    deferred.close(0, 128, 'fatal: repository not found');
+    await request.promise;
+
+    expect(request.res.statusCode).toBe(500);
+    expect(request.res.body).toEqual({ error: 'fatal: repository not found' });
+    expect(fsPromises.rm).toHaveBeenCalledWith('/tmp/repository', { recursive: true, force: true });
+  });
+
+  it('preserves the response when applying the selected identity fails', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const deferred = createDeferredCloneSpawn();
+    const setLocalIdentity = vi.fn(async () => { throw new Error('identity configuration failed'); });
+    const handler = registerClone({
+      fsPromises: createCloneFs(),
+      spawn: deferred.spawn,
+      gitExecutionService: { setLocalIdentity },
+      resolveCloneGitIdentity: async () => ({
+        userName: 'User',
+        userEmail: 'user@example.test',
+      }),
+    });
+    const request = beginClone(handler, cloneBody());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    deferred.close(0);
+    await request.promise;
+
+    expect(request.res.body).toMatchObject({ success: true, path: '/tmp/repository' });
+    expect(setLocalIdentity).toHaveBeenCalledWith(
+      '/tmp/repository',
+      expect.objectContaining({ userName: 'User' }),
+      expect.objectContaining({ lease: expect.any(Object), signal: expect.any(AbortSignal) }),
+    );
+    expect(warning).toHaveBeenCalledWith('Failed to apply git identity after clone:', expect.any(Error));
+    warning.mockRestore();
+  });
+
+  it('returns identity resolution failures without starting Git', async () => {
+    const spawn = vi.fn();
+    const handler = registerClone({
+      spawn,
+      resolveCloneGitIdentity: async () => { throw new Error('Git identity configuration failed'); },
+    });
+    const res = createMockResponse();
+
+    await handler(createCloneRequest(cloneBody()), res);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual({ error: 'Git identity configuration failed' });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('runs local clone post-processing under the held reservation at global saturation', async () => {
+    const destinations = new Set();
+    let releaseIdentity;
+    const fsPromises = createCloneFs({ destinationExists: (targetPath) => destinations.has(targetPath) });
+    const deferred = createDeferredCloneSpawn({
+      onClose: ({ options, args }) => destinations.add(path.posix.join(options.cwd, args.at(-1))),
+    });
+    const coordinator = createGitExecutionCoordinator({ globalConcurrency: 1, globalNetworkConcurrency: 1 });
+    const setLocalIdentity = vi.fn(() => new Promise((resolve) => { releaseIdentity = resolve; }));
+    const gitExecutionService = createGitExecutionService({
+      raw: {
+        setLocalIdentity,
+      },
+      coordinator,
+      resolver: {
+        resolve: async (directory) => ({
+          isRepository: true,
+          commonId: '/tmp/repository/.git',
+          worktreeId: directory,
+        }),
+      },
+    });
+    const handler = registerClone({
+      fsPromises,
+      spawn: deferred.spawn,
+      gitExecutionService,
+      resolveCloneGitIdentity: async () => ({ userName: 'User', userEmail: 'user@example.test' }),
+    });
+
+    const first = beginClone(handler, cloneBody('/tmp/repository'));
+    await waitForCloneSpawn(deferred);
+    deferred.close(0);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const second = beginClone(handler, cloneBody('/tmp/repository'));
+    for (let attempt = 0; attempt < 20 && coordinator.getStats().clonePending !== 1; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(coordinator.getStats()).toMatchObject({ active: 1, activeNetwork: 0, clonePending: 1 });
+    expect(second.res.body).toBeNull();
+    expect(setLocalIdentity).toHaveBeenCalledTimes(1);
+
+    releaseIdentity();
+    await first.promise;
+    await second.promise;
+    expect(first.res.body).toMatchObject({ success: true });
+    expect(second.res.statusCode).toBe(409);
+    expect(second.res.body).toEqual({ error: 'Destination path already exists' });
+  });
+});
 
 describe('fs write', () => {
   it('does not rewrite a file when content is unchanged', async () => {

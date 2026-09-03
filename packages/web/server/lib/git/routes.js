@@ -27,7 +27,23 @@ export function registerGitRoutes(app) {
       .join('\n');
   };
 
-  const isNonRepoGitError = (error) => /not a git repository/i.test(extractGitErrorText(error));
+  const isNonRepoGitError = (error) => {
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+
+    if (error.code === 'GIT_NOT_A_REPOSITORY' || error.reason === 'not-a-repository') {
+      return true;
+    }
+
+    const details = error.details;
+    if (details && typeof details === 'object' && details.reason === 'not-a-repository') {
+      return true;
+    }
+
+    const gitErrorCode = String(error.gitErrorCode || '').toLowerCase().replace(/[^a-z]/g, '');
+    return gitErrorCode === 'notagitrepository' || gitErrorCode === 'notarepository';
+  };
 
   const nonRepoStatusPayload = () => ({
     isGitRepository: false,

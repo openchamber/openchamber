@@ -1592,6 +1592,20 @@ describe.runIf(canRunGit())('getBranches', () => {
     expect(branches.all).toContain('remotes/origin/react');
   });
 
+  it('preserves unreachable remote branches alongside reachable remote results', async () => {
+    const { repository, remote } = createRepositoryWithRemote({ remoteName: 'origin', defaultBranch: 'react' });
+    const offlineRemote = path.join(remote, 'missing');
+    runGit(repository, ['remote', 'add', 'offline', offlineRemote]);
+    const branchHash = runGit(repository, ['rev-parse', 'refs/remotes/origin/react']).trim();
+    runGit(repository, ['update-ref', 'refs/remotes/offline/react', branchHash]);
+    runGit(repository, ['symbolic-ref', 'refs/remotes/offline/HEAD', 'refs/remotes/offline/react']);
+
+    const branches = await getBranches(repository);
+
+    expect(branches.all).toContain('remotes/origin/react');
+    expect(branches.all).toContain('remotes/offline/react');
+  });
+
   it('includes remote branches with no local tracking ref and prunes refs deleted on the remote (#2098)', async () => {
     const remote = createTempDir();
     runGit(remote, ['init', '--bare', '--initial-branch=main']);

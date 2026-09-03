@@ -1,6 +1,7 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
 import nodeFsPromises from 'node:fs/promises';
 import nodePath from 'node:path';
+import { createGitIgnoreReader } from './gitignore.js';
 
 const EXEC_JOB_TTL_MS = 30 * 60 * 1000;
 const OUTSIDE_FILE_GRANT_TTL_MS = 10 * 60 * 1000;
@@ -107,6 +108,99 @@ const createGitCheckIgnoreTimeoutMs = () => {
   if (Number.isFinite(raw) && raw >= 0) return raw;
   return 2500;
 };
+
+const createRequestAbortSignal = (req, res) => {
+  const controller = new AbortController();
+  const abort = () => {
+    if (!res?.writableEnded) {
+      controller.abort();
+    }
+  };
+  req?.once?.('aborted', abort);
+  res?.once?.('close', abort);
+  if (req?.aborted) {
+    controller.abort();
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      req?.off?.('aborted', abort);
+      res?.off?.('close', abort);
+    },
+  };
+};
+
+const runGitCloneProcess = ({ spawn, command, args, cwd, env, signal, timeoutMs }) => new Promise((resolve, reject) => {
+  let child;
+  try {
+    child = spawn(command, args, {
+      cwd,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env,
+    });
+  } catch (error) {
+    reject(error);
+    return;
+  }
+
+  let stdout = '';
+  let stderr = '';
+  let settled = false;
+  let terminationError;
+  let terminationRequested = false;
+  let timeout;
+
+  const cleanup = () => {
+    if (timeout) clearTimeout(timeout);
+    signal?.removeEventListener('abort', onAbort);
+  };
+  const finish = (callback, value) => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    callback(value);
+  };
+  const requestTermination = (error) => {
+    if (terminationRequested) return;
+    terminationRequested = true;
+    terminationError = error;
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      // The process may already have exited.
+    }
+  };
+  const onAbort = () => requestTermination(new Error('Git clone was cancelled'));
+
+  child.stdout?.on('data', (data) => { stdout += data.toString(); });
+  child.stderr?.on('data', (data) => { stderr += data.toString(); });
+  child.on('error', (error) => finish(reject, terminationError || error));
+  child.on('close', (code) => {
+    if (terminationError) {
+      finish(reject, terminationError);
+      return;
+    }
+    const combined = `${stdout}\n${stderr}`.trim();
+    if (code === 0) {
+      finish(resolve, combined);
+      return;
+    }
+    finish(reject, new Error(combined || `git clone failed with exit code ${code}`));
+  });
+
+  if (timeoutMs > 0) {
+    timeout = setTimeout(() => {
+      requestTermination(new Error(`Git clone timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  }
+  if (signal?.aborted) {
+    onAbort();
+    return;
+  }
+  signal?.addEventListener('abort', onAbort, { once: true });
+});
 
 const createUploadMaxBytes = () => {
   const raw = Number(process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES);
@@ -519,6 +613,8 @@ export const registerFsRoutes = (app, dependencies) => {
     resolveProjectDirectory,
     buildAugmentedPath,
     resolveGitBinaryForSpawn,
+    gitExecutionService,
+    resolveCloneGitIdentity: resolveCloneGitIdentityDependency = resolveCloneGitIdentity,
     openchamberUserConfigRoot,
   } = dependencies;
   const realpathCache = createRealpathCache({
@@ -552,6 +648,12 @@ export const registerFsRoutes = (app, dependencies) => {
   const gitCheckIgnoreTimeoutMs = createGitCheckIgnoreTimeoutMs();
   const gitReadCache = new Map();
   const inFlightGitReadCache = new Map();
+  const gitIgnoreReader = createGitIgnoreReader({
+    spawn,
+    resolveGitBinaryForSpawn,
+    gitExecutionService,
+    timeoutMs: gitCheckIgnoreTimeoutMs,
+  });
 
   const pruneExecJobs = () => {
     const now = Date.now();
@@ -791,7 +893,7 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: 'Destination path must include a directory name' });
       }
 
-      const identity = await resolveCloneGitIdentity(gitIdentityId);
+      const identity = await resolveCloneGitIdentityDependency(gitIdentityId);
       const gitArgs = ['clone', '--', remote, directoryName];
       const sshKeyPath = typeof identity?.sshKey === 'string' ? identity.sshKey.trim() : '';
       if (sshKeyPath) {
@@ -799,54 +901,98 @@ export const registerFsRoutes = (app, dependencies) => {
         gitArgs.unshift('-c');
       }
 
-      await fsPromises.mkdir(parentPath, { recursive: true });
-      try {
-        await fsPromises.access(resolvedDestination);
-        return res.status(409).json({ error: 'Destination path already exists' });
-      } catch (error) {
-        if (!error || error.code !== 'ENOENT') {
+      const requestAbort = createRequestAbortSignal(req, res);
+      let destinationOwned = false;
+      const executeClone = async (lease) => {
+        try {
+          await fsPromises.mkdir(parentPath, { recursive: true });
+          try {
+            await fsPromises.access(resolvedDestination);
+            return res.status(409).json({ error: 'Destination path already exists' });
+          } catch (error) {
+            if (!error || error.code !== 'ENOENT') {
+              throw error;
+            }
+          }
+
+          try {
+            await fsPromises.mkdir(resolvedDestination);
+            destinationOwned = true;
+          } catch (error) {
+            if (error?.code === 'EEXIST') {
+              return res.status(409).json({ error: 'Destination path already exists' });
+            }
+            throw error;
+          }
+
+          const output = await runGitCloneProcess({
+            spawn,
+            command: resolveGitBinaryForSpawn(),
+            args: gitArgs,
+            cwd: parentPath,
+            windowsHide: true,
+            env: {
+              ...process.env,
+              PATH: buildAugmentedPath ? buildAugmentedPath(process.env.PATH || '') : process.env.PATH,
+              GIT_TERMINAL_PROMPT: '0',
+            },
+            signal: requestAbort.signal,
+            timeoutMs: commandTimeoutMs,
+          });
+          lease.releaseNetwork();
+
+          if (identity?.userName && identity?.userEmail) {
+            try {
+              if (gitExecutionService?.setLocalIdentity) {
+                await gitExecutionService.setLocalIdentity(resolvedDestination, identity, {
+                  lease,
+                  signal: requestAbort.signal,
+                });
+              } else if (gitExecutionService?.coordinator?.run) {
+                const { setLocalIdentity } = await import('../git/index.js');
+                await gitExecutionService.coordinator.run({
+                  context: {
+                    isRepository: true,
+                    commonId: resolvedDestination,
+                    worktreeId: resolvedDestination,
+                  },
+                  kind: 'common-write',
+                  lease,
+                }, () => setLocalIdentity(resolvedDestination, identity));
+              } else {
+                const { setLocalIdentity } = await import('../git/index.js');
+                await setLocalIdentity(resolvedDestination, identity);
+              }
+            } catch (error) {
+              console.warn('Failed to apply git identity after clone:', error);
+            }
+          }
+
+          return res.json({ success: true, path: resolvedDestination, output });
+        } catch (error) {
+          lease.releaseNetwork();
+          if (destinationOwned) {
+            await Promise.resolve(fsPromises.rm?.(resolvedDestination, { recursive: true, force: true })).catch(() => {});
+          }
           throw error;
         }
-      }
+      };
 
-      const output = await new Promise((resolve, reject) => {
-        const child = spawn(resolveGitBinaryForSpawn(), gitArgs, {
-          cwd: parentPath,
-          windowsHide: true,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          env: {
-            ...process.env,
-            PATH: buildAugmentedPath ? buildAugmentedPath(process.env.PATH || '') : process.env.PATH,
-            GIT_TERMINAL_PROMPT: '0',
-          },
-        });
-
-        let stdout = '';
-        let stderr = '';
-        child.stdout.on('data', (data) => { stdout += data.toString(); });
-        child.stderr.on('data', (data) => { stderr += data.toString(); });
-        child.on('error', reject);
-        child.on('close', (code) => {
-          const combined = `${stdout}\n${stderr}`.trim();
-          if (code === 0) {
-            resolve(combined);
-            return;
-          }
-          const message = combined || `git clone failed with exit code ${code}`;
-          reject(new Error(message));
-        });
-      });
-
-      if (identity?.userName && identity?.userEmail) {
-        try {
-          const { setLocalIdentity } = await import('../git/index.js');
-          await setLocalIdentity(resolvedDestination, identity);
-        } catch (error) {
-          console.warn('Failed to apply git identity after clone:', error);
+      try {
+        if (gitExecutionService?.coordinator?.runClone) {
+          await gitExecutionService.coordinator.runClone({
+            destination: resolvedDestination,
+            label: 'fs/clone',
+            signal: requestAbort.signal,
+            queueTimeoutMs: commandTimeoutMs,
+          }, executeClone);
+        } else {
+          await executeClone({ releaseNetwork: () => {} });
         }
+      } finally {
+        requestAbort.cleanup();
       }
-
-      return res.json({ success: true, path: resolvedDestination, output });
+      return undefined;
     } catch (error) {
       console.error('Failed to clone repository:', error);
       return res.status(500).json({ error: error.message || 'Failed to clone repository' });
@@ -1572,44 +1718,20 @@ export const registerFsRoutes = (app, dependencies) => {
         try {
           const pathsToCheck = dirents.map((d) => d.name);
           if (pathsToCheck.length > 0) {
+            const requestAbort = createRequestAbortSignal(req, res);
             try {
-              const result = await new Promise((resolve) => {
-                const child = spawn(resolveGitBinaryForSpawn(), ['check-ignore', '--', ...pathsToCheck], {
-                  cwd: resolvedPath,
-                  windowsHide: true,
-                  stdio: ['ignore', 'pipe', 'pipe'],
-                });
-
-                let stdout = '';
-                let settled = false;
-                let timeout = null;
-                const finish = (value) => {
-                  if (settled) return;
-                  settled = true;
-                  if (timeout) clearTimeout(timeout);
-                  resolve(value);
-                };
-
-                if (gitCheckIgnoreTimeoutMs > 0) {
-                  timeout = setTimeout(() => {
-                    try {
-                      child.kill('SIGKILL');
-                    } catch {
-                    }
-                    finish('');
-                  }, gitCheckIgnoreTimeoutMs);
-                }
-
-                child.stdout.on('data', (data) => { stdout += data.toString(); });
-                child.on('close', () => finish(stdout));
-                child.on('error', () => finish(''));
-              });
-
-              result.split('\n').filter(Boolean).forEach((name) => {
-                const fullPath = path.join(resolvedPath, name.trim());
-                ignoredPaths.add(fullPath);
+              const ignoredNames = await gitIgnoreReader.getIgnoredNames(
+                resolvedPath,
+                pathsToCheck,
+                { signal: requestAbort.signal },
+              );
+              ignoredNames.forEach((name) => {
+                ignoredPaths.add(path.join(resolvedPath, name));
               });
             } catch {
+              // Gitignore is an optional filter; retain all entries on failure.
+            } finally {
+              requestAbort.cleanup();
             }
           }
         } catch {

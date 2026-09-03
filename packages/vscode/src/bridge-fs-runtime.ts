@@ -3,6 +3,9 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import type { BridgeResponse } from './bridge';
+import type { GitProcessExecutionOptions } from './bridge-git-process-runtime';
+import { runWithGitExecutionScope } from './git-execution-scope';
+import { parseGitCheckIgnoreResult } from './bridge-fs-helpers-runtime';
 
 type BridgeMessageInput = {
   id: string;
@@ -44,6 +47,17 @@ type FsExecCommandResult = {
   stderr?: string;
   error?: string;
 };
+
+type GitReadOptions = {
+  signal?: AbortSignal;
+  queueTimeoutMs?: number;
+};
+
+type GitReadRunner = <T>(
+  cwd: string,
+  task: () => Promise<T> | T,
+  options?: GitReadOptions,
+) => Promise<T>;
 
 const createGitReadCacheTtlMs = () => {
   const raw = Number(process.env.OPENCHAMBER_GIT_READ_CACHE_TTL_MS);
@@ -106,13 +120,18 @@ type FsDeps = {
   resolveUserPath: (value: string, baseDirectory: string) => string;
   listDirectoryEntries: (directoryPath: string) => Promise<DirectoryEntry[]>;
   normalizeFsPath: (value: string) => string;
-  execGit: (args: string[], cwd: string) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
+  execGit: (
+    args: string[],
+    cwd: string,
+    options?: GitProcessExecutionOptions,
+  ) => Promise<{ stdout: string; stderr: string; exitCode: number; code?: string }>;
   searchDirectory: (
     directory: string,
     query: string,
     limit: number | undefined,
     includeHidden: boolean,
     respectGitignore: boolean,
+    runGitRead?: GitReadRunner,
   ) => Promise<Array<{ name: string; path: string; relativePath: string; extension: string | undefined }>>;
   resolveFileReadPath: (inputPath: string) => Promise<
     | { ok: true; resolvedPath: string }
@@ -120,23 +139,35 @@ type FsDeps = {
   >;
   parseDroppedFileReference: (rawReference: string) => DroppedReferenceParse;
   readUriAsAttachment: (uri: vscode.Uri, name: string) => Promise<ReadUriAsAttachmentResult>;
+  runGitRead?: GitReadRunner;
 };
 
 const runGitCheckIgnore = async (
   execGit: FsDeps['execGit'],
   args: string[],
   cwd: string,
-): Promise<{ stdout: string; stderr: string; exitCode: number } | null> => {
+  runGitRead?: FsDeps['runGitRead'],
+): Promise<{ stdout: string; stderr: string; exitCode: number; code?: string } | null> => {
+  const controller = GIT_CHECK_IGNORE_TIMEOUT_MS > 0 ? new AbortController() : undefined;
+  const readOptions = controller
+    ? { signal: controller.signal, queueTimeoutMs: GIT_CHECK_IGNORE_TIMEOUT_MS }
+    : undefined;
+  const read = () => runGitRead
+    ? runGitRead(cwd, () => execGit(args, cwd, { signal: readOptions?.signal }), readOptions)
+    : runWithGitExecutionScope(true, () => execGit(args, cwd, { signal: readOptions?.signal }));
   if (GIT_CHECK_IGNORE_TIMEOUT_MS <= 0) {
-    return execGit(args, cwd);
+    return read();
   }
 
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
-      execGit(args, cwd),
+      read(),
       new Promise<null>((resolve) => {
-        timeout = setTimeout(() => resolve(null), GIT_CHECK_IGNORE_TIMEOUT_MS);
+        timeout = setTimeout(() => {
+          controller?.abort('Gitignore discovery timed out');
+          resolve(null);
+        }, GIT_CHECK_IGNORE_TIMEOUT_MS);
       }),
     ]);
   } finally {
@@ -144,6 +175,11 @@ const runGitCheckIgnore = async (
       clearTimeout(timeout);
     }
   }
+};
+
+const reportGitignoreFailure = (cwd: string, error: unknown): void => {
+  const detail = error instanceof Error ? error.message : String(error);
+  console.warn(`Gitignore filtering skipped for ${cwd}: ${detail}`);
 };
 
 export async function handleFsBridgeMessage(
@@ -207,23 +243,23 @@ export async function handleFsBridgeMessage(
         return { id, type, success: true, data: { entries, directory: normalized, path: normalized } };
       }
 
+      let ignoredNames = new Set<string>();
       try {
-        const result = await runGitCheckIgnore(deps.execGit, ['check-ignore', '--', ...pathsToCheck], normalized);
-        if (!result) {
-          return { id, type, success: true, data: { entries, directory: normalized, path: normalized } };
-        }
-        const ignoredNames = new Set(
-          result.stdout
-            .split('\n')
-            .map((name) => name.trim())
-            .filter(Boolean)
+        ignoredNames = parseGitCheckIgnoreResult(
+          await runGitCheckIgnore(
+            deps.execGit,
+            ['check-ignore', '-z', '--', ...pathsToCheck],
+            normalized,
+            deps.runGitRead,
+          ),
+          normalized,
         );
-
-        const filteredEntries = entries.filter((entry) => !ignoredNames.has(entry.name));
-        return { id, type, success: true, data: { entries: filteredEntries, directory: normalized, path: normalized } };
-      } catch {
-        return { id, type, success: true, data: { entries, directory: normalized, path: normalized } };
+      } catch (error) {
+        reportGitignoreFailure(normalized, error);
       }
+
+      const filteredEntries = entries.filter((entry) => !ignoredNames.has(entry.name));
+      return { id, type, success: true, data: { entries: filteredEntries, directory: normalized, path: normalized } };
     }
 
     case 'api:fs:search': {
@@ -234,7 +270,14 @@ export async function handleFsBridgeMessage(
         includeHidden?: boolean;
         respectGitignore?: boolean;
       };
-      const files = await deps.searchDirectory(directory, query, limit, Boolean(includeHidden), respectGitignore !== false);
+      const files = await deps.searchDirectory(
+        directory,
+        query,
+        limit,
+        Boolean(includeHidden),
+        respectGitignore !== false,
+        deps.runGitRead,
+      );
       return { id, type, success: true, data: { files } };
     }
 

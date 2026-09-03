@@ -44,6 +44,8 @@ export const registerSkillRoutes = (app, dependencies) => {
     parseSkillRepoSource,
     scanSkillsRepository,
     installSkillsFromRepository,
+    resolveGitBinaryForSpawn,
+    gitExecutionService,
     fetchGitHubRepoMetas,
     getProfiles,
     getProfile,
@@ -383,10 +385,12 @@ export const registerSkillRoutes = (app, dependencies) => {
       const scanResult = await scanWithCache(
         cacheKey,
         () => scanSkillsRepository({
-          source: src.source,
-          subpath: src.defaultSubpath,
-          defaultSubpath: src.defaultSubpath,
+         source: src.source,
+         subpath: src.defaultSubpath,
+         defaultSubpath: src.defaultSubpath,
           identity: resolveGitIdentity(src.gitIdentityId),
+          resolveGitBinaryForSpawn,
+          gitExecutionService,
         }),
         { refresh },
       );
@@ -426,6 +430,8 @@ export const registerSkillRoutes = (app, dependencies) => {
         source,
         subpath,
         identity,
+        resolveGitBinaryForSpawn,
+        gitExecutionService,
       });
 
       if (!result.ok) {
@@ -487,6 +493,8 @@ export const registerSkillRoutes = (app, dependencies) => {
         selections,
         conflictPolicy,
         conflictDecisions,
+        resolveGitBinaryForSpawn,
+        gitExecutionService,
       });
 
       if (!result.ok) {

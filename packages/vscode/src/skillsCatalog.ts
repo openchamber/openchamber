@@ -108,9 +108,45 @@ function looksLikeAuthError(message: string): boolean {
   );
 }
 
-async function runGit(args: string[], options?: { cwd?: string; timeoutMs?: number }) {
+type GitExecutableResolver = () => Promise<string | undefined>;
+
+type GitCloneLease = {
+  releaseNetwork: () => void;
+};
+
+type GitExecutionRuntime = {
+  coordinator: {
+    runClone: <T>(
+      options: { destination: string; label: string; queueTimeoutMs: number },
+      task: (lease: GitCloneLease) => Promise<T> | T,
+    ) => Promise<T>;
+  };
+};
+
+type SkillsCatalogDependencies = {
+  resolveGitExecutable?: GitExecutableResolver;
+  gitExecutionRuntime?: GitExecutionRuntime;
+};
+
+const resolveConfiguredGitExecutable: GitExecutableResolver = async () => {
+  const { getGitExecutablePath } = await import('./gitService');
+  return getGitExecutablePath();
+};
+
+const loadGitExecutionRuntime = async (): Promise<GitExecutionRuntime> => {
+  const { gitExecutionRuntime } = await import('./git-execution-runtime');
+  return gitExecutionRuntime;
+};
+
+async function runGit(
+  args: string[],
+  options?: { cwd?: string; timeoutMs?: number },
+  resolveGitExecutable: GitExecutableResolver = resolveConfiguredGitExecutable,
+) {
   try {
-    const { stdout, stderr } = await execFileAsync('git', args, {
+    const configuredPath = await resolveGitExecutable();
+    const gitExecutable = configuredPath?.trim() || 'git';
+    const { stdout, stderr } = await execFileAsync(gitExecutable, args, {
       cwd: options?.cwd,
       timeout: options?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       maxBuffer: DEFAULT_MAX_BUFFER,
@@ -131,8 +167,8 @@ async function runGit(args: string[], options?: { cwd?: string; timeoutMs?: numb
   }
 }
 
-async function assertGitAvailable() {
-  const result = await runGit(['--version'], { timeoutMs: 5_000 });
+async function assertGitAvailable(resolveGitExecutable: GitExecutableResolver = resolveConfiguredGitExecutable) {
+  const result = await runGit(['--version'], { timeoutMs: 5_000 }, resolveGitExecutable);
   if (!result.ok) {
     return { ok: false as const, error: { kind: 'gitUnavailable' as const, message: 'Git is not available in PATH' } };
   }
@@ -230,14 +266,21 @@ async function safeRm(dir: string) {
   }
 }
 
-async function cloneRepo(cloneUrl: string, targetDir: string) {
+async function cloneRepo(
+  cloneUrl: string,
+  targetDir: string,
+  resolveGitExecutable: GitExecutableResolver,
+) {
   const preferred = ['clone', '--depth', '1', '--filter=blob:none', '--no-checkout', cloneUrl, targetDir];
   const fallback = ['clone', '--depth', '1', '--no-checkout', cloneUrl, targetDir];
 
-  const result = await runGit(preferred, { timeoutMs: 60_000 });
-  if (result.ok) return { ok: true as const };
+  const result = await runGit(preferred, { timeoutMs: 60_000 }, resolveGitExecutable);
+  if (result.ok) {
+    return { ok: true as const };
+  }
 
-  const fallbackResult = await runGit(fallback, { timeoutMs: 60_000 });
+  await safeRm(targetDir);
+  const fallbackResult = await runGit(fallback, { timeoutMs: 60_000 }, resolveGitExecutable);
   if (fallbackResult.ok) return { ok: true as const };
 
   const combined = `${fallbackResult.stderr}\n${fallbackResult.message}`.trim();
@@ -255,120 +298,151 @@ async function cloneRepo(cloneUrl: string, targetDir: string) {
   return { ok: false as const, error: { kind: 'networkError' as const, message: combined || 'Failed to clone repository' } };
 }
 
-export async function scanSkillsRepository(options: { source: string; subpath?: string; defaultSubpath?: string }): Promise<SkillsRepoScanResult> {
-  const gitCheck = await assertGitAvailable();
-  if (!gitCheck.ok) {
-    return { ok: false as const, error: gitCheck.error };
-  }
-
+export async function scanSkillsRepository(
+  options: { source: string; subpath?: string; defaultSubpath?: string },
+  dependencies: SkillsCatalogDependencies = {},
+): Promise<SkillsRepoScanResult> {
   const parsed = parseSkillRepoSource(options.source, options.subpath);
   if (!parsed.ok) {
     return { ok: false as const, error: parsed.error };
   }
 
   const effectiveSubpath = parsed.effectiveSubpath || options.defaultSubpath || null;
+  const resolveGitExecutable = dependencies.resolveGitExecutable || resolveConfiguredGitExecutable;
+  const executionRuntime = dependencies.gitExecutionRuntime || await loadGitExecutionRuntime();
+  const runGitCommand = (args: string[], runOptions?: { cwd?: string; timeoutMs?: number }) => (
+    runGit(args, runOptions, resolveGitExecutable)
+  );
   const tempBase = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-vscode-skills-scan-'));
+  let cleaned = false;
+  const cleanup = async () => {
+    if (cleaned) return;
+    cleaned = true;
+    await safeRm(tempBase);
+  };
 
   try {
-    const cloned = await cloneRepo(parsed.cloneUrlHttps, tempBase);
-    if (!cloned.ok) {
-      return { ok: false as const, error: cloned.error };
-    }
-
-    const toFsPath = (posixPath: string) => path.join(tempBase, ...posixPath.split('/').filter(Boolean));
-
-    const patterns = effectiveSubpath
-      ? [`${effectiveSubpath}/SKILL.md`, `${effectiveSubpath}/**/SKILL.md`]
-      : ['SKILL.md', '**/SKILL.md'];
-
-    let skillMdPaths: string[] | null = null;
-
-    const sparseInit = await runGit(['-C', tempBase, 'sparse-checkout', 'init', '--no-cone'], { timeoutMs: 15_000 });
-    if (sparseInit.ok) {
-      const sparseSet = await runGit(['-C', tempBase, 'sparse-checkout', 'set', ...patterns], { timeoutMs: 30_000 });
-      if (sparseSet.ok) {
-        const checkout = await runGit(['-C', tempBase, 'checkout', '--force', 'HEAD'], { timeoutMs: 60_000 });
-        if (checkout.ok) {
-          const lsFiles = await runGit(['-C', tempBase, 'ls-files'], { timeoutMs: 15_000 });
-          if (lsFiles.ok) {
-            skillMdPaths = lsFiles.stdout
-              .split(/\r?\n/)
-              .map((line) => line.trim())
-              .filter(Boolean)
-              .filter((p) => p.endsWith('/SKILL.md') || p === 'SKILL.md');
+    return await executionRuntime.coordinator.runClone(
+      { destination: tempBase, label: 'skills-catalog/clone-repository', queueTimeoutMs: 60_000 },
+      async () => {
+        try {
+          const gitCheck = await assertGitAvailable(resolveGitExecutable);
+          if (!gitCheck.ok) {
+            return { ok: false as const, error: gitCheck.error };
           }
+
+          const cloned = await cloneRepo(parsed.cloneUrlHttps, tempBase, resolveGitExecutable);
+          if (!cloned.ok) {
+            return { ok: false as const, error: cloned.error };
+          }
+
+          const toFsPath = (posixPath: string) => path.join(tempBase, ...posixPath.split('/').filter(Boolean));
+
+          const patterns = effectiveSubpath
+            ? [`${effectiveSubpath}/SKILL.md`, `${effectiveSubpath}/**/SKILL.md`]
+            : ['SKILL.md', '**/SKILL.md'];
+
+          let skillMdPaths: string[] | null = null;
+
+          const sparseInit = await runGitCommand(['-C', tempBase, 'sparse-checkout', 'init', '--no-cone'], { timeoutMs: 15_000 });
+          if (sparseInit.ok) {
+            const sparseSet = await runGitCommand(['-C', tempBase, 'sparse-checkout', 'set', ...patterns], { timeoutMs: 30_000 });
+            if (sparseSet.ok) {
+              const checkout = await runGitCommand(['-C', tempBase, 'checkout', '--force', 'HEAD'], { timeoutMs: 60_000 });
+              if (checkout.ok) {
+                const lsFiles = await runGitCommand(['-C', tempBase, 'ls-files'], { timeoutMs: 15_000 });
+                if (lsFiles.ok) {
+                  skillMdPaths = lsFiles.stdout
+                    .split(/\r?\n/)
+                    .map((line: string) => line.trim())
+                    .filter(Boolean)
+                    .filter((p: string) => p.endsWith('/SKILL.md') || p === 'SKILL.md');
+                }
+              }
+            }
+          }
+
+          if (!Array.isArray(skillMdPaths)) {
+            const listArgs = ['-C', tempBase, 'ls-tree', '-r', '--name-only', 'HEAD'];
+            if (effectiveSubpath) {
+              listArgs.push('--', effectiveSubpath);
+            }
+
+            const list = await runGitCommand(listArgs, { timeoutMs: 30_000 });
+            if (!list.ok) {
+              return { ok: false as const, error: { kind: 'networkError' as const, message: list.stderr || list.message || 'Failed to list repository files' } };
+            }
+
+            skillMdPaths = list.stdout
+              .split(/\r?\n/)
+              .map((line: string) => line.trim())
+              .filter(Boolean)
+              .filter((p: string) => p.endsWith('/SKILL.md') || p === 'SKILL.md');
+          }
+
+          const skillDirs = Array.from(new Set(
+            (skillMdPaths || [])
+              .filter((p) => p !== 'SKILL.md')
+              .map((p) => path.posix.dirname(p)),
+          ));
+
+          const items: SkillsCatalogItem[] = [];
+
+          for (const skillDir of skillDirs) {
+            const skillName = path.posix.basename(skillDir);
+            const skillMdPath = path.posix.join(skillDir, 'SKILL.md');
+
+            const warnings: string[] = [];
+            let content = '';
+
+            try {
+              content = await fs.promises.readFile(toFsPath(skillMdPath), 'utf8');
+            } catch {
+              const show = await runGitCommand(['-C', tempBase, 'show', `HEAD:${skillMdPath}`], { timeoutMs: 15_000 });
+              if (!show.ok) {
+                warnings.push('Failed to read SKILL.md');
+              } else {
+                content = show.stdout;
+              }
+            }
+
+            const parsedMd = parseSkillMd(content);
+            warnings.push(...parsedMd.warnings);
+
+            const description = typeof parsedMd.frontmatter.description === 'string'
+              ? parsedMd.frontmatter.description
+              : undefined;
+            const frontmatterName = typeof parsedMd.frontmatter.name === 'string'
+              ? parsedMd.frontmatter.name
+              : undefined;
+
+            const installable = validateSkillName(skillName);
+            if (!installable) {
+              warnings.push('Skill directory name is not a valid OpenCode skill name');
+            }
+
+            items.push({
+              repoSource: options.source,
+              repoSubpath: effectiveSubpath || undefined,
+              skillDir,
+              skillName,
+              frontmatterName,
+              description,
+              installable,
+              warnings: warnings.length ? warnings : undefined,
+            });
+          }
+
+          items.sort((a, b) => String(a.skillName).localeCompare(String(b.skillName)));
+
+          return { ok: true as const, items };
+        } finally {
+          await cleanup();
         }
-      }
-    }
-
-    if (!Array.isArray(skillMdPaths)) {
-      const listArgs = ['-C', tempBase, 'ls-tree', '-r', '--name-only', 'HEAD'];
-      if (effectiveSubpath) {
-        listArgs.push('--', effectiveSubpath);
-      }
-
-      const list = await runGit(listArgs, { timeoutMs: 30_000 });
-      if (!list.ok) {
-        return { ok: true as const, items: [] as SkillsCatalogItem[] };
-      }
-
-      skillMdPaths = list.stdout
-        .split(/\r?\n/)
-        .map((l) => l.trim())
-        .filter(Boolean)
-        .filter((p) => p.endsWith('/SKILL.md') || p === 'SKILL.md');
-    }
-
-    const skillDirs = Array.from(new Set(skillMdPaths.filter((p) => p !== 'SKILL.md').map((p) => path.posix.dirname(p))));
-
-    const items: SkillsCatalogItem[] = [];
-
-    for (const skillDir of skillDirs) {
-      const skillName = path.posix.basename(skillDir);
-      const skillMdPath = path.posix.join(skillDir, 'SKILL.md');
-
-      const warnings: string[] = [];
-      let content = '';
-
-      try {
-        content = await fs.promises.readFile(toFsPath(skillMdPath), 'utf8');
-      } catch {
-        const show = await runGit(['-C', tempBase, 'show', `HEAD:${skillMdPath}`], { timeoutMs: 15_000 });
-        if (!show.ok) {
-          warnings.push('Failed to read SKILL.md');
-        } else {
-          content = show.stdout;
-        }
-      }
-
-      const parsedMd = parseSkillMd(content);
-      warnings.push(...parsedMd.warnings);
-
-      const description = typeof parsedMd.frontmatter.description === 'string' ? parsedMd.frontmatter.description : undefined;
-      const frontmatterName = typeof parsedMd.frontmatter.name === 'string' ? parsedMd.frontmatter.name : undefined;
-
-      const installable = validateSkillName(skillName);
-      if (!installable) {
-        warnings.push('Skill directory name is not a valid OpenCode skill name');
-      }
-
-      items.push({
-        repoSource: options.source,
-        repoSubpath: effectiveSubpath || undefined,
-        skillDir,
-        skillName,
-        frontmatterName,
-        description,
-        installable,
-        warnings: warnings.length ? warnings : undefined,
-      });
-    }
-
-    items.sort((a, b) => String(a.skillName).localeCompare(String(b.skillName)));
-
-    return { ok: true as const, items };
+      },
+    );
   } finally {
-    await safeRm(tempBase);
+    await cleanup();
   }
 }
 
@@ -438,12 +512,7 @@ export async function installSkillsFromRepository(options: {
   selections: Array<{ skillDir: string }>;
   conflictPolicy?: 'prompt' | 'skipAll' | 'overwriteAll';
   conflictDecisions?: Record<string, 'skip' | 'overwrite'>;
-}): Promise<SkillsInstallResult> { 
-  const gitCheck = await assertGitAvailable();
-  if (!gitCheck.ok) {
-    return { ok: false as const, error: gitCheck.error };
-  }
-
+}, dependencies: SkillsCatalogDependencies = {}): Promise<SkillsInstallResult> {
   if (options.scope === 'project' && !options.workingDirectory) {
     return { ok: false as const, error: { kind: 'invalidSource' as const, message: 'Project installs require a directory parameter' } };
   }
@@ -459,6 +528,11 @@ export async function installSkillsFromRepository(options: {
   }
 
   const userSkillDir = getUserSkillBaseDir();
+  const resolveGitExecutable = dependencies.resolveGitExecutable || resolveConfiguredGitExecutable;
+  const executionRuntime = dependencies.gitExecutionRuntime || await loadGitExecutionRuntime();
+  const runGitCommand = (args: string[], runOptions?: { cwd?: string; timeoutMs?: number }) => (
+    runGit(args, runOptions, resolveGitExecutable)
+  );
   const targetSource: SkillInstallSource = options.targetSource === 'agents' ? 'agents' : 'opencode';
 
   const skillPlans = requestedDirs.map((dir) => {
@@ -494,82 +568,114 @@ export async function installSkillsFromRepository(options: {
   }
 
   const tempBase = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-vscode-skills-install-'));
+  let cleaned = false;
+  const cleanup = async () => {
+    if (cleaned) return;
+    cleaned = true;
+    await safeRm(tempBase);
+  };
 
   try {
-    const cloned = await cloneRepo(parsed.cloneUrlHttps, tempBase);
-    if (!cloned.ok) {
-      return { ok: false as const, error: cloned.error };
-    }
+    return await executionRuntime.coordinator.runClone(
+      { destination: tempBase, label: 'skills-catalog/clone-repository', queueTimeoutMs: 90_000 },
+      async () => {
+        try {
+          const gitCheck = await assertGitAvailable(resolveGitExecutable);
+          if (!gitCheck.ok) {
+            return { ok: false as const, error: gitCheck.error };
+          }
 
-    await runGit(['-C', tempBase, 'sparse-checkout', 'init', '--cone'], { timeoutMs: 15_000 });
-    const setResult = await runGit(['-C', tempBase, 'sparse-checkout', 'set', ...requestedDirs], { timeoutMs: 30_000 });
-    if (!setResult.ok) {
-      return { ok: false as const, error: { kind: 'unknown' as const, message: setResult.stderr || setResult.message || 'Failed to configure sparse checkout' } };
-    }
+          const cloned = await cloneRepo(parsed.cloneUrlHttps, tempBase, resolveGitExecutable);
+          if (!cloned.ok) {
+            return { ok: false as const, error: cloned.error };
+          }
 
-    const checkoutResult = await runGit(['-C', tempBase, 'checkout', '--force', 'HEAD'], { timeoutMs: 60_000 });
-    if (!checkoutResult.ok) {
-      return { ok: false as const, error: { kind: 'unknown' as const, message: checkoutResult.stderr || checkoutResult.message || 'Failed to checkout repository' } };
-    }
+          await runGitCommand(['-C', tempBase, 'sparse-checkout', 'init', '--cone'], { timeoutMs: 15_000 });
+          const setResult = await runGitCommand(['-C', tempBase, 'sparse-checkout', 'set', ...requestedDirs], { timeoutMs: 30_000 });
+          if (!setResult.ok) {
+            return { ok: false as const, error: { kind: 'unknown' as const, message: setResult.stderr || setResult.message || 'Failed to configure sparse checkout' } };
+          }
 
-    const installed: Array<{ skillName: string; scope: SkillScope; source?: SkillInstallSource }> = [];
-    const skipped: Array<{ skillName: string; reason: string }> = [];
+          const checkoutResult = await runGitCommand(['-C', tempBase, 'checkout', '--force', 'HEAD'], { timeoutMs: 60_000 });
+          if (!checkoutResult.ok) {
+            return { ok: false as const, error: { kind: 'unknown' as const, message: checkoutResult.stderr || checkoutResult.message || 'Failed to checkout repository' } };
+          }
 
-    for (const plan of skillPlans) {
-      if (!plan.installable) {
-        skipped.push({ skillName: plan.skillName, reason: 'Invalid skill name (directory basename)' });
-        continue;
-      }
+          const installed: Array<{ skillName: string; scope: SkillScope; source?: SkillInstallSource }> = [];
+          const skipped: Array<{ skillName: string; reason: string }> = [];
 
-      const srcDir = toFsPath(tempBase, plan.skillDirPosix);
-      const skillMdPath = path.join(srcDir, 'SKILL.md');
-      if (!fs.existsSync(skillMdPath)) {
-        skipped.push({ skillName: plan.skillName, reason: 'SKILL.md not found in selected directory' });
-        continue;
-      }
+          for (const plan of skillPlans) {
+            if (!plan.installable) {
+              skipped.push({ skillName: plan.skillName, reason: 'Invalid skill name (directory basename)' });
+              continue;
+            }
 
-      const targetDir = options.scope === 'user'
-        ? (targetSource === 'agents'
-          ? path.join(os.homedir(), '.agents', 'skills', plan.skillName)
-          : path.join(userSkillDir, plan.skillName))
-        : (targetSource === 'agents'
-          ? path.join(options.workingDirectory as string, '.agents', 'skills', plan.skillName)
-          : path.join(options.workingDirectory as string, '.opencode', 'skills', plan.skillName));
+            const srcDir = toFsPath(tempBase, plan.skillDirPosix);
+            const skillMdPath = path.join(srcDir, 'SKILL.md');
+            if (!fs.existsSync(skillMdPath)) {
+              skipped.push({ skillName: plan.skillName, reason: 'SKILL.md not found in selected directory' });
+              continue;
+            }
 
-      const exists = fs.existsSync(targetDir);
-      let decision = options.conflictDecisions?.[plan.skillName] || null;
-      if (!decision) {
-        if (exists && options.conflictPolicy === 'skipAll') decision = 'skip';
-        if (exists && options.conflictPolicy === 'overwriteAll') decision = 'overwrite';
-        if (!exists) decision = 'overwrite';
-      }
+            const targetDir = options.scope === 'user'
+              ? (targetSource === 'agents'
+                ? path.join(os.homedir(), '.agents', 'skills', plan.skillName)
+                : path.join(userSkillDir, plan.skillName))
+              : (targetSource === 'agents'
+                ? path.join(
+                  // SAFETY: the project-scope guard above rejects installs without a working directory.
+                  options.workingDirectory as string,
+                  '.agents',
+                  'skills',
+                  plan.skillName,
+                )
+                : path.join(
+                  // SAFETY: the project-scope guard above rejects installs without a working directory.
+                  options.workingDirectory as string,
+                  '.opencode',
+                  'skills',
+                  plan.skillName,
+                ));
 
-      if (exists && decision === 'skip') {
-        skipped.push({ skillName: plan.skillName, reason: 'Already installed (skipped)' });
-        continue;
-      }
+            const exists = fs.existsSync(targetDir);
+            let decision = options.conflictDecisions?.[plan.skillName] || null;
+            if (!decision) {
+              if (exists && options.conflictPolicy === 'skipAll') decision = 'skip';
+              if (exists && options.conflictPolicy === 'overwriteAll') decision = 'overwrite';
+              if (!exists) decision = 'overwrite';
+            }
 
-      if (exists && decision === 'overwrite') {
-        await safeRm(targetDir);
-      }
+            if (exists && decision === 'skip') {
+              skipped.push({ skillName: plan.skillName, reason: 'Already installed (skipped)' });
+              continue;
+            }
 
-      await fs.promises.mkdir(path.dirname(targetDir), { recursive: true });
+            if (exists && decision === 'overwrite') {
+              await safeRm(targetDir);
+            }
 
-      try {
-        await copyDirectoryNoSymlinks(srcDir, targetDir);
-        installed.push({ skillName: plan.skillName, scope: options.scope, source: targetSource });
-      } catch (error) {
-        await safeRm(targetDir);
-        skipped.push({
-          skillName: plan.skillName,
-          reason: error instanceof Error ? error.message : 'Failed to copy skill files',
-        });
-      }
-    }
+            await fs.promises.mkdir(path.dirname(targetDir), { recursive: true });
 
-    return { ok: true as const, installed, skipped };
+            try {
+              await copyDirectoryNoSymlinks(srcDir, targetDir);
+              installed.push({ skillName: plan.skillName, scope: options.scope, source: targetSource });
+            } catch (error) {
+              await safeRm(targetDir);
+              skipped.push({
+                skillName: plan.skillName,
+                reason: error instanceof Error ? error.message : 'Failed to copy skill files',
+              });
+            }
+          }
+
+          return { ok: true as const, installed, skipped };
+        } finally {
+          await cleanup();
+        }
+      },
+    );
   } finally {
-    await safeRm(tempBase);
+    await cleanup();
   }
 }
 

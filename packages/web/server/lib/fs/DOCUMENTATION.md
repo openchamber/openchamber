@@ -30,9 +30,10 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
   - Owns exec job queue state (`execJobs`) and lifecycle/TTL pruning.
   - Enforces workspace boundary checks with active project + worktree fallback support.
   - The active project directory is validated with `fs.realpath`, so when the project root is itself a symlink the workspace base no longer matches the paths the client sends. Workspace resolution therefore retries against the raw directory the client requested (`requestedDirectory` from `resolveProjectDirectory`) before falling back to worktree roots. Symlinks are still resolved afterwards, and write/exec routes keep their canonical containment check against the resolved base.
-- `createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn })` from `search.js`
+- `createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn, gitExecutionService })` from `search.js`
   - Returns `{ searchFilesystemFiles(rootPath, options) }`.
   - Supports fuzzy matching, hidden-file handling, and optional `git check-ignore` filtering.
+  - Gitignore checks use the coordinated raw-read path when the execution service is provided; timeout, cancellation, non-repository, and Git failures retain the existing unfiltered search/list behavior.
 
 ## Composition contract with `index.js`
 - `index.js` provides composition-time dependencies only (platform primitives + callbacks such as `resolveProjectDirectory`, `normalizeDirectoryPath`, and `buildAugmentedPath`).
@@ -40,6 +41,7 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
 
 ## Notes for contributors
 - Keep filesystem policy (workspace root checks, error mapping, exec timeout behavior) inside this module, not in the composition root.
+- `POST /api/fs/clone` reserves the canonical destination through the shared Git execution coordinator. The reservation covers clone processing and partial-clone cleanup; network capacity is released after the clone process completes.
 - Filesystem `EPERM`/`EACCES` failures use the stable `reason: "os-permission"` response marker. Policy denials such as workspace-boundary or missing-grant failures must not use that marker because a native folder picker cannot remediate them.
 - Read-only routes authorize the requested path against the workspace before resolving symlinks. A symlink reached through the workspace may therefore target a file outside it, while a directly requested outside path still requires an exact-path grant. Write routes keep canonical-target boundary checks.
 - If adding new `/api/fs/*` endpoints, add them in `routes.js` and extend this document.

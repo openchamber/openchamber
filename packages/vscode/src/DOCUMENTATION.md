@@ -27,9 +27,35 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
   - Worktree removal waits for an active create/bootstrap task for the same directory so background Git and setup work cannot race deletion or restore stale bootstrap state.
   - Worktree population enables Git `core.longpaths` (local repo config plus `-c core.longpaths=true` on `git reset --hard`) so deeply nested checkouts under the managed data-dir worktree root do not fail on Windows MAX_PATH with "Filename too long".
 
+- `git-execution-service.ts`
+  - Facade that classifies standard Git operations before delegating to the
+    shared execution runtime. Public method signatures and built-in Git API
+    fallback behavior remain owned by `gitService.ts`.
+
+- `git-execution-runtime.ts`
+  - VS Code adapter for shared repository/worktree identity resolution,
+    bounded admission, status coalescing, cancellation, and read-only Git
+    environment scoping. Shared status sources receive a cancellation signal,
+    remain tracked until their Git task closes, and never cross a queued
+    mutation when status requests coalesce.
+  - Clone reservations remain held through sparse checkout, skill file
+    processing, and temporary-directory cleanup; network capacity is released
+    after that materialization work completes.
+
+- `git-context-resolver.ts`, `git-execution-coordinator.ts`,
+  `git-execution-errors.ts`
+  - Source-bundled re-exports of the web Git execution primitives. These are
+    shared source modules, not a runtime dependency on the published web
+    package.
+
 - `bridge-fs-runtime.ts`
   - Bridge handlers for filesystem-related message routes.
   - Uses shared FS helpers via injected dependencies.
+  - Gitignore checks use the shared Git read-admission adapter when called
+    through `bridge.ts`; direct test/helper callers retain the read-only
+    environment fallback. The optional filter has a bounded admission and
+    execution wait, and list/search keep their filesystem results when it
+    fails or times out.
 
 - `bridge-fs-helpers-runtime.ts`
   - Filesystem/path/search helper functions:
@@ -37,9 +63,15 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
     - directory listing
     - file search
     - file read path safety checks
-    - active-directory selection across multi-root workspaces
+     - active-directory selection across multi-root workspaces
     - dropped-file parsing and attachment reading
-    - models metadata fetch helper
+     - models metadata fetch helper
+    - Directory-search Gitignore checks accept the same shared Git read adapter
+      so filesystem search does not bypass Git execution coordination.
+    - Gitignore exit code `1` (no matches) and a confirmed non-repository are
+      empty results. Timeouts, permission failures, and other Git execution
+      failures remain visible to the parser and diagnostics, while list/search
+      return their existing unfiltered entries.
   - Read paths are authorized in the requested workspace path space before symlink resolution, matching the web runtime; directly requested outside-workspace paths remain denied.
 
 The webview CSP permits `blob:` only for `worker-src` so shared UI parsers can run bounded local decompression off the main thread. Blob scripts remain disallowed by `script-src`.
