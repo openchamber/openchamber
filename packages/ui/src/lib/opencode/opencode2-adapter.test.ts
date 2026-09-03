@@ -31,6 +31,40 @@ const json = (value: JsonValue, status = 200): Response => new Response(JSON.str
   headers: { 'content-type': 'application/json' },
 });
 
+const sseResponse = (chunks: Uint8Array[], status = 200, contentType = 'text/event-stream'): Response => {
+  let index = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (index >= chunks.length) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(chunks[index]);
+      index += 1;
+    },
+  });
+  return new Response(body, { status, headers: { 'content-type': contentType } });
+};
+
+const splitUtf8 = (value: string, boundaries: number[]): Uint8Array[] => {
+  const bytes = new TextEncoder().encode(value);
+  const points = [...boundaries].filter((point) => point > 0 && point < bytes.length).sort((left, right) => left - right);
+  const chunks: Uint8Array[] = [];
+  let start = 0;
+  for (const point of points) {
+    chunks.push(bytes.slice(start, point));
+    start = point;
+  }
+  chunks.push(bytes.slice(start));
+  return chunks;
+};
+
+const drain = async (stream: AsyncIterable<GlobalEvent>): Promise<void> => {
+  for await (const event of stream) {
+    void event;
+  }
+};
+
 const v2Session = (id: string, parentID?: string): V2SessionFixture => {
   const session: V2SessionFixture = {
     id,
@@ -243,16 +277,22 @@ describe('OpenCode V2 adapter', () => {
 
   test('normalizes sessions and traverses descendants with bounded parent pages', async () => {
     const parents: Array<string | null> = [];
-    const client = adapter(async (input) => {
+    const signals: Array<AbortSignal | null | undefined> = [];
+    const controller = new AbortController();
+    const client = adapter(async (input, init) => {
       const url = new URL(input instanceof Request ? input.url : input.toString());
       const parent = url.searchParams.get('parentID');
       parents.push(parent);
+      signals.push(input instanceof Request ? input.signal : init?.signal);
       if (parent === null || parent === '' || parent === 'null') return json({ data: [v2Session('root')], cursor: {} });
       if (parent === 'root') return json({ data: [v2Session('child', 'root')], cursor: {} });
       return json({ data: [], cursor: {} });
     });
 
-    const result = await client.experimental.session.list({ directory: '/repo', roots: false, archived: false, limit: 100 });
+    const result = await client.experimental.session.list(
+      { directory: '/repo', roots: false, archived: false, limit: 100 },
+      { signal: controller.signal },
+    );
     const exhausted = await client.experimental.session.list({ directory: '/repo', roots: false, archived: false, cursor: 9, limit: 100 });
 
     expect(parents).toEqual(['null', 'root', 'child']);
@@ -263,6 +303,7 @@ describe('OpenCode V2 adapter', () => {
     expect(result.data?.[0]?.projectID).toBe('project-1');
     expect(result.data?.[0]?.agent).toBe('build');
     expect(result.data?.[0]?.cost).toBe(1.25);
+    expect(signals.every((signal) => signal === controller.signal)).toBe(true);
     expect(exhausted.data).toEqual([]);
   });
 
@@ -293,7 +334,6 @@ describe('OpenCode V2 adapter', () => {
       if (url.pathname.endsWith('/message')) {
         return json({
           data: [
-            { id: 'user-1', type: 'user', time: { created: 1 }, text: 'question' },
             {
               id: 'assistant-1', type: 'assistant', time: { created: 2, completed: 4 }, agent: 'build',
               model: { id: 'model-1', providerID: 'provider-1' },
@@ -305,6 +345,7 @@ describe('OpenCode V2 adapter', () => {
               cost: 0.5,
               tokens: { input: 1, output: 1, reasoning: 1, cache: { read: 0, write: 0 } },
             },
+            { id: 'user-1', type: 'user', time: { created: 1 }, text: 'question' },
           ],
           cursor: { next: 'older-1' },
         });
@@ -316,6 +357,9 @@ describe('OpenCode V2 adapter', () => {
 
     expect(result.error).toBe(undefined);
     expect(result.data?.[0].parts).toEqual([{ id: 'user-1:text:0', sessionID: 'session-1', messageID: 'user-1', type: 'text', text: 'question' }]);
+    const assistant = result.data?.[1].info;
+    expect(assistant?.role).toBe('assistant');
+    if (assistant?.role === 'assistant') expect(assistant.parentID).toBe('user-1');
     expect(result.data?.[1].parts).toEqual([
       { id: 'assistant-1:text:0', sessionID: 'session-1', messageID: 'assistant-1', type: 'text', text: 'answer' },
       { id: 'assistant-1:reasoning:1', sessionID: 'session-1', messageID: 'assistant-1', type: 'reasoning', text: 'thinking', time: { start: 2, end: 3 } },
@@ -616,5 +660,89 @@ describe('OpenCode V2 adapter', () => {
         time: 102,
       },
     });
+  });
+
+  test('parses split UTF-8, CRLF, comments, multiline data, and separate SSE cursors', async () => {
+    const source = [
+      'id: cursor-1\r\n',
+      'event: update\r\n',
+      'retry: 42\r\n',
+      'unknown: ignored\r\n',
+      'data: {"id":"json-1","type":"integration.updated","data":{"label":"é"}}\r\n',
+      '\r\n',
+      ': heartbeat\r\n',
+      'id:\r\n',
+      'data: {"id":"json-2","type":"server.connected","data":{}}\r\n',
+      '\r\n',
+    ].join('');
+    const encoded = new TextEncoder().encode(source);
+    const multibyteStart = encoded.findIndex((byte) => byte === 0xc3);
+    const carriageReturn = encoded.findIndex((byte) => byte === 0x0d);
+    const cursors: Array<{ id?: string; event?: string; retry?: number }> = [];
+    const client = adapter(async () => sseResponse(splitUtf8(source, [multibyteStart + 1, carriageReturn + 1]), 200));
+
+    const result = await client.global.event({
+      onSseEvent: (event) => cursors.push({ id: event.id, event: event.event, retry: event.retry }),
+    });
+    const received: GlobalEvent[] = [];
+    if (result.stream) {
+      for await (const item of result.stream) received.push(item);
+    }
+
+    expect(received.map((item) => item.payload.id)).toEqual(['json-1', 'json-2']);
+    expect(received[0]?.payload.type).toBe('integration.updated');
+    expect(received[0]?.directory).toBe('/repo');
+    expect(cursors).toEqual([
+      { id: 'cursor-1', event: 'update', retry: 42 },
+      { id: '', event: undefined, retry: undefined },
+    ]);
+  });
+
+  test('forwards only the SSE cursor on the next request and rejects malformed envelopes', async () => {
+    const requests: Request[] = [];
+    const client = adapter(async (input) => {
+      const request = input instanceof Request ? input : new Request(input);
+      requests.push(request);
+      return sseResponse([new TextEncoder().encode('id: cursor-1\ndata: {"id":"json-1","type":"server.connected","data":{}}\n\n')]);
+    });
+
+    const first = await client.global.event();
+    if (first.stream) await drain(first.stream);
+    const second = await client.global.event({ headers: { 'Last-Event-ID': 'cursor-1' } });
+    if (second.stream) await drain(second.stream);
+
+    expect(requests[1]?.headers.get('Last-Event-ID')).toBe('cursor-1');
+
+    const errors: unknown[] = [];
+    const malformed = adapter(async () => sseResponse([new TextEncoder().encode('id: cursor-bad\ndata: not-json\n\n')]));
+    const streamResult = await malformed.global.event({ onSseError: (error) => errors.push(error) });
+    let failed = false;
+    try {
+      if (streamResult.stream) await drain(streamResult.stream);
+    } catch {
+      failed = true;
+    }
+    expect(failed).toBe(true);
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  test('isolates event callback failures without dropping later records', async () => {
+    const source = [
+      'data: {"id":"json-1","type":"server.connected","data":{}}\n\n',
+      'data: {"id":"json-2","type":"server.connected","data":{}}\n\n',
+    ].join('');
+    const callbackErrors: unknown[] = [];
+    const client = adapter(async () => sseResponse([new TextEncoder().encode(source)]));
+    const result = await client.global.event({
+      onSseEvent: (event) => {
+        if (event.data && typeof event.data === 'object') throw new Error('observer failed');
+      },
+      onSseError: (error) => callbackErrors.push(error),
+    });
+    const received: GlobalEvent[] = [];
+    if (result.stream) for await (const item of result.stream) received.push(item);
+
+    expect(received).toHaveLength(2);
+    expect(callbackErrors).toHaveLength(2);
   });
 });

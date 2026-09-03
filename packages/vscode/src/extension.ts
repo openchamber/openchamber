@@ -5,6 +5,7 @@ import { SessionEditorPanelProvider } from './SessionEditorPanelProvider';
 import { createOpenCodeManager, type OpenCodeManager } from './opencode';
 import { startGlobalEventWatcher, stopGlobalEventWatcher, setChatViewProvider } from './sessionActivityWatcher';
 import { resolveWorkspaceFolders } from './workspaceResolver';
+import { buildOpenCodeDiagnosticProbeUrl, getOpenCodeDiagnosticProbeTargets } from './opencodeDiagnosticProbes';
 
 let chatViewProvider: ChatViewProvider | undefined;
 let agentManagerProvider: AgentManagerPanelProvider | undefined;
@@ -594,34 +595,18 @@ export async function activate(context: vscode.ExtensionContext) {
         }
       };
 
-      const buildProbeUrl = (pathname: string, includeDirectory = true) => {
+      const buildProbeUrl = (pathname: string, directoryQuery: 'directory' | 'location[directory]' | false = 'directory') => {
         if (!resolvedApiUrl) return null;
-        const base = `${resolvedApiUrl.replace(/\/+$/, '')}/`;
-        const url = new URL(pathname.replace(/^\/+/, ''), base);
-        if (includeDirectory && workingDirectory) {
-          url.searchParams.set('directory', workingDirectory);
-        }
-        return url.toString();
+        return buildOpenCodeDiagnosticProbeUrl(resolvedApiUrl, pathname, workingDirectory, directoryQuery);
       };
 
-      const probeTargets: Array<{ label: string; path: string; includeDirectory?: boolean; timeoutMs?: number }> = [
-        { label: 'health', path: '/global/health', includeDirectory: false },
-        { label: 'config', path: '/config', includeDirectory: true },
-        { label: 'providers', path: '/config/providers', includeDirectory: true },
-        // Can be slower on large configs; keep the probe from producing false negatives.
-        { label: 'agents', path: '/agent', includeDirectory: true, timeoutMs: 12000 },
-        { label: 'commands', path: '/command', includeDirectory: true, timeoutMs: 10000 },
-        { label: 'project', path: '/project/current', includeDirectory: true },
-        { label: 'path', path: '/path', includeDirectory: true },
-        // Session listing is what powers the sidebar. This helps diagnose "no sessions shown" bugs.
-        { label: 'sessions', path: '/session', includeDirectory: true, timeoutMs: 12000 },
-        { label: 'sessionStatus', path: '/session/status', includeDirectory: true },
-      ];
+      const protocol = openCodeManager?.getProtocol();
+      const probeTargets = getOpenCodeDiagnosticProbeTargets(protocol ?? null);
 
       const probes = resolvedApiUrl
         ? await Promise.all(
             probeTargets.map(async (entry) => {
-              const url = buildProbeUrl(entry.path, entry.includeDirectory !== false);
+              const url = buildProbeUrl(entry.path, entry.directoryQuery);
               if (!url) {
                 return { label: entry.label, url: '(none)', result: null as null };
               }

@@ -17,6 +17,7 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 
 - `bridge-git-special-runtime.ts`
   - Specialized Git flows (`pr-description`, `conflict-details`) and generation helpers.
+  - Git generation uses the legacy SDK for legacy runtimes and the generated opencode2 client for V2. The V2 path waits on `session.wait`; it does not infer completion from `/api/session/active` omission.
 
 - `bridge-git-process-runtime.ts`
   - Git process execution and environment setup (`execGit`), including SSH agent socket resolution.
@@ -84,6 +85,11 @@ The webview build emits each worker as one self-contained file. VS Code webviews
   - A resolved local `opencode2` starts through its official global `service start` command. The extension then uses `Service.discover()` as the authoritative URL/auth source for every proxy, SSE stream, and watcher; it does not allocate a private port, inject a password, register process ownership, or stop the shared service.
   - The service command inherits the extension-host environment captured before shell discovery, without applying OpenChamber's managed provider aliases; global service environment overrides remain owned by OpenCode service configuration.
   - Restarting an opencode2 connection reruns global service start/discovery and publishes disconnect/connect transitions so transports rebind if the endpoint changes. Deactivation clears only extension-local state. Legacy managed children retain direct `serve` startup, generated auth, process registry, orphan cleanup, and owned shutdown; an explicit `openchamber.apiUrl` remains authoritative and bypasses global service discovery.
+
+- `sessionActivityWatcher.ts`
+  - Legacy runtimes reconcile the complete `/session/status` snapshot and retire omitted entries.
+  - opencode2 marks sessions returned by `/api/session/active` busy but treats omitted sessions as unknown. Terminal execution events provide the proof needed to retire activity.
+  - Legacy global events use the legacy SDK stream. opencode2 subscribes through the generated client at `/api/event`.
 
 - `bridge-permission-auto-accept-runtime.ts`
   - Owns the persisted VS Code permission auto-accept policy and its GET/PUT bridge contract.

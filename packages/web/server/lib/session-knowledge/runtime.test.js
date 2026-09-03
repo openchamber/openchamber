@@ -27,7 +27,11 @@ const createRuntime = (overrides = {}) => createSessionKnowledgeRuntime({
     readAll: async () => ({ global: [memory()], project: [], globalFailed: false, projectFailed: false }),
     ...overrides.agentMemoryRuntime,
   },
-  ...('openCodeFetch' in overrides ? { openCodeFetch: overrides.openCodeFetch } : {}),
+  openCodeApi: overrides.openCodeApi ?? {
+    supportsSessionMetadata: () => false,
+    getSession: async () => null,
+    mergeSessionMetadata: async () => null,
+  },
   ...('isAgentMemoryEnabled' in overrides ? { isAgentMemoryEnabled: overrides.isAgentMemoryEnabled } : {}),
 });
 
@@ -202,21 +206,23 @@ describe('reading what a session was told', () => {
   });
 
   test('pinning updates only the target session and invalidates its delivered signature', async () => {
-    const requests = [];
+    let writtenMetadata;
     const runtime = createRuntime({
-      openCodeFetch: async (path, options = {}) => {
-        requests.push({ path, options });
-        if (options.method === 'PATCH') return {};
-        return {
-          metadata: { openchamber: { project_context_pins: { notes: [], plans: [] }, knowledge_context_delivered: 'old' } },
-        };
+      openCodeApi: {
+        supportsSessionMetadata: () => true,
+        getSession: async () => null,
+        mergeSessionMetadata: async (_sessionID, _directory, mutate) => {
+          writtenMetadata = await mutate({
+            openchamber: { project_context_pins: { notes: [], plans: [] }, knowledge_context_delivered: 'old' },
+          });
+          return writtenMetadata;
+        },
       },
     });
 
     await runtime.setPin('ses_a', DIRECTORY, 'note', 'n1', true);
 
-    expect(requests.map((request) => request.path)).toEqual(['/session/ses_a', '/session/ses_a']);
-    expect(requests[1].options.body.metadata.openchamber).toEqual({
+    expect(writtenMetadata.openchamber).toEqual({
       project_context_pins: { notes: ['n1'], plans: [] },
       knowledge_context_delivered: '',
     });

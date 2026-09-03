@@ -164,8 +164,8 @@ describe('message stream websocket runtime', () => {
       payload: {
         type: 'session.idle',
         properties: { sessionID: 'ses-1', directory: '/tmp/project' },
+        id: 'evt-v2',
       },
-      eventId: 'evt-v2',
       directory: '/tmp/project',
     });
 
@@ -336,6 +336,60 @@ describe('message stream websocket runtime', () => {
 
     firstSocket.close();
     secondSocket.close();
+    await runtime.close();
+  });
+
+  it('normalizes V2 events on directory websocket streams before forwarding them', async () => {
+    const server = new EventEmitter();
+    const wsClients = new Set();
+
+    const runtime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade() {
+        throw new Error('upgrade should not be used in this test');
+      },
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      getOpenCodeProtocol: () => 'opencode2',
+      processForwardedEventPayload() {},
+      wsClients,
+      upstreamReconnectDelayMs: 0,
+      fetchImpl: async (_url, options) => createSseResponse({
+        signal: options.signal,
+        holdOpen: true,
+        blocks: [
+          'id: cursor-1\ndata: {"id":"json-1","type":"session.next.text.delta","properties":{"timestamp":42,"sessionID":"ses-1","assistantMessageID":"msg-1","textID":"text-1","delta":"hello"}}\n\n',
+        ],
+      }),
+    });
+
+    const socket = new FakeSocket();
+    runtime.wsServer.emit('connection', socket, { url: '/api/event/ws?directory=%2Ftmp%2Fproject' });
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(socket.sent).toContainEqual({ type: 'ready', scope: 'directory' });
+    expect(socket.sent).toContainEqual({
+      type: 'event',
+      payload: {
+        id: 'json-1',
+        type: 'message.part.delta',
+        properties: {
+          sessionID: 'ses-1',
+          messageID: 'msg-1',
+          partID: 'text-1',
+          field: 'text',
+          delta: 'hello',
+          directory: '/tmp/project',
+        },
+      },
+      eventId: 'cursor-1',
+      directory: '/tmp/project',
+    });
+
+    socket.close();
     await runtime.close();
   });
 

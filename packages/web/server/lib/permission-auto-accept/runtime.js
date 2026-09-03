@@ -20,15 +20,11 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function createPermissionAutoAcceptRuntime({
   globalEventHub,
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
+  openCodeApi,
   readSettingsFromDiskMigrated,
   persistSettings,
   broadcastGlobalUiEvent,
-  getOpenCodeProtocol = () => 'legacy',
-  fetchImpl = fetch,
   retryDelaysMs = RETRY_DELAYS_MS,
-  requestTimeoutMs = REQUEST_TIMEOUT_MS,
 }) {
   let policy = normalizePolicy();
   let loaded = false;
@@ -96,36 +92,11 @@ export function createPermissionAutoAcceptRuntime({
     }
   };
 
-  const request = async (path, { directory, directoryQuery = 'directory', method = 'GET', body } = {}) => {
-    const url = new URL(buildOpenCodeUrl(path, ''));
-    if (directory) url.searchParams.set(directoryQuery, directory);
-    const response = await fetchImpl(url, {
-      method,
-      headers: {
-        Accept: 'application/json',
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
-        ...getOpenCodeAuthHeaders(),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-      signal: AbortSignal.timeout(requestTimeoutMs),
-    });
-    if (!response.ok) {
-      const error = new Error(`OpenCode request failed (${response.status})`);
-      error.status = response.status;
-      throw error;
-    }
-    return response.json().catch(() => null);
-  };
-
   const getSession = async (sessionId, directory) => {
     const cached = sessions.get(sessionId);
     if (cached) return cached;
-    const protocol = getOpenCodeProtocol();
-    const path = protocol === 'opencode2'
-      ? `/api/session/${encodeURIComponent(sessionId)}`
-      : `/session/${encodeURIComponent(sessionId)}`;
-    const info = await request(path, { directory: protocol === 'legacy' ? directory : undefined });
-    rememberSession(info?.data ?? info, directory);
+    const info = await openCodeApi.getSession(sessionId, directory, { timeoutMs: REQUEST_TIMEOUT_MS });
+    rememberSession(info, directory);
     return sessions.get(sessionId) ?? null;
   };
 
@@ -153,14 +124,13 @@ export function createPermissionAutoAcceptRuntime({
     if (!permission?.id || !permission?.sessionID) return false;
     await load();
     if (!(await isSessionAutoAccepting(permission.sessionID, directory))) return false;
-    const protocol = getOpenCodeProtocol();
-    const replyPath = protocol === 'opencode2'
-      ? `/api/session/${encodeURIComponent(permission.sessionID)}/permission/${encodeURIComponent(permission.id)}/reply`
-      : `/permission/${encodeURIComponent(permission.id)}/reply`;
-    await request(replyPath, {
-      directory: protocol === 'legacy' ? directory : undefined,
-      method: 'POST',
-      body: { reply: 'once' },
+    await openCodeApi.replyPermission({
+      sessionID: permission.sessionID,
+      requestID: permission.id,
+      directory,
+      reply: 'once',
+    }, {
+      timeoutMs: REQUEST_TIMEOUT_MS,
     });
     return true;
   };
@@ -199,15 +169,11 @@ export function createPermissionAutoAcceptRuntime({
       for (const directory of scopes) {
         let payload;
         try {
-          const protocol = getOpenCodeProtocol();
-          payload = await request(protocol === 'opencode2' ? '/api/permission/request' : '/permission', {
-            directory,
-            directoryQuery: protocol === 'opencode2' ? 'location[directory]' : 'directory',
-          });
+          payload = await openCodeApi.listPendingPermissions(directory, { timeoutMs: REQUEST_TIMEOUT_MS });
         } catch {
           continue;
         }
-        const pending = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : null;
+        const pending = Array.isArray(payload) ? payload : null;
         if (!pending) continue;
         for (const permission of pending) {
           if (!permission?.id) continue;

@@ -77,41 +77,41 @@ type MessageStreamWsFrame = {
   scope?: "global" | "directory"
 }
 
-const normalizeOpenChamberSessionStatus = (payload: Event): Event | null => {
-  const record = payload as unknown as {
-    id?: unknown
-    type?: unknown
-    properties?: {
-      sessionID?: unknown
-      sessionId?: unknown
-      status?: unknown
-      metadata?: {
-        attempt?: unknown
-        message?: unknown
-        next?: unknown
-      }
+type OpenChamberSessionStatusEvent = {
+  id?: string
+  type: "openchamber:session-status"
+  properties?: {
+    sessionID?: string
+    sessionId?: string
+    status?: string
+    metadata?: {
+      attempt?: number
+      message?: string
+      next?: number
     }
   }
+}
 
-  if (record.type !== "openchamber:session-status") return null
+const normalizeOpenChamberSessionStatus = (payload: Event | OpenChamberSessionStatusEvent): Event | null => {
+  if (payload.type !== "openchamber:session-status") return null
 
-  const sessionID = typeof record.properties?.sessionID === "string" && record.properties.sessionID.length > 0
-    ? record.properties.sessionID
-    : typeof record.properties?.sessionId === "string" && record.properties.sessionId.length > 0
-      ? record.properties.sessionId
+  const sessionID = payload.properties?.sessionID && payload.properties.sessionID.length > 0
+    ? payload.properties.sessionID
+    : payload.properties?.sessionId && payload.properties.sessionId.length > 0
+      ? payload.properties.sessionId
       : ""
-  const rawStatus = typeof record.properties?.status === "string" ? record.properties.status : ""
+  const rawStatus = payload.properties?.status ?? ""
   if (!sessionID || !rawStatus) return null
 
   let status: SessionStatus | null = null
   if (rawStatus === "idle" || rawStatus === "busy") {
     status = { type: rawStatus }
   } else if (rawStatus === "retry") {
-    const metadata = record.properties?.metadata
+    const metadata = payload.properties?.metadata
     if (
-      typeof metadata?.attempt === "number"
-      && typeof metadata.message === "string"
-      && typeof metadata.next === "number"
+      metadata?.attempt !== undefined
+      && metadata.message !== undefined
+      && metadata.next !== undefined
     ) {
       status = {
         type: "retry",
@@ -124,15 +124,15 @@ const normalizeOpenChamberSessionStatus = (payload: Event): Event | null => {
   if (!status) return null
 
   return {
-    id: typeof record.id === "string" && record.id.length > 0
-      ? record.id
+    id: payload.id && payload.id.length > 0
+      ? payload.id
       : `openchamber-status-${sessionID}-${Date.now()}`,
     type: "session.status",
     properties: {
       sessionID,
       status,
     },
-  } as Event
+  }
 }
 
 const normalizeEventType = (payload: Event): Event => {
@@ -556,14 +556,17 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   }
 
   const runSseAttempt = async (signal: AbortSignal) => {
-    const events = await sdk.global.event({
+    const eventOptions = {
       signal,
       ...(lastEventId && lastEventId.length > 0 ? { headers: { "Last-Event-ID": lastEventId } } : {}),
       onSseEvent: (event: { id?: unknown }) => {
         resetHeartbeat()
-        if (typeof event.id === "string" && event.id.length > 0) {
-          lastEventId = event.id
+        if (typeof event.id === "string") {
+          lastEventId = event.id.length > 0 ? event.id : undefined
         }
+      },
+      onSseHeartbeat: () => {
+        resetHeartbeat()
       },
       onSseError: (error: unknown) => {
         if (isAbortError(error)) return
@@ -571,7 +574,8 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
         streamErrorLogged = true
         console.error("[event-pipeline] SSE stream error", error)
       },
-    })
+    } as Parameters<typeof sdk.global.event>[0] & { onSseHeartbeat: () => void }
+    const events = await sdk.global.event(eventOptions)
 
     markConnected()
 

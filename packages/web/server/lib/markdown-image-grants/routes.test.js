@@ -35,7 +35,6 @@ const createFixture = async ({ sources, markdown } = {}) => {
     info: { id: 'msg_1', role: 'assistant' },
     parts: [{ type: 'text', text }],
   }), { status: 200, headers: { 'content-type': 'application/json' } }));
-  vi.stubGlobal('fetch', fetchMock);
 
   let fullReadCount = 0;
   const app = express();
@@ -54,8 +53,12 @@ const createFixture = async ({ sources, markdown } = {}) => {
     validateDirectoryPath: async (candidate) => candidate === directory
       ? { ok: true, directory }
       : { ok: false, error: 'Invalid directory' },
-    buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
-    getOpenCodeAuthHeaders: () => ({ authorization: 'Basic test' }),
+    openCodeApi: {
+      getMessage: async (input, options) => {
+        const response = await fetchMock(input, options);
+        return response.json();
+      },
+    },
   });
   return {
     app,
@@ -74,17 +77,13 @@ const prepare = (app, directory, sources) => request(app)
   .expect(200);
 
 describe('session image assets', () => {
-  it('percent-encodes the directory header on the message fetch', async () => {
+  it('passes the directory through the OpenCode API boundary', async () => {
     const fixture = await createFixture();
     await prepare(fixture.app, fixture.directory, ['image.png']);
 
     expect(fixture.fetchMock).toHaveBeenCalledWith(
-      expect.any(URL),
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          'x-opencode-directory': encodeURIComponent(fixture.directory),
-        }),
-      }),
+      { sessionID: 'ses_1', messageID: 'msg_1', directory: fixture.directory },
+      { timeoutMs: 10_000 },
     );
   });
 

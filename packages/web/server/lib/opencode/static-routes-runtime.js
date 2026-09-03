@@ -8,8 +8,7 @@ export const createStaticRoutesRuntime = (dependencies) => {
     __dirname,
     express,
     resolveProjectDirectory,
-    buildOpenCodeUrl,
-    getOpenCodeAuthHeaders,
+    openCodeApi,
     readSettingsFromDiskMigrated,
     normalizePwaAppName,
     normalizePwaOrientation,
@@ -38,10 +37,8 @@ export const createStaticRoutesRuntime = (dependencies) => {
       }));
 
       registerPwaManifestRoute(app, {
-        process,
         resolveProjectDirectory,
-        buildOpenCodeUrl,
-        getOpenCodeAuthHeaders,
+        openCodeApi,
         readSettingsFromDiskMigrated,
         normalizePwaAppName,
         normalizePwaOrientation,

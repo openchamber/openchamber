@@ -16,19 +16,20 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 const sdk = vi.hoisted(() => ({
   sessionCreates: [],
-  createOpencodeClient: () => ({
-    session: {
-      create: async () => {
-        sdk.sessionCreates.push(Date.now());
-        return { data: { id: `sess-${sdk.sessionCreates.length}` } };
-      },
+  openCodeApi: {
+    createSession: async () => {
+      sdk.sessionCreates.push(Date.now());
+      return { id: `sess-${sdk.sessionCreates.length}` };
     },
-    command: { list: async () => ({ data: [] }) },
-  }),
-}));
-
-vi.mock('@opencode-ai/sdk/v2', () => ({
-  createOpencodeClient: sdk.createOpencodeClient,
+    listCommands: async () => [],
+    sendPrompt: async () => {
+      const response = await globalThis.fetch('http://127.0.0.1:9999/prompt');
+      if (!response.ok) throw new Error('prompt failed');
+      return true;
+    },
+    runCommand: async () => true,
+    supportsSessionMetadata: () => true,
+  },
 }));
 
 import { createScheduledTasksRuntime } from './runtime.js';
@@ -101,6 +102,7 @@ const createRuntimeDeps = (projectConfigRuntime) => ({
   waitForOpenCodeReady: async () => {},
   emitTaskRunEvent: vi.fn(),
   setSessionAutoAccept: async () => {},
+  openCodeApi: sdk.openCodeApi,
   logger: { info: () => {}, warn: () => {}, error: () => {} },
 });
 

@@ -55,7 +55,14 @@ export const resolveOpenCodeProtocol = (client: OpencodeClient): OpenCodeProtoco
   protocolDetectors.get(client)?.() ?? 'legacy';
 
 type LegacyResult<T> = { data?: T; error?: Error; response?: Response };
-type LegacyOptions = { signal?: AbortSignal; headers?: HeadersInit };
+type SseEvent = { data: JsonValue; event?: string; id?: string; retry?: number };
+type LegacyOptions = {
+  signal?: AbortSignal;
+  headers?: HeadersInit;
+  onSseEvent?: (event: SseEvent) => void;
+  onSseError?: (error: Error) => void;
+  onSseHeartbeat?: () => void;
+};
 type LocationInput = { directory?: string; workspace?: string };
 type SessionListInput = LocationInput & {
   roots?: boolean | 'true' | 'false';
@@ -151,11 +158,331 @@ type CompatibleProvider = {
 };
 type VcsResult = { branch?: string; default_branch?: string };
 type AdapterCallResult = LegacyResult<unknown> | { stream: AsyncIterable<GlobalEvent> };
+type JsonObject = { [key: string]: JsonValue };
+type SseFrame = { data: string; event?: string; id?: string; retry?: number };
+type SseRecord<T> = { data: T; event?: string; cursor?: string; retry?: number };
+type SseReaderOptions<T> = {
+  fetch: OpenCodeRuntimeFetch;
+  request: RequestInfo | URL;
+  init?: RequestInit;
+  initialCursor?: string;
+  maxFrameBytes?: number;
+  parse: (data: string) => T;
+  onSseEvent?: (event: SseRecord<T>) => void;
+  onSseHeartbeat?: () => void;
+  onSseError?: (error: Error) => void;
+};
+type ParsedAdapterEvent =
+  | { kind: 'v2'; event: EventSubscribeOutput; directory?: string }
+  | { kind: 'legacy'; payload: Event; directory?: string };
 
 const PAGE_LIMIT = 100;
 const MAX_PAGES = 100;
 const MAX_DESCENDANTS = 10_000;
 const EMPTY_TOKENS: TokenUsageInfo = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } };
+
+const V2_EVENT_TYPES = new Set([
+  'models-dev.refreshed',
+  'integration.updated',
+  'integration.connection.updated',
+  'catalog.updated',
+  'agent.updated',
+  'session.created',
+  'session.agent.selected',
+  'session.model.selected',
+  'session.moved',
+  'session.renamed',
+  'session.deleted',
+  'session.forked',
+  'session.inbox.delivered',
+  'session.inbox.enqueued',
+  'session.inbox.cancelled',
+  'session.inbox.delivery.changed',
+  'session.execution.started',
+  'session.execution.succeeded',
+  'session.execution.failed',
+  'session.execution.interrupted',
+  'session.instructions.updated',
+  'session.synthetic',
+  'session.skill.activated',
+  'session.shell.started',
+  'session.shell.ended',
+  'session.step.started',
+  'session.step.ended',
+  'session.step.failed',
+  'session.text.started',
+  'session.text.delta',
+  'session.text.ended',
+  'session.reasoning.started',
+  'session.reasoning.delta',
+  'session.reasoning.ended',
+  'session.tool.input.started',
+  'session.tool.input.delta',
+  'session.tool.input.ended',
+  'session.tool.called',
+  'session.tool.progress',
+  'session.tool.success',
+  'session.tool.failed',
+  'session.retry.scheduled',
+  'session.compaction.started',
+  'session.compaction.delta',
+  'session.compaction.ended',
+  'session.compaction.failed',
+  'session.revert.staged',
+  'session.revert.cleared',
+  'session.revert.committed',
+  'session.usage.updated',
+  'filesystem.changed',
+  'reference.updated',
+  'permission.asked',
+  'permission.replied',
+  'plugin.added',
+  'plugin.updated',
+  'worktree.updated',
+  'worktree.resolved',
+  'command.updated',
+  'config.updated',
+  'skill.updated',
+  'pty.created',
+  'pty.updated',
+  'pty.exited',
+  'pty.deleted',
+  'shell.created',
+  'shell.exited',
+  'shell.deleted',
+  'form.created',
+  'form.replied',
+  'form.cancelled',
+  'websearch.updated',
+  'session.status',
+  'session.idle',
+  'vcs.branch.updated',
+  'tui.prompt.append',
+  'tui.command.execute',
+  'tui.toast.show',
+  'tui.session.select',
+  'installation.updated',
+  'installation.update-available',
+  'mcp.status.changed',
+  'mcp.resources.changed',
+  'server.connected',
+]);
+
+const isJsonObject = (value: JsonValue | undefined): value is JsonObject =>
+  Object.prototype.toString.call(value) === '[object Object]';
+
+const stringValue = (value: JsonValue | undefined): string | undefined =>
+  Object.prototype.toString.call(value) === '[object String]' ? String(value) : undefined;
+
+const numberValue = (value: JsonValue | undefined): number | undefined => {
+  const parsed = Number(value);
+  return Object.prototype.toString.call(value) === '[object Number]' && Number.isFinite(parsed)
+    ? parsed
+    : undefined;
+};
+
+const locationValue = (value: JsonValue | undefined): LocationRef | undefined => {
+  if (!isJsonObject(value)) return undefined;
+  const directory = stringValue(value.directory);
+  if (!directory) return undefined;
+  const result: LocationRef = { directory };
+  const workspaceID = stringValue(value.workspaceID);
+  if (workspaceID) result.workspaceID = workspaceID;
+  return result;
+};
+
+const sseFrame = (block: string): SseFrame | null => {
+  const data: string[] = [];
+  let event: string | undefined;
+  let id: string | undefined;
+  let retry: number | undefined;
+
+  for (const line of block.split('\n')) {
+    if (line.startsWith(':')) continue;
+    const separator = line.indexOf(':');
+    const field = separator < 0 ? line : line.slice(0, separator);
+    let value = separator < 0 ? '' : line.slice(separator + 1);
+    if (value.startsWith(' ')) value = value.slice(1);
+
+    if (field === 'data') data.push(value);
+    else if (field === 'event') event = value;
+    else if (field === 'id' && !value.includes('\u0000')) id = value;
+    else if (field === 'retry' && /^\d+$/.test(value)) retry = Number(value);
+  }
+
+  if (data.length === 0) return null;
+  const frame: SseFrame = { data: data.join('\n') };
+  if (event !== undefined) frame.event = event;
+  if (id !== undefined) frame.id = id;
+  if (retry !== undefined) frame.retry = retry;
+  return frame;
+};
+
+const DEFAULT_SSE_FRAME_BYTES = 16 * 1024 * 1024;
+
+const cancelSseBody = async (response: Response): Promise<void> => {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // The response may already be closed by the runtime.
+  }
+};
+
+const isSseAbort = (error: Error, signal?: AbortSignal): boolean =>
+  Boolean(signal?.aborted) || error.name === 'AbortError';
+
+async function* readSseRecords<T>(options: SseReaderOptions<T>): AsyncGenerator<SseRecord<T>> {
+  const maxFrameBytes = options.maxFrameBytes ?? DEFAULT_SSE_FRAME_BYTES;
+  if (!Number.isSafeInteger(maxFrameBytes) || maxFrameBytes < 1) {
+    throw new Error('OpenCode V2 SSE frame limit must be a positive safe integer');
+  }
+
+  const report = (error: Error): void => {
+    try {
+      options.onSseError?.(error);
+    } catch {
+      // Error observers must not change stream control flow.
+    }
+  };
+  const notify = (callback: (() => void) | undefined): void => {
+    try {
+      callback?.();
+    } catch {
+      report(new Error('OpenCode V2 SSE heartbeat observer failed'));
+    }
+  };
+
+  const headers = new Headers(options.init?.headers);
+  if (!headers.has('Accept')) headers.set('Accept', 'text/event-stream');
+  if (options.initialCursor !== undefined) headers.set('Last-Event-ID', options.initialCursor);
+  const requestInit: RequestInit = { ...options.init, headers };
+  let response: Response | undefined;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  const signal = requestInit.signal ?? undefined;
+
+  try {
+    response = await options.fetch(options.request, requestInit);
+    if (!response.ok) {
+      throw new Error(`OpenCode V2 event stream failed with HTTP ${response.status}`);
+    }
+    const contentType = response.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase();
+    if (contentType !== 'text/event-stream') {
+      throw new Error('OpenCode V2 event stream returned an unsupported content type');
+    }
+    if (!response.body) throw new Error('OpenCode V2 event stream has no response body');
+
+    reader = response.body.getReader();
+    const lineDecoder = new TextDecoder('utf-8', { fatal: true });
+    const records: SseRecord<T>[] = [];
+    const blockLines: string[] = [];
+    const lineBytes: number[] = [];
+    let currentCursor = options.initialCursor;
+    let frameByteCount = 0;
+    let pendingCarriageReturn = false;
+
+    const dispatch = (): void => {
+      const frame = sseFrame(blockLines.join('\n'));
+      blockLines.length = 0;
+      frameByteCount = 0;
+      if (!frame) return;
+
+      const data = options.parse(frame.data);
+      if (frame.id !== undefined) currentCursor = frame.id;
+      const record: SseRecord<T> = { data };
+      if (frame.event !== undefined) record.event = frame.event;
+      if (currentCursor !== undefined) record.cursor = currentCursor;
+      if (frame.retry !== undefined) record.retry = frame.retry;
+      try {
+        options.onSseEvent?.(record);
+      } catch {
+        report(new Error('OpenCode V2 SSE event observer failed'));
+      }
+      records.push(record);
+    };
+
+    let firstLine = true;
+    const processLine = (rawLine: string): void => {
+      const line = firstLine ? rawLine.replace(/^\uFEFF/, '') : rawLine;
+      firstLine = false;
+      if (line.startsWith(':')) {
+        notify(options.onSseHeartbeat);
+        return;
+      }
+      if (line.length === 0) {
+        dispatch();
+        return;
+      }
+      blockLines.push(line);
+    };
+
+    const finishLine = (): void => {
+      const line = lineDecoder.decode(Uint8Array.from(lineBytes));
+      lineBytes.length = 0;
+      processLine(line);
+    };
+
+    const consume = (bytes: Uint8Array): void => {
+      for (const byte of bytes) {
+        if (pendingCarriageReturn) {
+          if (byte === 0x0a) {
+            frameByteCount += 1;
+            if (frameByteCount > maxFrameBytes) throw new Error('OpenCode V2 SSE frame is too large');
+            pendingCarriageReturn = false;
+            finishLine();
+            continue;
+          }
+          pendingCarriageReturn = false;
+          finishLine();
+        }
+
+        frameByteCount += 1;
+        if (frameByteCount > maxFrameBytes) throw new Error('OpenCode V2 SSE frame is too large');
+        if (byte === 0x0d) {
+          pendingCarriageReturn = true;
+        } else if (byte === 0x0a) {
+          finishLine();
+        } else {
+          lineBytes.push(byte);
+        }
+      }
+    };
+
+    const drain = async function* (): AsyncGenerator<SseRecord<T>> {
+      while (records.length > 0) yield records.shift()!;
+    };
+
+    while (true) {
+      const next = await reader.read();
+      if (next.done) {
+        if (pendingCarriageReturn) {
+          pendingCarriageReturn = false;
+          finishLine();
+        }
+        if (lineBytes.length > 0) finishLine();
+        if (blockLines.length > 0) dispatch();
+        yield* drain();
+        return;
+      }
+      consume(next.value);
+      yield* drain();
+    }
+  } catch (error) {
+    if (error instanceof Error && isSseAbort(error, signal)) return;
+    report(error instanceof Error ? error : new Error('OpenCode V2 event stream failed'));
+    throw error;
+  } finally {
+    if (reader) {
+      try {
+        await reader.cancel();
+      } catch {
+        // The request may already have been aborted by the caller.
+      }
+      reader.releaseLock();
+    } else if (response) {
+      await cancelSseBody(response);
+    }
+  }
+}
 
 const errorResult = (operation: string, error?: Error): LegacyResult<never> => ({
   error: error ?? new Error(`${operation} is unsupported by OpenCode V2`),
@@ -177,9 +504,14 @@ const location = (input: LocationInput | undefined, scopedDirectory: string | un
   return directory ? { directory } : undefined;
 };
 
-const requestOptions = (options?: LegacyOptions): LegacyOptions | undefined => options
-  ? { signal: options.signal, headers: options.headers }
-  : undefined;
+const makeRequestOptions = (options?: LegacyOptions, scopedDirectory?: string): LegacyOptions | undefined => {
+  if (!options && !scopedDirectory) return undefined;
+  const headers = new Headers(options?.headers);
+  if (scopedDirectory && !headers.has('x-opencode-directory')) {
+    headers.set('x-opencode-directory', encodeURIComponent(scopedDirectory));
+  }
+  return { signal: options?.signal, headers };
+};
 
 const normalizeSession = (info: SessionInfo): Session => {
   const session: Session = {
@@ -338,6 +670,19 @@ const normalizeMessage = (sessionID: string, message: SessionMessageInfo, sessio
   return null;
 };
 
+const normalizeMessages = (sessionID: string, messages: SessionMessageInfo[], session?: Session): NormalizedMessage[] => {
+  let latestUserID = '';
+  const normalized: NormalizedMessage[] = [];
+  for (const message of messages) {
+    const record = normalizeMessage(sessionID, message, session);
+    if (!record) continue;
+    if (record.info.role === 'assistant') record.info.parentID = latestUserID;
+    else latestUserID = record.info.id;
+    normalized.push(record);
+  }
+  return normalized;
+};
+
 const normalizePermission = (permission: V2PermissionRequest): PermissionRequest => {
   const normalized: PermissionRequest = {
     id: permission.id,
@@ -434,7 +779,65 @@ const normalizeAgent = (agent: AgentInfo) => ({
 const normalizeFileEntry = (entry: FileSystemEntry) => ({ path: entry.path, type: entry.type });
 
 const sessionIDOf = (event: EventSubscribeOutput): string | undefined => 'sessionID' in event.data ? event.data.sessionID : undefined;
-const eventDirectory = (event: EventSubscribeOutput, scopedDirectory?: string): string => event.location?.directory ?? scopedDirectory ?? 'global';
+const eventDirectory = (event: EventSubscribeOutput, scopedDirectory?: string): string => {
+  const nestedLocation = 'location' in event.data ? event.data.location : undefined;
+  return event.location?.directory ?? nestedLocation?.directory ?? scopedDirectory ?? 'global';
+};
+
+const legacyProperties = (type: string, properties: JsonObject): boolean => {
+  if (type === 'session.created' || type === 'session.deleted') return isJsonObject(properties.info);
+  if (type === 'permission.asked') return 'permission' in properties || 'patterns' in properties;
+  return !V2_EVENT_TYPES.has(type);
+};
+
+const normalizeSseEvent = (value: JsonValue): ParsedAdapterEvent | null => {
+  if (!isJsonObject(value)) return null;
+  const outer = value;
+  const payload = isJsonObject(outer.payload) ? outer.payload : outer;
+  const type = stringValue(payload.type);
+  if (!type) return null;
+
+  const eventID = stringValue(payload.id);
+  if (!eventID) return null;
+  const directory = stringValue(outer.directory);
+  const properties = isJsonObject(payload.properties) ? payload.properties : undefined;
+  if (!isJsonObject(payload.data) && properties && legacyProperties(type, properties)) {
+    const info = isJsonObject(properties.info) ? stringValue(properties.info.directory) : undefined;
+    // SAFETY: legacyProperties above accepts only event names with the legacy
+    // properties envelope, and the required id/type/properties fields are present.
+    const legacyPayload = { id: eventID, type: type as Event['type'], properties } as Event;
+    return {
+      kind: 'legacy',
+      payload: legacyPayload,
+      directory: directory ?? stringValue(properties.directory) ?? info,
+    };
+  }
+
+  const data = isJsonObject(payload.data) ? payload.data : properties;
+  if (!data) return null;
+  const created = numberValue(payload.created) ?? 0;
+  const location = locationValue(payload.location) ?? locationValue(outer.location) ?? (directory ? { directory } : undefined);
+  const rawEvent = { id: eventID, created, type, data };
+  if (location) Object.assign(rawEvent, { location });
+  if (isJsonObject(payload.metadata)) Object.assign(rawEvent, { metadata: payload.metadata });
+  // SAFETY: normalizeSseEvent checked the JSON envelope, event id, discriminant,
+  // object data, location and metadata before mapEvent reads the matching case.
+  const event = rawEvent as EventSubscribeOutput;
+  return { kind: 'v2', event, directory: directory ?? location?.directory };
+};
+
+const parseV2SseEvent = (data: string): JsonValue => {
+  let value: JsonValue;
+  try {
+    // SAFETY: JSON.parse returns only JSON values; the type is checked again by
+    // normalizeSseEvent at the protocol boundary below.
+    value = JSON.parse(data) as JsonValue;
+  } catch (error) {
+    throw new Error('OpenCode V2 event data is not valid JSON', { cause: error });
+  }
+  if (!normalizeSseEvent(value)) throw new Error('OpenCode V2 event envelope is invalid');
+  return value;
+};
 
 export function createOpencode2Adapter(
   legacyClient: OpencodeClient,
@@ -457,6 +860,7 @@ export function createOpencode2Adapter(
     }
     return runtimeFetch(new Request(url, original));
   };
+  const requestOptions = (options?: LegacyOptions): LegacyOptions | undefined => makeRequestOptions(options, scopedDirectory);
   const v2 = OpenCode.make({ baseUrl, fetch: fetchAdapter });
 
   const rememberSession = (session: Session): Session => {
@@ -464,7 +868,7 @@ export function createOpencode2Adapter(
     return session;
   };
 
-  const listV2Pages = async (input: SessionListInput, budget: { remaining: number }, parentID?: string | null): Promise<Session[]> => {
+  const listV2Pages = async (input: SessionListInput, budget: { remaining: number }, parentID: string | null | undefined, options?: LegacyOptions): Promise<Session[]> => {
     const output: Session[] = [];
     const seenCursors = new Set<string>();
     let cursor: string | undefined;
@@ -478,7 +882,7 @@ export function createOpencode2Adapter(
       if (directory) query.directory = directory;
       if (parentID !== undefined) query.parentID = parentID;
       if (cursor) query.cursor = cursor;
-      const result = await v2.session.list(query);
+      const result = await v2.session.list(query, requestOptions(options));
       for (const item of result.data) output.push(rememberSession(normalizeSession(item)));
       const next = result.cursor.next ?? undefined;
       if (!next || seenCursors.has(next) || next === cursor) break;
@@ -489,11 +893,11 @@ export function createOpencode2Adapter(
     return output;
   };
 
-  const listSessions = async (input: SessionListInput = {}): Promise<Session[]> => {
+  const listSessions = async (input: SessionListInput = {}, options?: LegacyOptions): Promise<Session[]> => {
     const rootsOnly = input.roots === true || input.roots === 'true';
     const broad = input.roots === false || input.roots === 'false' || input.roots === undefined;
     const budget = { remaining: MAX_PAGES };
-    const roots = await listV2Pages(input, budget, broad || rootsOnly ? null : undefined);
+    const roots = await listV2Pages(input, budget, broad || rootsOnly ? null : undefined, options);
     const all = [...roots];
     if (broad && !rootsOnly) {
       const queue = [...roots];
@@ -501,7 +905,7 @@ export function createOpencode2Adapter(
       while (queue.length > 0 && all.length < MAX_DESCENDANTS) {
         const parent = queue.shift();
         if (!parent) break;
-        const children = await listV2Pages(input, budget, parent.id);
+        const children = await listV2Pages(input, budget, parent.id, options);
         for (const child of children) {
           if (visited.has(child.id)) continue;
           visited.add(child.id);
@@ -519,7 +923,7 @@ export function createOpencode2Adapter(
     if (event.type === 'session.created') return rememberSession(normalizeCreatedSession(event));
     const id = sessionIDOf(event);
     if (!id) throw new Error(`${event.type} did not include a session ID`);
-    return rememberSession(normalizeSession(await v2.session.get({ sessionID: id })));
+    return rememberSession(normalizeSession(await v2.session.get({ sessionID: id }, requestOptions())));
   };
 
   const assistantInfo = (event: Extract<EventSubscribeOutput, { type: 'session.step.started' }>): AssistantMessage => {
@@ -586,6 +990,26 @@ export function createOpencode2Adapter(
 
   const mapEvent = async (event: EventSubscribeOutput): Promise<Event | null> => {
     switch (event.type) {
+      case 'models-dev.refreshed':
+      case 'integration.updated':
+      case 'integration.connection.updated':
+      case 'catalog.updated':
+      case 'plugin.added':
+      case 'reference.updated':
+      case 'pty.created':
+      case 'pty.updated':
+      case 'pty.exited':
+      case 'pty.deleted':
+      case 'tui.prompt.append':
+      case 'tui.command.execute':
+      case 'tui.toast.show':
+      case 'tui.session.select':
+      case 'installation.updated':
+      case 'installation.update-available':
+      case 'server.connected':
+        // SAFETY: these event names and property objects are shared by both SDK
+        // generations. This is the boundary between data and properties envelopes.
+        return { id: event.id, type: event.type as Event['type'], properties: event.data } as Event;
       case 'session.created':
         return { id: event.id, type: 'session.created', properties: { sessionID: event.data.sessionID, info: await sessionFromEvent(event) } };
       case 'session.renamed':
@@ -595,6 +1019,7 @@ export function createOpencode2Adapter(
         return { id: event.id, type: 'session.updated', properties: { sessionID: event.data.sessionID, info: await sessionFromEvent(event) } };
       case 'session.deleted': {
         const cached = sessions.get(event.data.sessionID);
+        sessions.delete(event.data.sessionID);
         if (cached) return { id: event.id, type: 'session.deleted', properties: { sessionID: cached.id, info: cached } };
         const directory = event.location?.directory ?? scopedDirectory ?? '';
         const fallback: Session = {
@@ -620,6 +1045,20 @@ export function createOpencode2Adapter(
       case 'session.execution.failed':
       case 'session.execution.interrupted':
         return { id: event.id, type: 'session.error', properties: { sessionID: event.data.sessionID, error: event.type === 'session.execution.failed' ? { name: 'UnknownError', data: { message: event.data.error.message } } : { name: 'MessageAbortedError', data: { message: event.data.reason } } } };
+      case 'session.revert.staged':
+      case 'session.revert.cleared':
+      case 'session.revert.committed': {
+        const info = await sessionFromEvent(event);
+        return { id: event.id, type: 'session.updated', properties: { sessionID: info.id, info } };
+      }
+      case 'session.usage.updated': {
+        const info = await sessionFromEvent(event);
+        info.cost = event.data.cost;
+        info.tokens = event.data.tokens;
+        return { id: event.id, type: 'session.updated', properties: { sessionID: info.id, info } };
+      }
+      case 'session.forked':
+        return { id: event.id, type: 'session.created', properties: { sessionID: event.data.sessionID, info: await sessionFromEvent(event) } };
       case 'session.step.started':
         return { id: event.id, type: 'message.updated', properties: { sessionID: event.data.sessionID, info: rememberAssistant(assistantInfo(event)) } };
       case 'session.step.ended':
@@ -648,7 +1087,17 @@ export function createOpencode2Adapter(
       }
       case 'session.tool.input.ended': {
         const snapshot = tools.get(event.data.id);
-        return toolPart(event, { status: 'running', input: snapshot?.input ?? {}, time: { start: snapshot?.started ?? event.created } });
+        let input = snapshot?.input ?? {};
+        try {
+          // SAFETY: JSON.parse produces JSON-compatible tool input, and
+          // isJsonObject below rejects non-object values before assignment.
+          const parsed = JSON.parse(event.data.text) as JsonValue;
+          if (isJsonObject(parsed)) input = parsed;
+        } catch {
+          // The subsequent tool.called event remains authoritative for input.
+        }
+        if (snapshot) snapshot.input = input;
+        return toolPart(event, { status: 'running', input, time: { start: snapshot?.started ?? event.created } });
       }
       case 'session.tool.called': {
         const current = tools.get(event.data.id);
@@ -691,8 +1140,40 @@ export function createOpencode2Adapter(
         return { id: event.id, type: 'question.asked', properties: normalizeQuestion(event.data.form) };
       }
       case 'form.replied':
-        forms.delete(event.data.id);
-        return { id: event.id, type: 'question.replied', properties: { sessionID: event.data.sessionID, requestID: event.data.id, answers: [] } };
+        {
+          const form = forms.get(event.data.id);
+          if (!form) return null;
+          forms.delete(event.data.id);
+          return {
+            id: event.id,
+            type: 'question.replied',
+            properties: {
+              sessionID: event.data.sessionID,
+              requestID: event.data.id,
+              answers: form.fields.map((field) => {
+                const value = event.data.answer[field.key];
+                if (Array.isArray(value)) return value.map(String);
+                if (value === undefined || value === null) return [];
+                return [String(value)];
+              }),
+            },
+          };
+        }
+      case 'session.retry.scheduled':
+        return { id: event.id, type: 'session.status', properties: { sessionID: event.data.sessionID, status: { type: 'retry', attempt: event.data.attempt, message: event.data.error.message, next: event.data.at } } };
+      case 'session.compaction.started':
+        return { id: event.id, type: 'session.status', properties: { sessionID: event.data.sessionID, status: { type: 'busy' } } };
+      case 'session.compaction.ended':
+        return { id: event.id, type: 'session.compacted', properties: { sessionID: event.data.sessionID } };
+      case 'session.compaction.failed':
+        return { id: event.id, type: 'session.error', properties: { sessionID: event.data.sessionID, error: { name: 'UnknownError', data: { message: event.data.error.message } } } };
+      case 'filesystem.changed':
+        // SAFETY: the generated filesystem event fields match the legacy file watcher payload.
+        return { id: event.id, type: 'file.watcher.updated', properties: event.data } as Event;
+      case 'worktree.updated':
+      case 'worktree.resolved':
+        // SAFETY: the generated worktree event fields match the legacy project-directory payload.
+        return { id: event.id, type: 'project.directories.updated', properties: event.data } as Event;
       case 'form.cancelled':
         forms.delete(event.data.id);
         return { id: event.id, type: 'question.rejected', properties: { sessionID: event.data.sessionID, requestID: event.data.id } };
@@ -713,10 +1194,10 @@ export function createOpencode2Adapter(
       const result = await v2.project.current({ location: location(input, scopedDirectory) }, requestOptions(options));
       return { id: result.id, worktree: result.directory, time: { created: 0, updated: 0 }, sandboxes: [] };
     })],
-    ['session.list', async (input: SessionListInput = {}) => guarded('session.list', () => listSessions(input))],
-    ['experimental.session.list', async (input: SessionListInput = {}) => {
+    ['session.list', async (input: SessionListInput = {}, options?: LegacyOptions) => guarded('session.list', () => listSessions(input, options))],
+    ['experimental.session.list', async (input: SessionListInput = {}, options?: LegacyOptions) => {
       if (input.cursor !== undefined) return { data: [] };
-      return guarded('experimental.session.list', () => listSessions(input));
+      return guarded('experimental.session.list', () => listSessions(input, options));
     }],
     ['session.get', async (input: SessionInput, options?: LegacyOptions) => guarded('session.get', async () => rememberSession(normalizeSession(await v2.session.get({ sessionID: input.sessionID }, requestOptions(options)))))],
     ['session.create', async (input: SessionCreateInput = {}, options?: LegacyOptions) => {
@@ -754,7 +1235,7 @@ export function createOpencode2Adapter(
         const result = await v2.message.list({ sessionID: input.sessionID, limit: input.limit, order: 'desc', cursor: input.before }, requestOptions(options));
         let session = sessions.get(input.sessionID);
         if (!session) session = rememberSession(normalizeSession(await v2.session.get({ sessionID: input.sessionID }, requestOptions(options))));
-        const data = result.data.map((message) => normalizeMessage(input.sessionID, message, session)).filter((message) => message !== null);
+        const data = normalizeMessages(input.sessionID, [...result.data].reverse(), session);
         const next = result.cursor.next ?? result.cursor.previous;
         const response: LegacyResult<typeof data> = { data };
         if (next) response.response = new Response(null, { headers: { 'x-next-cursor': next } });
@@ -949,11 +1430,50 @@ export function createOpencode2Adapter(
     })],
     ['global.event', async (options?: LegacyOptions) => {
       try {
-        const source = v2.event.subscribe(requestOptions(options));
+        let eventRequest: RequestInfo | URL = '/api/event';
+        try {
+          eventRequest = new URL('/api/event', baseUrl);
+        } catch {
+          // Relative runtime bases are resolved by the Request/runtimeFetch path.
+        }
+        const init = requestOptions(options);
+        const initialHeader = new Headers(init?.headers).get('Last-Event-ID');
+        const source = readSseRecords<JsonValue>({
+          fetch: fetchAdapter,
+          request: eventRequest,
+          init,
+          initialCursor: initialHeader === null ? undefined : initialHeader,
+          parse: parseV2SseEvent,
+          onSseEvent: (record) => {
+            const event: SseEvent = { data: record.data };
+            if (record.event !== undefined) event.event = record.event;
+            if (record.cursor !== undefined) event.id = record.cursor;
+            if (record.retry !== undefined) event.retry = record.retry;
+            options?.onSseEvent?.(event);
+          },
+          onSseHeartbeat: options?.onSseHeartbeat,
+          onSseError: options?.onSseError,
+        });
         const stream = (async function* (): AsyncGenerator<GlobalEvent> {
           for await (const event of source) {
-            const payload = await mapEvent(event);
-            if (payload) yield { directory: eventDirectory(event, scopedDirectory), payload };
+            try {
+              const normalized = normalizeSseEvent(event.data);
+              if (!normalized) throw new Error('OpenCode V2 event envelope is invalid');
+              const payload = normalized.kind === 'v2' ? await mapEvent(normalized.event) : normalized.payload;
+              if (!payload) continue;
+              const directory = normalized.kind === 'v2'
+                ? eventDirectory(normalized.event, normalized.directory ?? scopedDirectory)
+                : normalized.directory ?? scopedDirectory ?? 'global';
+              yield { directory, payload };
+            } catch (error) {
+              if (error instanceof Error && isSseAbort(error, options?.signal)) return;
+              try {
+                options?.onSseError?.(error instanceof Error ? error : new Error('OpenCode V2 event normalization failed'));
+              } catch {
+                // Error observers must not change stream control flow.
+              }
+              throw error;
+            }
           }
         })();
         return { stream };

@@ -3,8 +3,7 @@ import { summarizeText as summarizeSharedText } from '../text/summarization.js';
 export const createNotificationTemplateRuntime = (deps) => {
   const {
     readSettingsFromDisk,
-    buildOpenCodeUrl,
-    getOpenCodeAuthHeaders,
+    openCodeApi,
     resolveGitBinaryForSpawn,
   } = deps;
 
@@ -136,20 +135,10 @@ export const createNotificationTemplateRuntime = (deps) => {
     if (!sessionId) return '';
 
     try {
-      const url = buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}/message`, '');
-      const response = await fetch(`${url}?limit=5`, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json',
-          ...getOpenCodeAuthHeaders(),
-        },
-        signal: AbortSignal.timeout(3000),
-      });
-
-      if (!response.ok) return '';
-
-      const messages = await response.json().catch(() => null);
-      if (!Array.isArray(messages)) return '';
+      const { messages } = await openCodeApi.listMessages(
+        { sessionID: sessionId, limit: 5 },
+        { timeoutMs: 3000 },
+      );
 
       let target = null;
       if (messageId) {
@@ -201,17 +190,7 @@ export const createNotificationTemplateRuntime = (deps) => {
     }
 
     try {
-      const url = buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}`, '');
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(2000),
-      });
-      if (!response.ok) {
-        console.warn(`[Notification] fetchSessionInfo: ${response.status} for session ${sessionId}`);
-        return null;
-      }
-      const data = await response.json().catch(() => null);
+      const data = await openCodeApi.getSession(sessionId, undefined, { timeoutMs: 2000 });
       if (data && typeof data === 'object') {
         sessionInfoCache.set(sessionId, { data, at: Date.now() });
         return data;

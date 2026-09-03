@@ -1,4 +1,3 @@
-import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { buildDeferredRestartResponse } from './config-mutation-response.js';
 
 /**
@@ -23,9 +22,7 @@ export const registerSkillRoutes = (app, dependencies) => {
     isUnsafeSkillRelativePath,
     refreshOpenCodeAfterConfigChange,
     clientReloadDelayMs,
-    buildOpenCodeUrl,
-
-    getOpenCodeAuthHeaders,
+    openCodeApi,
     getOpenCodePort,
     getSkillSources,
     discoverSkills,
@@ -132,20 +129,7 @@ export const registerSkillRoutes = (app, dependencies) => {
     }
 
     try {
-      const client = createOpencodeClient({
-        baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''),
-        directory: workingDirectory || undefined,
-        headers: getOpenCodeAuthHeaders(),
-        fetch: (request) => fetch(request, { signal: AbortSignal.timeout(8_000) }),
-      });
-
-      const response = await client.app.skills(
-        workingDirectory ? { directory: workingDirectory } : undefined,
-      );
-      const payload = response?.data;
-      if (!Array.isArray(payload)) {
-        return [];
-      }
+      const payload = await openCodeApi.listSkills(workingDirectory || undefined, { timeoutMs: 8_000 });
 
       return payload
         .map((item) => {

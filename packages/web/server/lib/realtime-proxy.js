@@ -5,6 +5,7 @@ const PROXY_WS_PATH = '/api/openchamber/realtime-proxy/ws';
 
 const isAllowedSsePath = (pathname) => {
   return pathname === '/api/event'
+    || pathname === '/api/api/event'
     || pathname === '/api/global/event'
     || pathname === '/api/openchamber/events'
     || pathname === '/api/notifications/stream';

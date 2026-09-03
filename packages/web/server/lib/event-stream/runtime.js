@@ -65,6 +65,7 @@ export function createMessageStreamWsRuntime({
   upstreamReconnectDelayMs = DEFAULT_UPSTREAM_RECONNECT_DELAY_MS,
   fetchImpl = fetch,
   globalEventHub = null,
+  getOpenCodeProtocol = () => 'legacy',
 }) {
   const wsServer = new WebSocketServer({
     noServer: true,
@@ -83,6 +84,7 @@ export function createMessageStreamWsRuntime({
     fetchImpl,
     upstreamStallTimeoutMs,
     upstreamReconnectDelayMs,
+    getOpenCodeProtocol,
   });
 
   const globalBridge = createGlobalMessageStreamWsBridge({
@@ -127,6 +129,7 @@ export function createMessageStreamWsRuntime({
       upstreamStallTimeoutMs,
       upstreamReconnectDelayMs,
       fetchImpl,
+      getOpenCodeProtocol,
     });
   });
 

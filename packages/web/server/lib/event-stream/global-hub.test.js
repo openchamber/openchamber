@@ -85,9 +85,10 @@ describe('createGlobalMessageStreamHub', () => {
       await waitForAssertion(() => {
         expect(received[0]).toEqual({
           envelope: {
-            eventId: 'evt-v2',
+            eventId: undefined,
             directory: '/tmp/project',
             payload: {
+              id: 'evt-v2',
               type: 'session.error',
               properties: {
                 sessionID: 'ses-1',
@@ -97,6 +98,7 @@ describe('createGlobalMessageStreamHub', () => {
             },
           },
           payload: {
+            id: 'evt-v2',
             type: 'session.error',
             properties: {
               sessionID: 'ses-1',
@@ -105,7 +107,7 @@ describe('createGlobalMessageStreamHub', () => {
             },
           },
           directory: '/tmp/project',
-          eventId: 'evt-v2',
+          eventId: undefined,
         });
         expect(received[1]).toMatchObject({
           payload: {
@@ -122,10 +124,36 @@ describe('createGlobalMessageStreamHub', () => {
             },
           },
           directory: '/tmp/project',
-          eventId: 'evt-v2-next',
+          eventId: undefined,
         });
-        expect(hub.replayAfter('evt-v2')).toEqual([received[1]]);
+        expect(hub.replayAfter('evt-v2')).toEqual([]);
       });
+    } finally {
+      hub.stop();
+    }
+  });
+
+  it('uses the upstream SSE cursor for replay while preserving the JSON event id', async () => {
+    const received = [];
+    const hub = createGlobalMessageStreamHub({
+      buildOpenCodeUrl: (pathname) => `http://127.0.0.1:4096${pathname}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      getOpenCodeProtocol: () => 'opencode2',
+      upstreamReconnectDelayMs: 100,
+      fetchImpl: async () => createSseResponse({
+        blocks: [
+          'id: cursor-1\ndata: {"id":"json-1","type":"server.connected","data":{}}\n\n',
+        ],
+      }),
+    });
+    hub.subscribeEvent((event) => received.push(event));
+
+    try {
+      hub.start();
+      await waitForAssertion(() => expect(received).toHaveLength(1));
+      expect(received[0].eventId).toBe('cursor-1');
+      expect(received[0].payload.id).toBe('json-1');
+      expect(hub.replayAfter('cursor-1')).toEqual([]);
     } finally {
       hub.stop();
     }

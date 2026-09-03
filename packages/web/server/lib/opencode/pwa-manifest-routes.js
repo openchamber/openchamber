@@ -11,10 +11,8 @@ const mapPwaOrientationToManifest = (value) => {
 
 export const registerPwaManifestRoute = (app, dependencies) => {
   const {
-    process,
     resolveProjectDirectory,
-    buildOpenCodeUrl,
-    getOpenCodeAuthHeaders,
+    openCodeApi,
     readSettingsFromDiskMigrated,
     normalizePwaAppName,
     normalizePwaOrientation,
@@ -91,31 +89,14 @@ export const registerPwaManifestRoute = (app, dependencies) => {
     };
 
     const listSessions = async (directory) => {
-      const query = (() => {
-        if (typeof directory !== 'string' || directory.length === 0) {
-          return '';
-        }
-        const preparedDirectory = process.platform === 'win32'
-          ? directory.replace(/\//g, '\\\\')
-          : directory;
-        return `?directory=${encodeURIComponent(preparedDirectory)}`;
-      })();
-
-      const response = await fetch(buildOpenCodeUrl(`/session${query}`, ''), {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json',
-          ...getOpenCodeAuthHeaders(),
-        },
-        signal: AbortSignal.timeout(2500),
-      });
-
-      if (!response.ok) {
-        return [];
-      }
-
-      const payload = await response.json().catch(() => null);
-      return Array.isArray(payload) ? payload : [];
+      const { sessions } = await openCodeApi.listSessions({
+        global: true,
+        roots: false,
+        allPages: false,
+        limit: 12,
+        ...(directory ? { directory } : {}),
+      }, { timeoutMs: 2500 });
+      return sessions;
     };
 
     try {
@@ -169,8 +150,7 @@ export const registerPwaManifestRoute = (app, dependencies) => {
       recentPwaSessionsCache.set(cacheKey, { at: now, data: shortcuts });
       return shortcuts;
     } catch {
-      recentPwaSessionsCache.set(cacheKey, { at: now, data: [] });
-      return [];
+      return cached?.data ?? [];
     }
   };
 

@@ -79,8 +79,10 @@ function createNotificationRuntime() {
     sendPushToAllUiSessions,
     sendApnsToAllUiSessions,
     isAnyInteractiveClientVisible: () => false,
-    buildOpenCodeUrl: (pathname) => `http://opencode.test${pathname}`,
-    getOpenCodeAuthHeaders: () => ({}),
+    openCodeApi: {
+      supportsSessionMetadata: () => false,
+      getSession: async () => ({ id: 'ses-1' }),
+    },
   });
 
   return {

@@ -21,56 +21,44 @@ describe('session goal creation', () => {
   });
 
   it('writes the objective before patching active goal metadata', async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true }));
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = fetchMock;
-    try {
-      const goal = await createSessionGoal({
-        baseUrl: 'http://opencode.test',
-        authHeaders: { Authorization: 'Bearer test' },
-        sessionID: 'ses_123',
-        directory: '/repo/app',
-        objective: 'Finish and verify the migration',
-        tokenBudget: 200_000,
-        providerID: 'openai',
-        modelID: 'gpt-5.5',
-      });
+    const mergeSessionMetadata = vi.fn(async (_sessionID, _directory, mutate) => mutate({ other: true }));
+    const goal = await createSessionGoal({
+      openCodeApi: { mergeSessionMetadata },
+      sessionID: 'ses_123',
+      directory: '/repo/app',
+      objective: 'Finish and verify the migration',
+      tokenBudget: 200_000,
+      providerID: 'openai',
+      modelID: 'gpt-5.5',
+    });
 
-      expect(writeObjectiveMock).toHaveBeenCalledWith('ses_123', 'Finish and verify the migration');
-      expect(writeObjectiveMock.mock.invocationCallOrder[0]).toBeLessThan(fetchMock.mock.invocationCallOrder[0]);
-      expect(goal).toMatchObject({ objective: '', objectiveFile: true, status: 'active', tokenBudget: 200_000 });
-      expect(fetchMock).toHaveBeenCalledWith(
-        'http://opencode.test/session/ses_123?directory=%2Frepo%2Fapp',
-        expect.objectContaining({ method: 'PATCH' }),
-      );
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    expect(writeObjectiveMock).toHaveBeenCalledWith('ses_123', 'Finish and verify the migration');
+    expect(writeObjectiveMock.mock.invocationCallOrder[0]).toBeLessThan(mergeSessionMetadata.mock.invocationCallOrder[0]);
+    expect(goal).toMatchObject({ objective: '', objectiveFile: true, status: 'active', tokenBudget: 200_000 });
+    expect(mergeSessionMetadata).toHaveBeenCalledWith('ses_123', '/repo/app', expect.any(Function));
+    const metadata = await mergeSessionMetadata.mock.calls[0][2]({ other: true });
+    expect(metadata).toMatchObject({ other: true, openchamber: { goal } });
   });
 
   it('falls back to inline metadata when objective storage fails', async () => {
     writeObjectiveMock.mockRejectedValueOnce(new Error('disk unavailable'));
-    const fetchMock = vi.fn(async () => ({ ok: true }));
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = fetchMock;
-    try {
-      await createSessionGoal({
-        baseUrl: 'http://opencode.test',
-        authHeaders: {},
-        sessionID: 'ses_123',
-        directory: '/repo/app',
-        objective: 'Finish the migration',
-        onWarning: vi.fn(),
-      });
+    let writtenMetadata;
+    const mergeSessionMetadata = vi.fn(async (_sessionID, _directory, mutate) => {
+      writtenMetadata = await mutate({});
+      return writtenMetadata;
+    });
+    await createSessionGoal({
+      openCodeApi: { mergeSessionMetadata },
+      sessionID: 'ses_123',
+      directory: '/repo/app',
+      objective: 'Finish the migration',
+      onWarning: vi.fn(),
+    });
 
-      const payload = JSON.parse(fetchMock.mock.calls[0][1].body);
-      expect(payload.metadata.openchamber.goal).toMatchObject({
-        objective: 'Finish the migration',
-        objectiveFile: false,
-      });
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    expect(writtenMetadata.openchamber.goal).toMatchObject({
+      objective: 'Finish the migration',
+      objectiveFile: false,
+    });
   });
 
   it('builds the same goal intro with an optional budget', () => {

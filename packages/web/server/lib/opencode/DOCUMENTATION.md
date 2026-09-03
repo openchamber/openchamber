@@ -7,6 +7,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/index.js`: public entrypoint (currently baseline placeholder).
 - `packages/web/server/lib/opencode/auth.js`: provider authentication file operations.
 - `packages/web/server/lib/opencode/auth-state-runtime.js`: central OpenCode Basic-auth header runtime for managed passwords and discovered shared-service credentials.
+- `packages/web/server/lib/opencode/api-runtime.js`: protocol-aware server API for session, message, prompt, permission, catalog, status, wait, and metadata operations.
 - `packages/web/server/lib/opencode/cli-options.js`: CLI/environment option parsing for server startup arguments.
 - `packages/web/server/lib/opencode/cli-entry-runtime.js`: CLI entrypoint runtime that detects direct execution, parses CLI options, and starts server bootstrap.
 - `packages/web/server/lib/opencode/routes.js`: OpenCode/provider settings and auth-related route registration.
@@ -96,6 +97,14 @@ This module provides OpenCode server integration utilities for the web server ru
   - `DELETE /api/provider/:providerId/auth`
 - Owns lazy auth library loading for provider auth checks/removal.
 - Keeps route behavior independent from composition root; `index.js` now supplies dependencies only.
+
+## Public exports (api-runtime.js)
+
+- `createOpenCodeApiRuntime(dependencies)`: resolves the active protocol, URL, and auth headers for every call. Legacy requests use `@opencode-ai/sdk/v2`; opencode2 requests use `OpenCode.make` from `@opencode-ai/client`.
+- The returned API normalizes opencode2 sessions and messages into the legacy shapes used by server features. Pagination cursors remain separate from those records, and newest-first opencode2 message pages become chronological before normalization.
+- Session status has three outcomes. `authoritative` carries proven live state, `unknown` means opencode2 omitted the session from `/api/session/active`, and `unavailable` preserves request failure. `waitForSessionIdle` uses `/api/session/:id/wait` on opencode2.
+- Metadata writes fresh-read before merging on legacy. opencode2 rejects metadata and runtime-provider credential reads with `UnsupportedOpenCodeOperationError`; callers must skip dependent background work or return an explicit `501`.
+- Feature callers use this API instead of constructing OpenCode session, message, permission, provider, command, skill, or agent routes directly. Lifecycle keeps transport-level health and readiness probes, plus legacy-only warmup and post-restart agent checks. The generic browser proxy also remains transport-level.
 
 ## Public exports (session-runtime.js)
 - `createSessionRuntime({ writeSseEvent, getNotificationClients, broadcastEvent? })`: creates runtime-owned state machine and APIs for session status.

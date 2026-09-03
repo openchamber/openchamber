@@ -86,25 +86,20 @@ afterEach(() => {
 
 describe('session assist runtime with opencode2 events', () => {
   it('starts the idle assist flow when the hub translates execution success', async () => {
-    const requests = [];
     const generateSmallModelText = vi.fn(async () => ({
       text: '{"recap":"The task is complete","suggestion":"Continue with the next task"}',
       providerID: 'provider-1',
       modelID: 'model-1',
     }));
-    const fetchImpl = vi.fn(async (input, init = {}) => {
-      const url = new URL(typeof input === 'string' ? input : input.url);
-      requests.push({ pathname: url.pathname, search: url.search, method: init.method ?? 'GET' });
-      if (url.pathname === `/session/${SESSION_ID}` && init.method === 'PATCH') return Response.json({});
-      if (url.pathname === `/session/${SESSION_ID}`) return Response.json({ id: SESSION_ID, metadata: {} });
-      if (url.pathname === `/session/${SESSION_ID}/message`) return Response.json(messages);
-      return new Response('', { status: 404 });
-    });
-    vi.stubGlobal('fetch', fetchImpl);
+    const mergeSessionMetadata = vi.fn(async (_sessionID, _directory, mutate) => mutate({}));
 
     const assist = createSessionAssistRuntime({
-      buildOpenCodeUrl: (pathname) => `http://opencode.test${pathname}`,
-      getOpenCodeAuthHeaders: () => ({}),
+      openCodeApi: {
+        supportsSessionMetadata: () => true,
+        getSession: async () => ({ id: SESSION_ID, metadata: {} }),
+        listMessages: async () => ({ messages }),
+        mergeSessionMetadata,
+      },
       getSmallModelService: async () => ({ generateSmallModelText }),
       quietMs: 1,
     });
@@ -126,7 +121,12 @@ describe('session assist runtime with opencode2 events', () => {
         preferredProviderID: 'provider-1',
         preferredModelID: 'model-1',
       }));
-      expect(requests).toContainEqual({ pathname: `/session/${SESSION_ID}`, search: '?directory=%2Fworkspace', method: 'PATCH' });
+      expect(mergeSessionMetadata).toHaveBeenCalledWith(
+        SESSION_ID,
+        DIRECTORY,
+        expect.any(Function),
+        { timeoutMs: 5000 },
+      );
     } finally {
       assist.stop();
       hub.stop();

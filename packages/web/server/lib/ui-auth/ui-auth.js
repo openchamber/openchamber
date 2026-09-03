@@ -293,6 +293,7 @@ const isWebSocketUpgrade = (req) => {
 
 const isUrlAuthReadableHttpPath = (pathname) => {
   return pathname === '/api/event'
+    || pathname === '/api/api/event'
     || pathname === '/api/global/event'
     || pathname === '/api/openchamber/events'
     || pathname === '/api/openchamber/realtime-proxy/sse'

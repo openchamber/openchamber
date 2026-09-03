@@ -7,6 +7,29 @@ const json = (body) => new Response(JSON.stringify(body), {
   headers: { 'Content-Type': 'application/json' },
 });
 
+const createOpenCodeApi = () => {
+  const request = async (path, method = 'GET', body) => {
+    const response = await globalThis.fetch(`http://opencode.test${path}`, {
+      method,
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    return response.json();
+  };
+  return {
+    supportsSessionMetadata: () => true,
+    getSession: (sessionID) => request(`/session/${sessionID}`),
+    listMessages: async ({ sessionID }) => ({ messages: await request(`/session/${sessionID}/message`) }),
+    getMessage: ({ sessionID, messageID }) => request(`/session/${sessionID}/message/${messageID}`),
+    sendPrompt: ({ sessionID, directory: _directory, ...body }) => request(`/session/${sessionID}/prompt_async`, 'POST', body),
+    mergeSessionMetadata: async (sessionID, _directory, mutate) => {
+      const session = await request(`/session/${sessionID}`);
+      const metadata = await mutate(session.metadata ?? {});
+      await request(`/session/${sessionID}`, 'PATCH', { metadata });
+      return metadata;
+    },
+  };
+};
+
 describe('context obligatory runtime', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -39,8 +62,7 @@ describe('context obligatory runtime', () => {
       throw new Error(`Unexpected ${url.pathname}`);
     }));
     const runtime = createContextObligatoryRuntime({
-      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
-      getOpenCodeAuthHeaders: () => ({}),
+      openCodeApi: createOpenCodeApi(),
     });
 
     await runtime.processPayload({ type: 'session.compacted', properties: { sessionID: 'ses_1' } });
@@ -89,8 +111,7 @@ describe('context obligatory runtime', () => {
       signature: 'sig-1',
     }));
     const runtime = createContextObligatoryRuntime({
-      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
-      getOpenCodeAuthHeaders: () => ({}),
+      openCodeApi: createOpenCodeApi(),
       sessionKnowledgeRuntime: {
         metadataKey: 'knowledge_context_delivered',
         readPins: () => ({ notes: ['n1'], plans: [] }),
@@ -134,8 +155,7 @@ describe('context obligatory runtime', () => {
       throw new Error(`Unexpected ${url.pathname}`);
     }));
     const runtime = createContextObligatoryRuntime({
-      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
-      getOpenCodeAuthHeaders: () => ({}),
+      openCodeApi: createOpenCodeApi(),
       sessionKnowledgeRuntime: {
         metadataKey: 'knowledge_context_delivered',
         readPins: () => ({ notes: ['n1'], plans: [] }),
@@ -163,8 +183,7 @@ describe('context obligatory runtime', () => {
       throw new Error(`Unexpected ${url.pathname}`);
     }));
     const runtime = createContextObligatoryRuntime({
-      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
-      getOpenCodeAuthHeaders: () => ({}),
+      openCodeApi: createOpenCodeApi(),
       sessionKnowledgeRuntime: {
         metadataKey: 'knowledge_context_delivered',
         readPins: () => ({ notes: [], plans: [] }),
@@ -181,8 +200,7 @@ describe('context obligatory runtime', () => {
     const fetchImpl = vi.fn();
     vi.stubGlobal('fetch', fetchImpl);
     const runtime = createContextObligatoryRuntime({
-      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
-      getOpenCodeAuthHeaders: () => ({}),
+      openCodeApi: createOpenCodeApi(),
     });
     await runtime.processPayload({ type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'idle' } } });
     expect(fetchImpl).not.toHaveBeenCalled();

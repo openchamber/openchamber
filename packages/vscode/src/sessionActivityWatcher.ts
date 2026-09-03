@@ -1,4 +1,5 @@
-import { createOpencodeClient } from '@opencode-ai/sdk/v2';
+import { createOpencodeClient, type GlobalEvent } from '@opencode-ai/sdk/v2';
+import { OpenCode, type EventSubscribeOutput } from '@opencode-ai/client';
 import type { OpenCodeManager } from './opencode';
 
 // Session activity tracking (mirrors web server and desktop behavior)
@@ -9,12 +10,54 @@ interface SessionActivity {
   phase: ActivityPhase;
 }
 
+type SessionActivityProperties = {
+  sessionID?: string;
+  sessionId?: string;
+  status?: { type?: string };
+  info?: {
+    type?: string;
+    sessionID?: string;
+    sessionId?: string;
+    role?: string;
+    finish?: string;
+  };
+};
+
+type SessionActivityPayload = {
+  type?: string;
+  properties?: SessionActivityProperties;
+  data?: SessionActivityProperties;
+  payload?: SessionActivityPayload;
+};
+
+type SessionActivityNotification = {
+  type: 'openchamber:session-activity';
+  properties: {
+    sessionId: string;
+    phase: ActivityPhase;
+  };
+};
+
+type SessionActivityProvider = {
+  postMessage: (message: SessionActivityNotification) => void;
+};
+
+type SessionActivityClients = {
+  createLegacyClient: typeof createOpencodeClient;
+  createV2Client: typeof OpenCode.make;
+};
+
+const defaultSessionActivityClients: SessionActivityClients = {
+  createLegacyClient: createOpencodeClient,
+  createV2Client: OpenCode.make,
+};
+
 const sessionActivityPhases = new Map<string, { phase: ActivityPhase; updatedAt: number }>();
 const sessionActivityCooldowns = new Map<string, NodeJS.Timeout>();
 const SESSION_COOLDOWN_DURATION_MS = 2000;
 
 let globalEventWatcherAbortController: AbortController | null = null;
-let chatViewProvider: { postMessage: (message: unknown) => void } | null = null;
+let chatViewProvider: SessionActivityProvider | null = null;
 let globalEventWatcherRetryTimer: NodeJS.Timeout | null = null;
 let globalEventWatcherStartToken = 0;
 
@@ -26,39 +69,48 @@ const clearGlobalEventWatcherRetry = (): void => {
   globalEventWatcherRetryTimer = null;
 };
 
-const unwrapGlobalEventPayload = (eventData: unknown): Record<string, unknown> | null => {
-  if (!eventData || typeof eventData !== 'object') {
-    return null;
-  }
-
-  const record = eventData as { payload?: unknown };
-  if (record.payload && typeof record.payload === 'object') {
-    return record.payload as Record<string, unknown>;
-  }
-
-  return eventData as Record<string, unknown>;
+const unwrapGlobalEventPayload = (eventData: EventSubscribeOutput | GlobalEvent): SessionActivityPayload => {
+  const payload = 'payload' in eventData ? eventData.payload : eventData;
+  // SAFETY: both generated event unions use the discriminated fields read by
+  // deriveSessionActivity; it ignores all event-specific fields.
+  return payload as SessionActivityPayload;
 };
 
-const reconcileSessionActivityFromStatus = async (manager: OpenCodeManager): Promise<void> => {
+export const reconcileSessionActivityFromStatus = async (
+  manager: OpenCodeManager,
+  clients: SessionActivityClients = defaultSessionActivityClients,
+): Promise<void> => {
   const baseUrl = manager.getApiUrl();
   if (!baseUrl) {
     return;
   }
 
-  const url = new URL('/session/status', baseUrl);
-  const response = await fetch(url.toString(), {
-    headers: manager.getOpenCodeAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    throw new Error(`session status fetch failed (${response.status})`);
+  if (manager.getProtocol() === 'opencode2') {
+    const active = await clients.createV2Client({
+      baseUrl,
+      headers: manager.getOpenCodeAuthHeaders(),
+    }).session.active();
+    for (const sessionId of Object.keys(active)) {
+      setSessionActivityPhase(sessionId, 'busy');
+    }
+    // V2 active-session omission is unknown, not authoritative idle. Terminal
+    // execution events retire activity entries when the service supplies proof.
+    return;
   }
 
-  const statuses = await response.json() as Record<string, { type?: string }>;
+  const result = await clients.createLegacyClient({
+    baseUrl,
+    headers: manager.getOpenCodeAuthHeaders(),
+  }).session.status();
+  if (result.error) throw result.error;
+  const statuses = result.data;
+  if (!statuses) {
+    throw new Error('session status returned an invalid response');
+  }
   const knownSessionIds = new Set(Object.keys(statuses || {}));
 
   for (const [sessionId, data] of Object.entries(statuses || {})) {
-    const type = typeof data?.type === 'string' ? data.type : 'idle';
+    const type = data?.type ?? 'idle';
     const phase: ActivityPhase = type === 'busy' || type === 'retry' ? 'busy' : 'idle';
     setSessionActivityPhase(sessionId, phase);
   }
@@ -112,47 +164,51 @@ const setSessionActivityPhase = (sessionId: string, phase: ActivityPhase): void 
   }
 };
 
-export const getSessionActivitySnapshot = (): Record<string, { type: ActivityPhase }> => {
-  const snapshot: Record<string, { type: ActivityPhase }> = {};
-  for (const [sessionId, data] of sessionActivityPhases.entries()) {
-    snapshot[sessionId] = { type: data.phase };
-  }
-  return snapshot;
-};
+export const getSessionActivitySnapshot = () => Object.fromEntries(
+  Array.from(sessionActivityPhases, ([sessionId, data]) => [sessionId, { type: data.phase }]),
+);
 
-const deriveSessionActivity = (payload: Record<string, unknown>): SessionActivity | null => {
-  if (!payload || typeof payload !== 'object') {
-    return null;
+export const deriveSessionActivity = (payload: SessionActivityPayload): SessionActivity | null => {
+  const type = payload.type;
+  const properties = payload.properties ?? payload.data ?? {};
+
+  if (type === 'session.execution.started') {
+    const sessionId = properties.sessionID;
+    return sessionId
+      ? { sessionId, phase: 'busy' }
+      : null;
   }
 
-  const type = payload.type as string;
-  const properties = (payload.properties ?? payload) as Record<string, unknown>;
+  if (type === 'session.execution.succeeded' || type === 'session.execution.failed' || type === 'session.execution.interrupted') {
+    const sessionId = properties.sessionID;
+    return sessionId
+      ? { sessionId, phase: 'idle' }
+      : null;
+  }
 
   if (type === 'session.status') {
-    const status = properties?.status as Record<string, unknown> | undefined;
-    const info = properties?.info as Record<string, unknown> | undefined;
-    const sessionId = (properties?.sessionID ?? properties?.sessionId) as string;
-    const statusType = (status?.type ?? info?.type) as string;
+    const status = properties.status;
+    const info = properties.info;
+    const sessionId = properties.sessionID ?? properties.sessionId;
+    const statusType = status?.type ?? info?.type;
 
-    if (typeof sessionId === 'string' && sessionId.length > 0 && typeof statusType === 'string') {
+    if (sessionId && statusType) {
       const phase = statusType === 'busy' || statusType === 'retry' ? 'busy' : 'idle';
       return { sessionId, phase };
     }
   }
 
   if (type === 'message.updated' || type === 'message.part.updated' || type === 'message.part.delta') {
-    const info = properties?.info as Record<string, unknown> | undefined;
-    const sessionId = (info?.sessionID ?? info?.sessionId ?? properties?.sessionID ?? properties?.sessionId) as string;
-    const role = info?.role as string;
-    const finish = info?.finish as string;
-    if (typeof sessionId === 'string' && sessionId.length > 0 && role === 'assistant' && finish === 'stop') {
+    const info = properties.info;
+    const sessionId = info?.sessionID ?? info?.sessionId ?? properties.sessionID ?? properties.sessionId;
+    if (sessionId && info?.role === 'assistant' && info.finish === 'stop') {
       return { sessionId, phase: 'cooldown' };
     }
   }
 
   if (type === 'session.idle') {
-    const sessionId = (properties?.sessionID ?? properties?.sessionId) as string;
-    if (typeof sessionId === 'string' && sessionId.length > 0) {
+    const sessionId = properties.sessionID ?? properties.sessionId;
+    if (sessionId) {
       return { sessionId, phase: 'idle' };
     }
   }
@@ -181,7 +237,7 @@ const waitForOpenCodePort = async (manager: OpenCodeManager, timeoutMs = 30000):
 
 export const startGlobalEventWatcher = async (
   manager: OpenCodeManager,
-  provider: { postMessage: (message: unknown) => void }
+  provider: SessionActivityProvider,
 ): Promise<void> => {
   if (globalEventWatcherAbortController) {
     return;
@@ -221,10 +277,6 @@ export const startGlobalEventWatcher = async (
           throw new Error('OpenCode API URL not available');
         }
 
-        const client = createOpencodeClient({
-          baseUrl,
-          headers: manager.getOpenCodeAuthHeaders(),
-        });
         try {
           await reconcileSessionActivityFromStatus(manager);
         } catch (error) {
@@ -233,15 +285,21 @@ export const startGlobalEventWatcher = async (
             error instanceof Error ? error.message : error,
           );
         }
-        const result = await client.global.event({
-          signal,
-          sseMaxRetryAttempts: 0,
-        });
+        const protocol = manager.getProtocol();
+        const stream = protocol === 'opencode2'
+          ? OpenCode.make({ baseUrl, headers: manager.getOpenCodeAuthHeaders() }).event.subscribe({ signal })
+          : (await createOpencodeClient({
+              baseUrl,
+              headers: manager.getOpenCodeAuthHeaders(),
+            }).global.event({
+              signal,
+              sseMaxRetryAttempts: 0,
+            })).stream;
 
         console.log('[VSCode:Activity] connected');
 
-        for await (const event of result.stream) {
-          const payload = unwrapGlobalEventPayload((event as { payload?: unknown }).payload ?? event);
+        for await (const event of stream) {
+          const payload = unwrapGlobalEventPayload(event);
           if (payload) {
             const activity = deriveSessionActivity(payload);
             if (activity) {
@@ -289,6 +347,6 @@ export const stopGlobalEventWatcher = (): void => {
   sessionActivityPhases.clear();
 };
 
-export const setChatViewProvider = (provider: { postMessage: (message: unknown) => void } | null): void => {
+export const setChatViewProvider = (provider: SessionActivityProvider | null): void => {
   chatViewProvider = provider;
 };
