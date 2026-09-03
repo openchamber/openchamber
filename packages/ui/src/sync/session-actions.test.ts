@@ -1,12 +1,14 @@
 import { describe, expect, test, beforeEach, mock } from "bun:test"
 import type { PermissionRequest } from "@/types/permission"
 import type { QuestionRequest } from "@/types/question"
+import { useInlineCommentDraftStore } from "@/stores/useInlineCommentDraftStore"
 
 // Mock SDK client that records permission.reply / question.reply calls
 const replyCalls: Array<{ method: string; params: Record<string, unknown> }> = []
 const scopedClientDirectories: string[] = []
 const registeredSessionDirectories: Array<{ sessionID: string; directory: string }> = []
 let sessionRevertResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
+let pendingSessionRevert: Promise<unknown> | null = null
 let questionReplyError: unknown | null = null
 let questionRejectError: unknown | null = null
 let permissionReplyError: unknown | null = null
@@ -20,6 +22,7 @@ let afterUnrevertCall: ((sessionId: string) => void) | null = null
 let sessionDeleteError: unknown | null = null
 let beforeSessionUpdateResolve: ((sessionId: string) => void) | null = null
 let beforeSessionDeleteResolve: ((sessionId: string) => void) | null = null
+let currentSessionId: string | null = null
 const globalUpsertedSessions: unknown[] = []
 const globalRemovedSessionIds: string[] = []
 const deletedCleanupIdentities: Array<{ runtimeKey: string; directory: string; sessionId: string }> = []
@@ -160,6 +163,7 @@ mock.module("@/lib/opencode/client", () => ({
         const status = sessionRevertResult.response?.status
         throw new Error(`session.revert failed${status ? ` (${status})` : ""}: rejected`)
       }
+      if (pendingSessionRevert) return pendingSessionRevert
       return Promise.resolve(sessionRevertResult.data ?? { id: sessionId, time: { created: 1 }, revert: { messageID: messageId } })
     }),
     updateSession: mock((sessionId: string, changes: Record<string, unknown>, directory?: string | null) => {
@@ -199,7 +203,7 @@ mock.module("./session-ui-store", () => ({
         if (sessionId === "session-b") return "/other/project"
         return null
       },
-      currentSessionId: null,
+      currentSessionId,
       setCurrentSession: () => {},
       setWorktreeMetadata: () => {},
       setSessionDirectory: (sessionID: string, directory: string) => {
@@ -1237,6 +1241,7 @@ describe("respondToPermission passes directory", () => {
     replyCalls.length = 0
     scopedClientDirectories.length = 0
     sessionRevertResult = {}
+    pendingSessionRevert = null
   })
 
   test("passes directory from child store when permission is found", async () => {
@@ -1309,13 +1314,16 @@ describe("revertToMessage passes session directory", () => {
     replyCalls.length = 0
     scopedClientDirectories.length = 0
     sessionRevertResult = {}
+    pendingSessionRevert = null
     sessionMessageRecords.clear()
     failingRevertSessionIds.clear()
+    currentSessionId = "session-a"
     Object.assign(inputState, {
       pendingInputText: "previous draft",
       pendingInputMode: "normal" as const,
       attachedFiles: [],
     })
+    useInlineCommentDraftStore.setState({ drafts: {}, touchedAt: {} })
   })
 
   test("routes revert through the session directory instead of the current directory", async () => {
@@ -1345,7 +1353,96 @@ describe("revertToMessage passes session directory", () => {
     expect(inputState.pendingInputText).toBe("edit this")
   })
 
-  test("rolls back optimistic revert when the SDK returns an error", async () => {
+  test("keeps the timeline and composer unchanged until the revert is acknowledged", async () => {
+    const session = { id: "session-a", time: { created: 1 } } as Session
+    const targetMessage = { id: "msg_2", sessionID: "session-a", role: "user", time: { created: 2 } } as Message
+    const targetPart = { id: "prt_2", messageID: "msg_2", type: "text", text: "edit this" } as Part
+    const targetContextPart: Part = {
+      id: "prt_context",
+      sessionID: "session-a",
+      messageID: "msg_2",
+      type: "text",
+      text: "",
+      synthetic: true,
+      metadata: {
+        openchamberContext: {
+          kind: "file-quote",
+          fileLabel: "src/target.ts",
+          startLine: 3,
+          endLine: 4,
+          quote: "restored context",
+          text: "check this",
+        },
+      },
+    }
+    const sessionStore = createStore({}, {
+      session: [session],
+      message: { "session-a": [targetMessage] },
+      part: { "msg_2": [targetPart, targetContextPart] },
+    })
+    const childStores = createChildStores([["/test/project", sessionStore]])
+    const draftTarget = { directory: "/test/project", sessionKey: "session-a" }
+    useInlineCommentDraftStore.getState().addDraft(draftTarget, {
+      source: "file-quote",
+      fileLabel: "src/current.ts",
+      startLine: 1,
+      endLine: 1,
+      code: "current context",
+      language: "",
+      text: "keep pending",
+    })
+    let acknowledge!: (session: Session) => void
+    pendingSessionRevert = new Promise((resolve) => { acknowledge = resolve })
+
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    const reverting = revertToMessage("session-a", "msg_2")
+    await Promise.resolve()
+
+    const revertBeforeAck = (sessionStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert
+    const inputBeforeAck = inputState.pendingInputText
+    const contextBeforeAck = useInlineCommentDraftStore.getState().getDrafts(draftTarget)
+
+    acknowledge({ id: "session-a", time: { created: 1, updated: 2 }, revert: { messageID: "msg_2" } } as Session)
+    await reverting
+
+    expect(revertBeforeAck).toBe(undefined)
+    expect(inputBeforeAck).toBe("previous draft")
+    expect(contextBeforeAck.map((draft) => draft.code)).toEqual(["current context"])
+    expect((sessionStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert?.messageID).toBe("msg_2")
+    expect(inputState.pendingInputText).toBe("edit this")
+    expect(useInlineCommentDraftStore.getState().getDrafts(draftTarget).map((draft) => draft.code)).toEqual(["restored context"])
+  })
+
+  test("does not restore the reverted message into another session after acknowledgement", async () => {
+    const session = { id: "session-a", time: { created: 1 } } as Session
+    const targetMessage = { id: "msg_2", sessionID: "session-a", role: "user", time: { created: 2 } } as Message
+    const targetPart = { id: "prt_2", messageID: "msg_2", type: "text", text: "edit this" } as Part
+    const sessionStore = createStore({}, {
+      session: [session],
+      message: { "session-a": [targetMessage] },
+      part: { "msg_2": [targetPart] },
+    })
+    let acknowledge!: (session: Session) => void
+    pendingSessionRevert = new Promise((resolve) => { acknowledge = resolve })
+
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", sessionStore]]), () => "/test/project")
+
+    const reverting = revertToMessage("session-a", "msg_2")
+    await Promise.resolve()
+    currentSessionId = "session-b"
+    Object.assign(inputState, { pendingInputText: "other draft", attachedFiles: [] })
+    acknowledge({ id: "session-a", time: { created: 1, updated: 2 }, revert: { messageID: "msg_2" } } as Session)
+    await reverting
+
+    expect((sessionStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert?.messageID).toBe("msg_2")
+    expect(inputState.pendingInputText).toBe("other draft")
+    expect(inputState.attachedFiles).toEqual([])
+  })
+
+  test("keeps local state unchanged when revert returns an error", async () => {
     const session = { id: "session-a", time: { created: 1 } } as Session
     const targetMessage = { id: "msg_2", sessionID: "session-a", role: "user", time: { created: 2 } } as Message
     const targetPart = { id: "prt_2", messageID: "msg_2", type: "text", text: "edit this" } as Part

@@ -110,6 +110,8 @@ export const RevertedMessageDock: React.FC<RevertedMessageDockProps> = React.mem
         setForkingId(messageId);
         try {
             await forkFromMessage(sessionId, messageId);
+        } catch {
+            return;
         } finally {
             setForkingId(null);
         }

@@ -60,8 +60,25 @@ export type MessageQueueTarget = {
     sessionId: string;
 };
 
+interface MessageQueueClaim {
+    messages: QueuedMessage[];
+    acknowledge: () => void;
+    release: () => void;
+}
+
 const MAX_QUEUE_TARGETS = 50;
 const MAX_MESSAGES_PER_QUEUE = 20;
+
+const withNonEmptyEntry = <T>(
+    record: Record<string, T[]>,
+    key: string,
+    values: T[],
+) => {
+    const next = { ...record };
+    if (values.length > 0) next[key] = values;
+    else delete next[key];
+    return next;
+};
 
 export const createMessageQueueTarget = (
     sessionId: string,
@@ -107,9 +124,7 @@ interface MessageQueueActions {
     popToInput: (target: MessageQueueTarget, messageId: string) => QueuedMessage | null;
     clearQueue: (target: MessageQueueTarget) => void;
     clearAllQueues: () => void;
-    markSending: (target: MessageQueueTarget, messageId: string) => void;
-    clearSending: (target: MessageQueueTarget, messageId: string) => void;
-    getSendableQueue: (target: MessageQueueTarget) => QueuedMessage[];
+    claimForSend: (target: MessageQueueTarget, messageIds?: readonly string[]) => MessageQueueClaim | null;
     setFollowUpBehavior: (behavior: FollowUpBehavior) => void;
     getQueueForTarget: (target: MessageQueueTarget) => QueuedMessage[];
 }
@@ -158,16 +173,27 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
 
                     set((state) => {
                         const currentQueue = state.queuedMessages[key] ?? [];
+                        let excessMessages = Math.max(0, currentQueue.length + 1 - MAX_MESSAGES_PER_QUEUE);
+                        const sending = new Set(state.sendingIds[key] ?? []);
+                        const retainedQueue = currentQueue.filter((item) => {
+                            if (excessMessages === 0 || sending.has(item.id)) return true;
+                            excessMessages -= 1;
+                            return false;
+                        });
                         const queuedMessages = {
                             ...state.queuedMessages,
-                            [key]: [...currentQueue, queuedMessage].slice(-MAX_MESSAGES_PER_QUEUE),
+                            [key]: [...retainedQueue, queuedMessage],
                         };
                         const keys = Object.keys(queuedMessages);
                         if (keys.length > MAX_QUEUE_TARGETS) {
-                            keys.sort((left, right) => (
-                                (queuedMessages[left]?.[0]?.createdAt ?? 0) - (queuedMessages[right]?.[0]?.createdAt ?? 0)
-                            ));
-                            for (const staleKey of keys.slice(0, keys.length - MAX_QUEUE_TARGETS)) delete queuedMessages[staleKey];
+                            const removableKeys = keys
+                                .filter((candidate) => candidate !== key && !state.sendingIds[candidate]?.length)
+                                .sort((left, right) => (
+                                    (queuedMessages[left]?.[0]?.createdAt ?? 0) - (queuedMessages[right]?.[0]?.createdAt ?? 0)
+                                ));
+                            for (const staleKey of removableKeys.slice(0, keys.length - MAX_QUEUE_TARGETS)) {
+                                delete queuedMessages[staleKey];
+                            }
                         }
                         return {
                             queuedMessages,
@@ -178,21 +204,10 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                 removeFromQueue: (target, messageId) => {
                     const key = getMessageQueueKey(target);
                     set((state) => {
+                        if (state.sendingIds[key]?.includes(messageId)) return state;
                         const currentQueue = state.queuedMessages[key] ?? [];
                         const newQueue = currentQueue.filter((m) => m.id !== messageId);
-                        
-                        if (newQueue.length === 0) {
-                            const { [key]: _removed, ...rest } = state.queuedMessages;
-                            void _removed;
-                            return { queuedMessages: rest };
-                        }
-                        
-                        return {
-                            queuedMessages: {
-                                ...state.queuedMessages,
-                                [key]: newQueue,
-                            },
-                        };
+                        return { queuedMessages: withNonEmptyEntry(state.queuedMessages, key, newQueue) };
                     });
                 },
 
@@ -202,6 +217,8 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                     set((state) => {
                         const currentQueue = state.queuedMessages[key];
                         if (!currentQueue) return state;
+                        const sending = state.sendingIds[key];
+                        if (sending?.includes(fromId) || sending?.includes(toId)) return state;
                         const fromIndex = currentQueue.findIndex((m) => m.id === fromId);
                         const toIndex = currentQueue.findIndex((m) => m.id === toId);
                         if (fromIndex === -1 || toIndex === -1) return state;
@@ -224,8 +241,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                     const state = get();
                     const currentQueue = state.queuedMessages[key] ?? [];
                     const message = currentQueue.find((m) => m.id === messageId);
-                    
-                    if (!message) {
+                    if (!message || state.sendingIds[key]?.includes(messageId)) {
                         return null;
                     }
 
@@ -233,19 +249,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                     set((prevState) => {
                         const queue = prevState.queuedMessages[key] ?? [];
                         const newQueue = queue.filter((m) => m.id !== messageId);
-                        
-                        if (newQueue.length === 0) {
-                            const { [key]: _removed, ...rest } = prevState.queuedMessages;
-                            void _removed;
-                            return { queuedMessages: rest };
-                        }
-                        
-                        return {
-                            queuedMessages: {
-                                ...prevState.queuedMessages,
-                                    [key]: newQueue,
-                            },
-                        };
+                        return { queuedMessages: withNonEmptyEntry(prevState.queuedMessages, key, newQueue) };
                     });
 
                     return message;
@@ -259,50 +263,63 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         // and must find its entry to remove or restore.
                         const sending = state.sendingIds[key] ?? [];
                         const retained = (state.queuedMessages[key] ?? []).filter((m) => sending.includes(m.id));
-                        if (retained.length > 0) {
-                            return { queuedMessages: { ...state.queuedMessages, [key]: retained } };
-                        }
-                        const { [key]: _removed, ...rest } = state.queuedMessages;
-                        void _removed;
-                        return { queuedMessages: rest };
+                        return { queuedMessages: withNonEmptyEntry(state.queuedMessages, key, retained) };
                     });
                 },
 
                 clearAllQueues: () => {
-                    set({ queuedMessages: {}, sendingIds: {} });
-                },
-
-                markSending: (target, messageId) => {
-                    const key = getMessageQueueKey(target);
                     set((state) => {
-                        const current = state.sendingIds[key] ?? [];
-                        if (current.includes(messageId)) return state;
-                        return { sendingIds: { ...state.sendingIds, [key]: [...current, messageId] } };
+                        const queuedMessages = Object.fromEntries(
+                            Object.entries(state.queuedMessages).flatMap(([key, queue]) => {
+                                const sending = state.sendingIds[key] ?? [];
+                                const retained = queue.filter((message) => sending.includes(message.id));
+                                return retained.length > 0 ? [[key, retained]] : [];
+                            }),
+                        );
+                        return { queuedMessages };
                     });
                 },
 
-                clearSending: (target, messageId) => {
+                claimForSend: (target, messageIds) => {
                     const key = getMessageQueueKey(target);
+                    const requested = messageIds ? new Set(messageIds) : null;
+                    let messages: QueuedMessage[] = [];
                     set((state) => {
-                        const current = state.sendingIds[key];
-                        if (!current || !current.includes(messageId)) return state;
-                        const next = current.filter((id) => id !== messageId);
-                        if (next.length === 0) {
-                            const { [key]: _removed, ...rest } = state.sendingIds;
-                            void _removed;
-                            return { sendingIds: rest };
-                        }
-                        return { sendingIds: { ...state.sendingIds, [key]: next } };
+                        const sending = new Set(state.sendingIds[key] ?? []);
+                        messages = (state.queuedMessages[key] ?? []).filter((message) => (
+                            !sending.has(message.id) && (!requested || requested.has(message.id))
+                        ));
+                        if (messages.length === 0) return state;
+                        return {
+                            sendingIds: {
+                                ...state.sendingIds,
+                                [key]: [...sending, ...messages.map((message) => message.id)],
+                            },
+                        };
                     });
-                },
+                    if (messages.length === 0) return null;
 
-                getSendableQueue: (target) => {
-                    const key = getMessageQueueKey(target);
-                    const state = get();
-                    const queue = state.queuedMessages[key] ?? [];
-                    const sending = state.sendingIds[key];
-                    if (!sending || sending.length === 0) return queue;
-                    return queue.filter((message) => !sending.includes(message.id));
+                    const claimedIds = new Set(messages.map((message) => message.id));
+                    let settled = false;
+                    const settle = (acknowledged: boolean) => {
+                        if (settled) return;
+                        settled = true;
+                        set((state) => {
+                            const sending = (state.sendingIds[key] ?? []).filter((id) => !claimedIds.has(id));
+                            const queue = acknowledged
+                                ? (state.queuedMessages[key] ?? []).filter((message) => !claimedIds.has(message.id))
+                                : state.queuedMessages[key] ?? [];
+                            return {
+                                sendingIds: withNonEmptyEntry(state.sendingIds, key, sending),
+                                queuedMessages: withNonEmptyEntry(state.queuedMessages, key, queue),
+                            };
+                        });
+                    };
+                    return {
+                        messages,
+                        acknowledge: () => settle(true),
+                        release: () => settle(false),
+                    };
                 },
 
                 setFollowUpBehavior: (behavior) => {

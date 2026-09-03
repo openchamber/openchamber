@@ -46,6 +46,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
     const { isMobile, isTablet } = useDeviceInfo();
     const alwaysShowActions = isMobile || isTablet;
 
+    const [revertingMessageId, setRevertingMessageId] = React.useState<string | null>(null);
     const [forkingMessageId, setForkingMessageId] = React.useState<string | null>(null);
     const [searchQuery, setSearchQuery] = React.useState('');
     const [selectedIndex, setSelectedIndex] = React.useState(0);
@@ -209,13 +210,27 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
         }
     }, [filteredMessages, navigateToMessage, selectedIndex]);
 
-    // Handle fork with loading state and session refresh
+    const handleRevert = async (messageId: string) => {
+        if (!currentSessionId || revertingMessageId || forkingMessageId) return;
+        setRevertingMessageId(messageId);
+        try {
+            await revertToMessage(currentSessionId, messageId);
+            onOpenChange(false);
+        } catch {
+            return;
+        } finally {
+            setRevertingMessageId(null);
+        }
+    };
+
     const handleFork = async (messageId: string) => {
-        if (!currentSessionId) return;
+        if (!currentSessionId || revertingMessageId || forkingMessageId) return;
         setForkingMessageId(messageId);
         try {
             await forkFromMessage(currentSessionId, messageId);
             onOpenChange(false);
+        } catch {
+            return;
         } finally {
             setForkingMessageId(null);
         }
@@ -311,6 +326,8 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                             const showDateGroup = dateGroup !== previousDateGroup;
                             const messageTime = formatMessageTime(timestamp);
                             const isSelected = index === selectedIndex;
+                            const revertPending = revertingMessageId === message.info.id;
+                            const forkPending = forkingMessageId === message.info.id;
 
                             const snippet = searchQuery.trim()
                                 ? getSearchSnippet(getFullText(message.parts), searchQuery)
@@ -360,13 +377,16 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                                                         <button
                                                             type="button"
                                                             className="h-5 w-5 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-                                                            onClick={async (e) => {
+                                                            onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                await revertToMessage(currentSessionId, message.info.id);
-                                                                onOpenChange(false);
+                                                                void handleRevert(message.info.id);
                                                             }}
+                                                            disabled={revertPending || forkPending}
                                                         >
-                                                            <Icon name="arrow-go-back" className="h-4 w-4" />
+                                                            <Icon
+                                                                name={revertPending ? "loader-4" : "arrow-go-back"}
+                                                                className={cn("h-4 w-4", revertPending && "animate-spin")}
+                                                            />
                                                         </button>
                                                     </TooltipTrigger>
                                                     <TooltipContent sideOffset={6}>{t('chat.timeline.actions.revertFromHere')}</TooltipContent>
@@ -381,9 +401,9 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                                                                 e.stopPropagation();
                                                                 handleFork(message.info.id);
                                                             }}
-                                                            disabled={forkingMessageId === message.info.id}
+                                                            disabled={revertPending || forkPending}
                                                         >
-                                                            {forkingMessageId === message.info.id ? (
+                                                            {forkPending ? (
                                                                 <Icon name="loader-4" className="h-4 w-4 animate-spin" />
                                                             ) : (
                                                                 <Icon name="git-branch" className="h-4 w-4" />

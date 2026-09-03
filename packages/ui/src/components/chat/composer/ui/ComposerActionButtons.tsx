@@ -21,6 +21,8 @@ type ComposerActionButtonsProps = {
     canSend: boolean;
     canAbort: boolean;
     hasContent: boolean;
+    isSubmitting: boolean;
+    showAbortHint: boolean;
     currentSessionId: string | null;
     newSessionDraftOpen: boolean;
     onPrimaryAction: () => void;
@@ -37,6 +39,8 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
         canSend,
         canAbort,
         hasContent,
+        isSubmitting,
+        showAbortHint,
         currentSessionId,
         newSessionDraftOpen,
         onPrimaryAction,
@@ -44,6 +48,28 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
         onAbort,
     } = props;
     const { t } = useI18n();
+    const abortHint = showAbortHint ? (
+        <span className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 -translate-x-1/2 whitespace-nowrap typography-micro text-muted-foreground">
+            {t('chat.chatInput.actions.abortConfirmationHint')}
+        </span>
+    ) : null;
+
+    if (isSubmitting) {
+        return (
+            <div className="relative">
+                {abortHint}
+            <button
+                type="button"
+                disabled
+                aria-busy="true"
+                aria-label={t('chat.chatInput.actions.sendingMessageAria')}
+                className={cn(footerIconButtonClass, 'text-primary')}
+            >
+                <Icon name="loader-4" className={cn(sendIconSizeClass, 'animate-spin')} />
+            </button>
+            </div>
+        );
+    }
 
     const sendButton = (
         <button
@@ -75,7 +101,8 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
 
     return (
         <div className="relative">
-            {hasContent ? (
+            {abortHint}
+            {hasContent && !showAbortHint ? (
                 <button
                     type="button"
                     disabled={!currentSessionId}
@@ -116,6 +143,8 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
     && prev.canSend === next.canSend
     && prev.canAbort === next.canAbort
     && prev.hasContent === next.hasContent
+    && prev.isSubmitting === next.isSubmitting
+    && prev.showAbortHint === next.showAbortHint
     && prev.currentSessionId === next.currentSessionId
     && prev.newSessionDraftOpen === next.newSessionDraftOpen
     && prev.onPrimaryAction === next.onPrimaryAction

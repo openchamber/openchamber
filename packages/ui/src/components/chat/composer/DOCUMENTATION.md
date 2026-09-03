@@ -166,7 +166,12 @@ and the send path reading the same grammar.
   where the page may stop running, because a pending timer is not a saved
   draft. Two orderings are load-bearing: the debounced write is skipped once
   while a draft is being restored, and a deleted draft's empty signature is
-  recorded before a queued write could resurrect it.
+  recorded before a queued write could resurrect it. A submitted new-session
+  draft transfers to the materialized session identity without replacing the
+  visible prompt while its send awaits acknowledgement. Local attachments
+  belong to that visible identity. An ordinary session/runtime/directory switch
+  clears them and invalidates unfinished file reads. The submitted
+  draft-to-session transition retains them until send acknowledgement.
 - `state/useDraftTarget.ts` — the draft can target a directory that does not
   exist yet (a worktree being created). It must survive not appearing in the
   branch list, or the selector snaps back to the project root mid-creation. It
@@ -189,16 +194,38 @@ frame where nothing is open.
 none of them is verifiable outside a real device.** Change them only against
 hardware.
 
+## Submission lifecycle
+
+Remote composer submissions retain their text and attachments while
+`sendMessage()` is pending. The action slot shows a spinner and the composer is
+inert until the request is acknowledged. Success clears only the submitted
+draft and attachment IDs; failure leaves them available for retry. `ChatInput`
+uses `state/useComposerSubmission.ts` to allow one remote submission per draft
+identity, so switching sessions does not move the spinner or input lock; live
+session activity remains authoritative in the session stores.
+
+Queued prompts transfer ownership to `messageQueueStore` as soon as they are
+enqueued. Every dispatcher must use `claimForSend()`: the returned claim keeps
+entries visible with a spinner, removes only its exact entries after
+acknowledgement, and releases them for retry after a failed automatic, manual,
+or steer delivery.
+
+The global Escape shortcut owns the two-press abort confirmation in
+`session-ui-store`. The composer only renders the armed state as a small
+"Press Esc again" hint above its action slot. The first press must not surface
+the completed "Aborted" status.
+
 ## Testing
 
-The package has no DOM test environment, so coverage stops at the state and
-logic layers: the language, the submit assembly, path and drop handling, text
-splicing, large-paste detection, paste-offer invalidation, message history, and
-the CodeMirror language extension at the `EditorState` level.
+Most coverage stays at the state and logic layers: the language, submit
+assembly, path and drop handling, text splicing, large-paste detection,
+paste-offer invalidation, message history, draft submission transitions, and
+the CodeMirror language extension at the `EditorState` level. A small
+happy-dom test covers the action slot's spinner and abort hint states.
 
-Rendering, focus, keyboard behavior, IME and WKWebView are **not covered by
-tests** and are verified by hand. Do not report a change to them as validated
-on the strength of type-check and unit tests.
+Focus, global keyboard behavior, IME and WKWebView are **not covered by tests**
+and are verified by hand. Do not report a change to them as validated on the
+strength of type-check and unit tests.
 
 Run tests per file (`bun test <path>`): `mock.module` is process-global, so
 suites that install module mocks are order-dependent.

@@ -75,6 +75,7 @@ import { openSessionFromToast } from "./session-navigation"
 import { getPermissionToastKey, showPermissionNeededToast } from "./permission-toast"
 import { getRuntimeLiveStatusSeed, LIVE_STATUS_TTL_MS } from "./runtime-live-memory"
 import { getRuntimeKey } from "@/lib/runtime-switch"
+import { clearQuestionAnswerDraft, getQuestionAnswerDraftKey } from "./question-answer-draft"
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { isFilesystemError } from "@/lib/api/files-errors"
 import { formatMessage, useI18nStore } from "@/lib/i18n"
@@ -1762,6 +1763,9 @@ export function handleEvent(
 
   if (payload.type === "question.replied" || payload.type === "question.rejected") {
     const props = payload.properties as { sessionID?: string; requestID?: string }
+    if (props.sessionID && props.requestID) {
+      clearQuestionAnswerDraft(getQuestionAnswerDraftKey(expectedRuntimeKey, props.sessionID, props.requestID))
+    }
     const toastKey = getQuestionToastKey(props.sessionID, props.requestID)
     if (toastKey) {
       pendingQuestionToastIds.delete(toastKey)

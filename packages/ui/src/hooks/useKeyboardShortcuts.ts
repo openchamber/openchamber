@@ -60,7 +60,6 @@ export const useKeyboardShortcuts = () => {
   const activeProject = useProjectsStore((s) => s.getActiveProject());
   const { themeMode, setThemeMode } = useThemeSystem();
   const { phase: sessionPhase } = useCurrentSessionActivity();
-  const abortPrimedUntilRef = React.useRef<number | null>(null);
   const abortPrimedTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const themeModeRef = React.useRef(themeMode);
   const dispatcherRef = React.useRef<ShortcutDispatcher | null>(null);
@@ -98,7 +97,6 @@ export const useKeyboardShortcuts = () => {
       clearTimeout(abortPrimedTimeoutRef.current);
       abortPrimedTimeoutRef.current = null;
     }
-    abortPrimedUntilRef.current = null;
     clearAbortPrompt();
   }, [clearAbortPrompt]);
 
@@ -437,17 +435,24 @@ export const useKeyboardShortcuts = () => {
         return;
       }
       const now = Date.now();
-      if (abortPrimedUntilRef.current && now < abortPrimedUntilRef.current) {
+      const abortPrompt = useSessionUIStore.getState();
+      if (
+        !event.repeat
+        && abortPrompt.abortPromptSessionId === currentSessionId
+        && abortPrompt.abortPromptExpiresAt
+        && now < abortPrompt.abortPromptExpiresAt
+      ) {
         resetAbortPriming();
         if (invokeRegistered('abort_run', event)) event.preventDefault();
         return;
       }
       event.preventDefault();
+      if (event.repeat) return;
       const expiresAt = armAbortPrompt(3000) ?? now + 3000;
-      abortPrimedUntilRef.current = expiresAt;
       if (abortPrimedTimeoutRef.current) clearTimeout(abortPrimedTimeoutRef.current);
       abortPrimedTimeoutRef.current = setTimeout(() => {
-        if (abortPrimedUntilRef.current && Date.now() >= abortPrimedUntilRef.current) {
+        const promptExpiresAt = useSessionUIStore.getState().abortPromptExpiresAt;
+        if (promptExpiresAt && Date.now() >= promptExpiresAt) {
           resetAbortPriming();
         }
       }, Math.max(expiresAt - now, 0));
@@ -574,6 +579,8 @@ export const useKeyboardShortcuts = () => {
       window.removeEventListener('blur', handleBlur);
     };
   }, [armAbortPrompt, currentSessionId, dispatcher, effectiveDirectory, resetAbortPriming, selectionToolbarDispatcher, sessionPhase]);
+
+  React.useEffect(() => resetAbortPriming(), [currentSessionId, resetAbortPriming]);
 
   React.useEffect(() => () => resetAbortPriming(), [resetAbortPriming]);
 };
