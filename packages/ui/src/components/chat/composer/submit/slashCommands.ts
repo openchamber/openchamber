@@ -14,7 +14,7 @@
  */
 
 import type { I18nKey } from '@/lib/i18n';
-import type { MagicPromptId } from '@/lib/magicPrompts';
+import { renderMagicPrompt, type MagicPromptId } from '@/lib/magicPrompts';
 
 /** What a command needs before it can run. */
 export type CommandRequirement = 'session' | 'session-or-draft';
@@ -179,4 +179,21 @@ export function buildCommandVariables(
         visible: built.visible ?? {},
         instructions: built.instructions ?? {},
     };
+}
+
+export type RenderedMagicPrompt = {
+    visibleText: string;
+    instructionsText: string;
+};
+
+/** Render the same visible/instruction pair for direct and queued sends. */
+export async function renderMagicPromptCommand(
+    command: MagicPromptCommand,
+    argument: string,
+    render: typeof renderMagicPrompt = renderMagicPrompt,
+): Promise<RenderedMagicPrompt> {
+    const variables = buildCommandVariables(command, argument);
+    const visibleText = await render(command.visiblePrompt, variables.visible);
+    const instructionsText = await render(command.instructionsPrompt, variables.instructions);
+    return { visibleText, instructionsText };
 }

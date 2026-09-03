@@ -4,6 +4,7 @@ import type { Event } from '@opencode-ai/sdk/v2/client';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { deriveRecentSessions } from '../recent/activitySections';
+import { buildKnownSessionDirectories } from './sessionListDirectories';
 import { applyGlobalSessionStatusEvent, replaceGlobalSessionStatusById } from '@/sync/global-session-status';
 import {
   buildSidebarSessionProjection,
@@ -111,6 +112,27 @@ describe('projectSidebarActiveSessions', () => {
       knownDirectories: new Set(['/workspace/known']),
       isVSCode: true,
     })).toEqual([]);
+  });
+
+  test('matches Windows aliases, keeps POSIX case variants distinct, and rejects unknown directories', () => {
+    const knownDirectories = buildKnownSessionDirectories([
+      { path: 'C:/Repo' },
+      { path: '//Server/Share/Repo' },
+      { path: '/Repo' },
+    ], new Map());
+
+    expect(projectSidebarActiveSessions({
+      globalActiveSessions: [
+        session('drive', 'c:\\repo'),
+        session('unc', '\\\\server\\share\\repo'),
+        session('posix-match', '/Repo'),
+        session('posix-case-mismatch', '/repo'),
+        session('unknown', '/other'),
+      ],
+      liveSessions: [],
+      knownDirectories,
+      isVSCode: true,
+    }).map((entry) => entry.id)).toEqual(['drive', 'unc', 'posix-match']);
   });
 });
 

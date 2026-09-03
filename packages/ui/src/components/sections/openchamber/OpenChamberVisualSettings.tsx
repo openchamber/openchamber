@@ -4,7 +4,6 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import type { ThemeMode } from '@/types/theme';
 import { useUIStore, type LargeTextPasteBehavior } from '@/stores/useUIStore';
-import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { NumberInput } from '@/components/ui/number-input';
@@ -253,17 +252,6 @@ const WEEK_START_OPTIONS: Option<'auto' | 'monday' | 'sunday'>[] = [
     },
 ];
 
-const FOLLOW_UP_BEHAVIOR_OPTIONS: Option<FollowUpBehavior>[] = [
-    {
-        id: 'steer',
-        labelKey: 'settings.openchamber.visual.option.followUpBehavior.steer.label',
-    },
-    {
-        id: 'queue',
-        labelKey: 'settings.openchamber.visual.option.followUpBehavior.queue.label',
-    },
-];
-
 const LARGE_TEXT_PASTE_BEHAVIOR_OPTIONS: Option<LargeTextPasteBehavior>[] = [
     {
         id: 'ask',
@@ -283,7 +271,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'reportUsage' | 'autoSaveEnabled' | 'sessionTabs';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'reportUsage' | 'autoSaveEnabled' | 'sessionTabs';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
@@ -372,8 +360,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setShowTerminalQuickKeysOnDesktop = useUIStore(state => state.setShowTerminalQuickKeysOnDesktop);
     const fileEditorKeymap = useUIStore(state => state.fileEditorKeymap);
     const setFileEditorKeymap = useUIStore(state => state.setFileEditorKeymap);
-    const followUpBehavior = useMessageQueueStore(state => state.followUpBehavior);
-    const setFollowUpBehavior = useMessageQueueStore(state => state.setFollowUpBehavior);
     const persistChatDraft = useUIStore(state => state.persistChatDraft);
     const setPersistChatDraft = useUIStore(state => state.setPersistChatDraft);
     const inputSpellcheckEnabled = useUIStore(state => state.inputSpellcheckEnabled);
@@ -655,7 +641,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('dotfiles')
         || shouldShow('fileViewerPreview')
         || shouldShow('reasoning')
-        || shouldShow('followUpBehavior')
         || shouldShow('persistDraft')
         || shouldShow('largeTextPaste')
         || shouldShow('showToolFileIcons')
@@ -666,8 +651,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const showTransportSection = shouldShow('messageTransport');
     const showBehaviorMessageOptions = shouldShow('userMessageRendering')
         || shouldShow('mermaidRendering')
-        || (shouldShow('diffLayout') && !isVSCode)
-        || shouldShow('followUpBehavior');
+        || (shouldShow('diffLayout') && !isVSCode);
     const showBehaviorFeatureCheckboxes = shouldShow('sessionAssist')
         || (shouldShow('sessionGoal') && !isVSCode)
         || shouldShow('subagentReadOnlyBanner')
@@ -1724,24 +1708,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </SettingsControlGroup>
                                     )}
 
-                                    {shouldShow('followUpBehavior') && (
-                                        <SettingsControlGroup
-                                            title={t('settings.openchamber.visual.section.followUpBehavior')}
-                                            settingsItem="chat.follow-up-behavior"
-                                        >
-                                            <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.followUpBehaviorAria')}>
-                                                {FOLLOW_UP_BEHAVIOR_OPTIONS.map((option) => (
-                                                    <SettingsRadioOption
-                                                        key={option.id}
-                                                        selected={followUpBehavior === option.id}
-                                                        onSelect={() => setFollowUpBehavior(option.id)}
-                                                        label={tUnsafe(option.labelKey)}
-                                                        ariaLabel={t('settings.openchamber.visual.field.followUpBehaviorAria', { option: tUnsafe(option.labelKey) })}
-                                                    />
-                                                ))}
-                                            </SettingsRadioGroup>
-                                        </SettingsControlGroup>
-                                    )}
                                 </SettingsTwoColumn>
                             </SettingsSection>
                         )}

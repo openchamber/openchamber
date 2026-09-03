@@ -2165,6 +2165,7 @@ export const dict = {
   'chat.queuedMessage.send': 'gönder',
   'chat.queuedMessage.removeAria': 'Kuyruktan kaldır',
   'chat.queuedMessage.reorderAria': 'Yeniden sıralamak için sürükle',
+  'chat.queuedMessage.waiting': 'Oturum sona erdiğinde gönderilecek',
   'chat.container.returnToParent.aria': 'Üst session\'a dön',
   'chat.container.returnToParent.titleNamed': 'Şuraya dön: {title}',
   'chat.container.returnToParent.title': 'Üst session\'a dön',

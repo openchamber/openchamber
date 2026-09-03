@@ -414,7 +414,7 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().favoriteModels).toHaveLength(1);
     expect(useUIStore.getState().globalDraftStarters).toEqual([{ type: 'command', name: 'runtime-a' }]);
     expect(useUIStore.getState().draftStartersVisible).toBe(false);
-    expect(useMessageQueueStore.getState().followUpBehavior).toBe('steer');
+    expect(useMessageQueueStore.getState().followUpBehavior).toBe('queue');
 
     switchRuntimeEndpoint({ apiBaseUrl: 'https://preferences-b.example', runtimeKey: 'preferences-b' });
     registerSettingsApi(async () => ({}), async () => ({

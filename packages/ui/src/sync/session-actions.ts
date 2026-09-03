@@ -452,7 +452,7 @@ function isSessionCoveredByChildStore(sessionId: string, stores: ChildStoreManag
   const directory = useSessionUIStore.getState().getDirectoryForSession(sessionId)
     ?? resolveKnownSessionDirectory(sessionId)
   if (!directory) return false
-  return stores.children.has(normalizePath(directory) ?? directory)
+  return stores.getChild(directory) !== undefined
 }
 
 function resolveKnownSessionDirectory(sessionId: string): string | null {
@@ -1011,11 +1011,12 @@ function removeSessionFromLiveStores(sessionId: string, preferredDirectory?: str
   const visited = new Set<string>()
   const candidates: Array<[string, DirectoryStoreApi]> = []
 
-  if (preferredDirectory) {
-    const preferredStore = _childStores.children.get(preferredDirectory)
+  const normalizedPreferredDirectory = preferredDirectory ? normalizePath(preferredDirectory) : null
+  if (normalizedPreferredDirectory) {
+    const preferredStore = _childStores.getChild(normalizedPreferredDirectory)
     if (preferredStore) {
-      candidates.push([preferredDirectory, preferredStore])
-      visited.add(preferredDirectory)
+      candidates.push([normalizedPreferredDirectory, preferredStore])
+      visited.add(normalizedPreferredDirectory)
     }
   }
 

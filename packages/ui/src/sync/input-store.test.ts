@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test"
 import { strToU8, zipSync } from "fflate"
-import { useInputStore } from "./input-store"
+import { useInputStore, type PendingSyntheticPartsTarget } from "./input-store"
 
 class MockFileReader {
   result: string | ArrayBuffer | null = null
@@ -58,6 +58,7 @@ describe("input-store attachments", () => {
       pendingInputText: null,
       pendingInputMode: "replace",
       pendingSyntheticParts: null,
+      pendingSyntheticPartsByTarget: new Map(),
       activeEditorFile: null,
     })
     useInputStore.getState().setAttachedFiles([])
@@ -369,5 +370,68 @@ describe("input-store attachments", () => {
     // Removing the text entry cascades to the slide image
     useInputStore.getState().removeAttachedFile(files[0].id)
     expect(useInputStore.getState().attachedFiles).toEqual([])
+  })
+})
+
+describe("pending synthetic parts ownership", () => {
+  const target = (sessionId: string): PendingSyntheticPartsTarget => ({
+    runtimeKey: "runtime-a",
+    directory: "/repo",
+    sessionId,
+  })
+
+  test("consumes targeted synthetic context only for its runtime, directory, and session", () => {
+    const owner = target("session-a")
+    const otherSession = target("session-b")
+    const otherDirectory = { ...owner, directory: "/other-repo" }
+    const otherRuntime = { ...owner, runtimeKey: "runtime-b" }
+    const parts = [{ text: "conflict context", synthetic: true }]
+
+    useInputStore.getState().setPendingSyntheticParts(parts, owner)
+    expect(useInputStore.getState().consumePendingSyntheticParts(otherSession)).toBeNull()
+    expect(useInputStore.getState().consumePendingSyntheticParts(otherDirectory)).toBeNull()
+    expect(useInputStore.getState().consumePendingSyntheticParts(otherRuntime)).toBeNull()
+    expect(useInputStore.getState().consumePendingSyntheticParts(owner)).toEqual(parts)
+    expect(useInputStore.getState().consumePendingSyntheticParts(owner)).toBeNull()
+  })
+
+  test("keeps targeted context separate when another target is added", () => {
+    const owner = target("session-a")
+    const other = target("session-b")
+    const ownerParts = [{ text: "owner context", synthetic: true }]
+    const otherParts = [{ text: "other context", synthetic: true }]
+
+    useInputStore.getState().setPendingSyntheticParts(ownerParts, owner)
+    expect(useInputStore.getState().consumePendingSyntheticParts(owner)).toEqual(ownerParts)
+
+    useInputStore.getState().setPendingSyntheticParts(otherParts, other)
+    useInputStore.getState().restorePendingSyntheticParts(ownerParts, owner)
+
+    expect(useInputStore.getState().consumePendingSyntheticParts(owner)).toEqual(ownerParts)
+    expect(useInputStore.getState().consumePendingSyntheticParts(other)).toEqual(otherParts)
+  })
+
+  test("uses Windows path identity for targeted context without merging POSIX case variants", () => {
+    const driveOwner = { ...target("session-drive"), directory: "C:/Repo" }
+    const driveAlias = { ...driveOwner, directory: "c:\\repo" }
+    const driveParts = [{ text: "drive context", synthetic: true }]
+
+    useInputStore.getState().setPendingSyntheticParts(driveParts, driveOwner)
+    expect(useInputStore.getState().consumePendingSyntheticParts(driveAlias)).toEqual(driveParts)
+
+    const uncOwner = { ...target("session-unc"), directory: "//Server/Share/Repo" }
+    const uncAlias = { ...uncOwner, directory: "\\\\server\\share\\repo" }
+    const uncParts = [{ text: "UNC context", synthetic: true }]
+
+    useInputStore.getState().setPendingSyntheticParts(uncParts, uncOwner)
+    expect(useInputStore.getState().consumePendingSyntheticParts(uncAlias)).toEqual(uncParts)
+
+    const posixOwner = { ...target("session-posix"), directory: "/Repo" }
+    const posixAlias = { ...posixOwner, directory: "/repo" }
+    const posixParts = [{ text: "POSIX context", synthetic: true }]
+
+    useInputStore.getState().setPendingSyntheticParts(posixParts, posixOwner)
+    expect(useInputStore.getState().consumePendingSyntheticParts(posixAlias)).toBeNull()
+    expect(useInputStore.getState().consumePendingSyntheticParts(posixOwner)).toEqual(posixParts)
   })
 })

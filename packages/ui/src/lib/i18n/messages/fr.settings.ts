@@ -2225,12 +2225,6 @@ export const settingsDict = {
   'settings.magicPrompts.page.toast.resetFailed': 'Échec de la réinitialisation du prompt',
   'settings.magicPrompts.page.toast.resetAllSuccess': 'Tous les prompts ont été réinitialisés',
   'settings.magicPrompts.page.toast.resetAllFailed': 'Échec de la réinitialisation de tous les prompts',
-  'settings.openchamber.visual.section.followUpBehavior': 'Follow-up behavior',
-  'settings.openchamber.visual.section.followUpBehaviorAria': 'Follow-up behavior',
-  'settings.openchamber.visual.field.followUpBehaviorAria': 'Follow-up behavior: {option}',
-  'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
-  'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
-  'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
   ...linearIntegrationI18n.fr,
   ...thirdPartyIntegrationI18n.fr,
 } as const;

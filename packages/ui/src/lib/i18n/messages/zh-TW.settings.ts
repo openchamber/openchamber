@@ -2225,12 +2225,6 @@ export const settingsDict = {
   'settings.plugins.validation.specRequired': '請輸入套件或路徑',
   'settings.view.home.cards.plugins.description': '管理 opencode 外掛',
   'settings.view.home.cards.plugins.title': '外掛',
-  'settings.openchamber.visual.section.followUpBehavior': 'Follow-up behavior',
-  'settings.openchamber.visual.section.followUpBehaviorAria': 'Follow-up behavior',
-  'settings.openchamber.visual.field.followUpBehaviorAria': 'Follow-up behavior: {option}',
-  'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
-  'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
-  'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
   ...linearIntegrationI18n['zh-TW'],
   ...thirdPartyIntegrationI18n['zh-TW'],
 } as const;

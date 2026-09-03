@@ -8,13 +8,16 @@ import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useTodosPersistStore } from '@/stores/useTodosPersistStore';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { useInputStore } from './input-store';
+import { consumeComposerContext } from '@/components/chat/composer/submit/contextHandoff';
 import { cleanupPersistedSessionState } from './session-deletion-cleanup';
 
 const todo: Todo = { content: 'persisted', status: 'pending', priority: 'medium' };
 
 describe('cleanupPersistedSessionState', () => {
   beforeEach(() => {
-    useMessageQueueStore.setState({ queuedMessages: {}, quarantinedLegacyMessages: {} });
+    useMessageQueueStore.setState({ queuedMessages: {}, quarantinedLegacyMessages: {}, queueDeletionGenerations: {} });
+    useInputStore.setState({ pendingSyntheticParts: null, pendingSyntheticPartsByTarget: new Map() });
     useTodosPersistStore.setState({ sessions: {} });
     useInlineCommentDraftStore.setState({ drafts: {}, touchedAt: {} });
     useSessionPinnedStore.setState({ ids: new Set(), touchedAt: {} });
@@ -74,5 +77,40 @@ describe('cleanupPersistedSessionState', () => {
     cleanupPersistedSessionState({ runtimeKey: `${runtimeKey}-stale`, directory: '/repo', sessionId: 'session-1' });
 
     expect(useTodosPersistStore.getState().getSessionTodos('/repo', 'session-1')).toEqual([todo]);
+  });
+
+  test('blocks a late merged-send restoration after scoped deletion cleanup', async () => {
+    const runtimeKey = getRuntimeKey();
+    const deleted = createMessageQueueTarget('session-1', '/repo-a', runtimeKey)!;
+    const retained = createMessageQueueTarget('session-1', '/repo-b', runtimeKey)!;
+    const deletedContext = [{ text: 'deleted context', synthetic: true }];
+    const retainedContext = [{ text: 'retained context', synthetic: true }];
+    useInputStore.getState().setPendingSyntheticParts(deletedContext, deleted);
+    useInputStore.getState().setPendingSyntheticParts(retainedContext, retained);
+    const consumed = consumeComposerContext(deleted, null);
+
+    const queue = useMessageQueueStore.getState();
+    queue.addToQueue(deleted, { content: 'merged one' });
+    queue.addToQueue(deleted, { content: 'merged two' });
+    queue.addToQueue(retained, { content: 'retained' });
+    const guard = queue.getQueueRestorationGuard(deleted);
+    const removed = queue.clearQueue(deleted);
+    let rejectSend: (error: Error) => void = () => undefined;
+    const send = new Promise<void>((_, reject) => {
+      rejectSend = reject;
+    });
+    const mergedSend = send.catch(() => {
+      queue.restoreQueue(deleted, removed, guard);
+      consumed.restore();
+    });
+
+    cleanupPersistedSessionState({ runtimeKey, directory: deleted.directory, sessionId: deleted.sessionId });
+    rejectSend(new Error('send failed'));
+    await mergedSend;
+
+    expect(queue.getQueueForTarget(deleted)).toEqual([]);
+    expect(useInputStore.getState().consumePendingSyntheticParts(deleted)).toBeNull();
+    expect(queue.getQueueForTarget(retained).map((message) => message.content)).toEqual(['retained']);
+    expect(useInputStore.getState().consumePendingSyntheticParts(retained)).toEqual(retainedContext);
   });
 });

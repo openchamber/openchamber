@@ -2128,12 +2128,6 @@ export const settingsDict = {
   'settings.magicPrompts.page.toast.resetFailed': 'Fehler beim Zurücksetzen des Prompts',
   'settings.magicPrompts.page.toast.resetAllSuccess': 'Alle Prompt-Überschreibungen zurückgesetzt',
   'settings.magicPrompts.page.toast.resetAllFailed': 'Fehler beim Zurücksetzen aller Prompts',
-  'settings.openchamber.visual.section.followUpBehavior': 'Follow-up-Verhalten',
-  'settings.openchamber.visual.section.followUpBehaviorAria': 'Follow-up-Verhalten',
-  'settings.openchamber.visual.field.followUpBehaviorAria': 'Follow-up-Verhalten: {option}',
-  'settings.openchamber.visual.field.followUpBehaviorDescription': 'Wählen Sie aus, was passiert, wenn Sie Enter auf einer Follow-up-Nachricht drücken, während der Agent noch antwortet.',
-  'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steuerung',
-  'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Warteschlange',
 
   'settings.providers.page.quotaCredentials.accessToken': 'Zugriffstoken',
   'settings.providers.page.quotaCredentials.refreshToken': 'Aktualisierungstoken',

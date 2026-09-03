@@ -2184,6 +2184,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.queuedMessage.send": "send",
   "chat.queuedMessage.removeAria": "Eliminar de la cola",
   "chat.queuedMessage.reorderAria": "Arrastra para reordenar",
+  "chat.queuedMessage.waiting": "Se enviará cuando la sesión termine",
   "chat.container.returnToParent.aria": "Volver a la sesión principal",
   "chat.container.returnToParent.titleNamed": "Volver a: {title}",
   "chat.container.returnToParent.title": "Volver a la sesión principal",

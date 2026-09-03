@@ -124,7 +124,7 @@ export const btwSessionTitle = (question: string): string => `btw: ${question}`;
  * immediately, mirroring `forkFromMessage` in session-actions.
  */
 function insertForkIntoDirectoryStore(session: Session, directory: string): void {
-  const store = getSyncChildStores().children.get(directory);
+  const store = getSyncChildStores().getChild(directory);
   if (!store) return;
   const current = store.getState();
   const sessions = [...current.session];

@@ -103,6 +103,29 @@ describe('queued messages', () => {
         expect(result.primaryAttachments.map((a) => a.id)).toEqual(['one']);
         expect(result.additionalParts[0].attachments?.map((a) => a.id)).toEqual(['two']);
     });
+
+    test('keeps normalized synthetic parts attached to their queued message', () => {
+        const result = buildOutgoingMessage(input({
+            queued: [{
+                content: 'normalized prompt',
+                additionalParts: [{ text: 'instructions', synthetic: true }],
+            }],
+        }), deps());
+
+        expect(result.primaryText).toBe('normalized prompt');
+        expect(result.additionalParts).toEqual([{ text: 'instructions', synthetic: true }]);
+    });
+
+    test('keeps queued additional parts when the message is edited into the composer', () => {
+        const editedParts = [{ text: 'rendered instructions', synthetic: true }];
+        const result = buildOutgoingMessage(input({
+            composerText: 'edited prompt',
+            composerAdditionalParts: editedParts,
+        }), deps());
+
+        expect(result.primaryText).toBe('edited prompt');
+        expect(result.additionalParts).toEqual(editedParts);
+    });
 });
 
 describe('agent mentions', () => {

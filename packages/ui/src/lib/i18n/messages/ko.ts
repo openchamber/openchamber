@@ -2208,6 +2208,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.queuedMessage.send': 'send',
   'chat.queuedMessage.removeAria': '큐에서 제거',
   'chat.queuedMessage.reorderAria': '드래그하여 순서 변경',
+  'chat.queuedMessage.waiting': '세션이 끝나면 전송됩니다',
   'chat.container.returnToParent.aria': '상위 세션으로 돌아가기',
   'chat.container.returnToParent.titleNamed': '돌아가기: {title}',
   'chat.container.returnToParent.title': '상위 세션으로 돌아가기',

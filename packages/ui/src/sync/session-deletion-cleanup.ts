@@ -14,7 +14,7 @@ export const cleanupPersistedSessionState = (identity: {
   if (identity.runtimeKey !== getRuntimeKey() || !identity.directory || identity.directory === 'global' || !identity.sessionId) return;
 
   const queueTarget = createMessageQueueTarget(identity.sessionId, identity.directory, identity.runtimeKey);
-  if (queueTarget) useMessageQueueStore.getState().clearQueue(queueTarget);
+  if (queueTarget) useMessageQueueStore.getState().clearQueueForSessionDeletion(queueTarget);
   useTodosPersistStore.getState().clearSessionTodos(identity.runtimeKey, identity.directory, identity.sessionId);
   useSessionFoldersStore.getState().removeSessionEverywhere(identity.runtimeKey, identity.sessionId);
   useInlineCommentDraftStore.getState().clearSessionDrafts(identity.runtimeKey, identity.directory, identity.sessionId);

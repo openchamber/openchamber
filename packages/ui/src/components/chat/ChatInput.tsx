@@ -3,8 +3,16 @@ import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
-import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
+import {
+    createMessageQueueTarget,
+    getMessageQueueKey,
+    isQueueMessageDispatchable,
+    resolveMainSessionSendDisposition,
+    useMessageQueueStore,
+    type QueuedMessage,
+    type QueuedMessagePart,
+} from '@/stores/messageQueueStore';
+import { isAutoReviewRunActiveForTarget, useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { prepareLocalAttachments, useInputStore } from '@/sync/input-store';
@@ -19,9 +27,8 @@ import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
 import { buildLinkedIssue, buildLinkedLinearIssue } from '@/lib/linkedIssues';
 import { useUserMessageHistory } from "@/sync/sync-context";
-import { getInlineCommentDraftKey, useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
+import { getInlineCommentDraftKey, useInlineCommentDraftStore, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
-import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { startReviewFlow } from '@/lib/reviewFlow';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -56,6 +63,7 @@ import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { MobileAgentButton } from './MobileAgentButton';
 import { MobileModelButton } from './MobileModelButton';
 import { useCurrentSessionActivity, useSessionActivity } from '@/hooks/useSessionActivity';
+import { isQueuedSendBlockedForTarget, resolveQueuedSessionStatusType } from '@/hooks/useQueuedMessageAutoSend';
 import { toast } from '@/components/ui';
 // useMessageStore removed — messages now come from sync system
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -139,11 +147,13 @@ import {
     toServerFileUrl,
 } from './composer/attachments/filePaths';
 import { buildOutgoingMessage } from './composer/submit/buildOutgoingMessage';
+import { captureComposerContextForQueue, consumeComposerContext, withComposerContextRestore } from './composer/submit/contextHandoff';
 import {
-    buildCommandVariables,
     canRunCommand,
     findMagicPromptCommand,
     parseSlashCommand,
+    renderMagicPromptCommand,
+    type MagicPromptCommand,
 } from './composer/submit/slashCommands';
 import { useAutocompletePosition } from './composer/state/useAutocompletePosition';
 import { useMessageHistory } from './composer/state/useMessageHistory';
@@ -186,7 +196,6 @@ const MAX_MOBILE_COMPOSER_LINES = 16;
  */
 const MOBILE_COMPOSER_BOUND_GAP_PX = 4;
 const EMPTY_QUEUE: QueuedMessage[] = [];
-const EMPTY_SENDING_IDS: string[] = [];
 const COMPACT_CHAT_PLACEHOLDER_MAX_WIDTH = 560;
 const renameFileForAttachmentCitation = (file: File, filename: string): File => {
     if (file.name === filename) {
@@ -285,6 +294,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
         return snapshot.text;
     });
+    const [pendingEditedAdditionalParts, setPendingEditedAdditionalParts] = React.useState<QueuedMessagePart[]>([]);
     const confirmedMentionsRef = React.useRef<Set<string>>(initialDraftSnapshotRef.current.confirmedMentions);
     const [inputMode, setInputMode] = React.useState<'normal' | 'shell'>('normal');
     const [isDragging, setIsDragging] = React.useState(false);
@@ -400,7 +410,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (!newSessionDraftOpen || newSessionDraft.target !== 'chat' || message.trim().length === 0) return;
         void prepareChatDraftDirectory();
     }, [message, newSessionDraft.target, newSessionDraftOpen, prepareChatDraftDirectory]);
-    const consumePendingSyntheticParts = useInputStore((s) => s.consumePendingSyntheticParts);
     const acknowledgeSessionAbort = useSessionUIStore((s) => s.acknowledgeSessionAbort);
     const abortCurrentOperation = React.useCallback(
         (sessionIdOverride?: string) => sessionActions.abortCurrentOperation(sessionIdOverride ?? currentSessionId ?? ''),
@@ -759,11 +768,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     } | null>(null);
 
     // Message queue
-    const messageQueueTarget = currentSessionId
-        ? createMessageQueueTarget(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory)
-        : null;
+    const messageQueueTarget = React.useMemo(
+        () => currentSessionId
+            ? createMessageQueueTarget(
+                currentSessionId,
+                currentSessionDirectoryForSync ?? currentDirectory,
+                activeRuntimeKey,
+            )
+            : null,
+        [activeRuntimeKey, currentDirectory, currentSessionDirectoryForSync, currentSessionId],
+    );
     const messageQueueKey = messageQueueTarget ? getMessageQueueKey(messageQueueTarget) : null;
-    const followUpBehavior = useMessageQueueStore((state) => state.followUpBehavior);
     const queuedMessages = useMessageQueueStore(
         React.useCallback(
             (state) => {
@@ -776,6 +791,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const addToQueue = useMessageQueueStore((state) => state.addToQueue);
     const clearQueue = useMessageQueueStore((state) => state.clearQueue);
     const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
+    const restoreQueue = useMessageQueueStore((state) => state.restoreQueue);
+    const markSending = useMessageQueueStore((state) => state.markSending);
+    const clearSending = useMessageQueueStore((state) => state.clearSending);
+    const completeSending = useMessageQueueStore((state) => state.completeSending);
 
     // Inline comment drafts
     const inlineDraftSessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
@@ -795,7 +814,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             [inlineDraftKey]
         )
     );
-    const consumeDrafts = useInlineCommentDraftStore((state) => state.consumeDrafts);
     const hasDrafts = draftCount > 0;
 
     // User message history for up/down arrow navigation.
@@ -853,10 +871,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const { phase: btwSessionPhase } = useSessionActivity(btwSessionId, btwDirectory ?? undefined);
     const sessionPhase = isBtwActive ? btwSessionPhase : currentSessionPhase;
     const autoReviewRunning = useAutoReviewStore(React.useCallback((state) => {
-        if (!currentSessionId) return false;
-        const run = state.runsByOriginalSessionID[currentSessionId];
-        return run?.status === 'running' && run.runtimeKey === getRuntimeKey();
-    }, [currentSessionId]));
+        if (!messageQueueTarget) return false;
+        return isAutoReviewRunActiveForTarget(
+            state.runsByOriginalSessionID[messageQueueTarget.sessionId],
+            messageQueueTarget,
+        );
+    }, [messageQueueTarget]));
 
     const handleOpenMobilePanel = React.useCallback((panel: MobileControlsPanel) => {
         if (!isMobile) {
@@ -894,7 +914,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
     }, [pendingInputText, consumePendingInputText]);
 
-    const hasContent = message.trim().length > 0 || attachedFiles.length > 0 || hasDrafts;
+    const hasContent = message.trim().length > 0
+        || attachedFiles.length > 0
+        || hasDrafts
+        || pendingEditedAdditionalParts.length > 0;
     const hasQueuedMessages = queuedMessages.length > 0;
     const canSend = hasContent || hasQueuedMessages;
 
@@ -904,35 +927,60 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const currentMessage = composerRef.current?.getValue() ?? message;
         return {
             message: currentMessage,
-            hasContent: currentMessage.trim().length > 0 || attachedFiles.length > 0 || hasDrafts,
+            hasContent: currentMessage.trim().length > 0
+                || attachedFiles.length > 0
+                || hasDrafts
+                || pendingEditedAdditionalParts.length > 0,
         };
-    }, [attachedFiles.length, hasDrafts, message]);
+    }, [attachedFiles.length, hasDrafts, message, pendingEditedAdditionalParts.length]);
 
     // Keep a ref to handleSubmit so callbacks don't depend on it.
     type SubmitOptions = {
         queuedOnly?: boolean;
         queuedMessageId?: string;
-        delivery?: 'steer';
         /** Submit this text instead of the composer input. Used by preset
             starter chips: on mobile the collapsed pill has no mounted textarea,
             so the DOM-first input snapshot would read empty content. */
         presetText?: string;
     };
+    type QueueMessageOptions = {
+        attachments?: AttachedFile[];
+        additionalParts?: QueuedMessagePart[];
+    };
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
 
     // Add message to queue instead of sending
-    const handleQueueMessage = React.useCallback(() => {
+    const handleQueueMessage = React.useCallback((contentOverride?: string, queueOptions?: QueueMessageOptions): boolean => {
         const inputSnapshot = getCurrentInputSnapshot();
-        if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
+        const content = contentOverride ?? inputSnapshot.message;
+        const attachmentsToQueue = sanitizeAttachmentsForSend(queueOptions?.attachments ?? attachedFiles);
+        const requestedAdditionalParts = queueOptions?.additionalParts ?? [];
+        const hasQueueableContent = content.trim().length > 0
+            || attachmentsToQueue.length > 0
+            || hasDrafts
+            || pendingEditedAdditionalParts.length > 0
+            || requestedAdditionalParts.length > 0;
+        if (!hasQueueableContent || !currentSessionId || !messageQueueTarget) return false;
+        if (messageQueueTarget.runtimeKey !== getRuntimeKey()) return false;
 
-        // Context drafts stay in their store: the send that later delivers the
-        // queue consumes them and attaches them as structured context parts.
-        const messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
-        const attachmentsToQueue = sanitizeAttachmentsForSend(attachedFiles);
+        // Capture context before adding the item so every queued send owns the
+        // exact drafts and synthetic parts present at the time it was queued.
+        // This prevents a failed earlier send from restoring its context into a
+        // later item's target bucket.
+        const contextParts = captureComposerContextForQueue(messageQueueTarget, inlineDraftTarget);
+        const additionalPartsToQueue = [
+            ...pendingEditedAdditionalParts,
+            ...requestedAdditionalParts,
+            ...contextParts,
+        ];
+        const messageToQueue = content.replace(/^\n+|\n+$/g, '');
 
         addToQueue(messageQueueTarget, {
             content: messageToQueue,
             attachments: attachmentsToQueue.length > 0 ? attachmentsToQueue : undefined,
+            additionalParts: additionalPartsToQueue.length > 0 ? additionalPartsToQueue : undefined,
+            capturedContext: contextParts.length > 0 ? contextParts : undefined,
+            contextClaimed: true,
             sendConfig: currentProviderId && currentModelId ? {
                 providerID: currentProviderId,
                 modelID: currentModelId,
@@ -940,6 +988,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 variant: currentVariant ?? undefined,
             } : undefined,
         });
+        setPendingEditedAdditionalParts([]);
 
         // Sending while the agent works must still take the reader to the
         // live edge — a queued message produces no user row yet, so the
@@ -952,16 +1001,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // are processed later in handleSubmit which reads the ref via extractInlineFileMentions.
         // The ref is cleared in handleSubmit after all queued messages are sent.
         setMessage('');
-        if (attachmentsToQueue.length > 0) {
+        if (attachedFiles.length > 0) {
             clearAttachedFiles();
         }
 
         if (!isMobile) {
             composerRef.current?.focus();
         }
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, attachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, currentProviderId, currentModelId, currentAgentName, currentVariant, scrollToLatest]);
+        return true;
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, attachedFiles, hasDrafts, pendingEditedAdditionalParts, inlineDraftTarget, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, currentProviderId, currentModelId, currentAgentName, currentVariant, scrollToLatest]);
 
-    const handleQueuedMessageEdit = React.useCallback((content: string) => {
+    const handleQueuedMessageEdit = React.useCallback((
+        content: string,
+        _attachments?: QueuedMessage['attachments'],
+        additionalParts?: QueuedMessage['additionalParts'],
+    ) => {
+        setPendingEditedAdditionalParts(additionalParts ? [...additionalParts] : []);
         setMessage(content);
         setTimeout(() => {
             composerRef.current?.focus();
@@ -969,9 +1024,37 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, []);
 
     const handleQueuedMessageSend = React.useCallback((messageId: string) => {
-        // Force-sending from the queue during a busy session counts as steer
-        void handleSubmitRef.current({ queuedOnly: true, queuedMessageId: messageId, delivery: 'steer' });
+        void handleSubmitRef.current({ queuedOnly: true, queuedMessageId: messageId });
     }, []);
+
+    const getMainSessionSendDisposition = React.useCallback((
+        intent: 'composer' | 'queued',
+        queueWasInFlightAtSubmit = false,
+    ) => {
+        const liveDirectory = messageQueueTarget?.directory ?? currentSessionDirectoryForSync ?? currentDirectory ?? '';
+        const liveStatus = currentSessionId
+            ? resolveQueuedSessionStatusType(currentSessionId, liveDirectory)
+            : 'idle';
+        const liveAutoReview = messageQueueTarget
+            ? isAutoReviewRunActiveForTarget(
+                useAutoReviewStore.getState().runsByOriginalSessionID[messageQueueTarget.sessionId],
+                messageQueueTarget,
+            )
+            : false;
+
+        return resolveMainSessionSendDisposition({
+            intent,
+            hasMainSession: Boolean(currentSessionId),
+            isBtwActive,
+            isBusy: currentSessionPhase !== 'idle' || liveStatus !== 'idle' || liveAutoReview,
+            canQueue: intent === 'queued' || inputMode === 'normal',
+            hasQueuedMessageInFlight: queueWasInFlightAtSubmit || (
+                messageQueueTarget
+                    ? useMessageQueueStore.getState().getQueueDispatchState(messageQueueTarget).sendingIds.length > 0
+                    : false
+            ),
+        });
+    }, [currentDirectory, currentSessionDirectoryForSync, currentSessionId, currentSessionPhase, inputMode, isBtwActive, messageQueueTarget]);
 
     const handleOpenAgentPanel = React.useCallback(() => {
         setMobileControlsPanel('agent');
@@ -993,19 +1076,66 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         setLinearPickerOpen(true);
     }, []);
 
-    const getSubmitErrorMessage = (error: unknown, fallback: string) => {
-        const message = error instanceof Error ? error.message : '';
+    type SubmitError = Error | undefined;
+
+    const getSubmitErrorMessage = React.useCallback((error: SubmitError, fallback: string) => {
+        const message = error?.message ?? '';
         return message.toLowerCase().includes('runtime changed')
             ? t('chat.chatInput.toast.messageSendFailed')
             : message || fallback;
+    }, [t]);
+
+    type MagicPromptInvocation = {
+        command: MagicPromptCommand;
+        argument: string;
     };
+
+    const getMagicPromptInvocation = React.useCallback((text: string | null): MagicPromptInvocation | null => {
+        if (inputMode !== 'normal' || !text) return null;
+        const parsed = parseSlashCommand(text);
+        if (!parsed) return null;
+        const command = findMagicPromptCommand(parsed.name);
+        if (!command || !canRunCommand(command, {
+            hasSession: Boolean(currentSessionId),
+            hasDraft: newSessionDraftOpen,
+        })) {
+            return null;
+        }
+        return { command, argument: parsed.argument };
+    }, [currentSessionId, inputMode, newSessionDraftOpen]);
+
+    const queueMagicPrompt = React.useCallback(async (invocation: MagicPromptInvocation): Promise<void> => {
+        try {
+            const rendered = await renderMagicPromptCommand(invocation.command, invocation.argument);
+            handleQueueMessage(rendered.visibleText, {
+                additionalParts: [{ text: rendered.instructionsText, synthetic: true }],
+            });
+        } catch (error) {
+            toast.error(getSubmitErrorMessage(error instanceof Error ? error : undefined, t(invocation.command.errorToastKey)));
+        }
+    }, [getSubmitErrorMessage, handleQueueMessage, t]);
+
+    const queueBusySubmission = React.useCallback(async (
+        contentOverride?: string,
+        magicPromptOverride?: MagicPromptInvocation,
+    ): Promise<void> => {
+        const magicPrompt = magicPromptOverride
+            ?? getMagicPromptInvocation(contentOverride ?? getCurrentInputSnapshot().message);
+        if (magicPrompt) {
+            await queueMagicPrompt(magicPrompt);
+        } else {
+            handleQueueMessage(contentOverride);
+        }
+    }, [getCurrentInputSnapshot, getMagicPromptInvocation, handleQueueMessage, queueMagicPrompt]);
 
     const handleSubmit = async (options?: SubmitOptions) => {
         const submitRuntimeKey = getRuntimeKey();
         const queuedOnly = options?.queuedOnly ?? false;
         const queuedMessageId = options?.queuedMessageId;
-        const delivery = options?.delivery === 'steer' && sessionPhase !== 'idle' ? 'steer' : undefined;
         const capturedTarget = messageQueueTarget;
+        const queueRestorationGuard = capturedTarget
+            ? useMessageQueueStore.getState().getQueueRestorationGuard(capturedTarget)
+            : null;
         // An expired session cannot deliver anything: keep the prompt in the
         // composer and point at the login banner instead of burning the send
         // on a guaranteed 401.
@@ -1020,19 +1150,49 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const inputSnapshot = options?.presetText != null
             ? {
                 message: options.presetText,
-                hasContent: options.presetText.trim().length > 0 || attachedFiles.length > 0 || hasDrafts,
+                hasContent: options.presetText.trim().length > 0
+                    || attachedFiles.length > 0
+                    || hasDrafts
+                    || pendingEditedAdditionalParts.length > 0,
             }
             : getCurrentInputSnapshot();
+        const editedAdditionalParts = pendingEditedAdditionalParts;
         // A queued item stays in the queue until its own send resolves, so the
         // auto-send hook may already be delivering one of these. Merging it here
         // would send the same message twice (the window is seconds over a relay).
-        const sendingIds = messageQueueTarget
-            ? useMessageQueueStore.getState().sendingIds[getMessageQueueKey(messageQueueTarget)] ?? EMPTY_SENDING_IDS
-            : EMPTY_SENDING_IDS;
+        const queuedMessagesSnapshot = messageQueueTarget
+            ? useMessageQueueStore.getState().getQueueForTarget(messageQueueTarget)
+            : queuedMessages;
+        const hasQueuedMessagesAtSubmit = queuedMessagesSnapshot.length > 0;
+        const queueDispatchState = messageQueueTarget
+            ? useMessageQueueStore.getState().getQueueDispatchState(messageQueueTarget)
+            : null;
+        // Preserve the action's initial ordering decision across async file
+        // preparation. If the head resolves during that work, this composer
+        // submission still joins the queue instead of overtaking its tail.
+        const queueWasInFlightAtSubmit = (queueDispatchState?.sendingIds.length ?? 0) > 0;
         const queuedMessagesToSend = (queuedMessageId
-            ? queuedMessages.filter((message) => message.id === queuedMessageId)
-            : queuedMessages
-        ).filter((message) => !sendingIds.includes(message.id));
+            ? queuedMessagesSnapshot.filter((message) => message.id === queuedMessageId)
+            : queuedMessagesSnapshot);
+
+        // A queued chip may be clicked out of order, or while the queue head
+        // is still awaiting its request. Reject that dispatch before command
+        // handling or context consumption. The store repeats this check in
+        // markSending so concurrent callers share the same FIFO boundary.
+        if (
+            queuedOnly
+            && (
+                !queuedMessageId
+                || !queueDispatchState
+                || !isQueueMessageDispatchable(
+                    queuedMessagesSnapshot,
+                    queueDispatchState.sendingIds,
+                    queuedMessageId,
+                )
+            )
+        ) {
+            return;
+        }
 
         if (queuedOnly && autoReviewRunning) {
             return;
@@ -1040,7 +1200,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         if (queuedOnly) {
             if (queuedMessagesToSend.length === 0 || !currentSessionId) return;
-        } else if ((!inputSnapshot.hasContent && !hasQueuedMessages) || (!currentSessionId && !newSessionDraftOpen)) {
+        } else if ((!inputSnapshot.hasContent && !hasQueuedMessagesAtSubmit) || (!currentSessionId && !newSessionDraftOpen)) {
+            return;
+        }
+
+        // A queued chip may have rendered while the session was idle and be
+        // clicked after a new turn started. Keep the item visible and let the
+        // queue auto-send it after idle instead of sending into that turn.
+        if (queuedOnly && getMainSessionSendDisposition('queued') === 'preserve-queued') {
             return;
         }
 
@@ -1066,7 +1233,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // rejected turn winds down and the session returns to idle. This avoids
         // aborting the turn (which would surface an "aborted" notice).
         if (currentSessionId && !queuedOnly && autoReviewRunning && !isBtwActive) {
-            handleQueueMessage();
+            await queueBusySubmission(options?.presetText);
             return;
         }
 
@@ -1088,7 +1255,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 sessionActions.dismissOpenQuestionsForSession(currentSessionId),
             ]);
             if (deniedPermissions || dismissedQuestions) {
-                handleQueueMessage();
+                await queueBusySubmission(options?.presetText);
                 return;
             }
         }
@@ -1098,19 +1265,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             sessionId?: string;
             directory?: string;
             draftSnapshot?: NonNullable<typeof capturedDraftSnapshot>;
-            delivery?: 'steer';
         } | undefined;
         if (isBtwActive && btwSessionId && btwDirectory) {
             sendMessageOptions = {
                 sessionId: btwSessionId,
                 directory: btwDirectory,
             };
-        } else if (capturedTarget || capturedDraftSnapshot || delivery) {
+        } else if (capturedTarget || capturedDraftSnapshot) {
             sendMessageOptions = {};
             if (capturedTarget) sendMessageOptions.target = capturedTarget;
             if (capturedDraftSnapshot) sendMessageOptions.draftSnapshot = capturedDraftSnapshot;
         }
-        if (delivery && sendMessageOptions) sendMessageOptions.delivery = delivery;
 
         const preparedDocumentMentions = new Map<string, AttachedFile[]>();
         const reservedFilenames = new Set([
@@ -1150,28 +1315,46 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             }
         }
 
-        // Inline review comments and synthetic context are consumed before
-        // assembly so a failed send can restore exactly what it took. Context
-        // drafts ride with whichever send goes out next, including queued
-        // auto-sends: queueing leaves them in the store on purpose.
-        const syntheticParts = consumePendingSyntheticParts();
+        // File mention preparation can await the runtime. Re-check after it so
+        // a turn that started during preparation still becomes a visible queue
+        // item rather than a direct prompt.
+        const preparedSendDisposition = getMainSessionSendDisposition(
+            queuedOnly ? 'queued' : 'composer',
+            queueWasInFlightAtSubmit,
+        );
+        if (preparedSendDisposition === 'preserve-queued') {
+            return;
+        }
+        if (preparedSendDisposition === 'queue') {
+            await queueBusySubmission(options?.presetText);
+            return;
+        }
+
+        // Direct sends consume context before assembly so a failed send can
+        // restore exactly what it took. Queue items capture their own context
+        // while queueing, so a queued send never claims another item's context.
         const consumedDraftTarget = inlineDraftTarget;
-        const drafts: InlineCommentDraft[] = consumedDraftTarget
-            ? consumeDrafts(consumedDraftTarget)
-            : [];
+        const shouldConsumeComposerContext = !queuedOnly
+            || queuedMessagesToSend.some((queued) => !queued.contextClaimed);
+        const consumedContext = shouldConsumeComposerContext
+            ? consumeComposerContext(capturedTarget, consumedDraftTarget, queueRestorationGuard ?? undefined)
+            : { inlineComments: [], syntheticParts: [], restore: () => undefined };
+        const { syntheticParts, inlineComments: drafts } = consumedContext;
+        const restoreConsumedContext = consumedContext.restore;
 
         const availableSkillNames = new Set(
             selectSkillsForDirectory(useSkillsStore.getState(), currentDirectory).map((skill) => skill.name),
         );
 
         const outgoing = buildOutgoingMessage({
-            queued: queuedMessagesToSend,
-            composerText: !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : null,
-            composerAttachments: attachedFiles,
-            inlineComments: drafts,
+             queued: queuedMessagesToSend,
+             composerText: !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : null,
+             composerAttachments: attachedFiles,
+              composerAdditionalParts: !queuedOnly ? editedAdditionalParts : undefined,
+             inlineComments: drafts,
             syntheticTexts: [
                 ...buildBtwSyntheticTexts({ isBtwActive, isPromotedBtwSession }),
-                ...(syntheticParts?.map((part) => part.text) ?? []),
+                ...syntheticParts.map((part) => part.text),
             ],
             linkedIssue: linkedIssue
                 ? { number: linkedIssue.number, title: linkedIssue.title, url: linkedIssue.url, contextText: linkedIssue.contextText }
@@ -1201,28 +1384,64 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         if (outgoing.isEmpty) return;
 
-        // Clear queue and input
-        if (capturedTarget && queuedMessageId) {
-            removeFromQueue(capturedTarget, queuedMessageId);
-        } else if (capturedTarget && hasQueuedMessages) {
-            clearQueue(capturedTarget);
-        }
-        if (!queuedOnly) {
-            setMessage('');
-            confirmedMentionsRef.current.clear();
-            // Clear per-session draft on submit
-            persistDraftImmediately(chatDraftIdentity, '');
-            messageHistory.reset();
-            if (attachedFiles.length > 0) {
-                clearAttachedFiles();
+        let editedAdditionalPartsCleared = false;
+        let removedQueuedMessages: QueuedMessage[] = [];
+        const clearSubmittedInput = (
+            clearEditedAdditionalParts = false,
+            preserveQueueOnFailure = false,
+        ) => {
+            if (capturedTarget && queuedMessageId && !queuedOnly) {
+                removeFromQueue(capturedTarget, queuedMessageId);
+            } else if (capturedTarget && hasQueuedMessagesAtSubmit && !queuedOnly) {
+                const removed = clearQueue(capturedTarget);
+                if (preserveQueueOnFailure) removedQueuedMessages = removed;
             }
-            // Close expanded input overlay when submitting
-            setExpandedInput(false);
-        }
+            if (!queuedOnly) {
+                setMessage('');
+                if (clearEditedAdditionalParts) {
+                    editedAdditionalPartsCleared = true;
+                    setPendingEditedAdditionalParts([]);
+                }
+                confirmedMentionsRef.current.clear();
+                // Clear per-session draft on submit
+                persistDraftImmediately(chatDraftIdentity, '');
+                messageHistory.reset();
+                if (attachedFiles.length > 0) {
+                    clearAttachedFiles();
+                }
+                // Close expanded input overlay when submitting
+                setExpandedInput(false);
+            }
 
-        if (isMobile) {
-            composerRef.current?.blur();
-        }
+            if (isMobile) {
+                composerRef.current?.blur();
+            }
+        };
+        const restoreEditedAdditionalParts = () => {
+            const canRestoreTargetState = !capturedTarget
+                || (queueRestorationGuard !== null
+                    && useMessageQueueStore.getState().isQueueRestorationGuardCurrent(capturedTarget, queueRestorationGuard));
+            if (editedAdditionalPartsCleared && editedAdditionalParts.length > 0 && canRestoreTargetState) {
+                setPendingEditedAdditionalParts((current) => [...editedAdditionalParts, ...current]);
+            }
+        };
+
+        const guardMainSessionSend = async (magicPrompt?: MagicPromptInvocation): Promise<boolean> => {
+            const disposition = getMainSessionSendDisposition(
+                queuedOnly ? 'queued' : 'composer',
+                queueWasInFlightAtSubmit,
+            );
+            if (disposition === 'preserve-queued') {
+                restoreConsumedContext();
+                return true;
+            }
+            if (disposition === 'queue') {
+                restoreConsumedContext();
+                await queueBusySubmission(options?.presetText, magicPrompt);
+                return true;
+            }
+            return false;
+        };
 
         // Local slash commands, normal mode only.
         const parsedCommand = inputMode === 'normal' ? parseSlashCommand(primaryText) : null;
@@ -1232,34 +1451,40 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             // Commands that manipulate session state or open UI rather than
             // sending a message.
             if (commandName === 'undo' && currentSessionId) {
+                clearSubmittedInput();
                 await useSessionUIStore.getState().handleSlashUndo(currentSessionId);
                 scrollToBottom?.();
                 return;
             }
             if (commandName === 'redo' && currentSessionId) {
+                clearSubmittedInput();
                 await useSessionUIStore.getState().handleSlashRedo(currentSessionId);
                 scrollToBottom?.();
                 return;
             }
             if (commandName === 'timeline' && currentSessionId) {
+                clearSubmittedInput();
                 setTimelineDialogOpen(true);
                 return;
             }
             if (commandName === 'handoff-review' && currentSessionId && !isMobile && !isVSCodeRuntime()) {
+                clearSubmittedInput();
                 setReviewDialogOpen(true);
                 return;
             }
             if (commandName === 'compact' && currentSessionId) {
+                clearSubmittedInput();
                 try {
                     await sessionActions.waitForConnectionOrThrow();
                     const compactDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || undefined;
                     await opencodeClient.summarizeSession(currentSessionId, currentProviderId, currentModelId, compactDirectory);
                 } catch (error) {
-                    toast.error(getSubmitErrorMessage(error, t('chat.chatInput.toast.compactFailed')));
+                    toast.error(getSubmitErrorMessage(error instanceof Error ? error : undefined, t('chat.chatInput.toast.compactFailed')));
                 }
                 return;
             }
             if (commandName === 'btw' && currentSessionId) {
+                clearSubmittedInput();
                 const question = argument.trim();
                 if (!question) {
                     toast.error(t('chat.btw.toast.emptyArgument'));
@@ -1289,43 +1514,51 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     });
                     scrollToBottom?.();
                 } catch (error) {
-                    toast.error(getSubmitErrorMessage(error, t('chat.btw.toast.createFailed')));
+                    toast.error(getSubmitErrorMessage(error instanceof Error ? error : undefined, t('chat.btw.toast.createFailed')));
                 }
                 return;
             }
 
             // The rest render a visible prompt plus synthetic instructions and
             // send them as one message.
-            const command = findMagicPromptCommand(commandName);
-            const commandIsAvailable = command !== null && canRunCommand(command, {
-                hasSession: Boolean(currentSessionId),
-                hasDraft: newSessionDraftOpen,
-            });
-            if (command && commandIsAvailable) {
-                const variables = buildCommandVariables(command, argument);
-                try {
-                    await sessionActions.waitForConnectionOrThrow();
-                    const visibleText = await renderMagicPrompt(command.visiblePrompt, variables.visible);
-                    const instructionsText = await renderMagicPrompt(command.instructionsPrompt, variables.instructions);
-                    await sendMessage(
-                        visibleText,
-                        providerIdToSend,
-                        modelIdToSend,
-                        agentNameToSend,
-                        [],
-                        agentMentionName,
-                        [{ text: instructionsText, synthetic: true }],
-                        variantToSend,
-                        inputMode,
-                        sendMessageOptions,
-                    );
-                    scrollToBottom?.();
-                } catch (error) {
-                    toast.error(getSubmitErrorMessage(error, t(command.errorToastKey)));
-                }
-                return;
+            const magicPrompt = getMagicPromptInvocation(primaryText);
+            if (magicPrompt) {
+                if (await guardMainSessionSend(magicPrompt)) return;
+                 clearSubmittedInput(true, true);
+                 try {
+                     await withComposerContextRestore(consumedContext, async () => {
+                         await sessionActions.waitForConnectionOrThrow();
+                         const { visibleText, instructionsText } = await renderMagicPromptCommand(magicPrompt.command, magicPrompt.argument);
+                        await sendMessage(
+                            visibleText,
+                            providerIdToSend,
+                            modelIdToSend,
+                            agentNameToSend,
+                            [],
+                            agentMentionName,
+                            [
+                                { text: instructionsText, synthetic: true },
+                                ...additionalParts,
+                            ],
+                            variantToSend,
+                            inputMode,
+                            sendMessageOptions,
+                        );
+                     });
+                     scrollToBottom?.();
+                 } catch (error) {
+                     if (capturedTarget && queueRestorationGuard && removedQueuedMessages.length > 0) {
+                         restoreQueue(capturedTarget, removedQueuedMessages, queueRestorationGuard);
+                     }
+                     restoreEditedAdditionalParts();
+                     toast.error(getSubmitErrorMessage(error instanceof Error ? error : undefined, t(magicPrompt.command.errorToastKey)));
+                 }
+                 return;
             }
         }
+
+        if (await guardMainSessionSend()) return;
+        clearSubmittedInput(true, true);
 
         const currentSessionDirectory = capturedTarget?.directory ?? currentDirectory;
         // btw mode: the fork already carries the question plus full history,
@@ -1362,6 +1595,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // never claims the new message.
         scrollToBottom?.();
 
+        const queuedSend = queuedOnly && capturedTarget && queuedMessageId
+            ? { target: capturedTarget, messageId: queuedMessageId }
+            : null;
+        // Keep this check immediately before the queue claim. The earlier
+        // async guard can become stale while send preparation is yielding.
+        if (queuedSend && isQueuedSendBlockedForTarget(queuedSend.target)) {
+            restoreConsumedContext();
+            return;
+        }
+        if (queuedSend && !markSending(queuedSend.target, queuedSend.messageId)) {
+            restoreConsumedContext();
+            return;
+        }
+
         const sendPromise = sendMessage(
             primaryText,
             providerIdToSend,
@@ -1374,13 +1621,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             inputMode,
             sendMessageOptions,
         );
-        const restoreConsumedDrafts = () => {
-            if (consumedDraftTarget && drafts.length > 0) {
-                useInlineCommentDraftStore.getState().restoreDrafts(consumedDraftTarget, drafts);
-            }
-        };
-
         void sendPromise.then(() => {
+            if (queuedSend) {
+                completeSending(queuedSend.target, queuedSend.messageId);
+            }
             // Record what this session was pointed at, so the work-status panel
             // can show it as a context source long after the message scrolled
             // away. A snapshot only — never re-fetched, never authoritative.
@@ -1445,7 +1689,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 setLinkedLinearIssue(null);
             }
         }).catch((error: unknown) => {
-            const rawMessage =
+             const rawMessage =
                 error instanceof Error
                     ? error.message
                     : typeof error === 'string'
@@ -1453,8 +1697,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         : String(error ?? '');
             const normalized = rawMessage.toLowerCase();
 
-            console.error('Message send failed:', rawMessage || error);
-            restoreConsumedDrafts();
+             console.error('Message send failed:', rawMessage || error);
+              if (capturedTarget && queueRestorationGuard && removedQueuedMessages.length > 0) {
+                  restoreQueue(capturedTarget, removedQueuedMessages, queueRestorationGuard);
+              }
+             restoreConsumedContext();
+            restoreEditedAdditionalParts();
 
             // A failed send returns the typed prompt no matter WHY it failed —
             // auth, network, server, anything. Losing a long prompt to a toast
@@ -1516,6 +1764,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 useInputStore.getState().setAttachedFiles(allAttachments);
             }
             toast.error(rawMessage || t('chat.chatInput.toast.messageSendFailed'));
+        }).finally(() => {
+            if (queuedSend) {
+                clearSending(queuedSend.target, queuedSend.messageId);
+            }
         });
 
         if (!isMobile) {
@@ -1526,18 +1778,29 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // Update ref with latest handleSubmit on every render
     handleSubmitRef.current = handleSubmit;
 
-    // Primary action for send/queue button — respects selected follow-up behavior
+    // Primary action for send/queue button — a busy session always queues
     const handlePrimaryAction = React.useCallback(() => {
         const inputSnapshot = getCurrentInputSnapshot();
-        const canQueue = !isBtwActive && inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && (currentSessionPhase !== 'idle' || autoReviewRunning);
-        if (followUpBehavior === 'queue' && canQueue) {
+        const canQueue = !isBtwActive
+            && inputMode === 'normal'
+            && inputSnapshot.hasContent
+            && currentSessionId
+            && (currentSessionPhase !== 'idle' || autoReviewRunning);
+        if (canQueue && !getMagicPromptInvocation(inputSnapshot.message)) {
             handleQueueMessage();
-        } else if (followUpBehavior === 'steer' && canQueue) {
-            void handleSubmitRef.current({ delivery: 'steer' });
-        } else {
-            void handleSubmitRef.current();
+            return;
         }
-    }, [inputMode, getCurrentInputSnapshot, currentSessionId, currentSessionPhase, autoReviewRunning, followUpBehavior, handleQueueMessage, isBtwActive]);
+        void handleSubmitRef.current();
+    }, [autoReviewRunning, currentSessionId, currentSessionPhase, getCurrentInputSnapshot, getMagicPromptInvocation, handleQueueMessage, inputMode, isBtwActive]);
+
+    const handleQueueAction = React.useCallback(() => {
+        const inputSnapshot = getCurrentInputSnapshot();
+        if (!getMagicPromptInvocation(inputSnapshot.message)) {
+            handleQueueMessage();
+            return;
+        }
+        void handleSubmitRef.current();
+    }, [getCurrentInputSnapshot, getMagicPromptInvocation, handleQueueMessage]);
 
     // Draft welcome presets: submit immediately.
     const submitPresetPrompt = React.useCallback((text: string, type: 'command' | 'skill') => {
@@ -1720,33 +1983,24 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
 
-        // Handle Enter/Ctrl+Enter based on selected follow-up behavior. On
-        // mobile, and in desktop focus mode, plain Enter writes a newline and
-        // only Cmd/Ctrl+Enter sends: both are surfaces for composing long
-        // prompts, where an accidental send costs more than an extra keypress.
+        // Handle Enter/Ctrl+Enter. On mobile, and in desktop focus mode, plain
+        // Enter writes a newline and only Cmd/Ctrl+Enter sends: both are
+        // surfaces for composing long prompts, where an accidental send costs
+        // more than an extra keypress.
         const requiresModifierToSend = isMobile || isDesktopExpanded;
         if (e.key === 'Enter' && !e.shiftKey && (!requiresModifierToSend || e.ctrlKey || e.metaKey)) {
             e.preventDefault();
 
-            const isCtrlEnter = e.ctrlKey || e.metaKey;
-
-            // Queueing / steering only works when there's an existing busy
-            // session (or an active auto-review run).
-            const canQueue = !isBtwActive && inputMode === 'normal' && hasContent && currentSessionId && (currentSessionPhase !== 'idle' || autoReviewRunning);
-
-            if (followUpBehavior === 'queue') {
-                if (isCtrlEnter || !canQueue) {
-                    handleSubmit();
-                } else {
-                    handleQueueMessage();
-                }
+            // The submit handler rechecks live activity and queues when needed.
+            const canQueue = !isBtwActive
+                && inputMode === 'normal'
+                && hasContent
+                && currentSessionId
+                && (currentSessionPhase !== 'idle' || autoReviewRunning);
+            if (canQueue && !getMagicPromptInvocation(message)) {
+                handleQueueMessage();
             } else {
-                // steer: Enter steers into the running turn, Ctrl+Enter sends now.
-                if (isCtrlEnter || !canQueue) {
-                    handleSubmit();
-                } else {
-                    handleSubmit({ delivery: 'steer' });
-                }
+                void handleSubmitRef.current();
             }
         }
     };
@@ -3089,7 +3343,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onToggleExpandedInput={handleToggleExpandedInput}
                         onTogglePermissionAutoAccept={handlePermissionAutoAcceptToggle}
                         onPrimaryAction={handlePrimaryAction}
-                        onQueueMessage={handleQueueMessage}
+                         onQueueMessage={handleQueueAction}
                         onAbort={handleAbort}
                         onStartDictation={toggleDictation}
                         onDictationInsert={handleDictationInsert}

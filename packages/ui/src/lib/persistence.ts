@@ -5,7 +5,6 @@ import { useUIStore } from '@/stores/useUIStore';
 import { isMonoFontOption, isUiFontOption } from '@/lib/fontOptions';
 import {
   DEFAULT_FOLLOW_UP_BEHAVIOR,
-  isFollowUpBehavior,
   normalizeFollowUpBehavior,
   useMessageQueueStore,
   type FollowUpBehavior,
@@ -686,10 +685,8 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
 
   let nextFollowUpBehavior: FollowUpBehavior | null = null;
-  if (isFollowUpBehavior(settings.followUpBehavior)) {
-    nextFollowUpBehavior = settings.followUpBehavior;
-  } else if (typeof settings.queueModeEnabled === 'boolean') {
-    nextFollowUpBehavior = normalizeFollowUpBehavior(undefined, settings.queueModeEnabled);
+  if (settings.followUpBehavior !== undefined || settings.queueModeEnabled === true || settings.queueModeEnabled === false) {
+    nextFollowUpBehavior = normalizeFollowUpBehavior(settings.followUpBehavior, settings.queueModeEnabled);
   }
   if (nextFollowUpBehavior && nextFollowUpBehavior !== queueStore.followUpBehavior) {
     queueStore.setFollowUpBehavior(nextFollowUpBehavior);
@@ -1273,10 +1270,16 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.gitmojiEnabled === 'boolean') {
     result.gitmojiEnabled = candidate.gitmojiEnabled;
   }
-  if (isFollowUpBehavior(candidate.followUpBehavior)) {
-    result.followUpBehavior = candidate.followUpBehavior;
-  } else if (typeof candidate.queueModeEnabled === 'boolean') {
-    result.followUpBehavior = normalizeFollowUpBehavior(undefined, candidate.queueModeEnabled);
+  const persistedFollowUpBehavior = candidate.followUpBehavior === 'steer'
+    || candidate.followUpBehavior === 'queue'
+    || candidate.followUpBehavior === 'immediate'
+    ? candidate.followUpBehavior
+    : undefined;
+  if ('followUpBehavior' in candidate || candidate.queueModeEnabled === true || candidate.queueModeEnabled === false) {
+    result.followUpBehavior = normalizeFollowUpBehavior(
+      persistedFollowUpBehavior,
+      candidate.queueModeEnabled === true ? true : candidate.queueModeEnabled === false ? false : null,
+    );
   }
   if (typeof candidate.showDeletionDialog === 'boolean') {
     result.showDeletionDialog = candidate.showDeletionDialog;

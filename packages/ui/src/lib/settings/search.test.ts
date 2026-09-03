@@ -39,6 +39,17 @@ describe('settings search', () => {
     expect(results.some((result) => result.id === 'integrations.third-party.opencode-cursor-oauth')).toBe(true);
   });
 
+  test('does not expose the removed follow-up behavior setting', () => {
+    const results = buildSettingsSearchResults({
+      query: 'follow up steer queue send immediately',
+      runtimeCtx,
+      t,
+      getPageTitle: (page) => page,
+    });
+
+    expect(results.some((result) => result.id === 'chat.follow-up-behavior')).toBe(false);
+  });
+
   test('finds Linear connect on the integrations page', () => {
     const results = buildSettingsSearchResults({
       query: 'linear',

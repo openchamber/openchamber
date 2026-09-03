@@ -6,6 +6,7 @@ import {
     findMagicPromptCommand,
     MAGIC_PROMPT_COMMANDS,
     parseSlashCommand,
+    renderMagicPromptCommand,
 } from '../slashCommands';
 
 describe('parseSlashCommand', () => {
@@ -108,6 +109,26 @@ describe('buildCommandVariables', () => {
     test('an absent idea leaves the slot blank', () => {
         expect(buildCommandVariables(findMagicPromptCommand('schedule-task')!, '').visible.idea_block)
             .toBe('');
+    });
+});
+
+describe('renderMagicPromptCommand', () => {
+    test('renders the same normalized prompt pair used by direct and queued sends', async () => {
+        const calls: Array<{ id: string; variables: Record<string, string> }> = [];
+        const command = findMagicPromptCommand('summary')!;
+
+        const result = await renderMagicPromptCommand(command, 'latency', async (id, variables) => {
+            calls.push({ id, variables: variables ?? {} });
+            return `${id}:${Object.values(variables ?? {}).join('|')}`;
+        });
+
+        expect(result.visibleText).toBe('session.summary.visible: focused on: latency');
+        expect(result.instructionsText).toContain('session.summary.instructions:');
+        expect(result.instructionsText).toContain('latency');
+        expect(calls.map(({ id }) => id)).toEqual([
+            'session.summary.visible',
+            'session.summary.instructions',
+        ]);
     });
 });
 

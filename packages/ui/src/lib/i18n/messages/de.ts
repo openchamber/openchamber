@@ -2001,6 +2001,7 @@ export const dict = {
   'chat.queuedMessage.send': 'senden',
   'chat.queuedMessage.removeAria': 'Aus der Warteschlange entfernen',
   'chat.queuedMessage.reorderAria': 'Ziehen, um neu anzuordnen',
+  'chat.queuedMessage.waiting': 'Wird gesendet, sobald die Sitzung beendet ist',
   'chat.container.returnToParent.aria': 'Zurück zur übergeordneten Sitzung',
   'chat.container.returnToParent.titleNamed': 'Zurück zu: {title}',
   'chat.container.returnToParent.title': 'Zurück zur übergeordneten Sitzung',

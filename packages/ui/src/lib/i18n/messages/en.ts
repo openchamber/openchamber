@@ -2206,6 +2206,7 @@ export const dict = {
   'chat.queuedMessage.send': 'send',
   'chat.queuedMessage.removeAria': 'Remove from queue',
   'chat.queuedMessage.reorderAria': 'Drag to reorder',
+  'chat.queuedMessage.waiting': 'Will send when the session finishes',
   'chat.container.returnToParent.aria': 'Return to parent session',
   'chat.container.returnToParent.titleNamed': 'Return to: {title}',
   'chat.container.returnToParent.title': 'Return to parent session',

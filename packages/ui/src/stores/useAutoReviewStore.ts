@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { createDeferredSafeJSONStorage } from '@/stores/utils/safeStorage';
+import { canonicalizePathIdentity } from '@/lib/pathNormalization';
 
 type AutoReviewPhase = 'waiting_for_reviewer' | 'waiting_for_implementer';
 type AutoReviewStatus = 'running' | 'completed' | 'stopped' | 'error';
@@ -18,6 +19,32 @@ export type AutoReviewRun = {
   expectedAssistantParentID?: string;
   waitAfterCreatedAt?: number;
   error?: string;
+};
+
+type AutoReviewTarget = {
+  sessionId: string;
+  directory: string;
+  runtimeKey: string;
+};
+
+type AutoReviewRunTargetFields = Pick<AutoReviewRun, 'originalSessionID' | 'directory' | 'runtimeKey' | 'status'>;
+
+export const isAutoReviewRunActiveForTarget = (
+  run: AutoReviewRunTargetFields | undefined,
+  target: AutoReviewTarget,
+): boolean => {
+  if (
+    !run
+    || run.status !== 'running'
+    || run.originalSessionID !== target.sessionId
+    || run.runtimeKey !== target.runtimeKey
+  ) {
+    return false;
+  }
+
+  const runDirectory = canonicalizePathIdentity(run.directory);
+  const targetDirectory = canonicalizePathIdentity(target.directory);
+  return runDirectory !== null && targetDirectory !== null && runDirectory === targetDirectory;
 };
 
 type AutoReviewState = {

@@ -11,7 +11,7 @@ import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { deriveRecentSessions } from '../recent/activitySections';
-import { normalizePath } from '../utils';
+import { canonicalizePathIdentity } from '@/lib/pathNormalization';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { isBtwSession } from '@/lib/sessionBtwMetadata';
 import type { GlobalSessionStructure } from '@/stores/globalSessionStructure';
@@ -62,7 +62,7 @@ const isKnownActiveSessionDirectory = (
   isVSCode: boolean,
 ): boolean => {
   if (session.time?.archived) return true;
-  const directory = normalizePath(resolveGlobalSessionDirectory(session))?.toLowerCase();
+  const directory = canonicalizePathIdentity(resolveGlobalSessionDirectory(session));
   if (!directory) return !isVSCode;
   if (knownDirectories.size === 0) return !isVSCode;
   return knownDirectories.has(directory);

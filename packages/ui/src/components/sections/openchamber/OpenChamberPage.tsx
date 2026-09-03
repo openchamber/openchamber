@@ -180,7 +180,7 @@ const VisualSectionContent: React.FC = () => {
     ]} />;
 };
 
-// Chat section: User message rendering, Diff layout, Mobile status bar, Show reasoning traces, Follow-up behavior, Persist draft
+// Chat section: User message rendering, Diff layout, Mobile status bar, Show reasoning traces, Persist draft
 const ChatSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
     return (
@@ -206,7 +206,6 @@ const ChatSectionContent: React.FC = () => {
                 'diffLayout',
                 'dotfiles',
                 'fileViewerPreview',
-                'followUpBehavior',
                 'persistDraft',
                 'inputSpellcheck',
                 'largeTextPaste',

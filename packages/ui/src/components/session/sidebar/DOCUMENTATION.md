@@ -53,6 +53,9 @@ Directory demand always includes known project roots and worktrees. Visibility
 only changes priority. Row mounts must not start bootstrap work. Selection and
 activity subscriptions stay session-scoped so a structural list update does not
 make every row observe unrelated streaming updates.
+Known directory membership uses one canonical identity set. Windows drive and
+UNC aliases match, while POSIX path case remains significant; display metadata
+continues to use the original project and worktree paths.
 
 ## Loading rules
 

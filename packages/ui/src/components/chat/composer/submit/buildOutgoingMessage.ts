@@ -15,6 +15,7 @@
 
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
+import type { QueuedMessagePart } from '@/stores/messageQueueStore';
 import { contextPayloadFromDraft, createContextPart, type ContextPartMetadata } from '@/lib/messages/contextParts';
 
 export interface OutgoingPart {
@@ -39,6 +40,7 @@ export interface OutgoingMessage {
 export interface QueuedInput {
     content: string;
     attachments?: AttachedFile[];
+    additionalParts?: QueuedMessagePart[];
 }
 
 export interface OutgoingMessageInput {
@@ -47,6 +49,8 @@ export interface OutgoingMessageInput {
     /** The composer's own text, or null when this send skips it. */
     composerText: string | null;
     composerAttachments: readonly AttachedFile[];
+    /** Additional parts restored while editing a queued message. */
+    composerAdditionalParts?: readonly QueuedMessagePart[];
     /** Context drafts (code comments, terminal selections, annotations, PR context). */
     inlineComments: readonly InlineCommentDraft[];
     /** Synthetic context produced elsewhere (conflict resolution, and such). */
@@ -72,6 +76,15 @@ export interface OutgoingMessageDeps {
     /** Instruction telling the model which skills the user named. */
     buildSkillInstruction: (names: string[]) => string | null;
 }
+
+/** Assemble store-owned context after the authored message parts. */
+export const buildContextParts = (
+    inlineComments: readonly InlineCommentDraft[],
+    syntheticParts: readonly OutgoingPart[],
+): OutgoingPart[] => [
+    ...inlineComments.map((draft) => createContextPart(contextPayloadFromDraft(draft))),
+    ...syntheticParts,
+];
 
 export function buildOutgoingMessage(
     input: OutgoingMessageInput,
@@ -115,9 +128,13 @@ export function buildOutgoingMessage(
         if (index === 0) {
             primaryText = resolved.text;
             primaryAttachments = attachments;
-            return;
+        } else {
+            additionalParts.push({ text: resolved.text, attachments });
         }
-        additionalParts.push({ text: resolved.text, attachments });
+
+        if (queued.additionalParts) {
+            additionalParts.push(...queued.additionalParts);
+        }
     });
 
     // The composer's own text follows, becoming primary only when nothing was
@@ -137,17 +154,18 @@ export function buildOutgoingMessage(
         }
     }
 
+    if (input.composerAdditionalParts) {
+        additionalParts.push(...input.composerAdditionalParts);
+    }
+
     // Everything below is context for the model, never plain user text. Each
     // attached context item becomes its own synthetic part carrying structured
     // metadata, so the timeline can render it as a context block after the
     // server echoes the message back.
-    for (const draft of input.inlineComments) {
-        additionalParts.push(createContextPart(contextPayloadFromDraft(draft)));
-    }
-
-    for (const text of input.syntheticTexts) {
-        additionalParts.push({ text, synthetic: true });
-    }
+    additionalParts.push(...buildContextParts(
+        input.inlineComments,
+        input.syntheticTexts.map((text) => ({ text, synthetic: true })),
+    ));
 
     if (input.linkedIssue) {
         const { number, title, url, contextText } = input.linkedIssue;

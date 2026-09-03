@@ -55,6 +55,10 @@ mock.module('@/sync/sync-refs', () => ({
       getState: () => ({ session: childStoreSessions }),
       setState: (patch: { session: Session[] }) => { childStoreSessions.length = 0; childStoreSessions.push(...patch.session); },
     }]]),
+    getChild: (directory: string) => directory === '/project' ? {
+      getState: () => ({ session: childStoreSessions }),
+      setState: (patch: { session: Session[] }) => { childStoreSessions.length = 0; childStoreSessions.push(...patch.session); },
+    } : undefined,
   }),
 }));
 

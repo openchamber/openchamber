@@ -2184,6 +2184,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.queuedMessage.send": "send",
   "chat.queuedMessage.removeAria": "Видалити з черги",
   "chat.queuedMessage.reorderAria": "Перетягніть, щоб змінити порядок",
+  "chat.queuedMessage.waiting": "Надішлеться, коли сесія завершиться",
   "chat.container.returnToParent.aria": "Повернутися до батьківської сесії",
   "chat.container.returnToParent.titleNamed": "Повернутися до: {title}",
   "chat.container.returnToParent.title": "Повернутися до батьківської сесії",

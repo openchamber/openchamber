@@ -159,8 +159,23 @@ and the send path reading the same grammar.
   linked issue/PR) becomes its own synthetic text part carrying structured
   metadata** built by `lib/messages/contextParts.ts`; the timeline reads that
   metadata back to render context blocks. PR instructions precede the PR diff.
-  Queueing a message leaves context drafts in their store on purpose — the send
-  that later delivers the queue consumes them.
+   Queueing a magic prompt stores its rendered instruction as a synthetic part,
+   so auto-send does not need to interpret the original slash command. Busy
+   queueing also captures the current context drafts as synthetic parts on that
+   queue item; the captured subset is tracked separately from command-generated
+   instructions. Editing the item carries its parts back into the composer, and
+   auto-send does not claim context belonging to a different queued item. An
+    explicit queue-chip removal restores the captured subset, while a merged composer
+    send restores its removed queue items only if the request fails and session
+    deletion cleanup has not advanced the target's deletion generation. If a direct
+   send fails, the handoff restores its uncommitted drafts and synthetic parts
+   before showing a failure toast. Synthetic parts remain scoped by runtime,
+   directory, and session.
+- `ChatInput.tsx` re-checks live main-session activity before every normal
+  composer, preset, and dictation send. Busy sends become visible queue items;
+  new-session and btw sends keep their direct path. Queued-chip sends claim
+  only the queue head before dispatch and leave it visible until the request resolves, so
+  an activity transition or a later chip cannot send work twice or out of order.
 - `state/useComposerDraft.ts` — a draft belongs to a (runtime, directory,
   session) identity. Writes are debounced while typing but forced at every edge
   where the page may stop running, because a pending timer is not a saved

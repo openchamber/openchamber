@@ -2202,6 +2202,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.queuedMessage.send': '送信',
   'chat.queuedMessage.removeAria': 'キューから削除',
   'chat.queuedMessage.reorderAria': 'ドラッグして並び替え',
+  'chat.queuedMessage.waiting': 'セッションが終了したら送信されます',
   'chat.container.returnToParent.aria': '親セッションに戻る',
   'chat.container.returnToParent.titleNamed': '戻る: {title}',
   'chat.container.returnToParent.title': '親セッションに戻る',

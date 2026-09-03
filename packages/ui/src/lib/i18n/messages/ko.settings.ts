@@ -2225,12 +2225,6 @@ export const settingsDict = {
   'settings.promptTemplates.page.toast.created': '템플릿이 생성되었습니다',
   'settings.promptTemplates.page.toast.createFailed': '템플릿 생성 실패',
   'settings.promptTemplates.page.toast.saveUnexpectedError': '저장 중 예기치 않은 오류가 발생했습니다',
-  'settings.openchamber.visual.section.followUpBehavior': 'Follow-up behavior',
-  'settings.openchamber.visual.section.followUpBehaviorAria': 'Follow-up behavior',
-  'settings.openchamber.visual.field.followUpBehaviorAria': 'Follow-up behavior: {option}',
-  'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
-  'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
-  'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
   ...linearIntegrationI18n.ko,
   ...thirdPartyIntegrationI18n.ko,
 } as const;
