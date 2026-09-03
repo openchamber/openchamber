@@ -25,6 +25,7 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
 import { PROJECT_COLORS, PROJECT_COLOR_MAP, PROJECT_ICONS, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { cn } from '@/lib/utils';
+import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useWorktreeOrderStore } from '@/stores/useWorktreeOrderStore';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -52,8 +53,7 @@ type MobileProjectEditSurfaceProps = {
   onWorktreesChanged?: () => void;
 };
 
-const normalizePath = (value?: string | null): string =>
-  (value || '').replace(/\\/g, '/').replace(/\/+$/, '');
+const normalizePath = (value: string | null | undefined): string => normalizePathImpl(value) ?? '';
 
 const SortableWorktreeRow: React.FC<{
   worktree: WorktreeMetadata;

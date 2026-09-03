@@ -21,6 +21,7 @@ import type { FileListEntry, FileSearchResult } from '@/lib/api/types';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
+import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 
 // The full desktop file editor, loaded on demand — it's a heavy chunk and only
 // needed once a file is actually opened.
@@ -32,7 +33,7 @@ type MobileFilesRoute =
   | { type: 'browser'; directory: string }
   | { type: 'file'; path: string; returnDirectory: string };
 
-const normalizePath = (value?: string | null): string => (value || '').replace(/\\/g, '/').replace(/\/+$/g, '');
+const normalizePath = (value: string | null | undefined): string => normalizePathImpl(value) ?? '';
 
 const getNameFromPath = (path: string): string => {
   const normalized = normalizePath(path);

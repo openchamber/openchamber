@@ -6,6 +6,7 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 import { getWorktreeStatus } from '@/lib/worktrees/worktreeStatus';
 import { removeProjectWorktree, type ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -22,8 +23,7 @@ type MobileDeleteWorktreeDialogProps = {
   onDeleted?: () => void;
 };
 
-const normalizePath = (value?: string | null): string =>
-  (value || '').replace(/\\/g, '/').replace(/\/+$/, '');
+const normalizePath = (value: string | null | undefined): string => normalizePathImpl(value) ?? '';
 
 const getSessionDirectory = (session: Session): string => {
   const record = session as Session & { directory?: string | null; project?: { worktree?: string | null } | null };

@@ -9,6 +9,7 @@ import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { createWorktreeWithDefaults, resolveRootTrackingRemote } from '@/lib/worktrees/worktreeCreate';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
+import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import { useDirectoryStore } from './useDirectoryStore';
 import { useProjectsStore } from './useProjectsStore';
@@ -35,13 +36,7 @@ const generateWorktreeNameSeed = (groupSlug: string, modelSlug: string): string 
   return `${groupSlug}/${modelSlug}`;
 };
 
-const normalizePath = (value: string): string => {
-  const replaced = value.replace(/\\/g, '/');
-  if (replaced === '/') {
-    return '/';
-  }
-  return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
-};
+const normalizePath = (value: string | null | undefined): string => normalizePathImpl(value) ?? '';
 
 const registerCreatedSession = (session: Session, directory: string): Session => {
   const normalizedDirectory = normalizePath(directory);

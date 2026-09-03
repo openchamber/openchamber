@@ -10,6 +10,7 @@ import { coerceDiffScope, branchRangeKey, isBranchScopeAvailable, isBranchScopeD
 import { getBranchBase, getGitRangeDiff, getGitRangeFiles } from '@/lib/gitApi';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { cn } from '@/lib/utils';
+import { normalizePath } from '@/lib/pathNormalization';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
 import type { GitStatus, GitRangeFileEntry } from '@/lib/api/types';
 import {
@@ -167,9 +168,6 @@ const isWorkingStatusFile = (file: GitStatus['files'][number]): boolean => {
 const toAbsolutePath = (directory: string, filePath: string): string => {
     return toAbsoluteFilePath(directory, filePath);
 };
-
-const normalizePath = (value?: string | null): string =>
-    (value || '').replace(/\\/g, '/').replace(/\/+$/, '');
 
 const getFirstChangedModifiedLine = (original: string, modified: string): number => {
     const originalLines = original.split('\n');

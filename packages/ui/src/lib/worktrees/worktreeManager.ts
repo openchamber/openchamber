@@ -1,4 +1,5 @@
 import { substituteCommandVariables } from '@/lib/openchamberConfig';
+import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 import type { WorktreeMetadata } from '@/types/worktree';
 import {
   deleteRemoteBranch,
@@ -50,13 +51,7 @@ const deriveCanonicalWorktreeFields = (
 
 export type ProjectRef = { id: string; path: string };
 
-const normalizePath = (value: string): string => {
-  const replaced = value.replace(/\\/g, '/');
-  if (replaced === '/') {
-    return '/';
-  }
-  return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
-};
+const normalizePath = (value: string | null | undefined): string => normalizePathImpl(value) ?? '';
 
 export const getLatestWorktreeMetadata = (metadata: WorktreeMetadata): WorktreeMetadata => {
   const target = normalizePath(metadata.path);
