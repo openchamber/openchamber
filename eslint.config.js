@@ -20,4 +20,17 @@ export default tseslint.config([
       globals: globals.browser,
     },
   },
+  {
+    // Runtime JavaScript (guardian, server, CLI) — plain ESM, not covered by
+    // the TypeScript/TSX config above. `node --check` validates syntax only;
+    // this block adds the recommended JS rule set so the guardian/bin/opencode
+    // runtime JS is statically linted, not just parsed.
+    files: ['packages/web/server/lib/guardian/**/*.js', 'packages/web/server/lib/opencode/**/*.js', 'packages/web/bin/**/*.js'],
+    extends: [js.configs.recommended],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: { ...globals.node, ...globals.browser },
+    },
+  },
 ])

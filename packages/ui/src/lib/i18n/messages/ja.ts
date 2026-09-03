@@ -597,6 +597,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.questionPendingMany': '保留中の質問が{count}件あります',
   'sessions.sidebar.session.status.activeFor': 'アクティブ時間 {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': '前回のターンの所要時間 {duration}',
+  'sessions.sidebar.session.status.reconnecting': '再接続中…',
   'sessions.sidebar.session.subsessions.collapse': 'サブセッションを折りたたむ',
   'sessions.sidebar.session.subsessions.expand': 'サブセッションを展開',
   'sessions.sidebar.dialogs.deleteSession.title': 'セッションを削除しますか？',

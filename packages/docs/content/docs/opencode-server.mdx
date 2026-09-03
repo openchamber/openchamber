@@ -13,10 +13,12 @@ When OpenChamber starts, it looks for a server in this order:
 
 1. reuse a server it already started
 2. connect to an external one if you told it to (see below)
-3. auto-detect a server on the default port (`4096`)
-4. otherwise, start and manage its own
+3. otherwise, start and manage its own
 
-If nothing is configured, step 4 happens automatically and you're up and running.
+If nothing is configured, step 3 happens automatically and you're up and running.
+OpenChamber does not blindly attach to an unrelated server on the default port.
+An existing guardian-managed child is adopted only when its persisted owner and
+process identity match this OpenChamber instance.
 
 ## Connect to a server you already run
 
@@ -43,6 +45,17 @@ openchamber stop
 ```
 
 `openchamber` on its own starts the server in the background. Add `--foreground` to keep it attached to your terminal.
+
+`openchamber stop` and an ordinary `SIGTERM` are stop requests: they stop this
+instance's managed OpenCode child and do not imply a restart. Use the explicit
+`openchamber restart` command when you want a restart. Guardian handoff during a
+managed restart is enabled by default; use `--no-handoff` or set
+`OPENCHAMBER_RESTART_HANDOFF=disabled` to opt out.
+
+On Windows, rehydrating and stopping a persisted guardian child requires the
+PowerShell/.NET process-handle helper available on a normal Windows install.
+If that helper is unavailable or identity verification fails, OpenChamber
+fails closed instead of terminating by PID alone.
 
 ## Start OpenChamber at login
 

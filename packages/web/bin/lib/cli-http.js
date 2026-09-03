@@ -81,13 +81,22 @@ function getDesktopLocalAuthHeader(port, requestHeaders) {
   return token ? `Bearer ${token}` : null;
 }
 
-async function requestServerShutdown(port, hostOverride) {
+async function requestServerShutdown(port, hostOverride, options = {}) {
   if (!Number.isFinite(port) || port <= 0) return false;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 1500);
   try {
+    const restartRequested = options.mode === 'restart'
+      || options.preserveGuardian === true
+      || options.restart === true;
     const resp = await fetch(buildLocalUrl(port, '/api/system/shutdown', hostOverride), {
       method: 'POST',
+      ...(restartRequested
+        ? {
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'restart' }),
+        }
+        : {}),
       signal: controller.signal,
     });
     return resp.ok;

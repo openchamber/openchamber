@@ -245,11 +245,19 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     return uiAuthController.requireAuth(req, res, next);
   };
 
-  app.post('/api/system/shutdown', async (req, res, next) => {
+  // This route is registered before the shared /api middleware. Keep its
+  // parser local so the production bootstrap does not need to reorder the
+  // whole middleware stack (or parse every /api request just for shutdown).
+  app.post('/api/system/shutdown', express.json({ limit: '64kb' }), async (req, res, next) => {
     try {
+      const mode = req?.body?.mode === 'restart'
+        || req?.body?.preserveGuardian === true
+        || req?.body?.restart === true
+        ? 'restart'
+        : 'stop';
       await requireShutdownAuth(req, res, () => {
         res.json({ ok: true });
-        gracefulShutdown({ exitProcess: true }).catch((error) => {
+        gracefulShutdown({ exitProcess: true, mode }).catch((error) => {
           console.error('Shutdown request failed:', error?.message || error);
         });
       });

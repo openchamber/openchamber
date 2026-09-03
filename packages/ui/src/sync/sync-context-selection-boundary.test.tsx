@@ -2,9 +2,10 @@ import { describe, expect, test } from 'bun:test'
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createOpencodeClient } from '@opencode-ai/sdk/v2'
-import { SyncProvider, useSyncDirectory } from './sync-context'
+import { SyncProvider, useSessionKnownInactive, useSyncDirectory } from './sync-context'
 import { usePrefetchSessionMessages } from './use-sync'
 import { installHookTestDom } from '../components/session/sidebar/test-utils/testDom'
+import { markDirectoryStatusUnavailable, resetGlobalSessionStatus } from './global-session-status'
 
 const createSdk = () => createOpencodeClient({
   baseUrl: 'https://sync.test',
@@ -61,6 +62,31 @@ describe('SyncProvider selection boundary', () => {
       expect(directoryRenders).toBe(2)
     } finally {
       await act(async () => root.unmount())
+      dom.restore()
+    }
+  })
+
+  test('keeps control freshness stable across equivalent Windows directory spellings', async () => {
+    const dom = installHookTestDom()
+    const root = createRoot(dom.container)
+    let knownInactive: boolean | undefined
+    const Probe = ({ directory }: { directory: string }) => {
+      knownInactive = useSessionKnownInactive('session-a', directory)
+      return null
+    }
+
+    resetGlobalSessionStatus()
+    markDirectoryStatusUnavailable('C:/Repo')
+
+    try {
+      await act(async () => root.render(<Probe directory={'c:\\Repo\\'} />))
+      expect(knownInactive).toBe(false)
+
+      await act(async () => root.render(<Probe directory="C:/Repo" />))
+      expect(knownInactive).toBe(false)
+    } finally {
+      await act(async () => root.unmount())
+      resetGlobalSessionStatus()
       dom.restore()
     }
   })

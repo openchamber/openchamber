@@ -10,6 +10,8 @@ let runtimeKey = 'test-runtime';
 const promptAsyncCalls: unknown[][] = [];
 const promptAsyncResults: Array<unknown> = [];
 const pathGetResults: Array<unknown> = [];
+const sessionStatusCalls: unknown[][] = [];
+const sessionStatusResults: Array<unknown> = [];
 
 const promptAsyncMock = mock(async (...args: unknown[]) => {
   promptAsyncCalls.push(args);
@@ -24,6 +26,11 @@ const pathGetMock = mock(async () => {
   return next ?? { data: { directory: '/workspace/project' } };
 });
 
+const sessionStatusMock = mock(async (...args: unknown[]) => {
+  sessionStatusCalls.push(args);
+  return sessionStatusResults.shift() ?? { data: {} };
+});
+
 mock.module('@opencode-ai/sdk/v2', () => ({
   createOpencodeClient: mock(() => ({
     config: {
@@ -36,6 +43,7 @@ mock.module('@opencode-ai/sdk/v2', () => ({
     },
     session: {
       promptAsync: promptAsyncMock,
+      status: sessionStatusMock,
     },
     path: {
       get: pathGetMock,
@@ -75,6 +83,8 @@ beforeEach(() => {
   promptAsyncCalls.length = 0;
   promptAsyncResults.length = 0;
   pathGetResults.length = 0;
+  sessionStatusCalls.length = 0;
+  sessionStatusResults.length = 0;
 });
 
 describe('opencodeClient directory availability', () => {
@@ -212,5 +222,20 @@ describe('opencodeClient prompt retry behavior', () => {
     expect(error).toBeInstanceOf(Error);
     expect(error instanceof Error ? error.message : String(error)).toContain('runtime changed');
     expect(promptAsyncCalls).toHaveLength(0);
+  });
+});
+
+describe('opencodeClient session status snapshots', () => {
+  test('passes the directory to the official status endpoint and preserves empty success', async () => {
+    sessionStatusResults.push({ data: {} });
+
+    expect(await opencodeClient.getSessionStatusForDirectory('/repo')).toEqual({});
+    expect(sessionStatusCalls).toEqual([[{ directory: '/repo' }]]);
+  });
+
+  test('returns null for an unavailable status fetch instead of fabricating empty success', async () => {
+    sessionStatusResults.push({ error: new Error('OpenCode unavailable'), response: { status: 503 } });
+
+    expect(await opencodeClient.getSessionStatusForDirectory('/repo')).toBeNull();
   });
 });

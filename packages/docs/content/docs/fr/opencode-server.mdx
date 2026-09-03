@@ -13,10 +13,12 @@ Au démarrage, OpenChamber cherche un serveur dans cet ordre :
 
 1. réutiliser un serveur qu’il a déjà démarré
 2. se connecter à un serveur externe si vous le lui avez indiqué (voir ci-dessous)
-3. détecter automatiquement un serveur sur le port par défaut (`4096`)
-4. sinon, démarrer et gérer son propre serveur
+3. sinon, démarrer et gérer son propre serveur
 
-Si rien n’est configuré, l’étape 4 se fait automatiquement et vous pouvez commencer.
+Si rien n’est configuré, l’étape 3 se fait automatiquement et vous pouvez commencer.
+OpenChamber ne se connecte pas aveuglément à un serveur sans rapport sur le port par défaut ;
+un enfant guardian existant n’est adopté que si son propriétaire et son identité de processus
+persistés correspondent à cette instance OpenChamber.
 
 ## Se connecter à un serveur que vous exécutez déjà
 

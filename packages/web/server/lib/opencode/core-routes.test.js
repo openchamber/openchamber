@@ -27,7 +27,7 @@ describe('core-routes', () => {
     await request(app).post('/api/system/shutdown');
 
     expect(dependencies.gracefulShutdown).toHaveBeenCalled();
-    expect(shutdownOpts).toEqual({ exitProcess: true });
+    expect(shutdownOpts).toEqual({ exitProcess: true, mode: 'stop' });
   });
 
   it('should require UI auth before /api/system/shutdown when auth is configured', async () => {
@@ -81,7 +81,27 @@ describe('core-routes', () => {
       .expect(200, { ok: true });
 
     expect(dependencies.uiAuthController.requireAuth).toHaveBeenCalledTimes(1);
-    expect(dependencies.gracefulShutdown).toHaveBeenCalledWith({ exitProcess: true });
+    expect(dependencies.gracefulShutdown).toHaveBeenCalledWith({ exitProcess: true, mode: 'stop' });
+  });
+
+  it('preserves the guardian child when shutdown is requested for restart', async () => {
+    const app = express();
+    app.use(express.json());
+    const gracefulShutdown = vi.fn(async () => {});
+    registerServerStatusRoutes(app, {
+      gracefulShutdown,
+      getHealthSnapshot: () => ({ status: 'ok' }),
+      openchamberVersion: '1.0.0',
+      runtimeName: 'test',
+      express,
+    });
+
+    await request(app)
+      .post('/api/system/shutdown')
+      .send({ mode: 'restart' })
+      .expect(200, { ok: true });
+
+    expect(gracefulShutdown).toHaveBeenCalledWith({ exitProcess: true, mode: 'restart' });
   });
 
   it('should require tunnel auth for tunneled /api/system/shutdown requests', async () => {

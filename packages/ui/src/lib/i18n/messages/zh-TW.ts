@@ -610,6 +610,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.questionPendingMany': '{count} 個待回答問題',
   'sessions.sidebar.session.status.activeFor': '已活動 {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': '上一輪耗時 {duration}',
+  'sessions.sidebar.session.status.reconnecting': '正在重新連線…',
   'sessions.sidebar.session.subsessions.collapse': '摺疊子會話',
   'sessions.sidebar.session.subsessions.expand': '展開子會話',
   'sessions.sidebar.dialogs.deleteSession.title': '刪除會話？',

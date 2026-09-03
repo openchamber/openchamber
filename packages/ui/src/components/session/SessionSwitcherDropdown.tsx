@@ -8,8 +8,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Icon } from '@/components/icon/Icon';
+import { SessionStatusIndicator } from '@/components/session/SessionStatusIndicator';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useGlobalSessionStatus } from '@/sync/sync-context';
+import { useSessionDisplayStatus } from '@/sync/sync-context';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import {
   findSwitcherItemAncestorIds,
@@ -225,16 +226,21 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const notifyOnSubtasks = useUIStore((state) => state.notifyOnSubtasks);
 
-  const sessionStatus = useGlobalSessionStatus(session.id);
+  const sessionDisplayStatus = useSessionDisplayStatus(session.id);
   const unseenCount = useSessionUnseenCount(session.id);
 
   const isActive = currentSessionId === session.id;
   const sessionTitle = session.title?.trim() || t('sessions.sidebar.session.untitled');
   const isSubtask = Boolean((session as Session & { parentID?: string | null }).parentID);
   const needsAttention = unseenCount > 0 && (!isSubtask || notifyOnSubtasks);
-  const statusType = sessionStatus?.type ?? 'idle';
+  const statusType = sessionDisplayStatus.type;
+  // `reconnecting` (statusUnavailable + preserved busy/retry) is NOT confirmed
+  // active: no busy pulse dot. It is distinct from idle, though — render a
+  // static cloud-off icon so the session is identifiable as needing attention.
+  // Last-known data is preserved for freshness return.
   const isStreaming = statusType === 'busy' || statusType === 'retry';
-  const showUnreadDot = !isStreaming && needsAttention && !isActive;
+  const isReconnecting = statusType === 'reconnecting';
+  const showUnreadDot = !isStreaming && !isReconnecting && needsAttention && !isActive;
 
   const timestamp = session.time?.updated || session.time?.created || Date.now();
   const timeLabel = formatSessionCompactDateLabel(timestamp);
@@ -325,23 +331,12 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
         ) : null}
       </div>
 
-      {isStreaming || showUnreadDot ? (
-        <span className="flex h-3 w-3 flex-shrink-0 items-center justify-center self-center">
-          {isStreaming ? (
-            <span
-              className="h-1.5 w-1.5 rounded-full bg-primary animate-busy-pulse"
-              aria-label={t('sessions.sidebar.session.status.active')}
-              title={t('sessions.sidebar.session.status.active')}
-            />
-          ) : (
-            <span
-              className="h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
-              aria-label={t('sessions.sidebar.session.status.unread')}
-              title={t('sessions.sidebar.session.status.unread')}
-            />
-          )}
-        </span>
-      ) : null}
+      <SessionStatusIndicator
+        statusType={statusType}
+        showUnread={showUnreadDot}
+        size="sm"
+        className="flex h-3 w-3 flex-shrink-0 items-center justify-center self-center"
+      />
     </BaseMenu.Item>
   );
 }

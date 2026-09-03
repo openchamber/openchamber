@@ -18,9 +18,10 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { formatSessionWorktreeBadge } from '@/sync/session-worktree-contract';
-import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useSessionMessagesResolved } from '@/sync/sync-context';
+import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useSessionKnownInactive, useSessionMessagesResolved } from '@/sync/sync-context';
 import { useDirectoryStore as useAppDirectoryStore } from '@/stores/useDirectoryStore';
 import { isChatDirectoryForHome } from '@/lib/chatDirectories';
+import { normalizeProjectPath } from '@/lib/projectResolution';
 import { useSync } from '@/sync/use-sync';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
@@ -250,9 +251,7 @@ const isSameContextUsage = (
 };
 
 const normalize = (value: string): string => {
-  if (!value) return '';
-  const replaced = value.replace(/\\/g, '/');
-  return replaced === '/' ? '/' : replaced.replace(/\/+$/, '');
+  return normalizeProjectPath(value) ?? '';
 };
 
 const getActiveContextMode = (panelState: {
@@ -293,7 +292,6 @@ export const Header: React.FC = () => {
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
-  const currentSessionStatus = useGlobalSessionStatus(currentSessionId ?? '');
   const isCurrentSessionMovingToWorktree = useIsSessionWorktreeMovePending(currentSessionId ?? '');
   const currentGlobalSession = useGlobalSessionsStore(useShallow(React.useCallback(
     (state): HeaderSessionSnapshot | null => {
@@ -882,7 +880,13 @@ export const Header: React.FC = () => {
     toast.success(t('sessions.sidebar.session.export.success'));
   }, [currentSession?.title, currentSessionId, headerDirectoryStore, openDirectory, sync, t]);
 
-  const isCurrentSessionActive = currentSessionStatus?.type === 'busy' || currentSessionStatus?.type === 'retry';
+  // Control predicate: move-to-worktree requires the session to be KNOWN
+  // inactive. `reconnecting` (unavailable + preserved busy/retry) means
+  // "current truth = unknown", NOT inactive — the operation must fail closed.
+  // Presentation status (useSessionDisplayStatus) drives the spinner only;
+  // this control predicate is separate and stricter.
+  const isCurrentSessionKnownInactive = useSessionKnownInactive(currentSessionId ?? '', sessionDirectory || '');
+  const isCurrentSessionActive = !isCurrentSessionKnownInactive;
   const moveCurrentSessionToWorktree = React.useCallback(() => {
     if (!currentSessionId || !sessionDirectory || isCurrentSessionActive || isCurrentSessionMovingToWorktree) return;
     const sessions = useGlobalSessionsStore.getState().activeSessions;

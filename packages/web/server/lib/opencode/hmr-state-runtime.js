@@ -24,6 +24,11 @@ export const createHmrStateRuntime = (dependencies) => {
         userProvidedOpenCodePassword: undefined,
         openCodeAuthPassword: null,
         openCodeAuthSource: null,
+        guardianOutcomeUnknownFence: null,
+        guardianOutcomeUnknownFences: [],
+        // In-memory lease association only. The lease object is never
+        // serialized to disk or included in a durable guardian record.
+        guardianOutcomeUnknownLease: null,
       };
     }
     return globalThisLike[stateKey];
@@ -65,6 +70,11 @@ export const createHmrStateRuntime = (dependencies) => {
     hmrState.openCodeWorkingDirectory = runtime.openCodeWorkingDirectory;
     hmrState.openCodeAuthPassword = runtime.openCodeAuthPassword;
     hmrState.openCodeAuthSource = runtime.openCodeAuthSource;
+    hmrState.guardianOutcomeUnknownFence = runtime.guardianOutcomeUnknownFence ?? null;
+    hmrState.guardianOutcomeUnknownFences = Array.isArray(runtime.guardianOutcomeUnknownFences)
+      ? runtime.guardianOutcomeUnknownFences
+      : (runtime.guardianOutcomeUnknownFence ? [runtime.guardianOutcomeUnknownFence] : []);
+    hmrState.guardianOutcomeUnknownLease = runtime.guardianOutcomeUnknownLease ?? null;
   };
 
   const restoreRuntimeFromState = ({ hmrState, userProvidedOpenCodePassword }) => {
@@ -78,6 +88,11 @@ export const createHmrStateRuntime = (dependencies) => {
       openCodeWorkingDirectory: hmrState.openCodeWorkingDirectory,
       openCodeAuthPassword: auth.openCodeAuthPassword,
       openCodeAuthSource: auth.openCodeAuthSource,
+      guardianOutcomeUnknownFence: hmrState.guardianOutcomeUnknownFence ?? null,
+      guardianOutcomeUnknownFences: Array.isArray(hmrState.guardianOutcomeUnknownFences)
+        ? hmrState.guardianOutcomeUnknownFences
+        : (hmrState.guardianOutcomeUnknownFence ? [hmrState.guardianOutcomeUnknownFence] : []),
+      guardianOutcomeUnknownLease: hmrState.guardianOutcomeUnknownLease ?? null,
     };
   };
 

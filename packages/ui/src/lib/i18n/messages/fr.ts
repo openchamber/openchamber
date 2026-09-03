@@ -426,6 +426,7 @@ export const dict = {
   'sessions.sidebar.session.status.questionPendingMany': '{count} questions en attente',
   'sessions.sidebar.session.status.activeFor': 'Active depuis {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': 'Le dernier tour a duré {duration}',
+  'sessions.sidebar.session.status.reconnecting': 'Reconnexion…',
   'sessions.sidebar.session.subsessions.collapse': 'Réduire les sous-sessions',
   'sessions.sidebar.session.subsessions.expand': 'Développer les sous-sessions',
   'sessions.sidebar.dialogs.deleteSession.title': 'Supprimer la session ?',

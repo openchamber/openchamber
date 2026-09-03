@@ -526,6 +526,8 @@ let healthCheckInterval = null;
 let server = null;
 let expressApp = null;
 let currentRestartPromise = null;
+let currentIncarnation = null;
+let currentOwner = null;
 let isRestartingOpenCode = false;
 let openCodeApiPrefix = '';
 let openCodeApiPrefixDetected = true;
@@ -560,6 +562,11 @@ const initialOpenCodeAuthState = hmrStateRuntime.resolveOpenCodeAuthFromState({
 });
 let openCodeAuthPassword = initialOpenCodeAuthState.openCodeAuthPassword;
 let openCodeAuthSource = initialOpenCodeAuthState.openCodeAuthSource;
+let guardianOutcomeUnknownFence = hmrState.guardianOutcomeUnknownFence ?? null;
+let guardianOutcomeUnknownFences = Array.isArray(hmrState.guardianOutcomeUnknownFences)
+  ? hmrState.guardianOutcomeUnknownFences
+  : (guardianOutcomeUnknownFence ? [guardianOutcomeUnknownFence] : []);
+let guardianOutcomeUnknownLease = hmrState.guardianOutcomeUnknownLease ?? null;
 
 // Sync helper - call after modifying any HMR state variable
 const syncToHmrState = () => {
@@ -572,6 +579,9 @@ const syncToHmrState = () => {
     openCodeWorkingDirectory,
     openCodeAuthPassword,
     openCodeAuthSource,
+    guardianOutcomeUnknownFence,
+    guardianOutcomeUnknownFences,
+    guardianOutcomeUnknownLease,
   });
 };
 
@@ -589,6 +599,9 @@ const syncFromHmrState = () => {
   openCodeWorkingDirectory = restored.openCodeWorkingDirectory;
   openCodeAuthPassword = restored.openCodeAuthPassword;
   openCodeAuthSource = restored.openCodeAuthSource;
+  guardianOutcomeUnknownFence = restored.guardianOutcomeUnknownFence;
+  guardianOutcomeUnknownFences = restored.guardianOutcomeUnknownFences;
+  guardianOutcomeUnknownLease = restored.guardianOutcomeUnknownLease;
 };
 
 // Module-level variables that shadow HMR state
@@ -612,6 +625,16 @@ const {
 
 const ENV_SKIP_OPENCODE_START = process.env.OPENCODE_SKIP_START === 'true' ||
                                     process.env.OPENCHAMBER_SKIP_OPENCODE_START === 'true';
+// Normalized ownership decision: does this OpenChamber instance own a managed
+// local OpenCode? `OPENCODE_SKIP_START` / `OPENCHAMBER_SKIP_START` (explicit
+// operator opt-out) OR a runtime-detected external OpenCode server means this
+// instance does NOT own/manage a local OpenCode process. Guardian autostart,
+// guardian adoption, guardian-managed spawn, restart handoff, and legacy
+// managed spawn all route through this single decision instead of re-reading
+// the raw env flag at every call site. `isExternalOpenCode` is the runtime
+// mirror of the same operator decision, set during bootstrap; reading both
+// keeps the predicate authoritative before and after bootstrap.
+const ownsManagedLocalOpenCode = () => !ENV_SKIP_OPENCODE_START && !isExternalOpenCode;
 const ENV_DESKTOP_NOTIFY = (() => {
   if (process.env.OPENCHAMBER_DESKTOP_NOTIFY === 'true') {
     return true;
@@ -643,9 +666,12 @@ const openCodeAuthStateRuntime = createOpenCodeAuthStateRuntime({
 const getOpenCodeAuthHeaders = (...args) => openCodeAuthStateRuntime.getOpenCodeAuthHeaders(...args);
 const isOpenCodeConnectionSecure = (...args) => openCodeAuthStateRuntime.isOpenCodeConnectionSecure(...args);
 const ensureLocalOpenCodeServerPassword = (...args) => openCodeAuthStateRuntime.ensureLocalOpenCodeServerPassword(...args);
+const captureOpenCodeAuthState = (...args) => openCodeAuthStateRuntime.captureOpenCodeAuthState(...args);
+const restoreManagedOpenCodeCredential = (...args) => openCodeAuthStateRuntime.restoreManagedOpenCodeCredential(...args);
 
 const openCodeNetworkState = {};
 Object.defineProperties(openCodeNetworkState, {
+  openCodeProcess: { get: () => openCodeProcess },
   openCodePort: { get: () => openCodePort, set: (value) => { openCodePort = value; } },
   openCodeBaseUrl: { get: () => openCodeBaseUrl, set: (value) => { openCodeBaseUrl = value; } },
   openCodeApiPrefix: { get: () => openCodeApiPrefix, set: (value) => { openCodeApiPrefix = value; } },
@@ -1096,6 +1122,20 @@ Object.defineProperties(openCodeLifecycleState, {
   openCodeBaseUrl: { get: () => openCodeBaseUrl, set: (value) => { openCodeBaseUrl = value; } },
   openCodeWorkingDirectory: { get: () => openCodeWorkingDirectory, set: (value) => { openCodeWorkingDirectory = value; } },
   currentRestartPromise: { get: () => currentRestartPromise, set: (value) => { currentRestartPromise = value; } },
+  currentIncarnation: { get: () => currentIncarnation, set: (value) => { currentIncarnation = value; } },
+  currentOwner: { get: () => currentOwner, set: (value) => { currentOwner = value; } },
+  guardianOutcomeUnknownFence: {
+    get: () => guardianOutcomeUnknownFence,
+    set: (value) => { guardianOutcomeUnknownFence = value; },
+  },
+  guardianOutcomeUnknownFences: {
+    get: () => guardianOutcomeUnknownFences,
+    set: (value) => { guardianOutcomeUnknownFences = Array.isArray(value) ? value : []; },
+  },
+  guardianOutcomeUnknownLease: {
+    get: () => guardianOutcomeUnknownLease,
+    set: (value) => { guardianOutcomeUnknownLease = value; },
+  },
   isRestartingOpenCode: { get: () => isRestartingOpenCode, set: (value) => { isRestartingOpenCode = value; } },
   openCodeApiPrefix: { get: () => openCodeApiPrefix, set: (value) => { openCodeApiPrefix = value; } },
   openCodeApiPrefixDetected: { get: () => openCodeApiPrefixDetected, set: (value) => { openCodeApiPrefixDetected = value; } },
@@ -1135,6 +1175,8 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   applyOpencodeBinaryFromSettings,
   ensureOpencodeCliEnv,
   ensureLocalOpenCodeServerPassword,
+  captureOpenCodeAuthState,
+  restoreManagedOpenCodeCredential,
   resolveManagedOpenCodeLaunchSpec,
   setOpenCodePort,
   setDetectedOpenCodeApiPrefix,
@@ -1198,6 +1240,8 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
       console.warn('Failed to reconcile sessions after OpenCode restart:', error?.message ?? error);
     }
   },
+  resetSessionRuntimeForOpenCodeReplacement: () => sessionRuntime.resetForOpenCodeReplacement(),
+  guardianOwnerInstanceId: process.env.OPENCHAMBER_GUARDIAN_OWNER_ID,
   getManagedOpenCodeEnv: async () => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
     // Each capability is its own tool and its own switch; the plugin is only
@@ -1439,6 +1483,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
     messageStreamRuntime = value;
   },
   shouldSkipOpenCodeStop: () => ENV_SKIP_OPENCODE_START || isExternalOpenCode,
+  ownsManagedLocalOpenCode: () => ownsManagedLocalOpenCode(),
   getOpenCodePort: () => openCodePort,
   getOpenCodeProcess: () => openCodeProcess,
   setOpenCodeProcess: (value) => {
@@ -2005,7 +2050,7 @@ async function main(options = {}) {
     isReady: () => isOpenCodeReady,
     restartOpenCode: () => restartOpenCode(),
     getOpenCodeProcessInfo: () => {
-      const managed = Boolean((openCodeProcess || openCodePort) && !ENV_SKIP_OPENCODE_START && !isExternalOpenCode);
+      const managed = Boolean((openCodeProcess || openCodePort) && ownsManagedLocalOpenCode());
       // Only ever expose pid/port for a server WE manage. The Electron-side
       // killer kills by port (lsof + kill -KILL), so returning a port we don't
       // own — e.g. an external/desktop OpenCode on 4096 we attached to — would
@@ -2031,7 +2076,10 @@ async function main(options = {}) {
       } catch {
         // best-effort shutdown of the dictation worker
       }
-      return gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false });
+      return gracefulShutdown({
+        ...shutdownOptions,
+        exitProcess: shutdownOptions.exitProcess ?? false,
+      });
     }
   };
 }

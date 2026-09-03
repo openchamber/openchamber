@@ -500,6 +500,7 @@ export const dict = {
   'sessions.sidebar.session.status.questionPendingMany': '{count} ausstehende Fragen',
   'sessions.sidebar.session.status.activeFor': 'Seit {duration} aktiv',
   'sessions.sidebar.session.status.lastTurnDuration': 'Letzter Durchlauf dauerte {duration}',
+  'sessions.sidebar.session.status.reconnecting': 'Verbindung wird wiederhergestellt…',
   'sessions.sidebar.session.subsessions.collapse': 'Untersitzungen einklappen',
   'sessions.sidebar.session.subsessions.expand': 'Untersitzungen ausklappen',
   'sessions.sidebar.dialogs.deleteSession.title': 'Sitzung löschen?',

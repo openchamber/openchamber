@@ -596,6 +596,7 @@ export const dict = {
   'sessions.sidebar.session.status.questionPendingMany': '{count} pending questions',
   'sessions.sidebar.session.status.activeFor': 'Active for {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': 'Last turn took {duration}',
+  'sessions.sidebar.session.status.reconnecting': 'Reconnecting…',
   'sessions.sidebar.session.subsessions.collapse': 'Collapse subsessions',
   'sessions.sidebar.session.subsessions.expand': 'Expand subsessions',
   'sessions.sidebar.dialogs.deleteSession.title': 'Delete session?',

@@ -36,6 +36,10 @@ describe('normalizePath', () => {
       expect(normalizePath('C:\\Users\\me\\project')).toBe('C:/Users/me/project');
     });
 
+    test('maps equivalent Windows path spellings to the same key', () => {
+      expect(normalizePath('c:\\Repo\\')).toBe(normalizePath('C:/Repo'));
+    });
+
     test('does not match multi-character tokens before colon', () => {
       expect(normalizePath('abc:def')).toBe('abc:def');
     });

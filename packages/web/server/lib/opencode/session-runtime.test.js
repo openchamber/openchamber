@@ -253,6 +253,28 @@ describe('session runtime', () => {
     expect(events).toEqual([]);
   });
 
+  it('clears volatile live state at an OpenCode replacement boundary', () => {
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent() {},
+    });
+    runtimes.push(runtime);
+
+    runtime.processOpenCodeSsePayload({
+      type: 'session.status',
+      properties: { sessionID: 'session-replaced', status: { type: 'busy' } },
+    });
+    runtime.markUserMessageSent('session-replaced');
+
+    runtime.resetForOpenCodeReplacement();
+
+    expect(runtime.getActiveSessionCount()).toBe(0);
+    expect(runtime.getSessionActivitySnapshot()).toEqual({});
+    expect(runtime.getSessionStateSnapshot()).toEqual({});
+    expect(runtime.getSessionAttentionSnapshot()).toEqual({});
+  });
+
   it('restores activity when busy interrupts cooldown without timer underflow', () => {
     vi.useFakeTimers();
     const runtime = createSessionRuntime({
