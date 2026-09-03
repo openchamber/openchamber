@@ -4,6 +4,7 @@ import { AgentManagerPanelProvider } from './AgentManagerPanelProvider';
 import { SessionEditorPanelProvider } from './SessionEditorPanelProvider';
 import { createOpenCodeManager, type OpenCodeManager } from './opencode';
 import { startGlobalEventWatcher, stopGlobalEventWatcher, setChatViewProvider } from './sessionActivityWatcher';
+import { pathsEqualWithNormalizedDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 
 let chatViewProvider: ChatViewProvider | undefined;
@@ -537,7 +538,9 @@ export async function activate(context: vscode.ExtensionContext) {
       const debug = openCodeManager?.getDebugInfo();
       const resolvedApiUrl = openCodeManager?.getApiUrl();
       const workingDirectory = openCodeManager?.getWorkingDirectory() ?? '';
-      const workingDirectoryMatchesWorkspace = Boolean(primaryWorkspace && workingDirectory === primaryWorkspace);
+      const workingDirectoryMatchesWorkspace = Boolean(
+        primaryWorkspace && pathsEqualWithNormalizedDriveLetter(workingDirectory, primaryWorkspace)
+      );
       let resolvedApiPath = '';
       if (resolvedApiUrl) {
         try {
