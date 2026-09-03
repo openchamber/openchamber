@@ -7,7 +7,7 @@ import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { getWorktreeStatus } from '@/lib/worktrees/worktreeStatus';
-import { removeProjectWorktree, type ProjectRef } from '@/lib/worktrees/worktreeManager';
+import { getWorktreeDisplayName, removeProjectWorktree, type ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -92,7 +92,8 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
   }, [open, worktree?.path, worktree?.status?.isDirty]);
 
   const removeWorktreeInBackground = React.useCallback((target: WorktreeMetadata, sessionIds: string[]) => {
-    const toastId = toast.loading(t('sessions.sidebar.sessionDialogs.actions.deleting'));
+    const name = getWorktreeDisplayName(target);
+    const toastId = toast.loading(t('sessions.sidebar.sessionDialogs.worktree.removingTitle', { name }));
     void (async () => {
       try {
         if (sessionIds.length > 0) {
@@ -118,7 +119,7 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
           useDirectoryStore.getState().setDirectory(normalizePath(project.path), { showOverlay: false });
         }
 
-        toast.success(t('sessions.sidebar.sessionDialogs.worktree.removedTitle'), {
+        toast.success(t('sessions.sidebar.sessionDialogs.worktree.removedTitle', { name }), {
           id: toastId,
           description:
             hasBranch && deleteRemoteBranch
@@ -127,7 +128,7 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
         });
         onDeleted?.();
       } catch (error) {
-        toast.error(t('sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle'), {
+        toast.error(t('sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle', { name }), {
           id: toastId,
           description: error instanceof Error ? error.message : t('sessions.sidebar.dialogs.deleteResult.tryAgain'),
         });

@@ -60,6 +60,10 @@ const normalizePath = (value: string): string => {
   return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
 };
 
+/** The name the sidebar shows for a worktree, used in worktree-scoped toasts. */
+export const getWorktreeDisplayName = (worktree: WorktreeMetadata): string =>
+  worktree.branch || worktree.label || worktree.path;
+
 export const getLatestWorktreeMetadata = (metadata: WorktreeMetadata): WorktreeMetadata => {
   const target = normalizePath(metadata.path);
   const state = useSessionUIStore.getState();
