@@ -202,7 +202,7 @@ export type IssueCardHandle = {
 export type PullRequestState = 'open' | 'draft' | 'merged' | 'closed';
 export type PullRequestCheckState = 'success' | 'failure' | 'pending' | 'queued' | 'running';
 export type PullRequestMergeMethod = 'squash' | 'merge' | 'rebase';
-export type PullRequestTab = 'overview' | 'checks' | 'comments';
+export type PullRequestTab = 'overview' | 'changes' | 'checks' | 'comments';
 
 /** Guest-owned pull record. Not a GitHub PR. */
 export type PullRequestRecord = {
@@ -215,6 +215,12 @@ export type PullRequestRecord = {
   author?: string;
   body?: string;
   mergeable?: boolean;
+};
+
+/** One changed file in a pull. Diff is unified text. */
+export type PullRequestChange = {
+  path: string;
+  diff: string;
 };
 
 export type PullRequestCheck = {
@@ -239,6 +245,8 @@ export type PullRequestCreateValues = {
 
 export type PullRequestCreateProps = {
   values?: Partial<PullRequestCreateValues>;
+  /** When set, head and base are pickers. Omit to keep text fields. */
+  branches?: readonly string[];
   onSubmit: (values: PullRequestCreateValues) => void;
 };
 
@@ -247,6 +255,7 @@ export type PullRequestLabels = {
   open: string;
   refresh: string;
   overview: string;
+  changes: string;
   checks: string;
   comments: string;
   attach: string;
@@ -260,6 +269,7 @@ export type PullRequestLabels = {
   sendFailedChecks: string;
   sendComments: string;
   emptyDescription: string;
+  emptyChanges: string;
   emptyChecks: string;
   emptyComments: string;
   notMergeable: string;
@@ -271,6 +281,7 @@ export type PullRequestLabels = {
   createDescription: string;
   createHead: string;
   createBase: string;
+  createEmptyBranch: string;
   createDraft: string;
   createSubmit: string;
   save: string;
@@ -281,6 +292,7 @@ export type PullRequestLabels = {
 export type PullRequestProps = {
   mode: 'view' | 'create';
   pull?: PullRequestRecord;
+  changes?: readonly PullRequestChange[];
   checks?: readonly PullRequestCheck[];
   checksSummary?: PullRequestChecksSummary;
   comments?: readonly IssueCardComment[];

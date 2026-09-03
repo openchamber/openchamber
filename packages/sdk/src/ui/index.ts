@@ -47,6 +47,7 @@ export type {
   IssueViewProps,
   IssueViewAction,
   IssueViewToggle,
+  PullRequestChange,
   PullRequestCheck,
   PullRequestChecksSummary,
   PullRequestCheckState,

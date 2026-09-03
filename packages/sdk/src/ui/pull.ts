@@ -1,8 +1,11 @@
 import { clearNode, ensureStyle } from './dom.ts';
 import { icon } from './icons.ts';
+import { createChoiceMenu, placeFixedMenu } from './menu.ts';
 import { UI_CSS } from './style.ts';
 import type {
   IssueCardComment,
+  IssueFilterOption,
+  PullRequestChange,
   PullRequestCheck,
   PullRequestCreateValues,
   PullRequestHandle,
@@ -19,6 +22,7 @@ const DEFAULT_LABELS: PullRequestLabels = {
   open: 'Open',
   refresh: 'Refresh',
   overview: 'Overview',
+  changes: 'Changes',
   checks: 'Checks',
   comments: 'Comments',
   attach: 'Attach',
@@ -32,6 +36,7 @@ const DEFAULT_LABELS: PullRequestLabels = {
   sendFailedChecks: 'Send failed checks',
   sendComments: 'Send comments',
   emptyDescription: 'No description',
+  emptyChanges: 'No changes',
   emptyChecks: 'No checks',
   emptyComments: 'No comments',
   notMergeable: 'Not mergeable',
@@ -41,8 +46,9 @@ const DEFAULT_LABELS: PullRequestLabels = {
   stateClosed: 'closed',
   createTitle: 'Title',
   createDescription: 'Description',
-  createHead: 'Head',
-  createBase: 'Base',
+  createHead: 'Source',
+  createBase: 'Target',
+  createEmptyBranch: 'Pick a branch',
   createDraft: 'Create as draft',
   createSubmit: 'Create pull request',
   save: 'Save',
@@ -65,6 +71,7 @@ export const resolvePullRequestLabels = (
   open: labels?.open ?? DEFAULT_LABELS.open,
   refresh: labels?.refresh ?? DEFAULT_LABELS.refresh,
   overview: labels?.overview ?? DEFAULT_LABELS.overview,
+  changes: labels?.changes ?? DEFAULT_LABELS.changes,
   checks: labels?.checks ?? DEFAULT_LABELS.checks,
   comments: labels?.comments ?? DEFAULT_LABELS.comments,
   attach: labels?.attach ?? DEFAULT_LABELS.attach,
@@ -78,6 +85,7 @@ export const resolvePullRequestLabels = (
   sendFailedChecks: labels?.sendFailedChecks ?? DEFAULT_LABELS.sendFailedChecks,
   sendComments: labels?.sendComments ?? DEFAULT_LABELS.sendComments,
   emptyDescription: labels?.emptyDescription ?? DEFAULT_LABELS.emptyDescription,
+  emptyChanges: labels?.emptyChanges ?? DEFAULT_LABELS.emptyChanges,
   emptyChecks: labels?.emptyChecks ?? DEFAULT_LABELS.emptyChecks,
   emptyComments: labels?.emptyComments ?? DEFAULT_LABELS.emptyComments,
   notMergeable: labels?.notMergeable ?? DEFAULT_LABELS.notMergeable,
@@ -89,6 +97,7 @@ export const resolvePullRequestLabels = (
   createDescription: labels?.createDescription ?? DEFAULT_LABELS.createDescription,
   createHead: labels?.createHead ?? DEFAULT_LABELS.createHead,
   createBase: labels?.createBase ?? DEFAULT_LABELS.createBase,
+  createEmptyBranch: labels?.createEmptyBranch ?? DEFAULT_LABELS.createEmptyBranch,
   createDraft: labels?.createDraft ?? DEFAULT_LABELS.createDraft,
   createSubmit: labels?.createSubmit ?? DEFAULT_LABELS.createSubmit,
   save: labels?.save ?? DEFAULT_LABELS.save,
@@ -114,6 +123,33 @@ export const pullRequestStatusText = (
   return parts.join(' · ');
 };
 
+export const mergePullCreateValues = (
+  current: PullRequestCreateValues,
+  next: Partial<PullRequestCreateValues> | undefined,
+): PullRequestCreateValues => ({
+  ...current,
+  ...next,
+});
+
+export const branchPickerOptions = (branches: readonly string[]): IssueFilterOption[] => (
+  branches.map((name) => ({ id: name, label: name }))
+);
+
+const branchPickerLabel = (
+  value: string,
+  branches: readonly string[],
+  busy: boolean,
+  copy: PullRequestLabels,
+): string => {
+  if (value) {
+    return value;
+  }
+  if (busy && branches.length === 0) {
+    return copy.busy;
+  }
+  return copy.createEmptyBranch;
+};
+
 export const clampPullCreate = (values: PullRequestCreateValues): PullRequestCreateValues | null => {
   const title = values.title.trim();
   const head = values.head.trim();
@@ -133,6 +169,64 @@ export const clampPullCreate = (values: PullRequestCreateValues): PullRequestCre
 export const failedPullChecks = (checks: readonly PullRequestCheck[]): PullRequestCheck[] => (
   checks.filter((check) => check.state === 'failure')
 );
+
+type DiffLineKind = 'add' | 'del' | 'hunk' | 'meta' | 'ctx';
+
+export const classifyDiffLine = (line: string): DiffLineKind => {
+  if (
+    line.startsWith('+++')
+    || line.startsWith('---')
+    || line.startsWith('diff ')
+    || line.startsWith('index ')
+  ) {
+    return 'meta';
+  }
+  if (line.startsWith('@@')) {
+    return 'hunk';
+  }
+  if (line.startsWith('+')) {
+    return 'add';
+  }
+  if (line.startsWith('-')) {
+    return 'del';
+  }
+  return 'ctx';
+};
+
+const paintChanges = (
+  root: HTMLElement,
+  changes: readonly PullRequestChange[],
+  copy: PullRequestLabels,
+): void => {
+  if (changes.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'oc-sdk-card-muted';
+    empty.textContent = copy.emptyChanges;
+    root.append(empty);
+    return;
+  }
+  for (const file of changes) {
+    const card = document.createElement('div');
+    card.className = 'oc-sdk-pr-file';
+    const path = document.createElement('div');
+    path.className = 'oc-sdk-pr-file-path';
+    path.textContent = file.path;
+    card.append(path);
+    if (file.diff.trim()) {
+      const code = document.createElement('pre');
+      code.className = 'oc-sdk-pr-diff';
+      for (const line of file.diff.replace(/\r\n/g, '\n').split('\n')) {
+        const row = document.createElement('div');
+        row.className = 'oc-sdk-pr-diff-line';
+        row.dataset.kind = classifyDiffLine(line);
+        row.textContent = line === '' ? ' ' : line;
+        code.append(row);
+      }
+      card.append(code);
+    }
+    root.append(card);
+  }
+};
 
 const appendField = (
   root: HTMLElement,
@@ -283,28 +377,119 @@ export const mountPullRequest = (root: Element, initial: PullRequestProps): Pull
   };
   let editTitle = initial.pull?.title ?? '';
   let editBody = initial.pull?.body ?? '';
+  let openPicker: 'head' | 'base' | null = null;
+  let menu: HTMLDivElement | null = null;
+  let openTrigger: HTMLButtonElement | null = null;
 
   const shell = document.createElement('div');
   shell.className = 'oc-sdk-pr';
   root.append(shell);
 
+  const removeMenu = (): void => {
+    menu?.remove();
+    menu = null;
+    openTrigger = null;
+  };
+
+  const placeMenu = (): void => {
+    if (!menu || !openTrigger) {
+      return;
+    }
+    placeFixedMenu(menu, openTrigger);
+  };
+
+  const appendBranchPicker = (
+    root: HTMLElement,
+    id: 'head' | 'base',
+    label: string,
+    value: string,
+    branches: readonly string[],
+    copy: PullRequestLabels,
+    onPick: (next: string) => void,
+  ): void => {
+    const pick = document.createElement('div');
+    pick.className = 'oc-sdk-pr-pick';
+    const caption = document.createElement('span');
+    caption.className = 'oc-sdk-field-label';
+    caption.textContent = label;
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'oc-sdk-pr-pick-trigger';
+    trigger.setAttribute('aria-label', label);
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.setAttribute('aria-expanded', openPicker === id ? 'true' : 'false');
+    trigger.dataset.open = openPicker === id ? 'true' : 'false';
+    trigger.dataset.empty = value ? 'false' : 'true';
+    trigger.disabled = Boolean(props.busy) || branches.length === 0;
+    const captionValue = document.createElement('span');
+    captionValue.className = 'oc-sdk-pr-pick-value';
+    captionValue.textContent = branchPickerLabel(value, branches, Boolean(props.busy), copy);
+    trigger.append(captionValue, icon('chevron', 16, 'oc-sdk-filter-chevron'));
+    trigger.addEventListener('click', () => {
+      if (trigger.disabled) {
+        return;
+      }
+      openPicker = openPicker === id ? null : id;
+      paint();
+    });
+    pick.append(caption, trigger);
+    root.append(pick);
+    if (openPicker === id) {
+      openTrigger = trigger;
+      menu = createChoiceMenu(label, value, branchPickerOptions(branches), (next) => {
+        openPicker = null;
+        onPick(next);
+        paint();
+      });
+      document.body.append(menu);
+    }
+  };
+
+  const appendCreateRoute = (stack: HTMLElement, copy: PullRequestLabels): void => {
+    const card = document.createElement('div');
+    card.className = 'oc-sdk-pr-route-card';
+    const route = document.createElement('div');
+    route.className = 'oc-sdk-pr-route';
+    const branches = props.create?.branches;
+    if (branches !== undefined) {
+      appendBranchPicker(route, 'head', copy.createHead, createValues.head, branches, copy, (next) => {
+        createValues = { ...createValues, head: next };
+      });
+    } else {
+      appendField(route, copy.createHead, createValues.head, (value) => {
+        createValues = { ...createValues, head: value };
+      });
+    }
+    const arrow = document.createElement('div');
+    arrow.className = 'oc-sdk-pr-arrow';
+    arrow.setAttribute('aria-hidden', 'true');
+    arrow.textContent = '→';
+    route.append(arrow);
+    if (branches !== undefined) {
+      appendBranchPicker(route, 'base', copy.createBase, createValues.base, branches, copy, (next) => {
+        createValues = { ...createValues, base: next };
+      });
+    } else {
+      appendField(route, copy.createBase, createValues.base, (value) => {
+        createValues = { ...createValues, base: value };
+      });
+    }
+    card.append(route);
+    stack.append(card);
+  };
+
   const paintCreate = (copy: PullRequestLabels): void => {
     const body = document.createElement('div');
     body.className = 'oc-sdk-pr-body';
     const stack = document.createElement('div');
-    stack.className = 'oc-sdk-pr-stack';
+    stack.className = 'oc-sdk-pr-stack oc-sdk-pr-create';
+    appendCreateRoute(stack, copy);
     appendField(stack, copy.createTitle, createValues.title, (value) => {
       createValues = { ...createValues, title: value };
     });
     appendField(stack, copy.createDescription, createValues.description, (value) => {
       createValues = { ...createValues, description: value };
     }, true);
-    appendField(stack, copy.createHead, createValues.head, (value) => {
-      createValues = { ...createValues, head: value };
-    });
-    appendField(stack, copy.createBase, createValues.base, (value) => {
-      createValues = { ...createValues, base: value };
-    });
     const draft = document.createElement('label');
     draft.className = 'oc-sdk-pr-draft';
     const box = document.createElement('input');
@@ -331,6 +516,7 @@ export const mountPullRequest = (root: Element, initial: PullRequestProps): Pull
       }, Boolean(props.busy)));
       shell.append(foot);
     }
+    placeMenu();
   };
 
   const paintView = (copy: PullRequestLabels, pull: PullRequestRecord): void => {
@@ -342,9 +528,20 @@ export const mountPullRequest = (root: Element, initial: PullRequestProps): Pull
     state.textContent = pullRequestStatusText(pull, copy);
     meta.append(state);
     if (pull.head && pull.base) {
-      const branches = document.createElement('span');
-      branches.textContent = `${pull.head} → ${pull.base}`;
-      meta.append(branches);
+      const route = document.createElement('span');
+      route.className = 'oc-sdk-pr-route-view';
+      const head = document.createElement('span');
+      head.className = 'oc-sdk-pr-chip';
+      head.textContent = pull.head;
+      const arrow = document.createElement('span');
+      arrow.className = 'oc-sdk-pr-arrow-inline';
+      arrow.setAttribute('aria-hidden', 'true');
+      arrow.textContent = '→';
+      const base = document.createElement('span');
+      base.className = 'oc-sdk-pr-chip';
+      base.textContent = pull.base;
+      route.append(head, arrow, base);
+      meta.append(route);
     }
     if (pull.author) {
       const author = document.createElement('span');
@@ -375,6 +572,7 @@ export const mountPullRequest = (root: Element, initial: PullRequestProps): Pull
       tabs.append(tabButton);
     };
     addTab('overview', copy.overview);
+    addTab('changes', copy.changes);
     addTab('checks', copy.checks);
     addTab('comments', copy.comments);
     shell.append(tabs);
@@ -400,6 +598,8 @@ export const mountPullRequest = (root: Element, initial: PullRequestProps): Pull
         description.textContent = pull.body?.trim() ? pull.body : copy.emptyDescription;
         stack.append(description);
       }
+    } else if (tab === 'changes') {
+      paintChanges(stack, props.changes ?? [], copy);
     } else if (tab === 'checks') {
       if (props.onSendFailedChecks && failedPullChecks(props.checks ?? []).length > 0) {
         stack.append(button(copy.sendFailedChecks, 'secondary', () => {
@@ -478,6 +678,7 @@ export const mountPullRequest = (root: Element, initial: PullRequestProps): Pull
   };
 
   const paint = (): void => {
+    removeMenu();
     clearNode(shell);
     const copy = resolvePullRequestLabels(props.labels);
     const bar = document.createElement('div');
@@ -548,6 +749,32 @@ export const mountPullRequest = (root: Element, initial: PullRequestProps): Pull
     paintView(copy, props.pull);
   };
 
+  const onDocumentPointerDown = (event: PointerEvent): void => {
+    if (!(event.target instanceof Element)) {
+      return;
+    }
+    if (event.target.closest('.oc-sdk-pr-pick') || event.target.closest('.oc-sdk-menu')) {
+      return;
+    }
+    if (!openPicker) {
+      return;
+    }
+    openPicker = null;
+    paint();
+  };
+
+  const onDocumentKeyDown = (event: KeyboardEvent): void => {
+    if (event.key !== 'Escape' || !openPicker) {
+      return;
+    }
+    openPicker = null;
+    paint();
+  };
+
+  document.addEventListener('pointerdown', onDocumentPointerDown);
+  document.addEventListener('keydown', onDocumentKeyDown);
+  window.addEventListener('resize', placeMenu);
+  window.addEventListener('scroll', placeMenu, true);
   paint();
 
   return {
@@ -555,8 +782,11 @@ export const mountPullRequest = (root: Element, initial: PullRequestProps): Pull
       const pullChanged = next.pull?.id !== props.pull?.id;
       const modeChanged = next.mode !== props.mode;
       props = next;
-      if (modeChanged || next.mode === 'create') {
+      if (modeChanged) {
+        openPicker = null;
         createValues = { ...emptyCreate(), ...next.create?.values };
+      } else if (next.mode === 'create') {
+        createValues = mergePullCreateValues(createValues, next.create?.values);
       }
       if (pullChanged) {
         tab = 'overview';
@@ -566,6 +796,11 @@ export const mountPullRequest = (root: Element, initial: PullRequestProps): Pull
       paint();
     },
     dispose: () => {
+      document.removeEventListener('pointerdown', onDocumentPointerDown);
+      document.removeEventListener('keydown', onDocumentKeyDown);
+      window.removeEventListener('resize', placeMenu);
+      window.removeEventListener('scroll', placeMenu, true);
+      removeMenu();
       shell.remove();
     },
   };

@@ -893,6 +893,8 @@ html[data-oc-theme="dark"] .oc-sdk-btn[data-variant="default"]:hover {
   min-height: 0;
   height: 100%;
   overflow: hidden;
+  container-type: inline-size;
+  container-name: oc-sdk-pr;
   color: var(--surface-foreground, var(--oc-fg, inherit));
   font-family: var(--font-sans, var(--oc-font, inherit));
   font-size: 0.875rem;
@@ -1003,6 +1005,111 @@ html[data-oc-theme="dark"] .oc-sdk-btn[data-variant="default"]:hover {
   flex-direction: column;
   gap: 12px;
 }
+.oc-sdk-pr-create {
+  gap: 16px;
+}
+.oc-sdk-pr-route-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: 0.75rem;
+  background: var(--surface-elevated, var(--oc-elevated, transparent));
+  padding: 12px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-border, var(--oc-border, currentColor)) 60%, transparent);
+}
+.oc-sdk-pr-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: end;
+  gap: 8px;
+  min-width: 0;
+}
+.oc-sdk-pr-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.oc-sdk-pr-pick-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  border: 0;
+  border-radius: 0.5625rem;
+  background: var(--surface-background, var(--oc-bg, transparent));
+  color: var(--surface-foreground, var(--oc-fg, inherit));
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-border, var(--oc-border, currentColor)) 60%, transparent);
+}
+.oc-sdk-pr-pick-trigger:hover:not(:disabled) {
+  background: var(--interactive-hover, var(--oc-hover, transparent));
+}
+.oc-sdk-pr-pick-trigger[data-open="true"] {
+  background: var(--interactive-selection, var(--oc-selection, transparent));
+  color: var(--interactive-selection-foreground, var(--oc-fg, inherit));
+}
+.oc-sdk-pr-pick-trigger:focus-visible {
+  outline: 2px solid var(--interactive-focus-ring, var(--oc-focus, currentColor));
+}
+.oc-sdk-pr-pick-trigger:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.oc-sdk-pr-pick-value {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.oc-sdk-pr-pick-trigger[data-empty="true"] .oc-sdk-pr-pick-value {
+  color: var(--surface-muted-foreground, var(--oc-muted, gray));
+}
+.oc-sdk-pr-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  color: var(--surface-muted-foreground, var(--oc-muted, gray));
+  font-size: 0.875rem;
+}
+.oc-sdk-pr-route-view {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.oc-sdk-pr-chip {
+  display: inline-flex;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 999px;
+  background: var(--surface-elevated, var(--oc-elevated, transparent));
+  color: var(--surface-foreground, var(--oc-fg, inherit));
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-border, var(--oc-border, currentColor)) 50%, transparent);
+}
+.oc-sdk-pr-arrow-inline {
+  color: var(--surface-muted-foreground, var(--oc-muted, gray));
+}
+@container oc-sdk-pr (max-width: 420px) {
+  .oc-sdk-pr-route {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .oc-sdk-pr-arrow {
+    height: auto;
+    transform: rotate(90deg);
+  }
+}
 .oc-sdk-pr-check {
   display: flex;
   flex-direction: column;
@@ -1010,6 +1117,50 @@ html[data-oc-theme="dark"] .oc-sdk-btn[data-variant="default"]:hover {
   border: 1px solid color-mix(in srgb, var(--interactive-border, var(--oc-border, currentColor)) 60%, transparent);
   border-radius: 0.4375rem;
   padding: 8px 10px;
+}
+.oc-sdk-pr-file {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--interactive-border, var(--oc-border, currentColor)) 60%, transparent);
+  border-radius: 0.75rem;
+  background: var(--surface-elevated, var(--oc-elevated, transparent));
+}
+.oc-sdk-pr-file-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-bottom: 1px solid color-mix(in srgb, var(--interactive-border, var(--oc-border, currentColor)) 50%, transparent);
+  padding: 8px 10px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.oc-sdk-pr-diff {
+  margin: 0;
+  max-height: 22rem;
+  overflow: auto;
+  padding: 6px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+.oc-sdk-pr-diff-line {
+  padding: 0 10px;
+  white-space: pre;
+}
+.oc-sdk-pr-diff-line[data-kind="add"] {
+  background: color-mix(in srgb, var(--status-success, #2a7) 14%, transparent);
+  color: var(--status-success, #2a7);
+}
+.oc-sdk-pr-diff-line[data-kind="del"] {
+  background: color-mix(in srgb, var(--status-error, #c23) 14%, transparent);
+  color: var(--status-error, #c23);
+}
+.oc-sdk-pr-diff-line[data-kind="hunk"],
+.oc-sdk-pr-diff-line[data-kind="meta"] {
+  color: var(--surface-muted-foreground, var(--oc-muted, gray));
 }
 .oc-sdk-pr-check[data-state="failure"] {
   border-color: color-mix(in srgb, var(--status-error, #c23) 40%, transparent);
