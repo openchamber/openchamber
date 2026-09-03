@@ -472,7 +472,7 @@ describe('useUIStore persistence migrations', () => {
       linearIssueListAssignee: 'any',
       linearIssueListPriority: 'all',
       linearIssueListStatus: 'all',
-      linearIssueListTeamId: 'all',
+      linearIssueListTeamIdByRuntime: {},
     });
   });
 });
