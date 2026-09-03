@@ -332,7 +332,8 @@ export const SessionDialogs: React.FC = () => {
 
     const removeSelectedWorktree = React.useCallback(async (
         worktree: WorktreeMetadata,
-        deleteLocalBranch: boolean
+        deleteLocalBranch: boolean,
+        toastId?: string | number,
     ): Promise<boolean> => {
         const shouldRemoveRemote = deleteDialogShouldRemoveRemote && canRemoveRemoteBranches;
         const projectRef = getProjectRefForWorktree(worktree);
@@ -366,6 +367,7 @@ export const SessionDialogs: React.FC = () => {
             return true;
         } catch (error) {
             toast.error(t('sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle'), {
+                id: toastId,
                 description: renderToastDescription(error instanceof Error ? error.message : t('sessions.sidebar.dialogs.deleteResult.tryAgain')),
             });
             return false;
@@ -378,6 +380,7 @@ export const SessionDialogs: React.FC = () => {
         deleteLocalBranch: boolean
     ): void => {
         const shouldRemoveRemote = deleteDialogShouldRemoveRemote && canRemoveRemoteBranches;
+        const toastId = toast.loading(t('sessions.sidebar.sessionDialogs.actions.deleting'));
         void (async () => {
             try {
                 if (sessionIds.length > 0) {
@@ -386,13 +389,14 @@ export const SessionDialogs: React.FC = () => {
                         toast.error(failedIds.length === 1
                             ? t('sessions.sidebar.bulkActions.failedArchiveSingle', { count: failedIds.length })
                             : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }), {
+                            id: toastId,
                             description: renderToastDescription(t('sessions.sidebar.dialogs.deleteResult.tryAgain')),
                         });
                         return;
                     }
                 }
 
-                const removed = await removeSelectedWorktree(worktree, deleteLocalBranch);
+                const removed = await removeSelectedWorktree(worktree, deleteLocalBranch, toastId);
                 if (!removed) {
                     return;
                 }
@@ -400,10 +404,12 @@ export const SessionDialogs: React.FC = () => {
                     ? t('sessions.sidebar.sessionDialogs.worktree.removedWithRemote')
                     : t('sessions.sidebar.sessionDialogs.worktree.removed');
                 toast.success(t('sessions.sidebar.sessionDialogs.worktree.removedTitle'), {
+                    id: toastId,
                     description: renderToastDescription(archiveNote),
                 });
             } catch (error) {
                 toast.error(t('sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle'), {
+                    id: toastId,
                     description: renderToastDescription(error instanceof Error ? error.message : t('sessions.sidebar.dialogs.deleteResult.tryAgain')),
                 });
             }

@@ -92,6 +92,7 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
   }, [open, worktree?.path, worktree?.status?.isDirty]);
 
   const removeWorktreeInBackground = React.useCallback((target: WorktreeMetadata, sessionIds: string[]) => {
+    const toastId = toast.loading(t('sessions.sidebar.sessionDialogs.actions.deleting'));
     void (async () => {
       try {
         if (sessionIds.length > 0) {
@@ -101,7 +102,7 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
               failedIds.length === 1
                 ? t('sessions.sidebar.bulkActions.failedArchiveSingle', { count: failedIds.length })
                 : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }),
-              { description: t('sessions.sidebar.dialogs.deleteResult.tryAgain') },
+              { id: toastId, description: t('sessions.sidebar.dialogs.deleteResult.tryAgain') },
             );
             return;
           }
@@ -118,6 +119,7 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
         }
 
         toast.success(t('sessions.sidebar.sessionDialogs.worktree.removedTitle'), {
+          id: toastId,
           description:
             hasBranch && deleteRemoteBranch
               ? t('sessions.sidebar.sessionDialogs.worktree.removedWithRemote')
@@ -126,6 +128,7 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
         onDeleted?.();
       } catch (error) {
         toast.error(t('sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle'), {
+          id: toastId,
           description: error instanceof Error ? error.message : t('sessions.sidebar.dialogs.deleteResult.tryAgain'),
         });
       }
