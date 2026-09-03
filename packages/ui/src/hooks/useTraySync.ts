@@ -4,6 +4,11 @@ import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive } f
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { getSyncChildStores } from '@/sync/sync-refs';
+import {
+  TRAY_MAX_SESSIONS,
+  collectTrayStatusPollTargets,
+  readSyncedDirectories,
+} from './tray-status-poll';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useGlobalSessionStatusStore, applyGlobalSessionStatusSnapshot } from '@/sync/global-session-status';
 import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
@@ -38,7 +43,6 @@ const TRAY_ACTION_EVENT = 'openchamber:tray-action';
 // Event-driven updates do the real work; this is just a slow safety net.
 const POLL_INTERVAL_MS = 5000;
 const FLUSH_DEBOUNCE_MS = 500;
-const MAX_SESSIONS = 20;
 
 type TraySessionStatus = 'idle' | 'busy' | 'retry';
 
@@ -283,43 +287,14 @@ const collectLiveData = (): LiveData => {
 
 // Status for sessions outside the synced child stores arrives two ways, both
 // landing in useGlobalSessionStatusStore (the fallback in the rollup below):
-//  - live: the global event stream carries status events for every directory;
-//    the sync dispatcher routes the ones without a child store into the store;
+//  - live: the global event stream carries status events for every directory,
+//    and the sync dispatcher writes all of them into this index (child stores
+//    stay the primary source for the directories they cover);
 //  - polled: events only deliver changes, so an initial per-directory snapshot
 //    seeds the state and a slow poll reconciles anything missed. Per directory
 //    because the upstream `/session/status` endpoint is directory-scoped
 //    (querying it without a directory covers only the server's own cwd, NOT
 //    all projects).
-
-// Directories worth polling: everywhere the tray's visible sessions live —
-// including synced ones, so the poll reconciles any status event a child
-// store missed (e.g. a session created from another window mid-race). Returns
-// each directory with the session ids the global list places there, so the
-// snapshot can authoritatively clear stale entries by session id.
-const collectStatusPollDirectories = (): Map<string, string[]> => {
-  const allSessions = useGlobalSessionsStore.getState().activeSessions;
-  const rootDirs = new Set<string>();
-  allSessions
-    .filter((s) => s?.id && !s.parentID)
-    .slice()
-    .sort(compareSessionOrder)
-    .slice(0, MAX_SESSIONS)
-    .forEach((session) => {
-      const directory = resolveGlobalSessionDirectory(session);
-      if (directory) rootDirs.add(directory);
-    });
-
-  const targets = new Map<string, string[]>();
-  for (const session of allSessions) {
-    if (!session?.id) continue;
-    const directory = resolveGlobalSessionDirectory(session);
-    if (!directory || !rootDirs.has(directory)) continue;
-    const ids = targets.get(directory) ?? [];
-    ids.push(session.id);
-    targets.set(directory, ids);
-  }
-  return targets;
-};
 
 const buildSnapshot = (instanceName: string): TraySnapshot => {
   const live = collectLiveData();
@@ -381,7 +356,7 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
     .filter((s) => s?.id && !s.parentID) // root rows; sub-session work rolls up
     .slice()
     .sort(compareSessionOrder)
-    .slice(0, MAX_SESSIONS)
+    .slice(0, TRAY_MAX_SESSIONS)
     .map((session) => {
       const family = [session.id, ...collectDescendants(session.id)];
       const directory = resolveGlobalSessionDirectory(session) ?? '';
@@ -400,7 +375,7 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
   const approvals = live.approvals.map((a) => ({ ...a, sessionTitle: titleById.get(a.sessionId) || '' }));
 
   // Dock badge: count chats (root sessions) with unseen activity over the FULL
-  // cross-project list — not the MAX_SESSIONS-capped `sessions` above — so the
+  // cross-project list — not the TRAY_MAX_SESSIONS-capped `sessions` above — so the
   // number is accurate even with many projects. A subtask's unseen rolls up to
   // its root only when the user opted into subtask notifications, matching the
   // sidebar's needs-attention rule.
@@ -449,9 +424,16 @@ export const useTraySync = (): void => {
     // Seed + reconcile the cross-project status map. The live path is the
     // global event stream (captured by the sync dispatcher); this poll covers
     // sessions already busy before this window opened and any missed events.
-    // Cheap: ~ms per directory, bounded by the tray's visible session count.
+    // Targets exclude every directory a sync child store already covers: those
+    // get status live from the event stream and from the sync-context
+    // watchdog, so polling them here only duplicated that request each tick
+    // (see tray-status-poll.ts). Cheap: ~ms per remaining directory.
     const refreshGlobalStatus = async () => {
-      const targets = collectStatusPollDirectories();
+      const targets = collectTrayStatusPollTargets({
+        sessions: useGlobalSessionsStore.getState().activeSessions,
+        syncedDirectories: readSyncedDirectories(),
+        compareSessions: compareSessionOrder,
+      });
       await Promise.all([...targets.entries()].map(async ([directory, sessionIds]) => {
         // null = fetch failed → keep that directory's current entries;
         // {} = authoritative "everything here is idle".
