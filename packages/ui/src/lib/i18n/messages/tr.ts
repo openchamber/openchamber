@@ -975,8 +975,6 @@ export const dict = {
   'gitView.conflict.noDetailsAvailable': 'Çakışma detayları mevcut değil',
   'gitView.empty.notGitRepository': 'Bu dizin bir Git repository\'si değil',
   'gitView.empty.notGitRepositoryDescription': 'Bu dizinde Git\'i başlatın veya bir repository açın.',
-  'gitView.empty.discoveringRepositories': 'Git repository\'leri aranıyor...',
-  'gitView.empty.discoverFailed': 'Git repository\'leri taranamadı',
   'gitView.empty.retryDiscovery': 'Yeniden dene',
   'gitView.empty.selectRepositoryPlaceholder': 'Bir repository seç...',
   'gitView.empty.selectSessionOrDirectory': 'Git durumunu görüntülemek için bir session veya dizin seçin',
