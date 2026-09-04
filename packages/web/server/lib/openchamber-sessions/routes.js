@@ -82,6 +82,18 @@ const resolveVariant = (providers, providerID, modelID, variant) => {
 
 const parseConfigModel = (value) => splitModel(value);
 
+const resolveProjectDefaults = (settings, directory, projectId) => {
+  const projects = Array.isArray(settings?.projects) ? settings.projects : [];
+  const matchedProject = projectId
+    ? projects.find((entry) => entry?.id === projectId) || null
+    : projects.find((entry) => entry?.path === directory) || null;
+  return {
+    defaultAgent: asNonEmptyString(matchedProject?.defaultAgent),
+    defaultModel: asNonEmptyString(matchedProject?.defaultModel),
+    defaultVariant: asNonEmptyString(matchedProject?.defaultVariant),
+  };
+};
+
 const buildDirectoryHeaders = (directory) => ({
   // OpenCode rejects non-ASCII header values; the official SDK sends this
   // header percent-encoded, so match that wire format (non-ASCII checkout
@@ -121,11 +133,15 @@ const fetchSelectionInputs = async ({ buildOpenCodeUrl, authHeaders, directory, 
   };
 };
 
-const resolveDefaultSelection = ({ agents, providers, settings, opencodeDefaultAgent, opencodeDefaultModel }) => {
+const resolveDefaultSelection = ({ agents, providers, settings, projectDefaults, opencodeDefaultAgent, opencodeDefaultModel }) => {
   const primaryAgents = agents.filter((agent) => isPrimaryAgentMode(agent?.mode) && agent?.hidden !== true);
   let resolvedAgent = null;
+  const projectDefaultAgent = asNonEmptyString(projectDefaults?.defaultAgent);
   const settingsDefaultAgent = asNonEmptyString(settings?.defaultAgent);
-  if (settingsDefaultAgent) {
+  if (projectDefaultAgent) {
+    resolvedAgent = agents.find((agent) => agent?.name === projectDefaultAgent) || null;
+  }
+  if (!resolvedAgent && settingsDefaultAgent) {
     resolvedAgent = agents.find((agent) => agent?.name === settingsDefaultAgent) || null;
   }
   if (!resolvedAgent && opencodeDefaultAgent) {
@@ -140,8 +156,13 @@ const resolveDefaultSelection = ({ agents, providers, settings, opencodeDefaultA
 
   let model = null;
   let variant;
+  const projectDefaultModel = parseConfigModel(projectDefaults?.defaultModel);
   const settingsDefaultModel = parseConfigModel(settings?.defaultModel);
-  if (settingsDefaultModel && hasProviderModel(providers, settingsDefaultModel.providerID, settingsDefaultModel.modelID)) {
+  if (projectDefaultModel && hasProviderModel(providers, projectDefaultModel.providerID, projectDefaultModel.modelID)) {
+    model = projectDefaultModel;
+    variant = resolveVariant(providers, model.providerID, model.modelID, projectDefaults?.defaultVariant);
+  }
+  if (!model && settingsDefaultModel && hasProviderModel(providers, settingsDefaultModel.providerID, settingsDefaultModel.modelID)) {
     model = settingsDefaultModel;
     variant = resolveVariant(providers, model.providerID, model.modelID, settings?.defaultVariant);
   }
@@ -428,17 +449,18 @@ export const createOpenChamberSessionService = (dependencies) => {
     }
   };
 
-  const dispatchPrompt = async ({
-    client,
-    baseUrl,
-    authHeaders,
-    sessionID,
-    directory,
-    prompt,
-    goalInput,
-    requestedModel,
-    requestedAgent,
-    requestedVariant,
+const dispatchPrompt = async ({
+  client,
+  baseUrl,
+  authHeaders,
+  sessionID,
+  directory,
+  projectId,
+  prompt,
+  goalInput,
+  requestedModel,
+  requestedAgent,
+  requestedVariant,
     reuseSessionSelection = false,
   }) => {
     let model = requestedModel;
@@ -461,7 +483,10 @@ export const createOpenChamberSessionService = (dependencies) => {
         directory,
         readSettingsFromDiskMigrated,
       });
-      const defaults = resolveDefaultSelection(inputs);
+      const defaults = resolveDefaultSelection({
+        ...inputs,
+        projectDefaults: resolveProjectDefaults(inputs.settings, directory, projectId),
+      });
       if (!model) {
         model = defaults.model;
         if (variant == null) variant = defaults.variant;
@@ -643,6 +668,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         authHeaders,
         sessionID,
         directory: sessionDirectory,
+        projectId: resolvedDirectory.projectId,
         prompt,
         goalInput,
         requestedModel: model,

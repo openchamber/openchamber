@@ -5,11 +5,37 @@ const storage = new Map<string, string>()
 const createSessionCalls: Array<{ title?: string; directory: string | null; parentID: string | null; metadata?: unknown }> = []
 const permissionAutoAcceptCalls: Array<[string, boolean]> = []
 const savedVariantCalls: Array<string | undefined> = []
+const applyDefaultModelAgentSelectionCalls: Array<{
+  projectDefaultAgent?: string | null
+  projectDefaultModel?: string | null
+  projectDefaultVariant?: string | null
+}> = []
+const activateDirectoryCalls: Array<string | null | undefined> = []
 let configVariantOverride: string | null | undefined
 // Sync's session→directory index. `createSession` writes it, and directory
 // resolution reads it as the authoritative source, so the mock has to keep one.
 const sessionDirectoryRegistry = new Map<string, string>()
 let createdSessionDirectory: string | undefined
+const projectsState = {
+  projects: [] as Array<{
+    id: string
+    path: string
+    defaultAgent?: string | null
+    defaultModel?: string | null
+    defaultVariant?: string | null
+  }>,
+  activeProjectId: null as string | null,
+  setActiveProjectIdOnly: (projectId: string | null) => {
+    projectsState.activeProjectId = projectId
+  },
+  getActiveProject: () => null as {
+    id: string
+    path: string
+    defaultAgent?: string | null
+    defaultModel?: string | null
+    defaultVariant?: string | null
+  } | null,
+}
 
 const getMockCalls = (fn: unknown): unknown[][] => ((fn as { mock?: { calls: unknown[][] } }).mock?.calls ?? [])
 
@@ -102,19 +128,23 @@ mock.module("@/stores/useConfigStore", () => ({
       currentModelId: "model",
       currentVariantSelection: { override: configVariantOverride, inherited: "high" },
       agents: [],
-      activateDirectory: mock(async () => undefined),
-      applyDefaultModelAgentSelection: mock(() => undefined),
+      activateDirectory: mock(async (directory: string | null | undefined) => {
+        activateDirectoryCalls.push(directory)
+      }),
+      applyDefaultModelAgentSelection: mock((selection: {
+        projectDefaultAgent?: string | null
+        projectDefaultModel?: string | null
+        projectDefaultVariant?: string | null
+      }) => {
+        applyDefaultModelAgentSelectionCalls.push(selection)
+      }),
     }),
   },
 }))
 
 mock.module("@/stores/useProjectsStore", () => ({
   useProjectsStore: {
-    getState: () => ({
-      projects: [],
-      activeProjectId: null,
-      getActiveProject: () => null,
-    }),
+    getState: () => projectsState,
   },
 }))
 
@@ -357,11 +387,19 @@ describe("issue 2039 draft auto-accept", () => {
   beforeEach(() => {
     storage.clear()
     createSessionCalls.length = 0
+    applyDefaultModelAgentSelectionCalls.length = 0
+    activateDirectoryCalls.length = 0
     sessionDirectoryRegistry.clear()
     permissionAutoAcceptCalls.length = 0
     savedVariantCalls.length = 0
     configVariantOverride = undefined
     createdSessionDirectory = undefined
+    projectsState.projects = []
+    projectsState.activeProjectId = null
+    projectsState.setActiveProjectIdOnly = (projectId: string | null) => {
+      projectsState.activeProjectId = projectId
+    }
+    projectsState.getActiveProject = () => null
 
     useSessionUIStore.setState({
       currentSessionId: null,
@@ -418,6 +456,117 @@ describe("issue 2039 draft auto-accept", () => {
     })
 
     expect(savedVariantCalls).toEqual([undefined, "high"])
+  })
+
+  test("reapplies project defaults when a project draft target is selected on first use", async () => {
+    const project = {
+      id: "project-1",
+      path: "/repo",
+      defaultAgent: "agent-project",
+      defaultModel: "model-project",
+      defaultVariant: "variant-project",
+    }
+    projectsState.projects = [project]
+
+    useSessionUIStore.getState().openNewSessionDraft({
+      target: "project",
+      selectedProjectId: project.id,
+      directoryOverride: project.path,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    applyDefaultModelAgentSelectionCalls.length = 0
+    activateDirectoryCalls.length = 0
+
+    useSessionUIStore.getState().setNewSessionDraftTarget({
+      projectId: project.id,
+      directoryOverride: project.path,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(activateDirectoryCalls).toEqual(["/repo"])
+    expect(applyDefaultModelAgentSelectionCalls).toEqual([{
+      projectDefaultAgent: "agent-project",
+      projectDefaultModel: "model-project",
+      projectDefaultVariant: "variant-project",
+    }])
+  })
+
+  test("reapplies project defaults when a project draft target is overridden", async () => {
+    const project = {
+      id: "project-1",
+      path: "/repo",
+      defaultAgent: "agent-project",
+      defaultModel: "model-project",
+      defaultVariant: "variant-project",
+    }
+    projectsState.projects = [project]
+
+    useSessionUIStore.getState().openNewSessionDraft()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    applyDefaultModelAgentSelectionCalls.length = 0
+    activateDirectoryCalls.length = 0
+
+    useSessionUIStore.getState().overrideNewSessionDraftTarget({
+      target: "project",
+      selectedProjectId: project.id,
+      directoryOverride: project.path,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(activateDirectoryCalls).toEqual(["/repo"])
+    expect(applyDefaultModelAgentSelectionCalls).toEqual([{
+      projectDefaultAgent: "agent-project",
+      projectDefaultModel: "model-project",
+      projectDefaultVariant: "variant-project",
+    }])
+  })
+
+  test("reapplies global defaults when opening a fresh no-project draft", async () => {
+    useSessionUIStore.getState().openNewSessionDraft()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(activateDirectoryCalls).toEqual([null])
+    expect(applyDefaultModelAgentSelectionCalls).toEqual([{
+      projectDefaultAgent: undefined,
+      projectDefaultModel: undefined,
+      projectDefaultVariant: undefined,
+    }])
+  })
+
+  test("reapplies the default agent after a project session when the next draft has no project", async () => {
+    const project = {
+      id: "project-1",
+      path: "/repo",
+      defaultAgent: "agent-project",
+      defaultModel: "model-project",
+      defaultVariant: "variant-project",
+    }
+    projectsState.projects = [project]
+
+    useSessionUIStore.getState().openNewSessionDraft({
+      target: "project",
+      selectedProjectId: project.id,
+      directoryOverride: project.path,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await materializeOpenDraftSession({
+      providerID: "provider",
+      modelID: "model",
+      agent: "agent-project",
+    })
+
+    applyDefaultModelAgentSelectionCalls.length = 0
+    activateDirectoryCalls.length = 0
+
+    useSessionUIStore.getState().openNewSessionDraft()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(activateDirectoryCalls).toEqual([null])
+    expect(applyDefaultModelAgentSelectionCalls).toEqual([{
+      projectDefaultAgent: undefined,
+      projectDefaultModel: undefined,
+      projectDefaultVariant: undefined,
+    }])
   })
 
   test("does not apply draft auto-accept after the draft is closed", async () => {

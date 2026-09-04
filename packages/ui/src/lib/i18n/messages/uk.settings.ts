@@ -1162,6 +1162,7 @@ export const settingsDict = {
   "settings.projects.page.title.default": "Параметри проєкту",
   "settings.projects.page.section.worktree": "Worktree",
   "settings.projects.page.field.projectName": "Назва проєкту",
+  "settings.projects.page.field.projectAgent": "Агент проєкту",
   "settings.projects.page.field.projectModel": "Модель проєкту",
   "settings.projects.page.field.projectThinking": "Міркування проєкту",
   "settings.projects.page.section.chatDefaults": "Значення за замовчуванням для нових чатів",

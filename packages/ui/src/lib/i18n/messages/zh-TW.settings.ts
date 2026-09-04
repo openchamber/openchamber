@@ -1069,6 +1069,7 @@ export const settingsDict = {
   'settings.projects.page.title.default': '專案設定',
   'settings.projects.page.section.worktree': 'Worktree',
   'settings.projects.page.field.projectName': '專案名稱',
+  'settings.projects.page.field.projectAgent': '專案 Agent',
   'settings.projects.page.field.projectModel': '專案模型',
   'settings.projects.page.field.projectThinking': '專案思考層級',
   'settings.projects.page.section.chatDefaults': '新聊天的預設設定',

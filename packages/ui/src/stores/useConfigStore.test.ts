@@ -18,6 +18,16 @@ let listAgentsImpl: ((directory?: string | null) => Promise<TestAgent[]>) | null
 let withDirectoryCalls: Array<string | null> = [];
 let currentFetchDirectory: string | null = DIRECTORY;
 let configListener: ((event: { scopes: string[]; source?: string; timestamp: number }) => void | Promise<void>) | null = null;
+let projectsState: {
+  activeProjectId: string | null;
+  projects: Array<{ id: string; path: string; label: string; defaultAgent?: string }>;
+} = {
+  activeProjectId: 'project',
+  projects: [
+    { id: 'project', path: DIRECTORY, label: 'Project' },
+    { id: 'other', path: OTHER_DIRECTORY, label: 'Other' },
+  ],
+};
 
 const makeStorage = (): Storage => ({
   getItem: (key: string) => storage.get(key) ?? null,
@@ -150,13 +160,7 @@ mock.module('@/stores/utils/safeStorage', () => ({
 
 mock.module('@/stores/useProjectsStore', () => ({
   useProjectsStore: {
-    getState: () => ({
-      activeProjectId: 'project',
-      projects: [
-        { id: 'project', path: DIRECTORY, label: 'Project' },
-        { id: 'other', path: OTHER_DIRECTORY, label: 'Other' },
-      ],
-    }),
+    getState: () => projectsState,
   },
 }));
 
@@ -238,6 +242,13 @@ const { useSessionUIStore } = await import('@/sync/session-ui-store');
 describe('useConfigStore provider persistence', () => {
   beforeEach(() => {
     storage = new Map<string, string>();
+    projectsState = {
+      activeProjectId: 'project',
+      projects: [
+        { id: 'project', path: DIRECTORY, label: 'Project' },
+        { id: 'other', path: OTHER_DIRECTORY, label: 'Other' },
+      ],
+    };
     Object.defineProperty(globalThis, 'localStorage', {
       configurable: true,
       value: makeStorage(),
@@ -271,6 +282,9 @@ describe('useConfigStore provider persistence', () => {
       currentVariantSelection: { override: undefined, inherited: undefined },
       selectedProviderId: '',
       currentAgentName: undefined,
+      settingsDefaultAgent: undefined,
+      settingsDefaultModel: undefined,
+      settingsDefaultVariant: undefined,
       agents: [],
       agentModelSelections: {},
       opencodeDefaultAgent: undefined,
@@ -828,6 +842,44 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentVariant).toBe('high');
   });
 
+  test('a project default agent overrides the global default agent for fresh drafts', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5')],
+      agents: [testAgent('build'), testAgent('plan')],
+      currentProviderId: '',
+      currentModelId: '',
+      currentVariant: undefined,
+      settingsDefaultAgent: 'build',
+      settingsDefaultModel: 'openai/gpt-5.5',
+      selectionSource: 'auto',
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().applyDefaultModelAgentSelection({ projectDefaultAgent: 'plan' });
+
+    expect(useConfigStore.getState().currentAgentName).toBe('plan');
+  });
+
+  test('an unknown project default agent falls back to the global default agent', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5')],
+      agents: [testAgent('build'), testAgent('plan')],
+      currentProviderId: '',
+      currentModelId: '',
+      currentVariant: undefined,
+      settingsDefaultAgent: 'build',
+      settingsDefaultModel: 'openai/gpt-5.5',
+      selectionSource: 'auto',
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().applyDefaultModelAgentSelection({ projectDefaultAgent: 'missing' });
+
+    expect(useConfigStore.getState().currentAgentName).toBe('build');
+  });
+
   test('a fresh session applies the settings thinking level instead of the previous override', () => {
     useConfigStore.setState({
       activeDirectoryKey: DIRECTORY,
@@ -967,6 +1019,46 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentAgentName).toBe('review');
   });
 
+  test('sync config does not overwrite a project default agent for auto selection', () => {
+    projectsState = {
+      activeProjectId: 'project',
+      projects: [
+        { id: 'project', path: DIRECTORY, label: 'Project', defaultAgent: 'plan' },
+        { id: 'other', path: OTHER_DIRECTORY, label: 'Other' },
+      ],
+    };
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5')],
+      agents: [testAgent('build'), testAgent('plan'), testAgent('review')],
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.5',
+      currentAgentName: 'plan',
+      settingsDefaultAgent: 'build',
+      selectedProviderId: 'openai',
+      selectionSource: 'auto',
+      directoryScoped: {
+        [DIRECTORY]: {
+          providers: [provider('openai', 'gpt-5.5')],
+          agents: [testAgent('build'), testAgent('plan'), testAgent('review')],
+          currentProviderId: 'openai',
+          currentModelId: 'gpt-5.5',
+          currentAgentName: 'plan',
+          selectedProviderId: 'openai',
+          agentModelSelections: {},
+          defaultProviders: {},
+          selectionSource: 'auto',
+        },
+      },
+    });
+
+    emitSyncConfigChanged(DIRECTORY, { default_agent: 'review', model: 'openai/gpt-5.5' });
+
+    const state = useConfigStore.getState();
+    expect(state.currentAgentName).toBe('plan');
+    expect(state.directoryScoped[DIRECTORY]?.currentAgentName).toBe('plan');
+  });
+
   test('sync config defaults do not close the add-provider settings flow', () => {
     useConfigStore.setState({
       activeDirectoryKey: DIRECTORY,
@@ -1083,6 +1175,47 @@ describe('useConfigStore provider persistence', () => {
     expect(state.directoryScoped[DIRECTORY]?.opencodeDefaultModel).toBe('openai/gpt-5.5');
     expect(state.opencodeDefaultAgent).toBe('review');
     expect(state.opencodeDefaultModel).toBe('openai/gpt-5.5');
+  });
+
+  test('loadAgents refresh does not overwrite a project default agent with the global default', async () => {
+    projectsState = {
+      activeProjectId: 'project',
+      projects: [
+        { id: 'project', path: DIRECTORY, label: 'Project', defaultAgent: 'plan' },
+        { id: 'other', path: OTHER_DIRECTORY, label: 'Other' },
+      ],
+    };
+    liveAgents = [testAgent('build'), testAgent('plan')];
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5')],
+      agents: [testAgent('build'), testAgent('plan')],
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.5',
+      currentAgentName: 'plan',
+      settingsDefaultAgent: 'build',
+      selectedProviderId: 'openai',
+      selectionSource: 'auto',
+      directoryScoped: {
+        [DIRECTORY]: {
+          providers: [provider('openai', 'gpt-5.5')],
+          agents: [testAgent('build'), testAgent('plan')],
+          currentProviderId: 'openai',
+          currentModelId: 'gpt-5.5',
+          currentAgentName: 'plan',
+          selectedProviderId: 'openai',
+          agentModelSelections: {},
+          defaultProviders: {},
+          selectionSource: 'auto',
+        },
+      },
+    });
+
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY, source: 'test:projectAgentWinsRefresh' });
+
+    const state = useConfigStore.getState();
+    expect(state.currentAgentName).toBe('plan');
+    expect(state.directoryScoped[DIRECTORY]?.currentAgentName).toBe('plan');
   });
 
   test('in-flight loadAgents does not restore defaults cleared by a sync config event', async () => {

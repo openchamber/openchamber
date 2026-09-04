@@ -36,6 +36,7 @@ export const ProjectsPage: React.FC = () => {
       icon: data.icon,
       color: data.color,
       iconBackground: data.iconBackground,
+      defaultAgent: data.defaultAgent ?? null,
       defaultModel: data.defaultModel ?? null,
       defaultVariant: data.defaultVariant ?? null,
     });

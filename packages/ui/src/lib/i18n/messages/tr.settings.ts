@@ -2144,6 +2144,7 @@ export const settingsDict = {
   'settings.openchamber.appLinks.info': 'Burada listelenen linkler bu cihazda tekrar sormadan açılır. Diğer uygulama linkleri açılmadan önce her zaman sorar.',
   'settings.openchamber.appLinks.empty': 'Bu cihazda güvenilen uygulama linki yok. Bir link açarken "Güven ve aç" seçeneğini seçtiğinizde buraya eklenir.',
   'settings.openchamber.appLinks.removeAria': 'Güvenilen {scheme} linklerini kaldır',
+  'settings.projects.page.field.projectAgent': 'Proje Agentı',
   'settings.projects.page.field.projectModel': 'Proje Modeli',
   'settings.projects.page.field.projectThinking': 'Proje Thinking\'i',
   'settings.projects.page.section.chatDefaults': 'Yeni sohbetler için varsayılanlar',

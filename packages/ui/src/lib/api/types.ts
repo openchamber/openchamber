@@ -662,6 +662,7 @@ export interface ProjectEntry {
   } | null;
   iconBackground?: string | null;
   color?: string | null;
+  defaultAgent?: string;
   defaultModel?: string;
   /** Variant of `defaultModel`, when that model exposes any. */
   defaultVariant?: string;

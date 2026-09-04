@@ -1162,6 +1162,7 @@ export const settingsDict = {
   'settings.projects.page.title.default': '项目设置',
   'settings.projects.page.section.worktree': '工作树',
   'settings.projects.page.field.projectName': '项目名称',
+  'settings.projects.page.field.projectAgent': '项目智能体',
   'settings.projects.page.field.projectModel': '项目模型',
   'settings.projects.page.field.projectThinking': '项目思考级别',
   'settings.projects.page.section.chatDefaults': '新聊天的默认设置',

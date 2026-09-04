@@ -1399,6 +1399,7 @@ export const settingsDict = {
   'settings.projects.page.field.projectIcon': 'Ikona projektu',
   'settings.projects.page.field.projectIconBackgroundAria': 'Kolor tła ikony projektu',
   'settings.projects.page.field.projectName': 'Nazwa projektu',
+  'settings.projects.page.field.projectAgent': 'Agent projektu',
   'settings.projects.page.field.projectModel': 'Model projektu',
   'settings.projects.page.field.projectThinking': 'Poziom myślenia projektu',
   'settings.projects.page.section.chatDefaults': 'Domyślne ustawienia nowych czatów',

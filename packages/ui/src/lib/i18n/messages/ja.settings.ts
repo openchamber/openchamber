@@ -1195,6 +1195,7 @@ export const settingsDict = {
   'settings.projects.page.title.default': 'プロジェクト設定',
   'settings.projects.page.section.worktree': 'ワークツリー',
   'settings.projects.page.field.projectName': 'プロジェクト名',
+  'settings.projects.page.field.projectAgent': 'プロジェクトのエージェント',
   'settings.projects.page.field.projectModel': 'プロジェクトのモデル',
   'settings.projects.page.field.projectThinking': 'プロジェクトの思考レベル',
   'settings.projects.page.section.chatDefaults': '新規チャットの既定値',

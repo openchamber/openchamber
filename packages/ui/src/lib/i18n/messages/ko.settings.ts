@@ -1162,6 +1162,7 @@ export const settingsDict = {
   'settings.projects.page.title.default': '프로젝트 설정',
   'settings.projects.page.section.worktree': 'Worktree',
   'settings.projects.page.field.projectName': '프로젝트 이름',
+  'settings.projects.page.field.projectAgent': '프로젝트 에이전트',
   'settings.projects.page.field.projectModel': '프로젝트 모델',
   'settings.projects.page.field.projectThinking': '프로젝트 사고 수준',
   'settings.projects.page.section.chatDefaults': '새 채팅 기본값',

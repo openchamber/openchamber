@@ -297,7 +297,7 @@ type DefaultAgentModelSelection = {
 // Shared default-selection cascade used both at startup (loadAgents) and when opening a
 // fresh draft (applyDefaultModelAgentSelection), so the two paths stay identical.
 //
-//   Agent: settings.defaultAgent → opencode default_agent → build → first primary → first
+//   Agent: project.defaultAgent → settings.defaultAgent → opencode default_agent → build → first primary → first
 //   Model: project.defaultModel → settings.defaultModel → resolved agent's pinned model+variant → opencode config.model
 //          → opencode/big-pickle → first
 //
@@ -309,6 +309,7 @@ type DefaultAgentModelSelection = {
 const resolveDefaultAgentModelSelection = ({
     agents,
     providers,
+    projectDefaultAgent,
     projectDefaultModel,
     projectDefaultVariant,
     settingsDefaultAgent,
@@ -319,6 +320,7 @@ const resolveDefaultAgentModelSelection = ({
 }: {
     agents: Agent[];
     providers: ProviderWithModelList[];
+    projectDefaultAgent?: string;
     projectDefaultModel?: string;
     projectDefaultVariant?: string;
     settingsDefaultAgent?: string;
@@ -347,7 +349,10 @@ const resolveDefaultAgentModelSelection = ({
     const primaryAgents = agents.filter((agent) => isPrimaryMode(agent.mode));
 
     let resolvedAgent: Agent | undefined;
-    if (settingsDefaultAgent) {
+    if (projectDefaultAgent) {
+        resolvedAgent = agents.find((agent) => agent.name === projectDefaultAgent);
+    }
+    if (!resolvedAgent && settingsDefaultAgent) {
         resolvedAgent = agents.find((agent) => agent.name === settingsDefaultAgent);
     }
     if (!resolvedAgent && opencodeDefaultAgent) {
@@ -837,6 +842,28 @@ const getFallbackProjectDirectory = (): string | null => {
     }
 };
 
+const getProjectDefaultsForConfigDirectory = (directory: string | null | undefined): {
+    projectDefaultAgent?: string;
+    projectDefaultModel?: string;
+    projectDefaultVariant?: string;
+} => {
+    const configDirectory = normalizeConfigPath(directory);
+    if (!configDirectory) {
+        return {};
+    }
+
+    try {
+        const project = useProjectsStore.getState().projects.find((entry) => normalizeConfigPath(entry.path) === configDirectory);
+        return {
+            projectDefaultAgent: normalizeOptionalString(project?.defaultAgent),
+            projectDefaultModel: normalizeOptionalString(project?.defaultModel),
+            projectDefaultVariant: normalizeOptionalString(project?.defaultVariant),
+        };
+    } catch {
+        return {};
+    }
+};
+
 /**
  * Map a directory to its CONFIG scope. Providers/agents/defaults are defined at
  * the PROJECT level (opencode.json), so a worktree must inherit its parent
@@ -1133,7 +1160,7 @@ interface ConfigStore {
     cycleCurrentVariant: () => string | undefined;
     getCurrentModelVariants: () => string[];
     setAgent: (agentName: string | undefined) => void;
-    applyDefaultModelAgentSelection: (options?: { projectDefaultModel?: string; projectDefaultVariant?: string }) => void;
+    applyDefaultModelAgentSelection: (options?: { projectDefaultAgent?: string; projectDefaultModel?: string; projectDefaultVariant?: string }) => void;
     applyOpenCodeConfigDefaults: (directory?: string | null, source?: string, config?: Config) => void;
     setSelectedProvider: (providerId: string) => void;
     setSettingsDefaultModel: (model: string | undefined) => void;
@@ -2111,6 +2138,7 @@ export const useConfigStore = create<ConfigStore>()(
                             const latestSyncedOpencodeDefaultModel = hasLatestSyncedOpencodeConfig
                                 ? normalizeOptionalString(latestSyncedOpencodeConfig.model)
                                 : undefined;
+                            const projectDefaults = getProjectDefaultsForConfigDirectory(configDirectoryPath);
 
                             const providers = get().activeDirectoryKey === directoryKey
                                 ? get().providers
@@ -2288,11 +2316,14 @@ export const useConfigStore = create<ConfigStore>()(
                             }
 
                             // Resolve agent + model via the shared cascade:
-                            //   settings.defaultAgent → opencode default_agent → build → first primary → first
-                            //   settings.defaultModel → resolved agent's model+variant → opencode/big-pickle → first
+                            //   project.defaultAgent → settings.defaultAgent → opencode default_agent → build → first primary → first
+                            //   project.defaultModel → settings.defaultModel → resolved agent's model+variant → opencode/big-pickle → first
                             const resolvedDefault = resolveDefaultAgentModelSelection({
                                 agents: safeAgents,
                                 providers,
+                                projectDefaultAgent: projectDefaults.projectDefaultAgent,
+                                projectDefaultModel: projectDefaults.projectDefaultModel,
+                                projectDefaultVariant: projectDefaults.projectDefaultVariant,
                                 settingsDefaultAgent: openChamberDefaults.defaultAgent,
                                 settingsDefaultModel: openChamberDefaults.defaultModel,
                                 settingsDefaultVariant: openChamberDefaults.defaultVariant,
@@ -2691,6 +2722,7 @@ export const useConfigStore = create<ConfigStore>()(
                     } = resolveDefaultAgentModelSelection({
                         agents,
                         providers,
+                        projectDefaultAgent: options?.projectDefaultAgent,
                         projectDefaultModel: options?.projectDefaultModel,
                         projectDefaultVariant: options?.projectDefaultVariant,
                         settingsDefaultAgent,
@@ -2767,6 +2799,7 @@ export const useConfigStore = create<ConfigStore>()(
 
                     const opencodeDefaultAgent = normalizeOptionalString(syncedConfig.default_agent);
                     const opencodeDefaultModel = normalizeOptionalString(syncedConfig.model);
+                    const projectDefaults = getProjectDefaultsForConfigDirectory(configDirectory);
 
                     set((state) => {
                         const snapshot = state.directoryScoped[directoryKey];
@@ -2811,6 +2844,9 @@ export const useConfigStore = create<ConfigStore>()(
                         const resolved = resolveDefaultAgentModelSelection({
                             agents,
                             providers,
+                            projectDefaultAgent: projectDefaults.projectDefaultAgent,
+                            projectDefaultModel: projectDefaults.projectDefaultModel,
+                            projectDefaultVariant: projectDefaults.projectDefaultVariant,
                             settingsDefaultAgent: state.settingsDefaultAgent,
                             settingsDefaultModel: state.settingsDefaultModel,
                             settingsDefaultVariant: state.settingsDefaultVariant,

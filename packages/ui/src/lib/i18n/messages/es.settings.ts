@@ -1162,6 +1162,7 @@ export const settingsDict = {
   "settings.projects.page.title.default": "Configuración del proyecto",
   "settings.projects.page.section.worktree": "Worktree",
   "settings.projects.page.field.projectName": "Nombre del proyecto",
+  "settings.projects.page.field.projectAgent": "Agente del proyecto",
   "settings.projects.page.field.projectModel": "Modelo del proyecto",
   "settings.projects.page.field.projectThinking": "Razonamiento del proyecto",
   "settings.projects.page.section.chatDefaults": "Valores por defecto para chats nuevos",
