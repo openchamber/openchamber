@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
-import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
+import { normalizeContextPanelDirectoryKey, useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
@@ -70,6 +70,7 @@ import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, saveA
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { buildSessionTreeMoveMessages, requestSessionTreeMove, useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
+import { deriveDesktopHeaderTitle } from '@/lib/headerTitle';
 
 const DESKTOP_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50 hover:bg-interactive-hover transition-colors';
 
@@ -313,26 +314,15 @@ export const Header: React.FC = () => {
     },
     [currentSessionId],
   )));
-  const activeProject = useProjectsStore(useShallow((state) => {
-    if (!state.activeProjectId) {
-      return null;
-    }
-    const project = state.projects.find((candidate) => candidate.id === state.activeProjectId);
-    return project ? { id: project.id, path: project.path, label: project.label } : null;
-  }));
-  const activeProjectLabel = React.useMemo(() => {
-    if (!activeProject) {
-      return null;
-    }
-
-    const trimmedLabel = activeProject.label?.trim();
-    if (trimmedLabel) {
-      return trimmedLabel;
-    }
-
-    const pathSegments = activeProject.path.split(/[\\/]/).filter(Boolean);
-    return pathSegments[pathSegments.length - 1] ?? null;
-  }, [activeProject]);
+  const projects = useProjectsStore((state) => state.projects);
+  const activeProjectId = useProjectsStore((state) => state.activeProjectId);
+  const activeProject = React.useMemo(
+    () => (activeProjectId
+      ? projects.find((candidate) => candidate.id === activeProjectId) ?? null
+      : null),
+    [activeProjectId, projects],
+  );
+  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
 
   const { isMobile } = useDeviceInfo();
@@ -717,7 +707,7 @@ export const Header: React.FC = () => {
     return worktreeDirectory || sessionDirectory || draftDirectory;
   }, [draftDirectory, sessionDirectory, worktreeDirectory]);
   const activeContextMode = useUIStore(React.useCallback((state) => {
-    const directory = normalize(openDirectory || '');
+    const directory = normalizeContextPanelDirectoryKey(openDirectory || '');
     return directory ? getActiveContextMode(state.contextPanelByDirectory[directory]) : null;
   }, [openDirectory]));
 
@@ -746,17 +736,31 @@ export const Header: React.FC = () => {
 
   // Whether the title carries a second line under it. Hoisted because the
   // session menu's vertical alignment depends on the same answer.
+  const currentSessionTitle = currentSession?.title?.trim() || t('sessions.sidebar.session.untitled');
+  const desktopHeaderTitle = React.useMemo(() => {
+    const authoritativeDirectory = isNewSessionDraftOpen
+      ? draftDirectory || null
+      : currentSessionId
+        ? sessionDirectory || worktreeAttachment?.cwd || worktreeAttachment?.worktreeRoot || worktreeDirectory || null
+        : null;
+
+    return deriveDesktopHeaderTitle({
+      projects,
+      availableWorktreesByProject,
+      authoritativeDirectory,
+      activeProjectId,
+      isDraftOpen: isNewSessionDraftOpen,
+      draftProjectId: draftProjectId ?? null,
+      currentSessionId,
+      currentSessionTitle,
+      draftTitle: t('sessions.switcher.draftTitle'),
+      untitledTitle: t('sessions.sidebar.session.untitled'),
+      productTitle: 'OpenChamber',
+    });
+  }, [activeProjectId, availableWorktreesByProject, currentSessionId, currentSessionTitle, draftDirectory, draftProjectId, isNewSessionDraftOpen, projects, sessionDirectory, t, worktreeAttachment?.cwd, worktreeAttachment?.worktreeRoot, worktreeDirectory]);
+
   const showHeaderMetaRow = !isChatContext && !workStatusPanelVisible
-    && Boolean(activeProjectLabel || currentBranchLabel || (!isNewSessionDraftOpen && worktreeBadgeKind));
-
-
-  const currentSessionTitle = React.useMemo(() => {
-    if (!currentSessionId) {
-      return activeProjectLabel ?? 'OpenChamber';
-    }
-    const trimmedTitle = currentSession?.title?.trim();
-    return trimmedTitle && trimmedTitle.length > 0 ? trimmedTitle : 'Untitled Session';
-  }, [activeProjectLabel, currentSession?.title, currentSessionId]);
+    && Boolean(currentBranchLabel || (!isNewSessionDraftOpen && worktreeBadgeKind));
   const headerDirectoryStore = useDirectoryStore(openDirectory || undefined, { bootstrap: false });
   const sync = useSync();
   const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
@@ -1463,12 +1467,11 @@ export const Header: React.FC = () => {
                 </form>
               ) : (
                 <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
-                  {isNewSessionDraftOpen ? t('sessions.switcher.draftTitle') : currentSessionTitle}
+                  {desktopHeaderTitle}
                 </span>
               )}
               {showHeaderMetaRow ? (
                 <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
-                  {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
                   {currentBranchLabel ? (
                     <span className="inline-flex min-w-0 items-center gap-0.5">
                       <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
