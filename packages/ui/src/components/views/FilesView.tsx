@@ -2733,7 +2733,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       return;
     }
 
-    if (fileError || isSelectedImage || isSelectedPdf || isUnsupportedBinary) {
+    if (fileError || isSelectedImage || isSelectedPdf || isSelectedMedia || isUnsupportedBinary) {
       setPendingFileNavigation(null);
       pendingNavigationCycleRef.current = { key: '', attempts: 0 };
       return;
@@ -2805,6 +2805,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     fileLoading,
     isSelectedImage,
     isSelectedPdf,
+    isSelectedMedia,
     isUnsupportedBinary,
     loadedFilePath,
     handleSelectFile,
