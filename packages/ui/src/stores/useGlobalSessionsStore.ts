@@ -43,6 +43,9 @@ type GlobalSessionsState = {
   mutationRevisionBySessionId: Map<string, number>;
   hasLoaded: boolean;
   status: GlobalSessionsStatus;
+  /** Re-read the persisted managed-chats snapshot after the chats root is
+      warm; no-op once a load has started, completed, or mutated state. */
+  rehydrateManagedChatSessions: () => void;
   loadSessions: (fallbackActive?: Session[]) => Promise<LoadResult>;
   refreshSessionsForDirectories: (directories: Iterable<string>, fallbackActive?: Session[]) => Promise<LoadResult>;
   applySnapshot: (activeSessions: Session[], archivedSessions: Session[], status?: GlobalSessionsStatus) => void;
@@ -586,17 +589,20 @@ const buildReviewTransferMap = (sessions: Session[]): Map<string, ReviewTransfer
   return next
 }
 
+const buildManagedChatSessionsState = (sessions: Session[]) => ({
+  activeSessions: sessions,
+  archivedSessions: [] as Session[],
+  entityById: new Map(sessions.map((session) => [session.id, session])),
+  structure: buildGlobalSessionStructure(sessions),
+  sessionsByDirectory: buildSessionsByDirectory(sessions),
+  reviewTransferBySessionId: buildReviewTransferMap(sessions),
+});
+
 const initialManagedChatSessions = readManagedChatSessions();
-const initialEntityById = new Map(initialManagedChatSessions.map((session) => [session.id, session]));
-const initialStructure = buildGlobalSessionStructure(initialManagedChatSessions);
+const initialState = buildManagedChatSessionsState(initialManagedChatSessions);
 
 export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => ({
-  activeSessions: initialManagedChatSessions,
-  archivedSessions: [],
-  entityById: initialEntityById,
-  structure: initialStructure,
-  sessionsByDirectory: buildSessionsByDirectory(initialManagedChatSessions),
-  reviewTransferBySessionId: buildReviewTransferMap(initialManagedChatSessions),
+  ...initialState,
   mutationRevision: 0,
   mutationRevisionBySessionId: new Map(),
   hasLoaded: false,
@@ -615,18 +621,24 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     set((state) => applySessionMutations(state, mutations));
   },
 
+  // The module-init seed and runtime reset read the persisted snapshot before
+  // the server-resolved chats root is available, so relocated directories are
+  // filtered out of the stale sidebar paint until this runs after the warm-up.
+  rehydrateManagedChatSessions: () => {
+    const state = get();
+    if (state.status !== 'idle' || state.hasLoaded || state.mutationRevision !== 0) return;
+    const managedChatSessions = readManagedChatSessions();
+    const unchanged = managedChatSessions.length === state.activeSessions.length
+      && managedChatSessions.every((session, index) => session.id === state.activeSessions[index]?.id);
+    if (unchanged) return;
+    set(buildManagedChatSessionsState(managedChatSessions));
+  },
+
   resetForRuntimeSwitch: () => {
     loadGeneration += 1;
     inflightLoad = null;
-    const managedChatSessions = readManagedChatSessions();
-    const entityById = new Map(managedChatSessions.map((session) => [session.id, session]));
     set({
-      activeSessions: managedChatSessions,
-      archivedSessions: [],
-      entityById,
-      structure: buildGlobalSessionStructure(managedChatSessions),
-      sessionsByDirectory: buildSessionsByDirectory(managedChatSessions),
-      reviewTransferBySessionId: buildReviewTransferMap(managedChatSessions),
+      ...buildManagedChatSessionsState(readManagedChatSessions()),
       mutationRevision: 0,
       mutationRevisionBySessionId: new Map(),
       hasLoaded: false,
