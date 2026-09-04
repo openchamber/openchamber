@@ -16,6 +16,10 @@ RUN bun install --frozen-lockfile --ignore-scripts
 FROM deps AS builder
 WORKDIR /app
 COPY . .
+# `deps` installs with --ignore-scripts, so the root postinstall never runs there
+# and the patches/ directory is not present yet. Apply patch-package here, after
+# the full source copy, so the web bundle ships the patched ghostty-web.
+RUN bunx patch-package
 RUN bun run build:web
 
 FROM oven/bun:1.3.14 AS runtime
