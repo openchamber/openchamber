@@ -133,17 +133,6 @@ All notable changes to this project will be documented in this file.
 - Devices: re-pairing a phone keeps the device's existing name instead of resetting it to "OpenChamber Mobile".
 - Relay: paired devices no longer get logged out when the app restarts while another local OpenChamber process is running.
 - Sessions: headers now find archived sessions too, so an archived session's title no longer goes missing.
-- Files: the editor toolbar is now always docked under the file tabs; the floating hover toolbar and its setting were removed.
-- UI: the chat's top and bottom scroll fades are back, and the first uncached open of a session fades the conversation in instead of popping.
-- UI: the timeline dialog now fits small screens instead of squeezing the message list to a couple of rows (thanks to @gaojunran).
-- Chat: OpenCode notices now share one style.
-- UI: draft target menus stay inside the chat area instead of overlapping the header.
-- UI: Linear and Cloudflare tools now show their own icons.
-- UI: sidebar item tooltips no longer appear instantly on passing hover.
-- UI: the btw panel's shadow is lighter, matching the composer.
-- Devices: re-pairing a phone (or logging in again) keeps the device's existing name in Connected Devices instead of resetting it to "OpenChamber Mobile".
-- Relay: paired devices no longer get logged out when the app restarts (for example during an update) while another local OpenChamber process is running — the restarted app keeps serving them instead of a bystander process taking over.
-- Settings: the app no longer re-locks its config and credential directories to owner-only permissions on every write, which silently revoked access an administrator had granted — relevant when the OpenCode server runs as a separate user.
 - Files: the editor toolbar is always docked under the file tabs; the floating hover toolbar and its setting were removed.
 - UI: the chat's scroll fades are back, the first uncached session open fades in, the timeline dialog fits small screens (thanks to @gaojunran), OpenCode notices share one style, draft target menus stay inside the chat area, Linear and Cloudflare tools show their own icons, sidebar tooltips no longer appear on passing hover, and the btw panel's shadow matches the composer.
 
