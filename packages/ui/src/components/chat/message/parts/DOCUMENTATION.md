@@ -36,11 +36,13 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - Used by both `ProgressiveGroup.tsx` and `ToolPart.tsx`.
 
 - `toolRenderUtils.ts`
-  - Core classification helpers:
+  - Core classification and title helpers:
     - `isExpandableTool`
     - `isStaticTool`
     - `isStandaloneTool`
     - `getStaticGroupToolName`
+    - `getToolHeaderTitle`
+    - `getToolSecondaryText`
   - If a tool should switch between static vs expandable, change it here.
 
 - `ReasoningPart.tsx`
@@ -85,6 +87,7 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 - `read` and `skill` are **static navigation tools** and render via `StaticToolRow`.
 - Every other tool, including search/fetch, OpenCode built-ins, custom tools, plugins, and MCP tools, is **expandable** and renders through `ToolPart`.
 - The managed `openchamber` plugin tool uses the expandable path and hides its broad protocol input. The plugin supplies the selected action's human description as the native tool title; the UI renders that metadata without owning an action map. The full versioned result envelope renders through the same neutral JSON summary/tree/raw views as other tools, without a tool-specific output card.
+- OpenCode built-in tools keep their dedicated display name and path/command description. Custom, MCP, and OpenChamber plugin tools use a trimmed, nonblank authoritative `state.title` as the primary header, falling back to the tool metadata display name. Long headers truncate at narrow widths with the full title in a tooltip. A secondary description or justification is hidden only for those invocation-title tools when its trimmed text matches the authoritative title; distinct descriptions remain visible.
 - `ToolPart` defers expanded content after a user toggle, preventing large tool input/output payloads from mounting during the initial chat render.
 - The rich tool diff preview lives in `ToolPartDiffPreview.tsx` and is lazy-loaded from `ToolPart`. It is the only tool-card piece that imports the `@pierre/diffs` + Shiki rendering stack, keeping that stack out of the eager chat startup graph. While its chunk loads (first rendered diff only) the plain-text patch from `PlainDiffFallback.tsx` renders as the Suspense fallback, mirroring the preview's error fallback. `ToolPart` itself must not statically import `@pierre/diffs` runtime modules or `@/lib/shiki/appThemeRegistry`.
 - The `@pierre/diffs` stack is knowingly unprotected against the JS/TS `template-call` backtracking that OOM'd the renderer in openchamber/openchamber#2587. Our own markdown Shiki worker sanitizes every grammar it loads (`@/lib/shiki/sanitizeTemplateCallGrammar`), but the diff worker pool runs `preferredHighlighter: 'shiki-wasm'` (`DiffWorkerProvider.tsx`) and resolves its languages by id through `@pierre/diffs`' own registry — `langs` accepts `SupportedLanguages` strings only, so there is no seam to hand it a pre-sanitized `LanguageRegistration`. A pathological template literal inside a rendered diff can therefore still hang that pool's Oniguruma engine. The available levers are upstream (a `langs` overload accepting grammar objects) or switching that pool to the JS regex engine; neither is done.
