@@ -47,6 +47,19 @@ describe('terminal viewport remount guard', () => {
         expect(body.indexOf('if (!terminal)')).toBeLessThan(body.indexOf('terminal.reset()'));
     });
 
+    test('replays an authoritative snapshot immediately after its replacement drops the prior chunk id', () => {
+        const start = terminalViewportSource.indexOf('if (previousIndex < 0) {');
+        expect(start).toBeGreaterThan(-1);
+        const end = terminalViewportSource.indexOf('flush();', start);
+        expect(end).toBeGreaterThan(start);
+        const discontinuity = terminalViewportSource.slice(start, end);
+
+        expect(discontinuity).toContain('recreateRenderer();');
+        expect(discontinuity.indexOf('return;', discontinuity.indexOf('recreateRenderer();'))).toBe(-1);
+        expect(discontinuity).toContain('const isReplay = previousIndex < 0;');
+        expect(discontinuity).toContain('chunk.replayData ?? chunk.data');
+    });
+
     test('scrollback is read from the buffer slice, not from the tab', () => {
         expect(terminalViewSource).toContain('getBuffer(');
         expect(terminalViewSource).not.toContain('activeTab?.bufferChunks');
