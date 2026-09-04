@@ -113,6 +113,11 @@ describe('chat directories with relocated chats root', () => {
     expect(deletedDirectories).toEqual(['/srv/openchamber-chats/2026-08-21/session-a']);
   });
 
+  test('deletes legacy chat directories under the well-known segment while relocated', async () => {
+    await deleteChatDirectory('/Users/tester/.config/openchamber/chats/2026-08-21/session-legacy');
+    expect(deletedDirectories).toEqual(['/Users/tester/.config/openchamber/chats/2026-08-21/session-legacy']);
+  });
+
   test('retries the server chats root after a transient root failure', async () => {
     chatsRootOutcomes.push(new Error('transient network failure'), '/srv/openchamber-chats');
     await warmChatsRootDirectory();

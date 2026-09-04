@@ -104,7 +104,12 @@ async function isChatDirectory(directory: string | null | undefined): Promise<bo
   const normalized = normalizePath(directory ?? null);
   if (!normalized) return false;
   const root = normalizePath(await getChatsRootDirectory());
-  return Boolean(root && (normalized === root || normalized.startsWith(`${root}/`)));
+  // Legacy chats under the well-known segment stay deletable when the root
+  // is relocated; they classify as chats everywhere else already.
+  return Boolean(
+    (root && (normalized === root || normalized.startsWith(`${root}/`)))
+    || normalized.includes(MANAGED_CHATS_PATH_SEGMENT),
+  );
 }
 
 export async function deleteChatDirectory(directory: string): Promise<void> {
