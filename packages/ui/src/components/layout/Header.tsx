@@ -286,6 +286,7 @@ export const Header: React.FC = () => {
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const sessionTabsEnabled = useUIStore((state) => state.sessionTabsEnabled);
+  const setTimelineDialogOpen = useUIStore((state) => state.setTimelineDialogOpen);
 
   const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
 
@@ -1048,6 +1049,10 @@ export const Header: React.FC = () => {
     });
   }, [currentSessionId, handleOpenDraftMiniChat, isNewSessionDraftOpen, selectedSessionDirectory, sessionDirectory, worktreeDirectory]);
 
+  const handleOpenTimelineSearch = React.useCallback(() => {
+    setTimelineDialogOpen(true);
+  }, [setTimelineDialogOpen]);
+
   const handleOpenContextPanel = React.useCallback(() => {
     const directory = normalize(openDirectory || '');
     if (!directory) {
@@ -1656,6 +1661,13 @@ export const Header: React.FC = () => {
             onClick={handleOpenCurrentMiniChat}
             className={cn(desktopHeaderIconButtonClass, 'mr-1')}
             Icon={'picture-in-picture-2'}
+          />
+          <HeaderIconActionButton
+            title={t('header.actions.openTimelineSearch')}
+            ariaLabel={t('header.actions.openTimelineSearchAria')}
+            onClick={handleOpenTimelineSearch}
+            className={desktopHeaderIconButtonClass}
+            Icon="search"
           />
           {!isVSCode ? (
             <Tooltip>
