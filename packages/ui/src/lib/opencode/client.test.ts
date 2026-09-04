@@ -58,10 +58,19 @@ mock.module('@/lib/runtime-switch', () => ({
   getRuntimeKey: mock(() => runtimeKey),
 }));
 
+const fsHomeResponses: Array<Response | Error> = [];
+
 mock.module('@/lib/runtime-fetch', () => ({
-  runtimeFetch: mock(async () => new Response(JSON.stringify([]), {
-    headers: { 'Content-Type': 'application/json' },
-  })),
+  runtimeFetch: mock(async (input: string | URL | Request) => {
+    if (typeof input === 'string' && input.includes('/fs/home')) {
+      const next = fsHomeResponses.shift();
+      if (next instanceof Error) throw next;
+      if (next) return next;
+    }
+    return new Response(JSON.stringify([]), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }),
 }));
 
 mock.module('@/lib/startupTrace', () => ({
@@ -75,6 +84,7 @@ beforeEach(() => {
   promptAsyncCalls.length = 0;
   promptAsyncResults.length = 0;
   pathGetResults.length = 0;
+  fsHomeResponses.length = 0;
 });
 
 describe('opencodeClient directory availability', () => {
@@ -84,6 +94,37 @@ describe('opencodeClient directory availability', () => {
 
     pathGetResults.push(new Error('offline'));
     expect(await opencodeClient.getDirectoryAvailability('/private/deleted-worktree')).toBe('unknown');
+  });
+});
+
+describe('opencodeClient getFilesystemChatsRoot', () => {
+  const fsHomeResponse = (body: unknown) => new Response(JSON.stringify(body), {
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  test('returns the server-provided chats root', async () => {
+    fsHomeResponses.push(fsHomeResponse({ home: '/Users/tester', chatsRoot: '/srv/openchamber-chats' }));
+    expect(await opencodeClient.getFilesystemChatsRoot()).toBe('/srv/openchamber-chats');
+  });
+
+  test('returns null only for an older server that answers without chatsRoot', async () => {
+    fsHomeResponses.push(fsHomeResponse({ home: '/Users/tester' }));
+    expect(await opencodeClient.getFilesystemChatsRoot()).toBe(null);
+  });
+
+  test('throws on a failed fetch', async () => {
+    fsHomeResponses.push(new Error('transient network failure'));
+    await expect(opencodeClient.getFilesystemChatsRoot()).rejects.toThrow('transient network failure');
+  });
+
+  test('throws on a non-ok response', async () => {
+    fsHomeResponses.push(new Response('unavailable', { status: 503 }));
+    await expect(opencodeClient.getFilesystemChatsRoot()).rejects.toThrow('503');
+  });
+
+  test('throws on a malformed payload', async () => {
+    fsHomeResponses.push(fsHomeResponse({ chatsRoot: 42 }));
+    await expect(opencodeClient.getFilesystemChatsRoot()).rejects.toThrow();
   });
 });
 

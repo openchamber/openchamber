@@ -2051,21 +2051,20 @@ class OpencodeService {
     }
   }
 
+  // Throws on fetch or payload failure. Only a successful response may return
+  // null: that is an older server without chatsRoot, the sole case where the
+  // caller may fall back to the legacy home join.
   async getFilesystemChatsRoot(): Promise<string | null> {
-    try {
-      const response = await runtimeFetch(`${this.baseUrl}/fs/home`, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json'
-        }
-      });
-      if (!response.ok) {
-        return null;
+    const response = await runtimeFetch(`${this.baseUrl}/fs/home`, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json'
       }
-      return fsHomeResponseSchema.parse(await response.json()).chatsRoot ?? null;
-    } catch {
-      return null;
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to resolve the chats root (${response.status})`);
     }
+    return fsHomeResponseSchema.parse(await response.json()).chatsRoot ?? null;
   }
 
   async setOpenCodeWorkingDirectory(directoryPath: string | null | undefined): Promise<DirectorySwitchResult | null> {

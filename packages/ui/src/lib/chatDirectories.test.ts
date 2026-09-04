@@ -6,12 +6,23 @@ const deletedDirectories: string[] = [];
 
 // Null models an older server whose /api/fs/home answers without chatsRoot.
 let serverChatsRoot: string | null = null;
+// Queued outcomes for getFilesystemChatsRoot; an Error models a failed root
+// fetch, which must not be mistaken for an older server without chatsRoot.
+const chatsRootOutcomes: Array<Error | string | null> = [];
+const homeRequests: string[] = [];
 let testRuntimeKey = 'runtime-0';
 
 mock.module('@/lib/opencode/client', () => ({
   opencodeClient: {
-    getFilesystemHome: mock(async () => '/Users/tester'),
-    getFilesystemChatsRoot: mock(async () => serverChatsRoot),
+    getFilesystemHome: mock(async () => {
+      homeRequests.push('/Users/tester');
+      return '/Users/tester';
+    }),
+    getFilesystemChatsRoot: mock(async () => {
+      const outcome = chatsRootOutcomes.shift();
+      if (outcome instanceof Error) throw outcome;
+      return outcome !== undefined ? outcome : serverChatsRoot;
+    }),
     createDirectory: mock(async (path: string, options?: { allowOutsideWorkspace?: boolean }) => {
       createdDirectories.push(path);
       createDirectoryOptions.push(options);
@@ -39,6 +50,8 @@ describe('chat directories', () => {
     createDirectoryOptions.length = 0;
     deletedDirectories.length = 0;
     serverChatsRoot = null;
+    chatsRootOutcomes.length = 0;
+    homeRequests.length = 0;
     testRuntimeKey = `runtime-${Math.random().toString(36).slice(2)}`;
   });
 
@@ -71,6 +84,8 @@ describe('chat directories with relocated chats root', () => {
     createDirectoryOptions.length = 0;
     deletedDirectories.length = 0;
     serverChatsRoot = '/srv/openchamber-chats';
+    chatsRootOutcomes.length = 0;
+    homeRequests.length = 0;
     testRuntimeKey = `runtime-${Math.random().toString(36).slice(2)}`;
   });
 
@@ -96,6 +111,17 @@ describe('chat directories with relocated chats root', () => {
     await deleteChatDirectory('/srv/openchamber-chats/2026-08-21/session-a');
     await deleteChatDirectory('/Users/tester/project');
     expect(deletedDirectories).toEqual(['/srv/openchamber-chats/2026-08-21/session-a']);
+  });
+
+  test('retries the server chats root after a transient root failure', async () => {
+    chatsRootOutcomes.push(new Error('transient network failure'), '/srv/openchamber-chats');
+    await warmChatsRootDirectory();
+
+    const directory = await createChatDirectory(new Date(2026, 7, 21, 12));
+
+    expect(directory.startsWith('/srv/openchamber-chats/2026-08-21/session-')).toBe(true);
+    expect(createdDirectories).toEqual([directory]);
+    expect(homeRequests).toEqual([]);
   });
 
   test('still recognizes the well-known segment when the root is not warm', () => {
