@@ -1,25 +1,30 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createPermissionAutoAcceptRuntime } from './runtime.js';
 
-const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0] } = {}) => {
+const createRuntime = ({ stored, openCodeApi: apiOverrides = {}, retryDelaysMs = [0] } = {}) => {
   let settings = stored ?? { permissionAutoAccept: { sessions: {} } };
   let eventHandler;
   let statusHandler;
+  const openCodeApi = {
+    getSession: vi.fn(async (sessionID, directory) => ({ id: sessionID, directory })),
+    listPendingPermissions: vi.fn(async () => []),
+    replyPermission: vi.fn(async () => true),
+    ...apiOverrides,
+  };
   const runtime = createPermissionAutoAcceptRuntime({
     globalEventHub: {
       subscribeEvent(handler) { eventHandler = handler; return () => {}; },
       subscribeStatus(handler) { statusHandler = handler; return () => {}; },
     },
-    buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
-    getOpenCodeAuthHeaders: () => ({}),
+    openCodeApi,
     readSettingsFromDiskMigrated: async () => settings,
     persistSettings: async (changes) => { settings = { ...settings, ...changes }; },
-    fetchImpl: fetchImpl ?? vi.fn(async () => new Response('[]')),
     retryDelaysMs,
   });
   runtime.start();
   return {
     runtime,
+    openCodeApi,
     getSettings: () => settings,
     emit: (payload, directory = '/project') => eventHandler({ payload, directory }),
     connect: () => statusHandler({ type: 'connect' }),
@@ -62,85 +67,114 @@ describe('permission auto-accept runtime', () => {
   });
 
   it('fetches missing subagent lineage before replying', async () => {
-    const fetchImpl = vi.fn(async (url, init = {}) => {
-      const path = new URL(url).pathname;
-      if (path === '/permission') return new Response('[]');
-      if (path === '/session/child') return Response.json({ id: 'child', parentID: 'root', directory: '/project' });
-      if (init.method === 'POST') return Response.json({});
-      return new Response('', { status: 404 });
-    });
-    const { runtime } = createRuntime({
+    const { runtime, openCodeApi } = createRuntime({
       stored: { permissionAutoAccept: { sessions: { root: true } } },
-      fetchImpl,
+      openCodeApi: {
+        getSession: vi.fn(async () => ({ id: 'child', parentID: 'root', directory: '/project' })),
+      },
     });
     await expect(runtime.processPermission({ id: 'perm', sessionID: 'child' }, '/project')).resolves.toBe(true);
-    expect(fetchImpl.mock.calls.some(([url, init]) => new URL(url).pathname === '/permission/perm/reply' && init.method === 'POST')).toBe(true);
+    expect(openCodeApi.getSession).toHaveBeenCalledWith('child', '/project', { timeoutMs: 5000 });
+    expect(openCodeApi.replyPermission).toHaveBeenCalledWith({
+      sessionID: 'child',
+      requestID: 'perm',
+      directory: '/project',
+      reply: 'once',
+    }, { timeoutMs: 5000 });
+  });
+
+  it('replies to permission events with the authoritative session ID', async () => {
+    const { emit, openCodeApi } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { 'session/root': true } } },
+    });
+
+    emit({
+      type: 'permission.asked',
+      properties: { id: 'permission/one', sessionID: 'session/root' },
+    });
+    await flush();
+
+    expect(openCodeApi.replyPermission).toHaveBeenCalledWith({
+      sessionID: 'session/root',
+      requestID: 'permission/one',
+      directory: '/project',
+      reply: 'once',
+    }, { timeoutMs: 5000 });
+  });
+
+  it('uses session lookup while resolving missing lineage', async () => {
+    const getSession = vi.fn(async () => ({ id: 'child', parentID: 'root', directory: '/project' }));
+    const { runtime } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { root: true } } },
+      openCodeApi: { getSession },
+    });
+
+    await expect(runtime.processPermission({ id: 'perm', sessionID: 'child' }, '/project')).resolves.toBe(true);
+    expect(getSession).toHaveBeenCalledWith('child', '/project', { timeoutMs: 5000 });
+  });
+
+  it('reconciles both global and directory-scoped pending requests', async () => {
+    const listPendingPermissions = vi.fn(async (directory) => directory === '/project'
+      ? [{ id: 'pending', sessionID: 'root' }]
+      : []);
+    const { runtime, openCodeApi } = createRuntime({ openCodeApi: { listPendingPermissions } });
+
+    await runtime.setSessionPolicy('root', true, '/project');
+
+    expect(listPendingPermissions).toHaveBeenCalledWith(undefined, { timeoutMs: 5000 });
+    expect(listPendingPermissions).toHaveBeenCalledWith('/project', { timeoutMs: 5000 });
+    expect(openCodeApi.replyPermission).toHaveBeenCalledWith(expect.objectContaining({
+      sessionID: 'root',
+      requestID: 'pending',
+      directory: '/project',
+    }), { timeoutMs: 5000 });
   });
 
   it('retries a transient reply failure and deduplicates concurrent events', async () => {
-    let replyAttempts = 0;
-    const fetchImpl = vi.fn(async (url, init = {}) => {
-      const path = new URL(url).pathname;
-      if (path === '/permission') return new Response('[]');
-      if (path === '/permission/perm/reply' && init.method === 'POST') {
-        replyAttempts += 1;
-        return replyAttempts === 1 ? new Response('', { status: 503 }) : Response.json({});
-      }
-      return Response.json({ id: 'root' });
-    });
+    const replyPermission = vi.fn()
+      .mockRejectedValueOnce(new Error('unavailable'))
+      .mockResolvedValueOnce(true);
     const { runtime } = createRuntime({
       stored: { permissionAutoAccept: { sessions: { root: true } } },
-      fetchImpl,
+      openCodeApi: { replyPermission },
       retryDelaysMs: [0, 0],
     });
     const permission = { id: 'perm', sessionID: 'root' };
     const first = runtime.processPermission(permission, '/project');
     const second = runtime.processPermission(permission, '/project');
     await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
-    expect(replyAttempts).toBe(2);
+    expect(replyPermission).toHaveBeenCalledTimes(2);
   });
 
   it('reconciles pending permissions after reconnect', async () => {
-    const fetchImpl = vi.fn(async (url, init = {}) => {
-      const path = new URL(url).pathname;
-      if (path === '/permission') return Response.json([{ id: 'pending', sessionID: 'root' }]);
-      if (path === '/permission/pending/reply' && init.method === 'POST') return Response.json({});
-      return Response.json({ id: 'root' });
-    });
-    const { connect } = createRuntime({
+    const { connect, openCodeApi } = createRuntime({
       stored: { permissionAutoAccept: { sessions: { root: true } } },
-      fetchImpl,
+      openCodeApi: { listPendingPermissions: vi.fn(async () => [{ id: 'pending', sessionID: 'root' }]) },
     });
     connect();
     await flush();
-    expect(fetchImpl.mock.calls.some(([url]) => new URL(url).pathname === '/permission/pending/reply')).toBe(true);
+    expect(openCodeApi.replyPermission).toHaveBeenCalledWith(expect.objectContaining({ requestID: 'pending' }), { timeoutMs: 5000 });
   });
 
   it('accepts existing pending permissions when a session policy is enabled', async () => {
-    const fetchImpl = vi.fn(async (url, init = {}) => {
-      const parsed = new URL(url);
-      const path = parsed.pathname;
-      if (path === '/permission') {
-        return parsed.searchParams.get('directory') === '/project'
-          ? Response.json([
+    const listPendingPermissions = vi.fn(async (directory) => directory === '/project'
+      ? [
             { id: 'root-pending', sessionID: 'root' },
             { id: 'other-pending', sessionID: 'other' },
-          ])
-          : Response.json([]);
-      }
-      if (path === '/permission/root-pending/reply' && init.method === 'POST') return Response.json({});
-      if (path === '/session/other') return Response.json({ id: 'other' });
-      return new Response('', { status: 404 });
+        ]
+      : []);
+    const { runtime, openCodeApi } = createRuntime({
+      openCodeApi: {
+        listPendingPermissions,
+        getSession: vi.fn(async (sessionID) => ({ id: sessionID })),
+      },
     });
-    const { runtime } = createRuntime({ fetchImpl });
 
     await runtime.setSessionPolicy('root', true, '/project');
 
-    const replyPaths = fetchImpl.mock.calls
-      .filter(([, init]) => init?.method === 'POST')
-      .map(([url]) => new URL(url).pathname);
-    expect(replyPaths).toEqual(['/permission/root-pending/reply']);
-    expect(fetchImpl.mock.calls.some(([url]) => new URL(url).searchParams.get('directory') === '/project')).toBe(true);
+    expect(openCodeApi.replyPermission).toHaveBeenCalledTimes(1);
+    expect(openCodeApi.replyPermission).toHaveBeenCalledWith(expect.objectContaining({ requestID: 'root-pending' }), { timeoutMs: 5000 });
+    expect(listPendingPermissions).toHaveBeenCalledWith('/project', { timeoutMs: 5000 });
     expect(await runtime.load()).toEqual({ sessions: { root: true }, revision: 1 });
   });
 });

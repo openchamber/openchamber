@@ -33,6 +33,16 @@ type OpenChamberHealthSnapshot = {
   opencodeLaunchWrapperType?: unknown;
   nodeBinaryResolved?: unknown;
   bunBinaryResolved?: unknown;
+  openCodeProtocol?: unknown;
+};
+
+type OpenCodeProtocol = 'legacy' | 'opencode2';
+
+type ProbeTarget = {
+  label: string;
+  path: string;
+  directoryQuery?: 'directory' | 'location[directory]' | false;
+  timeoutMs?: number;
 };
 
 type OpenChamberOpencodeResolution = {
@@ -239,21 +249,29 @@ export const buildOpenCodeStatusReport = async (): Promise<string> => {
     }
   })() || { data: null, status: null, error: null };
 
-  const buildProbeUrl = (pathname: string, includeDirectory = true): string | null => {
+  const protocol: OpenCodeProtocol = openChamberHealth?.openCodeProtocol === 'opencode2'
+    ? 'opencode2'
+    : 'legacy';
+  const buildProbeUrl = (
+    pathname: string,
+    directoryQuery: ProbeTarget['directoryQuery'] = 'directory',
+  ): string | null => {
     if (!apiBase) return null;
     // A web runtime resolves its API base relative to the page; a relative
     // base is not a valid URL base on its own.
     const absoluteBase = /^[a-z][a-z0-9+.-]*:/i.test(apiBase) || !origin ? apiBase : new URL(apiBase, origin).toString();
     const url = new URL(pathname.replace(/^\/+/, ''), absoluteBase);
-    if (includeDirectory && directory) {
-      url.searchParams.set('directory', directory);
+    if (directoryQuery && directory) {
+      url.searchParams.set(directoryQuery, directory);
     }
     return url.toString();
   };
 
   // OpenCode's own view of its directories; `home` anchors the log path below.
   const pathInfo: { home?: unknown } | null = await (async () => {
-    const url = buildProbeUrl('/path', true);
+    const url = protocol === 'opencode2'
+      ? buildProbeUrl('/api/location', 'location[directory]')
+      : buildProbeUrl('/path');
     if (!url) return null;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
@@ -269,22 +287,34 @@ export const buildOpenCodeStatusReport = async (): Promise<string> => {
     }
   })();
 
-  const probeTargets: Array<{ label: string; path: string; includeDirectory?: boolean; timeoutMs?: number }> = [
-    { label: 'health', path: '/global/health', includeDirectory: false },
-    { label: 'config', path: '/config', includeDirectory: true },
-    { label: 'providers', path: '/config/providers', includeDirectory: true },
-    { label: 'agents', path: '/agent', includeDirectory: true, timeoutMs: 12000 },
-    { label: 'commands', path: '/command', includeDirectory: true, timeoutMs: 10000 },
-    { label: 'project', path: '/project/current', includeDirectory: true },
-    { label: 'path', path: '/path', includeDirectory: true },
-    { label: 'sessions', path: '/session', includeDirectory: true, timeoutMs: 12000 },
-    { label: 'sessionStatus', path: '/session/status', includeDirectory: true },
-  ];
+  const probeTargets: ProbeTarget[] = protocol === 'opencode2'
+    ? [
+        { label: 'health', path: '/api/health', directoryQuery: false },
+        { label: 'config', path: '/api/config', directoryQuery: 'location[directory]' },
+        { label: 'providers', path: '/api/provider', directoryQuery: 'location[directory]' },
+        { label: 'agents', path: '/api/agent', directoryQuery: 'location[directory]', timeoutMs: 12000 },
+        { label: 'commands', path: '/api/command', directoryQuery: 'location[directory]', timeoutMs: 10000 },
+        { label: 'project', path: '/api/project/current', directoryQuery: 'location[directory]' },
+        { label: 'path', path: '/api/location', directoryQuery: 'location[directory]' },
+        { label: 'sessions', path: '/api/session', directoryQuery: 'directory', timeoutMs: 12000 },
+        { label: 'sessionStatus', path: '/api/session/active', directoryQuery: false },
+      ]
+    : [
+        { label: 'health', path: '/global/health', directoryQuery: false },
+        { label: 'config', path: '/config' },
+        { label: 'providers', path: '/config/providers' },
+        { label: 'agents', path: '/agent', timeoutMs: 12000 },
+        { label: 'commands', path: '/command', timeoutMs: 10000 },
+        { label: 'project', path: '/project/current' },
+        { label: 'path', path: '/path' },
+        { label: 'sessions', path: '/session', timeoutMs: 12000 },
+        { label: 'sessionStatus', path: '/session/status' },
+      ];
 
   const probes = apiBase
     ? await Promise.all(
         probeTargets.map(async (entry) => {
-          const url = buildProbeUrl(entry.path, entry.includeDirectory !== false);
+          const url = buildProbeUrl(entry.path, entry.directoryQuery);
           if (!url) return { label: entry.label, url: '(none)', result: null as ProbeResult | null };
           const result = await safeFetch(url, typeof entry.timeoutMs === 'number' ? entry.timeoutMs : undefined);
           return { label: entry.label, url, result };
@@ -297,6 +327,7 @@ export const buildOpenCodeStatusReport = async (): Promise<string> => {
   lines.push(`OpenChamber version: ${appVersion}`);
   lines.push(`Runtime: ${origin || '(unknown)'} (api=${apiBase || '(unknown)'})`);
   lines.push(`OpenCode SDK base: ${opencodeClient.getBaseUrl()}`);
+  lines.push(`OpenCode protocol: ${protocol}`);
   lines.push(`Event stream: ${eventStreamStatus}`);
   lines.push(`Directory: ${directory || '(none)'}`);
   lines.push(`Platform: ${platform}`);

@@ -1,4 +1,3 @@
-import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { DateTime } from 'luxon';
 import parser from 'cron-parser';
 import { expandSnippets } from '../opencode/snippets.js';
@@ -249,12 +248,11 @@ export const createScheduledTasksRuntime = (deps) => {
   const {
     projectConfigRuntime,
     listProjects,
-    buildOpenCodeUrl,
-    getOpenCodeAuthHeaders,
     waitForOpenCodeReady,
     emitTaskRunEvent,
     setSessionAutoAccept,
     sessionKnowledgeRuntime = null,
+    openCodeApi,
     logger = console,
     maxGlobalConcurrency = DEFAULT_GLOBAL_CONCURRENCY,
     maxProjectConcurrency = DEFAULT_PROJECT_CONCURRENCY,
@@ -474,7 +472,7 @@ export const createScheduledTasksRuntime = (deps) => {
     ],
   });
 
-  const runPromptAsync = async ({ baseUrl, authHeaders, sessionID, projectPath, task }) => {
+  const runPromptAsync = async ({ sessionID, projectPath, task }) => {
     // Never allowed to fail the run: a task that executes without its
     // background is a lesser loss than a task that does not execute.
     const knowledge = sessionKnowledgeRuntime
@@ -482,22 +480,11 @@ export const createScheduledTasksRuntime = (deps) => {
         .catch(() => ({ text: '', signature: '' }))
       : { text: '', signature: '' };
 
-    const promptUrl = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}/prompt_async`);
-    promptUrl.searchParams.set('directory', projectPath);
-    const response = await fetch(promptUrl.toString(), {
-      method: 'POST',
-      headers: {
-        ...authHeaders,
-        'content-type': 'application/json',
-        accept: 'application/json',
-      },
-      body: JSON.stringify(buildPromptAsyncPayload(task, projectPath, knowledge.text)),
+    await openCodeApi.sendPrompt({
+      sessionID,
+      directory: projectPath,
+      ...buildPromptAsyncPayload(task, projectPath, knowledge.text),
     });
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      throw new Error(`prompt_async failed (${response.status})${body ? `: ${body}` : ''}`);
-    }
 
     // Recorded only after the prompt is accepted, so a failed dispatch carries
     // the context again on the next run.
@@ -507,7 +494,7 @@ export const createScheduledTasksRuntime = (deps) => {
     }
   };
 
-  const resolveScheduledCommand = async ({ client, projectPath, task }) => {
+  const resolveScheduledCommand = async ({ projectPath, task }) => {
     const parsed = parseScheduledCommandPrompt(task?.execution?.prompt);
     if (!parsed) {
       return null;
@@ -515,8 +502,7 @@ export const createScheduledTasksRuntime = (deps) => {
 
     let commands = [];
     try {
-      const response = await client.command.list({ directory: projectPath });
-      commands = Array.isArray(response?.data) ? response.data : [];
+      commands = await openCodeApi.listCommands(projectPath);
     } catch {
       return null;
     }
@@ -525,8 +511,8 @@ export const createScheduledTasksRuntime = (deps) => {
     return command ? { ...parsed, template: command.template } : null;
   };
 
-  const runScheduledCommand = async ({ client, projectPath, sessionID, task, command }) => {
-    await client.session.command({
+  const runScheduledCommand = async ({ projectPath, sessionID, task, command }) => {
+    await openCodeApi.runCommand({
       sessionID,
       directory: projectPath,
       command: command.command,
@@ -549,19 +535,15 @@ export const createScheduledTasksRuntime = (deps) => {
     if (typeof waitForOpenCodeReady === 'function') {
       await waitForOpenCodeReady(10_000, 250);
     }
+    if (task.execution.goalEnabled && !openCodeApi.supportsSessionMetadata()) {
+      throw new Error('Session goals are not supported by OpenCode V2');
+    }
 
-    const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
-    const authHeaders = getOpenCodeAuthHeaders();
-    const client = createOpencodeClient({
-      baseUrl,
-      headers: authHeaders,
-    });
-
-    const sessionResponse = await client.session.create({
+    const session = await openCodeApi.createSession({
       directory: projectPath,
       title,
     });
-    const sessionID = sessionResponse?.data?.id;
+    const sessionID = session?.id;
     if (!sessionID) {
       throw new Error('failed to create session');
     }
@@ -588,15 +570,14 @@ export const createScheduledTasksRuntime = (deps) => {
       }
     }
 
-    const scheduledCommand = await resolveScheduledCommand({ client, projectPath, task });
+    const scheduledCommand = await resolveScheduledCommand({ projectPath, task });
 
     if (task.execution.goalEnabled) {
       const commandObjective = scheduledCommand
         ? expandCommandGoalObjective(scheduledCommand.template, scheduledCommand.arguments)
         : null;
       await createSessionGoal({
-        baseUrl,
-        authHeaders,
+        openCodeApi,
         sessionID,
         directory: projectPath,
         objective: commandObjective ?? expandSnippets(task.execution.prompt, projectPath),
@@ -608,11 +589,9 @@ export const createScheduledTasksRuntime = (deps) => {
     }
 
     if (scheduledCommand) {
-      await runScheduledCommand({ client, projectPath, sessionID, task, command: scheduledCommand });
+      await runScheduledCommand({ projectPath, sessionID, task, command: scheduledCommand });
     } else {
       await runPromptAsync({
-        baseUrl,
-        authHeaders,
         sessionID,
         projectPath,
         task,

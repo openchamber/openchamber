@@ -8,11 +8,12 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-const createManager = (mode: 'managed' | 'external' = 'managed') => {
+const createManager = (mode: 'managed' | 'external' = 'managed', protocol: 'legacy' | 'opencode2' = 'legacy') => {
   let restartCount = 0;
   const manager: OpenCodeUpgradeManager = {
     getApiUrl: () => 'http://127.0.0.1:4096',
     getOpenCodeAuthHeaders: () => ({ Authorization: 'Basic test' }),
+    getProtocol: () => protocol,
     getDebugInfo: () => ({ mode }),
     restart: async () => { restartCount += 1; },
   };
@@ -52,6 +53,24 @@ describe('VS Code OpenCode upgrades', () => {
         code: 'OPENCODE_UPGRADE_UNSUPPORTED',
         error: 'This OpenCode runtime cannot be upgraded by OpenChamber.',
       },
+    });
+    assert.equal(fetchCount, 0);
+  });
+
+  test('does not offer the legacy upgrade route to opencode2', async () => {
+    const { manager } = createManager('managed', 'opencode2');
+    let fetchCount = 0;
+    const mockFetch: typeof fetch = async () => {
+      fetchCount += 1;
+      return new Response('{}');
+    };
+    globalThis.fetch = mockFetch;
+
+    assert.deepEqual(await getOpenCodeUpgradeStatus(manager), {
+      available: false,
+      currentVersion: null,
+      latestVersion: null,
+      upgrade: { supported: false, manager: null, reason: 'unsupported-protocol' },
     });
     assert.equal(fetchCount, 0);
   });

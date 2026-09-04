@@ -18,12 +18,14 @@ export const createHmrStateRuntime = (dependencies) => {
       globalThisLike[stateKey] = {
         openCodeProcess: null,
         openCodePort: null,
+        isSharedOpenCodeService: false,
         openCodeWorkingDirectory: getInitialOpenCodeWorkingDirectory(),
         isShuttingDown: false,
         signalsAttached: false,
         userProvidedOpenCodePassword: undefined,
         openCodeAuthPassword: null,
         openCodeAuthSource: null,
+        openCodeAuthUsername: null,
       };
     }
     return globalThisLike[stateKey];
@@ -49,7 +51,7 @@ export const createHmrStateRuntime = (dependencies) => {
     openCodeAuthPassword:
       typeof hmrState.openCodeAuthPassword === 'string' && hmrState.openCodeAuthPassword.length > 0
         ? hmrState.openCodeAuthPassword
-        : userProvidedOpenCodePassword,
+        : (hmrState.openCodeAuthSource === 'shared-service' ? null : userProvidedOpenCodePassword),
     openCodeAuthSource:
       typeof hmrState.openCodeAuthSource === 'string' && hmrState.openCodeAuthSource.length > 0
         ? hmrState.openCodeAuthSource
@@ -60,11 +62,13 @@ export const createHmrStateRuntime = (dependencies) => {
     hmrState.openCodeProcess = runtime.openCodeProcess;
     hmrState.openCodePort = runtime.openCodePort;
     hmrState.openCodeBaseUrl = runtime.openCodeBaseUrl;
+    hmrState.isSharedOpenCodeService = runtime.isSharedOpenCodeService;
     hmrState.isShuttingDown = runtime.isShuttingDown;
     hmrState.signalsAttached = runtime.signalsAttached;
     hmrState.openCodeWorkingDirectory = runtime.openCodeWorkingDirectory;
     hmrState.openCodeAuthPassword = runtime.openCodeAuthPassword;
     hmrState.openCodeAuthSource = runtime.openCodeAuthSource;
+    hmrState.openCodeAuthUsername = runtime.openCodeAuthUsername;
   };
 
   const restoreRuntimeFromState = ({ hmrState, userProvidedOpenCodePassword }) => {
@@ -73,11 +77,16 @@ export const createHmrStateRuntime = (dependencies) => {
       openCodeProcess: hmrState.openCodeProcess,
       openCodePort: hmrState.openCodePort,
       openCodeBaseUrl: hmrState.openCodeBaseUrl ?? null,
+      isSharedOpenCodeService: hmrState.isSharedOpenCodeService === true,
       isShuttingDown: hmrState.isShuttingDown,
       signalsAttached: hmrState.signalsAttached,
       openCodeWorkingDirectory: hmrState.openCodeWorkingDirectory,
       openCodeAuthPassword: auth.openCodeAuthPassword,
       openCodeAuthSource: auth.openCodeAuthSource,
+      openCodeAuthUsername:
+        hmrState.openCodeAuthUsername?.trim?.()
+          ? hmrState.openCodeAuthUsername
+          : null,
     };
   };
 

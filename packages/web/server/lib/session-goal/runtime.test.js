@@ -21,19 +21,42 @@ const session = {
   metadata: { openchamber: { goal } },
 };
 
-const jsonResponse = (body, status = 200) => new Response(JSON.stringify(body), {
-  status,
-  headers: { 'Content-Type': 'application/json' },
-});
+const createApi = (overrides = {}) => {
+  let metadata = structuredClone(session.metadata);
+  const calls = [];
+  const api = {
+    supportsSessionMetadata: () => true,
+    getSession: async (sessionID) => {
+      calls.push(`session:${sessionID}`);
+      return { ...session, metadata };
+    },
+    getSessionStatus: async (sessionID) => {
+      calls.push(`status:${sessionID}`);
+      return { kind: 'authoritative', status: { type: 'idle' } };
+    },
+    listSessionChildren: async (sessionID) => {
+      calls.push(`children:${sessionID}`);
+      return [];
+    },
+    listMessages: async (input) => {
+      calls.push(`messages:${input.sessionID}`);
+      return { messages: [] };
+    },
+    mergeSessionMetadata: async (sessionID, _directory, mutate) => {
+      calls.push(`metadata:${sessionID}`);
+      metadata = await mutate(metadata);
+      return metadata;
+    },
+    sendPrompt: async () => true,
+    ...overrides,
+  };
+  return { api, calls, getMetadata: () => metadata };
+};
 
-const requestPath = (input) => new URL(typeof input === 'string' ? input : input.url).pathname;
-
-const startIdleTick = async (fetchImpl) => {
+const startIdleTick = async (openCodeApi) => {
   const getSmallModelService = vi.fn();
-  vi.stubGlobal('fetch', fetchImpl);
   const runtime = createSessionGoalRuntime({
-    buildOpenCodeUrl: (pathname) => `http://opencode.test${pathname}`,
-    getOpenCodeAuthHeaders: () => ({}),
+    openCodeApi,
     getSmallModelService,
     isEnabled: () => true,
     idleQuietMs: 10,
@@ -57,80 +80,74 @@ describe('session goal live activity gate', () => {
   });
 
   it('waits for the next parent idle when the parent resumed during the quiet window', async () => {
-    const paths = [];
-    const { runtime, getSmallModelService } = await startIdleTick(vi.fn(async (input) => {
-      const pathname = requestPath(input);
-      paths.push(pathname);
-      if (pathname === `/session/${SESSION_ID}`) return jsonResponse(session);
-      if (pathname === '/session/status') return jsonResponse({ [SESSION_ID]: { type: 'busy' } });
-      throw new Error(`Unexpected request: ${pathname}`);
-    }));
+    const { api, calls } = createApi({
+      getSessionStatus: async (sessionID) => {
+        calls.push(`status:${sessionID}`);
+        return { kind: 'authoritative', status: { type: 'busy' } };
+      },
+    });
+    const { runtime, getSmallModelService } = await startIdleTick(api);
 
-    expect(paths).toEqual([`/session/${SESSION_ID}`, '/session/status']);
+    expect(calls).toEqual([`session:${SESSION_ID}`, `status:${SESSION_ID}`]);
     expect(getSmallModelService).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(paths).toHaveLength(2);
+    expect(calls).toHaveLength(2);
     runtime.stop();
   });
 
   it('waits for the parent result cycle while a direct child is working', async () => {
-    const paths = [];
-    const { runtime, getSmallModelService } = await startIdleTick(vi.fn(async (input) => {
-      const pathname = requestPath(input);
-      paths.push(pathname);
-      if (pathname === `/session/${SESSION_ID}`) return jsonResponse(session);
-      if (pathname === '/session/status') return jsonResponse({ [CHILD_ID]: { type: 'busy' } });
-      if (pathname === `/session/${SESSION_ID}/children`) return jsonResponse([{ id: CHILD_ID, parentID: SESSION_ID }]);
-      throw new Error(`Unexpected request: ${pathname}`);
-    }));
+    const { api, calls } = createApi({
+      listSessionChildren: async (sessionID) => {
+        calls.push(`children:${sessionID}`);
+        return [{ id: CHILD_ID, parentID: SESSION_ID }];
+      },
+      getSessionStatus: async (sessionID) => {
+        calls.push(`status:${sessionID}`);
+        return { kind: 'authoritative', status: { type: sessionID === CHILD_ID ? 'busy' : 'idle' } };
+      },
+    });
+    const { runtime, getSmallModelService } = await startIdleTick(api);
 
-    expect(paths).toEqual([
-      `/session/${SESSION_ID}`,
-      '/session/status',
-      `/session/${SESSION_ID}/children`,
+    expect(calls).toEqual([
+      `session:${SESSION_ID}`,
+      `status:${SESSION_ID}`,
+      `children:${SESSION_ID}`,
+      `status:${CHILD_ID}`,
     ]);
     expect(getSmallModelService).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(paths).toHaveLength(3);
+    expect(calls).toHaveLength(4);
     runtime.stop();
   });
 
   it('retries the quiet window when live status cannot be read', async () => {
-    const paths = [];
-    const { runtime, getSmallModelService } = await startIdleTick(vi.fn(async (input) => {
-      const pathname = requestPath(input);
-      paths.push(pathname);
-      if (pathname === `/session/${SESSION_ID}`) return jsonResponse(session);
-      if (pathname === '/session/status') return jsonResponse({ error: 'unavailable' }, 503);
-      throw new Error(`Unexpected request: ${pathname}`);
-    }));
+    const { api, calls } = createApi({
+      getSessionStatus: async (sessionID) => {
+        calls.push(`status:${sessionID}`);
+        return { kind: 'unavailable', error: new Error('unavailable') };
+      },
+    });
+    const { runtime, getSmallModelService } = await startIdleTick(api);
 
-    expect(paths).toEqual([`/session/${SESSION_ID}`, '/session/status']);
+    expect(calls).toEqual([`session:${SESSION_ID}`, `status:${SESSION_ID}`]);
     expect(getSmallModelService).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(10);
-    expect(paths).toEqual([
-      `/session/${SESSION_ID}`,
-      '/session/status',
-      `/session/${SESSION_ID}`,
-      '/session/status',
+    expect(calls).toEqual([
+      `session:${SESSION_ID}`,
+      `status:${SESSION_ID}`,
+      `session:${SESSION_ID}`,
+      `status:${SESSION_ID}`,
     ]);
     runtime.stop();
   });
 
   it('audits normally when the idle parent has no working children', async () => {
-    const requests = [];
-    const fetchImpl = vi.fn(async (input, init = {}) => {
-      const pathname = requestPath(input);
-      requests.push({ pathname, method: init.method ?? 'GET', body: init.body });
-      if (pathname === `/session/${SESSION_ID}` && init.method === 'PATCH') return jsonResponse(session);
-      if (pathname === `/session/${SESSION_ID}`) return jsonResponse(session);
-      if (pathname === '/session/status') return jsonResponse({});
-      if (pathname === `/session/${SESSION_ID}/children`) return jsonResponse([]);
-      if (pathname === `/session/${SESSION_ID}/message`) {
-        return jsonResponse([{
+    const { api, getMetadata } = createApi({
+      listMessages: async () => ({
+        messages: [{
           info: {
             id: 'msg_assistant',
             sessionID: SESSION_ID,
@@ -141,9 +158,8 @@ describe('session goal live activity gate', () => {
             tokens: { input: 1, output: 1, cache: { read: 0 } },
           },
           parts: [{ type: 'text', text: 'The task is verified complete.' }],
-        }]);
-      }
-      throw new Error(`Unexpected request: ${pathname}`);
+        }],
+      }),
     });
     const service = {
       generateSmallModelText: vi.fn(async () => ({
@@ -152,10 +168,8 @@ describe('session goal live activity gate', () => {
         modelID: 'model',
       })),
     };
-    vi.stubGlobal('fetch', fetchImpl);
     const runtime = createSessionGoalRuntime({
-      buildOpenCodeUrl: (pathname) => `http://opencode.test${pathname}`,
-      getOpenCodeAuthHeaders: () => ({}),
+      openCodeApi: api,
       getSmallModelService: async () => service,
       isEnabled: () => true,
       idleQuietMs: 10,
@@ -168,9 +182,7 @@ describe('session goal live activity gate', () => {
     await vi.runOnlyPendingTimersAsync();
 
     expect(service.generateSmallModelText).toHaveBeenCalledOnce();
-    const patch = requests.find((request) => request.pathname === `/session/${SESSION_ID}` && request.method === 'PATCH');
-    expect(patch).toBeDefined();
-    const writtenGoal = JSON.parse(patch.body).metadata.openchamber.goal;
+    const writtenGoal = getMetadata().openchamber.goal;
     expect(writtenGoal).toMatchObject({
       status: 'complete',
       evaluationProviderID: 'provider',

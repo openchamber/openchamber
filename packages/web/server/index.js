@@ -69,6 +69,7 @@ import { createServerUtilsRuntime } from './lib/opencode/server-utils-runtime.js
 import { createStaticRoutesRuntime } from './lib/opencode/static-routes-runtime.js';
 import { createSettingsRuntime } from './lib/opencode/settings-runtime.js';
 import { createOpenCodeResolutionRuntime } from './lib/opencode/opencode-resolution-runtime.js';
+import { createOpenCodeApiRuntime } from './lib/opencode/api-runtime.js';
 import { resolveOpenCodeUpgradeCapability } from './lib/opencode/upgrade-capability.js';
 import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
@@ -162,6 +163,7 @@ function headerIncludesEventStream(value) {
  */
 const SSE_PATH_PREFIXES = [
   '/api/event',
+  '/api/api/event',
   '/api/global/event',
   '/api/notifications/stream',
   '/api/openchamber/events',
@@ -531,6 +533,7 @@ let isRestartingOpenCode = false;
 let openCodeApiPrefix = '';
 let openCodeApiPrefixDetected = true;
 let openCodeApiDetectionTimer = null;
+let openCodeProtocol = null;
 let lastOpenCodeError = null;
 let lastOpenCodeLaunchDiagnostics = null;
 let lastOpenCodeHealthFailure = null;
@@ -539,6 +542,7 @@ let lastOpenCodeRestartDiagnostics = null;
 let isOpenCodeReady = false;
 let openCodeNotReadySince = 0;
 let isExternalOpenCode = false;
+let isSharedOpenCodeService = hmrState.isSharedOpenCodeService === true;
 let exitOnShutdown = true;
 let uiAuthController = null;
 let activeTunnelController = null;
@@ -561,6 +565,7 @@ const initialOpenCodeAuthState = hmrStateRuntime.resolveOpenCodeAuthFromState({
 });
 let openCodeAuthPassword = initialOpenCodeAuthState.openCodeAuthPassword;
 let openCodeAuthSource = initialOpenCodeAuthState.openCodeAuthSource;
+let openCodeAuthUsername = hmrState.openCodeAuthUsername ?? null;
 
 // Sync helper - call after modifying any HMR state variable
 const syncToHmrState = () => {
@@ -568,11 +573,13 @@ const syncToHmrState = () => {
     openCodeProcess,
     openCodePort,
     openCodeBaseUrl,
+    isSharedOpenCodeService,
     isShuttingDown,
     signalsAttached,
     openCodeWorkingDirectory,
     openCodeAuthPassword,
     openCodeAuthSource,
+    openCodeAuthUsername,
   });
 };
 
@@ -585,11 +592,13 @@ const syncFromHmrState = () => {
   openCodeProcess = restored.openCodeProcess;
   openCodePort = restored.openCodePort;
   openCodeBaseUrl = restored.openCodeBaseUrl;
+  isSharedOpenCodeService = restored.isSharedOpenCodeService;
   isShuttingDown = restored.isShuttingDown;
   signalsAttached = restored.signalsAttached;
   openCodeWorkingDirectory = restored.openCodeWorkingDirectory;
   openCodeAuthPassword = restored.openCodeAuthPassword;
   openCodeAuthSource = restored.openCodeAuthSource;
+  openCodeAuthUsername = restored.openCodeAuthUsername;
 };
 
 // Module-level variables that shadow HMR state
@@ -637,6 +646,10 @@ const openCodeAuthStateRuntime = createOpenCodeAuthStateRuntime({
   setAuthSource: (value) => {
     openCodeAuthSource = value;
   },
+  getAuthUsername: () => openCodeAuthUsername,
+  setAuthUsername: (value) => {
+    openCodeAuthUsername = value;
+  },
   getUserProvidedPassword: () => userProvidedOpenCodePassword,
   syncToHmrState,
 });
@@ -644,6 +657,7 @@ const openCodeAuthStateRuntime = createOpenCodeAuthStateRuntime({
 const getOpenCodeAuthHeaders = (...args) => openCodeAuthStateRuntime.getOpenCodeAuthHeaders(...args);
 const isOpenCodeConnectionSecure = (...args) => openCodeAuthStateRuntime.isOpenCodeConnectionSecure(...args);
 const ensureLocalOpenCodeServerPassword = (...args) => openCodeAuthStateRuntime.ensureLocalOpenCodeServerPassword(...args);
+const setOpenCodeServiceAuth = (...args) => openCodeAuthStateRuntime.setOpenCodeServiceAuth(...args);
 
 const openCodeNetworkState = {};
 Object.defineProperties(openCodeNetworkState, {
@@ -652,6 +666,7 @@ Object.defineProperties(openCodeNetworkState, {
   openCodeApiPrefix: { get: () => openCodeApiPrefix, set: (value) => { openCodeApiPrefix = value; } },
   openCodeApiPrefixDetected: { get: () => openCodeApiPrefixDetected, set: (value) => { openCodeApiPrefixDetected = value; } },
   openCodeApiDetectionTimer: { get: () => openCodeApiDetectionTimer, set: (value) => { openCodeApiDetectionTimer = value; } },
+  openCodeProtocol: { get: () => openCodeProtocol, set: (value) => { openCodeProtocol = value; } },
 });
 
 const openCodeNetworkRuntime = createOpenCodeNetworkRuntime({
@@ -664,13 +679,19 @@ const waitForReady = (...args) => openCodeNetworkRuntime.waitForReady(...args);
 const normalizeApiPrefix = (...args) => openCodeNetworkRuntime.normalizeApiPrefix(...args);
 const setDetectedOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.setDetectedOpenCodeApiPrefix(...args);
 const buildOpenCodeUrl = (...args) => openCodeNetworkRuntime.buildOpenCodeUrl(...args);
+const openCodeApi = createOpenCodeApiRuntime({
+  getOpenCodeProtocol: () => openCodeProtocol,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+});
+const getOpenCodeHealthPath = (...args) => openCodeNetworkRuntime.getOpenCodeHealthPath(...args);
 const ensureOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.ensureOpenCodeApiPrefix(...args);
 const scheduleOpenCodeApiDetection = (...args) => openCodeNetworkRuntime.scheduleOpenCodeApiDetection(...args);
 
 // Plugin-registered providers exist only inside the running OpenCode process.
 // Small-model callers resolve them through this connection; without it they
 // stay on the file-based resolution and plugin models remain unreachable.
-configureOpenCodeRuntimeProviders({ buildOpenCodeUrl, getOpenCodeAuthHeaders });
+configureOpenCodeRuntimeProviders({ openCodeApi });
 
 const ENV_CONFIGURED_API_PREFIX = normalizeApiPrefix(
   process.env.OPENCODE_API_PREFIX || process.env.OPENCHAMBER_API_PREFIX || ''
@@ -745,6 +766,7 @@ const openCodeResolutionRuntime = createOpenCodeResolutionRuntime({
 const getOpenCodeResolutionSnapshot = (...args) =>
   openCodeResolutionRuntime.getOpenCodeResolutionSnapshot(...args);
 
+const sharedOpenCodeServiceEnv = { ...process.env };
 applyLoginShellEnvSnapshot();
 
 notificationTemplateRuntime = createNotificationTemplateRuntime({
@@ -753,6 +775,7 @@ notificationTemplateRuntime = createNotificationTemplateRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   resolveGitBinaryForSpawn,
+  openCodeApi,
 });
 
 const notificationTriggerRuntime = createNotificationTriggerRuntime({
@@ -770,6 +793,7 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
   isAnyInteractiveClientVisible,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
+  openCodeApi,
 });
 
 const maybeSendPushForTrigger = (...args) => notificationTriggerRuntime.maybeSendPushForTrigger(...args);
@@ -777,14 +801,12 @@ const setAutoAcceptSession = (sessionId, enabled) => permissionAutoAcceptRuntime
 clearPendingPushBadge = () => notificationTriggerRuntime.clearPendingPushBadge();
 
 const sessionAssistRuntime = createSessionAssistRuntime({
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
+  openCodeApi,
   getSmallModelService: async () => import('./lib/small-model/index.js'),
 });
 
 const sessionGoalRuntime = createSessionGoalRuntime({
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
+  openCodeApi,
   getSmallModelService: async () => import('./lib/small-model/index.js'),
   emitGoalNotification: async ({ sessionId, directory, status, goal }) => {
     // The goal settle notification replaces the per-turn ready notifications
@@ -833,28 +855,11 @@ const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
   // reference here would read it before it exists.
   resolveProjectId: (directory) => resolveMemoryProjectId(directory),
   isAgentMemoryEnabled,
-  openCodeFetch: async (fetchPath, { directory, method = 'GET', body } = {}) => {
-    const params = new URLSearchParams();
-    if (directory) params.set('directory', directory);
-    const search = params.toString();
-    const response = await fetch(`${buildOpenCodeUrl(fetchPath, '')}${search ? `?${search}` : ''}`, {
-      method,
-      headers: {
-        Accept: 'application/json',
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
-        ...getOpenCodeAuthHeaders(),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!response.ok) throw new Error(`OpenCode ${method} ${fetchPath} failed with ${response.status}`);
-    return response.json().catch(() => null);
-  },
+  openCodeApi,
 });
 
 const contextObligatoryRuntime = createContextObligatoryRuntime({
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
+  openCodeApi,
   sessionKnowledgeRuntime,
 });
 
@@ -864,12 +869,12 @@ const globalMessageStreamHub = createGlobalMessageStreamHub({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
+  getOpenCodeProtocol: () => openCodeProtocol,
 });
 
 const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
   globalEventHub: globalMessageStreamHub,
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
+  openCodeApi,
   readSettingsFromDiskMigrated,
   persistSettings,
   broadcastGlobalUiEvent,
@@ -898,6 +903,7 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   getOpenCodeAuthHeaders,
   parseSseDataPayload: (...args) => parseSseDataPayload(...args),
   globalEventHub: globalMessageStreamHub,
+  getOpenCodeProtocol: () => openCodeProtocol,
   onPayload: (payload) => {
     maybeCacheSessionInfoFromEvent(payload);
     void maybeSendPushForTrigger(payload);
@@ -928,7 +934,7 @@ const processForwardedEventPayload = (payload, emitSyntheticEvent) => {
 
   maybeCacheSessionInfoFromEvent(payload);
 
-  if (payload.type !== 'session.status') {
+  if (payload.type !== 'session.status' && payload.type !== 'session.idle') {
     return;
   }
 
@@ -936,9 +942,11 @@ const processForwardedEventPayload = (payload, emitSyntheticEvent) => {
   const statusInfo = properties.status && typeof properties.status === 'object' ? properties.status : {};
   const info = properties.info && typeof properties.info === 'object' ? properties.info : {};
   const sessionId = typeof properties.sessionID === 'string' ? properties.sessionID.trim() : '';
-  const status = typeof statusInfo.type === 'string'
-    ? statusInfo.type.trim()
-    : (typeof info.type === 'string' ? info.type.trim() : '');
+  const status = payload.type === 'session.idle'
+    ? 'idle'
+    : typeof statusInfo.type === 'string'
+      ? statusInfo.type.trim()
+      : (typeof info.type === 'string' ? info.type.trim() : '');
 
   if (!sessionId || !status) {
     return;
@@ -1029,8 +1037,7 @@ const staticRoutesRuntime = createStaticRoutesRuntime({
   __dirname,
   express,
   resolveProjectDirectory,
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
+  openCodeApi,
   readSettingsFromDiskMigrated,
   normalizePwaAppName,
   normalizePwaOrientation,
@@ -1114,6 +1121,7 @@ Object.defineProperties(openCodeLifecycleState, {
   openCodeApiPrefix: { get: () => openCodeApiPrefix, set: (value) => { openCodeApiPrefix = value; } },
   openCodeApiPrefixDetected: { get: () => openCodeApiPrefixDetected, set: (value) => { openCodeApiPrefixDetected = value; } },
   openCodeApiDetectionTimer: { get: () => openCodeApiDetectionTimer, set: (value) => { openCodeApiDetectionTimer = value; } },
+  openCodeProtocol: { get: () => openCodeProtocol, set: (value) => { openCodeProtocol = value; } },
   lastOpenCodeError: { get: () => lastOpenCodeError, set: (value) => { lastOpenCodeError = value; } },
   lastOpenCodeLaunchDiagnostics: { get: () => lastOpenCodeLaunchDiagnostics, set: (value) => { lastOpenCodeLaunchDiagnostics = value; } },
   lastOpenCodeHealthFailure: { get: () => lastOpenCodeHealthFailure, set: (value) => { lastOpenCodeHealthFailure = value; } },
@@ -1122,6 +1130,7 @@ Object.defineProperties(openCodeLifecycleState, {
   isOpenCodeReady: { get: () => isOpenCodeReady, set: (value) => { isOpenCodeReady = value; } },
   openCodeNotReadySince: { get: () => openCodeNotReadySince, set: (value) => { openCodeNotReadySince = value; } },
   isExternalOpenCode: { get: () => isExternalOpenCode, set: (value) => { isExternalOpenCode = value; } },
+  isSharedOpenCodeService: { get: () => isSharedOpenCodeService, set: (value) => { isSharedOpenCodeService = value; } },
   isShuttingDown: { get: () => isShuttingDown, set: (value) => { isShuttingDown = value; } },
   healthCheckInterval: { get: () => healthCheckInterval, set: (value) => { healthCheckInterval = value; } },
   expressApp: { get: () => expressApp, set: (value) => { expressApp = value; } },
@@ -1145,10 +1154,13 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   getOpenCodeAuthHeaders,
   buildOpenCodeUrl,
   waitForReady,
+  getOpenCodeHealthPath,
   normalizeApiPrefix,
   applyOpencodeBinaryFromSettings,
   ensureOpencodeCliEnv,
   ensureLocalOpenCodeServerPassword,
+  setOpenCodeServiceAuth,
+  getSharedOpenCodeServiceEnv: () => sharedOpenCodeServiceEnv,
   resolveManagedOpenCodeLaunchSpec,
   setOpenCodePort,
   setDetectedOpenCodeApiPrefix,
@@ -1185,7 +1197,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   // so the UI keeps receiving events instead of staying pinned to the old
   // process (#2638). The runtime is created later by the startup pipeline;
   // by the time any restart runs, it is assigned.
-  onOpenCodeRestarted: () => {
+  onOpenCodeRestarted: ({ sharedService } = {}) => {
     // A restart reloads plugins: provider ports, credentials and the provider
     // list itself can all differ from what was cached.
     resetOpenCodeRuntimeProviders();
@@ -1194,6 +1206,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
     } catch (error) {
       console.warn('Failed to rebind message stream after OpenCode restart:', error?.message ?? error);
     }
+    if (sharedService) return;
     try {
       const { sessionIds } = sessionRuntime.interruptBusySessionsAfterRestart();
       if (sessionIds.length > 0) {
@@ -1236,6 +1249,7 @@ const getOpenCodeUpgradeCapability = () => {
     || resolvedOpencodeBinary;
   return resolveOpenCodeUpgradeCapability({
     isExternal: isExternalOpenCode,
+    isSharedService: isSharedOpenCodeService,
     hasManagedProcess: Boolean(openCodeProcess),
     activeBinary,
     isBundledBinary: isBundledOpenCodeCliPath,
@@ -1258,6 +1272,7 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   getOpenCodeAuthHeaders,
   waitForOpenCodeReady,
   sessionKnowledgeRuntime,
+  openCodeApi,
   setSessionAutoAccept: (sessionId, enabled, directory) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled, directory),
   emitTaskRunEvent: (event) => {
     for (const client of uiOpenChamberEventClients) {
@@ -1346,6 +1361,7 @@ const openChamberSessionService = createOpenChamberSessionService({
   waitForOpenCodeReady,
   emitSessionCreatedEvent,
   sessionKnowledgeRuntime,
+  openCodeApi,
 });
 // Browser actions are published to whichever OpenChamber clients are connected;
 // the one owning the browser panel answers. `emitRequest` returns the number of
@@ -1394,6 +1410,7 @@ const openChamberControlService = createOpenChamberControlService({
     isAgentMemoryEnabled,
     resolveProjectId: resolveMemoryProjectId,
   }),
+  openCodeApi,
 });
 
 const ensureGlobalWatcherStarted = async () => {
@@ -1411,7 +1428,8 @@ const ensureGlobalWatcherStarted = async () => {
 const bootstrapOpenCodeAtStartup = async (...args) => {
   await openCodeLifecycleRuntime.bootstrapOpenCodeAtStartup(...args);
   scheduleOpenCodeApiDetection();
-  if (openCodeLifecycleState.openCodeProcess && !openCodeLifecycleState.isExternalOpenCode) {
+  if ((openCodeLifecycleState.openCodeProcess || openCodeLifecycleState.isSharedOpenCodeService)
+    && !openCodeLifecycleState.isExternalOpenCode) {
     startHealthMonitoring();
   }
   // The global watcher used to start only for desktop notifications; the
@@ -1453,7 +1471,8 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   setMessageStreamRuntime: (value) => {
     messageStreamRuntime = value;
   },
-  shouldSkipOpenCodeStop: () => ENV_SKIP_OPENCODE_START || isExternalOpenCode,
+  shouldSkipOpenCodeStop: () => ENV_SKIP_OPENCODE_START || isExternalOpenCode || isSharedOpenCodeService,
+  getOpenCodeOwnership: () => isSharedOpenCodeService ? 'shared-service' : 'external',
   getOpenCodePort: () => openCodePort,
   getOpenCodeProcess: () => openCodeProcess,
   setOpenCodeProcess: (value) => {
@@ -1707,6 +1726,8 @@ async function main(options = {}) {
         openCodeAuthSource: openCodeAuthSource || null,
         openCodeApiPrefix: '',
         openCodeApiPrefixDetected: true,
+        openCodeProtocol,
+        openCodeOwnership: isSharedOpenCodeService ? 'shared-service' : (isExternalOpenCode ? 'external' : 'managed'),
         isOpenCodeReady,
         lastOpenCodeError,
         lastOpenCodeLaunchDiagnostics,
@@ -1908,7 +1929,9 @@ async function main(options = {}) {
     sanitizeSkillCatalogs,
     isUnsafeSkillRelativePath,
     buildOpenCodeUrl,
+    getOpenCodeHealthPath,
     getOpenCodeAuthHeaders,
+    openCodeApi,
     getOpenCodePort: () => openCodePort,
     // Dev-server discovery must not offer OpenChamber's own listeners back to
     // the user as something to preview.
@@ -1947,6 +1970,7 @@ async function main(options = {}) {
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     globalEventHub: globalMessageStreamHub,
+    getOpenCodeProtocol: () => openCodeProtocol,
     processForwardedEventPayload,
     messageStreamWsClients: uiNotificationWsClients,
     upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
@@ -2021,7 +2045,12 @@ async function main(options = {}) {
     isReady: () => isOpenCodeReady,
     restartOpenCode: () => restartOpenCode(),
     getOpenCodeProcessInfo: () => {
-      const managed = Boolean((openCodeProcess || openCodePort) && !ENV_SKIP_OPENCODE_START && !isExternalOpenCode);
+      const managed = Boolean(
+        (openCodeProcess || openCodePort)
+        && !ENV_SKIP_OPENCODE_START
+        && !isExternalOpenCode
+        && !isSharedOpenCodeService,
+      );
       // Only ever expose pid/port for a server WE manage. The Electron-side
       // killer kills by port (lsof + kill -KILL), so returning a port we don't
       // own — e.g. an external/desktop OpenCode on 4096 we attached to — would

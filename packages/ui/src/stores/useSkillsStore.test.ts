@@ -58,11 +58,13 @@ mock.module('./utils/safeStorage', () => ({
   }),
 }));
 
+const { usePendingOpenCodeRestartStore } = await import('./usePendingOpenCodeRestartStore');
 const { invalidateSkillsLoadCache, useSkillsStore } = await import('./useSkillsStore');
 
 describe('useSkillsStore directory resolution', () => {
   beforeEach(() => {
     runtimeFetchCalls = [];
+    usePendingOpenCodeRestartStore.getState().clear();
     getDirectoryImpl = () => undefined;
     runtimeFetchImpl = async () => new Response(JSON.stringify({
       skills: [{
@@ -212,6 +214,24 @@ describe('useSkillsStore directory resolution', () => {
     const headers = new Headers(renameCall?.headers);
     expect(headers.get('content-type')).toBe('application/json');
     expect(headers.get('x-opencode-directory')).toBe(activeProjectPath);
+  });
+
+  test('renameSkill records a deferred shared-service restart', async () => {
+    runtimeFetchImpl = async (_url, init) => {
+      if (init?.method === 'PATCH') {
+        return Response.json({
+          success: true,
+          requiresReload: false,
+          requiresRestart: true,
+          restartDeferred: true,
+        });
+      }
+      return Response.json({ skills: [] });
+    };
+
+    expect(await useSkillsStore.getState().renameSkill('old-skill', 'new-skill')).toBe(true);
+    expect(usePendingOpenCodeRestartStore.getState().changes).toHaveLength(1);
+    expect(usePendingOpenCodeRestartStore.getState().changes[0]?.scope).toBe('skills');
   });
 
   test('invalidateSkillsLoadCache() with no argument clears the active-project cache key used by loadSkills', async () => {

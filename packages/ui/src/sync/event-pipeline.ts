@@ -14,6 +14,7 @@
 
 import type { Event, OpencodeClient, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { opencodeClient } from "@/lib/opencode/client"
+import { resolveOpenCodeProtocol } from "@/lib/opencode/opencode2-adapter"
 import { getRuntimeUrlResolver } from "@/lib/runtime-url"
 import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from "@/lib/runtime-auth"
 import { type RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
@@ -76,41 +77,41 @@ type MessageStreamWsFrame = {
   scope?: "global" | "directory"
 }
 
-const normalizeOpenChamberSessionStatus = (payload: Event): Event | null => {
-  const record = payload as unknown as {
-    id?: unknown
-    type?: unknown
-    properties?: {
-      sessionID?: unknown
-      sessionId?: unknown
-      status?: unknown
-      metadata?: {
-        attempt?: unknown
-        message?: unknown
-        next?: unknown
-      }
+type OpenChamberSessionStatusEvent = {
+  id?: string
+  type: "openchamber:session-status"
+  properties?: {
+    sessionID?: string
+    sessionId?: string
+    status?: string
+    metadata?: {
+      attempt?: number
+      message?: string
+      next?: number
     }
   }
+}
 
-  if (record.type !== "openchamber:session-status") return null
+const normalizeOpenChamberSessionStatus = (payload: Event | OpenChamberSessionStatusEvent): Event | null => {
+  if (payload.type !== "openchamber:session-status") return null
 
-  const sessionID = typeof record.properties?.sessionID === "string" && record.properties.sessionID.length > 0
-    ? record.properties.sessionID
-    : typeof record.properties?.sessionId === "string" && record.properties.sessionId.length > 0
-      ? record.properties.sessionId
+  const sessionID = payload.properties?.sessionID && payload.properties.sessionID.length > 0
+    ? payload.properties.sessionID
+    : payload.properties?.sessionId && payload.properties.sessionId.length > 0
+      ? payload.properties.sessionId
       : ""
-  const rawStatus = typeof record.properties?.status === "string" ? record.properties.status : ""
+  const rawStatus = payload.properties?.status ?? ""
   if (!sessionID || !rawStatus) return null
 
   let status: SessionStatus | null = null
   if (rawStatus === "idle" || rawStatus === "busy") {
     status = { type: rawStatus }
   } else if (rawStatus === "retry") {
-    const metadata = record.properties?.metadata
+    const metadata = payload.properties?.metadata
     if (
-      typeof metadata?.attempt === "number"
-      && typeof metadata.message === "string"
-      && typeof metadata.next === "number"
+      metadata?.attempt !== undefined
+      && metadata.message !== undefined
+      && metadata.next !== undefined
     ) {
       status = {
         type: "retry",
@@ -123,15 +124,15 @@ const normalizeOpenChamberSessionStatus = (payload: Event): Event | null => {
   if (!status) return null
 
   return {
-    id: typeof record.id === "string" && record.id.length > 0
-      ? record.id
+    id: payload.id && payload.id.length > 0
+      ? payload.id
       : `openchamber-status-${sessionID}-${Date.now()}`,
     type: "session.status",
     properties: {
       sessionID,
       status,
     },
-  } as Event
+  }
 }
 
 const normalizeEventType = (payload: Event): Event => {
@@ -555,14 +556,17 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   }
 
   const runSseAttempt = async (signal: AbortSignal) => {
-    const events = await sdk.global.event({
+    const eventOptions = {
       signal,
       ...(lastEventId && lastEventId.length > 0 ? { headers: { "Last-Event-ID": lastEventId } } : {}),
       onSseEvent: (event: { id?: unknown }) => {
         resetHeartbeat()
-        if (typeof event.id === "string" && event.id.length > 0) {
-          lastEventId = event.id
+        if (typeof event.id === "string") {
+          lastEventId = event.id.length > 0 ? event.id : undefined
         }
+      },
+      onSseHeartbeat: () => {
+        resetHeartbeat()
       },
       onSseError: (error: unknown) => {
         if (isAbortError(error)) return
@@ -570,7 +574,8 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
         streamErrorLogged = true
         console.error("[event-pipeline] SSE stream error", error)
       },
-    })
+    } as Parameters<typeof sdk.global.event>[0] & { onSseHeartbeat: () => void }
+    const events = await sdk.global.event(eventOptions)
 
     markConnected()
 
@@ -783,7 +788,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     })
   }
 
-  const resolveTransport = (): "ws" | "sse" => {
+  const resolveLegacyTransport = (): "ws" | "sse" => {
     if (typeof WebSocket !== "function") {
       return "sse"
     }
@@ -796,14 +801,20 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     return wsFallbackUntil > Date.now() ? "sse" : "ws"
   }
 
+  const resolveTransport = (): "ws" | "sse" | Promise<"ws" | "sse"> => {
+    if (transport === "sse") return "sse"
+    const protocol = resolveOpenCodeProtocol(sdk)
+    if (!(protocol instanceof Promise)) return protocol === "opencode2" ? "sse" : resolveLegacyTransport()
+    return protocol.then((detected) => detected === "opencode2" ? "sse" : resolveLegacyTransport())
+  }
+
   void (async () => {
     while (!abort.signal.aborted) {
       attempt = new AbortController()
       lastEventAt = Date.now()
       attemptAbortReason = null
       let retryDelayMs = reconnectDelayMs
-      const currentTransport = resolveTransport()
-      activeTransport = currentTransport
+      let currentTransport = activeTransport
       const onAbort = () => {
         attemptAbortReason = "pipeline_stopped"
         attempt?.abort()
@@ -811,6 +822,9 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       abort.signal.addEventListener("abort", onAbort)
 
       try {
+        const resolvedTransport = resolveTransport()
+        currentTransport = resolvedTransport instanceof Promise ? await resolvedTransport : resolvedTransport
+        activeTransport = currentTransport
         if (currentTransport === "ws") {
           await runWsAttempt(attempt.signal)
         } else {

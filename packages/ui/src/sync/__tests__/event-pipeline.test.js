@@ -10,6 +10,7 @@ mock.module('@/lib/runtime-auth', () => ({
 }));
 
 const { createEventPipeline } = await import('../event-pipeline');
+const { createOpencode2Adapter } = await import('@/lib/opencode/opencode2-adapter');
 
 const originalDocument = globalThis.document;
 const originalWindow = globalThis.window;
@@ -601,6 +602,92 @@ describe('createEventPipeline', () => {
         },
       },
     ]);
+  });
+
+  it('uses adapter SSE for opencode2 even when websocket is configured', async () => {
+    installDomStubs();
+    globalThis.WebSocket = FakeWebSocket;
+
+    const event = {
+      id: 'event-1',
+      created: 100,
+      type: 'session.text.delta',
+      location: { directory: '/repo' },
+      data: { sessionID: 'session-1', assistantMessageID: 'assistant-1', ordinal: 0, delta: 'hello' },
+    };
+    const legacy = createSdkWithSingleEvent({}, new Promise(() => {}));
+    const sdk = createOpencode2Adapter(
+      legacy,
+      'https://openchamber.test',
+      '/repo',
+      async () => new Response(`data: ${JSON.stringify(event)}\n\n`, { headers: { 'content-type': 'text/event-stream' } }),
+      async () => 'opencode2',
+    );
+
+    let cleanup;
+    const delivered = new Promise((resolve) => {
+      const pipeline = createEventPipeline({
+        sdk,
+        transport: 'ws',
+        onEvent: (directory, payload) => resolve({ directory, payload }),
+      });
+      cleanup = pipeline.cleanup;
+    });
+
+    try {
+      await expect(withTimeout(delivered, 500, 'timed out waiting for opencode2 SSE event')).resolves.toEqual({
+        directory: '/repo',
+        payload: {
+          id: 'event-1',
+          type: 'message.part.delta',
+          properties: {
+            sessionID: 'session-1',
+            messageID: 'assistant-1',
+            partID: 'assistant-1:text:0',
+            field: 'text',
+            delta: 'hello',
+          },
+        },
+      });
+      expect(FakeWebSocket.instances).toHaveLength(0);
+    } finally {
+      cleanup?.();
+    }
+  });
+
+  it('retries protocol detector failures without opening a legacy websocket', async () => {
+    installDomStubs();
+    globalThis.WebSocket = FakeWebSocket;
+    const originalConsoleError = console.error;
+    console.error = () => {};
+    const legacy = createSdkWithSingleEvent({}, new Promise(() => {}));
+    const sdk = createOpencode2Adapter(
+      legacy,
+      'https://openchamber.test',
+      '/repo',
+      async () => { throw new Error('fetch should not run'); },
+      async () => { throw new Error('protocol unavailable'); },
+    );
+
+    let cleanup;
+    const disconnected = new Promise((resolve) => {
+      const pipeline = createEventPipeline({
+        sdk,
+        transport: 'auto',
+        reconnectDelayMs: 1_000,
+        onEvent: () => {},
+        onDisconnect: resolve,
+      });
+      cleanup = pipeline.cleanup;
+    });
+
+    try {
+      await expect(withTimeout(disconnected, 500, 'timed out waiting for detector failure')).resolves.toContain('protocol unavailable');
+      expect(FakeWebSocket.instances).toHaveLength(0);
+    } finally {
+      cleanup?.();
+      console.error = originalConsoleError;
+    }
   });
 
   it('falls back to SSE when websocket closes before ready in auto mode', async () => {

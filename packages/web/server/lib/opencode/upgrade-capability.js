@@ -6,6 +6,7 @@ const isWindowsArm64 = () => process.platform === 'win32' && process.arch === 'a
 
 export const resolveOpenCodeUpgradeCapability = ({
   isExternal,
+  isSharedService,
   hasManagedProcess,
   activeBinary,
   isBundledBinary,
@@ -23,6 +24,14 @@ export const resolveOpenCodeUpgradeCapability = ({
       supported: false,
       manager: 'external',
       reason: 'external',
+    };
+  }
+
+  if (isSharedService) {
+    return {
+      supported: false,
+      manager: 'external',
+      reason: 'shared-service',
     };
   }
 

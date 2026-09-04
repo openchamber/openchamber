@@ -110,14 +110,17 @@ const extractJsonObject = (value) => {
 };
 
 const extractSessionStatus = (payload) => {
-  if (!payload || payload.type !== 'session.status') return null;
+  const isIdleEvent = payload?.type === 'session.idle';
+  if (!payload || (!isIdleEvent && payload.type !== 'session.status')) return null;
   const properties = payload.properties && typeof payload.properties === 'object' ? payload.properties : {};
   const status = properties.status && typeof properties.status === 'object' ? properties.status : {};
   const info = properties.info && typeof properties.info === 'object' ? properties.info : {};
   const sessionId = typeof properties.sessionID === 'string' ? properties.sessionID.trim() : '';
-  const type = typeof status.type === 'string'
-    ? status.type.trim()
-    : (typeof info.type === 'string' ? info.type.trim() : '');
+  const type = isIdleEvent
+    ? 'idle'
+    : typeof status.type === 'string'
+      ? status.type.trim()
+      : (typeof info.type === 'string' ? info.type.trim() : '');
   if (!sessionId || !type) return null;
   const directory = typeof properties.directory === 'string' && properties.directory
     ? properties.directory
@@ -146,8 +149,7 @@ const messagePartsToText = (message) => {
 };
 
 export const createSessionAssistRuntime = ({
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
+  openCodeApi,
   getSmallModelService,
   quietMs = IDLE_QUIET_MS,
 }) => {
@@ -163,43 +165,23 @@ export const createSessionAssistRuntime = ({
     }
   };
 
-  const openCodeFetch = async (path, { directory, method = 'GET', body } = {}) => {
-    const base = buildOpenCodeUrl(path, '');
-    const url = directory ? `${base}?directory=${encodeURIComponent(directory)}` : base;
-    const response = await fetch(url, {
-      method,
-      headers: {
-        Accept: 'application/json',
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
-        ...getOpenCodeAuthHeaders(),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    if (!response.ok) {
-      throw new Error(`OpenCode ${method} ${path} failed with ${response.status}`);
-    }
-    return response.json().catch(() => null);
-  };
-
   const fetchRecentMessages = async (sessionId, directory) => {
-    const base = buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}/message`, '');
-    const params = new URLSearchParams({ limit: String(TRANSCRIPT_MESSAGE_LIMIT) });
-    if (directory) params.set('directory', directory);
-    const response = await fetch(`${base}?${params.toString()}`, {
-      method: 'GET',
-      headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    if (!response.ok) return null;
-    const messages = await response.json().catch(() => null);
-    return Array.isArray(messages) ? messages : null;
+    try {
+      const { messages } = await openCodeApi.listMessages(
+        { sessionID: sessionId, directory, limit: TRANSCRIPT_MESSAGE_LIMIT },
+        { timeoutMs: FETCH_TIMEOUT_MS },
+      );
+      return messages;
+    } catch {
+      return null;
+    }
   };
 
   const generateAssist = async (sessionId, directory) => {
+    if (!openCodeApi.supportsSessionMetadata()) return;
     const targets = getSessionAssistTargets();
     if (!targets.recap && !targets.suggestion) return;
-    const session = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory })
+    const session = await openCodeApi.getSession(sessionId, directory, { timeoutMs: FETCH_TIMEOUT_MS })
       .catch((error) => {
         console.warn(`[session-assist] session fetch failed: ${error?.message || error}`);
         return null;
@@ -312,34 +294,24 @@ export const createSessionAssistRuntime = ({
     // Merge from a FRESH read: generation takes tens of seconds, and merging
     // from the session snapshot fetched before it would clobber any metadata
     // written meanwhile (suggestion dismissals, review links, …).
-    const freshSession = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory })
-      .catch(() => null);
-    const currentMetadata = freshSession?.metadata && typeof freshSession.metadata === 'object'
-      ? freshSession.metadata
-      : (session.metadata && typeof session.metadata === 'object' ? session.metadata : {});
-    const currentNamespace = currentMetadata.openchamber && typeof currentMetadata.openchamber === 'object'
-      ? currentMetadata.openchamber
-      : {};
-
     console.log(`[session-assist] generated for ${sessionId} via ${generated.providerID}/${generated.modelID}`);
-    await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, {
-      directory,
-      method: 'PATCH',
-      body: {
-        metadata: {
-          ...currentMetadata,
-          openchamber: {
-            ...currentNamespace,
-            assist: {
-              recap,
-              suggestion,
-              forMessageID: lastAssistantInfo.id,
-              generatedAt: Date.now(),
-            },
+    await openCodeApi.mergeSessionMetadata(sessionId, directory, (currentMetadata) => {
+      const currentNamespace = currentMetadata.openchamber && typeof currentMetadata.openchamber === 'object'
+        ? currentMetadata.openchamber
+        : {};
+      return {
+        ...currentMetadata,
+        openchamber: {
+          ...currentNamespace,
+          assist: {
+            recap,
+            suggestion,
+            forMessageID: lastAssistantInfo.id,
+            generatedAt: Date.now(),
           },
         },
-      },
-    });
+      };
+    }, { timeoutMs: FETCH_TIMEOUT_MS });
   };
 
   const armTimer = (sessionId, directory) => {

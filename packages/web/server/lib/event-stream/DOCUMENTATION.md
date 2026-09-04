@@ -10,6 +10,7 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - `packages/web/server/lib/event-stream/directory-ws-bridge.js`: browser-facing per-directory WS bridge that owns one scoped upstream reader per connection.
 - `packages/web/server/lib/event-stream/protocol.js`: path constants, SSE envelope parsing, and WebSocket frame serialization helpers.
 - `packages/web/server/lib/event-stream/upstream-reader.js`: reusable upstream SSE reader with event-id tracking, stall recovery, and reconnect handling.
+- `packages/web/server/lib/event-stream/opencode2-event-normalizer.js`: stateful opencode2-to-legacy event translator shared by the global hub, directory bridge, and standalone watcher.
 - `packages/web/server/lib/event-stream/runtime.js`: thin WebSocket server runtime for upgrade handling and path dispatch to the global/directory bridges.
 - `packages/web/server/lib/event-stream/protocol.test.js`: unit tests for protocol helpers.
 - `packages/web/server/lib/event-stream/upstream-reader.test.js`: unit tests for upstream SSE reader behavior.
@@ -26,7 +27,7 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - `sendMessageStreamWsEvent(socket, payload, options)`: sends an event frame with optional `eventId` and `directory`.
 
 ### Runtime helpers
-- `createGlobalMessageStreamHub(...)`: creates a shared `/global/event` upstream SSE hub with event/status subscribers and bounded event-id replay.
+- `createGlobalMessageStreamHub(...)`: creates a shared upstream SSE hub (`/global/event` for legacy, `/api/event` for opencode2) with event/status subscribers, protocol-aware event normalization, and bounded event-id replay.
 - `createGlobalUiEventBroadcaster({ sseClients, wsClients, writeSseEvent })`: returns a broadcaster that fans out the same synthetic UI event to SSE and WS clients.
 - `createMessageStreamWsRuntime(...)`: mounts the message-stream WS server, upgrade handler, and SSE-to-WS bridge onto the web HTTP server.
 
@@ -39,8 +40,10 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - Browser clients connect to the WS endpoints above.
 - OpenChamber still fetches OpenCode upstream event streams over SSE.
 - The web server creates one shared global message-stream hub. OpenCode watcher side effects and global WS clients subscribe to that hub, so there is one upstream `/global/event` SSE reader for both server-side processing and browser fan-out.
+- The shared hub preserves legacy event envelopes unchanged and translates opencode2 events into legacy names and properties. Unsupported opencode2 events retain a shallow `{ id, type, data, location }` shape. The UI consumes opencode2 through the adapter SSE path, whose stateful mapper handles session text, tool, and message events.
+- JSON event IDs stay in event payloads. Only the SSE `id:` field becomes `eventId`, feeds the replay buffer, and returns as `Last-Event-ID`. Durable `sync` markers stop at this boundary.
 - The global hub keeps a bounded replay buffer keyed by SSE `eventId` so reconnecting browser clients can receive buffered events after their requested `Last-Event-ID`.
-- Directory WS clients still attach one upstream `/event?directory=...` SSE reader per connection because directory streams are scoped.
+- Directory WS clients attach one scoped upstream reader per connection. Legacy uses `/event?directory=...`; opencode2 uses `/api/event?directory=...`.
 - If an upstream SSE stream stalls after the browser WS is already ready, the reader aborts that upstream fetch and reconnects upstream with `Last-Event-ID`, keeping the browser WS alive when recovery is fast.
 - When the shared global upstream reconnects after it was previously ready, the global WS bridge sends a fresh `ready` frame to already-ready browser clients. The browser treats this as a reconnect edge and can run scoped state repair without requiring the browser WS to close.
 - Health checks are reserved for initial upstream connect failures and explicit upstream-unavailable responses, not for ordinary stall recovery on an already-established stream.

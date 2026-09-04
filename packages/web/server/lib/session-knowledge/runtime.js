@@ -112,7 +112,7 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     agentMemoryRuntime,
     resolveProjectId,
     isAgentMemoryEnabled,
-    openCodeFetch = null,
+    openCodeApi,
   } = dependencies;
 
   /**
@@ -248,46 +248,46 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
   };
 
   const readSession = async (sessionId, directory) => (
-    openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory })
+    openCodeApi.getSession(sessionId, directory)
   );
 
   /**
    * What this session still owes, read from its own stored signature.
    */
   const resolvePendingForSession = async (sessionId, directory) => {
+    if (!openCodeApi.supportsSessionMetadata()) return { text: '', signature: '' };
     const session = await readSession(sessionId, directory).catch(() => null);
     return resolvePending(directory, readDeliveredSignature(session), readPins(session));
   };
 
   const collectSummaryForSession = async (sessionId, directory) => {
+    if (!openCodeApi.supportsSessionMetadata()) {
+      return { notes: [], plans: [], memory: { global: 0, project: 0 } };
+    }
     const session = await readSession(sessionId, directory).catch(() => null);
     return collectSummary(directory, readPins(session));
   };
 
   const setPin = async (sessionId, directory, kind, id, pinned) => {
-    const fresh = await readSession(sessionId, directory);
-    const metadata = isRecord(fresh?.metadata) ? fresh.metadata : {};
-    const openchamber = isRecord(metadata.openchamber) ? metadata.openchamber : {};
-    const pins = readPins(fresh);
-    const key = kind === 'note' ? 'notes' : 'plans';
-    const next = new Set(pins[key]);
-    if (pinned) next.add(id);
-    else next.delete(id);
-    await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, {
-      directory,
-      method: 'PATCH',
-      body: {
-        metadata: {
-          ...metadata,
-          openchamber: {
-            ...openchamber,
-            [PINS_METADATA_KEY]: { ...pins, [key]: [...next] },
-            [KNOWLEDGE_METADATA_KEY]: '',
-          },
+    let writtenPins;
+    await openCodeApi.mergeSessionMetadata(sessionId, directory, (metadata) => {
+      const openchamber = isRecord(metadata.openchamber) ? metadata.openchamber : {};
+      const pins = readPins({ metadata });
+      const key = kind === 'note' ? 'notes' : 'plans';
+      const next = new Set(pins[key]);
+      if (pinned) next.add(id);
+      else next.delete(id);
+      writtenPins = { ...pins, [key]: [...next] };
+      return {
+        ...metadata,
+        openchamber: {
+          ...openchamber,
+          [PINS_METADATA_KEY]: writtenPins,
+          [KNOWLEDGE_METADATA_KEY]: '',
         },
-      },
+      };
     });
-    return { ...pins, [key]: [...next] };
+    return writtenPins;
   };
 
   /**
@@ -300,18 +300,12 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
    * drop whatever changed in between.
    */
   const recordDelivered = async (sessionId, directory, signature) => {
-    const fresh = await readSession(sessionId, directory);
-    const metadata = isRecord(fresh?.metadata) ? fresh.metadata : {};
-    const openchamber = isRecord(metadata.openchamber) ? metadata.openchamber : {};
-    await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, {
-      directory,
-      method: 'PATCH',
-      body: {
-        metadata: {
-          ...metadata,
-          openchamber: { ...openchamber, [KNOWLEDGE_METADATA_KEY]: signature },
-        },
-      },
+    await openCodeApi.mergeSessionMetadata(sessionId, directory, (metadata) => {
+      const openchamber = isRecord(metadata.openchamber) ? metadata.openchamber : {};
+      return {
+        ...metadata,
+        openchamber: { ...openchamber, [KNOWLEDGE_METADATA_KEY]: signature },
+      };
     });
   };
 

@@ -191,25 +191,11 @@ const markdownImageSources = (message) => {
   return sources;
 };
 
-const fetchMessage = async ({ sessionId, messageId, directory, buildOpenCodeUrl, getOpenCodeAuthHeaders }) => {
-  const url = new URL(buildOpenCodeUrl(
-    `/session/${encodeURIComponent(sessionId)}/message/${encodeURIComponent(messageId)}`,
-    '',
-  ));
-  url.searchParams.set('directory', directory);
-  const response = await fetch(url, {
-    headers: {
-      accept: 'application/json',
-      // Percent-encoded to match the SDK wire format; raw non-ASCII values
-      // are rejected by OpenCode.
-      'x-opencode-directory': encodeURIComponent(directory),
-      ...getOpenCodeAuthHeaders(),
-    },
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (response.status === 404) return null;
-  if (!response.ok) throw new Error(`OpenCode returned ${response.status}`);
-  const message = await response.json().catch(() => null);
+const fetchMessage = async ({ sessionId, messageId, directory, openCodeApi }) => {
+  const message = await openCodeApi.getMessage(
+    { sessionID: sessionId, messageID: messageId, directory },
+    { timeoutMs: 10_000 },
+  );
   return message?.info && Array.isArray(message.parts) ? message : null;
 };
 
@@ -259,8 +245,7 @@ export const registerMarkdownImageGrantRoutes = (app, dependencies) => {
     os,
     crypto,
     validateDirectoryPath,
-    buildOpenCodeUrl,
-    getOpenCodeAuthHeaders,
+    openCodeApi,
     approvedTempRoot = path.join(os.tmpdir(), 'opencode'),
   } = dependencies;
 
@@ -286,8 +271,7 @@ export const registerMarkdownImageGrantRoutes = (app, dependencies) => {
           sessionId,
           messageId,
           directory: validatedDirectory.directory,
-          buildOpenCodeUrl,
-          getOpenCodeAuthHeaders,
+          openCodeApi,
         });
         if (!message || message.info?.id !== messageId || message.info?.role !== 'assistant') {
           return res.status(404).json({ error: 'Assistant message not found' });

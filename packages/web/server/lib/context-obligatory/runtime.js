@@ -31,33 +31,14 @@ const buildContextPrompt = (entries) => {
 };
 
 export const createContextObligatoryRuntime = ({
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
+  openCodeApi,
   sessionKnowledgeRuntime = null,
 }) => {
   const inflight = new Set();
   let stopped = false;
 
-  const openCodeFetch = async (fetchPath, { directory, method = 'GET', body, query } = {}) => {
-    const params = new URLSearchParams(query || {});
-    if (directory) params.set('directory', directory);
-    const search = params.toString();
-    const response = await fetch(`${buildOpenCodeUrl(fetchPath, '')}${search ? `?${search}` : ''}`, {
-      method,
-      headers: {
-        Accept: 'application/json',
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
-        ...getOpenCodeAuthHeaders(),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    if (!response.ok) throw new Error(`OpenCode ${method} ${fetchPath} failed with ${response.status}`);
-    return response.json().catch(() => null);
-  };
-
   const tick = async (sessionId, directory) => {
-    const session = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory });
+    const session = await openCodeApi.getSession(sessionId, directory, { timeoutMs: FETCH_TIMEOUT_MS });
     if (session?.parentID) return;
     const state = readContextState(session);
 
@@ -81,20 +62,20 @@ export const createContextObligatoryRuntime = ({
 
     if (state.messages.length === 0 && !knowledge.text) return;
 
-    const recent = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/message`, {
-      directory,
-      query: { limit: String(MESSAGE_FETCH_LIMIT) },
-    });
-    if (!Array.isArray(recent) || recent.length === 0) return;
+    const { messages: recent } = await openCodeApi.listMessages(
+      { sessionID: sessionId, directory, limit: MESSAGE_FETCH_LIMIT },
+      { timeoutMs: FETCH_TIMEOUT_MS },
+    );
+    if (recent.length === 0) return;
     const summary = recent.toReversed().find((message) =>
       message?.info?.role === 'assistant' && message.info.summary === true)?.info;
     if (!summary?.id || !summary?.time?.completed) return;
     if (state.openchamber.context_obligatory_last_compaction_message_id === summary.id) return;
 
     const fetched = await Promise.allSettled(state.messages.map(async (pinned) => {
-      const message = await openCodeFetch(
-        `/session/${encodeURIComponent(sessionId)}/message/${encodeURIComponent(pinned.id)}`,
-        { directory },
+      const message = await openCodeApi.getMessage(
+        { sessionID: sessionId, messageID: pinned.id, directory },
+        { timeoutMs: FETCH_TIMEOUT_MS },
       );
       const text = Array.isArray(message?.parts)
         ? message.parts.filter((part) => part?.type === 'text' && typeof part.text === 'string')
@@ -114,46 +95,39 @@ export const createContextObligatoryRuntime = ({
     const modelID = typeof executionInfo?.modelID === 'string' ? executionInfo.modelID : '';
     if (!providerID || !modelID) throw new Error('no pre-compaction assistant provider/model');
     const agent = typeof executionInfo.agent === 'string' ? executionInfo.agent : executionInfo.mode;
-    await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/prompt_async`, {
+    await openCodeApi.sendPrompt({
+      sessionID: sessionId,
       directory,
-      method: 'POST',
-      body: {
-        model: { providerID, modelID },
-        ...(typeof agent === 'string' && agent ? { agent } : {}),
-        parts: [{
-          type: 'text',
-          text: [knowledge.text, entries.length > 0 ? buildContextPrompt(entries) : '']
-            .filter(Boolean)
-            .join('\n\n---\n\n'),
-          synthetic: true,
-        }],
-      },
+      model: { providerID, modelID },
+      ...(typeof agent === 'string' && agent ? { agent } : {}),
+      parts: [{
+        type: 'text',
+        text: [knowledge.text, entries.length > 0 ? buildContextPrompt(entries) : '']
+          .filter(Boolean)
+          .join('\n\n---\n\n'),
+        synthetic: true,
+      }],
     });
 
-    const fresh = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory });
-    const freshState = readContextState(fresh);
-    await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, {
-      directory,
-      method: 'PATCH',
-      body: {
-        metadata: {
-          ...freshState.metadata,
-          openchamber: {
-            ...freshState.openchamber,
-            context_obligatory_last_compaction_message_id: summary.id,
-            // Recorded together with the cursor: the session now carries this
-            // knowledge again, so the next send must not repeat it.
-            ...(knowledge.signature
-              ? { [sessionKnowledgeRuntime.metadataKey]: knowledge.signature }
-              : {}),
-          },
+    await openCodeApi.mergeSessionMetadata(sessionId, directory, (metadata) => {
+      const freshState = readContextState({ metadata });
+      return {
+        ...freshState.metadata,
+        openchamber: {
+          ...freshState.openchamber,
+          context_obligatory_last_compaction_message_id: summary.id,
+          // Recorded together with the cursor: the session now carries this
+          // knowledge again, so the next send must not repeat it.
+          ...(knowledge.signature
+            ? { [sessionKnowledgeRuntime.metadataKey]: knowledge.signature }
+            : {}),
         },
-      },
-    });
+      };
+    }, { timeoutMs: FETCH_TIMEOUT_MS });
   };
 
   const processPayload = (payload, directoryHint = '') => {
-    if (stopped || payload?.type !== 'session.compacted') return;
+    if (stopped || !openCodeApi.supportsSessionMetadata() || payload?.type !== 'session.compacted') return;
     const sessionId = payload?.properties?.sessionID;
     if (typeof sessionId !== 'string' || inflight.has(sessionId)) return;
     const directory = payload?.properties?.directory || directoryHint;

@@ -114,7 +114,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       sanitizeSkillCatalogs,
       isUnsafeSkillRelativePath,
       buildOpenCodeUrl,
+      getOpenCodeHealthPath,
       getOpenCodeAuthHeaders,
+      openCodeApi,
       getOpenCodePort,
       getOwnPorts,
       devServerScanner,
@@ -162,6 +164,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       upsertProviderConfig,
       refreshOpenCodeAfterConfigChange,
       buildOpenCodeUrl,
+      getOpenCodeHealthPath,
       getOpenCodeAuthHeaders,
     });
 
@@ -194,6 +197,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       validateDirectoryPath,
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
+      openCodeApi,
       waitForOpenCodeReady,
       emitSessionCreatedEvent,
       sessionService: openChamberSessionService,
@@ -207,8 +211,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       os,
       crypto,
       validateDirectoryPath,
-      buildOpenCodeUrl,
-      getOpenCodeAuthHeaders,
+      openCodeApi,
     });
 
     registerConfigEntityRoutes(app, {
@@ -272,8 +275,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       isUnsafeSkillRelativePath,
       refreshOpenCodeAfterConfigChange,
       clientReloadDelayMs,
-      buildOpenCodeUrl,
-      getOpenCodeAuthHeaders,
+      openCodeApi,
       getOpenCodePort,
       getSkillSources,
       discoverSkills,

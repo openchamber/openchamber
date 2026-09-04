@@ -1,6 +1,6 @@
 import express from 'express';
-import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { createWorktree, getWorktreeBootstrapStatus } from '../git/index.js';
+import { createOpenCodeApiRuntime } from '../opencode/api-runtime.js';
 import { expandSnippets } from '../opencode/snippets.js';
 import { expandCommandGoalObjective, parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
@@ -82,40 +82,18 @@ const resolveVariant = (providers, providerID, modelID, variant) => {
 
 const parseConfigModel = (value) => splitModel(value);
 
-const buildDirectoryHeaders = (directory) => ({
-  // OpenCode rejects non-ASCII header values; the official SDK sends this
-  // header percent-encoded, so match that wire format (non-ASCII checkout
-  // paths such as "Masaüstü" otherwise fail every dispatched prompt).
-  ...(directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : {}),
-});
-
-const fetchJson = async (url, authHeaders, fallback, directory) => {
-  const response = await fetch(url.toString(), {
-    headers: { ...authHeaders, ...buildDirectoryHeaders(directory), accept: 'application/json' },
-  });
-  if (!response.ok) return fallback;
-  return response.json().catch(() => fallback);
-};
-
-const fetchSelectionInputs = async ({ buildOpenCodeUrl, authHeaders, directory, readSettingsFromDiskMigrated }) => {
+const fetchSelectionInputs = async ({ openCodeApi, directory, readSettingsFromDiskMigrated }) => {
   const settings = await readSettingsFromDiskMigrated();
-  const providersUrl = new URL(buildOpenCodeUrl('/config/providers', ''));
-  providersUrl.searchParams.set('directory', directory);
-  const agentsUrl = new URL(buildOpenCodeUrl('/agent', ''));
-  agentsUrl.searchParams.set('directory', directory);
-  const configUrl = new URL(buildOpenCodeUrl('/config', ''));
-  configUrl.searchParams.set('directory', directory);
-
-  const [providersBody, agentsBody, configBody] = await Promise.all([
-    fetchJson(providersUrl, authHeaders, { providers: [] }, directory),
-    fetchJson(agentsUrl, authHeaders, [], directory),
-    fetchJson(configUrl, authHeaders, {}, directory),
+  const [providersBody, agents, configBody] = await Promise.all([
+    openCodeApi.listProviders(directory).catch(() => ({ providers: [] })),
+    openCodeApi.listAgents(directory).catch(() => []),
+    openCodeApi.getConfig(directory).catch(() => ({})),
   ]);
 
   return {
     settings,
     providers: Array.isArray(providersBody?.providers) ? providersBody.providers : [],
-    agents: Array.isArray(agentsBody) ? agentsBody : [],
+    agents: Array.isArray(agents) ? agents : [],
     opencodeDefaultAgent: asNonEmptyString(configBody?.default_agent) || asNonEmptyString(configBody?.defaultAgent),
     opencodeDefaultModel: asNonEmptyString(configBody?.model),
   };
@@ -176,74 +154,13 @@ const resolveDefaultSelection = ({ agents, providers, settings, opencodeDefaultA
   };
 };
 
-const runPromptAsync = async ({ baseUrl, authHeaders, sessionID, directory, payload }) => {
-  const promptUrl = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}/prompt_async`);
-  promptUrl.searchParams.set('directory', directory);
-  const response = await fetch(promptUrl.toString(), {
-    method: 'POST',
-    headers: {
-      ...authHeaders,
-      ...buildDirectoryHeaders(directory),
-      'content-type': 'application/json',
-      accept: 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`prompt_async failed (${response.status})${body ? `: ${body}` : ''}`);
-  }
-};
-
-const createSession = async ({ baseUrl, authHeaders, directory, title }) => {
-  const sessionUrl = new URL(`${baseUrl}/session`);
-  sessionUrl.searchParams.set('directory', directory);
-  const response = await fetch(sessionUrl.toString(), {
-    method: 'POST',
-    headers: {
-      ...authHeaders,
-      ...buildDirectoryHeaders(directory),
-      'content-type': 'application/json',
-      accept: 'application/json',
-    },
-    body: JSON.stringify({ directory, ...(title ? { title } : {}) }),
-  });
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`session create failed (${response.status})${body ? `: ${body}` : ''}`);
-  }
-
-  const body = await response.json().catch(() => null);
-  const sessionID = body?.id || body?.data?.id;
-  if (!sessionID) {
-    throw new Error('failed to create session');
-  }
-  return sessionID;
-};
-
-const forkSession = async ({ client, sessionID, directory, messageID }) => {
-  const response = await client.session.fork({
-    sessionID,
-    directory,
-    ...(messageID ? { messageID } : {}),
-  });
-  const session = response?.data;
-  if (!session?.id) {
-    throw new Error('failed to fork session');
-  }
-  return session;
-};
-
-const latestCompletedAssistantMessageID = async ({ client, sessionID, directory }) => {
-  let response;
+const latestCompletedAssistantMessageID = async ({ openCodeApi, sessionID, directory }) => {
+  let messages;
   try {
-    response = await client.session.messages({ sessionID, directory, limit: 100 });
+    ({ messages } = await openCodeApi.listMessages({ sessionID, directory, limit: 100 }));
   } catch {
     return null;
   }
-  const messages = Array.isArray(response?.data) ? response.data : [];
   let latest = null;
   for (const message of messages) {
     const info = message?.info;
@@ -303,14 +220,13 @@ const waitForWorktreeBootstrapReady = async ({ directory }) => {
   }
 };
 
-const latestUserMessageID = async ({ client, sessionID, directory }) => {
-  let response;
+const latestUserMessageID = async ({ openCodeApi, sessionID, directory }) => {
+  let messages;
   try {
-    response = await client.session.messages({ sessionID, directory, limit: 100 });
+    ({ messages } = await openCodeApi.listMessages({ sessionID, directory, limit: 100 }));
   } catch {
     return { ok: false, messageID: null };
   }
-  const messages = Array.isArray(response?.data) ? response.data : [];
   let latest = null;
   for (const message of messages) {
     const info = message?.info;
@@ -323,10 +239,10 @@ const latestUserMessageID = async ({ client, sessionID, directory }) => {
 // `prompt_async` answers 204 as soon as OpenCode forks the run, and every later
 // failure is reported only on the session event stream. Confirm the prompt was
 // actually recorded so `promptDispatched` never claims a dispatch that vanished.
-const waitForPromptLanded = async ({ client, sessionID, directory, baselineUserMessageID }) => {
+const waitForPromptLanded = async ({ openCodeApi, sessionID, directory, baselineUserMessageID }) => {
   const deadline = Date.now() + PROMPT_LANDED_TIMEOUT_MS;
   for (;;) {
-    const latest = await latestUserMessageID({ client, sessionID, directory });
+    const latest = await latestUserMessageID({ openCodeApi, sessionID, directory });
     // A failed lookup is not authoritative evidence that the prompt was lost.
     if (!latest.ok) return true;
     if (latest.messageID && latest.messageID !== baselineUserMessageID) return true;
@@ -362,13 +278,17 @@ export const createOpenChamberSessionService = (dependencies) => {
     createSessionGoal: createSessionGoalOverride,
     sessionKnowledgeRuntime = null,
   } = dependencies;
+  const openCodeApi = dependencies.openCodeApi || createOpenCodeApiRuntime({
+    getOpenCodeProtocol: dependencies.getOpenCodeProtocol || (() => 'legacy'),
+    buildOpenCodeUrl,
+    getOpenCodeAuthHeaders,
+  });
 
   // Last user message of an existing session, as a selection to reuse. Returns
   // null when the session has no user message carrying a model.
-  const fetchLastUserSelection = async ({ client, sessionID, directory }) => {
+  const fetchLastUserSelection = async ({ sessionID, directory }) => {
     try {
-      const response = await client.session.messages({ sessionID, directory, limit: 20 });
-      const records = Array.isArray(response?.data) ? response.data : [];
+      const { messages: records } = await openCodeApi.listMessages({ sessionID, directory, limit: 20 });
       for (let index = records.length - 1; index >= 0; index -= 1) {
         const info = records[index]?.info;
         if (info?.role !== 'user') continue;
@@ -391,10 +311,8 @@ export const createOpenChamberSessionService = (dependencies) => {
   // Reject them before any session, worktree, or goal side effect happens.
   const validateRequestedSelection = async ({ directory, requestedModel, requestedAgent, requestedVariant }) => {
     if (!requestedModel && !requestedAgent && !requestedVariant) return;
-    const authHeaders = getOpenCodeAuthHeaders();
     const { providers, agents } = await fetchSelectionInputs({
-      buildOpenCodeUrl,
-      authHeaders,
+      openCodeApi,
       directory,
       readSettingsFromDiskMigrated,
     });
@@ -429,9 +347,6 @@ export const createOpenChamberSessionService = (dependencies) => {
   };
 
   const dispatchPrompt = async ({
-    client,
-    baseUrl,
-    authHeaders,
     sessionID,
     directory,
     prompt,
@@ -445,7 +360,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     let agent = requestedAgent;
     let variant = requestedVariant;
     if (reuseSessionSelection && (!model || !agent)) {
-      const previous = await fetchLastUserSelection({ client, sessionID, directory });
+      const previous = await fetchLastUserSelection({ sessionID, directory });
       if (previous) {
         if (!model && previous.model) {
           model = previous.model;
@@ -456,8 +371,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     }
     if (!model || !agent) {
       const inputs = await fetchSelectionInputs({
-        buildOpenCodeUrl,
-        authHeaders,
+        openCodeApi,
         directory,
         readSettingsFromDiskMigrated,
       });
@@ -479,8 +393,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     let resolvedCommand = null;
     if (parsedCommand) {
       try {
-        const response = await client.command.list({ directory });
-        const commands = Array.isArray(response?.data) ? response.data : [];
+        const commands = await openCodeApi.listCommands(directory);
         const command = commands.find((candidate) => candidate?.name === parsedCommand.command);
         if (command) resolvedCommand = { ...parsedCommand, template: command.template };
       } catch {
@@ -491,8 +404,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         ? expandCommandGoalObjective(resolvedCommand.template, resolvedCommand.arguments)
         : null;
       await (createSessionGoalOverride || createSessionGoal)({
-        baseUrl,
-        authHeaders,
+        openCodeApi,
         sessionID,
         directory,
         objective: commandObjective ?? expandedPrompt,
@@ -510,7 +422,7 @@ export const createOpenChamberSessionService = (dependencies) => {
 
     if (resolvedCommand) {
       try {
-        await client.session.command({
+        await openCodeApi.runCommand({
           sessionID,
           directory,
           command: resolvedCommand.command,
@@ -523,7 +435,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         throw markGoalPartial(error);
       }
     } else {
-      const baseline = await latestUserMessageID({ client, sessionID, directory });
+      const baseline = await latestUserMessageID({ openCodeApi, sessionID, directory });
       // A session the agent dispatched has no UI to attach the project's
       // standing context, so it is asked for here. Never fails the dispatch:
       // a session that runs without its background beats one that never runs.
@@ -532,23 +444,19 @@ export const createOpenChamberSessionService = (dependencies) => {
           .catch(() => ({ text: '', signature: '' }))
         : { text: '', signature: '' };
       try {
-        await runPromptAsync({
-          baseUrl,
-          authHeaders,
+        await openCodeApi.sendPrompt({
           sessionID,
           directory,
-          payload: {
-            model,
-            ...(agent ? { agent } : {}),
-            ...(variant ? { variant } : {}),
-            parts: [
-              ...(knowledge.text ? [{ type: 'text', text: knowledge.text, synthetic: true }] : []),
-              { type: 'text', text: expandedPrompt },
-              ...(goalInput.enabled
-                ? [{ type: 'text', text: buildGoalIntroText(goalInput.tokenBudget), synthetic: true }]
-                : []),
-            ],
-          },
+          model,
+          ...(agent ? { agent } : {}),
+          ...(variant ? { variant } : {}),
+          parts: [
+            ...(knowledge.text ? [{ type: 'text', text: knowledge.text, synthetic: true }] : []),
+            { type: 'text', text: expandedPrompt },
+            ...(goalInput.enabled
+              ? [{ type: 'text', text: buildGoalIntroText(goalInput.tokenBudget), synthetic: true }]
+              : []),
+          ],
         });
       } catch (error) {
         throw markGoalPartial(error);
@@ -559,7 +467,7 @@ export const createOpenChamberSessionService = (dependencies) => {
           .catch(() => undefined);
       }
       const landed = await waitForPromptLanded({
-        client,
+        openCodeApi,
         sessionID,
         directory,
         baselineUserMessageID: baseline.messageID,
@@ -599,6 +507,9 @@ export const createOpenChamberSessionService = (dependencies) => {
     if (!resolvedDirectory.ok) {
       throw new OpenChamberControlError(resolvedDirectory.error, resolvedDirectory.status || 400);
     }
+    if (goalInput.enabled && !openCodeApi.supportsSessionMetadata()) {
+      throw new OpenChamberControlError('Session goals are not supported by OpenCode V2', 501);
+    }
 
     const worktreeInput = resolveWorktreeInput(payload);
     let worktree = null;
@@ -624,23 +535,16 @@ export const createOpenChamberSessionService = (dependencies) => {
       await waitForWorktreeBootstrapReady({ directory: sessionDirectory });
     }
 
-    const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
-    const authHeaders = getOpenCodeAuthHeaders();
-    const client = createOpencodeClient({ baseUrl, headers: authHeaders });
-    const sessionID = await createSession({
-      client,
-      baseUrl,
-      authHeaders,
+    const session = await openCodeApi.createSession({
       directory: sessionDirectory,
       ...(title ? { title } : {}),
     });
+    const sessionID = session?.id;
+    if (!sessionID) throw new Error('failed to create session');
 
     let dispatch = { model, agent, variant, promptDispatched: false, dispatchedAsCommand: false };
     if (prompt) {
       dispatch = await dispatchPrompt({
-        client,
-        baseUrl,
-        authHeaders,
         sessionID,
         directory: sessionDirectory,
         prompt,
@@ -696,6 +600,9 @@ export const createOpenChamberSessionService = (dependencies) => {
     if (!prompt) throw new OpenChamberControlError('prompt is required', 400);
     const goalInput = resolveGoalInput(payload, prompt);
     if (!goalInput.ok) throw new OpenChamberControlError(goalInput.error, 400);
+    if (goalInput.enabled && !openCodeApi.supportsSessionMetadata()) {
+      throw new OpenChamberControlError('Session goals are not supported by OpenCode V2', 501);
+    }
     const requestedModel = resolveRequestedModel(payload);
 
     let targetSessionID = sourceSessionID;
@@ -721,12 +628,8 @@ export const createOpenChamberSessionService = (dependencies) => {
         requestedVariant: asNonEmptyString(payload.variant),
       });
 
-      const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
-      const authHeaders = getOpenCodeAuthHeaders();
-      const client = createOpencodeClient({ baseUrl, headers: authHeaders });
       if (action === 'fork') {
-        targetSession = await forkSession({
-          client,
+        targetSession = await openCodeApi.forkSession({
           sessionID: sourceSessionID,
           directory,
           messageID: asNonEmptyString(payload.messageId) || undefined,
@@ -735,15 +638,12 @@ export const createOpenChamberSessionService = (dependencies) => {
       }
 
       const baselineAssistantMessageId = await latestCompletedAssistantMessageID({
-        client,
+        openCodeApi,
         sessionID: targetSessionID,
         directory,
       });
 
       const dispatch = await dispatchPrompt({
-        client,
-        baseUrl,
-        authHeaders,
         sessionID: targetSessionID,
         directory,
         prompt,

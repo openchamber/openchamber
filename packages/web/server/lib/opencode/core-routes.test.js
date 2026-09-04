@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { createTunnelAuth } from './tunnel-auth.js';
-import { registerAuthAndAccessRoutes, registerCommonRequestMiddleware, registerServerStatusRoutes } from './core-routes.js';
+import { registerAuthAndAccessRoutes, registerCommonRequestMiddleware, registerServerStatusRoutes, registerSettingsUtilityRoutes } from './core-routes.js';
 
 describe('core-routes', () => {
   afterEach(() => {
@@ -28,6 +28,28 @@ describe('core-routes', () => {
 
     expect(dependencies.gracefulShutdown).toHaveBeenCalled();
     expect(shutdownOpts).toEqual({ exitProcess: true });
+  });
+
+  it('reports manual global-service restart semantics for shared V2 config reload', async () => {
+    const app = express();
+    registerSettingsUtilityRoutes(app, {
+      readCustomThemesFromDisk: vi.fn(async () => []),
+      refreshOpenCodeAfterConfigChange: vi.fn(async () => ({
+        reloaded: false,
+        external: false,
+        sharedService: true,
+      })),
+      clientReloadDelayMs: 100,
+    });
+
+    const response = await request(app).post('/api/config/reload').expect(200);
+
+    expect(response.body).toEqual({
+      success: true,
+      requiresReload: false,
+      requiresManualRestart: true,
+      message: 'Configuration is saved on disk. Restart the global OpenCode service to apply the changes.',
+    });
   });
 
   it('should require UI auth before /api/system/shutdown when auth is configured', async () => {

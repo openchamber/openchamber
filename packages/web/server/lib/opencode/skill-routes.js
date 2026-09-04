@@ -1,4 +1,3 @@
-import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { buildDeferredRestartResponse } from './config-mutation-response.js';
 
 /**
@@ -21,9 +20,9 @@ export const registerSkillRoutes = (app, dependencies) => {
     readSettingsFromDisk,
     sanitizeSkillCatalogs,
     isUnsafeSkillRelativePath,
-    buildOpenCodeUrl,
-
-    getOpenCodeAuthHeaders,
+    refreshOpenCodeAfterConfigChange,
+    clientReloadDelayMs,
+    openCodeApi,
     getOpenCodePort,
     getSkillSources,
     discoverSkills,
@@ -130,20 +129,7 @@ export const registerSkillRoutes = (app, dependencies) => {
     }
 
     try {
-      const client = createOpencodeClient({
-        baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''),
-        directory: workingDirectory || undefined,
-        headers: getOpenCodeAuthHeaders(),
-        fetch: (request) => fetch(request, { signal: AbortSignal.timeout(8_000) }),
-      });
-
-      const response = await client.app.skills(
-        workingDirectory ? { directory: workingDirectory } : undefined,
-      );
-      const payload = response?.data;
-      if (!Array.isArray(payload)) {
-        return [];
-      }
+      const payload = await openCodeApi.listSkills(workingDirectory || undefined, { timeoutMs: 8_000 });
 
       return payload
         .map((item) => {
@@ -624,7 +610,16 @@ export const registerSkillRoutes = (app, dependencies) => {
         console.log(`[Server] Renaming skill: ${skillName} -> ${newName}`);
         console.log('[Server] Working directory:', directory);
         renameSkill(skillName, newName, directory);
-        await refreshOpenCodeAfterConfigChange('skill rename');
+        const refreshResult = await refreshOpenCodeAfterConfigChange('skill rename');
+
+        if (refreshResult?.sharedService) {
+          return res.json({
+            ...buildDeferredRestartResponse(
+              `Skill renamed to ${newName}. Restart the global OpenCode service to apply.`,
+            ),
+            name: newName,
+          });
+        }
 
         return res.json({
           success: true,

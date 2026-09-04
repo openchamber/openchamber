@@ -11,7 +11,7 @@ and one suggested user follow-up with the small model
    fan-out (`index.js` → `onPayload`), riding the same upstream connection as
    notifications. Purely event-driven — dormant sessions never generate
    anything, there is no backfill and no session scanning.
-2. `session.status: idle` arms a 60-second per-session timer; any `busy`/
+2. `session.status: idle` or the equivalent `session.idle` event arms a 60-second per-session timer; any `busy`/
    `retry` status or a user `message.updated` clears it (the "1 minute of
    quiet" rule).
 3. On fire: fetch the session (skip sub-agent sessions with `parentID`),

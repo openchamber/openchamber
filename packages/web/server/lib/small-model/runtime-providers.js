@@ -106,14 +106,11 @@ function parseProviderListing(payload) {
 }
 
 const fetchSnapshot = async () => {
-  const response = await fetch(connection.buildOpenCodeUrl('/provider', ''), {
-    headers: { Accept: 'application/json', ...connection.getOpenCodeAuthHeaders() },
-    signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS),
-  });
-  if (!response.ok) {
-    throw new Error(`OpenCode provider listing failed with ${response.status}`);
-  }
-  return parseProviderListing(await response.json());
+  const payload = await connection.openCodeApi.getRuntimeProviderListing(
+    undefined,
+    { timeoutMs: SNAPSHOT_TIMEOUT_MS },
+  );
+  return parseProviderListing(payload);
 };
 
 /**
@@ -152,5 +149,4 @@ export async function getRuntimeProvider(providerID) {
   const current = await getRuntimeProviderSnapshot();
   return current?.providers.get(providerID) ?? null;
 }
-
 

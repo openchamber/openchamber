@@ -12,7 +12,9 @@ Policy inheritance uses the nearest explicit session value. A child `false` ther
 
 ## Runtime
 
-`createPermissionAutoAcceptRuntime` loads and serializes policy writes, subscribes to the global OpenCode event hub, caches session lineage, retries transient replies, and reconciles pending permissions after startup, reconnect, and policy enablement. Enabling Auto-Accept for a session immediately accepts matching pending requests and keeps handling future requests without requiring a connected UI.
+`createPermissionAutoAcceptRuntime` loads and serializes policy writes, subscribes to the normalized global OpenCode event hub, caches session lineage, retries transient replies, and reconciles pending permissions after startup, reconnect, and policy enablement. Enabling Auto-Accept for a session immediately accepts matching pending requests and keeps handling future requests without requiring a connected UI.
+
+The runtime asks `createOpenCodeApiRuntime` for session lineage, pending requests, and replies. That API selects the active protocol and generated client. Legacy keeps `directory` query scoping. For opencode2, only pending-list requests carry `location.directory`; session lookup and replies have no location query. The opencode2 reply session ID comes directly from the permission event or pending request and is never inferred from the request ID.
 
 Unknown lineage and failed policy loads fail closed. A failed pending-permission fetch is distinct from an empty successful response and never clears policy state.
 
@@ -31,4 +33,4 @@ VS Code retains its foreground-only responder because it does not run the web se
 
 ## Tests
 
-`runtime.test.js` covers restart persistence, nearest explicit subagent inheritance, missing-lineage lookup, retry/deduplication, and reconnect reconciliation.
+`runtime.test.js` covers restart persistence, nearest explicit subagent inheritance, missing-lineage lookup, protocol-specific query shape, retry/deduplication, and reconnect reconciliation.

@@ -7,6 +7,7 @@ import { createOpenCodeEnvRuntime } from './env-runtime.js';
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
 const originalComSpec = process.env.ComSpec;
 const originalPath = process.env.PATH;
+const originalShell = process.env.SHELL;
 const originalLocalAppData = process.env.LOCALAPPDATA;
 const originalSystemRoot = process.env.SystemRoot;
 const originalBundledOpencodeCliDir = process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR;
@@ -14,6 +15,18 @@ const originalResourcesPath = process.resourcesPath;
 const originalWslBinary = process.env.WSL_BINARY;
 const originalOpenChamberWslBinary = process.env.OPENCHAMBER_WSL_BINARY;
 const originalPlatform = process.platform;
+const isolatedEnvKeys = [
+  'OPENCODE_PATH',
+  'OPENCHAMBER_OPENCODE_PATH',
+  'OPENCHAMBER_OPENCODE_BIN',
+  'APPDATA',
+  'USERPROFILE',
+  'ProgramData',
+  'ProgramFiles',
+  'PATHEXT',
+  'PathExt',
+];
+const originalIsolatedEnv = Object.fromEntries(isolatedEnvKeys.map((key) => [key, process.env[key]]));
 const tempDirs = [];
 const itIf = (condition) => condition ? it : it.skip;
 
@@ -27,6 +40,21 @@ const setPlatform = (platform) => {
   Object.defineProperty(process, 'platform', {
     value: platform,
   });
+};
+
+const isolateWindowsDiscovery = (root, searchPath = root) => {
+  process.env.PATH = searchPath;
+  process.env.APPDATA = path.join(root, 'app-data');
+  process.env.LOCALAPPDATA = path.join(root, 'local-app-data');
+  process.env.USERPROFILE = path.join(root, 'home');
+  process.env.ProgramData = path.join(root, 'program-data');
+  process.env.ProgramFiles = path.join(root, 'program-files');
+  delete process.env.OPENCODE_BINARY;
+  delete process.env.OPENCODE_PATH;
+  delete process.env.OPENCHAMBER_OPENCODE_PATH;
+  delete process.env.OPENCHAMBER_OPENCODE_BIN;
+  delete process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR;
+  Object.defineProperty(process, 'resourcesPath', { configurable: true, value: undefined });
 };
 
 afterEach(() => {
@@ -54,6 +82,12 @@ afterEach(() => {
     process.env.PATH = originalPath;
   } else {
     delete process.env.PATH;
+  }
+
+  if (typeof originalShell === 'string') {
+    process.env.SHELL = originalShell;
+  } else {
+    delete process.env.SHELL;
   }
 
   if (typeof originalSystemRoot === 'string') {
@@ -90,6 +124,11 @@ afterEach(() => {
   } else {
     delete process.env.OPENCHAMBER_WSL_BINARY;
   }
+
+  for (const key of isolatedEnvKeys) {
+    if (originalIsolatedEnv[key] !== undefined) process.env[key] = originalIsolatedEnv[key];
+    else delete process.env[key];
+  }
 });
 
 const createRuntime = (settings, options = {}) => {
@@ -124,6 +163,7 @@ describe('OpenCode env runtime', () => {
     const binary = path.join(explicitDir, process.platform === 'win32' ? 'custom-shell.exe' : 'custom-shell');
     fs.writeFileSync(binary, '#!/bin/sh\nexit 0\n');
     if (process.platform !== 'win32') fs.chmodSync(binary, 0o755);
+    if (process.platform === 'win32') process.env.PATHEXT = '.exe';
     process.env.PATH = defaultDir;
     const { runtime } = createRuntime({});
 
@@ -337,7 +377,10 @@ describe('OpenCode env runtime', () => {
   it('bounds every login-shell probe and falls through when one overruns', () => {
     setPlatform('darwin');
     process.env.PATH = createTempDir('openchamber-empty-path-');
-    process.env.SHELL = '/bin/zsh';
+    const shellPath = path.join(createTempDir('openchamber-shell-'), 'probe-shell');
+    fs.writeFileSync(shellPath, '#!/bin/sh\n');
+    fs.chmodSync(shellPath, 0o755);
+    process.env.SHELL = shellPath;
     delete process.env.OPENCODE_BINARY;
     const shellCalls = [];
     const { runtime } = createRuntime({}, {
@@ -363,10 +406,9 @@ describe('OpenCode env runtime', () => {
     const desktopBinary = path.join(localAppData, 'Programs', 'OpenCode', 'OpenCode.exe');
     fs.mkdirSync(path.dirname(desktopBinary), { recursive: true });
     fs.writeFileSync(desktopBinary, '');
+    isolateWindowsDiscovery(localAppData, createTempDir('openchamber-empty-path-'));
     process.env.LOCALAPPDATA = localAppData;
-    process.env.PATH = createTempDir('openchamber-empty-path-');
     process.env.SystemRoot = createTempDir('openchamber-empty-systemroot-');
-    delete process.env.OPENCODE_BINARY;
     const { runtime } = createRuntime({}, {
       spawnSync: () => ({ status: 1, stdout: '', stderr: '' }),
     });
@@ -374,24 +416,89 @@ describe('OpenCode env runtime', () => {
     expect(runtime.resolveOpencodeCliPath()).toBeNull();
   });
 
-  it('skips Windows OpenCode desktop app entries returned by where.exe', () => {
+  it('falls back to opencode2 when where.exe only finds the legacy desktop GUI', () => {
     setPlatform('win32');
     const localAppData = createTempDir('openchamber-localappdata-');
     const desktopBinary = path.join(localAppData, 'Programs', 'OpenCode', 'OpenCode.exe');
-    const cliBinary = path.join(createTempDir('openchamber-cli-'), 'opencode.exe');
+    const cliBinary = path.join(createTempDir('openchamber-cli-'), 'opencode2.exe');
     fs.mkdirSync(path.dirname(desktopBinary), { recursive: true });
     fs.writeFileSync(desktopBinary, '');
     fs.writeFileSync(cliBinary, '');
+    isolateWindowsDiscovery(localAppData, createTempDir('openchamber-empty-path-'));
     process.env.LOCALAPPDATA = localAppData;
-    process.env.PATH = createTempDir('openchamber-empty-path-');
     process.env.SystemRoot = createTempDir('openchamber-empty-systemroot-');
-    delete process.env.OPENCODE_BINARY;
     const { runtime, state } = createRuntime({}, {
-      spawnSync: () => ({ status: 0, stdout: `${desktopBinary}\r\n${cliBinary}\r\n`, stderr: '' }),
+      spawnSync: (command, args) => ({
+        status: 0,
+        stdout: args[0] === 'opencode' ? `${desktopBinary}\r\n` : `${cliBinary}\r\n`,
+        stderr: '',
+      }),
     });
 
     expect(runtime.resolveOpencodeCliPath()).toBe(cliBinary);
     expect(state.resolvedOpencodeBinarySource).toBe('where');
+  });
+
+  it('finds and unwraps an opencode2 npm shim from an isolated Windows PATH', () => {
+    setPlatform('win32');
+    const root = createTempDir('openchamber-opencode2-path-');
+    const npmDir = path.join(root, 'npm');
+    const shim = path.join(npmDir, 'opencode2.cmd');
+    const nativeBinary = path.join(npmDir, 'node_modules', '@opencode-ai', 'cli', 'bin', 'opencode2.exe');
+    fs.mkdirSync(path.dirname(nativeBinary), { recursive: true });
+    fs.writeFileSync(nativeBinary, '');
+    fs.writeFileSync(shim, '@ECHO off\r\n"%dp0%\\node_modules\\@opencode-ai\\cli\\bin\\opencode2.exe" %*\r\n');
+    isolateWindowsDiscovery(root, npmDir);
+    process.env.PATHEXT = '.exe;.cmd';
+    const { runtime, state } = createRuntime({}, {
+      spawnSync: () => ({ status: 1, stdout: '', stderr: '' }),
+      homedir: () => path.join(root, 'home'),
+    });
+
+    expect(runtime.resolveOpencodeCliPath().toLowerCase()).toBe(shim.toLowerCase());
+    expect(state.resolvedOpencodeBinarySource).toBe('path');
+    expect(runtime.resolveManagedOpenCodeLaunchSpec(shim)).toEqual({
+      binary: nativeBinary,
+      args: [],
+      wrapperType: 'native-wrapper',
+    });
+  });
+
+  it('keeps legacy opencode ahead of opencode2 on Windows PATH', () => {
+    setPlatform('win32');
+    const pathDir = createTempDir('openchamber-opencode-path-preference-');
+    const legacy = path.join(pathDir, 'opencode.cmd');
+    fs.writeFileSync(legacy, '');
+    fs.writeFileSync(path.join(pathDir, 'opencode2.cmd'), '');
+    isolateWindowsDiscovery(pathDir, pathDir);
+    process.env.PATHEXT = '.cmd';
+    const { runtime } = createRuntime({}, { homedir: () => path.join(pathDir, 'home') });
+
+    expect(runtime.resolveOpencodeCliPath().toLowerCase()).toBe(legacy.toLowerCase());
+  });
+
+  it('finds an opencode2 npm shim without selecting the Windows desktop GUI', () => {
+    setPlatform('win32');
+    const root = createTempDir('openchamber-opencode2-npm-fallback-');
+    const localAppData = path.join(root, 'local');
+    const appData = path.join(root, 'roaming');
+    const desktopBinary = path.join(localAppData, 'Programs', 'OpenCode', 'OpenCode.exe');
+    const shim = path.join(appData, 'npm', 'opencode2.cmd');
+    fs.mkdirSync(path.dirname(desktopBinary), { recursive: true });
+    fs.mkdirSync(path.dirname(shim), { recursive: true });
+    fs.writeFileSync(desktopBinary, '');
+    fs.writeFileSync(shim, '');
+    isolateWindowsDiscovery(root, path.dirname(desktopBinary));
+    process.env.LOCALAPPDATA = localAppData;
+    process.env.APPDATA = appData;
+    process.env.PATHEXT = '.EXE;.CMD';
+    const { runtime, state } = createRuntime({}, {
+      spawnSync: () => ({ status: 1, stdout: '', stderr: '' }),
+      homedir: () => process.env.USERPROFILE,
+    });
+
+    expect(runtime.resolveOpencodeCliPath()).toBe(shim);
+    expect(state.resolvedOpencodeBinarySource).toBe('fallback');
   });
 
   it('rejects WSL settings in strict mode', async () => {
@@ -413,10 +520,9 @@ describe('OpenCode env runtime', () => {
     const dir = createTempDir('openchamber-wsl-opencode-');
     const wslBinary = path.join(dir, 'wsl.exe');
     fs.writeFileSync(wslBinary, '');
-    process.env.PATH = dir;
+    isolateWindowsDiscovery(dir, dir);
     process.env.SystemRoot = dir;
     process.env.WSL_BINARY = wslBinary;
-    delete process.env.OPENCODE_BINARY;
 
     const calls = [];
     const spawnSyncMock = (command, args) => {
@@ -464,6 +570,23 @@ describe('OpenCode env runtime', () => {
     fs.mkdirSync(path.dirname(nativeBinary), { recursive: true });
     fs.writeFileSync(nativeBinary, '');
     fs.writeFileSync(shim, '@ECHO off\r\n"%dp0%\\node_modules\\opencode-ai\\bin\\opencode.exe" %*\r\n');
+    const { runtime } = createRuntime({});
+
+    expect(runtime.resolveManagedOpenCodeLaunchSpec(shim)).toEqual({
+      binary: nativeBinary,
+      args: [],
+      wrapperType: 'native-wrapper',
+    });
+  });
+
+  it('resolves opencode2 npm shims to their own packaged executable', () => {
+    setPlatform('win32');
+    const npmDir = createTempDir('openchamber-opencode2-npm-');
+    const shim = path.join(npmDir, 'opencode2.cmd');
+    const nativeBinary = path.join(npmDir, 'node_modules', '@opencode-ai', 'cli', 'bin', 'opencode2.exe');
+    fs.mkdirSync(path.dirname(nativeBinary), { recursive: true });
+    fs.writeFileSync(nativeBinary, '');
+    fs.writeFileSync(shim, '@ECHO off\r\n"%dp0%\\node_modules\\@opencode-ai\\cli\\bin\\opencode2.exe" %*\r\n');
     const { runtime } = createRuntime({});
 
     expect(runtime.resolveManagedOpenCodeLaunchSpec(shim)).toEqual({

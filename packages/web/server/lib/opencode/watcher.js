@@ -1,4 +1,5 @@
 import { createUpstreamSseReader } from '../event-stream/upstream-reader.js';
+import { createOpenCode2EventNormalizer } from '../event-stream/opencode2-event-normalizer.js';
 
 export const createOpenCodeWatcherRuntime = (deps) => {
   const {
@@ -10,12 +11,14 @@ export const createOpenCodeWatcherRuntime = (deps) => {
     upstreamStallTimeoutMs,
     upstreamReconnectDelayMs = 1000,
     globalEventHub = null,
+    getOpenCodeProtocol = () => 'legacy',
   } = deps;
 
   let abortController = null;
   let reader = null;
   let unsubscribeEvent = null;
   let unsubscribeStatus = null;
+  const opencode2Normalizer = createOpenCode2EventNormalizer();
 
   const unwrapGlobalEventPayload = (eventData) => {
     if (!eventData || typeof eventData !== 'object') {
@@ -65,7 +68,10 @@ export const createOpenCodeWatcherRuntime = (deps) => {
 
     reader = createUpstreamSseReader({
       signal,
-      buildUrl: () => buildOpenCodeUrl('/global/event', ''),
+      buildUrl: () => buildOpenCodeUrl(
+        getOpenCodeProtocol() === 'opencode2' ? '/api/event' : '/global/event',
+        '',
+      ),
       getHeaders: getOpenCodeAuthHeaders,
       fetchImpl,
       stallTimeoutMs: upstreamStallTimeoutMs,
@@ -74,10 +80,18 @@ export const createOpenCodeWatcherRuntime = (deps) => {
         console.log('[PushWatcher] connected');
       },
       onEvent(event) {
-        const payload = unwrapGlobalEventPayload(event.payload);
-        if (!payload || typeof payload !== 'object') {
+        if (getOpenCodeProtocol() === 'opencode2') {
+          const normalized = opencode2Normalizer.normalize({
+            envelope: event.envelope,
+            payload: event.payload,
+          });
+          if (!normalized) return;
+          onPayload(normalized.payload);
           return;
         }
+
+        const payload = unwrapGlobalEventPayload(event.payload);
+        if (!payload || typeof payload !== 'object') return;
         onPayload(payload);
       },
       onError(error) {
@@ -98,6 +112,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
     try {
       abortController.abort();
       reader?.stop();
+      opencode2Normalizer.reset();
       unsubscribeEvent?.();
       unsubscribeStatus?.();
     } catch {

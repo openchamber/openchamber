@@ -1,8 +1,10 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { OpenCode, type SessionMessageInfo } from '@opencode-ai/client';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import * as gitService from './gitService';
 import type { BridgeContext, BridgeResponse } from './bridge';
+import type { OpenCodeProtocol } from './opencode';
 
 type BridgeMessageInput = {
   id: string;
@@ -24,6 +26,7 @@ const BRIDGE_GIT_MODEL_CATALOG_CACHE_TTL_MS = 30 * 1000;
 
 let bridgeGitModelCatalogCache: Set<string> | null = null;
 let bridgeGitModelCatalogCacheAt = 0;
+let bridgeGitModelCatalogCacheKey = '';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => {
   setTimeout(resolve, ms);
@@ -80,18 +83,22 @@ const readStringField = (value: unknown, key: string): string => {
 
 const fetchBridgeGitModelCatalog = async (
   apiUrl: string,
-  authHeaders?: Record<string, string>
+  authHeaders: Record<string, string> | undefined,
+  protocol: OpenCodeProtocol,
 ): Promise<Set<string>> => {
   const now = Date.now();
-  if (bridgeGitModelCatalogCache && now - bridgeGitModelCatalogCacheAt < BRIDGE_GIT_MODEL_CATALOG_CACHE_TTL_MS) {
+  const cacheKey = `${protocol}:${apiUrl.replace(/\/+$/, '')}`;
+  if (bridgeGitModelCatalogCacheKey === cacheKey && bridgeGitModelCatalogCache && now - bridgeGitModelCatalogCacheAt < BRIDGE_GIT_MODEL_CATALOG_CACHE_TTL_MS) {
     return bridgeGitModelCatalogCache;
   }
 
-  const client = createBridgeGitClient(apiUrl, authHeaders);
-  const payload = unwrapBridgeSdkData(
-    await client.v2.model.list(undefined, { signal: AbortSignal.timeout(8_000) }),
-    'model.list'
-  );
+  const signal = AbortSignal.timeout(8_000);
+  const payload = protocol === 'opencode2'
+    ? (await OpenCode.make({ baseUrl: apiUrl.replace(/\/+$/, ''), headers: authHeaders || {} }).model.list(undefined, { signal })).data
+    : unwrapBridgeSdkData(
+        await createBridgeGitClient(apiUrl, authHeaders).v2.model.list(undefined, { signal }),
+        'model.list',
+      );
   const refs = new Set<string>();
   if (Array.isArray(payload)) {
     for (const item of payload) {
@@ -111,6 +118,7 @@ const fetchBridgeGitModelCatalog = async (
 
   bridgeGitModelCatalogCache = refs;
   bridgeGitModelCatalogCacheAt = now;
+  bridgeGitModelCatalogCacheKey = cacheKey;
   return refs;
 };
 
@@ -118,11 +126,12 @@ const resolveBridgeGitGenerationModel = async (
   payloadModel: { providerId?: string; modelId?: string; zenModel?: string },
   settings: Record<string, unknown>,
   apiUrl: string,
-  authHeaders?: Record<string, string>
+  authHeaders: Record<string, string> | undefined,
+  protocol: OpenCodeProtocol,
 ): Promise<{ providerID: string; modelID: string }> => {
   let catalog: Set<string> | null = null;
   try {
-    catalog = await fetchBridgeGitModelCatalog(apiUrl, authHeaders);
+    catalog = await fetchBridgeGitModelCatalog(apiUrl, authHeaders, protocol);
   } catch {
     catalog = null;
   }
@@ -172,7 +181,17 @@ const extractTextFromMessageParts = (parts: unknown): string => {
   return textParts.join('\n').trim();
 };
 
-const generateBridgeTextWithSessionFlow = async ({
+const extractTextFromV2Message = (message: SessionMessageInfo): string => {
+  if (message.type !== 'assistant' || message.finish !== 'stop') return '';
+  return message.content
+    .filter((part) => part.type === 'text')
+    .map((part) => part.text.trim())
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+};
+
+const generateLegacyBridgeText = async ({
   apiUrl,
   directory,
   prompt,
@@ -267,6 +286,75 @@ const generateBridgeTextWithSessionFlow = async ({
   }
 };
 
+const generateV2BridgeText = async ({
+  apiUrl,
+  directory,
+  prompt,
+  providerID,
+  modelID,
+  authHeaders,
+}: {
+  apiUrl: string;
+  directory: string;
+  prompt: string;
+  providerID: string;
+  modelID: string;
+  authHeaders?: Record<string, string>;
+}): Promise<string> => {
+  const client = OpenCode.make({
+    baseUrl: apiUrl.replace(/\/+$/, ''),
+    headers: authHeaders || {},
+  });
+  const deadlineAt = Date.now() + BRIDGE_GIT_GENERATION_TIMEOUT_MS;
+  const remainingMs = () => Math.max(1_000, deadlineAt - Date.now());
+  let sessionId: string | null = null;
+
+  try {
+    const session = await client.session.create({
+      location: { directory },
+      title: 'Git Generation',
+      model: { providerID, id: modelID },
+    }, { signal: AbortSignal.timeout(remainingMs()) });
+    sessionId = session.id;
+    await client.session.prompt({
+      sessionID: sessionId,
+      text: prompt,
+    }, { signal: AbortSignal.timeout(remainingMs()) });
+    await client.session.wait({ sessionID: sessionId }, { signal: AbortSignal.timeout(remainingMs()) });
+
+    const messages = await client.message.list({
+      sessionID: sessionId,
+      limit: 10,
+      order: 'desc',
+    }, { signal: AbortSignal.timeout(remainingMs()) });
+    for (const message of messages.data) {
+      const text = extractTextFromV2Message(message);
+      if (text) return text;
+    }
+    throw new Error('No completed assistant response returned by generator');
+  } finally {
+    if (sessionId) {
+      try {
+        await client.session.remove({ sessionID: sessionId }, { signal: AbortSignal.timeout(5_000) });
+      } catch {
+        // ignore cleanup failures
+      }
+    }
+  }
+};
+
+const generateBridgeTextWithSessionFlow = async (input: {
+  apiUrl: string;
+  directory: string;
+  prompt: string;
+  providerID: string;
+  modelID: string;
+  authHeaders?: Record<string, string>;
+  protocol: OpenCodeProtocol;
+}): Promise<string> => input.protocol === 'opencode2'
+  ? generateV2BridgeText(input)
+  : generateLegacyBridgeText(input);
+
 const parseJsonObjectSafe = (value: string): Record<string, unknown> | null => {
   try {
     const parsed = JSON.parse(value) as unknown;
@@ -339,11 +427,13 @@ export async function handleSpecialGitBridgeMessage(
         }
 
         const settings = deps.readSettings(ctx) as Record<string, unknown>;
+        const protocol = ctx?.manager?.getProtocol?.() ?? 'legacy';
         const { providerID, modelID } = await resolveBridgeGitGenerationModel(
           { providerId, modelId, zenModel: payloadZenModel },
           settings,
           apiUrl,
-          ctx?.manager?.getOpenCodeAuthHeaders()
+          ctx?.manager?.getOpenCodeAuthHeaders(),
+          protocol,
         );
         const raw = await generateBridgeTextWithSessionFlow({
           apiUrl,
@@ -352,6 +442,7 @@ export async function handleSpecialGitBridgeMessage(
           providerID,
           modelID,
           authHeaders: ctx?.manager?.getOpenCodeAuthHeaders(),
+          protocol,
         });
         if (!raw) {
           return { id, type, success: false, error: 'No PR description returned by generator' };

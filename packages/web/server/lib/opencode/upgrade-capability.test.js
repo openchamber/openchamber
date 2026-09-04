@@ -7,6 +7,7 @@ describe('OpenCode upgrade capability', () => {
 
     expect(resolveOpenCodeUpgradeCapability({
       isExternal: false,
+      isSharedService: false,
       hasManagedProcess: true,
       activeBinary: '/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode',
       isBundledBinary,
@@ -22,6 +23,7 @@ describe('OpenCode upgrade capability', () => {
 
     expect(resolveOpenCodeUpgradeCapability({
       isExternal: true,
+      isSharedService: false,
       hasManagedProcess: false,
       activeBinary: null,
       isBundledBinary,
@@ -32,6 +34,7 @@ describe('OpenCode upgrade capability', () => {
     });
     expect(resolveOpenCodeUpgradeCapability({
       isExternal: false,
+      isSharedService: false,
       hasManagedProcess: false,
       activeBinary: '/usr/local/bin/opencode',
       isBundledBinary,
@@ -42,9 +45,24 @@ describe('OpenCode upgrade capability', () => {
     });
   });
 
+  it('blocks upgrades owned by the shared OpenCode service', () => {
+    expect(resolveOpenCodeUpgradeCapability({
+      isExternal: false,
+      isSharedService: true,
+      hasManagedProcess: false,
+      activeBinary: '/usr/local/bin/opencode2',
+      isBundledBinary: () => false,
+    })).toEqual({
+      supported: false,
+      manager: 'external',
+      reason: 'shared-service',
+    });
+  });
+
   it('allows OpenCode to upgrade a managed non-bundled binary', () => {
     expect(resolveOpenCodeUpgradeCapability({
       isExternal: false,
+      isSharedService: false,
       hasManagedProcess: true,
       activeBinary: '/Users/alice/.opencode/bin/opencode',
       isBundledBinary: () => false,

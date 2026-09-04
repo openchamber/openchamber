@@ -357,7 +357,9 @@ const buildProxiedResponse = (
   return new Response(body, { status: proxied.status, headers: proxied.headers });
 };
 
-const isSseApiPath = (pathname: string) => pathname === '/api/event' || pathname === '/api/global/event';
+const isSseApiPath = (pathname: string) => pathname === '/api/event'
+  || pathname === '/api/global/event'
+  || pathname === '/api/api/event';
 const isSessionMessageApiPath = (pathname: string) => /^\/api\/session\/[^/]+\/message$/.test(pathname);
 const isApiPath = (pathname: string) => pathname === '/api' || pathname.startsWith('/api/');
 const isLocalRuntimePath = (pathname: string) => isApiPath(pathname) || pathname === '/auth/session';
@@ -1254,7 +1256,8 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 
       let start;
       try {
-        start = await vscodeStreamPerfMeasure('vscode.webview.sse_start_ms', () => startSseProxy({ path: suffixPath, headers, streamId }));
+        const ssePath = `${targetUrl.pathname}${targetUrl.search}`;
+        start = await vscodeStreamPerfMeasure('vscode.webview.sse_start_ms', () => startSseProxy({ path: ssePath, headers, streamId }));
       } catch (error) {
         await stream.cancel();
         throw error;

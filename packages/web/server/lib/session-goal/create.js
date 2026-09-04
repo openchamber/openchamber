@@ -47,8 +47,7 @@ const fitObjective = async ({ objective, directory, sessionID, providerID, model
 };
 
 export const createSessionGoal = async ({
-  baseUrl,
-  authHeaders,
+  openCodeApi,
   sessionID,
   directory,
   objective,
@@ -98,17 +97,14 @@ export const createSessionGoal = async ({
     createdAt: now,
     updatedAt: now,
   };
-  const url = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}`);
-  url.searchParams.set('directory', directory);
-  const response = await fetch(url.toString(), {
-    method: 'PATCH',
-    headers: {
-      ...authHeaders,
-      'content-type': 'application/json',
-      accept: 'application/json',
-    },
-    body: JSON.stringify({ metadata: { openchamber: { goal } } }),
+  await openCodeApi.mergeSessionMetadata(sessionID, directory, (metadata) => {
+    const openchamber = metadata.openchamber && typeof metadata.openchamber === 'object' && !Array.isArray(metadata.openchamber)
+      ? metadata.openchamber
+      : {};
+    return {
+      ...metadata,
+      openchamber: { ...openchamber, goal },
+    };
   });
-  if (!response.ok) throw new Error(`goal metadata patch failed (${response.status})`);
   return goal;
 };

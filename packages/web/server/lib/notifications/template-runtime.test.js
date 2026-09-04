@@ -4,11 +4,13 @@ import { createNotificationTemplateRuntime } from './template-runtime.js';
 
 const originalFetch = globalThis.fetch;
 
-const createRuntime = (settings = {}) => createNotificationTemplateRuntime({
+const createRuntime = (settings = {}, openCodeApi = {
+  listMessages: async () => ({ messages: [] }),
+  getSession: async () => null,
+}) => createNotificationTemplateRuntime({
   readSettingsFromDisk: async () => settings,
   persistSettings: vi.fn(async () => {}),
-  buildOpenCodeUrl: (path) => path,
-  getOpenCodeAuthHeaders: () => ({}),
+  openCodeApi,
   resolveGitBinaryForSpawn: () => 'git',
 });
 
@@ -68,16 +70,18 @@ describe('notification template message extraction', () => {
   });
 
   it('excludes reasoning parts when fetching assistant messages', async () => {
-    const runtime = createRuntime();
-    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify([
-      {
-        info: { id: 'msg-1', role: 'assistant', finish: 'stop' },
-        parts: [
-          { type: 'reasoning', text: 'private chain of thought' },
-          { type: 'text', text: 'final answer' },
-        ],
-      },
-    ])));
+    const runtime = createRuntime({}, {
+      getSession: async () => null,
+      listMessages: async () => ({
+        messages: [{
+          info: { id: 'msg-1', role: 'assistant', finish: 'stop' },
+          parts: [
+            { type: 'reasoning', text: 'private chain of thought' },
+            { type: 'text', text: 'final answer' },
+          ],
+        }],
+      }),
+    });
 
     await expect(runtime.fetchLastAssistantMessageText('session-1', 'msg-1')).resolves.toBe('final answer');
   });

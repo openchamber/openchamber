@@ -148,14 +148,17 @@ const extractJsonObject = (value) => {
 };
 
 const extractSessionStatus = (payload) => {
-  if (!payload || payload.type !== 'session.status') return null;
+  const isIdleEvent = payload?.type === 'session.idle';
+  if (!payload || (!isIdleEvent && payload.type !== 'session.status')) return null;
   const properties = payload.properties && typeof payload.properties === 'object' ? payload.properties : {};
   const status = properties.status && typeof properties.status === 'object' ? properties.status : {};
   const info = properties.info && typeof properties.info === 'object' ? properties.info : {};
   const sessionId = typeof properties.sessionID === 'string' ? properties.sessionID.trim() : '';
-  const type = typeof status.type === 'string'
-    ? status.type.trim()
-    : (typeof info.type === 'string' ? info.type.trim() : '');
+  const type = isIdleEvent
+    ? 'idle'
+    : typeof status.type === 'string'
+      ? status.type.trim()
+      : (typeof info.type === 'string' ? info.type.trim() : '');
   if (!sessionId || !type) return null;
   const directory = typeof properties.directory === 'string' && properties.directory
     ? properties.directory
@@ -165,6 +168,14 @@ const extractSessionStatus = (payload) => {
 
 // A user abort lands as an assistant message carrying MessageAbortedError.
 const extractAbortedAssistant = (payload) => {
+  if (payload?.type === 'session.error') {
+    const error = payload.properties?.error;
+    const sessionId = payload.properties?.sessionID;
+    if (error?.name === 'MessageAbortedError' && typeof sessionId === 'string' && sessionId) {
+      return { sessionId };
+    }
+    return null;
+  }
   if (!payload || payload.type !== 'message.updated') return null;
   const info = payload.properties?.info;
   if (!info || typeof info !== 'object' || info.role !== 'assistant') return null;
@@ -245,8 +256,7 @@ const messageTokenTotal = (info) => {
 };
 
 export const createSessionGoalRuntime = ({
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
+  openCodeApi,
   getSmallModelService,
   emitGoalNotification,
   isEnabled = isSessionGoalEnabled,
@@ -266,45 +276,24 @@ export const createSessionGoalRuntime = ({
     }
   };
 
-  const openCodeFetch = async (fetchPath, { directory, method = 'GET', body, query } = {}) => {
-    const base = buildOpenCodeUrl(fetchPath, '');
-    const params = new URLSearchParams(query || {});
-    if (directory) params.set('directory', directory);
-    const search = params.toString();
-    const url = search ? `${base}?${search}` : base;
-    const response = await fetch(url, {
-      method,
-      headers: {
-        Accept: 'application/json',
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
-        ...getOpenCodeAuthHeaders(),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    if (!response.ok) {
-      throw new Error(`OpenCode ${method} ${fetchPath} failed with ${response.status}`);
-    }
-    return response.json().catch(() => null);
-  };
-
   const fetchRecentMessages = async (sessionId, directory) => {
-    const messages = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/message`, {
-      directory,
-      query: { limit: String(MESSAGE_FETCH_LIMIT) },
-    }).catch(() => null);
-    return Array.isArray(messages) ? messages : null;
-  };
-
-  const fetchSessionStatuses = async (directory) => {
-    const statuses = await openCodeFetch('/session/status', { directory }).catch(() => null);
-    return statuses && typeof statuses === 'object' && !Array.isArray(statuses) ? statuses : null;
+    try {
+      const { messages } = await openCodeApi.listMessages(
+        { sessionID: sessionId, directory, limit: MESSAGE_FETCH_LIMIT },
+        { timeoutMs: FETCH_TIMEOUT_MS },
+      );
+      return messages;
+    } catch {
+      return null;
+    }
   };
 
   const fetchSessionChildren = async (sessionId, directory) => {
-    const children = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/children`, { directory })
-      .catch(() => null);
-    return Array.isArray(children) ? children : null;
+    try {
+      return await openCodeApi.listSessionChildren(sessionId, directory, { timeoutMs: FETCH_TIMEOUT_MS });
+    } catch {
+      return null;
+    }
   };
 
   const isWorkingStatus = (status) => status?.type === 'busy' || status?.type === 'retry';
@@ -314,25 +303,20 @@ export const createSessionGoalRuntime = ({
   // Returns the written goal, or null when the stored goal no longer matches
   // the expected id (user replaced/cleared it while we worked).
   const writeGoal = async (sessionId, directory, expectedGoalId, mutate) => {
-    const session = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory });
-    const currentGoal = parseGoalMetadata(session);
-    if (!currentGoal || currentGoal.id !== expectedGoalId) return null;
-    const nextGoal = { ...currentGoal, ...mutate(currentGoal), updatedAt: Date.now() };
-    const currentMetadata = session?.metadata && typeof session.metadata === 'object' ? session.metadata : {};
-    const currentNamespace = currentMetadata.openchamber && typeof currentMetadata.openchamber === 'object'
-      ? currentMetadata.openchamber
-      : {};
-    await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, {
-      directory,
-      method: 'PATCH',
-      body: {
-        metadata: {
-          ...currentMetadata,
-          openchamber: { ...currentNamespace, goal: nextGoal },
-        },
-      },
-    });
-    return nextGoal;
+    let written = null;
+    await openCodeApi.mergeSessionMetadata(sessionId, directory, (currentMetadata) => {
+      const currentGoal = parseGoalMetadata({ metadata: currentMetadata });
+      if (!currentGoal || currentGoal.id !== expectedGoalId) return currentMetadata;
+      written = { ...currentGoal, ...mutate(currentGoal), updatedAt: Date.now() };
+      const currentNamespace = currentMetadata.openchamber && typeof currentMetadata.openchamber === 'object'
+        ? currentMetadata.openchamber
+        : {};
+      return {
+        ...currentMetadata,
+        openchamber: { ...currentNamespace, goal: written },
+      };
+    }, { timeoutMs: FETCH_TIMEOUT_MS });
+    return written;
   };
 
   const settleGoal = async ({ sessionId, directory, goal, status, statusReason, note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID, evaluationProviderID, evaluationModelID }) => {
@@ -433,22 +417,20 @@ export const createSessionGoalRuntime = ({
       ? lastAssistantInfo.agent
       : (typeof lastAssistantInfo?.mode === 'string' ? lastAssistantInfo.mode : '');
     const variant = typeof lastAssistantInfo?.variant === 'string' ? lastAssistantInfo.variant : '';
-    await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/prompt_async`, {
+    await openCodeApi.sendPrompt({
+      sessionID: sessionId,
       directory,
-      method: 'POST',
-      body: {
-        model: { providerID, modelID },
-        ...(agent ? { agent } : {}),
-        ...(variant ? { variant } : {}),
-        parts: [{ type: 'text', text: buildContinuationPrompt(goal) }],
-      },
+      model: { providerID, modelID },
+      ...(agent ? { agent } : {}),
+      ...(variant ? { variant } : {}),
+      parts: [{ type: 'text', text: buildContinuationPrompt(goal) }],
     });
   };
 
   const tick = async (sessionId, directory) => {
-    if (!isEnabled()) return;
+    if (!isEnabled() || !openCodeApi.supportsSessionMetadata()) return;
 
-    const session = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory })
+    const session = await openCodeApi.getSession(sessionId, directory, { timeoutMs: FETCH_TIMEOUT_MS })
       .catch((error) => {
         console.warn(`[session-goal] session fetch failed: ${error?.message || error}`);
         return null;
@@ -484,19 +466,26 @@ export const createSessionGoalRuntime = ({
     // its next idle event will arm a fresh tick. If a child is still working,
     // OpenCode will inject its result into the parent and produce the same
     // busy→idle cycle, so do not poll or audit the interim parent reply.
-    const statuses = await fetchSessionStatuses(directory);
-    if (!statuses) {
+    const parentStatus = await openCodeApi.getSessionStatus(sessionId, directory, { timeoutMs: FETCH_TIMEOUT_MS });
+    if (parentStatus.kind !== 'authoritative') {
       armTimer(sessionId, directory, idleQuietMs);
       return;
     }
-    if (isWorkingStatus(statuses[sessionId])) return;
+    if (isWorkingStatus(parentStatus.status)) return;
 
     const children = await fetchSessionChildren(sessionId, directory);
     if (!children) {
       armTimer(sessionId, directory, idleQuietMs);
       return;
     }
-    if (children.some((child) => typeof child?.id === 'string' && isWorkingStatus(statuses[child.id]))) return;
+    const childStatuses = await Promise.all(children
+      .filter((child) => typeof child?.id === 'string')
+      .map((child) => openCodeApi.getSessionStatus(child.id, directory, { timeoutMs: FETCH_TIMEOUT_MS })));
+    if (childStatuses.some((state) => state.kind !== 'authoritative')) {
+      armTimer(sessionId, directory, idleQuietMs);
+      return;
+    }
+    if (childStatuses.some((state) => isWorkingStatus(state.status))) return;
 
     const messages = await fetchRecentMessages(sessionId, directory);
     if (!messages) return;
@@ -763,7 +752,8 @@ export const createSessionGoalRuntime = ({
   // "stop". Messages the user sends afterwards leave the paused goal alone;
   // Resume re-arms the loop (and kicks off immediately on an idle session).
   const pauseAfterAbort = async (sessionId, directory) => {
-    const session = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory })
+    if (!openCodeApi.supportsSessionMetadata()) return;
+    const session = await openCodeApi.getSession(sessionId, directory, { timeoutMs: FETCH_TIMEOUT_MS })
       .catch(() => null);
     const goal = parseGoalMetadata(session);
     if (!goal || goal.status !== 'active') return;
@@ -775,7 +765,7 @@ export const createSessionGoalRuntime = ({
   };
 
   const processPayload = (payload, directoryHint = '') => {
-    if (stopped) return;
+    if (stopped || !openCodeApi.supportsSessionMetadata()) return;
 
     const aborted = extractAbortedAssistant(payload);
     if (aborted) {

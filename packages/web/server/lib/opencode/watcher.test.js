@@ -141,6 +141,44 @@ describe('createOpenCodeWatcherRuntime', () => {
     expect(fetchLastEventIds.slice(0, 2)).toEqual([null, 'evt-1']);
   });
 
+  it('uses the V2 event path and normalizes V2 payloads without a shared hub', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const payloads = [];
+    const fetchCalls = [];
+
+    const watcher = createOpenCodeWatcherRuntime({
+      waitForOpenCodePort: async () => {},
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      getOpenCodeProtocol: () => 'opencode2',
+      onPayload(payload) {
+        payloads.push(payload);
+        watcher.stop();
+      },
+      fetchImpl: async (url, options) => {
+        fetchCalls.push({ url, headers: options.headers });
+        return createSseResponse({
+          signal: options.signal,
+          blocks: [
+            'id: cursor-1\ndata: {"id":"json-1","type":"session.execution.succeeded","properties":{"sessionID":"ses-1"}}\n\n',
+          ],
+        });
+      },
+    });
+
+    await watcher.start();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(fetchCalls[0].url).toBe('http://127.0.0.1:4096/api/event');
+    expect(payloads).toEqual([
+      {
+        id: 'json-1',
+        type: 'session.idle',
+        properties: { sessionID: 'ses-1' },
+      },
+    ]);
+  });
+
   it('subscribes to a shared global event hub instead of opening its own upstream stream', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const payloads = [];

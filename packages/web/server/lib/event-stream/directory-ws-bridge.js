@@ -1,5 +1,6 @@
 import { sendMessageStreamWsEvent, sendMessageStreamWsFrame } from './protocol.js';
 import { createUpstreamSseReader } from './upstream-reader.js';
+import { createOpenCode2EventNormalizer } from './opencode2-event-normalizer.js';
 
 function shouldTriggerUpstreamHealthCheck(upstream) {
   if (!upstream) {
@@ -26,8 +27,10 @@ export function acceptDirectoryMessageStreamWsConnection({
   upstreamStallTimeoutMs,
   upstreamReconnectDelayMs,
   fetchImpl,
+  getOpenCodeProtocol = () => 'legacy',
 }) {
   const controller = new AbortController();
+  const opencode2Normalizer = createOpenCode2EventNormalizer();
   let upstreamConnected = false;
   let streamReady = false;
   let reader = null;
@@ -37,6 +40,7 @@ export function acceptDirectoryMessageStreamWsConnection({
       controller.abort();
     }
     reader?.stop();
+    opencode2Normalizer.reset();
     wsClients.delete(socket);
   };
 
@@ -72,14 +76,29 @@ export function acceptDirectoryMessageStreamWsConnection({
 
   const run = async () => {
     const forwardEvent = ({ envelope, payload }) => {
-      const directory = requestedDirectory || envelope?.directory || 'global';
+      const normalized = getOpenCodeProtocol() === 'opencode2'
+        ? opencode2Normalizer.normalize({
+          envelope: {
+            ...envelope,
+            ...(requestedDirectory && !envelope?.directory ? { directory: requestedDirectory } : {}),
+          },
+          payload,
+        })
+        : { envelope, payload, directory: envelope?.directory || 'global', eventId: envelope?.eventId };
+      if (!normalized) {
+        return;
+      }
 
-      sendMessageStreamWsEvent(socket, payload, {
+      const directory = normalized.directory !== 'global'
+        ? normalized.directory
+        : requestedDirectory || envelope?.directory || 'global';
+
+      sendMessageStreamWsEvent(socket, normalized.payload, {
         directory,
-        eventId: typeof envelope?.eventId === 'string' && envelope.eventId.length > 0 ? envelope.eventId : undefined,
+        eventId: normalized.eventId,
       });
 
-      processForwardedEventPayload(payload, (syntheticPayload) => {
+      processForwardedEventPayload(normalized.payload, (syntheticPayload) => {
         sendMessageStreamWsEvent(socket, syntheticPayload, { directory: 'global' });
       });
     };
@@ -106,7 +125,8 @@ export function acceptDirectoryMessageStreamWsConnection({
           buildUrlFailed = false;
           let targetUrl;
           try {
-            targetUrl = new URL(buildOpenCodeUrl('/event', ''));
+            const eventPath = getOpenCodeProtocol() === 'opencode2' ? '/api/event' : '/event';
+            targetUrl = new URL(buildOpenCodeUrl(eventPath, ''));
           } catch {
             buildUrlFailed = true;
             throw new Error('OpenCode service unavailable');

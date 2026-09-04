@@ -35,17 +35,12 @@ const providerPayload = (overrides = {}) => ({
 });
 
 describe('OpenCode runtime provider snapshot', () => {
-  let fetchMock;
+  let getRuntimeProviderListing;
 
   beforeEach(() => {
-    fetchMock = vi.fn(async () => new Response(JSON.stringify(providerPayload()), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    }));
-    vi.stubGlobal('fetch', fetchMock);
+    getRuntimeProviderListing = vi.fn(async () => providerPayload());
     configureOpenCodeRuntimeProviders({
-      buildOpenCodeUrl: (pathname) => `http://127.0.0.1:4096${pathname}`,
-      getOpenCodeAuthHeaders: () => ({ Authorization: 'Basic test' }),
+      openCodeApi: { getRuntimeProviderListing },
     });
   });
 
@@ -59,8 +54,7 @@ describe('OpenCode runtime provider snapshot', () => {
     const provider = await getRuntimeProvider('llmapi');
 
     expect(provider).toMatchObject({ apiKey: 'plugin-key', baseURL: 'https://api.llmapi.ai/v1' });
-    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:4096/provider');
-    expect(fetchMock.mock.calls[0][1].headers).toMatchObject({ Authorization: 'Basic test' });
+    expect(getRuntimeProviderListing).toHaveBeenCalledWith(undefined, { timeoutMs: 5000 });
   });
 
   it('refuses the zen sentinel as a credential', async () => {
@@ -79,19 +73,19 @@ describe('OpenCode runtime provider snapshot', () => {
   it('serves one snapshot to concurrent callers instead of refetching', async () => {
     await Promise.all([getRuntimeProvider('llmapi'), getRuntimeProvider('opencode'), getRuntimeProvider('zai-coding-plan')]);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(getRuntimeProviderListing).toHaveBeenCalledTimes(1);
   });
 
   it('answers "unknown" rather than "no providers" when OpenCode is unreachable', async () => {
     resetOpenCodeRuntimeProviders();
-    fetchMock.mockRejectedValue(new Error('connection refused'));
+    getRuntimeProviderListing.mockRejectedValue(new Error('connection refused'));
 
     expect(await getRuntimeProviderSnapshot()).toBeNull();
   });
 
   it('keeps the previous snapshot when a later refresh fails', async () => {
     await getRuntimeProviderSnapshot();
-    fetchMock.mockRejectedValue(new Error('connection refused'));
+    getRuntimeProviderListing.mockRejectedValue(new Error('connection refused'));
 
     // Past the snapshot TTL, so the next read genuinely attempts a refresh.
     vi.useFakeTimers();
@@ -99,7 +93,7 @@ describe('OpenCode runtime provider snapshot', () => {
     const refreshed = await getRuntimeProviderSnapshot();
     vi.useRealTimers();
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(getRuntimeProviderListing).toHaveBeenCalledTimes(2);
     expect(refreshed.providers.has('llmapi')).toBe(true);
   });
 
@@ -107,6 +101,6 @@ describe('OpenCode runtime provider snapshot', () => {
     configureOpenCodeRuntimeProviders(null);
 
     expect(await getRuntimeProvider('llmapi')).toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(getRuntimeProviderListing).not.toHaveBeenCalled();
   });
 });

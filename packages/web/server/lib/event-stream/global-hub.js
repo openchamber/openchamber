@@ -1,4 +1,5 @@
 import { createUpstreamSseReader } from './upstream-reader.js';
+import { createOpenCode2EventNormalizer } from './opencode2-event-normalizer.js';
 
 // Raised from 512 → 2048 to improve recovery after brief disconnects during
 // long-running agent sessions where many events accumulate quickly.
@@ -11,10 +12,12 @@ export function createGlobalMessageStreamHub({
   upstreamStallTimeoutMs,
   upstreamReconnectDelayMs,
   replayLimit = MESSAGE_STREAM_GLOBAL_REPLAY_LIMIT,
+  getOpenCodeProtocol = () => 'legacy',
 }) {
   const eventSubscribers = new Set();
   const statusSubscribers = new Set();
   const replay = [];
+  const opencode2Normalizer = createOpenCode2EventNormalizer();
 
   let controller = null;
   let reader = null;
@@ -42,6 +45,10 @@ export function createGlobalMessageStreamHub({
   };
 
   const normalizeEvent = ({ envelope, payload }) => {
+    if (getOpenCodeProtocol() === 'opencode2') {
+      return opencode2Normalizer.normalize({ envelope, payload });
+    }
+
     const directory =
       typeof envelope?.directory === 'string' && envelope.directory.length > 0 ? envelope.directory : 'global';
     const eventId = typeof envelope?.eventId === 'string' && envelope.eventId.length > 0 ? envelope.eventId : undefined;
@@ -67,7 +74,8 @@ export function createGlobalMessageStreamHub({
       buildUrl: () => {
         buildUrlFailed = false;
         try {
-          return new URL(buildOpenCodeUrl('/global/event', ''));
+          const eventPath = getOpenCodeProtocol() === 'opencode2' ? '/api/event' : '/global/event';
+          return new URL(buildOpenCodeUrl(eventPath, ''));
         } catch {
           buildUrlFailed = true;
           throw new Error('OpenCode service unavailable');
@@ -86,6 +94,9 @@ export function createGlobalMessageStreamHub({
       },
       onEvent(event) {
         const normalized = normalizeEvent(event);
+        if (!normalized) {
+          return;
+        }
         if (normalized.eventId) {
           replay.push(normalized);
           if (replay.length > replayLimit) {
@@ -123,6 +134,7 @@ export function createGlobalMessageStreamHub({
     controller = null;
     everConnected = false;
     buildUrlFailed = false;
+    opencode2Normalizer.reset();
   };
 
   return {
