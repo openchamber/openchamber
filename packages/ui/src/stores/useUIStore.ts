@@ -804,6 +804,7 @@ interface UIStore {
   eventStreamHint: string | null;
   showReasoningTraces: boolean;
   streamingAutoFollowEnabled: boolean;
+  showMessageSpeedMetrics: boolean;
   sessionRecapEnabled: boolean;
   sessionSuggestionEnabled: boolean;
   sessionGoalEnabled: boolean;
@@ -1008,6 +1009,7 @@ interface UIStore {
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
   setShowReasoningTraces: (value: boolean) => void;
   setStreamingAutoFollowEnabled: (value: boolean) => void;
+  setShowMessageSpeedMetrics: (value: boolean) => void;
   setSessionRecapEnabled: (value: boolean) => void;
   setSessionSuggestionEnabled: (value: boolean) => void;
   setSessionGoalEnabled: (value: boolean) => void;
@@ -1187,6 +1189,7 @@ export const useUIStore = create<UIStore>()(
         eventStreamHint: null,
         showReasoningTraces: true,
         streamingAutoFollowEnabled: true,
+        showMessageSpeedMetrics: false,
         sessionRecapEnabled: true,
         sessionSuggestionEnabled: true,
         sessionGoalEnabled: true,
@@ -1945,6 +1948,10 @@ export const useUIStore = create<UIStore>()(
 
         setStreamingAutoFollowEnabled: (value) => {
           set({ streamingAutoFollowEnabled: value });
+        },
+
+        setShowMessageSpeedMetrics: (value) => {
+          set({ showMessageSpeedMetrics: value });
         },
 
         setSessionRecapEnabled: (value) => {
@@ -2901,6 +2908,7 @@ export const useUIStore = create<UIStore>()(
           // Note: isSettingsDialogOpen intentionally NOT persisted
           showReasoningTraces: state.showReasoningTraces,
           streamingAutoFollowEnabled: state.streamingAutoFollowEnabled,
+          showMessageSpeedMetrics: state.showMessageSpeedMetrics,
           sessionRecapEnabled: state.sessionRecapEnabled,
           sessionSuggestionEnabled: state.sessionSuggestionEnabled,
           sessionGoalEnabled: state.sessionGoalEnabled,

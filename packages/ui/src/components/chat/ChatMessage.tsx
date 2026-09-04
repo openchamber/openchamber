@@ -38,6 +38,8 @@ import { getContextObligatoryMessages } from '@/lib/contextObligatoryMessages';
 import { setContextObligatoryMessage } from '@/sync/session-actions';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { focusChatInput } from './composer/editor/dom';
+import { deriveMessageSpeedMetrics } from './lib/messageSpeedMetrics';
+import type { MessageSpeedMetrics } from './lib/messageSpeedMetrics';
 
 const ToolOutputDialog = lazyWithChunkRecovery(() => import('./message/ToolOutputDialog'));
 
@@ -169,13 +171,14 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     }
 
     const providers = useConfigStore((state) => state.providers);
-    const { showReasoningTraces, stickyUserHeader, chatRenderMode, showExpandedBashTools, showExpandedEditTools } = useUIStore(
+    const { showReasoningTraces, stickyUserHeader, chatRenderMode, showExpandedBashTools, showExpandedEditTools, showMessageSpeedMetrics } = useUIStore(
         useShallow((state) => ({
             showReasoningTraces: state.showReasoningTraces,
             stickyUserHeader: state.stickyUserHeader,
             chatRenderMode: state.chatRenderMode,
             showExpandedBashTools: state.showExpandedBashTools,
             showExpandedEditTools: state.showExpandedEditTools,
+            showMessageSpeedMetrics: state.showMessageSpeedMetrics,
         }))
     );
 
@@ -430,6 +433,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         if (isUser) return true;
         return Boolean(messageCompletedAt && messageCompletedAt > 0);
     }, [isUser, messageCompletedAt]);
+
+    const speedMetrics = React.useMemo<MessageSpeedMetrics | null>(() => {
+        if (isUser || !isMessageCompleted) return null;
+        return deriveMessageSpeedMetrics(message.info, normalizedParts);
+    }, [isUser, isMessageCompleted, message.info, normalizedParts]);
 
     const messageFinish = React.useMemo(() => {
         const finish = (message.info as { finish?: string }).finish;
@@ -973,6 +981,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 footerModelName={headerModelName}
                                 footerAgentName={headerAgentName}
                                 footerVariant={headerVariant}
+                                speedMetrics={speedMetrics}
+                                showSpeedMetrics={showMessageSpeedMetrics}
                                 isDarkTheme={isDarkTheme}
                             />
 
