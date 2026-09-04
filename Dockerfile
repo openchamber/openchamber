@@ -57,6 +57,9 @@ RUN npm config set prefix /home/openchamber/.npm-global && mkdir -p /home/opench
 COPY --from=cloudflare/cloudflared@sha256:6d91c121b803126f7a5344005d17a9324788fc09d305b6e2560ec6040a7ae283 /usr/local/bin/cloudflared /usr/local/bin/cloudflared
 
 ENV NODE_ENV=production
+# The base image ships with the POSIX locale, which makes bash readline treat
+# every byte of a multibyte character separately in the built-in terminal.
+ENV LANG=C.UTF-8
 
 COPY scripts/docker-entrypoint.sh /home/openchamber/openchamber-entrypoint.sh
 
