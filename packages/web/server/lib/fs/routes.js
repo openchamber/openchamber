@@ -285,7 +285,7 @@ const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProject
       path,
       os,
       normalizeDirectoryPath,
-      openchamberUserConfigRoot,
+      managedRoots,
     });
     if (lexical.ok) {
       return lexical;
@@ -1700,7 +1700,7 @@ export const registerFsRoutes = (app, dependencies) => {
         path,
         os,
         normalizeDirectoryPath,
-        openchamberUserConfigRoot,
+        managedRoots,
       });
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
