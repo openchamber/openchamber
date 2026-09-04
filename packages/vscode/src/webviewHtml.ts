@@ -228,11 +228,11 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
         return {
           startingApi: 'OpenCode API başlatılıyor…',
           initializing: 'Başlatılıyor…',
-          connecting: 'Bağlanılıyor…',
+          connecting: 'Bağlanıyor…',
           connected: 'Bağlandı!',
           connectionError: 'Bağlantı hatası',
-          reconnecting: 'Yeniden bağlanılıyor…',
-          cliNotFound: 'OpenCode CLI bulunamadı. Lütfen önce yükleyin.',
+          reconnecting: 'Yeniden bağlanıyor…',
+          cliNotFound: 'OpenCode CLI bulunamadı. Lütfen önce kurun.',
         };
       }
       return {
@@ -310,8 +310,8 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
               }
               if (detected.indexOf('tr') === 0) {
                 return {
-                  startingDevServer: (host) => 'Webview geliştirme sunucusu başlatılıyor (' + host + ')...',
-                  waitingDevServer: (host, attempt) => 'Webview geliştirme sunucusu bekleniyor (' + host + ')... deneme ' + attempt,
+                  startingDevServer: (host) => 'Webview dev sunucusu başlatılıyor (' + host + ')...',
+                  waitingDevServer: (host, attempt) => 'Webview dev sunucusu bekleniyor (' + host + ')... deneme ' + attempt,
                 };
               }
             }

@@ -1301,12 +1301,10 @@ class OpencodeService {
    * endpoint introduced in OpenCode SDK v1.17.12. Wraps
    * `session.permission.get`.
    *
-   * Returns a tagged `FetchPermissionResult` so the caller can distinguish
-   * a confirmed-resolved permission (HTTP 404) from a fetch failure
-   * (network error, malformed response, or pre-v1.17.12 server without
-   * the V2 endpoint). The auto-accept flow uses this distinction to drop
-   * resolved permissions from the resync output, preventing stale
-   * `permission.list` entries from sticking around in the UI.
+   * Returns the state of the V2 permission authority. Its HTTP 404 result
+   * does not prove that a request from `permission.list` has settled:
+   * list-derived reconciliation must use that list's own reply path.
+   * Fetch failures remain distinct from the V2 resolved result.
    */
   async fetchPermission(
     sessionID: string,

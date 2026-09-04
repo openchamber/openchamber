@@ -1,10 +1,10 @@
+import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import yaml from 'yaml';
 import { parse as parseJsonc, printParseErrorCode, type ParseError } from 'jsonc-parser';
 
-const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
 const AGENT_DIR = path.join(OPENCODE_CONFIG_DIR, 'agents');
 const COMMAND_DIR = path.join(OPENCODE_CONFIG_DIR, 'commands');
 const GLOBAL_SNIPPET_DIR = path.join(OPENCODE_CONFIG_DIR, 'snippet');

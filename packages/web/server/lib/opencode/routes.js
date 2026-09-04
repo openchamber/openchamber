@@ -815,10 +815,10 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
       try {
         await fs.promises.access(AGENTS_MD_PATH);
       } catch {
-        return res.json({ content: '', exists: false });
+        return res.json({ content: '', exists: false, path: AGENTS_MD_PATH });
       }
       const content = await fs.promises.readFile(AGENTS_MD_PATH, 'utf8');
-      return res.json({ content, exists: true });
+      return res.json({ content, exists: true, path: AGENTS_MD_PATH });
     } catch (error) {
       console.error('Failed to read AGENTS.md:', error);
       return res.status(500).json({ error: 'Failed to read AGENTS.md' });

@@ -421,7 +421,7 @@ an authoritative loopback callback URL even when OpenChamber binds port `0`.
 
 ## Storage and configuration
 - Provider auth: `~/.local/share/opencode/auth.json`.
-- User config: `~/.config/opencode/opencode.json`.
+- User config: `$XDG_CONFIG_HOME/opencode/opencode.json`, falling back to `~/.config/opencode/opencode.json` when unset or blank.
 - Project config: `<workingDirectory>/.opencode/opencode.json` or `opencode.json`.
 - Custom config: `OPENCODE_CONFIG` env var path.
 - Rate limit config: `OPENCHAMBER_RATE_LIMIT_MAX_ATTEMPTS`, `OPENCHAMBER_RATE_LIMIT_NO_IP_MAX_ATTEMPTS` env vars.
@@ -433,3 +433,7 @@ an authoritative loopback callback URL even when OpenChamber binds port `0`.
 - Config merging follows priority: custom > project > user.
 - UI auth uses scrypt for password hashing with constant-time comparison.
 - Tunnel auth treats `host.docker.internal` as local-only when the socket remote IP is private/loopback.
+
+The behavior `GET /api/behavior/agents-md` response includes `path`, the effective
+server-side filename, whether or not the file exists. Settings displays this
+path without deriving a directory from the browser environment.

@@ -172,3 +172,14 @@ Reachable filesystem routes: `api:fs:read` (attachments, config), `api:fs:search
 
 Maintenance: reviews, changelog entries, and parity claims consult this map;
 whoever mounts or unmounts a surface updates it in the same change.
+
+## Global OpenCode paths
+
+`opencodeConfigPaths.ts` owns the global config directory for config CRUD,
+skill discovery/install, global AGENTS.md, and quota config-file lookup. It
+resolves `$XDG_CONFIG_HOME/opencode` at extension startup, falling back to
+`~/.config/opencode` when unset or blank. Project paths, the explicit
+`OPENCODE_CONFIG` file layer, and the auth data directory stay separate.
+No files are migrated. The behavior GET bridge response includes the effective
+`path` for both existing and missing AGENTS.md files; shared Settings uses it
+in the warning.

@@ -99,10 +99,18 @@ describe('OpenCode global config paths', () => {
     routes.registerOpenCodeRoutes(app, {});
 
     const response = { json: vi.fn(), status: vi.fn(() => response) };
+    await handlers.get('GET /api/behavior/agents-md')({}, response);
+    expect(response.json).toHaveBeenLastCalledWith({
+      content: '', exists: false, path: path.join(process.env.XDG_CONFIG_HOME, 'opencode', 'AGENTS.md'),
+    });
+
     await handlers.get('PUT /api/behavior/agents-md')({ body: { content: 'Global behavior' } }, response);
 
     expect(fs.readFileSync(path.join(process.env.XDG_CONFIG_HOME, 'opencode', 'AGENTS.md'), 'utf8')).toBe('Global behavior');
-    expect(response.json).toHaveBeenCalled();
+    await handlers.get('GET /api/behavior/agents-md')({}, response);
+    expect(response.json).toHaveBeenLastCalledWith({
+      content: 'Global behavior', exists: true, path: path.join(process.env.XDG_CONFIG_HOME, 'opencode', 'AGENTS.md'),
+    });
     fs.rmSync(root, { recursive: true, force: true });
   });
 });

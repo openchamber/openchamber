@@ -1,4 +1,5 @@
 import React from 'react';
+import { z } from 'zod';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
@@ -30,7 +31,11 @@ import {
   SETTINGS_SELECT_SIZE,
 } from '@/components/sections/shared/SettingsSection';
 
-const AGENTS_MD_PATH = '~/.config/opencode/AGENTS.md';
+const agentsMdResponseSchema = z.object({
+  content: z.string(),
+  exists: z.boolean(),
+  path: z.string().min(1).optional(),
+});
 
 const readApiError = async (response: Response, fallback: string) => {
   const data = await response.json().catch(() => null) as { error?: unknown } | null;
@@ -104,6 +109,7 @@ export const BehaviorPage: React.FC = () => {
   const { t } = useI18n();
   const isVSCode = useIsVSCodeRuntime();
   const [prompt, setPrompt] = React.useState('');
+  const [agentsMdPath, setAgentsMdPath] = React.useState('AGENTS.md');
   const [optimizeSystemPrompt, setOptimizeSystemPrompt] = React.useState(false);
   const [responseStyleEnabled, setResponseStyleEnabled] = React.useState(DEFAULT_BEHAVIOR_SETTINGS.responseStyleEnabled);
   const [responseStylePreset, setResponseStylePreset] = React.useState<ResponseStyleValue>(DEFAULT_BEHAVIOR_SETTINGS.responseStylePreset);
@@ -154,9 +160,11 @@ export const BehaviorPage: React.FC = () => {
           }
         }
 
-        if (!nextSettings.prompt.trim() && agentsMdRes.ok) {
-          const agentsData = await agentsMdRes.json();
-          if (typeof agentsData.content === 'string') {
+        if (agentsMdRes.ok) {
+          const agentsData = agentsMdResponseSchema.parse(await agentsMdRes.json());
+          if (abort.signal.aborted) return;
+          setAgentsMdPath(agentsData.path ?? 'AGENTS.md');
+          if (!nextSettings.prompt.trim()) {
             nextSettings = { ...nextSettings, prompt: agentsData.content };
           }
         }
@@ -326,7 +334,7 @@ export const BehaviorPage: React.FC = () => {
               {t('settings.behavior.page.warning.title')}
             </p>
             <p>
-              {t('settings.behavior.page.warning.description', { path: AGENTS_MD_PATH })}
+              {t('settings.behavior.page.warning.description', { path: agentsMdPath })}
             </p>
           </div>
         )}
