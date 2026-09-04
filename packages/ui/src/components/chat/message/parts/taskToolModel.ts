@@ -1,5 +1,6 @@
 import type { MessageRecord } from '@/lib/messageCompletion';
 
+import { capToolOutputText } from '../toolRenderers';
 import { readTaskTagSessionIdFromOutput } from './taskSessionIdParser';
 
 export type TaskToolSummaryEntry = {
@@ -130,4 +131,13 @@ export const buildTaskSummaryEntriesFromSession = (messages: MessageRecord[]): T
 
 export const stripTaskMetadataFromOutput = (output: string): string => {
     return output.replace(/\n*<task_metadata>[\s\S]*?<\/task_metadata>\s*$/i, '').trimEnd();
+};
+
+// The task tool renders its output through the markdown parser instead of the
+// shared tool-output path, so it needs the same size guard as
+// `getToolOutputText` (issue #2265): an unbounded single string reaching the
+// parser can exhaust V8's Zone allocator and crash the renderer.
+export const prepareTaskToolOutput = (output: string | undefined): string => {
+    if (!output) return '';
+    return capToolOutputText(stripTaskMetadataFromOutput(output));
 };

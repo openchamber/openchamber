@@ -2,8 +2,18 @@ import { describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { buildChildrenIndex, computeSubtreeCost, formatCost } from './subagentCost';
 
-function makeSession(id: string, cost: number, parentID?: string): Session {
-  return { id, cost, parentID } as unknown as Session;
+function makeSession(id: string, cost: number | undefined, parentID?: string): Session {
+  return {
+    id,
+    slug: id,
+    projectID: 'project',
+    directory: '/project',
+    title: id,
+    version: '1',
+    time: { created: 0, updated: 0 },
+    cost,
+    parentID,
+  };
 }
 
 describe('buildChildrenIndex', () => {
@@ -57,7 +67,7 @@ describe('computeSubtreeCost', () => {
 
   test('treats zero and undefined cost as zero, not a break', () => {
     const root = makeSession('root', 0);
-    const child = { id: 'child', parentID: 'root' } as unknown as Session;
+    const child = makeSession('child', undefined, 'root');
     const sessions = [root, child];
     const sessionsById = new Map(sessions.map((s) => [s.id, s]));
     const childrenByParent = buildChildrenIndex(sessions);

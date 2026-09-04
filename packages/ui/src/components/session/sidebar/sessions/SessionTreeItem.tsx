@@ -39,6 +39,7 @@ export type SessionTreeItemProps = SessionTreeItemRenderProps & Pick<SessionNode
   | 'setEditTitle'
   | 'toggleParent'
   | 'setOpenSidebarMenuKey'
+  | 'startSessionWorktreeMenuLoad'
 > & {
   allowReselect: boolean;
   onSessionSelected?: (sessionId: string) => void;
@@ -88,6 +89,7 @@ export function SessionTreeItem({
   startFolderRename,
   copiedSessionId,
   setCopiedSessionId,
+  startSessionWorktreeMenuLoad,
   mobileVariant,
   alwaysShowActions,
 }: SessionTreeItemProps): React.ReactNode {
@@ -95,15 +97,23 @@ export function SessionTreeItem({
   const toggleFolderCollapse = useSessionFoldersStore((state) => state.toggleFolderCollapse);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
-  const descendantIds = React.useMemo(() => {
+  // Keyed by the descendant ids themselves, not by node identity: the sidebar
+  // rebuilds a project's node tree whenever one of its session records
+  // changes, and a fresh array here would give every row in that project a
+  // new delete handler and force it to re-render.
+  const descendantIdsKey = React.useMemo(() => {
     const ids: string[] = [];
     const visit = (current: SessionNode) => current.children.forEach((child) => {
       ids.push(child.session.id);
       visit(child);
     });
     visit(node);
-    return ids;
+    return ids.join('\n');
   }, [node]);
+  const descendantIds = React.useMemo(
+    () => (descendantIdsKey ? descendantIdsKey.split('\n') : []),
+    [descendantIdsKey],
+  );
   const createFolderAndStartRename = React.useCallback((scopeKey: string, parentId?: string | null) => {
     if (!scopeKey) return null;
     if (parentId && useSessionFoldersStore.getState().collapsedFolderIds.has(parentId)) toggleFolderCollapse(parentId);
@@ -160,11 +170,12 @@ export function SessionTreeItem({
       openSidebarMenuKey={openSidebarMenuKey}
       setOpenSidebarMenuKey={setOpenSidebarMenuKey}
       createFolderAndStartRename={createFolderAndStartRename}
-       handleDeleteSession={sessionActions.handleDeleteSession}
-       handleRestoreSession={sessionActions.handleRestoreSession}
-      mobileVariant={mobileVariant}
-      alwaysShowActions={alwaysShowActions}
-       pinnedSessionIds={pinnedSessionIds}
+        handleDeleteSession={sessionActions.handleDeleteSession}
+        handleRestoreSession={sessionActions.handleRestoreSession}
+       startSessionWorktreeMenuLoad={startSessionWorktreeMenuLoad}
+       mobileVariant={mobileVariant}
+       alwaysShowActions={alwaysShowActions}
+        pinnedSessionIds={pinnedSessionIds}
       node={node}
       depth={depth}
       groupDirectory={groupDirectory}
@@ -175,6 +186,7 @@ export function SessionTreeItem({
       subtreeContainsEditing={renderExtras?.subtreeContainsEditing ?? EMPTY_SUBTREE_CONTAINS_EDITING}
       menuOpenSessionId={renderExtras?.menuOpenSessionId ?? null}
       nodeStructureKey={renderExtras?.nodeStructureKey ?? ''}
+      relativeTimeTick={renderExtras?.relativeTimeTick}
     >
       {node.children.map((child) => (
         <SessionTreeItem
@@ -201,11 +213,12 @@ export function SessionTreeItem({
            setIsSessionSearchOpen={setIsSessionSearchOpen}
            deleteSessionConfirm={deleteSessionConfirm}
            setDeleteSessionConfirm={setDeleteSessionConfirm}
-           startFolderRename={startFolderRename}
-           setCopiedSessionId={setCopiedSessionId}
-          mobileVariant={mobileVariant}
-          alwaysShowActions={alwaysShowActions}
-          depth={depth + 1}
+            startFolderRename={startFolderRename}
+            setCopiedSessionId={setCopiedSessionId}
+            startSessionWorktreeMenuLoad={startSessionWorktreeMenuLoad}
+           mobileVariant={mobileVariant}
+           alwaysShowActions={alwaysShowActions}
+           depth={depth + 1}
           {...childContext}
           renderExtras={childRenderExtrasFor?.(child)}
         />

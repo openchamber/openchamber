@@ -67,6 +67,7 @@ export const createRequestSecurityRuntime = (deps) => {
 
   const getRequestOriginCandidates = async (req) => {
     const origins = new Set();
+    const hosts = new Set();
     const forwardedProto = typeof req.headers['x-forwarded-proto'] === 'string'
       ? req.headers['x-forwarded-proto'].split(',')[0].trim().toLowerCase()
       : '';
@@ -78,6 +79,7 @@ export const createRequestSecurityRuntime = (deps) => {
     const host = forwardedHost || (typeof req.headers.host === 'string' ? req.headers.host.trim() : '');
 
     if (host) {
+      hosts.add(host.toLowerCase());
       origins.add(`${protocol}://${host}`);
       const [hostname, port] = host.split(':');
       const normalizedHost = typeof hostname === 'string' ? hostname.toLowerCase() : '';
@@ -98,10 +100,10 @@ export const createRequestSecurityRuntime = (deps) => {
     } catch {
     }
 
-    return origins;
+    return { origins, hosts };
   };
 
-  const isRequestOriginAllowed = async (req) => {
+  const isRequestOriginAllowed = (req) => {
     const originHeader = typeof req.headers.origin === 'string' ? req.headers.origin.trim() : '';
     if (!originHeader) {
       return false;
@@ -111,15 +113,28 @@ export const createRequestSecurityRuntime = (deps) => {
       return true;
     }
 
-    let normalizedOrigin = '';
+    let origin;
     try {
-      normalizedOrigin = new URL(originHeader).origin;
+      origin = new URL(originHeader);
     } catch {
       return false;
     }
 
-    const allowedOrigins = await getRequestOriginCandidates(req);
-    return allowedOrigins.has(normalizedOrigin);
+    const forwardedHostHeader = req.headers['x-forwarded-host'];
+    const forwardedHost = (Array.isArray(forwardedHostHeader) ? forwardedHostHeader[0] : forwardedHostHeader || '')
+      .split(',')[0].trim().toLowerCase();
+    const hostHeader = req.headers.host;
+    const host = forwardedHost || (Array.isArray(hostHeader) ? hostHeader[0] : hostHeader || '').trim().toLowerCase();
+    if (host && host === origin.host.toLowerCase()) return true;
+
+    // TLS commonly ends at a cloud edge before an HTTP hop to OpenChamber.
+    // In that setup the browser's Origin is https while a generic reverse
+    // proxy reports the upstream request as http. The external host remains
+    // authoritative, so compare it directly instead of requiring the proxy to
+    // preserve the browser-facing protocol.
+    return getRequestOriginCandidates(req).then((candidates) => (
+      candidates.origins.has(origin.origin) || candidates.hosts.has(origin.host.toLowerCase())
+    ));
   };
 
   return {

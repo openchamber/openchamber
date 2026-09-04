@@ -8,6 +8,11 @@ const recordStartupPerformanceMock = vi.fn();
 vi.mock('node:child_process', () => ({
   spawn: spawnMock,
   spawnSync: spawnSyncMock,
+  // `managed-process-registry.js` (imported transitively via lifecycle.js)
+  // calls `promisify(execFile)` at module load, so the mock must expose a
+  // function here. Lifecycle tests don't exercise the reaper path, so a plain
+  // stub is enough; the registry's best-effort writes are no-ops on errors.
+  execFile: vi.fn(),
 }));
 vi.mock('./startup-performance.js', () => ({
   recordStartupPerformance: recordStartupPerformanceMock,

@@ -179,6 +179,13 @@ including edits the user made by hand and excluding session edits that are
 already committed. If a session-authored count is ever needed, it has to come
 from aggregating message summaries, not from `Session.summary`.
 
+One exception: while the directory is a worktree whose creation has not
+finished (`useWorktreeBootstrapPending`), the working tree transiently holds
+bootstrap files that the initial git reset is about to remove. Those are not
+changes on the branch, so the panel neither fetches status nor renders the
+changed-files row until the bootstrap settles, then forces one status fetch so
+the row reflects the reset tree rather than a mid-creation snapshot.
+
 ## Section order
 
 Ordering is by durability, not category:
@@ -319,8 +326,10 @@ Stored in session metadata as a **snapshot** (`lib/linkedIssues.ts`, namespace
 pinned messages. Number, title, url, author and avatar only — the body,
 comments and state belong to GitHub, and mirroring them would mean owning their
 staleness. The stored title can drift; that is the price of a store that never
-needs refreshing. The row opens the real thread, which is where current state
-lives.
+needs refreshing. A GitHub row opens github.com. A Linear row opens the
+right-hand Linear panel when Linear is connected on desktop/web; otherwise it
+opens the Linear URL (no rail in VS Code or the phone shell, and none while
+disconnected).
 
 Writes happen **after** the send promise resolves and are deliberately
 swallowed on failure: the message went out, and a missing bookkeeping entry
@@ -344,6 +353,28 @@ the matching header dropdown:
   section loads them itself, keyed on the directory, since skills are
   discovered relative to the active project. It does not wrap the call in
   `runBackgroundNetworkTask`: the store already gates its own fetch.
+
+Usage waits for the instance to say it is initialised. Quota providers report
+themselves as configured only once the instance can read their credentials,
+which on a remote instance is not true when the UI mounts — a fetch fired at
+mount gets "nothing configured" for every provider, and since each one then has
+a result, nothing asks again until the three-minute refresh. That is why Usage
+could stay missing from the panel until Settings -> Usage forced a fresh fetch.
+`useQuotaStore.ensureLoadedForRuntime` owns both the readiness rule and the
+once-per-instance bookkeeping, so every caller can ask on each connection
+change.
+
+### These readouts belong to the connected instance
+
+Quotas, MCP status, skills, agent memory and the Linear/GitHub logins are all
+served by whichever OpenChamber instance is connected, and each was cached
+globally or by directory alone — which two instances can share. A switch left
+the previous instance's answers on screen, and its Linear login usable against
+a runtime that has no Linear. `apps/runtimeEndpointReset.ts` now drops all of
+them, each store guarding its own in-flight requests with a generation so a
+response for the previous instance cannot land in the new one. The MCP and
+skills effects take `isConnected` as a dependency — not a gate — because
+`directory` alone does not change when both instances hold the same path.
 
 The panel now performs these itself, silently and through the
 background-network gate, so it cannot compete with chat bootstrap traffic for

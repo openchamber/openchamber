@@ -36,6 +36,7 @@ import { cn } from '@/lib/utils';
 import type { ComposerLanguageContext } from '../language/tokenize';
 import type { ComposerAutoCorrect } from './autocorrect';
 import { composerLanguage, setLanguageContext } from './composerLanguage';
+import { replaceWithCaret } from './documentEdits';
 import type { ComposerEditorViewStore } from './viewStore';
 import { composerEditorTheme, composerSelectionExtension } from './theme';
 import { handleComposerHostMouseDown } from './hostMouseDown';
@@ -351,17 +352,14 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             // A stale value echo can differ from CodeMirror's newer document,
             // and replacing it would interrupt the IME session and move the caret.
             if (view.compositionStarted) return;
-            view.dispatch({
-                changes: { from: 0, to: current.length, insert: value },
-                // An external rewrite (draft restore, history navigation,
-                // "add to chat", dictation insert) lands the caret at the END,
-                // matching what a plain textarea did when its value was
-                // replaced. Every rewrite that reaches here appends or
-                // replaces wholesale; keeping the old caret instead left it
-                // stranded before the inserted text, and the next insertion
-                // or keystroke landed inside the previous one.
-                selection: { anchor: value.length },
-            });
+            // An external rewrite (draft restore, history navigation,
+            // "add to chat", dictation insert) lands the caret at the END,
+            // matching what a plain textarea did when its value was replaced.
+            // Every rewrite that reaches here appends or replaces wholesale;
+            // keeping the old caret instead left it stranded before the
+            // inserted text, and the next insertion or keystroke landed inside
+            // the previous one.
+            view.dispatch(replaceWithCaret(view.state, 0, current.length, value));
             // A large insert can push the caret below the fold, and a
             // transaction-time `scrollIntoView` cannot reach it: wrapped-line
             // heights are still estimates during the update, and the
@@ -515,18 +513,18 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                 if (!view || !text) return;
                 const { from, to } = view.state.selection.main;
                 view.dispatch({
-                    changes: { from, to, insert: text },
-                    selection: { anchor: from + text.length },
+                    ...replaceWithCaret(view.state, from, to, text),
                     userEvent: 'input.type',
                 });
             },
             replaceRange(from, to, text, selectionStart, selectionEnd = selectionStart) {
                 const view = viewRef.current;
                 if (!view) return;
-                const anchor = selectionStart ?? from + text.length;
+                const caret = selectionStart === undefined
+                    ? undefined
+                    : { anchor: selectionStart, head: selectionEnd ?? selectionStart };
                 view.dispatch({
-                    changes: { from, to, insert: text },
-                    selection: { anchor, head: selectionEnd ?? anchor },
+                    ...replaceWithCaret(view.state, from, to, text, caret),
                     userEvent: 'input.type',
                 });
             },

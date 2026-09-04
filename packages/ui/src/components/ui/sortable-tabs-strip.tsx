@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
 import { Icon } from "@/components/icon/Icon";
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
 
 export type SortableTabsStripItem = {
   id: string;
@@ -49,6 +50,15 @@ type SortableTabsStripProps = {
       (e.g. a sliding mobile drawer): creating a composited layer mid-slide
       flickers in WKWebView. Tab-switch animation stays (layout transition). */
   nonCompositedIndicator?: boolean;
+  /** Per-tab right-click context menu. Return the menu items for the given tab,
+      or null/undefined to disable the context menu for that tab. */
+  tabContextMenu?: (args: {
+    id: string;
+    index: number;
+    isActive: boolean;
+    allIds: string[];
+    close: () => void;
+  }) => React.ReactNode;
   className?: string;
 };
 
@@ -106,6 +116,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   animateActivePill,
   activePillLowercase = true,
   nonCompositedIndicator = false,
+  tabContextMenu,
   className,
 }) => {
   const { t } = useI18n();
@@ -445,7 +456,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
             aria-hidden
           />
         ) : null}
-        {items.map((item) => {
+        {items.map((item, index) => {
           const isActive = item.id === activeId;
           const showInactiveIconOnly = inactiveTabsIconOnly && usesActivePillIndicator && !isActive && Boolean(item.icon);
           const shouldShowLabel = !showInactiveIconOnly;
@@ -479,9 +490,18 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                 }
               }
             : undefined;
-          return (
-            <Wrapper key={item.id} id={item.id} className={wrapperClassName}>
-              <div
+          const tabMenuItems = !isMobile && tabContextMenu
+            ? tabContextMenu({
+              id: item.id,
+              index,
+              isActive,
+              allIds: itemIDs,
+              close: () => onClose?.(item.id),
+            })
+            : null;
+
+          const tabElement = (
+            <div
                 ref={(element) => setTabRef(item.id, element)}
                 onAuxClick={handleAuxClick}
                 onMouseDown={handleMouseDown}
@@ -636,6 +656,24 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                   </button>
                 ) : null}
               </div>
+          );
+
+          return (
+            <Wrapper key={item.id} id={item.id} className={wrapperClassName}>
+              {tabMenuItems ? (
+                <ContextMenu>
+                  <ContextMenuTrigger
+                    render={(triggerProps) => (
+                      <div {...triggerProps} className={cn('flex h-full min-w-0', triggerProps.className)}>
+                        {tabElement}
+                      </div>
+                    )}
+                  />
+                  <ContextMenuContent className="w-52">{tabMenuItems}</ContextMenuContent>
+                </ContextMenu>
+              ) : (
+                tabElement
+              )}
             </Wrapper>
           );
         })}

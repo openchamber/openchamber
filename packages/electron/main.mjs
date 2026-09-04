@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, webContents } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, MessageChannelMain, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, webContents } from 'electron';
 import contextMenu from 'electron-context-menu';
 import log from 'electron-log/main.js';
 import dgram from 'node:dgram';
@@ -33,7 +33,8 @@ import {
 } from './linux-autostart.mjs';
 import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.mjs';
 import { shouldAllowBrowserPanelCertificateError } from './browser-panel-security.mjs';
-import { createRendererRecoveryPolicy } from './renderer-recovery.mjs';
+import { createRelayDevTunnelBridge } from './relay-dev-tunnel.mjs';
+import { attachRendererRecovery } from './renderer-recovery.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 
 const execFileAsync = promisify(execFile);
@@ -2497,7 +2498,6 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   };
 
   const browserWindow = new BrowserWindow(options);
-  const rendererRecoveryPolicy = createRendererRecoveryPolicy();
   browserWindow.__ocLabel = label || nextWindowLabel();
   browserWindow.__ocRuntimeConfig = { apiBaseUrl: desktopApiBaseUrl, clientToken: desktopClientToken, requestHeaders: desktopRequestHeaders };
   browserWindow.__ocInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
@@ -2658,19 +2658,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   browserWindow.webContents.on('zoom-changed', () => {
     browserWindow.webContents.setZoomFactor(1);
   });
-  browserWindow.webContents.on('render-process-gone', (_event, details) => {
-    if (!rendererRecoveryPolicy.shouldReload(details.reason)) return;
-    log.warn('[electron] renderer exited unexpectedly; reloading window', {
-      label: browserWindow.__ocLabel,
-      reason: details.reason,
-      exitCode: details.exitCode,
-    });
-    setTimeout(() => {
-      if (!browserWindow.isDestroyed()) {
-        browserWindow.webContents.reload();
-      }
-    }, 100);
-  });
+  attachRendererRecovery(browserWindow, { log, label: 'window' });
 
   browserWindow.webContents.on('dom-ready', () => {
     if (browserWindow.__ocLabel === 'main') {
@@ -2907,6 +2895,8 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   browserWindow.__ocMiniChat = true;
   browserWindow.__ocMiniChatSessionId = sessionWindowKey;
   browserWindow.__ocPinned = false;
+
+  attachRendererRecovery(browserWindow, { log, label: 'mini chat' });
 
   if (sessionWindowKey) {
     state.miniChatWindowsBySession.set(sessionWindowKey, browserWindow);
@@ -3159,6 +3149,59 @@ const setupAutoUpdater = () => {
     log.error('[electron] autoUpdater error', err);
   });
 };
+
+// quitAndInstall() reports failures (rejected code signature, a Squirrel
+// session already disabled by an earlier failure) asynchronously on the
+// 'error' event, long after the call returns. Give the install that long to
+// either take the app down or report why it did not.
+const UPDATE_INSTALL_GRACE_MS = 15_000;
+
+/**
+ * Hand the downloaded update to the platform installer and keep the IPC call
+ * open until the app quits or the updater reports a failure, so a rejected
+ * install reaches the renderer instead of dying in the log. Restores the
+ * quit/install flags when the install never happens.
+ */
+const installDownloadedUpdate = () => new Promise((resolve, reject) => {
+  let settled = false;
+
+  const rollbackQuitState = () => {
+    state.quitRequested = false;
+    state.installingUpdate = false;
+  };
+
+  const fail = (error) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(graceTimer);
+    autoUpdater.off('error', fail);
+    rollbackQuitState();
+    log.error('[electron] update install failed', error);
+    reject(error instanceof Error ? error : new Error(String(error)));
+  };
+
+  // Still running after the grace period: the install is underway and the app
+  // is shutting down, so release the pending IPC reply.
+  const graceTimer = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    autoUpdater.off('error', fail);
+    resolve(null);
+  }, UPDATE_INSTALL_GRACE_MS);
+
+  autoUpdater.on('error', fail);
+
+  // Defer so the renderer's invoke channel is idle before the app starts
+  // shutting down.
+  setImmediate(() => {
+    try {
+      killSidecar();
+      autoUpdater.quitAndInstall();
+    } catch (error) {
+      fail(error);
+    }
+  });
+});
 
 const parseRelevantChangelogNotes = async (fromVersion, toVersion) => {
   try {
@@ -3797,6 +3840,7 @@ const runSpecChain = (specs, appName) => {
 // The tunnel client lives in the web package (it already has a WebSocket
 // client) and is loaded only if the user actually previews a remote dev server.
 let devTunnelClientPromise = null;
+const relayDevTunnelBridge = createRelayDevTunnelBridge({ createMessageChannel: () => new MessageChannelMain(), logger: log });
 const getDevTunnelClient = async () => {
   if (!devTunnelClientPromise) {
     devTunnelClientPromise = import('@openchamber/web/server/lib/dev-tunnel/client.js')
@@ -3810,6 +3854,7 @@ const getDevTunnelClient = async () => {
 };
 
 const closeAllDevTunnels = () => {
+  relayDevTunnelBridge.closeAll();
   if (!devTunnelClientPromise) return;
   const pending = devTunnelClientPromise;
   devTunnelClientPromise = null;
@@ -3917,6 +3962,11 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (!baseUrl) throw new Error('baseUrl is required');
       if (!(port > 0 && port <= 65535)) throw new Error('A valid port is required');
 
+      if (args.relay === true) {
+        const targetKey = typeof args.targetKey === 'string' ? args.targetKey.trim() : '';
+        return relayDevTunnelBridge.open({ targetKey, remotePort: port, webContents: browserWindow?.webContents });
+      }
+
       const headers = {};
       const requestHeaders = args.requestHeaders && typeof args.requestHeaders === 'object' ? args.requestHeaders : {};
       for (const [name, value] of Object.entries(requestHeaders)) {
@@ -3938,6 +3988,9 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const client = await getDevTunnelClient();
       return { closed: client.close({ baseUrl, port }) };
     }
+
+    case 'desktop_relay_dev_tunnel_close_all':
+      return { closed: relayDevTunnelBridge.closeForWebContents(browserWindow?.webContents.id) };
 
     /**
      * Forces prefers-color-scheme for one previewed page.
@@ -4497,9 +4550,20 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
             const onError = (error) => finish(reject, error);
             autoUpdater.on('update-downloaded', onDownloaded);
             autoUpdater.on('error', onError);
-            Promise.resolve(autoUpdater.downloadUpdate()).catch((error) => finish(reject, error));
+            // downloadUpdate() resolves once the payload is on disk. It stays
+            // the authoritative signal: when the file was already cached the
+            // updater emits no 'update-downloaded', and waiting only for the
+            // event left this promise pending and its listeners attached on
+            // every retry.
+            Promise.resolve(autoUpdater.downloadUpdate())
+              .then(() => finish(resolve, null))
+              .catch((error) => finish(reject, error));
           });
         }
+        // The 'update-downloaded' event does not fire for an already cached
+        // payload, so record the payload as ready here too; otherwise restart
+        // would relaunch without installing anything.
+        state.pendingUpdate.downloaded = true;
         emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
           event: 'Finished',
           data: {},
@@ -4536,20 +4600,16 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           } catch {
           }
         }
+        return await installDownloadedUpdate();
       }
       // Defer so the IPC reply flushes before the app starts shutting down.
-      // Without this, quitAndInstall() can race with the renderer's pending
-      // invoke and the restart appears to do nothing from the UI side.
+      // Without this, relaunch can race with the renderer's pending invoke and
+      // the restart appears to do nothing from the UI side.
       setImmediate(() => {
         try {
-          if (applyUpdate) {
-            killSidecar();
-            autoUpdater.quitAndInstall();
-          } else {
-            prepareForQuit();
-            app.relaunch();
-            app.exit(0);
-          }
+          prepareForQuit();
+          app.relaunch();
+          app.exit(0);
         } catch (err) {
           log.error('[electron] desktop_restart failed', err);
         }

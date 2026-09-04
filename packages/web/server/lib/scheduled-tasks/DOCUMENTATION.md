@@ -25,6 +25,13 @@ in shared project config under the project write lock:
   from the winner's persisted `nextRunAt`.
 - Project config writes also take a cross-process `.json.lock` file so the
   read-modify-write is serialized across processes, not only within one process.
+- The sharing processes may run different OpenChamber versions. Normalization
+  keeps only the fields a build knows, so every writer persists tasks it did
+  not change verbatim from disk and swaps only `state` onto a task whose state
+  it updated; a task goes out normalized only when it was deliberately
+  replaced (upsert, loop adoption). An older server touching the file after a
+  run therefore cannot strip fields a newer build added, such as a task's goal
+  or auto-accept settings.
 - Lock timeout / filesystem errors on claim, manual-start, or completion state
   writes always release the in-process running slot (via `finally`) and best-effort
   re-arm the **next future** occurrence; they must not leave the task permanently

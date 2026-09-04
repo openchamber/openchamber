@@ -1,0 +1,41 @@
+---
+title: Git ve GitHub İş Akışları
+description: OpenChamber'dan çıkmadan branch'leri hazırlayın, commit edin ve yönetin.
+---
+
+# Git ve GitHub İş Akışları
+
+OpenChamber'da yerleşik bir git görünümü vardır. Böylece terminale geçmeden değişiklikleri gözden geçirebilir, commit edebilir ve branch'leri yönetebilirsiniz. Sağ kenar çubuğundaki **Git** sekmesinden açın.
+
+## İnceleme ve commit
+
+Git görünümü değişikliklerinizi **staged** ve **unstaged** olarak ayırır:
+
+- bir dosyayı stage etmek için yanındaki **+** simgesine, stage'den çıkarmak için **−** simgesine tıklayın
+- bir gruptaki her şeyi tek seferde stage edin ya da stage'den çıkarın
+- diff'ini görmek için bir dosyaya tıklayın
+
+Sonra bir commit mesajı yazıp commit edin. OpenChamber'a staged değişikliklerinizden bir commit mesajı **generate** ettirebilirsiniz. Mevcut oturumun modelini kullanır, bu yüzden açık bir oturum gerekir.
+
+## Branch'ler ve geçmiş
+
+Git görünümü günlük git işlerinin geri kalanını da kapsar:
+
+- branch oluşturma, değiştirme, yeniden adlandırma ve silme
+- push, pull ve fetch
+- geçmişi ve commit başına diff'leri gezme
+- değişiklikleri stash etme ve geri yükleme
+
+## Pull request'ler
+
+GitHub'ı bağlayın. Bkz. [GitHub Issues & PRs](/github/). Sonra **PR** sekmesiyle pull request açabilir, güncelleyebilir, hazır diye işaretleyebilir ya da merge edebilirsiniz. Başlık ve açıklamasını da commit mesajlarında olduğu gibi oluşturur.
+
+## Çakışmaları içeri alma
+
+Bir merge, rebase ya da integrate çakışmaya takılırsa, OpenChamber neyin sıkıştığını gösterir ve bunu çözmenize izin verir. Bunu agent'a devretmek de dahil.
+
+## İlgili
+
+- [GitHub Issues & PRs](/github/) — GitHub'ı bağlayın ve işlere issue'lardan başlayın
+- [Worktree Sessions](/worktrees/) — bir branch'i kendi klasöründe izole edin
+- [Git Identities](/git-identities/) — her repo için doğru kişi olarak commit edin

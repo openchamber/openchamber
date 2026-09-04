@@ -4,9 +4,11 @@ import type { Message, Part } from '@opencode-ai/sdk/v2';
 import {
     buildTaskSummaryEntriesFromSession,
     parseTaskMetadataBlock,
+    prepareTaskToolOutput,
     readTaskSessionIdFromRecord,
     readTaskSessionIdFromOutput,
 } from './taskToolModel';
+import { TOOL_OUTPUT_MAX_CHARS } from '../toolRenderers';
 
 describe('taskToolModel', () => {
     test('reads the current OpenCode running-state identity contract', () => {
@@ -38,5 +40,20 @@ describe('taskToolModel', () => {
             tool: 'read',
             state: { status: 'completed', title: undefined, input: { filePath: 'a.ts' } },
         }]);
+    });
+
+    test('strips task metadata and caps oversized task output before markdown rendering', () => {
+        const oversized = 'x'.repeat(TOOL_OUTPUT_MAX_CHARS + 5_000);
+        const output = `${oversized}\n<task_metadata>{"sessionID":"child-1"}</task_metadata>`;
+        const prepared = prepareTaskToolOutput(output);
+
+        expect(prepared.length).toBeLessThan(oversized.length);
+        expect(prepared).toContain('output truncated');
+        expect(prepared).not.toContain('task_metadata');
+    });
+
+    test('leaves normal task output untouched', () => {
+        expect(prepareTaskToolOutput('done\n<task_metadata>{"sessionID":"child-1"}</task_metadata>')).toBe('done');
+        expect(prepareTaskToolOutput(undefined)).toBe('');
     });
 });

@@ -34,6 +34,8 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/startup-performance.js`: opt-in startup phase diagnostics with fixed labels and numeric metadata allowlists.
 - `packages/web/server/lib/agent-tool/runtime.js`: managed OpenCode custom-tool materialization, environment injection, loopback authentication, and fixed CLI action dispatch.
 - `packages/web/server/lib/system-prompt/runtime.js`: opt-in managed OpenCode system-prompt optimizer materialization and plugin injection.
+- `packages/web/server/lib/mcp-reconnect/runtime.js`: always-on managed OpenCode plugin that reconnects MCP servers OpenCode marked `failed`, with per-server backoff.
+- `packages/web/server/lib/opencode/managed-plugin-config.js`: the one `OPENCODE_CONFIG_CONTENT` merge every managed plugin (agent tools, system prompt optimizer, MCP reconnect) appends itself through.
 - `packages/web/server/lib/opencode/server-utils-runtime.js`: shared server runtime utilities for OpenCode proxy wiring, OpenCode port/readiness helpers, and snapshot fetchers.
 - `packages/web/server/lib/opencode/openchamber-routes.js`: OpenChamber update and models metadata route registration.
 - `packages/web/server/lib/opencode/pwa-manifest-routes.js`: PWA manifest route registration with recent-session shortcut resolution and short-lived caching.
@@ -130,7 +132,8 @@ The runtime maintains active-session count incrementally from idempotent activit
   - `killProcessOnPort(port)`
 
 Managed OpenCode launch also merges the environment returned by the agent-tool
-runtime. PATH and `OPENCODE_SERVER_PASSWORD` remain lifecycle-owned and cannot
+runtime, the opt-in system prompt optimizer, and the always-on MCP reconnect
+plugin, each appending its `file://` entry to the previous one's config. PATH and `OPENCODE_SERVER_PASSWORD` remain lifecycle-owned and cannot
 be replaced by injected values. External OpenCode processes receive no
 OpenChamber tool injection. Managed launch env strips AppImage `ARGV0` before
 spawn so zsh-backed OpenCode tools do not rewrite child argv[0] to the AppImage
@@ -208,6 +211,7 @@ Managed health failures are classified as `timeout`, `connection_refused`, `conn
   - `writeSettingsToDisk(settings)`
   - `persistSettings(changes)`
 - Persistent permission auto-accept policy is stored under `permissionAutoAccept`; execution ownership lives in `lib/permission-auto-accept/`.
+- Queued follow-up messages live in `<data-dir>/message-queue.json`, not in settings; execution ownership lives in `lib/message-queue/`.
 - Shared sidebar preferences are stored as validated top-level fields: `sidebarProjectDisplayMode`, `sidebarSessionGroupingMode`, `sidebarProjectSortOrder`, and `sidebarShowRecentSection`. Device-local picker selection and sticky-header state do not enter `settings.json`.
 
 ## Public exports (settings-helpers.js)

@@ -151,6 +151,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const addProject = useProjectsStore((s) => s.addProject);
   const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
+  const addProjects = useProjectsStore((s) => s.addProjects);
   const gitIdentityProfiles = useGitIdentitiesStore((s) => s.profiles);
   const globalGitIdentity = useGitIdentitiesStore((s) => s.globalIdentity);
   const defaultGitIdentityId = useGitIdentitiesStore((s) => s.defaultGitIdentityId);
@@ -177,6 +178,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const [cloneRemoteUrl, setCloneRemoteUrl] = React.useState('');
   const [selectedGitIdentityId, setSelectedGitIdentityId] = React.useState<string | null>(null);
   const [showHidden, setShowHidden] = React.useState(false);
+  const [selectedPaths, setSelectedPaths] = React.useState<string[]>([]);
 
   const explorerRootDirectory = dialogHomeDirectory || homeDirectory;
 
@@ -197,6 +199,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     setCloneRemoteUrl('');
     setSelectedGitIdentityId(null);
     setShowHidden(false);
+    setSelectedPaths([]);
     requestAnimationFrame(() => focusPathInput(inputRef.current));
 
     let cancelled = false;
@@ -330,6 +333,27 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     setHighlightedIndex(0);
   }, [query, rows.length]);
 
+  // Selections apply to the currently browsed directory: navigating into
+  // another folder clears the pending batch so the primary action always
+  // reflects the visible picker state.
+  React.useEffect(() => {
+    setSelectedPaths([]);
+  }, [browseDirectoryAbsolutePath]);
+
+  const selectionPaths = React.useMemo(
+    () => selectedPaths.filter((path) => {
+      const normalized = normalizeDirectoryPath(path);
+      return Boolean(normalized && !addedProjectPaths.has(normalized));
+    }),
+    [addedProjectPaths, selectedPaths]
+  );
+
+  const togglePathSelection = React.useCallback((path: string) => {
+    setSelectedPaths((prev) => (
+      prev.includes(path) ? prev.filter((entry) => entry !== path) : [...prev, path]
+    ));
+  }, []);
+
   const targetPath = React.useMemo(() => {
     if (!explorerRootDirectory) return '';
     return trimTrailingSeparators(displayPathToAbsolutePath(query, explorerRootDirectory));
@@ -351,28 +375,29 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   );
   const canAddProject = !isConfirming
     && !isOpeningFinder
-    && !isAlreadyAdded
     && browseErrorReason !== 'os-permission'
     && browseErrorReason !== 'invalid-response'
     && browseErrorReason !== 'unknown'
-    && Boolean(targetPath);
+    && ((!isCloneMode && selectionPaths.length > 0) || (!isAlreadyAdded && Boolean(targetPath)));
   const canSubmitClone = canAddProject && cloneRemoteUrl.trim().length > 0;
   const highlightedRow = rows[highlightedIndex] ?? null;
   const hasHighlightedBrowseItem = Boolean(
     highlightedRow && (highlightedRow.type === 'up' || highlightedRow.type === 'directory')
   );
   const submitModifierLabel = formatShortcutForDisplay('mod');
-  const submitActionLabel = isAlreadyAdded
-    ? t('directoryExplorerDialog.actions.alreadyAdded')
-    : isCloneMode
-      ? isConfirming
-        ? t('directoryExplorerDialog.actions.cloning')
-        : t('directoryExplorerDialog.actions.cloneAndAdd')
-    : isConfirming
-      ? t('directoryExplorerDialog.actions.adding')
-    : shouldCreateTarget
-      ? t('directoryExplorerDialog.actions.createAndAdd')
-      : t('directoryExplorerDialog.actions.addProject');
+  const submitActionLabel = !isCloneMode && selectionPaths.length > 0
+    ? t('directoryExplorerDialog.actions.addSelected')
+    : isAlreadyAdded
+      ? t('directoryExplorerDialog.actions.alreadyAdded')
+      : isCloneMode
+        ? isConfirming
+          ? t('directoryExplorerDialog.actions.cloning')
+          : t('directoryExplorerDialog.actions.cloneAndAdd')
+      : isConfirming
+        ? t('directoryExplorerDialog.actions.adding')
+      : shouldCreateTarget
+        ? t('directoryExplorerDialog.actions.createAndAdd')
+        : t('directoryExplorerDialog.actions.addProject');
 
   React.useLayoutEffect(() => {
     const button = addButtonRef.current;
@@ -429,9 +454,17 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   }, [addProject, addedProjectPaths, openProjectDraft, t]);
 
   const finalizeSelection = React.useCallback(async (target: string) => {
-    if (!target || isConfirming) return;
+    if (isConfirming) return;
     const normalized = normalizeDirectoryPath(target);
-    if (normalized && addedProjectPaths.has(normalized)) return;
+    // Batch selections supersede the single-target flow. Only the single-target
+    // flow is blocked by an already-added (or missing) directory.
+    const selectionToAdd = isCloneMode
+      ? []
+      : selectedPaths.filter((path) => {
+        const selectionNormalized = normalizeDirectoryPath(path);
+        return Boolean(selectionNormalized && !addedProjectPaths.has(selectionNormalized));
+      });
+    if (selectionToAdd.length === 0 && (!target || (normalized && addedProjectPaths.has(normalized)))) return;
     let selectedTarget = target;
 
     setIsConfirming(true);
@@ -449,6 +482,21 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
           gitIdentityId: selectedGitIdentity?.id ?? null,
         });
         selectedTarget = result.path;
+      } else if (selectionToAdd.length > 0) {
+        // Batch path wins over single-target create: with checkboxes ticked,
+        // the user wants the selections added, not a fresh directory created
+        // for whatever happens to be typed in the filter.
+        const added = await addProjects(selectionToAdd);
+        if (added.length === 0) {
+          toast.error(t('directoryExplorerDialog.toast.failedToAddProject'), {
+            description: t('directoryExplorerDialog.toast.selectValidDirectoryPath'),
+          });
+          return;
+        }
+        toast.success(t('directoryExplorerDialog.toast.addedProjects', { count: added.length }));
+        setSelectedPaths([]);
+        handleClose();
+        return;
       } else if (shouldCreateSelection) {
         await opencodeClient.createDirectory(target, { asProject: true });
       }
@@ -467,7 +515,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     } finally {
       setIsConfirming(false);
     }
-  }, [addProject, addedProjectPaths, cloneRemoteUrl, isCloneMode, isConfirming, openProjectDraft, selectedGitIdentity?.id, shouldCreateTarget, targetPath, t]);
+  }, [addProject, addProjects, addedProjectPaths, cloneRemoteUrl, handleClose, isCloneMode, isConfirming, openProjectDraft, selectedGitIdentity?.id, selectedPaths, shouldCreateTarget, targetPath, t]);
 
   const browseToDisplayPath = React.useCallback((displayPath: string) => {
     setQuery(ensureBrowseDirectoryPath(displayPath));
@@ -508,6 +556,9 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
         return;
       }
 
+      // Clear pending selections so the Finder-sourced target is honored
+      // instead of silently being absorbed by the batch branch.
+      setSelectedPaths([]);
       await finalizeSelection(result.path);
     } catch (error) {
       toast.error(t('directoryExplorerDialog.toast.failedToSelectDirectory'), {
@@ -529,6 +580,20 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       setHighlightedIndex((index) => Math.max(0, index - 1));
       return;
     }
+    if (event.key === ' ') {
+      // Only treat Space as a selection toggle when the user is actively
+      // browsing a directory (trailing slash or no filter typing). When
+      // the input is in path-entry mode, Space is a literal character
+      // and must reach the input value.
+      if (hasTrailingPathSeparator(query)) {
+        event.preventDefault();
+        if (highlightedRow && highlightedRow.type === 'directory' && !highlightedRow.disabled) {
+          togglePathSelection(highlightedRow.path);
+        }
+        return;
+      }
+      return;
+    }
     if (event.key === 'Enter') {
       event.preventDefault();
       if (isPrimaryModifierPressed(event)) {
@@ -544,7 +609,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       event.preventDefault();
       handleClose();
     }
-  }, [executeRow, finalizeSelection, handleClose, hasHighlightedBrowseItem, highlightedRow, query, rows.length, targetPath]);
+  }, [executeRow, finalizeSelection, handleClose, hasHighlightedBrowseItem, highlightedRow, query, rows.length, targetPath, togglePathSelection]);
 
   const showHiddenToggle = (
     <button
@@ -684,15 +749,31 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
                       {t('directoryExplorerDialog.browse.addedBadge')}
                     </span>
                   ) : row.type === 'directory' ? (
-                    <button
-                      type="button"
-                      onMouseDown={(event) => event.stopPropagation()}
-                      onClick={(event) => handleQuickAdd(event, row.path)}
-                      className="flex-shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/60 hover:text-foreground"
-                      title={t('directoryExplorerDialog.browse.quickAdd')}
-                    >
-                      <Icon name="add" className="h-3.5 w-3.5" />
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onClick={(event) => { event.stopPropagation(); togglePathSelection(row.path); }}
+                        title={t('directoryExplorerDialog.browse.selectForAdd')}
+                        aria-label={t('directoryExplorerDialog.browse.selectForAdd')}
+                        aria-pressed={selectedPaths.includes(row.path)}
+                        className="flex-shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-interactive-hover/60 hover:text-foreground"
+                      >
+                        <Icon
+                          name={selectedPaths.includes(row.path) ? 'checkbox' : 'checkbox-blank'}
+                          className="h-4 w-4"
+                        />
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onClick={(event) => handleQuickAdd(event, row.path)}
+                        className="flex-shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/60 hover:text-foreground"
+                        title={t('directoryExplorerDialog.browse.quickAdd')}
+                      >
+                        <Icon name="add" className="h-3.5 w-3.5" />
+                      </button>
+                    </>
                   ) : null}
                 </button>
               );
@@ -738,7 +819,16 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
             {isOpeningFinder ? t('directoryExplorerDialog.actions.openingFinder') : t('directoryExplorerDialog.actions.openInFinder')}
           </Button>
         ) : null}
-        <Button variant="ghost" size="xs" onClick={() => setIsCloneMode((value) => !value)} disabled={isConfirming || isOpeningFinder} className={cn(isMobile && 'flex-1')}>
+        <Button
+          variant="ghost"
+          size="xs"
+          onClick={() => {
+            setIsCloneMode((value) => !value);
+            setSelectedPaths([]);
+          }}
+          disabled={isConfirming || isOpeningFinder}
+          className={cn(isMobile && 'flex-1')}
+        >
           {isCloneMode ? t('directoryExplorerDialog.actions.addLocalProject') : t('directoryExplorerDialog.actions.cloneRepository')}
         </Button>
         {isMobile ? (

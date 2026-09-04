@@ -15,6 +15,7 @@ import {
   subscribeToSettingsSaveState,
   syncDesktopSettings,
   updateDesktopSettings,
+  type SettingsSyncedDetail,
 } from './persistence';
 import { switchRuntimeEndpoint } from './runtime-switch';
 
@@ -842,5 +843,218 @@ describe('updateDesktopSettings', () => {
 
     expect(useUIStore.getState().autoSaveEnabled).toBe(true);
     expect(saveCalls.some((changes) => changes.autoSaveEnabled === true)).toBe(true);
+  });
+
+  test('does not invent theme defaults when the authoritative snapshot omits theme fields', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    registerSettingsApi(
+      // SAFETY: this mock echoes back exactly the partial changes it received;
+      // the tests below only read fields the changes actually contain.
+      async (changes) => ({ ...changes } as SettingsPayload),
+      async () => ({
+        settings: { draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
+        source: 'web',
+      }),
+    );
+
+    const synced: SettingsSyncedDetail[] = [];
+    const listener = (event: Event): void => {
+      // SAFETY: dispatchSettingsSynced is the only emitter for this key and
+      // always sends a CustomEvent<SettingsSyncedDetail>.
+      const detail = (event as CustomEvent<SettingsSyncedDetail>).detail;
+      if (detail) synced.push(detail);
+    };
+    window.addEventListener('openchamber:settings-synced', listener);
+    try {
+      await syncDesktopSettings();
+    } finally {
+      window.removeEventListener('openchamber:settings-synced', listener);
+    }
+
+    expect(synced.length).toBeGreaterThan(0);
+    const bootstrapSync = synced.find((detail) => detail.bootstrap);
+    expect(bootstrapSync).toBeTruthy();
+    expect(bootstrapSync?.adoptTheme).toBe(true);
+    expect(bootstrapSync?.settings.useSystemTheme).toBe(undefined);
+    expect(bootstrapSync?.settings.lightThemeId).toBe(undefined);
+    expect(bootstrapSync?.settings.darkThemeId).toBe(undefined);
+  });
+
+  test('marks settings save echoes as non-bootstrap syncs', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    registerSettingsApi(
+      // SAFETY: this mock echoes back exactly the partial changes it received;
+      // the assertions below only read fields the changes actually contain.
+      async (changes) => ({ ...changes } as SettingsPayload),
+    );
+
+    const synced: SettingsSyncedDetail[] = [];
+    const listener = (event: Event): void => {
+      // SAFETY: dispatchSettingsSynced is the only emitter for this key and
+      // always sends a CustomEvent<SettingsSyncedDetail>.
+      const detail = (event as CustomEvent<SettingsSyncedDetail>).detail;
+      if (detail) synced.push(detail);
+    };
+    window.addEventListener('openchamber:settings-synced', listener);
+    try {
+      await updateDesktopSettings({ themeVariant: 'dark' });
+    } finally {
+      window.removeEventListener('openchamber:settings-synced', listener);
+    }
+
+    expect(synced.length).toBeGreaterThan(0);
+    expect(synced.every((detail) => detail.bootstrap === false)).toBe(true);
+    expect(synced.every((detail) => detail.adoptTheme === false)).toBe(true);
+    expect(synced.every((detail) => detail.settings.themeVariant === 'dark')).toBe(true);
+  });
+
+  test('allows a bootstrap sync to preserve the current window theme', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    registerSettingsApi(
+      async (changes) => ({ ...changes } as SettingsPayload),
+      async () => ({
+        settings: { activeProjectId: 'project-a', themeVariant: 'dark' },
+        source: 'web',
+      }),
+    );
+
+    const synced: SettingsSyncedDetail[] = [];
+    const listener = (event: Event): void => {
+      const detail = (event as CustomEvent<SettingsSyncedDetail>).detail;
+      if (detail) synced.push(detail);
+    };
+    window.addEventListener('openchamber:settings-synced', listener);
+    try {
+      await syncDesktopSettings({ adoptTheme: false });
+    } finally {
+      window.removeEventListener('openchamber:settings-synced', listener);
+    }
+
+    const broadcastSync = synced.find((detail) => detail.bootstrap && !detail.adoptTheme);
+    expect(broadcastSync).toBeTruthy();
+    expect(broadcastSync?.settings.activeProjectId).toBe('project-a');
+    expect(broadcastSync?.settings.themeVariant).toBe('dark');
+  });
+});
+
+describe('unload lifecycle flush (#2197)', () => {
+  beforeEach(() => {
+    getWindow();
+    registerRuntimeAPIs(null);
+    invalidateSettingsCache();
+  });
+
+  test('flushes a pending debounced settings save on pagehide without a double write', async () => {
+    const saveCalls: Array<Partial<SettingsPayload>> = [];
+    registerSettingsSave(async (changes) => {
+      saveCalls.push(changes);
+      return {};
+    });
+
+    const update = updateDesktopSettings({ showDeletionDialog: false });
+    expect(saveCalls).toEqual([]);
+
+    getWindow().dispatchEvent(new Event('pagehide'));
+
+    // The flush must hand the pending changes to the settings backend
+    // synchronously inside the lifecycle listener — an unloading window has
+    // no later turn for the debounce timer.
+    expect(saveCalls).toEqual([{ showDeletionDialog: false }]);
+
+    await update;
+    await delay(300);
+    // The canceled debounce timer must not replay the same write.
+    expect(saveCalls).toHaveLength(1);
+  });
+
+  test('flushes a pending debounced settings save on beforeunload without a double write', async () => {
+    const saveCalls: Array<Partial<SettingsPayload>> = [];
+    registerSettingsSave(async (changes) => {
+      saveCalls.push(changes);
+      return {};
+    });
+
+    const update = updateDesktopSettings({ gitChangesViewMode: 'tree' });
+    expect(saveCalls).toEqual([]);
+
+    getWindow().dispatchEvent(new Event('beforeunload'));
+
+    expect(saveCalls).toEqual([{ gitChangesViewMode: 'tree' }]);
+
+    await update;
+    await delay(300);
+    expect(saveCalls).toHaveLength(1);
+  });
+
+  test('persists a showDeletionDialog toggle followed by an immediate unload', async () => {
+    const saveCalls: Array<Partial<SettingsPayload>> = [];
+    registerSettingsSave(async (changes) => {
+      saveCalls.push(changes);
+      return {};
+    });
+    startAppearanceAutoSave();
+
+    try {
+      useUIStore.getState().setShowDeletionDialog(false);
+      getWindow().dispatchEvent(new Event('pagehide'));
+
+      expect(saveCalls.some((changes) => changes.showDeletionDialog === false)).toBe(true);
+    } finally {
+      useUIStore.getState().setShowDeletionDialog(true);
+      // Let the restore write drain so it cannot leak into other tests.
+      await delay(300);
+    }
+  });
+
+  test('sends the unload flush with keepalive so the browser cannot cancel it', async () => {
+    // No runtime settings API: the write has to take the HTTP branch, which is
+    // the one the browser cancels on unload without `keepalive`.
+    registerRuntimeAPIs(null);
+    const inits: RequestInit[] = [];
+    const previousFetch = globalThis.fetch;
+    // SAFETY: the mock receives only the (input, init) pair production code
+    // passes and always resolves to a Response; the assertion supplies the
+    // overload signatures a plain arrow function cannot declare.
+    globalThis.fetch = (async (_input, init) => {
+      inits.push(init ?? {});
+      return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }) as typeof fetch;
+
+    try {
+      const update = updateDesktopSettings({ gitChangesViewMode: 'flat' });
+      getWindow().dispatchEvent(new Event('pagehide'));
+      await update;
+      await delay(50);
+
+      expect(inits).toHaveLength(1);
+      expect(inits[0].method).toBe('PUT');
+      expect(inits[0].keepalive).toBe(true);
+
+      // The ordinary debounced write stays a plain fetch.
+      inits.length = 0;
+      await updateDesktopSettings({ gitChangesViewMode: 'tree' });
+      await delay(300);
+      expect(inits).toHaveLength(1);
+      expect(inits[0].keepalive).toBe(false);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  test('ignores lifecycle events when no settings write is pending', async () => {
+    const saveCalls: Array<Partial<SettingsPayload>> = [];
+    registerSettingsSave(async (changes) => {
+      saveCalls.push(changes);
+      return {};
+    });
+
+    getWindow().dispatchEvent(new Event('pagehide'));
+    getWindow().dispatchEvent(new Event('beforeunload'));
+    await delay(50);
+
+    expect(saveCalls).toEqual([]);
   });
 });

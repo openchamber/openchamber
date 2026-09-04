@@ -83,6 +83,16 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };
     }
 
+    case 'api:git/branch-push-status': {
+      const { directory, branches } = (payload || {}) as { directory?: string; branches?: string[] };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      if (!Array.isArray(branches) || branches.some((branch) => typeof branch !== 'string')) {
+        return { id, type, success: false, error: 'branches must be an array of branch names' };
+      }
+      return { id, type, success: true, data: await gitService.getGitUnpushedBranchCounts(directory!, branches) };
+    }
+
     case 'api:git/remote-branches': {
       const { directory, branch, remote } = (payload || {}) as {
         directory?: string;

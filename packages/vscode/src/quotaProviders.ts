@@ -4,6 +4,7 @@ import os from 'node:os';
 import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
 import { deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
 import { getProviderAuth, updateProviderAuth } from './opencodeAuth';
+import { fetchExeDevUsage } from './exeDevQuota';
 
 type AuthEntry = Record<string, unknown> | string;
 type AuthFile = Record<string, AuthEntry>;
@@ -774,6 +775,7 @@ export const listConfiguredQuotaProviders = () => {
   if (openCodeGoAuth && (typeof openCodeGoAuth.key === 'string' || typeof openCodeGoAuth.token === 'string')) configured.add('opencode-go');
   if (readCredential('ollama-cloud')) configured.add('ollama-cloud');
   if (readCredential('cursor')) configured.add('cursor');
+  if (readCredential('exe-dev')) configured.add('exe-dev');
 
   const anthropicAuth = normalizeAuthEntry(getAuthEntry(auth, ['anthropic', 'claude']));
   if (anthropicAuth && ((anthropicAuth as Record<string, unknown>).access || (anthropicAuth as Record<string, unknown>).token)) {
@@ -1946,6 +1948,16 @@ const fetchOllamaCloudQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+const fetchExeDevQuota = async (): Promise<ProviderResult> => {
+  const usageToken = readCredential('exe-dev')?.usageToken;
+  if (!usageToken) return buildResult({ providerId: 'exe-dev', providerName: 'exe.dev', ok: false, configured: false, error: 'Not configured' });
+  try {
+    return buildResult({ providerId: 'exe-dev', providerName: 'exe.dev', ok: true, configured: true, usage: { windows: await fetchExeDevUsage(usageToken) } });
+  } catch (error) {
+    return buildResult({ providerId: 'exe-dev', providerName: 'exe.dev', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
+  }
+};
+
 const fetchCursorQuota = async (): Promise<ProviderResult> => {
   const accessToken = readCredential('cursor')?.accessToken;
   if (!accessToken) return buildResult({ providerId: 'cursor', providerName: 'Cursor', ok: false, configured: false, error: 'Not configured' });
@@ -2868,6 +2880,8 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
       return fetchMiniMaxCnCodingPlanQuota();
     case 'ollama-cloud':
       return fetchOllamaCloudQuota();
+    case 'exe-dev':
+      return fetchExeDevQuota();
     case 'openrouter':
       return fetchOpenRouterQuota();
     case 'zai-coding-plan':

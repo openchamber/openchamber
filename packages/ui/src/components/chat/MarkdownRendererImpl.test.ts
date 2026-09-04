@@ -193,6 +193,8 @@ const fakeReact = {
         return hookStates[index] as { current: T };
     },
     memo: <T>(component: T): T => component,
+    createContext: <T>(defaultValue: T) => ({ Provider: 'provider', defaultValue }),
+    useContext: <T>(context: { defaultValue: T }): T => context.defaultValue,
 };
 
 const fakeJsx = (_type: string, props: FakeJsxProps | null, ...children: FakeElement[]): FakeElement => {

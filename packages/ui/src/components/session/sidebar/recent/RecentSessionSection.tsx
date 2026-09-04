@@ -49,6 +49,7 @@ type Props = {
   | 'setDeleteSessionConfirm'
   | 'startFolderRename'
   | 'setCopiedSessionId'
+  | 'startSessionWorktreeMenuLoad'
 >;
 
 export const RecentSessionSection: React.FC<Props> = (props) => {
@@ -162,6 +163,7 @@ export const RecentSessionSection: React.FC<Props> = (props) => {
       setDeleteSessionConfirm={props.setDeleteSessionConfirm}
       startFolderRename={props.startFolderRename}
       setCopiedSessionId={props.setCopiedSessionId}
+      startSessionWorktreeMenuLoad={props.startSessionWorktreeMenuLoad}
     />
   );
 };

@@ -891,7 +891,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
           hideBottomScrollShadow
           scrollShadowSize={12}
           outerClassName={maxHeightClassName}
-          className="overlay-scrollbar-target--no-gutter"
+          className="oc-sticky-fade-scroller overlay-scrollbar-target--no-gutter"
           style={maxHeightStyle}
           onScroll={stickyHeaders ? (event) => syncStickyFade(event.currentTarget) : undefined}
         >

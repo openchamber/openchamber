@@ -13,6 +13,8 @@ type GitHubAuthStore = {
     runtimeGitHub?: RuntimeAPIs['github'],
     options?: { force?: boolean }
   ) => Promise<GitHubAuthStatusWithError | null>;
+  /** Same instance-scoping as Linear: the login lives on the connected instance. */
+  resetForRuntimeSwitch: () => void;
 };
 
 const fetchStatus = async (
@@ -36,6 +38,9 @@ const fetchStatus = async (
 
 // In-flight dedup for refreshStatus
 let _inFlightAuthRefresh: Promise<GitHubAuthStatusWithError | null> | null = null;
+// Bumped by every reset so a response already in flight for the previous
+// instance cannot write itself into the new instance's status.
+let authGeneration = 0;
 
 export const useGitHubAuthStore = create<GitHubAuthStore>((set, get) => ({
   status: null,
@@ -50,13 +55,16 @@ export const useGitHubAuthStore = create<GitHubAuthStore>((set, get) => ({
 
     if (_inFlightAuthRefresh) return _inFlightAuthRefresh;
 
+    const generation = authGeneration;
     set({ isLoading: true });
     _inFlightAuthRefresh = (async () => {
       try {
         const payload = await fetchStatus(runtimeGitHub);
+        if (generation !== authGeneration) return null;
         set({ status: payload, isLoading: false, hasChecked: true });
         return payload;
       } catch (error) {
+        if (generation !== authGeneration) return null;
         const message = error instanceof Error ? error.message : String(error);
         set({
           status: { connected: false, error: message },
@@ -68,5 +76,10 @@ export const useGitHubAuthStore = create<GitHubAuthStore>((set, get) => ({
     })().finally(() => { _inFlightAuthRefresh = null; });
 
     return _inFlightAuthRefresh;
+  },
+  resetForRuntimeSwitch: () => {
+    authGeneration += 1;
+    _inFlightAuthRefresh = null;
+    set({ status: null, isLoading: false, hasChecked: false });
   },
 }));

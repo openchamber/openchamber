@@ -3,7 +3,17 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import { computeRollup } from './useSubagentCostRollup';
 
 function makeSession(id: string, cost: number, parentID?: string): Session {
-  return { id, cost, parentID } as unknown as Session;
+  return {
+    id,
+    slug: id,
+    projectID: 'project',
+    directory: '/project',
+    title: id,
+    version: '1',
+    time: { created: 0, updated: 0 },
+    cost,
+    parentID,
+  };
 }
 
 const sessions: Session[] = [

@@ -2,8 +2,10 @@ import express from 'express';
 import { deleteManagedCredential, getManagedCredentialStatus, normalizers, readManagedCredential, writeManagedCredential } from './credentials/providers.js';
 import { fetchOllamaCloudUsage } from './providers/ollama-cloud.js';
 import { importCursorCredential, validateCursorCredential } from './providers/cursor.js';
+import { fetchExeDevUsage } from './providers/exe-dev.js';
 
 const validators = {
+  'exe-dev': fetchExeDevUsage,
   'ollama-cloud': fetchOllamaCloudUsage,
   cursor: validateCursorCredential,
 };

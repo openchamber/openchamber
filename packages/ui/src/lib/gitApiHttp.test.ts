@@ -1,13 +1,35 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  abortMerge,
+  abortRebase,
+  applyGitStash,
+  checkoutBranch,
+  checkoutCommit,
+  cherryPick,
+  continueMerge,
+  continueRebase,
+  createBranch,
+  deleteGitBranch,
+  deleteRemoteBranch,
+  dropGitStash,
   getGitBranches,
   getGitStatus,
   gitFetch,
+  merge,
+  popGitStash,
+  rebase,
+  removeRemote,
+  renameBranch,
+  resetToCommit,
+  revertCommit,
   stageGitFile,
   stageGitFiles,
+  stashGitChanges,
   unstageGitFile,
   unstageGitFiles,
 } from './gitApiHttp';
+import type { GitStatus } from './api/types';
+import { sessionEvents } from './sessionEvents';
 
 type FetchCall = {
   input: RequestInfo | URL;
@@ -120,6 +142,28 @@ describe('gitApiHttp index mutations', () => {
 });
 
 describe('gitApiHttp status cache', () => {
+  test('a Git refresh hint invalidates the cached status before listeners fetch', async () => {
+    installWindowMock();
+    let statusRequestCount = 0;
+    globalThis.fetch = async () => {
+      statusRequestCount += 1;
+      return jsonResponse(statusPayload({ behind: statusRequestCount }));
+    };
+
+    try {
+      const directory = '/repo-cache-tool-mutation';
+      const first = await getGitStatus(directory);
+      sessionEvents.requestGitRefresh({ directory });
+      const afterMutation = await getGitStatus(directory);
+
+      expect(first.behind).toBe(1);
+      expect(afterMutation.behind).toBe(2);
+      expect(statusRequestCount).toBe(2);
+    } finally {
+      restoreMocks();
+    }
+  });
+
   test('invalidates cached status after fetch', async () => {
     installWindowMock();
     const calls: FetchCall[] = [];
@@ -163,6 +207,262 @@ describe('gitApiHttp status cache', () => {
         '/api/git/fetch?directory=%2Frepo-cache-fetch',
         '/api/git/status?directory=%2Frepo-cache-fetch',
       ]);
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('fresh status bypasses an unexpired cached snapshot', async () => {
+    installWindowMock();
+    let statusRequestCount = 0;
+    globalThis.fetch = (async () => {
+      statusRequestCount += 1;
+      return jsonResponse(statusPayload({ behind: statusRequestCount }));
+    }) as typeof fetch;
+
+    try {
+      const directory = '/repo-cache-fresh';
+      const first = await getGitStatus(directory);
+      const cached = await getGitStatus(directory);
+      const fresh = await getGitStatus(directory, { fresh: true });
+
+      expect(first.behind).toBe(1);
+      expect(cached.behind).toBe(1);
+      expect(fresh.behind).toBe(2);
+      expect(statusRequestCount).toBe(2);
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('fresh status cannot be replaced in cache by an older in-flight response', async () => {
+    installWindowMock();
+    const statusResolvers: Array<(response: Response) => void> = [];
+    // SAFETY: the mock accepts the same arguments as fetch and always returns
+    // a pending Response promise controlled by this test.
+    globalThis.fetch = (async () => new Promise<Response>((resolve) => {
+      statusResolvers.push(resolve);
+    })) as typeof fetch;
+
+    try {
+      const directory = '/repo-cache-fresh-race';
+      const older = getGitStatus(directory);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const fresh = getGitStatus(directory, { fresh: true });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(statusResolvers).toHaveLength(2);
+      statusResolvers[1](jsonResponse(statusPayload({ current: 'fresh' })));
+      statusResolvers[0](jsonResponse(statusPayload({ current: 'stale' })));
+
+      expect((await fresh).current).toBe('fresh');
+      expect((await older).current).toBe('stale');
+      expect((await getGitStatus(directory)).current).toBe('fresh');
+      expect(statusResolvers).toHaveLength(2);
+    } finally {
+      restoreMocks();
+    }
+  });
+});
+
+const statusPayload = (overrides: Partial<GitStatus> = {}): GitStatus => ({
+  current: 'main',
+  tracking: null,
+  ahead: 0,
+  behind: 0,
+  files: [],
+  isClean: true,
+  ...overrides,
+});
+
+const jsonResponse = <T>(payload: T) => new Response(JSON.stringify(payload), {
+  status: 200,
+  headers: { 'Content-Type': 'application/json' },
+});
+
+const installStatusMutationFetchMock = () => {
+  // SAFETY: `statusUrls` starts empty and only ever receives request URLs, which
+  // are strings; the annotation names that element type up front.
+  const mock = {
+    statusUrls: [] as string[],
+    behind: 0,
+  };
+  // SAFETY: the mock receives only the (input, init) pair production code passes
+  // and always resolves to a Response, so it honours the fetch contract; the
+  // assertion supplies the overload signatures a plain arrow function cannot.
+  globalThis.fetch = (async (input) => {
+    const url = String(input);
+    if (url.startsWith('/api/git/status')) {
+      mock.statusUrls.push(url);
+      return jsonResponse(statusPayload({ behind: mock.behind }));
+    }
+    return jsonResponse({ success: true });
+  }) as typeof fetch;
+  return mock;
+};
+
+/**
+ * Seeds the status cache, performs the mutation, and asserts the next status
+ * read issues a fresh request that observes the post-mutation state instead of
+ * serving the pre-mutation cache entry.
+ */
+const expectStatusInvalidatedBy = async <T>(
+  directory: string,
+  mutate: () => Promise<T>
+): Promise<void> => {
+  const mock = installStatusMutationFetchMock();
+
+  const seeded = await getGitStatus(directory);
+  expect(seeded.behind).toBe(0);
+
+  mock.behind = 2;
+  const cached = await getGitStatus(directory);
+  expect(cached.behind).toBe(0);
+  expect(mock.statusUrls).toHaveLength(1);
+
+  await mutate();
+
+  const refreshed = await getGitStatus(directory);
+  expect(refreshed.behind).toBe(2);
+  expect(mock.statusUrls).toHaveLength(2);
+};
+
+describe('gitApiHttp post-mutation status invalidation (#2281)', () => {
+  test('checkout and branch mutations invalidate cached status', async () => {
+    installWindowMock();
+    try {
+      await expectStatusInvalidatedBy('/repo-2281-checkout', () => checkoutBranch('/repo-2281-checkout', 'feature'));
+      await expectStatusInvalidatedBy('/repo-2281-create-branch', () => createBranch('/repo-2281-create-branch', 'feature/new'));
+      await expectStatusInvalidatedBy('/repo-2281-rename-branch', () => renameBranch('/repo-2281-rename-branch', 'old', 'new'));
+      await expectStatusInvalidatedBy('/repo-2281-delete-branch', () => deleteGitBranch('/repo-2281-delete-branch', { branch: 'feature/old' }));
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('stash lifecycle mutations invalidate cached status', async () => {
+    installWindowMock();
+    try {
+      await expectStatusInvalidatedBy('/repo-2281-stash', () => stashGitChanges('/repo-2281-stash', { message: 'WIP' }));
+      await expectStatusInvalidatedBy('/repo-2281-stash-apply', () => applyGitStash('/repo-2281-stash-apply', { ref: 'stash@{0}' }));
+      await expectStatusInvalidatedBy('/repo-2281-stash-pop', () => popGitStash('/repo-2281-stash-pop', { ref: 'stash@{0}' }));
+      await expectStatusInvalidatedBy('/repo-2281-stash-drop', () => dropGitStash('/repo-2281-stash-drop', { ref: 'stash@{0}' }));
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('merge and rebase lifecycle mutations invalidate cached status', async () => {
+    installWindowMock();
+    try {
+      await expectStatusInvalidatedBy('/repo-2281-merge', () => merge('/repo-2281-merge', { branch: 'feature' }));
+      await expectStatusInvalidatedBy('/repo-2281-merge-abort', () => abortMerge('/repo-2281-merge-abort'));
+      await expectStatusInvalidatedBy('/repo-2281-merge-continue', () => continueMerge('/repo-2281-merge-continue'));
+      await expectStatusInvalidatedBy('/repo-2281-rebase', () => rebase('/repo-2281-rebase', { onto: 'main' }));
+      await expectStatusInvalidatedBy('/repo-2281-rebase-abort', () => abortRebase('/repo-2281-rebase-abort'));
+      await expectStatusInvalidatedBy('/repo-2281-rebase-continue', () => continueRebase('/repo-2281-rebase-continue'));
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('history mutations invalidate cached status', async () => {
+    installWindowMock();
+    try {
+      await expectStatusInvalidatedBy('/repo-2281-checkout-commit', () => checkoutCommit('/repo-2281-checkout-commit', 'abc123'));
+      await expectStatusInvalidatedBy('/repo-2281-cherry-pick', () => cherryPick('/repo-2281-cherry-pick', 'abc123'));
+      await expectStatusInvalidatedBy('/repo-2281-revert-commit', () => revertCommit('/repo-2281-revert-commit', 'abc123'));
+      await expectStatusInvalidatedBy('/repo-2281-reset', () => resetToCommit('/repo-2281-reset', 'abc123', 'mixed'));
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('remote-side mutations invalidate cached status', async () => {
+    installWindowMock();
+    try {
+      await expectStatusInvalidatedBy('/repo-2281-delete-remote-branch', () => deleteRemoteBranch('/repo-2281-delete-remote-branch', { branch: 'feature', remote: 'origin' }));
+      await expectStatusInvalidatedBy('/repo-2281-remove-remote', () => removeRemote('/repo-2281-remove-remote', { remote: 'origin' }));
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('a failed mutation does not invalidate cached status', async () => {
+    installWindowMock();
+    const statusUrls: string[] = [];
+    // SAFETY: see installStatusMutationFetchMock - the mock honours the fetch
+    // contract; the assertion supplies its overload signatures.
+    globalThis.fetch = (async (input) => {
+      const url = String(input);
+      if (url.startsWith('/api/git/status')) {
+        statusUrls.push(url);
+        return jsonResponse(statusPayload());
+      }
+      return new Response(JSON.stringify({ error: 'checkout failed' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    try {
+      const directory = '/repo-2281-failed-checkout';
+      await getGitStatus(directory);
+
+      const error = await captureError(async () => {
+        await checkoutBranch(directory, 'feature');
+      });
+      expect(error).toBeInstanceOf(Error);
+      // SAFETY: the assertion above established that `error` is an Error.
+      expect((error as Error).message).toBe('checkout failed');
+
+      await getGitStatus(directory);
+      expect(statusUrls).toHaveLength(1);
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('a status request admitted before a mutation cannot satisfy the post-mutation refresh', async () => {
+    installWindowMock();
+    const statusResolvers: Array<(response: Response) => void> = [];
+    const statusUrls: string[] = [];
+    // SAFETY: see installStatusMutationFetchMock - the mock honours the fetch
+    // contract; the assertion supplies its overload signatures.
+    globalThis.fetch = (async (input) => {
+      const url = String(input);
+      if (url.startsWith('/api/git/status')) {
+        statusUrls.push(url);
+        return new Promise<Response>((resolve) => {
+          statusResolvers.push(resolve);
+        });
+      }
+      return jsonResponse({ success: true });
+    }) as typeof fetch;
+
+    try {
+      const directory = '/repo-2281-deferred';
+      const preMutationRead = getGitStatus(directory);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(statusUrls).toHaveLength(1);
+
+      await checkoutBranch(directory, 'feature');
+
+      const postMutationRead = getGitStatus(directory);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(statusUrls).toHaveLength(2);
+
+      statusResolvers[1](jsonResponse(statusPayload({ current: 'feature' })));
+      statusResolvers[0](jsonResponse(statusPayload({ current: 'main' })));
+
+      const [preMutationStatus, postMutationStatus] = await Promise.all([preMutationRead, postMutationRead]);
+      expect(preMutationStatus.current).toBe('main');
+      expect(postMutationStatus.current).toBe('feature');
+
+      // The late pre-mutation response must not repopulate the cache.
+      const cachedRead = await getGitStatus(directory);
+      expect(cachedRead.current).toBe('feature');
+      expect(statusUrls).toHaveLength(2);
     } finally {
       restoreMocks();
     }

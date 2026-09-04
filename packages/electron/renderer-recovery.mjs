@@ -8,6 +8,8 @@ const RECOVERABLE_REASONS = new Set([
   'memory-eviction',
 ]);
 
+const RELOAD_DELAY_MS = 100;
+
 export const createRendererRecoveryPolicy = (now = Date.now) => {
   let windowStartedAt = 0;
   let attempts = 0;
@@ -27,4 +29,26 @@ export const createRendererRecoveryPolicy = (now = Date.now) => {
       return true;
     },
   };
+};
+
+/**
+ * Reload a window whose renderer process died, within the recovery budget.
+ * Shared by every BrowserWindow so the desktop shell has one recovery policy.
+ */
+export const attachRendererRecovery = (browserWindow, { log, label }) => {
+  const policy = createRendererRecoveryPolicy();
+  browserWindow.webContents.on('render-process-gone', (_event, details) => {
+    if (!policy.shouldReload(details.reason)) return;
+    log.warn('[electron] renderer exited unexpectedly; reloading window', {
+      label: browserWindow.__ocLabel,
+      surface: label,
+      reason: details.reason,
+      exitCode: details.exitCode,
+    });
+    setTimeout(() => {
+      if (!browserWindow.isDestroyed()) {
+        browserWindow.webContents.reload();
+      }
+    }, RELOAD_DELAY_MS);
+  });
 };

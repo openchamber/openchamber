@@ -686,7 +686,7 @@ async function spawnManagedOpenCodeServer(
   workingDirectory: string,
   port: number,
   timeoutMs: number
-): Promise<{ url: string; close: () => void }> {
+): Promise<{ url: string; close: () => Promise<void> }> {
   const binary = stripWrappingQuotes(process.env.OPENCODE_BINARY || 'opencode') || 'opencode';
   const launch = resolveWindowsLaunchSpec(binary, ['serve', '--hostname', '127.0.0.1', '--port', String(port)]);
   const child = spawn(launch.binary, launch.args, {
@@ -761,18 +761,28 @@ async function spawnManagedOpenCodeServer(
   });
 
   // Record this child so a future run can reap it if we crash before teardown.
-  registerManagedProcess({ pid: child.pid, ownerPid: process.pid, port, binary, runtime: 'vscode' });
+  const registration = registerManagedProcess({
+    pid: child.pid,
+    ownerPid: process.pid,
+    port,
+    binary,
+    runtime: 'vscode',
+  }).catch(() => {});
 
   return {
     url,
-    close: () => {
+    close: async () => {
       killProcessTree(child.pid);
       try {
         child.kill('SIGTERM');
       } catch {
         // ignore
       }
-      unregisterManagedProcess(child.pid);
+      // Both writes touch the same registry file. Unordered, the removal can
+      // land before the registration and leave a stale entry pointing at a dead
+      // pid; awaiting keeps the extension host alive until the file is gone.
+      await registration;
+      await unregisterManagedProcess(child.pid).catch(() => {});
     },
   };
 }
@@ -802,7 +812,7 @@ async function allocateManagedOpenCodePort(): Promise<number> {
 }
 
 export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCodeManager {
-  let server: { url: string; close: () => void } | null = null;
+  let server: { url: string; close: () => Promise<void> } | null = null;
   let reapedOrphansOnce = false;
   let managedApiUrlOverride: string | null = null;
   let managedPassword: string | null = null;
@@ -1017,7 +1027,7 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
           setStatus('connected');
         } else {
           try {
-            server.close();
+            await server.close();
           } catch {
             // ignore
           }
@@ -1057,7 +1067,7 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
 
     if (server) {
       try {
-        server.close();
+        await server.close();
       } catch {
         // Ignore close errors
       }

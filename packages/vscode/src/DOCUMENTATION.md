@@ -23,6 +23,7 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 
 - `gitService.ts`
   - Owns VS Code Git and worktree operations.
+  - Fetches the current tracked source branch once before worktree creation. Fetch failure falls back to the local branch and reports it to the shared UI.
   - Fast worktree creation reports bootstrap phases explicitly: `directory-created`, then `git-ready` after Git population/upstream work, and `setup-ready` after setup commands. Existing worktrees without tracked bootstrap state fall back to `ready`/`setup-ready`; shared webview consumers also accept legacy responses without `phase`.
   - Worktree removal waits for an active create/bootstrap task for the same directory so background Git and setup work cannot race deletion or restore stale bootstrap state.
   - Worktree population enables Git `core.longpaths` (local repo config plus `-c core.longpaths=true` on `git reset --hard`) so deeply nested checkouts under the managed data-dir worktree root do not fail on Windows MAX_PATH with "Filename too long".
@@ -72,6 +73,7 @@ The webview build emits each worker as one self-contained file. VS Code webviews
   - Includes Zen utility model parity handler used by shared notification settings (`/api/zen/models`).
   - Owns managed OpenCode upgrade status and mutation handlers, including capability reporting, upgrade serialization, and process restart after a successful upgrade.
   - Provider handlers cover source lookup, disconnect (`DELETE /api/provider/:id/auth`), and custom provider upsert (`PUT /api/provider`; create/update OpenAI-compatible config with explicit `scope` for user/project/custom layers; requires `env` or stored auth; secrets via OpenCode auth API).
+  - Quota handlers keep managed exe.dev, Ollama Cloud, and Cursor credentials in the extension data directory with the same private-file contract as the web runtime. exe.dev uses one command-scoped usage token for the aggregate billing shared by every `exe-*` model provider.
 
 - `opencode-upgrade-runtime.ts`
   - Owns managed-versus-external capability decisions, latest-version checks, serialized OpenCode self-upgrades, and restart-after-upgrade behavior.
@@ -91,3 +93,82 @@ When adding new bridge route families:
 1. Prefer creating or extending a domain runtime module under `packages/vscode/src/bridge-*-runtime.ts`.
 2. Keep `bridge.ts` focused on delegation order and minimal fallthrough behavior.
 3. Inject dependencies into runtimes instead of reaching into unrelated modules directly.
+
+## VS Code surface reachability map
+
+Verified 2026-08-28 against `8f5eb231b`.
+
+Three webview hosts, all rendering `renderVSCodeApp` → `VSCodeApp`
+(`packages/ui/src/apps/VSCodeApp.tsx`):
+
+- `ChatViewProvider.ts` — sidebar view, `panelType: 'chat'`, `viewMode: 'sidebar'`.
+- `SessionEditorPanelProvider.ts` — editor tab, `panelType: 'chat'`, `viewMode: 'editor'`.
+- `AgentManagerPanelProvider.ts` — editor tab, `panelType: 'agentManager'` → `AgentManagerView`, no `VSCodeLayout`.
+
+`VSCodeLayout` has exactly three views: `sessions`, `chat`, `settings`
+(`packages/ui/src/components/layout/VSCodeLayout.tsx:76`). There is no
+`MainLayout`, no `ContextPanel`, and no `ContextPanelRail` in this runtime, so
+every surface reached only through those is unreachable.
+
+### Surfaces
+
+| Surface | Status | Mount chain / cut-off |
+|---|---|---|
+| Chat timeline | MOUNTED | `VSCodeLayout` → `ChatView` → `ChatContainer` → `MessageList` |
+| Composer | MOUNTED | `ChatContainer` → `ChatInput` (model/agent controls, autocomplete, attachments, dictation, GitHub issue/PR pickers, `ReviewFlowDialog`, `PendingChangesBar`) |
+| Work status panel | MOUNTED | `ChatContainer` → `WorkStatusPanel` |
+| Permission / question cards | MOUNTED | `ChatContainer` → `PermissionCard`, `QuestionCard` |
+| Timeline dialog | MOUNTED | `ChatContainer` → `TimelineDialog` |
+| Tool output / inline diff preview | MOUNTED | `MessageList` → `ToolPart`, `ToolOutputDialog` (`DiffViewToggle`, not `DiffView`) |
+| Sessions sidebar | MOUNTED | `VSCodeLayout` → `SessionSidebar` with `mobileVariant hideDirectoryControls` |
+| Session dialogs | MOUNTED | `VSCodeLayout` → `SessionDialogs` |
+| Session switcher | MOUNTED | `VSCodeHeader` → `SessionSwitcherDropdown` |
+| MCP dropdown | MOUNTED | `VSCodeHeader` `showMcp` → `McpDropdown` |
+| Context usage / rate limits | MOUNTED | `VSCodeHeader` `showContextUsage` / `showRateLimits` → `ContextUsageDisplay`, `UsageProgressBar` |
+| Agent manager | MOUNTED | `VSCodeApp` `panelType === 'agentManager'` → `AgentManagerView` |
+| Settings | PARTIAL | `VSCodeLayout` → lazy `SettingsView`. `metadata.ts` `isAvailable: (ctx) => !ctx.isVSCode` hides `remote-instances`, `git`, `shortcuts`, `magic-prompts`, `voice`, `tunnel`, `about` |
+| Usage / quota page | MOUNTED | `SettingsView` → `UsagePage` (slug `usage`, no VS Code gate) |
+| Notifications settings | MOUNTED | `SettingsView` → slug `notifications` (no VS Code gate) |
+| MCP settings | MOUNTED | `SettingsView` → `McpSidebar` / `McpPage` |
+| Agents / commands / skills / plugins / providers / projects settings | MOUNTED | `SettingsView` page registry |
+| Worktrees | PARTIAL | Create/remove reachable via `SessionSidebar` → `NewWorktreeDialog` and `sessionWorktreeMenu`. `WorktreesView` is `MainLayout`-only |
+| Git | PARTIAL | Read-only status/branches/log via `useGitStore` in `SessionSidebar`, `ChatInput`, `WorkStatusPrimaryGroup`. Stage/commit/push/history/merge/rebase live in `GitView` + `views/git/*`, cut off with `ContextPanel` |
+| Voice / dictation | PARTIAL | `ComposerDictation` renders in `ChatInput`; the `voice` settings page is VS Code-gated |
+| Command palette | PARTIAL | `useKeyboardShortcuts` runs from `SyncAppEffects` and `open_command_palette` toggles `isCommandPaletteOpen`, but `CommandPalette` renders only in `MainLayout` — the shortcut opens nothing |
+| ContextPanel / project context (notes, todos, plans tabs) | NOT MOUNTED | `ContextPanel`, `ContextPanelRail`, `RightSidebarTabs` imported only by `MainLayout` and `MobileWorkspaceDrawer` |
+| Terminal | NOT MOUNTED | `TerminalView` imported only by `ContextPanel` and `MobileWorkspaceDrawer`. `webview/api/index.ts` ships `createStubTerminalAPI()` whose every method throws unsupported |
+| Files view | NOT MOUNTED | lazy `FilesView` in `ContextPanel`; `SidebarFilesTree` is `MainLayout`-only |
+| Diff view | NOT MOUNTED | lazy `DiffView` in `ContextPanel` |
+| Git view | NOT MOUNTED | lazy `GitView` in `ContextPanel` |
+| Plan view | NOT MOUNTED | lazy `PlanView` in `ContextPanel`, `ProjectNotesTodoPanel`, `MobileApp` |
+| Pull request view | NOT MOUNTED | `PullRequestView` imported only by `ContextPanel` |
+| Browser panel | NOT MOUNTED | `BrowserPane` imported only by `ContextPanel`; `RuntimeAPIs` has no browser member in `webview/api/index.ts` |
+| Walkthrough | NOT MOUNTED | `WalkthroughView` imported only by `ContextPanel` |
+| Archive view | NOT MOUNTED | `ArchiveView` imported only by `MainLayout` |
+| Scheduled tasks | NOT MOUNTED | `ScheduledTasksDialog` imported only by `MainLayout` |
+| Memory debug panel | NOT MOUNTED | `MemoryDebugPanel` imported only by `App.tsx` (web/desktop root) |
+| Mini chat | NOT MOUNTED | `MiniChatLayout` imported only by `ElectronMiniChatApp` |
+
+### Dead bridge surface
+
+Handlers with no reachable caller in the VS Code webview.
+
+| Handler | Why unreachable |
+|---|---|
+| `api:git/ignore-openchamber` | No reference anywhere in `packages/vscode/webview` |
+| `api:git/commit`, `api:git/commit-files`, `api:git/commit-file-diff` | Only `GitView` and `views/git/*` call them |
+| `api:git/log` (write paths), `api:git/checkout`, `api:git/checkout-commit`, `api:git/reset-to-commit`, `api:git/revert-commit`, `api:git/cherry-pick` | `views/git/HistoryCommitRow.tsx` only |
+| `api:git/merge`, `api:git/merge/abort`, `api:git/merge/continue`, `api:git/rebase`, `api:git/rebase/abort`, `api:git/rebase/continue`, `api:git/conflict-details` | `GitView` only |
+| `api:git/push`, `api:git/pull`, `api:git/fetch` | `GitView` and `MobileChangesSurface` only |
+| `api:git/diff`, `api:git/file-diff` | `DiffView` only |
+| `api:git/pr-description` | `views/git/PullRequestSection.tsx` only |
+| `api:git/identity` | `git` settings page is VS Code-gated |
+| `api:github/pr:create`, `api:github/pr:merge`, `api:github/pr:ready`, `api:github/pr:update` | `views/git/PullRequestSection.tsx` only. `api:github/pr:status` stays reachable through `useGitHubPrStatusStore` in the sidebar |
+| `api:fs:write`, `api:fs:rename`, `api:fs:delete`, `api:fs:reveal`, `api:fs:mkdir` | `FilesView`, `SidebarFilesTree`, `PlanView` only |
+| `api:fs:exec` | Terminal API is a throwing stub; no other caller |
+
+Reachable filesystem routes: `api:fs:read` (attachments, config), `api:fs:search`
+(`useFileSearchStore` behind composer file mentions), `api:fs:list`, `api:fs:stat`.
+
+Maintenance: reviews, changelog entries, and parity claims consult this map;
+whoever mounts or unmounts a surface updates it in the same change.

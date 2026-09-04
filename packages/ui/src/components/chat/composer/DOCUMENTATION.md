@@ -28,6 +28,18 @@ existing mobile fixed-position rules unchanged.
 | `attachments/` | Files: paths, drop payloads |
 | `ui/` | Presentation |
 | `text.ts` | How inserted text meets the text already there |
+| `largeTextPaste.ts` | Detect large plain-text pastes and build virtual `.txt` files |
+| `largeTextPasteOffer.ts` | Ask-toast offer id begin/resolve (supersede + double-apply guards) |
+
+`ChatInput.handlePaste` owns paste orchestration: URL-over-selection markdown
+links, clipboard images (attach + citation), and large plain-text pastes.
+Large pastes (about 2,000 characters or 25 lines) follow the composer setting
+`largeTextPasteBehavior` (`ask` / `attach` / `inline`). Attaching creates an
+in-memory `text/plain` file named `pasted-context-N.txt`, inserts a bracket
+citation, and sends it through the same attachment pipeline as a manually
+picked `.txt` file. Ask-toast actions read live composer/attachment state so
+typing or other attaches between paste and choice stay consistent. Short text,
+images, and URL wraps keep their existing paths.
 
 ## The prompt language
 
@@ -59,6 +71,15 @@ copy.
 `editor/` wraps CodeMirror. The document is a plain string: `getValue()` is
 exactly what gets sent, so nothing downstream serializes a rich document model
 back into a prompt.
+
+The document is not, however, the string it was given: CodeMirror normalizes
+line endings, so a `\r\n` pair becomes one break and the document ends up
+shorter than the inserted string. **Never derive a caret position from the
+length of text you are inserting** — a caret past the end makes `dispatch`
+throw, the transaction never applies, and the un-normalized text stays in React
+state to crash again on the next restore. Every edit that moves the caret goes
+through `replaceWithCaret` (`editor/documentEdits.ts`), which measures the
+change instead of the string.
 
 The composer previously painted a transparent `<textarea>` over a mirror
 `<div>`. That restricted highlighting to styles which do not change glyph
@@ -138,8 +159,14 @@ and the send path reading the same grammar.
   linked issue/PR) becomes its own synthetic text part carrying structured
   metadata** built by `lib/messages/contextParts.ts`; the timeline reads that
   metadata back to render context blocks. PR instructions precede the PR diff.
-  Queueing a message leaves context drafts in their store on purpose — the send
-  that later delivers the queue consumes them.
+  The same module's `buildComposerContext` captures that context when a message
+  is **queued** instead of sent: the chips leave the composer with the message
+  (as `QueuedContextPart`s on the queue item), the server or the VS Code
+  auto-send delivers them through `queuedContextToParts`, and editing the
+  queued message puts them back. A queued message is placed as captured — its
+  mention, file mentions, and skill instruction were resolved when it was
+  queued, never at delivery — and its context follows it before the next
+  queued message.
 - `state/useComposerDraft.ts` — a draft belongs to a (runtime, directory,
   session) identity. Writes are debounced while typing but forced at every edge
   where the page may stop running, because a pending timer is not a saved
@@ -148,7 +175,9 @@ and the send path reading the same grammar.
   recorded before a queued write could resurrect it.
 - `state/useDraftTarget.ts` — the draft can target a directory that does not
   exist yet (a worktree being created). It must survive not appearing in the
-  branch list, or the selector snaps back to the project root mid-creation.
+  branch list, or the selector snaps back to the project root mid-creation. It
+  also owns the advisory dirty state for the selected directory, clearing it as
+  soon as the target changes so a warning never names a previous branch.
 - `ui/DraftTargetSelectors.tsx` owns the controlled project/worktree picker
   state and registers its application shortcuts locally. The selectors only
   consume their shared prefix while the draft target UI is mounted.
@@ -170,8 +199,8 @@ hardware.
 
 The package has no DOM test environment, so coverage stops at the state and
 logic layers: the language, the submit assembly, path and drop handling, text
-splicing, message history, and the CodeMirror language extension at the
-`EditorState` level.
+splicing, large-paste detection, paste-offer invalidation, message history, and
+the CodeMirror language extension at the `EditorState` level.
 
 Rendering, focus, keyboard behavior, IME and WKWebView are **not covered by
 tests** and are verified by hand. Do not report a change to them as validated

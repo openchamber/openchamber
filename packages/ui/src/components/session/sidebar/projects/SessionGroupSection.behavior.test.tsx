@@ -138,6 +138,10 @@ const createProps = (): SessionGroupSectionProps => ({
   deleteSessionConfirm: null,
   setDeleteSessionConfirm: () => undefined,
   setCopiedSessionId: () => undefined,
+  startSessionWorktreeMenuLoad: () => ({
+    cachedTargets: [],
+    refreshTargets: Promise.resolve([]),
+  }),
   onToggleCollapsedGroup: () => undefined,
   folderRename: null,
   setFolderRenameDraft: () => undefined,

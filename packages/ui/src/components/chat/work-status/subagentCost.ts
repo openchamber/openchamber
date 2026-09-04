@@ -17,7 +17,7 @@ export const formatCost = (cost: number): string => `$${trimZeros(cost.toFixed(4
 export function buildChildrenIndex(sessions: Session[]): Map<string, Session[]> {
   const index = new Map<string, Session[]>();
   for (const session of sessions) {
-    const parentID = (session as unknown as { parentID?: string }).parentID;
+    const parentID = session.parentID;
     if (!parentID) continue;
     const existing = index.get(parentID);
     if (existing) {
@@ -30,8 +30,7 @@ export function buildChildrenIndex(sessions: Session[]): Map<string, Session[]> 
 }
 
 function sessionCost(session: Session | undefined): number {
-  const cost = (session as unknown as { cost?: number } | undefined)?.cost;
-  return typeof cost === 'number' ? cost : 0;
+  return session?.cost ?? 0;
 }
 
 /**

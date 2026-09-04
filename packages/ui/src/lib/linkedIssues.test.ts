@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
-import { buildLinkedIssue, buildLinkedIssueId, getLinkedIssues, withLinkedIssue, type LinkedIssue } from './linkedIssues';
+import { buildLinkedIssue, buildLinkedIssueId, buildLinkedLinearIssue, canOpenLinearIssueInContextPanel, getLinkedIssues, withLinkedIssue, type LinkedIssue } from './linkedIssues';
 
-const issue = (overrides: Partial<LinkedIssue> = {}): LinkedIssue => ({
+type LinkedGitHubIssue = Exclude<LinkedIssue, { kind: 'linear' }>;
+
+const issue = (overrides: Partial<LinkedGitHubIssue> = {}): LinkedGitHubIssue => ({
   id: 'owner/repo#12',
   number: 12,
   title: 'Rail badge count',
@@ -76,6 +78,28 @@ describe('buildLinkedIssue', () => {
   });
 });
 
+describe('buildLinkedLinearIssue', () => {
+  test('stores the Linear identifier without inventing a GitHub number', () => {
+    const built = buildLinkedLinearIssue({
+      identifier: 'ENG-12',
+      title: 'Broken login',
+      url: 'https://linear.app/openchamber/issue/ENG-12',
+      author: { login: 'Ada', avatarUrl: 'https://avatars/1' },
+      linkedAt: 5,
+    });
+    expect(built).toEqual({
+      id: 'linear:ENG-12',
+      identifier: 'ENG-12',
+      title: 'Broken login',
+      url: 'https://linear.app/openchamber/issue/ENG-12',
+      kind: 'linear',
+      author: 'Ada',
+      authorAvatarUrl: 'https://avatars/1',
+      linkedAt: 5,
+    });
+  });
+});
+
 describe('getLinkedIssues', () => {
   test('returns an empty list for a session with no metadata', () => {
     expect(getLinkedIssues(undefined)).toEqual([]);
@@ -93,6 +117,17 @@ describe('getLinkedIssues', () => {
       'string',
     ]);
     expect(getLinkedIssues(session)).toEqual([good]);
+  });
+
+  test('keeps Linear entries next to GitHub ones', () => {
+    const github = issue();
+    const linear = buildLinkedLinearIssue({
+      identifier: 'ENG-12',
+      title: 'Broken login',
+      url: 'https://linear.app/openchamber/issue/ENG-12',
+      linkedAt: 2,
+    });
+    expect(getLinkedIssues(sessionWith([github, linear]))).toEqual([github, linear]);
   });
 
   test('survives a non-array payload', () => {
@@ -141,5 +176,43 @@ describe('withLinkedIssue', () => {
       true,
     );
     expect((next.openchamber as { linked_issues: LinkedIssue[] }).linked_issues).toEqual([issue()]);
+  });
+});
+
+describe('canOpenLinearIssueInContextPanel', () => {
+  test('opens the rail when Linear is connected, the shell has a context panel, and a directory is known', () => {
+    expect(canOpenLinearIssueInContextPanel({
+      linearAvailable: true,
+      linearConnected: true,
+      inDedicatedMobileShell: false,
+      directory: '/repo',
+    })).toBe(true);
+  });
+
+  test('falls back when Linear is missing, disconnected, the mobile shell is open, or the directory is blank', () => {
+    expect(canOpenLinearIssueInContextPanel({
+      linearAvailable: false,
+      linearConnected: true,
+      inDedicatedMobileShell: false,
+      directory: '/repo',
+    })).toBe(false);
+    expect(canOpenLinearIssueInContextPanel({
+      linearAvailable: true,
+      linearConnected: false,
+      inDedicatedMobileShell: false,
+      directory: '/repo',
+    })).toBe(false);
+    expect(canOpenLinearIssueInContextPanel({
+      linearAvailable: true,
+      linearConnected: true,
+      inDedicatedMobileShell: true,
+      directory: '/repo',
+    })).toBe(false);
+    expect(canOpenLinearIssueInContextPanel({
+      linearAvailable: true,
+      linearConnected: true,
+      inDedicatedMobileShell: false,
+      directory: '  ',
+    })).toBe(false);
   });
 });

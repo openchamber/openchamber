@@ -285,7 +285,14 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                   <DropdownMenuTrigger asChild>
                     <button
                       type="button"
-                      className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                      className={cn(
+                        'flex min-w-0 flex-1 items-center gap-1.5 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-[padding]',
+                        // Reserve hover space for the absolute action buttons,
+                        // matching the collapse-toggle branch below.
+                        isRepo && !hideDirectoryControls
+                          ? (alwaysShowActions ? 'pr-20' : 'pr-7 group-hover/project:pr-20 group-focus-within/project:pr-20')
+                          : (alwaysShowActions ? 'pr-14' : 'pr-7 group-hover/project:pr-14 group-focus-within/project:pr-14'),
+                      )}
                       aria-label={t('sessions.sidebar.project.selectAria', { project: projectLabel })}
                     >
                       <ProjectHeaderIdentity id={id} projectLabel={projectLabel} projectIcon={projectIcon} projectColor={projectColor} projectIconImage={projectIconImage} projectIconBackground={projectIconBackground} />
@@ -295,7 +302,9 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                   <DropdownMenuContent align="start" className="max-h-[70vh] min-w-[220px] overflow-y-auto">
                     {projectPickerOptions?.map((option) => (
                       <DropdownMenuItem key={option.id} onClick={() => onProjectSelect?.(option.id)} className="flex items-center justify-between gap-3" title={option.projectDescription}>
-                        <ProjectHeaderIdentity {...option} />
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <ProjectHeaderIdentity {...option} />
+                        </span>
                         {option.id === id ? <Icon name="check" className="h-4 w-4 flex-shrink-0 text-primary" /> : null}
                       </DropdownMenuItem>
                     ))}
@@ -340,7 +349,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                 showCreateButtons ? 'right-7' : 'right-0.5',
               )}>
                 {showCreateButtons && isRepo && !hideDirectoryControls && onNewWorktreeSession ? (
-                  <Tooltip delayDuration={500}>
+                  <Tooltip>
                     <TooltipTrigger asChild>
                       <button
                         type="button"
@@ -396,7 +405,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
 
               {showCreateButtons && onNewSession ? (
                 <div className="absolute right-0.5 top-1/2 z-10 -translate-y-1/2">
-                  <Tooltip delayDuration={500}>
+                  <Tooltip>
                     <TooltipTrigger asChild>
                       <button
                         type="button"

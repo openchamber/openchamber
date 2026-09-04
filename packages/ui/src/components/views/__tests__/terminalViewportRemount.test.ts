@@ -100,4 +100,13 @@ describe('terminal viewport remount guard', () => {
         expect(terminalViewportSource).toContain('resizeRef.current(size.cols, size.rows)');
         expect(terminalViewportSource).toContain('...(provisionalSizeRef.current ?? {})');
     });
+
+    test('rebuilds the canvas renderer when terminal fonts finish loading after the startup bound', () => {
+        expect(terminalViewportSource).toContain('loadMonoFont(font)');
+        expect(terminalViewportSource).toContain('Promise.all([loadMonoFont(font), loadNerdFonts()])');
+        expect(terminalViewportSource).toContain('Promise.all([loadGhostty(), fonts.loadedBeforeTimeout])');
+        expect(terminalViewportSource).toContain('if (!fontsLoaded)');
+        expect(terminalViewportSource).toContain('void fonts.loaded.then(() => {');
+        expect(terminalViewportSource).toContain('setRendererGeneration((value) => value + 1)');
+    });
 });

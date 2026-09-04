@@ -6,6 +6,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { getGitHubPrStatusKey, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import type { SessionTreeItemProps } from '../sessions/SessionTreeItem';
 import { useArchivedAutoFolders } from '../folders/useArchivedAutoFolders';
 import { ProjectSessionSelectionEffect } from '../projects/useProjectSessionSelection';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -33,6 +34,10 @@ import { CHAT_DRAFT_PROJECT_ID, getChatsRootForHome, getChatsRootFromDirectory }
 import { isCapacitorApp } from '@/lib/platform';
 
 const PR_NO_PR_RETRY_MS = 5 * 60_000;
+
+// A stable empty array: without a chats group the sections hook must not see a
+// new reference on every render.
+const EMPTY_STANDALONE_GROUPS: SessionGroup[] = [];
 
 const isRootSession = (session: Session): boolean => {
   // SAFETY: OpenCode attaches parentID to hierarchical session records,
@@ -83,6 +88,12 @@ type SessionProjectCollectionProps = {
     isWorktreeTopologyLoading: boolean;
     unresolvedWorktreeProjectPaths: ReadonlySet<string>;
     projectView: ReturnType<typeof useSessionProjectViewState>['state'];
+    /**
+     * The match count belongs in the sidebar header, which renders above this
+     * list, while only the list knows what matched. Reported upwards rather
+     * than recomputed there, so the number and the rows can never disagree.
+     */
+    onSearchMatchCountChange: (count: number) => void;
   };
   actions: {
     rowActions: {
@@ -103,6 +114,7 @@ type SessionProjectCollectionProps = {
     openProjectEditDialog: (id: string) => void;
     removeProject: (id: string) => void;
     reorderProjects: (fromIndex: number, toIndex: number) => void;
+    startSessionWorktreeMenuLoad: SessionTreeItemProps['startSessionWorktreeMenuLoad'];
     renderProjectStatusIndicator?: (projectId: string, groups: SessionGroup[]) => React.ReactNode;
     initialActiveSessionByProject: Map<string, string>;
     persistActiveSessionByProject: (value: Map<string, string>) => void;
@@ -179,13 +191,48 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     [collection.archivedSessions, collection.sessions, topology.availableWorktreesByProject, topology.isVSCode, topology.projects],
   );
   const { getSessionsForProject, getArchivedSessionsForProject } = useProjectSessionLists({ ownership });
-  const { projectSections, groupSearchDataByGroup, sectionsForRender, flatSectionsForRender } = useSessionSidebarSections({
+  // Built before the sections hook runs, because that hook owns the search data
+  // for every group the sidebar renders — the chats group included. A group the
+  // hook never sees renders an empty list while a search is active.
+  const chatGroup = React.useMemo<SessionGroup | null>(() => {
+    if (topology.isVSCode) return null;
+    const chatsRoot = getChatsRootForHome(view.homeDirectory)
+      ?? collection.chatSessions.map((session) => getChatsRootFromDirectory(session.directory)).find(Boolean)
+      ?? null;
+    if (!chatsRoot) return null;
+    const folderScopes = Array.from(new Set([
+      chatsRoot,
+      ...collection.chatSessions.map((session) => normalizePath(session.directory ?? null)).filter(Boolean),
+    ])).filter((directory): directory is string => Boolean(directory))
+      .map((directory) => ({ scopeKey: directory, directory }));
+    return {
+      id: 'managed-chats',
+      label: '',
+      branch: null,
+      description: null,
+      isMain: true,
+      worktree: null,
+      directory: chatsRoot,
+      folderScopeKey: chatsRoot,
+      folderScopes,
+      draftTarget: 'chat',
+      sessions: collection.chatSessions
+        .filter((session) => !session.time?.archived && isRootSession(session))
+        .map((session) => ({ session, children: (collection.childrenMap.get(session.id) ?? []).filter((child) => !child.time?.archived).map((child) => ({ session: child, children: [], worktree: null })), worktree: null })),
+    };
+  }, [collection.chatSessions, collection.childrenMap, topology.isVSCode, view.homeDirectory]);
+  const standaloneGroups = React.useMemo<SessionGroup[]>(
+    () => chatGroup ? [chatGroup] : EMPTY_STANDALONE_GROUPS,
+    [chatGroup],
+  );
+  const { projectSections, groupSearchDataByGroup, sectionsForRender, flatSectionsForRender, searchMatchCount } = useSessionSidebarSections({
     normalizedProjects: topology.projects,
     getSessionsForProject,
     getArchivedSessionsForProject,
     availableWorktreesByProject: topology.availableWorktreesByProject,
     projectRepoStatus: topology.projectRepoStatus,
     projectRootBranches: topology.projectRootBranches,
+    gitBranches: topology.gitBranches,
     lastRepoStatus: topology.lastRepoStatus,
     buildGroupedSessions,
     hasSessionSearchQuery: view.hasSessionSearchQuery,
@@ -193,7 +240,16 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     filterSessionNodesForSearch,
     buildGroupSearchText,
     foldersMap,
+    standaloneGroups,
   });
+
+  const onSearchMatchCountChange = view.onSearchMatchCountChange;
+  React.useEffect(() => {
+    onSearchMatchCountChange(searchMatchCount);
+  }, [onSearchMatchCountChange, searchMatchCount]);
+  // Unmounting means nothing is listed any more, so the header must not keep
+  // showing the last count it was told about.
+  React.useEffect(() => () => onSearchMatchCountChange(0), [onSearchMatchCountChange]);
 
   // Second bootstrap-demand owner: the layout-level useSessionListSync keeps
   // every known directory alive at background priority even when the sidebar
@@ -330,6 +386,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     setDeleteSessionConfirm,
     startFolderRename,
     setCopiedSessionId,
+    startSessionWorktreeMenuLoad: actions.startSessionWorktreeMenuLoad,
     folderRename,
     setFolderRenameDraft,
     clearFolderRename,
@@ -350,6 +407,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     deleteSessionConfirm,
     copiedSessionId,
     setCopiedSessionId,
+    actions.startSessionWorktreeMenuLoad,
     rowActions,
     toggleParent,
     view.hideDirectoryControls,
@@ -375,33 +433,6 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     scrollerActions.setActiveProjectIdOnly,
     scrollerActions.setSessionSwitcherOpen,
   ]);
-  const chatGroup = React.useMemo<SessionGroup | null>(() => {
-    if (topology.isVSCode) return null;
-    const chatsRoot = getChatsRootForHome(view.homeDirectory)
-      ?? collection.chatSessions.map((session) => getChatsRootFromDirectory(session.directory)).find(Boolean)
-      ?? null;
-    if (!chatsRoot) return null;
-    const folderScopes = Array.from(new Set([
-      chatsRoot,
-      ...collection.chatSessions.map((session) => normalizePath(session.directory ?? null)).filter(Boolean),
-    ])).filter((directory): directory is string => Boolean(directory))
-      .map((directory) => ({ scopeKey: directory, directory }));
-    return {
-      id: 'managed-chats',
-      label: '',
-      branch: null,
-      description: null,
-      isMain: true,
-      worktree: null,
-      directory: chatsRoot,
-      folderScopeKey: chatsRoot,
-      folderScopes,
-      draftTarget: 'chat',
-      sessions: collection.chatSessions
-        .filter((session) => !session.time?.archived && isRootSession(session))
-        .map((session) => ({ session, children: (collection.childrenMap.get(session.id) ?? []).filter((child) => !child.time?.archived).map((child) => ({ session: child, children: [], worktree: null })), worktree: null })),
-    };
-  }, [collection.chatSessions, collection.childrenMap, topology.isVSCode, view.homeDirectory]);
   const renderChatsSection = React.useCallback(() => {
     if (!chatGroup) return null;
     return <SessionGroupSection
@@ -457,12 +488,14 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       setDeleteSessionConfirm={setDeleteSessionConfirm}
       startFolderRename={startFolderRename}
       setCopiedSessionId={setCopiedSessionId}
+      startSessionWorktreeMenuLoad={actions.startSessionWorktreeMenuLoad}
       chatSessions={collection.chatSessions}
       renderChatsSection={renderChatsSection}
       onNewChat={handleOpenNewChat}
       showRecentSection={showRecentSection && !singleProjectMode}
     /> : null
   ), [
+    actions.startSessionWorktreeMenuLoad,
     alwaysShowActions,
     collection.childrenMap,
     collection.pinnedSessionIds,
@@ -492,8 +525,14 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     view.mobileVariant,
     view.normalizedSessionSearchQuery,
   ]);
+  // The chats live in the scroller's top content, which the "no project section
+  // matched" branch drops. Tell the scroller when that content is itself a
+  // search result, or a chat-only match renders as "no matches" (issue #3200).
+  const topContentHasSearchMatches = view.hasSessionSearchQuery
+    && standaloneGroups.some((group) => groupSearchDataByGroup.get(group)?.hasMatch === true);
   const scrollerModel = React.useMemo(() => ({
     topContent: recentSection,
+    topContentHasSearchMatches,
     hasSharedSessions: Boolean(recentSection),
     sectionsForRender: orderedSectionsForRender,
     projectSections,
@@ -520,6 +559,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     view.searchEmptyState,
     visibleSessionCountByGroup,
     recentSection,
+    topContentHasSearchMatches,
     singleProjectMode,
     selectedSingleProjectId,
   ]);

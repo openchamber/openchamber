@@ -91,6 +91,10 @@ other runtime API.
   a blocker instead of a raw 500 message.
 - `call.js` — wire formats and per-provider auth, replicating OpenCode's
   plugin auth loaders:
+  - OpenCode-hosted providers receive `x-opencode-session`. Session-backed
+    features reuse the real OpenCode session id, walkthrough retries reuse the
+    walkthrough cache key, and standalone one-shot actions receive a fresh
+    opaque id for that generation.
   - **GitHub Copilot**: fetches the requested model's authenticated `/models`
     metadata from `https://api.githubcopilot.com` (or
     `copilot-api.<enterprise>`) and honors its advertised endpoint, preferring
@@ -116,9 +120,11 @@ other runtime API.
      endpoint, (3) the endpoint OpenCode resolved at runtime, or (4) the
     provider's `api` field from the models.dev catalog. The credential follows
     the same shape: config `options.apiKey`, then the runtime credential, then
-    the auth.json entry. Configured API keys honor OpenCode's `{env:NAME}` and
-    `{file:path}` substitutions; file contents and resolved credentials remain
-    server-side.
+    the auth.json entry. `provider.<id>.options.headers` is sent with the
+    request and overrides the bearer default, so gateways that authenticate on
+    their own header work here exactly as they do in a chat turn. Configured API
+    keys and header values honor OpenCode's `{env:NAME}` and `{file:path}`
+    substitutions; file contents and resolved credentials remain server-side.
   - The runtime credential is refused for providers listed in
     `OWN_CREDENTIAL_HANDLING`. Their branches need the stored entry rather than
     a bearer token: the clearest case is the ChatGPT-plan `openai` login, whose

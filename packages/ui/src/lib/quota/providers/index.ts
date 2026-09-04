@@ -23,6 +23,7 @@ export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'opencode-go', name: 'OpenCode Go' },
   { id: 'crof', name: 'CrofAI' },
   { id: 'deepseek', name: 'DeepSeek' },
+  { id: 'exe-dev', name: 'exe.dev' },
   { id: 'neuralwatt', name: 'NeuralWatt' },
   { id: 'xai', name: 'xAI' },
 ];
