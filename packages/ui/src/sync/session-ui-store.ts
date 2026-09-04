@@ -701,6 +701,11 @@ const resolveCreatableDraftDirectory = async (
 }
 
 const recoverStaleDraftDirectory = async (openedDraft: NewSessionDraftState): Promise<void> => {
+  // A managed Chat deliberately has no project directory. Its live directory
+  // may still point at an unregistered external path, which is not a stale
+  // project target for this recovery to repair.
+  if (openedDraft.target !== "project") return
+
   const resolved = await resolveCreatableDraftDirectory(openedDraft, openedDraft.directoryOverride)
   if (resolved.status !== "ok") return
   const recovered = normalizePath(resolved.directory ?? null)
@@ -709,6 +714,7 @@ const recoverStaleDraftDirectory = async (openedDraft: NewSessionDraftState): Pr
 
   const currentDraft = useSessionUIStore.getState().newSessionDraft
   if (!currentDraft.open) return
+  if (currentDraft.target !== "project") return
   if (currentDraft.preserveDirectoryOverride === true) return
   if (currentDraft.pendingWorktreeRequestId) return
   if (normalizePath(currentDraft.directoryOverride) !== original) return
@@ -1102,6 +1108,25 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const activeProject = projectsState.getActiveProject()
     const currentDirectory = normalizePath(useDirectoryStore.getState().currentDirectory ?? null)
     const persistedTarget = readPersistedDraftTarget()
+    const persistedProjectById = persistedTarget?.projectId
+      ? projects.find((p) => p.id === persistedTarget.projectId) ?? null
+      : null
+    const persistedProjectByDir = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, persistedTarget?.directory ?? null)
+    const currentDirProject = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, currentDirectory)
+    const isImplicitExternalChatFallback = currentDirectory !== null
+      && currentDirProject === null
+      && options?.target === undefined
+      && options?.directoryOverride === undefined
+      && options?.selectedProjectId === undefined
+    // Only a user-initiated, unqualified New Session action may restore its
+    // saved project. Explicit targets and the live directory take precedence
+    // when choosing the project and directory below.
+    const shouldRestorePersistedTarget = options?.automatic !== true
+      && options?.target === undefined
+      && options?.directoryOverride === undefined
+      && options?.selectedProjectId === undefined
+      && (!currentDirectory || currentDirProject !== null)
+      && Boolean(persistedProjectById || persistedProjectByDir)
 
     const explicitDirectory = options?.directoryOverride !== undefined
       ? normalizePath(options.directoryOverride)
@@ -1111,7 +1136,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       const hasExplicitProjectTarget = options?.directoryOverride !== undefined
         || (options?.selectedProjectId !== undefined && options.selectedProjectId !== CHAT_DRAFT_PROJECT_ID)
         || isVSCodeRuntime()
-      target = options?.selectedProjectId === CHAT_DRAFT_PROJECT_ID || !hasExplicitProjectTarget
+      target = options?.selectedProjectId === CHAT_DRAFT_PROJECT_ID || (!hasExplicitProjectTarget && !shouldRestorePersistedTarget)
         ? "chat"
         : "project"
     }
@@ -1126,16 +1151,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       return projects[0] ?? null
     })()
 
-    const persistedProjectById = persistedTarget?.projectId
-      ? projects.find((p) => p.id === persistedTarget.projectId) ?? null
-      : null
-    const persistedProjectByDir = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, persistedTarget?.directory ?? null)
-    const currentDirProject = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, currentDirectory)
-
     const selectedProject = target === "chat" ? null : (() => {
       if (explicitProject) return explicitProject
       if (explicitDirectory !== null) return inferredProjectFromDir
       if (currentDirectory) return currentDirProject
+      if (shouldRestorePersistedTarget) return persistedProjectByDir ?? persistedProjectById
       return persistedProjectByDir ?? persistedProjectById ?? fallbackProject
     })()
 
@@ -1143,6 +1163,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (explicitDirectory !== null) return explicitDirectory
       if (explicitProject) return normalizePath(explicitProject.path ?? null)
       if (currentDirectory) return currentDirectory
+      if (shouldRestorePersistedTarget) {
+        return persistedProjectByDir
+          ? persistedTarget?.directory ?? normalizePath(selectedProject?.path ?? null)
+          : normalizePath(selectedProject?.path ?? null)
+      }
       if (persistedTarget?.directory) return persistedTarget.directory
       return normalizePath(selectedProject?.path ?? null)
     })()
@@ -1151,7 +1176,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       warmChatsRootDirectory()
     }
 
-    persistDraftTarget({ projectId: selectedProject?.id ?? null, directory })
+    // An unregistered live path falls back to managed Chat for this draft, but
+    // it is not a user choice that should discard the last known project.
+    if (!(target === "chat" && isImplicitExternalChatFallback)) {
+      persistDraftTarget({ projectId: selectedProject?.id ?? null, directory })
+    }
 
     const nextDraft: NewSessionDraftState = {
       draftId: nextDraftId++,
