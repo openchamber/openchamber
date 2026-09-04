@@ -602,7 +602,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       hasBootstrapResyncedRef.current = true;
       void (async () => {
         await initializeAppearancePreferences();
-        await syncDesktopSettings({ adoptWorkspace: isBootstrapResync });
+        await syncDesktopSettings({ bootstrap: isBootstrapResync });
         if (isBootstrapResync) {
           await applyPersistedDirectoryPreferences();
         }

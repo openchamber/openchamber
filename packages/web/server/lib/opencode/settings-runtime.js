@@ -696,8 +696,8 @@ export const createSettingsRuntime = (deps) => {
       return { settings, changed: false };
     }
 
-    const defaultLight = 'flexoki-light';
-    const defaultDark = 'flexoki-dark';
+    const defaultLight = 'openchamber-light';
+    const defaultDark = 'openchamber-dark';
 
     let nextLightThemeId = hasLight ? settings.lightThemeId : undefined;
     let nextDarkThemeId = hasDark ? settings.darkThemeId : undefined;

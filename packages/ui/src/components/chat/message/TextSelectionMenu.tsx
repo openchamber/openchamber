@@ -20,6 +20,12 @@ import { rangeToMarkdown, trimSelectionValue, wrapMarkdownSelectionForChat } fro
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { registerActiveSelectionToolbar } from '@/lib/addSelectionToChat';
 import { collectSelectionOverlayRects } from '@/lib/selectionOverlayRects';
+import {
+  DESKTOP_MENU_FALLBACK_HEIGHT_PX,
+  DESKTOP_MENU_FALLBACK_WIDTH_PX,
+  getDesktopClampedX,
+  getDesktopClampedY,
+} from './selectionMenuPosition';
 
 interface TextSelectionMenuProps {
   containerRef: React.RefObject<HTMLElement | null>;
@@ -43,8 +49,6 @@ const normalizeDistilledInsight = (insight: string): string => (
   insight.trim().replace(/^[-*+]\s+/, '').slice(0, PROJECT_NOTE_BODY_MAX_LENGTH)
 );
 
-const DESKTOP_MENU_SIDE_MARGIN_PX = 8;
-const DESKTOP_MENU_FALLBACK_WIDTH_PX = 280;
 export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerRef }) => {
   const { t } = useI18n();
   const [position, setPosition] = React.useState<MenuPosition>({ x: 0, y: 0, show: false });
@@ -103,6 +107,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
   const [isAddingToNotes, setIsAddingToNotes] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
   const menuWidthRef = React.useRef(DESKTOP_MENU_FALLBACK_WIDTH_PX);
+  const menuHeightRef = React.useRef(DESKTOP_MENU_FALLBACK_HEIGHT_PX);
   const pendingSelectionRef = React.useRef<SelectionPayload | null>(null);
   const openRafRef = React.useRef<number | null>(null);
   const mouseUpTimeoutRef = React.useRef<number | null>(null);
@@ -196,23 +201,17 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     isMenuVisibleRef.current = false;
   }, []);
 
-  const getDesktopClampedX = React.useCallback((anchorX: number) => {
-    if (typeof window === 'undefined') {
-      return anchorX;
-    }
+  const getClampedX = React.useCallback((anchorX: number) => (
+    typeof window === 'undefined'
+      ? anchorX
+      : getDesktopClampedX(anchorX, window.innerWidth, menuWidthRef.current)
+  ), []);
 
-    const viewportWidth = window.innerWidth;
-    const menuWidth = menuWidthRef.current;
-    const halfWidth = menuWidth / 2;
-    const minX = DESKTOP_MENU_SIDE_MARGIN_PX + halfWidth;
-    const maxX = viewportWidth - DESKTOP_MENU_SIDE_MARGIN_PX - halfWidth;
-
-    if (minX > maxX) {
-      return viewportWidth / 2;
-    }
-
-    return Math.min(Math.max(anchorX, minX), maxX);
-  }, []);
+  const getClampedY = React.useCallback((anchorY: number) => (
+    typeof window === 'undefined'
+      ? anchorY
+      : getDesktopClampedY(anchorY, window.innerHeight, menuHeightRef.current)
+  ), []);
 
   const addMarkdownToChat = React.useCallback((markdownText: string) => {
     const markdownBlock = wrapMarkdownSelectionForChat(markdownText);
@@ -241,8 +240,10 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     // Position menu above the selection
     const menuX = isMobile
       ? rect.left + rect.width / 2
-      : getDesktopClampedX(rect.left + rect.width / 2);
-    const menuY = rect.top - 10;
+      : getClampedX(rect.left + rect.width / 2);
+    const menuY = isMobile
+      ? rect.top - 10
+      : getClampedY(rect.top - 10);
 
     setSelectedText(plainText);
     setSelectedTextMarkdown(markdownText);
@@ -264,7 +265,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
         openRafRef.current = null;
       });
     }
-  }, [addMarkdownToChat, getDesktopClampedX, hideMenu, isMobile, position.show]);
+  }, [addMarkdownToChat, getClampedX, getClampedY, hideMenu, isMobile, position.show]);
 
   React.useLayoutEffect(() => {
     if (!position.show || isMobile || !menuRef.current) {
@@ -272,16 +273,28 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     }
 
     const measuredWidth = menuRef.current.offsetWidth;
-    if (!Number.isFinite(measuredWidth) || measuredWidth <= 0 || measuredWidth === menuWidthRef.current) {
+    const measuredHeight = menuRef.current.offsetHeight;
+    const widthChanged = Number.isFinite(measuredWidth) && measuredWidth > 0 && measuredWidth !== menuWidthRef.current;
+    const heightChanged = Number.isFinite(measuredHeight) && measuredHeight > 0 && measuredHeight !== menuHeightRef.current;
+    if (!widthChanged && !heightChanged) {
       return;
     }
 
-    menuWidthRef.current = measuredWidth;
+    if (widthChanged) {
+      menuWidthRef.current = measuredWidth;
+    }
+    if (heightChanged) {
+      menuHeightRef.current = measuredHeight;
+    }
     setPosition((prev) => ({
       ...prev,
-      x: getDesktopClampedX(prev.x),
+      x: getClampedX(prev.x),
+      y: getClampedY(prev.y),
     }));
-  }, [getDesktopClampedX, isMobile, position.show]);
+    // Entering comment mode and typing into the comment box both grow the
+    // popup, so remeasuring on those keeps the cached height (and the Y clamp
+    // built from it) honest.
+  }, [commentMode, commentText, getClampedX, getClampedY, isMobile, position.show]);
 
   // The desktop popup hangs above its anchor, so a tall comment box near the
   // top of the chat can climb over the app header. On the desktop shell the
@@ -310,7 +323,8 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     const handleViewportResize = () => {
       setPosition((prev) => ({
         ...prev,
-        x: getDesktopClampedX(prev.x),
+        x: getClampedX(prev.x),
+        y: getClampedY(prev.y),
       }));
     };
 
@@ -318,7 +332,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     return () => {
       window.removeEventListener('resize', handleViewportResize);
     };
-  }, [getDesktopClampedX, isMobile, position.show]);
+  }, [getClampedX, getClampedY, isMobile, position.show]);
 
   const handleSelectionChange = React.useCallback(() => {
     // While the comment input is open, clicking or typing in it collapses the

@@ -1140,6 +1140,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
                             onInput={handleViewportInput}
                             onResize={handleViewportResize}
                             theme={xtermTheme}
+                            monoFont={monoFont}
                             fontFamily={resolvedFontStack}
                             fontSize={terminalFontSize}
                             enableTouchScroll={useTouchTerminalInput}

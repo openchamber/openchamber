@@ -5,21 +5,23 @@ import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
-type ProviderId = 'ollama-cloud' | 'cursor';
+type ProviderId = 'exe-dev' | 'ollama-cloud' | 'cursor';
 type Status = { configured: boolean; secretMasked?: string };
+type CredentialPayload = { usageToken?: string; cookie?: string; accessToken?: string; refreshToken?: string };
+const EXE_DEV_TOKEN_COMMAND = `ssh exe.dev "ssh-key generate-api-key --label=openchamber --exp=30d --cmds='billing credits usage'"`;
 
 export const QuotaCredentials: React.FC<{ providerId: ProviderId; providerName: string }> = ({ providerId, providerName }) => {
   const { t } = useI18n();
   const [status, setStatus] = React.useState<Status | null>(null);
-  const [values, setValues] = React.useState<Record<string, string>>({});
+  const [values, setValues] = React.useState<CredentialPayload>({});
   const [busy, setBusy] = React.useState(false);
   const route = `/api/quota/credentials/${providerId}`;
   React.useEffect(() => { void runtimeFetch(route).then(async (response) => {
     if (!response.ok) throw new Error();
-    const next = await response.json() as Status;
+    const next: Status = await response.json();
     setStatus(next); setValues({});
   }).catch(() => setStatus({ configured: false })); }, [route]);
-  const request = async (path: string, method: string, body?: object) => {
+  const request = async (path: string, method: string, body?: CredentialPayload) => {
     setBusy(true);
     try {
       const response = await runtimeFetch(path, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
@@ -31,11 +33,16 @@ export const QuotaCredentials: React.FC<{ providerId: ProviderId; providerName: 
     } catch (error) { toast.error(error instanceof Error && error.message ? error.message : t('settings.providers.page.openCodeGo.saveFailed')); }
     finally { setBusy(false); }
   };
-  const field = (name: string, label: string, placeholder: string) => <label className="block typography-ui-label text-foreground">{label}<Input className="mt-1 h-7 font-mono text-xs" type="password" autoComplete="off" value={values[name] ?? ''} onChange={(event) => setValues((current) => ({ ...current, [name]: event.target.value }))} placeholder={status?.secretMasked ?? placeholder} /></label>;
+  const field = (name: keyof CredentialPayload, label: string, placeholder: string) => <label className="block typography-ui-label text-foreground">{label}<Input className="mt-1 h-7 font-mono text-xs" type="password" autoComplete="off" value={values[name] ?? ''} onChange={(event) => setValues((current) => ({ ...current, [name]: event.target.value }))} placeholder={status?.secretMasked ?? placeholder} /></label>;
   return <div data-settings-item={`usage.${providerId}-credentials`} className="mb-8">
     <div className="mb-1 px-1"><h3 className="typography-ui-header font-medium text-foreground">{providerName}</h3></div>
     <section className="space-y-3 px-2 pb-2 pt-0">
+      {providerId === 'exe-dev' && <div className="space-y-1.5">
+        <p className="typography-meta text-muted-foreground">{t('settings.providers.page.quotaCredentials.exeDevTokenInstructions')}</p>
+        <code className="typography-code block whitespace-pre-wrap break-all rounded bg-muted/50 px-2 py-1.5 text-xs text-foreground">{EXE_DEV_TOKEN_COMMAND}</code>
+      </div>}
       {providerId === 'ollama-cloud' && field('cookie', t('settings.providers.page.openCodeGo.authCookie'), 'session=...')}
+      {providerId === 'exe-dev' && field('usageToken', t('settings.providers.page.quotaCredentials.usageToken'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}
       {providerId === 'cursor' && field('accessToken', t('settings.providers.page.quotaCredentials.accessToken'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}
       {providerId === 'cursor' && field('refreshToken', t('settings.providers.page.quotaCredentials.refreshToken'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}
       <div className="flex flex-wrap gap-2">

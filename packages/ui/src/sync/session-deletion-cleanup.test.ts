@@ -3,7 +3,7 @@ import type { Todo } from '@opencode-ai/sdk/v2/client';
 
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { createChatDraftIdentity, readChatDraft, writeChatDraft } from '@/lib/chatDraftPersistence';
-import { createMessageQueueTarget, useMessageQueueStore } from '@/stores/messageQueueStore';
+import { createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore } from '@/stores/messageQueueStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useTodosPersistStore } from '@/stores/useTodosPersistStore';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
@@ -25,8 +25,14 @@ describe('cleanupPersistedSessionState', () => {
     const runtimeKey = getRuntimeKey();
     const deleted = createMessageQueueTarget('session-1', '/repo-a', runtimeKey)!;
     const retained = createMessageQueueTarget('session-1', '/repo-b', runtimeKey)!;
-    useMessageQueueStore.getState().addToQueue(deleted, { content: 'delete' });
-    useMessageQueueStore.getState().addToQueue(retained, { content: 'retain' });
+    // Outside VS Code the queue is a projection of the server's; seed it the
+    // way a server snapshot would, and expect only the projection to go.
+    useMessageQueueStore.setState({
+      queuedMessages: {
+        [getMessageQueueKey(deleted)]: [{ id: 'q-delete', content: 'delete', text: 'delete', createdAt: 1 }],
+        [getMessageQueueKey(retained)]: [{ id: 'q-retain', content: 'retain', text: 'retain', createdAt: 1 }],
+      },
+    });
     useTodosPersistStore.getState().setSessionTodos('/repo-a', 'session-1', [todo]);
     useTodosPersistStore.getState().setSessionTodos('/repo-b', 'session-1', [todo]);
     const deletedDraft = createChatDraftIdentity(runtimeKey, '/repo-a', 'session-1')!;

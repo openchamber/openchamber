@@ -144,7 +144,16 @@ describe('cli settings accessors', () => {
     await withTempDir(async (dir) => {
       const accessors = makeAccessors(dir);
       fs.writeFileSync(path.join(dir, 'settings.json'), '"just a string"');
-      await expect(accessors.readSettingsStrict()).rejects.toThrow(/non-object payload/);
+      await expect(accessors.readSettingsStrict()).rejects.toThrow(/corrupt or unreadable/);
+    });
+  });
+
+  it('names the settings file in the strict read failure', async () => {
+    await withTempDir(async (dir) => {
+      const accessors = makeAccessors(dir);
+      const filePath = path.join(dir, 'settings.json');
+      fs.writeFileSync(filePath, '{"unfinished": "trunc');
+      await expect(accessors.readSettingsStrict()).rejects.toThrow(filePath);
     });
   });
 

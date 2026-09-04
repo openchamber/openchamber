@@ -5,7 +5,7 @@ import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
-import { parseAgentMentions } from '@/lib/messages/agentMentions';
+import { queuedContextToParts } from '@/components/chat/composer/submit/buildOutgoingMessage';
 import { getDirectoryState } from '@/sync/sync-refs';
 import { useDirectorySync } from '@/sync/sync-context';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -82,14 +82,14 @@ export const buildQueuedAutoSendPayload = (queue: QueuedMessage[]) => {
     return null;
   }
 
-  const agents = useConfigStore.getState().getVisibleAgents();
-  const { sanitizedText, mention } = parseAgentMentions(queued.content, agents);
-
+  // A queued message is delivered as captured: mention already stripped,
+  // file mentions resolved, and the context it was queued with following it.
   return {
     queuedMessageId: queued.id,
-    primaryText: sanitizedText,
+    primaryText: queued.text,
     primaryAttachments: queued.attachments ?? [],
-    agentMentionName: mention?.name,
+    agentMentionName: queued.agentMention,
+    additionalParts: queuedContextToParts(queued.context ?? []),
     sendConfig: queued.sendConfig,
   };
 };
@@ -114,7 +114,7 @@ export const sendQueuedAutoSendPayload = (
     resolved.agent,
     payload.primaryAttachments,
     payload.agentMentionName,
-    undefined,
+    payload.additionalParts.length > 0 ? payload.additionalParts : undefined,
     resolved.variant,
     'normal',
     { target },
@@ -148,11 +148,18 @@ const resolveSessionSendConfig = (sessionId: string) => {
     ?? config.currentModelId
     ?? selection.lastUsedProvider?.modelID;
 
-  const variant =
+  // A recorded `null` is an explicit "Default": it stops the lookup and sends
+  // no effort, instead of falling through to the persisted copy.
+  const savedVariant =
     selectedAgent && providerID && modelID
-      ? (selection.getAgentModelVariantForSession(sessionId, selectedAgent, providerID, modelID)
-        ?? context.getAgentModelVariantForSession(sessionId, selectedAgent, providerID, modelID))
+      ? (() => {
+        const live = selection.getAgentModelVariantForSession(sessionId, selectedAgent, providerID, modelID);
+        return live !== undefined
+          ? live
+          : context.getAgentModelVariantForSession(sessionId, selectedAgent, providerID, modelID);
+      })()
       : undefined;
+  const variant = savedVariant ?? undefined;
 
   return {
     providerID,

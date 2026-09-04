@@ -544,7 +544,8 @@ describe('useConfigStore provider persistence', () => {
 
     useConfigStore.getState().setCurrentVariantOverride('max', 'high');
     expect(useConfigStore.getState().cycleCurrentVariant()).toBe(undefined);
-    expect(useConfigStore.getState().currentVariant).toBe('high');
+    // Default is a choice to send no effort, not a way back to the inherited one.
+    expect(useConfigStore.getState().currentVariant).toBe(undefined);
     expect(useConfigStore.getState().currentVariantSelection).toEqual({ override: null, inherited: 'high' });
   });
 
@@ -562,7 +563,7 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().currentVariantSelection.override).toBe('high');
     expect(useConfigStore.getState().cycleCurrentVariant()).toBe(undefined);
     expect(useConfigStore.getState().currentVariantSelection.override).toBeNull();
-    expect(useConfigStore.getState().currentVariant).toBe('high');
+    expect(useConfigStore.getState().currentVariant).toBe(undefined);
   });
 
   test('an unavailable explicit variant cycles back to Default', () => {
@@ -576,7 +577,7 @@ describe('useConfigStore provider persistence', () => {
     });
 
     expect(useConfigStore.getState().cycleCurrentVariant()).toBe(undefined);
-    expect(useConfigStore.getState().currentVariant).toBe('low');
+    expect(useConfigStore.getState().currentVariant).toBe(undefined);
     expect(useConfigStore.getState().currentVariantSelection.override).toBeNull();
   });
 
@@ -606,6 +607,73 @@ describe('useConfigStore provider persistence', () => {
 
     useConfigStore.getState().setAgent('plan');
     expect(useConfigStore.getState().currentVariant).toBe('medium');
+  });
+
+  test('an explicit Default effort sends no variant instead of the settings default', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', { low: {}, high: {} })],
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.5',
+      currentVariant: 'low',
+      currentVariantSelection: { override: 'low', inherited: 'low' },
+      settingsDefaultVariant: 'low',
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setCurrentVariantOverride(null, 'low');
+
+    expect(useConfigStore.getState().currentVariant).toBe(undefined);
+    expect(useConfigStore.getState().currentVariantSelection).toEqual({ override: null, inherited: 'low' });
+  });
+
+  test('setAgent keeps a session Default effort instead of restoring the settings default', () => {
+    const sessionId = 'ses_agent_default_effort';
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useSelectionStore.getState().saveAgentModelForSession(sessionId, 'plan', 'openai', 'gpt-5.5');
+    useSelectionStore.getState().saveAgentModelVariantForSession(sessionId, 'plan', 'openai', 'gpt-5.5', null);
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', { low: {}, high: {} })],
+      agents: [testAgent('plan')],
+      settingsDefaultVariant: 'low',
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.5',
+      currentVariant: 'low',
+      currentVariantSelection: { override: undefined, inherited: 'low' },
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setAgent('plan');
+
+    const state = useConfigStore.getState();
+    expect(state.currentVariant).toBe(undefined);
+    expect(state.currentVariantSelection).toEqual({ override: null, inherited: 'low' });
+    expect(state.directoryScoped[DIRECTORY]?.currentVariant).toBe(undefined);
+  });
+
+  test('setAgent reports the same effort through currentVariant and the picker selection', () => {
+    const sessionId = 'ses_agent_effort_in_sync';
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useSelectionStore.getState().saveAgentModelForSession(sessionId, 'plan', 'openai', 'gpt-5.5');
+    useSelectionStore.getState().saveAgentModelVariantForSession(sessionId, 'plan', 'openai', 'gpt-5.5', 'high');
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', { low: {}, high: {} })],
+      agents: [testAgent('plan')],
+      settingsDefaultVariant: 'low',
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.5',
+      currentVariant: 'low',
+      currentVariantSelection: { override: 'low', inherited: 'low' },
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setAgent('plan');
+
+    const state = useConfigStore.getState();
+    expect(state.currentVariant).toBe('high');
+    expect(state.currentVariantSelection).toEqual({ override: 'high', inherited: 'low' });
   });
 
   test('setAgent applies settings default variant for a saved session agent model', () => {
@@ -696,6 +764,79 @@ describe('useConfigStore provider persistence', () => {
     const state = useConfigStore.getState();
     expect(state.currentProviderId).toBe('provider');
     expect(state.currentModelId).toBe('model-a');
+  });
+
+  test('[issue-2531] setAgent keeps the manual model when switching to an agent without an override', () => {
+    const sessionId = 'ses_2531_mode_switch';
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('deepseek', 'deepseek-v4-pro'), provider('kimi', 'kimi-k3')],
+      agents: [testAgent('build'), testAgent('plan')],
+      settingsDefaultModel: 'deepseek/deepseek-v4-pro',
+      currentProviderId: 'kimi',
+      currentModelId: 'kimi-k3',
+      currentAgentName: 'build',
+      selectionSource: 'manual',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setAgent('plan');
+
+    const state = useConfigStore.getState();
+    expect(state.currentAgentName).toBe('plan');
+    expect(state.currentProviderId).toBe('kimi');
+    expect(state.currentModelId).toBe('kimi-k3');
+  });
+
+  test('[issue-2690] setAgent persists the kept manual model for the session and agent', () => {
+    const sessionId = 'ses_2690_persist_kept_model';
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('deepseek', 'deepseek-v4-pro'), provider('kimi', 'kimi-k3')],
+      agents: [testAgent('build'), testAgent('plan')],
+      settingsDefaultModel: 'deepseek/deepseek-v4-pro',
+      currentProviderId: 'kimi',
+      currentModelId: 'kimi-k3',
+      currentAgentName: 'build',
+      selectionSource: 'manual',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setAgent('plan');
+
+    // Keeping the pair only in memory loses it on reload; the write is what
+    // makes the choice survive.
+    const selection = useSelectionStore.getState();
+    expect(selection.getSessionModelSelection(sessionId)).toEqual({ providerId: 'kimi', modelId: 'kimi-k3' });
+    expect(selection.getAgentModelForSession(sessionId, 'plan')).toEqual({ providerId: 'kimi', modelId: 'kimi-k3' });
+  });
+
+  test('[issue-2690] setAgent falls back to the settings default when the kept model is gone', () => {
+    const sessionId = 'ses_2690_stale_model';
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('deepseek', 'deepseek-v4-pro')],
+      agents: [testAgent('build'), testAgent('plan')],
+      settingsDefaultModel: 'deepseek/deepseek-v4-pro',
+      // The provider still exists but this model was removed from it.
+      currentProviderId: 'deepseek',
+      currentModelId: 'retired-model',
+      currentAgentName: 'build',
+      selectionSource: 'manual',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setAgent('plan');
+
+    const state = useConfigStore.getState();
+    expect(state.currentProviderId).toBe('deepseek');
+    expect(state.currentModelId).toBe('deepseek-v4-pro');
   });
 
   test('loadAgents does not fetch OpenCode config directly', async () => {

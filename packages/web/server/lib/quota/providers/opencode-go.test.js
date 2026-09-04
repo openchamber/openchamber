@@ -43,7 +43,11 @@ describe('OpenCode Go quota provider', () => {
       return new Response(JSON.stringify({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } }));
     });
     expect(request.url).toBe('https://opencode.ai/zen/go/v1/usage');
-    expect(request.options.headers).toMatchObject({ Accept: 'application/json', Authorization: 'Bearer secret' });
+    expect(request.options.headers).toMatchObject({
+      Accept: 'application/json',
+      Authorization: 'Bearer secret',
+      'x-opencode-session': 'openchamber-usage',
+    });
     expect(request.options.headers.Cookie).toBeUndefined();
     expect(usage['5h'].usedPercent).toBe(25);
   });

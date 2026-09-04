@@ -334,6 +334,29 @@ describe('OpenCode env runtime', () => {
     });
   });
 
+  it('bounds every login-shell probe and falls through when one overruns', () => {
+    setPlatform('darwin');
+    process.env.PATH = createTempDir('openchamber-empty-path-');
+    process.env.SHELL = '/bin/zsh';
+    delete process.env.OPENCODE_BINARY;
+    const shellCalls = [];
+    const { runtime } = createRuntime({}, {
+      homedir: () => createTempDir('openchamber-empty-home-'),
+      spawnSync: (command, args, options) => {
+        shellCalls.push({ command, args, options });
+        // What spawnSync reports when `timeout` fires: no status, an error.
+        return { status: null, signal: 'SIGTERM', error: new Error('spawnSync ETIMEDOUT'), stdout: '', stderr: '' };
+      },
+    });
+
+    expect(runtime.resolveOpencodeCliPath()).toBeNull();
+    expect(shellCalls.length).toBeGreaterThan(0);
+    for (const call of shellCalls) {
+      expect(call.args).toContain('-lic');
+      expect(call.options.timeout).toBe(5_000);
+    }
+  });
+
   it('does not auto-detect the Windows OpenCode desktop app as a CLI', () => {
     setPlatform('win32');
     const localAppData = createTempDir('openchamber-localappdata-');

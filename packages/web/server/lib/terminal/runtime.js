@@ -276,16 +276,39 @@ export function createTerminalRuntime({
 
   const upgradeHandler = (req, socket, head) => {
     if (parseRequestPathname(req.url) !== TERMINAL_WS_PATH) return;
-    void (async () => {
+    const accept = () => {
+      if (!wsServer) { rejectWebSocketUpgrade(socket, 500, 'Terminal WebSocket unavailable'); return; }
       try {
-        if (uiAuthController?.enabled) {
-          if (!await uiAuthController.ensureSessionToken(req, null)) { rejectWebSocketUpgrade(socket, 401, 'UI authentication required'); return; }
-          if (!await isRequestOriginAllowed(req)) { rejectWebSocketUpgrade(socket, 403, 'Invalid origin'); return; }
-        }
-        if (!wsServer) { rejectWebSocketUpgrade(socket, 500, 'Terminal WebSocket unavailable'); return; }
         wsServer.handleUpgrade(req, socket, head, (ws) => wsServer.emit('connection', ws, req));
       } catch { rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); }
-    })();
+    };
+    const checkOrigin = () => {
+      try {
+        const result = isRequestOriginAllowed(req);
+        if (!(result instanceof Promise)) {
+          if (result) accept();
+          else rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
+          return;
+        }
+        void result.then((allowed) => {
+          if (allowed) accept();
+          else rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
+        }).catch(() => rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'));
+      } catch { rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); }
+    };
+    if (!uiAuthController?.enabled) { accept(); return; }
+    try {
+      const result = uiAuthController.ensureSessionToken(req, null);
+      if (!(result instanceof Promise)) {
+        if (result) checkOrigin();
+        else rejectWebSocketUpgrade(socket, 401, 'UI authentication required');
+        return;
+      }
+      void result.then((sessionToken) => {
+        if (sessionToken) checkOrigin();
+        else rejectWebSocketUpgrade(socket, 401, 'UI authentication required');
+      }).catch(() => rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'));
+    } catch { rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); }
   };
   server.on('upgrade', upgradeHandler);
 

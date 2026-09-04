@@ -1,0 +1,53 @@
+---
+title: Entegrasyonlar
+description: GitHub ve Linear’ı OpenChamber’a bağlayın.
+---
+
+# Entegrasyonlar
+
+**Settings → Integrations**, OpenChamber’ın birlikte çalıştığı servislere giriş yaptığınız yerdir. Giriş OpenChamber sunucusunda saklanır; böylece web, masaüstü ve eşleştirilmiş telefon aynı girişi paylaşır.
+
+## GitHub
+
+**GitHub** kartını genişletin ve kısa bir cihaz koduyla giriş yapmak için **Connect GitHub** seçin. Bağlandıktan sonra OpenChamber issue’lardan ve pull request’lerden oturum başlatabilir, onları mesajlara ekleyebilir ve PR açıp güncelleyebilir. GitHub’ın yapabildiği her şey [GitHub Issues & PRs](/tr/github/) sayfasında.
+
+## Linear
+
+### Çalışma alanı bağlayın
+
+1. **Linear** kartını genişletin ve **Connect** seçin.
+2. Açılan tarayıcı sekmesinde erişimi onaylayın. O zamana kadar kart **Waiting for Linear** gösterir.
+
+Başka bir Linear organizasyonunu **Add workspace** ile bağlayın. Aynı anda tek bir çalışma alanı geçerlidir: **Switch to** ile geçiş yapın; **Disconnect** yalnızca geçerli olanı kaldırır. Proje eşlemeniz korunur.
+
+### Issue’lara göz atın
+
+Bir çalışma alanı bağlandığında sağdaki bağlam çubuğunda **Linear** paneli belirir. Geçerli çalışma alanının issue’larını listeler ve şunları yapmanızı sağlar:
+
+- duruma (**Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**), atanan kişiye (**Anyone** ya da **Assigned to me**), takıma ve önceliğe göre filtreleme
+- başlık, tanımlayıcı ya da Linear URL’siyle arama
+- bir issue’yu açıp açıklamasını, yorumlarını, etiketlerini ve önceliğini okuma
+- **Status** değiştirme ya da **Close issue** seçme
+- geçerli **Workspace**’i değiştirme
+
+### Bir issue’dan oturum başlatın
+
+- Linear panelinde bir issue açın ve **Start session** seçin. Issue kaydırılırken düğme alt kısımda kalır.
+- Sohbette listeden seçmek için **New Session From Linear Issue** seçin; yeni bir dal istiyorsanız **Create in worktree** kullanın.
+- **New Worktree** iletişim kutusunda **Start from Linear Issue** seçin.
+
+Oturum, issue’nun takımına eşlenen projede açılır ve issue ilk istem olur. Takımları Linear kartında eşleyin: **Default project** tüm takımları kapsar, **Team projects** takım bazında bunu geçersiz kılar. Eşlenmemiş bir takım için önce eşleme yapmanız istenir. İlk mesaj **Issue Review** magic prompt’undan oluşturulur; bunu **Settings → Magic Prompts → Linear** altında düzenleyebilirsiniz.
+
+### Bir issue’yu mesaja bağlayın
+
+Sohbet yazma alanında **Link Linear Issue** seçin. Issue, bir sonraki mesajınıza bağlam olarak eklenir ve oturumun çalışma durumu paneli ona bir bağlantı tutar.
+
+### Oturum yorumları
+
+Linear kartında **Session comments** açın; bir issue’dan başlatılan oturum başladığında, bittiğinde ya da başarısız olduğunda o issue’ya oturumu açan bir bağlantıyla yorum bırakır. Yorumlar yalnızca bu OpenChamber sunucusunun herkese açık bir adresi olduğunda gönderilir; böylece bağlantı issue’daki herkes için çalışır. Yerel ya da özel bir adreste hiçbir şey gönderilmez.
+
+## İlgili
+
+- [GitHub Issues & PRs](/tr/github/) — GitHub’ın OpenChamber’da yapabildiği her şey
+- [Worktree oturumları](/tr/worktrees/) — issue oturumlarının başlayabileceği yer
+- [Magic Prompts](/tr/magic-prompts/) — bir Linear oturumunun başladığı istemi düzenleyin

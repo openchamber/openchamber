@@ -257,6 +257,7 @@ export const createSessionAssistRuntime = ({
         prompt: `The latest exchange in the conversation:\n\n${transcript}\n\nWrite ${requestedFields} in the SAME language as this sample from the conversation: "${languageSample}"`,
         system: buildAssistSystemPrompt(targets),
         directory,
+        sessionID: sessionId,
         preferredProviderID: typeof lastAssistantInfo.providerID === 'string' ? lastAssistantInfo.providerID : undefined,
         preferredModelID: typeof lastAssistantInfo.modelID === 'string' ? lastAssistantInfo.modelID : undefined,
       });

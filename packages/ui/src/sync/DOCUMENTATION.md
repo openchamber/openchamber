@@ -56,7 +56,7 @@ So:
 | `selection-store.ts` | Model/agent/variant selections | App UI state |
 | `voice-store.ts` | Voice state | App UI state |
 
-Local chat attachments are normalized by `attachment-files.ts` before entering `input-store.ts`. PNG, JPEG, GIF, WebP, and PDF retain their media type; HEIC/HEIF is converted to JPEG; recognized text/code formats and unknown files whose first 4 KB are text are sent as `text/plain`; binary files outside the supported media types are rejected. Jupyter notebooks become readable markdown with non-text outputs omitted. HAR credentials, cookies, and sensitive URL parameters are redacted, while request/response body text is omitted. SVG and Draw.io files are attached as source text, not executable/rendered content. Browser and VS Code pickers expose the same allowlist, while drag-and-drop may still accept an unknown extension after content inspection.
+Local chat attachments are normalized by `attachment-files.ts` before entering `input-store.ts`. PNG, JPEG, GIF, WebP, and PDF retain their media type; HEIC/HEIF is converted to JPEG; recognized text/code formats and unknown files whose first 4 KB are text are sent as `text/plain`; binary files outside the supported media types are rejected. Jupyter notebooks become readable markdown with non-text outputs omitted. HAR credentials, cookies, and sensitive URL parameters are redacted, while request/response body text is omitted. SVG and Draw.io files are attached as source text, not executable/rendered content. Browser and VS Code pickers expose the same allowlist, while drag-and-drop may still accept an unknown extension after content inspection. Large plain-text clipboard pastes can become in-memory `text/plain` attachments named `pasted-context-N.txt` through the composer paste path; they use the same normalization and send pipeline as manually attached `.txt` files.
 
 Office and OpenDocument packages are metadata-validated before asynchronous extraction, with limits of 20 MB compressed input, 5,000 archive entries, 25 MB per entry, 8 MB per XML part, and 100 MB total uncompressed content. Unsafe or non-canonical archive paths reject the whole attachment, and only XML, relationship, and supported image entries are decompressed and retained. Extracted text, including its explicit truncation notice, is bounded to 500,000 characters so compact but dense Office files cannot consume an entire model context window. XLSX dense rows are serialized as quoted TSV under a single source range instead of repeating every cell address; highly sparse rows retain explicit cell coordinates so distant cells do not generate vast empty TSV spans. Confirmed Office/OpenDocument `@file` mentions are loaded through the runtime filesystem route before submit and use this same extraction pipeline instead of being forwarded as `text/plain` `file://` parts that OpenCode rejects as binary. A failed mention load or extraction leaves the composer intact, and a runtime switch discards preparation from the previous runtime. At most 50 signature-validated PNG, JPEG, GIF, or WebP images and 40 MB of image bytes are retained, with a 20 MB per-image limit; unsupported, invalid, omitted, and truncated content remains explicit in the extracted text. Images whose citations fall beyond text truncation are not attached. Extracted document content remains a `text/plain` file attachment with the original document filename, rather than becoming visible user-message text. Supported embedded images become separate image file parts; the extracted text contains `[filename]` citations at the source paragraph, slide object, spreadsheet cell anchor, or OpenDocument text position. Generated image filenames are re-evaluated if the composer changes during asynchronous preparation, avoiding collisions. The store publishes all generated parts atomically only after every data URL is ready.
 
@@ -202,6 +202,22 @@ Rules:
 
 Initial loads use smaller pages on constrained VS Code/mobile surfaces. Prefetch resolves only the initial renderable page; it does not eagerly download older history. The mounted chat timeline requests older pages when its viewport is underfilled or the user scrolls toward history, while mobile uses its explicit load-older action. Timeline caches, pending work, prepend snapshots, and stale checks use runtime + directory + session identity so equal session IDs in different worktrees cannot share lifecycle state. Older pages are fetched through the same loader and merged with optimistic records before publication. The same chronology contract applies in the VS Code webview because it consumes this shared loader and sync store; the extension bridge must transport OpenCode records without introducing its own ID-based ordering.
 
+## Failed-turn diagnostics
+
+A `session.error` event is the only account of a turn OpenCode stopped, and
+it can arrive with no assistant message to attach to. `session-error-log.ts`
+keeps the last 20 of them in memory (`recordSessionError`, fed from the
+event pipeline next to the error notification) and `summarizeOpenCodeError`
+reads the `{ name, data: { message } }` payload. The chat shows the newest
+error for the open session under its last message while that turn is the
+latest one (`SessionErrorNotice`), and also names a user message that an idle
+session has left unanswered for five seconds, since an accepted send that
+produced neither a message nor an error would otherwise look like nothing
+happened. Both buffers — session errors and rejected sends — appear in the
+status report (`buildOpenCodeStatusReport`, Ctrl/Cmd+Shift+L or
+`__opencodeDebug.statusReport()`) together with the managed OpenCode
+process's last error and stderr tail and the expected log file locations.
+
 ## Loading diagnostics
 
 Session loading instrumentation is disabled by default. Set `localStorage.openchamber_session_load_perf` to `"1"`, reproduce the interaction, then inspect `window.__openchamberSessionLoadPerformance.events`.
@@ -219,6 +235,10 @@ Streaming assistant and reasoning text is throttled once before reaching the mar
 The event pipeline delivers each ordered per-directory flush as one reducer batch. Events retain their individual notifications, cleanup, routing, materialization, and debug side effects, while directory mutations accumulate in order and publish one store transaction per touched directory. Global session mutations and live status, ordering, and timing transitions also accumulate in event order and each owner publishes at most once for the flush. Each top-level state slice is cloned lazily at most once in that batch; no-op events do not change references.
 
 Streaming lifecycle derivation has two paths. Directory attach, switch, bootstrap, and reconnect may perform a full reconciliation. Normal store publications reconcile only sessions whose `session_status` or `message` bucket changed; part-only events update the affected streaming message heartbeat directly and must not rescan all busy sessions.
+
+A trailing assistant message that the server stamped `time.completed` is never marked as streaming: the stamp means the whole response (text plus every tool call) finished, so even while the session stays busy for the next step of the turn, the typing indicator and the streaming part-update suspension must not linger on finished content. The message-level streaming state (`streamingMessageIds` / `messageStreamStates`) is therefore a *message* lifecycle, not a turn lifecycle — it is completed by an explicit `time.completed`, by a newer trailing message, or by the session leaving `busy`.
+
+When an assistant `message.updated` event carries `time.completed` and the store still believes the session busy, sync schedules one deferred status check (`maybePollStatusAfterMessageCompletion`, ~750ms). The status is re-read when the timer fires, so a normal turn whose `session.idle` lands inside that window issues no request at all; only a still-busy session spends a directory status poll, sharing the watchdog's one-in-flight-per-directory guard. The invariant is unchanged from the watchdog escalation: the monotonic pass confirms or raises active status and never lowers it, and an authoritative resync runs only when the snapshot disagrees with a store that still believes the session busy. This narrows the stuck-spinner window after a lost `session.idle` from a watchdog interval to one round-trip; the 5s watchdog poll remains the backstop.
 
 Incomplete-session materialization is deduplicated by runtime, directory, and session for the full cooldown window, including after a fast success or failure. A settled-running-tool recovery may supersede a different request in that window so an earlier pre-settlement refresh cannot consume the only terminal recovery signal. Deferred recovery is dropped if its captured runtime is no longer active. If recovery requests a tail refresh while an older load is in flight, one refresh runs after that load instead of losing the newer authority demand. Completion retains the cooldown marker until expiry, and an older completion cannot clear a newer request marker. Recovery starts after the current ordered event batch and rechecks whether local state already contains the requested entity before starting HTTP. An explicit empty part bucket is authoritative fetched-empty state, not a missing snapshot. This prevents repeated orphan/missing-part events from creating message-tail and status request storms while preserving later recovery.
 
@@ -264,11 +284,13 @@ Rules:
 2. If an action targets a session by ID, resolve the **session's own directory**. Do not assume the current directory is correct.
 3. `session-ui-store.ts` should delegate to `session-actions.ts` for these mutations instead of duplicating SDK calls.
 4. Sending after a revert commits the new branch optimistically: remove the reverted tail and marker before inserting the new message, and restore both if the send is rejected.
-5. Composer and queued sends carry their captured runtime, directory, and session through asynchronous preparation. A runtime change cancels the send instead of re-resolving it against the new runtime.
+5. Composer and queued sends carry their captured runtime, directory, and session through asynchronous preparation. A runtime change cancels the send instead of re-resolving it against the new runtime. Outside VS Code the queue itself is server-owned (`packages/web/server/lib/message-queue/`): the UI hands the server the captured send configuration, resolved text, attachments, and attached context at queue time and the server delivers on idle; the composer only sends a queued message itself after taking it back from the server (`takeForSend`). See the `messageQueueStore.ts` section in `stores/DOCUMENTATION.md`.
 6. After session creation, the directory returned by the server is authoritative over the requested draft directory. The server may canonicalize a worktree path, and the first prompt must use the same directory identity as the created session.
 7. Regular new-chat drafts that inherit the persisted current/last directory must not create a session against a confirmed-missing path. Fall back to the active project only when OpenCode reports the directory missing; keep explicit worktree targets, in-flight worktree creation, and unknown/offline probes unchanged, and do not persist the fallback until session creation succeeds. A concurrent draft rewrite to that same active-project fallback must not abort session creation.
 8. A prompt send that fails **after** the request left the client is ambiguous, never a definite failure: the server may already be answering it. Transports tag those errors (`markAmbiguousTransportFailure` in `@/lib/relay/transport-error`; the relay tunnel tags every stream that dies with a request in flight), and `isAmbiguousSendFailure` reads the tag before falling back to status/text heuristics. An ambiguous failure waits for the connection to return, refetches recent messages, and confirms the optimistic message in place instead of rolling it back — rolling it back lets the message queue re-send a prompt the engine is already running, producing two independent AI responses for one user message.
-9. Revert and unrevert cascade through known descendant sessions before mutating the parent. Revert uses the first descendant user message at or after the parent's target timestamp, including equal timestamps because message IDs do not define chronology. A descendant failure is logged and does not block its siblings or the parent. The parent runs last so its shared-directory file snapshot remains authoritative.
+9. `SessionLiveActivity` has three answers and `unknown` is never `idle`. `getSessionLiveActivity` reports `active` when any child store or the global session-status index holds a non-idle status, `idle` only when a child store actually covers the session's directory, and `unknown` otherwise — child stores are evicted for background directories, and the global index keeps only non-idle entries, so absence of a status is not proof of idleness. Callers that gate a destructive action (worktree moves) must refuse on `unknown`.
+10. Revert and unrevert cascade through known descendant sessions before mutating the parent. Revert uses the first descendant user message at or after the parent's target timestamp, including equal timestamps because message IDs do not define chronology. A descendant failure is logged and does not block its siblings or the parent. The parent runs last so its shared-directory file snapshot remains authoritative. A busy descendant is aborted before it is reverted, like the parent, so nothing keeps writing past the revert boundary. Redo clears the revert marker on every descendant, including markers the user set on a subagent independently of the parent undo.
+11. Starting a session from an assistant answer carries the source session ID, rendered directory, and answer text into the action. It must not rediscover that context from the globally active child store or the OpenCode client's fallback directory: the visible session may belong to an existing worktree while the active provider directory points elsewhere. New isolated worktrees resolve their registered parent project from that captured directory, preferring recorded worktree metadata when available. The dialog offers creation only after the project root is confirmed as a Git repository, and the creation boundary repeats that check so stale or bypassed UI state cannot run Git commands against a non-repository directory; failures leave the dialog open and visible.
 
 Examples of global-store updates performed in `session-actions.ts`:
 
@@ -350,6 +372,14 @@ The global sessions store persists and hydrates one bounded, runtime-scoped star
 
 VS Code intentionally has no managed Chats mode. It neither reads nor writes the managed Chats startup cache, regular drafts continue to target the open workspace, and the global session store rejects managed chat sessions from both snapshots and live upserts before any VS Code surface can consume them. Sidebar and switcher filters repeat that exclusion defensively.
 
+### Remembering the last draft target
+
+`session-ui-store.ts` persists the side of the composer's target selector the user last worked on under `oc.chatInput.lastDraftTarget`, so a plain new session reopens there instead of always landing on Chat. The record holds a project id, a directory, and `target`, which is `"chat"`, `"project"`, or `null`.
+
+`null` is what a record written before `target` existed reads as, and it leaves the Chat default in place rather than guessing a side from the directory. A recorded project that no longer exists falls back to Chat the same way. Only a picker choice writes `"chat"` or `"project"`.
+
+A session's own directory is not a target choice. "New session in the current directory" forwards the current session's directory even when that session is a managed chat, and a chat scratch directory names no project, so those overrides resolve to a chat draft. Treating one as an explicit project target is how a plus pressed inside a chat opened a project draft.
+
 When creating a draft in `handleDirectoryEvent`, **only clone the state fields the event will mutate**. Never spread all fields eagerly.
 
 ```typescript
@@ -407,6 +437,74 @@ The global stream can omit a directory for a session-addressed event. Resolve it
 3. If your event fires frequently (more than a few times per second), verify that unrelated components don't re-render — check with the stream perf counters
 
 ## Selector hygiene
+
+### Runtime context versus directory context
+
+`SyncProvider` publishes two contexts. `SyncRuntimeContext` (`useSyncRuntime()`)
+holds the child-store manager, message loader, SDK, runtime key, and a
+subscribable `currentDirectory` source; its value changes only on runtime
+reconfiguration. `SyncContext` (`useSyncSystem()` / `useSync()`) adds the
+current directory string, so every consumer re-renders on each directory
+switch.
+
+A hook that takes an explicit directory, or needs only runtime fields, must
+read `useSyncRuntime()`. `useDirectoryStore(directory)` reads the current
+directory through `runtime.currentDirectory` with `useSyncExternalStore`, so a
+consumer that passes its own directory gets a constant snapshot and is not
+re-rendered by a cross-project switch. This is what keeps sidebar rows
+(permissions, question counts, session lookups) out of the switch commit: a
+row must not pay for the chat changing directory.
+
+### Session switch commit
+
+The sidebar click publishes `currentSessionId`/`currentSessionDirectory`
+synchronously, and the message fetch starts before that publication so the
+request is on the wire while React renders. `ChatContainer` consumes a
+`useDeferredValue` copy of the selection: the first commit paints the cheap
+reactions (active row, URL, tabs) and the timeline for the new session renders
+in a transition behind it. Selection *policy* inside `ChatContainer` (auto-
+opening a draft when nothing is selected) reads the live store value, because
+the deferred one still names the previous session for one commit.
+
+A session whose messages are not in memory at the click keeps the previous
+timeline on screen while they load (up to 400ms), then swaps straight to the
+finished view; the skeleton appears only when loading takes longer. A session
+the user waited for fades in (100ms); one that was ready appears in the same
+frame. The sidebar prefetches the two rows on either side of the open session
+shortly after it settles, so most neighbouring switches are warm.
+
+The column changes as one. The composer and the status chip above it read
+the session the timeline shows (`components/chat/chatColumnSession.ts`), not
+the live selection: read live, they re-shaped a commit ahead of the swap
+(a taller draft, chips, a working chip) and the outgoing timeline, pinned to
+its end, jumped before it was replaced. The reveal effect below runs once per
+gate for the same reason — `revealWaited` flips for the outgoing session at
+the click, and re-running on it hid that timeline before the next one mounted.
+
+The timeline's first paint for a session is atomic. `ChatContainer` owns a
+`TimelineRevealGate` per session key (`components/chat/timelineRevealGate.ts`):
+a markdown renderer whose first paint is provisional (blocks not yet in the
+settled cache, so code is unhighlighted) takes a hold in its layout effect,
+and the timeline root stays at opacity 0 until every hold releases, capped at
+250ms, then fades in once as a whole. A warm switch takes no holds and reveals
+in the same frame. The gate stops accepting holds after the opening commit so
+rows mounting during scroll never hide the timeline. Once the lazy markdown
+module has loaded, `MarkdownRenderer` mounts it synchronously instead of
+through `Suspense`: a suspended boundary shows its fallback for a tick and
+React then throttles later-resolving boundaries by ~300ms, which staggered
+user and assistant text on a cold open.
+
+An opened session is shown already at its end. The scroll hook holds the gate
+until the viewport is pinned; the recap note holds it until the session record
+is in memory, because it cannot decide whether it renders before that and would
+otherwise grow the footer under a pinned viewport. The reveal itself runs on
+the next frame after the last hold releases, with one exact pin against the
+final content height. Afterwards "at the end" is an invariant, not a scroll:
+while the reader sits on the end of a session that is not producing output,
+content growth re-pins with one instant write; output growth belongs to the
+follow logic, which glides only while the session is working.
+
+`bun run profile:switch` measures both moments; see `scripts/perf/DOCUMENTATION.md`.
 
 Select leaf values, not containers:
 

@@ -13,8 +13,11 @@ import { opencodeClient } from "@/lib/opencode/client"
 import { mergeSessionDirectoryMetadata, resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { registerSessionDirectory } from "./sync-refs"
+import { useGlobalSessionStatusStore } from "./global-session-status"
 import { recordSendFailure } from "./send-failure-log"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
+import { draftFromContextPayload, readContextPart, type ContextCarrierPart } from "@/lib/messages/contextParts"
+import { useInlineCommentDraftStore, type InlineCommentDraftTarget } from "@/stores/useInlineCommentDraftStore"
 import { materializeSessionSnapshots } from "./materialization"
 import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
 import { sessionEvents } from "@/lib/sessionEvents"
@@ -30,8 +33,11 @@ import { getBtwOriginalSessionID, getBtwSessionID, isBtwSession, withoutBtwSessi
 import { withLinkedIssue, type LinkedIssue } from "@/lib/linkedIssues"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
+import { requestSessionArchiveBatch } from "./session-archive-batch"
+import { registerBulkArchiveEchoes, releaseBulkArchiveEchoes } from "./bulk-archive-echo"
 import { getRuntimeKey } from "@/lib/runtime-switch"
-import { isAmbiguousTransportFailure } from "@/lib/relay/transport-error"
+import { markAmbiguousTransportFailure } from "@/lib/relay/transport-error"
+import { getErrorStatus, isAmbiguousSendFailure } from "./send-failure-classification"
 import { getStaleRunningToolMessageID } from "./materialization"
 import { normalizePath } from "@/lib/pathNormalization"
 import { mergeMessages } from "./optimistic"
@@ -71,20 +77,29 @@ let _optimisticAdd: ((input: OptimisticAddInput) => void) | null = null
 let _optimisticRemove: ((input: OptimisticRemoveInput) => void) | null = null
 let _optimisticConfirm: ((input: OptimisticConfirmInput) => void) | null = null
 
-function sessionMutationPatch(
+/**
+ * Revision patch for one or more sessions changing in the same store write.
+ *
+ * A batch bumps the revision once, because it is one state change: consumers
+ * compare revisions to decide whether their view of the list is stale, and a
+ * batch leaves them stale exactly once rather than once per session.
+ */
+function sessionsMutationPatch(
   state: ReturnType<DirectoryStoreApi["getState"]>,
-  sessionId: string,
+  sessionIds: Iterable<string>,
   deleted: boolean,
 ) {
   const revision = (state.sessionRevision ?? 0) + 1
   const sessionEventRevision = { ...(state.sessionEventRevision ?? {}) }
   const sessionDeletedRevision = { ...(state.sessionDeletedRevision ?? {}) }
-  if (deleted) {
-    sessionDeletedRevision[sessionId] = revision
-    delete sessionEventRevision[sessionId]
-  } else {
-    sessionEventRevision[sessionId] = revision
-    delete sessionDeletedRevision[sessionId]
+  for (const sessionId of sessionIds) {
+    if (deleted) {
+      sessionDeletedRevision[sessionId] = revision
+      delete sessionEventRevision[sessionId]
+    } else {
+      sessionEventRevision[sessionId] = revision
+      delete sessionDeletedRevision[sessionId]
+    }
   }
   return {
     sessionListSource: "live" as const,
@@ -92,6 +107,14 @@ function sessionMutationPatch(
     sessionEventRevision,
     sessionDeletedRevision,
   }
+}
+
+function sessionMutationPatch(
+  state: ReturnType<DirectoryStoreApi["getState"]>,
+  sessionId: string,
+  deleted: boolean,
+) {
+  return sessionsMutationPatch(state, [sessionId], deleted)
 }
 
 function invalidateSessionLoads(sessionId: string, directories: Iterable<string | null | undefined>): void {
@@ -135,7 +158,11 @@ function assertSdkSuccess<T>(result: SdkResult<T>, operation: string): T | undef
   const status = result.response?.status
   const error = new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`) as Error & { status?: number }
   if (status !== undefined) error.status = status
-  throw error
+  // Wrapping loses the original error's identity: the transport's
+  // "dispatched, outcome unknown" tag, a DOMException abort, a TypeError from
+  // fetch. Re-tag the wrapper so `isAmbiguousSendFailure` still classifies it
+  // as ambiguous instead of reading it as a definite server rejection.
+  throw isAmbiguousSendFailure(result.error) ? markAmbiguousTransportFailure(error) : error
 }
 
 function assertSdkData<T>(result: SdkResult<T>, operation: string): T {
@@ -374,43 +401,6 @@ function connectionLostError(): Error {
   return new Error(`Connection lost${suffix}. Please wait for reconnection.`)
 }
 
-function getErrorStatus(error: unknown): number | null {
-  if (!error || typeof error !== "object") return null
-  const direct = (error as { status?: unknown }).status
-  if (typeof direct === "number") return direct
-  const response = (error as { response?: { status?: unknown } }).response
-  return typeof response?.status === "number" ? response.status : null
-}
-
-function isAmbiguousSendFailure(error: unknown): boolean {
-  // Authoritative first: the transport that lost the request says whether it
-  // had already been dispatched. The text matching below only covers direct
-  // fetch/HTTP failures, whose wording we do not control either — relay tunnel
-  // aborts ("stream aborted by host", "relay keepalive timeout", …) match none
-  // of those patterns and used to be misread as definite failures.
-  if (isAmbiguousTransportFailure(error)) return true
-
-  const status = getErrorStatus(error)
-  if (status === 503 || status === 504 || status === 408) return true
-  if (error instanceof TypeError) return true
-  if (error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError")) return true
-
-  const message = error instanceof Error
-    ? error.message.toLowerCase()
-    : typeof error === "string"
-      ? error.toLowerCase()
-      : ""
-
-  return message.includes("timeout")
-    || message.includes("timed out")
-    || message.includes("failed to fetch")
-    || message.includes("networkerror")
-    || message.includes("network error")
-    || message.includes("gateway timeout")
-    || message.includes("econnreset")
-    || message.includes("socket hang up")
-}
-
 // Wait briefly for the pipeline to re-establish connection before failing a
 // send. Transient reconnects (heartbeat race, WS→SSE fallback, brief network
 // blip) otherwise surface as a hard "Connection lost" toast even though the
@@ -443,13 +433,73 @@ type DescendantSession = {
   directory: string
 }
 
+/** "unknown" means no live source covers this session right now, so no caller
+ *  may treat it as idle on this answer. "idle" requires positive coverage. */
+export type SessionLiveActivity = "unknown" | "idle" | "active"
+
+/**
+ * A session's live status can live in a different child store than the one that
+ * wins the directory dedup, so any store reporting a non-idle status counts.
+ * Read at the moment of use: a descendant can start working after the subtree
+ * snapshot was taken.
+ *
+ * Absence of a non-idle status is not proof of idleness. Child stores are
+ * evicted for background directories, and the global status index keeps only
+ * non-idle entries, so "no report" and "idle" are different answers: report
+ * "idle" only when a child store actually covers the session's directory.
+ */
+export function getSessionLiveActivity(sessionId: string): SessionLiveActivity {
+  const stores = _childStores
+
+  if (stores) {
+    for (const [, store] of stores.children) {
+      const status = store.getState().session_status?.[sessionId]
+      if (status && status.type !== "idle") return "active"
+    }
+  }
+
+  // Cross-directory live index: populated by global events and authoritative
+  // per-directory status snapshots, and it survives child-store eviction.
+  if (useGlobalSessionStatusStore.getState().statusById.has(sessionId)) return "active"
+
+  if (!stores) return "unknown"
+  return isSessionCoveredByChildStore(sessionId, stores) ? "idle" : "unknown"
+}
+
+function isSessionCoveredByChildStore(sessionId: string, stores: ChildStoreManager): boolean {
+  if (findSessionDirectoryInChildStores(sessionId)) return true
+  const directory = useSessionUIStore.getState().getDirectoryForSession(sessionId)
+    ?? resolveKnownSessionDirectory(sessionId)
+  if (!directory) return false
+  return stores.children.has(normalizePath(directory) ?? directory)
+}
+
+function resolveKnownSessionDirectory(sessionId: string): string | null {
+  const globalSession = getGlobalSessionSnapshot(sessionId)
+  return globalSession ? resolveGlobalSessionDirectory(globalSession) : null
+}
+
+export function isSessionBusyNow(sessionId: string): boolean {
+  return getSessionLiveActivity(sessionId) === "active"
+}
+
+async function abortDescendantIfBusy(sessionId: string, directory: string): Promise<void> {
+  if (!isSessionBusyNow(sessionId)) return
+  try {
+    await sdk().session.abort({ sessionID: sessionId, directory })
+  } catch {
+    // ignore abort errors
+  }
+}
+
 function getDescendantSessions(rootId: string): DescendantSession[] {
   const stores = _childStores
   if (!stores) return []
 
   const sessionsById = new Map<string, DescendantSession>()
   for (const [storeDirectory, store] of stores.children) {
-    for (const session of store.getState().session) {
+    const state = store.getState()
+    for (const session of state.session) {
       const directory = session.directory || storeDirectory
       const current = sessionsById.get(session.id)
       if (!current || session.directory) sessionsById.set(session.id, { session, directory })
@@ -483,6 +533,9 @@ async function fetchSessionMessages(sessionId: string, directory?: string | null
 async function cascadeRevertToDescendants(rootId: string, cutoff: number): Promise<void> {
   for (const { session, directory } of getDescendantSessions(rootId)) {
     try {
+      // A running descendant would keep writing messages past the revert
+      // boundary, so stop it first for the same reason the parent is aborted.
+      await abortDescendantIfBusy(session.id, directory)
       const messages = await fetchSessionMessages(session.id, directory)
       // Equal timestamps belong to the reverted side of the boundary. Keeping
       // them would rely on unrelated message IDs to decide chronology.
@@ -500,6 +553,9 @@ async function cascadeUnrevertToDescendants(rootId: string): Promise<void> {
   for (const { session, directory } of getDescendantSessions(rootId)) {
     if (!session.revert) continue
     try {
+      // Same reason as the revert cascade: a running descendant keeps writing
+      // messages that the unrevert would race against.
+      await abortDescendantIfBusy(session.id, directory)
       const result = await sdk().session.unrevert({ sessionID: session.id, directory })
       mirrorSessionIntoLiveStores(assertSdkData(result, "session.unrevert"), directory)
     } catch (error) {
@@ -560,6 +616,32 @@ function restoreFilePartsToInput(fileParts: Array<Record<string, unknown>>): voi
     if (url) {
       useInputStore.getState().addRestoredAttachment({ url, mimeType: mime, filename })
     }
+  }
+}
+
+/**
+ * Put a message's attached context (review comments, quotes, terminal
+ * selections, annotations) back on the composer chips.
+ *
+ * Context rides out as synthetic parts carrying structured metadata, so a
+ * reverted or forked message can be rebuilt into the drafts it came from.
+ * Without this the context is simply gone: the message is pulled back into the
+ * composer with its text and files, but the comments attached to it are not.
+ *
+ * The target's existing drafts are replaced, matching how text and file
+ * attachments are restored — the composer ends up as the message was sent.
+ */
+function restoreContextPartsToInput(
+  parts: readonly ContextCarrierPart[],
+  target: InlineCommentDraftTarget,
+): void {
+  const store = useInlineCommentDraftStore.getState()
+  store.clearDrafts(target)
+  for (const part of parts) {
+    const payload = readContextPart(part)
+    if (!payload) continue
+    const draft = draftFromContextPayload(payload)
+    if (draft) store.addDraft(target, draft)
   }
 }
 
@@ -976,6 +1058,50 @@ function removeSessionFromLiveStores(sessionId: string, preferredDirectory?: str
   return snapshots
 }
 
+/**
+ * Remove a batch of server-confirmed sessions from every live child store.
+ *
+ * Each affected store is written once for the whole batch. Removing the
+ * sessions one at a time notified every subscriber — and therefore re-rendered
+ * the sidebar — once per session, which is what made archiving a worktree's
+ * sessions block the main thread for seconds.
+ */
+function removeSessionsFromLiveStores(sessionIds: Iterable<string>, preferredDirectory?: string): SessionListSnapshot[] {
+  const ids = new Set(sessionIds)
+  if (!_childStores || ids.size === 0) return []
+
+  const snapshots: SessionListSnapshot[] = []
+  const visited = new Set<string>()
+  const candidates: Array<[string, DirectoryStoreApi]> = []
+
+  if (preferredDirectory) {
+    const preferredStore = _childStores.children.get(preferredDirectory)
+    if (preferredStore) {
+      candidates.push([preferredDirectory, preferredStore])
+      visited.add(preferredDirectory)
+    }
+  }
+
+  for (const entry of _childStores.children.entries()) {
+    if (visited.has(entry[0])) continue
+    candidates.push(entry)
+  }
+
+  for (const [directory, store] of candidates) {
+    const current = store.getState()
+    const removed = current.session.filter((session) => ids.has(session.id)).map((session) => session.id)
+    if (removed.length === 0) continue
+
+    snapshots.push({ directory })
+    store.setState({
+      session: current.session.filter((session) => !ids.has(session.id)),
+      ...sessionsMutationPatch(current, removed, true),
+    })
+  }
+
+  return snapshots
+}
+
 function cleanupSessionWorktreeMetadata(sessionId: string): void {
   useSessionUIStore.getState().setWorktreeMetadata(sessionId, null)
 }
@@ -1189,7 +1315,14 @@ export type ArchiveSessionsOptions = {
 }
 
 /**
- * Archive several sessions sequentially, preserving partial results.
+ * Archive several sessions, preserving partial results.
+ *
+ * Sessions that carry no review or btw link are archived by their directory's
+ * server in one request, and the whole answer is reconciled with a single store
+ * write. The remainder — review sessions, btw forks, sessions with an active
+ * btw fork, and any session this client does not hold — keep the per-session
+ * path, because unlinking a partner is UI-owned work that reads and rewrites
+ * another session's metadata.
  *
  * One failed session never blocks or erases the others: it is reported in
  * `failedIds` while the remaining IDs are still attempted. When
@@ -1206,10 +1339,55 @@ export async function archiveSessions(
   const archivedIds: string[] = []
   const failedIds: string[] = []
   const expectedRuntimeKey = options?.expectedRuntimeKey ?? getRuntimeKey()
+  if (ids.length === 0) return { archivedIds, failedIds }
 
-  for (const [index, id] of ids.entries()) {
+  const plan = planArchiveBatches(ids)
+
+  for (const [directory, batchIds] of plan.batchesByDirectory) {
     if (isStaleRuntime(expectedRuntimeKey)) {
-      failedIds.push(...ids.slice(index))
+      failedIds.push(...batchIds)
+      continue
+    }
+
+    const archivedAt = Date.now()
+    registerBulkArchiveEchoes(
+      expectedRuntimeKey,
+      batchIds.map((id) => ({ id, archivedAt })),
+    )
+    const result = await requestSessionArchiveBatch(directory, batchIds, archivedAt)
+    if (isStaleRuntime(expectedRuntimeKey)) {
+      failedIds.push(...batchIds)
+      continue
+    }
+
+    if (result.outcome === "archived") {
+      releaseBulkArchiveEchoes(expectedRuntimeKey, batchIds)
+      registerBulkArchiveEchoes(
+        expectedRuntimeKey,
+        result.archived.flatMap((session) => (
+          session.time?.archived === undefined
+            ? []
+            : [{ id: session.id, archivedAt: session.time.archived }]
+        )),
+      )
+      commitArchivedSessions(result.archived, directory)
+      archivedIds.push(...result.archived.map((session) => session.id))
+      failedIds.push(...result.failedIds)
+      continue
+    }
+
+    // The runtime does not serve the batch route, or its answer could not be
+    // trusted. Archiving each session individually is slower but reaches the
+    // same state, and re-archiving a session the server already archived writes
+    // the same field again.
+    console.warn("[session-actions] archive batch unavailable, archiving one by one", result.reason)
+    releaseBulkArchiveEchoes(expectedRuntimeKey, batchIds)
+    plan.individualIds.push(...batchIds)
+  }
+
+  for (const [index, id] of plan.individualIds.entries()) {
+    if (isStaleRuntime(expectedRuntimeKey)) {
+      failedIds.push(...plan.individualIds.slice(index))
       break
     }
     if (await archiveSession(id, expectedRuntimeKey)) archivedIds.push(id)
@@ -1217,6 +1395,82 @@ export async function archiveSessions(
   }
 
   return { archivedIds, failedIds }
+}
+
+/**
+ * A session whose archive also has to rewrite another session's metadata.
+ *
+ * Review sessions and btw forks point at a parent that must be unlinked, and a
+ * parent with an active btw fork has to delete that fork. Those are
+ * read-modify-write pairs on a second session, so they stay on the per-session
+ * path instead of the server batch.
+ */
+function hasLinkedSessionCleanup(session: Session): boolean {
+  return isReviewSession(session) || isBtwSession(session) || Boolean(getBtwSessionID(session))
+}
+
+/**
+ * Split the requested IDs into per-directory server batches and the sessions
+ * that must be archived individually.
+ *
+ * Link classification reads this client's session records rather than
+ * refetching each session: those records are kept current by the same
+ * `session.updated` events that publish a link created anywhere else, so a
+ * fetch per session would buy no authority the store does not already have.
+ * A session this client does not hold is classified as individual, which
+ * restores the per-session fetch for exactly the cases where the store has
+ * nothing to say.
+ */
+function planArchiveBatches(ids: string[]) {
+  const global = useGlobalSessionsStore.getState()
+  const knownSessions = new Map<string, Session>()
+  for (const session of [...global.activeSessions, ...global.archivedSessions]) {
+    knownSessions.set(session.id, session)
+  }
+  for (const store of _childStores?.children.values() ?? []) {
+    for (const session of store.getState().session) knownSessions.set(session.id, session)
+  }
+
+  const batchesByDirectory = new Map<string, string[]>()
+  const individualIds: string[] = []
+
+  for (const id of ids) {
+    const session = knownSessions.get(id)
+    const directory = session
+      ? resolveGlobalSessionDirectory(session) ?? getSessionDirectory(id)
+      : undefined
+    if (!session || !directory || hasLinkedSessionCleanup(session)) {
+      individualIds.push(id)
+      continue
+    }
+    const batch = batchesByDirectory.get(directory)
+    if (batch) batch.push(id)
+    else batchesByDirectory.set(directory, [id])
+  }
+
+  return { batchesByDirectory, individualIds }
+}
+
+/**
+ * Reconcile a server-confirmed archive batch with one write per store.
+ *
+ * This mirrors what `archiveSession` does for a single session — drop it from
+ * the live directory stores, invalidate its cached messages, move it to the
+ * archived bucket, and clear it if it was open — with the per-session store
+ * notifications collapsed into one.
+ */
+function commitArchivedSessions(sessions: Session[], directory: string): void {
+  if (sessions.length === 0) return
+
+  const ids = sessions.map((session) => session.id)
+  const snapshots = removeSessionsFromLiveStores(ids, directory)
+  const directories = [...snapshots.map((snapshot) => snapshot.directory), directory]
+  for (const id of ids) invalidateSessionLoads(id, directories)
+
+  useGlobalSessionsStore.getState().upsertSessions(sessions)
+
+  const ui = useSessionUIStore.getState()
+  if (ui.currentSessionId && ids.includes(ui.currentSessionId)) ui.setCurrentSession(null)
 }
 
 /**
@@ -1795,6 +2049,14 @@ export async function respondToQuestion(
     if (assertSdkData(result, "question.reply") !== true) {
       throw new Error("Question reply failed")
     }
+    // A successful reply is authoritative: the backend resolved the question,
+    // so clear it from the local store deterministically instead of waiting
+    // for the SSE `question.replied` event. A lost event (SSE gap) would leave
+    // the question pending forever, which keeps the session in "waiting for
+    // answer" — the next task's thinking and final response never render
+    // (issues #2911, #2448). The later SSE event is a no-op (the reducer only
+    // removes when present).
+    removeQuestionRequestFromChildStores(sessionId, requestId)
   } catch (error) {
     if (isQuestionRequestNotFoundError(error)) {
       removeQuestionRequestFromChildStores(sessionId, requestId)
@@ -1820,6 +2082,11 @@ export async function rejectQuestion(
     if (assertSdkData(result, "question.reject") !== true) {
       throw new Error("Question rejection failed")
     }
+    // A successful rejection is authoritative: the backend resolved the
+    // question, so clear it from the local store deterministically (see
+    // respondToQuestion for the lost-SSE-event rationale — issues #2911,
+    // #2448). The later SSE `question.rejected` event is a no-op.
+    removeQuestionRequestFromChildStores(sessionId, requestId)
   } catch (error) {
     if (isQuestionRequestNotFoundError(error)) {
       removeQuestionRequestFromChildStores(sessionId, requestId)
@@ -1851,6 +2118,10 @@ export async function rejectQuestion(
  * abort the session so the OpenCode runner reaches `idle` — otherwise the new
  * prompt arrives while the run is still active and is discarded by the runner's
  * `ensureRunning`.
+ *
+ * A successful reject clears the local store deterministically (see
+ * {@link rejectQuestion}) so a lost `question.rejected` SSE event cannot leave
+ * the session in the pending "waiting for answer" state (issues #2911, #2448).
  */
 export async function dismissOpenQuestionsForSession(sessionId: string): Promise<boolean> {
   if (!sessionId) return false
@@ -1933,6 +2204,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   const targetMsg = messages.find((m) => m.id === messageId)
   let messageText = ""
   let submittedFileParts: Array<Record<string, unknown>> = []
+  let submittedContextParts: readonly ContextCarrierPart[] = []
   if (targetMsg && targetMsg.role === "user") {
     const parts = state.part[messageId] ?? []
     const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
@@ -1944,6 +2216,9 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     // Exclude synthetic file parts (server-generated file content that should
     // not be restored to the composer).
     submittedFileParts = parts.filter((p) => p.type === "file" && !isSyntheticPart(p)) as Array<Record<string, unknown>>
+    // Attached context (review comments, quotes, terminal selections) rides in
+    // synthetic text parts and belongs back on the composer chips.
+    submittedContextParts = parts
   }
 
   // Optimistically set only the revert marker. Keep messages and parts in the
@@ -1971,6 +2246,10 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   const prevInputAttachments = [...useInputStore.getState().attachedFiles]
   const prevInputText = useInputStore.getState().pendingInputText
   const prevInputMode = useInputStore.getState().pendingInputMode
+  const draftTarget: InlineCommentDraftTarget | null = directory
+    ? { directory, sessionKey: sessionId }
+    : null
+  const prevDrafts = draftTarget ? useInlineCommentDraftStore.getState().getDrafts(draftTarget) : []
 
   // Restore reverted message text and file attachments to input
   if (messageText) {
@@ -1984,6 +2263,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   // Clear existing attachments first — previous revert's attachments
   // must not carry over, even when the current message has no files.
   restoreFilePartsToInput(submittedFileParts)
+  if (draftTarget) restoreContextPartsToInput(submittedContextParts, draftTarget)
 
   // Call SDK and merge authoritative result into store
   try {
@@ -2018,6 +2298,10 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
       pendingInputMode: prevInputMode,
       attachedFiles: prevInputAttachments,
     })
+    if (draftTarget) {
+      useInlineCommentDraftStore.getState().clearDrafts(draftTarget)
+      useInlineCommentDraftStore.getState().restoreDrafts(draftTarget, prevDrafts)
+    }
     throw err
   }
 }
@@ -2140,6 +2424,11 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   }
   // Clear existing attachments and restore file parts from the forked message.
   restoreFilePartsToInput(fileParts)
+  // The forked session is a fresh draft target, so the attached context of the
+  // forked message follows the text into its composer.
+  if (directory) {
+    restoreContextPartsToInput(parts, { directory, sessionKey: forkedSession.id })
+  }
 }
 
 export async function fetchMessagesForSession(sessionID: string, directory?: string | null): Promise<void> {

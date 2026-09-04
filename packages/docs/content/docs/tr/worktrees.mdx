@@ -1,0 +1,36 @@
+---
+title: Worktree Oturumları
+description: Bir oturuma ayrı branch ve klasör verin, çalışma izole kalsın.
+---
+
+# Worktree Oturumları
+
+Bir worktree oturumu, repo'nuzun kendi checkout edilmiş kopyasında ve kendi branch'inde çalışır. Buna git worktree denir. Böylece paralel oturumlar birbirinin dosyalarına çarpmaz. Biri refactor yaparken diğeri bir bug'ı düzeltebilir, geçiş yapıp durmadan.
+
+## Oluşturun
+
+1. Oturum kenar çubuğunun üstündeki düğmeden yeni worktree iletişim kutusunu açın.
+2. Bir başlangıç noktası seçin:
+   - **new branch** — branch'e ad verin ve hangi branch'ten başlanacağını seçin
+   - **existing branch** — zaten sahip olduğunuz bir branch'i checkout edin
+3. Worktree klasörünü onaylayın. OpenChamber klasör adını branch isminden önerir.
+4. Oluşturun.
+
+OpenChamber branch'i oluşturur, klasörü hazırlar ve içinde bir oturum başlatır. Bunu bir [todo](/notes-todos-plans/) ya da [GitHub issue veya PR](/github/) üzerinden de başlatabilirsiniz.
+
+## Çalışmayı geri alın
+
+İş hazır olduğunda, Git görünümündeki **Integrate** seçeneğini kullanarak worktree'nin commit'lerini başka bir branch'e, örneğin `main`'e taşıyın. Bir değişiklik çakışırsa, çakışmayı çözmesi için işi agent'a verebilirsiniz.
+
+## Temizleme
+
+Oturumu silmek ya da arşivlemek worktree'yi kaldırabilir. Branch'i de silmek isteyip istemediğinizi siz seçersiniz. Yerelse yerel, varsa uzak depodaki branch de silinir. Siz istemeden hiçbir şey silinmez.
+
+## Bir şey ters görünüyorsa
+
+Klasörü kaybolduysa, branch'i detached durumdaysa ya da bir merge veya rebase yarım kaldıysa worktree'nin bakıma ihtiyacı olabilir. OpenChamber bunları işaretler, böylece düzeltebilirsiniz. Bkz. [Worktrees & Git](/troubleshooting/worktrees-git/).
+
+## İlgili
+
+- [Multi-run](/multi-run/) — birçok worktree oturumunu aynı anda başlatın
+- [Git & GitHub Workflows](/git/) — OpenChamber içinden commit edin ve integrate edin

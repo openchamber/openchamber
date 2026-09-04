@@ -108,6 +108,30 @@ export const getAnchoredTurnMetrics = ({
     };
 };
 
+// The scroll offset that puts the LAST REAL ROW's bottom just above the
+// composer overlay. Distinct from the list's own end offset, which is derived
+// from the total content length: that length includes any reserved anchored
+// end space and, right after rows re-wrap on a width change, row sizes that
+// have not been re-measured yet. Scrolling to it then lands below the real
+// content and leaves a blank tail. `extraInset` reserves additional slack
+// below the content when a caller wants the row to sit clear of the edge.
+export const resolveRealContentEndOffset = ({
+    state,
+    composerOverlayHeight,
+    extraInset = 0,
+}: {
+    readonly state: TimelineListMeasurementState;
+    readonly composerOverlayHeight: number;
+    readonly extraInset?: number;
+}): number | null => {
+    const lastIndex = state.data.length - 1;
+    if (lastIndex < 0) return null;
+    const lastBottom = getRowBottom(state, lastIndex);
+    if (lastBottom === null) return null;
+    const visibleLength = Math.max(0, state.scrollLength - composerOverlayHeight - extraInset);
+    return Math.max(0, lastBottom - visibleLength);
+};
+
 // "At the end" for follow purposes is a tight band, not the list's isNearEnd
 // (half a viewport): that band hid the scroll-to-bottom pill and re-armed
 // follow while the user had genuinely scrolled away, yanking them back on the

@@ -14,7 +14,7 @@ import { formatDirectoryName, formatPathForDisplay } from '@/lib/utils';
 import type { SessionGroup } from '../types';
 import { ProjectHeaderIdentity, SortableGroupItem, SortableProjectItem } from './sortableItems';
 import { SessionGroupSection, type SessionGroupSectionProps } from './SessionGroupSection';
-import { buildGroupRenderDescriptors, selectRenderedProjectSections, type ProjectSection } from './sessionProjectRender';
+import { buildGroupRenderDescriptors, resolveSearchResultPlacement, selectRenderedProjectSections, type ProjectSection } from './sessionProjectRender';
 import { formatProjectLabel } from '../utils';
 import { useI18n } from '@/lib/i18n';
 import type { ProjectSortOrder } from '@/stores/useSessionDisplayStore';
@@ -58,6 +58,7 @@ type SessionProjectScrollerGroupProps = Pick<SessionGroupSectionProps,
   | 'setDeleteSessionConfirm'
   | 'startFolderRename'
   | 'setCopiedSessionId'
+  | 'startSessionWorktreeMenuLoad'
 > & {
   pinnedSessionIds: Set<string>;
   sessionOrderIndex: Map<string, number>;
@@ -74,6 +75,12 @@ type SessionProjectScrollerGroupActions = Pick<SessionGroupSectionProps,
 
 type SessionProjectScrollerModel = {
   topContent?: React.ReactNode;
+  /**
+   * Whether the top content itself holds search results. The managed chats
+   * render only there, so without this the "no project section matched" branch
+   * below would drop a matching chat and claim there is nothing to show.
+   */
+  topContentHasSearchMatches?: boolean;
   hasSharedSessions?: boolean;
   sectionsForRender: ProjectSection[];
   projectSections: ProjectSection[];
@@ -224,7 +231,10 @@ function SessionProjectScrollerComponent(props: Props): React.ReactNode {
   }
 
   if (model.sectionsForRender.length === 0) {
-    return <ScrollableOverlay useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className="space-y-1 pb-1 pl-2.5 pr-2">{model.searchEmptyState}</ScrollableOverlay>;
+    const placement = resolveSearchResultPlacement(model.topContentHasSearchMatches === true);
+    return <ScrollableOverlay useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className="space-y-1 pb-1 pl-2.5 pr-2">
+      {placement === 'top-content' ? model.topContent : model.searchEmptyState}
+    </ScrollableOverlay>;
   }
 
   return (
@@ -247,7 +257,7 @@ function SessionProjectScrollerComponent(props: Props): React.ReactNode {
         hideTopScrollShadow={!enableStickyFade}
         scrollShadowSize={96}
         outerClassName="flex-1 min-h-0"
-        className="oc-sidebar-scroller space-y-1.5 pb-1 pl-2.5 pr-2 [overflow-anchor:none]"
+        className="oc-sidebar-scroller oc-sticky-fade-scroller space-y-1.5 pb-1 pl-2.5 pr-2 [overflow-anchor:none]"
         onScroll={enableStickyFade ? (event) => syncTopFade(event.currentTarget) : undefined}
       >
       {model.topContent}

@@ -1,0 +1,38 @@
+---
+title: GitHub Issues & PRs
+description: GitHub'ı bağlayın ve issue'lar ile pull request'lerden oturum başlatın.
+---
+
+# GitHub Issues & PRs
+
+GitHub hesabınızı bağlayın. OpenChamber issue'ları ve pull request'leri içeri çekebilir, birinden doğrudan oturum başlatabilir ve sizin yerinize PR açıp güncelleyebilir.
+
+## GitHub'ı bağlayın
+
+1. **Settings → Integrations** bölümünü açın ve **GitHub** kartını genişletin.
+2. **Connect GitHub** seçin. OpenChamber bir bağlantı ve kısa bir kod gösterir.
+3. Bağlantıyı açın, kodu girin ve onaylayın.
+
+Bağlantı kurulunca hesabınız kartta görünür. Birden fazla hesap bağlayabilir, aralarında geçiş yapabilir ya da istediğiniz zaman bağlantıyı kesebilirsiniz. Aynı makinede `gh` CLI ile giriş yapılmışsa OpenChamber onu yedek olarak kullanabilir.
+
+## Bir issue veya PR'den işe başlayın
+
+GitHub bağlıyken bir [worktree session](/worktrees/) oluşturduğunuzda, **Start from GitHub issue/PR** seçebilirsiniz:
+
+- bir **issue** seçin. OpenChamber branch'i onun adına göre adlandırır ve oturumu, issue ve yorumları ilk mesaj olarak açar
+- bir **pull request** seçin. PR'nin branch'ini checkout eder. İsterseniz PR'nin diff'ini de ekleyebilirsiniz, böylece agent değişikliğin tamamını görür
+
+Bu sizi, bağlam zaten yüklenmiş halde doğrudan bir oturuma sokar.
+
+## Pull request açma ve yönetme
+
+[git view](/git/) içindeki **PR** sekmesinden pull request oluşturabilir, güncelleyebilir, taslağı hazır diye işaretleyebilir ya da merge edebilirsiniz. OpenChamber PR başlığını ve açıklamasını değişikliklerinizden oluşturabilir.
+
+## Bir issue ya da PR'ı mesaja bağlayın
+
+Sohbet yazma alanında **Link GitHub Issue** ya da **Link GitHub PR** seçin. Issue ya da diff'iyle birlikte PR, bir sonraki mesajınıza bağlam olarak eklenir ve oturumun çalışma durumu paneli ona bir bağlantı tutar. Aynı seçiciden, issue'yu ilk istem olarak kullanan yeni bir oturum da başlatabilirsiniz.
+
+## İlgili
+
+- [Git & GitHub Workflows](/git/) — branch'leri commit edin ve yönetin
+- [Worktree Sessions](/worktrees/) — issue ve PR oturumlarının başladığı yer

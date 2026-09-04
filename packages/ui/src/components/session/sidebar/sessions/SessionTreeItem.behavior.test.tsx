@@ -3,6 +3,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionNodeItemProps } from './SessionNodeItem';
+import type { SessionTreeItemProps } from './SessionTreeItem';
 import { installHookTestDom } from '../test-utils/testDom';
 import { I18nProvider } from '@/lib/i18n';
 
@@ -38,6 +39,11 @@ mock.module('./hooks/useSessionActions', () => ({
 }));
 
 const { SessionTreeItem } = await import('./SessionTreeItem');
+
+const noopStartSessionWorktreeMenuLoad: SessionTreeItemProps['startSessionWorktreeMenuLoad'] = () => ({
+  cachedTargets: [],
+  refreshTargets: Promise.resolve([]),
+});
 
 const session = (id: string): Session => ({
   id,
@@ -91,6 +97,7 @@ describe('SessionTreeItem public behavior', () => {
         setDeleteSessionConfirm={noop}
         startFolderRename={noop}
         setCopiedSessionId={setCopiedSessionId}
+        startSessionWorktreeMenuLoad={noopStartSessionWorktreeMenuLoad}
         mobileVariant={false}
         alwaysShowActions={false}
         {...context}

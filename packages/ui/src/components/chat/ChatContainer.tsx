@@ -4,6 +4,7 @@ import type { PermissionRequest } from '@/types/permission';
 import type { QuestionRequest } from '@/types/question';
 
 import { ChatInput } from './ChatInput';
+import { ChatColumnSessionContext, type ChatColumnSession } from './chatColumnSession';
 import { DraftPresetChips } from './DraftPresetChips';
 import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
@@ -11,11 +12,24 @@ import { Skeleton } from '@/components/ui/skeleton';
 import ChatEmptyState from './ChatEmptyState';
 import { useGlobalSyncStore } from '@/sync/global-sync-store';
 import MessageList, { type MessageListHandle } from './MessageList';
+import { createTimelineRevealGate, TIMELINE_REVEAL_CAP_MS, TimelineRevealGateContext, type TimelineRevealGate } from './timelineRevealGate';
+
+// How long the previous timeline stays on screen while a session that is not
+// in memory loads, before the skeleton takes over.
+const SESSION_SWITCH_HOLD_MS = 400;
+// End inset reserved for the status row that floats over the timeline's
+// bottom edge (its tallest resting height plus the mb-2 gap).
+const STATUS_OVERLAY_RESERVED_HEIGHT = 40;
+// A freshly opened timeline is shown once its content height has held still
+// for this many consecutive frames, or after the cap.
+const TIMELINE_SETTLE_STABLE_FRAMES = 2;
+const TIMELINE_SETTLE_CAP_MS = 300;
 import { PermissionCard } from './PermissionCard';
 import { QuestionCard } from './QuestionCard';
 import { hasActiveQuestionToolInCurrentTurn, recoverPendingQuestionWithRetry } from '@/sync/question-recovery';
 import { StatusRowContainer } from './StatusRowContainer';
 import { SessionRecapNote } from '@/components/chat/SessionRecapSpacer';
+import { SessionErrorNotice } from '@/components/chat/SessionErrorNotice';
 import ScrollToBottomButton from './components/ScrollToBottomButton';
 import { PromptNavigatorRail } from './components/PromptNavigatorRail';
 import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
@@ -56,6 +70,7 @@ import { WorkStatusPanel } from './work-status/WorkStatusPanel';
 import { useWorkStatusVisibility } from './work-status/useWorkStatusVisibility';
 import { getEmbeddedSessionChatOriginSessionId } from '@/components/layout/contextPanelEmbeddedChat';
 import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
+import { hasContextParts } from '@/lib/messages/contextParts';
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
 import { findShellCommandForMessage, isUserShellMarkerMessage } from './lib/shellBridge';
 import { resolveChatPromptReadOnly } from './chatPromptReadOnly';
@@ -174,9 +189,9 @@ type ChatViewportProps = {
     } | null;
     scrollToBottom: () => void;
     endPinningReleased: boolean;
-    // One-shot fade for content that replaced the hydration skeleton;
-    // cached sessions render instantly without it.
-    revealContent: boolean;
+    /** The user waited for this session (held or fetched); reveal it with a fade. */
+    revealWaited: boolean;
+    revealGate: TimelineRevealGate;
     sessionQuestions: QuestionRequest[];
     sessionPermissions: PermissionRequest[];
     isProgrammaticFollowActive: boolean;
@@ -213,7 +228,8 @@ const ChatViewport = React.memo(({
     retryOverlay,
     scrollToBottom,
     endPinningReleased,
-    revealContent,
+    revealWaited,
+    revealGate,
     sessionQuestions,
     sessionPermissions,
     isProgrammaticFollowActive,
@@ -262,7 +278,10 @@ const ChatViewport = React.memo(({
             // Other fully synthetic user messages (loop continuations,
             // plan-mode injections) are not prompts the user typed — keep
             // them out of the navigator entirely.
-            if (isFullySyntheticMessage(message.parts)) {
+            // Attached context (a quoted message, a terminal selection) is
+            // synthetic transport-wise but is a turn the user sent, so a
+            // context-only message stays navigable.
+            if (isFullySyntheticMessage(message.parts) && !hasContextParts(message.parts)) {
                 continue;
             }
             let displayParts = normalizedPromptPartsCache.current.get(message.parts);
@@ -358,11 +377,90 @@ const ChatViewport = React.memo(({
                 </div>
             )}
 
+            <SessionErrorNotice sessionId={currentSessionId} directory={directory} />
             <SessionRecapNote sessionId={currentSessionId} directory={directory} isMobile={isMobile} />
 
             <div className="flex-shrink-0" style={{ height: isMobile ? '40px' : '10vh' }} aria-hidden="true" />
         </>
     ), [currentSessionId, directory, isMobile, sessionPermissions, sessionQuestions]);
+
+    // Opening a session paints the timeline as one finished picture: the root
+    // stays invisible while any renderer holds a provisional first paint, then
+    // everything appears together. A session the user waited for fades in
+    // once as a whole; one that was ready at the click shows in the same
+    // frame.
+    const timelineRootRef = React.useRef<HTMLDivElement | null>(null);
+    const endPinningReleasedRef = React.useRef(endPinningReleased);
+    endPinningReleasedRef.current = endPinningReleased;
+    // Read through a ref: the effect runs once per gate (per opened session).
+    // `revealWaited` flips for the session still on screen the moment another
+    // one is selected — before the deferred swap mounts it — and re-running
+    // the effect then would hide the outgoing timeline for the frames until
+    // the new one arrives.
+    const revealWaitedRef = React.useRef(revealWaited);
+    revealWaitedRef.current = revealWaited;
+    React.useLayoutEffect(() => {
+        const root = timelineRootRef.current;
+        if (!root) return;
+        root.setAttribute('data-timeline-reveal', 'pending');
+        let finished = false;
+        let timer: number | null = null;
+        let frame: number | null = null;
+        // Revealed once the geometry has settled: after the last hold the
+        // list still lays rows out from its own measurements over a few
+        // frames, so the timeline stays hidden — pinned to the end on every
+        // frame — until the content height has held still for two frames,
+        // then shows already sitting on the end. The settle is bounded so a
+        // list that keeps growing (images, late tool output) still appears.
+        const reveal = (fade: boolean) => {
+            if (finished) return;
+            finished = true;
+            if (timer !== null) window.clearTimeout(timer);
+            const startedAt = performance.now();
+            let lastHeight = -1;
+            let stableFrames = 0;
+            const settle = () => {
+                frame = null;
+                const node = scrollRef.current;
+                let height = -1;
+                if (node) {
+                    height = node.scrollHeight;
+                    if (!endPinningReleasedRef.current) {
+                        const end = height - node.clientHeight;
+                        if (end - node.scrollTop > 1) node.scrollTop = end;
+                    }
+                }
+                stableFrames = height === lastHeight ? stableFrames + 1 : 0;
+                lastHeight = height;
+                if (stableFrames < TIMELINE_SETTLE_STABLE_FRAMES && performance.now() - startedAt < TIMELINE_SETTLE_CAP_MS) {
+                    frame = window.requestAnimationFrame(settle);
+                    return;
+                }
+                if (fade) root.setAttribute('data-timeline-reveal', 'fading');
+                else root.removeAttribute('data-timeline-reveal');
+            };
+            frame = window.requestAnimationFrame(settle);
+        };
+        // Holds are taken in layout effects, including those of rows the list
+        // mounts in a nested synchronous pass; a microtask runs after all of
+        // them and still before the browser paints this commit.
+        queueMicrotask(() => {
+            if (finished) return;
+            revealGate.close();
+            if (revealGate.holds === 0) {
+                reveal(revealWaitedRef.current);
+                return;
+            }
+            revealGate.onEmpty = () => reveal(true);
+            timer = window.setTimeout(() => reveal(true), TIMELINE_REVEAL_CAP_MS);
+        });
+        return () => {
+            finished = true;
+            if (timer !== null) window.clearTimeout(timer);
+            if (frame !== null) window.cancelAnimationFrame(frame);
+            revealGate.onEmpty = null;
+        };
+    }, [revealGate, scrollRef]);
 
     const scrollContainerProps = React.useMemo(() => ({
         className: 'absolute inset-0 overflow-y-auto overflow-x-hidden z-0 chat-scroll overlay-scrollbar-target',
@@ -381,11 +479,12 @@ const ChatViewport = React.memo(({
                 isDesktopExpandedInput
                     ? 'absolute inset-0 opacity-0 pointer-events-none'
                     : 'flex-1',
-                revealContent && !isDesktopExpandedInput && 'oc-chat-hydration-reveal',
             )}
+            ref={timelineRootRef}
             aria-hidden={isDesktopExpandedInput}
         >
             <div className="absolute inset-0">
+              <TimelineRevealGateContext.Provider value={revealGate}>
                 <MessageList
                     key={currentSessionKey}
                     ref={messageListRef}
@@ -413,6 +512,7 @@ const ChatViewport = React.memo(({
                     listFooter={listFooter}
                     scrollContainerProps={scrollContainerProps}
                 />
+              </TimelineRevealGateContext.Provider>
                 <OverlayScrollbar containerRef={scrollRef} disableHorizontal suppressVisibility={isProgrammaticFollowActive} userIntentOnly observeMutations={false} />
                 {showPromptNavigator && promptTurnIds.length >= 2 ? (
                     <PromptNavigatorRail
@@ -444,7 +544,8 @@ const ChatViewport = React.memo(({
         && prev.retryOverlay === next.retryOverlay
         && prev.scrollToBottom === next.scrollToBottom
         && prev.endPinningReleased === next.endPinningReleased
-        && prev.revealContent === next.revealContent
+        && prev.revealWaited === next.revealWaited
+        && prev.revealGate === next.revealGate
         && prev.sessionQuestions === next.sessionQuestions
         && prev.sessionPermissions === next.sessionPermissions
         && prev.isProgrammaticFollowActive === next.isProgrammaticFollowActive
@@ -584,10 +685,54 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 }) => {
     const messagesEnabled = messagesEnabledProp ?? active;
     const { t } = useI18n();
-    // Session UI state
-    const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
-    const currentSessionDirectory = useSessionUIStore((s) => s.currentSessionDirectory);
+    // Session UI state. The selection is published synchronously by the
+    // sidebar click, but the chat swaps its content on a deferred copy: the
+    // first commit paints the cheap reactions (active row, URL, tab) while the
+    // timeline for the new session renders in an interruptible transition
+    // behind it. Both fields travel as one value so the key, the message
+    // subscription, and the loader target never mix an old directory with a
+    // new session id.
+    const liveSessionId = useSessionUIStore((s) => s.currentSessionId);
+    const liveSessionDirectory = useSessionUIStore((s) => s.currentSessionDirectory);
     const materializedDraftSessionId = useSessionUIStore((s) => s.materializedDraftSessionId);
+    const liveSelection = React.useMemo(
+        () => ({ sessionId: liveSessionId, directory: liveSessionDirectory }),
+        [liveSessionId, liveSessionDirectory],
+    );
+    // A session whose messages are not in memory yet keeps the previous
+    // timeline on screen while they load, instead of flashing a skeleton
+    // between two conversations. The hold ends when the session becomes
+    // renderable or after SESSION_SWITCH_HOLD_MS, whichever comes first, and
+    // never applies when nothing was shown before or when the session was just
+    // created from a draft.
+    const liveSessionRenderable = useSessionRenderable(liveSessionId ?? '', liveSessionDirectory ?? undefined);
+    const shownSelectionRef = React.useRef(liveSelection);
+    const [expiredHoldSessionId, setExpiredHoldSessionId] = React.useState<string | null>(null);
+    const holdPreviousTimeline = Boolean(liveSessionId)
+        && !liveSessionRenderable
+        && liveSessionId !== materializedDraftSessionId
+        && shownSelectionRef.current.sessionId !== null
+        && shownSelectionRef.current.sessionId !== liveSessionId
+        && expiredHoldSessionId !== liveSessionId;
+    React.useEffect(() => {
+        if (!holdPreviousTimeline || !liveSessionId) return;
+        const timer = window.setTimeout(() => setExpiredHoldSessionId(liveSessionId), SESSION_SWITCH_HOLD_MS);
+        return () => window.clearTimeout(timer);
+    }, [holdPreviousTimeline, liveSessionId]);
+    // A session the user waited for (not in memory at the click) fades in; one
+    // that was ready appears in the same frame. Decided once per selection so
+    // a later, warm visit to the same session is instant again.
+    const lastLiveSessionIdRef = React.useRef<string | null | undefined>(undefined);
+    const waitedSessionIdRef = React.useRef<string | null>(null);
+    if (liveSessionId !== lastLiveSessionIdRef.current) {
+        lastLiveSessionIdRef.current = liveSessionId;
+        waitedSessionIdRef.current = liveSessionId && !liveSessionRenderable ? liveSessionId : null;
+    }
+    const targetSelection = holdPreviousTimeline ? shownSelectionRef.current : liveSelection;
+    const { sessionId: currentSessionId, directory: currentSessionDirectory } = React.useDeferredValue(targetSelection);
+    shownSelectionRef.current = { sessionId: currentSessionId, directory: currentSessionDirectory };
+    const revealWaited = Boolean(currentSessionId) && currentSessionId === waitedSessionIdRef.current;
+
     const clearMaterializedDraftSession = useSessionUIStore((s) => s.clearMaterializedDraftSession);
     const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
     const setCurrentSession = useSessionUIStore((s) => s.setCurrentSession);
@@ -600,6 +745,18 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const currentSessionKey = currentSessionId
         ? JSON.stringify([getRuntimeKey(), effectiveSessionDirectory, currentSessionId])
         : null;
+    // One gate per opened session; the scroll hook holds it until the
+    // viewport is pinned to the end so the first visible frame is already
+    // at the bottom.
+    const revealGateRef = React.useRef<{ key: string | null; gate: TimelineRevealGate } | null>(null);
+    if (revealGateRef.current?.key !== currentSessionKey) {
+        revealGateRef.current = { key: currentSessionKey, gate: createTimelineRevealGate() };
+    }
+    const revealGate = revealGateRef.current.gate;
+    const chatColumnSession = React.useMemo<ChatColumnSession>(
+        () => ({ sessionId: currentSessionId ?? null, directory: currentSessionId ? effectiveSessionDirectory ?? null : null }),
+        [currentSessionId, effectiveSessionDirectory],
+    );
     const ensureSessionRenderable = React.useCallback(
         (sessionId: string) => sync.ensureSessionRenderable(sessionId, false, effectiveSessionDirectory),
         [effectiveSessionDirectory, sync],
@@ -820,9 +977,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         return () => setWorkStatusPanelVisible(false);
     }, [setWorkStatusPanelVisible, showWorkStatusPanel]);
     const messageListRef = React.useRef<MessageListHandle | null>(null);
-    // Session keys that showed the hydration skeleton this app run; their
-    // content gets a one-shot reveal fade once it replaces the skeleton.
-    const hydrationRevealKeyRef = React.useRef<string | null>(null);
 
     const currentSession = useSession(currentSessionId, effectiveSessionDirectory);
     const parentSession = useParentSession(currentSessionId, effectiveSessionDirectory);
@@ -903,13 +1057,17 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         };
     }, []);
 
+    // Selection policy reads the live selection, not the deferred one: right
+    // after a click the deferred id still names the previous session (or
+    // nothing) for one commit, and acting on that would open a draft over the
+    // session the user just chose.
     React.useEffect(() => {
-        if (autoOpenDraft && !currentSessionId && !draftOpen) {
+        if (autoOpenDraft && !liveSessionId && !draftOpen) {
             // Programmatic fallback, not user navigation — must not clear the
             // persisted last-session pointer the cold-launch restore reads.
             openNewSessionDraft({ automatic: true });
         }
-    }, [autoOpenDraft, currentSessionId, draftOpen, openNewSessionDraft]);
+    }, [autoOpenDraft, liveSessionId, draftOpen, openNewSessionDraft]);
 
     const activeTurnChangeRef = React.useRef<(turnId: string | null) => void>(() => {});
     const handleActiveTurnChange = React.useCallback((turnId: string | null) => {
@@ -920,7 +1078,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // OVER the timeline's bottom edge; its measured height keeps the live
     // streaming line above it and reserves matching end inset in the list.
     const [statusOverlayHeight, setStatusOverlayHeight] = React.useState(0);
-    const composerOverlayHeight = statusOverlayHeight;
+    // The reserve is fixed so the timeline's end does not move when the row
+    // appears a commit after the session opened: a viewport pinned to the end
+    // would otherwise be left sitting the row's height above it. Measurement
+    // only extends the reserve for a taller row.
+    const composerOverlayHeight = Math.max(STATUS_OVERLAY_RESERVED_HEIGHT, statusOverlayHeight);
     const statusOverlayObserverRef = React.useRef<ResizeObserver | null>(null);
     const onStatusOverlayNode = React.useCallback((node: HTMLDivElement | null) => {
         statusOverlayObserverRef.current?.disconnect();
@@ -977,6 +1139,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         sessionMessageCount,
         composerOverlayHeight,
         lastUserMessageId,
+        sessionIsWorking,
+        revealGate,
         onActiveTurnChange: handleActiveTurnChange,
     });
 
@@ -1159,15 +1323,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const isSessionHydrating =
         Boolean(currentSessionId)
         && !hasRenderableSessionSnapshot;
-    React.useEffect(() => {
-        if (isSessionHydrating || hydrationRevealKeyRef.current === null) return;
-        // One-shot: forget the key after the reveal animation has played so a
-        // later (now cached) visit to the same session opens instantly.
-        const timer = setTimeout(() => {
-            hydrationRevealKeyRef.current = null;
-        }, 400);
-        return () => clearTimeout(timer);
-    }, [isSessionHydrating, currentSessionKey]);
     const retrySessionLoad = React.useCallback(() => {
         if (!messagesEnabled || !currentSessionId) return;
         void sync.ensureSessionRenderable(currentSessionId, true, effectiveSessionDirectory);
@@ -1307,9 +1462,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 
         const showHydrationSkeleton = isSessionHydrating && sessionMessages.length === 0 && !sessionIsWorking;
         if (showHydrationSkeleton) {
-            hydrationRevealKeyRef.current = currentSessionKey ?? currentSessionId ?? null;
-        }
-        if (showHydrationSkeleton) {
             if (sessionMessageLoadState.status === 'error') {
                 return (
                     <div className="flex min-h-0 flex-1 items-center justify-center px-6">
@@ -1411,7 +1563,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 retryOverlay={retryOverlay}
                 scrollToBottom={resumeToLatestInstant}
                 endPinningReleased={userOwnsScroll}
-                revealContent={hydrationRevealKeyRef.current !== null && hydrationRevealKeyRef.current === (currentSessionKey ?? currentSessionId ?? null)}
+                revealWaited={revealWaited}
+                revealGate={revealGate}
                 sessionQuestions={sessionQuestions}
                 sessionPermissions={sessionPermissions}
                 isProgrammaticFollowActive={isFollowingProgrammatically}
@@ -1430,6 +1583,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 
 	return (
 		<div ref={workStatusRowRef} className="flex h-full min-h-0 bg-background">
+		<ChatColumnSessionContext.Provider value={chatColumnSession}>
 		<div data-composer-bound className="relative flex min-w-0 flex-1 flex-col h-full bg-background">
 			{returnToParentButton}
 			{sessionSurface}
@@ -1514,6 +1668,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 onLoadEarlier={handleLoadOlderClick}
             />
         </div>
+        </ChatColumnSessionContext.Provider>
         {/* Kept mounted while it could ever show, so it can animate its own
             collapse; `visible` drives that. Unmounting on the spot is what made
             the chat jump wide before easing narrow again. */}

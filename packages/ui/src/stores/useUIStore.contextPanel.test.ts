@@ -319,6 +319,75 @@ describe('useUIStore closeContextPanelTab surface stability', () => {
   });
 });
 
+describe('useUIStore closeContextPanelTabs bulk', () => {
+  const directory = '/repo';
+
+  test('closing every tab of the only surface closes the panel', () => {
+    useUIStore.getState().openContextBrowser(directory, 'https://a.test');
+    useUIStore.getState().openContextBrowser(directory, 'https://b.test');
+    useUIStore.getState().openContextBrowser(directory, 'https://c.test');
+
+    const state0 = useUIStore.getState().contextPanelByDirectory[directory];
+    const ids = state0?.tabs.map((tab) => tab.id) ?? [];
+    useUIStore.getState().closeContextPanelTabs(directory, ids);
+
+    const state = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(state?.tabs).toHaveLength(0);
+    expect(state?.isOpen).toBe(false);
+  });
+
+  test('closing all tabs of the active surface closes the panel but keeps other surfaces in state', () => {
+    useUIStore.getState().openContextPanelTab(directory, { mode: 'terminal' });
+    useUIStore.getState().openContextFile(directory, '/repo/a.ts');
+    useUIStore.getState().openContextFile(directory, '/repo/b.ts');
+
+    const state0 = useUIStore.getState().contextPanelByDirectory[directory];
+    const fileIds = state0?.tabs.filter((tab) => tab.mode === 'file').map((tab) => tab.id) ?? [];
+    useUIStore.getState().closeContextPanelTabs(directory, fileIds);
+
+    const state = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(state?.tabs.map((tab) => tab.mode)).toEqual(['terminal']);
+    expect(state?.activeTabId).toBe('terminal');
+    // Matches the single-close rule: emptying the active surface closes the panel.
+    expect(state?.isOpen).toBe(false);
+  });
+
+  test('closing only inactive-mode tabs leaves the active tab and panel intact', () => {
+    useUIStore.getState().openContextFile(directory, '/repo/a.ts');
+    useUIStore.getState().openContextPanelTab(directory, { mode: 'terminal' });
+
+    const state0 = useUIStore.getState().contextPanelByDirectory[directory];
+    const fileTab = state0?.tabs.find((tab) => tab.mode === 'file');
+    useUIStore.getState().closeContextPanelTabs(directory, [fileTab?.id as string]);
+
+    const state = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(state?.activeTabId).toBe('terminal');
+    expect(state?.isOpen).toBe(true);
+  });
+
+  test('closing a subset of the active surface including the active tab keeps a remaining same-mode tab', () => {
+    useUIStore.getState().openContextPanelTab(directory, { mode: 'terminal' });
+    useUIStore.getState().openContextFile(directory, '/repo/a.ts');
+    useUIStore.getState().openContextFile(directory, '/repo/b.ts');
+    useUIStore.getState().openContextFile(directory, '/repo/c.ts');
+
+    const state0 = useUIStore.getState().contextPanelByDirectory[directory];
+    const fileTabs = state0?.tabs.filter((tab) => tab.mode === 'file') ?? [];
+    const keptFile = fileTabs.find((tab) => tab.targetPath === '/repo/a.ts');
+    const closedIds = fileTabs.filter((tab) => tab.id !== keptFile?.id).map((tab) => tab.id);
+    expect(state0?.tabs.find((tab) => tab.id === state0.activeTabId)?.targetPath).toBe('/repo/c.ts');
+
+    useUIStore.getState().closeContextPanelTabs(directory, closedIds);
+
+    const state = useUIStore.getState().contextPanelByDirectory[directory];
+    const activeTab = state?.tabs.find((tab) => tab.id === state.activeTabId);
+    expect(activeTab?.mode).toBe('file');
+    expect(activeTab?.targetPath).toBe('/repo/a.ts');
+    expect(state?.isOpen).toBe(true);
+    expect(state?.tabs.some((tab) => tab.mode === 'terminal')).toBe(true);
+  });
+});
+
 describe('useUIStore per-surface panel widths', () => {
   const directory = '/repo';
 

@@ -58,7 +58,7 @@ mock.module('@/sync/sync-refs', () => ({
   }),
 }));
 
-const { btwSessionTitle, startBtwSession, destroyBtwSession, promoteBtwSession, filterBtwTailMessages, findLastCompletedAssistantMessageID, BTW_BOUNDARY_INSTRUCTION } =
+const { btwSessionTitle, startBtwSession, destroyBtwSession, promoteBtwSession, filterBtwTailMessages, findLastCompletedAssistantMessageID, BTW_BOUNDARY_INSTRUCTION, BTW_PROMOTION_NOTICE, buildBtwSyntheticTexts } =
   await import('@/lib/btw');
 const { useBtwStore } = await import('@/stores/useBtwStore');
 
@@ -302,5 +302,26 @@ describe('promoteBtwSession', () => {
     patchSessionMetadataImpl = () => Promise.reject(new Error('patch failed'));
     await expect(promoteBtwSession(ref)).rejects.toThrow('patch failed');
     expect(currentSessionSwitches).toEqual([]);
+  });
+});
+
+describe('buildBtwSyntheticTexts', () => {
+  test('a send routed to an active fork carries only the boundary instruction', () => {
+    // Regression: a promoted parent that opens a new btw fork used to send the
+    // promotion notice into the fork alongside the boundary instruction, telling
+    // the fork both that btw constraints apply and that they no longer apply.
+    expect(buildBtwSyntheticTexts({ isBtwActive: true, isPromotedBtwSession: true }))
+      .toEqual([BTW_BOUNDARY_INSTRUCTION]);
+    expect(buildBtwSyntheticTexts({ isBtwActive: true, isPromotedBtwSession: false }))
+      .toEqual([BTW_BOUNDARY_INSTRUCTION]);
+  });
+
+  test('a promoted session with no active fork carries the promotion notice', () => {
+    expect(buildBtwSyntheticTexts({ isBtwActive: false, isPromotedBtwSession: true }))
+      .toEqual([BTW_PROMOTION_NOTICE]);
+  });
+
+  test('an ordinary session carries neither', () => {
+    expect(buildBtwSyntheticTexts({ isBtwActive: false, isPromotedBtwSession: false })).toEqual([]);
   });
 });

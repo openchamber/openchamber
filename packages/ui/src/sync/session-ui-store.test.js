@@ -8,8 +8,10 @@ import { setActionRefs, setOptimisticRefs } from './session-actions';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useSelectionStore } from './selection-store';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
+import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
 /**
@@ -398,7 +400,10 @@ describe('openNewSessionDraft project binding', () => {
   const projectA = { id: 'proj-a', path: '/projects/alpha', label: 'Alpha' };
   const projectB = { id: 'proj-b', path: '/projects/beta', label: 'Beta' };
 
+  const DRAFT_TARGET_KEY = 'oc.chatInput.lastDraftTarget';
+
   beforeEach(() => {
+    getDeferredSafeStorage().removeItem(DRAFT_TARGET_KEY);
     useSessionUIStore.setState({
       currentSessionId: null,
       currentSessionDirectory: null,
@@ -410,6 +415,10 @@ describe('openNewSessionDraft project binding', () => {
       activeProjectId: projectA.id,
     });
     useDirectoryStore.getState().setDirectory(projectB.path, { showOverlay: false });
+  });
+
+  afterEach(() => {
+    getDeferredSafeStorage().removeItem(DRAFT_TARGET_KEY);
   });
 
   test('defaults an implicit draft to Chat when active project differs', () => {
@@ -448,6 +457,82 @@ describe('openNewSessionDraft project binding', () => {
 
     expect(draft.open).toBe(true);
     expect(draft.selectedProjectId).toBe(projectB.id);
+  });
+
+  test('reopens an implicit draft on the project the target selector was last set to', () => {
+    useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectB.id });
+    useSessionUIStore.getState().closeNewSessionDraft();
+    // A chat session leaves its managed scratch directory current; the project
+    // to reopen on can only come from the recorded target.
+    useDirectoryStore.getState().setDirectory(
+      '/Users/tester/.config/openchamber/chats/ses_chat',
+      { showOverlay: false },
+    );
+
+    useSessionUIStore.getState().openNewSessionDraft();
+    const draft = useSessionUIStore.getState().newSessionDraft;
+
+    expect(draft.target).toBe('project');
+    expect(draft.selectedProjectId).toBe(projectB.id);
+    expect(draft.directoryOverride).toBe(projectB.path);
+  });
+
+  test('setNewSessionDraftTarget records Chat, so the next implicit draft opens on Chat', () => {
+    useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectB.id });
+    useSessionUIStore.getState().setNewSessionDraftTarget({ projectId: CHAT_DRAFT_PROJECT_ID });
+    useSessionUIStore.getState().closeNewSessionDraft();
+
+    useSessionUIStore.getState().openNewSessionDraft();
+
+    expect(useSessionUIStore.getState().newSessionDraft.target).toBe('chat');
+  });
+
+  test('keeps the Chat default for a record written before the target was stored', () => {
+    getDeferredSafeStorage().setItem(
+      DRAFT_TARGET_KEY,
+      JSON.stringify({ projectId: projectB.id, directory: projectB.path }),
+    );
+
+    useSessionUIStore.getState().openNewSessionDraft();
+
+    expect(useSessionUIStore.getState().newSessionDraft.target).toBe('chat');
+  });
+
+  test('a chat scratch directory forwarded as override opens a chat draft', () => {
+    // "New session in the current directory" callers forward the current
+    // session's directory even when that session is a chat; its scratch
+    // directory names no project.
+    useSessionUIStore.getState().openNewSessionDraft({
+      directoryOverride: '/Users/tester/.config/openchamber/chats/ses_chat',
+    });
+    const draft = useSessionUIStore.getState().newSessionDraft;
+
+    expect(draft.target).toBe('chat');
+    expect(draft.directoryOverride).toBeNull();
+  });
+
+  test('a chat scratch override opens Chat even when the recorded target is a project', () => {
+    getDeferredSafeStorage().setItem(
+      DRAFT_TARGET_KEY,
+      JSON.stringify({ projectId: projectB.id, directory: projectB.path, target: 'project' }),
+    );
+
+    useSessionUIStore.getState().openNewSessionDraft({
+      directoryOverride: '/Users/tester/.config/openchamber/chats/ses_chat',
+    });
+
+    expect(useSessionUIStore.getState().newSessionDraft.target).toBe('chat');
+  });
+
+  test('falls back to Chat when the last project target no longer exists', () => {
+    getDeferredSafeStorage().setItem(
+      DRAFT_TARGET_KEY,
+      JSON.stringify({ projectId: 'proj-removed', directory: '/projects/removed', target: 'project' }),
+    );
+
+    useSessionUIStore.getState().openNewSessionDraft();
+
+    expect(useSessionUIStore.getState().newSessionDraft.target).toBe('chat');
   });
 });
 
@@ -960,5 +1045,86 @@ describe('deleteSessions option forwarding', () => {
 
     expect(deleted).toBe(false);
     expect(deleteSessionCalls).toEqual([]);
+  });
+});
+
+describe('sendMessage effort record', () => {
+  let originalSendMessage;
+
+  const SESSION = 'session-effort';
+  const PROVIDER = 'provider-a';
+  const MODEL = 'model-a';
+  const AGENT = 'build';
+
+  const readRecord = () => useSelectionStore
+    .getState()
+    .getAgentModelVariantForSession(SESSION, AGENT, PROVIDER, MODEL);
+
+  beforeEach(() => {
+    const childStore = {
+      getState: () => ({ session: [], message: {}, part: {}, session_status: {} }),
+      setState: () => {},
+    };
+    const childStores = {
+      children: new Map(),
+      ensureChild: () => childStore,
+      getChild: () => childStore,
+    };
+    setActionRefs(opencodeClient, childStores, () => '/current/project');
+    setOptimisticRefs(() => {}, () => {});
+    useConfigStore.setState({
+      isConnected: true,
+      currentProviderId: PROVIDER,
+      currentModelId: MODEL,
+      currentAgentName: AGENT,
+      currentVariant: undefined,
+      currentVariantSelection: { override: undefined, inherited: undefined },
+    });
+    useSessionUIStore.setState({
+      currentSessionId: SESSION,
+      currentSessionDirectory: '/current/project',
+      newSessionDraft: { open: false, directoryOverride: null, parentID: null },
+    });
+    originalSendMessage = opencodeClient.sendMessage;
+    opencodeClient.sendMessage = async () => 'msg';
+  });
+
+  afterEach(() => {
+    opencodeClient.sendMessage = originalSendMessage;
+    useSelectionStore.getState().saveAgentModelVariantForSession(SESSION, AGENT, PROVIDER, MODEL, undefined);
+  });
+
+  const send = (variant) => useSessionUIStore.getState().sendMessage(
+    'hello', PROVIDER, MODEL, AGENT, undefined, undefined, undefined, variant, 'normal',
+  );
+
+  test('keeps an explicit Default across the send that follows it', async () => {
+    // What the picker leaves behind: `null` recorded, and a send that carries
+    // no effort because "Default" means exactly that.
+    useSelectionStore.getState().saveAgentModelVariantForSession(SESSION, AGENT, PROVIDER, MODEL, null);
+    useConfigStore.setState({ currentVariantSelection: { override: null, inherited: 'high' } });
+
+    await send(undefined);
+
+    expect(readRecord()).toBeNull();
+  });
+
+  test('records the effort a send carries', async () => {
+    useConfigStore.setState({ currentVariantSelection: { override: 'high', inherited: 'high' } });
+
+    await send('high');
+
+    expect(readRecord()).toBe('high');
+  });
+
+  test('records no choice when the live selection inherits its effort', async () => {
+    useConfigStore.setState({
+      currentVariant: 'high',
+      currentVariantSelection: { override: undefined, inherited: 'high' },
+    });
+
+    await send('high');
+
+    expect(readRecord()).toBe(undefined);
   });
 });

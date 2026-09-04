@@ -1,25 +1,35 @@
 import { describe, expect, test } from 'bun:test';
+import { renderToStaticMarkup } from 'react-dom/server';
 
-import { SimpleMarkdownRenderer } from './MarkdownRenderer';
 import { QuestionMarkdown } from './QuestionMarkdown';
 
+// The markdown renderer is lazy, so a synchronous server render always emits the
+// Suspense fallback QuestionMarkdown supplies. That fallback is the surface that
+// has to keep the exact question text and the question typography classes.
 describe('QuestionMarkdown', () => {
-  test('delegates exact content to the tool markdown renderer', () => {
+  test('renders the question content verbatim', () => {
     const content = 'Choose **one** from `mode`: [details](https://example.com)';
-    const element = QuestionMarkdown({ content, size: 'meta' });
 
-    expect(element.type).toBe(SimpleMarkdownRenderer);
-    expect(element.props.content).toBe(content);
-    expect(element.props.variant).toBe('tool');
-    expect(element.props.fallbackContent.props.children).toBe(content);
-    expect(element.props.fallbackContent.props.className).toContain('whitespace-pre-wrap');
+    const html = renderToStaticMarkup(<QuestionMarkdown content={content} size="meta" />);
+
+    expect(html).toBe(
+      `<div class="question-markdown typography-meta whitespace-pre-wrap">${content}</div>`,
+    );
   });
 
-  test('preserves question typography size and caller classes', () => {
-    const meta = QuestionMarkdown({ content: 'Meta', size: 'meta', className: 'font-medium text-foreground' });
-    const micro = QuestionMarkdown({ content: 'Micro', size: 'micro', className: 'text-muted-foreground' });
+  test('applies meta typography and caller classes', () => {
+    const html = renderToStaticMarkup(
+      <QuestionMarkdown content="Meta" size="meta" className="font-medium text-foreground" />,
+    );
 
-    expect(meta.props.className).toBe('question-markdown typography-meta font-medium text-foreground');
-    expect(micro.props.className).toBe('question-markdown typography-micro text-muted-foreground');
+    expect(html).toContain('class="question-markdown typography-meta font-medium text-foreground whitespace-pre-wrap"');
+  });
+
+  test('applies micro typography and caller classes', () => {
+    const html = renderToStaticMarkup(
+      <QuestionMarkdown content="Micro" size="micro" className="text-muted-foreground" />,
+    );
+
+    expect(html).toContain('class="question-markdown typography-micro text-muted-foreground whitespace-pre-wrap"');
   });
 });

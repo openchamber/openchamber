@@ -29,10 +29,22 @@ type ProjectSectionCacheEntry = {
   archivedSessions: Session[];
   availableWorktrees: WorktreeMetadata[];
   rootBranch: string | null;
+  /** Current branch of every worktree directory the section renders. */
+  worktreeBranchesKey: string;
   isRepo: boolean;
   buildGroupedSessions: Args['buildGroupedSessions'];
   section: ProjectSection;
 };
+
+const worktreeBranchesKeyFor = (
+  worktrees: WorktreeMetadata[],
+  gitBranches: ReadonlyMap<string, string | null>,
+): string => worktrees
+  .map((worktree) => {
+    const directory = normalizePath(worktree.path) ?? worktree.path;
+    return `${directory}=${gitBranches.get(directory) ?? ''}`;
+  })
+  .join('\n');
 
 const EMPTY_WORKTREES: WorktreeMetadata[] = [];
 
@@ -43,6 +55,7 @@ type Args = {
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>;
   projectRepoStatus: Map<string, boolean | null>;
   projectRootBranches: Map<string, string | null>;
+  gitBranches: ReadonlyMap<string, string | null>;
   lastRepoStatus: boolean;
   buildGroupedSessions: (
     sessions: Session[],
@@ -56,6 +69,13 @@ type Args = {
   filterSessionNodesForSearch: (nodes: SessionNode[], query: string) => SessionNode[];
   buildGroupSearchText: (group: SessionGroup) => string;
   foldersMap: SessionFoldersMap;
+  /**
+   * Groups the sidebar renders outside any project section — today the managed
+   * chats. They search like every other group: a group with no search data
+   * renders its filtered nodes as an empty list, so leaving them out made every
+   * chat vanish the moment a query was typed.
+   */
+  standaloneGroups: SessionGroup[];
 };
 
 export const useSessionSidebarSections = (args: Args) => {
@@ -66,6 +86,7 @@ export const useSessionSidebarSections = (args: Args) => {
     availableWorktreesByProject,
     projectRepoStatus,
     projectRootBranches,
+    gitBranches,
     lastRepoStatus,
     buildGroupedSessions,
     hasSessionSearchQuery,
@@ -73,6 +94,7 @@ export const useSessionSidebarSections = (args: Args) => {
     filterSessionNodesForSearch,
     buildGroupSearchText,
     foldersMap,
+    standaloneGroups,
   } = args;
   const projectSectionCacheRef = React.useRef<Map<string, ProjectSectionCacheEntry>>(new Map());
 
@@ -93,6 +115,7 @@ export const useSessionSidebarSections = (args: Args) => {
         ? Boolean(projectRepoStatus.get(project.id))
         : lastRepoStatus;
       const rootBranch = projectRootBranches.get(project.id) ?? null;
+      const worktreeBranchesKey = worktreeBranchesKeyFor(worktreesForProject, gitBranches);
       const cached = previousCache.get(project.id);
       if (
         cached
@@ -101,6 +124,7 @@ export const useSessionSidebarSections = (args: Args) => {
         && sameSessions(cached.archivedSessions, archivedSessions)
         && cached.availableWorktrees === worktreesForProject
         && cached.rootBranch === rootBranch
+        && cached.worktreeBranchesKey === worktreeBranchesKey
         && cached.isRepo === isRepo
         && cached.buildGroupedSessions === buildGroupedSessions
       ) {
@@ -110,6 +134,19 @@ export const useSessionSidebarSections = (args: Args) => {
       }
 
       rebuiltSections += 1;
+      if (cached) {
+        // Diagnostic: name what invalidated the cached section so a sidebar
+        // that rebuilds on every session switch can be traced to its input.
+        const reason = cached.project !== project ? 'project'
+          : !sameSessions(cached.activeSessions, activeSessions) ? 'sessions'
+          : !sameSessions(cached.archivedSessions, archivedSessions) ? 'archived'
+          : cached.availableWorktrees !== worktreesForProject ? 'worktrees'
+          : cached.rootBranch !== rootBranch ? 'branch'
+          : cached.worktreeBranchesKey !== worktreeBranchesKey ? 'worktreeBranches'
+          : cached.isRepo !== isRepo ? 'repo'
+          : 'builder';
+        streamPerfCount(`ui.sidebar.project_section.rebuilt_reason.${reason}`);
+      }
       const projectSessions = dedupeSessionsById([...activeSessions, ...archivedSessions]);
       const groups = buildGroupedSessions(
         projectSessions,
@@ -125,6 +162,7 @@ export const useSessionSidebarSections = (args: Args) => {
         archivedSessions,
         availableWorktrees: worktreesForProject,
         rootBranch,
+        worktreeBranchesKey,
         isRepo,
         buildGroupedSessions,
         section,
@@ -144,6 +182,7 @@ export const useSessionSidebarSections = (args: Args) => {
     lastRepoStatus,
     buildGroupedSessions,
     projectRootBranches,
+    gitBranches,
   ]);
 
   const visibleProjectSections = React.useMemo(() => {
@@ -158,29 +197,33 @@ export const useSessionSidebarSections = (args: Args) => {
 
     const countNodes = (nodes: SessionNode[]): number => nodes.reduce((total, node) => total + 1 + countNodes(node.children), 0);
 
-    visibleProjectSections.forEach((section) => {
-      section.groups.forEach((group) => {
-        const filteredNodes = filterSessionNodesForSearch(group.sessions, normalizedSessionSearchQuery);
-        const matchedSessionCount = countNodes(filteredNodes);
-        const groupMatches = matchesRankQuery([buildGroupSearchText(group)], normalizedSessionSearchQuery);
-        const scopeKey = normalizePath(group.directory ?? null);
-        const scopeFolders = scopeKey ? (foldersMap[scopeKey] ?? []) : [];
-        const folderNameMatchCount = scopeFolders.filter((folder) => matchesRankQuery([folder.name], normalizedSessionSearchQuery)).length;
+    const addSearchData = (group: SessionGroup) => {
+      const filteredNodes = filterSessionNodesForSearch(group.sessions, normalizedSessionSearchQuery);
+      const matchedSessionCount = countNodes(filteredNodes);
+      const groupMatches = matchesRankQuery([buildGroupSearchText(group)], normalizedSessionSearchQuery);
+      const scopeKey = normalizePath(group.directory ?? null);
+      const scopeFolders = scopeKey ? (foldersMap[scopeKey] ?? []) : [];
+      const folderNameMatchCount = scopeFolders.filter((folder) => matchesRankQuery([folder.name], normalizedSessionSearchQuery)).length;
 
-        result.set(group, {
-          filteredNodes,
-          matchedSessionCount,
-          folderNameMatchCount,
-          groupMatches,
-          hasMatch: groupMatches || matchedSessionCount > 0 || folderNameMatchCount > 0,
-        });
+      result.set(group, {
+        filteredNodes,
+        matchedSessionCount,
+        folderNameMatchCount,
+        groupMatches,
+        hasMatch: groupMatches || matchedSessionCount > 0 || folderNameMatchCount > 0,
       });
+    };
+
+    visibleProjectSections.forEach((section) => {
+      section.groups.forEach(addSearchData);
     });
+    standaloneGroups.forEach(addSearchData);
 
     return result;
   }, [
     hasSessionSearchQuery,
     visibleProjectSections,
+    standaloneGroups,
     filterSessionNodesForSearch,
     normalizedSessionSearchQuery,
     buildGroupSearchText,
@@ -271,17 +314,23 @@ export const useSessionSidebarSections = (args: Args) => {
       return 0;
     }
 
-    return sectionsForRender.reduce((total, section) => {
-      return total + section.groups.reduce((groupTotal, group) => {
-        const data = groupSearchDataByGroup.get(group);
-        if (!data) {
-          return groupTotal;
-        }
-        const metadataMatches = data.folderNameMatchCount + (data.groupMatches ? 1 : 0);
-        return groupTotal + data.matchedSessionCount + metadataMatches;
-      }, 0);
-    }, 0);
-  }, [hasSessionSearchQuery, sectionsForRender, groupSearchDataByGroup]);
+    const countGroup = (total: number, group: SessionGroup): number => {
+      const data = groupSearchDataByGroup.get(group);
+      if (!data) {
+        return total;
+      }
+      const metadataMatches = data.folderNameMatchCount + (data.groupMatches ? 1 : 0);
+      return total + data.matchedSessionCount + metadataMatches;
+    };
+
+    const projectMatches = sectionsForRender.reduce(
+      (total, section) => section.groups.reduce(countGroup, total),
+      0,
+    );
+    // Chats the user can see in the list count as matches too, or the header
+    // reports zero while their results sit right underneath it.
+    return standaloneGroups.reduce(countGroup, projectMatches);
+  }, [hasSessionSearchQuery, sectionsForRender, standaloneGroups, groupSearchDataByGroup]);
 
   return {
     projectSections,

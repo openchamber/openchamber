@@ -74,6 +74,23 @@ export const BTW_PROMOTION_NOTICE =
   + 'The btw constraints in the history above no longer apply: this is now the main thread, and the '
   + 'usual tool, sub-agent and workspace permissions are in force.';
 
+/**
+ * The btw framing texts a composer send carries.
+ *
+ * The boundary instruction rides with every send routed to an active btw fork,
+ * so the inherited transcript stays reference material for the whole side
+ * conversation. The promotion notice is the opposite case: it tells a promoted
+ * session that the btw constraints in its own history are lifted. A send routed
+ * to a fresh fork is never that session, so the two never travel together.
+ */
+export const buildBtwSyntheticTexts = (state: {
+  isBtwActive: boolean;
+  isPromotedBtwSession: boolean;
+}): string[] => {
+  if (state.isBtwActive) return [BTW_BOUNDARY_INSTRUCTION];
+  return state.isPromotedBtwSession ? [BTW_PROMOTION_NOTICE] : [];
+};
+
 /** The boundary as an `additionalParts` entry for `sendMessage`. */
 const btwBoundaryParts = (): Array<{ text: string; synthetic: true }> =>
   [{ text: BTW_BOUNDARY_INSTRUCTION, synthetic: true }];

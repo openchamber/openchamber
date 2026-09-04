@@ -27,13 +27,19 @@ interface AgentMemoryState {
   projectPath: string | null;
   loading: boolean;
   loaded: boolean;
+  /** When the held entries were last read successfully. */
+  loadedAt: number | null;
   /** True once the server has reported the feature switched off. */
   disabled: boolean;
   globalFailed: boolean;
   projectFailed: boolean;
   error: string | null;
 
-  load: (projectPath: string | null) => Promise<void>;
+  /**
+   * `maxAgeMs` skips the read when the same project's entries were loaded
+   * more recently than that; omit it for an unconditional re-read.
+   */
+  load: (projectPath: string | null, options?: { maxAgeMs?: number }) => Promise<void>;
   /** Re-read the store the last load used. */
   refresh: () => Promise<void>;
   saveEntry: (
@@ -55,6 +61,7 @@ const EMPTY_STATE = {
   globalFailed: false,
   projectFailed: false,
   error: null as string | null,
+  loadedAt: null as number | null,
 };
 
 const EMPTY_MEMORY: AgentMemoryEntry[] = [];
@@ -99,10 +106,19 @@ const errorMessage = (error: unknown, fallback: string): string => (
 export const useAgentMemoryStore = create<AgentMemoryState>((set, get) => ({
   ...EMPTY_STATE,
 
-  load: async (projectPath) => {
-    const requestId = ++loadSequence;
+  load: async (projectPath, options) => {
     const previous = get();
     const ownerChanged = previous.projectPath !== projectPath;
+    if (
+      options?.maxAgeMs !== undefined
+      && !ownerChanged
+      && previous.loaded
+      && previous.loadedAt !== null
+      && Date.now() - previous.loadedAt < options.maxAgeMs
+    ) {
+      return;
+    }
+    const requestId = ++loadSequence;
     if (ownerChanged) {
       set({ loading: true, projectPath, project: [], projectFailed: false });
     } else {
@@ -120,6 +136,7 @@ export const useAgentMemoryStore = create<AgentMemoryState>((set, get) => ({
         projectFailed: snapshot.projectFailed,
         loading: false,
         loaded: true,
+        loadedAt: Date.now(),
         disabled: false,
         error: null,
       });

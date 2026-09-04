@@ -6,12 +6,33 @@ import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { cn } from '@/lib/utils';
 import { SettingsInfoHint } from './SettingsInfoHint';
 
+/**
+ * Width cap shared by every settings value picker.
+ *
+ * `applyTypography` scales the `--typography-*` vars but never the root rem,
+ * so a rem-based cap (`max-w-48`) stays 192px while the label inside it grows,
+ * and the value clips at 150–200% interface font size. `ch` is measured
+ * against the trigger's own `typography-ui-label` font, so the cap grows with
+ * the setting. Below `@xl` the field row stacks and the control is plain
+ * `w-full`, so this cap only binds on wide panes.
+ */
+const SETTINGS_TRIGGER_WIDTH_CLASS = 'w-full min-w-[22ch] max-w-[40ch]';
+
 /** Settings select trigger: full column width in stacked cells; capped in field rows via parent. */
-export const SETTINGS_SELECT_TRIGGER_CLASS = 'w-full min-w-40 max-w-48';
+export const SETTINGS_SELECT_TRIGGER_CLASS = SETTINGS_TRIGGER_WIDTH_CLASS;
 export const SETTINGS_SELECT_SIZE = 'settings' as const;
 
 /** Fixed-width select used inside full-width SettingsFieldRow control columns. */
-export const SETTINGS_SELECT_ROW_TRIGGER_CLASS = 'w-full min-w-40 max-w-48';
+export const SETTINGS_SELECT_ROW_TRIGGER_CLASS = SETTINGS_TRIGGER_WIDTH_CLASS;
+
+/**
+ * Width for every settings NumberInput stepper. Font-relative for the same
+ * reason as the trigger cap above: a rem-fixed `w-16`/`w-20`/`w-24`/`w-32`
+ * clips its own digits once the interface font is scaled up. The explicit
+ * `typography-ui-label` pins `ch` to the same scaled font the inner numeric
+ * field renders in, since the wrapper would otherwise inherit an unscaled one.
+ */
+export const SETTINGS_NUMBER_INPUT_CLASS = 'typography-ui-label w-[16ch]';
 
 /** Compact reset / icon action next to a settings control (matches h-8 controls). */
 export const SETTINGS_ICON_BUTTON_CLASS =
@@ -21,7 +42,7 @@ export const SETTINGS_ICON_BUTTON_CLASS =
 // eslint-disable-next-line react-refresh/only-export-components
 export const SETTINGS_CUSTOM_TRIGGER_CLASS = cn(
   dropdownTriggerVariants(),
-  'w-full min-w-40 max-w-48',
+  SETTINGS_TRIGGER_WIDTH_CLASS,
 );
 
 /** Shared width for stacked control clusters (select/input + reset). */
@@ -310,8 +331,8 @@ export const SettingsFieldRow: React.FC<SettingsFieldRowProps> = ({
       )}
     >
       <div className="min-w-0 @xl:w-56 @xl:shrink-0">
-        <div className="flex items-center gap-1.5">
-          <div className={SETTINGS_FIELD_LABEL_CLASS}>{label}</div>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <div className={cn('min-w-0 truncate', SETTINGS_FIELD_LABEL_CLASS)}>{label}</div>
           {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
         </div>
         {description != null ? (

@@ -40,9 +40,17 @@ export const createSettingsAccessors = ({ fsPromises, path, dataDir, settingsFil
       }
       throw error;
     }
-    const parsed = JSON.parse(raw);
+    const corruptSettingsError = (cause) =>
+      new Error(`Settings file is corrupt or unreadable: ${settingsPath} (fix or remove it, then retry)`, { cause });
+
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      throw corruptSettingsError(error);
+    }
     if (!parsed || typeof parsed !== 'object') {
-      throw new Error('Settings file is malformed (non-object payload)');
+      throw corruptSettingsError(new Error('non-object payload'));
     }
     return parsed;
   };

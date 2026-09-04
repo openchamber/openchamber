@@ -1,4 +1,4 @@
-import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
+import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go Nutzungsverfolgung',
   'settings.providers.page.openCodeGo.description': 'Verbinden Sie das OpenCode Go Dashboard, um rollierenden, wöchentlichen und monatlichen Verbrauch anzuzeigen.',
@@ -1794,7 +1794,10 @@ export const settingsDict = {
   'settings.voice.page.provider.server': 'Server',
   'settings.voice.page.provider.local': 'Lokal',
   'settings.voice.page.tooltip.sttLocal': 'On-device Transkription auf dem OpenChamber-Server. Modelle werden automatisch heruntergeladen; kein API-Schlüssel erforderlich.',
-  'settings.voice.page.tooltip.localTts': 'On-device Synthese auf dem OpenChamber-Server (Kokoro, Englisch). Das Modell wird automatisch heruntergeladen; kein API-Schlüssel erforderlich.',
+  'settings.voice.page.tooltip.localTts': 'On-Device-Synthese auf dem OpenChamber-Server (Kokoro für Englisch; Modelle für andere Sprachen werden beim ersten Einsatz geladen). Kein API-Schlüssel nötig.',
+  'settings.voice.page.field.followTextLanguage': 'Stimme an die Sprache des Textes anpassen',
+  'settings.voice.page.field.followTextLanguageAria': 'Stimme an die Sprache des Textes anpassen',
+  'settings.voice.page.field.followTextLanguageInfo': 'Ist eine Antwort in einer anderen Sprache, wird eine Stimme für diese Sprache verwendet: eine passende macOS-Stimme oder ein lokales Modell, das beim ersten Einsatz geladen wird.',
   'settings.voice.page.stt.model.parakeetV2': 'Parakeet v2 (Englisch)',
   'settings.voice.page.stt.model.parakeetV3': 'Parakeet v3 (25 europäische Sprachen)',
   'settings.voice.page.stt.model.whisperBase': 'Whisper base (mehrsprachig)',
@@ -1882,7 +1885,7 @@ export const settingsDict = {
   'settings.openchamber.visual.section.streaming': 'Streaming',
   'settings.openchamber.visual.field.streamingAutoFollow': 'Neuen Inhalten beim Streaming folgen',
   'settings.openchamber.visual.field.streamingAutoFollowAria': 'Neuen Inhalten automatisch folgen, während eine Antwort gestreamt wird',
-  'settings.openchamber.visual.field.streamingAutoFollowInfo': 'Während eine Antwort eintrifft, folgt die Ansicht laufend dem neuesten Inhalt. Deaktivieren, um die Ansicht ruhig zu halten und manuell zu scrollen.',
+  'settings.openchamber.visual.field.streamingAutoFollowInfo': 'Während eine Antwort eintrifft, folgt die Ansicht laufend dem neuesten Inhalt. Deaktivieren, um die Ansicht ruhig zu halten und manuell zu scrollen; das Senden einer Nachricht aus der Mitte des Chats lässt die Ansicht dann ebenfalls an Ort und Stelle.',
   'settings.openchamber.visual.section.messageAppearance': 'Nachrichten-Erscheinungsbild',
   'settings.openchamber.visual.section.toolsAndFiles': 'Werkzeuge & Dateien',
   'settings.openchamber.visual.section.composer': 'Komponist',
@@ -2002,6 +2005,13 @@ export const settingsDict = {
   'settings.openchamber.visual.field.persistDraftMessages': 'Entwurfsnachrichten speichern',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': 'Rechtschreibprüfung in Texteingaben aktivieren',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'Rechtschreibprüfung in Texteingaben aktivieren',
+  'settings.openchamber.visual.field.largeTextPaste': 'Großes Texteinfügen',
+  'settings.openchamber.visual.field.largeTextPasteHint': 'Beim Einfügen von mehr als etwa 2.000 Zeichen oder 25 Zeilen wählen, ob der Text als Datei angehängt, direkt eingefügt oder jedes Mal nachgefragt werden soll.',
+  'settings.openchamber.visual.field.largeTextPasteAria': 'Verhalten bei großem Texteinfügen',
+  'settings.openchamber.visual.field.largeTextPasteOptionAria': 'Großes Texteinfügen: {option}',
+  'settings.openchamber.visual.option.largeTextPaste.ask.label': 'Jedes Mal fragen',
+  'settings.openchamber.visual.option.largeTextPaste.attach.label': 'Als Datei anhängen',
+  'settings.openchamber.visual.option.largeTextPaste.inline.label': 'Direkt einfügen',
   'settings.openchamber.visual.field.sendAnonymousUsageReportsAria': 'Anonyme Nutzungsberichte senden',
   'settings.openchamber.visual.field.sendAnonymousUsageReports': 'Anonyme Nutzungsberichte senden',
   'settings.openchamber.visual.field.sendAnonymousUsageReportsHint': 'Hilft uns zu verstehen, welche App-Versionen aktiv genutzt werden, damit wir Verbesserungen priorisieren können. Es werden nur die App-Version, Plattform und Laufzeit gesammelt - keine persönlichen Daten oder Code.',
@@ -2125,6 +2135,8 @@ export const settingsDict = {
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Warteschlange',
 
   'settings.providers.page.quotaCredentials.accessToken': 'Zugriffstoken',
+  'settings.providers.page.quotaCredentials.usageToken': 'Nutzungs-API-Token',
+  'settings.providers.page.quotaCredentials.exeDevTokenInstructions': 'Führen Sie diesen Befehl im Terminal aus und fügen Sie dann das Token unten ein. Es kann nur die LLM-Guthabennutzung lesen und läuft nach 30 Tagen ab.',
   'settings.providers.page.quotaCredentials.refreshToken': 'Aktualisierungstoken',
   'settings.providers.page.quotaCredentials.tokenPlaceholder': 'Token einfügen',
   'settings.view.nav.group.general': 'OpenChamber',
@@ -2211,5 +2223,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.themeMode.light.description': 'Immer helles Erscheinungsbild verwenden',
   'settings.openchamber.visual.option.themeMode.dark.description': 'Immer dunkles Erscheinungsbild verwenden',
   'chat.message.userText.collapseAria': 'Benutzernachricht einklappen',
-  ...thirdPartyIntegrationI18n.de,
+  ...linearIntegrationI18n.de,
+  'settings.page.integrations.title': 'Integrationen',
+  'settings.page.integrations.description': 'Verbinde GitHub und Linear, damit OpenChamber mit deinen Issues und Pull Requests arbeiten kann.',
 };

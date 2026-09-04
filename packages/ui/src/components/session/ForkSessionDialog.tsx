@@ -17,6 +17,9 @@ import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { EXECUTION_FORK_DEFAULT_INSTRUCTIONS, EXECUTION_FORK_GOAL_INSTRUCTIONS } from '@/lib/messages/executionMeta';
 import { useI18n } from '@/lib/i18n';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 export type ForkSessionExecution = {
   providerID: string;
@@ -32,13 +35,22 @@ type ForkSessionDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projectDirectory: string | null;
+  sourceSessionId: string | null;
+  worktreeProjectDirectory: string | null;
   submitting?: boolean;
   onConfirm: (execution: ForkSessionExecution) => Promise<void> | void;
 };
 
 export function ForkSessionDialog(props: ForkSessionDialogProps) {
   const { t } = useI18n();
-  const { open, onOpenChange, projectDirectory, submitting = false, onConfirm } = props;
+  const { open, onOpenChange, projectDirectory, sourceSessionId, worktreeProjectDirectory, submitting = false, onConfirm } = props;
+  const metadataProjectDirectory = useSessionUIStore((state) => (
+    sourceSessionId ? state.worktreeMetadata.get(sourceSessionId)?.projectDirectory ?? null : null
+  ));
+  const resolvedWorktreeProjectDirectory = metadataProjectDirectory ?? worktreeProjectDirectory;
+  const git = useRuntimeAPIs().git;
+  const isGitRepository = useIsGitRepo(resolvedWorktreeProjectDirectory);
+  const ensureGitStatus = useGitStore((state) => state.ensureStatus);
 
   const loadProviders = useConfigStore((state) => state.loadProviders);
   const loadConfigAgents = useConfigStore((state) => state.loadAgents);
@@ -56,7 +68,7 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
   const [instructions, setInstructions] = React.useState(EXECUTION_FORK_DEFAULT_INSTRUCTIONS);
   const [createWorktree, setCreateWorktree] = React.useState(false);
   const [runAsGoal, setRunAsGoal] = React.useState(false);
-  const showCreateWorktree = React.useMemo(() => !isVSCodeRuntime(), []);
+  const showCreateWorktree = !isVSCodeRuntime() && isGitRepository === true;
   // The goal loop lives in the web server; VS Code only renders goal state.
   const showRunAsGoal = React.useMemo(() => !isVSCodeRuntime(), []);
 
@@ -78,6 +90,11 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
     void loadConfigAgents({ directory: projectDirectory });
     void loadAgentsStoreAgents();
   }, [open, loadProviders, loadConfigAgents, loadAgentsStoreAgents, projectDirectory]);
+
+  React.useEffect(() => {
+    if (!open || !resolvedWorktreeProjectDirectory || !git) return;
+    void ensureGitStatus(resolvedWorktreeProjectDirectory, git);
+  }, [ensureGitStatus, git, open, resolvedWorktreeProjectDirectory]);
 
   // Reset only when the dialog transitions to open. Reading the store snapshot
   // here (instead of subscribing) avoids clobbering in-progress user edits when
