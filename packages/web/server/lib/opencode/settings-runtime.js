@@ -1,4 +1,5 @@
 import { createProjectIdFromPath } from '../projects/project-id.js';
+import { isPlainObject } from './shared.js';
 
 const DEFAULT_NOTIFICATION_TEMPLATES = {
   completion: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
@@ -507,8 +508,8 @@ export const createSettingsRuntime = (deps) => {
       throw error;
     }
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') {
-      throw new Error('Settings file is malformed (non-object payload)');
+    if (!isPlainObject(parsed)) {
+      throw new Error('Settings file is malformed (expected object payload)');
     }
     return parsed;
   };

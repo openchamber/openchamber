@@ -22,7 +22,7 @@ the web server and survives UI disconnects.
   blockedStreak,           // consecutive blocked audit verdicts
   auditFailStreak,         // consecutive failed/unavailable audit calls
   note,                    // latest audit progress note, <= 280 chars
-  statusReason,            // why settled; 'resumed' is a kickoff signal from UI
+  statusReason,            // why settled; 'repeated output truncation' is the bounded truncation breaker; 'resumed' is a kickoff signal from UI
   evaluationProviderID,    // provider used by the latest successful audit
   evaluationModelID,       // model used by the latest successful audit
   lastAccountedMessageID,  // incremental accounting cursor
@@ -40,8 +40,27 @@ content, since "Implement this plan: X" alone gives the audit nothing to
 judge against. The armed send also attaches a synthetic system-reminder
 part telling the agent goal mode is active and that each turn should end
 with a factual done/verified/remaining statement for the independent audit.
-Freshness/stale-write protection is by `id`: every runtime write re-reads the
-session and drops the write when the stored goal id no longer matches.
+Freshness/stale-write protection combines goal `id`, goal metadata identity
+(objective/file flag, status, budget, and creation time), a logical-goal
+identity (objective/file flag, budget, and creation time), expected `status`, a per-session cancellation generation, and a runtime-local serialized
+read/modify/PATCH queue. Busy/retry status events and fresh goal replacements
+advance the generation before clearing work; repeated identical
+`session.updated` events do not. A newer runtime write supersedes an older
+queued write. Resume dedup keeps the CAS identity separate from the goal
+lifecycle signal (`goal.updatedAt` plus the session's `time.updated`), so
+repeated delivery is suppressed while a file-backed edit can start a new
+Resume. At the `session.updated` boundary, finite `session.time.updated` is
+the primary monotonic freshness value and finite `goal.updatedAt` is its
+secondary value. Older events are ignored; equal freshness keeps the first
+accepted event. A first event may have no freshness timestamp, but after a
+finite per-session baseline exists, an event with no finite freshness value is
+ignored. Every write and continuation re-checks stopped state, generation,
+goal identity, and active status immediately before its operation. A
+continuation also re-reads the message tail and effective file objective after
+the final admission checks and immediately before `prompt_async`. External UI
+`PATCH` callers cannot participate in that queue or CAS protocol, so they can
+still race a runtime write; these checks are not cross-process atomicity or a
+server-side CAS.
 
 ## File-backed objectives
 
@@ -61,8 +80,16 @@ before touching the filesystem). Rationale: metadata rides every
   patching the goal metadata and falls back to an inline objective when the
   write fails; `clearSessionGoal` deletes the file best-effort.
 - The tick resolves the effective objective fresh on every cycle (the file
-  is live-editable mid-goal) and falls back to the inline `objective` when
-  the file is unreadable — a goal never dies because a file went away.
+  is live-editable mid-goal). A file-read failure is never authoritative empty
+  success: when no inline fallback exists, the runtime uses the normal bounded
+  retry/backoff policy and settles the goal as `blocked` with
+  `statusReason: 'objective file unavailable'` after retry exhaustion.
+  The runtime captures that effective text for the tick and re-reads the file
+  immediately before every terminal write and continuation dispatch; changed content rejects
+  stale in-flight work and starts a fresh bounded tick without changing the
+  metadata identity.
+  Inline fallbacks continue to preserve the ordinary file-backed path when the
+  file is temporarily unreadable.
 - UI display fetches content via the GET route
   (`useGoalObjectiveContent`); in VS Code the route is unavailable, so the
   strip degrades to the audit note (display-only fallback by design).
@@ -73,42 +100,109 @@ before touching the filesystem). Rationale: metadata rides every
 ## Flow
 
 1. `createSessionGoalRuntime` subscribes to the global SSE hub (same pattern
-   as session-assist — it needs the envelope's `directory`).
-2. `session.status: idle` arms a 15s per-session timer; `busy`/`retry` clears
-   it. A `session.updated` carrying a fresh active goal (`turnsUsed === 0` or
+   as session-assist — it needs the envelope's `directory`). It keeps a local
+   directory record for every authoritative active goal it observes. On server
+   startup, `start({ listDirectories })` also performs one bounded scan of known
+   directories and arms active root goals that emitted no post-restart event.
+   The strict settings read distinguishes a missing settings file (successful
+   empty result) from malformed data, including an array payload, and from a
+   read or migration failure. If the directory list or a
+   session-list fetch is unavailable, the scan schedules at most four delayed
+   recovery attempts and never treats the failure as an empty result. The
+   OpenCode lifecycle keeps its separate best-effort warmup fallback, while
+   `start` retains the strict signal for goal recovery. The lifecycle calls
+   `start` again after confirmed readiness with a fresh bounded window, covering
+   the startup race where the initial scan ran before OpenCode was usable.
+   Recovery remains capped at the same four MRU directories and has no
+   permanent polling loop.
+2. `session.status: idle` arms a 15s per-session timer; `busy`/`retry` advances
+   the session generation before clearing it. A `session.updated` carrying a fresh active goal (`turnsUsed === 0` or
    `statusReason === 'resumed'`) arms a kickoff timer — 3s for fresh goals,
-   ~250ms for an explicit Resume so the nudge feels immediate — since setting
-   a goal on an idle session emits no status transition.
+    ~250ms for an explicit Resume so the nudge feels immediate — since setting
+    a goal on an idle session emits no status transition. Resume replaces an
+   existing idle timer; if work is in flight, the replacement is armed once
+   that work clears. A shorter pending delay always wins, and a later normal
+   idle event cannot replace an already-earlier Resume timer. Fetch/quiet
+   failures use bounded exponential delays derived from the idle delay (15s,
+   30s, 60s, 120s by default), at most four retries after the initial tick.
+     On fetch retry exhaustion, the runtime re-reads the authoritative goal and
+     settles an active goal as `blocked` even when no dispatch reservation exists.
+     The guarded write uses the current goal revision and generation, with a
+     `statusReason` that identifies the exhausted fetch retry. If the read or
+     blocked PATCH is unavailable, terminalization retries with bounded backoff
+     and then stops until a later authoritative idle event or Resume starts a
+     fresh bounded window. This path never calls `prompt_async`.
+    Authoritative activity and successful audit/continuation progress reset the
+    corresponding retry state; a failed fetch never becomes an empty success.
+    A `message.updated` user event invalidates an armed timer or in-flight tick
+    only when its finite creation timestamp is at or after that work's arm
+    point. Replayed events and events without timestamps do not cancel active
+    work; Clear/no-goal updates and user aborts keep their explicit invalidation
+    behavior.
 3. On fire (`tick`), gated by the `sessionGoalEnabled` setting:
-   - fetch session (skip sub-agent sessions), require an `active` goal;
+    - fetch session (skip sub-agent sessions), require an `active` goal;
+      a response with the requested ID but without `metadata.openchamber.goal`
+      is a valid no-goal response only when this runtime has no known active goal;
+      otherwise it is partial/unknown and follows the bounded fetch-retry policy;
    - authoritative live-activity check after the quiet window: re-read the
      session status map, bail if the parent resumed, then list direct child
      sessions and bail while any child is `busy`/`retry`. A background
-     subagent leaves its parent idle, then injects its result into the parent
-     when done; that parent `busy` → `idle` cycle re-arms the loop without
-     polling. Status/children fetch failure is unknown, not empty, so it skips
-     the audit and retries after another quiet window;
+      subagent leaves its parent idle, then injects its result into the parent
+      when done; that parent `busy` → `idle` cycle re-arms the loop without
+      polling. Status/children/message fetch failure is unknown, not empty, so
+      it skips the audit and re-arms a bounded quiet retry after in-flight work
+       clears. A fetch failure is never represented as an empty successful
+       response.
+       Recent-message and child/status payloads are shape-validated at the
+       runtime boundary. A valid status map omits idle sessions, so the target
+       or a child absent from that map is authoritative idle. Malformed maps,
+       malformed explicit target/child entries, and unknown explicit status
+       types remain retryable unknown state, never an empty success.
+       Unknown status events for a known goal follow the bounded status retry
+       policy instead of clearing timers or treating the session as busy;
+       unknown events for unrelated sessions do not invalidate this goal.
    - quiescence check via the message tail (trailing user message or
      unfinished assistant reply → bail; the next idle transition re-arms);
    - token accounting as a SNAPSHOT of the latest completed assistant turn:
-     `input + cache.read + output`. Earlier turns' inputs and outputs fold
+      `input + reasoning + cache.read + cache.write + output`. Earlier turns' inputs and outputs fold
      into the next turn's cache, so the latest snapshot already carries the
      whole run's paid tokens — no summing across messages. Goal-relative via
-     `tokensBaseline` (the same snapshot of the newest pre-goal turn,
-     captured on the first tick). Compaction (an assistant message with
-     `summary: true`) breaks the snapshot chain, so accounting is segmented:
-     the summary message closes the segment into `tokensCommitted` (the
-     summary turn read the whole context, so its snapshot prices the
-     compaction itself) and the next segment starts with a zero baseline.
-     `tokensUsed = tokensCommitted + current segment`, kept monotonic so
-     unflagged context shrinks never move the budget backwards;
+      `tokensBaseline` (the same snapshot of the newest pre-goal turn,
+      captured on the first tick). Compaction (an assistant message with
+      `summary: true`) breaks the snapshot chain, so accounting is segmented:
+       the summary message closes the segment into `tokensCommitted`; OpenCode
+       zeroes the summary token fields, so the compaction call itself is a
+       known undercount, and the next segment starts with a zero baseline.
+      Messages are ordered by finite `time.created`, while equal timestamps
+      retain authoritative API order. Missing or non-finite timestamps stay in
+      a stable unknown bucket after timestamped messages. The persisted `lastAccountedMessageID`
+      remains compatible; if it is outside the bounded page, the runtime does
+      not replay the page or infer chronology from IDs and preserves prior
+      monotonic totals until a safe cursor is visible. `tokensUsed =
+      tokensCommitted + current segment`, kept monotonic so unflagged context
+      shrinks never move the budget backwards;
+      if the initial full page contains no visible pre-goal assistant baseline,
+      the runtime conservatively leaves the cursor and totals unchanged rather
+      than charging unknown pre-goal context. This can undercount until a safe
+      baseline is visible, but preserves monotonic totals and summary
+      segmentation;
    - a user abort pauses the goal instead of blocking it: the event path in
      `processPayload` pauses immediately on the MessageAbortedError message
-     (before any tick could send a continuation over the user's explicit
-     stop), with a tick-side safety net. Messages sent while paused leave
-     the goal alone; Resume re-arms the loop, and resuming over an aborted
-     tail skips the audit and goes straight to a continuation nudge;
-   - terminal checks, cheapest first: assistant turn error → `blocked`;
+      (before any tick could send a continuation over the user's explicit
+      stop), with a tick-side safety net. A per-session cancellation generation
+      prevents stale ticks from writing metadata or dispatching after abort. If
+      busy/retry advances the generation before the pause write completes, the
+      pending abort is rebound to the new generation and the next authoritative
+      idle pauses the goal before audit/dispatch.
+      Messages sent while paused leave the goal alone; Resume re-arms the loop,
+      and resuming over an aborted tail skips the audit and goes straight to a
+      continuation nudge;
+    - terminal checks, cheapest first: genuine assistant turn errors → `blocked`;
+      `finish: "length"` and `MessageOutputLengthError` remain resumable when
+      applicable: the first eligible completed non-summary truncation may
+      recover, while the second consecutive one blocks with
+      `statusReason: 'repeated output truncation'`; summaries and assistants
+      without a finite `time.created` do not contribute to the breaker;
      `tokensUsed >= tokenBudget` → `budgetLimited`;
      `turnsUsed >= MAX_AUTO_TURNS` (20) → `blocked`;
    - if the latest message is a compaction summary, skip the audit and
@@ -128,21 +222,86 @@ before touching the filesystem). Rationale: metadata rides every
      audit unavailable") — resumable, and settling resets the streak so
      Resume gets fresh tolerance. A dead small model can never drive the
      loop blind to the turn cap;
-   - continue: persist accounting + `turnsUsed` first (a crash after the
-     write just waits for the next idle tick; the reverse could double-send),
-     re-check the tail, then `POST /session/:id/prompt_async` with the
-     continuation prompt using the last assistant message's
-     provider/model/agent — the goal spends the session's own subscription.
+    - continue: persist accounting + `turnsUsed` first (a crash after the
+      write is reconciled by the next idle tick or restart scan; the reverse
+      could double-send),
+      re-check the tail, then `POST /session/:id/prompt_async` with the
+      continuation prompt using the last assistant message's
+      provider/model/agent — the goal spends the session's own subscription.
+        A proven pre-admission rejection re-arms after in-flight work clears and
+        retries the existing accounting reservation for that exact tail without
+        incrementing tokens or turns again. The reservation is created before
+        the ambiguous accounting PATCH and is idempotently recognized on the
+        next read, so an accepted PATCH with a lost response cannot double-count.
+        Proven rejection dispatch is attempted at most four times, including the
+         initial attempt. On exhaustion the runtime enters an in-memory
+         `terminalization-pending` state before disabling ordinary retries. An
+         authoritative active goal is settled as blocked and its reservation is
+         released only after the terminal write succeeds. If the final fetch,
+         guarded restore, or blocked PATCH fails, terminalization retries with
+          bounded backoff, at most four times after the first terminal attempt.
+           If any terminal write (`complete`, `budgetLimited`, or ordinary
+           `blocked`) committed before its response was lost, the next
+           authoritative terminal read completes the same settlement, releases
+           the matching reservation, and emits one notification without another
+           PATCH. Exhaustion of that resolution window leaves the
+          reservation protected and waits for a later authoritative idle or
+          Resume to start one new bounded resolution window. While pending or
+          escalated, no path may call `prompt_async`. An ambiguous `prompt_async`
+        response is reconciled against authoritative session, status, and
+        message state. It is never retried as a blind POST. A later status or
+        changed tail drops the reservation. If the tail moved before dispatch,
+        guarded cleanup restores the exact
+        before-accounting values; if that restore is no longer safe, the goal is
+        explicitly blocked rather than silently charged. If both the restore
+        and blocked writes fail, the reservation remains as an explicit local
+         pending or escalated state and retries through the bounded policy; a
+          later authoritative idle or Resume starts another bounded resolution
+           window. Pause, replacement/edit, abort, and runtime stop never
+        silently drop an undispatched reservation: an active edit-in-place that
+        retains the reservation identity (`id` + `createdAt`) rebinds it and
+        preserves its accounting, while lifecycle invalidation restores the
+        exact before-state; an identity change either proves the old charge is
+        gone or blocks the current goal explicitly when the charge cannot be
+         separated. Resume adopts its authoritative accounting state. When it
+           resets `turnsUsed` while retaining the accounting cursor, any
+           rejected or terminalization reservation for the previous segment is
+           resolved as superseded, its fence is cleared, and the idle kickoff
+           creates one fresh continuation reservation. A genuinely new logical
+           goal
+          cleans up the old reservation. Accounting-first ordering remains
+          intact.
+        The restart scan uses the persisted cursor and authoritative transcript.
+        If `sessionGoalEnabled` is false, it skips the ambiguity hold and keeps a
+        bounded per-goal retry window. Any active-goal timer that fires while the
+        setting is disabled does no work or dispatch, but its authoritative local
+        session record is retained. Re-enabling the setting clears the bounded
+        retry window and re-arms every known active goal, including goals found by
+        the restart scan, so unchanged idle goals recover without permanent
+        polling.
+       If the cursor already names the current assistant tail and no in-memory
+       reservation survived, the state is ambiguous (the POST may have been
+       accepted); recovery holds that goal rather than charging or dispatching
+       again. A new tail or explicit Resume releases the hold. This is the
+       bounded safest outcome without adding a reservation schema or a
+       cross-process transaction.
 4. Settling (`complete`/`blocked`/`budgetLimited`) fires the injected
    `emitGoalNotification` so the user hears about it even with the UI closed:
+   rollback fallback that confirms `blocked` uses this same settlement path;
+   the reservation is removed only after that terminal write succeeds.
    desktop + UI broadcast + the standard push fanout (web-push with full
    text; APNs with a generic per-type title and the session name as body).
    It obeys the notify-on-completion setting. Conversely, while a goal is
    ACTIVE the notifications runtime suppresses per-turn "ready"
    notifications on every channel — they would only echo the loop's own
    continuations; error/question/permission notifications are untouched.
-   Pausing a goal from the UI also aborts the running turn (and vice versa —
-   an abort pauses the goal), so "stop" means stop on both axes.
+    Pausing a goal from the UI also aborts the running turn (and vice versa —
+    an abort pauses the goal), so "stop" means stop on both axes.
+
+`stop()` clears timers and invalidates all in-flight ticks, metadata writes, and
+continuation dispatches. Late completions cannot write or send. The runtime's
+queue/version/goal/status guards are local to this server process; an external
+UI `PATCH` cannot join them and may still race a runtime write.
 
 ## Continuation prompt
 
@@ -208,6 +367,23 @@ ordering used by create and scheduled goals.
   `session.updated` but does not run the loop.
 - A goal on a session with no assistant reply yet starts after the first
   user exchange completes (no provider/model to continue with before that).
-- `tokensUsed` only counts completed assistant messages seen within the
-  40-message fetch window per tick; extremely long busy stretches between
-  idles undercount (acceptable: budget is a guardrail, not billing).
+ - `tokensUsed` only counts completed assistant messages seen within the
+   40-message fetch window per tick; extremely long busy stretches between
+   idles undercount (acceptable: budget is a guardrail, not billing). Message
+   chronology is `time.created`; missing timestamps remain in stable API order,
+   and IDs never break chronology. The cursor is an opaque message identity,
+   never an ordering key.
+- The runtime-local queue and reservation cannot make an external UI PATCH or
+  another OpenChamber process participate in the same compare-and-swap. Final
+  session/status, transcript-tail, objective-content, generation, and status
+  checks minimize this race; a mutation after those checks and before the POST
+ remains ambiguous. Ambiguous POST responses are reconciled and never retried
+ blindly, so an accepted-but-lost continuation cannot trigger duplicate
+ provider execution. Only a proven non-admission rejection enters the bounded
+ dispatch retry policy. Undispatched accounting is restored to its guarded
+ before-state or explicitly blocks instead of being silently charged.
+- A hard process crash can still occur after the accounting PATCH and before
+  the in-memory reservation is durable. On restart the transcript/cursor hold
+  prevents a second charge or prompt, but it cannot reconstruct the exact
+  pre-PATCH counters without another persisted reservation record; the goal
+  may remain active until a new tail or explicit Resume supplies intent.

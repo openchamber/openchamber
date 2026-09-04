@@ -86,6 +86,22 @@ describe('settings runtime', () => {
     }
   });
 
+  it('rejects array-shaped strict settings while preserving empty and missing settings', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, '[]', 'utf8');
+      await expect(runtime.readSettingsFromDiskStrict()).rejects.toThrow('expected object payload');
+
+      await fsPromises.writeFile(settingsFilePath, '{}', 'utf8');
+      await expect(runtime.readSettingsFromDiskStrict()).resolves.toEqual({});
+
+      await fsPromises.rm(settingsFilePath);
+      await expect(runtime.readSettingsFromDiskStrict()).resolves.toEqual({});
+    } finally {
+      await cleanup();
+    }
+  });
+
   it.skipIf(process.platform === 'win32')('writes settings with restrictive directory and file permissions', async () => {
     const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
     try {

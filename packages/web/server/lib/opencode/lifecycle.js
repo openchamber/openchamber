@@ -109,8 +109,26 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     reapManagedOrphanedProcesses = reapOrphanedProcesses,
     getWarmupDirectories = async () => [],
     onOpenCodeRestarted = null,
+    onOpenCodeReady = null,
     now = Date.now,
   } = deps;
+
+  const notifyOpenCodeReady = () => {
+    if (!onOpenCodeReady) return;
+    try {
+      Promise.resolve(onOpenCodeReady()).catch((error) => {
+        console.warn('OpenCode readiness callback failed:', error?.message ?? error);
+      });
+    } catch (error) {
+      console.warn('OpenCode readiness callback failed:', error?.message ?? error);
+    }
+  };
+
+  const markOpenCodeReady = () => {
+    const wasReady = state.isOpenCodeReady === true;
+    state.isOpenCodeReady = true;
+    if (!wasReady) notifyOpenCodeReady();
+  };
 
   const killProcessOnPortWin32 = (port) => {
     try {
@@ -753,7 +771,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         setOpenCodePort(port);
         setDetectedOpenCodeApiPrefix(prefix);
 
-        state.isOpenCodeReady = true;
+        markOpenCodeReady();
         state.lastOpenCodeError = null;
         state.openCodeNotReadySince = 0;
 
@@ -836,7 +854,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           console.log(`External OpenCode server on port ${probePort} is healthy`);
           state.openCodeBaseUrl = probeOrigin ?? null;
           setOpenCodePort(probePort);
-          state.isOpenCodeReady = true;
+          markOpenCodeReady();
           state.lastOpenCodeError = null;
           state.openCodeNotReadySince = 0;
           syncToHmrState();
@@ -961,7 +979,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           continue;
         }
 
-        state.isOpenCodeReady = true;
+        markOpenCodeReady();
         state.lastOpenCodeError = null;
         return;
       } catch (error) {
@@ -1032,7 +1050,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     try {
       await waitForOpenCodeReady();
-      state.isOpenCodeReady = true;
+      markOpenCodeReady();
       state.openCodeNotReadySince = 0;
 
       // Waiting for the agent to appear only makes sense when we actually
@@ -1041,7 +1059,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         await waitForAgentPresence(agentName);
       }
 
-      state.isOpenCodeReady = true;
+      markOpenCodeReady();
       state.openCodeNotReadySince = 0;
     } catch (error) {
       state.isOpenCodeReady = false;
@@ -1081,7 +1099,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         console.log(`Using external OpenCode server at ${label} (skip-start mode)`);
         state.openCodeBaseUrl = env.ENV_CONFIGURED_OPENCODE_HOST?.origin ?? null;
         setOpenCodePort(env.ENV_EFFECTIVE_PORT);
-        state.isOpenCodeReady = true;
+        markOpenCodeReady();
         state.isExternalOpenCode = true;
         state.lastOpenCodeError = null;
         state.openCodeNotReadySince = 0;
@@ -1091,7 +1109,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         console.log(`Auto-detected existing OpenCode server at ${label}`);
         state.openCodeBaseUrl = env.ENV_CONFIGURED_OPENCODE_HOST?.origin ?? null;
         setOpenCodePort(env.ENV_EFFECTIVE_PORT);
-        state.isOpenCodeReady = true;
+        markOpenCodeReady();
         state.isExternalOpenCode = true;
         state.lastOpenCodeError = null;
         state.openCodeNotReadySince = 0;

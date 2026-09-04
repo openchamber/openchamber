@@ -389,7 +389,48 @@ const readSettingsFromDiskMigrated = (...args) => settingsRuntime.readSettingsFr
 const readSettingsFromDisk = (...args) => settingsRuntime.readSettingsFromDisk(...args);
 const readSettingsFromDiskStrict = (...args) => settingsRuntime.readSettingsFromDiskStrict(...args);
 const writeSettingsToDisk = (...args) => settingsRuntime.writeSettingsToDisk(...args);
-const persistSettings = (...args) => settingsRuntime.persistSettings(...args);
+let sessionGoalRuntime;
+const persistSettings = async (...args) => {
+  const changes = args[0];
+  const updated = await settingsRuntime.persistSettings(...args);
+  if (changes?.sessionGoalEnabled === true || changes?.sessionGoalEnabled === false) {
+    sessionGoalRuntime?.onSettingsChanged?.();
+  }
+  return updated;
+};
+
+// Known project directories, MRU first (lastDirectory, then projects by
+// lastOpenedAt). The session-goal restart scan uses the strict settings reader
+// so a read failure remains a retryable failure instead of an empty scan.
+const collectKnownDirectories = async (readSettings = readSettingsFromDiskStrict) => {
+  const settings = await readSettings();
+  if (Array.isArray(settings)) {
+    throw new Error('Settings file is malformed (expected object payload)');
+  }
+  const directories = [];
+  if (typeof settings.lastDirectory === 'string' && settings.lastDirectory) {
+    directories.push(settings.lastDirectory);
+  }
+  const projects = Array.isArray(settings.projects) ? [...settings.projects] : [];
+  projects.sort((a, b) => (b?.lastOpenedAt ?? 0) - (a?.lastOpenedAt ?? 0));
+  for (const project of projects) {
+    if (typeof project?.path === 'string' && project.path) {
+      directories.push(project.path);
+    }
+  }
+  return [...new Set(directories)].slice(0, 4);
+};
+
+// Lifecycle warmup is deliberately best-effort. Keep its existing behavior
+// even when settings are unavailable, while the session-goal scan receives the
+// strict collector above and can schedule bounded recovery.
+const collectWarmupDirectories = async () => {
+  try {
+    return await collectKnownDirectories(readSettingsFromDiskMigrated);
+  } catch {
+    return [];
+  }
+};
 
 const requestSecurityRuntime = createRequestSecurityRuntime({
   readSettingsFromDiskMigrated,
@@ -784,7 +825,7 @@ const sessionAssistRuntime = createSessionAssistRuntime({
   getSmallModelService: async () => import('./lib/small-model/index.js'),
 });
 
-const sessionGoalRuntime = createSessionGoalRuntime({
+sessionGoalRuntime = createSessionGoalRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   getSmallModelService: async () => import('./lib/small-model/index.js'),
@@ -1165,22 +1206,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   // lazily on first request (seconds on large session stores), so the
   // lifecycle warms these right after readiness — before the UI's first
   // interactive request would otherwise pay that cost.
-  getWarmupDirectories: async () => {
-    const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    if (!settings) return [];
-    const directories = [];
-    if (typeof settings.lastDirectory === 'string' && settings.lastDirectory) {
-      directories.push(settings.lastDirectory);
-    }
-    const projects = Array.isArray(settings.projects) ? [...settings.projects] : [];
-    projects.sort((a, b) => (b?.lastOpenedAt ?? 0) - (a?.lastOpenedAt ?? 0));
-    for (const project of projects) {
-      if (typeof project?.path === 'string' && project.path) {
-        directories.push(project.path);
-      }
-    }
-    return [...new Set(directories)];
-  },
+  getWarmupDirectories: collectWarmupDirectories,
   // A managed restart can move OpenCode to a NEW port (the old one may stay
   // occupied if killProcessOnPort/waitForPortRelease didn't free it in time,
   // on any platform). Rebind the message-stream upstream readers to the current port
@@ -1214,6 +1240,12 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
       console.warn('Failed to reconcile sessions after OpenCode restart:', error?.message ?? error);
     }
   },
+  onOpenCodeReady: () => sessionGoalRuntime.start({
+    listDirectories: collectKnownDirectories,
+    resetRetryWindow: true,
+  }).catch((error) => {
+    console.warn('[session-goal] readiness recovery failed:', error?.message || error);
+  }),
   getManagedOpenCodeEnv: async () => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
     // Each capability is its own tool and its own switch; the plugin is only
@@ -2001,6 +2033,19 @@ async function main(options = {}) {
     await scheduledTasksRuntime.start();
   } catch (error) {
     console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error);
+  }
+
+  // Deterministic restart recovery for persisted active goals: an already-idle
+  // session usually emits no SSE event after a restart, so a bounded one-shot
+  // scan over the known directories re-arms the loop (see runtime.recover).
+  // The scan mirrors the lifecycle warmup directories (MRU last, then
+  // projects) and is bounded per runtime; there is no permanent polling.
+  try {
+    await sessionGoalRuntime.start({
+      listDirectories: collectKnownDirectories,
+    });
+  } catch (error) {
+    console.warn('[session-goal] restart recovery failed:', error?.message || error);
   }
 
   // Only opens a relay control socket when the user opted in (config enabled).
