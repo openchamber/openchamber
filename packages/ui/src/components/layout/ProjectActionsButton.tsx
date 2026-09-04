@@ -136,6 +136,8 @@ export const ProjectActionsButton = ({
   const [actions, setActions] = React.useState<OpenChamberProjectAction[]>([]);
   const [selectedActionId, setSelectedActionId] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
+  const [devServerDetected, setDevServerDetected] = React.useState<boolean | null>(null);
+  const detectionDirectoryRef = React.useRef<string | null>(null);
   const tabByKeyRef = React.useRef<Record<string, string>>({});
   const urlWatchByRunKeyRef = React.useRef<Record<string, UrlWatchEntry>>({});
   const streamCleanupByRunKeyRef = React.useRef<Record<string, () => void>>({});
@@ -169,6 +171,12 @@ export const ProjectActionsButton = ({
       return;
     }
 
+    const detectedDirectory = normalizeProjectActionDirectory(directory || stableProjectRef?.path || '');
+    if (detectionDirectoryRef.current !== detectedDirectory) {
+      detectionDirectoryRef.current = detectedDirectory;
+      setDevServerDetected(null);
+    }
+
     const requestId = loadRequestIdRef.current + 1;
     loadRequestIdRef.current = requestId;
 
@@ -189,6 +197,16 @@ export const ProjectActionsButton = ({
         }
         return null;
       });
+
+      const scripts = await readPackageJsonScripts(detectedDirectory);
+      if (loadRequestIdRef.current !== requestId) {
+        return;
+      }
+      const devServer = await detectDevServerCommand(detectedDirectory, filtered, scripts);
+      if (loadRequestIdRef.current !== requestId) {
+        return;
+      }
+      setDevServerDetected(devServer !== null);
     } catch {
       if (loadRequestIdRef.current !== requestId) {
         return;
@@ -199,18 +217,11 @@ export const ProjectActionsButton = ({
         setIsLoading(false);
       }
     }
-  }, [stableProjectRef]);
+  }, [directory, stableProjectRef]);
 
   const normalizedDirectory = React.useMemo(() => {
     return normalizeProjectActionDirectory(directory || stableProjectRef?.path || '');
   }, [directory, stableProjectRef?.path]);
-
-  const selectedAction = React.useMemo(() => {
-    if (!selectedActionId) {
-      return null;
-    }
-    return actions.find((entry) => entry.id === selectedActionId) ?? null;
-  }, [actions, selectedActionId]);
 
   const autoDiscoverAction = React.useMemo<OpenChamberProjectAction>(() => ({
     id: AUTO_DISCOVER_ACTION_ID,
@@ -220,7 +231,20 @@ export const ProjectActionsButton = ({
     autoOpenUrl: true,
   }), [t]);
 
-  const canUseAutoDiscover = !isMobile;
+  const selectedAction = React.useMemo(() => {
+    if (!selectedActionId) {
+      return null;
+    }
+    return actions.find((entry) => entry.id === selectedActionId) ?? null;
+  }, [actions, selectedActionId]);
+
+  const canUseAutoDiscover = !isMobile && devServerDetected === true;
+  const autoDiscoverRunActive = React.useMemo(() => {
+    if (!normalizedDirectory) return false;
+    const runKey = toProjectActionRunKey(normalizedDirectory, AUTO_DISCOVER_ACTION_ID);
+    const run = projectActionRuns[runKey];
+    return run?.status === 'running' || run?.status === 'waiting-for-preview' || run?.status === 'stopping';
+  }, [normalizedDirectory, projectActionRuns]);
   const displayActions = React.useMemo(
     () => canUseAutoDiscover ? [autoDiscoverAction, ...actions] : actions,
     [actions, autoDiscoverAction, canUseAutoDiscover]
@@ -253,16 +277,19 @@ export const ProjectActionsButton = ({
   }, [loadActions, projectId]);
 
   React.useEffect(() => {
+    if (devServerDetected === null) {
+      return;
+    }
     if (!selectedActionId) {
       return;
     }
-    if (selectedActionId === AUTO_DISCOVER_ACTION_ID && canUseAutoDiscover) {
+    if (selectedActionId === AUTO_DISCOVER_ACTION_ID && (canUseAutoDiscover || autoDiscoverRunActive)) {
       return;
     }
     if (!actions.some((entry) => entry.id === selectedActionId)) {
       setSelectedActionId(null);
     }
-  }, [actions, canUseAutoDiscover, selectedActionId]);
+  }, [actions, autoDiscoverRunActive, canUseAutoDiscover, devServerDetected, selectedActionId]);
 
   React.useEffect(() => {
     /**
@@ -312,7 +339,8 @@ export const ProjectActionsButton = ({
 
         const watch = urlWatchByRunKeyRef.current[runKey] ?? { lastSeenChunkId: null, openedUrl: false, tail: '', openInPreview: false, announced: [], offering: false };
         urlWatchByRunKeyRef.current[runKey] = watch;
-        const action = displayActions.find((item) => item.id === entry.actionId);
+        const action = displayActions.find((item) => item.id === entry.actionId)
+          ?? (entry.actionId === AUTO_DISCOVER_ACTION_ID ? autoDiscoverAction : undefined);
         const bufferChunks = terminalStore.getBuffer(entry.directory, entry.tabId).chunks;
         if (!action || bufferChunks.length === 0) continue;
 
@@ -386,7 +414,7 @@ export const ProjectActionsButton = ({
     return useTerminalStore.subscribe((state, previousState) => {
       if (state.sessions !== previousState.sessions || state.buffers !== previousState.buffers) monitorRuns();
     });
-  }, [displayActions, openContextPreview, openExternal, projectActionRuns, removeProjectActionRun, setTabPreviewUrl, t, updateProjectActionRunStatus]);
+  }, [autoDiscoverAction, displayActions, openContextPreview, openExternal, projectActionRuns, removeProjectActionRun, setTabPreviewUrl, t, updateProjectActionRunStatus]);
 
   const getOrCreateActionTab = React.useCallback(async (action: OpenChamberProjectAction, options: { revealTerminal?: boolean } = {}) => {
     if (!normalizedDirectory) {
@@ -680,10 +708,19 @@ export const ProjectActionsButton = ({
     delete previewWaitTimeoutByRunKeyRef.current[runKey];
   }, [normalizedDirectory, projectActionRuns, removeProjectActionRun, setTabSessionId, terminal, updateProjectActionRunStatus]);
 
+  const selectedAutoDiscoverAvailable = selectedActionId === AUTO_DISCOVER_ACTION_ID
+    && (canUseAutoDiscover || autoDiscoverRunActive);
+  const resolvedSelected = selectedAutoDiscoverAvailable
+    ? autoDiscoverAction
+    : selectedAction ?? (autoDiscoverRunActive ? autoDiscoverAction : displayActions[0]) ?? null;
+
   const handlePrimaryClick = React.useCallback(() => {
-    const action = selectedAction ?? displayActions[0];
+    const action = resolvedSelected;
     if (!action) {
       return;
+    }
+    if (action.id === AUTO_DISCOVER_ACTION_ID) {
+      setSelectedActionId(action.id);
     }
     const runKey = toProjectActionRunKey(normalizedDirectory, action.id);
     const runningEntry = projectActionRuns[runKey];
@@ -695,7 +732,7 @@ export const ProjectActionsButton = ({
       return;
     }
     void runAction(action);
-  }, [displayActions, normalizedDirectory, runAction, projectActionRuns, selectedAction, stopAction]);
+  }, [normalizedDirectory, projectActionRuns, resolvedSelected, runAction, stopAction]);
 
   const handleSelectAction = React.useCallback((action: OpenChamberProjectAction, toggleStopIfRunning = false) => {
     setSelectedActionId(action.id);
@@ -726,8 +763,7 @@ export const ProjectActionsButton = ({
     setSettingsDialogOpen(true);
   }, [setSettingsDialogOpen, setSettingsPage, setSettingsProjectsSelectedId, stableProjectRef?.id]);
 
-  const previewAction = selectedAction ?? displayActions[0] ?? null;
-  const previewRun = previewAction ? projectActionRuns[toProjectActionRunKey(normalizedDirectory, previewAction.id)] : null;
+  const previewRun = resolvedSelected ? projectActionRuns[toProjectActionRunKey(normalizedDirectory, resolvedSelected.id)] : null;
   const selectedRunPreviewUrl = useTerminalStore((state) => {
     if (!previewRun) return null;
     return state.sessions.get(previewRun.directory)?.tabs.find((tab) => tab.id === previewRun.tabId)?.previewUrl ?? null;
@@ -737,17 +773,12 @@ export const ProjectActionsButton = ({
     return null;
   }
 
-  const resolvedSelected = selectedAction ?? displayActions[0] ?? null;
-  if (!resolvedSelected) {
-    return null;
-  }
-
-  const selectedIconKey = (resolvedSelected.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
-  const selectedIconName = resolvedSelected.id === AUTO_DISCOVER_ACTION_ID
+  const selectedIconKey = (resolvedSelected?.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
+  const selectedIconName = resolvedSelected?.id === AUTO_DISCOVER_ACTION_ID
     ? 'scan-2'
     : PROJECT_ACTION_ICON_MAP[selectedIconKey] || 'play';
-  const selectedRunKey = toProjectActionRunKey(normalizedDirectory, resolvedSelected.id);
-  const selectedRunning = projectActionRuns[selectedRunKey];
+  const selectedRunKey = resolvedSelected ? toProjectActionRunKey(normalizedDirectory, resolvedSelected.id) : null;
+  const selectedRunning = selectedRunKey ? projectActionRuns[selectedRunKey] : null;
   const isStoppingSelected = selectedRunning?.status === 'stopping';
   const isWaitingForSelectedPreview = selectedRunning?.status === 'waiting-for-preview';
   const showSelectedPreviewButton = Boolean(selectedRunning && selectedRunPreviewUrl);
@@ -757,40 +788,42 @@ export const ProjectActionsButton = ({
     }
     openContextPreview(selectedRunning.directory, selectedRunPreviewUrl);
   };
-  const isAutoDiscoverSelected = resolvedSelected.id === AUTO_DISCOVER_ACTION_ID;
+  const isAutoDiscoverSelected = resolvedSelected?.id === AUTO_DISCOVER_ACTION_ID;
 
   if (compact) {
     return (
       <div className="inline-flex items-center">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              disabled={isLoading || isStoppingSelected}
-              className={cn(
-                'app-region-no-drag inline-flex h-9 w-9 items-center justify-center rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] p-2',
-                'typography-ui-label font-medium text-muted-foreground hover:bg-interactive-hover hover:text-foreground transition-colors',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                'disabled:cursor-not-allowed',
-                className
-              )}
-              onClick={handlePrimaryClick}
-              aria-label={selectedRunning
-                ? t('projectActions.actions.stopNamedAria', { name: resolvedSelected.name })
-                : t('projectActions.actions.runNamedAria', { name: resolvedSelected.name })}
-            >
-              {isStoppingSelected || isWaitingForSelectedPreview
-                ? <Icon name="loader-4" className="h-5 w-5 animate-spin text-[var(--status-warning)]" />
-                : selectedRunning
-                  ? <Icon name="stop" className="h-5 w-5 text-[var(--status-warning)]" />
-                  : <Icon name={selectedIconName} className="h-5 w-5" />}
-            </button>
-          </TooltipTrigger>
-          {isAutoDiscoverSelected ? (
-            <TooltipContent sideOffset={6}>{t('projectActions.actions.autoDiscoverTooltip')}</TooltipContent>
-          ) : null}
-        </Tooltip>
-        {showSelectedPreviewButton ? (
+        {resolvedSelected ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                disabled={isLoading || isStoppingSelected}
+                className={cn(
+                  'app-region-no-drag inline-flex h-9 w-9 items-center justify-center rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] p-2',
+                  'typography-ui-label font-medium text-muted-foreground hover:bg-interactive-hover hover:text-foreground transition-colors',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                  'disabled:cursor-not-allowed',
+                  className
+                )}
+                onClick={handlePrimaryClick}
+                aria-label={selectedRunning
+                  ? t('projectActions.actions.stopNamedAria', { name: resolvedSelected.name })
+                  : t('projectActions.actions.runNamedAria', { name: resolvedSelected.name })}
+              >
+                {isStoppingSelected || isWaitingForSelectedPreview
+                  ? <Icon name="loader-4" className="h-5 w-5 animate-spin text-[var(--status-warning)]" />
+                  : selectedRunning
+                    ? <Icon name="stop" className="h-5 w-5 text-[var(--status-warning)]" />
+                    : <Icon name={selectedIconName} className="h-5 w-5" />}
+              </button>
+            </TooltipTrigger>
+            {isAutoDiscoverSelected ? (
+              <TooltipContent sideOffset={6}>{t('projectActions.actions.autoDiscoverTooltip')}</TooltipContent>
+            ) : null}
+          </Tooltip>
+        ) : null}
+        {resolvedSelected && showSelectedPreviewButton ? (
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -820,7 +853,7 @@ export const ProjectActionsButton = ({
               <Icon name="add" className="h-4 w-4" />
               <span className="typography-ui-label text-foreground">{t('projectActions.actions.addNewAction')}</span>
             </DropdownMenuItem>
-            <DropdownMenuSeparator />
+            {displayActions.length > 0 ? <DropdownMenuSeparator /> : null}
             {displayActions.map((entry) => {
               const iconKey = (entry.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
               const iconName = entry.id === AUTO_DISCOVER_ACTION_ID
@@ -865,36 +898,38 @@ export const ProjectActionsButton = ({
         className
       )}
     >
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={handlePrimaryClick}
-            disabled={isLoading || isStoppingSelected}
-            className={cn(
-              'inline-flex h-full items-center justify-center typography-ui-label font-medium text-foreground hover:bg-interactive-hover',
-              compact ? 'w-9 px-0' : 'px-2.5',
-              'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed'
-            )}
-            aria-label={selectedRunning
-              ? t('projectActions.actions.stopNamedAria', { name: resolvedSelected.name })
-              : t('projectActions.actions.runNamedAria', { name: resolvedSelected.name })}
-          >
-            <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center">
-              {isStoppingSelected || isWaitingForSelectedPreview
-                ? <Icon name="loader-4" className="h-4 w-4 animate-spin text-[var(--status-warning)]" />
-                : selectedRunning
-                  ? <Icon name="stop" className="h-4 w-4 text-[var(--status-warning)]" />
-                  : <Icon name={selectedIconName} className="h-4 w-4" />}
-            </span>
-          </button>
-        </TooltipTrigger>
-        {isAutoDiscoverSelected ? (
-          <TooltipContent sideOffset={6}>{t('projectActions.actions.autoDiscoverTooltip')}</TooltipContent>
-        ) : null}
-      </Tooltip>
+      {resolvedSelected ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={handlePrimaryClick}
+              disabled={isLoading || isStoppingSelected}
+              className={cn(
+                'inline-flex h-full items-center justify-center typography-ui-label font-medium text-foreground hover:bg-interactive-hover',
+                compact ? 'w-9 px-0' : 'px-2.5',
+                'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed'
+              )}
+              aria-label={selectedRunning
+                ? t('projectActions.actions.stopNamedAria', { name: resolvedSelected.name })
+                : t('projectActions.actions.runNamedAria', { name: resolvedSelected.name })}
+            >
+              <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center">
+                {isStoppingSelected || isWaitingForSelectedPreview
+                  ? <Icon name="loader-4" className="h-4 w-4 animate-spin text-[var(--status-warning)]" />
+                  : selectedRunning
+                    ? <Icon name="stop" className="h-4 w-4 text-[var(--status-warning)]" />
+                    : <Icon name={selectedIconName} className="h-4 w-4" />}
+              </span>
+            </button>
+          </TooltipTrigger>
+          {isAutoDiscoverSelected ? (
+            <TooltipContent sideOffset={6}>{t('projectActions.actions.autoDiscoverTooltip')}</TooltipContent>
+          ) : null}
+        </Tooltip>
+      ) : null}
 
-      {showSelectedPreviewButton ? (
+      {resolvedSelected && showSelectedPreviewButton ? (
         <Tooltip>
           <TooltipTrigger asChild>
             <button
@@ -933,7 +968,7 @@ export const ProjectActionsButton = ({
             <Icon name="add" className="h-4 w-4" />
             <span className="typography-ui-label text-foreground">{t('projectActions.actions.addNewAction')}</span>
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
+          {displayActions.length > 0 ? <DropdownMenuSeparator /> : null}
           {displayActions.map((entry) => {
             const iconKey = (entry.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
             const iconName = entry.id === AUTO_DISCOVER_ACTION_ID
