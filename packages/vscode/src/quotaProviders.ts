@@ -100,12 +100,15 @@ type ZaiPayload = {
   };
 };
 
-type ZhipuaiTokensLimit = {
-  type: 'TOKENS_LIMIT';
+type ZhipuaiCreditLimit = {
+  type: 'TOKENS_LIMIT' | 'CREDIT_LIMIT';
   unit?: number;
   number?: number;
-  nextResetTime?: number;
+  usage?: number;
+  currentValue?: number;
+  remaining?: number;
   percentage?: number;
+  nextResetTime?: number;
 };
 
 type ZhipuaiMcpTimeLimit = {
@@ -125,7 +128,8 @@ type ZhipuaiMcpTimeLimit = {
 
 type ZhipuaiPayload = {
   data?: {
-    limits?: Array<ZhipuaiTokensLimit | ZhipuaiMcpTimeLimit>;
+    limits?: Array<ZhipuaiCreditLimit | ZhipuaiMcpTimeLimit>;
+    level?: string;
   };
 };
 
@@ -2187,23 +2191,26 @@ const fetchZhipuaiCodingPlanQuota = async (): Promise<ProviderResult> => {
     const payload = await response.json() as ZhipuaiPayload;
     const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
 
-    const tokensLimit = limits.find((limit): limit is ZhipuaiTokensLimit => limit?.type === 'TOKENS_LIMIT');
-    const mcpToolsTimeLimit = limits.find((limit): limit is ZhipuaiMcpTimeLimit => limit?.type === 'TIME_LIMIT');
-
     const windows: Record<string, UsageWindow> = {};
 
-    // Handle TOKENS_LIMIT (5-hour window for token usage)
-    if (tokensLimit) {
-      const windowSeconds = resolveWindowSeconds(tokensLimit);
-      const resetAt = tokensLimit?.nextResetTime ? normalizeTimestamp(tokensLimit.nextResetTime) : null;
-      const usedPercent = typeof tokensLimit?.percentage === 'number' ? tokensLimit.percentage : null;
+    // The API renamed TOKENS_LIMIT to CREDIT_LIMIT (current Lite/Pro/Max coding
+    // plans); field semantics stayed the same, so both limit types map to the
+    // same windows - mirrors the zai-coding-plan handling above.
+    for (const limit of limits.filter((entry) => entry?.type === 'TOKENS_LIMIT' || entry?.type === 'CREDIT_LIMIT')) {
+      const windowSeconds = resolveWindowSeconds(limit as Record<string, unknown>);
+      const windowLabel = resolveWindowLabel(windowSeconds);
+      const resetAt = limit?.nextResetTime ? normalizeTimestamp(limit.nextResetTime) : null;
+      const usedPercent = typeof limit?.percentage === 'number' ? limit.percentage : null;
 
-      windows['Tokens'] = toUsageWindow({
+      windows[windowLabel] = toUsageWindow({
         usedPercent,
         windowSeconds,
         resetAt,
+        valueLabel: formatZaiCreditValueLabel(limit),
       });
     }
+
+    const mcpToolsTimeLimit = limits.find((limit): limit is ZhipuaiMcpTimeLimit => limit?.type === 'TIME_LIMIT');
 
     // Handle TIME_LIMIT (MCP tools monthly window)
     if (mcpToolsTimeLimit) {
@@ -2225,6 +2232,7 @@ const fetchZhipuaiCodingPlanQuota = async (): Promise<ProviderResult> => {
       ok: true,
       configured: true,
       usage: { windows },
+      planLabel: payload?.data?.level || null,
     });
   } catch (error) {
     return buildResult({
