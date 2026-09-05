@@ -364,8 +364,39 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.notifyOnQuestion === 'boolean') {
       result.notifyOnQuestion = candidate.notifyOnQuestion;
     }
+    if (typeof candidate.notifyOnPermission === 'boolean') {
+      result.notifyOnPermission = candidate.notifyOnPermission;
+    }
     if (candidate.notificationTemplates && typeof candidate.notificationTemplates === 'object') {
       result.notificationTemplates = candidate.notificationTemplates;
+    }
+    if (typeof candidate.notificationSoundEnabled === 'boolean') {
+      result.notificationSoundEnabled = candidate.notificationSoundEnabled;
+    }
+    if (typeof candidate.notificationSoundVolume === 'number' && Number.isFinite(candidate.notificationSoundVolume)) {
+      // Clamp to [0, 1]; non-finite values are dropped by the isFinite check above.
+      result.notificationSoundVolume = Math.min(1, Math.max(0, candidate.notificationSoundVolume));
+    }
+    if (candidate.notificationSoundEventSounds && typeof candidate.notificationSoundEventSounds === 'object' && !Array.isArray(candidate.notificationSoundEventSounds)) {
+      // Validate as a partial Record<NotificationEventKind, string>; only known
+      // event keys with non-empty string values are kept. Unknown sound ids are
+      // preserved as-is; at playback time, playSoundForEvent falls back to the
+      // default sound for the event when the configured id cannot be resolved.
+      const raw = candidate.notificationSoundEventSounds;
+      const sanitized = {};
+      const knownEvents = ['completion', 'error', 'question', 'permission', 'subtask'];
+      for (const event of knownEvents) {
+        const value = raw[event];
+        if (typeof value === 'string' && value.length > 0) {
+          sanitized[event] = value;
+        }
+      }
+      if (Object.keys(sanitized).length > 0) {
+        result.notificationSoundEventSounds = sanitized;
+      }
+    }
+    if (typeof candidate.notificationSoundFocusOnly === 'boolean') {
+      result.notificationSoundFocusOnly = candidate.notificationSoundFocusOnly;
     }
     if (typeof candidate.summarizeLastMessage === 'boolean') {
       result.summarizeLastMessage = candidate.summarizeLastMessage;

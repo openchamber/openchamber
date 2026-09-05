@@ -6,6 +6,7 @@ import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeBootstrapPresent } from '@/lib/vscodeBootstrap';
+import type { NotificationSoundEventSounds } from '@/lib/notificationSound';
 
 type ManagedRemoteTunnelPreset = {
   id: string;
@@ -88,6 +89,7 @@ export type DesktopSettings = {
   notifyOnCompletion?: boolean;
   notifyOnError?: boolean;
   notifyOnQuestion?: boolean;
+  notifyOnPermission?: boolean;
 
   // Per-event notification templates
   notificationTemplates?: {
@@ -96,6 +98,12 @@ export type DesktopSettings = {
     question: { title: string; message: string };
     subtask: { title: string; message: string };
   };
+
+  // Notification sounds (audio cues)
+  notificationSoundEnabled?: boolean;
+  notificationSoundVolume?: number; // 0..1
+  notificationSoundEventSounds?: NotificationSoundEventSounds;
+  notificationSoundFocusOnly?: boolean;
 
   // Summarization settings
   summarizeLastMessage?: boolean;

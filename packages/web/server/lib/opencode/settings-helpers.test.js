@@ -351,6 +351,128 @@ describe('settings helpers', () => {
     expect(response.collapsibleThinkingBlocks).toBe(true);
   });
 
+  describe('notification sound fields', () => {
+    it('round-trips notificationSoundEnabled boolean through sanitizeSettingsUpdate', () => {
+      const helpers = createTestHelpers();
+
+      expect(helpers.sanitizeSettingsUpdate({ notificationSoundEnabled: true })).toEqual({
+        notificationSoundEnabled: true,
+      });
+      expect(helpers.sanitizeSettingsUpdate({ notificationSoundEnabled: false })).toEqual({
+        notificationSoundEnabled: false,
+      });
+    });
+
+    it('rejects non-boolean notificationSoundEnabled values', () => {
+      const helpers = createTestHelpers();
+
+      expect(helpers.sanitizeSettingsUpdate({ notificationSoundEnabled: 'yes' })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ notificationSoundEnabled: 1 })).toEqual({});
+    });
+
+    it('round-trips notifyOnPermission boolean through sanitizeSettingsUpdate', () => {
+      const helpers = createTestHelpers();
+
+      expect(helpers.sanitizeSettingsUpdate({ notifyOnPermission: true })).toEqual({
+        notifyOnPermission: true,
+      });
+      expect(helpers.sanitizeSettingsUpdate({ notifyOnPermission: false })).toEqual({
+        notifyOnPermission: false,
+      });
+    });
+
+    it('rejects non-boolean notifyOnPermission values', () => {
+      const helpers = createTestHelpers();
+
+      expect(helpers.sanitizeSettingsUpdate({ notifyOnPermission: 'yes' })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ notifyOnPermission: 1 })).toEqual({});
+    });
+
+    it('clamps notificationSoundVolume to [0, 1]', () => {
+      const helpers = createTestHelpers();
+
+      expect(helpers.sanitizeSettingsUpdate({ notificationSoundVolume: 0.5 })).toEqual({
+        notificationSoundVolume: 0.5,
+      });
+      expect(helpers.sanitizeSettingsUpdate({ notificationSoundVolume: 1.5 }).notificationSoundVolume).toBe(1);
+      expect(helpers.sanitizeSettingsUpdate({ notificationSoundVolume: -0.5 }).notificationSoundVolume).toBe(0);
+    });
+
+    it('rejects non-finite notificationSoundVolume values', () => {
+      const helpers = createTestHelpers();
+
+      expect(helpers.sanitizeSettingsUpdate({ notificationSoundVolume: NaN })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ notificationSoundVolume: Infinity })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ notificationSoundVolume: 'loud' })).toEqual({});
+    });
+
+    it('round-trips notificationSoundFocusOnly boolean through sanitizeSettingsUpdate', () => {
+      const helpers = createTestHelpers();
+
+      expect(helpers.sanitizeSettingsUpdate({ notificationSoundFocusOnly: true })).toEqual({
+        notificationSoundFocusOnly: true,
+      });
+      expect(helpers.sanitizeSettingsUpdate({ notificationSoundFocusOnly: false })).toEqual({
+        notificationSoundFocusOnly: false,
+      });
+    });
+
+    it('keeps only known event keys with non-empty string values in notificationSoundEventSounds', () => {
+      const helpers = createTestHelpers();
+
+      const input = {
+        completion: 'pack-bipbop/completion',
+        error: 'pack-alert/error',
+        question: 'pack-bipbop/question',
+        permission: 'pack-bipbop/permission',
+        subtask: 'pack-bipbop/subtask',
+        unknownEvent: 'should-be-dropped',
+      };
+      const result = helpers.sanitizeSettingsUpdate({ notificationSoundEventSounds: input });
+      expect(result.notificationSoundEventSounds).toEqual({
+        completion: 'pack-bipbop/completion',
+        error: 'pack-alert/error',
+        question: 'pack-bipbop/question',
+        permission: 'pack-bipbop/permission',
+        subtask: 'pack-bipbop/subtask',
+      });
+    });
+
+    it('drops non-object or array notificationSoundEventSounds', () => {
+      const helpers = createTestHelpers();
+
+      expect(helpers.sanitizeSettingsUpdate({ notificationSoundEventSounds: 'nope' })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ notificationSoundEventSounds: [1, 2] })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ notificationSoundEventSounds: null })).toEqual({});
+    });
+
+    it('drops empty notificationSoundEventSounds objects', () => {
+      const helpers = createTestHelpers();
+
+      expect(helpers.sanitizeSettingsUpdate({ notificationSoundEventSounds: {} })).toEqual({});
+      expect(
+        helpers.sanitizeSettingsUpdate({ notificationSoundEventSounds: { unknownEvent: 'x' } })
+      ).toEqual({});
+    });
+
+    it('includes notification sound fields in formatSettingsResponse when present', () => {
+      const helpers = createTestHelpers();
+
+      const response = helpers.formatSettingsResponse({
+        notificationSoundEnabled: true,
+        notificationSoundVolume: 0.7,
+        notificationSoundEventSounds: { completion: 'pack-bipbop/completion' },
+        notificationSoundFocusOnly: false,
+        notifyOnPermission: false,
+      });
+      expect(response.notificationSoundEnabled).toBe(true);
+      expect(response.notificationSoundVolume).toBe(0.7);
+      expect(response.notificationSoundEventSounds).toEqual({ completion: 'pack-bipbop/completion' });
+      expect(response.notificationSoundFocusOnly).toBe(false);
+      expect(response.notifyOnPermission).toBe(false);
+    });
+  });
+
   it('includes transient desktop LAN access runtime status in desktop settings response', () => {
     const helpers = createTestHelpers();
     const previousRuntime = process.env.OPENCHAMBER_RUNTIME;

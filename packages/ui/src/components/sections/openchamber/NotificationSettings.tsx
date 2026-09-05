@@ -5,15 +5,25 @@ import { toast } from '@/components/ui';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getClientPlatform } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
+import {
+  previewSound,
+  SOUND_PACK_GROUPS,
+  DEFAULT_EVENT_SOUNDS,
+  type NotificationEventKind,
+} from '@/lib/notificationSound';
 import {
   SettingsSection,
   SettingsTwoColumn,
   SettingsCheckboxRow,
   SettingsGroupTitle,
   SETTINGS_OPTION_STACK_CLASS,
+  SETTINGS_SELECT_SIZE,
+  SETTINGS_SELECT_ROW_TRIGGER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
+import { Icon } from '@/components/icon/Icon';
 
 const DEFAULT_NOTIFICATION_TEMPLATES = {
   completion: {
@@ -41,6 +51,14 @@ const TEMPLATE_EVENT_LABEL_KEYS = {
   question: 'settings.notifications.page.template.event.question',
 } as const satisfies Record<NotificationTemplateEvent, string>;
 
+const SOUND_EVENT_LABEL_KEYS = {
+  completion: 'settings.notifications.page.events.completionLabel',
+  error: 'settings.notifications.page.events.errorLabel',
+  question: 'settings.notifications.page.events.questionLabel',
+  permission: 'settings.notifications.page.events.permissionLabel',
+  subtask: 'settings.notifications.page.events.subtaskLabel',
+} as const satisfies Record<NotificationEventKind, string>;
+
 export const NotificationSettings: React.FC = () => {
   const { t } = useI18n();
   const isDesktop = React.useMemo(() => isDesktopShell(), []);
@@ -66,8 +84,18 @@ export const NotificationSettings: React.FC = () => {
   const setNotifyOnError = useUIStore(state => state.setNotifyOnError);
   const notifyOnQuestion = useUIStore(state => state.notifyOnQuestion);
   const setNotifyOnQuestion = useUIStore(state => state.setNotifyOnQuestion);
+  const notifyOnPermission = useUIStore(state => state.notifyOnPermission);
+  const setNotifyOnPermission = useUIStore(state => state.setNotifyOnPermission);
   const notificationTemplates = useUIStore(state => state.notificationTemplates);
   const setNotificationTemplates = useUIStore(state => state.setNotificationTemplates);
+  const notificationSoundEnabled = useUIStore(state => state.notificationSoundEnabled);
+  const setNotificationSoundEnabled = useUIStore(state => state.setNotificationSoundEnabled);
+  const notificationSoundVolume = useUIStore(state => state.notificationSoundVolume);
+  const setNotificationSoundVolume = useUIStore(state => state.setNotificationSoundVolume);
+  const notificationSoundEventSounds = useUIStore(state => state.notificationSoundEventSounds);
+  const setNotificationSoundForEvent = useUIStore(state => state.setNotificationSoundForEvent);
+  const notificationSoundFocusOnly = useUIStore(state => state.notificationSoundFocusOnly);
+  const setNotificationSoundFocusOnly = useUIStore(state => state.setNotificationSoundFocusOnly);
 
   const [notificationPermission, setNotificationPermission] = React.useState<NotificationPermission>('default');
   const [pushSupported, setPushSupported] = React.useState(false);
@@ -518,92 +546,183 @@ export const NotificationSettings: React.FC = () => {
           )}
         </SettingsSection>
 
-        {nativeNotificationsEnabled && canShowNotifications && (
-          <>
-            <SettingsSection
-              settingsItem="notifications.events"
-              title={t('settings.notifications.page.events.title')}
-            >
-              <div className={SETTINGS_OPTION_STACK_CLASS}>
+        <SettingsSection
+          settingsItem="notifications.sounds"
+          title={t('settings.notifications.page.sounds.title')}
+        >
+          <div className={SETTINGS_OPTION_STACK_CLASS}>
+            <SettingsCheckboxRow
+              checked={notificationSoundEnabled}
+              onChange={(checked) => setNotificationSoundEnabled(checked)}
+              label={t('settings.notifications.page.sounds.enableLabel')}
+              info={t('settings.notifications.page.sounds.hint')}
+              ariaLabel={t('settings.notifications.page.sounds.enableAria')}
+            />
+            {notificationSoundEnabled && (
+              <>
                 <SettingsCheckboxRow
-                  checked={notifyOnCompletion}
-                  onChange={setNotifyOnCompletion}
-                  label={t('settings.notifications.page.events.completionLabel')}
-                  ariaLabel={t('settings.notifications.page.events.completionAria')}
+                  checked={notificationSoundFocusOnly}
+                  onChange={(checked) => setNotificationSoundFocusOnly(checked)}
+                  label={t('settings.notifications.page.sounds.focusOnlyLabel')}
+                  info={t('settings.notifications.page.sounds.focusOnlyHint')}
+                  ariaLabel={t('settings.notifications.page.sounds.focusOnlyAria')}
                 />
-
-                <SettingsCheckboxRow
-                  checked={notifyOnSubtasks}
-                  onChange={setNotifyOnSubtasks}
-                  label={t('settings.notifications.page.events.subtaskLabel')}
-                  ariaLabel={t('settings.notifications.page.events.subtaskAria')}
-                />
-
-                <SettingsCheckboxRow
-                  checked={notifyOnError}
-                  onChange={setNotifyOnError}
-                  label={t('settings.notifications.page.events.errorLabel')}
-                  ariaLabel={t('settings.notifications.page.events.errorAria')}
-                />
-
-                <SettingsCheckboxRow
-                  checked={notifyOnQuestion}
-                  onChange={setNotifyOnQuestion}
-                  label={t('settings.notifications.page.events.questionLabel')}
-                  ariaLabel={t('settings.notifications.page.events.questionAria')}
-                />
-              </div>
-            </SettingsSection>
-
-            {!isNativeApp && (
-            <SettingsSection
-              title={t('settings.notifications.page.template.title')}
-              description={(
-                <>
-                  {t('settings.notifications.page.template.variablesLabel')}{' '}
-                  <code className="text-[var(--primary-base)]">{'{project_name}'}</code>{' '}
-                  <code className="text-[var(--primary-base)]">{'{worktree}'}</code>{' '}
-                  <code className="text-[var(--primary-base)]">{'{branch}'}</code>{' '}
-                  <code className="text-[var(--primary-base)]">{'{session_name}'}</code>{' '}
-                  <code className="text-[var(--primary-base)]">{'{agent_name}'}</code>{' '}
-                  <code className="text-[var(--primary-base)]">{'{model_name}'}</code>{' '}
-                  <code className="text-[var(--primary-base)]">{'{last_message}'}</code>
-                </>
-              )}
-            >
-              <SettingsTwoColumn className="gap-2 md:grid-cols-2 md:gap-3 lg:gap-3">
-                {(['completion', 'subtask', 'error', 'question'] as const).map((event: NotificationTemplateEvent) => (
-                  <section key={event} className="p-2">
-                    <SettingsGroupTitle className="capitalize">
-                      {t(TEMPLATE_EVENT_LABEL_KEYS[event])}
-                    </SettingsGroupTitle>
-                    <div className="mt-1.5 space-y-2">
-                      <div>
-                        <label className="typography-micro text-muted-foreground block mb-1">{t('settings.notifications.page.template.field.title')}</label>
-                        <Input
-                          value={notificationTemplates[event].title}
-                          onChange={(e) => updateTemplate(event, 'title', e.target.value)}
-                          className="h-7"
-                          placeholder={t(DEFAULT_NOTIFICATION_TEMPLATES[event].titleKey)}
-                        />
-                      </div>
-                      <div>
-                        <label className="typography-micro text-muted-foreground block mb-1">{t('settings.notifications.page.template.field.message')}</label>
-                        <Input
-                          value={notificationTemplates[event].message}
-                          onChange={(e) => updateTemplate(event, 'message', e.target.value)}
-                          className="h-7"
-                          placeholder={t(DEFAULT_NOTIFICATION_TEMPLATES[event].messageKey)}
-                        />
-                      </div>
+                <div className="flex items-center gap-3 py-1">
+                  <span className="text-sm text-muted-foreground whitespace-nowrap min-w-[5rem]">
+                    {t('settings.notifications.page.sounds.volumeLabel')}
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={notificationSoundVolume}
+                    onChange={(e) => setNotificationSoundVolume(Number(e.target.value))}
+                    className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-muted"
+                    aria-label={t('settings.notifications.page.sounds.volumeLabel')}
+                  />
+                </div>
+                <div className="space-y-1.5 py-1">
+                  <SettingsGroupTitle className="text-xs uppercase tracking-wide text-muted-foreground">
+                    {t('settings.notifications.page.sounds.perEventTitle')}
+                  </SettingsGroupTitle>
+                  {(['completion', 'error', 'question', 'permission', 'subtask'] as const).map((event) => (
+                    <div key={event} className="flex items-center gap-2 py-0.5">
+                      <span className="text-sm text-muted-foreground whitespace-nowrap min-w-[6rem]">
+                        {t(SOUND_EVENT_LABEL_KEYS[event])}
+                      </span>
+                      <Select
+                        value={notificationSoundEventSounds[event] ?? DEFAULT_EVENT_SOUNDS[event]}
+                        onValueChange={(v) => setNotificationSoundForEvent(event, v)}
+                      >
+                        <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={t(SOUND_EVENT_LABEL_KEYS[event])}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {SOUND_PACK_GROUPS.map((group) => (
+                            <React.Fragment key={group.pack}>
+                              <div className="px-2 py-1 text-xs font-semibold text-muted-foreground">
+                                {group.label}
+                              </div>
+                              {group.sounds.map((sound) => (
+                                <SelectItem key={sound.id} value={sound.id}>
+                                  {sound.label}
+                                </SelectItem>
+                              ))}
+                            </React.Fragment>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2"
+                        onClick={() => previewSound(notificationSoundEventSounds[event] ?? DEFAULT_EVENT_SOUNDS[event], notificationSoundVolume)}
+                        aria-label={t('settings.notifications.page.sounds.previewAria')}
+                        title={t('settings.notifications.page.sounds.previewAction')}
+                      >
+                        <Icon name="play" className="size-4" />
+                      </Button>
                     </div>
-                  </section>
-                ))}
-              </SettingsTwoColumn>
-            </SettingsSection>
+                  ))}
+                </div>
+              </>
             )}
+          </div>
+        </SettingsSection>
 
-          </>
+        {((nativeNotificationsEnabled && canShowNotifications) || notificationSoundEnabled) && (
+          <SettingsSection
+            settingsItem="notifications.events"
+            title={t('settings.notifications.page.events.title')}
+            info={t('settings.notifications.page.events.hint')}
+          >
+            <div className={SETTINGS_OPTION_STACK_CLASS}>
+              <SettingsCheckboxRow
+                checked={notifyOnCompletion}
+                onChange={setNotifyOnCompletion}
+                label={t('settings.notifications.page.events.completionLabel')}
+                ariaLabel={t('settings.notifications.page.events.completionAria')}
+              />
+
+              <SettingsCheckboxRow
+                checked={notifyOnSubtasks}
+                onChange={setNotifyOnSubtasks}
+                label={t('settings.notifications.page.events.subtaskLabel')}
+                ariaLabel={t('settings.notifications.page.events.subtaskAria')}
+              />
+
+              <SettingsCheckboxRow
+                checked={notifyOnError}
+                onChange={setNotifyOnError}
+                label={t('settings.notifications.page.events.errorLabel')}
+                ariaLabel={t('settings.notifications.page.events.errorAria')}
+              />
+
+              <SettingsCheckboxRow
+                checked={notifyOnQuestion}
+                onChange={setNotifyOnQuestion}
+                label={t('settings.notifications.page.events.questionLabel')}
+                ariaLabel={t('settings.notifications.page.events.questionAria')}
+              />
+
+              <SettingsCheckboxRow
+                checked={notifyOnPermission}
+                onChange={setNotifyOnPermission}
+                label={t('settings.notifications.page.events.permissionLabel')}
+                ariaLabel={t('settings.notifications.page.events.permissionAria')}
+              />
+            </div>
+          </SettingsSection>
+        )}
+
+        {nativeNotificationsEnabled && canShowNotifications && !isNativeApp && (
+          <SettingsSection
+            title={t('settings.notifications.page.template.title')}
+            description={(
+              <>
+                {t('settings.notifications.page.template.variablesLabel')}{' '}
+                <code className="text-[var(--primary-base)]">{'{project_name}'}</code>{' '}
+                <code className="text-[var(--primary-base)]">{'{worktree}'}</code>{' '}
+                <code className="text-[var(--primary-base)]">{'{branch}'}</code>{' '}
+                <code className="text-[var(--primary-base)]">{'{session_name}'}</code>{' '}
+                <code className="text-[var(--primary-base)]">{'{agent_name}'}</code>{' '}
+                <code className="text-[var(--primary-base)]">{'{model_name}'}</code>{' '}
+                <code className="text-[var(--primary-base)]">{'{last_message}'}</code>
+              </>
+            )}
+          >
+            <SettingsTwoColumn className="gap-2 md:grid-cols-2 md:gap-3 lg:gap-3">
+              {(['completion', 'subtask', 'error', 'question'] as const).map((event: NotificationTemplateEvent) => (
+                <section key={event} className="p-2">
+                  <SettingsGroupTitle className="capitalize">
+                    {t(TEMPLATE_EVENT_LABEL_KEYS[event])}
+                  </SettingsGroupTitle>
+                  <div className="mt-1.5 space-y-2">
+                    <div>
+                      <label className="typography-micro text-muted-foreground block mb-1">{t('settings.notifications.page.template.field.title')}</label>
+                      <Input
+                        value={notificationTemplates[event].title}
+                        onChange={(e) => updateTemplate(event, 'title', e.target.value)}
+                        className="h-7"
+                        placeholder={t(DEFAULT_NOTIFICATION_TEMPLATES[event].titleKey)}
+                      />
+                    </div>
+                    <div>
+                      <label className="typography-micro text-muted-foreground block mb-1">{t('settings.notifications.page.template.field.message')}</label>
+                      <Input
+                        value={notificationTemplates[event].message}
+                        onChange={(e) => updateTemplate(event, 'message', e.target.value)}
+                        className="h-7"
+                        placeholder={t(DEFAULT_NOTIFICATION_TEMPLATES[event].messageKey)}
+                      />
+                    </div>
+                  </div>
+                </section>
+              ))}
+            </SettingsTwoColumn>
+          </SettingsSection>
         )}
 
         {isBrowser && (

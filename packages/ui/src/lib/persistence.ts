@@ -568,7 +568,12 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     notifyOnCompletion: defaults.notifyOnCompletion,
     notifyOnError: defaults.notifyOnError,
     notifyOnQuestion: defaults.notifyOnQuestion,
+    notifyOnPermission: defaults.notifyOnPermission,
     notificationTemplates: defaults.notificationTemplates,
+    notificationSoundEnabled: defaults.notificationSoundEnabled,
+    notificationSoundVolume: defaults.notificationSoundVolume,
+    notificationSoundEventSounds: defaults.notificationSoundEventSounds,
+    notificationSoundFocusOnly: defaults.notificationSoundFocusOnly,
     summarizeLastMessage: defaults.summarizeLastMessage,
     summaryThreshold: defaults.summaryThreshold,
     summaryLength: defaults.summaryLength,
@@ -726,8 +731,23 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.notifyOnQuestion === 'boolean' && settings.notifyOnQuestion !== store.notifyOnQuestion) {
     store.setNotifyOnQuestion(settings.notifyOnQuestion);
   }
+  if (typeof settings.notifyOnPermission === 'boolean' && settings.notifyOnPermission !== store.notifyOnPermission) {
+    store.setNotifyOnPermission(settings.notifyOnPermission);
+  }
   if (settings.notificationTemplates && typeof settings.notificationTemplates === 'object') {
     store.setNotificationTemplates(settings.notificationTemplates);
+  }
+  if (typeof settings.notificationSoundEnabled === 'boolean' && settings.notificationSoundEnabled !== store.notificationSoundEnabled) {
+    store.setNotificationSoundEnabled(settings.notificationSoundEnabled);
+  }
+  if (typeof settings.notificationSoundVolume === 'number' && Number.isFinite(settings.notificationSoundVolume) && settings.notificationSoundVolume !== store.notificationSoundVolume) {
+    store.setNotificationSoundVolume(settings.notificationSoundVolume);
+  }
+  if (settings.notificationSoundEventSounds && typeof settings.notificationSoundEventSounds === 'object') {
+    store.setNotificationSoundEventSounds(settings.notificationSoundEventSounds);
+  }
+  if (typeof settings.notificationSoundFocusOnly === 'boolean' && settings.notificationSoundFocusOnly !== store.notificationSoundFocusOnly) {
+    store.setNotificationSoundFocusOnly(settings.notificationSoundFocusOnly);
   }
   if (typeof settings.summarizeLastMessage === 'boolean' && settings.summarizeLastMessage !== store.summarizeLastMessage) {
     store.setSummarizeLastMessage(settings.summarizeLastMessage);
@@ -1306,6 +1326,37 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.notifyOnQuestion === 'boolean') {
     result.notifyOnQuestion = candidate.notifyOnQuestion;
+  }
+  if (typeof candidate.notifyOnPermission === 'boolean') {
+    result.notifyOnPermission = candidate.notifyOnPermission;
+  }
+  if (typeof candidate.notificationSoundEnabled === 'boolean') {
+    result.notificationSoundEnabled = candidate.notificationSoundEnabled;
+  }
+  if (typeof candidate.notificationSoundVolume === 'number' && Number.isFinite(candidate.notificationSoundVolume)) {
+    // Clamp to [0, 1]; non-finite values are dropped by the isFinite check above.
+    result.notificationSoundVolume = Math.min(1, Math.max(0, candidate.notificationSoundVolume));
+  }
+  if (candidate.notificationSoundEventSounds && typeof candidate.notificationSoundEventSounds === 'object' && !Array.isArray(candidate.notificationSoundEventSounds)) {
+    // Validate as a partial Record<NotificationEventKind, string>; only known
+    // event keys with non-empty string values are kept. Unknown sound ids are
+    // preserved as-is; at playback time, `playSoundForEvent` falls back to the
+    // default sound for the event when the configured id cannot be resolved.
+    const raw = candidate.notificationSoundEventSounds as Record<string, unknown>;
+    const sanitized: Record<string, string> = {};
+    const knownEvents = ['completion', 'error', 'question', 'permission', 'subtask'];
+    for (const event of knownEvents) {
+      const value = raw[event];
+      if (typeof value === 'string' && value.length > 0) {
+        sanitized[event] = value;
+      }
+    }
+    if (Object.keys(sanitized).length > 0) {
+      result.notificationSoundEventSounds = sanitized as DesktopSettings['notificationSoundEventSounds'];
+    }
+  }
+  if (typeof candidate.notificationSoundFocusOnly === 'boolean') {
+    result.notificationSoundFocusOnly = candidate.notificationSoundFocusOnly;
   }
   if (candidate.notificationTemplates && typeof candidate.notificationTemplates === 'object') {
     const templates = candidate.notificationTemplates as Record<string, unknown>;
