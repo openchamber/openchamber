@@ -29,11 +29,11 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     readSettingsFromDiskMigrated,
     fetchFreeZenModels,
     getCachedZenModels,
+    desktopUpdater,
   } = dependencies;
 
   app.get('/api/openchamber/update-check', async (req, res) => {
     try {
-      const { checkForUpdates } = await import('../package-manager.js');
       const parseString = (value) => (typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined);
       const parseReportUsage = (value) => {
         if (typeof value !== 'string') return true;
@@ -49,8 +49,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         return 'desktop';
       };
       const userAgent = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : '';
-
-      const updateInfo = await checkForUpdates({
+      const updateRequest = {
         appType: parseString(req.query.appType),
         deviceClass: parseString(req.query.deviceClass) || inferDeviceClass(userAgent),
         platform: parseString(req.query.platform),
@@ -59,7 +58,25 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         currentVersion: parseString(req.query.currentVersion),
         installId: parseString(req.query.installId),
         reportUsage: parseReportUsage(parseString(req.query.reportUsage)),
-      });
+      };
+      let updateInfo;
+      if (process.env.OPENCHAMBER_RUNTIME === 'desktop' && updateRequest.appType === 'web') {
+        if (typeof desktopUpdater?.check !== 'function') {
+          return res.status(503).json({
+            available: false,
+            code: 'DESKTOP_UPDATER_UNAVAILABLE',
+            error: 'The desktop updater is not available.',
+          });
+        }
+        updateInfo = {
+          ...await desktopUpdater.check(),
+          packageManager: 'electron',
+          updateOwner: 'electron-updater',
+        };
+      } else {
+        const { checkForUpdates } = await import('../package-manager.js');
+        updateInfo = await checkForUpdates(updateRequest);
+      }
       res.json(updateInfo);
     } catch (error) {
       console.error('Failed to check for updates:', error);
@@ -72,6 +89,37 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
 
   app.post('/api/openchamber/update-install', async (_req, res) => {
     try {
+      if (process.env.OPENCHAMBER_RUNTIME === 'desktop') {
+        if (typeof desktopUpdater?.install !== 'function' || typeof desktopUpdater?.restart !== 'function') {
+          return res.status(503).json({
+            code: 'DESKTOP_UPDATER_UNAVAILABLE',
+            error: 'The desktop updater is not available.',
+          });
+        }
+
+        const updateInfo = await desktopUpdater.install();
+        if (!updateInfo?.available) {
+          return res.status(400).json({ error: 'No update available' });
+        }
+
+        res.json({
+          success: true,
+          message: 'Desktop update downloaded, host will restart shortly',
+          version: updateInfo.version,
+          packageManager: 'electron',
+          updateOwner: 'electron-updater',
+          autoRestart: true,
+          restartManager: 'electron-updater',
+        });
+
+        setImmediate(() => {
+          Promise.resolve()
+            .then(() => desktopUpdater.restart())
+            .catch((error) => console.error('Failed to restart after desktop update:', error));
+        });
+        return;
+      }
+
       const { spawn: spawnChild, spawnSync } = await import('child_process');
       const {
         checkForUpdates,

@@ -366,6 +366,7 @@ an authoritative loopback callback URL even when OpenChamber binds port `0`.
 - `registerOpenChamberRoutes(app, dependencies)`: registers OpenChamber endpoints:
   - `GET /api/openchamber/update-check`
   - `POST /api/openchamber/update-install`
+    - Desktop-managed hosts delegate authenticated Web update requests to the Electron main process, which checks, downloads, and applies the update through `electron-updater` before restarting the host.
     - Foreground servers running under a systemd user unit queue installation in
       a separate transient unit and restart the configured service afterwards.
       `OPENCHAMBER_SYSTEMD_UNIT` overrides the default `openchamber.service`.

@@ -11,12 +11,27 @@ export interface WebUiServerController {
   stop: (options?: { exitProcess?: boolean }) => Promise<void>;
 }
 
+export interface DesktopUpdateInfo {
+  available: boolean;
+  currentVersion?: string;
+  version?: string | null;
+  body?: string | null;
+  date?: string | null;
+}
+
+export interface DesktopUpdater {
+  check: () => Promise<DesktopUpdateInfo>;
+  install: () => Promise<DesktopUpdateInfo>;
+  restart: () => Promise<void> | void;
+}
+
 export interface StartWebUiServerOptions {
   port?: number;
   host?: string;
   attachSignals?: boolean;
   exitOnShutdown?: boolean;
   uiPassword?: string | null;
+  desktopUpdater?: DesktopUpdater;
 }
 
 export declare function startWebUiServer(

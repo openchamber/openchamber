@@ -18,7 +18,7 @@ const childProcess = await import('child_process');
 const packageManager = await import('../package-manager.js');
 const { registerOpenChamberRoutes } = await import('./openchamber-routes.js');
 
-const createApp = ({ environment = {}, storedOptions = {} } = {}) => {
+const createApp = ({ environment = {}, storedOptions = {}, desktopUpdater } = {}) => {
   const app = express();
   const dependencies = {
     fs: {
@@ -47,6 +47,7 @@ const createApp = ({ environment = {}, storedOptions = {} } = {}) => {
     readSettingsFromDiskMigrated: vi.fn(),
     fetchFreeZenModels: vi.fn(),
     getCachedZenModels: vi.fn(),
+    desktopUpdater,
   };
 
   registerOpenChamberRoutes(app, dependencies);
@@ -67,6 +68,95 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.clearAllMocks();
+});
+
+describe('OpenChamber desktop host update route', () => {
+  it('uses electron-updater to check for Web client updates', async () => {
+    const desktopUpdater = {
+      check: vi.fn(async () => ({
+        available: true,
+        currentVersion: '1.17.0',
+        version: '1.17.1',
+      })),
+      install: vi.fn(),
+      restart: vi.fn(),
+    };
+    const { app } = createApp({
+      environment: {
+        OPENCHAMBER_RUNTIME: 'desktop',
+      },
+      desktopUpdater,
+    });
+
+    await request(app)
+      .get('/api/openchamber/update-check?appType=web&reportUsage=false')
+      .expect(200, {
+        available: true,
+        currentVersion: '1.17.0',
+        version: '1.17.1',
+        packageManager: 'electron',
+        updateOwner: 'electron-updater',
+      });
+
+    expect(desktopUpdater.check).toHaveBeenCalledOnce();
+    expect(packageManager.checkForUpdates).not.toHaveBeenCalled();
+  });
+
+  it('installs through electron-updater and restarts after responding', async () => {
+    const desktopUpdater = {
+      check: vi.fn(),
+      install: vi.fn(async () => ({
+        available: true,
+        version: '1.17.1',
+      })),
+      restart: vi.fn(),
+    };
+    const { app } = createApp({
+      environment: {
+        OPENCHAMBER_RUNTIME: 'desktop',
+      },
+      desktopUpdater,
+    });
+
+    await request(app)
+      .post('/api/openchamber/update-install')
+      .expect(200, {
+        success: true,
+        message: 'Desktop update downloaded, host will restart shortly',
+        version: '1.17.1',
+        packageManager: 'electron',
+        updateOwner: 'electron-updater',
+        autoRestart: true,
+        restartManager: 'electron-updater',
+      });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(desktopUpdater.install).toHaveBeenCalledOnce();
+    expect(desktopUpdater.restart).toHaveBeenCalledOnce();
+    expect(packageManager.checkForUpdates).not.toHaveBeenCalled();
+    expect(packageManager.detectPackageManagerDetails).not.toHaveBeenCalled();
+    expect(packageManager.getUpdateCommand).not.toHaveBeenCalled();
+    expect(childProcess.spawn).not.toHaveBeenCalled();
+    expect(childProcess.spawnSync).not.toHaveBeenCalled();
+  });
+
+  it('fails safely when the Electron updater bridge is unavailable', async () => {
+    const { app } = createApp({
+      environment: {
+        OPENCHAMBER_RUNTIME: 'desktop',
+      },
+    });
+
+    await request(app)
+      .post('/api/openchamber/update-install')
+      .expect(503, {
+        code: 'DESKTOP_UPDATER_UNAVAILABLE',
+        error: 'The desktop updater is not available.',
+      });
+
+    expect(packageManager.checkForUpdates).not.toHaveBeenCalled();
+    expect(childProcess.spawn).not.toHaveBeenCalled();
+  });
 });
 
 describe('OpenChamber foreground update route', () => {

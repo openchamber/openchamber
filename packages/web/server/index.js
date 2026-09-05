@@ -1637,6 +1637,12 @@ async function main(options = {}) {
   const getDesktopRuntimeConfig = typeof options.getDesktopRuntimeConfig === 'function'
     ? options.getDesktopRuntimeConfig
     : null;
+  const desktopUpdater = options.desktopUpdater
+    && typeof options.desktopUpdater.check === 'function'
+    && typeof options.desktopUpdater.install === 'function'
+    && typeof options.desktopUpdater.restart === 'function'
+    ? options.desktopUpdater
+    : null;
 
   console.log(`Starting OpenChamber on port ${port === 0 ? 'auto' : port}`);
 
@@ -1812,6 +1818,7 @@ async function main(options = {}) {
     getCachedZenModels,
     setAutoAcceptSession,
     agentToolRuntime,
+    desktopUpdater,
   });
   uiAuthController = bootstrapResult.uiAuthController;
   realtimeProxyRuntime = attachRealtimeProxy({

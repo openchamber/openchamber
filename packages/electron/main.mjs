@@ -1588,6 +1588,16 @@ const spawnLocalServer = async () => {
       apiBaseUrl: state.apiBaseUrl || '',
       requestHeaders: sanitizeRuntimeRequestHeaders(state.requestHeaders || {}),
     }),
+    desktopUpdater: {
+      check: () => handleInvoke(null, 'desktop_check_for_updates'),
+      install: async () => {
+        const updateInfo = await handleInvoke(null, 'desktop_check_for_updates');
+        if (!updateInfo.available) return updateInfo;
+        await handleInvoke(null, 'desktop_download_and_install_update');
+        return updateInfo;
+      },
+      restart: () => handleInvoke(null, 'desktop_restart'),
+    },
   });
 
   const port = handle.getPort();
