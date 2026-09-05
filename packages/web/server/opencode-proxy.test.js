@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import express from 'express';
 import path from 'path';
@@ -29,6 +29,7 @@ describe('OpenCode proxy SSE forwarding', () => {
   let proxyServer;
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await closeServer(proxyServer);
     await closeServer(upstreamServer);
     proxyServer = undefined;
@@ -705,5 +706,107 @@ describe('OpenCode proxy SSE forwarding', () => {
     });
 
     expect(response.status).toBe(504);
+  });
+
+  it('does not log proxy error when the client aborts the request', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const upstream = express();
+    let markUpstreamReceived;
+    const upstreamReceived = new Promise((resolve) => {
+      markUpstreamReceived = resolve;
+    });
+    upstream.get('/hang', () => {
+      markUpstreamReceived();
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+    const externalBaseUrl = `http://127.0.0.1:${upstreamPort}`;
+
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      LONG_REQUEST_TIMEOUT_MS: 5000,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        openCodeBaseUrl: externalBaseUrl,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `${externalBaseUrl}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    const controller = new AbortController();
+    const fetchPromise = fetch(`http://127.0.0.1:${proxyPort}/api/hang`, {
+      signal: controller.signal,
+    }).catch(() => {});
+
+    await upstreamReceived;
+    controller.abort();
+    await fetchPromise;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const proxyErrorLogs = errorSpy.mock.calls
+      .map((call) => call.join(' '))
+      .filter((msg) => msg.includes('[proxy] OpenCode proxy error:'));
+
+    expect(proxyErrorLogs).toHaveLength(0);
+  });
+
+  it('returns 503 when upstream resets after a parsed POST body is forwarded', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const upstream = express();
+    let upstreamBody;
+    upstream.use(express.json());
+    upstream.post('/reset', (req) => {
+      upstreamBody = req.body;
+      req.socket.destroy();
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+    const externalBaseUrl = `http://127.0.0.1:${upstreamPort}`;
+
+    const app = express();
+    app.use(express.json());
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      LONG_REQUEST_TIMEOUT_MS: 5000,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        openCodeBaseUrl: externalBaseUrl,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `${externalBaseUrl}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    const startedAt = Date.now();
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/reset`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'hello' }),
+      signal: AbortSignal.timeout(2000),
+    });
+
+    expect(response.status).toBe(503);
+    expect(Date.now() - startedAt).toBeLessThan(1000);
+    await expect(response.json()).resolves.toMatchObject({ error: 'OpenCode service unavailable' });
+    expect(upstreamBody).toEqual({ prompt: 'hello' });
+    expect(errorSpy).toHaveBeenCalledWith('[proxy] OpenCode proxy error:', 'socket hang up');
   });
 });

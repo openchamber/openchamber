@@ -20,10 +20,11 @@ const OPENCODE_AGENT_KEEP_ALIVE_MS = 30_000;
 // exists to prevent (measured: at 64 concurrent requests, a cap of 32 left
 // 303 sockets in TIME_WAIT versus 0 at 256).
 const OPENCODE_AGENT_MAX_FREE_SOCKETS = 256;
-// Evicts idle free sockets from our side. Without it the only thing that
-// retires an idle pooled socket is the upstream closing it. Note this is
-// distinct from `keepAliveMsecs`, which is the TCP keep-alive probe delay.
-const OPENCODE_AGENT_IDLE_TIMEOUT_MS = 60_000;
+// Evicts idle free sockets from our side before upstream servers close them
+// (Node default keepAliveTimeout is 5s, Bun default idle timeout is 10s).
+// Setting this higher than upstream causes stale socket reuse where the
+// client writes into a dead socket and gets 'socket hang up' (ECONNRESET).
+const OPENCODE_AGENT_IDLE_TIMEOUT_MS = 4_000;
 
 const OPENCODE_AGENT_OPTIONS = {
   keepAlive: true,
@@ -919,6 +920,15 @@ export const registerOpenCodeProxy = (app, deps) => {
         }
       },
       error: (err, req, res) => {
+        if (
+          req?.aborted ||
+          res?.writableEnded ||
+          res?.destroyed ||
+          req?.socket?.destroyed ||
+          res?.socket?.destroyed
+        ) {
+          return;
+        }
         console.error('[proxy] OpenCode proxy error:', err.message);
         if (req?.[PROXY_TIMEOUT_MARKER]) {
           return;
