@@ -72,7 +72,7 @@ Manual `runNow` does not claim a schedule occurrence.
   - Timer scheduling and queueing
   - Concurrency controls
   - Session create + prompt_async execution
-  - Emits OpenChamber task-run events
+  - Emits OpenChamber task-run events via `emitTaskRunEvent`, which fans out to both legacy SSE clients (`uiOpenChamberEventClients`) and `broadcastGlobalUiEvent` (WS + notification SSE clients)
 
 - `packages/web/server/lib/scheduled-tasks/loops.js`
   - Discovery of `.agents/loops/*.md` (project scope, ancestors up to the worktree root) and `~/.agents/loops/*.md` (user scope)

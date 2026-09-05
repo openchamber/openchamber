@@ -76,6 +76,7 @@ This module provides notification message preparation utilities for the web serv
 
 ### Emitter runtime API (emitter-runtime.js)
 - `createNotificationEmitterRuntime(dependencies)`: creates runtime for unified notification emission channels.
+- `broadcastGlobalUiEvent` is called for synthetic notification events so they reach WS clients via the client-side event bus (`packages/ui/src/lib/openchamberEventBus.ts`), not just the notification SSE stream. The bus is authoritative only when the event pipeline is on the WS transport; consumers fall back to the notification SSE stream when the pipeline is on SSE.
 - Returned API:
   - `writeSseEvent(res, payload)`
   - `emitDesktopNotification(payload)`

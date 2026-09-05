@@ -8,6 +8,8 @@ mock.module('./runtime-switch', () => ({
   subscribeRuntimeEndpointChanged: () => () => undefined,
 }));
 
+import { __resetOpenChamberEventBusForTesting, publishOpenChamberBusEvent, setWsEventPipelineActive } from './openchamberEventBus';
+
 class MockEventSource {
   static CLOSED = 2;
   static instances: MockEventSource[] = [];
@@ -31,6 +33,7 @@ describe('openchamber events', () => {
     MockEventSource.instances = [];
     globalThis.window = {} as Window & typeof globalThis;
     globalThis.EventSource = MockEventSource as unknown as typeof EventSource;
+    __resetOpenChamberEventBusForTesting();
   });
 
   afterEach(() => {
@@ -70,6 +73,86 @@ describe('openchamber events', () => {
         dispatchedAsCommand: false,
       },
     ]);
+    unsubscribe();
+  });
+
+  test('delivers bus events via dispatchFromEnvelope when WS is active', async () => {
+    setWsEventPipelineActive(true);
+
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const events: unknown[] = [];
+    const unsubscribe = subscribeOpenchamberEvents((event) => events.push(event));
+
+    publishOpenChamberBusEvent({
+      type: 'openchamber:session-created',
+      properties: {
+        sessionId: 'ses_bus',
+        directory: '/repo/worktrees/bus',
+        createdAt: 999,
+        promptDispatched: true,
+        dispatchedAsCommand: false,
+      },
+    });
+
+    expect(events).toEqual([
+      {
+        type: 'session-created',
+        sessionId: 'ses_bus',
+        directory: '/repo/worktrees/bus',
+        createdAt: 999,
+        promptDispatched: true,
+        dispatchedAsCommand: false,
+      },
+    ]);
+
+    expect(MockEventSource.instances).toHaveLength(0);
+    unsubscribe();
+  });
+
+  test('does not open EventSource when WS pipeline is active', async () => {
+    setWsEventPipelineActive(true);
+
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const unsubscribe = subscribeOpenchamberEvents(() => {});
+
+    expect(MockEventSource.instances).toHaveLength(0);
+    unsubscribe();
+  });
+
+  test('opens EventSource fallback when WS pipeline is inactive', async () => {
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const unsubscribe = subscribeOpenchamberEvents(() => {});
+
+    expect(MockEventSource.instances).toHaveLength(1);
+    expect(MockEventSource.instances[0].url).toBe('http://runtime.test/api/openchamber/events');
+    unsubscribe();
+  });
+
+  test('closes EventSource fallback when WS becomes active', async () => {
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const unsubscribe = subscribeOpenchamberEvents(() => {});
+
+    const source = MockEventSource.instances[0];
+    expect(source.readyState).toBe(1);
+
+    setWsEventPipelineActive(true);
+
+    expect(source.readyState).toBe(MockEventSource.CLOSED);
+    unsubscribe();
+  });
+
+  test('opens EventSource fallback when WS becomes inactive', async () => {
+    setWsEventPipelineActive(true);
+
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const unsubscribe = subscribeOpenchamberEvents(() => {});
+
+    expect(MockEventSource.instances).toHaveLength(0);
+
+    setWsEventPipelineActive(false);
+
+    expect(MockEventSource.instances).toHaveLength(1);
+    expect(MockEventSource.instances[0].url).toBe('http://runtime.test/api/openchamber/events');
     unsubscribe();
   });
 });
