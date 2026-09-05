@@ -315,6 +315,7 @@ export const settingsDict = {
   'settings.remoteInstances.clientAuth.addDevice.transport.localHint': '供同一台電腦上的應用程式使用。',
   'settings.remoteInstances.clientAuth.addDevice.transport.lan': '僅家用網路',
   'settings.remoteInstances.clientAuth.addDevice.transport.lanHint': '透過 Wi-Fi 直接連線。離開此網路後無法使用。',
+  'settings.remoteInstances.clientAuth.addDevice.transport.lanUnavailableDesktopHint': '若要使用此選項，請前往「設定 > 桌面端網路存取」，設定桌面 UI 密碼，並勾選「允許本機網路中的其他裝置開啟此應用程式」。',
   'settings.remoteInstances.clientAuth.addDevice.transport.relay': '任何地方',
   'settings.remoteInstances.clientAuth.addDevice.transport.relayHint': '在家與外出都可用。外出時流量經由 OpenChamber Private Relay(端對端加密隧道)傳輸，無需設定。',
   'settings.remoteInstances.clientAuth.addDevice.fallback.relay': '外出時也允許透過加密中繼連線',

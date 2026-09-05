@@ -2133,6 +2133,7 @@ export const settingsDict = {
   'settings.remoteInstances.clientAuth.addDevice.transport.localHint': 'Pour les applications sur cette même machine.',
   'settings.remoteInstances.clientAuth.addDevice.transport.lan': 'Réseau domestique uniquement',
   'settings.remoteInstances.clientAuth.addDevice.transport.lanHint': 'Connexion directe via votre Wi-Fi. Ne fonctionne pas hors de ce réseau.',
+  'settings.remoteInstances.clientAuth.addDevice.transport.lanUnavailableDesktopHint': 'Pour utiliser cette option, accédez à Paramètres > Accès réseau du bureau, définissez un mot de passe pour l’interface du bureau et autorisez les autres appareils de votre réseau local à ouvrir cette application.',
   'settings.remoteInstances.clientAuth.addDevice.transport.relay': 'Partout',
   'settings.remoteInstances.clientAuth.addDevice.transport.relayHint': 'Fonctionne à la maison et en déplacement. En déplacement, le trafic passe par OpenChamber Private Relay — un tunnel chiffré de bout en bout. Aucune configuration.',
   'settings.remoteInstances.clientAuth.addDevice.fallback.relay': 'Autoriser aussi le relais chiffré en déplacement',

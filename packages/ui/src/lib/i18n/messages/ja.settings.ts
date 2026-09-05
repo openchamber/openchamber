@@ -342,6 +342,7 @@ export const settingsDict = {
   'settings.remoteInstances.clientAuth.addDevice.transport.localHint': '同じマシン上のアプリ用です。',
   'settings.remoteInstances.clientAuth.addDevice.transport.lan': '自宅ネットワークのみ',
   'settings.remoteInstances.clientAuth.addDevice.transport.lanHint': 'Wi-Fi経由で直接接続します。このネットワークの外では使えません。',
+  'settings.remoteInstances.clientAuth.addDevice.transport.lanUnavailableDesktopHint': 'このオプションを使うには、設定 > デスクトップネットワークアクセスでデスクトップ UI パスワードを設定し、ローカルネットワーク上の他のデバイスからこのアプリを開けるようにしてください。',
   'settings.remoteInstances.clientAuth.addDevice.transport.relay': 'どこでも',
   'settings.remoteInstances.clientAuth.addDevice.transport.relayHint': '自宅でも外出先でも使えます。外出先の通信は、エンドツーエンド暗号化トンネルのOpenChamber Private Relayを経由します。設定は不要です。',
   'settings.remoteInstances.clientAuth.addDevice.fallback.relay': '外出先では暗号化リレー経由の接続も許可',

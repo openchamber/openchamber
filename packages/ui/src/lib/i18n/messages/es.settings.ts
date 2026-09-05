@@ -309,6 +309,7 @@ export const settingsDict = {
   "settings.remoteInstances.clientAuth.addDevice.transport.localHint": "Para aplicaciones en esta misma máquina.",
   "settings.remoteInstances.clientAuth.addDevice.transport.lan": "Solo red doméstica",
   "settings.remoteInstances.clientAuth.addDevice.transport.lanHint": "Se conecta directamente por tu Wi-Fi. No funciona fuera de esta red.",
+  "settings.remoteInstances.clientAuth.addDevice.transport.lanUnavailableDesktopHint": "Para usar esta opción, ve a Ajustes > Acceso de red de escritorio, establece una contraseña para la interfaz de escritorio y permite que otros dispositivos de tu red local abran esta aplicación.",
   "settings.remoteInstances.clientAuth.addDevice.transport.relay": "En cualquier lugar",
   "settings.remoteInstances.clientAuth.addDevice.transport.relayHint": "Funciona en casa y fuera. Fuera de casa el tráfico pasa por OpenChamber Private Relay, un túnel cifrado de extremo a extremo. Sin configuración.",
   "settings.remoteInstances.clientAuth.addDevice.fallback.relay": "Permitir también el relay cifrado fuera de casa",
