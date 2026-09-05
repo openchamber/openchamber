@@ -10,6 +10,7 @@ import type {
   Provider,
   Config,
   Agent,
+  AgentV2Info,
   TextPartInput,
   FilePartInput,
 } from "@opencode-ai/sdk/v2";
@@ -339,6 +340,124 @@ const getDesktopFilesApi = (): FilesAPI | null => {
     return apis.files;
   }
   return null;
+};
+
+/**
+ * Stock V2 built-in agent IDs. V2 wire does not expose a `native` (or
+ * `builtIn`) flag — derived from `packages/core/src/plugin/agent.ts` in
+ * stock OpenCode 1.18.25, which initializes these IDs via
+ * `draft.update(AgentV2.ID.make(...))`. The default agent uses the
+ * brand name "build" (set via `AgentV2.defaultID`).
+ */
+const BUILT_IN_AGENT_IDS: ReadonlySet<string> = new Set([
+  'build', 'plan', 'general', 'explore', 'compaction', 'title', 'summary',
+]);
+
+/** V1-shaped permission rule effect values. V2 `PermissionV2Effect` is the
+ *  same union ("allow" | "deny" | "ask") — typed here locally so we can
+ *  narrow the mapped rule's `action` field without dragging in any UI-side
+ *  PermissionAction type. */
+type MappedPermissionAction = 'allow' | 'deny' | 'ask';
+
+const isMappedPermissionAction = (value: unknown): value is MappedPermissionAction =>
+  value === 'allow' || value === 'deny' || value === 'ask';
+
+/**
+ * Map V2 wire `AgentV2Info` to the V2 SDK's V1-shaped `Agent` type alias
+ * (`@opencode-ai/sdk/v2` re-exports the V1-shaped type under the same name).
+ *
+ * Verified against stock OpenCode 1.18.25 (packages/schema/src/agent.ts,
+ * packages/schema/src/permission.ts, packages/core/src/v1/config/migrate.ts,
+ * packages/core/src/plugin/agent.ts).
+ *
+ * Field parity:
+ * - mapped directly: name=v2.id, description, mode, hidden, color, prompt=v2.system, steps
+ * - mapped via V2 location:
+ *     temperature <- v2.request.body.temperature (if number)
+ *     topP       <- v2.request.body.top_p        (if number)
+ *     variant    <- v2.model.variant
+ *     model      <- v2.model ? { modelID: v2.model.id, providerID: v2.model.providerID } : undefined
+ *     options    <- v2.request.body MINUS reserved {temperature, top_p}
+ *                   (the inverse of stock V1->V2 migration: V1 stores
+ *                   temperature/topP at top level and `options` as a
+ *                   separate opaque bag; stock migrateAgent composes
+ *                   body = {...options, temperature, top_p}. The reverse
+ *                   must strip the reserved keys to avoid duplicating
+ *                   them between options and the top-level agent.temperature
+ *                   / agent.topP fields, which would violate the legacy
+ *                   V1 wire contract that consumers and the cache
+ *                   signature depend on.)
+ * - mapped via explicit field rename:
+ *     permission <- v2.permissions.map(r => ({ permission: r.action, pattern: r.resource, action: r.effect }))
+ *                  // V2 Permission.Rule = { action: string; resource: string; effect: "allow"|"deny"|"ask" }
+ *                  // V1 PermissionRule  = { permission: string; pattern: string; action: "allow"|"deny"|"ask" }
+ *                  // Semantics are equivalent (Wildcard.match on action/resource);
+ *                  // only the field names are renamed. See packages/core/src/permission.ts:evaluate.
+ * - derived (V2 wire does not expose this flag):
+ *     native     <- v2.id is in the stock built-in ID set
+ *                  ({ "build", "plan", "general", "explore", "compaction", "title", "summary" })
+ *                  // Source: packages/core/src/plugin/agent.ts
+ *
+ * Validation: every mapped field has a production consumer in OpenChamber UI
+ * (useAgentsStore.buildAgentsSignature, permissionUtils.resolvePermissionAction,
+ * ModelControls/AgentPermissionsEditor/AgentsSidebar rule iteration, etc.).
+ *
+ * Payload violation: malformed V2 permission entries (non-string action /
+ * non-string resource / effect outside the typed union) are treated as a
+ * payload violation and this function THROWS an Error with the prefix
+ * `agent.list failed: malformed permission rule (...)`. The throw
+ * propagates through listAgents so the caller (useAgentsStore /
+ * useConfigStore) preserves its existing cache and retries on the next
+ * invocation. Silent drop of malformed rules would let allow / deny / ask
+ * decisions drift without detection — downstream consumers (e.g.
+ * resolvePermissionAction) compare `rule.permission === 'edit'`, which
+ * never matches an `undefined` field, silently degrading every
+ * permission check to 'ask'.
+ */
+const normalizeAgentV2ToV1 = (v2: AgentV2Info): Agent => {
+  const body = (v2.request?.body ?? {}) as Record<string, unknown>;
+  const temperature = typeof body.temperature === 'number' ? body.temperature : undefined;
+  const topP = typeof body.top_p === 'number' ? body.top_p : undefined;
+  const permissions = (v2.permissions ?? []).map((rule) => {
+    if (typeof rule.action !== 'string') {
+      throw new Error(`agent.list failed: malformed permission rule (action=${String(rule.action)})`);
+    }
+    if (typeof rule.resource !== 'string') {
+      throw new Error(`agent.list failed: malformed permission rule (resource=${String(rule.resource)})`);
+    }
+    if (!isMappedPermissionAction(rule.effect)) {
+      throw new Error(`agent.list failed: malformed permission rule (effect=${String(rule.effect)})`);
+    }
+    return {
+      permission: rule.action,
+      pattern: rule.resource,
+      action: rule.effect,
+    };
+  });
+  // Strip the reserved keys (inverse of stock V1->V2 body composition) so
+  // options holds only the user's original opaque bag. Use a plain for-loop
+  // + continue instead of `delete` (which mutates the input object).
+  const options: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(body)) {
+    if (key === 'temperature' || key === 'top_p') continue;
+    options[key] = value;
+  }
+  return {
+    name: v2.id,
+    description: v2.description,
+    mode: v2.mode,
+    hidden: v2.hidden,
+    temperature,
+    topP,
+    color: v2.color,
+    permission: permissions,
+    model: v2.model ? { modelID: v2.model.id, providerID: v2.model.providerID } : undefined,
+    variant: v2.model?.variant,
+    prompt: v2.system,
+    options,
+    steps: v2.steps,
+    native: BUILT_IN_AGENT_IDS.has(v2.id),
+  };
 };
 
 class OpencodeService {
@@ -1624,30 +1743,26 @@ class OpencodeService {
       return existing;
     }
 
+    // V2 contract: the 200 response envelope is `{ location, data: AgentV2Info[] }`.
+    // We unwrap `response.data.data` to get the agent list (matches the pattern
+    // used by V2 consumers in this file, e.g. v2.session.permission.get).
     const request = (async () => {
-      const params = effectiveDirectory ? { directory: effectiveDirectory } : undefined;
-      const response = await this.client.app.agents(params);
-      if (!response.error && Array.isArray(response.data) && response.data.length > 0) {
-        return response.data;
+      const location = effectiveDirectory ? { directory: effectiveDirectory } : undefined;
+      const response = await this.client.v2.agent.list(location ? { location } : undefined);
+      if (response.error) {
+        throw new Error(`agent.list failed (${response.response?.status ?? 'unknown'}): ${formatSdkError(response.error)}`);
       }
-
-      // SDK gap / endpoint drift: current OpenCode exposes the authoritative
-      // agent list at /agent, while app.agents can be empty on some runtimes.
-      const fallbackResponse = await runtimeFetch('/api/agent', {
-        ...(effectiveDirectory ? { query: { directory: effectiveDirectory } } : {}),
-      });
-      if (!fallbackResponse.ok) {
-        if (response.error) {
-          throw new Error(`app.agents failed${response.response?.status ? ` (${response.response.status})` : ''}: ${formatSdkError(response.error)}`);
-        }
-        throw new Error(`agent.list failed (${fallbackResponse.status})`);
+      const data = response.data?.data;
+      if (!Array.isArray(data)) {
+        throw new Error('agent.list failed: invalid response (non-array data)');
       }
-
-      const fallbackData = await fallbackResponse.json().catch(() => null) as unknown;
-      if (!Array.isArray(fallbackData)) {
-        throw new Error('agent.list failed: invalid response');
+      // V1 semantic preserved: an empty V2 response is treated as a hard
+      // failure rather than silently returning []. Silent empty would defeat
+      // caller-side retries and clear the cached agent list.
+      if (data.length === 0) {
+        throw new Error('agent.list failed: empty response');
       }
-      return fallbackData as Agent[];
+      return data.map(normalizeAgentV2ToV1);
     })();
 
     this.listAgentsInFlight.set(key, request);
