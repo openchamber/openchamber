@@ -51,7 +51,12 @@ export function mergeBootstrapSessions(
   allSessions: Session[] | null,
   existingSessions: Session[],
   revisions?: BootstrapSessionRevisionOptions,
-): { sessions: Session[]; rootCount: number } {
+): { sessions: Session[]; rootCount: number; complete: boolean } {
+  // Completeness means the full hierarchy (roots and children) was fetched.
+  // A null `allSessions` is a roots-only fallback after the child-session
+  // fetch failed: the committed list is NOT authoritative-complete and must
+  // never prove completeness for relation omission pruning.
+  const complete = allSessions !== null
   const completeSessions = allSessions ?? existingSessions.filter(
     (session) => Boolean(getParentId(session)),
   )
@@ -95,7 +100,7 @@ export function mergeBootstrapSessions(
     getParentId(session) ? count : count + 1
   ), 0)
 
-  return { sessions, rootCount }
+  return { sessions, rootCount, complete }
 }
 
 export function getReconnectCandidateSessionIds(state: ReconnectMaterializationState, options?: ReconnectCandidateOptions) {
