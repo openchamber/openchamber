@@ -1586,7 +1586,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       const result = await files.readFile(path, {
         ...options,
         directory: root || undefined,
-        ...(cacheOptions?.fresh ? { fresh: true } : {}),
+        ...cacheOptions,
       });
       return result.content ?? '';
     }
@@ -2654,15 +2654,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       return false;
     }
 
-    diagramXmlRef.current = xml;
-    diagramSavedXmlRef.current = xml;
-    setDraftContent(xml);
+    applyLoadedTextContent(xml);
     const stat = await readFileStat(path).catch(() => null);
     if (stat) {
       lastLoadedFileStatRef.current = stat;
     }
     return true;
-  }, [files, readFileStat, t]);
+  }, [applyLoadedTextContent, files, readFileStat, t]);
 
   React.useEffect(() => {
     return () => {
