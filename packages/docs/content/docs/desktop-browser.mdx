@@ -13,8 +13,9 @@ Pages opened here cannot use your camera, microphone, or location: those request
 
 Copy and paste use the computer's clipboard on macOS, Windows, and Linux. A page
 must be focused before it can copy. Clipboard reads through JavaScript work only
-for a focused page on `localhost`, `127.0.0.1`, or `[::1]`; external pages cannot
-read the clipboard. Native paste still works on external pages after you focus a
+for a focused page on the literal `localhost` hostname. Pages opened through a
+remote development tunnel, external pages, and pages addressed as `127.0.0.1` or
+`[::1]` cannot read the clipboard. Native paste still works after you focus a
 field. The web and VS Code versions do not provide this browser or its clipboard
 behavior.
 

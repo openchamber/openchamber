@@ -162,7 +162,8 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
   location, and device-picker requests from pages shown there are denied. A focused
   page can write to the system clipboard, so its normal Copy controls and native
   paste work across tabs and local applications. Clipboard reads are limited to a
-  focused loopback page. External pages cannot read the system clipboard. Electron
+  focused page on the literal `localhost` hostname. External and tunnelled pages
+  cannot read the system clipboard. Electron
   grants permission requests by default when no handler is set, and the panel
   loads whatever address the user types. Tab favicons are fetched in this
   session too, so icons behind the page's own login resolve and the app's origin

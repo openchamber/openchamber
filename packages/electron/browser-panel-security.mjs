@@ -1,12 +1,13 @@
 const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
+const CLIPBOARD_READ_HOSTNAME = 'localhost';
 const CLIPBOARD_WRITE_PERMISSION = 'clipboard-sanitized-write';
 const CLIPBOARD_READ_PERMISSION = 'clipboard-read';
 
-const isLoopbackHttpUrl = (url) => {
+const isLocalhostHttpUrl = (url) => {
   try {
     const parsed = new URL(url);
     return (parsed.protocol === 'http:' || parsed.protocol === 'https:')
-      && LOOPBACK_HOSTNAMES.has(parsed.hostname.toLowerCase());
+      && parsed.hostname.toLowerCase() === CLIPBOARD_READ_HOSTNAME;
   } catch {
     return false;
   }
@@ -15,7 +16,7 @@ const isLoopbackHttpUrl = (url) => {
 export const shouldAllowBrowserPanelPermission = ({ permission, requestingUrl, isFocused }) => {
   if (!isFocused) return false;
   if (permission === CLIPBOARD_WRITE_PERMISSION) return true;
-  if (permission === CLIPBOARD_READ_PERMISSION) return isLoopbackHttpUrl(requestingUrl);
+  if (permission === CLIPBOARD_READ_PERMISSION) return isLocalhostHttpUrl(requestingUrl);
   return false;
 };
 

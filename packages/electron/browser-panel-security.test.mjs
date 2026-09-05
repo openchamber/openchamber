@@ -23,24 +23,22 @@ test('denies clipboard writes when the browser page is not focused', () => {
   }), false);
 });
 
-test('allows focused loopback pages to read the system clipboard', () => {
-  for (const requestingUrl of [
-    'http://localhost:3000/',
-    'http://127.0.0.1:3000/',
-    'https://[::1]:3000/',
-  ]) {
-    assert.equal(shouldAllowBrowserPanelPermission({
-      permission: 'clipboard-read',
-      requestingUrl,
-      isFocused: true,
-    }), true);
-  }
+test('allows a focused localhost page to read the system clipboard', () => {
+  assert.equal(shouldAllowBrowserPanelPermission({
+    permission: 'clipboard-read',
+    requestingUrl: 'http://localhost:3000/',
+    isFocused: true,
+  }), true);
 });
 
-test('denies clipboard reads outside focused loopback pages', () => {
+test('denies clipboard reads outside focused localhost pages', () => {
   for (const request of [
     { requestingUrl: 'https://example.com/', isFocused: true },
     { requestingUrl: 'http://localhost.example.com/', isFocused: true },
+    // Remote dev servers use a 127.0.0.1 bridge, so it must not inherit local
+    // clipboard-read trust merely because the transport terminates on loopback.
+    { requestingUrl: 'http://127.0.0.1:3000/', isFocused: true },
+    { requestingUrl: 'https://[::1]:3000/', isFocused: true },
     { requestingUrl: 'http://localhost:3000/', isFocused: false },
     { requestingUrl: 'not a url', isFocused: true },
   ]) {
