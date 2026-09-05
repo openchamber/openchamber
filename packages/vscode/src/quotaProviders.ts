@@ -3,7 +3,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
-import { deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
+import {
+  deleteLegacyOpenCodeGoCredential,
+  parseOllamaCloudSettingsHtml,
+  readCredential,
+  validateOllamaCloudResponseUrl,
+  type OllamaCloudUsage,
+} from './quotaCredentials';
 import { getProviderAuth, updateProviderAuth } from './opencodeAuth';
 import { fetchExeDevUsage } from './exeDevQuota';
 
@@ -1862,30 +1868,26 @@ const fetchMiniMaxCnCodingPlanQuota = () => fetchMiniMaxQuota({
   usageFieldsAreRemaining: true,
 });
 
-const parseOllamaSettingsHtml = (html: string) => {
-  const windows: Record<string, UsageWindow> = {};
-  const sessionMatch = html.match(/Session\s+usage[^0-9]*([0-9.]+)%/i);
-  if (sessionMatch) {
+const buildOllamaUsageWindows = (usage: OllamaCloudUsage): ProviderUsage['windows'] => {
+  const windows: ProviderUsage['windows'] = {};
+  if (usage.sessionPercent !== undefined) {
     windows.session = toUsageWindow({
-      usedPercent: toNumber(sessionMatch[1]),
+      usedPercent: usage.sessionPercent,
       windowSeconds: null,
       resetAt: null,
     });
   }
 
-  const weeklyMatch = html.match(/Weekly\s+usage[^0-9]*([0-9.]+)%/i);
-  if (weeklyMatch) {
+  if (usage.weeklyPercent !== undefined) {
     windows.weekly = toUsageWindow({
-      usedPercent: toNumber(weeklyMatch[1]),
+      usedPercent: usage.weeklyPercent,
       windowSeconds: null,
       resetAt: null,
     });
   }
 
-  const premiumMatch = html.match(/Premium[^0-9]*([0-9]+)\s*\/\s*([0-9]+)/i);
-  if (premiumMatch) {
-    const used = toNumber(premiumMatch[1]);
-    const total = toNumber(premiumMatch[2]);
+  if (usage.premium) {
+    const { used, total } = usage.premium;
     const usedPercent = total && used !== null ? Math.min(100, (used / total) * 100) : null;
     windows.premium = toUsageWindow({
       usedPercent,
@@ -1918,7 +1920,19 @@ const fetchOllamaCloudQuota = async (): Promise<ProviderResult> => {
         Cookie: cookie,
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
       },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(15_000),
     });
+
+    if (response.status === 401 || response.status === 403) {
+      return buildResult({
+        providerId: 'ollama-cloud',
+        providerName: 'Ollama Cloud',
+        ok: false,
+        configured: true,
+        error: 'Ollama Cloud authentication failed',
+      });
+    }
 
     if (!response.ok) {
       return buildResult({
@@ -1930,12 +1944,16 @@ const fetchOllamaCloudQuota = async (): Promise<ProviderResult> => {
       });
     }
 
+    validateOllamaCloudResponseUrl(response);
+    const usage = parseOllamaCloudSettingsHtml(await response.text());
+    if (!usage) throw new Error('Ollama Cloud usage response could not be parsed');
+
     return buildResult({
       providerId: 'ollama-cloud',
       providerName: 'Ollama Cloud',
       ok: true,
       configured: true,
-      usage: { windows: parseOllamaSettingsHtml(await response.text()) },
+      usage: { windows: buildOllamaUsageWindows(usage) },
     });
   } catch (error) {
     return buildResult({

@@ -22,14 +22,24 @@ const AUTH = JSON.stringify({
   'github-copilot': { access: 'test-token' },
   anthropic: { access: 'test-token', refresh: 'test-refresh' },
 });
-((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
-((fs as unknown) as { readFileSync: () => string }).readFileSync = () => AUTH;
+const setAuthFileMock = (): void => {
+  ((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
+  ((fs as unknown) as { readFileSync: () => string }).readFileSync = () => AUTH;
+};
+
+const restoreFs = (): void => {
+  const fsMock = fs as unknown as { existsSync: unknown; readFileSync: unknown };
+  fsMock.existsSync = ORIGINAL_FS.existsSync;
+  fsMock.readFileSync = ORIGINAL_FS.readFileSync;
+};
 
 import { fetchQuotaForProvider } from './quotaProviders';
 
 type MockResponseInit = { ok?: boolean; status?: number };
+type OllamaResponseInit = MockResponseInit & { url?: string };
 
 after(() => {
+  restoreFs();
   if (previousQuotaDataDirectory === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
   else process.env.OPENCHAMBER_DATA_DIR = previousQuotaDataDirectory;
   fs.rmSync(temporaryQuotaDataDirectory, { recursive: true, force: true });
@@ -40,6 +50,20 @@ const mockResponse = (body: unknown, init: MockResponseInit = {}): Response => (
   status: init.status ?? 200,
   json: async () => body,
 } as unknown as Response);
+
+type OllamaResponse = {
+  ok: boolean;
+  status: number;
+  url: string;
+  text: () => Promise<string>;
+};
+
+const mockOllamaResponse = (body: string, init: OllamaResponseInit = {}): OllamaResponse => ({
+  ok: 'ok' in init ? init.ok! : (init.status ?? 200) >= 200 && (init.status ?? 200) < 300,
+  status: init.status ?? 200,
+  url: init.url ?? 'https://ollama.com/settings',
+  text: async () => body,
+});
 
 // Documented NeuralWatt payload from https://portal.neuralwatt.com/docs/api/quota.
 // plan="standard", kwh_included=20.0, kwh_used=13.9023.
@@ -70,10 +94,12 @@ let ORIGINAL_FETCH: typeof globalThis.fetch;
 
 beforeEach(() => {
   ORIGINAL_FETCH = globalThis.fetch;
+  setAuthFileMock();
 });
 
 afterEach(() => {
   globalThis.fetch = ORIGINAL_FETCH;
+  restoreFs();
 });
 
 const stubFetchReturning = (resolver: () => Promise<unknown>): void => {
@@ -372,6 +398,9 @@ describe('Z.ai quota provider (VS Code parity)', () => {
 });
 
 describe('NeuralWatt quota provider (VS Code parity)', () => {
+  beforeEach(setAuthFileMock);
+  afterEach(restoreFs);
+
   test('builds subscription window keyed by plan name (windowSeconds null)', async () => {
     stubFetchReturning(() => Promise.resolve(mockResponse(DOCUMENTED_SUBSCRIPTION_PAYLOAD)));
 
@@ -617,20 +646,13 @@ describe('NeuralWatt quota provider (VS Code parity)', () => {
     assert.equal(result.usage, null);
   });
 
-  // Restore fs so other test files (which use the real auth file) are unaffected.
-  test('teardown: restore fs', () => {
-    const fsMock = fs as unknown as { existsSync: unknown; readFileSync: unknown };
-    fsMock.existsSync = ORIGINAL_FS.existsSync;
-    fsMock.readFileSync = ORIGINAL_FS.readFileSync;
-  });
 });
 
 describe('DeepSeek quota provider (VS Code parity)', () => {
   beforeEach(() => {
-    const fsMock = fs as unknown as { existsSync: () => boolean; readFileSync: () => string };
-    fsMock.existsSync = () => true;
-    fsMock.readFileSync = () => AUTH;
+    setAuthFileMock();
   });
+  afterEach(restoreFs);
 
   test('builds credits_balance window from documented USD payload (string balance)', async () => {
     stubFetchReturning(() => Promise.resolve(mockResponse({
@@ -708,9 +730,117 @@ describe('DeepSeek quota provider (VS Code parity)', () => {
     assert.equal(result.usage!.windows.credits_balance!.valueLabel, '$0.00');
   });
 
-  test('teardown: restore fs', () => {
-    const fsMock = fs as unknown as { existsSync: unknown; readFileSync: unknown };
-    fsMock.existsSync = ORIGINAL_FS.existsSync;
-    fsMock.readFileSync = ORIGINAL_FS.readFileSync;
+});
+
+describe('Ollama Cloud quota provider (VS Code parity)', () => {
+  const credentialPath = path.join(temporaryQuotaDataDirectory, 'quota', 'ollama-cloud.json');
+
+  beforeEach(() => {
+    restoreFs();
+    fs.mkdirSync(path.dirname(credentialPath), { recursive: true });
+    fs.writeFileSync(credentialPath, JSON.stringify({ cookie: '__Secure-session=test-cookie' }));
+  });
+
+  afterEach(() => {
+    fs.rmSync(credentialPath, { force: true });
+    restoreFs();
+  });
+
+  test('reports authentication failure on 401', async () => {
+    stubFetchFailing(async () => ({}), { ok: false, status: 401 });
+
+    const result = await fetchQuotaForProvider('ollama-cloud');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'Ollama Cloud authentication failed');
+  });
+
+  test('reports authentication failure on 403', async () => {
+    stubFetchFailing(async () => ({}), { ok: false, status: 403 });
+
+    const result = await fetchQuotaForProvider('ollama-cloud');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'Ollama Cloud authentication failed');
+  });
+
+  test('reports authentication failure when redirected to /signin', async () => {
+    stubFetchReturning(() => Promise.resolve(mockOllamaResponse('<html>Sign in</html>', { url: 'https://ollama.com/signin' })));
+
+    const result = await fetchQuotaForProvider('ollama-cloud');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'Ollama Cloud authentication failed');
+  });
+
+  test('returns usage windows for a valid cookie', async () => {
+    stubFetchReturning(() => Promise.resolve(mockOllamaResponse('<html><body><div>Session usage 50%</div><div>Weekly usage 25%</div><div>Premium 2 / 10</div></body></html>')));
+
+    const result = await fetchQuotaForProvider('ollama-cloud');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.configured, true);
+    assert.equal(result.usage!.windows.session!.usedPercent, 50);
+    assert.equal(result.usage!.windows.weekly!.usedPercent, 25);
+    assert.equal(result.usage!.windows.premium!.valueLabel, '2 / 10');
+  });
+
+  test('accepts an authenticated page with no usage data', async () => {
+    stubFetchReturning(() => Promise.resolve(mockOllamaResponse('<html><body><p>No usage yet</p></body></html>')));
+
+    const result = await fetchQuotaForProvider('ollama-cloud');
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.usage!.windows, {});
+  });
+
+  test('rejects an unrecognized successful HTML response', async () => {
+    stubFetchReturning(() => Promise.resolve(mockOllamaResponse('<html>Unexpected content</html>')));
+
+    const result = await fetchQuotaForProvider('ollama-cloud');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'Ollama Cloud usage response could not be parsed');
+    assert.equal(result.usage, null);
+  });
+
+  test('reports HTTP failures separately from authentication failures', async () => {
+    stubFetchFailing(async () => ({}), { ok: false, status: 500 });
+
+    const result = await fetchQuotaForProvider('ollama-cloud');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'API error: 500');
+  });
+
+  test('rejects an unexpected final redirect origin', async () => {
+    stubFetchReturning(() => Promise.resolve(mockOllamaResponse('<html>Session usage 50%</html>', { url: 'https://evil.example/settings' })));
+
+    const result = await fetchQuotaForProvider('ollama-cloud');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Ollama Cloud redirected to an unexpected origin');
+  });
+
+  test('rejects an unexpected final redirect path', async () => {
+    stubFetchReturning(() => Promise.resolve(mockOllamaResponse('<html>Session usage 50%</html>', { url: 'https://ollama.com/dashboard' })));
+
+    const result = await fetchQuotaForProvider('ollama-cloud');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Ollama Cloud returned an unexpected final path');
+  });
+
+  test('preserves timeout failures separately from HTTP failures', async () => {
+    stubFetchReturning(() => Promise.reject(new DOMException('The operation timed out', 'TimeoutError')));
+
+    const result = await fetchQuotaForProvider('ollama-cloud');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'The operation timed out');
   });
 });

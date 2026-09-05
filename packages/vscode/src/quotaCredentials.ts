@@ -6,7 +6,49 @@ import { fetchExeDevUsage } from './exeDevQuota';
 
 export type ManagedProvider = 'exe-dev' | 'ollama-cloud' | 'cursor';
 export type ManagedCredential = Record<string, string>;
+export type OllamaCloudUsage = {
+  sessionPercent?: number;
+  weeklyPercent?: number;
+  premium?: { used: number; total: number };
+};
 const providers = new Set<ManagedProvider>(['exe-dev', 'ollama-cloud', 'cursor']);
+const OLLAMA_CLOUD_ORIGIN = 'https://ollama.com';
+const OLLAMA_SETTINGS_PATH = '/settings';
+const OLLAMA_SIGNIN_PATH = '/signin';
+const NO_USAGE_PAGE_PATTERN = /(?:^|>)\s*No usage(?: data)?(?: available)? yet\.?\s*(?=<|$)/i;
+
+export const validateOllamaCloudResponseUrl = (response: { url: string }) => {
+  let url: URL;
+  try {
+    url = new URL(response.url);
+  } catch {
+    throw new Error('Ollama Cloud returned an invalid final URL');
+  }
+
+  if (url.origin !== OLLAMA_CLOUD_ORIGIN) {
+    throw new Error('Ollama Cloud redirected to an unexpected origin');
+  }
+  if (url.pathname === OLLAMA_SIGNIN_PATH) {
+    throw new Error('Ollama Cloud authentication failed');
+  }
+  if (url.pathname !== OLLAMA_SETTINGS_PATH) {
+    throw new Error('Ollama Cloud returned an unexpected final path');
+  }
+};
+
+export const parseOllamaCloudSettingsHtml = (html: string): OllamaCloudUsage | null => {
+  const usage: OllamaCloudUsage = {};
+  const sessionMatch = html.match(/Session\s+usage(?:\s|<[^>]*>|[:：])*([0-9]+(?:\.[0-9]+)?)\s*%/i);
+  if (sessionMatch) usage.sessionPercent = Number(sessionMatch[1]);
+
+  const weeklyMatch = html.match(/Weekly\s+usage(?:\s|<[^>]*>|[:：])*([0-9]+(?:\.[0-9]+)?)\s*%/i);
+  if (weeklyMatch) usage.weeklyPercent = Number(weeklyMatch[1]);
+
+  const premiumMatch = html.match(/Premium(?:\s|<[^>]*>|[:：])*([0-9]+)(?:\s|<[^>]*>)*\/(?:\s|<[^>]*>)*([0-9]+)/i);
+  if (premiumMatch) usage.premium = { used: Number(premiumMatch[1]), total: Number(premiumMatch[2]) };
+
+  return Object.keys(usage).length > 0 || NO_USAGE_PAGE_PATTERN.test(html) ? usage : null;
+};
 const directory = () => path.join(process.env.OPENCHAMBER_DATA_DIR ? path.resolve(process.env.OPENCHAMBER_DATA_DIR) : path.join(os.homedir(), '.config', 'openchamber'), 'quota');
 const target = (provider: ManagedProvider) => {
   if (!providers.has(provider)) throw new Error('Unsupported credential provider');
@@ -56,10 +98,11 @@ export const importCursorCredential = () => {
 export const validateCredential = async (provider: ManagedProvider, credential: ManagedCredential) => {
   if (provider === 'exe-dev') await fetchExeDevUsage(credential.usageToken);
   if (provider === 'ollama-cloud') {
-    const response = await fetch('https://ollama.com/settings', { headers: { Cookie: credential.cookie }, redirect: 'manual', signal: AbortSignal.timeout(15_000) });
-    if (!response.ok || (response.status >= 300 && response.status < 400)) throw new Error('Ollama Cloud authentication failed');
-    const html = await response.text();
-    if (!/Session\s+usage|Weekly\s+usage|Premium[^0-9]*[0-9]+\s*\/\s*[0-9]+/i.test(html)) throw new Error('Ollama Cloud usage data could not be parsed');
+    const response = await fetch('https://ollama.com/settings', { headers: { Cookie: credential.cookie }, redirect: 'follow', signal: AbortSignal.timeout(15_000) });
+    if (response.status === 401 || response.status === 403) throw new Error('Ollama Cloud authentication failed');
+    if (!response.ok) throw new Error(`Ollama Cloud returned HTTP ${response.status}`);
+    validateOllamaCloudResponseUrl(response);
+    if (!parseOllamaCloudSettingsHtml(await response.text())) throw new Error('Ollama Cloud usage response could not be parsed');
   }
   if (provider === 'cursor') {
     if (!credential.accessToken && credential.refreshToken) {

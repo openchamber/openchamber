@@ -6,6 +6,8 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.authCookie': 'Cookie авторизації',
   'settings.providers.page.openCodeGo.apiKey': 'Ключ API',
   'settings.providers.page.openCodeGo.help': 'Скопіюйте ID робочого простору з URL панелі, а cookie auth з інструментів розробника браузера. OpenChamber ніколи не сканує сховище cookie браузера.',
+  'settings.providers.page.ollamaCloud.help': 'Вставте cookie сесії з ollama.com (знайдіть __Secure-session=... в інструментах розробника браузера). Це не ваш локальний API-ключ або кінцева точка Ollama. OpenChamber ніколи не сканує сховище cookie браузера.',
+  'settings.providers.page.ollamaCloud.cookie': 'Cookie сесії',
   'settings.providers.page.openCodeGo.save': 'Зберегти й перевірити',
   'settings.providers.page.openCodeGo.replace': 'Замінити',
   'settings.providers.page.openCodeGo.validate': 'Перевірити',

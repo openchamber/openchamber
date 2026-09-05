@@ -6,6 +6,8 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.authCookie': 'Kimlik doğrulama çerezi',
   'settings.providers.page.openCodeGo.apiKey': 'API anahtarı',
   'settings.providers.page.openCodeGo.help': 'Çalışma alanı ID\'sini kontrol paneli URL\'sinden, kimlik doğrulama çerezini de tarayıcınızın geliştirici araçlarından kopyalayın. OpenChamber tarayıcı çerez deposunu asla taramaz.',
+  'settings.providers.page.ollamaCloud.help': 'ollama.com adresindeki oturum çerezini yapıştırın (tarayıcınızın geliştirici araçlarında __Secure-session=... ifadesini arayın). Bu, yerel Ollama API anahtarınız veya uç noktanız değildir. OpenChamber tarayıcı çerez deposunu asla taramaz.',
+  'settings.providers.page.ollamaCloud.cookie': 'Oturum çerezi',
   'settings.providers.page.openCodeGo.save': 'Kaydet ve doğrula',
   'settings.providers.page.openCodeGo.replace': 'Değiştir',
   'settings.providers.page.openCodeGo.validate': 'Doğrula',
