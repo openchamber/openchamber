@@ -1070,6 +1070,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.darkTheme': 'Ciemny motyw',
   'settings.openchamber.visual.field.diffLayoutAria': 'Układ diffa: {option}',
   'settings.openchamber.visual.field.editTools': 'Narzędzia edycji',
+  'settings.openchamber.visual.field.todoList': 'Lista zadań',
 
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'Włącz sprawdzanie pisowni w polach tekstowych',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': 'Włącz sprawdzanie pisowni w polach tekstowych',
@@ -1115,6 +1116,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.showDotfilesAria': 'Pokaż pliki ukryte',
   'settings.openchamber.visual.field.showExpandedBashToolsAria': 'Pokaż rozwinięte narzędzia bash',
   'settings.openchamber.visual.field.showExpandedEditToolsAria': 'Pokaż rozwinięte narzędzia edycji',
+  'settings.openchamber.visual.field.showExpandedTodoToolsAria': 'Pokaż rozwinięte narzędzia zadań',
   'settings.openchamber.visual.field.sessionRecap': 'Generuj podsumowanie sesji',
   'settings.openchamber.visual.field.sessionRecapAria': 'Generuj podsumowanie po zakończeniu pracy agenta',
   'settings.openchamber.visual.field.sessionSuggestion': 'Generuj sugestię następnej wiadomości użytkownika',
