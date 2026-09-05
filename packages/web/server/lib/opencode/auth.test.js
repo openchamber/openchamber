@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
+
+const AUTH_MODULE_PATH = fileURLToPath(new URL('./auth.js', import.meta.url));
 
 // auth.js bakes the data directory into module scope from os.homedir() at
 // import time. Point os.homedir() at a temp home for that import only, so no
@@ -12,7 +15,7 @@ const loadAuthModule = async () => {
   os.homedir = () => home;
   let authModule;
   try {
-    authModule = await import(`./auth.js?auth-permissions-test=${Math.random().toString(36).slice(2)}`);
+    authModule = await import(`${pathToFileURL(AUTH_MODULE_PATH).href}?auth-permissions-test=${Math.random().toString(36).slice(2)}`);
   } finally {
     os.homedir = originalHomedir;
   }
