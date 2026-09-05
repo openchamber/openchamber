@@ -36,11 +36,28 @@ const getSessionAssistTargets = () => {
 };
 
 const IDLE_QUIET_MS = 60_000;
-const TRANSCRIPT_MESSAGE_LIMIT = 12;
 const TRANSCRIPT_PART_CHAR_LIMIT = 6_000;
+// Over the budget the transcript is trimmed from the OLDEST end, and only ever
+// on a TRANSCRIPT_DROP_CHUNK boundary: the prompt is sent to the session's own
+// model, so consecutive assists on one session share a token prefix and hit the
+// backend's prefix cache. Dropping one message per turn would shift the start of
+// the transcript every time and defeat that.
+const TRANSCRIPT_DROP_CHUNK = 16;
+// Room left for everything the prompt wraps around the transcript: the header,
+// the pointer to the last message, the requested fields and the language sample.
+// Generous on purpose — the budget it is subtracted from is itself an estimate.
+const PROMPT_SCAFFOLD_RESERVE_CHARS = 2_000;
 const RECAP_CHAR_LIMIT = 320;
 const SUGGESTION_CHAR_LIMIT = 500;
 const FETCH_TIMEOUT_MS = 5_000;
+// The transcript is the whole session, so the message list can be large.
+const HISTORY_FETCH_TIMEOUT_MS = 20_000;
+const ASSIST_TIMEOUT_MS = 120_000;
+const STALENESS_TAIL_LIMIT = 4;
+// Expected outcomes of a whole-session transcript, not failures: a session
+// longer than its own model's context, and a reasoning model that spends the
+// output budget thinking. Both mean "no suggestion this cycle".
+const QUIET_GENERATION_CODES = new Set(['context-too-small', 'output-exhausted']);
 
 const buildAssistSystemPrompt = ({ recap, suggestion }) => [
   'You assist a user who chats with a coding agent. Based on the conversation transcript, return exactly one JSON object and nothing else — no prose, no markdown, no code fences.',
@@ -48,44 +65,40 @@ const buildAssistSystemPrompt = ({ recap, suggestion }) => [
   recap
     ? 'recap: at most 20 words. State the substance directly — the facts, result, or conclusion, plus the next move if there is one. NEVER narrate ("The assistant explained…", "The agent did…") — write the content itself, like a note the user jotted down.'
     : '',
-  suggestion ? 'suggestion: write ONE immediately sendable next user message addressed TO the coding agent.' : '',
-  suggestion ? 'The suggestion should be the most useful next step after the assistant\'s latest reply. It should help the user continue productively, not inspect already-known details.' : '',
-  suggestion ? 'Prefer suggestions that ask the agent to make a concrete improvement, implement something specific, validate the latest change, explain tradeoffs, improve the current approach, or continue from the current result.' : '',
+  // Written in the USER's voice because the client pastes this exact string
+  // into the composer for the user to send. A suggestion phrased as the agent
+  // ("I would do X") reads as nonsense once it lands there.
+  suggestion ? 'suggestion: write ONE short message the user could send to the coding agent as-is, asking for the next step.' : '',
+  suggestion ? 'You are given the WHOLE conversation, not just the end. Judge the next step against what the user actually asked for at the start, not only against your latest reply.' : '',
   suggestion ? 'Rules for suggestion:' : '',
-  suggestion ? '- Output exactly one message the user could click and send without editing.' : '',
-  suggestion ? '- Pick one best next action yourself.' : '',
+  suggestion ? '- Return an EMPTY STRING when there is no honest next step: the request the user made is already satisfied, or the conversation is waiting on a decision only the user can make. An empty suggestion is a correct and expected answer, not a failure.' : '',
+  suggestion ? '- Never invent follow-up work to fill the field. Finishing a task is a valid end state.' : '',
+  suggestion ? '- Work you flagged as unverified, out of scope, or "not tested" in your own reply is NOT automatically the next step. It is only the next step if it is part of what the user asked for.' : '',
+  // Describes the grammar instead of quoting an opener. An English template
+  // here is copied verbatim: measured against a Spanish conversation, quoting
+  // one returned the suggestion in English in 2 of 3 runs.
+  suggestion ? '- Address the agent directly, in the imperative, in the language of the conversation. Do not write it as the agent describing its own plan.' : '',
   suggestion ? '- Do not include alternatives, choices, slash-separated options, or "or".' : '',
-  suggestion ? '- Do not write "Do X or Y", "Ask whether...", "Maybe...", or "You could...".' : '',
-  suggestion ? '- Do not ask for information the assistant already provided.' : '',
-  suggestion ? '- Do not ask to see exact code, file paths, prompt locations, or implementation internals unless the assistant did not provide them and they are necessary for the next step.' : '',
-  suggestion ? '- Do not produce generic workflow commands like "Run tests" unless testing is clearly the next unresolved step.' : '',
-  suggestion ? '- Do not produce meta/debug requests that merely inspect the implementation.' : '',
-  suggestion ? '- Use imperative or question form.' : '',
-  suggestion ? '- Keep it concise.' : '',
-  suggestion ? 'Use these examples to understand how to choose the suggestion. Do not copy their topic or wording unless the current conversation is about the same thing.' : '',
-  suggestion ? 'Example 1:' : '',
-  suggestion ? 'Assistant reply summary:' : '',
-  suggestion ? 'The assistant already identified the file where the feature is implemented, explained what context is sent to the small model, and summarized the current prompt.' : '',
-  suggestion ? 'Bad suggestion:' : '',
-  suggestion ? '"Show me the exact runtime.js code and where the prompt is built."' : '',
-  suggestion ? 'Why bad:' : '',
-  suggestion ? 'It asks for information the assistant already provided. It repeats inspection instead of moving to an improvement or decision.' : '',
-  suggestion ? 'Good suggestion:' : '',
-  suggestion ? '"Suggest how to improve the prompt and context so the generated suggestion is more useful."' : '',
-  suggestion ? 'Why good:' : '',
-  suggestion ? 'It naturally continues from the analysis and asks for a concrete improvement.' : '',
-  suggestion ? 'Example 2:' : '',
-  suggestion ? 'Assistant reply summary:' : '',
-  suggestion ? 'The assistant implemented a timeline dialog redesign, listed concrete UI changes, and reported that type-check and lint passed.' : '',
-  suggestion ? 'Bad suggestion:' : '',
-  suggestion ? '"Check whether scrolling or loading older messages works without jumps."' : '',
-  suggestion ? 'Why bad:' : '',
-  suggestion ? 'It contains an alternative. A suggestion chip must be one sendable message, not a choice the user has to edit.' : '',
-  suggestion ? 'Good suggestion:' : '',
-  suggestion ? '"Check whether scrolling and loading older messages work without jumps."' : '',
-  suggestion ? 'Why good:' : '',
-  suggestion ? 'It picks a single validation request that the user can send immediately.' : '',
+  suggestion ? '- Do not restate information you already gave in the reply.' : '',
+  suggestion ? 'Example 1 — the request is finished:' : '',
+  suggestion ? 'The user asked for a bug ticket. You created it and summarized your findings. Your reply also noted that the mobile panel was not verified on screen.' : '',
+  suggestion ? 'Correct suggestion: "" (empty). The user asked for a ticket and the ticket exists. The unverified mobile panel is work described IN the ticket, not work the user asked you to do now.' : '',
+  // Example 1 taught the "already done" case well (empty in every measured run)
+  // and this one exists because the sibling case did not: asked for a sendable
+  // imperative, the model produced "merge the PR" in 4 runs out of 4, when
+  // merging is exactly the decision it is waiting on.
+  suggestion ? 'Example 2 — the work is done and the next move is the user\'s to make:' : '',
+  suggestion ? 'You finished the change, opened a pull request, reported it is mergeable, and said you are waiting for review. Nothing is blocked on you.' : '',
+  suggestion ? 'Correct suggestion: "" (empty). Merging, deploying, approving, choosing between designs and spending money are the user\'s calls. Telling them to make their own decision is not a next step, it is nagging.' : '',
+  suggestion ? 'Example 3 — the request is not finished:' : '',
+  suggestion ? 'The user asked you to make the tests pass. Two of them still fail and you have just located the cause.' : '',
+  suggestion ? 'A correct suggestion here is one imperative sentence, in the conversation\'s language, naming the specific fix to apply and the check to re-run.' : '',
+  // These examples describe the answers rather than quoting them. Quoting an
+  // English sentence primes the field: measured against a Spanish session, the
+  // recap came back in Spanish and the suggestion in English, 2 runs out of 3.
+  suggestion ? 'The examples above are described in English only because these instructions are in English. They say nothing about the language of your answer.' : '',
   'All requested values MUST be written in the same language as the conversation text itself. Ignore any other language preferences or personalization you may have — only the conversation text decides the language.',
+  'This applies to every field independently: it is never correct for one field to be in the language of the conversation and another in English.',
   'Use double quotes for JSON strings, no trailing commas.',
 ].filter(Boolean).join('\n');
 
@@ -145,6 +158,53 @@ const messagePartsToText = (message) => {
     .slice(0, TRANSCRIPT_PART_CHAR_LIMIT);
 };
 
+// Tool NAMES only, never their input or output: a session can be almost all
+// tool calls (the text parts stay short), so a transcript without them reads as
+// an empty conversation — and tool payloads are exactly where file contents,
+// command lines and credentials would leak into a utility prompt.
+const messageToolSummary = (message) => {
+  const parts = Array.isArray(message?.parts) ? message.parts : [];
+  const names = parts
+    .filter((part) => part?.type === 'tool' && typeof part.tool === 'string' && part.tool)
+    .map((part) => part.tool);
+  if (names.length === 0) return '';
+  const counts = new Map();
+  for (const name of names) counts.set(name, (counts.get(name) ?? 0) + 1);
+  const rendered = [...counts.entries()].map(([name, n]) => (n > 1 ? `${name}×${n}` : name));
+  return `[tools: ${rendered.join(', ')}]`;
+};
+
+// Numbered by position in the SESSION, not in the rendered list: a message that
+// carries no text and no tools is skipped, and renumbering around it would move
+// every later block the moment OpenCode patches that message.
+const renderMessage = (message, index) => {
+  const role = message?.info?.role === 'user' ? 'User' : 'Assistant';
+  const body = [messagePartsToText(message), messageToolSummary(message)].filter(Boolean).join('\n');
+  return body ? { number: index, text: `#${index} ${role}:\n${body}` } : null;
+};
+
+// Renders the whole conversation, oldest first. Over budget, the oldest
+// messages are dropped on a TRANSCRIPT_DROP_CHUNK boundary so the start of the
+// transcript only moves in steps and the shared prefix survives between calls.
+export const buildTranscript = (messages, charBudget) => {
+  const rendered = messages.map((message, index) => renderMessage(message, index + 1)).filter(Boolean);
+  let start = 0;
+  let total = rendered.reduce((sum, block) => sum + block.text.length + 2, 0);
+  while (total > charBudget && start < rendered.length - 1) {
+    const next = Math.min(start + TRANSCRIPT_DROP_CHUNK, rendered.length - 1);
+    for (let i = start; i < next; i += 1) total -= rendered[i].text.length + 2;
+    start = next;
+  }
+  const kept = rendered.slice(start);
+  return {
+    text: kept.map((block) => block.text).join('\n\n'),
+    droppedOldest: start,
+    // The number the last block actually carries, which is what the tail of the
+    // prompt points at.
+    lastNumber: kept.length > 0 ? kept[kept.length - 1].number : 0,
+  };
+};
+
 export const createSessionAssistRuntime = ({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -182,14 +242,20 @@ export const createSessionAssistRuntime = ({
     return response.json().catch(() => null);
   };
 
-  const fetchRecentMessages = async (sessionId, directory) => {
+  // `limit` omitted fetches the whole conversation, which is what the transcript
+  // needs: the suggestion is judged against what the user asked for at the START
+  // of the session, which a tail window cannot see. The staleness re-check
+  // before writing only needs the tail, and passes a small limit.
+  const fetchSessionMessages = async (sessionId, directory, { limit } = {}) => {
     const base = buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}/message`, '');
-    const params = new URLSearchParams({ limit: String(TRANSCRIPT_MESSAGE_LIMIT) });
+    const params = new URLSearchParams();
+    if (limit) params.set('limit', String(limit));
     if (directory) params.set('directory', directory);
-    const response = await fetch(`${base}?${params.toString()}`, {
+    const query = params.toString();
+    const response = await fetch(query ? `${base}?${query}` : base, {
       method: 'GET',
       headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      signal: AbortSignal.timeout(limit ? FETCH_TIMEOUT_MS : HISTORY_FETCH_TIMEOUT_MS),
     });
     if (!response.ok) return null;
     const messages = await response.json().catch(() => null);
@@ -208,7 +274,7 @@ export const createSessionAssistRuntime = ({
     // Sub-agent/task sessions never surface in chat — skip them.
     if (typeof session.parentID === 'string' && session.parentID) return;
 
-    const messages = await fetchRecentMessages(sessionId, directory);
+    const messages = await fetchSessionMessages(sessionId, directory);
     if (!messages || messages.length === 0) {
       console.warn('[session-assist] no messages fetched');
       return;
@@ -225,21 +291,33 @@ export const createSessionAssistRuntime = ({
     const lastAssistantInfo = lastAssistant?.info;
     if (!lastAssistantInfo?.id) return;
 
-    // Only the last exchange: the assistant reply plus the user message it
-    // answered (assistant info.parentID → user info.id). Everything else is
-    // token waste for a one-line recap and a single suggestion.
+    const preferredProviderID = typeof lastAssistantInfo.providerID === 'string' ? lastAssistantInfo.providerID : undefined;
+    const preferredModelID = typeof lastAssistantInfo.modelID === 'string' ? lastAssistantInfo.modelID : undefined;
+    const { generateSmallModelText, describeSmallModel } = await getSmallModelService();
+
+    // Size the transcript against the model that will actually answer. A local
+    // proxy model is absent from the catalog and falls back to a conservative
+    // context, so a fixed budget would either waste a large window or overflow a
+    // small one — and overflow is fatal here (see onOverflow below).
+    const described = await describeSmallModel({ directory, preferredProviderID, preferredModelID })
+      .catch(() => null);
+    const charBudget = Number(described?.inputCharBudget) > 0
+      ? described.inputCharBudget - PROMPT_SCAFFOLD_RESERVE_CHARS
+      : 0;
+    if (charBudget <= 0) return;
+
+    // The whole conversation. Everything that varies per call — the pointer to
+    // the last message, the requested fields, the language sample — goes AFTER
+    // it, so the history stays an append-only prefix between consecutive
+    // assists on the same session.
+    const transcript = buildTranscript(messages, charBudget);
+    const assistantText = messagePartsToText(lastAssistant);
     const parentUserMessage = typeof lastAssistantInfo.parentID === 'string' && lastAssistantInfo.parentID
       ? messages.find((message) => message?.info?.id === lastAssistantInfo.parentID && message?.info?.role === 'user')
       : null;
     const userText = parentUserMessage ? messagePartsToText(parentUserMessage) : '';
-    const assistantText = messagePartsToText(lastAssistant);
-    const transcript = [
-      userText ? `User:\n${userText}` : '',
-      assistantText ? `Assistant:\n${assistantText}` : '',
-    ].filter(Boolean).join('\n\n');
-    if (!transcript) return;
+    if (!transcript.text) return;
 
-    const { generateSmallModelText } = await getSmallModelService();
     const requestedFields = [targets.recap ? 'recap' : '', targets.suggestion ? 'suggestion' : '']
       .filter(Boolean)
       .join(' and ');
@@ -254,17 +332,35 @@ export const createSessionAssistRuntime = ({
         // session's own provider unless the user explicitly picked a small
         // model (settings override / opencode config).
         restrictToPreferredProvider: true,
-        prompt: `The latest exchange in the conversation:\n\n${transcript}\n\nWrite ${requestedFields} in the SAME language as this sample from the conversation: "${languageSample}"`,
+        prompt: [
+          transcript.droppedOldest
+            ? `The conversation so far (the first ${transcript.droppedOldest} messages are omitted):`
+            : 'The whole conversation, from the user\'s first message:',
+          '',
+          transcript.text,
+          '',
+          '---',
+          `The conversation ends at message #${transcript.lastNumber}, the assistant's latest reply. Everything above it has already happened.`,
+          `Write ${requestedFields} in the SAME language as this sample from the conversation: "${languageSample}"`,
+        ].join('\n'),
         system: buildAssistSystemPrompt(targets),
+        // The transcript is the whole session and the answer is two short
+        // fields; the input clamp truncates the TAIL, which here is the
+        // instruction, so an oversized prompt must fail instead of asking the
+        // model to answer a question it can no longer see.
+        onOverflow: 'error',
+        // A whole session is a long prefill on the first assist; later ones hit
+        // the backend's prefix cache. The 60s default is a cold-start timeout.
+        timeoutMs: ASSIST_TIMEOUT_MS,
         directory,
         sessionID: sessionId,
-        preferredProviderID: typeof lastAssistantInfo.providerID === 'string' ? lastAssistantInfo.providerID : undefined,
-        preferredModelID: typeof lastAssistantInfo.modelID === 'string' ? lastAssistantInfo.modelID : undefined,
+        preferredProviderID,
+        preferredModelID,
       });
     } catch (error) {
       // No authenticated provider (404) or a transient model failure — this is
       // background sugar, never retry loops or logs spam.
-      if (Number(error?.statusCode) !== 404) {
+      if (Number(error?.statusCode) !== 404 && !QUIET_GENERATION_CODES.has(error?.code)) {
         console.warn('[session-assist] generation failed:', error?.message || error);
       }
       return;
@@ -279,7 +375,7 @@ export const createSessionAssistRuntime = ({
     // so one hallucinated field doesn't kill the other).
     const hasCyrillic = (text) => /[\u0400-\u04FF]/.test(text);
     const hasCjk = (text) => /[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]/.test(text);
-    const inputText = `${userText}\n${assistantText}`;
+    const inputText = transcript.text;
     const scriptMismatch = (text) => (hasCyrillic(text) && !hasCyrillic(inputText))
       || (hasCjk(text) && !hasCjk(inputText));
     if (recap && scriptMismatch(recap)) {
@@ -294,7 +390,7 @@ export const createSessionAssistRuntime = ({
 
     // The session may have moved on while we generated — a stale patch would
     // flash outdated content, so re-check the tail before writing.
-    const latest = await fetchRecentMessages(sessionId, directory);
+    const latest = await fetchSessionMessages(sessionId, directory, { limit: STALENESS_TAIL_LIMIT });
     const latestAssistantId = (() => {
       if (!latest) return null;
       for (let i = latest.length - 1; i >= 0; i -= 1) {
