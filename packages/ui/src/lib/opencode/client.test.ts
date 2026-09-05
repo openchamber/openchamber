@@ -97,34 +97,42 @@ describe('opencodeClient directory availability', () => {
   });
 });
 
-describe('opencodeClient getFilesystemChatsRoot', () => {
-  const fsHomeResponse = (body: unknown) => new Response(JSON.stringify(body), {
+describe('opencodeClient getFilesystemHomeInfo', () => {
+  type HomePayload = { home?: string; chatsRoot?: string | number };
+  const fsHomeResponse = (body: HomePayload) => new Response(JSON.stringify(body), {
     headers: { 'Content-Type': 'application/json' },
   });
 
   test('returns the server-provided chats root', async () => {
     fsHomeResponses.push(fsHomeResponse({ home: '/Users/tester', chatsRoot: '/srv/openchamber-chats' }));
-    expect(await opencodeClient.getFilesystemChatsRoot()).toBe('/srv/openchamber-chats');
+    expect(await opencodeClient.getFilesystemHomeInfo()).toEqual({ home: '/Users/tester', chatsRoot: '/srv/openchamber-chats' });
   });
 
-  test('returns null only for an older server that answers without chatsRoot', async () => {
+  test('returns the home for an older server that answers without chatsRoot', async () => {
     fsHomeResponses.push(fsHomeResponse({ home: '/Users/tester' }));
-    expect(await opencodeClient.getFilesystemChatsRoot()).toBe(null);
+    expect(await opencodeClient.getFilesystemHomeInfo()).toEqual({ home: '/Users/tester' });
   });
 
   test('throws on a failed fetch', async () => {
     fsHomeResponses.push(new Error('transient network failure'));
-    await expect(opencodeClient.getFilesystemChatsRoot()).rejects.toThrow('transient network failure');
+    await expect(opencodeClient.getFilesystemHomeInfo()).rejects.toThrow('transient network failure');
   });
 
   test('throws on a non-ok response', async () => {
     fsHomeResponses.push(new Response('unavailable', { status: 503 }));
-    await expect(opencodeClient.getFilesystemChatsRoot()).rejects.toThrow('503');
+    await expect(opencodeClient.getFilesystemHomeInfo()).rejects.toThrow('503');
+  });
+
+  test('rejects missing home and relative roots rather than caching a fallback', async () => {
+    fsHomeResponses.push(fsHomeResponse({}));
+    await expect(opencodeClient.getFilesystemHomeInfo()).rejects.toThrow();
+    fsHomeResponses.push(fsHomeResponse({ home: '/home/user', chatsRoot: 'relative' }));
+    await expect(opencodeClient.getFilesystemHomeInfo()).rejects.toThrow();
   });
 
   test('throws on a malformed payload', async () => {
     fsHomeResponses.push(fsHomeResponse({ chatsRoot: 42 }));
-    await expect(opencodeClient.getFilesystemChatsRoot()).rejects.toThrow();
+    await expect(opencodeClient.getFilesystemHomeInfo()).rejects.toThrow();
   });
 });
 

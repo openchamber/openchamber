@@ -4,7 +4,6 @@ import type { GlobalState, State } from "./types"
 import { runtimeFetch } from "../lib/runtime-fetch"
 import { emitSyncConfigChanged } from "./sync-refs"
 import { warmChatsRootDirectory } from "../lib/chatDirectories"
-import { useGlobalSessionsStore } from "../stores/useGlobalSessionsStore"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
@@ -72,9 +71,6 @@ export async function bootstrapGlobal(
 ) {
   // Sync chat classification needs the root before session lists load.
   await warmChatsRootDirectory()
-  // The store seeded its snapshot before the root was resolvable; recover
-  // relocated chat sessions the cold seed filtered out.
-  useGlobalSessionsStore.getState().rehydrateManagedChatSessions()
   const results = await Promise.allSettled([
     retry(() => sdk.path.get().then((x) => set({ path: unwrap(x, "path.get") }))),
     retry(() => sdk.global.config.get().then((x) => set({ config: unwrap(x, "global.config.get") }))),

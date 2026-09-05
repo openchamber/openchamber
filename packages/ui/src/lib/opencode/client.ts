@@ -343,8 +343,9 @@ const getDesktopFilesApi = (): FilesAPI | null => {
 };
 
 // /api/fs/home parsing boundary. Older servers answer without chatsRoot;
-// .partial() maps that to undefined so callers fall back to the home join.
-const fsHomeResponseSchema = z.object({ chatsRoot: z.string().min(1) }).partial();
+// Only a valid home response may use the legacy chats-root fallback.
+const fsAbsolutePathSchema = z.string().trim().regex(/^(?:\/|[A-Za-z]:[\\/]|\\\\)/);
+const fsHomeResponseSchema = z.object({ home: fsAbsolutePathSchema, chatsRoot: fsAbsolutePathSchema.optional() });
 
 class OpencodeService {
   private client: OpencodeClient;
@@ -1952,10 +1953,9 @@ class OpencodeService {
     }
   }
 
-  // Throws on fetch or payload failure. Only a successful response may return
-  // null: that is an older server without chatsRoot, the sole case where the
-  // caller may fall back to the legacy home join.
-  async getFilesystemChatsRoot(): Promise<string | null> {
+  // Both roots must describe the same server response, including on desktop.
+  // Failure is distinct from an older server omitting chatsRoot.
+  async getFilesystemHomeInfo(): Promise<z.infer<typeof fsHomeResponseSchema>> {
     const response = await runtimeFetch(`${this.baseUrl}/fs/home`, {
       method: 'GET',
       headers: {
@@ -1965,7 +1965,7 @@ class OpencodeService {
     if (!response.ok) {
       throw new Error(`Failed to resolve the chats root (${response.status})`);
     }
-    return fsHomeResponseSchema.parse(await response.json()).chatsRoot ?? null;
+    return fsHomeResponseSchema.parse(await response.json());
   }
 
   async setOpenCodeWorkingDirectory(directoryPath: string | null | undefined): Promise<DirectorySwitchResult | null> {

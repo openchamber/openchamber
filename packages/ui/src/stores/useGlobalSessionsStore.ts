@@ -9,6 +9,7 @@ import { raiseSessionOrderingBaselines } from '@/sync/session-ordering';
 import { mapWithConcurrency } from '@/lib/concurrency';
 import { persistManagedChatSessions, readManagedChatSessions } from '@/sync/persist-cache';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { ensureChatsRootDirectory, getChatsRootForHome } from '@/lib/chatDirectories';
 import { countSyncPerformance } from '@/sync/performance-diagnostics';
 import {
   applyGlobalSessionStructureMutations,
@@ -42,9 +43,10 @@ type GlobalSessionsState = {
   mutationRevision: number;
   mutationRevisionBySessionId: Map<string, number>;
   hasLoaded: boolean;
+  managedChatsHydrated: boolean;
   status: GlobalSessionsStatus;
   /** Re-read the persisted managed-chats snapshot after the chats root is
-      warm; no-op once a load has started, completed, or mutated state. */
+      warm; retain newer mutations and stop after an authoritative load. */
   rehydrateManagedChatSessions: () => void;
   loadSessions: (fallbackActive?: Session[]) => Promise<LoadResult>;
   refreshSessionsForDirectories: (directories: Iterable<string>, fallbackActive?: Session[]) => Promise<LoadResult>;
@@ -589,10 +591,10 @@ const buildReviewTransferMap = (sessions: Session[]): Map<string, ReviewTransfer
   return next
 }
 
-const buildManagedChatSessionsState = (sessions: Session[]) => ({
+const buildManagedChatSessionsState = (sessions: Session[], archivedSessions: Session[] = []) => ({
   activeSessions: sessions,
-  archivedSessions: [] as Session[],
-  entityById: new Map(sessions.map((session) => [session.id, session])),
+  archivedSessions,
+  entityById: new Map([...sessions, ...archivedSessions].map((session) => [session.id, session])),
   structure: buildGlobalSessionStructure(sessions),
   sessionsByDirectory: buildSessionsByDirectory(sessions),
   reviewTransferBySessionId: buildReviewTransferMap(sessions),
@@ -606,6 +608,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   mutationRevision: 0,
   mutationRevisionBySessionId: new Map(),
   hasLoaded: false,
+  managedChatsHydrated: false,
   status: 'idle',
 
   applySnapshot: (activeSessions, archivedSessions, status = 'ready') => {
@@ -626,12 +629,13 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   // filtered out of the stale sidebar paint until this runs after the warm-up.
   rehydrateManagedChatSessions: () => {
     const state = get();
-    if (state.status !== 'idle' || state.hasLoaded || state.mutationRevision !== 0) return;
-    const managedChatSessions = readManagedChatSessions();
-    const unchanged = managedChatSessions.length === state.activeSessions.length
-      && managedChatSessions.every((session, index) => session.id === state.activeSessions[index]?.id);
-    if (unchanged) return;
-    set(buildManagedChatSessionsState(managedChatSessions));
+    if (state.managedChatsHydrated || state.hasLoaded) return;
+    const hydrated = overlayMutationsSince(state, readManagedChatSessions(), state.archivedSessions, 0);
+    const unchanged = sameSessionList(hydrated.activeSessions, state.activeSessions)
+      && sameSessionList(hydrated.archivedSessions, state.archivedSessions);
+    set(unchanged
+      ? { managedChatsHydrated: true }
+      : { ...buildManagedChatSessionsState(hydrated.activeSessions, hydrated.archivedSessions), managedChatsHydrated: true });
   },
 
   resetForRuntimeSwitch: () => {
@@ -642,6 +646,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       mutationRevision: 0,
       mutationRevisionBySessionId: new Map(),
       hasLoaded: false,
+      managedChatsHydrated: false,
       status: 'idle',
     });
   },
@@ -651,12 +656,16 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       return inflightLoad;
     }
 
-    set((state) => (state.status === 'loading' ? state : { status: 'loading' }));
-
     const generation = loadGeneration;
     const baselineRevision = get().mutationRevision;
     const loadPromise = (async () => {
+      let rootsReady = false;
       try {
+        await ensureChatsRootDirectory();
+        if (generation !== loadGeneration) return { activeSessions: [], archivedSessions: [] };
+        rootsReady = true;
+        get().rehydrateManagedChatSessions();
+        set((state) => (state.status === 'loading' ? state : { status: 'loading' }));
         const sdk = opencodeClient.getSdkClient();
         // One inclusive fetch, split client-side. The server's
         // `time_archived IS NULL` active filter would exclude restored
@@ -684,6 +693,13 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       } catch (error) {
         if (generation !== loadGeneration) {
           return { activeSessions: [], archivedSessions: [] };
+        }
+        if (!rootsReady) {
+          // No classification authority arrived. Preserve both memory and the
+          // persisted snapshot so a retry can hydrate it after root recovery.
+          set({ status: 'error' });
+          const state = get();
+          return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
         }
         console.warn('[GlobalSessions] Failed to load sessions, using fallback snapshot:', error);
         set((state) => {
@@ -719,6 +735,17 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
     const generation = loadGeneration;
     const baselineRevision = get().mutationRevision;
+    try {
+      await ensureChatsRootDirectory();
+    } catch {
+      const state = get();
+      return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
+    }
+    if (generation !== loadGeneration) {
+      const state = get();
+      return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
+    }
+    get().rehydrateManagedChatSessions();
     const sdk = opencodeClient.getSdkClient();
     const fetched = await fetchDirectoryPages(sdk, directorySet);
 
@@ -846,10 +873,17 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 useGlobalSessionsStore.subscribe((state, previous) => {
   countSyncPerformance('globalSessionPublications');
   if (
-    state.activeSessions !== previous.activeSessions
-    && (state.status !== 'idle' || state.activeSessions.length > 0)
+    getChatsRootForHome(null) !== null
+    && (state.activeSessions !== previous.activeSessions
+      || (!state.managedChatsHydrated && state.mutationRevision !== previous.mutationRevision)
+      || (state.hasLoaded && !previous.hasLoaded))
   ) {
-    persistManagedChatSessions(state.activeSessions);
+    // A local mutation can precede the initial load. Preserve the saved seed
+    // and overlay its explicit mutations instead of persisting a partial list.
+    const sessions = !state.hasLoaded && !state.managedChatsHydrated
+      ? overlayMutationsSince(state, readManagedChatSessions(), [], 0).activeSessions
+      : state.activeSessions;
+    persistManagedChatSessions(sessions);
   }
 });
 
