@@ -309,6 +309,7 @@ mock.module("../session-actions", () => ({
   unrevertSession: mock(async () => undefined),
   forkFromMessage: mock(async () => undefined),
   fetchMessagesForSession: mock(async () => undefined),
+  relocateSessionFromMissingDirectory: mock(async () => ({ status: "unchanged" })),
   getSessionLastAssistantModel: () => null,
   patchSessionMetadata: mock(async () => undefined),
   abortCurrentOperation: mock(async () => undefined),
