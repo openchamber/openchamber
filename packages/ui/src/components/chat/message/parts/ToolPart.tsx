@@ -677,8 +677,13 @@ const ToolScrollableTextOutput: React.FC<{
 
     const handleCopyOutput = React.useCallback(async (event: React.MouseEvent<HTMLButtonElement>) => {
         event.stopPropagation();
-        const result = await copyTextToClipboard(renderedOutput);
-        if (!result.ok) {
+        try {
+            const result = await copyTextToClipboard(renderedOutput);
+            if (!result.ok) {
+                toast.error(t('chat.toolPart.copyOutputFailed'));
+                return;
+            }
+        } catch {
             toast.error(t('chat.toolPart.copyOutputFailed'));
             return;
         }

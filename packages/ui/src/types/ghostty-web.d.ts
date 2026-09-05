@@ -5,6 +5,10 @@ declare module 'ghostty-web' {
     lineHeight?: number;
   }
 
+  export interface Terminal {
+    deselect(): void;
+  }
+
   export interface RendererOptions {
     lineHeight?: number;
   }

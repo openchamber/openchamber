@@ -39,6 +39,7 @@ import { formatTimestampForDisplay } from './timeFormat';
 import { ToolRevealOnMount } from './parts/ToolRevealOnMount';
 import { StaticToolRow } from './parts/ProgressiveGroup';
 import { isExpandableTool, isStandaloneTool } from './parts/toolRenderUtils';
+import { getShellClipboardText } from './parts/toolOutput';
 import TurnActivity from '../components/TurnActivity';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
@@ -310,8 +311,20 @@ const UserShellActionPart: React.FC<{ part: ShellActionPartLike }> = ({ part }) 
     const copyOutputToClipboard = React.useCallback(async () => {
         if (!hasOutput) return;
 
-        const result = await copyTextToClipboard(output);
-        if (!result.ok) return;
+        // Copy the VT-interpreted visible text, not the raw terminal stream:
+        // raw bash output contains \r / ESC[2K / color sequences that a VT
+        // emulator (the integrated terminal) would interpret as commands on
+        // paste, collapsing the output to its last frame.
+        try {
+            const result = await copyTextToClipboard(getShellClipboardText(output));
+            if (!result.ok) {
+                toast.error(t('chat.toolPart.copyOutputFailed'));
+                return;
+            }
+        } catch {
+            toast.error(t('chat.toolPart.copyOutputFailed'));
+            return;
+        }
 
         clearCopiedResetTimeout();
         setCopiedOutput(true);
@@ -321,7 +334,7 @@ const UserShellActionPart: React.FC<{ part: ShellActionPartLike }> = ({ part }) 
                 copiedResetTimeoutRef.current = null;
             }, 2000);
         }
-    }, [clearCopiedResetTimeout, hasOutput, output]);
+    }, [clearCopiedResetTimeout, hasOutput, output, t]);
 
     return (
         <div className="mt-2">

@@ -10,6 +10,11 @@ type TerminalViewportRect = {
   height: number;
 };
 
+export type TerminalSelectionPixelOffset = {
+  x: number;
+  y: number;
+};
+
 export const getTerminalCellFromPoint = (
   clientX: number,
   clientY: number,
@@ -26,6 +31,34 @@ export const getTerminalCellFromPoint = (
     column: Math.max(0, Math.min(columns - 1, column)),
     row: Math.max(0, Math.min(rows - 1, row)),
   };
+};
+
+export const getSingleCellSelectionOffset = (
+  bounds: TerminalViewportRect,
+  columns: number,
+  rows: number,
+): TerminalSelectionPixelOffset | undefined => {
+  if (
+    !Number.isFinite(bounds.width) ||
+    !Number.isFinite(bounds.height) ||
+    bounds.width <= 0 ||
+    bounds.height <= 0 ||
+    !Number.isFinite(columns) ||
+    !Number.isFinite(rows) ||
+    columns <= 0 ||
+    rows <= 0
+  ) return undefined;
+
+  const cellWidth = bounds.width / columns;
+  const cellHeight = bounds.height / rows;
+  const halfWidth = cellWidth / 2;
+  const halfHeight = cellHeight / 2;
+  const cellDiagonal = Math.hypot(halfWidth, halfHeight);
+  const scale = (halfWidth / cellDiagonal + 1) / 2;
+
+  // Move diagonally inside the cell far enough to cross Ghostty's half-cell
+  // threshold, without changing the cell used for the selection endpoint.
+  return { x: halfWidth * scale, y: halfHeight * scale };
 };
 
 export const getTerminalWordRange = (

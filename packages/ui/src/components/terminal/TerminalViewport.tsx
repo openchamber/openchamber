@@ -12,8 +12,10 @@ import {
 } from '@/lib/terminalOutput';
 import {
   getTerminalCellFromPoint,
+  getSingleCellSelectionOffset,
   getTerminalWordRange,
   type TerminalCellPosition,
+  type TerminalSelectionPixelOffset,
 } from '@/lib/terminalTouchSelection';
 import type { TerminalChunk } from '@/stores/useTerminalStore';
 
@@ -239,7 +241,6 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
     const handleWindowBlur = () => {
       if (terminal) terminal.options.cursorBlink = false;
     };
-
     container.addEventListener('focusin', handleFocusIn);
     container.addEventListener('focusout', handleFocusOut);
     window.addEventListener('focus', handleWindowFocus);
@@ -412,12 +413,15 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
     const dispatchSelectionMouseEvent = (
       type: 'mousedown' | 'mousemove',
       cell: TerminalCellPosition,
+      pixelOffset?: TerminalSelectionPixelOffset,
     ) => {
       const canvas = container.querySelector('canvas');
       if (!canvas) return;
       const bounds = canvas.getBoundingClientRect();
-      const clientX = bounds.left + ((cell.column + 0.5) / terminal.cols) * bounds.width;
-      const clientY = bounds.top + ((cell.row + 0.5) / terminal.rows) * bounds.height;
+      const cellWidth = bounds.width / terminal.cols;
+      const cellHeight = bounds.height / terminal.rows;
+      const clientX = bounds.left + (cell.column + 0.5) * cellWidth + (pixelOffset?.x ?? 0);
+      const clientY = bounds.top + (cell.row + 0.5) * cellHeight + (pixelOffset?.y ?? 0);
       canvas.dispatchEvent(new MouseEvent(type, {
         bubbles: true,
         cancelable: true,
@@ -458,9 +462,18 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
         const word = getTerminalWordRange(cells, cell.column);
         const selectionAnchor = { column: word.startColumn, row: cell.row };
         selectionFocus = { column: word.endColumn, row: cell.row };
+        const singleCellOffset =
+          word.startColumn === word.endColumn && Boolean(cells[cell.column]?.trim())
+            ? (() => {
+                const canvas = container.querySelector('canvas');
+                return canvas
+                  ? getSingleCellSelectionOffset(canvas.getBoundingClientRect(), terminal.cols, terminal.rows)
+                  : undefined;
+              })()
+            : undefined;
         gesture = 'selecting';
         dispatchSelectionMouseEvent('mousedown', selectionAnchor);
-        dispatchSelectionMouseEvent('mousemove', selectionFocus);
+        dispatchSelectionMouseEvent('mousemove', selectionFocus, singleCellOffset);
       }, 350);
     };
     const move = (event: PointerEvent) => {
@@ -512,18 +525,31 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
       if (container.hasPointerCapture(event.pointerId)) container.releasePointerCapture(event.pointerId);
       pointerId = null;
       gesture = 'idle';
-      if (shouldFinishSelection) finishSelection();
+      if (shouldFinishSelection) {
+        if (terminal.hasSelection()) terminal.deselect();
+        else finishSelection();
+      }
+    };
+    const handleWindowBlur = () => {
+      clearLongPress();
+      if (pointerId !== null && container.hasPointerCapture(pointerId)) container.releasePointerCapture(pointerId);
+      pointerId = null;
+      gesture = 'idle';
+      remainder = 0;
+      selectionFocus = null;
     };
     container.addEventListener('pointerdown', down);
     container.addEventListener('pointermove', move, { passive: false });
     container.addEventListener('pointerup', up);
     container.addEventListener('pointercancel', cancel);
+    window.addEventListener('blur', handleWindowBlur);
     return () => {
       clearLongPress();
       container.removeEventListener('pointerdown', down);
       container.removeEventListener('pointermove', move);
       container.removeEventListener('pointerup', up);
       container.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('blur', handleWindowBlur);
     };
   }, [enableTouchScroll, fontSize, ready]);
 
