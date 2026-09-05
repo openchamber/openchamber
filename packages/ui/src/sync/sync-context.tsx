@@ -384,8 +384,13 @@ function enqueueSessionMaterialization(
   const k = getSessionMaterializationRequestKey(runtimeKey, directory, sessionID)
   const existing = pendingSessionMaterializations.get(k)
   if (existing && Date.now() - existing.enqueuedAt < SESSION_MATERIALIZATION_COOLDOWN_MS) {
-    const settlementMustFollowEarlierRecovery = request.reason === "settled-running-tool"
-      && existing.request.reason !== "settled-running-tool"
+    const isSettlement = request.reason === "settled-running-tool"
+      || request.reason === "settled-error"
+      || request.reason === "settled-unanswered-turn"
+    const existingIsSettlement = existing.request.reason === "settled-running-tool"
+      || existing.request.reason === "settled-error"
+      || existing.request.reason === "settled-unanswered-turn"
+    const settlementMustFollowEarlierRecovery = isSettlement && !existingIsSettlement
     if (!settlementMustFollowEarlierRecovery) return
   }
 
@@ -906,6 +911,9 @@ const getSessionIdFromPayload = (event: Event): string | null => {
   if (
     event.type === "message.removed"
     || event.type === "session.status"
+    || event.type === "session.idle"
+    || event.type === "session.error"
+    || event.type === "session.next.step.failed"
     || event.type === "todo.updated"
     || event.type === "permission.asked"
     || event.type === "permission.replied"
@@ -971,6 +979,11 @@ const getMessageIdFromPayload = (event: Event): string | null => {
     }
     const id = (info as { id?: unknown }).id
     return typeof id === "string" && id.length > 0 ? id : null
+  }
+
+  if (event.type === "session.next.step.failed") {
+    const messageID = props.assistantMessageID ?? props.messageID
+    return typeof messageID === "string" && messageID.length > 0 ? messageID : null
   }
 
   if (event.type === "message.removed" || event.type === "message.part.delta" || event.type === "message.part.removed") {
@@ -1784,10 +1797,19 @@ export function handleEvent(
 
   // Notification dispatch for session turn-complete and error events.
   // These are NOT handled by the event reducer — only the notification store.
-  if (payload.type === "session.idle" || payload.type === "session.error") {
-    const props = payload.properties as { sessionID?: string; error?: OpenCodeSessionErrorPayload }
-    const sessionID = props.sessionID
-    const errorSummary = payload.type === "session.error" ? summarizeOpenCodeError(props.error) : null
+  if (
+    payload.type === "session.idle"
+    || payload.type === "session.error"
+    || payload.type === "session.next.step.failed"
+  ) {
+    const props = payload.properties as {
+      sessionID?: string
+      assistantMessageID?: string
+      error?: OpenCodeSessionErrorPayload
+    }
+    const sessionID = props.sessionID ?? getSessionIdFromPayload(payload) ?? undefined
+    const isError = payload.type === "session.error" || payload.type === "session.next.step.failed"
+    const errorSummary = isError ? summarizeOpenCodeError(props.error) : null
     if (errorSummary && sessionID) {
       recordSessionError({ sessionId: sessionID, directory: resolvedDirectory ?? null, ...errorSummary })
     }
@@ -1797,15 +1819,24 @@ export function handleEvent(
     if (session && (session as { parentID?: string }).parentID) {
       // subtask — skip notification
     } else if (sessionID) {
-      appendNotification({
-        directory: resolvedDirectory,
-        session: sessionID,
-        time: Date.now(),
-        viewed: isViewedInCurrentSession(resolvedDirectory, sessionID),
-        ...(errorSummary
-          ? { type: "error" as const, error: errorSummary }
-          : { type: "turn-complete" as const }),
-      })
+      if (payload.type === "session.error" || (payload.type === "session.next.step.failed" && errorSummary)) {
+        appendNotification({
+          directory: resolvedDirectory,
+          session: sessionID,
+          time: Date.now(),
+          viewed: isViewedInCurrentSession(resolvedDirectory, sessionID),
+          type: "error" as const,
+          error: errorSummary ?? { name: null, message: null },
+        })
+      } else if (payload.type === "session.idle") {
+        appendNotification({
+          directory: resolvedDirectory,
+          session: sessionID,
+          time: Date.now(),
+          viewed: isViewedInCurrentSession(resolvedDirectory, sessionID),
+          type: "turn-complete" as const,
+        })
+      }
     }
   }
 
@@ -1994,7 +2025,11 @@ export function handleEvent(
     }
   }
 
-  if (payload.type === "session.idle" || payload.type === "session.error") {
+  if (
+    payload.type === "session.idle"
+    || payload.type === "session.error"
+    || payload.type === "session.next.step.failed"
+  ) {
     const sessionID = getSessionIdFromPayload(payload) ?? undefined
     const state = getDirectoryEventState(store, batch)
     const messageID = sessionID ? getStaleRunningToolMessageID(state, sessionID) : undefined
@@ -2003,6 +2038,18 @@ export function handleEvent(
         reason: "settled-running-tool",
         messageID,
       })
+    } else if (sessionID && (payload.type === "session.error" || payload.type === "session.next.step.failed")) {
+      enqueueSessionMaterialization(resolvedDirectory, sessionID, childStores, {
+        reason: "settled-error",
+      })
+    } else if (sessionID && payload.type === "session.idle") {
+      const messages = state.message[sessionID] ?? []
+      const lastMessage = messages.length > 0 ? messages[messages.length - 1] : undefined
+      if (lastMessage?.role === "user") {
+        enqueueSessionMaterialization(resolvedDirectory, sessionID, childStores, {
+          reason: "settled-unanswered-turn",
+        })
+      }
     }
     // The reducer already wrote the idle/error status into `draft`; finalize
     // the interrupted message and orphaned tools through the same batch.

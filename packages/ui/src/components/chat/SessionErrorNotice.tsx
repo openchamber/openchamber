@@ -36,9 +36,10 @@ const useLastMessageState = (sessionId: string, directory?: string): LastMessage
       cacheRef.current = null;
       return null;
     }
+    const completed = typeof info.time?.completed === 'number' && info.time.completed > 0 ? info.time.completed : undefined;
     const next: LastMessageState = {
       role: typeof info.role === 'string' ? info.role : '',
-      timestamp: info.time?.completed ?? info.time?.created ?? 0,
+      timestamp: completed ?? info.time?.created ?? 0,
       hasError: Boolean(info.error),
     };
     const cached = cacheRef.current;

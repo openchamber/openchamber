@@ -626,4 +626,47 @@ describe("isSessionMaterializationStillNeeded", () => {
 
     expect(getStaleRunningToolMessageID(state, "ses_1")).toBe(undefined)
   })
+
+  test("recovers a settled session whose trailing message is an unanswered user turn", () => {
+    const state = { message: { ses_1: [userMessage("msg_1")] }, part: {} }
+    expect(isSessionMaterializationStillNeeded(state, "ses_1", {
+      reason: "settled-unanswered-turn",
+    })).toBe(true)
+
+    const repliedState = {
+      message: { ses_1: [userMessage("msg_1"), message("msg_2")] },
+      part: {},
+    }
+    expect(isSessionMaterializationStillNeeded(repliedState, "ses_1", {
+      reason: "settled-unanswered-turn",
+    })).toBe(false)
+  })
+
+  test("recovers a settled session with an error until the assistant error is materialized", () => {
+    const state = { message: { ses_1: [userMessage("msg_1")] }, part: {} }
+    expect(isSessionMaterializationStillNeeded(state, "ses_1", {
+      reason: "settled-error",
+    })).toBe(true)
+
+    const assistantWithoutError = {
+      message: { ses_1: [userMessage("msg_1"), message("msg_2")] },
+      part: {},
+    }
+    expect(isSessionMaterializationStillNeeded(assistantWithoutError, "ses_1", {
+      reason: "settled-error",
+    })).toBe(true)
+
+    const assistantWithError = {
+      message: {
+        ses_1: [
+          userMessage("msg_1"),
+          { ...message("msg_2"), error: { name: "APIError", data: { message: "402 Insufficient Balance" } } } as Message,
+        ],
+      },
+      part: {},
+    }
+    expect(isSessionMaterializationStillNeeded(assistantWithError, "ses_1", {
+      reason: "settled-error",
+    })).toBe(false)
+  })
 })
