@@ -12,12 +12,16 @@ import { openRuntimeWebSocket } from '@/lib/relay/runtime-socket';
 import { type RelayTunnelWebSocket } from '@/lib/relay/tunnel-client';
 
 export interface DictationStartOptions {
-    provider?: 'local' | 'openai-compatible';
+    provider?: 'local' | 'openai-compatible' | 'funasr-websocket';
     language?: string;
     localModel?: string;
     openaiCompatible?: {
         baseUrl?: string;
         model?: string;
+        apiKey?: string;
+    };
+    funasrWebsocket?: {
+        url?: string;
         apiKey?: string;
     };
 }

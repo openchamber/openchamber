@@ -226,7 +226,7 @@ export type DesktopSettings = {
   responseStylePreset?: 'concise' | 'detailed' | 'mentor' | 'pushback' | 'noFiller' | 'matchEnergy' | 'warmPeer' | 'custom';
   responseStyleCustomInstructions?: string;
   dictationEnabled?: boolean;
-  sttProvider?: 'local' | 'openai-compatible';
+  sttProvider?: 'local' | 'openai-compatible' | 'funasr-websocket';
   sttServerUrl?: string;
   sttModel?: string;
   sttLocalModel?: string;

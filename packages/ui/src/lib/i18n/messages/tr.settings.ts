@@ -1791,6 +1791,7 @@ export const settingsDict = {
   'settings.voice.page.provider.custom': 'Özel',
   'settings.voice.page.provider.say': 'Say',
   'settings.voice.page.provider.server': 'Sunucu',
+  'settings.voice.page.provider.funasr': 'FunASR WebSocket',
   'settings.voice.page.provider.local': 'Yerel',
   'settings.voice.page.tooltip.sttLocal': 'OpenChamber sunucusunda cihaz üstü transkripsiyon. Modeller otomatik indirilir; API anahtarı gerekmez.',
   'settings.voice.page.tooltip.localTts': 'OpenChamber sunucusunda yerel sentez (İngilizce için Kokoro; diğer dillerin modelleri ilk kullanımda indirilir). API anahtarı gerekmez.',

@@ -1843,6 +1843,7 @@ export const settingsDict = {
   "settings.voice.page.provider.custom": "Власний",
   "settings.voice.page.provider.say": "Say",
   "settings.voice.page.provider.server": "Сервер",
+  "settings.voice.page.provider.funasr": "FunASR WebSocket",
   "settings.voice.page.provider.local": "Локальний",
   "settings.voice.page.tooltip.sttLocal": "Локальна розшифровка на сервері OpenChamber. Моделі завантажуються автоматично; ключ API не потрібен.",
   "settings.voice.page.tooltip.localTts": "Локальний синтез на сервері OpenChamber (Kokoro для англійської; моделі для інших мов завантажуються при першому використанні). Ключ API не потрібен.",

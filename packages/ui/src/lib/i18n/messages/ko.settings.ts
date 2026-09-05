@@ -1843,6 +1843,7 @@ export const settingsDict = {
   'settings.voice.page.provider.custom': '사용자 정의',
   'settings.voice.page.provider.say': 'Say',
   'settings.voice.page.provider.server': '서버',
+  'settings.voice.page.provider.funasr': 'FunASR WebSocket',
   'settings.voice.page.provider.local': '로컬',
   'settings.voice.page.tooltip.sttLocal': 'OpenChamber 서버에서 로컬로 변환합니다. 모델은 자동으로 다운로드되며 API 키가 필요 없습니다.',
   'settings.voice.page.tooltip.localTts': 'OpenChamber 서버에서 로컬로 음성을 합성합니다(영어는 Kokoro, 다른 언어 모델은 처음 사용할 때 다운로드). API 키가 필요 없습니다.',

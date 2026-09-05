@@ -192,7 +192,7 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   } else {
     localStorage.removeItem('dictationEnabled');
   }
-  if (settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible') {
+  if (settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible' || settings.sttProvider === 'funasr-websocket') {
     localStorage.setItem('sttProvider', settings.sttProvider);
   } else {
     localStorage.removeItem('sttProvider');
@@ -1000,7 +1000,7 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     if (typeof settings.dictationEnabled === 'boolean' && settings.dictationEnabled !== configStore.dictationEnabled) {
       nextConfigState.dictationEnabled = settings.dictationEnabled;
     }
-    if ((settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible') && settings.sttProvider !== configStore.sttProvider) {
+    if ((settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible' || settings.sttProvider === 'funasr-websocket') && settings.sttProvider !== configStore.sttProvider) {
       nextConfigState.sttProvider = settings.sttProvider;
     }
     if (typeof settings.sttServerUrl === 'string' && settings.sttServerUrl !== configStore.sttServerUrl) {
@@ -1726,7 +1726,7 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.dictationEnabled === 'boolean') {
     result.dictationEnabled = candidate.dictationEnabled;
   }
-  if (candidate.sttProvider === 'local' || candidate.sttProvider === 'openai-compatible') {
+  if (candidate.sttProvider === 'local' || candidate.sttProvider === 'openai-compatible' || candidate.sttProvider === 'funasr-websocket') {
     result.sttProvider = candidate.sttProvider;
   } else if (candidate.sttProvider === 'server') {
     // Legacy provider migration: 'server' was the OpenAI-compatible endpoint.
