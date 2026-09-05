@@ -258,7 +258,7 @@ Managed health failures are classified as `timeout`, `connection_refused`, `conn
 - `registerConfigEntityRoutes(app, dependencies)`: registers configuration entity routes:
   - Agents: `/api/config/agents/:name` and `/api/config/agents/:name/config`
   - Commands: `/api/config/commands/:name`
-  - MCP servers: `/api/config/mcp` and `/api/config/mcp/:name`
+  - MCP servers: `/api/config/mcp`, `/api/config/mcp/:name`, and `POST /api/config/mcp-tools/probe` (one-shot tools/list probe for Settings; kept outside the `/api/config/mcp/:name` namespace so a server literally named `tools` cannot collide with the probe route)
   - Snippets: `/api/config/snippets`, `/api/config/snippets/:name`, and `/api/config/snippets/expand`
 - Agent/command/MCP write routes persist config to disk and return a deferred-restart payload (`requiresReload: false`, `requiresRestart: true`, `restartDeferred: true`) instead of restarting OpenCode immediately. The UI accumulates these changes and applies them with `POST /api/config/reload`.
 
