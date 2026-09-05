@@ -706,6 +706,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.sessionDialogs.worktree.attachedArchived": "Прикріплене worktree заархівовано.",
   "sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural": "Прикріплені worktree заархівовано.",
   "sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved": "Worktree заархівовано, віддалені гілки видалено.",
+  "sessions.missingDirectory.movedToProject": "Теки цієї сесії більше не існує. Сесію перенесено до {project}.",
   "sessions.sidebar.sessionDialogs.worktree.label": "Worktree",
   "sessions.sidebar.sessionDialogs.worktree.pathUnavailable": "Шлях worktree недоступний.",
   "sessions.sidebar.sessionDialogs.worktree.uncommittedWarning": "Незакомічені зміни буде скасовано.",

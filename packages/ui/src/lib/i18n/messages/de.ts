@@ -609,6 +609,7 @@ export const dict = {
   'sessions.sidebar.sessionDialogs.worktree.attachedArchived': 'Angefügter Worktree archiviert.',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': 'Angefügte Worktrees archiviert.',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': 'Archivierte Worktrees und entfernte Remote-Branches.',
+  'sessions.missingDirectory.movedToProject': 'Der Ordner dieser Sitzung existiert nicht mehr. Die Sitzung wurde nach {project} verschoben.',
   'sessions.sidebar.sessionDialogs.worktree.label': 'Worktree',
   'sessions.sidebar.sessionDialogs.worktree.pathUnavailable': 'Worktree-Pfad nicht verfügbar.',
   'sessions.sidebar.sessionDialogs.worktree.uncommittedWarning': 'Nicht committete Änderungen werden verworfen.',

@@ -706,6 +706,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.sessionDialogs.worktree.attachedArchived': '关联工作树已归档。',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': '关联工作树已归档。',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': '工作树已归档且远程分支已移除。',
+  'sessions.missingDirectory.movedToProject': '此会话的文件夹已不存在。会话已移至 {project}。',
   'sessions.sidebar.sessionDialogs.worktree.label': '工作树',
   'sessions.sidebar.sessionDialogs.worktree.pathUnavailable': '工作树路径不可用。',
   'sessions.sidebar.sessionDialogs.worktree.uncommittedWarning': '未提交的更改将被丢弃。',

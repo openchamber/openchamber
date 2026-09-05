@@ -1544,11 +1544,11 @@ async function getProjectPrimaryDirectory(projectID?: string): Promise<string | 
   }
 }
 
-type MissingWorktreeRestore = { sourceDirectory: string; destinationDirectory: string }
+type MissingWorktreeRelocation = { sourceDirectory: string; destinationDirectory: string }
 
-async function resolveMissingWorktreeRestore(
+async function resolveMissingWorktreeRelocation(
   session: Session & { project?: { worktree?: string | null } | null },
-): Promise<MissingWorktreeRestore | null> {
+): Promise<MissingWorktreeRelocation | null> {
   const ownedDirectory = resolveSessionOwnedDirectory(session)
   const projectWorktree = session.project?.worktree?.trim()
   if (!ownedDirectory || !projectWorktree) return null
@@ -1566,7 +1566,14 @@ async function resolveMissingWorktreeRestore(
   return { sourceDirectory: ownedDirectory, destinationDirectory: projectDirectory }
 }
 
-function getRestoreSubtree(rootSession: Session, sourceDirectory: string): Array<{ session: Session; sourceDirectory: string }> {
+type OwnedSubtreeEntry = { session: Session; ownedDirectory: string | null }
+
+/**
+ * The root's subtree as the global cache knows it, root first. Drawn from the
+ * global cache rather than a live child store so archived descendants that
+ * never materialized in a directory store are still included.
+ */
+function getGlobalSubtree(rootSession: Session): OwnedSubtreeEntry[] {
   const global = useGlobalSessionsStore.getState()
   const sessionsById = new Map<string, Session>()
 
@@ -1580,6 +1587,10 @@ function getRestoreSubtree(rootSession: Session, sourceDirectory: string): Array
     .map((id) => sessionsById.get(id))
     .filter((session): session is Session => Boolean(session))
     .map((session) => ({ session, ownedDirectory: resolveSessionOwnedDirectory(session) }))
+}
+
+function getRestoreSubtree(rootSession: Session, sourceDirectory: string): Array<{ session: Session; sourceDirectory: string }> {
+  return getGlobalSubtree(rootSession)
     // Keep a node while it is still archived or still stranded in the
     // confirmed-missing worktree. The second clause matters on retry: a prior
     // attempt may have already unarchived the root (server echo made it active)
@@ -1588,6 +1599,58 @@ function getRestoreSubtree(rootSession: Session, sourceDirectory: string): Array
     .filter((entry) => Boolean(entry.session.time?.archived) || entry.ownedDirectory === sourceDirectory)
     .map((entry) => (entry.ownedDirectory ? { session: entry.session, sourceDirectory: entry.ownedDirectory } : null))
     .filter((entry): entry is { session: Session; sourceDirectory: string } => entry !== null)
+}
+
+export type MissingDirectoryRelocation =
+  /** The session's directory is gone; its subtree now lives in the project directory. */
+  | { status: "moved"; sourceDirectory: string; destinationDirectory: string; movedSessionIds: string[] }
+  /** The directory is available, its state is unknown, or the session has no project to move to. */
+  | { status: "unchanged" }
+  /** The runtime changed while the relocation was in flight; nothing local was published. */
+  | { status: "stale" }
+  /** A control-plane move failed; `movedSessionIds` already live in the destination. */
+  | { status: "failed"; movedSessionIds: string[]; error: unknown }
+
+/**
+ * Move an active session whose worktree no longer exists into its project's
+ * primary directory.
+ *
+ * Same gate as the archived-session restore fallback: only a server-confirmed
+ * `missing` directory qualifies, the destination is the OpenCode project the
+ * session belongs to, and `available`, `unknown`, probe failures, and sessions
+ * without a project leave everything untouched. Every session of the root's
+ * subtree still stranded in that directory moves with it, root first, so the
+ * session the user is looking at is usable even if a descendant move fails.
+ * Moves carry no changes (`moveChanges: false`): the directory is gone, so
+ * there is nothing to carry.
+ */
+export async function relocateSessionFromMissingDirectory(
+  sessionId: string,
+  expectedRuntimeKey = getRuntimeKey(),
+): Promise<MissingDirectoryRelocation> {
+  if (isStaleRuntime(expectedRuntimeKey)) return { status: "stale" }
+  const rootSession = getGlobalSessionSnapshot(sessionId)
+  if (!rootSession) return { status: "unchanged" }
+
+  const relocation = await resolveMissingWorktreeRelocation(rootSession)
+  if (isStaleRuntime(expectedRuntimeKey)) return { status: "stale" }
+  if (!relocation) return { status: "unchanged" }
+
+  const stranded = getGlobalSubtree(rootSession)
+    .filter((entry) => entry.ownedDirectory === relocation.sourceDirectory)
+    .map((entry) => entry.session)
+  const movedSessionIds: string[] = []
+  for (const session of stranded) {
+    try {
+      await moveSessionToDirectory(session, relocation.sourceDirectory, relocation.destinationDirectory, false, expectedRuntimeKey)
+    } catch (error) {
+      console.error("[session-actions] relocateSessionFromMissingDirectory failed", error)
+      return { status: "failed", movedSessionIds, error }
+    }
+    if (isStaleRuntime(expectedRuntimeKey)) return { status: "stale" }
+    movedSessionIds.push(session.id)
+  }
+  return { status: "moved", ...relocation, movedSessionIds }
 }
 
 /**
@@ -1606,7 +1669,7 @@ export async function unarchiveSession(sessionId: string, expectedRuntimeKey = g
   const sessionDirectory = getSessionDirectory(sessionId)
   try {
     const restore = globalSession
-      ? await resolveMissingWorktreeRestore(globalSession)
+      ? await resolveMissingWorktreeRelocation(globalSession)
       : null
     if (isStaleRuntime(expectedRuntimeKey)) return false
 

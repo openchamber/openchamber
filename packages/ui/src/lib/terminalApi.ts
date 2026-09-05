@@ -107,9 +107,31 @@ const decode = (data: RelayTunnelSocketMessageEvent['data']): TerminalMessage | 
   try { return terminalMessageSchema.safeParse(JSON.parse(decoder.decode(bytes))).data ?? null; } catch { return null; }
 };
 
+/**
+ * Server error code for a terminal request whose working directory no longer
+ * exists (a deleted worktree). Mirrors `TERMINAL_CWD_MISSING_CODE` in
+ * `packages/web/server/lib/terminal/runtime.js`.
+ */
+const TERMINAL_CWD_MISSING_CODE = 'TERMINAL_CWD_MISSING';
+
+export class TerminalRequestError extends Error {
+  readonly code: string | null;
+
+  constructor(message: string, code: string | null) {
+    super(message);
+    this.name = 'TerminalRequestError';
+    this.code = code;
+  }
+}
+
+export const isTerminalCwdMissingError = (error: unknown): boolean =>
+  error instanceof TerminalRequestError && error.code === TERMINAL_CWD_MISSING_CODE;
+
+const terminalErrorBodySchema = z.object({ error: z.string().optional(), code: z.string().optional() });
+
 const responseError = async (response: Response, fallback: string): Promise<Error> => {
-  const body = await response.json().catch(() => null) as { error?: unknown } | null;
-  return new Error(typeof body?.error === 'string' ? body.error : fallback);
+  const body = terminalErrorBodySchema.safeParse(await response.json().catch(() => null)).data;
+  return new TerminalRequestError(body?.error ?? fallback, body?.code ?? null);
 };
 
 const trimProjection = (value: string): string => {

@@ -706,6 +706,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.sessionDialogs.worktree.attachedArchived": "Worktree adjunto archivado.",
   "sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural": "Worktrees adjuntos archivados.",
   "sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved": "Worktrees archivados e branches remotas excluídas.",
+  "sessions.missingDirectory.movedToProject": "A pasta desta sessão não existe mais. A sessão foi movida para {project}.",
   "sessions.sidebar.sessionDialogs.worktree.label": "Worktree",
   "sessions.sidebar.sessionDialogs.worktree.pathUnavailable": "Caminho de worktree não disponível.",
   "sessions.sidebar.sessionDialogs.worktree.uncommittedWarning": "As alterações sem commit serão perdidas.",

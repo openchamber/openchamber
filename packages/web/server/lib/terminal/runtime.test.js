@@ -266,6 +266,40 @@ describe('terminal runtime', () => {
     }
   });
 
+  it('names a missing working directory so the client can recover the session', async () => {
+    let cwdMissing = false;
+    const harness = createHarness({
+      fs: {
+        promises: {
+          stat: async () => {
+            if (cwdMissing) throw Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+            return { isDirectory: () => true };
+          },
+        },
+      },
+    });
+    try {
+      const create = harness.routes.post.get('/api/terminal/create');
+      const created = createResponse();
+      await create({ body: { sessionId: 'worktree-terminal', cwd: '/repo/.worktrees/feature' } }, created);
+      expect(created.statusCode).toBe(200);
+
+      cwdMissing = true;
+      const recreated = createResponse();
+      await create({ body: { sessionId: 'worktree-terminal-2', cwd: '/repo/.worktrees/feature' } }, recreated);
+      expect(recreated.statusCode).toBe(400);
+      expect(recreated.body).toEqual({ error: 'Invalid working directory', code: 'TERMINAL_CWD_MISSING' });
+
+      const restarted = createResponse();
+      await harness.routes.post.get('/api/terminal/:sessionId/restart')(
+        { params: { sessionId: 'worktree-terminal' }, body: { cwd: '/repo/.worktrees/feature' } },
+        restarted,
+      );
+      expect(restarted.statusCode).toBe(400);
+      expect(restarted.body).toEqual({ error: 'Invalid working directory', code: 'TERMINAL_CWD_MISSING' });
+    } finally { await harness.runtime.shutdown(); }
+  });
+
   it('removes its websocket upgrade listener on shutdown', async () => {
     const server = new EventEmitter();
     const runtime = createRuntime(server);

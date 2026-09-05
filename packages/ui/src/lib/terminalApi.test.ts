@@ -2,7 +2,8 @@ import { describe, expect, mock, test } from 'bun:test';
 import type { TerminalSessionPurpose, TerminalStreamEvent } from './api/types';
 import type { RelayTunnelWebSocket } from './relay/tunnel-client';
 
-mock.module('./runtime-fetch', () => ({ runtimeFetch: async () => new Response(null, { status: 500 }) }));
+let nextFetchResponse = (): Response => new Response(null, { status: 500 });
+mock.module('./runtime-fetch', () => ({ runtimeFetch: async () => nextFetchResponse() }));
 mock.module('./runtime-url', () => ({ getRuntimeUrlResolver: () => ({ websocket: () => 'ws://example.test/terminal' }) }));
 mock.module('./runtime-auth', () => ({
   clearRuntimeUrlAuthToken: () => undefined,
@@ -10,7 +11,7 @@ mock.module('./runtime-auth', () => ({
 }));
 mock.module('./relay/runtime-socket', () => ({ openRuntimeWebSocket: () => { throw new Error('not used in tests'); } }));
 
-const { parseTerminalSession, parseTerminalSessionPurpose, TerminalTransport } = await import('./terminalApi');
+const { createTerminalSession, isTerminalCwdMissingError, parseTerminalSession, parseTerminalSessionPurpose, TerminalRequestError, TerminalTransport } = await import('./terminalApi');
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -101,6 +102,22 @@ describe('terminal transport', () => {
       status: 'running',
       purpose: { type: 'project-action', actionId: 'build' },
     })).toBeNull();
+  });
+
+  test('surfaces the server error code so a missing working directory is recoverable', async () => {
+    const options = { cwd: '/repo/.worktrees/gone', cols: 80, rows: 24 };
+    nextFetchResponse = () => new Response(JSON.stringify({ error: 'Invalid working directory', code: 'TERMINAL_CWD_MISSING' }), { status: 400, headers: { 'content-type': 'application/json' } });
+    try {
+      await expect(createTerminalSession(options)).rejects.toThrow(TerminalRequestError);
+      await expect(createTerminalSession(options)).rejects.toThrow('Invalid working directory');
+      expect(await createTerminalSession(options).then(() => false, isTerminalCwdMissingError)).toBe(true);
+
+      nextFetchResponse = () => new Response(JSON.stringify({ error: 'Invalid working directory' }), { status: 400, headers: { 'content-type': 'application/json' } });
+      await expect(createTerminalSession(options)).rejects.toThrow(TerminalRequestError);
+      expect(await createTerminalSession(options).then(() => false, isTerminalCwdMissingError)).toBe(false);
+    } finally {
+      nextFetchResponse = () => new Response(null, { status: 500 });
+    }
   });
 
   test('hydrates simultaneous subscribers and rejects duplicate sequences', async () => {

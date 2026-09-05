@@ -19,6 +19,9 @@ const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const TERMINATION_GRACE_MS = 1000;
 const INTERACTIVE_TERMINAL_MODE = 'interactive';
 const COMMAND_TERMINAL_MODE = 'command';
+// Error code the create/restart routes attach when the requested cwd no longer
+// exists. Mirrored by `TERMINAL_CWD_MISSING_CODE` in packages/ui/src/lib/terminalApi.ts.
+const TERMINAL_CWD_MISSING_CODE = 'TERMINAL_CWD_MISSING';
 const TERMINAL_PURPOSE = Object.freeze({ type: 'terminal' });
 const MAX_PURPOSE_ID_CHARS = 128;
 const OBJECT_TAG = '[object Object]';
@@ -235,11 +238,18 @@ export function createTerminalRuntime({
     ptyProcess.onExit(({ exitCode, signal }) => { session.eventQueue.push({ type: 'exit', process: ptyProcess, exitCode, signal }); drainEvents(session); });
   };
 
+  // A working directory that no longer exists (a deleted worktree) is the one
+  // rejection the client can recover from by moving the session to its
+  // project, so the response names it. Every other rejection stays generic.
+  const invalidWorkingDirectory = (code) => Object.assign(new Error('Invalid working directory'), code ? { code } : {});
   const validateCwd = async (cwd) => {
     if (typeof cwd !== 'string' || !cwd.trim()) throw new Error('cwd is required');
-    const stats = await fs.promises.stat(cwd).catch(() => null);
-    if (!stats?.isDirectory()) throw new Error('Invalid working directory');
+    let stats;
+    try { stats = await fs.promises.stat(cwd); }
+    catch (error) { throw invalidWorkingDirectory(error?.code === 'ENOENT' || error?.code === 'ENOTDIR' ? TERMINAL_CWD_MISSING_CODE : undefined); }
+    if (!stats?.isDirectory()) throw invalidWorkingDirectory();
   };
+  const errorBody = (error, fallback) => ({ error: error?.message || fallback, ...(typeof error?.code === 'string' ? { code: error.code } : {}) });
 
   const applyAppearance = (session, { themeMode, terminalBackground, terminalForeground }) => {
     const previous = [session.themeMode, session.terminalBackground, session.terminalForeground];
@@ -461,7 +471,7 @@ export function createTerminalRuntime({
         purpose: getSessionPurpose(session),
       });
     }
-    catch (error) { res.status(error?.message === 'Maximum terminal sessions reached' ? 429 : 400).json({ error: error?.message || 'Failed to create terminal session' }); }
+    catch (error) { res.status(error?.message === 'Maximum terminal sessions reached' ? 429 : 400).json(errorBody(error, 'Failed to create terminal session')); }
   });
   app.post('/api/terminal/:sessionId/resize', (req, res) => {
     const session = sessions.get(req.params.sessionId);
@@ -505,7 +515,7 @@ export function createTerminalRuntime({
     try {
       await restart;
       res.json({ sessionId: session.id, cols, rows, status: session.status });
-    } catch (error) { res.status(400).json({ error: error?.message || 'Failed to restart terminal' }); }
+    } catch (error) { res.status(400).json(errorBody(error, 'Failed to restart terminal')); }
     finally { if (pendingSessionRestarts.get(session.id) === restart) pendingSessionRestarts.delete(session.id); }
   });
   app.delete('/api/terminal/:sessionId', async (req, res) => {

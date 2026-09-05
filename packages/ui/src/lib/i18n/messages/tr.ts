@@ -687,6 +687,7 @@ export const dict = {
   'sessions.sidebar.sessionDialogs.worktree.attachedArchived': 'Bağlı worktree arşivlendi.',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': 'Bağlı worktree\'ler arşivlendi.',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': 'Worktree\'ler arşivlendi ve uzak branch\'ler kaldırıldı.',
+  'sessions.missingDirectory.movedToProject': 'Bu oturumun klasörü artık mevcut değil. Oturum {project} konumuna taşındı.',
   'sessions.sidebar.sessionDialogs.worktree.label': 'Worktree',
   'sessions.sidebar.sessionDialogs.worktree.pathUnavailable': 'Worktree yolu kullanılamıyor.',
   'sessions.sidebar.sessionDialogs.worktree.uncommittedWarning': 'Commit edilmemiş değişiklikler atılacak.',

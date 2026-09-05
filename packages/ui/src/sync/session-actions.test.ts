@@ -21,6 +21,8 @@ let sessionDeleteError: unknown | null = null
 let beforeSessionUpdateResolve: ((sessionId: string) => void) | null = null
 let beforeSessionDeleteResolve: ((sessionId: string) => void) | null = null
 let beforeControlPlaneMoveResolve: ((sessionId: string) => void) | null = null
+let beforeDirectoryAvailabilityResolve: (() => void) | null = null
+const controlPlaneMoveErrorsById = new Map<string, Error>()
 let globalHasLoaded = true
 const deletedChatDirectories: string[] = []
 const globalUpsertedSessions: unknown[] = []
@@ -78,6 +80,8 @@ const mockSdk = {
       moveSession: mock((params: Record<string, unknown>) => {
         replyCalls.push({ method: "controlPlane.moveSession", params })
         beforeControlPlaneMoveResolve?.(String(params.sessionID))
+        const error = controlPlaneMoveErrorsById.get(String(params.sessionID))
+        if (error) return Promise.resolve({ error, response: { status: 500 } })
         return Promise.resolve({})
       }),
     },
@@ -165,7 +169,10 @@ mock.module("@/lib/opencode/client", () => ({
       return mockScopedClient
     },
     getDirectory: () => "/test/project",
-    getDirectoryAvailability: mock(async (directory: string) => directoryAvailability.get(directory) ?? "available"),
+    getDirectoryAvailability: mock(async (directory: string) => {
+      beforeDirectoryAvailabilityResolve?.()
+      return directoryAvailability.get(directory) ?? "available"
+    }),
     getFilesystemHome: mock(async () => "/home/test"),
     getSdkClient: () => mockSdk,
     getSessionMessages: mock((sessionId: string, _limit?: number, directory?: string | null) => {
@@ -557,6 +564,8 @@ describe("confirmed session removal", () => {
     archiveBatchRequests.length = 0
     archiveBatchResponse = { status: 404, body: { error: 'not found' } }
     beforeControlPlaneMoveResolve = null
+    beforeDirectoryAvailabilityResolve = null
+    controlPlaneMoveErrorsById.clear()
     globalHasLoaded = true
     deletedChatDirectories.length = 0
   })
@@ -1021,6 +1030,8 @@ describe("session restore (unarchive)", () => {
     sessionUpdateResult = {}
     beforeSessionUpdateResolve = null
     beforeControlPlaneMoveResolve = null
+    beforeDirectoryAvailabilityResolve = null
+    controlPlaneMoveErrorsById.clear()
     globalHasLoaded = true
     deletedChatDirectories.length = 0
   })
@@ -2874,5 +2885,137 @@ describe("dismissOpenPermissionsForSession", () => {
     } finally {
       console.error = originalError
     }
+  })
+})
+
+describe("relocateSessionFromMissingDirectory", () => {
+  const missingWorktree = "/projects/main/.worktrees/gone"
+  const projectDirectory = "/projects/main"
+  const worktreeSession = (id: string, parentID: string | null, directory = missingWorktree, archived = 0): Session & { project: { worktree: string } } => ({
+    id,
+    slug: id,
+    projectID: "project-main",
+    directory,
+    title: id,
+    version: "1",
+    project: { worktree: projectDirectory },
+    time: { created: 1, updated: 1, archived },
+    parentID: parentID ?? undefined,
+  })
+  const mainProject: Project = { id: "project-main", worktree: projectDirectory, time: { created: 1, updated: 1 }, sandboxes: [] }
+  const stores = () => createChildStores([[missingWorktree, createStore({})], [projectDirectory, createStore({})]])
+  const movesOf = () => replyCalls
+    .filter((call) => call.method === "controlPlane.moveSession")
+    .map((call) => ({ sessionID: call.params.sessionID, destination: call.params.destination, moveChanges: call.params.moveChanges }))
+
+  beforeEach(() => {
+    replyCalls.length = 0
+    registeredSessionDirectories.length = 0
+    movedSessionDirectories.length = 0
+    globalUpsertedSessions.length = 0
+    globalActiveSessions = []
+    globalArchivedSessions.length = 0
+    openCodeProjects.length = 0
+    directoryAvailability.clear()
+    controlPlaneMoveErrorsById.clear()
+    beforeDirectoryAvailabilityResolve = null
+    runtimeKey = "default-runtime"
+  })
+
+  test("moves the whole stranded subtree, root first, to the project directory without carrying changes", async () => {
+    const root = worktreeSession("root", null)
+    const child = worktreeSession("child", "root")
+    const archivedChild = worktreeSession("archived-child", "root", missingWorktree, 42)
+    const elsewhere = worktreeSession("elsewhere", "root", projectDirectory)
+    globalActiveSessions = [root, child, elsewhere]
+    globalArchivedSessions.push(archivedChild)
+    openCodeProjects.push(mainProject)
+    directoryAvailability.set(missingWorktree, "missing")
+    const { relocateSessionFromMissingDirectory, setActionRefs } = await import("./session-actions")
+    setActionRefs(actionSdk, stores(), () => missingWorktree)
+
+    const result = await relocateSessionFromMissingDirectory("root")
+
+    expect(result).toEqual({
+      status: "moved",
+      sourceDirectory: missingWorktree,
+      destinationDirectory: projectDirectory,
+      movedSessionIds: ["root", "child", "archived-child"],
+    })
+    expect(movesOf()).toEqual([
+      { sessionID: "root", destination: { directory: projectDirectory }, moveChanges: false },
+      { sessionID: "child", destination: { directory: projectDirectory }, moveChanges: false },
+      { sessionID: "archived-child", destination: { directory: projectDirectory }, moveChanges: false },
+    ])
+    expect(movedSessionDirectories).toEqual([
+      { sessionID: "root", directory: projectDirectory },
+      { sessionID: "child", directory: projectDirectory },
+      { sessionID: "archived-child", directory: projectDirectory },
+    ])
+  })
+
+  for (const availability of ["available", "unknown"] as const) {
+    test(`leaves the session alone when its directory is ${availability}`, async () => {
+      globalActiveSessions = [worktreeSession("root", null)]
+      openCodeProjects.push(mainProject)
+      directoryAvailability.set(missingWorktree, availability)
+      const { relocateSessionFromMissingDirectory, setActionRefs } = await import("./session-actions")
+      setActionRefs(actionSdk, stores(), () => missingWorktree)
+
+      expect(await relocateSessionFromMissingDirectory("root")).toEqual({ status: "unchanged" })
+      expect(movesOf()).toEqual([])
+    })
+  }
+
+  test("leaves a session that already lives in its project directory alone", async () => {
+    globalActiveSessions = [worktreeSession("root", null, projectDirectory)]
+    openCodeProjects.push(mainProject)
+    directoryAvailability.set(projectDirectory, "missing")
+    const { relocateSessionFromMissingDirectory, setActionRefs } = await import("./session-actions")
+    setActionRefs(actionSdk, stores(), () => projectDirectory)
+
+    expect(await relocateSessionFromMissingDirectory("root")).toEqual({ status: "unchanged" })
+    expect(movesOf()).toEqual([])
+  })
+
+  test("leaves the session alone when OpenCode knows no project for it", async () => {
+    globalActiveSessions = [worktreeSession("root", null)]
+    directoryAvailability.set(missingWorktree, "missing")
+    const { relocateSessionFromMissingDirectory, setActionRefs } = await import("./session-actions")
+    setActionRefs(actionSdk, stores(), () => missingWorktree)
+
+    expect(await relocateSessionFromMissingDirectory("root")).toEqual({ status: "unchanged" })
+    expect(movesOf()).toEqual([])
+  })
+
+  test("reports the sessions already moved when a descendant move fails", async () => {
+    globalActiveSessions = [worktreeSession("root", null), worktreeSession("child", "root")]
+    openCodeProjects.push(mainProject)
+    directoryAvailability.set(missingWorktree, "missing")
+    controlPlaneMoveErrorsById.set("child", new Error("destination busy"))
+    const { relocateSessionFromMissingDirectory, setActionRefs } = await import("./session-actions")
+    setActionRefs(actionSdk, stores(), () => missingWorktree)
+
+    const result = await relocateSessionFromMissingDirectory("root")
+
+    expect(result.status).toBe("failed")
+    expect(result.status === "failed" ? result.movedSessionIds : null).toEqual(["root"])
+    expect(movedSessionDirectories).toEqual([{ sessionID: "root", directory: projectDirectory }])
+  })
+
+  test("publishes nothing when the runtime changes while the directory is being probed", async () => {
+    globalActiveSessions = [worktreeSession("root", null)]
+    openCodeProjects.push(mainProject)
+    directoryAvailability.set(missingWorktree, "missing")
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    beforeDirectoryAvailabilityResolve = () => {
+      switchRuntimeEndpoint({ apiBaseUrl: "http://other.test", runtimeKey: "other-runtime" })
+    }
+    const { relocateSessionFromMissingDirectory, setActionRefs } = await import("./session-actions")
+    setActionRefs(actionSdk, stores(), () => missingWorktree)
+
+    expect(await relocateSessionFromMissingDirectory("root")).toEqual({ status: "stale" })
+    expect(movesOf()).toEqual([])
+    expect(movedSessionDirectories).toEqual([])
   })
 })

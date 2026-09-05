@@ -381,6 +381,31 @@ reports failure instead of committing. The deletion already accepted by the
 server stays deleted there; its persisted state is left as harmless stale
 metadata and the next authoritative load reconciles it.
 
+### Missing directory relocation (active sessions)
+
+The same directory can disappear under an active session: a worktree removed
+by the agent or by hand leaves the session, its tabs, and its prompts pointed
+at a path that no longer exists, and the terminal server answers every create
+and restart with `Invalid working directory`. `relocateSessionFromMissingDirectory`
+(`session-actions.ts`) applies the restore fallback's gate to a live session:
+an exact `missing` probe, the destination resolved from the server `projectID`,
+and `available`, `unknown`, probe failures, project-root sessions, and sessions
+without a project left untouched. Every session of the root's subtree still
+stranded in that directory moves with it, root first, so the session the user
+is looking at is usable even when a descendant move fails; the result names
+the sessions already moved. Moves carry no changes because the source is gone.
+
+`session-ui-store.recoverMissingSessionDirectory` owns the user-visible side:
+one shared attempt per runtime and session, the worktree hint cleared for each
+moved session (it is the first thing every directory lookup reads), the current
+session re-selected through `setCurrentSession` so the active directory,
+project, and OpenCode client follow it, and one toast naming the destination.
+It runs from two places: a terminal create/restart rejected with the server's
+`TERMINAL_CWD_MISSING` code, and session activation for any session whose
+directory is neither a registered project root nor a managed chat directory
+(the same probe a reopened draft performs on its inherited directory). VS Code
+registers no worktrees, so activation never probes there.
+
 ## The golden rule
 
 ### Managed chat directories

@@ -13,6 +13,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { createContextPart } from '@/lib/messages/contextParts';
 
 /**
@@ -1256,5 +1257,146 @@ describe('sendMessage effort record', () => {
     await send('high');
 
     expect(readRecord()).toBe(undefined);
+  });
+});
+
+describe('missing session directory recovery', () => {
+  const missingWorktree = '/projects/main/.worktrees/gone';
+  const projectDirectory = '/projects/main';
+  const moves = [];
+  const probes = [];
+  let availability = 'missing';
+  let originalGetDirectoryAvailability;
+  let originalGetSdkClient;
+  let originalProjects;
+  let originalActiveProjectId;
+  let originalDirectoryState;
+  let originalClientDirectory;
+  let originalGlobalState;
+
+  const worktreeSession = (id, directory, parentID = null) => ({
+    id,
+    parentID: parentID ?? undefined,
+    projectID: 'project-main',
+    directory,
+    project: { worktree: projectDirectory },
+    title: id,
+    version: '1',
+    time: { created: 1, updated: 1 },
+  });
+
+  const settle = async () => {
+    for (let index = 0; index < 10; index += 1) await Bun.sleep(0);
+  };
+
+  beforeEach(() => {
+    moves.length = 0;
+    probes.length = 0;
+    availability = 'missing';
+    originalGetDirectoryAvailability = opencodeClient.getDirectoryAvailability;
+    originalGetSdkClient = opencodeClient.getSdkClient;
+    originalProjects = useProjectsStore.getState().projects;
+    originalActiveProjectId = useProjectsStore.getState().activeProjectId;
+    originalDirectoryState = useDirectoryStore.getState();
+    originalClientDirectory = opencodeClient.getDirectory();
+    originalGlobalState = useGlobalSessionsStore.getState();
+
+    const childStore = {
+      getState: () => ({ session: [], message: {}, part: {}, session_status: {} }),
+      setState: () => {},
+    };
+    const childStores = { children: new Map(), ensureChild: () => childStore, getChild: () => childStore };
+    setActionRefs({
+      project: { list: async () => ({ data: [{ id: 'project-main', worktree: projectDirectory }] }) },
+      session: { messages: async () => ({ data: [] }) },
+    }, childStores, () => projectDirectory);
+    setOptimisticRefs(() => {}, () => {});
+    opencodeClient.getSdkClient = () => ({
+      experimental: { controlPlane: { moveSession: async (params) => { moves.push(params); return {}; } } },
+    });
+    opencodeClient.getDirectoryAvailability = async (directory) => {
+      probes.push(directory);
+      return availability;
+    };
+    useProjectsStore.setState({
+      projects: [{ id: 'project-main', path: projectDirectory, label: 'Main' }],
+      activeProjectId: 'project-main',
+    });
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      currentSessionDirectory: null,
+      worktreeMetadata: new Map(),
+      newSessionDraft: { open: false, directoryOverride: null, parentID: null },
+    });
+  });
+
+  afterEach(() => {
+    opencodeClient.getDirectoryAvailability = originalGetDirectoryAvailability;
+    opencodeClient.getSdkClient = originalGetSdkClient;
+    useProjectsStore.setState({ projects: originalProjects, activeProjectId: originalActiveProjectId });
+    useDirectoryStore.setState(originalDirectoryState, true);
+    useGlobalSessionsStore.setState(originalGlobalState, true);
+    opencodeClient.setDirectory(originalClientDirectory ?? undefined);
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null, worktreeMetadata: new Map() });
+  });
+
+  test('moves the current session to its project, drops the worktree hint, and shares one attempt between callers', async () => {
+    const root = worktreeSession('root', missingWorktree);
+    const child = worktreeSession('child', missingWorktree, 'root');
+    useGlobalSessionsStore.setState({ activeSessions: [root, child], archivedSessions: [] });
+    useSessionUIStore.setState({ currentSessionId: 'root', currentSessionDirectory: missingWorktree });
+    useSessionUIStore.getState().setWorktreeMetadata('root', { path: missingWorktree, branch: 'gone' });
+    useSessionUIStore.getState().setWorktreeMetadata('child', { path: missingWorktree, branch: 'gone' });
+
+    const store = useSessionUIStore.getState();
+    const [first, second] = await Promise.all([
+      store.recoverMissingSessionDirectory('root'),
+      store.recoverMissingSessionDirectory('root'),
+    ]);
+
+    expect(first).toBe(second);
+    expect(first.status).toBe('moved');
+    expect(moves.map((move) => move.sessionID)).toEqual(['root', 'child']);
+    expect(moves.every((move) => move.destination.directory === projectDirectory && move.moveChanges === false)).toBe(true);
+    expect(useSessionUIStore.getState().worktreeMetadata.has('root')).toBe(false);
+    expect(useSessionUIStore.getState().worktreeMetadata.has('child')).toBe(false);
+    expect(useSessionWorktreeStore.getState().getAttachment('root')).toBeUndefined();
+    expect(useSessionUIStore.getState().getDirectoryForSession('root')).toBe(projectDirectory);
+    expect(useSessionUIStore.getState().currentSessionDirectory).toBe(projectDirectory);
+    expect(useDirectoryStore.getState().currentDirectory).toBe(projectDirectory);
+  });
+
+  test('probes a worktree session on activation and relocates it only when the directory is confirmed missing', async () => {
+    const root = worktreeSession('root', missingWorktree);
+    useGlobalSessionsStore.setState({ activeSessions: [root], archivedSessions: [] });
+
+    availability = 'available';
+    useSessionUIStore.getState().setCurrentSession('root', missingWorktree);
+    await settle();
+    expect(probes).toEqual([missingWorktree]);
+    expect(moves).toEqual([]);
+    expect(useSessionUIStore.getState().currentSessionDirectory).toBe(missingWorktree);
+
+    availability = 'missing';
+    useSessionUIStore.getState().setCurrentSession('root', missingWorktree);
+    await settle();
+    expect(moves.map((move) => move.sessionID)).toEqual(['root']);
+    expect(useSessionUIStore.getState().currentSessionDirectory).toBe(projectDirectory);
+  });
+
+  test('never probes a session that lives in its project root or in a managed chat directory', async () => {
+    const chatDirectory = '/home/user/.config/openchamber/chats/2026-09-05/session-abc';
+    useGlobalSessionsStore.setState({
+      activeSessions: [worktreeSession('in-root', projectDirectory), worktreeSession('chat', chatDirectory)],
+      archivedSessions: [],
+    });
+
+    useSessionUIStore.getState().setCurrentSession('in-root', projectDirectory);
+    await settle();
+    useSessionUIStore.getState().setCurrentSession('chat', chatDirectory);
+    await settle();
+
+    expect(probes).toEqual([]);
+    expect(moves).toEqual([]);
   });
 });
