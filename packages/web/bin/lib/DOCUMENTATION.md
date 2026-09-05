@@ -7,6 +7,7 @@ This directory contains the non-entrypoint implementation for the OpenChamber CL
 - `../cli.js`
   - Owns process bootstrap, package/version lookup, command table wiring, signal handlers, top-level error handling, and legacy exports used by tests or external consumers.
   - Injects runtime dependencies into command factories, such as `serveCommand`, `stopCommand`, package-manager loading, cancel cleanup, and foreground server state setters.
+  - Dispatches commands through the `commandDispatch` table (`run`/`help` per command); unknown-command suggestions are derived from its keys. Register every new command in both the `commands` wiring and `commandDispatch`.
   - Should not grow command-specific behavior. If a new branch needs more than dispatch/wiring, move it here into a command or helper module instead.
 
 ## Command Modules
@@ -70,10 +71,18 @@ Command modules implement user-facing commands and preserve output contracts acr
 These modules hold reusable, non-presentational logic for commands.
 
 - `cli-args.js`
-  - Argument parsing, defaults, help text, completion script generation, and typo suggestions.
+  - Argument parsing entrypoint, defaults, help text, completion script generation, and typo suggestions.
+  - Backed by commander (see `cli-commander.js`): it tokenizes argv, strips removed flags (which keep their migration errors), enforces required-value flags (`--port`, `--host`, `--server`) with stable messages, delegates value extraction and unknown-flag detection to `parseCommandTokens`, and maps commander results onto the historical flat options bag. Flags not allowed for the resolved command are reported through `removedFlagErrors` as unknown options for that command, with closest-match suggestions.
+  - Help rendering: `showHelp()` is the global overview; every command has a dedicated `show*Help()` function. `session`/`schedule` render focused per-action help when an action is present (`openchamber session list --help`), and `showTunnelHelp(subcommand)`/`showStartupHelp(action)` render focused help per tunnel/startup subcommand.
 
 - `cli-errors.js`
   - CLI exit codes and typed tunnel CLI errors.
+
+- `cli-commander.js`
+  - Commander-backed single source of truth for which flags each command accepts (`GLOBAL_OPTION_FLAGS` plus `COMMAND_OPTION_FLAGS`).
+  - Tunnel flags are validated per subcommand via dedicated `tunnel <subcommand>` keys (`TUNNEL_SUBCOMMAND_NAMES`); startup does the same via `startup <action>` keys, since only `enable` consumes its command-specific flags. The base `tunnel`/`startup` keys are the union pools used for their `--help` overviews and unknown subcommands.
+  - Exposes `parseCommandTokens(command, tokens)` (option values plus unknown flags via commander's `parseOptions` with `exitOverride`, so commander never prints or exits) and `optionNamesForCommand(command)` for suggestion pools.
+  - All value-taking options are declared with optional `[value]` syntax on purpose: missing-value semantics stay in `cli-args.js` so usage errors and messages remain stable across modes. When adding a flag, add it here plus the mapping in `cli-args.js`.
 
 - `cli-paths.js`
   - Data, run, log, settings, tunnel profile, and managed-local config paths.

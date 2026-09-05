@@ -328,12 +328,12 @@ async function handleTunnelProfileSubcommand(options, action, { boldText, ensure
 
     if (!isQuietMode(options)) {
       clackIntro('Tunnel Profile');
-      logStatus('info', 'Available subcommands', 'list, show, add, remove');
+      logStatus('info', 'Available commands', 'list, show, add, remove');
       clackLog.step('List profiles: `openchamber tunnel profile list`');
       clackLog.step('Show one profile: `openchamber tunnel profile show --name <name>`');
       clackLog.step('Add profile: `openchamber tunnel profile add --provider cloudflare --mode managed-remote --name <name> --hostname <host> --token <token>`');
       clackLog.step('Remove profile: `openchamber tunnel profile remove --name <name>`');
-      clackOutro('Choose a subcommand');
+      clackOutro('Choose a command');
     }
     return;
   }
@@ -615,7 +615,7 @@ async function handleTunnelProfileSubcommand(options, action, { boldText, ensure
   const suggestion = findClosestMatch(sub, knownProfileActions);
   const hint = suggestion ? ` Did you mean '${suggestion}'?` : '';
   throw new TunnelCliError(
-    `Unknown tunnel profile subcommand '${sub}'.${hint} Use 'openchamber tunnel help'.`,
+    `Unknown tunnel profile command '${sub}'.${hint} Use 'openchamber tunnel help'.`,
     EXIT_CODE.USAGE_ERROR
   );
 }
@@ -1747,7 +1747,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
         const suggestion = findClosestMatch(subcommand, knownTunnelSubcommands);
         const hint = suggestion ? ` Did you mean '${suggestion}'?` : '';
         throw new TunnelCliError(
-          `Unknown tunnel subcommand '${subcommand}'.${hint} Use 'openchamber tunnel help'.`,
+          `Unknown tunnel command '${subcommand}'.${hint} Use 'openchamber tunnel help'.`,
           EXIT_CODE.USAGE_ERROR
         );
       }

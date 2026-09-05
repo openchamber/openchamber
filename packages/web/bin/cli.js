@@ -24,7 +24,14 @@ import {
 import {
   parseArgs,
   showHelp,
+  showServeHelp,
+  showStopHelp,
+  showRestartHelp,
+  showStatusHelp,
+  showLogsHelp,
+  showUpdateHelp,
   showControlHelp,
+  CONTROL_COMMAND_NAMES,
   showStartupHelp,
   showConnectUrlHelp,
   showTunnelHelp,
@@ -234,9 +241,66 @@ commands.update = createUpdateCommand({
   serveCommand: commands.serve.bind(commands),
 });
 
+function runControlAction(controlAction) {
+  if (controlAction === 'help') {
+    showControlHelp();
+    return;
+  }
+  if (CONTROL_COMMAND_NAMES.includes(controlAction)) {
+    throw new TunnelCliError(
+      `'${controlAction}' is a top-level command, not a control subcommand. Use: openchamber ${controlAction}`,
+      EXIT_CODE.USAGE_ERROR,
+    );
+  }
+  const suggestion = findClosestMatch(controlAction, CONTROL_COMMAND_NAMES);
+  const hint = suggestion ? ` Did you mean 'openchamber ${suggestion}'?` : '';
+  throw new TunnelCliError(
+    `Unknown control command '${controlAction}'.${hint} 'control' only supports: help. Use 'openchamber control' to list control-plane commands.`,
+    EXIT_CODE.USAGE_ERROR,
+  );
+}
+
+// Table-driven dispatch. `run(options, parsed)` executes the command;
+// `help` renders command-specific help (falling back to showHelp()).
+// Entry keys are the source of truth for known-command suggestions.
+const commandDispatch = {
+  serve: { run: (options) => commands.serve(options), help: () => showServeHelp() },
+  'connect-url': { run: (options) => commands['connect-url'](options), help: () => showConnectUrlHelp() },
+  stop: { run: (options) => commands.stop(options), help: () => showStopHelp() },
+  restart: { run: (options) => commands.restart.call(commands, options), help: () => showRestartHelp() },
+  status: { run: (options) => commands.status(options), help: () => showStatusHelp() },
+  schedule: {
+    run: (options, parsed) => commands.schedule(options, parsed.scheduleAction),
+    help: (options, parsed) => commands.schedule(options, 'help', parsed.scheduleAction),
+  },
+  session: {
+    run: (options, parsed) => commands.session(options, parsed.sessionAction),
+    help: (options, parsed) => commands.session(options, 'help', parsed.sessionAction),
+  },
+  models: {
+    run: (options) => commands.models(options, 'show'),
+    help: (options) => commands.models(options, 'help'),
+  },
+  projects: {
+    run: (options) => commands.projects(options, 'list'),
+    help: (options) => commands.projects(options, 'help'),
+  },
+  control: { run: (options, parsed) => runControlAction(parsed.controlAction), help: () => showControlHelp() },
+  tunnel: {
+    run: (options, parsed) => commands.tunnel(options, parsed.subcommand, parsed.tunnelAction),
+    help: (options, parsed) => showTunnelHelp(parsed.subcommand),
+  },
+  startup: {
+    run: (options, parsed) => commands.startup(options, parsed.startupAction),
+    help: (options, parsed) => showStartupHelp(parsed.startupAction),
+  },
+  logs: { run: (options) => commands.logs(options), help: () => showLogsHelp() },
+  update: { run: (options) => commands.update(options), help: () => showUpdateHelp() },
+};
+
 async function main() {
   const parsed = parseArgs();
-  const { command, subcommand, tunnelAction, startupAction, scheduleAction, sessionAction, controlAction, options, removedFlagErrors, helpRequested, versionRequested } = parsed;
+  const { command, commandExplicit, options, removedFlagErrors, helpRequested, versionRequested } = parsed;
   activeCommandOptions = options;
 
   if (versionRequested) {
@@ -266,68 +330,22 @@ async function main() {
   }
 
   if (helpRequested) {
-    if (command === 'tunnel') {
-      showTunnelHelp();
-    } else if (command === 'startup') {
-      showStartupHelp();
-    } else if (command === 'connect-url') {
-      showConnectUrlHelp();
-    } else if (command === 'schedule') {
-      await commands.schedule(options, 'help');
-    } else if (command === 'session') {
-      await commands.session(options, 'help');
-    } else if (command === 'models') {
-      await commands.models(options, 'help');
-    } else if (command === 'projects') {
-      await commands.projects(options, 'help');
-    } else if (command === 'control') {
-      showControlHelp();
+    if (!commandExplicit) {
+      showHelp();
+      return;
+    }
+    const entry = commandDispatch[command];
+    if (entry?.help) {
+      await entry.help(options, parsed);
     } else {
       showHelp();
     }
     return;
   }
 
-  if (command === 'tunnel') {
-    await commands.tunnel(options, subcommand, tunnelAction);
-    return;
-  }
-
-  if (command === 'startup') {
-    await commands.startup(options, startupAction);
-    return;
-  }
-
-  if (command === 'schedule') {
-    await commands.schedule(options, scheduleAction);
-    return;
-  }
-
-  if (command === 'session') {
-    await commands.session(options, sessionAction);
-    return;
-  }
-
-  if (command === 'models') {
-    await commands.models(options, 'show');
-    return;
-  }
-
-  if (command === 'projects') {
-    await commands.projects(options, 'list');
-    return;
-  }
-
-  if (command === 'control') {
-    if (controlAction !== 'help') {
-      throw new TunnelCliError(`Unknown control command '${controlAction}'.`, EXIT_CODE.USAGE_ERROR);
-    }
-    showControlHelp();
-    return;
-  }
-
-  if (!commands[command]) {
-    const knownCommands = ['serve', 'stop', 'restart', 'status', 'schedule', 'session', 'models', 'projects', 'control', 'tunnel', 'startup', 'logs', 'update'];
+  const entry = commandDispatch[command];
+  if (!entry) {
+    const knownCommands = Object.keys(commandDispatch);
     const suggestion = findClosestMatch(command, knownCommands);
     const hint = suggestion ? ` Did you mean '${suggestion}'?` : '';
     if (isJsonMode(options)) {
@@ -345,7 +363,7 @@ async function main() {
     process.exit(EXIT_CODE.USAGE_ERROR);
   }
 
-  await commands[command](options);
+  await entry.run(options, parsed);
 }
 
 const isCliExecution = isModuleCliExecution(process.argv[1], import.meta.url, fs.realpathSync, 'openchamber');
@@ -429,6 +447,8 @@ if (isCliExecution) {
 export {
   main,
   commands,
+  commandDispatch,
+  runControlAction,
   parseArgs,
   assertAuthenticatedNetworkExposure,
   resolveServeHost,
