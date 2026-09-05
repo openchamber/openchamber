@@ -201,6 +201,12 @@ refusing programmatic focus outside a gesture, WebKit leaving the layout
 viewport panned after the keyboard hides, overlay chains handing off through a
 frame where nothing is open.
 
+Typed text and salvage text shown after a failed dictation use the same measured
+line and screen-height limits. Once the viewport reports usable space, content
+scrolls inside the composer so the failed-dictation action row stays inside the
+chat screen. A transient non-positive viewport measurement keeps the existing
+line cap until the next resize instead of collapsing the editor to zero height.
+
 **Every timeout and `flushSync` in them has a reason recorded next to it, and
 none of them is verifiable outside a real device.** Change them only against
 hardware.
