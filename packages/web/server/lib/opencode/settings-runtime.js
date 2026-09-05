@@ -568,8 +568,12 @@ export const createSettingsRuntime = (deps) => {
 
   const writeSettingsToDisk = async (settings) => {
     const settingsDirectory = path.dirname(SETTINGS_FILE_PATH);
-    await fsPromises.mkdir(settingsDirectory, { recursive: true, mode: 0o700 });
-    if (process.platform !== 'win32') await fsPromises.chmod(settingsDirectory, 0o700);
+    // Restrictive mode on creation only: re-chmodding an existing directory
+    // would clobber granted group access (chmod replaces the POSIX ACL mask).
+    const createdDirectory = await fsPromises.mkdir(settingsDirectory, { recursive: true, mode: 0o700 });
+    if (createdDirectory !== undefined && process.platform !== 'win32') {
+      await fsPromises.chmod(settingsDirectory, 0o700);
+    }
     // Atomic write: Electron main and ssh-manager read this file via plain
     // readFile + JSON.parse and silently coerce parse errors to {}. A
     // partial read during a non-atomic writeFile would make their next
