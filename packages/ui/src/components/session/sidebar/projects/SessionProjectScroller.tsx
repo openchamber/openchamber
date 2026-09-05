@@ -425,7 +425,7 @@ function SessionProjectScrollerComponent(props: Props): React.ReactNode {
           ) : (
             <>
               <Icon name="history" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/80" />
-              <span className="truncate text-[14px] font-semibold lowercase text-foreground">
+              <span className="truncate text-[14px] font-semibold text-foreground">
                 {t('sessions.sidebar.activity.recentTitle')}
               </span>
             </>

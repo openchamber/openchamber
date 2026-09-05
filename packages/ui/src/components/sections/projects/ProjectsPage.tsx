@@ -5,6 +5,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { ProjectSettingsPanel } from '@/components/sections/projects/ProjectSettingsPanel';
 import type { ProjectIdentitySaveData } from '@/components/sections/projects/useProjectIdentityForm';
 import { useI18n } from '@/lib/i18n';
+import { getProjectDisplayLabel } from '@/lib/projectDisplayLabel';
 
 export const ProjectsPage: React.FC = () => {
   const { t } = useI18n();
@@ -49,7 +50,7 @@ export const ProjectsPage: React.FC = () => {
     );
   }
 
-  const headerLabel = selectedProject.label ?? t('settings.projects.page.title.default');
+  const headerLabel = getProjectDisplayLabel(selectedProject);
 
   return (
     <SettingsPageLayout

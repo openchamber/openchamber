@@ -30,7 +30,7 @@ export const useProjectIdentityAutoSave = (
   const isSavingRef = React.useRef(false);
 
   React.useEffect(() => {
-    if (!hasChanges || !name.trim() || isUploadingIcon || isRemovingCustomIcon || isSavingRef.current) {
+    if (!hasChanges || isUploadingIcon || isRemovingCustomIcon || isSavingRef.current) {
       return;
     }
 
