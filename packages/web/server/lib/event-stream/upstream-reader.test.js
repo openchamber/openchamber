@@ -272,4 +272,174 @@ describe('createUpstreamSseReader', () => {
     expect(attempt).toBe(2);
     expect(tracked.getListenerCount()).toBe(0);
   });
+
+  it('backs off reconnect delay after consecutive upstream failures', async () => {
+    const errors = [];
+    const recordedDelays = [];
+    let attempt = 0;
+    let reader;
+
+    // Capture the requested reconnect delays instead of measuring wall-clock
+    // time. Each captured entry corresponds to one `waitForReconnectDelay` call.
+    const setTimeoutImpl = (handler, ms) => {
+      recordedDelays.push(ms);
+      // Fire immediately so the connection loop proceeds to the next attempt.
+      return globalThis.setTimeout(handler, 0);
+    };
+
+    reader = createUpstreamSseReader({
+      buildUrl: () => 'http://127.0.0.1:4096/global/event',
+      reconnectDelayMs: 10,
+      reconnectMaxDelayMs: 40,
+      reconnectBackoffMultiplier: 2,
+      setTimeoutImpl,
+      fetchImpl: async (_url, options) => {
+        attempt += 1;
+        if (attempt <= 4) {
+          return {
+            ok: false,
+            status: 503,
+            body: {
+              cancel: async () => {},
+            },
+          };
+        }
+
+        return createSseResponse({
+          signal: options.signal,
+          blocks: [
+            'id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n',
+          ],
+        });
+      },
+      onError(error) {
+        errors.push(error);
+      },
+      onEvent() {
+        reader.stop();
+      },
+    });
+
+    await reader.start();
+
+    expect(errors).toHaveLength(4);
+    expect(attempt).toBe(5);
+    // Conventional backoff: failures 1..4 ask for base*multiplier^(n-1) capped at max,
+    // so the schedule is 10, 20, 40, 40 (the last one already hit the cap).
+    expect(recordedDelays).toEqual([10, 20, 40, 40]);
+  });
+
+  it('resets the consecutive failure counter after a successful connect', async () => {
+    const events = [];
+    const recordedDelays = [];
+    let attempt = 0;
+    let reader;
+
+    const setTimeoutImpl = (handler, ms) => {
+      recordedDelays.push(ms);
+      return globalThis.setTimeout(handler, 0);
+    };
+
+    reader = createUpstreamSseReader({
+      buildUrl: () => 'http://127.0.0.1:4096/global/event',
+      reconnectDelayMs: 5,
+      reconnectMaxDelayMs: 20,
+      reconnectBackoffMultiplier: 2,
+      setTimeoutImpl,
+      fetchImpl: async (_url, options) => {
+        attempt += 1;
+        if (attempt === 1 || attempt === 2) {
+          return {
+            ok: false,
+            status: 503,
+            body: { cancel: async () => {} },
+          };
+        }
+        if (attempt === 3) {
+          return createSseResponse({
+            signal: options.signal,
+            blocks: [
+              'id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n',
+            ],
+          });
+        }
+        if (attempt === 4) {
+          return {
+            ok: false,
+            status: 503,
+            body: { cancel: async () => {} },
+          };
+        }
+        return createSseResponse({
+          signal: options.signal,
+          blocks: [
+            'id: evt-2\ndata: {"type":"session.updated","properties":{}}\n\n',
+          ],
+        });
+      },
+      onError() {},
+      onEvent(event) {
+        events.push(event.eventId);
+        if (event.eventId === 'evt-2') {
+          reader.stop();
+        }
+      },
+    });
+
+    await reader.start();
+
+    expect(events).toEqual(['evt-1', 'evt-2']);
+    expect(attempt).toBe(5);
+    // Schedule: failures 1..2 escalate 5 -> 10; healthy connect (attempt 3)
+    // resets the counter, so the next failure (attempt 4) waits the base
+    // value again, not the escalated one. The trailing entry is the post-stop
+    // cleanup waitForReconnectDelay that fires before the abort short-circuit.
+    expect(recordedDelays.slice(0, 3)).toEqual([5, 10, 5]);
+  });
+
+  it('keeps immediate reconnect when reconnectDelayMs is zero', async () => {
+    const recordedDelays = [];
+    let attempt = 0;
+    let reader;
+
+    const setTimeoutImpl = (handler, ms) => {
+      recordedDelays.push(ms);
+      return globalThis.setTimeout(handler, 0);
+    };
+
+    reader = createUpstreamSseReader({
+      buildUrl: () => 'http://127.0.0.1:4096/global/event',
+      reconnectDelayMs: 0,
+      reconnectMaxDelayMs: 50,
+      reconnectBackoffMultiplier: 10,
+      setTimeoutImpl,
+      fetchImpl: async (_url, options) => {
+        attempt += 1;
+        if (attempt <= 3) {
+          return {
+            ok: false,
+            status: 503,
+            body: { cancel: async () => {} },
+          };
+        }
+        return createSseResponse({
+          signal: options.signal,
+          blocks: [
+            'id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n',
+          ],
+        });
+      },
+      onEvent() {
+        reader.stop();
+      },
+    });
+
+    await reader.start();
+
+    expect(attempt).toBe(4);
+    // Zero base delay short-circuits the backoff schedule entirely, regardless
+    // of the multiplier/cap. The reset on a healthy connect is also free in
+    // this configuration.
+    expect(recordedDelays).toEqual([0, 0, 0]);
+  });
 });
