@@ -239,6 +239,7 @@ const settingsNormalizationRuntime = createSettingsNormalizationRuntime({
   path,
   processLike: process,
   realpathSync: fs.realpathSync,
+  readdirSync: fs.readdirSync,
   tunnelBootstrapTtlDefaultMs: TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS,
   tunnelBootstrapTtlMinMs: TUNNEL_BOOTSTRAP_TTL_MIN_MS,
   tunnelBootstrapTtlMaxMs: TUNNEL_BOOTSTRAP_TTL_MAX_MS,

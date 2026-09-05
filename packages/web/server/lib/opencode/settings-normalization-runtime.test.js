@@ -167,3 +167,100 @@ describe('settings normalization runtime - symlink resolution', () => {
     });
   });
 });
+
+// issue #1913: on case-insensitive filesystems realpathSync preserves the input
+// casing, so a project stored as lowercase never matches the real-case session
+// directory. readdir walking recovers the true on-disk casing.
+describe('settings normalization runtime - case-insensitive filesystem casing (#1913)', () => {
+  const posixPath = {
+    resolve: (...args) => args[args.length - 1],
+    sep: '/',
+    dirname: (p) => p.split('/').slice(0, -1).join('/') || '/',
+    join: (...parts) => parts.join('/').replace(/\/+/g, '/'),
+  };
+
+  // Directory tree: /Users/me/Desktop/VcFiles/app (true casing).
+  const listing = {
+    '/': ['Users'],
+    '/Users': ['me'],
+    '/Users/me': ['Desktop'],
+    '/Users/me/Desktop': ['VcFiles'],
+    '/Users/me/Desktop/VcFiles': ['app'],
+  };
+  const readdirSync = (dir) => {
+    if (!Object.prototype.hasOwnProperty.call(listing, dir)) throw new Error('ENOENT');
+    return listing[dir];
+  };
+
+  const darwinRuntime = () => createTestRuntime({
+    path: posixPath,
+    processLike: { platform: 'darwin', env: {} },
+    realpathSync: (p) => p,
+    readdirSync,
+  });
+
+  it('recovers the on-disk casing when the stored path is lowercase', () => {
+    const runtime = darwinRuntime();
+    expect(runtime.normalizePathForPersistence('/users/me/desktop/vcfiles/app'))
+      .toBe('/Users/me/Desktop/VcFiles/app');
+  });
+
+  it('leaves a path that already matches disk casing untouched', () => {
+    const runtime = darwinRuntime();
+    expect(runtime.normalizePathForPersistence('/Users/me/Desktop/VcFiles/app'))
+      .toBe('/Users/me/Desktop/VcFiles/app');
+  });
+
+  it('does not rewrite when a component is genuinely missing', () => {
+    const runtime = darwinRuntime();
+    expect(runtime.normalizePathForPersistence('/Users/me/Desktop/nonexistent/app'))
+      .toBe('/Users/me/Desktop/nonexistent/app');
+  });
+
+  it('never rewrites case on a case-sensitive filesystem (linux)', () => {
+    const runtime = createTestRuntime({
+      path: posixPath,
+      processLike: { platform: 'linux', env: {} },
+      realpathSync: (p) => p,
+      readdirSync,
+    });
+    expect(runtime.normalizePathForPersistence('/users/me/desktop/vcfiles/app'))
+      .toBe('/users/me/desktop/vcfiles/app');
+  });
+
+  it('normalizeSettingsPaths flags a change so the corrected path is persisted', () => {
+    const runtime = darwinRuntime();
+    const projects = [{ id: 'a', path: '/users/me/desktop/vcfiles/app', label: 'App' }];
+    const result = runtime.normalizeSettingsPaths({ projects });
+    expect(result.changed).toBe(true);
+    expect(result.settings.projects[0].path).toBe('/Users/me/Desktop/VcFiles/app');
+  });
+
+  it('recovers on-disk casing and drive-letter case on Windows (win32)', () => {
+    const winPath = {
+      resolve: (...args) => args[args.length - 1],
+      sep: '\\',
+      dirname: (p) => p.replace(/\\[^\\]*$/, ''),
+      join: (...parts) => parts.join('\\').replace(/\\+/g, '\\'),
+    };
+    // Tree: C:\Users\me\Desktop\app (true casing on disk).
+    const winListing = {
+      'C:\\': ['Users'],
+      'C:\\Users': ['me'],
+      'C:\\Users\\me': ['Desktop'],
+      'C:\\Users\\me\\Desktop': ['app'],
+    };
+    const runtime = createTestRuntime({
+      path: winPath,
+      processLike: { platform: 'win32', env: {} },
+      realpathSync: (p) => p,
+      readdirSync: (dir) => {
+        if (!Object.prototype.hasOwnProperty.call(winListing, dir)) throw new Error('ENOENT');
+        return winListing[dir];
+      },
+    });
+    // Lowercase drive letter + wrong segment casing come back fully canonical.
+    expect(runtime.normalizePathForPersistence('c:\\users\\me\\desktop\\app'))
+      .toBe('C:\\Users\\me\\Desktop\\app');
+  });
+});
