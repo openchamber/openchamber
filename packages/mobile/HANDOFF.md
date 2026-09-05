@@ -131,7 +131,9 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
   (Android 13+; older versions allow notifications by default). `windowSoftInputMode=adjustResize`.
   FCM `default_notification_icon=@drawable/ic_stat_notify`.
 - Adaptive and themed launcher icon: full-bleed color background + `ic_launcher_foreground` (sources under
-  `packages/mobile/assets/`, regenerable with `@capacitor/assets`).
+  `packages/mobile/assets/`, regenerable with `@capacitor/assets`). The `<monochrome>` layer
+  (`ic_launcher_monochrome.png`) is hand-maintained: regeneration rewrites `ic_launcher.xml`
+  without it, so re-add the layer afterwards.
 
 ## Quirks / gotchas
 
