@@ -1871,6 +1871,7 @@ export const settingsDict = {
   'settings.voice.page.provider.custom': 'カスタム',
   'settings.voice.page.provider.say': 'Say',
   'settings.voice.page.provider.server': 'サーバー',
+  'settings.voice.page.provider.funasr': 'FunASR WebSocket',
   'settings.voice.page.provider.local': 'ローカル',
   'settings.voice.page.tooltip.sttLocal': 'OpenChamber サーバー上でローカルに文字起こしします。モデルは自動でダウンロードされ、API キーは不要です。',
   'settings.voice.page.tooltip.localTts': 'OpenChamber サーバー上でローカルに音声合成します（英語は Kokoro、他の言語のモデルは初回使用時にダウンロード）。API キーは不要です。',

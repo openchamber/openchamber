@@ -1838,6 +1838,7 @@ export const settingsDict = {
   'settings.voice.page.provider.custom': '自定义',
   'settings.voice.page.provider.say': 'Say',
   'settings.voice.page.provider.server': '服务器',
+  'settings.voice.page.provider.funasr': 'FunASR WebSocket',
   'settings.voice.page.provider.local': '本地',
   'settings.voice.page.tooltip.sttLocal': '在 OpenChamber 服务器上本地转写。模型自动下载，无需 API 密钥。',
   'settings.voice.page.tooltip.localTts': '在 OpenChamber 服务器上本地合成语音（英语使用 Kokoro；其他语言的模型在首次使用时下载）。无需 API 密钥。',

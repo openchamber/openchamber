@@ -1838,6 +1838,7 @@ export const settingsDict = {
   "settings.voice.page.provider.custom": "Personalizado",
   "settings.voice.page.provider.say": "Falar",
   "settings.voice.page.provider.server": "Servidor",
+  "settings.voice.page.provider.funasr": "FunASR WebSocket",
   "settings.voice.page.provider.local": "Local",
   "settings.voice.page.tooltip.sttLocal": "Transcrição local no servidor do OpenChamber. Os modelos são baixados automaticamente; não é necessária chave de API.",
   "settings.voice.page.tooltip.localTts": "Síntese local no servidor do OpenChamber (Kokoro para inglês; modelos de outros idiomas são baixados no primeiro uso). Não requer chave de API.",

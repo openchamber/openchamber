@@ -1745,6 +1745,7 @@ export const settingsDict = {
   'settings.voice.page.provider.custom': '自訂',
   'settings.voice.page.provider.say': 'Say',
   'settings.voice.page.provider.server': '伺服器',
+  'settings.voice.page.provider.funasr': 'FunASR WebSocket',
   'settings.voice.page.provider.local': '本機',
   'settings.voice.page.tooltip.sttLocal': '在 OpenChamber 伺服器上本機轉寫。模型會自動下載，無需 API 金鑰。',
   'settings.voice.page.tooltip.localTts': '在 OpenChamber 伺服器上本機合成語音（英文使用 Kokoro；其他語言的模型在首次使用時下載）。不需要 API 金鑰。',

@@ -51,6 +51,11 @@ response carries `X-Speech-Model` and `X-Speech-Language`.
   - `openai-compatible`: buffered per-segment transcription against any
     OpenAI-compatible `/v1/audio/transcriptions` endpoint
     (`openai-compatible-session.js`, reuses `../tts/stt.js`).
+  - `funasr-websocket`: real-time FunASR over `ws://` or `wss://`
+    (`funasr-websocket-session.js`). It negotiates the FunASR `binary`
+    subprotocol, streams raw 16 kHz PCM16, and forwards `2pass-online`
+    partials plus `2pass-offline` finals. An optional API key is sent in an
+    Authorization header, never embedded in the endpoint URL.
 - `local/` — worker process + client (IPC, idle shutdown TTL), sherpa
   recognizer engine and segment session (one decode per committed segment),
   model catalog and downloader. The native `sherpa-onnx-node` addon is only
@@ -69,8 +74,9 @@ Server → client: `ready`, `ack {ackSeq}`, `partial {text}`,
 `error {error, retryable, reasonCode?}`, `pong`.
 
 `options` in `start` carries the client-selected provider config:
-`{ provider: 'local' | 'openai-compatible', language?, localModel?,
-openaiCompatible?: { baseUrl, model, apiKey } }`.
+`{ provider: 'local' | 'openai-compatible' | 'funasr-websocket', language?,
+localModel?, openaiCompatible?: { baseUrl, model, apiKey },
+funasrWebsocket?: { url, apiKey } }`.
 
 ## Segmentation
 

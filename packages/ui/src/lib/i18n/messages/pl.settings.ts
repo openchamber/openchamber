@@ -2175,6 +2175,7 @@ export const settingsDict = {
   'settings.voice.page.provider.custom': 'Własny',
   'settings.voice.page.provider.say': 'Say',
   'settings.voice.page.provider.server': 'Serwer',
+  'settings.voice.page.provider.funasr': 'FunASR WebSocket',
   'settings.voice.page.provider.local': 'Lokalny',
   'settings.voice.page.tooltip.sttLocal': 'Transkrypcja lokalna na serwerze OpenChamber. Modele pobierają się automatycznie; klucz API nie jest potrzebny.',
   'settings.voice.page.tooltip.localTts': 'Lokalna synteza na serwerze OpenChamber (Kokoro dla angielskiego; modele innych języków pobierane przy pierwszym użyciu). Klucz API nie jest potrzebny.',

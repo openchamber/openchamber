@@ -63,6 +63,15 @@ const getDictationStartOptions = (): DictationStartOptions => {
             },
         };
     }
+    if (state.sttProvider === 'funasr-websocket') {
+        return {
+            provider: 'funasr-websocket',
+            funasrWebsocket: {
+                url: state.sttServerUrl,
+                ...(state.sttApiKey ? { apiKey: state.sttApiKey } : {}),
+            },
+        };
+    }
     return {
         provider: 'local',
         ...(language ? { language } : {}),

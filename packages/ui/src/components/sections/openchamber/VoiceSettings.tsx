@@ -1200,6 +1200,7 @@ export const VoiceSettings: React.FC = () => {
                                 options={[
                                     { value: 'local', label: t('settings.voice.page.provider.local') },
                                     { value: 'openai-compatible', label: t('settings.voice.page.provider.server') },
+                                    { value: 'funasr-websocket', label: t('settings.voice.page.provider.funasr') },
                                 ]}
                             />
                         </SettingsControlGroup>
@@ -1211,7 +1212,7 @@ export const VoiceSettings: React.FC = () => {
                             </div>
                         )}
 
-                        {sttProvider === 'openai-compatible' && (
+                        {(sttProvider === 'openai-compatible' || sttProvider === 'funasr-websocket') && (
                             <div className="space-y-3">
                                 <div className="space-y-1.5">
                                     <span className="flex items-center gap-1.5">
@@ -1225,7 +1226,7 @@ export const VoiceSettings: React.FC = () => {
                                             type="text"
                                             value={sttServerUrl}
                                             onChange={(e) => setSttServerUrl(e.target.value)}
-                                            placeholder="http://localhost:8001/v1"
+                                            placeholder={sttProvider === 'funasr-websocket' ? 'ws://localhost:10095' : 'http://localhost:8001/v1'}
                                             className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
                                         />
                                         {sttServerUrl && (
@@ -1263,6 +1264,7 @@ export const VoiceSettings: React.FC = () => {
                                         )}
                                     </div>
                                 </div>
+                                {sttProvider === 'openai-compatible' && <>
                                 <div className="space-y-1.5">
                                     <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.voice.page.field.model')}</span>
                                     <div className={cn('relative', SETTINGS_CONTROL_CLUSTER_CLASS)}>
@@ -1290,6 +1292,7 @@ export const VoiceSettings: React.FC = () => {
                                         />
                                     </div>
                                 </div>
+                                </>}
                             </div>
                         )}
                     </>
