@@ -41,6 +41,8 @@
     "reflect-metadata": "^0.2.2",
     "sherpa-onnx-node": "1.12.28",
     "simple-git": "^3.36.0",
+    "tar-stream": "^3.2.0",
+    "unbzip2-stream": "^1.4.3",
     "web-push": "^3.6.7",
     "ws": "^8.18.3",
     "yaml": "^2.8.1"

@@ -1,15 +1,18 @@
 /**
  * Downloads and extracts local sherpa-onnx STT model archives.
  * Archives (.tar.bz2) come from the k2-fsa GitHub releases and are extracted
- * with the system `tar` into the speech-models directory.
+ * with a pure-JS pipeline (unbzip2-stream + tar-stream) so extraction never
+ * depends on a system `tar`/`bzip2` pair being installed.
  */
 
-import { createWriteStream } from 'fs';
+import { createReadStream, createWriteStream } from 'fs';
 import { mkdir, rename, rm, stat } from 'fs/promises';
 import path from 'path';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
-import { spawn } from 'child_process';
+
+import unbzip2Stream from 'unbzip2-stream';
+import tar from 'tar-stream';
 
 import { getLocalSttModelSpec } from './model-catalog.js';
 
@@ -65,19 +68,75 @@ async function downloadToFile(url, outputPath, onProgress) {
 async function extractTarArchive(archivePath, destDir) {
   await mkdir(destDir, { recursive: true });
 
+  // Pure-JS extraction: bzip2 decompression (unbzip2-stream) feeds the tar
+  // parser (tar-stream). Avoids the system `tar`/`bzip2` dependency that
+  // breaks downloads on minimal Linux hosts (issue #2887). Entries are
+  // confined to destDir (path traversal is rejected via path.relative) and
+  // only regular files/directories are materialized — links, devices and
+  // FIFOs are skipped so a hostile or broken archive cannot escape the
+  // staging dir or leave broken entries behind.
+  const resolvedDest = path.resolve(destDir);
+  const readStream = createReadStream(archivePath);
+  const bz2 = unbzip2Stream();
+  const extract = tar.extract();
+
   await new Promise((resolve, reject) => {
-    const child = spawn('tar', ['xf', archivePath, '-C', destDir], {
-      stdio: 'ignore',
-      windowsHide: true,
-    });
-    child.on('error', reject);
-    child.on('exit', (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`tar exited with code ${code}`));
+    let settled = false;
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      // Tear the whole pipeline down: tar-stream requires next() per entry,
+      // and a write failure without destroying the extract stream would
+      // leave the pipeline hanging with the archive fd open.
+      readStream.destroy();
+      bz2.destroy();
+      extract.destroy();
+      reject(error);
+    };
+
+    extract.on('entry', (header, stream, next) => {
+      const resolvedTarget = path.resolve(resolvedDest, header.name);
+      const rel = path.relative(resolvedDest, resolvedTarget);
+      if (rel.startsWith('..') || path.isAbsolute(rel)) {
+        stream.resume();
+        next();
+        return;
       }
+      if (header.type === 'directory') {
+        stream.resume();
+        void mkdir(resolvedTarget, { recursive: true }).then(() => next(), (e) => fail(new Error('mkdir-dir: ' + String(e))));
+        return;
+      }
+      if (header.type !== 'file') {
+        // Symlink/hardlink/device/FIFO entries: never materialize links from
+        // archives (unvalidated link targets could escape destDir).
+        stream.resume();
+        next();
+        return;
+      }
+      void mkdir(path.dirname(resolvedTarget), { recursive: true })
+        .then(() => {
+          const out = createWriteStream(resolvedTarget);
+          out.on('error', fail);
+          stream.on('error', fail);
+          out.on('finish', () => {
+            // Drop this entry's listeners before proceeding: a late error
+            // from a finished entry must not destroy the extraction of the
+            // next one.
+            out.removeListener('error', fail);
+            stream.removeListener('error', fail);
+            next();
+          });
+          stream.pipe(out);
+        }, fail);
     });
+    extract.on('error', fail);
+    extract.on('finish', () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    });
+    pipeline(readStream, bz2, extract).catch(fail);
   });
 }
 
