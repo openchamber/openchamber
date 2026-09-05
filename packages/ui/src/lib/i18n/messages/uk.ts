@@ -3282,7 +3282,6 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.toast.authorizeOpenFailed': 'Не вдалося відкрити сторінку авторизації',
   'mcpDropdown.toast.authorizeFailed': 'Авторизація не вдалася',
   'header.services.tooltip.currentInstance': 'Поточний інстанс: {current} ({toggle})',
-  'header.workStatusPanel.showOverlay': 'Показати стан роботи поверх чату',
   'settings.mcp.page.connection.title': 'Як під’єднатись',
   'settings.mcp.page.connection.description': 'Встав команду, яка його запускає, або посилання на готовий сервер.',
   'settings.mcp.page.registration.title': 'Цьому серверу потрібен власний застосунок',

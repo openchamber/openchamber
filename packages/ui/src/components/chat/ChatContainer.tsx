@@ -936,10 +936,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // composer enters the same fullscreen-input mode via its drag handle.
     const isDesktopExpandedInput = isExpandedInput;
     const useCompactDraftLayout = isMobile || isVSCode || chatSurfaceMode === 'mini-chat';
-    // Work-status panel: a borderless column to the right of the transcript.
-    // It yields to the context panel and to a narrow chat; `rowRef` goes on the
-    // row that holds both columns, so its width never depends on the panel's
-    // own visibility.
+    // Work-status panel: an overlay inside the chat column. `rowRef` stays on
+    // the outer row so the lifecycle signal remains independent of the panel.
     const { rowRef: workStatusRowRef, visible: workStatusVisible, fits: workStatusFits } = useWorkStatusVisibility({
         isMobile,
         isVSCode,
@@ -952,17 +950,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         && !isDesktopExpandedInput;
     const showWorkStatusPanel = workStatusPanelMountable && workStatusVisible;
 
-    // Offered over the chat when there is no room beside it. The panel is still
-    // switched on; only the layout refuses it.
-    const workStatusPanelEnabled = useUIStore((state) => state.workStatusPanelEnabled);
-    const workStatusOverlayOpen = useUIStore((state) => state.workStatusOverlayOpen);
     const setWorkStatusPanelFits = useUIStore((state) => state.setWorkStatusPanelFits);
-    // Mounted whenever it could be shown, not only while it is: an element
-    // that appears and disappears with the condition has nothing to animate.
-    const workStatusOverlayMountable = workStatusPanelMountable
-        && workStatusPanelEnabled
-        && !workStatusFits;
-    const showWorkStatusOverlay = workStatusOverlayMountable && workStatusOverlayOpen;
 
     React.useEffect(() => {
         setWorkStatusPanelFits(workStatusPanelMountable && workStatusFits);
@@ -1584,7 +1572,13 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 	return (
 		<div ref={workStatusRowRef} className="flex h-full min-h-0 bg-background">
 		<ChatColumnSessionContext.Provider value={chatColumnSession}>
-		<div data-composer-bound className="relative flex min-w-0 flex-1 flex-col h-full bg-background">
+        <div
+            data-composer-bound
+            className={cn(
+                'relative flex min-w-0 flex-1 flex-col h-full bg-background',
+                showWorkStatusPanel && 'work-status-overlay-visible',
+            )}
+        >
 			{returnToParentButton}
 			{sessionSurface}
 
@@ -1644,13 +1638,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 )}
             </div>
 
-            {/* Inside the chat column, not beside it: as a row sibling it took
-                part in the flex layout and pushed the transcript, which is the
-                one thing an overlay must not do. */}
-            {workStatusOverlayMountable ? (
+            {/* The panel is anchored to this positioned chat column. It overlays
+                the transcript and never participates in the outer flex row. */}
+            {workStatusPanelMountable ? (
                 <WorkStatusPanel
-                    overlay
-                    visible={showWorkStatusOverlay}
+                    visible={showWorkStatusPanel}
                     sessionId={currentSessionId ?? null}
                     directory={workStatusDirectory ?? null}
                     repositoryEnabled={!isManagedChatContext}
@@ -1669,17 +1661,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             />
         </div>
         </ChatColumnSessionContext.Provider>
-        {/* Kept mounted while it could ever show, so it can animate its own
-            collapse; `visible` drives that. Unmounting on the spot is what made
-            the chat jump wide before easing narrow again. */}
-        {workStatusPanelMountable ? (
-            <WorkStatusPanel
-                visible={showWorkStatusPanel}
-                sessionId={currentSessionId ?? null}
-                directory={workStatusDirectory ?? null}
-                repositoryEnabled={!isManagedChatContext}
-            />
-        ) : null}
-        </div>
+         </div>
     );
 };

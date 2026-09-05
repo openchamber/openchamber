@@ -3282,7 +3282,6 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.toast.authorizeOpenFailed': 'No se pudo abrir la página de autorización',
   'mcpDropdown.toast.authorizeFailed': 'Error de autorización',
   'header.services.tooltip.currentInstance': 'Instancia actual: {current} ({toggle})',
-  'header.workStatusPanel.showOverlay': 'Mostrar estado sobre el chat',
   'settings.mcp.page.connection.title': 'Cómo conectarse',
   'settings.mcp.page.connection.description': 'Pega el comando que lo inicia o el enlace a un servidor alojado.',
   'settings.mcp.page.registration.title': 'Este servidor necesita su propia app',

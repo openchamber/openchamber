@@ -23,21 +23,23 @@ instead of reserving empty space.
 
 It is **not** a context-panel surface. It is not registered in
 `lib/surfaces/registry.ts`, has no rail icon, no tab, no persisted width and no
-resizer. It is a card floating inside the chat column — rounded border, faint
-fill, its own margin — rather than a docked pane flush against the window edge.
+resizer. It is a card floating inside the chat column, with a rounded border
+and faint fill, rather than a docked pane flush against the window edge.
 When it overlays the transcript, it uses the shared `oc-glass-panel` surface;
-the inline card keeps its lighter, non-blurred fill instead.
+the panel remains a glass overlay in its only desktop placement.
 
 ## Placement
 
 `ChatContainer`'s top-level return is a flex row:
 
 - the existing chat column (`data-composer-bound`, `flex-1 min-w-0`), holding
-  the viewport, the composer and the timeline dialog;
-- `WorkStatusPanel`, a fixed-width `shrink-0` sibling.
+  the viewport, the composer, the timeline dialog and the panel overlay;
+- `ContextPanel`, the separate right-hand surface.
 
-Nothing inside `ChatViewport` changed. The virtualizer sees the column shrink
-exactly as it already does when the context panel opens.
+`WorkStatusPanel` is an absolutely positioned overlay inside the chat column,
+anchored to that column's top-right edge. It never participates in the flex
+layout and never changes the transcript width. Nothing inside `ChatViewport`
+changed.
 
 ## Visibility
 
@@ -50,8 +52,8 @@ exactly as it already does when the context panel opens.
   the same key the rail and the panel use. It is deliberately **not** the
   directory this panel reports about: a managed Chat reports about none, and
   that empty key answered "closed" for a context panel that was plainly open;
-- the row cannot fit `WORK_STATUS_MIN_CHAT_WIDTH` of transcript alongside
-  `WORK_STATUS_PANEL_WIDTH` of panel.
+- the chat column is unavailable, has not attached yet, or is narrower than
+  1024px, the 300px panel, its 24px gap, plus the minimum 700px transcript width.
 
 `ChatContainer` additionally suppresses it in mini-chat and in expanded-input
 mode. It remains available on a new-session draft: when the draft targets a
@@ -64,24 +66,16 @@ cannot leak into the draft while directory-independent sections remain
 available.
 
 `rowRef` is a **callback ref, not an object ref**. An object ref gives no signal
-when the node attaches, so the measuring effect read `.current`, found nothing
-whenever the row mounted after the effect first ran, and only recovered on the
-next unrelated dependency change — in practice, opening and closing the context
-panel. `useWorkStatusVisibility.test.ts` covers a row that attaches late.
+when the node attaches, so the panel would not become visible when the chat
+mounted late. `useWorkStatusVisibility.test.ts` covers a row that attaches
+late.
 
-### Why the chat area is measured, not the chat column
+### Why the chat area is measured
 
-**The width test must observe something the panel cannot resize.** The chat
-column's width is an *output* of the visibility decision: hiding the panel
-widens the chat, which would re-satisfy a chat-width test and re-show the
-panel, which narrows the chat again — an infinite oscillation.
-
-It measures the **chat area** — the container holding the chat and the context
-panel together, marked `data-chat-area` in `MainLayout`. Measuring the chat row
-instead reported a width still catching up while the context panel animated
-closed, so the panel reappeared only once that number crossed the threshold:
-the chat widened and then narrowed again. The chat area does not move when the
-context panel opens. `useWorkStatusVisibility.test.ts` pins both properties.
+The hook measures the chat column and requires 1024px: 300px for the panel, a
+24px gap, and at least 700px of transcript. When the panel is visible, the
+message and composer columns reserve the panel's 324px space and shift left
+into the otherwise empty gutter. The overlay never occupies flex space.
 
 The context-panel check mirrors `ContextPanel`'s own derivation: `isOpen` alone
 is not enough, because a panel with no resolvable active tab renders nothing
@@ -214,7 +208,7 @@ describes the current frame, not a preference.
 ## Appearing and disappearing
 
 The panel collapses on the context panel's own curve and duration rather than
-unmounting, and slides out to the right with a fade when switched off. It stays
+unmounting, and fades and lifts when switched off. It stays
 mounted wherever it could ever show, so the collapse has something to animate;
 its content is dropped once the collapse finishes.
 

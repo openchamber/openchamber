@@ -428,28 +428,16 @@ export const Header: React.FC = () => {
   // While the work-status panel is on screen it already reports the project,
   // the branch and the context fill — three paces away in the same window.
   // These yield to it rather than saying the same thing twice, and return the
-  // moment the panel is switched off or squeezed out by a narrow chat.
+  // moment the panel is switched off or unavailable on this runtime.
   const workStatusPanelVisible = useUIStore((state) => state.workStatusPanelVisible);
   const workStatusPanelEnabled = useUIStore((state) => state.workStatusPanelEnabled);
   const setWorkStatusPanelEnabled = useUIStore((state) => state.setWorkStatusPanelEnabled);
   const workStatusPanelFits = useUIStore((state) => state.workStatusPanelFits);
-  const workStatusOverlayOpen = useUIStore((state) => state.workStatusOverlayOpen);
-  const setWorkStatusOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
 
-  // Two meanings for one button. With room beside the chat it switches the
-  // panel on and off. Without room it cannot be shown inline at all, so it
-  // reads as off and opens the panel over the chat instead — the stored
-  // preference is left alone, so the panel comes back on its own once the
-  // window is wide enough again.
-  const workStatusPanelShownInline = workStatusPanelEnabled && workStatusPanelFits;
-  const workStatusToggleActive = workStatusPanelShownInline || workStatusOverlayOpen;
+  const workStatusToggleActive = workStatusPanelEnabled && workStatusPanelFits;
   const handleWorkStatusToggle = React.useCallback(() => {
-    if (workStatusPanelEnabled && !workStatusPanelFits) {
-      setWorkStatusOverlayOpen(!workStatusOverlayOpen);
-      return;
-    }
     setWorkStatusPanelEnabled(!workStatusPanelEnabled);
-  }, [setWorkStatusOverlayOpen, setWorkStatusPanelEnabled, workStatusOverlayOpen, workStatusPanelEnabled, workStatusPanelFits]);
+  }, [setWorkStatusPanelEnabled, workStatusPanelEnabled]);
   const showDesktopHeaderContextUsage = !isVSCode
     && !workStatusPanelVisible
     && !!stableDesktopContextUsage
@@ -1680,13 +1668,7 @@ export const Header: React.FC = () => {
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
-                {workStatusPanelEnabled && !workStatusPanelFits
-                  ? (workStatusOverlayOpen
-                    ? t('header.workStatusPanel.hide')
-                    : t('header.workStatusPanel.showOverlay'))
-                  : workStatusPanelEnabled
-                    ? t('header.workStatusPanel.hide')
-                    : t('header.workStatusPanel.show')}
+                {workStatusPanelEnabled ? t('header.workStatusPanel.hide') : t('header.workStatusPanel.show')}
               </TooltipContent>
             </Tooltip>
           ) : null}

@@ -3281,7 +3281,6 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.toast.authorizeOpenFailed': '認証ページを開けませんでした',
   'mcpDropdown.toast.authorizeFailed': '認証に失敗しました',
   'header.services.tooltip.currentInstance': '現在のインスタンス: {current}（{toggle}）',
-  'header.workStatusPanel.showOverlay': 'チャットの上に作業状況を表示',
   'settings.mcp.page.connection.title': '接続方法',
   'settings.mcp.page.connection.description': '起動コマンド、またはホスト型サーバーのリンクを貼り付けます。',
   'settings.mcp.page.registration.title': 'このサーバーには専用アプリが必要です',

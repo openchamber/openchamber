@@ -28,13 +28,8 @@ type Props = {
   directory: string | null;
   /** Managed Chats have no project repository, even if another project remains active. */
   repositoryEnabled?: boolean;
-  /** Whether the panel should currently occupy space. */
+  /** Whether the panel should currently be interactive and visible. */
   visible: boolean;
-  /**
-   * Floats over the transcript instead of sitting beside it, for when the chat
-   * is too narrow to give it a column of its own.
-   */
-  overlay?: boolean;
 };
 
 /**
@@ -65,10 +60,9 @@ const PANEL_TRANSITION_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
  * eat a visible slice of every row's trailing value, and the shadows already
  * say there is more to see.
  */
-export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible, repositoryEnabled = true, overlay = false }) => {
+export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible, repositoryEnabled = true }) => {
   const { t } = useI18n();
   const setScrollTop = useUIStore((state) => state.setWorkStatusScrollTop);
-  const setOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
   const hiddenSections = useUIStore((state) => state.workStatusHiddenSections);
   const [sectionsDialogOpen, setSectionsDialogOpen] = React.useState(false);
   // Starts optimistic: sections report after their first commit, and rendering
@@ -139,35 +133,8 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
     setScrollTop(0);
   }, [sessionId, setScrollTop]);
 
-  // Dismissed like any transient surface: a click elsewhere or Escape. It
-  // covers the transcript, so leaving it up would block the thing it reports on.
-  const overlayRef = React.useRef<HTMLElement | null>(null);
-  React.useEffect(() => {
-    // Only while it is actually up: a hidden overlay listening for clicks would
-    // swallow the very press that opens it.
-    if (!overlay || !visible) return undefined;
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (overlayRef.current?.contains(target)) return;
-      // The header toggle closes it on its own; letting this fire too would
-      // close and immediately reopen.
-      if (target?.closest('[data-work-status-toggle]')) return;
-      setOverlayOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOverlayOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown, true);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown, true);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [overlay, setOverlayOpen, visible]);
-
   return (
     <aside
-      ref={overlayRef}
       aria-label={t('chat.workStatus.ariaLabel')}
       aria-hidden={!interactive}
       // The card stays mounted while hidden so it can animate its own collapse,
@@ -176,52 +143,20 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
       // focusable descendant is an accessibility fault in its own right.
       inert={!interactive}
       className={cn(
-        // `self-start` keeps the card at content height instead of stretching
-        // to the row; `max-h` then caps it so a long panel scrolls rather than
-        // overflowing the chat.
-        // A left margin as well as a right one: flush against the transcript
-        // the card's own shadow had no room and was clipped down that edge.
-        'relative my-4 flex shrink-0 flex-col self-start overflow-hidden',
-        'max-h-[calc(100%-2rem)]',
-        interactive ? 'ml-2 mr-4' : 'ml-0 mr-0',
-        // Out of the flow entirely, anchored to the chat column's top-right so
-        // it reads as a dropdown from the header button. As a flex child it
-        // took part in the layout and pushed the transcript, which is the one
-        // thing an overlay must not do. Stronger shadow: it sits on content now.
-        overlay && [
-          'absolute right-3 top-3 z-30 mx-0 my-0',
-          'max-h-[calc(100%-1.5rem)]',
-          'shadow-[0_8px_28px_-8px_rgb(0_0_0_/_0.28)]',
-          // Beside the transcript the translucent fill reads as depth; on top
-          // of it, message bubbles showed straight through the rows. Frosting
-          // separates the two without going fully opaque.
-          'oc-glass-panel',
-        ],
+        'absolute right-3 top-3 z-30 mx-0 my-0 flex max-h-[calc(100%-1.5rem)]',
+        'shrink-0 flex-col overflow-hidden shadow-[0_8px_28px_-8px_rgb(0_0_0_/_0.28)]',
+        'oc-glass-panel',
         // When every section is hidden the card keeps its border and background
-        // so the settings button stays discoverable — going transparent made the
-        // only recovery path unreachable.
+        // so the settings button stays discoverable.
         'motion-reduce:transition-none',
         'rounded-xl border border-[var(--interactive-border)]',
-        !overlay && 'bg-[var(--surface-muted)]/40',
-        // A lighter version of the composer's lift: the same shape, but this
-        // card is taller, so the composer's spread reads as heavy here.
-        'shadow-[0_2px_8px_-3px_rgb(0_0_0_/_0.08)]',
       )}
       style={{
-        // The overlay keeps its width: it takes no space from the chat, so
-        // collapsing it would animate a dimension nothing depends on. It fades
-        // and lifts instead, like the dropdown it reads as.
-        width: overlay || interactive ? WORK_STATUS_PANEL_WIDTH : 0,
+        width: WORK_STATUS_PANEL_WIDTH,
         opacity: interactive ? 1 : 0,
-        transform: visible
-          ? 'translateY(0) scale(1)'
-          : overlay
-            ? 'translateY(-6px) scale(0.98)'
-            // Inline: leaves to the right and arrives from it, so the card
-            // reads as sliding out past the window edge.
-            : `translateX(${WORK_STATUS_PANEL_WIDTH / 4}px)`,
+        transform: visible ? 'translateY(0) scale(1)' : 'translateY(-6px) scale(0.98)',
         transformOrigin: 'top right',
-        transitionProperty: 'width, opacity, transform, margin',
+        transitionProperty: 'opacity, transform',
         transitionDuration: `${PANEL_TRANSITION_MS}ms`,
         transitionTimingFunction: PANEL_TRANSITION_EASING,
         pointerEvents: interactive ? undefined : 'none',

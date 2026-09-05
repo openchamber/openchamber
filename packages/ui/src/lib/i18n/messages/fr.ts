@@ -3279,7 +3279,6 @@ export const dict = {
   'mcpDropdown.toast.authorizeOpenFailed': 'Impossible d\'ouvrir la page d\'autorisation',
   'mcpDropdown.toast.authorizeFailed': 'Échec de l\'autorisation',
   'header.services.tooltip.currentInstance': 'Instance actuelle : {current} ({toggle})',
-  'header.workStatusPanel.showOverlay': 'Afficher l\'état par-dessus le chat',
   'settings.mcp.page.connection.title': 'Comment le joindre',
   'settings.mcp.page.connection.description': 'Colle la commande qui le démarre, ou le lien vers un serveur hébergé.',
   'settings.mcp.page.registration.title': 'Ce serveur exige sa propre app',

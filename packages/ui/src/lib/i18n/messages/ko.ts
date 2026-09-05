@@ -3281,7 +3281,6 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.toast.authorizeOpenFailed': '인증 페이지를 열지 못했습니다',
   'mcpDropdown.toast.authorizeFailed': '인증에 실패했습니다',
   'header.services.tooltip.currentInstance': '현재 인스턴스: {current} ({toggle})',
-  'header.workStatusPanel.showOverlay': '채팅 위에 작업 상태 표시',
   'settings.mcp.page.connection.title': '연결 방법',
   'settings.mcp.page.connection.description': '실행 명령 또는 호스팅 서버 링크를 붙여넣으세요.',
   'settings.mcp.page.registration.title': '이 서버는 전용 앱이 필요합니다',

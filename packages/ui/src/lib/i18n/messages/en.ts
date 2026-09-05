@@ -3281,7 +3281,6 @@ export const dict = {
   'mcpDropdown.toast.authorizeOpenFailed': 'Could not open the authorization page',
   'mcpDropdown.toast.authorizeFailed': 'Authorization failed',
   'header.services.tooltip.currentInstance': 'Current instance: {current} ({toggle})',
-  'header.workStatusPanel.showOverlay': 'Show work status over the chat',
   'settings.mcp.page.connection.title': 'How to reach it',
   'settings.mcp.page.connection.description': 'Paste the command that starts it, or the link to a hosted server.',
   'settings.mcp.page.registration.title': 'This server needs its own app',

@@ -3196,7 +3196,6 @@ export const dict = {
   'mcpDropdown.toast.authorizeOpenFailed': 'Yetkilendirme sayfası açılamadı',
   'mcpDropdown.toast.authorizeFailed': 'Yetkilendirme başarısız',
   'header.services.tooltip.currentInstance': 'Geçerli örnek: {current} ({toggle})',
-  'header.workStatusPanel.showOverlay': 'Çalışma durumunu sohbet üzerinde göster',
   'settings.mcp.page.connection.title': 'Nasıl erişilir',
   'settings.mcp.page.connection.description': 'Onu başlatan komutu ya da barındırılan bir sunucunun bağlantısını yapıştır.',
   'settings.mcp.page.registration.title': 'Bu sunucu için ayrı uygulama gerekli',

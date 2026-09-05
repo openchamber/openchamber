@@ -3298,7 +3298,6 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.toast.authorizeOpenFailed': 'Nie udało się otworzyć strony autoryzacji',
   'mcpDropdown.toast.authorizeFailed': 'Autoryzacja nie powiodła się',
   'header.services.tooltip.currentInstance': 'Bieżąca instancja: {current} ({toggle})',
-  'header.workStatusPanel.showOverlay': 'Pokaż stan pracy nad czatem',
   'settings.mcp.page.connection.title': 'Jak się połączyć',
   'settings.mcp.page.connection.description': 'Wklej polecenie uruchamiające lub link do serwera hostowanego.',
   'settings.mcp.page.registration.title': 'Ten serwer wymaga własnej aplikacji',

@@ -3281,7 +3281,6 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.toast.authorizeOpenFailed': '無法開啟授權頁面',
   'mcpDropdown.toast.authorizeFailed': '授權失敗',
   'header.services.tooltip.currentInstance': '目前執行個體：{current}（{toggle}）',
-  'header.workStatusPanel.showOverlay': '在聊天上方顯示工作狀態',
   'settings.mcp.page.connection.title': '如何連線',
   'settings.mcp.page.connection.description': '貼上啟動指令，或代管伺服器的連結。',
   'settings.mcp.page.registration.title': '此伺服器需要獨立應用程式',
