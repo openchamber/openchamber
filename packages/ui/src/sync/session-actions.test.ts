@@ -1,6 +1,7 @@
 import { describe, expect, test, beforeEach, mock } from "bun:test"
 import type { PermissionRequest } from "@/types/permission"
 import type { QuestionRequest } from "@/types/question"
+import { isAmbiguousTransportFailure } from "@/lib/relay/transport-error"
 
 // Mock SDK client that records permission.reply / question.reply calls
 const replyCalls: Array<{ method: string; params: Record<string, unknown> }> = []
@@ -34,6 +35,51 @@ let archiveBatchResponse: { status: number; body: unknown } = {
 const deletedCleanupIdentities: Array<{ runtimeKey: string; directory: string; sessionId: string }> = []
 const movedSessionDirectories: Array<{ sessionID: string; directory: string }> = []
 
+// Controls the V2 question surface on mockScopedClient. The behaviors model
+// the real hey-api result shapes (SDK 1.18.25):
+//   - "ok"                    204 success → { data: undefined, error: undefined, response: { status: 204 } }
+//   - "throw"                 the SDK call itself throws (transport drop / old SDK) → caught = no response evidence
+//   - { status, body }        an HTTP error response → { error: body, response: { status } }
+// (body `undefined` with a response models the hey-api catch path: fetch threw
+// after dispatch, so `response` is undefined.) The default is the structured
+// 404 a V2 server answers for a not-found request — the not-admitted class
+// that justifies the V1 fallback the older V1-path tests rely on.
+const V2_STRUCTURED_404 = {
+  status: 404,
+  body: { _tag: "QuestionNotFoundError", requestID: "q-1", message: "Question request not found" },
+} as const
+const V2_ROUTE_MISS_404 = { status: 404, body: "<html>404 Not Found</html>" } as const
+let v2QuestionReplyBehavior: "ok" | "throw" | { status: number; body?: unknown; responseless?: true } = V2_STRUCTURED_404
+let v2QuestionRejectBehavior: "ok" | "throw" | { status: number; body?: unknown; responseless?: boolean } = V2_STRUCTURED_404
+
+// QuestionV2CallParams / QuestionV2SdkResult mirror the surface session-actions
+// consumes on `client.v2.session.question.reply/reject`: reply/reject take
+// { sessionID, requestID, questionV2Reply? } and answer 204 with no body
+// (RequestResult collapses that to `{ data: undefined, error: undefined,
+// response }`); the hey-api catch path returns `{ error, response: undefined }`.
+type QuestionV2CallParams = {
+  sessionID?: string
+  requestID?: string
+  questionV2Reply?: { answers: string[][] }
+}
+type QuestionV2SdkResult = { data?: undefined; error?: unknown; response?: { status?: number } }
+
+const v2QuestionSdkResult = (behavior: "ok" | "throw" | { status: number; body?: unknown; responseless?: boolean }): QuestionV2SdkResult | null => {
+  if (behavior === "ok") {
+    // Hey-api 204 branch: data branch with the response still attached.
+    return { data: undefined, error: undefined, response: { status: 204 } }
+  }
+  if (behavior === "throw") return null
+  if (behavior.responseless) {
+    // Transport drop after dispatch: raw fetch error, no response object.
+    return { error: new TypeError("Failed to fetch"), response: undefined }
+  }
+  // HTTP error branch: jsonError ?? textError, response attached. The real
+  // SDK's error interceptors also coerce falsy errors to `{}` (finalError =
+  // finalError || {}), so an empty body arrives as an object, not a string.
+  return { error: behavior.body || {}, response: { status: behavior.status } }
+}
+
 const mockScopedClient = {
   permission: {
     reply: mock((params: Record<string, unknown>) => {
@@ -60,6 +106,28 @@ const mockScopedClient = {
       }
       return Promise.resolve({ data: true })
     }),
+  },
+  v2: {
+    session: {
+      question: {
+        reply: mock((params: QuestionV2CallParams): Promise<QuestionV2SdkResult> => {
+          if (v2QuestionReplyBehavior === "throw") {
+            throw new TypeError("Failed to fetch")
+          }
+          replyCalls.push({ method: "question.v2.reply", params })
+          // SAFETY: v2QuestionSdkResult builds exactly this mock result type.
+          return Promise.resolve(v2QuestionSdkResult(v2QuestionReplyBehavior) as QuestionV2SdkResult)
+        }),
+        reject: mock((params: QuestionV2CallParams): Promise<QuestionV2SdkResult> => {
+          if (v2QuestionRejectBehavior === "throw") {
+            throw new TypeError("Failed to fetch")
+          }
+          replyCalls.push({ method: "question.v2.reject", params })
+          // SAFETY: v2QuestionSdkResult builds exactly this mock result type.
+          return Promise.resolve(v2QuestionSdkResult(v2QuestionRejectBehavior) as QuestionV2SdkResult)
+        }),
+      },
+    },
   },
 }
 
@@ -1829,9 +1897,11 @@ describe("respondToQuestion passes directory", () => {
 
     await respondToQuestion("session-a", "q-1", [["answer1"]])
 
-    expect(replyCalls.length).toBe(1)
-    expect(replyCalls[0].params.requestID).toBe("q-1")
-    expect(replyCalls[0].params.directory).toBe("/test/project")
+    // The V2 attempt (structured 404 → fallback) precedes the V1 call.
+    const v1Calls = replyCalls.filter((call) => call.method === "question.reply")
+    expect(v1Calls).toHaveLength(1)
+    expect(v1Calls[0].params.requestID).toBe("q-1")
+    expect(v1Calls[0].params.directory).toBe("/test/project")
     expect(scopedClientDirectories).toEqual(["/test/project"])
   })
 
@@ -1881,9 +1951,11 @@ describe("rejectQuestion passes directory", () => {
 
     await rejectQuestion("session-a", "q-2")
 
-    expect(replyCalls.length).toBe(1)
-    expect(replyCalls[0].params.requestID).toBe("q-2")
-    expect(replyCalls[0].params.directory).toBe("/test/project")
+    // The V2 attempt (structured 404 → fallback) precedes the V1 call.
+    const v1Calls = replyCalls.filter((call) => call.method === "question.reject")
+    expect(v1Calls).toHaveLength(1)
+    expect(v1Calls[0].params.requestID).toBe("q-2")
+    expect(v1Calls[0].params.directory).toBe("/test/project")
   })
 })
 
@@ -2013,8 +2085,10 @@ describe("blocking request reply routing and stale recovery (issue OPE-236)", ()
     await respondToQuestion("session-wt", "q-wt", [["Yes"]])
 
     expect(scopedClientDirectories).toEqual(["/test/project/wt"])
-    expect(replyCalls[0]?.params.directory).toBe("/test/project/wt")
-    expect(replyCalls[0]?.params.requestID).toBe("q-wt")
+    // The V2 attempt (structured 404 → fallback) precedes the V1 reply.
+    const v1Calls = replyCalls.filter((call) => call.method === "question.reply")
+    expect(v1Calls[0]?.params.directory).toBe("/test/project/wt")
+    expect(v1Calls[0]?.params.requestID).toBe("q-wt")
   })
 
   test("routes permission replies by the request's own session directory", async () => {
@@ -2051,7 +2125,9 @@ describe("blocking request reply routing and stale recovery (issue OPE-236)", ()
     await respondToQuestion("session-a", "q-1", [["Yes"]])
 
     expect(scopedClientDirectories).toEqual(["/test/project"])
-    expect(replyCalls[0]?.params.directory).toBe("/test/project")
+    // The V2 attempt (structured 404 → fallback) precedes the V1 reply.
+    const v1Calls = replyCalls.filter((call) => call.method === "question.reply")
+    expect(v1Calls[0]?.params.directory).toBe("/test/project")
   })
 
   test("enqueues settled-running-tool tail recovery when the question reply is not found", async () => {
@@ -2375,3 +2451,490 @@ describe("dismissOpenPermissionsForSession", () => {
     }
   })
 })
+
+describe("native V2 question reply/reject with classified V1 fallback", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    scopedClientDirectories.length = 0
+    questionReplyError = null
+    questionRejectError = null
+    v2QuestionReplyBehavior = V2_STRUCTURED_404
+    v2QuestionRejectBehavior = V2_STRUCTURED_404
+  })
+
+  const questionSessionStore = (questionId: string) => {
+    const question = buildQuestion(questionId, "session-a")
+    return createStore({}, {
+      session: [sessionFixture("session-a")],
+      question: { "session-a": [question] },
+    })
+  }
+
+  const loadActions = async () => {
+    const { setActionRefs, respondToQuestion, rejectQuestion } = await import("./session-actions")
+    return { setActionRefs, respondToQuestion, rejectQuestion }
+  }
+
+  test("V2 reply success resolves through v2.session.question.reply and skips V1", async () => {
+    const store = questionSessionStore("q-1")
+    const childStores = createChildStores([["/test/project", store]])
+    v2QuestionReplyBehavior = "ok"
+
+    const { setActionRefs, respondToQuestion } = await loadActions()
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    await respondToQuestion("session-a", "q-1", [["Yes"]])
+
+    const v2Calls = replyCalls.filter((call) => call.method === "question.v2.reply")
+    const v1Calls = replyCalls.filter((call) => call.method === "question.reply")
+    expect(v2Calls).toHaveLength(1)
+    expect(v1Calls).toHaveLength(0)
+    // The V2 route is addressed by sessionID + requestID and carries the same
+    // normalized string[][] answers the V1 path sends.
+    expect(v2Calls[0].params).toEqual({
+      sessionID: "session-a",
+      requestID: "q-1",
+      questionV2Reply: { answers: [["Yes"]] },
+    })
+    // A confirmed V2 reply is authoritative: the pending request clears from
+    // the local store exactly as the V1 success path clears it.
+    expect(store.getState().question["session-a"]).toBe(undefined)
+  })
+
+  test("V2 reply 404 (structured QuestionNotFoundError) falls back to the V1 call with the same answers and directory", async () => {
+    const store = questionSessionStore("q-1")
+    const childStores = createChildStores([["/test/project", store]])
+    // Default: structured NotFoundError body, response present — the class
+    // proving a V2 handler answered and the request provably did not mutate.
+
+    const { setActionRefs, respondToQuestion } = await loadActions()
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    await respondToQuestion("session-a", "q-1", [["Yes"]])
+
+    expect(replyCalls.filter((call) => call.method === "question.v2.reply")).toHaveLength(1)
+    const v1Calls = replyCalls.filter((call) => call.method === "question.reply")
+    expect(v1Calls).toHaveLength(1)
+    expect(v1Calls[0].params.requestID).toBe("q-1")
+    expect(v1Calls[0].params.answers).toEqual([["Yes"]])
+    expect(v1Calls[0].params.directory).toBe("/test/project")
+    // The V1 fallback answered successfully, so pending state clears.
+    expect(store.getState().question["session-a"]).toBe(undefined)
+  })
+
+  test("V2 reply 404 (structured SessionNotFoundError) falls back to the V1 call with the same answers and directory", async () => {
+    const store = questionSessionStore("q-1")
+    const childStores = createChildStores([["/test/project", store]])
+    // A SessionNotFoundError body is the same not-admitted class as
+    // QuestionNotFoundError: a V2 handler answered and provably did not
+    // mutate the request, so the V1 fallback is safe.
+    v2QuestionReplyBehavior = { status: 404, body: { _tag: "SessionNotFoundError", message: "Session not found" } }
+
+    const { setActionRefs, respondToQuestion } = await loadActions()
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    await respondToQuestion("session-a", "q-1", [["Yes"]])
+
+    expect(replyCalls.filter((call) => call.method === "question.v2.reply")).toHaveLength(1)
+    const v1Calls = replyCalls.filter((call) => call.method === "question.reply")
+    expect(v1Calls).toHaveLength(1)
+    expect(v1Calls[0].params.requestID).toBe("q-1")
+    expect(v1Calls[0].params.answers).toEqual([["Yes"]])
+    expect(v1Calls[0].params.directory).toBe("/test/project")
+    // The V1 fallback answered successfully, so pending state clears.
+    expect(store.getState().question["session-a"]).toBe(undefined)
+  })
+
+  test("V2 reply 404 with an unparseable pre-V2 body (route miss) also falls back to V1", async () => {
+    const store = questionSessionStore("q-1")
+    const childStores = createChildStores([["/test/project", store]])
+    v2QuestionReplyBehavior = V2_ROUTE_MISS_404
+
+    const { setActionRefs, respondToQuestion } = await loadActions()
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    await respondToQuestion("session-a", "q-1", [["Yes"]])
+
+    expect(replyCalls.filter((call) => call.method === "question.v2.reply")).toHaveLength(1)
+    const v1Calls = replyCalls.filter((call) => call.method === "question.reply")
+    expect(v1Calls).toHaveLength(1)
+    expect(v1Calls[0].params.answers).toEqual([["Yes"]])
+    expect(store.getState().question["session-a"]).toBe(undefined)
+  })
+
+  test("V2 reply 404 with an empty body (SDK-coerced to {}) does NOT fall back and surfaces the rejected error with status 404", async () => {
+    const store = questionSessionStore("q-1")
+    const childStores = createChildStores([["/test/project", store]])
+    // The SDK's error interceptors coerce a falsy error to `{}` (finalError =
+    // finalError || {}), so an empty body is a parsed object, not route-miss
+    // evidence — the V1 fallback must not run.
+    v2QuestionReplyBehavior = { status: 404, body: "" }
+
+    const { setActionRefs, respondToQuestion } = await loadActions()
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    let thrown: CaughtV2MutationError | undefined
+    await respondToQuestion("session-a", "q-1", [["Yes"]]).catch((error) => {
+      thrown = error
+    })
+
+    const typed = caughtV2MutationError(thrown)
+    expect(typed.v2QuestionMutationKind).toBe("rejected")
+    expect(typed.status).toBe(404)
+    expect(replyCalls.some((call) => call.method === "question.reply")).toBe(false)
+    // A parsed rejection is not a stale-request signal: pending state stays
+    // for the user to retry, not cleared optimistically.
+    expect(store.getState().question["session-a"]).not.toBe(undefined)
+  })
+
+  test("V2 reply 404 with a structured unrelated-tag body does NOT fall back and surfaces the rejected error with status 404", async () => {
+    const store = questionSessionStore("q-1")
+    const childStores = createChildStores([["/test/project", store]])
+    // A parsed JSON body with a non-not-found `_tag` proves a V2 handler
+    // answered and rejected the request for an unrelated reason — not
+    // provably not-admitted, so the V1 fallback must not run.
+    v2QuestionReplyBehavior = { status: 404, body: { _tag: "SomeOtherError", message: "nope" } }
+
+    const { setActionRefs, respondToQuestion } = await loadActions()
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    let thrown: CaughtV2MutationError | undefined
+    await respondToQuestion("session-a", "q-1", [["Yes"]]).catch((error) => {
+      thrown = error
+    })
+
+    const typed = caughtV2MutationError(thrown)
+    expect(typed.v2QuestionMutationKind).toBe("rejected")
+    expect(typed.status).toBe(404)
+    expect(replyCalls.some((call) => call.method === "question.reply")).toBe(false)
+    // A parsed rejection is not a stale-request signal: pending state stays
+    // for the user to retry, not cleared optimistically.
+    expect(store.getState().question["session-a"]).not.toBe(undefined)
+  })
+
+  test("V2 reply 404 with a structured body lacking a not-found tag does NOT fall back and surfaces the rejected error with status 404", async () => {
+    const store = questionSessionStore("q-1")
+    const childStores = createChildStores([["/test/project", store]])
+    // A parsed JSON body without any `_tag` is still a structured server
+    // answer, not route-miss evidence — no fallback.
+    v2QuestionReplyBehavior = { status: 404, body: { message: "not found" } }
+
+    const { setActionRefs, respondToQuestion } = await loadActions()
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    let thrown: CaughtV2MutationError | undefined
+    await respondToQuestion("session-a", "q-1", [["Yes"]]).catch((error) => {
+      thrown = error
+    })
+
+    const typed = caughtV2MutationError(thrown)
+    expect(typed.v2QuestionMutationKind).toBe("rejected")
+    expect(typed.status).toBe(404)
+    expect(replyCalls.some((call) => call.method === "question.reply")).toBe(false)
+    expect(store.getState().question["session-a"]).not.toBe(undefined)
+  })
+
+  test("V2 reply fetch-throw (transport drop) does NOT fall back and throws the ambiguous-tagged error", async () => {
+    const store = questionSessionStore("q-1")
+    const childStores = createChildStores([["/test/project", store]])
+    v2QuestionReplyBehavior = "throw"
+
+    const { setActionRefs, respondToQuestion } = await loadActions()
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    let thrown: CaughtV2MutationError | undefined
+    await respondToQuestion("session-a", "q-1", [["Yes"]]).catch((error) => {
+      thrown = error
+    })
+
+    expect(thrown).toBeInstanceOf(Error)
+    expect(caughtV2MutationError(thrown).v2QuestionMutationKind).toBe("ambiguous")
+    // SAFETY: the thrown value is whatever the action rejected with; the tag
+    // predicate accepts any input by design.
+    expect(isAmbiguousTransportFailure(thrown)).toBe(true)
+    // The V2 request may have been admitted: never replay it through V1.
+    expect(replyCalls.some((call) => call.method === "question.reply")).toBe(false)
+    // No response evidence → pending state is left for SSE/reconciliation to
+    // decide, not removed optimistically.
+    expect(store.getState().question["session-a"]).not.toBe(undefined)
+  })
+
+  test("V2 reply responseless result (hey-api catch path) does NOT fall back and is tagged ambiguous", async () => {
+    const store = questionSessionStore("q-1")
+    const childStores = createChildStores([["/test/project", store]])
+    // The hey-api catch path returns a raw error with no response object —
+    // the same no-evidence class as a throw.
+    v2QuestionReplyBehavior = { status: 0, responseless: true }
+
+    const { setActionRefs, respondToQuestion } = await loadActions()
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    let thrown: CaughtV2MutationError | undefined
+    await respondToQuestion("session-a", "q-1", [["Yes"]]).catch((error) => {
+      thrown = error
+    })
+
+    expect(caughtV2MutationError(thrown).v2QuestionMutationKind).toBe("ambiguous")
+    // SAFETY: the thrown value is whatever the action rejected with; the tag
+    // predicate accepts any input by design.
+    expect(isAmbiguousTransportFailure(thrown)).toBe(true)
+    expect(replyCalls.some((call) => call.method === "question.reply")).toBe(false)
+    expect(store.getState().question["session-a"]).not.toBe(undefined)
+  })
+
+  test("V2 reply 400 does NOT fall back and surfaces the rejected error with its status", async () => {
+    const store = questionSessionStore("q-1")
+    const childStores = createChildStores([["/test/project", store]])
+    v2QuestionReplyBehavior = { status: 400, body: { _tag: "InvalidRequestError", message: "bad answers" } }
+
+    const { setActionRefs, respondToQuestion } = await loadActions()
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    let thrown: CaughtV2MutationError | undefined
+    await respondToQuestion("session-a", "q-1", [["Yes"]]).catch((error) => {
+      thrown = error
+    })
+
+    const typed = caughtV2MutationError(thrown)
+    expect(typed).toBeInstanceOf(Error)
+    expect(typed.v2QuestionMutationKind).toBe("rejected")
+    expect(typed.status).toBe(400)
+    expect(replyCalls.some((call) => call.method === "question.reply")).toBe(false)
+  })
+
+  test("V2 reply 500 does NOT fall back and surfaces the server-error-tagged error", async () => {
+    const store = questionSessionStore("q-1")
+    const childStores = createChildStores([["/test/project", store]])
+    v2QuestionReplyBehavior = { status: 500, body: { message: "kaboom" } }
+
+    const { setActionRefs, respondToQuestion } = await loadActions()
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    let thrown: CaughtV2MutationError | undefined
+    await respondToQuestion("session-a", "q-1", [["Yes"]]).catch((error) => {
+      thrown = error
+    })
+
+    const typed = caughtV2MutationError(thrown)
+    expect(typed.v2QuestionMutationKind).toBe("server-error")
+    expect(typed.status).toBe(500)
+    // SAFETY: the thrown value is whatever the action rejected with; the tag
+    // predicate accepts any input by design.
+    expect(isAmbiguousTransportFailure(thrown)).toBe(true)
+    // Commit-before-fail window: a V1 resend could duplicate an admitted V2
+    // reply, so the fallback must never run.
+    expect(replyCalls.some((call) => call.method === "question.reply")).toBe(false)
+    expect(store.getState().question["session-a"]).not.toBe(undefined)
+  })
+
+  test("V2 reject success resolves through v2.session.question.reject and skips V1", async () => {
+    const store = questionSessionStore("q-1")
+    const childStores = createChildStores([["/test/project", store]])
+    v2QuestionRejectBehavior = "ok"
+
+    const { setActionRefs, rejectQuestion } = await loadActions()
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    await rejectQuestion("session-a", "q-1")
+
+    const v2Calls = replyCalls.filter((call) => call.method === "question.v2.reject")
+    const v1Calls = replyCalls.filter((call) => call.method === "question.reject")
+    expect(v2Calls).toHaveLength(1)
+    expect(v1Calls).toHaveLength(0)
+    expect(v2Calls[0].params).toEqual({ sessionID: "session-a", requestID: "q-1" })
+    expect(store.getState().question["session-a"]).toBe(undefined)
+  })
+
+  test("V2 reject 404 (structured QuestionNotFoundError) falls back to the V1 call", async () => {
+    const store = questionSessionStore("q-1")
+    const childStores = createChildStores([["/test/project", store]])
+    // Default structured 404 covers the not-admitted class; the fallback
+    // answered successfully, so pending state clears.
+
+    const { setActionRefs, rejectQuestion } = await loadActions()
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    await rejectQuestion("session-a", "q-1")
+
+    expect(replyCalls.filter((call) => call.method === "question.v2.reject")).toHaveLength(1)
+    const v1Calls = replyCalls.filter((call) => call.method === "question.reject")
+    expect(v1Calls).toHaveLength(1)
+    expect(v1Calls[0].params.requestID).toBe("q-1")
+    expect(store.getState().question["session-a"]).toBe(undefined)
+  })
+
+  test("V2 reject 404 with an unparseable pre-V2 body (route miss) also falls back", async () => {
+    const store = questionSessionStore("q-1")
+    const childStores = createChildStores([["/test/project", store]])
+    v2QuestionRejectBehavior = V2_ROUTE_MISS_404
+
+    const { setActionRefs, rejectQuestion } = await loadActions()
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    await rejectQuestion("session-a", "q-1")
+
+    const v1Calls = replyCalls.filter((call) => call.method === "question.reject")
+    expect(v1Calls).toHaveLength(1)
+    expect(store.getState().question["session-a"]).toBe(undefined)
+  })
+
+  test("V2 reject 404 with a structured unrelated-tag body does NOT fall back and surfaces the rejected error with status 404", async () => {
+    const store = questionSessionStore("q-1")
+    const childStores = createChildStores([["/test/project", store]])
+    // Same split as reply: a parsed JSON body with a non-not-found `_tag` is
+    // a server rejection, not provably-not-admitted route-miss evidence.
+    v2QuestionRejectBehavior = { status: 404, body: { _tag: "SomeOtherError", message: "nope" } }
+
+    const { setActionRefs, rejectQuestion } = await loadActions()
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    let thrown: CaughtV2MutationError | undefined
+    await rejectQuestion("session-a", "q-1").catch((error) => {
+      thrown = error
+    })
+
+    const typed = caughtV2MutationError(thrown)
+    expect(typed.v2QuestionMutationKind).toBe("rejected")
+    expect(typed.status).toBe(404)
+    expect(replyCalls.some((call) => call.method === "question.reject")).toBe(false)
+    expect(store.getState().question["session-a"]).not.toBe(undefined)
+  })
+
+  test("V2 reject 404 with a structured body lacking a not-found tag does NOT fall back and surfaces the rejected error with status 404", async () => {
+    const store = questionSessionStore("q-1")
+    const childStores = createChildStores([["/test/project", store]])
+    v2QuestionRejectBehavior = { status: 404, body: { message: "not found" } }
+
+    const { setActionRefs, rejectQuestion } = await loadActions()
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    let thrown: CaughtV2MutationError | undefined
+    await rejectQuestion("session-a", "q-1").catch((error) => {
+      thrown = error
+    })
+
+    const typed = caughtV2MutationError(thrown)
+    expect(typed.v2QuestionMutationKind).toBe("rejected")
+    expect(typed.status).toBe(404)
+    expect(replyCalls.some((call) => call.method === "question.reject")).toBe(false)
+    expect(store.getState().question["session-a"]).not.toBe(undefined)
+  })
+
+  test("V2 reject fetch-throw (transport drop) does NOT fall back and throws the ambiguous-tagged error", async () => {
+    const store = questionSessionStore("q-1")
+    const childStores = createChildStores([["/test/project", store]])
+    v2QuestionRejectBehavior = "throw"
+
+    const { setActionRefs, rejectQuestion } = await loadActions()
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    let thrown: CaughtV2MutationError | undefined
+    await rejectQuestion("session-a", "q-1").catch((error) => {
+      thrown = error
+    })
+
+    expect(caughtV2MutationError(thrown).v2QuestionMutationKind).toBe("ambiguous")
+    // SAFETY: the thrown value is whatever the action rejected with; the tag
+    // predicate accepts any input by design.
+    expect(isAmbiguousTransportFailure(thrown)).toBe(true)
+    expect(replyCalls.some((call) => call.method === "question.reject")).toBe(false)
+    expect(store.getState().question["session-a"]).not.toBe(undefined)
+  })
+
+  test("V2 reject 400 does NOT fall back and surfaces the rejected error with its status", async () => {
+    const store = questionSessionStore("q-1")
+    const childStores = createChildStores([["/test/project", store]])
+    v2QuestionRejectBehavior = { status: 400, body: { _tag: "InvalidRequestError", message: "bad request" } }
+
+    const { setActionRefs, rejectQuestion } = await loadActions()
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    let thrown: CaughtV2MutationError | undefined
+    await rejectQuestion("session-a", "q-1").catch((error) => {
+      thrown = error
+    })
+
+    const typed = caughtV2MutationError(thrown)
+    expect(typed.v2QuestionMutationKind).toBe("rejected")
+    expect(typed.status).toBe(400)
+    expect(replyCalls.some((call) => call.method === "question.reject")).toBe(false)
+  })
+
+  test("V2 reject 401 does NOT fall back and surfaces the rejected error with its status", async () => {
+    const store = questionSessionStore("q-1")
+    const childStores = createChildStores([["/test/project", store]])
+    v2QuestionRejectBehavior = { status: 401, body: { _tag: "UnauthorizedError", message: "unauthorized" } }
+
+    const { setActionRefs, rejectQuestion } = await loadActions()
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    let thrown: CaughtV2MutationError | undefined
+    await rejectQuestion("session-a", "q-1").catch((error) => {
+      thrown = error
+    })
+
+    const typed = caughtV2MutationError(thrown)
+    expect(typed.v2QuestionMutationKind).toBe("rejected")
+    expect(typed.status).toBe(401)
+    expect(replyCalls.some((call) => call.method === "question.reject")).toBe(false)
+  })
+
+  test("V2 reject 500 does NOT fall back and surfaces the server-error-tagged error", async () => {
+    const store = questionSessionStore("q-1")
+    const childStores = createChildStores([["/test/project", store]])
+    v2QuestionRejectBehavior = { status: 500, body: { message: "kaboom" } }
+
+    const { setActionRefs, rejectQuestion } = await loadActions()
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    let thrown: CaughtV2MutationError | undefined
+    await rejectQuestion("session-a", "q-1").catch((error) => {
+      thrown = error
+    })
+
+    const typed = caughtV2MutationError(thrown)
+    expect(typed.v2QuestionMutationKind).toBe("server-error")
+    expect(typed.status).toBe(500)
+    // SAFETY: the thrown value is whatever the action rejected with; the tag
+    // predicate accepts any input by design.
+    expect(isAmbiguousTransportFailure(thrown)).toBe(true)
+    expect(replyCalls.some((call) => call.method === "question.reject")).toBe(false)
+    expect(store.getState().question["session-a"]).not.toBe(undefined)
+  })
+
+  test("V2 reject fetch-throw keeps question pending: dismissOpenQuestionsForSession still returns true (non-blocking dismissal)", async () => {
+    const store = questionSessionStore("q-1")
+    const childStores = createChildStores([["/question/project", store]])
+    v2QuestionRejectBehavior = "throw"
+
+    const { setActionRefs, dismissOpenQuestionsForSession } = await import("./session-actions")
+    setActionRefs(actionsSdk(), childStores, () => "/question/project")
+
+    // Optimistic local removal happens before the reject round-trip by design
+    // (send path must not block); the ambiguous V2 outcome must not run the V1
+    // reject underneath it.
+    const dismissed = await dismissOpenQuestionsForSession("session-a")
+
+    expect(dismissed).toBe(true)
+    expect(replyCalls.some((call) => call.method === "question.reject")).toBe(false)
+  })
+})
+
+/**
+ * The catch value these tests observe: the Error the classification path
+ * throws (v2QuestionMutationError) or, for the non-fallback classes, exactly
+ * that Error plus the transport tag.
+ */
+type CaughtV2MutationError = Error & { status?: number; v2QuestionMutationKind?: string }
+
+/**
+ * Read the tagged V2 mutation error the action threw.
+ * SAFETY: these tests drive the real classification path; the catch value is
+ * the Error produced by v2QuestionMutationError carrying these exact fields.
+ */
+const caughtV2MutationError = (thrown: CaughtV2MutationError | undefined): CaughtV2MutationError => {
+  expect(thrown).toBeInstanceOf(Error)
+  // SAFETY: narrowed by the toBeInstanceOf assertion above; the classification
+  // path always rejects with this exact shape.
+  return thrown as CaughtV2MutationError
+}

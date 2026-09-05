@@ -1980,7 +1980,7 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
       return;
     }
 
-    if (type === 'question.asked') {
+    if (type === 'question.asked' || type === 'question.v2.asked') {
       if (!settings.notifyOnQuestion) return;
       const questions = Array.isArray(properties.questions) ? properties.questions : [];
       const firstQuestion = questions[0] as Record<string, unknown> | undefined;

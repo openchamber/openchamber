@@ -912,6 +912,11 @@ const getSessionIdFromPayload = (event: Event): string | null => {
     || event.type === "question.asked"
     || event.type === "question.replied"
     || event.type === "question.rejected"
+    // V2 question events share the V1 property shape (sessionID at the top
+    // level of `properties`); the V2 counterpart of the V1 routing branch.
+    || event.type === "question.v2.asked"
+    || event.type === "question.v2.replied"
+    || event.type === "question.v2.rejected"
   ) {
     const sessionID = props.sessionID
     return typeof sessionID === "string" && sessionID.length > 0 ? sessionID : null
@@ -1752,7 +1757,7 @@ export function handleEvent(
     }
   }
 
-  if (payload.type === "question.asked") {
+  if (payload.type === "question.asked" || payload.type === "question.v2.asked") {
     const question = payload.properties as QuestionRequest
     const sessionID = question.sessionID
     const toastKey = getQuestionToastKey(sessionID, question.id)
@@ -1773,7 +1778,12 @@ export function handleEvent(
     }
   }
 
-  if (payload.type === "question.replied" || payload.type === "question.rejected") {
+  if (
+    payload.type === "question.replied"
+    || payload.type === "question.rejected"
+    || payload.type === "question.v2.replied"
+    || payload.type === "question.v2.rejected"
+  ) {
     const props = payload.properties as { sessionID?: string; requestID?: string }
     const toastKey = getQuestionToastKey(props.sessionID, props.requestID)
     if (toastKey) {
@@ -1890,9 +1900,14 @@ export function handleEvent(
     case "permission.replied":
       cloneField("permission", (value) => ({ ...value }))
       break
+    // V2 question events mutate the same `question` slice as their V1
+    // counterparts; reuse the single targeted clone.
     case "question.asked":
     case "question.replied":
     case "question.rejected":
+    case "question.v2.asked":
+    case "question.v2.replied":
+    case "question.v2.rejected":
       cloneField("question", (value) => ({ ...value }))
       break
     case "lsp.updated":

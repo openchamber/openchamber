@@ -1,8 +1,45 @@
 import { describe, expect, test } from "bun:test"
 import type { Session } from "@opencode-ai/sdk/v2"
-import type { Event, Message, Part, PermissionRequest, QuestionRequest, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type {
+  Event,
+  Message,
+  Part,
+  PermissionRequest,
+  QuestionRequest,
+  SessionStatus,
+} from "@opencode-ai/sdk/v2/client"
 import { applyDirectoryEvent } from "../event-reducer"
 import { INITIAL_STATE, type State } from "../types"
+
+// Fully-typed minimal V2 question fixtures: the reducer reads only
+// id/sessionID/requestID, and the SDK payload types require questions/answers
+// arrays and the envelope `id`, so no type assertions are needed.
+const questionRequest = (id: string, sessionID = "ses_1"): QuestionRequest => ({
+  id,
+  sessionID,
+  questions: [],
+})
+
+const questionAskedEvent = (
+  type: "question.asked" | "question.v2.asked",
+  id: string,
+): Event => ({
+  type,
+  id,
+  properties: questionRequest(id),
+})
+
+const questionRepliedEvent = (requestID: string): Event => ({
+  type: "question.v2.replied",
+  id: `evt_${requestID}`,
+  properties: { sessionID: "ses_1", requestID, answers: [] },
+})
+
+const questionRejectedEvent = (requestID: string): Event => ({
+  type: "question.v2.rejected",
+  id: `evt_${requestID}`,
+  properties: { sessionID: "ses_1", requestID },
+})
 
 function state(overrides: Partial<State> = {}): State {
   return {
@@ -344,5 +381,69 @@ describe("applyDirectoryEvent", () => {
 
     expect(draft.question.ses_1).not.toBe(afterReply)
     expect(draft.question.ses_1).toEqual([])
+  })
+
+  test("upserts question.v2.asked requests like the V1 asked event", () => {
+    const draft = state({ question: { ses_1: [questionRequest("ques_1")] } })
+
+    expect(applyDirectoryEvent(draft, questionAskedEvent("question.v2.asked", "ques_2"))).toBe(true)
+
+    expect(draft.question.ses_1.map((item) => item.id)).toEqual(["ques_1", "ques_2"])
+  })
+
+  test("question.v2.asked is idempotent — replaying the event does not duplicate", () => {
+    const draft = state()
+
+    expect(applyDirectoryEvent(draft, questionAskedEvent("question.v2.asked", "ques_1"))).toBe(true)
+    expect(applyDirectoryEvent(draft, questionAskedEvent("question.v2.asked", "ques_1"))).toBe(true)
+    expect(draft.question.ses_1.map((item) => item.id)).toEqual(["ques_1"])
+  })
+
+  test("dual-fire v1 + v2 asked for the same id stays a single pending entry", () => {
+    const draft = state()
+
+    expect(applyDirectoryEvent(draft, questionAskedEvent("question.asked", "ques_1"))).toBe(true)
+    expect(applyDirectoryEvent(draft, questionAskedEvent("question.v2.asked", "ques_1"))).toBe(true)
+
+    expect(draft.question.ses_1).toHaveLength(1)
+    // The V2 arrival replaces the stored record rather than appending a twin.
+    expect(draft.question.ses_1[0]?.id).toBe("ques_1")
+  })
+
+  test("removes pending requests on question.v2.replied and question.v2.rejected", () => {
+    const draft = state({ question: { ses_1: [questionRequest("ques_1"), questionRequest("ques_2")] } })
+
+    expect(applyDirectoryEvent(draft, questionRepliedEvent("ques_1"))).toBe(true)
+    expect(draft.question.ses_1.map((item) => item.id)).toEqual(["ques_2"])
+
+    expect(applyDirectoryEvent(draft, questionRejectedEvent("ques_2"))).toBe(true)
+    expect(draft.question.ses_1).toEqual([])
+  })
+
+  test("v2 removal events are no-ops for unknown requests and clear v1-asked entries too", () => {
+    const draft = state({ question: { ses_1: [questionRequest("ques_1")] } })
+
+    // Unknown request: no change, no array replacement.
+    expect(applyDirectoryEvent(draft, questionRepliedEvent("ques_missing"))).toBe(false)
+
+    // Dual-emission safety: the V2 terminal event resolves a request that was
+    // created by the V1 asked event.
+    expect(applyDirectoryEvent(draft, questionRepliedEvent("ques_1"))).toBe(true)
+    expect(draft.question.ses_1).toEqual([])
+  })
+
+  test("a late question.v2.asked after a terminal event re-registers the request", () => {
+    const draft = state()
+
+    expect(applyDirectoryEvent(draft, questionAskedEvent("question.v2.asked", "ques_1"))).toBe(true)
+    expect(applyDirectoryEvent(draft, questionRepliedEvent("ques_1"))).toBe(true)
+    expect(draft.question.ses_1).toEqual([])
+
+    // The reducer keeps no tombstone or last-status bookkeeping: asked is an
+    // unconditional upsert, so a replayed or late asked re-inserts after a
+    // terminal removal. This is intentional for the ordered SSE stream — it is
+    // what makes replayed asks self-harmless — never a stale-request guard.
+    expect(applyDirectoryEvent(draft, questionAskedEvent("question.v2.asked", "ques_1"))).toBe(true)
+    expect(draft.question.ses_1.map((item) => item.id)).toEqual(["ques_1"])
   })
 })

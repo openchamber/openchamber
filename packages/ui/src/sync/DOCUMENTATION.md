@@ -425,6 +425,7 @@ Keep this in sync with `handleDirectoryEvent` in `sync-context.tsx`:
 | `vcs.branch.updated` | (none — mutates `draft.vcs` directly) |
 | `permission.asked/replied` | `permission` |
 | `question.asked/replied/rejected` | `question` |
+| `question.v2.asked/replied/rejected` | `question` |
 | `lsp.updated` | `lsp` |
 
 ### Directory-less session events

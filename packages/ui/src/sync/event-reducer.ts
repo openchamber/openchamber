@@ -549,7 +549,12 @@ export function applyDirectoryEvent(
       return false
     }
 
-    case "question.asked": {
+    case "question.asked":
+    case "question.v2.asked": {
+      // V2 asked events carry the identical property shape (`id`, `sessionID`,
+      // `questions`, optional `tool`) — the V1 `QuestionRequest` cast is exact.
+      // Same code path keeps dual-emission idempotent: a replace-upsert by id
+      // is a no-op for repeated asks regardless of which version fired.
       const question = event.properties as QuestionRequest
       const questions = draft.question[question.sessionID] ?? []
       const next = [...questions]
@@ -564,7 +569,12 @@ export function applyDirectoryEvent(
     }
 
     case "question.replied":
-    case "question.rejected": {
+    case "question.rejected":
+    case "question.v2.replied":
+    case "question.v2.rejected": {
+      // V2 replied/rejected carry the identical { sessionID, requestID } shape;
+      // removal by sessionID+requestID stays idempotent when the server emits
+      // both the V1 and V2 event for the same request.
       const props = event.properties as { sessionID: string; requestID: string }
       const questions = draft.question[props.sessionID]
       if (!questions) return false

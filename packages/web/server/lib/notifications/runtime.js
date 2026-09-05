@@ -504,7 +504,7 @@ export const createNotificationTriggerRuntime = (deps) => {
       return;
     }
 
-    if (payload.type === 'question.asked' && sessionId) {
+    if ((payload.type === 'question.asked' || payload.type === 'question.v2.asked') && sessionId) {
       const existingTimer = pushQuestionDebounceTimers.get(sessionId);
       if (existingTimer) {
         clearTimeout(existingTimer);
