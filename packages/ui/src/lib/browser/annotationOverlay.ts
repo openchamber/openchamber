@@ -535,6 +535,7 @@ export const buildAnnotationOverlayScript = (
   };
 
   var onKeyDown = function (event) {
+    if (event.isComposing || event.keyCode === 229) return;
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopImmediatePropagation();

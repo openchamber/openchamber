@@ -2635,7 +2635,7 @@ export function SyncProvider(props: {
       stopped = true
       clearInterval(interval)
     }
-  }, [childStores, triggerDirectoryResync])
+  }, [childStores, props.sdk, triggerDirectoryResync])
 
   // Ensure current directory's child store exists
   useEffect(() => {

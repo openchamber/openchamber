@@ -77,7 +77,10 @@ const createRuntimeHarness = ({ messages, messageFactory, goalOverrides = {}, ma
   const fetchImpl = vi.fn(async (input, init = {}) => {
     const pathname = requestPath(input);
     requests.push({ pathname, method: init.method ?? 'GET', body: init.body });
-    if (pathname === `/session/${SESSION_ID}` && init.method === 'PATCH') return jsonResponse(activeSession);
+    if (pathname === `/session/${SESSION_ID}` && init.method === 'PATCH') {
+      activeSession.metadata = JSON.parse(init.body).metadata;
+      return jsonResponse(activeSession);
+    }
     if (pathname === `/session/${SESSION_ID}`) return jsonResponse(activeSession);
     if (pathname === '/session/status') return jsonResponse({});
     if (pathname === `/session/${SESSION_ID}/children`) return jsonResponse([]);
@@ -98,7 +101,7 @@ const createRuntimeHarness = ({ messages, messageFactory, goalOverrides = {}, ma
     idleQuietMs: 10,
     maxAutoTurns,
   });
-  return { runtime, requests, service };
+  return { runtime, requests, service, activeSession };
 };
 
 const runIdleTick = async (runtime) => {
@@ -418,6 +421,45 @@ describe('session goal live activity gate', () => {
       statusReason: 'repeated output truncation',
     });
     runtime.stop();
+  });
+
+  it('allows one explicit Resume after repeated truncation, then blocks another cutoff', async () => {
+    const first = assistantMessage('first', { finish: 'length', time: { created: 10, completed: 11 } });
+    const second = assistantMessage('second', { finish: 'length', time: { created: 20, completed: 21 } });
+    const messages = [first, second];
+    const { runtime, requests, activeSession } = createRuntimeHarness({ messages });
+    try {
+      await runIdleTick(runtime);
+      expect(lastPatchedGoal(requests).status).toBe('blocked');
+      expect(requests.filter((request) => request.pathname.endsWith('/prompt_async'))).toHaveLength(0);
+      Object.assign(activeSession.metadata.openchamber.goal, { status: 'active', statusReason: 'resumed', turnsUsed: 0 });
+      await runIdleTick(runtime);
+      expect(lastPatchedGoal(requests)).toMatchObject({ status: 'active', statusReason: '', turnsUsed: 1 });
+      expect(requests.filter((request) => request.pathname.endsWith('/prompt_async'))).toHaveLength(1);
+      messages.push(assistantMessage('third', { finish: 'length', time: { created: 30, completed: 31 } }));
+      await runIdleTick(runtime);
+      expect(lastPatchedGoal(requests)).toMatchObject({ status: 'blocked', statusReason: 'repeated output truncation' });
+      expect(requests.filter((request) => request.pathname.endsWith('/prompt_async'))).toHaveLength(1);
+    } finally {
+      runtime.stop();
+    }
+  });
+
+  it.each([
+    { tokenBudget: 1, error: undefined, expectedStatus: 'budgetLimited' },
+    { tokenBudget: null, error: { name: 'APIError' }, expectedStatus: 'blocked' },
+  ])('keeps $expectedStatus protection on explicit Resume', async ({ tokenBudget, error, expectedStatus }) => {
+    const { runtime, requests } = createRuntimeHarness({
+      goalOverrides: { statusReason: 'resumed', tokenBudget },
+      messages: [assistantMessage('resumed', { finish: 'length', error })],
+    });
+    try {
+      await runIdleTick(runtime);
+      expect(lastPatchedGoal(requests).status).toBe(expectedStatus);
+      expect(requests.filter((request) => request.pathname.endsWith('/prompt_async'))).toHaveLength(0);
+    } finally {
+      runtime.stop();
+    }
   });
 
   it('continues after a truncated agent turn followed by a length-finished summary', async () => {

@@ -124,7 +124,10 @@ before touching the filesystem). Rationale: metadata rides every
       The consecutive state is derived from the loaded message history, not
       persisted, using `info.time.created` chronology rather than message IDs.
       Summary messages are not agent turns; an ordinary completed assistant
-      turn naturally breaks the consecutive condition;
+      turn naturally breaks the consecutive condition. Explicit Resume grants
+      one new recovery attempt over the same transcript; the continuation
+      consumes that permission, so another truncation blocks again. Resume
+      does not bypass assistant errors or the token budget;
    - otherwise, small-model audit of the objective + the last assistant turn
      only — no conversation history and no continuation prompts
      (`restrictToPreferredProvider`, session's own provider/model preferred):

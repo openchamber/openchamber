@@ -707,7 +707,7 @@ export const createSessionGoalRuntime = ({
     // A second consecutive completed, non-summary length-truncated turn is a
     // bounded recovery failure. Derive this from the loaded transcript rather
     // than persisting another goal counter.
-    if (lengthTail && hasRepeatedLengthTail(messages, lastAssistant, goal.createdAt)) {
+    if (lengthTail && goal.statusReason !== 'resumed' && hasRepeatedLengthTail(messages, lastAssistant, goal.createdAt)) {
       await settleGoal({
         sessionId, directory, goal, status: 'blocked', statusReason: 'repeated output truncation', tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
       });

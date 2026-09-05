@@ -11,6 +11,7 @@
  * is running, abort keeps that slot and the outer new-session action sends.
  */
 
+import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { StopIcon } from '@/components/icons/StopIcon';
 import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
@@ -165,15 +166,17 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                         <StopIcon className={cn(stopIconSizeClass)} />
                     </button>
                 ) : canPrimaryAction ? (
-                    <button
+                    <Button
                         type="button"
-                        className={cn(footerIconButtonClass, 'text-primary hover:text-primary')}
+                        variant="ghost"
+                        size="icon"
+                        className="text-primary hover:text-primary"
                         onClick={onPrimaryAction}
                         title={t('chat.chatInput.actions.sendMessageAria')}
                         aria-label={t('chat.chatInput.actions.sendMessageAria')}
                     >
                         <Icon name="send-plane-2" className={cn(sendIconSizeClass)} />
-                    </button>
+                    </Button>
                 ) : null}
             </div>
             {/* While running, Send moves outside because Abort owns the pill's
