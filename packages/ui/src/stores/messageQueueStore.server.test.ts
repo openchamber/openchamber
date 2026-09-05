@@ -233,6 +233,23 @@ describe("server-owned message queue", () => {
     expect(useMessageQueueStore.getState().queuedMessages[key]?.map((m) => m.content)).toEqual(["newer"])
   })
 
+  test("an empty session without a directory still clears the projection it was keyed under", () => {
+    applyMessageQueueUpdatedEvent(updated(4, session([serverItem("q1", "queued")], "q1")), "runtime-a")
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toHaveLength(1)
+    expect(useMessageQueueStore.getState().sendingIds[key]).toEqual(["q1"])
+
+    // A server that forgot the directory once the queue emptied.
+    applyMessageQueueUpdatedEvent(updated(5, { sessionId: "session-1", directory: "", items: [], sendingId: null }), "runtime-a")
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toBe(undefined)
+    expect(useMessageQueueStore.getState().sendingIds[key]).toBe(undefined)
+
+    // Still never backwards, and never another runtime's projection.
+    applyMessageQueueUpdatedEvent(updated(6, session([serverItem("q2", "later")])), "runtime-a")
+    applyMessageQueueUpdatedEvent(updated(3, { sessionId: "session-1", directory: "", items: [], sendingId: null }), "runtime-a")
+    applyMessageQueueUpdatedEvent(updated(9, { sessionId: "session-1", directory: "", items: [], sendingId: null }), "runtime-b")
+    expect(useMessageQueueStore.getState().queuedMessages[key]?.map((m) => m.content)).toEqual(["later"])
+  })
+
   test("removeFromQueue and clearQueue update locally and tell the server", async () => {
     useMessageQueueStore.setState({ queuedMessages: { [key]: [{ id: "q1", content: "a", text: "a", createdAt: 1 }, { id: "q2", content: "b", text: "b", createdAt: 2 }] } })
     respond = () => json({ revision: 10, session: session([serverItem("q2", "b")]) })

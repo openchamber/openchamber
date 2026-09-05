@@ -70,6 +70,7 @@ const deferredStorage: Storage = {
 
 mock.module("@/stores/utils/safeStorage", () => ({
   getDeferredSafeStorage: () => deferredStorage,
+  getSafeSessionStorage: () => deferredStorage,
   createDeferredSafeJSONStorage: () => ({
     getItem: async () => null,
     setItem: async () => undefined,

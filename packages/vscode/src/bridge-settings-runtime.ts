@@ -1,3 +1,4 @@
+import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -76,7 +77,7 @@ const inferSkillScopeAndSourceFromLocation = (location: string, workingDirectory
 
   const home = os.homedir();
   const userRoots = [
-    path.join(home, '.config', 'opencode'),
+    OPENCODE_CONFIG_DIR,
     path.join(home, '.opencode'),
     path.join(home, '.claude', 'skills'),
     path.join(home, '.agents', 'skills'),

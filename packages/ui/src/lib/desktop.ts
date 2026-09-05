@@ -203,6 +203,7 @@ export type DesktopSettings = {
   recentEfforts?: Record<string, string[]>;
   diffLayoutPreference?: 'dynamic' | 'inline' | 'side-by-side';
   gitChangesViewMode?: 'flat' | 'tree';
+  toolJsonViewMode?: 'summary' | 'formatted' | 'raw';
   directoryShowHidden?: boolean;
   filesViewShowGitignored?: boolean;
 

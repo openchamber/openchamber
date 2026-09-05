@@ -129,6 +129,7 @@ const installRendererDom = () => {
             setTimeout,
             clearTimeout,
             requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(Date.now()), 0),
+            cancelAnimationFrame: clearTimeout,
         },
     });
     Object.defineProperty(globalThis, 'MutationObserver', {
@@ -288,6 +289,7 @@ mock.module('./markdown/decorate', () => ({
         );
     },
     getMarkdownCodeText: () => '',
+    stabilizeMarkdownTableWidths: () => undefined,
 }));
 mock.module('./markdown/textPosition', () => ({ findTextPosition: () => null }));
 mock.module('./markdown/mermaidViewer', () => ({

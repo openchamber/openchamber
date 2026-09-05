@@ -95,13 +95,19 @@ persisted "sending" flag would strand a message forever.
    the tick re-arms with backoff.
 5. The head is marked in flight (broadcast), then sent:
    - text starting with `/` that names a command in OpenCode's `/command`
-     list (skills included) goes to `POST /session/:id/command` with the
-     captured model, agent, variant, and file parts;
+     list (skills included) and carries no captured context goes to
+     `POST /session/:id/command` with the captured model, agent, variant, and
+     file parts. That route accepts file parts only, so a command queued
+     **with** context takes the prompt route instead, the same rule the
+     composer applies: the command's template is expanded with its arguments
+     (`$ARGUMENTS`, `$1..$N`, or appended), a skill keeps its `/name args` text
+     and gets an explicit "the user invoked this skill" synthetic part after
+     the context;
    - otherwise `POST /session/:id/prompt_async` with the parts in the same
-     order a UI send uses: text, files, the captured context, pending project
-     knowledge (`sessionKnowledgeRuntime.resolvePendingForSession`, synthetic,
-     recorded as delivered only after the prompt is accepted), then the agent
-     mention. The command path sends files and captured context as `parts`.
+     order a UI send uses: text, files, the captured context, the skill
+     invocation when there is one, pending project knowledge
+     (`sessionKnowledgeRuntime.resolvePendingForSession`, synthetic, recorded
+     as delivered only after the prompt is accepted), then the agent mention.
    Success removes the item, persists, broadcasts, and marks the user
    message sent for notifications. Failure keeps the item, backs off
    2 s → 60 s (doubling per consecutive failure of that item), and re-arms.
@@ -134,7 +140,11 @@ allowlists.
 
 Every mutation broadcasts `openchamber:message-queue.updated` with
 `{ revision, session }` to all connected clients (SSE and WS), so several
-devices on one server see one queue.
+devices on one server see one queue. The session in that payload always names
+its `directory`, including the broadcast that removes the last item: the UI
+keys its projection by directory, and a broadcast without one left the
+delivered message on screen (a session's directory is remembered until the
+session is deleted or evicted).
 
 Limits: 20 items per session, 50 sessions (oldest evicted, never one with an
 item in flight), 200k characters of content; attachment payloads are bounded

@@ -1,5 +1,7 @@
 import { parsePatchFiles } from '@pierre/diffs';
 
+import { isToolDiffPreviewOversized } from './toolDiffPreview';
+
 export type DiffPatchEntry = {
     id: string;
     title: string;
@@ -431,6 +433,15 @@ const getPatchEntriesFromText = (
     idPrefix: string,
     resolveTitle: (path: string) => string,
 ): DiffPatchEntry[] => {
+    if (isToolDiffPreviewOversized(patch)) {
+        return [{
+            id: `${idPrefix}-0`,
+            title: resolveTitle(fallbackTitle),
+            patch,
+            renderMode: 'text',
+        }];
+    }
+
     const normalized = normalizeLooseUnifiedPatch(patch);
     if (!normalized) {
         return [];

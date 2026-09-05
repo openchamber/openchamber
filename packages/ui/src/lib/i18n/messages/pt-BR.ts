@@ -4,6 +4,7 @@ import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'sessions.sidebar.projectAction.active': 'Ação do projeto em execução',
   ...settingsDict,
   ...linearIssuePickerI18n['pt-BR'],
   ...linearPanelI18n['pt-BR'],

@@ -19,9 +19,12 @@ import { spawn } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
+import { resolveBunExecutable } from './lib/bun-executable.mjs';
+
 const TEST_FILE = /\.(test|spec)\.(js|cjs|mjs|jsx|ts|tsx)$/;
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'dist-bundle', 'build', 'out', '.git', 'ios', 'android']);
 const MAX_PARALLEL = 4;
+const bunExecutable = resolveBunExecutable();
 
 const collect = (root, found = []) => {
   for (const entry of readdirSync(root, { withFileTypes: true })) {
@@ -44,7 +47,7 @@ const resolveCommand = (file) => {
   // implements. Node's ESM loader cannot resolve the extensionless local
   // specifiers these files use (`./sseProxy`), so it never ran them at all.
   if (isTypeScript || /from\s+['"]bun:test['"]/.test(source)) {
-    return { label: 'bun', command: 'bun', args: ['test', file] };
+    return { label: 'bun', command: bunExecutable, args: ['test', file] };
   }
   if (/from\s+['"]node:test['"]/.test(source)) {
     return { label: 'node', command: 'node', args: ['--test', file] };
@@ -53,7 +56,10 @@ const resolveCommand = (file) => {
 };
 
 const run = ({ command, args }) => new Promise((resolve) => {
-  const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(command, args, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
   let output = '';
   child.stdout.on('data', (chunk) => { output += chunk; });
   child.stderr.on('data', (chunk) => { output += chunk; });

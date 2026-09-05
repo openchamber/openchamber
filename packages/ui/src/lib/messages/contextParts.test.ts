@@ -121,6 +121,43 @@ describe('round-trip through part metadata', () => {
         expect(readContextPart(part)).toEqual(payload);
     });
 
+    test('code comments also carry OpenCode Desktop metadata', () => {
+        const payload = contextPayloadFromDraft(draft());
+        const part = asPart(payload);
+        expect(part.metadata.opencodeComment).toEqual({
+            path: 'src/app.ts',
+            selection: { startLine: 3, endLine: 5, startChar: 0, endChar: 0 },
+            comment: 'fix this',
+            preview: 'const x = 1;',
+            origin: 'review',
+        });
+        expect(readContextPart(part)).toEqual(payload);
+    });
+
+    test('reads OpenCode Desktop metadata when canonical metadata is absent', () => {
+        expect(readContextPart({
+            type: 'text',
+            metadata: {
+                opencodeComment: {
+                    path: 'src/other.ts',
+                    selection: { startLine: 8, endLine: 9 },
+                    comment: 'check this',
+                    preview: 'value',
+                    origin: 'review',
+                },
+            },
+        })).toEqual({
+            kind: 'code-comment',
+            source: 'diff',
+            fileLabel: 'src/other.ts',
+            startLine: 8,
+            endLine: 9,
+            language: '',
+            code: 'value',
+            text: 'check this',
+        });
+    });
+
     test('non-text parts, missing metadata, and malformed payloads read as null', () => {
         expect(readContextPart({ type: 'file', metadata: {} })).toBeNull();
         expect(readContextPart({ type: 'text' })).toBeNull();

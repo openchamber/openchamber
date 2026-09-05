@@ -144,7 +144,7 @@ import {
     buildCommandVariables,
     canRunCommand,
     findMagicPromptCommand,
-    parseSlashCommand,
+    planLocalSlashCommand,
 } from './composer/submit/slashCommands';
 import { useAutocompletePosition } from './composer/state/useAutocompletePosition';
 import { useMessageHistory } from './composer/state/useMessageHistory';
@@ -1011,6 +1011,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const handleQueueMessage = React.useCallback(async () => {
         const inputSnapshot = getCurrentInputSnapshot();
         if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
+
+        // A local command is run, not queued: the queue delivers text to the
+        // model, and `/compact` or `/btw` mean nothing there.
+        if (planLocalSlashCommand(inputSnapshot.message, inputMode, hasDrafts, true)) {
+            void handleSubmitRef.current();
+            return;
+        }
         const queueRuntimeKey = getRuntimeKey();
         const queueTarget = messageQueueTarget;
         const queueSessionId = currentSessionId;
@@ -1119,7 +1126,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
         recordLinkedReferences(queueSessionId, queueTarget.directory, linked);
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, attachedFiles, sanitizeAttachmentsForSend, prepareDocumentMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, inlineDraftTarget, consumeDrafts, linkedIssue, linkedPr, linkedLinearIssue, scrollToLatest, clearAttachedFiles, isMobile, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, attachedFiles, sanitizeAttachmentsForSend, prepareDocumentMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, inlineDraftTarget, consumeDrafts, linkedIssue, linkedPr, linkedLinearIssue, scrollToLatest, clearAttachedFiles, isMobile, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
 
     /** Put the context a queued message was captured with back on the composer chips. */
     const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[]) => {
@@ -1241,6 +1248,51 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
 
+        // Local slash commands are planned before anything is taken or
+        // consumed. An action command must leave the queue and the attached
+        // context where they are; a prompt command must send that context with
+        // the prompt it produces. A command the composer cannot run here is not
+        // a local command at all and goes out as typed.
+        let commandPlan = !queuedOnly && inputSnapshot.hasContent
+            ? planLocalSlashCommand(inputSnapshot.message, inputMode, hasDrafts, Boolean(currentSessionId))
+            : null;
+        if (commandPlan?.kind === 'prompt') {
+            const magicCommand = findMagicPromptCommand(commandPlan.command.name);
+            const commandIsAvailable = commandPlan.command.name === 'btw'
+                ? Boolean(currentSessionId)
+                : magicCommand !== null && canRunCommand(magicCommand, {
+                    hasSession: Boolean(currentSessionId),
+                    hasDraft: newSessionDraftOpen,
+                });
+            if (!commandIsAvailable) commandPlan = null;
+        }
+        if (commandPlan?.command.name === 'handoff-review' && (isMobile || isVSCodeRuntime())) commandPlan = null;
+
+        // A failed send returns the typed prompt no matter WHY it failed —
+        // auth, network, server, anything. Losing a long prompt to a toast is
+        // the one outcome this handler must never produce. The mentions are
+        // snapshotted here because sending clears them before it can fail.
+        const confirmedMentionsSnapshot = new Set(confirmedMentionsRef.current);
+        const restoreComposerText = () => {
+            if (queuedOnly || !inputSnapshot.message) return;
+            for (const mention of confirmedMentionsSnapshot) confirmedMentionsRef.current.add(mention);
+            if (currentChatDraftIdentityRef.current !== chatDraftIdentity) {
+                // The user switched sessions mid-send: restore into that
+                // session's persisted draft, not the visible composer.
+                writeChatDraft(chatDraftIdentity, inputSnapshot.message, confirmedMentionsRef.current);
+                return;
+            }
+            const currentInput = composerRef.current?.getValue() ?? messageRef.current;
+            if (!currentInput || currentInput === inputSnapshot.message) {
+                setMessage(inputSnapshot.message);
+                writeChatDraft(chatDraftIdentity, inputSnapshot.message, confirmedMentionsRef.current);
+            } else {
+                // New typing already lives in the composer; the failed prompt
+                // joins it instead of clobbering either text.
+                useInputStore.getState().setPendingInputText(inputSnapshot.message, 'append');
+            }
+        };
+
         // The projection knows the captured send configuration; the full
         // messages are taken from the queue only once nothing below can still
         // bail out, so an early return leaves the queue untouched.
@@ -1268,7 +1320,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // queued-message auto-send hook delivers it as the next turn once the
         // rejected turn winds down and the session returns to idle. This avoids
         // aborting the turn (which would surface an "aborted" notice).
-        if (currentSessionId && !queuedOnly && autoReviewRunning && !isBtwActive) {
+        if (currentSessionId && !queuedOnly && autoReviewRunning && !isBtwActive && !commandPlan) {
             void handleQueueMessage();
             return;
         }
@@ -1276,7 +1328,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // btw mode: the child fork's blocking prompts are answered inside the
         // panel; the composer send goes straight to the fork (routeMessage
         // queues if the fork's own turn is busy).
-        if (currentSessionId && !queuedOnly && !isBtwActive) {
+        if (currentSessionId && !queuedOnly && !isBtwActive && !commandPlan) {
             // Sending is authoritative for blocking prompts: deny pending
             // permissions and dismiss open questions for the session subtree,
             // then queue the message once if either was open. The deny/clear
@@ -1294,6 +1346,41 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 void handleQueueMessage();
                 return;
             }
+        }
+
+        // Action commands change session or UI state and send nothing. The
+        // command text goes; the queue and whatever the composer had attached
+        // stay exactly where they are.
+        if (commandPlan?.kind === 'action' && currentSessionId) {
+            const actionName = commandPlan.command.name;
+            setMessage('');
+            confirmedMentionsRef.current.clear();
+            persistDraftImmediately(chatDraftIdentity, '');
+            messageHistory.reset();
+            setExpandedInput(false);
+            if (isMobile) composerRef.current?.blur();
+            try {
+                if (actionName === 'undo') {
+                    await useSessionUIStore.getState().handleSlashUndo(currentSessionId);
+                    scrollToBottom?.();
+                } else if (actionName === 'redo') {
+                    await useSessionUIStore.getState().handleSlashRedo(currentSessionId);
+                    scrollToBottom?.();
+                } else if (actionName === 'timeline') {
+                    setTimelineDialogOpen(true);
+                } else if (actionName === 'handoff-review') {
+                    setReviewDialogOpen(true);
+                } else if (actionName === 'compact') {
+                    await sessionActions.waitForConnectionOrThrow();
+                    const compactDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || undefined;
+                    await opencodeClient.summarizeSession(currentSessionId, providerIdToSend, modelIdToSend, compactDirectory);
+                }
+            } catch (error) {
+                restoreComposerText();
+                if (actionName !== 'compact') throw error;
+                toast.error(getSubmitErrorMessage(error, t('chat.chatInput.toast.compactFailed')));
+            }
+            return;
         }
 
         let sendMessageOptions: {
@@ -1338,7 +1425,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // skips anything already in flight, and a message already being
         // delivered stays out of this send so it cannot go out twice.
         let queuedMessagesToSend: QueuedMessage[] = [];
-        if (capturedTarget && hasQueuedMessages) {
+        if (capturedTarget && hasQueuedMessages && !commandPlan) {
             try {
                 queuedMessagesToSend = await takeForSend(capturedTarget, queuedMessageId);
             } catch (error) {
@@ -1357,6 +1444,27 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const drafts: InlineCommentDraft[] = consumedDraftTarget
             ? consumeDrafts(consumedDraftTarget)
             : [];
+        const restoreConsumedDrafts = () => {
+            if (consumedDraftTarget && drafts.length > 0) {
+                useInlineCommentDraftStore.getState().restoreDrafts(consumedDraftTarget, drafts);
+            }
+        };
+        // Everything a prompt command consumed comes back if it fails: the
+        // attached context, the typed text, and the files.
+        const restoreConsumedInput = () => {
+            restoreConsumedDrafts();
+            if (syntheticParts?.length) {
+                const inputState = useInputStore.getState();
+                inputState.setPendingSyntheticParts([...syntheticParts, ...(inputState.pendingSyntheticParts ?? [])]);
+            }
+            restoreComposerText();
+            if (!queuedOnly && attachedFiles.length > 0) {
+                const inputState = useInputStore.getState();
+                const present = new Set(inputState.attachedFiles.map((attachment) => attachment.id));
+                const missing = attachedFiles.filter((attachment) => !present.has(attachment.id));
+                if (missing.length > 0) inputState.setAttachedFiles([...inputState.attachedFiles, ...missing]);
+            }
+        };
 
         const availableSkillNames = new Set(
             selectSkillsForDirectory(useSkillsStore.getState(), currentDirectory).map((skill) => skill.name),
@@ -1417,44 +1525,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             composerRef.current?.blur();
         }
 
-        // Local slash commands, normal mode only.
-        const parsedCommand = inputMode === 'normal' ? parseSlashCommand(primaryText) : null;
-        if (parsedCommand) {
-            const { name: commandName, argument } = parsedCommand;
+        // Prompt commands render a visible prompt (or fork a btw question) and
+        // send it with everything the composer had attached.
+        if (commandPlan?.kind === 'prompt') {
+            const { name: commandName, argument } = commandPlan.command;
 
-            // Commands that manipulate session state or open UI rather than
-            // sending a message.
-            if (commandName === 'undo' && currentSessionId) {
-                await useSessionUIStore.getState().handleSlashUndo(currentSessionId);
-                scrollToBottom?.();
-                return;
-            }
-            if (commandName === 'redo' && currentSessionId) {
-                await useSessionUIStore.getState().handleSlashRedo(currentSessionId);
-                scrollToBottom?.();
-                return;
-            }
-            if (commandName === 'timeline' && currentSessionId) {
-                setTimelineDialogOpen(true);
-                return;
-            }
-            if (commandName === 'handoff-review' && currentSessionId && !isMobile && !isVSCodeRuntime()) {
-                setReviewDialogOpen(true);
-                return;
-            }
-            if (commandName === 'compact' && currentSessionId) {
-                try {
-                    await sessionActions.waitForConnectionOrThrow();
-                    const compactDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || undefined;
-                    await opencodeClient.summarizeSession(currentSessionId, currentProviderId, currentModelId, compactDirectory);
-                } catch (error) {
-                    toast.error(getSubmitErrorMessage(error, t('chat.chatInput.toast.compactFailed')));
-                }
-                return;
-            }
             if (commandName === 'btw' && currentSessionId) {
                 const question = argument.trim();
                 if (!question) {
+                    restoreConsumedInput();
                     toast.error(t('chat.btw.toast.emptyArgument'));
                     return;
                 }
@@ -1462,6 +1541,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     || currentDirectory
                     || null;
                 if (!targetDirectory) {
+                    restoreConsumedInput();
                     toast.error(t('chat.btw.toast.createFailed'));
                     return;
                 }
@@ -1479,22 +1559,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         modelID: modelIdToSend,
                         agent: agentNameToSend,
                         variant: variantToSend,
+                        attachments: primaryAttachments,
+                        additionalParts,
                     });
                     scrollToBottom?.();
                 } catch (error) {
+                    restoreConsumedInput();
                     toast.error(getSubmitErrorMessage(error, t('chat.btw.toast.createFailed')));
                 }
                 return;
             }
 
             // The rest render a visible prompt plus synthetic instructions and
-            // send them as one message.
+            // send them as one message, the attached context riding along.
             const command = findMagicPromptCommand(commandName);
-            const commandIsAvailable = command !== null && canRunCommand(command, {
-                hasSession: Boolean(currentSessionId),
-                hasDraft: newSessionDraftOpen,
-            });
-            if (command && commandIsAvailable) {
+            if (command) {
                 const variables = buildCommandVariables(command, argument);
                 try {
                     await sessionActions.waitForConnectionOrThrow();
@@ -1505,15 +1584,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         providerIdToSend,
                         modelIdToSend,
                         agentNameToSend,
-                        [],
+                        primaryAttachments,
                         agentMentionName,
-                        [{ text: instructionsText, synthetic: true }],
+                        [...additionalParts, { text: instructionsText, synthetic: true }],
                         variantToSend,
                         inputMode,
                         sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
+                    restoreConsumedInput();
                     toast.error(getSubmitErrorMessage(error, t(command.errorToastKey)));
                 }
                 return;
@@ -1567,12 +1647,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             inputMode,
             sendMessageOptions,
         );
-        const restoreConsumedDrafts = () => {
-            if (consumedDraftTarget && drafts.length > 0) {
-                useInlineCommentDraftStore.getState().restoreDrafts(consumedDraftTarget, drafts);
-            }
-        };
-
         void sendPromise.then(() => {
             // On a draft there is no session yet in this closure: the send path
             // creates one and makes it current before resolving, so the id is
@@ -1605,27 +1679,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
             console.error('Message send failed:', rawMessage || error);
             restoreConsumedDrafts();
-
-            // A failed send returns the typed prompt no matter WHY it failed —
-            // auth, network, server, anything. Losing a long prompt to a toast
-            // is the one outcome this handler must never produce.
-            if (inputSnapshot.message) {
-                if (currentChatDraftIdentityRef.current !== chatDraftIdentity) {
-                    // The user switched sessions mid-send: restore into that
-                    // session's persisted draft, not the visible composer.
-                    writeChatDraft(chatDraftIdentity, inputSnapshot.message, confirmedMentionsRef.current);
-                } else {
-                    const currentInput = composerRef.current?.getValue() ?? messageRef.current;
-                    if (!currentInput || currentInput === inputSnapshot.message) {
-                        setMessage(inputSnapshot.message);
-                        writeChatDraft(chatDraftIdentity, inputSnapshot.message, confirmedMentionsRef.current);
-                    } else {
-                        // New typing already lives in the composer; the failed
-                        // prompt joins it instead of clobbering either text.
-                        useInputStore.getState().setPendingInputText(inputSnapshot.message, 'append');
-                    }
-                }
-            }
+            restoreComposerText();
 
             const isSoftNetworkError =
                 normalized.includes('timeout') ||
@@ -3043,10 +3097,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         canAbort={canAbort}
                         footerIconButtonClass={footerIconButtonClass}
                         iconSizeClass={iconSizeClass}
+                        sendIconSizeClass={sendIconSizeClass}
                         stopIconSizeClass={stopIconSizeClass}
                         theme={currentTheme}
                         onExpand={mobileShell.expand}
                         onApplySuggestion={applyAssistSuggestion}
+                        onPrimaryAction={handlePrimaryAction}
+                        onQueueMessage={() => { void handleQueueMessage(); }}
                         onNewSession={handleMobileNewSession}
                         onPickLocalFiles={handlePickLocalFiles}
                         onOpenIssuePicker={openIssuePicker}

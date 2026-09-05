@@ -3,6 +3,7 @@ import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 
 export const dict = {
+  'sessions.sidebar.projectAction.active': 'Projektaktion aktiv',
   ...settingsDict,
   ...linearIssuePickerI18n.de,
   ...linearPanelI18n.de,

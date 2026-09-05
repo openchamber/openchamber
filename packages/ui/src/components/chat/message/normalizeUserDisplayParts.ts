@@ -117,10 +117,43 @@ const shouldKeepSyntheticUserText = (text: string, planModeEnabled: boolean): bo
     return false;
 };
 
+const redundantCommentFileUrls = (parts: Part[]): Set<string> => {
+    const comments = parts
+        .map((part) => readContextPart(part))
+        .filter((payload) => payload?.kind === 'code-comment');
+    if (comments.length === 0) return new Set();
+
+    const redundant = new Set<string>();
+    for (const part of parts) {
+        if (part.type !== 'file') continue;
+        const { url } = part;
+        const range = url.match(/[?&]start=(\d+)&end=(\d+)/);
+        if (!range) continue;
+        const encodedPath = url.replace(/^file:\/\//, '').split('?')[0];
+        let path = encodedPath;
+        try {
+            path = decodeURIComponent(encodedPath);
+        } catch {
+            // Keep the encoded path; malformed URLs must not break rendering.
+        }
+        path = path.replace(/\\/g, '/');
+        const matches = comments.some((comment) => {
+            const commentPath = comment.fileLabel.replace(/\\/g, '/');
+            return comment.startLine === Number(range[1])
+                && comment.endLine === Number(range[2])
+                && (path === commentPath || path.endsWith(`/${commentPath}`));
+        });
+        if (matches) redundant.add(url);
+    }
+    return redundant;
+};
+
 export const normalizeUserDisplayParts = (parts: Part[], options?: { planModeEnabled?: boolean }): Part[] => {
     const planModeEnabled = options?.planModeEnabled === true;
+    const redundantFileUrls = redundantCommentFileUrls(parts);
     return parts
         .filter((part) => {
+            if (part.type === 'file' && redundantFileUrls.has(part.url)) return false;
             const synthetic = (part as { synthetic?: boolean }).synthetic === true;
             if (!synthetic) return true;
             if (part.type !== 'text') return false;

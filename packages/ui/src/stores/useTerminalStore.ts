@@ -1,8 +1,11 @@
 import { create } from 'zustand';
 import { devtools, persist, createJSONStorage } from 'zustand/middleware';
 import type { PersistStorage } from 'zustand/middleware';
+import { z } from 'zod';
 
 import { getSafeSessionStorage } from '@/stores/utils/safeStorage';
+import type { TerminalServerSession } from '@/lib/api/types';
+import { normalizeTerminalDirectory } from '@/lib/pathNormalization';
 
 export interface TerminalChunk {
   id: number;
@@ -28,12 +31,23 @@ export const EMPTY_TERMINAL_BUFFER: TerminalBuffer = Object.freeze({
   lastSequence: -1,
 });
 
-export type TerminalTabLifecycle = 'idle' | 'running' | 'exited';
+export type TerminalTabLifecycle = 'idle' | 'starting' | 'running' | 'stopping' | 'exited';
+
+export const ACTIVE_PROJECT_ACTION_LIFECYCLES: ReadonlySet<TerminalTabLifecycle> = new Set([
+  'starting',
+  'running',
+  'stopping',
+]);
+
+export type TerminalTabPurpose =
+  | { type: 'terminal' }
+  | { type: 'project-action'; actionId: string; executionId: string | null };
 
 export type TerminalTab = {
   id: string;
   terminalSessionId: string | null;
   lifecycle: TerminalTabLifecycle;
+  purpose: TerminalTabPurpose;
   label: string;
   iconKey: string | null;
   isConnecting: boolean;
@@ -48,19 +62,20 @@ export type DirectoryTerminalState = {
   activeTabId: string | null;
 };
 
-export type TerminalProjectActionRun = {
-  key: string;
-  directory: string;
-  actionId: string;
-  tabId: string;
-  sessionId: string;
-  status: 'running' | 'waiting-for-preview' | 'stopping';
+export const directoryMayHaveActiveProjectAction = (state: DirectoryTerminalState | undefined): boolean =>
+  Boolean(state?.tabs.some((tab) => isProjectActionPurpose(tab.purpose) && tab.lifecycle !== 'exited'));
+
+type TerminalActionMutationRevisions = ReadonlyMap<string, number>;
+
+type ReconcileServerSessionsOptions = {
+  startedActionMutationRevisions?: TerminalActionMutationRevisions;
 };
 
 interface TerminalStore {
   sessions: Map<string, DirectoryTerminalState>;
   buffers: Map<string, TerminalBuffer>;
-  projectActionRuns: Record<string, TerminalProjectActionRun>;
+  actionMutationRevisions: Map<string, number>;
+  nextActionMutationRevision: number;
   nextChunkId: number;
   nextTabId: number;
   hasHydrated: boolean;
@@ -69,27 +84,25 @@ interface TerminalStore {
   getDirectoryState: (directory: string) => DirectoryTerminalState | undefined;
   getActiveTab: (directory: string) => TerminalTab | undefined;
   getBuffer: (directory: string, tabId: string) => TerminalBuffer;
+  matchesActionExecution: (directory: string, tabId: string, executionId: string | null | undefined) => boolean;
+  captureStartedActionMutationRevisions: (directory: string) => TerminalActionMutationRevisions;
 
   createTab: (directory: string) => string;
-  adoptServerSessions: (
-    directory: string,
-    serverSessions: Array<{ sessionId: string; status: 'running' | 'exited'; createdAt: number | null }>,
-  ) => void;
+  reconcileServerSessions: (directory: string, serverSessions: TerminalServerSession[], options?: ReconcileServerSessionsOptions) => void;
   setActiveTab: (directory: string, tabId: string) => void;
   setTabLabel: (directory: string, tabId: string, label: string) => void;
   setTabIconKey: (directory: string, tabId: string, iconKey: string | null) => void;
   closeTab: (directory: string, tabId: string) => void;
 
-  setTabSessionId: (directory: string, tabId: string, sessionId: string | null) => void;
-  setTabLifecycle: (directory: string, tabId: string, lifecycle: TerminalTabLifecycle) => void;
-  setConnecting: (directory: string, tabId: string, isConnecting: boolean) => void;
+  setTabPurpose: (directory: string, tabId: string, purpose: TerminalTabPurpose) => void;
+  allocateActionExecution: (directory: string, tabId: string, actionId: string) => string | null;
+  setTabSessionId: (directory: string, tabId: string, sessionId: string | null, options?: { expectedExecutionId?: string | null }) => void;
+  setTabLifecycle: (directory: string, tabId: string, lifecycle: TerminalTabLifecycle, options?: { expectedExecutionId?: string | null }) => void;
+  setConnecting: (directory: string, tabId: string, isConnecting: boolean, options?: { expectedExecutionId?: string | null }) => void;
   replaceBuffer: (directory: string, tabId: string, content: string, sequence: number) => void;
   appendToBuffer: (directory: string, tabId: string, chunk: string, sequence?: number, replayData?: string) => void;
-  setTabPreviewUrl: (directory: string, tabId: string, url: string | null, options?: { locked?: boolean; autoOpened?: boolean }) => void;
+  setTabPreviewUrl: (directory: string, tabId: string, url: string | null, options?: { locked?: boolean; autoOpened?: boolean; expectedExecutionId?: string | null }) => void;
   markPreviewAutoOpened: (directory: string, tabId: string) => void;
-  setProjectActionRun: (run: TerminalProjectActionRun) => void;
-  updateProjectActionRunStatus: (runKey: string, status: TerminalProjectActionRun['status']) => void;
-  removeProjectActionRun: (runKey: string) => void;
 
   removeDirectory: (directory: string) => void;
   clearAll: () => void;
@@ -124,6 +137,10 @@ const dropBufferKeys = (
 const TERMINAL_STORE_NAME = 'terminal-store';
 let hydrationListenerAttached = false;
 let fallbackTabId = 0;
+const persistedProjectActionPurposeSchema = z.object({
+  type: z.literal('project-action'),
+  actionId: z.string(),
+});
 
 const createTerminalTabId = (): string => {
   if (typeof globalThis.crypto?.randomUUID === 'function') return `tab-${globalThis.crypto.randomUUID()}`;
@@ -131,7 +148,13 @@ const createTerminalTabId = (): string => {
   return `tab-${Date.now().toString(36)}-${fallbackTabId.toString(36)}`;
 };
 
-type PersistedTerminalTab = Pick<TerminalTab, 'id' | 'label' | 'iconKey' | 'createdAt'>;
+type PersistedTerminalTabPurpose =
+  | { type: 'terminal' }
+  | { type: 'project-action'; actionId: string };
+
+type PersistedTerminalTab = Pick<TerminalTab, 'id' | 'label' | 'iconKey' | 'createdAt'> & {
+  purpose?: PersistedTerminalTabPurpose;
+};
 
 type PersistedDirectoryTerminalState = {
   tabs: PersistedTerminalTab[];
@@ -146,6 +169,59 @@ type PersistedTerminalStoreState = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
+const isProjectActionPurpose = (purpose: TerminalTabPurpose): purpose is Extract<TerminalTabPurpose, { type: 'project-action' }> =>
+  purpose.type === 'project-action';
+
+const shouldApplyExecutionGuard = (tab: TerminalTab, expectedExecutionId: string | null | undefined): boolean => {
+  if (!isProjectActionPurpose(tab.purpose)) {
+    return expectedExecutionId == null;
+  }
+  if (expectedExecutionId === undefined) {
+    return true;
+  }
+  return tab.purpose.executionId === expectedExecutionId;
+};
+
+const createExecutionId = (): string => createTerminalTabId().replace(/^tab-/, 'exec-');
+
+const toActionLifecycle = (status: TerminalServerSession['status']): TerminalTabLifecycle =>
+  status === 'running' ? 'running' : 'exited';
+
+const toActionPurposeFromSession = (
+  purpose: Extract<TerminalServerSession['purpose'], { type: 'project-action' }>,
+  status: TerminalServerSession['status'],
+): Extract<TerminalTabPurpose, { type: 'project-action' }> => ({
+  type: 'project-action',
+  actionId: purpose.actionId,
+  executionId: status === 'running' ? purpose.executionId : null,
+});
+
+const authoritativeTerminalSessions = (sessions: TerminalServerSession[]): TerminalServerSession[] => {
+  const actions = new Map<string, TerminalServerSession>();
+  const terminals: TerminalServerSession[] = [];
+  for (const session of sessions) {
+    if (session.purpose?.type !== 'project-action') {
+      terminals.push(session);
+      continue;
+    }
+    const previous = actions.get(session.purpose.actionId);
+    if (!previous
+      || (session.status === 'running' && previous.status !== 'running')
+      || (session.status === previous.status && (
+        (session.createdAt ?? 0) > (previous.createdAt ?? 0)
+        || (session.createdAt === previous.createdAt && session.sessionId > previous.sessionId)
+      ))) actions.set(session.purpose.actionId, session);
+  }
+  return [...terminals, ...actions.values()];
+};
+
+const resetActionPreview = { previewUrl: null, previewAutoOpened: false, previewUrlLocked: false };
+
+const toAdoptedActionLabel = (actionId: string): string => {
+  const trimmed = actionId.trim();
+  return trimmed || 'Action';
+};
+
 const tabIdNumber = (tabId: string): number | null => {
   const match = /^tab-(\d+)$/.exec(tabId);
   if (!match) return null;
@@ -153,13 +229,33 @@ const tabIdNumber = (tabId: string): number | null => {
   return Number.isFinite(num) ? num : null;
 };
 
-function normalizeDirectory(dir: string): string {
-  let normalized = dir.trim();
-  while (normalized.length > 1 && normalized.endsWith('/')) {
-    normalized = normalized.slice(0, -1);
+const normalizeDirectory = normalizeTerminalDirectory;
+
+const actionMutationRevisionKey = (directory: string, actionId: string): string => `${directory}\u0000${actionId}`;
+
+const updateActionMutationRevision = (
+  revisions: Map<string, number>,
+  directory: string,
+  actionId: string,
+  revision: number,
+) => {
+  revisions.set(actionMutationRevisionKey(directory, actionId), revision);
+};
+
+const hasActionMutatedSinceRequestStarted = (
+  state: Pick<TerminalStore, 'actionMutationRevisions'>,
+  directory: string,
+  actionId: string,
+  startedActionMutationRevisions: TerminalActionMutationRevisions | undefined,
+): boolean => {
+  if (!startedActionMutationRevisions) {
+    return false;
   }
-  return normalized;
-}
+  const revisionKey = actionMutationRevisionKey(directory, actionId);
+  const currentRevision = state.actionMutationRevisions.get(revisionKey) ?? 0;
+  const startedRevision = startedActionMutationRevisions.get(revisionKey) ?? 0;
+  return currentRevision > startedRevision;
+};
 
 const DEFAULT_TAB_LABEL_PATTERN = /^Terminal(?: (\d+))?$/;
 
@@ -182,10 +278,20 @@ const nextDefaultTabLabel = (tabs: readonly TerminalTab[]): string => {
   return highest === 0 ? 'Terminal' : `Terminal ${highest + 1}`;
 };
 
+/** A project action the user would expect to see marked as running. */
+export const isActiveProjectActionTab = (tab: TerminalTab): boolean =>
+  tab.purpose.type === 'project-action'
+  && tab.purpose.executionId !== null
+  && ACTIVE_PROJECT_ACTION_LIFECYCLES.has(tab.lifecycle);
+
+const isLiveRunningTerminal = (tab: TerminalTab | undefined): boolean =>
+  Boolean(tab && tab.terminalSessionId !== null && tab.lifecycle === 'running');
+
 const createEmptyTab = (id: string, label: string): TerminalTab => ({
   id,
   terminalSessionId: null,
   lifecycle: 'idle',
+  purpose: { type: 'terminal' },
   label,
   iconKey: null,
   isConnecting: false,
@@ -231,6 +337,9 @@ const partializeTerminalStore = (state: TerminalStore): PersistedTerminalStoreSt
           label: tab.label,
           iconKey: tab.iconKey,
           createdAt: tab.createdAt,
+          purpose: tab.purpose.type === 'project-action'
+            ? { type: 'project-action', actionId: tab.purpose.actionId }
+            : { type: 'terminal' },
         })),
       },
     ]),
@@ -267,7 +376,8 @@ export const useTerminalStore = create<TerminalStore>()(
       (set, get) => ({
         sessions: new Map(),
         buffers: new Map(),
-        projectActionRuns: {},
+        actionMutationRevisions: new Map(),
+        nextActionMutationRevision: 1,
         nextChunkId: 1,
         nextTabId: 1,
         hasHydrated: typeof window === 'undefined',
@@ -307,6 +417,22 @@ export const useTerminalStore = create<TerminalStore>()(
         getBuffer: (directory: string, tabId: string) =>
           get().buffers.get(bufferKey(normalizeDirectory(directory), tabId)) ?? EMPTY_TERMINAL_BUFFER,
 
+        matchesActionExecution: (directory, tabId, executionId) => {
+          const tab = get().sessions.get(normalizeDirectory(directory))?.tabs.find((entry) => entry.id === tabId);
+          return Boolean(tab && isProjectActionPurpose(tab.purpose) && tab.purpose.executionId === executionId);
+        },
+
+        captureStartedActionMutationRevisions: (directory) => {
+          const key = normalizeDirectory(directory);
+          const prefix = actionMutationRevisionKey(key, '');
+          const snapshot = new Map<string, number>();
+          for (const [actionKey, revision] of get().actionMutationRevisions.entries()) {
+            if (!actionKey.startsWith(prefix)) continue;
+            snapshot.set(actionKey, revision);
+          }
+          return snapshot;
+        },
+
         createTab: (directory: string) => {
           const key = normalizeDirectory(directory);
           if (!key) {
@@ -338,57 +464,185 @@ export const useTerminalStore = create<TerminalStore>()(
           return tabId;
         },
 
-        /**
-         * The server owns which terminal sessions exist; the local tab list is
-         * only this client's projection. Adoption is strictly additive: server
-         * sessions no local tab references become tabs (id = session id, the
-         * create/attach contract), and nothing is ever removed here, so a
-         * failed or partial listing cannot destroy local tabs.
-         */
-        adoptServerSessions: (directory, serverSessions) => {
+        reconcileServerSessions: (directory, serverSessions, options) => {
           const key = normalizeDirectory(directory);
-          if (!key || serverSessions.length === 0) return;
+          if (!key) return;
 
           set((state) => {
             const existing = state.sessions.get(key);
-            const knownIds = new Set<string>();
-            for (const tab of existing?.tabs ?? []) {
-              knownIds.add(tab.id);
-              if (tab.terminalSessionId) knownIds.add(tab.terminalSessionId);
+            if (!existing && serverSessions.length === 0) {
+              return state;
             }
-
-            const newcomers = serverSessions.filter((session) => !knownIds.has(session.sessionId));
-            if (newcomers.length === 0) return state;
-
             const tabs = [...(existing?.tabs ?? [])];
-            // A single untouched placeholder tab (fresh directory state) is
-            // replaced by the first adopted session instead of sitting next to it.
+            let buffers = state.buffers;
+            let tabsChanged = false;
+            let activationCandidate: { tabId: string; createdAt: number; index: number } | null = null;
+            const listedActionIds = new Set<string>();
+            const matchedTabIds = new Set<string>();
             const placeholder = tabs.length === 1
               && tabs[0].terminalSessionId === null
               && tabs[0].lifecycle === 'idle'
+              && tabs[0].purpose.type === 'terminal'
               && !state.buffers.has(bufferKey(key, tabs[0].id))
               ? tabs[0]
               : null;
-            if (placeholder) tabs.length = 0;
+            if (placeholder && serverSessions.length > 0) tabs.length = 0;
 
-            for (const session of newcomers) {
+            for (const session of authoritativeTerminalSessions(serverSessions)) {
+              let matchIndex = tabs.findIndex((tab) => tab.terminalSessionId === session.sessionId || tab.id === session.sessionId);
+              const sessionPurpose = session.purpose;
+              const staleActionAuthority = sessionPurpose?.type === 'project-action'
+                && hasActionMutatedSinceRequestStarted(state, key, sessionPurpose.actionId, options?.startedActionMutationRevisions);
+              if (sessionPurpose?.type === 'project-action') {
+                listedActionIds.add(sessionPurpose.actionId);
+                const actionMatchIndex = tabs.findIndex((tab) => (
+                  isProjectActionPurpose(tab.purpose) && tab.purpose.actionId === sessionPurpose.actionId
+                ));
+                if (staleActionAuthority) {
+                  if (actionMatchIndex >= 0) {
+                    matchedTabIds.add(tabs[actionMatchIndex]!.id);
+                  }
+                  continue;
+                }
+                if (matchIndex < 0) {
+                  matchIndex = actionMatchIndex;
+                }
+              }
+
+              const nextPurpose: TerminalTabPurpose = sessionPurpose?.type === 'project-action'
+                ? toActionPurposeFromSession(sessionPurpose, session.status)
+                : { type: 'terminal' };
+
+              if (matchIndex >= 0) {
+                const current = tabs[matchIndex]!;
+                let nextLifecycle = current.purpose.type === 'project-action' || sessionPurpose?.type === 'project-action'
+                  ? toActionLifecycle(session.status)
+                  : session.status;
+                if (current.lifecycle === 'stopping' && session.status === 'running'
+                  && current.purpose.type === 'project-action' && nextPurpose.type === 'project-action'
+                  && current.purpose.executionId === nextPurpose.executionId) nextLifecycle = 'stopping';
+                const nextCreatedAt = session.createdAt ?? current.createdAt;
+                const executionChanged = sessionPurpose?.type === 'project-action'
+                  && (current.terminalSessionId !== session.sessionId
+                    || (nextPurpose.type === 'project-action' && nextPurpose.executionId !== null
+                      && (current.purpose.type !== 'project-action' || current.purpose.executionId !== nextPurpose.executionId)));
+                if (executionChanged) {
+                  const keyToDrop = bufferKey(key, current.id);
+                  buffers = dropBufferKeys(buffers, (entry) => entry === keyToDrop) ?? buffers;
+                }
+                const activatesRunningAction = sessionPurpose?.type === 'project-action'
+                  && session.status === 'running'
+                  && (current.terminalSessionId !== session.sessionId || current.lifecycle !== 'running');
+                const purposeChanged = current.purpose.type !== nextPurpose.type
+                  || (current.purpose.type === 'project-action' && nextPurpose.type === 'project-action'
+                    && (current.purpose.actionId !== nextPurpose.actionId || current.purpose.executionId !== nextPurpose.executionId));
+                if (
+                  current.terminalSessionId !== session.sessionId
+                  || current.lifecycle !== nextLifecycle
+                  || current.isConnecting !== false
+                  || current.createdAt !== nextCreatedAt
+                  || purposeChanged
+                ) {
+                  tabs[matchIndex] = {
+                    ...current,
+                    terminalSessionId: session.sessionId,
+                    lifecycle: nextLifecycle,
+                    purpose: nextPurpose,
+                    isConnecting: false,
+                    createdAt: nextCreatedAt,
+                  };
+                  if (executionChanged) Object.assign(tabs[matchIndex], resetActionPreview);
+                  tabsChanged = true;
+                }
+                if (activatesRunningAction) {
+                  const candidate = { tabId: current.id, createdAt: nextCreatedAt, index: matchIndex };
+                  if (
+                    !activationCandidate
+                    || candidate.createdAt > activationCandidate.createdAt
+                    || (candidate.createdAt === activationCandidate.createdAt && candidate.index > activationCandidate.index)
+                  ) {
+                    activationCandidate = candidate;
+                  }
+                }
+                matchedTabIds.add(current.id);
+                continue;
+              }
+
+              const label = sessionPurpose?.type === 'project-action'
+                ? toAdoptedActionLabel(sessionPurpose.actionId)
+                : (placeholder && tabs.length === 0 ? placeholder.label : nextDefaultTabLabel(tabs));
+              const iconKey = sessionPurpose?.type === 'project-action' ? 'play' : null;
               const tab: TerminalTab = {
-                ...createEmptyTab(session.sessionId, placeholder && tabs.length === 0 ? placeholder.label : nextDefaultTabLabel(tabs)),
+                ...createEmptyTab(session.sessionId, label),
                 terminalSessionId: session.sessionId,
-                lifecycle: session.status,
+                lifecycle: sessionPurpose?.type === 'project-action' ? toActionLifecycle(session.status) : session.status,
+                purpose: nextPurpose,
+                iconKey,
                 createdAt: session.createdAt ?? Date.now(),
               };
               tabs.push(tab);
+              tabsChanged = true;
+              if (sessionPurpose?.type === 'project-action' && session.status === 'running') {
+                const candidate = { tabId: tab.id, createdAt: tab.createdAt, index: tabs.length - 1 };
+                if (
+                  !activationCandidate
+                  || candidate.createdAt > activationCandidate.createdAt
+                  || (candidate.createdAt === activationCandidate.createdAt && candidate.index > activationCandidate.index)
+                ) {
+                  activationCandidate = candidate;
+                }
+              }
+              matchedTabIds.add(tab.id);
             }
 
+            let changed = tabsChanged || Boolean(placeholder && serverSessions.length > 0);
+            const reconciledTabs: TerminalTab[] = tabs.map((tab) => {
+              if (!isProjectActionPurpose(tab.purpose)) return tab;
+              if (listedActionIds.has(tab.purpose.actionId) || matchedTabIds.has(tab.id)) return tab;
+              if (
+                tab.lifecycle === 'starting'
+                || hasActionMutatedSinceRequestStarted(state, key, tab.purpose.actionId, options?.startedActionMutationRevisions)
+              ) {
+                return tab;
+              }
+              if (tab.lifecycle === 'exited' && !tab.isConnecting) return tab;
+              changed = true;
+              return {
+                ...tab,
+                lifecycle: 'exited',
+                isConnecting: false,
+                purpose: { type: 'project-action', actionId: tab.purpose.actionId, executionId: null },
+              };
+            });
+
             const previousActive = existing?.activeTabId ?? null;
-            const activeTabId = previousActive && tabs.some((tab) => tab.id === previousActive)
+            const resolvedActiveTabId = previousActive && reconciledTabs.some((tab) => tab.id === previousActive)
               ? previousActive
-              : tabs[0]?.id ?? null;
+              : reconciledTabs[0]?.id ?? null;
+            const resolvedActiveTab = resolvedActiveTabId
+              ? reconciledTabs.find((tab) => tab.id === resolvedActiveTabId)
+              : reconciledTabs[0];
+            const activeTabId = activationCandidate && !isLiveRunningTerminal(resolvedActiveTab)
+              ? activationCandidate.tabId
+              : resolvedActiveTabId;
+
+            // Activation transitions always rewrite the adopted tab, so today
+            // `changed` is true whenever `activeTabId` moved; the explicit
+            // activeTabId comparison keeps this guard honest if a future
+            // activation path stops touching the tabs array.
+            if (
+              !changed
+              && existing
+              && activeTabId === existing.activeTabId
+              && reconciledTabs.length === existing.tabs.length
+              && reconciledTabs.every((tab, index) => tab === existing.tabs[index])
+            ) {
+              return state;
+            }
 
             const newSessions = new Map(state.sessions);
-            newSessions.set(key, { tabs, activeTabId });
-            return { sessions: newSessions };
+            newSessions.set(key, { tabs: reconciledTabs, activeTabId });
+            return { sessions: newSessions, buffers };
           });
         },
 
@@ -496,11 +750,16 @@ export const useTerminalStore = create<TerminalStore>()(
               return state;
             }
 
+            const closedPurpose = existing.tabs[idx].purpose;
+            let actionMutationRevisions = state.actionMutationRevisions;
+            let nextActionMutationRevision = state.nextActionMutationRevision;
+            if (closedPurpose.type === 'project-action') {
+              actionMutationRevisions = new Map(actionMutationRevisions);
+              updateActionMutationRevision(actionMutationRevisions, key, closedPurpose.actionId, nextActionMutationRevision);
+              nextActionMutationRevision += 1;
+            }
+            const mutationState = { actionMutationRevisions, nextActionMutationRevision };
             const nextTabs = existing.tabs.filter((t) => t.id !== tabId);
-            const nextRuns = Object.fromEntries(
-              Object.entries(state.projectActionRuns).filter(([, run]) => !(run.directory === key && run.tabId === tabId))
-            );
-            const runsChanged = Object.keys(nextRuns).length !== Object.keys(state.projectActionRuns).length;
             const closedBufferKey = bufferKey(key, tabId);
             const nextBuffers = state.buffers.has(closedBufferKey)
               ? dropBufferKeys(state.buffers, (bufferEntryKey) => bufferEntryKey === closedBufferKey)
@@ -510,12 +769,14 @@ export const useTerminalStore = create<TerminalStore>()(
               const newTabId = createTerminalTabId();
               const newTab = createEmptyTab(newTabId, 'Terminal');
               newSessions.set(key, createEmptyDirectoryState(newTab));
-              return {
+              const nextState: Pick<TerminalStore, 'sessions' | 'nextTabId'> & { buffers?: Map<string, TerminalBuffer> } = {
                 sessions: newSessions,
                 nextTabId: state.nextTabId + 1,
-                ...(nextBuffers ? { buffers: nextBuffers } : {}),
-                ...(runsChanged ? { projectActionRuns: nextRuns } : {}),
               };
+              if (nextBuffers) {
+                nextState.buffers = nextBuffers;
+              }
+              return { ...nextState, ...mutationState };
             }
 
             let nextActive = existing.activeTabId;
@@ -530,15 +791,78 @@ export const useTerminalStore = create<TerminalStore>()(
               activeTabId: nextActive,
             });
 
-            return {
+            const nextState: Pick<TerminalStore, 'sessions'> & { buffers?: Map<string, TerminalBuffer> } = {
               sessions: newSessions,
-              ...(nextBuffers ? { buffers: nextBuffers } : {}),
-              ...(runsChanged ? { projectActionRuns: nextRuns } : {}),
             };
+            if (nextBuffers) {
+              nextState.buffers = nextBuffers;
+            }
+            return { ...nextState, ...mutationState };
           });
         },
 
-        setTabSessionId: (directory: string, tabId: string, sessionId: string | null) => {
+        setTabPurpose: (directory, tabId, purpose) => {
+          const key = normalizeDirectory(directory);
+          set((state) => {
+            const existing = state.sessions.get(key);
+            if (!existing) return state;
+            const idx = findTabIndex(existing, tabId);
+            if (idx < 0) return state;
+            const current = existing.tabs[idx]!;
+            if (JSON.stringify(current.purpose) === JSON.stringify(purpose)) {
+              return state;
+            }
+            const nextTabs = [...existing.tabs];
+            const executionChanged = purpose.type === 'project-action' && purpose.executionId !== null
+              && (current.purpose.type !== 'project-action' || current.purpose.executionId !== purpose.executionId);
+            nextTabs[idx] = { ...current, purpose };
+            if (executionChanged) Object.assign(nextTabs[idx], resetActionPreview);
+            const keyToDrop = bufferKey(key, tabId);
+            const buffers = executionChanged
+              ? dropBufferKeys(state.buffers, (entry) => entry === keyToDrop) ?? state.buffers
+              : state.buffers;
+            const sessions = new Map(state.sessions);
+            sessions.set(key, { ...existing, tabs: nextTabs });
+            if (purpose.type !== 'project-action') {
+              return { sessions };
+            }
+            const actionMutationRevisions = new Map(state.actionMutationRevisions);
+            updateActionMutationRevision(actionMutationRevisions, key, purpose.actionId, state.nextActionMutationRevision);
+            return { sessions, buffers, actionMutationRevisions, nextActionMutationRevision: state.nextActionMutationRevision + 1 };
+          });
+        },
+
+        allocateActionExecution: (directory, tabId, actionId) => {
+          const key = normalizeDirectory(directory);
+          const existing = get().sessions.get(key);
+          if (!existing || findTabIndex(existing, tabId) < 0) return null;
+          const executionId = createExecutionId();
+          set((state) => {
+            const current = state.sessions.get(key);
+            if (!current) return state;
+            const idx = findTabIndex(current, tabId);
+            if (idx < 0) return state;
+            const nextTabs = [...current.tabs];
+            nextTabs[idx] = {
+              ...nextTabs[idx]!,
+              purpose: { type: 'project-action', actionId, executionId },
+              lifecycle: 'starting',
+              terminalSessionId: null,
+              ...resetActionPreview,
+              isConnecting: false,
+            };
+            const sessions = new Map(state.sessions);
+            sessions.set(key, { ...current, tabs: nextTabs });
+            const actionMutationRevisions = new Map(state.actionMutationRevisions);
+            updateActionMutationRevision(actionMutationRevisions, key, actionId, state.nextActionMutationRevision);
+            const keyToDrop = bufferKey(key, tabId);
+            const buffers = dropBufferKeys(state.buffers, (entry) => entry === keyToDrop) ?? state.buffers;
+            return { sessions, buffers, actionMutationRevisions, nextActionMutationRevision: state.nextActionMutationRevision + 1 };
+          });
+          return executionId;
+        },
+
+        setTabSessionId: (directory: string, tabId: string, sessionId: string | null, options) => {
           const key = normalizeDirectory(directory);
           set((state) => {
             const newSessions = new Map(state.sessions);
@@ -553,6 +877,9 @@ export const useTerminalStore = create<TerminalStore>()(
             }
 
             const tab = existing.tabs[idx];
+            if (!shouldApplyExecutionGuard(tab, options?.expectedExecutionId)) {
+              return state;
+            }
             const shouldResetBuffer = sessionId !== null && tab.terminalSessionId !== sessionId;
 
             const nextLifecycle = sessionId
@@ -574,11 +901,27 @@ export const useTerminalStore = create<TerminalStore>()(
             const nextTabs = [...existing.tabs];
             nextTabs[idx] = nextTab;
             newSessions.set(key, { ...existing, tabs: nextTabs });
-            return { sessions: newSessions, ...(nextBuffers ? { buffers: nextBuffers } : {}) };
+            const nextState: Pick<TerminalStore, 'sessions' | 'nextActionMutationRevision'> & {
+              buffers?: Map<string, TerminalBuffer>;
+              actionMutationRevisions?: Map<string, number>;
+            } = {
+              sessions: newSessions,
+              nextActionMutationRevision: state.nextActionMutationRevision,
+            };
+            if (isProjectActionPurpose(tab.purpose)) {
+              const actionMutationRevisions = new Map(state.actionMutationRevisions);
+              updateActionMutationRevision(actionMutationRevisions, key, tab.purpose.actionId, state.nextActionMutationRevision);
+              nextState.actionMutationRevisions = actionMutationRevisions;
+              nextState.nextActionMutationRevision = state.nextActionMutationRevision + 1;
+            }
+            if (nextBuffers) {
+              nextState.buffers = nextBuffers;
+            }
+            return nextState;
           });
         },
 
-        setTabLifecycle: (directory: string, tabId: string, lifecycle: TerminalTabLifecycle) => {
+        setTabLifecycle: (directory: string, tabId: string, lifecycle: TerminalTabLifecycle, options) => {
           const key = normalizeDirectory(directory);
           set((state) => {
             const newSessions = new Map(state.sessions);
@@ -592,14 +935,23 @@ export const useTerminalStore = create<TerminalStore>()(
               return state;
             }
 
+            if (!shouldApplyExecutionGuard(existing.tabs[idx]!, options?.expectedExecutionId)) {
+              return state;
+            }
+
+            const current = existing.tabs[idx]!;
+            if (current.lifecycle === lifecycle && !current.isConnecting) return state;
             const nextTabs = [...existing.tabs];
-            nextTabs[idx] = { ...nextTabs[idx], lifecycle, isConnecting: false };
+            nextTabs[idx] = { ...current, lifecycle, isConnecting: false };
             newSessions.set(key, { ...existing, tabs: nextTabs });
-            return { sessions: newSessions };
+            if (current.purpose.type !== 'project-action' || current.lifecycle === lifecycle) return { sessions: newSessions };
+            const actionMutationRevisions = new Map(state.actionMutationRevisions);
+            updateActionMutationRevision(actionMutationRevisions, key, current.purpose.actionId, state.nextActionMutationRevision);
+            return { sessions: newSessions, actionMutationRevisions, nextActionMutationRevision: state.nextActionMutationRevision + 1 };
           });
         },
 
-        setConnecting: (directory: string, tabId: string, isConnecting: boolean) => {
+        setConnecting: (directory: string, tabId: string, isConnecting: boolean, options) => {
           const key = normalizeDirectory(directory);
           set((state) => {
             const newSessions = new Map(state.sessions);
@@ -610,6 +962,10 @@ export const useTerminalStore = create<TerminalStore>()(
 
             const idx = findTabIndex(existing, tabId);
             if (idx < 0) {
+              return state;
+            }
+
+            if (!shouldApplyExecutionGuard(existing.tabs[idx]!, options?.expectedExecutionId)) {
               return state;
             }
 
@@ -711,6 +1067,9 @@ export const useTerminalStore = create<TerminalStore>()(
             }
 
             const tab = existing.tabs[idx];
+            if (!shouldApplyExecutionGuard(tab, options.expectedExecutionId)) {
+              return state;
+            }
             const nextPreviewAutoOpened = options.autoOpened ?? tab.previewAutoOpened;
             const nextPreviewUrlLocked = options.locked ?? tab.previewUrlLocked;
             if (tab.previewUrl === url && tab.previewAutoOpened === nextPreviewAutoOpened && tab.previewUrlLocked === nextPreviewUrlLocked) {
@@ -755,47 +1114,6 @@ export const useTerminalStore = create<TerminalStore>()(
           });
         },
 
-        setProjectActionRun: (run: TerminalProjectActionRun) => {
-          set((state) => {
-            const existing = state.projectActionRuns[run.key];
-            if (existing
-              && existing.directory === run.directory
-              && existing.actionId === run.actionId
-              && existing.tabId === run.tabId
-              && existing.sessionId === run.sessionId
-              && existing.status === run.status) {
-              return state;
-            }
-            return { projectActionRuns: { ...state.projectActionRuns, [run.key]: run } };
-          });
-        },
-
-        updateProjectActionRunStatus: (runKey: string, status: TerminalProjectActionRun['status']) => {
-          set((state) => {
-            const existing = state.projectActionRuns[runKey];
-            if (!existing || existing.status === status) {
-              return state;
-            }
-            return {
-              projectActionRuns: {
-                ...state.projectActionRuns,
-                [runKey]: { ...existing, status },
-              },
-            };
-          });
-        },
-
-        removeProjectActionRun: (runKey: string) => {
-          set((state) => {
-            if (!state.projectActionRuns[runKey]) {
-              return state;
-            }
-            const next = { ...state.projectActionRuns };
-            delete next[runKey];
-            return { projectActionRuns: next };
-          });
-        },
-
         removeDirectory: (directory: string) => {
           const key = normalizeDirectory(directory);
           set((state) => {
@@ -803,19 +1121,31 @@ export const useTerminalStore = create<TerminalStore>()(
             newSessions.delete(key);
             const prefix = bufferKey(key, '');
             const nextBuffers = dropBufferKeys(state.buffers, (entryKey) => entryKey.startsWith(prefix));
-            const nextRuns = Object.fromEntries(
-              Object.entries(state.projectActionRuns).filter(([, run]) => run.directory !== key)
-            );
-            return {
+            const revisionPrefix = actionMutationRevisionKey(key, '');
+            let actionMutationRevisions: Map<string, number> | undefined;
+            for (const actionKey of state.actionMutationRevisions.keys()) {
+              if (!actionKey.startsWith(revisionPrefix)) continue;
+              actionMutationRevisions ??= new Map(state.actionMutationRevisions);
+              actionMutationRevisions.delete(actionKey);
+            }
+            const nextState: Pick<TerminalStore, 'sessions'> & {
+              buffers?: Map<string, TerminalBuffer>;
+              actionMutationRevisions?: Map<string, number>;
+            } = {
               sessions: newSessions,
-              ...(nextBuffers ? { buffers: nextBuffers } : {}),
-              projectActionRuns: nextRuns,
             };
+            if (nextBuffers) {
+              nextState.buffers = nextBuffers;
+            }
+            if (actionMutationRevisions) {
+              nextState.actionMutationRevisions = actionMutationRevisions;
+            }
+            return nextState;
           });
         },
 
         clearAll: () => {
-          set({ sessions: new Map(), buffers: new Map(), projectActionRuns: {}, nextChunkId: 1, nextTabId: 1 });
+          set({ sessions: new Map(), buffers: new Map(), actionMutationRevisions: new Map(), nextActionMutationRevision: 1, nextChunkId: 1, nextTabId: 1 });
         },
       }),
       {
@@ -864,6 +1194,10 @@ export const useTerminalStore = create<TerminalStore>()(
               }
               const id = num === null ? persistedId : createTerminalTabId();
               migratedTabIds.set(persistedId, id);
+              const persistedPurpose = persistedProjectActionPurposeSchema.safeParse(rawTab.purpose).data;
+              const purpose: TerminalTabPurpose = persistedPurpose
+                ? { type: 'project-action', actionId: persistedPurpose.actionId, executionId: null }
+                : { type: 'terminal' };
 
               tabs.push({
                 id,
@@ -871,6 +1205,7 @@ export const useTerminalStore = create<TerminalStore>()(
                 iconKey: typeof rawTab.iconKey === 'string' ? rawTab.iconKey : null,
                 terminalSessionId: null,
                 lifecycle: 'idle',
+                purpose,
                 createdAt: typeof rawTab.createdAt === 'number' ? rawTab.createdAt : Date.now(),
                 isConnecting: false,
                 previewUrl: null,
@@ -905,6 +1240,8 @@ export const useTerminalStore = create<TerminalStore>()(
             ...currentState,
             sessions,
             buffers: new Map(),
+            actionMutationRevisions: new Map(),
+            nextActionMutationRevision: 1,
             nextChunkId: 1,
             nextTabId,
             hasHydrated: true,

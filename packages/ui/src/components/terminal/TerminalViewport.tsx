@@ -17,6 +17,8 @@ import {
 } from '@/lib/terminalTouchSelection';
 import type { TerminalChunk } from '@/stores/useTerminalStore';
 
+import { selectTerminalChunkReplay } from './terminalChunkReplay';
+
 // ghostty-web (638 KB raw of JS + the WASM VT) loads on demand: TerminalView
 // stays eagerly importable for the bottom dock without pulling the emulator
 // into the startup graph before a terminal is actually mounted.
@@ -328,29 +330,12 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
   React.useEffect(() => {
     const terminal = terminalRef.current;
     if (!terminal) return;
-    if (chunks.length === 0) {
-      if (lastChunkRef.current !== null) recreateRenderer();
-      return;
-    }
-    const previous = lastChunkRef.current;
-    // Chunk ids are monotonic and the store appends, so the already-written chunk
-    // is normally the last one. Scanning from the end keeps this O(1) per chunk
-    // instead of O(chunks) on every streamed write.
-    let previousIndex = -1;
-    if (previous !== null) {
-      for (let index = chunks.length - 1; index >= 0; index -= 1) {
-        const id = chunks[index].id;
-        if (id === previous) { previousIndex = index; break; }
-        if (id < previous) break;
-      }
-      if (previousIndex < 0) {
-        recreateRenderer();
-        return;
-      }
-    }
-    const isReplay = previousIndex < 0;
-    const pending = previousIndex >= 0 ? chunks.slice(previousIndex + 1) : chunks;
-    writeQueueRef.current += pending.map((chunk) => isReplay ? (chunk.replayData ?? chunk.data) : chunk.data).join('');
+    const { reset, replay, pending } = selectTerminalChunkReplay(chunks, lastChunkRef.current);
+    if (reset) recreateRenderer();
+    if (pending.length === 0) return;
+    writeQueueRef.current += pending
+      .map((chunk) => replay ? (chunk.replayData ?? chunk.data) : chunk.data)
+      .join('');
     lastChunkRef.current = chunks.at(-1)?.id ?? null;
     flush();
   }, [chunks, flush, ready, recreateRenderer]);

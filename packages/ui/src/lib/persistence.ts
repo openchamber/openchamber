@@ -619,6 +619,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     recentEfforts: defaults.recentEfforts,
     diffLayoutPreference: defaults.diffLayoutPreference,
     gitChangesViewMode: defaults.gitChangesViewMode,
+    toolJsonViewMode: defaults.toolJsonViewMode,
     directoryShowHidden: true,
     filesViewShowGitignored: false,
     dictationEnabled: true,
@@ -1043,6 +1044,15 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     if (settings.gitChangesViewMode !== store.gitChangesViewMode) {
       store.setGitChangesViewMode(settings.gitChangesViewMode);
     }
+  }
+  switch (settings.toolJsonViewMode) {
+    case 'summary':
+    case 'formatted':
+    case 'raw':
+      if (settings.toolJsonViewMode !== store.toolJsonViewMode) {
+        store.setToolJsonViewMode(settings.toolJsonViewMode);
+      }
+      break;
   }
   if (typeof settings.directoryShowHidden === 'boolean') {
     setDirectoryShowHidden(settings.directoryShowHidden, { persist: false });
@@ -1618,6 +1628,13 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     && (candidate.gitChangesViewMode === 'flat' || candidate.gitChangesViewMode === 'tree')
   ) {
     result.gitChangesViewMode = candidate.gitChangesViewMode;
+  }
+  switch (candidate.toolJsonViewMode) {
+    case 'summary':
+    case 'formatted':
+    case 'raw':
+      result.toolJsonViewMode = candidate.toolJsonViewMode;
+      break;
   }
   if (typeof candidate.directoryShowHidden === 'boolean') {
     result.directoryShowHidden = candidate.directoryShowHidden;

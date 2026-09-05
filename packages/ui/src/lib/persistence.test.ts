@@ -401,6 +401,7 @@ describe('updateDesktopSettings', () => {
         showReasoningTraces: false,
         terminalShell: 'fish',
         favoriteModels: [{ providerID: 'anthropic', modelID: 'claude-sonnet-4' }],
+        toolJsonViewMode: 'raw',
         followUpBehavior: 'steer',
         draftStarters: [{ type: 'command', name: 'runtime-a' }],
         draftStartersVisible: false,
@@ -413,6 +414,7 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().showReasoningTraces).toBe(false);
     expect(useUIStore.getState().terminalShell).toBe('fish');
     expect(useUIStore.getState().favoriteModels).toHaveLength(1);
+    expect(useUIStore.getState().toolJsonViewMode).toBe('raw');
     expect(useUIStore.getState().globalDraftStarters).toEqual([{ type: 'command', name: 'runtime-a' }]);
     expect(useUIStore.getState().draftStartersVisible).toBe(false);
     expect(useMessageQueueStore.getState().followUpBehavior).toBe('steer');
@@ -427,6 +429,7 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().showReasoningTraces).toBe(true);
     expect(useUIStore.getState().terminalShell).toBe('auto');
     expect(useUIStore.getState().favoriteModels).toEqual([]);
+    expect(useUIStore.getState().toolJsonViewMode).toBe('summary');
     expect(useUIStore.getState().globalDraftStarters).toBeNull();
     expect(useUIStore.getState().draftStartersVisible).toBe(true);
     expect(useMessageQueueStore.getState().followUpBehavior).toBe('queue');
@@ -443,6 +446,18 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().showReasoningTraces).toBe(false);
     expect(useUIStore.getState().terminalShell).toBe('fish');
     expect(localStorage.getItem('selectedThemeId')).toBe('existing-theme');
+  });
+
+  test('ignores an invalid JSON view mode in a settings save response', async () => {
+    getWindow();
+    useUIStore.getState().setToolJsonViewMode('formatted');
+    const invalidSettings: SettingsPayload = {};
+    Object.defineProperty(invalidSettings, 'toolJsonViewMode', { value: 'invalid', enumerable: true });
+    registerSettingsSave(async () => invalidSettings);
+
+    await updateDesktopSettings({ showReasoningTraces: false });
+
+    expect(useUIStore.getState().toolJsonViewMode).toBe('formatted');
   });
 
   test('applies authoritative shared sidebar preferences without replacing local-only sidebar state', async () => {
@@ -756,7 +771,7 @@ describe('updateDesktopSettings', () => {
     }
   });
 
-  test('autosaves terminal shell changes to shared settings', async () => {
+  test('autosaves appearance preferences to shared settings', async () => {
     getWindow();
     useUIStore.getState().setTerminalShell('auto');
     useUIStore.getState().setTerminalLoginShells([]);
@@ -769,10 +784,12 @@ describe('updateDesktopSettings', () => {
 
     useUIStore.getState().setTerminalShell('zsh');
     useUIStore.getState().setTerminalLoginShells(['zsh']);
+    useUIStore.getState().setToolJsonViewMode('formatted');
     await delay(500);
 
     expect(saveCalls.some((changes) => changes.terminalShell === 'zsh')).toBe(true);
     expect(saveCalls.some((changes) => changes.terminalLoginShells?.includes('zsh'))).toBe(true);
+    expect(saveCalls.some((changes) => changes.toolJsonViewMode === 'formatted')).toBe(true);
   });
 
   test('applies persisted autoSaveEnabled from server settings', async () => {

@@ -16,6 +16,7 @@ import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
+import { isIMECompositionEvent } from '@/lib/ime';
 import { rangeToMarkdown, trimSelectionValue, wrapMarkdownSelectionForChat } from './selectionMarkdown';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { registerActiveSelectionToolbar } from '@/lib/addSelectionToChat';
@@ -590,6 +591,9 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
           resizeCommentInput();
         }}
         onKeyDown={(event) => {
+          // An IME candidate is confirmed with Enter and abandoned with
+          // Escape; neither keystroke belongs to the comment yet.
+          if (isIMECompositionEvent(event)) return;
           // Desktop: Enter attaches, Shift+Enter breaks the line. Mobile
           // keyboards use Enter for line breaks; attaching is the button's job.
           if (event.key === 'Enter' && !event.shiftKey && !isMobile) {

@@ -32,8 +32,8 @@ const viewportKeyDeclaration = terminalViewSource
     .find((line) => line.includes('const terminalViewportKey =')) ?? '';
 
 describe('terminal viewport remount guard', () => {
-    test('viewport identity excludes the PTY session id', () => {
-        expect(viewportKeyDeclaration).toContain('effectiveDirectory');
+    test('viewport identity uses the authoritative terminal directory and excludes the PTY session id', () => {
+        expect(viewportKeyDeclaration).toContain('terminalDirectory');
         expect(viewportKeyDeclaration).toContain('activeTabId');
         expect(viewportKeyDeclaration).not.toContain('terminalSessionId');
     });

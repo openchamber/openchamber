@@ -42,6 +42,7 @@ Select code in the editor, right-click, and find the **OpenChamber** submenu:
 | Action | Description |
 |--------|-------------|
 | Add to Context | Attach selection to your next prompt |
+| Add Comment | Open a comment thread on the selected lines. The comment stays anchored in the editor and goes out with your next message as a context card. The gutter `+` does the same once the extension is active |
 | Explain | Ask the agent to explain the selected code |
 | Improve Code | Ask the agent to improve the selection in-place |
 

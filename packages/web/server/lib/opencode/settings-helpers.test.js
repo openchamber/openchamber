@@ -88,6 +88,15 @@ describe('settings helpers', () => {
     })).toEqual({});
   });
 
+  it('persists valid tool JSON view modes', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ toolJsonViewMode: 'summary' })).toEqual({ toolJsonViewMode: 'summary' });
+    expect(helpers.sanitizeSettingsUpdate({ toolJsonViewMode: 'formatted' })).toEqual({ toolJsonViewMode: 'formatted' });
+    expect(helpers.sanitizeSettingsUpdate({ toolJsonViewMode: 'raw' })).toEqual({ toolJsonViewMode: 'raw' });
+    expect(helpers.sanitizeSettingsUpdate({ toolJsonViewMode: 'unknown' })).toEqual({});
+  });
+
   it('accepts only booleans for wide chat layout', () => {
     const helpers = createTestHelpers();
 

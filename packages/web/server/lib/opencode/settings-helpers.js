@@ -687,6 +687,13 @@ export const createSettingsHelpers = (dependencies) => {
         result.gitChangesViewMode = mode;
       }
     }
+    switch (candidate.toolJsonViewMode) {
+      case 'summary':
+      case 'formatted':
+      case 'raw':
+        result.toolJsonViewMode = candidate.toolJsonViewMode;
+        break;
+    }
     if (typeof candidate.directoryShowHidden === 'boolean') {
       result.directoryShowHidden = candidate.directoryShowHidden;
     }

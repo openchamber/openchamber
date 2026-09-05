@@ -9,7 +9,10 @@ import {
   logStatus,
 } from '../cli-output.js';
 
-async function startupCommand(options, action = 'status') {
+async function startupCommand(options, action = 'status', dependencies = {}) {
+  const getStatus = dependencies.getStartupStatus || getStartupStatus;
+  const enableService = dependencies.enableStartupService || enableStartupService;
+  const disableService = dependencies.disableStartupService || disableStartupService;
   const normalized = typeof action === 'string' ? action.trim().toLowerCase() : 'status';
   if (!['status', 'enable', 'disable'].includes(normalized)) {
     throw new TunnelCliError(
@@ -20,14 +23,14 @@ async function startupCommand(options, action = 'status') {
 
   let status;
   if (normalized === 'enable') {
-    status = enableStartupService(options);
+    status = enableService(options);
   } else if (normalized === 'disable') {
-    status = disableStartupService();
+    status = disableService();
   } else {
-    status = getStartupStatus();
+    status = getStatus();
   }
 
-  const result = { action: normalized, ...status };
+  let result = { action: normalized, ...status };
   if (!result.supported) {
     throw new TunnelCliError(
       `Startup integration is not supported on ${result.platform}.`,
@@ -40,13 +43,30 @@ async function startupCommand(options, action = 'status') {
       EXIT_CODE.GENERAL_ERROR
     );
   }
+  if (result.platform === 'linux' && result.enabled && result.lingerEnabled !== true) {
+    const user = result.lingerUser || '"$USER"';
+    const disabled = result.lingerEnabled === false;
+    result = {
+      ...result,
+      messages: [{
+        level: 'warning',
+        code: disabled ? 'LINGER_DISABLED' : 'LINGER_UNKNOWN',
+        message: disabled
+          ? `User lingering is disabled; the startup service may stop after logout. Run \`sudo loginctl enable-linger ${user}\` to keep it running.`
+          : `Could not verify user lingering; the startup service may stop after logout. Check with \`loginctl show-user ${user} -p Linger\`.`,
+      }],
+    };
+  }
   if (isJsonMode(options)) {
     printJson(result);
     return;
   }
 
   if (isQuietMode(options)) {
-    process.stdout.write(`startup ${result.enabled ? 'enabled' : 'disabled'} platform:${result.platform} supported:${result.supported ? 'yes' : 'no'}${result.servicePath ? ` path:${result.servicePath}` : ''}\n`);
+    const lingerToken = result.platform === 'linux'
+      ? ` linger:${result.lingerEnabled === true ? 'yes' : result.lingerEnabled === false ? 'no' : 'unknown'}`
+      : '';
+    process.stdout.write(`startup ${result.enabled ? 'enabled' : 'disabled'} platform:${result.platform} supported:${result.supported ? 'yes' : 'no'}${result.servicePath ? ` path:${result.servicePath}` : ''}${lingerToken}\n`);
     return;
   }
 
@@ -57,6 +77,21 @@ async function startupCommand(options, action = 'status') {
   }
   if (normalized === 'enable') {
     logStatus('info', 'service command', 'openchamber serve --foreground');
+  }
+  if (result.platform === 'linux') {
+    if (result.lingerEnabled === true) {
+      logStatus('success', 'user lingering enabled');
+    } else if (result.lingerEnabled === false) {
+      logStatus(result.enabled ? 'warning' : 'info', `${result.enabled ? '[LINGER_DISABLED] ' : ''}user lingering is disabled`, result.enabled ? 'startup service may stop after logout' : undefined);
+      if (result.enabled) {
+        logStatus('info', '[ENABLE_LINGER]', `sudo loginctl enable-linger ${result.lingerUser || '"$USER"'}`);
+      }
+    } else {
+      logStatus(result.enabled ? 'warning' : 'info', result.enabled ? '[LINGER_UNKNOWN] could not verify user lingering' : 'user lingering state is unknown', result.enabled ? 'startup service may stop after logout' : undefined);
+      if (result.enabled) {
+        logStatus('info', '[CHECK_LINGER]', `loginctl show-user ${result.lingerUser || '"$USER"'} -p Linger`);
+      }
+    }
   }
   clackOutro(normalized === 'status' ? 'status complete' : `${normalized} complete`);
 }

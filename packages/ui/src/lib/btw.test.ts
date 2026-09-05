@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { Message, Part, Session } from '@opencode-ai/sdk/v2';
+import type { StartBtwInput } from './btw';
 
 let forkSessionImpl: (sessionId: string, messageId?: string, directory?: string | null) => Promise<Session>;
 let getSessionMessagesImpl: (id: string, limit?: number, directory?: string | null) => Promise<Array<{ info: Message; parts: Part[] }>>;
@@ -211,6 +212,38 @@ describe('startBtwSession', () => {
     await startBtwSession(startInput);
 
     expect(sentParts).toEqual([[{ text: BTW_BOUNDARY_INSTRUCTION, synthetic: true }]]);
+  });
+
+  test('the first question keeps inline comment context', async () => {
+    forkSessionImpl = () => Promise.resolve(makeSession('fork-1', '/project'));
+    const commentPart: NonNullable<StartBtwInput['additionalParts']>[number] = {
+      text: 'Comment on `src/auth.ts` lines 4-4:\n```ts\nauth();\n```\n\ncheck this',
+      synthetic: true,
+      metadata: {
+        openchamberContext: {
+          kind: 'code-comment',
+          source: 'file',
+          fileLabel: 'src/auth.ts',
+          startLine: 4,
+          endLine: 4,
+          language: 'ts',
+          code: 'auth();',
+          text: 'check this',
+        },
+      },
+    };
+    let sentParts: unknown;
+    sendMessageImpl = (...args) => {
+      sentParts = args[6];
+      return Promise.resolve();
+    };
+
+    await startBtwSession({ ...startInput, additionalParts: [commentPart] });
+
+    expect(sentParts).toEqual([
+      { text: BTW_BOUNDARY_INSTRUCTION, synthetic: true },
+      commentPart,
+    ]);
   });
 
   test('an empty parent produces a marker without a boundary', async () => {

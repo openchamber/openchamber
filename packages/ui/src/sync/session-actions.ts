@@ -303,8 +303,11 @@ function reconcileSessionMove(
   const destinationStore = stores?.ensureChild(destinationDirectory, { bootstrap: false })
   const sourceState = sourceStore?.getState()
   const destinationState = destinationStore?.getState()
-  const liveSession = sourceState?.session.find((candidate) => candidate.id === session.id) ?? session
-  const movedSession = { ...liveSession, directory: destinationDirectory } as Session
+  const liveSession = sourceState?.session.find((candidate) => candidate.id === session.id)
+  const movedSession = {
+    ...mergeSessionDirectoryMetadata(session, liveSession),
+    directory: destinationDirectory,
+  } as Session
 
   if (!destinationStore || !destinationState || sourceStore === destinationStore) {
     return movedSession
@@ -370,6 +373,7 @@ export async function moveSessionToDirectory(
   sourceDirectory: string,
   destinationDirectory: string,
   moveChanges = true,
+  expectedRuntimeKey?: string,
 ): Promise<void> {
   const result = await opencodeClient.getSdkClient().experimental.controlPlane.moveSession({
     sessionID: session.id,
@@ -377,6 +381,10 @@ export async function moveSessionToDirectory(
     moveChanges,
   })
   assertSdkSuccess(result, "Move session")
+
+  // If the runtime changed during the control-plane request, the server move
+  // already happened, but we must not publish stale local state to the UI/stores.
+  if (isStaleRuntime(expectedRuntimeKey)) return
 
   invalidateSessionLoads(session.id, [sourceDirectory, destinationDirectory])
 
@@ -1490,6 +1498,65 @@ function commitArchivedSessions(sessions: Session[], directory: string): void {
  */
 const UNARCHIVED_TIMESTAMP = 0
 
+async function getProjectPrimaryDirectory(projectID?: string): Promise<string | null> {
+  if (!projectID) return null
+
+  try {
+    const result = await sdk().project.list()
+    const projects = assertSdkData(result, "project.list")
+    const projectDirectory = projects.find((candidate) => candidate.id === projectID)?.worktree?.trim()
+    return projectDirectory ? normalizePath(projectDirectory) ?? projectDirectory : null
+  } catch {
+    return null
+  }
+}
+
+type MissingWorktreeRestore = { sourceDirectory: string; destinationDirectory: string }
+
+async function resolveMissingWorktreeRestore(
+  session: Session & { project?: { worktree?: string | null } | null },
+): Promise<MissingWorktreeRestore | null> {
+  const ownedDirectory = resolveSessionOwnedDirectory(session)
+  const projectWorktree = session.project?.worktree?.trim()
+  if (!ownedDirectory || !projectWorktree) return null
+
+  let availability: Awaited<ReturnType<typeof opencodeClient.getDirectoryAvailability>>
+  try {
+    availability = await opencodeClient.getDirectoryAvailability(ownedDirectory)
+  } catch {
+    return null
+  }
+  if (availability !== "missing") return null
+
+  const projectDirectory = await getProjectPrimaryDirectory(session.projectID)
+  if (!projectDirectory || projectDirectory === ownedDirectory) return null
+  return { sourceDirectory: ownedDirectory, destinationDirectory: projectDirectory }
+}
+
+function getRestoreSubtree(rootSession: Session, sourceDirectory: string): Array<{ session: Session; sourceDirectory: string }> {
+  const global = useGlobalSessionsStore.getState()
+  const sessionsById = new Map<string, Session>()
+
+  for (const session of [...global.activeSessions, ...global.archivedSessions]) {
+    const current = sessionsById.get(session.id)
+    if (!current || Boolean(session.time?.archived)) sessionsById.set(session.id, session)
+  }
+  sessionsById.set(rootSession.id, rootSession)
+
+  return [...computeSubtreeIds([...sessionsById.values()], rootSession.id)]
+    .map((id) => sessionsById.get(id))
+    .filter((session): session is Session => Boolean(session))
+    .map((session) => ({ session, ownedDirectory: resolveSessionOwnedDirectory(session) }))
+    // Keep a node while it is still archived or still stranded in the
+    // confirmed-missing worktree. The second clause matters on retry: a prior
+    // attempt may have already unarchived the root (server echo made it active)
+    // but failed to move it, so filtering on `archived` alone would drop the
+    // root and report a false success while it stays in the deleted worktree.
+    .filter((entry) => Boolean(entry.session.time?.archived) || entry.ownedDirectory === sourceDirectory)
+    .map((entry) => (entry.ownedDirectory ? { session: entry.session, sourceDirectory: entry.ownedDirectory } : null))
+    .filter((entry): entry is { session: Session; sourceDirectory: string } => entry !== null)
+}
+
 /**
  * Restore one archived session back to the active list.
  *
@@ -1502,8 +1569,34 @@ const UNARCHIVED_TIMESTAMP = 0
  */
 export async function unarchiveSession(sessionId: string, expectedRuntimeKey = getRuntimeKey()): Promise<boolean> {
   if (isStaleRuntime(expectedRuntimeKey)) return false
+  const globalSession = getGlobalSessionSnapshot(sessionId)
   const sessionDirectory = getSessionDirectory(sessionId)
   try {
+    const restore = globalSession
+      ? await resolveMissingWorktreeRestore(globalSession)
+      : null
+    if (isStaleRuntime(expectedRuntimeKey)) return false
+
+    if (globalSession && restore) {
+      for (const { session, sourceDirectory } of getRestoreSubtree(globalSession, restore.sourceDirectory)) {
+        const restored = await opencodeClient.updateSession(
+          session.id,
+          { time: { archived: UNARCHIVED_TIMESTAMP } },
+          sourceDirectory,
+        )
+        if (isStaleRuntime(expectedRuntimeKey)) return false
+        if (!restored) {
+          throw new Error("session.update failed: server did not return the restored session")
+        }
+        if (restored.time?.archived) {
+          throw new Error("session.update failed: server kept the session archived")
+        }
+        await moveSessionToDirectory(restored, sourceDirectory, restore.destinationDirectory, false, expectedRuntimeKey)
+        if (isStaleRuntime(expectedRuntimeKey)) return false
+      }
+      return true
+    }
+
     const restored = await opencodeClient.updateSession(sessionId, { time: { archived: UNARCHIVED_TIMESTAMP } }, sessionDirectory)
     if (isStaleRuntime(expectedRuntimeKey)) return false
     if (!restored) {

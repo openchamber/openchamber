@@ -366,7 +366,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
               >
                 {changelog.kind === 'raw' ? (
                   <div
-                    className="p-4 typography-markdown-body text-foreground leading-relaxed break-words [&_a]:!text-[var(--primary-base)] [&_a]:!no-underline [&_a:hover]:!underline"
+                    className="p-4 typography-markdown-body text-foreground leading-relaxed break-words [&_a]:!text-[var(--primary-base)] [&_a]:!no-underline [&_a:hover]:!underline [&_h3]:!mt-4 [&_h3]:!mb-1.5 [&_h3]:!text-xs [&_h3]:!font-medium [&_h3]:!uppercase [&_h3]:!tracking-wide [&_h3]:!text-muted-foreground [&_h3:first-child]:!mt-0"
                     onClickCapture={(e) => {
                       const target = e.target as HTMLElement;
                       const a = target.closest('a');
@@ -392,7 +392,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                           </span>
                         </div>
                         <div
-                          className="typography-markdown-body text-foreground leading-relaxed break-words [&_a]:!text-[var(--primary-base)] [&_a]:!no-underline [&_a:hover]:!underline"
+                          className="typography-markdown-body text-foreground leading-relaxed break-words [&_a]:!text-[var(--primary-base)] [&_a]:!no-underline [&_a:hover]:!underline [&_h3]:!mt-4 [&_h3]:!mb-1.5 [&_h3]:!text-xs [&_h3]:!font-medium [&_h3]:!uppercase [&_h3]:!tracking-wide [&_h3]:!text-muted-foreground [&_h3:first-child]:!mt-0"
                           onClickCapture={(e) => {
                             const target = e.target as HTMLElement;
                             const a = target.closest('a');
