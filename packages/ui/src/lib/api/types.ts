@@ -1,5 +1,6 @@
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { DraftStarterRef } from '@/lib/draftStarters';
+import type { InputHistoryScope } from '@/lib/inputHistoryScope';
 
 type RuntimePlatform = 'web' | 'desktop' | 'vscode';
 
@@ -657,6 +658,7 @@ interface FileReadOptions {
   outsideFileGrant?: string;
   optional?: boolean;
   directory?: string;
+  fresh?: boolean;
 }
 
 export interface FilesAPI {
@@ -723,8 +725,12 @@ export interface SettingsPayload {
   sessionRetentionAction?: 'archive' | 'delete';
   followUpBehavior?: 'steer' | 'queue';
   queueModeEnabled?: boolean;
+  inputHistoryScope?: InputHistoryScope;
+  inputHistoryLimit?: number;
   gitmojiEnabled?: boolean;
   inputSpellcheckEnabled?: boolean;
+  enterToSend?: boolean;
+  enterToSendConfigured?: boolean;
   showOpenCodeUpdateNotifications?: boolean;
   openCodeUpdateToastDismissedVersion?: string;
   showToolFileIcons?: boolean;
@@ -750,6 +756,7 @@ export interface SettingsPayload {
   shortcutOverrides?: Record<string, string>;
   diffLayoutPreference?: 'dynamic' | 'inline' | 'side-by-side';
   gitChangesViewMode?: 'flat' | 'tree';
+  toolJsonViewMode?: 'summary' | 'formatted' | 'raw';
   directoryShowHidden?: boolean;
   filesViewShowGitignored?: boolean;
   openInAppId?: string;

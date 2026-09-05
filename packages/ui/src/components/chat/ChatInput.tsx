@@ -3,7 +3,7 @@ import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedContextPart, type QueuedMessage } from '@/stores/messageQueueStore';
+import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedContextPart, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
@@ -18,7 +18,6 @@ import {
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
 import { buildLinkedIssue, buildLinkedLinearIssue } from '@/lib/linkedIssues';
-import { useUserMessageHistory } from "@/sync/sync-context";
 import { getInlineCommentDraftKey, useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
@@ -51,6 +50,7 @@ import { ModelControls } from './ModelControls';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
 import { CONTEXT_METADATA_KEY, draftFromContextPayload } from '@/lib/messages/contextParts';
 import { ComposerStatusBar } from './ComposerStatusBar';
+import { shouldSubmitEnter } from './composer/keyboardPolicy';
 import { PendingChangesBar } from './PendingChangesBar';
 import { useChatColumnSession } from './chatColumnSession';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
@@ -165,6 +165,19 @@ import { LinkedReferenceRow } from './composer/ui/LinkedReferenceRow';
 import { RevertedMessageDock } from './composer/ui/RevertedMessageDock';
 import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
 import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
+import {
+    createInputHistoryIdentity,
+    selectInputHistoryEntries,
+    type InputHistorySubmission,
+    useInputHistoryStore,
+} from '@/stores/useInputHistoryStore';
+import {
+    buildChatInputHistorySubmissions,
+    buildInputHistoryNavigatorIdentity,
+    mapInputHistoryEntriesToValues,
+    mergeSessionInputHistory,
+} from './inputHistory';
+import { useUserMessageHistory } from '@/sync/sync-context';
 
 // Lazy like in ChatMessage: a static import would pull the @pierre/diffs and
 // Shiki stacks into the eager startup graph for a dialog opened on demand.
@@ -490,6 +503,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const agents = getVisibleAgents();
     const isMobile = useUIStore((state) => state.isMobile);
     const hasHardwareKeyboard = useHardwareKeyboard();
+    const enterToSend = useUIStore((state) => state.enterToSend);
+    const enterToSendConfigured = useUIStore((state) => state.enterToSendConfigured);
     const { enabled: isTabletLayout } = useTabletLayout();
     const setImagePreviewOpen = useUIStore((state) => state.setImagePreviewOpen);
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
@@ -885,9 +900,33 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const consumeDrafts = useInlineCommentDraftStore((state) => state.consumeDrafts);
     const hasDrafts = draftCount > 0;
 
-    // User message history for up/down arrow navigation.
-    // Keep this on a narrow hook instead of full session message records.
-    const messageHistory = useMessageHistory(useUserMessageHistory(currentSessionId ?? ""));
+    const inputHistoryScope = useInputHistoryStore((state) => state.scope);
+    const inputHistoryIdentity = React.useMemo(
+        () => createInputHistoryIdentity(
+            activeRuntimeKey,
+            currentSessionDirectoryForSync ?? currentDirectory ?? '',
+            currentSessionId ?? 'draft',
+        ),
+        [activeRuntimeKey, currentDirectory, currentSessionDirectoryForSync, currentSessionId],
+    );
+    const inputHistoryEntries = useInputHistoryStore(React.useCallback(
+        (state) => selectInputHistoryEntries(state, inputHistoryIdentity),
+        [inputHistoryIdentity],
+    ));
+    // Session scope also reads the visible transcript, so sessions older than
+    // the persisted history still recall their prompts.
+    const transcriptPrompts = useUserMessageHistory(currentSessionId ?? '');
+    const historyValues = React.useMemo(
+        () => (inputHistoryScope === 'session'
+            ? mergeSessionInputHistory(transcriptPrompts, inputHistoryEntries)
+            : mapInputHistoryEntriesToValues(inputHistoryEntries)),
+        [inputHistoryEntries, inputHistoryScope, transcriptPrompts],
+    );
+    const messageHistoryIdentity = React.useMemo(
+        () => buildInputHistoryNavigatorIdentity(inputHistoryScope, inputHistoryIdentity),
+        [inputHistoryIdentity, inputHistoryScope],
+    );
+    const messageHistory = useMessageHistory<AttachedFile>(historyValues, messageHistoryIdentity);
 
     // Keep messageRef in sync with message state
     React.useEffect(() => {
@@ -1388,6 +1427,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             sessionId?: string;
             directory?: string;
             draftSnapshot?: NonNullable<typeof capturedDraftSnapshot>;
+            historySubmissions?: InputHistorySubmission[];
             delivery?: 'steer';
         } | undefined;
         if (isBtwActive && btwSessionId && btwDirectory) {
@@ -1434,6 +1474,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 return;
             }
             if (queuedOnly && queuedMessagesToSend.length === 0) return;
+        }
+
+        const historySubmissions = buildChatInputHistorySubmissions({
+            inputMode,
+            // Server-owned items were recorded on acceptance. VS Code records
+            // the full items actually taken, never the metadata projection.
+            queuedMessages: isServerOwnedMessageQueue() ? [] : queuedMessagesToSend,
+            composerText: inputSnapshot.message,
+            composerAttachments: attachedFiles,
+            includeComposer: !queuedOnly && inputSnapshot.hasContent,
+        });
+        if (historySubmissions?.length) {
+            sendMessageOptions = { ...sendMessageOptions, historySubmissions };
         }
 
         // Inline review comments and synthetic context are consumed before
@@ -1907,9 +1960,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         if (e.key === 'ArrowUp' && canNavigateHistoryUp) {
             e.preventDefault();
-            const recalled = messageHistory.older(message);
+            const recalled = messageHistory.older({ text: message, attachments: attachedFiles });
             if (recalled !== null) {
-                setMessage(recalled);
+                setMessage(recalled.text);
+                useInputStore.getState().setAttachedFiles([...recalled.attachments]);
                 // Caret to the start, so the recalled message reads from its
                 // beginning rather than from wherever the draft's caret was.
                 requestAnimationFrame(() => composerRef.current?.setSelection(0, 0));
@@ -1919,20 +1973,28 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         if (e.key === 'ArrowDown' && canNavigateHistoryDown) {
             e.preventDefault();
-            const recalled = messageHistory.newer();
-            if (recalled !== null) setMessage(recalled);
+            const recalled = messageHistory.newer({ text: message, attachments: attachedFiles });
+            if (recalled !== null) {
+                setMessage(recalled.text);
+                useInputStore.getState().setAttachedFiles([...recalled.attachments]);
+                requestAnimationFrame(() => composerRef.current?.setSelection(recalled.text.length, recalled.text.length));
+            }
             return;
         }
 
-        // Handle Enter/Ctrl+Enter based on selected follow-up behavior. On
-        // mobile, and in desktop focus mode, plain Enter writes a newline and
-        // only Cmd/Ctrl+Enter sends: both are surfaces for composing long
-        // prompts, where an accidental send costs more than an extra keypress.
-        const requiresModifierToSend = isMobile || isDesktopExpanded;
-        if (e.key === 'Enter' && !e.shiftKey && (!requiresModifierToSend || e.ctrlKey || e.metaKey)) {
+        // Preserve each surface's existing default until the user changes the
+        // setting. Once configured, the choice applies consistently everywhere.
+        const isCtrlEnter = e.ctrlKey || e.metaKey;
+        if (e.key === 'Enter' && shouldSubmitEnter({
+            isMobile,
+            isDesktopExpanded,
+            enterToSend,
+            enterToSendConfigured,
+            shiftKey: e.shiftKey,
+            ctrlKey: e.ctrlKey,
+            metaKey: e.metaKey,
+        })) {
             e.preventDefault();
-
-            const isCtrlEnter = e.ctrlKey || e.metaKey;
 
             // Queueing / steering only works when there's an existing busy
             // session (or an active auto-review run).
@@ -3248,6 +3310,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                                 editable={Boolean(currentSessionId || newSessionDraftOpen)}
                                 autoCorrect={composerAutoCorrect({ isMobile })}
                                 autoCapitalize={isMobile ? 'sentences' : 'none'}
+                                preserveDeferredEnterShift={!enterToSendConfigured || !isMobile}
                                 spellCheck={isMobile || inputSpellcheckEnabled}
                                 fillContainer={isComposerExpanded}
                                 maxLines={isMobile ? MAX_MOBILE_COMPOSER_LINES : MAX_VISIBLE_COMPOSER_LINES}

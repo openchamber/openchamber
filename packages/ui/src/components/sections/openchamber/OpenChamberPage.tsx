@@ -204,12 +204,15 @@ const ChatSectionContent: React.FC = () => {
                 'splitAssistantMessageActions',
                 'subagentReadOnlyBanner',
                 'diffLayout',
+                'inputHistoryScope',
+                'inputHistoryLimit',
                 'dotfiles',
                 'fileViewerPreview',
                 'followUpBehavior',
                 'persistDraft',
                 'inputSpellcheck',
                 'largeTextPaste',
+                'enterToSend',
             ]}
         />
     );

@@ -72,6 +72,8 @@ import { getToolDescriptionFallback } from './toolRenderUtils';
 import { ApplyPatchFileButtons } from './ApplyPatchFileButtons';
 import { openApplyPatchFileInEditor } from './applyPatchEditorAction';
 
+type ToolJsonViewMode = 'summary' | 'formatted' | 'raw';
+
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
 const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
@@ -651,28 +653,23 @@ const StreamingPlainTextOutput: React.FC<{ output: string }> = ({ output }) => {
     );
 };
 
-const ToolScrollableTextOutput: React.FC<{
-    output: string;
-    part: ToolPartType;
-    metadata: Record<string, unknown> | undefined;
-    input: Record<string, unknown> | undefined;
-    isStreaming?: boolean;
-}> = ({ output, part, metadata, input, isStreaming = false }) => {
+type JsonOutputResult = ReturnType<typeof tryParseJsonOutput>;
+
+const JsonToolOutput: React.FC<{
+    jsonResult: JsonOutputResult;
+    renderedOutput: string;
+}> = ({ jsonResult, renderedOutput }) => {
     const { t } = useI18n();
-    const renderedOutput = getToolOutputText(output, part, metadata);
-    const outputLanguage = getToolOutputLanguage(output, part, metadata, input);
-    const jsonResult = React.useMemo(() => tryParseJsonOutput(renderedOutput), [renderedOutput]);
-    const [jsonViewMode, setJsonViewMode] = React.useState<'summary' | 'formatted' | 'raw'>('summary');
+    const jsonViewMode = useUIStore((state) => state.toolJsonViewMode);
     const [copiedJson, setCopiedJson] = React.useState(false);
 
     React.useEffect(() => {
-        setJsonViewMode('summary');
         setCopiedJson(false);
     }, [renderedOutput]);
 
-    const handleJsonViewChange = React.useCallback((view: 'summary' | 'formatted' | 'raw', event: React.MouseEvent<HTMLButtonElement>) => {
+    const handleJsonViewChange = React.useCallback((view: ToolJsonViewMode, event: React.MouseEvent<HTMLButtonElement>) => {
         event.stopPropagation();
-        setJsonViewMode(view);
+        useUIStore.getState().setToolJsonViewMode(view);
     }, []);
 
     const handleCopyOutput = React.useCallback(async (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -688,6 +685,88 @@ const ToolScrollableTextOutput: React.FC<{
         }
     }, [renderedOutput, t]);
 
+    return (
+        <div className="tool-output-surface relative p-2 rounded-xl w-full min-w-0">
+            <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'summary' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
+                    onClick={(event) => handleJsonViewChange('summary', event)}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    aria-label={t('chat.toolPart.showNavigableJson')}
+                    title={t('chat.toolPart.showNavigableJson')}
+                >
+                    <Icon name="list-unordered" className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'formatted' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
+                    onClick={(event) => handleJsonViewChange('formatted', event)}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    aria-label={t('chat.toolPart.showFormattedJson')}
+                    title={t('chat.toolPart.showFormattedJson')}
+                >
+                    <Icon name="node-tree" className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'raw' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
+                    onClick={(event) => handleJsonViewChange('raw', event)}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    aria-label={t('chat.toolPart.showRawJson')}
+                    title={t('chat.toolPart.showRawJson')}
+                >
+                    <Icon name="code-box" className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 rounded-md bg-[var(--surface-elevated)]/80 text-muted-foreground hover:text-foreground"
+                    onClick={handleCopyOutput}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    aria-label={copiedJson ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
+                    title={copiedJson ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
+                >
+                    <Icon name={copiedJson ? 'check' : 'file-copy'} className="h-3.5 w-3.5" />
+                </Button>
+            </div>
+            {jsonViewMode === 'summary' ? (
+                <JsonSummaryView data={jsonResult.data} />
+            ) : jsonViewMode === 'formatted' ? (
+                <JsonTreeViewer
+                    data={jsonResult.data}
+                    initiallyExpandedDepth={1}
+                    maxHeight="400px"
+                />
+            ) : (
+                <div className="typography-code pr-12 text-muted-foreground/90">
+                    <WorkerHighlightedCode
+                        language="json"
+                        code={renderedOutput}
+                        style={TOOL_COLLAPSED_CUSTOM_STYLE}
+                        codeStyle={CODE_TAG_PROPS.style}
+                        wrap
+                    />
+                </div>
+            )}
+        </div>
+    );
+};
+
+const ToolScrollableTextOutput: React.FC<{
+    output: string;
+    part: ToolPartType;
+    metadata: Record<string, unknown> | undefined;
+    input: Record<string, unknown> | undefined;
+    isStreaming?: boolean;
+}> = ({ output, part, metadata, input, isStreaming = false }) => {
+    const renderedOutput = getToolOutputText(output, part, metadata);
+    const outputLanguage = getToolOutputLanguage(output, part, metadata, input);
+    const jsonResult = React.useMemo(() => tryParseJsonOutput(renderedOutput), [renderedOutput]);
+
     if (part.tool === 'bash' && isStreaming) {
         return (
             <div className="typography-code text-muted-foreground/90">
@@ -697,75 +776,7 @@ const ToolScrollableTextOutput: React.FC<{
     }
 
     if (jsonResult.isJson) {
-        return (
-            <div className="tool-output-surface relative p-2 rounded-xl w-full min-w-0">
-                <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'summary' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
-                        onClick={(event) => handleJsonViewChange('summary', event)}
-                        onPointerDown={(event) => event.stopPropagation()}
-                        aria-label={t('chat.toolPart.showNavigableJson')}
-                        title={t('chat.toolPart.showNavigableJson')}
-                    >
-                        <Icon name="list-unordered" className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'formatted' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
-                        onClick={(event) => handleJsonViewChange('formatted', event)}
-                        onPointerDown={(event) => event.stopPropagation()}
-                        aria-label={t('chat.toolPart.showFormattedJson')}
-                        title={t('chat.toolPart.showFormattedJson')}
-                    >
-                        <Icon name="node-tree" className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'raw' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
-                        onClick={(event) => handleJsonViewChange('raw', event)}
-                        onPointerDown={(event) => event.stopPropagation()}
-                        aria-label={t('chat.toolPart.showRawJson')}
-                        title={t('chat.toolPart.showRawJson')}
-                    >
-                        <Icon name="code-box" className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 rounded-md bg-[var(--surface-elevated)]/80 text-muted-foreground hover:text-foreground"
-                        onClick={handleCopyOutput}
-                        onPointerDown={(event) => event.stopPropagation()}
-                        aria-label={copiedJson ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
-                        title={copiedJson ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
-                    >
-                        <Icon name={copiedJson ? 'check' : 'file-copy'} className="h-3.5 w-3.5" />
-                    </Button>
-                </div>
-                {jsonViewMode === 'summary' ? (
-                    <JsonSummaryView data={jsonResult.data} />
-                ) : jsonViewMode === 'formatted' ? (
-                    <JsonTreeViewer
-                        data={jsonResult.data}
-                        initiallyExpandedDepth={1}
-                        maxHeight="400px"
-                    />
-                ) : (
-                    <div className="typography-code pr-12 text-muted-foreground/90">
-                        <WorkerHighlightedCode
-                            language="json"
-                            code={renderedOutput}
-                            style={TOOL_COLLAPSED_CUSTOM_STYLE}
-                            codeStyle={CODE_TAG_PROPS.style}
-                            wrap
-                        />
-                    </div>
-                )}
-            </div>
-        );
+        return <JsonToolOutput jsonResult={jsonResult} renderedOutput={renderedOutput} />;
     }
 
     return (

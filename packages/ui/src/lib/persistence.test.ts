@@ -4,6 +4,11 @@ import type { RuntimeAPIs, SettingsPayload } from '@/lib/api/types';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { startAppearanceAutoSave } from '@/lib/appearanceAutoSave';
+import {
+  DEFAULT_INPUT_HISTORY_LIMIT,
+  DEFAULT_INPUT_HISTORY_SCOPE,
+} from '@/lib/inputHistoryScope';
+import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
@@ -30,6 +35,8 @@ type TestWindow = {
 
 let createdWindow = false;
 let createdLocalStorage = false;
+const originalInputHistoryApplyScope = useInputHistoryStore.getState().applyScope;
+const originalInputHistoryApplyEntryLimit = useInputHistoryStore.getState().applyEntryLimit;
 
 const ensureLocalStorage = (): void => {
   if (typeof localStorage !== 'undefined') {
@@ -156,6 +163,14 @@ describe('updateDesktopSettings', () => {
     registerRuntimeAPIs(null);
     invalidateSettingsCache();
     resetModelPrefsState();
+    useInputHistoryStore.setState({
+      entryLimit: DEFAULT_INPUT_HISTORY_LIMIT,
+      scope: DEFAULT_INPUT_HISTORY_SCOPE,
+      globalBuckets: {},
+      sessionBuckets: {},
+      applyEntryLimit: originalInputHistoryApplyEntryLimit,
+      applyScope: originalInputHistoryApplyScope,
+    });
   });
 
   test('waits for the debounced settings save to finish before resolving', async () => {
@@ -259,6 +274,16 @@ describe('updateDesktopSettings', () => {
     } finally {
       globalThis.fetch = previousFetch;
     }
+  });
+
+  test('applies enterToSendConfigured when it arrives without enterToSend', async () => {
+    useUIStore.setState({ enterToSend: false, enterToSendConfigured: false });
+    registerSettingsSave(async () => ({ enterToSendConfigured: true }));
+
+    await updateDesktopSettings({ enterToSendConfigured: true });
+
+    expect(useUIStore.getState().enterToSend).toBe(false);
+    expect(useUIStore.getState().enterToSendConfigured).toBe(true);
   });
 
   test('reports an error without applying a malformed fallback settings response', async () => {
@@ -401,6 +426,7 @@ describe('updateDesktopSettings', () => {
         showReasoningTraces: false,
         terminalShell: 'fish',
         favoriteModels: [{ providerID: 'anthropic', modelID: 'claude-sonnet-4' }],
+        toolJsonViewMode: 'raw',
         followUpBehavior: 'steer',
         draftStarters: [{ type: 'command', name: 'runtime-a' }],
         draftStartersVisible: false,
@@ -413,6 +439,7 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().showReasoningTraces).toBe(false);
     expect(useUIStore.getState().terminalShell).toBe('fish');
     expect(useUIStore.getState().favoriteModels).toHaveLength(1);
+    expect(useUIStore.getState().toolJsonViewMode).toBe('raw');
     expect(useUIStore.getState().globalDraftStarters).toEqual([{ type: 'command', name: 'runtime-a' }]);
     expect(useUIStore.getState().draftStartersVisible).toBe(false);
     expect(useMessageQueueStore.getState().followUpBehavior).toBe('steer');
@@ -427,6 +454,7 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().showReasoningTraces).toBe(true);
     expect(useUIStore.getState().terminalShell).toBe('auto');
     expect(useUIStore.getState().favoriteModels).toEqual([]);
+    expect(useUIStore.getState().toolJsonViewMode).toBe('summary');
     expect(useUIStore.getState().globalDraftStarters).toBeNull();
     expect(useUIStore.getState().draftStartersVisible).toBe(true);
     expect(useMessageQueueStore.getState().followUpBehavior).toBe('queue');
@@ -443,6 +471,18 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().showReasoningTraces).toBe(false);
     expect(useUIStore.getState().terminalShell).toBe('fish');
     expect(localStorage.getItem('selectedThemeId')).toBe('existing-theme');
+  });
+
+  test('ignores an invalid JSON view mode in a settings save response', async () => {
+    getWindow();
+    useUIStore.getState().setToolJsonViewMode('formatted');
+    const invalidSettings: SettingsPayload = {};
+    Object.defineProperty(invalidSettings, 'toolJsonViewMode', { value: 'invalid', enumerable: true });
+    registerSettingsSave(async () => invalidSettings);
+
+    await updateDesktopSettings({ showReasoningTraces: false });
+
+    expect(useUIStore.getState().toolJsonViewMode).toBe('formatted');
   });
 
   test('applies authoritative shared sidebar preferences without replacing local-only sidebar state', async () => {
@@ -547,6 +587,24 @@ describe('updateDesktopSettings', () => {
       projectSortOrder: 'z-a',
       showRecentSection: false,
     });
+  });
+
+  test('applies validated input history scope from shared settings save responses', async () => {
+    getWindow();
+    registerSettingsSave(async () => ({ inputHistoryScope: 'session' }));
+
+    await updateDesktopSettings({ inputHistoryScope: 'session' });
+
+    expect(useInputHistoryStore.getState().scope).toBe('session');
+  });
+
+  test('applies validated input history limit from shared settings save responses', async () => {
+    getWindow();
+    registerSettingsSave(async () => ({ inputHistoryLimit: 100 }));
+
+    await updateDesktopSettings({ inputHistoryLimit: 100 });
+
+    expect(useInputHistoryStore.getState().entryLimit).toBe(100);
   });
 
   test('does not broadcast a stale project selection over a newer pending update', async () => {
@@ -756,7 +814,7 @@ describe('updateDesktopSettings', () => {
     }
   });
 
-  test('autosaves terminal shell changes to shared settings', async () => {
+  test('autosaves appearance preferences to shared settings', async () => {
     getWindow();
     useUIStore.getState().setTerminalShell('auto');
     useUIStore.getState().setTerminalLoginShells([]);
@@ -769,10 +827,12 @@ describe('updateDesktopSettings', () => {
 
     useUIStore.getState().setTerminalShell('zsh');
     useUIStore.getState().setTerminalLoginShells(['zsh']);
+    useUIStore.getState().setToolJsonViewMode('formatted');
     await delay(500);
 
     expect(saveCalls.some((changes) => changes.terminalShell === 'zsh')).toBe(true);
     expect(saveCalls.some((changes) => changes.terminalLoginShells?.includes('zsh'))).toBe(true);
+    expect(saveCalls.some((changes) => changes.toolJsonViewMode === 'formatted')).toBe(true);
   });
 
   test('applies persisted autoSaveEnabled from server settings', async () => {
@@ -787,6 +847,150 @@ describe('updateDesktopSettings', () => {
     await syncDesktopSettings();
 
     expect(useUIStore.getState().autoSaveEnabled).toBe(false);
+  });
+
+  test('applies persisted input history scope from server settings', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: {
+        inputHistoryScope: 'session',
+        autoSaveEnabled: true,
+        draftStartersCraftGoalAdded: true,
+        draftStartersScheduleTaskAdded: true,
+      },
+      source: 'web',
+    }));
+
+    await syncDesktopSettings();
+
+    expect(useInputHistoryStore.getState().scope).toBe('session');
+  });
+
+  test('applies persisted input history limit from server settings', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: {
+        inputHistoryLimit: 100,
+        autoSaveEnabled: true,
+        draftStartersCraftGoalAdded: true,
+        draftStartersScheduleTaskAdded: true,
+      },
+      source: 'web',
+    }));
+
+    await syncDesktopSettings();
+
+    expect(useInputHistoryStore.getState().entryLimit).toBe(100);
+  });
+
+  test('defaults omitted input history scope to global without writing a migration', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    useInputHistoryStore.getState().applyScope('session');
+    const saveCalls: Array<Partial<SettingsPayload>> = [];
+    registerSettingsApi(async (changes) => {
+      saveCalls.push(changes);
+      return changes as SettingsPayload;
+    }, async () => ({
+      settings: {
+        autoSaveEnabled: true,
+        draftStartersCraftGoalAdded: true,
+        draftStartersScheduleTaskAdded: true,
+      },
+      source: 'web',
+    }));
+
+    await syncDesktopSettings();
+
+    expect(useInputHistoryStore.getState().scope).toBe(DEFAULT_INPUT_HISTORY_SCOPE);
+    expect(saveCalls.some((changes) => changes.inputHistoryScope !== undefined)).toBe(false);
+  });
+
+  test('defaults omitted input history limit to forty without writing a migration', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    useInputHistoryStore.getState().applyEntryLimit(100);
+    const saveCalls: Array<Partial<SettingsPayload>> = [];
+    registerSettingsApi(async (changes) => {
+      saveCalls.push(changes);
+      return changes as SettingsPayload;
+    }, async () => ({
+      settings: {
+        autoSaveEnabled: true,
+        draftStartersCraftGoalAdded: true,
+        draftStartersScheduleTaskAdded: true,
+      },
+      source: 'web',
+    }));
+
+    await syncDesktopSettings();
+
+    expect(useInputHistoryStore.getState().entryLimit).toBe(DEFAULT_INPUT_HISTORY_LIMIT);
+    expect(saveCalls.some((changes) => changes.inputHistoryLimit !== undefined)).toBe(false);
+  });
+
+  test('does not reapply the hydrated input history scope when it already matches', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    useInputHistoryStore.getState().applyScope('session');
+    let applyScopeCalls = 0;
+    useInputHistoryStore.setState({
+      applyScope: (scope) => {
+        applyScopeCalls += 1;
+        originalInputHistoryApplyScope(scope);
+      },
+    });
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: {
+        inputHistoryScope: 'session',
+        autoSaveEnabled: true,
+        draftStartersCraftGoalAdded: true,
+        draftStartersScheduleTaskAdded: true,
+      },
+      source: 'web',
+    }));
+
+    try {
+      await syncDesktopSettings();
+    } finally {
+      useInputHistoryStore.setState({ applyScope: originalInputHistoryApplyScope });
+    }
+
+    expect(applyScopeCalls).toBe(0);
+    expect(useInputHistoryStore.getState().scope).toBe('session');
+  });
+
+  test('does not reapply the hydrated input history limit when it already matches', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    useInputHistoryStore.getState().applyEntryLimit(100);
+    let applyEntryLimitCalls = 0;
+    useInputHistoryStore.setState({
+      applyEntryLimit: (limit) => {
+        applyEntryLimitCalls += 1;
+        originalInputHistoryApplyEntryLimit(limit);
+      },
+    });
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: {
+        inputHistoryLimit: 100,
+        autoSaveEnabled: true,
+        draftStartersCraftGoalAdded: true,
+        draftStartersScheduleTaskAdded: true,
+      },
+      source: 'web',
+    }));
+
+    try {
+      await syncDesktopSettings();
+    } finally {
+      useInputHistoryStore.setState({ applyEntryLimit: originalInputHistoryApplyEntryLimit });
+    }
+
+    expect(applyEntryLimitCalls).toBe(0);
+    expect(useInputHistoryStore.getState().entryLimit).toBe(100);
   });
 
   test('autosaves autoSaveEnabled changes to shared settings', async () => {

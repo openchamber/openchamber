@@ -4,48 +4,61 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 export const CHAT_DRAFT_PROJECT_ID = 'openchamber:chats';
-const MANAGED_CHATS_PATH_SEGMENT = '/.config/openchamber/chats/';
-const chatsRootByRuntime = new Map<string, Promise<string>>();
+type ChatRoots = { configured: string; legacy: string };
+const chatsRootByRuntime = new Map<string, Promise<ChatRoots>>();
+const chatsRootCacheByRuntime = new Map<string, ChatRoots>();
 
-const joinPath = (base: string, ...parts: string[]): string => {
-  const separator = base.includes('\\') ? '\\' : '/';
-  return [base.replace(/[\\/]+$/, ''), ...parts].join(separator);
-};
+const joinPath = (base: string, ...parts: string[]): string =>
+  [base.replace(/[\\/]+$/, ''), ...parts].join('/');
 
-export function isChatDirectoryForHome(directory: string | null | undefined, home: string | null | undefined): boolean {
-  const normalized = normalizePath(directory ?? null);
-  if (normalized?.includes(MANAGED_CHATS_PATH_SEGMENT)) return true;
-  const normalizedHome = normalizePath(home ?? null);
-  if (!normalized || !normalizedHome) return false;
-  const root = normalizePath(joinPath(normalizedHome, '.config', 'openchamber', 'chats'));
-  return Boolean(root && normalized.startsWith(`${root}/`));
+function legacyRootForHome(home: string | null | undefined): string | null {
+  const normalized = normalizePath(home);
+  return normalized ? joinPath(normalized, '.config', 'openchamber', 'chats') : null;
 }
 
-export function isChatDirectoryPath(directory: string | null | undefined): boolean {
-  return normalizePath(directory ?? null)?.includes(MANAGED_CHATS_PATH_SEGMENT) === true;
+function isWithinRoot(directory: string, root: string): boolean {
+  return !directory.split('/').some((part) => part === '..' || part === '.')
+    && (directory === root || directory.startsWith(`${root}/`));
+}
+
+function cachedRoots(): ChatRoots | undefined {
+  return chatsRootCacheByRuntime.get(getRuntimeKey());
 }
 
 export function getChatsRootFromDirectory(directory: string | null | undefined): string | null {
-  const normalized = normalizePath(directory ?? null);
-  const index = normalized?.indexOf(MANAGED_CHATS_PATH_SEGMENT) ?? -1;
-  return normalized && index >= 0
-    ? normalized.slice(0, index + MANAGED_CHATS_PATH_SEGMENT.length - 1)
-    : null;
+  const normalized = normalizePath(directory);
+  const roots = cachedRoots();
+  if (!normalized || !roots) return null;
+  if (isWithinRoot(normalized, roots.configured)) return roots.configured;
+  return isWithinRoot(normalized, roots.legacy) ? roots.legacy : null;
+}
+
+export function isChatDirectoryPath(directory: string | null | undefined): boolean {
+  return getChatsRootFromDirectory(directory) !== null;
+}
+
+export function isChatDirectoryForHome(directory: string | null | undefined, home: string | null | undefined): boolean {
+  if (isChatDirectoryPath(directory)) return true;
+  const normalized = normalizePath(directory);
+  const legacy = legacyRootForHome(home);
+  return Boolean(normalized && legacy && isWithinRoot(normalized, legacy));
 }
 
 export function getChatsRootForHome(home: string | null | undefined): string | null {
-  const normalizedHome = normalizePath(home ?? null);
-  return normalizedHome ? normalizePath(joinPath(normalizedHome, '.config', 'openchamber', 'chats')) : null;
+  return cachedRoots()?.configured ?? legacyRootForHome(home);
 }
 
-async function getChatsRootDirectory(): Promise<string> {
+async function getChatRoots(): Promise<ChatRoots> {
   const runtimeKey = getRuntimeKey();
   const existing = chatsRootByRuntime.get(runtimeKey);
   if (existing) return existing;
-
-  const pending = opencodeClient.getFilesystemHome().then((home) => {
-    if (!home) throw new Error('Unable to resolve the home directory');
-    return joinPath(home, '.config', 'openchamber', 'chats');
+  const pending = opencodeClient.getFilesystemHomeInfo().then(({ home, chatsRoot }) => {
+    const legacy = legacyRootForHome(home);
+    const configured = normalizePath(chatsRoot) ?? legacy;
+    if (!legacy || !configured) throw new Error('Unable to resolve chat directories');
+    const roots = { configured, legacy };
+    chatsRootCacheByRuntime.set(runtimeKey, roots);
+    return roots;
   }).catch((error) => {
     chatsRootByRuntime.delete(runtimeKey);
     throw error;
@@ -54,29 +67,35 @@ async function getChatsRootDirectory(): Promise<string> {
   return pending;
 }
 
-export function warmChatsRootDirectory(): void {
-  void getChatsRootDirectory().catch(() => undefined);
+/** Required before a global snapshot can classify or persist managed chats. */
+export async function ensureChatsRootDirectory(): Promise<void> {
+  await getChatRoots();
+}
+
+export function warmChatsRootDirectory(): Promise<void> {
+  return ensureChatsRootDirectory().catch(() => undefined);
 }
 
 export async function createChatDirectory(now = new Date()): Promise<string> {
-  const root = await getChatsRootDirectory();
+  const runtimeKey = getRuntimeKey();
+  const roots = await getChatRoots();
+  if (getRuntimeKey() !== runtimeKey) throw new Error('Runtime changed while preparing chat directory');
   const date = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
-  const dateDirectory = joinPath(root, date);
   const id = globalThis.crypto?.randomUUID?.() ?? `${now.getTime()}-${Math.random().toString(36).slice(2)}`;
-  const directory = joinPath(dateDirectory, `session-${id}`);
+  const directory = joinPath(roots.configured, date, `session-${id}`);
   await opencodeClient.createDirectory(directory);
   return directory;
 }
 
-async function isChatDirectory(directory: string | null | undefined): Promise<boolean> {
-  const normalized = normalizePath(directory ?? null);
-  if (!normalized) return false;
-  const root = normalizePath(await getChatsRootDirectory());
-  return Boolean(root && (normalized === root || normalized.startsWith(`${root}/`)));
-}
-
 export async function deleteChatDirectory(directory: string): Promise<void> {
-  if (!await isChatDirectory(directory)) return;
+  const normalized = normalizePath(directory);
+  if (!normalized) return;
+  const runtimeKey = getRuntimeKey();
+  const roots = await getChatRoots();
+  if (getRuntimeKey() !== runtimeKey) throw new Error('Runtime changed while deleting chat directory');
+  // A session may own a descendant, never either shared chats root itself.
+  if (normalized === roots.configured || normalized === roots.legacy) return;
+  if (!isWithinRoot(normalized, roots.configured) && !isWithinRoot(normalized, roots.legacy)) return;
   const response = await runtimeFetch('/api/fs/delete', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

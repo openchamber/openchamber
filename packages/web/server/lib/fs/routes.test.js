@@ -1429,3 +1429,80 @@ describe('fs stat directory scope (issue 3019)', () => {
     expect(res.body.isFile).toBe(true);
   });
 });
+
+describe('fs managed chats root', () => {
+  const registerWithChatsRoot = ({ managedChatsRoot, fsPromises = {} } = {}) => {
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => '/home/user' },
+      path: path.posix,
+      fsPromises: {
+        realpath: async (targetPath) => targetPath,
+        mkdir: async () => undefined,
+        ...fsPromises,
+      },
+      spawn: vi.fn(),
+      crypto: { randomUUID: () => 'job-0' },
+      normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: '/repo' }),
+      buildAugmentedPath: () => '/usr/bin',
+      resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: '/home/user/.config/openchamber',
+      managedChatsRoot,
+    });
+    return {
+      home: getRoute('GET', '/api/fs/home'),
+      mkdir: getRoute('POST', '/api/fs/mkdir'),
+    };
+  };
+
+  it('exposes the default chats root next to the home directory', async () => {
+    const { home } = registerWithChatsRoot();
+
+    const res = createMockResponse();
+    await home(undefined, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.home).toBe('/home/user');
+    expect(res.body.chatsRoot).toBe('/home/user/.config/openchamber/chats');
+  });
+
+  it('exposes a relocated chats root when OPENCHAMBER_CHATS_DIR is configured upstream', async () => {
+    const { home } = registerWithChatsRoot({ managedChatsRoot: '/srv/openchamber-chats' });
+
+    const res = createMockResponse();
+    await home(undefined, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.chatsRoot).toBe('/srv/openchamber-chats');
+  });
+
+  it('allows mkdir inside the relocated chats root outside the active workspace', async () => {
+    const mkdirCalls = [];
+    const { mkdir } = registerWithChatsRoot({
+      managedChatsRoot: '/srv/openchamber-chats',
+      fsPromises: {
+        mkdir: async (targetPath) => {
+          mkdirCalls.push(targetPath);
+        },
+      },
+    });
+
+    const res = createMockResponse();
+    await mkdir({ body: { path: '/srv/openchamber-chats/2026-08-25/session-a' } }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(mkdirCalls).toEqual(['/srv/openchamber-chats/2026-08-25/session-a']);
+  });
+
+  it('still rejects mkdir outside the workspace and all managed roots', async () => {
+    const { mkdir } = registerWithChatsRoot({ managedChatsRoot: '/srv/openchamber-chats' });
+
+    const res = createMockResponse();
+    await mkdir({ body: { path: '/etc/passwd-holder' } }, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Path is outside of active workspace' });
+  });
+});

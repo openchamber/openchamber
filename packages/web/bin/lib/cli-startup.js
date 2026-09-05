@@ -313,8 +313,7 @@ function getCurrentUsername() {
 // when the user has lingering enabled. Detect it so `startup enable` can warn
 // that the service may otherwise stop on logout. Returns null when the state
 // cannot be determined (no username, loginctl unavailable, or odd output).
-function getUserLingerEnabled(username) {
-  const user = typeof username === 'string' && username.length > 0 ? username : getCurrentUsername();
+function getUserLingerEnabled(user) {
   if (!user) {
     return null;
   }

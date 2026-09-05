@@ -1,6 +1,7 @@
 import type { ContextPartMetadata } from '@/lib/messages/contextParts';
 import { createOpencodeClient, OpencodeClient } from "@opencode-ai/sdk/v2";
 import type { PermissionV2Request, PermissionV2Effect, PermissionV2Source } from "@opencode-ai/sdk/v2/client";
+import { z } from "zod";
 import type { FilesAPI } from "../api/types";
 import { getDesktopHomeDirectory } from "../desktop";
 import type {
@@ -14,7 +15,6 @@ import type {
   FilePartInput,
 } from "@opencode-ai/sdk/v2";
 import { isAmbiguousTransportFailure, markAmbiguousTransportFailure } from "@/lib/relay/transport-error";
-import { z } from "zod";
 import { FilesystemError, parseFilesystemErrorReason } from "@/lib/api/files-errors";
 import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
@@ -330,6 +330,11 @@ const getDesktopFilesApi = (): FilesAPI | null => {
   }
   return null;
 };
+
+// /api/fs/home parsing boundary. Older servers answer without chatsRoot;
+// only a valid home response may use the legacy chats-root fallback.
+const fsAbsolutePathSchema = z.string().trim().regex(/^(?:\/|[A-Za-z]:[\\/]|\\\\)/);
+const fsHomeResponseSchema = z.object({ home: fsAbsolutePathSchema, chatsRoot: fsAbsolutePathSchema.optional() });
 
 class OpencodeService {
   private client: OpencodeClient;
@@ -1940,6 +1945,21 @@ class OpencodeService {
       console.warn('Failed to resolve filesystem home directory:', error);
       return null;
     }
+  }
+
+  // Both roots must describe the same server response, including on desktop.
+  // Failure is distinct from an older server omitting chatsRoot.
+  async getFilesystemHomeInfo(): Promise<z.infer<typeof fsHomeResponseSchema>> {
+    const response = await runtimeFetch(`${this.baseUrl}/fs/home`, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json'
+      }
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to resolve the chats root (${response.status})`);
+    }
+    return fsHomeResponseSchema.parse(await response.json());
   }
 
   async setOpenCodeWorkingDirectory(directoryPath: string | null | undefined): Promise<DirectorySwitchResult | null> {

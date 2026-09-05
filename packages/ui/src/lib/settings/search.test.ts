@@ -30,6 +30,28 @@ describe('settings search', () => {
     expect(results.some((result) => result.id === 'integrations.linear.mapping')).toBe(true);
   });
 
+  test('finds the chat input history scope setting', () => {
+    const results = buildSettingsSearchResults({
+      query: 'input history scope',
+      runtimeCtx,
+      t,
+      getPageTitle: (page) => page,
+    });
+
+    expect(results.some((result) => result.id === 'chat.input-history-scope')).toBe(true);
+  });
+
+  test('finds the chat input history limit setting by recall keywords', () => {
+    const results = buildSettingsSearchResults({
+      query: 'remember prompts',
+      runtimeCtx,
+      t,
+      getPageTitle: (page) => page,
+    });
+
+    expect(results.some((result) => result.id === 'chat.input-history-limit')).toBe(true);
+  });
+
   test('hides Linear connect in VS Code', () => {
     const results = buildSettingsSearchResults({
       query: 'linear',

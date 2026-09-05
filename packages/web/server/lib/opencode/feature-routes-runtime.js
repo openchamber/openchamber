@@ -98,6 +98,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       createFsSearchRuntime,
       openchamberDataDir,
       openchamberUserConfigRoot,
+      managedChatsRoot,
       normalizeDirectoryPath,
       resolveProjectDirectory,
       resolveOptionalProjectDirectory,
@@ -332,6 +333,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       buildAugmentedPath,
       resolveGitBinaryForSpawn,
       openchamberUserConfigRoot,
+      managedChatsRoot,
     });
   };
 

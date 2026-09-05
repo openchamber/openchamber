@@ -875,6 +875,7 @@ interface UIStore {
   /** Width of the walkthrough table of contents, in pixels. */
   walkthroughTocWidth: number;
   gitChangesViewMode: 'flat' | 'tree';
+  toolJsonViewMode: 'summary' | 'formatted' | 'raw';
   linearIssueListStatus: LinearIssueListStatus;
   linearIssueListAssignee: LinearIssueListAssignee;
   /**
@@ -942,6 +943,8 @@ interface UIStore {
   projectContextTab: string;
   inputSpellcheckEnabled: boolean;
   largeTextPasteBehavior: LargeTextPasteBehavior;
+  enterToSend: boolean;
+  enterToSendConfigured: boolean;
   wideChatLayoutEnabled: boolean;
   codeBlockLineWrap: boolean;
   showToolFileIcons: boolean;
@@ -1086,6 +1089,7 @@ interface UIStore {
   setDiffWrapLines: (wrap: boolean) => void;
   setWalkthroughTocWidth: (width: number) => void;
   setGitChangesViewMode: (mode: 'flat' | 'tree') => void;
+  setToolJsonViewMode: (mode: 'summary' | 'formatted' | 'raw') => void;
   setLinearIssueListStatus: (status: LinearIssueListStatus) => void;
   setLinearIssueListAssignee: (assignee: LinearIssueListAssignee) => void;
   setLinearIssueListTeamId: (teamId: string) => void;
@@ -1126,6 +1130,8 @@ interface UIStore {
   setProjectContextTab: (value: string) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
   setLargeTextPasteBehavior: (value: LargeTextPasteBehavior) => void;
+  setEnterToSend: (value: boolean) => void;
+  setEnterToSendConfigured: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
   setCodeBlockLineWrap: (value: boolean) => void;
   setShowToolFileIcons: (value: boolean) => void;
@@ -1251,6 +1257,7 @@ export const useUIStore = create<UIStore>()(
         diffWrapLines: false,
         walkthroughTocWidth: 224,
         gitChangesViewMode: 'flat',
+        toolJsonViewMode: 'summary',
         linearIssueListStatus: 'all',
         linearIssueListAssignee: 'any',
         linearIssueListTeamId: LINEAR_ISSUE_LIST_ALL_TEAMS,
@@ -1295,6 +1302,8 @@ export const useUIStore = create<UIStore>()(
         projectContextTab: 'notes',
         inputSpellcheckEnabled: false,
         largeTextPasteBehavior: DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR,
+        enterToSend: false,
+        enterToSendConfigured: false,
         wideChatLayoutEnabled: false,
         codeBlockLineWrap: true,
         showToolFileIcons: true,
@@ -2197,6 +2206,10 @@ export const useUIStore = create<UIStore>()(
           set({ gitChangesViewMode: mode });
         },
 
+        setToolJsonViewMode: (mode) => {
+          set({ toolJsonViewMode: mode });
+        },
+
         setLinearIssueListStatus: (status) => {
           set({ linearIssueListStatus: sanitizeLinearIssueListStatus(status) });
         },
@@ -2593,6 +2606,12 @@ export const useUIStore = create<UIStore>()(
         setLargeTextPasteBehavior: (value) => {
           set({ largeTextPasteBehavior: normalizeLargeTextPasteBehavior(value) });
         },
+        setEnterToSend: (value) => {
+          set({ enterToSend: value });
+        },
+        setEnterToSendConfigured: (value) => {
+          set({ enterToSendConfigured: value });
+        },
         setWideChatLayoutEnabled: (value) => {
           set({ wideChatLayoutEnabled: value });
         },
@@ -2912,6 +2931,12 @@ export const useUIStore = create<UIStore>()(
           state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
           state.largeTextPasteBehavior = normalizeLargeTextPasteBehavior(state.largeTextPasteBehavior);
 
+          if (state.toolJsonViewMode !== 'summary'
+            && state.toolJsonViewMode !== 'formatted'
+            && state.toolJsonViewMode !== 'raw') {
+            state.toolJsonViewMode = 'summary';
+          }
+
           if (typeof state.autoSaveEnabled !== 'boolean') {
             state.autoSaveEnabled = true;
           }
@@ -2986,6 +3011,7 @@ export const useUIStore = create<UIStore>()(
           diffWrapLines: state.diffWrapLines,
           walkthroughTocWidth: state.walkthroughTocWidth,
           gitChangesViewMode: state.gitChangesViewMode,
+          toolJsonViewMode: state.toolJsonViewMode,
           linearIssueListStatus: state.linearIssueListStatus,
           linearIssueListAssignee: state.linearIssueListAssignee,
           linearIssueListTeamIdByRuntime: state.linearIssueListTeamIdByRuntime,
@@ -3013,6 +3039,8 @@ export const useUIStore = create<UIStore>()(
           projectContextSidebarWidth: state.projectContextSidebarWidth,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
           largeTextPasteBehavior: state.largeTextPasteBehavior,
+          enterToSend: state.enterToSend,
+          enterToSendConfigured: state.enterToSendConfigured,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
           codeBlockLineWrap: state.codeBlockLineWrap,
           showToolFileIcons: state.showToolFileIcons,

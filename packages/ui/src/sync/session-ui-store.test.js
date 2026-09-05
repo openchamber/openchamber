@@ -1,3 +1,4 @@
+import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -1261,6 +1262,11 @@ describe('sendMessage effort record', () => {
   });
 });
 
+const originalHomeInfo = opencodeClient.getFilesystemHomeInfo;
+opencodeClient.getFilesystemHomeInfo = async () => ({ home: '/Users/tester' });
+await ensureChatsRootDirectory();
+opencodeClient.getFilesystemHomeInfo = originalHomeInfo;
+
 describe('missing session directory recovery', () => {
   const missingWorktree = '/projects/main/.worktrees/gone';
   const projectDirectory = '/projects/main';
@@ -1390,7 +1396,7 @@ describe('missing session directory recovery', () => {
   });
 
   test('never probes a session that lives in its project root or in a managed chat directory', async () => {
-    const chatDirectory = '/home/user/.config/openchamber/chats/2026-09-05/session-abc';
+    const chatDirectory = '/Users/tester/.config/openchamber/chats/2026-09-05/session-abc';
     useGlobalSessionsStore.setState({
       activeSessions: [worktreeSession('in-root', projectDirectory), worktreeSession('chat', chatDirectory)],
       archivedSessions: [],

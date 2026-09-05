@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test"
+import { selectInputHistoryEntries, useInputHistoryStore } from "./useInputHistoryStore"
 import type { AttachedFile } from "./types/sessionTypes"
 import type { MessageQueueUpdatedEvent } from "./messageQueueStore"
 
 type FetchCall = { path: string; method: string; body: ReturnType<typeof JSON.parse> }
 let calls: FetchCall[] = []
+let activeRuntimeKey = "runtime-a"
 let respond: (call: FetchCall) => Response = () => new Response("{}", { status: 200 })
 
 mock.module("@/lib/runtime-fetch", () => ({
@@ -19,7 +21,7 @@ mock.module("@/lib/runtime-fetch", () => ({
 }))
 const desktop = await import("@/lib/desktop")
 mock.module("@/lib/desktop", () => ({ ...desktop, isVSCodeRuntime: () => false }))
-mock.module("@/lib/runtime-switch", () => ({ getRuntimeKey: () => "runtime-a" }))
+mock.module("@/lib/runtime-switch", () => ({ getRuntimeKey: () => activeRuntimeKey }))
 mock.module("@/lib/persistence", () => ({ updateDesktopSettings: async () => undefined }))
 
 const {
@@ -80,6 +82,8 @@ const attachment: AttachedFile = {
 }
 
 beforeEach(() => {
+  activeRuntimeKey = "runtime-a"
+  useInputHistoryStore.setState({ globalBuckets: {}, sessionBuckets: {} })
   calls = []
   respond = () => json({ revision: 1, session: session([]) })
   // Forgetting also drops the revision guard, so each test starts unordered.
@@ -148,6 +152,50 @@ describe("server-owned message queue", () => {
     })
     expect(useMessageQueueStore.getState().queuedMessages[key]?.map((m) => m.id)).toEqual(["srv-1"])
   })
+
+  test("accepted queue history survives automatic delivery and manual take without recapture", async () => {
+    const historyTarget = { runtimeKey: 'runtime-a', directory: '/repo', sessionId: 'history-accepted' };
+    const item = serverItem('history-item', 'original prompt');
+    respond = () => json({ revision: 100, session: { ...session([item]), sessionId: historyTarget.sessionId } });
+    const pending = useMessageQueueStore.getState().addToQueue(historyTarget, {
+      content: item.content,
+      attachments: [{ ...attachment, dataUrl: 'file:///repo/note.txt' }],
+      sendConfig: { providerID: 'p', modelID: 'm' },
+    });
+    const entries = () => selectInputHistoryEntries({ ...useInputHistoryStore.getState(), scope: 'session' }, historyTarget);
+    expect(entries()).toHaveLength(0);
+    await pending;
+    expect(entries().map((entry) => entry.text)).toEqual(['original prompt']);
+    expect(entries()[0]?.restorableAttachments[0]?.reference).toBe('file:///repo/note.txt');
+    // A server delivery broadcast removes the projection, never the history.
+    applyMessageQueueUpdatedEvent(updated(101, { ...session([]), sessionId: historyTarget.sessionId }), historyTarget.runtimeKey);
+    expect(entries()).toHaveLength(1);
+    respond = () => json({ revision: 102, session: { ...session([]), sessionId: historyTarget.sessionId }, items: [item] });
+    await useMessageQueueStore.getState().takeForSend(historyTarget);
+    expect(entries()).toHaveLength(1);
+  });
+
+  test("queue acceptance records the captured owner after the active runtime changes", async () => {
+    const historyTarget = { runtimeKey: 'runtime-a', directory: '/original', sessionId: 'history-runtime-switch' };
+    respond = () => {
+      activeRuntimeKey = 'runtime-b';
+      return json({ revision: 110, session: { ...session([]), sessionId: historyTarget.sessionId, directory: historyTarget.directory } });
+    };
+    await useMessageQueueStore.getState().addToQueue(historyTarget, {
+      content: 'for original runtime', sendConfig: { providerID: 'p', modelID: 'm' },
+    });
+    expect(selectInputHistoryEntries({ ...useInputHistoryStore.getState(), scope: 'session' }, historyTarget).map((entry) => entry.text)).toEqual(['for original runtime']);
+    expect(selectInputHistoryEntries({ ...useInputHistoryStore.getState(), scope: 'session' }, { ...historyTarget, runtimeKey: activeRuntimeKey })).toEqual([]);
+  });
+
+  test("a rejected queue acceptance records no history", async () => {
+    const historyTarget = { runtimeKey: 'runtime-a', directory: '/repo', sessionId: 'history-rejected' };
+    respond = () => new Response('rejected', { status: 500 });
+    await expect(useMessageQueueStore.getState().addToQueue(historyTarget, {
+      content: 'rejected prompt', sendConfig: { providerID: 'p', modelID: 'm' },
+    })).rejects.toThrow();
+    expect(selectInputHistoryEntries({ ...useInputHistoryStore.getState(), scope: 'session' }, historyTarget)).toEqual([]);
+  });
 
   test("addToQueue hands the captured context to the server, and a take brings it back", async () => {
     const context = [

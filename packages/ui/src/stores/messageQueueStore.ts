@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import { z } from 'zod';
 import type { Event } from '@opencode-ai/sdk/v2';
+import { createInputHistoryIdentity, createInputHistorySubmission, useInputHistoryStore } from './useInputHistoryStore';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import type { AttachedFile } from './types/sessionTypes';
 import { contextPartMetadataSchema, type ContextPartMetadata } from '@/lib/messages/contextParts';
@@ -548,6 +549,8 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                             set((state) => removeMessageLocally(state, key, id));
                             throw new Error('A queued message needs a provider and model to be delivered later.');
                         }
+                        const historyIdentity = createInputHistoryIdentity(target.runtimeKey, target.directory, target.sessionId);
+                        const historySubmission = createInputHistorySubmission(message.content, message.attachments ?? []);
                         try {
                             const result = await requestJson(serverSessionResponseSchema, `${sessionPath(target.sessionId)}/items`, jsonInit('POST', {
                                 directory: target.directory,
@@ -556,6 +559,9 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                             // The optimistic entry is replaced by the server's copy of the queue.
                             set((state) => removeMessageLocally(state, key, id));
                             applyServerSession(result.session, result.revision, target.runtimeKey);
+                            if (historyIdentity) {
+                                useInputHistoryStore.getState().appendSubmissions(historyIdentity, [historySubmission]);
+                            }
                         } catch (error) {
                             set((state) => removeMessageLocally(state, key, id));
                             throw error;

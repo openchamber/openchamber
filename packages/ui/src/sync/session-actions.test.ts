@@ -1740,6 +1740,138 @@ describe("optimisticSend target directory", () => {
     expect(targetStore.getState().part[revertedMessage.id]).toEqual([revertedPart])
   })
 
+  test("runs appendSubmissions before revert cleanup and optimistic insertion", async () => {
+    const revertedMessage = { id: "msg_000000000000Reverted", role: "user", sessionID: "session-reverted", time: { created: 2 } } as Message
+    const targetStore = createStore({}, {
+      session: [{ id: "session-reverted", revert: { messageID: revertedMessage.id } } as Session],
+      message: { "session-reverted": [revertedMessage] },
+      part: { [revertedMessage.id]: [{ id: "part_2", type: "text", text: "old branch" } as Part] },
+    })
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const callOrder: string[] = []
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      () => {
+        callOrder.push("optimistic-add")
+      },
+      () => {},
+      () => {
+        callOrder.push("revert-confirm")
+      },
+    )
+
+    await optimisticSend({
+      sessionId: "session-reverted",
+      directory: "/target/project",
+      content: "new branch",
+      providerID: "provider",
+      modelID: "model",
+      appendSubmissions: () => {
+        callOrder.push("append")
+      },
+      send: async () => {},
+    })
+
+    expect(callOrder).toEqual(["append", "revert-confirm", "optimistic-add"])
+  })
+
+  test("runs appendSubmissions once for a definite rejection", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    let appendCalls = 0
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      () => {},
+      () => {},
+    )
+
+    await expect(optimisticSend({
+      sessionId: "session-rejected",
+      directory: "/target/project",
+      content: "hello",
+      providerID: "provider",
+      modelID: "model",
+      appendSubmissions: () => {
+        appendCalls += 1
+      },
+      send: async () => { throw new Error("rejected") },
+    })).rejects.toThrow("rejected")
+
+    expect(appendCalls).toBe(1)
+  })
+
+  test("runs appendSubmissions once for an ambiguous confirmation", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    let appendCalls = 0
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      () => {},
+      () => {},
+      () => {},
+    )
+
+    await optimisticSend({
+      sessionId: "session-confirmed",
+      directory: "/target/project",
+      content: "hello",
+      providerID: "provider",
+      modelID: "model",
+      appendSubmissions: () => {
+        appendCalls += 1
+      },
+      send: async (messageID) => {
+        sessionMessagesResult = {
+          data: [{
+            info: { id: messageID, role: "user", sessionID: "session-confirmed", time: { created: 1 } } as Message,
+            parts: [{ id: "server-part", type: "text", text: "hello" } as Part],
+          }],
+        }
+        const error = new Error("Failed to send message (504): gateway timeout") as Error & { status?: number }
+        error.status = 504
+        throw error
+      },
+    })
+
+    expect(appendCalls).toBe(1)
+  })
+
+  test("does not run appendSubmissions when the runtime changes before dispatch", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    let appendCalls = 0
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://runtime-b.test", runtimeKey: "runtime-b" })
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      () => {},
+      () => {},
+    )
+
+    await expect(optimisticSend({
+      sessionId: "session-race",
+      directory: "/target/project",
+      runtimeKey: "runtime-a",
+      content: "hello",
+      providerID: "provider",
+      modelID: "model",
+      appendSubmissions: () => {
+        appendCalls += 1
+      },
+      send: async () => {},
+    })).rejects.toThrow("runtime changed")
+
+    expect(appendCalls).toBe(0)
+  })
+
   test("rolls back a captured send when the runtime changes after optimistic insert", async () => {
     const targetStore = createStore({})
     const childStores = createChildStores([["/target/project", targetStore]])

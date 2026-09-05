@@ -86,7 +86,7 @@ import { formatMessage, useI18nStore } from "@/lib/i18n"
 import { sessionEvents } from "@/lib/sessionEvents"
 import { listGlobalSessionPages } from "@/stores/globalSessions"
 import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests } from "./scoped-blocking-requests"
-import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type UserMessageHistorySnapshot } from "./user-message-history"
+import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type TranscriptPrompt, type UserMessageHistorySnapshot } from "./user-message-history"
 import {
   EMPTY_SESSION_MESSAGE_LOAD_STATE,
   SessionMessageLoader,
@@ -3433,7 +3433,12 @@ export function useSessionRenderable(sessionID: string, directory?: string): boo
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
-export function useUserMessageHistory(sessionID: string, directory?: string): string[] {
+/**
+ * The user's prompts in the visible transcript of a session, oldest first.
+ * Session-scoped ArrowUp recall merges this with the persisted input history,
+ * so sessions that predate the persisted store still recall their prompts.
+ */
+export function useUserMessageHistory(sessionID: string, directory?: string): TranscriptPrompt[] {
   const store = useDirectoryStore(directory)
   const snapshotRef = useRef<UserMessageHistorySnapshot>(EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT)
 
