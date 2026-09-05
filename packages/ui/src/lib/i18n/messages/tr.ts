@@ -145,6 +145,7 @@ export const dict = {
   'mobile.sessions.removeProjectAria': '{label} öğesini kaldır',
   'mobile.sessions.confirmRemoveProjectAria': '{label} öğesini kaldırmayı onayla',
   'mobile.sessions.toast.projectRemoved': '{label} kaldırıldı',
+  'mobile.sessions.copySessionIdAria': '{title} oturumunun kimliğini kopyala',
   'mobile.sessions.archiveSessionAria': '{title} öğesini arşivle',
   'mobile.sessions.cancelArchiveAria': '{title} öğesini arşivlemeyi iptal et',
   'mobile.sessions.renameSessionAria': '{title} öğesini yeniden adlandır',

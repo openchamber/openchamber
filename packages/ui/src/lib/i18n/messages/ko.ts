@@ -158,6 +158,7 @@ export const dict: Record<I18nKey, string> = {
   'mobile.sessions.removeProjectAria': '{label} 제거',
   'mobile.sessions.confirmRemoveProjectAria': '{label} 제거 확인',
   'mobile.sessions.toast.projectRemoved': '{label} 제거됨',
+  'mobile.sessions.copySessionIdAria': '{title}의 세션 ID 복사',
   'mobile.sessions.archiveSessionAria': '{title} 보관',
   'mobile.sessions.cancelArchiveAria': '{title} 보관 취소',
   'mobile.sessions.renameSessionAria': '{title} 이름 바꾸기',

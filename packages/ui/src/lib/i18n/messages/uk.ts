@@ -158,6 +158,7 @@ export const dict: Record<I18nKey, string> = {
   "mobile.sessions.removeProjectAria": "Видалити {label}",
   "mobile.sessions.confirmRemoveProjectAria": "Підтвердити видалення {label}",
   "mobile.sessions.toast.projectRemoved": "Видалено {label}",
+  "mobile.sessions.copySessionIdAria": "Копіювати ID сесії {title}",
   "mobile.sessions.archiveSessionAria": "Архівувати {title}",
   "mobile.sessions.cancelArchiveAria": "Скасувати архівування {title}",
   "mobile.sessions.renameSessionAria": "Перейменувати {title}",

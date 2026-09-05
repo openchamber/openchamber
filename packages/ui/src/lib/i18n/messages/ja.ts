@@ -159,6 +159,7 @@ export const dict: Record<I18nKey, string> = {
   'mobile.sessions.removeProjectAria': '{label}を削除',
   'mobile.sessions.confirmRemoveProjectAria': '{label}の削除を確認',
   'mobile.sessions.toast.projectRemoved': '{label}を削除しました',
+  'mobile.sessions.copySessionIdAria': '{title}のセッションIDをコピー',
   'mobile.sessions.archiveSessionAria': '{title}をアーカイブ',
   'mobile.sessions.cancelArchiveAria': '{title}のアーカイブをキャンセル',
   'mobile.sessions.renameSessionAria': '{title}の名前を変更',

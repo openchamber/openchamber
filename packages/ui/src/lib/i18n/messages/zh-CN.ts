@@ -158,6 +158,7 @@ export const dict: Record<I18nKey, string> = {
   'mobile.sessions.removeProjectAria': '移除 {label}',
   'mobile.sessions.confirmRemoveProjectAria': '确认移除 {label}',
   'mobile.sessions.toast.projectRemoved': '已移除 {label}',
+  'mobile.sessions.copySessionIdAria': '复制 {title} 的会话 ID',
   'mobile.sessions.archiveSessionAria': '归档 {title}',
   'mobile.sessions.cancelArchiveAria': '取消归档 {title}',
   'mobile.sessions.renameSessionAria': '重命名 {title}',

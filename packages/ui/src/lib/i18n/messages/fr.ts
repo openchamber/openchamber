@@ -2991,6 +2991,7 @@ export const dict = {
   'mobile.sessions.removeProjectAria': 'Supprimer {label}',
   'mobile.sessions.confirmRemoveProjectAria': 'Confirmer la suppression de {label}',
   'mobile.sessions.toast.projectRemoved': '{label} supprimé',
+  'mobile.sessions.copySessionIdAria': 'Copier l’ID de session de {title}',
   'mobile.sessions.archiveSessionAria': 'Archiver {title}',
   'mobile.sessions.cancelArchiveAria': 'Annuler l’archivage de {title}',
   'mobile.sessions.renameSessionAria': 'Renommer {title}',
