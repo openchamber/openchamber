@@ -1,6 +1,6 @@
 export type InputHistoryScope = 'global' | 'session';
 
-export const DEFAULT_INPUT_HISTORY_SCOPE: InputHistoryScope = 'global';
+export const DEFAULT_INPUT_HISTORY_SCOPE: InputHistoryScope = 'session';
 export const DEFAULT_INPUT_HISTORY_LIMIT = 40;
 export const MIN_INPUT_HISTORY_LIMIT = 1;
 export const MAX_INPUT_HISTORY_LIMIT = 100;

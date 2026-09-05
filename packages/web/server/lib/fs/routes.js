@@ -526,9 +526,12 @@ export const registerFsRoutes = (app, dependencies) => {
     openchamberUserConfigRoot,
     managedChatsRoot,
   } = dependencies;
-  const managedRoots = [openchamberUserConfigRoot, managedChatsRoot]
-    .filter((root) => typeof root === 'string' && root.trim().length > 0)
-    .map((root) => path.resolve(root));
+  // Chat worktrees may live outside every project workspace; both managed
+  // roots stay valid filesystem targets.
+  const chatsRoot = typeof managedChatsRoot === 'string' && managedChatsRoot.trim()
+    ? path.resolve(managedChatsRoot.trim())
+    : path.join(openchamberUserConfigRoot, 'chats');
+  const managedRoots = [path.resolve(openchamberUserConfigRoot), chatsRoot];
   const realpathCache = createRealpathCache({
     realpath: fsPromises.realpath.bind(fsPromises),
   });
@@ -707,9 +710,6 @@ export const registerFsRoutes = (app, dependencies) => {
       if (!home || typeof home !== 'string' || home.length === 0) {
         return res.status(500).json({ error: 'Failed to resolve home directory' });
       }
-      const chatsRoot = managedChatsRoot && managedChatsRoot.trim()
-        ? path.resolve(managedChatsRoot.trim())
-        : path.join(openchamberUserConfigRoot, 'chats');
       return res.json({ home, chatsRoot });
     } catch (error) {
       console.error('Failed to resolve home directory:', error);

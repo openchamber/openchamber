@@ -2239,6 +2239,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.inputHistoryLimitDescription': 'Zmniejszenie tej liczby od razu usuwa starsze prompty z historii.',
   'settings.openchamber.visual.field.inputHistoryLimitAria': 'Liczba zapamiętywanych promptów',
   'settings.openchamber.visual.field.inputHistoryLimitUnit': 'promptów',
+  'settings.openchamber.visual.field.enterToSend': 'Enter wysyła',
+  'settings.openchamber.visual.field.enterToSendHint': 'Po zmianie ustawienie steruje działaniem klawiszy Enter i Shift+Enter na każdej powierzchni. Do tego czasu każda powierzchnia zachowuje dotychczasowe działanie.',
   ...linearIntegrationI18n.pl,
   'settings.page.integrations.title': 'Integracje',
   'settings.page.integrations.description': 'Połącz GitHub i Linear, aby OpenChamber mógł pracować z Twoimi issue i pull requestami.',

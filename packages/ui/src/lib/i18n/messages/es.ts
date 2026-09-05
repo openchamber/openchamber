@@ -2300,8 +2300,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.actions.linkGithubPr": "Vincular PR de GitHub",
   "chat.chatInput.actions.modelAgentSettings": "Configuración del modelo y agente",
   "chat.chatInput.actions.sendMessageAria": "Enviar mensaje",
-  'chat.chatInput.actions.enterToSend': 'Enter envía',
-  'chat.chatInput.actions.enterToSendHint': 'Después de cambiarlo, controla Enter y Shift+Enter en todas las superficies. Hasta entonces, cada superficie mantiene su comportamiento actual.',
   "chat.chatInput.actions.queueMessageAria": "Poner mensaje en cola",
   "chat.chatInput.actions.stopGeneratingAria": "Detener generación",
   "chat.chatInput.focusMode.toggleAria": "Activar o desactivar modo de enfoque",

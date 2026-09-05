@@ -36,6 +36,7 @@ export type SyncPerformanceCounters = {
   questionChangeCallbacks: number
   sessionMessageChangeCallbacks: number
   sessionRenderableNotificationSkips: number
+  userMessageHistoryNotificationSkips: number
   sessionMessageRecordNotificationSkips: number
   materializationEnqueues: number
   materializationEmptyAssistantEnqueues: number
@@ -78,6 +79,7 @@ const createCounters = (): SyncPerformanceCounters => ({
   questionChangeCallbacks: 0,
   sessionMessageChangeCallbacks: 0,
   sessionRenderableNotificationSkips: 0,
+  userMessageHistoryNotificationSkips: 0,
   sessionMessageRecordNotificationSkips: 0,
   materializationEnqueues: 0,
   materializationEmptyAssistantEnqueues: 0,

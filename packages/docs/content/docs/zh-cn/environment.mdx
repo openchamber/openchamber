@@ -25,6 +25,10 @@ OpenChamber web 服务器监听的地址。使用 `0.0.0.0` 可允许其他机�
 
 覆盖 OpenChamber 数据目录。默认是 `~/.config/openchamber`。
 
+### `OPENCHAMBER_CHATS_DIR`
+
+更改 OpenChamber 为无项目聊天创建的托管聊天目录的位置。默认是 `~/.config/openchamber/chats`。当 OpenChamber 和 OpenCode 以不同用户运行时，请设置为 OpenCode 服务器可读取的目录。现有聊天不会被移动。
+
 ### `OPENCHAMBER_COMPRESS_API`
 
 控制 API 响应压缩。`true` 或 `1` 强制开启，`false` 或 `0` 强制关闭。

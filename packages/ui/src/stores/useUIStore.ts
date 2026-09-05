@@ -2256,6 +2256,7 @@ export const useUIStore = create<UIStore>()(
           const trimmed = identifier?.trim() ?? '';
           set({ linearIssueFocus: trimmed || null });
         },
+
         setInputBarOffset: (offset) => {
           set({ inputBarOffset: offset });
         },

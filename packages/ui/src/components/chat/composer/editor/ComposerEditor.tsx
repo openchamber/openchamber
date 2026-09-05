@@ -234,7 +234,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                     // A deferred Enter loses its modifiers in the re-dispatch.
                     if (event.key === 'Enter' && isDeferredSyntheticEvent(event)) {
                         const preserveShift = handlersRef.current.preserveDeferredEnterShift !== false;
-                        restoreDeferredEnterModifiers(event, lastRealEnterModsRef.current, { preserveShift });
+                        restoreDeferredEnterModifiers(event, lastRealEnterModsRef.current, preserveShift);
                         clearDeferredEnterModifiers();
                     }
                     return handlersRef.current.onKeyDown?.(event) ?? false;

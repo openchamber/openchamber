@@ -199,17 +199,22 @@ Prompt recall has two owners on purpose.
 - `packages/ui/src/stores/useInputHistoryStore.ts` owns the persisted source of
   truth. It keeps the runtime-scoped global bucket and the runtime + directory
   + session bucket, each capped by the configurable input-history limit. That
-  setting defaults to 40 entries.
+  setting defaults to 40 entries. Recall reads the current session's bucket by
+  default; the Chat setting can widen it to every project on the runtime.
 - `state/useMessageHistory.ts` owns only keyboard traversal through whichever
-  bucket the composer was given. It stashes the current draft on entry and
-  restores it on the way back out.
-- `ChatInput.tsx` owns the recalled-entry presentation. If the user edits a
-  recalled prompt, the UI may show an overlay state for "this came from
-  history", but that edit does not rewrite stored history.
+  bucket the composer was given. Moving away from a position stores the
+  composer's current text and attachments as an overlay for that position, so
+  the live draft and any edit made to a recalled prompt survive a round trip
+  through history. Overlays never rewrite stored history; sending resets them.
+- `ChatInput.tsx` applies the recalled text and attachments to the composer and
+  places the caret.
 
-Transcript visibility is not part of this contract anymore. Revert markers may
-hide older user messages from the chat timeline, but they do not decide what
-ArrowUp and ArrowDown can recall.
+In session scope the composer merges two sources, oldest first: the visible
+transcript's user prompts (`useUserMessageHistory` in `sync-context.tsx`), so
+sessions that predate the persisted store still recall, and the persisted
+session bucket, which adds attachments and keeps prompts a revert hid from the
+timeline. A prompt present in both collapses to the persisted entry. Global
+scope reads the persisted runtime bucket only.
 
 ## Mobile
 

@@ -117,9 +117,9 @@ describe('useInputHistoryStore', () => {
     const identity = mod.createInputHistoryIdentity('runtime-a', '/repo', 'session-1');
 
     expect(identity).not.toBeNull();
-    expect(DEFAULT_INPUT_HISTORY_SCOPE).toBe('global');
+    expect(DEFAULT_INPUT_HISTORY_SCOPE).toBe('session');
     expect(DEFAULT_INPUT_HISTORY_LIMIT).toBe(40);
-    expect(mod.useInputHistoryStore.getState().scope).toBe('global');
+    expect(mod.useInputHistoryStore.getState().scope).toBe('session');
     expect(mod.useInputHistoryStore.getState().entryLimit).toBe(DEFAULT_INPUT_HISTORY_LIMIT);
     expect(mod.selectInputHistoryEntries(mod.useInputHistoryStore.getState(), identity!)).toEqual([]);
   });

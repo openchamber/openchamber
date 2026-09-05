@@ -57,7 +57,7 @@ describe('deferred Enter modifiers', () => {
     for (const modifiers of [{ shiftKey: true, ctrlKey: true, metaKey: false }, { shiftKey: true, ctrlKey: false, metaKey: true }]) {
         test(`untouched mobile deferred Shift does not submit: ${JSON.stringify(modifiers)}`, () => {
             const event = { shiftKey: false, ctrlKey: false, metaKey: false };
-            restoreDeferredEnterModifiers(event, modifiers, { preserveShift: true });
+            restoreDeferredEnterModifiers(event, modifiers, true);
             expect(shouldSubmitEnter(policy({ isMobile: true, ...event }))).toBe(false);
         });
     }
@@ -75,7 +75,7 @@ describe('deferred Enter modifiers', () => {
     test('does not restore iOS auto-capitalization as Shift', () => {
         const event = { shiftKey: false, ctrlKey: false, metaKey: false };
 
-        restoreDeferredEnterModifiers(event, { shiftKey: true, ctrlKey: false, metaKey: false }, { preserveShift: false });
+        restoreDeferredEnterModifiers(event, { shiftKey: true, ctrlKey: false, metaKey: false }, false);
 
         expect(event).toEqual({ shiftKey: false, ctrlKey: false, metaKey: false });
     });

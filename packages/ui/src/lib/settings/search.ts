@@ -384,7 +384,8 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   {
     id: 'chat.enter-to-send',
     page: 'chat',
-    titleKey: 'chat.chatInput.actions.enterToSend',
+    titleKey: 'settings.openchamber.visual.field.enterToSend',
+    descriptionKey: 'settings.openchamber.visual.field.enterToSendHint',
     keywords: ['enter', 'shift enter', 'send', 'newline'],
   },
   {

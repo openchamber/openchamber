@@ -175,7 +175,9 @@ import {
     buildChatInputHistorySubmissions,
     buildInputHistoryNavigatorIdentity,
     mapInputHistoryEntriesToValues,
+    mergeSessionInputHistory,
 } from './inputHistory';
+import { useUserMessageHistory } from '@/sync/sync-context';
 
 // Lazy like in ChatMessage: a static import would pull the @pierre/diffs and
 // Shiki stacks into the eager startup graph for a dialog opened on demand.
@@ -198,7 +200,6 @@ const MAX_MOBILE_COMPOSER_LINES = 16;
  */
 const MOBILE_COMPOSER_BOUND_GAP_PX = 4;
 const EMPTY_QUEUE: QueuedMessage[] = [];
-const EMPTY_INPUT_HISTORY_ENTRIES = Object.freeze([] as const);
 const COMPACT_CHAT_PLACEHOLDER_MAX_WIDTH = 560;
 const renameFileForAttachmentCitation = (file: File, filename: string): File => {
     if (file.name === filename) {
@@ -908,13 +909,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         ),
         [activeRuntimeKey, currentDirectory, currentSessionDirectoryForSync, currentSessionId],
     );
-    const inputHistoryEntries = useInputHistoryStore(React.useCallback((state) => {
-        const entries = selectInputHistoryEntries(state, inputHistoryIdentity);
-        return entries.length === 0 ? EMPTY_INPUT_HISTORY_ENTRIES : entries;
-    }, [inputHistoryIdentity]));
+    const inputHistoryEntries = useInputHistoryStore(React.useCallback(
+        (state) => selectInputHistoryEntries(state, inputHistoryIdentity),
+        [inputHistoryIdentity],
+    ));
+    // Session scope also reads the visible transcript, so sessions older than
+    // the persisted history still recall their prompts.
+    const transcriptPrompts = useUserMessageHistory(currentSessionId ?? '');
     const historyValues = React.useMemo(
-        () => mapInputHistoryEntriesToValues(inputHistoryEntries),
-        [inputHistoryEntries],
+        () => (inputHistoryScope === 'session'
+            ? mergeSessionInputHistory(transcriptPrompts, inputHistoryEntries)
+            : mapInputHistoryEntriesToValues(inputHistoryEntries)),
+        [inputHistoryEntries, inputHistoryScope, transcriptPrompts],
     );
     const messageHistoryIdentity = React.useMemo(
         () => buildInputHistoryNavigatorIdentity(inputHistoryScope, inputHistoryIdentity),

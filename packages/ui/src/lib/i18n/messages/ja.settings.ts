@@ -2246,6 +2246,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.inputHistoryLimitDescription': 'この数を減らすと、履歴内の古いプロンプトはすぐに削除されます。',
   'settings.openchamber.visual.field.inputHistoryLimitAria': '記憶するプロンプト数',
   'settings.openchamber.visual.field.inputHistoryLimitUnit': '件',
+  'settings.openchamber.visual.field.enterToSend': 'Enterで送信',
+  'settings.openchamber.visual.field.enterToSendHint': '変更すると、すべての環境でEnterとShift+Enterの動作を制御します。変更するまでは、各環境の既存の動作が維持されます。',
   ...linearIntegrationI18n.ja,
   'settings.page.integrations.title': '連携',
   'settings.page.integrations.description': 'GitHub と Linear を接続すると、OpenChamber が Issue やプルリクエストを扱えるようになります。',

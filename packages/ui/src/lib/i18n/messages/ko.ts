@@ -2322,8 +2322,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.linkGithubPr': 'GitHub PR 연결',
   'chat.chatInput.actions.modelAgentSettings': '모델 및 에이전트 설정',
   'chat.chatInput.actions.sendMessageAria': '보내기 메시지',
-  'chat.chatInput.actions.enterToSend': 'Enter로 전송',
-  'chat.chatInput.actions.enterToSendHint': '변경하면 모든 환경에서 Enter와 Shift+Enter의 동작을 제어합니다. 변경하기 전에는 각 환경의 기존 동작이 유지됩니다.',
   'chat.chatInput.actions.queueMessageAria': '메시지 대기열에 추가',
   'chat.chatInput.actions.stopGeneratingAria': '생성 중지',
   'chat.chatInput.focusMode.toggleAria': '집중 모드 전환',

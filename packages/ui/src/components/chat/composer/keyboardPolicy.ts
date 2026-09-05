@@ -28,16 +28,12 @@ export interface EnterModifierState {
     metaKey: boolean;
 }
 
-interface DeferredEnterModifierOptions {
-    preserveShift?: boolean;
-}
-
 export const restoreDeferredEnterModifiers = (
     event: EnterModifierState,
     modifiers: EnterModifierState,
-    options: DeferredEnterModifierOptions = {},
+    preserveShift = true,
 ): void => {
-    if (options.preserveShift !== false && modifiers.shiftKey) {
+    if (preserveShift && modifiers.shiftKey) {
         Object.defineProperty(event, 'shiftKey', { value: true });
     }
     if (modifiers.ctrlKey) Object.defineProperty(event, 'ctrlKey', { value: true });

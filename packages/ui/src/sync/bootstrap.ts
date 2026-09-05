@@ -69,9 +69,10 @@ export async function bootstrapGlobal(
   sdk: OpencodeClient,
   set: (patch: Partial<GlobalState>) => void,
 ) {
-  // Sync chat classification needs the root before session lists load.
-  await warmChatsRootDirectory()
   const results = await Promise.allSettled([
+    // Sync chat classification needs the chats root before session lists load;
+    // it resolves alongside the other bootstrap calls, not ahead of them.
+    warmChatsRootDirectory(),
     retry(() => sdk.path.get().then((x) => set({ path: unwrap(x, "path.get") }))),
     retry(() => sdk.global.config.get().then((x) => set({ config: unwrap(x, "global.config.get") }))),
     retry(() =>

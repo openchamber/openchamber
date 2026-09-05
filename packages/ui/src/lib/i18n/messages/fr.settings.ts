@@ -2246,6 +2246,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.inputHistoryLimitDescription': 'Réduire ce nombre supprime aussitôt les prompts les plus anciens de votre historique.',
   'settings.openchamber.visual.field.inputHistoryLimitAria': 'Prompts à mémoriser',
   'settings.openchamber.visual.field.inputHistoryLimitUnit': 'prompts',
+  'settings.openchamber.visual.field.enterToSend': 'Entrée envoie',
+  'settings.openchamber.visual.field.enterToSendHint': 'Après modification, ce réglage contrôle Entrée et Maj+Entrée sur toutes les surfaces. En attendant, chaque surface conserve son comportement actuel.',
   ...linearIntegrationI18n.fr,
   'settings.page.integrations.title': 'Intégrations',
   'settings.page.integrations.description': 'Connectez GitHub et Linear pour qu’OpenChamber puisse travailler avec vos issues et pull requests.',

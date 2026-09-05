@@ -1959,6 +1959,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.inputHistoryLimitDescription': 'Bu sayıyı azaltmak, eski prompt\'ları geçmişinizden hemen siler.',
   'settings.openchamber.visual.field.inputHistoryLimitAria': 'Hatırlanacak prompt sayısı',
   'settings.openchamber.visual.field.inputHistoryLimitUnit': 'prompt',
+  'settings.openchamber.visual.field.enterToSend': 'Enter gönderir',
+  'settings.openchamber.visual.field.enterToSendHint': 'Değiştirildikten sonra Enter ve Shift+Enter davranışını tüm yüzeylerde kontrol eder. O zamana kadar her yüzey mevcut davranışını korur.',
   'settings.openchamber.visual.actions.resetInputBarOffsetAria': 'Giriş çubuğu ofsetini sıfırla',
   'settings.openchamber.visual.field.terminalQuickKeysAria': 'Terminal hızlı tuşları',
   'settings.openchamber.visual.field.terminalQuickKeys': 'Terminal Hızlı Tuşları',

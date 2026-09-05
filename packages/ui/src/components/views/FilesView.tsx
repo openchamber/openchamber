@@ -2134,7 +2134,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             }
             applyLoadedTextContent(content);
           },
-          maxBytes: MAX_CONTENT_POLL_BYTES,
         })
       : null;
 
@@ -2165,7 +2164,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           if (contentPoller && latestStat.size <= MAX_CONTENT_POLL_BYTES) {
             // Only an observed read retires the change; a dirty buffer or a
             // failed read leaves the baseline so the next tick retries.
-            const observed = await contentPoller.poll(latestStat.size);
+            const observed = await contentPoller.poll();
             if (observed && !cancelled) {
               lastLoadedFileStatRef.current = latestStat;
             }

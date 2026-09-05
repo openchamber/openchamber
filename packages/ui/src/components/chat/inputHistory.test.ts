@@ -7,6 +7,7 @@ import {
   buildChatInputHistorySubmissions,
   buildInputHistoryNavigatorIdentity,
   mapInputHistoryEntriesToValues,
+  mergeSessionInputHistory,
 } from './inputHistory';
 
 const ATTACHMENT: AttachedFile = {
@@ -129,5 +130,45 @@ describe('buildInputHistoryNavigatorIdentity', () => {
       directory: '/repo',
       sessionId: 'session-1',
     })).toBe('session\nruntime-a\n/repo\nsession-1');
+  });
+});
+
+describe('mergeSessionInputHistory', () => {
+  const entry = (text: string, submittedAtMs: number): InputHistoryEntry => ({
+    text,
+    attachmentKeys: [],
+    restorableAttachments: [],
+    submittedAt: submittedAtMs * 1000,
+  });
+
+  test('recalls transcript prompts when nothing is persisted yet', () => {
+    const values = mergeSessionInputHistory(
+      [{ text: 'first', createdAt: 10 }, { text: 'second', createdAt: 20 }],
+      [],
+    );
+
+    expect(values.map((value) => value.text)).toEqual(['first', 'second']);
+    expect(values[0]?.attachments).toEqual([]);
+  });
+
+  test('interleaves persisted entries by time and collapses duplicates onto the persisted entry', () => {
+    const persisted: InputHistoryEntry = {
+      ...entry('second', 20),
+      restorableAttachments: [{
+        key: 'server-file',
+        source: 'file-url',
+        filename: 'server.txt',
+        mimeType: 'text/plain',
+        size: 11,
+        reference: '/repo/server.txt',
+      }],
+    };
+    const values = mergeSessionInputHistory(
+      [{ text: 'first', createdAt: 10 }, { text: 'second', createdAt: 20 }, { text: 'fourth', createdAt: 40 }],
+      [persisted, entry('reverted', 30)],
+    );
+
+    expect(values.map((value) => value.text)).toEqual(['first', 'second', 'reverted', 'fourth']);
+    expect(values[1]?.attachments[0]?.filename).toBe('server.txt');
   });
 });

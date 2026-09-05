@@ -2246,6 +2246,8 @@ export const settingsDict = {
   "settings.openchamber.visual.field.inputHistoryLimitDescription": "Якщо зменшити це число, старіші промпти одразу буде видалено з історії.",
   "settings.openchamber.visual.field.inputHistoryLimitAria": "Скільки промптів пам’ятати",
   "settings.openchamber.visual.field.inputHistoryLimitUnit": "промптів",
+  "settings.openchamber.visual.field.enterToSend": "Enter надсилає",
+  "settings.openchamber.visual.field.enterToSendHint": "Після зміни цей параметр керує поведінкою Enter і Shift+Enter на всіх поверхнях. До цього кожна поверхня зберігає свою поточну поведінку.",
   ...linearIntegrationI18n.uk,
   'settings.page.integrations.title': 'Інтеграції',
   'settings.page.integrations.description': 'Підключіть GitHub і Linear, щоб OpenChamber міг працювати з вашими задачами та pull request-ами.',

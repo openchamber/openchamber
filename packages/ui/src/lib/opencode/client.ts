@@ -1,9 +1,9 @@
 import type { ContextPartMetadata } from '@/lib/messages/contextParts';
 import { createOpencodeClient, OpencodeClient } from "@opencode-ai/sdk/v2";
 import type { PermissionV2Request, PermissionV2Effect, PermissionV2Source } from "@opencode-ai/sdk/v2/client";
+import { z } from "zod";
 import type { FilesAPI } from "../api/types";
 import { getDesktopHomeDirectory } from "../desktop";
-import { z } from "zod";
 import type {
   Session,
   Message,
@@ -343,7 +343,7 @@ const getDesktopFilesApi = (): FilesAPI | null => {
 };
 
 // /api/fs/home parsing boundary. Older servers answer without chatsRoot;
-// Only a valid home response may use the legacy chats-root fallback.
+// only a valid home response may use the legacy chats-root fallback.
 const fsAbsolutePathSchema = z.string().trim().regex(/^(?:\/|[A-Za-z]:[\\/]|\\\\)/);
 const fsHomeResponseSchema = z.object({ home: fsAbsolutePathSchema, chatsRoot: fsAbsolutePathSchema.optional() });
 

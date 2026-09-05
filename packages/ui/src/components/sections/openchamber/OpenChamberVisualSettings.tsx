@@ -70,9 +70,7 @@ import {
 import { isTerminalShell } from '@/lib/terminalShell';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
-import {
-    useInputHistoryStore,
-} from '@/stores/useInputHistoryStore';
+import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 
 interface Option<T extends string> {
     id: T;
@@ -738,7 +736,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('showToolFileIcons')
         || shouldShow('showTurnChangedFiles')
         || (!isMobile && shouldShow('inputSpellcheck'))
-         || shouldShow('enterToSend')
+        || shouldShow('enterToSend')
         || shouldShow('reasoning')
         || shouldShow('expandedTools');
     // First behavior section under the page header should not draw a top border on Chat-only;
@@ -1512,7 +1510,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         />
                                     ))}
                                 </SettingsRadioGroup>
-                                    </SettingsControlGroup>
+                            </SettingsControlGroup>
                         )}
                         <div className={SETTINGS_OPTION_STACK_CLASS}>
                             {shouldShow('autoSaveEnabled') && (
@@ -2150,9 +2148,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <SettingsCheckboxRow
                                         checked={enterToSendConfigured ? enterToSend : !isMobile && !isExpandedInput}
                                         onChange={handleEnterToSendChange}
-                                        label={t('chat.chatInput.actions.enterToSend')}
-                                        info={t('chat.chatInput.actions.enterToSendHint')}
-                                        ariaLabel={t('chat.chatInput.actions.enterToSend')}
+                                        label={t('settings.openchamber.visual.field.enterToSend')}
+                                        info={t('settings.openchamber.visual.field.enterToSendHint')}
+                                        ariaLabel={t('settings.openchamber.visual.field.enterToSend')}
                                         settingsItem="chat.enter-to-send"
                                     />
                                 )}

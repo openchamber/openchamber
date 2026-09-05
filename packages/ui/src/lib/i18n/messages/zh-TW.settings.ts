@@ -2246,6 +2246,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.inputHistoryLimitDescription': '調低這個數字會立刻從歷史記錄移除較早的提示詞。',
   'settings.openchamber.visual.field.inputHistoryLimitAria': '要記住的提示詞數量',
   'settings.openchamber.visual.field.inputHistoryLimitUnit': '則',
+  'settings.openchamber.visual.field.enterToSend': 'Enter 傳送',
+  'settings.openchamber.visual.field.enterToSendHint': '變更後，此設定會控制所有介面中的 Enter 與 Shift+Enter。變更前，各介面會維持現有行為。',
   ...linearIntegrationI18n['zh-TW'],
   'settings.page.integrations.title': '整合',
   'settings.page.integrations.description': '連接 GitHub 和 Linear，讓 OpenChamber 可以處理你的 issue 和 pull request。',

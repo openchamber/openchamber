@@ -1,4 +1,4 @@
-export const DEFAULT_INPUT_HISTORY_SCOPE = 'global';
+export const DEFAULT_INPUT_HISTORY_SCOPE = 'session';
 export const DEFAULT_INPUT_HISTORY_LIMIT = 40;
 const MIN_INPUT_HISTORY_LIMIT = 1;
 const MAX_INPUT_HISTORY_LIMIT = 100;

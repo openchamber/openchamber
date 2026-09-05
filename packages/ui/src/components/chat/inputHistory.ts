@@ -8,6 +8,8 @@ import {
   type InputHistorySubmission,
 } from '@/stores/useInputHistoryStore';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
+import type { TranscriptPrompt } from '@/sync/user-message-history';
+import { toServerFileUrl } from './composer/attachments/filePaths';
 
 type HistoryQueuedMessage = {
   content: string;
@@ -20,30 +22,6 @@ type BuildHistorySubmissionsArgs = {
   composerText: string;
   composerAttachments: readonly AttachedFile[];
   includeComposer: boolean;
-};
-
-const FILE_URI_PREFIX = 'file://';
-
-const encodeFilePath = (filepath: string): string => {
-  let normalized = filepath.replace(/\\/g, '/');
-  if (/^[A-Za-z]:/.test(normalized)) {
-    normalized = `/${normalized}`;
-  }
-  return normalized
-    .split('/')
-    .map((segment, index) => {
-      if (index === 1 && /^[A-Za-z]:$/.test(segment)) return segment;
-      return encodeURIComponent(segment);
-    })
-    .join('/');
-};
-
-const toFileUrl = (filepath: string): string => {
-  const normalized = filepath.replace(/\\/g, '/').trim();
-  if (normalized.toLowerCase().startsWith(FILE_URI_PREFIX)) {
-    return normalized;
-  }
-  return `${FILE_URI_PREFIX}${encodeFilePath(normalized)}`;
 };
 
 export function buildChatInputHistorySubmissions({
@@ -85,7 +63,7 @@ function materializeHistoryAttachment(attachment: InputHistoryAttachment): Attac
     return {
       id: `history-${attachment.key}`,
       file: new File([], attachment.filename, { type: attachment.mimeType }),
-      dataUrl: toFileUrl(attachment.reference),
+      dataUrl: toServerFileUrl(attachment.reference),
       mimeType: attachment.mimeType,
       filename: attachment.filename,
       size: attachment.size,
@@ -107,6 +85,28 @@ export function mapInputHistoryEntriesToValues(
       .map(materializeHistoryAttachment)
       .filter((attachment): attachment is AttachedFile => attachment !== null),
   }));
+}
+
+/**
+ * Session-scoped recall: the visible transcript's prompts (so sessions older
+ * than the persisted store still recall) merged with the persisted bucket
+ * (attachments, and prompts a revert hid from the transcript), oldest first.
+ * A prompt present in both collapses to the persisted entry.
+ */
+export function mergeSessionInputHistory(
+  transcript: readonly TranscriptPrompt[],
+  entries: readonly InputHistoryEntry[],
+): Array<MessageHistoryValue<AttachedFile>> {
+  const persistedTexts = new Set(entries.map((entry) => entry.text));
+  const timed: Array<{ at: number; value: MessageHistoryValue<AttachedFile> }> = [
+    ...transcript
+      .filter((prompt) => !persistedTexts.has(prompt.text))
+      .map((prompt) => ({ at: prompt.createdAt, value: { text: prompt.text, attachments: [] } })),
+    ...mapInputHistoryEntriesToValues(entries)
+      // submittedAt is milliseconds × 1000 plus a sequence number.
+      .map((value, index) => ({ at: Math.floor(entries[index]!.submittedAt / 1000), value })),
+  ];
+  return timed.sort((left, right) => left.at - right.at).map((item) => item.value);
 }
 
 export function buildInputHistoryNavigatorIdentity(

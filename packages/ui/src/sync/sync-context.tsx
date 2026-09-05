@@ -86,6 +86,7 @@ import { formatMessage, useI18nStore } from "@/lib/i18n"
 import { sessionEvents } from "@/lib/sessionEvents"
 import { listGlobalSessionPages } from "@/stores/globalSessions"
 import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests } from "./scoped-blocking-requests"
+import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type TranscriptPrompt, type UserMessageHistorySnapshot } from "./user-message-history"
 import {
   EMPTY_SESSION_MESSAGE_LOAD_STATE,
   SessionMessageLoader,
@@ -3429,6 +3430,51 @@ export function useSessionRenderable(sessionID: string, directory?: string): boo
       : () => undefined,
     [sessionID, store],
   )
+  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+}
+
+/**
+ * The user's prompts in the visible transcript of a session, oldest first.
+ * Session-scoped ArrowUp recall merges this with the persisted input history,
+ * so sessions that predate the persisted store still recall their prompts.
+ */
+export function useUserMessageHistory(sessionID: string, directory?: string): TranscriptPrompt[] {
+  const store = useDirectoryStore(directory)
+  const snapshotRef = useRef<UserMessageHistorySnapshot>(EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT)
+
+  const getSnapshot = useCallback(() => {
+    const next = buildUserMessageHistorySnapshot(store.getState(), sessionID, snapshotRef.current)
+    snapshotRef.current = next
+    return next.history
+  }, [sessionID, store])
+
+  const subscribe = useCallback((notify: () => void) => {
+    if (!sessionID) return () => undefined
+    const unsubscribeMessages = subscribeDirectorySessionMessages(store, sessionID, (change) => {
+      if (!change.messagesChanged && !change.reset && change.partMessageIDs.length > 0) {
+        const records = snapshotRef.current.sessionID === sessionID ? snapshotRef.current.records : []
+        const affectsUserHistory = change.partMessageIDs.some((messageID) => (
+          records.some((record) => record.message.id === messageID)
+        ))
+        if (!affectsUserHistory) {
+          countSyncPerformance("userMessageHistoryNotificationSkips")
+          return
+        }
+      }
+      notify()
+    })
+    const unsubscribeSession = store.subscribe((state, previous) => {
+      if (state.session === previous.session) return
+      const currentRevert = state.session.find((session) => session.id === sessionID)?.revert?.messageID
+      const previousRevert = previous.session.find((session) => session.id === sessionID)?.revert?.messageID
+      if (currentRevert !== previousRevert) notify()
+    })
+    return () => {
+      unsubscribeMessages()
+      unsubscribeSession()
+    }
+  }, [sessionID, store])
+
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 

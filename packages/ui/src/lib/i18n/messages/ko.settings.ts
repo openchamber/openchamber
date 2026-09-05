@@ -2246,6 +2246,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.inputHistoryLimitDescription': '이 숫자를 낮추면 기록에서 오래된 프롬프트가 바로 삭제됩니다.',
   'settings.openchamber.visual.field.inputHistoryLimitAria': '기억할 프롬프트 수',
   'settings.openchamber.visual.field.inputHistoryLimitUnit': '개',
+  'settings.openchamber.visual.field.enterToSend': 'Enter로 전송',
+  'settings.openchamber.visual.field.enterToSendHint': '변경하면 모든 환경에서 Enter와 Shift+Enter의 동작을 제어합니다. 변경하기 전에는 각 환경의 기존 동작이 유지됩니다.',
   ...linearIntegrationI18n.ko,
   'settings.page.integrations.title': '통합',
   'settings.page.integrations.description': 'GitHub와 Linear를 연결하면 OpenChamber가 이슈와 풀 리퀘스트를 다룰 수 있습니다.',

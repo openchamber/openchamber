@@ -118,12 +118,9 @@ export const sendQueuedAutoSendPayload = (
     payload.agentMentionName,
     payload.additionalParts.length > 0 ? payload.additionalParts : undefined,
     resolved.variant,
-      'normal',
-      {
-        target,
-        historySubmissions: payload.historySubmissions,
-      },
-    );
+    'normal',
+    { target, historySubmissions: payload.historySubmissions },
+  );
 };
 
 const resolveSessionSendConfig = (sessionId: string) => {

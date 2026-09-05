@@ -21,9 +21,7 @@ import {
   isInputHistoryLimit,
   isInputHistoryScope,
 } from '@/lib/inputHistoryScope';
-import {
-  useInputHistoryStore,
-} from '@/stores/useInputHistoryStore';
+import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { normalizeMobileKeyboardMode, setStoredMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { isCapacitorApp } from '@/lib/platform';
@@ -1081,14 +1079,11 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
       store.setGitChangesViewMode(settings.gitChangesViewMode);
     }
   }
-  switch (settings.toolJsonViewMode) {
-    case 'summary':
-    case 'formatted':
-    case 'raw':
-      if (settings.toolJsonViewMode !== store.toolJsonViewMode) {
-        store.setToolJsonViewMode(settings.toolJsonViewMode);
-      }
-      break;
+  if (typeof settings.toolJsonViewMode === 'string'
+    && (settings.toolJsonViewMode === 'summary' || settings.toolJsonViewMode === 'formatted' || settings.toolJsonViewMode === 'raw')) {
+    if (settings.toolJsonViewMode !== store.toolJsonViewMode) {
+      store.setToolJsonViewMode(settings.toolJsonViewMode);
+    }
   }
   if (typeof settings.directoryShowHidden === 'boolean') {
     setDirectoryShowHidden(settings.directoryShowHidden, { persist: false });
@@ -1677,12 +1672,11 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   ) {
     result.gitChangesViewMode = candidate.gitChangesViewMode;
   }
-  switch (candidate.toolJsonViewMode) {
-    case 'summary':
-    case 'formatted':
-    case 'raw':
-      result.toolJsonViewMode = candidate.toolJsonViewMode;
-      break;
+  if (
+    typeof candidate.toolJsonViewMode === 'string'
+    && (candidate.toolJsonViewMode === 'summary' || candidate.toolJsonViewMode === 'formatted' || candidate.toolJsonViewMode === 'raw')
+  ) {
+    result.toolJsonViewMode = candidate.toolJsonViewMode;
   }
   if (typeof candidate.directoryShowHidden === 'boolean') {
     result.directoryShowHidden = candidate.directoryShowHidden;

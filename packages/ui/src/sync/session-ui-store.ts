@@ -99,14 +99,6 @@ import {
 
 export type { AttachedFile }
 
-function appendInputHistorySubmissions(
-  identity: ReturnType<typeof createInputHistoryIdentity>,
-  submissions: readonly InputHistorySubmission[],
-): void {
-  if (!identity || submissions.length === 0) return
-  useInputHistoryStore.getState().appendSubmissions(identity, submissions)
-}
-
 type GoalCommand = { name: string; template?: string }
 
 export function expandSlashCommandGoalObjective(content: string, commands: GoalCommand[]): string {
@@ -1734,8 +1726,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         createdDraftSession.directory ?? '',
         createdDraftSession.sessionId,
       )
-      const appendSubmissions = historyIdentity && options?.historySubmissions?.length
-        ? () => appendInputHistorySubmissions(historyIdentity, options.historySubmissions ?? [])
+      const historySubmissions = options?.historySubmissions
+      const appendSubmissions = historyIdentity && historySubmissions?.length
+        ? () => useInputHistoryStore.getState().appendSubmissions(historyIdentity, historySubmissions)
         : undefined
 
       notifyMessageSent(createdDraftSession.sessionId)
@@ -1860,13 +1853,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const partsWithPinnedContext = prefixParts.length > 0
       ? [...prefixParts, ...(additionalParts || [])]
       : additionalParts
-    const currentHistoryIdentity = createInputHistoryIdentity(
+    const historyIdentity = createInputHistoryIdentity(
       capturedRuntimeKey,
       currentSessionDirectory ?? '',
       targetSessionId || '',
     )
-    const appendSubmissions = currentHistoryIdentity && options?.historySubmissions?.length
-      ? () => appendInputHistorySubmissions(currentHistoryIdentity, options.historySubmissions ?? [])
+    const historySubmissions = options?.historySubmissions
+    const appendSubmissions = historyIdentity && historySubmissions?.length
+      ? () => useInputHistoryStore.getState().appendSubmissions(historyIdentity, historySubmissions)
       : undefined
 
     const messageRoute = await routeMessage({

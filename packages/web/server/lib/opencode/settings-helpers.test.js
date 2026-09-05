@@ -121,7 +121,7 @@ describe('settings helpers', () => {
         inputHistoryLimit: 40,
       });
       expect(helpers.formatSettingsResponse({})).toMatchObject({
-        inputHistoryScope: 'global',
+        inputHistoryScope: 'session',
         inputHistoryLimit: DEFAULT_INPUT_HISTORY_LIMIT,
       });
     } finally {
@@ -265,14 +265,14 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ inputHistoryScope: 'workspace' })).toEqual({});
   });
 
-  it('defaults inputHistoryScope to global in formatted settings responses', () => {
+  it('defaults inputHistoryScope to session in formatted settings responses', () => {
     const helpers = createTestHelpers();
 
-    expect(helpers.formatSettingsResponse({ inputHistoryScope: 'session' })).toMatchObject({
-      inputHistoryScope: 'session',
+    expect(helpers.formatSettingsResponse({ inputHistoryScope: 'global' })).toMatchObject({
+      inputHistoryScope: 'global',
     });
     expect(helpers.formatSettingsResponse({})).toMatchObject({
-      inputHistoryScope: 'global',
+      inputHistoryScope: 'session',
     });
   });
 

@@ -2,8 +2,6 @@ import { describe, expect, test } from 'bun:test';
 
 import { createFileContentPoller } from './fileContentPoller';
 
-const MAX_BYTES = 200_000;
-
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => { resolve = done; });
@@ -23,11 +21,10 @@ describe('createFileContentPoller', () => {
       getLoadedRevision: () => 0,
       isDirty: () => false,
       applyContent: (content) => applied.push(content),
-      maxBytes: MAX_BYTES,
     });
 
-    expect(await poller.poll(12)).toBe(true);
-    expect(await poller.poll(12)).toBe(true);
+    expect(await poller.poll()).toBe(true);
+    expect(await poller.poll()).toBe(true);
 
     expect(reads).toBe(2);
     expect(applied).toEqual([]);
@@ -41,10 +38,9 @@ describe('createFileContentPoller', () => {
       getLoadedRevision: () => 0,
       isDirty: () => false,
       applyContent: (content) => applied.push(content),
-      maxBytes: MAX_BYTES,
     });
 
-    expect(await poller.poll(6)).toBe(false);
+    expect(await poller.poll()).toBe(false);
     expect(applied).toEqual([]);
   });
 
@@ -59,10 +55,9 @@ describe('createFileContentPoller', () => {
       getLoadedRevision: () => 0,
       isDirty: () => true,
       applyContent: () => undefined,
-      maxBytes: MAX_BYTES,
     });
 
-    expect(await poller.poll(6)).toBe(false);
+    expect(await poller.poll()).toBe(false);
     expect(reads).toBe(0);
   });
 
@@ -78,10 +73,9 @@ describe('createFileContentPoller', () => {
       getLoadedRevision: () => 0,
       isDirty: () => false,
       applyContent: (content) => applied.push(content),
-      maxBytes: MAX_BYTES,
     });
 
-    expect(await poller.poll(3)).toBe(true);
+    expect(await poller.poll()).toBe(true);
 
     expect(reads).toBe(2);
     expect(applied).toEqual(['abd']);
@@ -97,10 +91,9 @@ describe('createFileContentPoller', () => {
       getLoadedRevision: () => 0,
       isDirty: () => dirty,
       applyContent: (content) => applied.push(content),
-      maxBytes: MAX_BYTES,
     });
 
-    const polling = poller.poll(20);
+    const polling = poller.poll();
     dirty = true;
     read.resolve('external edit');
     await polling;
@@ -117,17 +110,16 @@ describe('createFileContentPoller', () => {
       getLoadedRevision: () => 0,
       isDirty: () => false,
       applyContent: (content) => applied.push(content),
-      maxBytes: MAX_BYTES,
     });
 
-    await poller.poll(7);
+    await poller.poll();
     expect(applied).toEqual([]);
 
-    expect(await poller.poll(7)).toBe(true);
+    expect(await poller.poll()).toBe(true);
     expect(applied).toEqual(['settled']);
   });
 
-  test('allows only one read in flight and ignores a disposed poll', async () => {
+  test('ignores a read that resolves after dispose', async () => {
     const read = deferred<string>();
     let reads = 0;
     const applied: string[] = [];
@@ -140,14 +132,12 @@ describe('createFileContentPoller', () => {
       getLoadedRevision: () => 0,
       isDirty: () => false,
       applyContent: (content) => applied.push(content),
-      maxBytes: MAX_BYTES,
     });
 
-    const first = poller.poll(5);
-    await poller.poll(5);
+    const pending = poller.poll();
     poller.dispose();
     read.resolve('after');
-    await first;
+    expect(await pending).toBe(false);
 
     expect(reads).toBe(1);
     expect(applied).toEqual([]);
@@ -165,10 +155,9 @@ describe('createFileContentPoller', () => {
       getLoadedRevision: () => loadedRevision,
       isDirty: () => false,
       applyContent: (content) => applied.push(content),
-      maxBytes: MAX_BYTES,
     });
 
-    const polling = poller.poll(20);
+    const polling = poller.poll();
     firstRead.resolve('external edit');
     await Promise.resolve();
     loadedRevision += 1;
@@ -179,22 +168,4 @@ describe('createFileContentPoller', () => {
     expect(applied).toEqual([]);
   });
 
-  test('does not read content above the polling byte limit', async () => {
-    let reads = 0;
-    const poller = createFileContentPoller({
-      readContent: async () => {
-        reads += 1;
-        return 'content';
-      },
-      getLoadedContent: () => 'before',
-      getLoadedRevision: () => 0,
-      isDirty: () => false,
-      applyContent: () => undefined,
-      maxBytes: MAX_BYTES,
-    });
-
-    expect(await poller.poll(MAX_BYTES + 1)).toBe(false);
-
-    expect(reads).toBe(0);
-  });
 });

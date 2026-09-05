@@ -259,7 +259,7 @@ const readSnapshot = (): InputHistorySnapshot => {
   });
 };
 
-const cloneEntriesWithLimit = (entries: readonly InputHistoryEntry[], limit: number): InputHistoryEntry[] => (
+const trimEntriesToLimit = (entries: readonly InputHistoryEntry[], limit: number): InputHistoryEntry[] => (
   entries.slice(Math.max(0, entries.length - limit))
 );
 
@@ -273,7 +273,7 @@ const limitNamespaces = (
       key,
       {
         touchedAt: namespace.touchedAt,
-        entries: cloneEntriesWithLimit(namespace.entries, entryLimit),
+        entries: trimEntriesToLimit(namespace.entries, entryLimit),
       },
     ] as const)
     .sort((left, right) => right[1].touchedAt - left[1].touchedAt)
@@ -381,8 +381,7 @@ export const createInputHistoryIdentity = (
 
 const getAttachmentReference = (attachment: AttachedFile): string | null => {
   if (attachment.source === 'vscode' && attachment.vscodeSource === 'file') {
-    const normalizedPath = normalizePath(attachment.vscodePath ?? null);
-    return normalizedPath;
+    return normalizePath(attachment.vscodePath ?? null);
   }
   const candidate = attachment.dataUrl.trim();
   return candidate || null;
@@ -484,7 +483,7 @@ const appendToNamespace = (
   }
   return {
     touchedAt,
-    entries: cloneEntriesWithLimit(entries, entryLimit),
+    entries: trimEntriesToLimit(entries, entryLimit),
   };
 };
 

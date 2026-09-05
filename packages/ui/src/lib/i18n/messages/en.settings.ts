@@ -2097,6 +2097,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'Enable Spellcheck in Text Inputs',
   'settings.openchamber.visual.field.largeTextPaste': 'Large text paste',
   'settings.openchamber.visual.field.largeTextPasteHint': 'When pasting more than about 2,000 characters or 25 lines, choose whether to attach the text as a file, paste it inline, or ask each time.',
+  'settings.openchamber.visual.field.enterToSend': 'Enter sends',
+  'settings.openchamber.visual.field.enterToSendHint': 'Once changed, this controls Enter and Shift+Enter on every surface. Until then, each surface keeps its existing behavior.',
   'settings.openchamber.visual.field.largeTextPasteAria': 'Large text paste behavior',
   'settings.openchamber.visual.field.largeTextPasteOptionAria': 'Large text paste: {option}',
   'settings.openchamber.visual.option.largeTextPaste.ask.label': 'Ask each time',

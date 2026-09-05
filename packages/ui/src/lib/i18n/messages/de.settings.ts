@@ -2012,6 +2012,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'Rechtschreibprüfung in Texteingaben aktivieren',
   'settings.openchamber.visual.field.largeTextPaste': 'Großes Texteinfügen',
   'settings.openchamber.visual.field.largeTextPasteHint': 'Beim Einfügen von mehr als etwa 2.000 Zeichen oder 25 Zeilen wählen, ob der Text als Datei angehängt, direkt eingefügt oder jedes Mal nachgefragt werden soll.',
+  'settings.openchamber.visual.field.enterToSend': 'Enter sendet',
+  'settings.openchamber.visual.field.enterToSendHint': 'Nach der Änderung steuern Enter und Shift+Enter das Verhalten auf jeder Oberfläche. Bis dahin behält jede Oberfläche ihr bestehendes Verhalten bei.',
   'settings.openchamber.visual.field.largeTextPasteAria': 'Verhalten bei großem Texteinfügen',
   'settings.openchamber.visual.field.largeTextPasteOptionAria': 'Großes Texteinfügen: {option}',
   'settings.openchamber.visual.option.largeTextPaste.ask.label': 'Jedes Mal fragen',
