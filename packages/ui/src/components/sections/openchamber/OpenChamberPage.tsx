@@ -2,6 +2,7 @@ import React from 'react';
 import { OpenChamberVisualSettings } from './OpenChamberVisualSettings';
 import { AboutSettings } from './AboutSettings';
 import { SessionRetentionSettings } from './SessionRetentionSettings';
+import { SessionNavigationSettings } from './SessionNavigationSettings';
 import { PasskeySettings } from './PasskeySettings';
 import { AppLinkSecuritySettings } from './AppLinkSecuritySettings';
 import { DefaultsSettings } from './DefaultsSettings';
@@ -220,6 +221,7 @@ const SessionsSectionContent: React.FC = () => {
     return (
         <>
             <DefaultsSettings />
+            <SessionNavigationSettings />
             <SessionRetentionSettings />
         </>
     );

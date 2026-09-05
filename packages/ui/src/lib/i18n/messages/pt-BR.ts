@@ -489,6 +489,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.archivePage.deleteSessionAria": "Excluir {title}",
   "sessions.archivePage.restoreSessionAria": "Restaurar {title}",
   "sessions.switcher.openAria": "Abrir seletor de sessões",
+  "sessions.mruSwitcher.title": "Vistas recentemente",
   "header.sessionTabs.stripAria": "Sessões abertas",
   "header.sessionTabs.tabMenuAria": "Ações da aba de sessão",
   "header.sessionTabs.closeTab": "Fechar aba",

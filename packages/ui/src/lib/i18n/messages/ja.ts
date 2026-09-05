@@ -489,6 +489,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.archivePage.deleteSessionAria': '{title} を削除',
   'sessions.archivePage.restoreSessionAria': '{title} を復元',
   'sessions.switcher.openAria': 'セッションスイッチャーを開く',
+  'sessions.mruSwitcher.title': '最近表示した項目',
   'header.sessionTabs.stripAria': '開いているセッション',
   'header.sessionTabs.tabMenuAria': 'セッションタブの操作',
   'header.sessionTabs.closeTab': 'タブを閉じる',

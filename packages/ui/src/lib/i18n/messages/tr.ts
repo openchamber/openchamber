@@ -474,6 +474,7 @@ export const dict = {
   'sessions.archivePage.deleteSessionAria': '{title} öğesini sil',
   'sessions.archivePage.restoreSessionAria': '{title} öğesini geri yükle',
   'sessions.switcher.openAria': 'Session değiştiriciyi aç',
+  'sessions.mruSwitcher.title': 'Son görüntülenenler',
   'sessions.switcher.empty': 'Son kullanılan session yok',
   'sessions.switcher.draftTitle': 'Yeni session',
   'sessions.sidebar.updateCheck.errorTitle': 'Güncellemeler kontrol edilemedi',

@@ -66,6 +66,16 @@ const SHORTCUT_GROUPS = {
         'settings.openchamber.keyboardShortcuts.action.switch_session_next.label',
     },
     {
+      id: 'cycle_recent_sessions_forward',
+      defaultBinding: 'ctrl+tab',
+      customizable: false,
+    },
+    {
+      id: 'cycle_recent_sessions_backward',
+      defaultBinding: 'ctrl+shift+tab',
+      customizable: false,
+    },
+    {
       id: 'rename_current_session',
       defaultBinding: 'mod+k r',
       customizable: true,

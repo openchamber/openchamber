@@ -392,6 +392,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['delete', 'confirmation'],
   },
   {
+    id: 'sessions.recent-session-cycling',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.sessionNavigation.field.cycleRecentSessions',
+    descriptionKey: 'settings.openchamber.sessionNavigation.field.cycleRecentSessionsInfo',
+    keywords: ['recent sessions', 'mru', 'ctrl tab', 'keyboard', 'switcher'],
+    isAvailable: (ctx) => !ctx.isMobile && !ctx.isVSCode,
+  },
+  {
     id: 'sessions.small-model',
     page: 'sessions',
     titleKey: 'settings.openchamber.defaults.smallModel.title',

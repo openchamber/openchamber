@@ -66,6 +66,14 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ draftStartersVisible: 'false' })).toEqual({});
   });
 
+  it('accepts only booleans for recent session cycling', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ recentSessionCyclingEnabled: true })).toEqual({ recentSessionCyclingEnabled: true });
+    expect(helpers.sanitizeSettingsUpdate({ recentSessionCyclingEnabled: false })).toEqual({ recentSessionCyclingEnabled: false });
+    expect(helpers.sanitizeSettingsUpdate({ recentSessionCyclingEnabled: 'false' })).toEqual({});
+  });
+
   it('sanitizes shared sidebar display preferences', () => {
     const helpers = createTestHelpers();
 

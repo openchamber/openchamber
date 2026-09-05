@@ -426,6 +426,7 @@ export const dict = {
   'sessions.sidebar.activity.chatsEmpty': 'Noch keine Chats.',
   'chat.chatInput.chooseProject': 'Projekt auswählen',
   'sessions.switcher.openAria': 'Sitzungswechsler öffnen',
+  'sessions.mruSwitcher.title': 'Zuletzt angesehen',
   'header.sessionTabs.stripAria': 'Offene Sitzungen',
   'header.sessionTabs.tabMenuAria': 'Aktionen für den Sitzungs-Tab',
   'header.sessionTabs.closeTab': 'Tab schließen',

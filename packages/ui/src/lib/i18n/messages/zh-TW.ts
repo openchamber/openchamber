@@ -502,6 +502,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.archivePage.deleteSessionAria': '刪除 {title}',
   'sessions.archivePage.restoreSessionAria': '還原 {title}',
   'sessions.switcher.openAria': '開啟會話切換器',
+  'sessions.mruSwitcher.title': '最近檢視',
   'header.sessionTabs.stripAria': '開啟的會話',
   'header.sessionTabs.tabMenuAria': '工作階段分頁動作',
   'header.sessionTabs.closeTab': '關閉分頁',

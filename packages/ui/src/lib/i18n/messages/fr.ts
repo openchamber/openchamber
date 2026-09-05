@@ -318,6 +318,7 @@ export const dict = {
   'sessions.archivePage.deleteSessionAria': 'Supprimer {title}',
   'sessions.archivePage.restoreSessionAria': 'Restaurer {title}',
   'sessions.switcher.openAria': 'Sélecteur de session ouvert',
+  'sessions.mruSwitcher.title': 'Consultées récemment',
   'header.sessionTabs.stripAria': 'Sessions ouvertes',
   'header.sessionTabs.tabMenuAria': 'Actions de l\'onglet de session',
   'header.sessionTabs.closeTab': 'Fermer l\'onglet',

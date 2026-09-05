@@ -595,6 +595,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     messageStreamTransport: 'auto',
     stickyUserHeader: defaults.stickyUserHeader,
     promptNavigatorEnabled: defaults.promptNavigatorEnabled,
+    recentSessionCyclingEnabled: defaults.recentSessionCyclingEnabled,
     wideChatLayoutEnabled: defaults.wideChatLayoutEnabled,
     showSplitAssistantMessageActions: defaults.showSplitAssistantMessageActions,
     draftStartersVisible: defaults.draftStartersVisible,
@@ -860,6 +861,12 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.promptNavigatorEnabled === 'boolean' && settings.promptNavigatorEnabled !== store.promptNavigatorEnabled) {
     store.setPromptNavigatorEnabled(settings.promptNavigatorEnabled);
+  }
+  if (typeof settings.recentSessionCyclingEnabled === 'boolean'
+    && settings.recentSessionCyclingEnabled !== undefined
+    && settings.recentSessionCyclingEnabled !== store.recentSessionCyclingEnabled
+  ) {
+    store.setRecentSessionCyclingEnabled(settings.recentSessionCyclingEnabled);
   }
   if (typeof settings.wideChatLayoutEnabled === 'boolean' && settings.wideChatLayoutEnabled !== store.wideChatLayoutEnabled) {
     store.setWideChatLayoutEnabled(settings.wideChatLayoutEnabled);
@@ -1529,6 +1536,12 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.promptNavigatorEnabled === 'boolean') {
     result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
+  }
+  if (
+    candidate.recentSessionCyclingEnabled === true
+    || candidate.recentSessionCyclingEnabled === false
+  ) {
+    result.recentSessionCyclingEnabled = candidate.recentSessionCyclingEnabled;
   }
   if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
     result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;

@@ -601,6 +601,12 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.promptNavigatorEnabled === 'boolean') {
       result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
     }
+    if (
+      candidate.recentSessionCyclingEnabled === true
+      || candidate.recentSessionCyclingEnabled === false
+    ) {
+      result.recentSessionCyclingEnabled = candidate.recentSessionCyclingEnabled;
+    }
     if (typeof candidate.expandedEditorToolbar === 'boolean') {
       result.expandedEditorToolbar = candidate.expandedEditorToolbar;
     }

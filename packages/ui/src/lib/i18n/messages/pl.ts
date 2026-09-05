@@ -300,6 +300,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.archivePage.deleteSessionAria': 'Usuń {title}',
   'sessions.archivePage.restoreSessionAria': 'Przywróć {title}',
   'sessions.switcher.openAria': 'Otwórz przełącznik sesji',
+  'sessions.mruSwitcher.title': 'Ostatnio wyświetlane',
   'header.sessionTabs.stripAria': 'Otwarte sesje',
   'header.sessionTabs.tabMenuAria': 'Akcje karty sesji',
   'header.sessionTabs.closeTab': 'Zamknij kartę',

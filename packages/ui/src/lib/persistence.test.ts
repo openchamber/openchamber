@@ -245,16 +245,21 @@ describe('updateDesktopSettings', () => {
 
   test('sanitizes a successful fallback settings response before applying it', async () => {
     const previousFetch = globalThis.fetch;
-    const fallbackFetch: typeof fetch = async () => new Response(JSON.stringify({ terminalShell: 'zsh' }), {
+    const fallbackFetch: typeof fetch = async () => new Response(JSON.stringify({
+      terminalShell: 'zsh',
+      recentSessionCyclingEnabled: 'false',
+    }), {
       headers: { 'Content-Type': 'application/json' },
     });
     try {
       globalThis.fetch = fallbackFetch;
       useUIStore.getState().setTerminalShell('fish');
+      useUIStore.getState().setRecentSessionCyclingEnabled(true);
 
       await updateDesktopSettings({ terminalShell: 'zsh' });
 
       expect(useUIStore.getState().terminalShell).toBe('zsh');
+      expect(useUIStore.getState().recentSessionCyclingEnabled).toBe(true);
       expect(getSettingsSaveState()).toBe('idle');
     } finally {
       globalThis.fetch = previousFetch;
@@ -404,6 +409,7 @@ describe('updateDesktopSettings', () => {
         followUpBehavior: 'steer',
         draftStarters: [{ type: 'command', name: 'runtime-a' }],
         draftStartersVisible: false,
+        recentSessionCyclingEnabled: false,
         draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
       },
       source: 'web',
@@ -415,6 +421,7 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().favoriteModels).toHaveLength(1);
     expect(useUIStore.getState().globalDraftStarters).toEqual([{ type: 'command', name: 'runtime-a' }]);
     expect(useUIStore.getState().draftStartersVisible).toBe(false);
+    expect(useUIStore.getState().recentSessionCyclingEnabled).toBe(false);
     expect(useMessageQueueStore.getState().followUpBehavior).toBe('steer');
 
     switchRuntimeEndpoint({ apiBaseUrl: 'https://preferences-b.example', runtimeKey: 'preferences-b' });
@@ -429,6 +436,7 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().favoriteModels).toEqual([]);
     expect(useUIStore.getState().globalDraftStarters).toBeNull();
     expect(useUIStore.getState().draftStartersVisible).toBe(true);
+    expect(useUIStore.getState().recentSessionCyclingEnabled).toBe(true);
     expect(useMessageQueueStore.getState().followUpBehavior).toBe('queue');
   });
 

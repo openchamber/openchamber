@@ -489,6 +489,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.archivePage.deleteSessionAria': '删除 {title}',
   'sessions.archivePage.restoreSessionAria': '还原 {title}',
   'sessions.switcher.openAria': '打开会话切换器',
+  'sessions.mruSwitcher.title': '最近查看',
   'header.sessionTabs.stripAria': '打开的会话',
   'header.sessionTabs.tabMenuAria': '会话标签页操作',
   'header.sessionTabs.closeTab': '关闭标签页',

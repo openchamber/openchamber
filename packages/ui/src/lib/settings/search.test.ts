@@ -42,4 +42,17 @@ describe('settings search', () => {
     expect(results.some((result) => result.id === 'integrations.linear.add-workspace')).toBe(false);
     expect(results.some((result) => result.id === 'integrations.linear.mapping')).toBe(false);
   });
+
+  test('shows recent session cycling only where the switcher is available', () => {
+    const search = (runtimeOverrides: Partial<typeof runtimeCtx> = {}) => buildSettingsSearchResults({
+      query: 'mru',
+      runtimeCtx: { ...runtimeCtx, ...runtimeOverrides },
+      t,
+      getPageTitle: (page) => page,
+    });
+
+    expect(search().some((result) => result.id === 'sessions.recent-session-cycling')).toBe(true);
+    expect(search({ isMobile: true }).some((result) => result.id === 'sessions.recent-session-cycling')).toBe(false);
+    expect(search({ isVSCode: true }).some((result) => result.id === 'sessions.recent-session-cycling')).toBe(false);
+  });
 });

@@ -489,6 +489,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.archivePage.deleteSessionAria': '{title} 삭제',
   'sessions.archivePage.restoreSessionAria': '{title} 복원',
   'sessions.switcher.openAria': '세션 전환기 열기',
+  'sessions.mruSwitcher.title': '최근에 본 항목',
   'header.sessionTabs.stripAria': '열린 세션',
   'header.sessionTabs.tabMenuAria': '세션 탭 작업',
   'header.sessionTabs.closeTab': '탭 닫기',
