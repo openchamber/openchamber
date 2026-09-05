@@ -13,7 +13,7 @@ const TICK_MS = 1000;
 
 /**
  * Elapsed time of a session's current turn, or of the turn that just finished.
- * Colored to match the row's status dot in each state, so the pair reads as one
+ * Colored to match the row's status marker in each state, so the pair reads as one
  * indicator rather than two.
  *
  * Deliberately a leaf. The tick re-renders this span alone rather than the
@@ -44,7 +44,7 @@ export const SessionActivityDuration: React.FC<{
     <span
       className={cn(
         'shrink-0 tabular-nums',
-        // The readout wears its dot's color, so the row reads as one signal:
+        // The readout wears its marker's color, so the row reads as one signal:
         // primary while the turn runs, info once it is waiting to be read.
         running ? 'text-primary' : 'text-[var(--status-info)]',
         className,

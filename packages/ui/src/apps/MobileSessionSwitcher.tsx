@@ -2,6 +2,7 @@ import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
+import { SessionActivityMarker } from '@/components/session/sidebar/sessions/SessionActivityMarker';
 import { formatSessionCompactDateLabel } from '@/components/session/sidebar/utils';
 import { useSwitcherItems } from '@/components/session/sidebar/shell/useSwitcherItems';
 import { useTabletLayout } from '@/lib/device';
@@ -21,9 +22,7 @@ const TABLET_POPOVER_WIDTH = 380;
 const getSessionTitle = (session: Session, fallback: string): string =>
   session.title?.trim() || fallback;
 
-/** One switcher row: live status (busy spinner / attention dot), title,
-    "project · branch", compact time. Mirrors the desktop SessionSwitcherDropdown
-    indicator conventions; no subsession chevrons on mobile by design. */
+/** One switcher row: live status, title, "project · branch", compact time. */
 const SwitcherRow: React.FC<{
   session: Session;
   meta: string;
@@ -58,15 +57,16 @@ const SwitcherRow: React.FC<{
           <span className="block truncate typography-micro text-muted-foreground">{meta}</span>
         ) : null}
       </span>
-      {/* Activity sits on the right, before the time — no reserved left gutter. */}
       {isStreaming || showUnreadDot ? (
-        <span
-          className={cn(
-            'size-1.5 shrink-0 rounded-full',
-            isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
-          )}
-          aria-hidden
-        />
+        <span className="inline-flex size-2.5 shrink-0 items-center justify-center">
+          <SessionActivityMarker
+            state={isStreaming ? 'active' : 'unread'}
+            label={t(isStreaming
+              ? 'sessions.sidebar.session.status.active'
+              : 'sessions.sidebar.session.status.unread')}
+            decorative
+          />
+        </span>
       ) : null}
       {/* The elapsed turn takes the time slot while it matters, then hands it
           back to the relative timestamp. */}
