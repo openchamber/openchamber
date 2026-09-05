@@ -315,6 +315,12 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       setSessionsSheetOpen(false);
       return true;
     }
+    // Session changes (e.g. subagent navigation) aren't tracked above, but
+    // useRouter() already pushed a history entry for them.
+    if (window.history.length > 1 && window.history.state?.route) {
+      window.history.back();
+      return true;
+    }
     return false;
   }, [activeSurface, closeSurface, closeWorkspace, openPlan, sessionsSheetOpen, workspaceOpen]);
 
