@@ -1487,6 +1487,7 @@ export const dict: Record<I18nKey, string> = {
   'filesView.diagram.closeDiagramView': '关闭图表视图',
   'filesView.diagram.saveDiagram': '保存图表',
   'contextUsage.aria.label': '上下文用量',
+  'contextUsage.aria.value': '{tokens}，已使用上下文的 {percentage}',
   'contextUsage.mobile.title': '上下文用量',
   'contextUsage.mobile.usedTokens': '已用 Token',
   'contextUsage.mobile.contextLimit': '上下文上限',

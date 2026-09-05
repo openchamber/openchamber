@@ -127,6 +127,13 @@ subscribes to `currentProviderId` / `currentModelId` for the limits.
 `contextUsage.test.ts` pins the arithmetic — notably that the *latest*
 reporting assistant turn is the answer, not a sum across turns.
 
+The desktop context-panel chat header resolves one coherent snapshot from the
+newest token-reporting assistant message. Tokens, provider, model and limits all
+come from that message, so a subagent using another model does not inherit the
+main session's context window. Live model limits take precedence over the
+models.dev metadata cache. If neither source knows the recorded model, the
+indicator waits instead of presenting the 200K fallback as authoritative.
+
 Two further rules on this readout:
 
 - The displayed percentage is computed **unrounded**. `clampPercent` applies

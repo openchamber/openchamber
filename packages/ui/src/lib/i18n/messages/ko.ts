@@ -1523,6 +1523,7 @@ export const dict: Record<I18nKey, string> = {
   'filesView.diagram.closeDiagramView': '다이어그램 보기 닫기',
   'filesView.diagram.saveDiagram': '다이어그램 저장',
   'contextUsage.aria.label': '컨텍스트 사용량',
+  'contextUsage.aria.value': '{tokens}, 컨텍스트의 {percentage} 사용',
   'contextUsage.mobile.title': '컨텍스트 사용량',
   'contextUsage.mobile.usedTokens': '사용한 토큰',
   'contextUsage.mobile.contextLimit': '컨텍스트 한도',

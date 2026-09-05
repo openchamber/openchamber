@@ -1496,6 +1496,7 @@ export const dict = {
   'filesView.diagram.closeDiagramView': 'Diyagram görünümünü kapat',
   'filesView.diagram.saveDiagram': 'Diyagramı kaydet',
   'contextUsage.aria.label': 'Bağlam kullanımı',
+  'contextUsage.aria.value': '{tokens}, bağlamın {percentage} kadarı kullanıldı',
   'contextUsage.mobile.title': 'Bağlam Kullanımı',
   'contextUsage.mobile.usedTokens': 'Kullanılan token',
   'contextUsage.mobile.contextLimit': 'Bağlam limiti',

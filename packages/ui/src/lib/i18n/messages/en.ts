@@ -1521,6 +1521,7 @@ export const dict = {
   'filesView.diagram.closeDiagramView': 'Close diagram view',
   'filesView.diagram.saveDiagram': 'Save diagram',
   'contextUsage.aria.label': 'Context usage',
+  'contextUsage.aria.value': '{tokens}, {percentage} of context used',
   'contextUsage.mobile.title': 'Context Usage',
   'contextUsage.mobile.usedTokens': 'Used tokens',
   'contextUsage.mobile.contextLimit': 'Context limit',

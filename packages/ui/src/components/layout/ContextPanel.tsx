@@ -4,6 +4,7 @@ import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { DiffViewIcon } from '@/components/icons/DiffIcon';
 import { Button } from '@/components/ui/button';
 import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
+import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { PullRequestView } from '@/components/views/PullRequestView';
 import { TerminalView } from '@/components/views/TerminalView';
@@ -30,7 +31,9 @@ import { useBrowserFaviconStore } from '@/stores/useBrowserFaviconStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
 import { markSessionViewed } from '@/sync/notification-store';
-import { setExternallyViewedSession, useDirectoryStore } from '@/sync/sync-context';
+import { setExternallyViewedSession, useDirectoryStore, useEnsureSessionMessages, useSessionMessages } from '@/sync/sync-context';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { resolveSessionContextSnapshot } from '@/components/chat/work-status/contextUsage';
 import { ContextPanelContent } from './ContextSidebarTab';
 import { BrowserPane } from '@/components/browser/BrowserPane';
 import { browserUrlLabel } from '@/lib/browser/url';
@@ -60,7 +63,39 @@ const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
 const EMPTY_SESSION_TITLE_MAP = new Map<string, string>();
 
+const SessionContextUsageIndicator: React.FC<{
+  sessionID: string;
+  directory: string;
+}> = ({ sessionID, directory }) => {
+  useEnsureSessionMessages(sessionID, directory);
+  const messages = useSessionMessages(sessionID, directory);
+  const providers = useConfigStore((state) => state.providers);
+  const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
+  const snapshot = React.useMemo(
+    () => resolveSessionContextSnapshot(messages, providers, modelsMetadata),
+    [messages, modelsMetadata, providers],
+  );
 
+  if (!snapshot) return null;
+
+  return (
+    <ContextUsageDisplay
+      totalTokens={snapshot.totalTokens}
+      percentage={snapshot.percent}
+      colorPercentage={Math.round(snapshot.percent)}
+      contextLimit={snapshot.contextLimit}
+      outputLimit={snapshot.outputLimit}
+      size="compact"
+      hideIcon
+      showPercentIcon
+      showTokenCount
+      staticProgressbar
+      className="h-7 shrink-0 px-1"
+      valueClassName="typography-ui-label font-medium leading-none text-foreground"
+      percentIconClassName="h-4 w-4"
+    />
+  );
+};
 
 const normalizeDirectoryKey = (value: string): string => {
   if (!value) return '';
@@ -1071,6 +1106,9 @@ export const ContextPanel: React.FC = () => {
         </div>
       )}
       <div className="flex items-center gap-1 px-1.5">
+        {activeChatSessionID && directoryKey ? (
+          <SessionContextUsageIndicator sessionID={activeChatSessionID} directory={directoryKey} />
+        ) : null}
         {activeTab?.mode === 'browser' ? (
           <Button
             type="button"

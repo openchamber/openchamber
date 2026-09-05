@@ -1733,6 +1733,7 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.output': 'Wyjście',
   'contextSidebar.tokens.reasoning': 'Rozumowanie',
   'contextUsage.aria.label': 'Użycie kontekstu',
+  'contextUsage.aria.value': '{tokens}, wykorzystano {percentage} kontekstu',
   'contextUsage.mobile.contextLimit': 'Limit kontekstu',
   'contextUsage.mobile.outputLimit': 'Limit wyjścia',
   'contextUsage.mobile.cost': 'Koszt',

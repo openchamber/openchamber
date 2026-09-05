@@ -1487,6 +1487,7 @@ export const dict: Record<I18nKey, string> = {
   "filesView.diagram.closeDiagramView": "Fechar visualização de diagrama",
   "filesView.diagram.saveDiagram": "Salvar diagrama",
   "contextUsage.aria.label": "Uso do contexto",
+  "contextUsage.aria.value": "{tokens}, {percentage} do contexto usado",
   "contextUsage.mobile.title": "Uso do contexto",
   "contextUsage.mobile.usedTokens": "Tokens usados",
   "contextUsage.mobile.contextLimit": "Limite de contexto",

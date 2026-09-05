@@ -1285,6 +1285,7 @@ export const dict = {
   'filesView.error.readFileFailed': 'Échec de la lecture du fichier',
   'filesView.editor.htmlPreviewTitle': 'Aperçu HTML',
   'contextUsage.aria.label': 'Utilisation du contexte',
+  'contextUsage.aria.value': '{tokens}, {percentage} du contexte utilisé',
   'contextUsage.mobile.title': 'Utilisation du contexte',
   'contextUsage.mobile.usedTokens': 'Jetons utilisés',
   'contextUsage.mobile.contextLimit': 'Limite de contexte',
