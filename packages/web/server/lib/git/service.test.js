@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import simpleGit from 'simple-git';
+import { normalizeGitOutputPath } from './output-path.js';
 
 import {
   checkoutBranch,
@@ -12,6 +13,7 @@ import {
   createWorktree,
   getWorktreeBootstrapStatus,
   getBranches,
+  getRepositoryRoot,
   getUnpushedBranchCounts,
   getRangeDiff,
   getStatus,
@@ -53,6 +55,9 @@ const runGit = (cwd, args) =>
     cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    env: process.platform === 'win32'
+      ? { ...process.env, MSYS: [process.env.MSYS, 'noglob'].filter(Boolean).join(' ') }
+      : process.env,
   });
 
 const readBranchConfig = (cwd, branch, key) => {
@@ -445,6 +450,80 @@ describe('getStatus', () => {
 // ---------------------------------------------------------------------------
 
 describe('worktree root resolution', () => {
+  it.each(['repo', 'repo space', 'repo-\u4e2d\u6587'])('uses filesystem paths returned by Git for %s', async (name) => {
+    if (!canRunGit()) return;
+    const parent = createTempDir();
+    const repo = path.join(parent, name);
+    const subdirectory = path.join(repo, 'packages', 'app');
+    fs.mkdirSync(subdirectory, { recursive: true });
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'core.autocrlf', 'false']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+
+    for (const directory of [repo, subdirectory]) {
+      expect(await isGitRepository(directory)).toBe(true);
+      expect(fs.realpathSync(await getRepositoryRoot(directory))).toBe(fs.realpathSync(repo));
+      expect(fs.realpathSync((await resolveWorktreeTopLevel(directory)).root)).toBe(fs.realpathSync(repo));
+      expect((await getStatus(directory)).isClean).toBe(true);
+    }
+
+    fs.writeFileSync(path.join(repo, 'README.md'), 'before\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    fs.writeFileSync(path.join(repo, 'README.md'), 'after /c/keep-this-content\n');
+    expect((await getBranches(subdirectory)).current).toBe('main');
+    expect((await getStatus(repo)).files).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'README.md', working_dir: 'M' }),
+    ]));
+    expect(await getDiff(repo, { path: 'README.md' })).toContain('+after /c/keep-this-content');
+
+    const entries = await getWorktrees(subdirectory);
+    expect(entries).toHaveLength(1);
+    expect(fs.realpathSync(entries[0].path)).toBe(fs.realpathSync(repo));
+  });
+
+  it('creates and queries a managed worktree using native filesystem paths', async () => {
+    if (!canRunGit()) return;
+    const previousDataHome = process.env.XDG_DATA_HOME;
+    const parent = createTempDir();
+    process.env.XDG_DATA_HOME = path.join(parent, 'data space');
+    try {
+      const repo = path.join(parent, 'repo space');
+      fs.mkdirSync(repo);
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'core.autocrlf', 'false']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), 'initial\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const created = await createWorktree(repo, {
+        mode: 'new', branchName: 'feature/native-paths', worktreeName: 'native-paths',
+      });
+      await expect.poll(
+        async () => (await getWorktreeBootstrapStatus(created.path)).status,
+        { timeout: 20_000 },
+      ).not.toBe('pending');
+      expect(await getWorktreeBootstrapStatus(created.path)).toMatchObject({ status: 'ready', error: null });
+      expect(fs.readFileSync(path.join(created.path, 'README.md'), 'utf8')).toBe('initial\n');
+      expect(fs.realpathSync(await getRepositoryRoot(created.path))).toBe(fs.realpathSync(created.path));
+      expect(fs.realpathSync((await resolvePrimaryWorktreeRoot(created.path)).root)).toBe(fs.realpathSync(repo));
+      expect((await getStatus(created.path)).isClean).toBe(true);
+      const entries = await getWorktrees(created.path);
+      expect(entries.map((entry) => fs.realpathSync(entry.path)).sort()).toEqual(
+        [fs.realpathSync(repo), fs.realpathSync(created.path)].sort(),
+      );
+      await removeWorktree(repo, { directory: created.path });
+      expect(fs.existsSync(created.path)).toBe(false);
+      expect(await getWorktrees(repo)).toHaveLength(1);
+    } finally {
+      if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousDataHome;
+    }
+  });
+
   it('resolves the git toplevel for a repository subdirectory', async () => {
     if (!canRunGit()) return;
 
@@ -453,7 +532,7 @@ describe('worktree root resolution', () => {
     runGit(repo, ['init', '-b', 'main']);
     fs.mkdirSync(subdirectory, { recursive: true });
 
-    await expect(resolveWorktreeTopLevel(subdirectory)).resolves.toEqual({ root: fs.realpathSync(repo) });
+    expect(fs.realpathSync((await resolveWorktreeTopLevel(subdirectory)).root)).toBe(fs.realpathSync(repo));
   });
 
   it('resolves the primary worktree root from a linked worktree', async () => {
@@ -470,7 +549,7 @@ describe('worktree root resolution', () => {
     fs.rmSync(worktree, { recursive: true, force: true });
     runGit(repo, ['worktree', 'add', '-b', 'feature/test', worktree, 'HEAD']);
 
-    await expect(resolvePrimaryWorktreeRoot(worktree)).resolves.toEqual({ root: fs.realpathSync(repo) });
+    expect(fs.realpathSync((await resolvePrimaryWorktreeRoot(worktree)).root)).toBe(fs.realpathSync(repo));
   });
 });
 
@@ -807,6 +886,7 @@ describe('createWorktree', () => {
     const repo = createTempDir();
     const worktree = createTempDir();
     runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'core.autocrlf', 'false']);
     runGit(repo, ['config', 'user.email', 'test@example.com']);
     runGit(repo, ['config', 'user.name', 'Test User']);
     fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
@@ -815,7 +895,7 @@ describe('createWorktree', () => {
     fs.rmSync(worktree, { recursive: true, force: true });
     runGit(repo, ['worktree', 'add', '--no-checkout', '-b', 'feature/stale-lock', worktree, 'HEAD']);
 
-    const lockPath = runGit(worktree, ['rev-parse', '--git-path', 'index.lock']).trim();
+    const lockPath = normalizeGitOutputPath(runGit(worktree, ['rev-parse', '--git-path', 'index.lock']).trim());
     fs.writeFileSync(lockPath, 'stale');
 
     await expect(populateWorktreeWithLockRecovery(worktree)).resolves.toBeUndefined();
@@ -845,13 +925,17 @@ describe('createWorktree', () => {
       runGit(repo, ['worktree', 'add', '-b', 'feature/in-use', worktree, 'HEAD']);
       const canonicalWorktree = fs.realpathSync(worktree);
 
-      await expect(createWorktree(repo, {
+      const error = await createWorktree(repo, {
         mode: 'existing',
         existingBranch: 'feature/in-use',
         branchName: 'feature/in-use',
         worktreeName: 'feature-in-use',
         returnAfterDirectoryCreated: true,
-      })).rejects.toThrow(`Branch is already checked out in ${canonicalWorktree}`);
+      }).then(() => null, (error) => error);
+      expect(error).toBeInstanceOf(Error);
+      expect(error.message.replace(/\\/g, '/')).toBe(
+        `Branch is already checked out in ${canonicalWorktree.replace(/\\/g, '/')}`,
+      );
 
       const candidateDirectory = path.join(dataHome, 'opencode', 'worktree', projectID, 'feature-in-use');
       expect(fs.existsSync(candidateDirectory)).toBe(false);
@@ -1648,6 +1732,61 @@ describe.runIf(canRunGit())('getUnpushedBranchCounts', () => {
     await expect(getUnpushedBranchCounts(repository, ['next', 'no-upstream', 'remotes/origin/react'])).resolves.toEqual({
       counts: { next: 1 },
     });
+  });
+});
+
+describe.runIf(canRunGit())('Git revision arguments', () => {
+  it.each([undefined, 'glob'])('preserves revision syntax with inherited MSYS=%j', async (msys) => {
+    const { repository } = createRepositoryWithRemote();
+    runGit(repository, ['branch', '--set-upstream-to=origin/react', 'next']);
+    fs.writeFileSync(path.join(repository, 'feature.txt'), 'feature\n');
+    runGit(repository, ['add', 'feature.txt']);
+    runGit(repository, ['commit', '-m', 'feature']);
+
+    const previousMsys = process.env.MSYS;
+    if (msys === undefined) delete process.env.MSYS;
+    else process.env.MSYS = msys;
+    try {
+      expect(await getRangeDiff(repository, { base: 'origin/react', head: 'next@{0}' })).toContain('+feature');
+      expect(await getUnpushedBranchCounts(repository, ['next'])).toEqual({ counts: { next: 1 } });
+      expect(process.env.MSYS).toBe(msys);
+    } finally {
+      if (previousMsys === undefined) delete process.env.MSYS;
+      else process.env.MSYS = previousMsys;
+    }
+  });
+});
+
+describe.runIf(canRunGit())('Git inherited environment', () => {
+  it('runs repository operations without applying blocked environment overrides or mutating the parent', async () => {
+    const { tmpDir } = await createTempRepo();
+    const overrides = {
+      EDITOR: 'unused-editor', PAGER: 'unused-pager', PREFIX: '/unused-prefix',
+      SSH_ASKPASS: 'unused-askpass', GIT_ASKPASS: 'unused-askpass',
+      GIT_SSH: 'unused-ssh', GIT_SSH_COMMAND: 'unused-ssh',
+      GIT_PAGER: 'unused-pager', GIT_EDITOR: 'unused-editor',
+      GIT_SEQUENCE_EDITOR: 'unused-editor', GIT_EXEC_PATH: '/unused-exec',
+      GIT_EXTERNAL_DIFF: 'unused-diff', GIT_PROXY_COMMAND: 'unused-proxy',
+      GIT_TEMPLATE_DIR: '/unused-template', GIT_CONFIG: '/unused-config',
+      GIT_CONFIG_GLOBAL: '/unused-global', GIT_CONFIG_SYSTEM: '/unused-system',
+      GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'user.name', GIT_CONFIG_VALUE_0: 'Injected User',
+      eDiToR: 'unused-editor', gIt_CoNfIg_CoUnT: '1',
+      MSYS: 'glob',
+    };
+    const previous = Object.fromEntries(Object.keys(overrides).map((key) => [key, process.env[key]]));
+    try {
+      Object.assign(process.env, overrides);
+      expect(fs.realpathSync(await getRepositoryRoot(tmpDir))).toBe(fs.realpathSync(tmpDir));
+      expect((await getStatus(tmpDir)).isClean).toBe(true);
+      await setLocalIdentity(tmpDir, { userName: 'Configured User', userEmail: 'test@example.com' });
+      expect(Object.fromEntries(Object.keys(overrides).map((key) => [key, process.env[key]]))).toEqual(overrides);
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+    expect(runGit(tmpDir, ['config', '--local', '--get', 'user.name']).trim()).toBe('Configured User');
   });
 });
 
