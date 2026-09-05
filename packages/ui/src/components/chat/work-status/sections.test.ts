@@ -111,9 +111,9 @@ describe('sanitizeWorkStatusHiddenSections', () => {
     expect(sanitizeWorkStatusHiddenSections(['usage', 'usage'])).toEqual(['usage']);
   });
 
-  test('treats a non-array payload as no preference', () => {
-    expect(sanitizeWorkStatusHiddenSections(undefined)).toEqual([]);
-    expect(sanitizeWorkStatusHiddenSections('usage')).toEqual([]);
-    expect(sanitizeWorkStatusHiddenSections({ usage: true })).toEqual([]);
+  test('treats a non-array payload as default hidden preference', () => {
+    expect(sanitizeWorkStatusHiddenSections(undefined)).toEqual(['telemetry']);
+    expect(sanitizeWorkStatusHiddenSections('usage')).toEqual(['telemetry']);
+    expect(sanitizeWorkStatusHiddenSections({ usage: true })).toEqual(['telemetry']);
   });
 });

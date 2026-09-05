@@ -1180,7 +1180,7 @@ export const useUIStore = create<UIStore>()(
         workStatusPanelVisible: false,
         workStatusPanelFits: false,
         workStatusOverlayOpen: false,
-        workStatusHiddenSections: [],
+        workStatusHiddenSections: ['telemetry'],
         isSessionSwitcherOpen: false,
         isSessionDropdownOpen: false,
         pendingDiffFile: null,
@@ -2697,6 +2697,17 @@ export const useUIStore = create<UIStore>()(
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          // v18 -> v19: seed opt-in telemetry section into stored hidden list for existing users
+          if (version < 19) {
+            if (Array.isArray(state.workStatusHiddenSections)) {
+              if (!state.workStatusHiddenSections.includes('telemetry')) {
+                state.workStatusHiddenSections.push('telemetry');
+              }
+            } else {
+              state.workStatusHiddenSections = ['telemetry'];
+            }
+          }
 
           // v15 -> v16: the main-area surface concept is gone from persistence
           // (the chat always owns the desktop main area; panel surfaces have

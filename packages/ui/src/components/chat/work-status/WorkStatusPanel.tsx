@@ -8,6 +8,7 @@ import { WORK_STATUS_PANEL_WIDTH } from './useWorkStatusVisibility';
 import { WorkStatusGoalRow } from './WorkStatusGoalRow';
 import { WorkStatusPrimaryGroup } from './WorkStatusPrimaryGroup';
 import { WorkStatusUsageSection } from './WorkStatusUsageSection';
+import { WorkStatusTelemetrySection } from './WorkStatusTelemetrySection';
 import { WorkStatusSubagentsSection } from './WorkStatusSubagentsSection';
 import { WorkStatusTasksSection } from './WorkStatusTasksSection';
 import { WorkStatusMcpSection } from './WorkStatusMcpSection';
@@ -147,6 +148,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
     // swallow the very press that opens it.
     if (!overlay || !visible) return undefined;
     const onPointerDown = (event: PointerEvent) => {
+      // SAFETY: DOM Event target cast to HTMLElement to check contains and closest
       const target = event.target as HTMLElement | null;
       if (overlayRef.current?.contains(target)) return;
       // The header toggle closes it on its own; letting this fire too would
@@ -254,6 +256,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
           goalRow={<WorkStatusGoalRow sessionId={sessionId} directory={directory} />}
         />
         {sectionVisible('usage') ? <WorkStatusUsageSection /> : null}
+        {sectionVisible('telemetry') ? <WorkStatusTelemetrySection sessionId={sessionId} directory={directory} /> : null}
         {sectionVisible('subagents') ? <WorkStatusSubagentsSection sessionId={sessionId} directory={directory} /> : null}
         {sectionVisible('tasks') ? <WorkStatusTasksSection sessionId={sessionId} directory={directory} /> : null}
         {sectionVisible('mcp') ? <WorkStatusMcpSection directory={directory} /> : null}

@@ -103,6 +103,7 @@ which requests only providers enabled for this panel.
 | Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
 | Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not |
 | Linked threads | `lib/linkedIssues.ts` over session metadata | written by the flows that attach an issue or PR |
+| Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed post-completion on idle state; tool intervals union-merged |
 | Goal | `useSessionGoal` | respects the Settings toggle |
 | MCP | `useMcpStore` | connect/disconnect reuses the dropdown's actions |
 | Pinned messages | `getContextObligatoryMessages` + `state.part` | see below |
@@ -191,8 +192,9 @@ the row reflects the reset tree rather than a mid-creation snapshot.
 Ordering is by durability, not category:
 
 1. **Session** (goal, context, cost), **Project** (attention, branch,
-   changes, PR, checks) and **Usage** — true for as long as the session is
-   open. Usage sits here rather than lower down because a spent quota stops the
+   changes, PR, checks), **Usage**, and **Turn stats** (opt-in session telemetry:
+   throughput, duration, TTFT, cache hit rate) — true for as long as the session
+   is open. Usage sits here rather than lower down because a spent quota stops the
    work outright;
 2. **Subagents**, **Tasks** — what is happening right now;
 3. **MCP**, **Pinned messages**, **Context sources** — supporting material.

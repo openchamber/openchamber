@@ -14,6 +14,7 @@ export const WORK_STATUS_SECTION_IDS = [
   'session',
   'repository',
   'usage',
+  'telemetry',
   'subagents',
   'tasks',
   'mcp',
@@ -23,16 +24,17 @@ export const WORK_STATUS_SECTION_IDS = [
 
 type WorkStatusSectionId = (typeof WORK_STATUS_SECTION_IDS)[number];
 
-export const WORK_STATUS_SECTION_LABEL_KEYS: Record<WorkStatusSectionId, I18nKey> = {
+export const WORK_STATUS_SECTION_LABEL_KEYS = {
   session: 'chat.workStatus.section.session',
   repository: 'chat.workStatus.section.project',
   usage: 'chat.workStatus.section.usage',
+  telemetry: 'chat.workStatus.section.telemetry',
   subagents: 'chat.workStatus.section.subagents',
   tasks: 'chat.workStatus.section.tasks',
   mcp: 'chat.workStatus.section.mcp',
   pinned: 'chat.workStatus.section.pinned',
   contextSources: 'chat.workStatus.section.contextBreakdown',
-};
+} as const satisfies Record<WorkStatusSectionId, I18nKey>;
 
 const KNOWN_IDS = new Set<string>(WORK_STATUS_SECTION_IDS);
 
@@ -75,8 +77,12 @@ export const getWorkStatusPanelPresentation = ({
   showEmptyState: contentMounted && allSectionsHidden,
 });
 
+export const WORK_STATUS_DEFAULT_HIDDEN_SECTIONS = [
+  'telemetry',
+] as const satisfies readonly WorkStatusSectionId[];
+
 export const sanitizeWorkStatusHiddenSections = (value: unknown): WorkStatusSectionId[] => {
-  if (!Array.isArray(value)) return [];
+  if (!Array.isArray(value)) return [...WORK_STATUS_DEFAULT_HIDDEN_SECTIONS];
   const seen = new Set<WorkStatusSectionId>();
   for (const entry of value) {
     if (isWorkStatusSectionId(entry)) seen.add(entry);
