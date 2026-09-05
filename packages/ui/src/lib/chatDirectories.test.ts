@@ -20,10 +20,10 @@ afterEach(() => { home.mockRestore(); mkdir.mockRestore(); request.mockRestore()
 
 describe('server-owned chat directories', () => {
   test('creates beneath the relocated root and uses the legacy root only for an older response', async () => {
-    expect(await createChatDirectory(new Date(2026, 8, 5))).toStartWith('/srv/chats/2026-09-05/session-');
+    expect((await createChatDirectory(new Date(2026, 8, 5))).startsWith('/srv/chats/2026-09-05/session-')).toBe(true);
     nextRuntime();
     home.mockResolvedValue({ home: '/home/user' });
-    expect(await createChatDirectory(new Date(2026, 8, 5))).toStartWith('/home/user/.config/openchamber/chats/2026-09-05/session-');
+    expect((await createChatDirectory(new Date(2026, 8, 5))).startsWith('/home/user/.config/openchamber/chats/2026-09-05/session-')).toBe(true);
   });
 
   test('classifies only exact configured and actual legacy roots after warming', async () => {
@@ -54,8 +54,8 @@ describe('server-owned chat directories', () => {
     home.mockRejectedValueOnce(new Error('offline'));
     await warmChatsRootDirectory();
     await createChatDirectory();
-    expect(mkdir).toHaveBeenCalledTimes(1);
-    expect(home).toHaveBeenCalledTimes(3);
+    expect(mkdir.mock.calls).toHaveLength(1);
+    expect(home.mock.calls).toHaveLength(3);
   });
 
   test('runtime switch during root lookup cannot delete on the destination runtime', async () => {
