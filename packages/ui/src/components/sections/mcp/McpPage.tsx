@@ -1449,6 +1449,27 @@ export const McpPage: React.FC = () => {
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.mcp.page.status.runtimeStatus')}</span>
                     <StatusBadge status={effectiveRuntimeStatus?.status} enabled={enabled} getStatusLabel={getStatusLabel} />
+                    {selectedServer?.scope && (
+                      <span
+                        className="inline-flex items-center rounded border px-1.5 py-0.5 text-xs font-medium"
+                        style={{
+                          backgroundColor:
+                            selectedServer.scope === 'user'
+                              ? 'var(--status-warning-background)'
+                              : 'var(--status-info-background)',
+                          borderColor:
+                            selectedServer.scope === 'user'
+                              ? 'var(--status-warning-border)'
+                              : 'var(--status-info-border)',
+                          color:
+                            selectedServer.scope === 'user'
+                              ? 'var(--status-warning-foreground)'
+                              : 'var(--status-info-foreground)',
+                        }}
+                      >
+                        {t(selectedServer.scope === 'user' ? 'settings.common.scope.global' : 'settings.common.scope.project')}
+                      </span>
+                    )}
                   </div>
                   <p className="typography-meta text-muted-foreground">{runtimeDescription}</p>
                   <p className="typography-micro text-muted-foreground/80">
