@@ -92,7 +92,7 @@ export function sendBridgeMessage<T = unknown>(type: string, payload?: unknown):
  * pushes outward (editor comment threads following the composer's drafts) has
  * no answer to wait for, so it does not go through the request path at all.
  */
-export function postBridgeNotification(type: string, payload?: unknown): void {
+export function postBridgeNotification<Payload extends object>(type: string, payload: Payload): void {
   getVSCodeAPI().postMessage({ type, payload });
 }
 

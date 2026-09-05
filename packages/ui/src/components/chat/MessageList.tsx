@@ -1014,10 +1014,13 @@ const TimelineList = React.memo(({
             lastWidth = width;
             setIsWidthResizing(true);
             if (quietTimer !== null) clearTimeout(quietTimer);
+            // Released after the owning hook's 350ms settle decision — while a
+            // pin release is still pending, re-enabled end maintenance would
+            // snap the viewport back before the hook can let it go.
             quietTimer = setTimeout(() => {
                 quietTimer = null;
                 setIsWidthResizing(false);
-            }, 300);
+            }, 400);
         });
         observer.observe(node);
         return () => {
@@ -1067,8 +1070,9 @@ const TimelineList = React.memo(({
                 // live edge — defines where the viewport rests.
                 // Also released while the width resizes: re-pinning against
                 // rows that are still re-measuring shakes the pinned
-                // viewport; the owning hook re-asserts the end once the
-                // resize settles.
+                // viewport; once the resize settles the owning hook
+                // re-asserts the end for a streaming session and releases
+                // the pin for an idle one.
                 maintainScrollAtEnd={anchoredEndSpace || !streamingAutoFollowEnabled || isWidthResizing || endPinningReleased
                     ? false
                     // Animated only while the session actively streams: there

@@ -14,6 +14,7 @@ const createRuntime = async () => {
   });
   return {
     runtime,
+    tempRoot,
     cleanup: async () => {
       await rm(tempRoot, { recursive: true, force: true });
     },
@@ -470,6 +471,90 @@ describe('project-config loop reconciliation', () => {
     } finally {
       await cleanup();
     }
+  });
+
+  describe('fields this build does not know', () => {
+    // Simulates a config written by a newer build (or a newer UI): the task
+    // carries execution and state fields normalization here has never heard of.
+    const seedForeignTask = async (runtime, tempRoot) => {
+      const created = await runtime.upsertScheduledTask('project-test', {
+        name: 'Nightly digest',
+        enabled: true,
+        schedule: { kind: 'daily', time: '09:30', timezone: 'UTC' },
+        execution: { prompt: 'Summarize', providerID: 'openai', modelID: 'gpt-4.1', goalEnabled: true },
+      });
+      const filePath = path.join(tempRoot, 'project-test.json');
+      const stored = JSON.parse(await readFile(filePath, 'utf8'));
+      stored.scheduledTasks[0].execution.futureExecutionField = 'keep me';
+      stored.scheduledTasks[0].state.futureStateField = 42;
+      stored.scheduledTasks[0].futureTopLevelField = true;
+      await writeFile(filePath, JSON.stringify(stored, null, 2), 'utf8');
+      return { id: created.task.id, filePath };
+    };
+
+    const readStoredTask = async (filePath, id) => {
+      const stored = JSON.parse(await readFile(filePath, 'utf8'));
+      return stored.scheduledTasks.find((task) => task.id === id);
+    };
+
+    it('survive a state update after a run, and the claim update', async () => {
+      const { runtime, tempRoot, cleanup } = await createRuntime();
+      try {
+        const { id, filePath } = await seedForeignTask(runtime, tempRoot);
+
+        await runtime.updateScheduledTaskState('project-test', id, { lastStatus: 'success', lastRunAt: 1000 });
+        let stored = await readStoredTask(filePath, id);
+        expect(stored.execution.futureExecutionField).toBe('keep me');
+        expect(stored.execution.goalEnabled).toBe(true);
+        expect(stored.futureTopLevelField).toBe(true);
+        expect(stored.state.lastStatus).toBe('success');
+
+        await runtime.updateScheduledTaskStateIf('project-test', id, () => true, { lastScheduledFor: 5000 });
+        stored = await readStoredTask(filePath, id);
+        expect(stored.execution.futureExecutionField).toBe('keep me');
+        expect(stored.state.lastScheduledFor).toBe(5000);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it('survive writes that replace or delete a different task, and a loop sync', async () => {
+      const { runtime, tempRoot, cleanup } = await createRuntime();
+      try {
+        const { id, filePath } = await seedForeignTask(runtime, tempRoot);
+
+        const other = await runtime.upsertScheduledTask('project-test', {
+          id: 'other-task',
+          name: 'Other',
+          enabled: true,
+          schedule: { kind: 'daily', time: '10:00', timezone: 'UTC' },
+          execution: { prompt: 'Other', providerID: 'openai', modelID: 'gpt-4.1' },
+        });
+        expect((await readStoredTask(filePath, id)).execution.futureExecutionField).toBe('keep me');
+
+        await runtime.deleteScheduledTask('project-test', other.task.id);
+        expect((await readStoredTask(filePath, id)).execution.futureExecutionField).toBe('keep me');
+
+        await runtime.reconcileLoopTasks('project-test', []);
+        expect((await readStoredTask(filePath, id)).execution.futureExecutionField).toBe('keep me');
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it('are dropped only when the task itself is deliberately saved', async () => {
+      const { runtime, tempRoot, cleanup } = await createRuntime();
+      try {
+        const { id, filePath } = await seedForeignTask(runtime, tempRoot);
+        const [task] = await runtime.listScheduledTasks('project-test');
+        await runtime.upsertScheduledTask('project-test', { ...task, name: 'Renamed' });
+        const stored = await readStoredTask(filePath, id);
+        expect(stored.name).toBe('Renamed');
+        expect(stored.execution.futureExecutionField).toBeUndefined();
+      } finally {
+        await cleanup();
+      }
+    });
   });
 
   it('conditionally updates state only when the predicate passes (occurrence claim)', async () => {

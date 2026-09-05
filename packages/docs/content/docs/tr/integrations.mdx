@@ -1,54 +1,53 @@
 ---
 title: Entegrasyonlar
-description: Claude ya da Cursor aboneliğinizi bir provider olarak kullanın.
+description: GitHub ve Linear’ı OpenChamber’a bağlayın.
 ---
 
 # Entegrasyonlar
 
-Integration, sahip olduğunuz bir aboneliği kullanarak OpenChamber'a bir provider ekleyen küçük bir eklentidir. Bunları **Settings → Integrations** altında yönetirsiniz.
+**Settings → Integrations**, OpenChamber’ın birlikte çalıştığı servislere giriş yaptığınız yerdir. Giriş OpenChamber sunucusunda saklanır; böylece web, masaüstü ve eşleştirilmiş telefon aynı girişi paylaşır.
 
-> **Experimental feature.** Provider politikalarına uymaya çalışıyoruz, ama hesap kısıtlamaları ve askıya alma kararları yine her provider'ın kendi kararıdır. Integrations'ı kendi sorumluluğunuzda kullanın.
+## GitHub
 
-Kullanılabilir integrations:
+**GitHub** kartını genişletin ve kısa bir cihaz koduyla giriş yapmak için **Connect GitHub** seçin. Bağlandıktan sonra OpenChamber issue’lardan ve pull request’lerden oturum başlatabilir, onları mesajlara ekleyebilir ve PR açıp güncelleyebilir. GitHub’ın yapabildiği her şey [GitHub Issues & PRs](/tr/github/) sayfasında.
 
-- **Claude Code** — Claude Pro ya da Max planınız, API anahtarı gerekmez
-- **Cursor** — Cursor planınızın model limitleri
+## Linear
 
-## Bir entegrasyon kurun
+### Çalışma alanı bağlayın
 
-1. **Settings → Integrations** bölümünü açın.
-2. Integration'ı bulun ve **Install** seçin.
-3. İstenince OpenCode'u yeniden başlatın. Provider yeniden başlatmadan sonra görünür.
-4. **Set up** seçin ve giriş yapın. Modeller sonra sohbet model seçicisinde görünür.
+1. **Linear** kartını genişletin ve **Connect** seçin.
+2. Açılan tarayıcı sekmesinde erişimi onaylayın. O zamana kadar kart **Waiting for Linear** gösterir.
 
-Integration'lar kullanıcı düzeyinde kurulur, bu yüzden her projede çalışır. Aynı karttan istediğiniz zaman güncelleyebilir ya da kaldırabilirsiniz.
+Başka bir Linear organizasyonunu **Add workspace** ile bağlayın. Aynı anda tek bir çalışma alanı geçerlidir: **Switch to** ile geçiş yapın; **Disconnect** yalnızca geçerli olanı kaldırır. Proje eşlemeniz korunur.
 
-## Claude Code
+### Issue’lara göz atın
 
-Claude Code, Claude Pro ya da Max planınızı kullanır. API anahtarı yoktur ve ayrı bir Claude uygulaması gerekmez.
+Bir çalışma alanı bağlandığında sağdaki bağlam çubuğunda **Linear** paneli belirir. Geçerli çalışma alanının issue’larını listeler ve şunları yapmanızı sağlar:
 
-1. Integration'ı kurun. Yukarıya bakın.
-2. **Set up** seçin ve giriş yapın. Henüz Claude Code CLI'nız yoksa kurulum önce onu yüklemeyi önerir, sonra giriş yaptırır.
+- duruma (**Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**), atanan kişiye (**Anyone** ya da **Assigned to me**), takıma ve önceliğe göre filtreleme
+- başlık, tanımlayıcı ya da Linear URL’siyle arama
+- bir issue’yu açıp açıklamasını, yorumlarını, etiketlerini ve önceliğini okuma
+- **Status** değiştirme ya da **Close issue** seçme
+- geçerli **Workspace**’i değiştirme
 
-Claude Code, burada provider CLI'sının kurulu ve giriş yapılmış olmasını gerektiren tek integration'dır. Cursor CLI gerektirmez.
+### Bir issue’dan oturum başlatın
 
-**Claude hesabınız nasıl güvende kalır:** Bu integration, Anthropic'in resmi Claude Agent SDK'sını ve kurulu Claude Code CLI'nızı kullanır. OAuth'u kaçırmaz, tarayıcı token'larını çıkarmaz ya da yeniden oynatmaz, desteklenmeyen bir istemciyi taklit etmez ve Anthropic'in kimlik doğrulama akışını atlamaz. Anthropic'in desteklediği erişim yolunda kalır. Bu yüzden token kaçırma ya da yetkisiz kimlik doğrulama kestirmelerinin hesap banı riskini taşımaz.
+- Linear panelinde bir issue açın ve **Start session** seçin. Issue kaydırılırken düğme alt kısımda kalır.
+- Sohbette listeden seçmek için **New Session From Linear Issue** seçin; yeni bir dal istiyorsanız **Create in worktree** kullanın.
+- **New Worktree** iletişim kutusunda **Start from Linear Issue** seçin.
 
-## Cursor
+Oturum, issue’nun takımına eşlenen projede açılır ve issue ilk istem olur. Takımları Linear kartında eşleyin: **Default project** tüm takımları kapsar, **Team projects** takım bazında bunu geçersiz kılar. Eşlenmemiş bir takım için önce eşleme yapmanız istenir. İlk mesaj **Issue Review** magic prompt’undan oluşturulur; bunu **Settings → Magic Prompts → Linear** altında düzenleyebilirsiniz.
 
-Cursor, Cursor planınıza dahil modelleri OpenChamber'da kullanılabilir hale getirir.
+### Bir issue’yu mesaja bağlayın
 
-1. Integration'ı kurun. Yukarıya bakın.
-2. **Set up** seçin, bağlantıyı açın ve tarayıcınızda erişimi onaylayın. API anahtarı gerekmez. Giriş yaptıktan sonra model listesi otomatik yüklenir.
+Sohbet yazma alanında **Link Linear Issue** seçin. Issue, bir sonraki mesajınıza bağlam olarak eklenir ve oturumun çalışma durumu paneli ona bir bağlantı tutar.
 
-## Güncelleme ya da kaldırma
+### Oturum yorumları
 
-- **Update** eklentinin en son yayımlanmış sürümünü kurar.
-- **Remove** eklentiyi OpenCode config'inizden siler. OpenCode yenilendikten sonra provider yüklenmeyi bırakır.
-
-Bir kartta girdilerin elle yönetilmesi gerektiği yazıyorsa, **Manage plugins** seçin ve kopyaları orada temizleyin.
+Linear kartında **Session comments** açın; bir issue’dan başlatılan oturum başladığında, bittiğinde ya da başarısız olduğunda o issue’ya oturumu açan bir bağlantıyla yorum bırakır. Yorumlar yalnızca bu OpenChamber sunucusunun herkese açık bir adresi olduğunda gönderilir; böylece bağlantı issue’daki herkes için çalışır. Yerel ya da özel bir adreste hiçbir şey gönderilmez.
 
 ## İlgili
 
-- [Providers, Models & Agents](/providers/) — diğer provider'ları bağlayın ve model seçin
-- [Usage & Quotas](/usage/) — ne kadar kullandığınızı izleyin
+- [GitHub Issues & PRs](/tr/github/) — GitHub’ın OpenChamber’da yapabildiği her şey
+- [Worktree oturumları](/tr/worktrees/) — issue oturumlarının başlayabileceği yer
+- [Magic Prompts](/tr/magic-prompts/) — bir Linear oturumunun başladığı istemi düzenleyin

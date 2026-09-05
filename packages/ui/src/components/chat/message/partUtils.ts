@@ -62,8 +62,8 @@ export const filterVisibleParts = (parts: Part[], options: VisibleFilterOptions 
             return true;
         }
 
-        // Only filter out synthetic parts if there are non-synthetic parts present.
-        // Otherwise, show synthetic parts so the message is displayed.
+        // Only filter out synthetic parts if there are non-synthetic parts present
+        // Otherwise, show synthetic parts so the message is displayed
         if (isSynthetic && hasNonSynthetic) {
             return false;
         }

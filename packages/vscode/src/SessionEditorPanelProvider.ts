@@ -193,7 +193,7 @@ export class SessionEditorPanelProvider {
         // Tagged with this panel's identity: a snapshot only speaks for the
         // store that produced it, and every panel has its own.
         void vscode.commands.executeCommand('openchamber.internal.inlineCommentsSync', {
-          ...(message.payload as Record<string, unknown>),
+          snapshot: message.payload,
           surfaceId: panelId,
         });
         return;

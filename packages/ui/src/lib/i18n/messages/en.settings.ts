@@ -1,5 +1,4 @@
 import { linearIntegrationI18n } from './linear-integration.i18n';
-import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go usage tracking',
   'settings.providers.page.openCodeGo.description': 'Connect the OpenCode Go dashboard to show rolling, weekly, and monthly quota.',
@@ -13,6 +12,8 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.delete': 'Delete',
   'settings.providers.page.quotaCredentials.saved': '{provider} credentials saved.',
   'settings.providers.page.quotaCredentials.accessToken': 'Access token',
+  'settings.providers.page.quotaCredentials.usageToken': 'Usage API token',
+  'settings.providers.page.quotaCredentials.exeDevTokenInstructions': 'Run this command in your terminal, then paste the token below. It can only read LLM credit usage and expires after 30 days.',
   'settings.providers.page.quotaCredentials.refreshToken': 'Refresh token',
   'settings.providers.page.quotaCredentials.tokenPlaceholder': 'Paste token',
   'settings.providers.page.openCodeGo.saveFailed': 'Could not validate OpenCode Go credentials.',
@@ -2222,5 +2223,6 @@ export const settingsDict = {
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
   ...linearIntegrationI18n.en,
-  ...thirdPartyIntegrationI18n.en,
+  'settings.page.integrations.title': 'Integrations',
+  'settings.page.integrations.description': 'Connect GitHub and Linear so OpenChamber can work with your issues and pull requests.',
 } as const;

@@ -1,6 +1,6 @@
+import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import {
   createAgent,
@@ -78,7 +78,7 @@ type ConfigRuntimeDeps = {
   clientReloadDelayMs: number;
 };
 
-const AGENTS_MD_PATH = path.join(os.homedir(), '.config', 'opencode', 'AGENTS.md');
+const AGENTS_MD_PATH = path.join(OPENCODE_CONFIG_DIR, 'AGENTS.md');
 const MAX_BEHAVIOR_PROMPT_SIZE = 1024 * 1024;
 
 const resolveWorkingDirectory = (ctx: BridgeContext | undefined, directory?: string): string | undefined => (
@@ -186,10 +186,10 @@ export async function handleConfigBridgeMessage(
     case 'api:behavior/agents-md:get': {
       try {
         const content = await fs.promises.readFile(AGENTS_MD_PATH, 'utf8');
-        return { id, type, success: true, data: { content, exists: true } };
+        return { id, type, success: true, data: { content, exists: true, path: AGENTS_MD_PATH } };
       } catch (error) {
         if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
-          return { id, type, success: true, data: { content: '', exists: false } };
+          return { id, type, success: true, data: { content: '', exists: false, path: AGENTS_MD_PATH } };
         }
         throw error;
       }

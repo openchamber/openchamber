@@ -35,6 +35,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitStatus } from '@/stores/useGitStore';
+import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { ContextRailSurfacesDialog } from './ContextRailSurfacesDialog';
@@ -171,6 +172,8 @@ export const ContextPanelRail: React.FC = () => {
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
   const linearAuthChecked = useLinearAuthStore((state) => state.hasChecked);
   const linearConnected = useLinearAuthStore((state) => state.status?.connected === true);
+  const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
+  const githubConnected = useGitHubAuthStore((state) => state.status?.connected === true);
   const { screenWidth } = useDeviceInfo();
   const gitStatus = useGitStatus(directoryKey || null);
 
@@ -268,15 +271,25 @@ export const ContextPanelRail: React.FC = () => {
       screenWidth,
       tabs,
       linearConnected,
+      githubConnected,
     });
-  }, [contextRailHiddenSurfaces, contextRailOrder, linearConnected, planModeEnabled, screenWidth, tabs]);
+  }, [contextRailHiddenSurfaces, contextRailOrder, githubConnected, linearConnected, planModeEnabled, screenWidth, tabs]);
 
+  // A surface whose integration disconnected closes rather than lingering as
+  // an active panel with no rail icon.
   React.useEffect(() => {
     if (!directoryKey || !linearAuthChecked || linearConnected || activeMode !== 'linear') {
       return;
     }
     closeContextPanel(directoryKey);
   }, [activeMode, closeContextPanel, directoryKey, linearAuthChecked, linearConnected]);
+
+  React.useEffect(() => {
+    if (!directoryKey || !githubAuthChecked || githubConnected || activeMode !== 'pr') {
+      return;
+    }
+    closeContextPanel(directoryKey);
+  }, [activeMode, closeContextPanel, directoryKey, githubAuthChecked, githubConnected]);
 
   const [isSurfacesDialogOpen, setIsSurfacesDialogOpen] = React.useState(false);
 

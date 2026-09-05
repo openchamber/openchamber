@@ -385,8 +385,20 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     return unsupportedWebRouteResponse('Remote tunnel settings');
   }
 
+  // Archiving a batch of sessions server-side needs an OpenChamber server
+  // process; the extension host has none. Answering explicitly keeps the
+  // shared UI on its per-session archive path instead of leaving the request
+  // to the generic proxy.
+  if (normalizedPathname === '/api/openchamber/sessions/archive') {
+    return unsupportedWebRouteResponse('Server-side session archiving');
+  }
+
   if (/^\/api\/projects\/[^/]+\/scheduled-tasks(?:\/[^/]+)?$/.test(normalizedPathname)) {
     return unsupportedWebRouteResponse('Scheduled tasks');
+  }
+
+  if (normalizedPathname === '/api/fs/git-dirs') {
+    return unsupportedWebRouteResponse('Nested git repository discovery');
   }
 
   if (normalizedPathname === '/api/sessions/snapshot' && method === 'GET') {
@@ -1323,6 +1335,8 @@ onCommand('addContextSelection', (payload) => {
 const removedComments = createRemovalTombstones();
 
 onCommand('addLineComment', (payload) => {
+  // SAFETY: the payload crossed the extension boundary as JSON; every field is
+  // read as unknown here and trusted only after the checks below.
   const record = payload as {
     draftId?: unknown;
     filePath?: unknown;
@@ -1352,8 +1366,6 @@ onCommand('addLineComment', (payload) => {
     console.warn('[openchamber] inline comment arrived without a path; dropping', record);
     return;
   }
-
-  const fileLabel = `${relativePath}:${startLine}${startLine !== endLine ? `-${endLine}` : ''}`;
 
   void Promise.all([
     import('@/sync/session-ui-store'),
@@ -1396,10 +1408,10 @@ onCommand('addLineComment', (payload) => {
       return;
     }
 
-    const addedId = useInlineCommentDraftStore.getState().addDraft(target, {
+    useInlineCommentDraftStore.getState().addDraft(target, {
       id: draftId,
       source,
-      fileLabel,
+      fileLabel: relativePath,
       startLine,
       endLine,
       side,
@@ -1407,13 +1419,6 @@ onCommand('addLineComment', (payload) => {
       language,
       text: comment,
     });
-    // No comment text was captured up-front (multi-line capture flow): open the
-    // in-webview editor for this draft so the user can type with line breaks.
-    // A comment written in the editor thread arrives complete, so it does not
-    // reopen an editor the user already finished with.
-    if (!comment && addedId) {
-      useInlineCommentDraftStore.getState().setAutoEditDraftId(addedId);
-    }
   });
 });
 
@@ -1440,7 +1445,8 @@ void import('@/stores/useInlineCommentDraftStore').then(({ useInlineCommentDraft
 });
 
 onCommand('removeLineComment', (payload) => {
-  const draftId = (payload as { draftId?: unknown })?.draftId;
+  if (typeof payload !== 'object' || payload === null || !('draftId' in payload)) return;
+  const { draftId } = payload;
   if (typeof draftId !== 'string' || !draftId) {
     return;
   }
@@ -1468,8 +1474,8 @@ onCommand('removeLineComment', (payload) => {
       } catch {
         continue;
       }
-      if (!Array.isArray(parsed) || parsed.length !== 3) continue;
-      const [keyRuntime, directory, sessionKey] = parsed as [string, string, string];
+      if (!Array.isArray(parsed) || parsed.length !== 3 || !parsed.every((segment) => typeof segment === 'string')) continue;
+      const [keyRuntime, directory, sessionKey] = parsed;
       if (keyRuntime !== runtimeKey) continue;
       state.removeDraft({ directory, sessionKey }, draftId);
       return;
@@ -2015,7 +2021,7 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
 // Listen for settings sync command from extension (broadcast to all VS Code webviews)
 onCommand('settingsSynced', () => {
   import('@openchamber/ui/lib/persistence').then(({ syncDesktopSettings }) => {
-    void syncDesktopSettings();
+    void syncDesktopSettings({ adoptTheme: false });
   });
 });
 

@@ -92,6 +92,16 @@ describe("persisted directory sessions", () => {
     expect(readManagedChatSessions()).toEqual([])
   })
 
+  test("coalesces a continuing burst into one trailing session write", async () => {
+    persistSessions(directory, [session(1, 1)])
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    persistSessions(directory, [session(1, 2)])
+    await waitForPersistence()
+
+    expect(storage.writes).toBe(1)
+    expect(readDirCache(directory).sessions?.[0]?.time.updated).toBe(2)
+  })
+
   test("keeps the 50 most recently updated sessions across restart reads", async () => {
     const sessions = Array.from({ length: 60 }, (_, updated) => session(59 - updated, updated))
 

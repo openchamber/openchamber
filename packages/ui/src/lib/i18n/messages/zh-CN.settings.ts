@@ -1,5 +1,4 @@
 import { linearIntegrationI18n } from './linear-integration.i18n';
-import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 用量跟踪',
   'settings.providers.page.openCodeGo.description': '连接 OpenCode Go 控制面板以显示滚动、每周和每月配额。',
@@ -13,6 +12,8 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.delete': '删除',
   'settings.providers.page.quotaCredentials.saved': '已保存 {provider} 凭据。',
   'settings.providers.page.quotaCredentials.accessToken': '访问令牌',
+  'settings.providers.page.quotaCredentials.usageToken': '用量 API 令牌',
+  'settings.providers.page.quotaCredentials.exeDevTokenInstructions': '在终端中运行此命令，然后在下方粘贴令牌。该令牌只能读取 LLM 积分用量，并将在 30 天后过期。',
   'settings.providers.page.quotaCredentials.refreshToken': '刷新令牌',
   'settings.providers.page.quotaCredentials.tokenPlaceholder': '粘贴令牌',
   'settings.providers.page.openCodeGo.saveFailed': '无法验证 OpenCode Go 凭据。',
@@ -2232,5 +2233,6 @@ export const settingsDict = {
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
   ...linearIntegrationI18n['zh-CN'],
-  ...thirdPartyIntegrationI18n['zh-CN'],
+  'settings.page.integrations.title': '集成',
+  'settings.page.integrations.description': '连接 GitHub 和 Linear，让 OpenChamber 可以处理你的 issue 和拉取请求。',
 } as const;

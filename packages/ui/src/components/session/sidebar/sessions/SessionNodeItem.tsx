@@ -233,7 +233,7 @@ const QuickSessionAction = React.memo(function QuickSessionAction({
   };
 
   return (
-    <Tooltip delayDuration={500}>
+    <Tooltip>
       <TooltipTrigger asChild>
         <button
           type="button"
@@ -347,6 +347,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const renameDraftRef = React.useRef(renameDraft);
   renameDraftRef.current = renameDraft;
   const renameTargetRef = React.useRef<string | null>(null);
+  const pendingRenameSelectRef = React.useRef(false);
+  const renameInputRef = React.useRef<HTMLInputElement>(null);
   const formRef = React.useRef<HTMLFormElement>(null);
 
   const session = node.session;
@@ -633,8 +635,23 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     }
     if (renameTargetRef.current === session.id) return;
     renameTargetRef.current = session.id;
+    pendingRenameSelectRef.current = true;
     setRenameDraft(editTitle);
   }, [editingId, editTitle, session.id]);
+
+  // Entering rename mode selects the whole title, so the first keystroke
+  // replaces it instead of appending to it. The selection waits for the commit
+  // that actually renders `editTitle`: the draft state above is seeded when the
+  // row mounts, so on a session whose title changed since then the input still
+  // holds the old text during the commit that opens the form.
+  React.useLayoutEffect(() => {
+    if (editingId !== session.id || !pendingRenameSelectRef.current) return;
+    const input = renameInputRef.current;
+    if (!input || input.value !== editTitle) return;
+    pendingRenameSelectRef.current = false;
+    input.focus();
+    input.select();
+  }, [editingId, editTitle, renameDraft, session.id]);
 
   if (editingId === session.id) {
     return (
@@ -656,6 +673,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
             }}
           >
             <input
+              ref={renameInputRef}
               value={renameDraft}
               onChange={(event) => setRenameDraft(event.target.value)}
               className="flex-1 min-w-0 bg-transparent typography-ui-label outline-none placeholder:text-muted-foreground"

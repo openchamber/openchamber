@@ -126,8 +126,7 @@ const redundantCommentFileUrls = (parts: Part[]): Set<string> => {
     const redundant = new Set<string>();
     for (const part of parts) {
         if (part.type !== 'file') continue;
-        const url = (part as { url?: unknown }).url;
-        if (typeof url !== 'string') continue;
+        const { url } = part;
         const range = url.match(/[?&]start=(\d+)&end=(\d+)/);
         if (!range) continue;
         const encodedPath = url.replace(/^file:\/\//, '').split('?')[0];
@@ -154,7 +153,7 @@ export const normalizeUserDisplayParts = (parts: Part[], options?: { planModeEna
     const redundantFileUrls = redundantCommentFileUrls(parts);
     return parts
         .filter((part) => {
-            if (part.type === 'file' && redundantFileUrls.has((part as { url?: string }).url ?? '')) return false;
+            if (part.type === 'file' && redundantFileUrls.has(part.url)) return false;
             const synthetic = (part as { synthetic?: boolean }).synthetic === true;
             if (!synthetic) return true;
             if (part.type !== 'text') return false;

@@ -173,6 +173,12 @@ interface SkillsStore {
   renameSkill: (name: string, newName: string, directory?: string | null) => Promise<boolean>;
   deleteSkill: (name: string, directory?: string | null) => Promise<boolean>;
   getSkillByName: (name: string, directory?: string | null) => DiscoveredSkill | undefined;
+  /**
+   * Skills are discovered on the connected instance and cached by directory,
+   * which two instances can share — so a switch must drop the caches rather
+   * than report the previous instance's skills for the new one.
+   */
+  resetForRuntimeSwitch: () => void;
 
   // Supporting files
   readSupportingFile: (skillName: string, filePath: string, directory?: string | null) => Promise<string | null>;
@@ -192,6 +198,10 @@ const SKILLS_LOAD_CACHE_TTL_MS = 5000;
 const DEFAULT_SKILLS_CACHE_KEY = '__default__';
 const skillsLastLoadedAt = new Map<string, number>();
 const skillsLoadInFlight = new Map<string, Promise<boolean>>();
+// Bumped on every runtime switch. Skills are discovered on the connected
+// instance and cached by directory, which two instances can share, so a load
+// already in flight for the previous instance must not write into the new one.
+let skillsGeneration = 0;
 
 const getSkillsCacheKey = (directory: string | null): string => {
   return directory?.trim() || DEFAULT_SKILLS_CACHE_KEY;
@@ -279,6 +289,13 @@ export const useSkillsStore = create<SkillsStore>()(
         isLoading: false,
         skillDraft: null,
 
+        resetForRuntimeSwitch: () => {
+          skillsGeneration += 1;
+          skillsLastLoadedAt.clear();
+          skillsLoadInFlight.clear();
+          set({ skills: [], skillsByDirectory: {}, isLoading: false });
+        },
+
         setSelectedSkill: (name: string | null) => {
           set({ selectedSkillName: name });
         },
@@ -304,6 +321,7 @@ export const useSkillsStore = create<SkillsStore>()(
             return inFlight;
           }
 
+          const generation = skillsGeneration;
           const request = (async () => {
             set({ isLoading: true });
             // Failure must never look like an empty project. The mirror is the
@@ -349,6 +367,7 @@ export const useSkillsStore = create<SkillsStore>()(
                   data.externalSkills ?? null,
                 );
 
+                if (generation !== skillsGeneration) return false;
                 set((state) => {
                   const next: Partial<SkillsStore> = {
                     skillsByDirectory: { ...state.skillsByDirectory, [cacheKey]: visibleSkills },
@@ -367,6 +386,7 @@ export const useSkillsStore = create<SkillsStore>()(
             }
 
             console.error("Failed to load skills:", lastError);
+            if (generation !== skillsGeneration) return false;
             set((state) => {
               const next: Partial<SkillsStore> = {
                 skillsByDirectory: { ...state.skillsByDirectory, [cacheKey]: previousSkills },

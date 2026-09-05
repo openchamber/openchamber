@@ -5,11 +5,14 @@ import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { ChangesPanel, type ChangesGroupConfig } from '@/components/views/git/ChangesPanel';
+import { BranchSelector } from '@/components/views/git/BranchSelector';
 import { CommitSection } from '@/components/views/git/CommitSection';
+import { DirtyBranchSwitchDialog } from '@/components/views/git/DirtyBranchSwitchDialog';
 import { SyncActions } from '@/components/views/git/SyncActions';
 import { PierreDiffViewer } from '@/components/views/PierreDiffViewer';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
 import type { GitStatus } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { generateCommitMessage, stageGitFile, stageGitFiles, unstageGitFile, unstageGitFiles } from '@/lib/gitApi';
@@ -18,9 +21,12 @@ import { getLanguageFromExtension, isImageFile } from '@/lib/toolHelpers';
 import {
   useGitStore,
   useGitStatus,
+  useGitBranches,
   useIsGitRepo,
   useGitLoadingStatus,
 } from '@/stores/useGitStore';
+import { NestedRepoResolutionStates } from '@/components/views/git/NestedRepoResolutionStates';
+import { NestedRepoPicker } from '@/components/views/git/NestedRepoPicker';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;
@@ -56,12 +62,19 @@ type MobileChangesSurfaceProps = {
 export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onClose, initialDiffPath, initialDiffStaged = false }) => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
-  const currentDirectory = normalizePath(useEffectiveDirectory() ?? null);
+  const rootDirectory = normalizePath(useEffectiveDirectory() ?? null);
+  // When the root is not itself a repository, changes come from the resolved
+  // nested repository instead.
+  const { rootIsGitRepo, gitDirectory, nestedRepos } = useNestedGitDirectory(rootDirectory || null);
+  const currentDirectory = gitDirectory ?? rootDirectory;
   const status = useGitStatus(currentDirectory || null);
+  const branches = useGitBranches(currentDirectory || null);
   const isGitRepo = useIsGitRepo(currentDirectory || null);
   const isLoadingStatus = useGitLoadingStatus(currentDirectory || null);
   const setActiveDirectory = useGitStore((state) => state.setActiveDirectory);
   const ensureAll = useGitStore((state) => state.ensureAll);
+  const ensureNestedRepos = useGitStore((state) => state.ensureNestedRepos);
+  const selectNestedRepo = useGitStore((state) => state.selectNestedRepo);
   const fetchStatus = useGitStore((state) => state.fetchStatus);
   const fetchBranches = useGitStore((state) => state.fetchBranches);
   const prefetchDiffs = useGitStore((state) => state.prefetchDiffs);
@@ -95,6 +108,7 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
   const [remoteUrl, setRemoteUrl] = React.useState<string | null>(null);
   const [diffLoadError, setDiffLoadError] = React.useState<string | null>(null);
   const [diffRetryNonce, setDiffRetryNonce] = React.useState(0);
+  const [pendingDirtySwitchBranch, setPendingDirtySwitchBranch] = React.useState<string | null>(null);
 
   const changeEntries = React.useMemo(() => {
     const files = status?.files ?? [];
@@ -147,6 +161,55 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
       }
     }
   }, [currentDirectory, fetchBranches, fetchStatus, git, t]);
+
+  const localBranches = React.useMemo(
+    () => (branches?.all ?? []).filter((branch) => !branch.startsWith('remotes/')).sort(),
+    [branches],
+  );
+
+  const remoteBranches = React.useMemo(
+    () => (branches?.all ?? [])
+      .filter((branch) => branch.startsWith('remotes/'))
+      .map((branch) => branch.replace(/^remotes\//, ''))
+      .sort(),
+    [branches],
+  );
+
+  const performCheckout = React.useCallback(async (branch: string) => {
+    if (!currentDirectory) return;
+    const normalized = branch.replace(/^remotes\//, '');
+    try {
+      const result = await git.checkoutBranch(currentDirectory, normalized);
+      toast.success(t('gitView.toast.checkedOut', { name: result.branch || normalized }));
+      await refreshStatusAndBranches();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('gitView.toast.checkoutFailed', { name: normalized }));
+    }
+  }, [currentDirectory, git, refreshStatusAndBranches, t]);
+
+  const handleCheckoutBranch = React.useCallback((branch: string) => {
+    const normalized = branch.replace(/^remotes\//, '');
+    if ((status?.files?.length ?? 0) > 0) {
+      setPendingDirtySwitchBranch(normalized);
+      return;
+    }
+    void performCheckout(normalized);
+  }, [performCheckout, status?.files]);
+
+  const handleCreateBranch = React.useCallback(async (branch: string, remote?: GitRemote) => {
+    if (!currentDirectory) return;
+    try {
+      await git.createBranch(currentDirectory, branch, status?.current ?? 'HEAD');
+      await git.checkoutBranch(currentDirectory, branch);
+      if (remote) {
+        await git.gitPush(currentDirectory, { remote: remote.name, branch, options: ['--set-upstream'] });
+      }
+      await refreshStatusAndBranches();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('gitView.toast.createBranchFailed'));
+      throw error;
+    }
+  }, [currentDirectory, git, refreshStatusAndBranches, status?.current, t]);
 
   const refreshRemotes = React.useCallback(async () => {
     if (!currentDirectory) {
@@ -465,6 +528,16 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
             {status?.current || currentDirectory || ''}
           </p>
         </div>
+        {rootIsGitRepo === false && Array.isArray(nestedRepos) && nestedRepos.length > 0 ? (
+          <NestedRepoPicker
+            repositories={nestedRepos}
+            selectedRepository={gitDirectory ?? null}
+            onSelectRepository={(repository) => {
+              if (rootDirectory) selectNestedRepo(rootDirectory, repository);
+            }}
+            repositoryRoot={rootDirectory ?? undefined}
+          />
+        ) : null}
       </header>
       <div className="min-h-0 flex-1">{state}</div>
     </div>
@@ -474,12 +547,24 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
     return renderListState(<MobileChangesState message={t('gitView.empty.selectSessionOrDirectory')} />);
   }
 
-  if (isLoadingStatus && isGitRepo === null) {
-    return renderListState(<MobileChangesState loading message={t('gitView.loading.checkingRepository')} />);
+  // Non-repo root: surface nested-repository resolution while the operating
+  // directory has not proven to be a repository (discovering, failed,
+  // unsupported, none found, or settling on the auto-selected one).
+  if (rootIsGitRepo === false && isGitRepo !== true) {
+    return renderListState(
+      <NestedRepoResolutionStates
+        rootIsGitRepo={rootIsGitRepo}
+        resolvedIsGitRepo={isGitRepo}
+        nestedRepos={nestedRepos}
+        onRetryDiscovery={() => {
+          if (rootDirectory) void ensureNestedRepos(rootDirectory, { force: true });
+        }}
+      />
+    );
   }
 
-  if (isGitRepo === false) {
-    return renderListState(<MobileChangesState icon message={t('gitView.empty.notGitRepository')} description={t('gitView.empty.notGitRepositoryDescription')} />);
+  if (isLoadingStatus && isGitRepo === null) {
+    return renderListState(<MobileChangesState loading message={t('gitView.loading.checkingRepository')} />);
   }
 
   if (route.type === 'diff') {
@@ -511,9 +596,19 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
         ) : null}
         <div className="min-w-0 flex-1 px-1">
           <h2 className="typography-ui-label text-foreground">{t('mobile.nav.changes')}</h2>
-          <p className="truncate typography-micro text-muted-foreground">
-            {status?.current || currentDirectory}
-          </p>
+          <BranchSelector
+            currentBranch={status?.current}
+            localBranches={localBranches}
+            remoteBranches={remoteBranches}
+            branchInfo={branches?.branches}
+            currentBranchAhead={status?.ahead}
+            onCheckout={(branch) => void handleCheckoutBranch(branch)}
+            onCreate={handleCreateBranch}
+            remotes={effectiveRemotes}
+            disabled={isLoadingStatus}
+            directory={currentDirectory}
+            switchBlockedNotice={(status?.files?.length ?? 0) > 0 ? t('gitView.branch.switchBlockedNotice') : null}
+          />
         </div>
         <SyncActions
           syncAction={syncAction}
@@ -563,6 +658,61 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
           <MobileChangesState icon message={t('gitView.empty.cleanTitle')} description={t('mobile.changes.cleanDescription')} />
         </div>
       )}
+      <DirtyBranchSwitchDialog
+        open={pendingDirtySwitchBranch !== null}
+        onOpenChange={(open) => { if (!open) setPendingDirtySwitchBranch(null); }}
+        targetBranch={pendingDirtySwitchBranch ?? ''}
+        changedFileCount={status?.files?.length ?? 0}
+        onCommitAndSwitch={async (message, pushAfter) => {
+          const branch = pendingDirtySwitchBranch;
+          if (!branch || !currentDirectory) return;
+          const sourceBranch = status?.current ?? null;
+          await git.createGitCommit(currentDirectory, message, { addAll: true });
+          let pushedRemoteName: string | null = null;
+          if (pushAfter) {
+            const trackingRemoteName = status?.tracking?.split('/')[0];
+            const remote = effectiveRemotes.find((entry) => entry.name === trackingRemoteName) ?? effectiveRemotes[0];
+            try {
+              if (!remote) throw new Error(t('mobile.changes.noRemote'));
+              await git.gitPush(currentDirectory, status?.tracking
+                ? { remote: remote.name }
+                : { remote: remote.name, branch: sourceBranch ?? undefined, options: ['--set-upstream'] });
+              pushedRemoteName = remote.name;
+            } catch {
+              toast.error(t('gitView.dirtySwitch.pushFailed'));
+              await refreshStatusAndBranches();
+              setPendingDirtySwitchBranch(null);
+              return;
+            }
+          }
+          toast.success(sourceBranch
+            ? pushedRemoteName
+              ? t('gitView.toast.pushedToUpstream', { name: pushedRemoteName })
+              : t('gitView.dirtySwitch.committedNotPushed', { branch: sourceBranch })
+            : t('gitView.toast.commitCreated'));
+          await refreshStatusAndBranches();
+          setPendingDirtySwitchBranch(null);
+          await performCheckout(branch);
+        }}
+        onGenerateMessage={async () => {
+          if (!currentDirectory) return '';
+          const paths = (status?.files ?? []).map((file) => file.path).sort();
+          const { message } = await generateCommitMessage(currentDirectory, paths);
+          return message.subject?.trim() ?? '';
+        }}
+        onRevertAndSwitch={async () => {
+          const branch = pendingDirtySwitchBranch;
+          if (!branch || !currentDirectory) return;
+          await handleRevertAll((status?.files ?? []).map((file) => file.path));
+          const fresh = await git.getGitStatus(currentDirectory);
+          if (!fresh.isClean && (fresh.files?.length ?? 0) > 0) {
+            toast.error(t('gitView.dirtySwitch.revertIncomplete'));
+            return;
+          }
+          setPendingDirtySwitchBranch(null);
+          await performCheckout(branch);
+        }}
+      />
     </div>
   );
 };

@@ -1,12 +1,19 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
-import { LINEAR_ISSUE_LIST_ALL_TEAMS, useUIStore } from './useUIStore';
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
+
+let runtimeKey = 'url:https://instance-a';
+const runtimeSwitch = await import('@/lib/runtime-switch');
+mock.module('@/lib/runtime-switch', () => ({ ...runtimeSwitch, getRuntimeKey: () => runtimeKey }));
+
+const { LINEAR_ISSUE_LIST_ALL_TEAMS, useUIStore } = await import('./useUIStore');
 
 describe('linear issue list filters', () => {
   beforeEach(() => {
+    runtimeKey = 'url:https://instance-a';
     useUIStore.setState({
       linearIssueListStatus: 'all',
       linearIssueListAssignee: 'any',
       linearIssueListTeamId: LINEAR_ISSUE_LIST_ALL_TEAMS,
+      linearIssueListTeamIdByRuntime: {},
       linearIssueListPriority: 'all',
       linearIssueFocus: null,
     });
@@ -66,5 +73,44 @@ describe('linear issue list filters', () => {
     useUIStore.getState().setLinearIssueFocus('ENG-12');
     useUIStore.getState().setLinearIssueFocus(null);
     expect(useUIStore.getState().linearIssueFocus).toBeNull();
+  });
+
+  test('keeps the team filter with the instance that owns the workspace', () => {
+    useUIStore.getState().setLinearIssueListTeamId('team-eng');
+    expect(useUIStore.getState().linearIssueListTeamId).toBe('team-eng');
+
+    // Switching instances: a team belongs to one Linear workspace, so the new
+    // instance opens on all teams rather than on a filter matching nothing.
+    runtimeKey = 'url:https://instance-b';
+    useUIStore.getState().applyLinearIssueListFiltersForRuntime();
+    expect(useUIStore.getState().linearIssueListTeamId).toBe(LINEAR_ISSUE_LIST_ALL_TEAMS);
+
+    useUIStore.getState().setLinearIssueListTeamId('team-ops');
+    expect(useUIStore.getState().linearIssueListTeamId).toBe('team-ops');
+
+    // Switching back restores the first instance's own choice.
+    runtimeKey = 'url:https://instance-a';
+    useUIStore.getState().applyLinearIssueListFiltersForRuntime();
+    expect(useUIStore.getState().linearIssueListTeamId).toBe('team-eng');
+  });
+
+  test('a transient runtime key stores nothing and reads as all teams', () => {
+    runtimeKey = 'mobile-disconnected';
+    useUIStore.getState().setLinearIssueListTeamId('team-eng');
+
+    expect(useUIStore.getState().linearIssueListTeamIdByRuntime).toEqual({});
+
+    useUIStore.getState().applyLinearIssueListFiltersForRuntime();
+    expect(useUIStore.getState().linearIssueListTeamId).toBe(LINEAR_ISSUE_LIST_ALL_TEAMS);
+  });
+
+  test('resetting filters clears the stored team for this instance only', () => {
+    useUIStore.getState().setLinearIssueListTeamId('team-eng');
+    runtimeKey = 'url:https://instance-b';
+    useUIStore.getState().setLinearIssueListTeamId('team-ops');
+
+    useUIStore.getState().resetLinearIssueListFilters();
+
+    expect(useUIStore.getState().linearIssueListTeamIdByRuntime).toEqual({ 'url:https://instance-a': 'team-eng' });
   });
 });

@@ -91,6 +91,10 @@ other runtime API.
   a blocker instead of a raw 500 message.
 - `call.js` — wire formats and per-provider auth, replicating OpenCode's
   plugin auth loaders:
+  - OpenCode-hosted providers receive `x-opencode-session`. Session-backed
+    features reuse the real OpenCode session id, walkthrough retries reuse the
+    walkthrough cache key, and standalone one-shot actions receive a fresh
+    opaque id for that generation.
   - **GitHub Copilot**: fetches the requested model's authenticated `/models`
     metadata from `https://api.githubcopilot.com` (or
     `copilot-api.<enterprise>`) and honors its advertised endpoint, preferring

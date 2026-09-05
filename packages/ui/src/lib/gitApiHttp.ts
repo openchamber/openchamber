@@ -7,6 +7,7 @@ import type {
   GitFileDiffResponse,
   GetGitFileDiffOptions,
   GitBranch,
+  GitUnpushedBranchCounts,
   GitDeleteBranchPayload,
   GitDeleteRemoteBranchPayload,
   GitRemoveRemotePayload,
@@ -35,10 +36,11 @@ import type {
   RevertCommitResponse,
   ResetToCommitResponse,
 } from './api/types';
+import { normalizePath } from './pathNormalization';
 import { runtimeFetch } from './runtime-fetch';
 import { getRuntimeUrlResolver } from './runtime-url';
 import { getRuntimeKey } from './runtime-switch';
-import { notifyGitStatusInvalidated } from './gitStatusInvalidation';
+import { notifyGitStatusInvalidated, subscribeGitStatusInvalidations } from './gitStatusInvalidation';
 
 const API_BASE = '/api/git';
 const GIT_STATUS_CACHE_TTL_MS = 1200;
@@ -58,8 +60,7 @@ const getStatusCacheKey = (runtimeKey: string, directory: string, mode?: 'light'
 const getStatusCacheVersion = (runtimeKey: string, directory: string): number =>
   gitStatusCacheVersions.get(getDirectoryCacheKey(runtimeKey, directory)) ?? 0;
 
-const invalidateGitStatusCache = (directory: string): void => {
-  const runtimeKey = getRuntimeKey();
+const clearGitStatusCache = (runtimeKey: string, directory: string): void => {
   const key = getDirectoryCacheKey(runtimeKey, directory);
   gitStatusCacheVersions.set(key, getStatusCacheVersion(runtimeKey, directory) + 1);
   for (const mode of [undefined, 'light'] as const) {
@@ -67,6 +68,13 @@ const invalidateGitStatusCache = (directory: string): void => {
     gitStatusCache.delete(statusKey);
     gitStatusInFlight.delete(statusKey);
   }
+};
+
+subscribeGitStatusInvalidations((directory) => {
+  clearGitStatusCache(getRuntimeKey(), directory);
+});
+
+const invalidateGitStatusCache = (directory: string): void => {
   notifyGitStatusInvalidated(directory);
 };
 
@@ -131,9 +139,43 @@ export async function checkIsGitRepository(directory: string): Promise<boolean> 
   }
 }
 
-export async function getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<GitStatus> {
+export class GitDirectoriesUnsupportedError extends Error {
+  constructor() {
+    super('Nested git repository discovery is not supported by this runtime');
+    this.name = 'GitDirectoriesUnsupportedError';
+  }
+}
+
+export async function listGitDirectories(root: string): Promise<string[]> {
+  const response = await runtimeFetch('/api/fs/git-dirs', { query: { path: root } });
+  if (response.status === 501) {
+    throw new GitDirectoriesUnsupportedError();
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to list git directories: ${response.statusText}`);
+  }
+  // SAFETY: the route is ours (`GET /api/fs/git-dirs`) and answers this exact
+  // shape on every 2xx; a malformed body fails the array check below.
+  const data = await response.json() as { repositories?: Array<{ path?: string | null }> };
+  if (!Array.isArray(data?.repositories)) {
+    throw new Error('Unexpected git directories response');
+  }
+  // The server joins paths with the platform separator; every other git
+  // directory key in the UI is normalized, so match that here or a Windows
+  // repository never equals its own selection or root prefix.
+  return data.repositories
+    .map((entry) => normalizePath(entry?.path ?? null))
+    .filter((path): path is string => path !== null);
+}
+
+export async function getGitStatus(directory: string, options?: { mode?: 'light'; fresh?: boolean }): Promise<GitStatus> {
   const mode = options?.mode;
   const runtimeKey = getRuntimeKey();
+  if (options?.fresh) {
+    // A forced read must cross the transport cache boundary too. Advancing the
+    // version also prevents an older in-flight response from repopulating it.
+    clearGitStatusCache(runtimeKey, directory);
+  }
   const key = getStatusCacheKey(runtimeKey, directory, mode);
   const now = Date.now();
   const cached = gitStatusCache.get(key);
@@ -460,6 +502,16 @@ export async function getGitBranches(directory: string): Promise<GitBranch> {
   if (!response.ok) {
     throw new Error(`Failed to get branches: ${response.statusText}`);
   }
+  return response.json();
+}
+
+export async function getGitUnpushedBranchCounts(directory: string, branches: string[]): Promise<GitUnpushedBranchCounts> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/branch-push-status`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ branches }),
+  });
+  if (!response.ok) throw new Error(`Failed to get branch push status: ${response.statusText}`);
   return response.json();
 }
 

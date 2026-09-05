@@ -5,11 +5,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { resolveBunExecutable } from './lib/bun-executable.mjs';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 const useDetachedChildren = process.platform === 'darwin';
 const webRoot = path.join(repoRoot, 'packages/web');
+
+const bunExecutable = resolveBunExecutable();
 
 function run(label, command, args, env = {}, options = {}) {
   return spawn(command, args, {
@@ -17,6 +21,7 @@ function run(label, command, args, env = {}, options = {}) {
     stdio: 'inherit',
     env: { ...process.env, ...env },
     detached: useDetachedChildren,
+    windowsHide: true,
   }).on('error', (error) => {
     console.error(`[dev:web:hmr] Failed to start ${label}:`, error);
   });
@@ -112,15 +117,25 @@ function clearViteCache() {
 
 clearViteCache();
 
-const api = run('api', 'bun', ['run', '--cwd', 'packages/web', 'dev:server:watch'], {
-  OPENCHAMBER_PORT: backendPort,
-  // Dev backends share the relay identity with the production instance; never
-  // let them capture the machine's relay host on their own.
-  OPENCHAMBER_RELAY_HOST: process.env.OPENCHAMBER_RELAY_HOST || 'off',
-});
+const api = run(
+  'api',
+  bunExecutable,
+  [
+    'run',
+    '--cwd',
+    'packages/web',
+    'dev:server:watch',
+  ],
+  {
+    OPENCHAMBER_PORT: backendPort,
+    // Dev backends share the relay identity with the production instance; never
+    // let them capture the machine's relay host on their own.
+    OPENCHAMBER_RELAY_HOST: process.env.OPENCHAMBER_RELAY_HOST || 'off',
+  },
+);
 const vite = run(
   'vite',
-  'bun',
+  bunExecutable,
   ['x', 'vite', '--force', '--host', hmrHost, '--port', uiPort, '--strictPort'],
   {
     OPENCHAMBER_PORT: backendPort,

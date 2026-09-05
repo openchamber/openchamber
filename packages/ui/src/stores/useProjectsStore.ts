@@ -1112,7 +1112,7 @@ if (typeof window !== 'undefined') {
     const detail = (event as CustomEvent<SettingsSyncedDetail>).detail;
     if (detail && typeof detail === 'object' && detail.settings) {
       useProjectsStore.getState().synchronizeFromSettings(detail.settings, {
-        adoptActiveProject: detail.adoptWorkspace,
+        adoptActiveProject: detail.bootstrap,
       });
     }
   });

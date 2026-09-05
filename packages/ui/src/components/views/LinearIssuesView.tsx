@@ -251,6 +251,14 @@ export const LinearIssuesView: React.FC = () => {
   const setListPriority = useUIStore((state) => state.setLinearIssueListPriority);
   const resetListFilters = useUIStore((state) => state.resetLinearIssueListFilters);
   const setLinearIssueFocus = useUIStore((state) => state.setLinearIssueFocus);
+  const applyLinearFiltersForRuntime = useUIStore((state) => state.applyLinearIssueListFiltersForRuntime);
+
+  // The team filter is stored per instance, and rehydration can run before the
+  // runtime endpoint is known. Reading it here means the view always opens on
+  // the filter belonging to the instance it is about to query.
+  React.useEffect(() => {
+    applyLinearFiltersForRuntime();
+  }, [applyLinearFiltersForRuntime]);
 
   const [query, setQuery] = React.useState('');
   const [searchOpen, setSearchOpen] = React.useState(false);

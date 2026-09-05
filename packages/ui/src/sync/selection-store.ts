@@ -29,16 +29,21 @@ export type SelectionState = {
   getSessionAgentSelection: (sessionId: string) => string | null
   saveAgentModelForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => void
   getAgentModelForSession: (sessionId: string, agentName: string) => { providerId: string; modelId: string } | null
-  saveAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string, variant: string | undefined) => void
-  getAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => string | undefined
+  /**
+   * `variant` is the effort chosen for this agent/model in this session:
+   * a name, `null` for an explicit "Default" (send no effort), or `undefined`
+   * to forget the choice so the inherited default applies again.
+   */
+  saveAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string, variant: string | null | undefined) => void
+  getAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => string | null | undefined
 }
 
 const isPersistedSelectionState = (state: unknown): state is PersistedSelectionState => (
   typeof state === "object" && state !== null
 )
 
-// In-memory variant storage (not persisted)
-const agentModelVariantSelections = new Map<string, Map<string, Map<string, string>>>()
+// In-memory variant storage (not persisted). `null` is an explicit "Default".
+const agentModelVariantSelections = new Map<string, Map<string, Map<string, string | null>>>()
 
 // Maximum number of sessions to persist to local storage to prevent unbounded growth
 const MAX_PERSISTED_SESSIONS = 150
@@ -91,20 +96,21 @@ export const useSelectionStore = create<SelectionState>()(
 
       saveAgentModelVariantForSession: (sessionId, agentName, providerId, modelId, variant) => {
         const key = `${providerId}/${modelId}`
+        const clears = variant === undefined
         let agentMap = agentModelVariantSelections.get(sessionId)
-        if (!agentMap && variant) {
+        if (!agentMap && !clears) {
           agentMap = new Map()
           agentModelVariantSelections.set(sessionId, agentMap)
         }
         if (!agentMap) return
         let modelMap = agentMap.get(agentName)
-        if (!modelMap && variant) {
+        if (!modelMap && !clears) {
           modelMap = new Map()
           agentMap.set(agentName, modelMap)
         }
         if (!modelMap) return
 
-        if (!variant) {
+        if (clears) {
           modelMap.delete(key)
           if (modelMap.size === 0) {
             agentMap.delete(agentName)

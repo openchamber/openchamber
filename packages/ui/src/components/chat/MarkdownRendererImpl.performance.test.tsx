@@ -12,6 +12,7 @@ type OperationCounts = {
   replaceCalls: number;
   removeCalls: number;
   getBoundingClientRectCalls: number;
+  tableProbeReads: number;
   viewBoxWrites: number;
   resizeObserverCreates: number;
   resizeObserverObserveCalls: number;
@@ -62,6 +63,7 @@ let windowInstance: Window;
 let previousGlobals: Map<string, PropertyDescriptor | undefined>;
 let activeCounts: OperationCounts | null = null;
 let animationFrameQueue: FrameRequestCallback[] = [];
+let tableProbeWidths: Map<string, number> | null = null;
 let notifyResize: ((entries: Array<{ target: Element; contentRect: { width: number; height: number } }>) => void) | null = null;
 let MarkdownRenderer: React.ComponentType<{
   content: string;
@@ -82,6 +84,7 @@ const makeCounts = (): OperationCounts => ({
   replaceCalls: 0,
   removeCalls: 0,
   getBoundingClientRectCalls: 0,
+  tableProbeReads: 0,
   viewBoxWrites: 0,
   resizeObserverCreates: 0,
   resizeObserverObserveCalls: 0,
@@ -239,10 +242,15 @@ const initializePerformanceDom = async (): Promise<void> => {
     return originalRemove.call(this);
   } });
   const originalGetBoundingClientRect = elementPrototype.getBoundingClientRect;
-  Object.defineProperty(elementPrototype, 'getBoundingClientRect', { configurable: true, value: function (): DOMRect {
+  Object.defineProperty(elementPrototype, 'getBoundingClientRect', { configurable: true, value: function (this: Element): DOMRect {
     if (activeCounts) {
       activeCounts.getBoundingClientRectCalls += 1;
       activeCounts.geometrySequence.push('read');
+    }
+    if (this.matches('table') && this.closest('[data-md-table-measure]')) {
+      if (activeCounts) activeCounts.tableProbeReads += 1;
+      const key = (this.textContent ?? '').trim();
+      return new windowInstance.DOMRect(0, 0, tableProbeWidths?.get(key) ?? 0, 20);
     }
     return originalGetBoundingClientRect.call(this);
   } });
@@ -318,6 +326,77 @@ afterAll(() => {
 });
 
 describe('MarkdownRenderer DOM mount performance contract', () => {
+  test('fixes body-sized table columns once the stream settles', async () => {
+    const content = [
+      '| An intentionally oversized header | Another oversized header | A third oversized header |',
+      '| --- | --- | --- |',
+      '| short | medium body value | very long body value |',
+    ].join('\n');
+    tableProbeWidths = new Map([
+      ['short', 48],
+      ['medium body value', 186],
+      ['very long body value', 800],
+    ]);
+    const counts = makeCounts();
+    activeCounts = counts;
+    const host = document.createElement('div');
+    document.body.replaceChildren(host);
+    const root = createRoot(host);
+    const render = (isStreaming: boolean) => root.render(
+      <MarkdownRenderer
+        content={content}
+        messageId="table-width-message"
+        isAnimated={false}
+        isStreaming={isStreaming}
+        enableFileReferences={false}
+      />,
+    );
+
+    try {
+      await act(async () => {
+        render(true);
+        await waitForSettledEffects();
+      });
+      await flushAnimationFrame();
+      expect(host.querySelector('[data-markdown="table"]')?.getAttribute('data-md-table-layout')).toBe('pending');
+      expect(counts.tableProbeReads).toBe(0);
+
+      await act(async () => {
+        render(false);
+        await waitForSettledEffects();
+      });
+      await flushAnimationFrame();
+
+      const table = host.querySelector<HTMLTableElement>('[data-markdown="table"]');
+      const cells = Array.from(table?.querySelectorAll('th, td') ?? []);
+      const columnWidths = Array.from(table?.querySelectorAll<HTMLTableColElement>('colgroup[data-md-table-columns] col') ?? [])
+        .map((column) => column.style.width);
+      const tableProbeReads = counts.tableProbeReads;
+      await flushAnimationFrame();
+
+      expect(table).not.toBeNull();
+      expect(table?.getAttribute('data-md-table-layout')).toBe('fixed');
+      expect(table?.style.tableLayout).toBe('fixed');
+      expect(table?.style.width).toBe('626px');
+      expect(columnWidths).toEqual(['120px', '186px', '320px']);
+      expect(table?.classList.contains('w-max')).toBe(true);
+      expect(table?.classList.contains('min-w-full')).toBe(false);
+      expect(table?.classList.contains('w-full')).toBe(false);
+      expect(table?.parentElement?.classList.contains('overflow-x-auto')).toBe(true);
+      expect(cells.length).toBeGreaterThan(0);
+      expect(cells.every((cell) => cell.classList.contains('min-w-[120px]'))).toBe(true);
+      expect(cells.every((cell) => cell.classList.contains('max-w-[320px]'))).toBe(true);
+      expect(cells.every((cell) => (
+        cell.classList.contains('whitespace-normal')
+        && cell.classList.contains('[overflow-wrap:anywhere]')
+      ))).toBe(true);
+      expect(counts.tableProbeReads).toBe(tableProbeReads);
+    } finally {
+      tableProbeWidths = null;
+      await act(async () => root.unmount());
+    }
+  });
+
   test('builds Markdown sprite controls without parsing SVG markup', async () => {
     const mounted = await mountFixture(1);
 
@@ -517,7 +596,8 @@ describe('MarkdownRenderer DOM mount performance contract', () => {
     expect(metrics.innerHTMLWrites).toBeGreaterThan(0);
     expect(metrics.querySelectorAllCalls).toBeGreaterThan(0);
     expect(metrics.appendCalls).toBeGreaterThan(0);
-    expect(metrics.getBoundingClientRectCalls).toBe(metrics.mermaidRenderedCount);
+    expect(metrics.tableProbeReads).toBe(fixtureWorkload.rendererCount * 2);
+    expect(metrics.getBoundingClientRectCalls).toBe(metrics.mermaidRenderedCount + metrics.tableProbeReads);
     expect(metrics.viewBoxWrites).toBe(metrics.mermaidRenderedCount);
     expect(metrics.resizeObserverCreates).toBe(1);
     expect(metrics.resizeObserverObserveCalls).toBe(metrics.mermaidRenderedCount);

@@ -20,9 +20,9 @@
  *
  * - With an `Origin` header, the request came from a browser context and the
  *   usual origin check applies unchanged.
- * - With no `Origin`, the request must carry client-token auth. A browser
- *   cannot reach this path: the WebSocket API always sends an origin and never
- *   lets a page set an `Authorization` header.
+ * - With no `Origin`, the request must carry client-token auth or a short-lived
+ *   URL token. The URL-token case is used only by the trusted renderer through
+ *   the E2EE relay; the UI-auth allowlist limits it to this exact path.
  */
 import net from 'node:net';
 import { WebSocketServer } from 'ws';
@@ -133,7 +133,7 @@ export function createDevTunnelRuntime({
     void (async () => {
       try {
         if (uiAuthController?.enabled) {
-          const auth = await uiAuthController.resolveAuthContext(req, null, { allowUrlToken: false });
+          const auth = await uiAuthController.resolveAuthContext(req, null, { allowUrlToken: true });
           if (!auth) {
             rejectWebSocketUpgrade(socket, 401, 'UI authentication required');
             return;

@@ -1,0 +1,20 @@
+{
+  "extension.description": "OpenCode destekli AI kodlama asistanı",
+  "views.chat.name": "Chat",
+  "command.openSidebar.title": "Kenar çubuğunu aç",
+  "command.focusChat.title": "Chat'e odaklan",
+  "command.restartApi.title": "API bağlantısını yeniden başlat",
+  "command.showOpenCodeStatus.title": "OpenCode durumunu göster",
+  "command.openAgentManager.title": "Agent yöneticisini aç",
+  "command.openActiveSessionInEditor.title": "Aktif oturumu düzenleyicide aç",
+  "command.openNewSessionInEditor.title": "Düzenleyicide yeni oturum aç",
+  "command.openCurrentOrNewSessionInEditor.title": "Oturumu düzenleyicide aç",
+  "command.addToContext.title": "Bağlama ekle",
+  "command.explain.title": "Açıkla",
+  "command.improveCode.title": "Kodu iyileştir",
+  "command.newSession.title": "Yeni oturum",
+  "command.showSettings.title": "Ayarlar",
+  "command.attachExplorerToChat.title": "OpenChamber Chat'ine ekle",
+  "configuration.apiUrl.description": "Harici bir OpenCode API sunucusunun URL'si. Yerel bir örneğin otomatik başlatılması için boş bırakın.",
+  "configuration.opencodeBinary.description": "opencode CLI ikili dosyasının (binary) isteğe bağlı mutlak yolu. PATH araması başarısız olduğunda faydalıdır. Uygulanması için pencere yeniden yükleme veya API yeniden başlatma gerekir."
+}

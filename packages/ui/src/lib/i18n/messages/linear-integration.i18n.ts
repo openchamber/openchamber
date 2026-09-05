@@ -1,6 +1,9 @@
-/** Linear first-party integration settings strings — merged into each locale's settings dictionary. */
+/** Built-in integration (GitHub, Linear) settings strings — merged into each locale's settings dictionary. */
 export const linearIntegrationI18n = {
   en: {
+    'settings.integrations.github.title': 'GitHub',
+    'settings.integrations.github.description': 'Connect a GitHub account for pull requests and issues.',
+    'settings.integrations.github.status.notConnected': 'Not connected',
     'settings.integrations.firstParty.title': 'Built-in integrations',
     'settings.integrations.firstParty.info': 'Sign-ins for services that ship with OpenChamber. The login stays on this computer so web, desktop, and a paired phone share it.',
     'settings.integrations.linear.title': 'Linear',
@@ -48,6 +51,9 @@ export const linearIntegrationI18n = {
     'settings.magicPrompts.page.group.linearIssueReview.description': 'Prompts used when starting a session from a Linear issue: visible user message + hidden instructions.',
   },
   de: {
+    'settings.integrations.github.title': 'GitHub',
+    'settings.integrations.github.description': 'GitHub-Konto für Pull Requests und Issues verbinden.',
+    'settings.integrations.github.status.notConnected': 'Nicht verbunden',
     'settings.integrations.firstParty.title': 'Eingebaute Integrationen',
     'settings.integrations.firstParty.info': 'Anmeldungen für Dienste, die mit OpenChamber mitgeliefert werden. Die Anmeldung bleibt auf diesem Computer, damit Web, Desktop und ein gekoppeltes Telefon sie teilen.',
     'settings.integrations.linear.title': 'Linear',
@@ -95,6 +101,9 @@ export const linearIntegrationI18n = {
     'settings.magicPrompts.page.group.linearIssueReview.description': 'Eingabeaufforderungen beim Start einer Sitzung aus einem Linear-Issue: sichtbare Benutzernachricht + versteckte Anweisungen.',
   },
   fr: {
+    'settings.integrations.github.title': 'GitHub',
+    'settings.integrations.github.description': 'Connecter un compte GitHub pour les pull requests et les issues.',
+    'settings.integrations.github.status.notConnected': 'Non connecté',
     'settings.integrations.firstParty.title': 'Intégrations natives',
     'settings.integrations.firstParty.info': 'Connexions aux services fournis avec OpenChamber. La connexion reste sur cet ordinateur pour que le web, le bureau et un téléphone apparié la partagent.',
     'settings.integrations.linear.title': 'Linear',
@@ -142,6 +151,9 @@ export const linearIntegrationI18n = {
     'settings.magicPrompts.page.group.linearIssueReview.description': 'Prompts utilisés au démarrage d’une session depuis un ticket Linear : message utilisateur visible + instructions masquées.',
   },
   es: {
+    'settings.integrations.github.title': 'GitHub',
+    'settings.integrations.github.description': 'Conecta una cuenta de GitHub para pull requests e issues.',
+    'settings.integrations.github.status.notConnected': 'No conectado',
     'settings.integrations.firstParty.title': 'Integraciones nativas',
     'settings.integrations.firstParty.info': 'Inicios de sesión de los servicios incluidos en OpenChamber. El inicio de sesión se guarda en este ordenador para que la web, el escritorio y un teléfono emparejado lo compartan.',
     'settings.integrations.linear.title': 'Linear',
@@ -189,6 +201,9 @@ export const linearIntegrationI18n = {
     'settings.magicPrompts.page.group.linearIssueReview.description': 'Prompts usados al iniciar una sesión desde un issue de Linear: mensaje visible del usuario e instrucciones ocultas.',
   },
   ja: {
+    'settings.integrations.github.title': 'GitHub',
+    'settings.integrations.github.description': 'プルリクエストと Issue のために GitHub アカウントを接続します。',
+    'settings.integrations.github.status.notConnected': '未接続',
     'settings.integrations.firstParty.title': '標準連携',
     'settings.integrations.firstParty.info': 'OpenChamber に同梱されているサービスのログインです。このコンピュータに保存され、Web、デスクトップ、ペアリングしたスマホで共有されます。',
     'settings.integrations.linear.title': 'Linear',
@@ -236,6 +251,9 @@ export const linearIntegrationI18n = {
     'settings.magicPrompts.page.group.linearIssueReview.description': 'Linear の Issue からセッションを開始するときに使うプロンプト: 表示ユーザーメッセージ + 非表示の指示。',
   },
   ko: {
+    'settings.integrations.github.title': 'GitHub',
+    'settings.integrations.github.description': '풀 리퀘스트와 이슈를 위해 GitHub 계정을 연결합니다.',
+    'settings.integrations.github.status.notConnected': '연결되지 않음',
     'settings.integrations.firstParty.title': '기본 제공 통합',
     'settings.integrations.firstParty.info': 'OpenChamber에 포함된 서비스 로그인입니다. 이 컴퓨터에 저장되며 웹, 데스크톱, 페어링된 휴대폰이 공유합니다.',
     'settings.integrations.linear.title': 'Linear',
@@ -283,6 +301,9 @@ export const linearIntegrationI18n = {
     'settings.magicPrompts.page.group.linearIssueReview.description': 'Linear 이슈로 세션을 시작할 때 쓰는 프롬프트입니다: 표시 사용자 메시지 + 숨겨진 지침.',
   },
   pl: {
+    'settings.integrations.github.title': 'GitHub',
+    'settings.integrations.github.description': 'Połącz konto GitHub dla pull requestów i issues.',
+    'settings.integrations.github.status.notConnected': 'Nie połączono',
     'settings.integrations.firstParty.title': 'Wbudowane integracje',
     'settings.integrations.firstParty.info': 'Logowania do usług dostarczanych z OpenChamber. Zapisujemy je na tym komputerze, żeby przeglądarka, aplikacja desktopowa i sparowany telefon z nich korzystały.',
     'settings.integrations.linear.title': 'Linear',
@@ -330,6 +351,9 @@ export const linearIntegrationI18n = {
     'settings.magicPrompts.page.group.linearIssueReview.description': 'Prompty używane przy starcie sesji ze zgłoszenia Linear: widoczna wiadomość użytkownika i ukryte instrukcje.',
   },
   'pt-BR': {
+    'settings.integrations.github.title': 'GitHub',
+    'settings.integrations.github.description': 'Conecte uma conta do GitHub para pull requests e issues.',
+    'settings.integrations.github.status.notConnected': 'Não conectado',
     'settings.integrations.firstParty.title': 'Integrações nativas',
     'settings.integrations.firstParty.info': 'Logins dos serviços inclusos no OpenChamber. O login fica neste computador para que a web, o app desktop e um celular emparelhado o compartilhem.',
     'settings.integrations.linear.title': 'Linear',
@@ -377,6 +401,9 @@ export const linearIntegrationI18n = {
     'settings.magicPrompts.page.group.linearIssueReview.description': 'Prompts usados ao iniciar uma sessão a partir de uma issue do Linear: mensagem visível do usuário e instruções ocultas.',
   },
   uk: {
+    'settings.integrations.github.title': 'GitHub',
+    'settings.integrations.github.description': 'Підключіть акаунт GitHub для pull request-ів та issues.',
+    'settings.integrations.github.status.notConnected': 'Не підключено',
     'settings.integrations.firstParty.title': 'Вбудовані інтеграції',
     'settings.integrations.firstParty.info': 'Входи до сервісів, що входять до OpenChamber. Логін лишається на цьому комп’ютері, тож веб, десктоп і спарений телефон користуються одним обліковим записом.',
     'settings.integrations.linear.title': 'Linear',
@@ -424,6 +451,9 @@ export const linearIntegrationI18n = {
     'settings.magicPrompts.page.group.linearIssueReview.description': 'Промпти для старту сесії з Linear issue: видиме повідомлення користувача та приховані інструкції.',
   },
   'zh-CN': {
+    'settings.integrations.github.title': 'GitHub',
+    'settings.integrations.github.description': '连接 GitHub 账号以处理拉取请求和议题。',
+    'settings.integrations.github.status.notConnected': '未连接',
     'settings.integrations.firstParty.title': '内置集成',
     'settings.integrations.firstParty.info': 'OpenChamber 自带服务的登录。登录保存在这台电脑上，网页、桌面应用和已配对的手机会共用它。',
     'settings.integrations.linear.title': 'Linear',
@@ -471,6 +501,9 @@ export const linearIntegrationI18n = {
     'settings.magicPrompts.page.group.linearIssueReview.description': '从 Linear Issue 开始会话时使用的提示词：可见用户消息 + 隐藏指令。',
   },
   'zh-TW': {
+    'settings.integrations.github.title': 'GitHub',
+    'settings.integrations.github.description': '連接 GitHub 帳號以處理拉取請求與議題。',
+    'settings.integrations.github.status.notConnected': '未連接',
     'settings.integrations.firstParty.title': '內建整合',
     'settings.integrations.firstParty.info': 'OpenChamber 內建服務的登入。登入保存在這台電腦上，網頁、桌面應用程式和已配對的手機會共用它。',
     'settings.integrations.linear.title': 'Linear',
@@ -518,6 +551,9 @@ export const linearIntegrationI18n = {
     'settings.magicPrompts.page.group.linearIssueReview.description': '從 Linear Issue 開始會話時使用的提示詞：可見使用者訊息 + 隱藏指令。',
   },
   tr: {
+    'settings.integrations.github.title': 'GitHub',
+    'settings.integrations.github.description': "Pull request ve issue'lar için bir GitHub hesabı bağlayın.",
+    'settings.integrations.github.status.notConnected': 'Bağlı değil',
     'settings.integrations.firstParty.title': 'Yerleşik entegrasyonlar',
     'settings.integrations.firstParty.info': 'OpenChamber ile gelen hizmetlerin oturumları. Giriş bu bilgisayarda kalır; web, masaüstü ve eşlenen telefon paylaşır.',
     'settings.integrations.linear.title': 'Linear',

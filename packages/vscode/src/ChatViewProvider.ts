@@ -158,7 +158,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         // Tagged with the sidebar's identity: a snapshot only speaks for the
         // store that produced it, and each session panel has its own.
         void vscode.commands.executeCommand('openchamber.internal.inlineCommentsSync', {
-          ...(message.payload as Record<string, unknown>),
+          snapshot: message.payload,
           surfaceId: SIDEBAR_SURFACE_ID,
         });
         return;

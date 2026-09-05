@@ -12,6 +12,7 @@ import type { IconName } from "@/components/icon/icons";
 import { BranchSelector } from './BranchSelector';
 import { WorktreeBranchDisplay } from './WorktreeBranchDisplay';
 import { SyncActions } from './SyncActions';
+import { NestedRepoPicker } from './NestedRepoPicker';
 import type {
   GitStatus,
   GitIdentityProfile,
@@ -21,10 +22,12 @@ import type {
   GitHubChecksSummary,
 } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { useDeviceInfo } from '@/lib/device';
 
 type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;
 
 interface GitHeaderProps {
+  directory: string;
   status: GitStatus | null;
   localBranches: string[];
   remoteBranches: string[];
@@ -51,6 +54,13 @@ interface GitHeaderProps {
   pullRequest?: GitHubPullRequest | null;
   prChecks?: GitHubChecksSummary | null;
   onOpenPullRequest?: () => void;
+  // Nested repository picker: shown when the Git tab operates on a repository
+  // nested inside a non-repository root. Options are absolute repository
+  // paths; `repositoryRoot` is the root those paths are relative to.
+  repositoryOptions?: string[];
+  selectedRepository?: string | null;
+  onSelectRepository?: (repository: string) => void;
+  repositoryRoot?: string;
 }
 
 const IDENTITY_ICON_MAP: Record<string, IconName> = {
@@ -232,6 +242,7 @@ const UpstreamStatusPill: React.FC<UpstreamStatusPillProps> = ({
 };
 
 export const GitHeader: React.FC<GitHeaderProps> = ({
+  directory,
   status,
   localBranches,
   remoteBranches,
@@ -258,11 +269,18 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   pullRequest,
   prChecks,
   onOpenPullRequest,
+  repositoryOptions,
+  selectedRepository,
+  onSelectRepository,
+  repositoryRoot,
 }) => {
   const { t } = useI18n();
+  const { isMobile } = useDeviceInfo();
   if (!status) {
     return null;
   }
+
+  const repositoryOptionsForPicker = (repositoryOptions ?? []).filter(Boolean);
 
   const managementButtons = (
     <div className="flex items-center gap-1 shrink-0">
@@ -410,23 +428,34 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   return (
     <header className="@container/git-header px-3 py-2 bg-transparent">
       <div className="flex items-center justify-between gap-2 min-w-0">
-        <div className="min-w-0 flex-1">
-          {isWorktreeMode ? (
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          {isWorktreeMode && !isMobile ? (
             <WorktreeBranchDisplay
               currentBranch={status.current}
               onRename={onRenameBranch}
             />
           ) : (
             <BranchSelector
+              directory={directory}
               currentBranch={status.current}
               localBranches={localBranches}
               remoteBranches={remoteBranches}
               branchInfo={branchInfo}
+              currentBranchAhead={status.ahead}
               onCheckout={onCheckoutBranch}
               onCreate={onCreateBranch}
               remotes={remotes}
+              switchBlockedNotice={(status.files?.length ?? 0) > 0 ? t('gitView.branch.switchBlockedNotice') : null}
             />
           )}
+          {repositoryOptionsForPicker.length > 0 && onSelectRepository ? (
+            <NestedRepoPicker
+              repositories={repositoryOptionsForPicker}
+              selectedRepository={selectedRepository ?? null}
+              onSelectRepository={onSelectRepository}
+              repositoryRoot={repositoryRoot}
+            />
+          ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {identityControl}

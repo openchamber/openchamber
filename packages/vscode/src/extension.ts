@@ -4,10 +4,23 @@ import { AgentManagerPanelProvider } from './AgentManagerPanelProvider';
 import { SessionEditorPanelProvider } from './SessionEditorPanelProvider';
 import { createOpenCodeManager, type OpenCodeManager } from './opencode';
 import { startGlobalEventWatcher, stopGlobalEventWatcher, setChatViewProvider } from './sessionActivityWatcher';
+import { pathsEqualWithNormalizedDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 import { InlineCommentThreads, SIDEBAR_SURFACE_ID } from './InlineCommentThreads';
 
 let chatViewProvider: ChatViewProvider | undefined;
+
+/** The webview's `{ drafts: [{ id, text }] }` snapshot, or null when it is not one. */
+function readDraftSnapshot(snapshot: unknown): Array<{ id: string; text: string }> | null {
+  if (typeof snapshot !== 'object' || snapshot === null || !('drafts' in snapshot) || !Array.isArray(snapshot.drafts)) return null;
+  const drafts: Array<{ id: string; text: string }> = [];
+  for (const entry of snapshot.drafts) {
+    if (typeof entry !== 'object' || entry === null || !('id' in entry) || typeof entry.id !== 'string') continue;
+    const text = 'text' in entry && typeof entry.text === 'string' ? entry.text : '';
+    drafts.push({ id: entry.id, text });
+  }
+  return drafts;
+}
 let agentManagerProvider: AgentManagerPanelProvider | undefined;
 let sessionEditorProvider: SessionEditorPanelProvider | undefined;
 let openCodeManager: OpenCodeManager | undefined;
@@ -551,21 +564,14 @@ export async function activate(context: vscode.ExtensionContext) {
   // follow it. Not contributed in package.json: internal wiring, not a command
   // a user should find in the palette.
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.internal.inlineCommentsSync', (payload: unknown) => {
-      const record = payload as { drafts?: unknown; surfaceId?: unknown };
-      const drafts = record?.drafts;
-      // The surface id is stamped by the provider that received the snapshot,
-      // so an untagged one cannot be attributed and is ignored rather than
-      // applied to threads it may know nothing about.
-      if (!Array.isArray(drafts) || typeof record?.surfaceId !== 'string') return;
-      inlineCommentThreads.reconcile(
-        record.surfaceId,
-        drafts.flatMap((entry) => {
-          const draft = entry as { id?: unknown; text?: unknown };
-          if (typeof draft?.id !== 'string') return [];
-          return [{ id: draft.id, text: typeof draft.text === 'string' ? draft.text : '' }];
-        })
-      );
+    vscode.commands.registerCommand('openchamber.internal.inlineCommentsSync', (message: { snapshot: unknown; surfaceId: string }) => {
+      // The snapshot crossed the webview boundary as JSON; the surface id was
+      // stamped by the provider that received it, so an untagged snapshot
+      // cannot be attributed and is ignored rather than applied to threads it
+      // may know nothing about.
+      const drafts = readDraftSnapshot(message.snapshot);
+      if (!drafts || !message.surfaceId) return;
+      inlineCommentThreads.reconcile(message.surfaceId, drafts);
     })
   );
 
@@ -636,7 +642,9 @@ export async function activate(context: vscode.ExtensionContext) {
       const debug = openCodeManager?.getDebugInfo();
       const resolvedApiUrl = openCodeManager?.getApiUrl();
       const workingDirectory = openCodeManager?.getWorkingDirectory() ?? '';
-      const workingDirectoryMatchesWorkspace = Boolean(primaryWorkspace && workingDirectory === primaryWorkspace);
+      const workingDirectoryMatchesWorkspace = Boolean(
+        primaryWorkspace && pathsEqualWithNormalizedDriveLetter(workingDirectory, primaryWorkspace)
+      );
       let resolvedApiPath = '';
       if (resolvedApiUrl) {
         try {

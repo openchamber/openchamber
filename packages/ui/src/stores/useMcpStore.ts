@@ -54,6 +54,10 @@ type RefreshOptions = {
 };
 
 const ensureFreshInFlight = new Map<string, Promise<void>>();
+// Bumped on every runtime switch. Status is keyed by directory alone and two
+// instances can hold the same project path, so a request already in flight for
+// the previous instance would otherwise write its servers over the new one's.
+let mcpGeneration = 0;
 
 type TestConnectionResult = {
   status?: McpStatus;
@@ -91,6 +95,12 @@ interface McpStore {
   completeAuth: (name: string, code: string, directory?: string | null) => Promise<void>;
   clearAuth: (name: string, directory?: string | null) => Promise<void>;
   testConnection: (name: string, directory?: string | null) => Promise<TestConnectionResult>;
+  /**
+   * MCP status is keyed by directory alone, and two instances can hold the same
+   * project path — so on a switch the previous instance's servers would be
+   * reported for the new one. Drop everything and let consumers re-ask.
+   */
+  resetForRuntimeSwitch: () => void;
 }
 
 export const useMcpStore = create<McpStore>()(
@@ -100,6 +110,18 @@ export const useMcpStore = create<McpStore>()(
     loadingKeys: {},
     lastErrorKeys: {},
     refreshedAtKeys: {},
+
+    resetForRuntimeSwitch: () => {
+      mcpGeneration += 1;
+      ensureFreshInFlight.clear();
+      set({
+        byDirectory: {},
+        diagnosticsByDirectory: {},
+        loadingKeys: {},
+        lastErrorKeys: {},
+        refreshedAtKeys: {},
+      });
+    },
 
     getStatusForDirectory: (directory) => {
       const key = toKey(directory ?? useDirectoryStore.getState().currentDirectory);
@@ -127,9 +149,11 @@ export const useMcpStore = create<McpStore>()(
         }));
       }
 
+      const generation = mcpGeneration;
       try {
         const api = getMcpApiClient(directory);
         const result = await api.mcp.status();
+        if (generation !== mcpGeneration) return;
         const data = (result.data ?? {}) as McpStatusMap;
 
         set((state) => ({
@@ -145,6 +169,7 @@ export const useMcpStore = create<McpStore>()(
           refreshedAtKeys: { ...state.refreshedAtKeys, [key]: Date.now() },
         }));
       } catch (error) {
+        if (generation !== mcpGeneration) return;
         const message = error instanceof Error ? error.message : 'Failed to load MCP status';
         set((state) => ({
           loadingKeys: { ...state.loadingKeys, [key]: false },

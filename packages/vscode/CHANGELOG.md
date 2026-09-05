@@ -1,6 +1,19 @@
-## [Unreleased]
+## [1.22.1] - 2026-09-04
 
-- Switching sessions is faster: the clicked session highlights at once, and its conversation appears as one finished view — text, tool cards, and the recap together — instead of arriving in pieces with a moment of unstyled code blocks.
+- **OpenCode Go:** the usage request the extension sends to OpenCode Go now carries the `x-opencode-session` header that OpenCode Go requires from 6 September. Chat traffic already had it, because it goes through OpenCode.
+- Message queue: a queued message keeps its attached context, file mentions, and skill; editing it brings them back to the composer.
+- Thinking effort: picking Default now sticks after a send and across agent or session switches, and a reopened session restores the effort its last message used (thanks to @yulia-ivashko).
+- Worktrees: removing a worktree no longer freezes the interface; it runs in the background with a progress toast (thanks to @yulia-ivashko). A worktree created from a branch behind its upstream now fetches first and branches from the remote (thanks to @jtatum).
+- Worktrees: the New Worktree dialog keeps its form when the worktree list changes while open, and a removed worktree leaves the sidebar under every project it was listed in (thanks to @yulia-ivashko).
+- Sessions: starting a rename selects the whole title (thanks to @yulia-ivashko).
+- Settings: the theme no longer flips when switching sessions across directories, and a theme the extension cannot fully report keeps the current preference (thanks to @kydorn).
+- Settings: Fixel Text is available as an interface font.
+- Usage: exe.dev usage windows are tracked.
+- Settings: the Integrations page, which offered the Claude Code and Cursor plugin installs, is gone.
+
+## [1.22.0] - 2026-08-30
+
+- Switching sessions is now visually stable, without conversation jumps or partial rendering.
 - Chat: a turn that OpenCode stopped no longer ends with nothing on screen — what OpenCode reported shows under the last message, and a message an idle session has left unanswered is named as such. The status report (Ctrl/Cmd+Shift+L) now lists the last session errors and rejected sends.
 - Chat: a session opened from the sidebar lands at its end and stays there, instead of landing above the bottom or snapping up a moment later.
 

@@ -14,7 +14,7 @@ export const buildGoalIntroText = (tokenBudget) => {
     + '\n</system-reminder>';
 };
 
-const fitObjective = async ({ objective, directory, providerID, modelID, warn }) => {
+const fitObjective = async ({ objective, directory, sessionID, providerID, modelID, warn }) => {
   if (objective.length <= GOAL_OBJECTIVE_CHAR_LIMIT) return objective;
 
   let distilled = null;
@@ -32,6 +32,7 @@ const fitObjective = async ({ objective, directory, providerID, modelID, warn })
         'Write in the same language as the task text.',
       ].join('\n'),
       directory,
+      sessionID,
       preferredProviderID: providerID,
       preferredModelID: modelID,
     });
@@ -66,6 +67,7 @@ export const createSessionGoal = async ({
   const objectiveText = await fitObjective({
     objective: String(objective ?? '').trim(),
     directory,
+    sessionID,
     providerID,
     modelID,
     warn,

@@ -17,28 +17,6 @@ const runtimeCtx = {
 };
 
 describe('settings search', () => {
-  test('finds the Claude Code third-party integration', () => {
-    const results = buildSettingsSearchResults({
-      query: 'claude',
-      runtimeCtx,
-      t,
-      getPageTitle: (page) => page,
-    });
-
-    expect(results.some((result) => result.id === 'integrations.third-party.opencode-claude')).toBe(true);
-  });
-
-  test('finds third-party integrations by OpenChamber npm package names', () => {
-    const results = buildSettingsSearchResults({
-      query: '@openchamber/opencode-cursor',
-      runtimeCtx,
-      t,
-      getPageTitle: (page) => page,
-    });
-
-    expect(results.some((result) => result.id === 'integrations.third-party.opencode-cursor-oauth')).toBe(true);
-  });
-
   test('finds Linear connect on the integrations page', () => {
     const results = buildSettingsSearchResults({
       query: 'linear',

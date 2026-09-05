@@ -17,6 +17,7 @@ const getWorktreeBootstrapStatusMock = vi.fn(async () => ({
 const sessionCreateMock = vi.fn(async () => ({ data: { id: 'ses_123' } }));
 const sessionForkMock = vi.fn(async () => ({ data: { id: 'ses_fork', title: 'Forked session' } }));
 const sessionMessagesMock = vi.fn(async () => ({ data: [] }));
+const sessionUpdateMock = vi.fn(async ({ sessionID }) => ({ data: { id: sessionID, time: { archived: 1 } } }));
 
 let existingSessionMessages = [];
 let dispatchedUserMessageSeq = 0;
@@ -78,6 +79,7 @@ vi.mock('@opencode-ai/sdk/v2', () => ({
       fork: sessionForkMock,
       messages: sessionMessagesMock,
       command: sessionCommandMock,
+      update: sessionUpdateMock,
     },
     command: {
       list: commandListMock,
@@ -132,6 +134,92 @@ describe('openchamber session routes', () => {
     sessionCommandMock.mockResolvedValue({ data: {} });
     commandListMock.mockReset();
     commandListMock.mockResolvedValue({ data: [] });
+    sessionUpdateMock.mockReset();
+    sessionUpdateMock.mockImplementation(async ({ sessionID }) => ({ data: { id: sessionID, time: { archived: 1 } } }));
+  });
+
+  describe('archiving a batch of sessions', () => {
+    it('archives every id against the resolved directory and returns the archived sessions', async () => {
+      const { app } = createApp();
+      const response = await request(app)
+        .post('/api/openchamber/sessions/archive')
+        .send({ directory: '/repo/app', ids: ['ses_a', 'ses_b'], archivedAt: 1700 })
+        .expect(200);
+
+      expect(response.body.directory).toBe('/repo/app');
+      expect(response.body.archived.map((session) => session.id)).toEqual(['ses_a', 'ses_b']);
+      expect(response.body.failedIds).toEqual([]);
+      expect(sessionUpdateMock).toHaveBeenCalledTimes(2);
+      expect(sessionUpdateMock).toHaveBeenCalledWith({
+        sessionID: 'ses_a',
+        directory: '/repo/app',
+        time: { archived: 1700 },
+      });
+    });
+
+    it('keeps archiving after a failed session and reports it as failed', async () => {
+      sessionUpdateMock.mockImplementation(async ({ sessionID }) => {
+        if (sessionID === 'ses_b') throw new Error('session.update failed');
+        return { data: { id: sessionID } };
+      });
+
+      const { app } = createApp();
+      const response = await request(app)
+        .post('/api/openchamber/sessions/archive')
+        .send({ directory: '/repo/app', ids: ['ses_a', 'ses_b', 'ses_c'] })
+        .expect(200);
+
+      expect(response.body.archived.map((session) => session.id)).toEqual(['ses_a', 'ses_c']);
+      expect(response.body.failedIds).toEqual(['ses_b']);
+    });
+
+    it('reports a session the server did not confirm as failed instead of archived', async () => {
+      sessionUpdateMock.mockImplementation(async ({ sessionID }) => (
+        sessionID === 'ses_b' ? { data: null } : { data: { id: sessionID } }
+      ));
+
+      const { app } = createApp();
+      const response = await request(app)
+        .post('/api/openchamber/sessions/archive')
+        .send({ directory: '/repo/app', ids: ['ses_a', 'ses_b'] })
+        .expect(200);
+
+      expect(response.body.archived.map((session) => session.id)).toEqual(['ses_a']);
+      expect(response.body.failedIds).toEqual(['ses_b']);
+    });
+
+    it('rejects an empty batch, an oversized batch, and non-string ids', async () => {
+      const { app } = createApp();
+
+      await request(app).post('/api/openchamber/sessions/archive').send({ directory: '/repo/app', ids: [] }).expect(400);
+      await request(app)
+        .post('/api/openchamber/sessions/archive')
+        .send({ directory: '/repo/app', ids: Array.from({ length: 501 }, (_, index) => `ses_${index}`) })
+        .expect(400);
+      await request(app)
+        .post('/api/openchamber/sessions/archive')
+        .send({ directory: '/repo/app', ids: ['ses_a', ''] })
+        .expect(400);
+      await request(app)
+        .post('/api/openchamber/sessions/archive')
+        .send({ directory: '/repo/app', ids: ['ses_a'], archivedAt: -1 })
+        .expect(400);
+
+      expect(sessionUpdateMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects a directory the runtime does not accept', async () => {
+      const { app } = createApp({
+        validateDirectoryPath: async () => ({ ok: false, error: 'Invalid directory' }),
+      });
+
+      await request(app)
+        .post('/api/openchamber/sessions/archive')
+        .send({ directory: '/elsewhere', ids: ['ses_a'] })
+        .expect(400);
+
+      expect(sessionUpdateMock).not.toHaveBeenCalled();
+    });
   });
 
   it('creates a session for a directory', async () => {

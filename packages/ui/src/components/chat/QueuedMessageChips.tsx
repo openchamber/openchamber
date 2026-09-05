@@ -20,20 +20,20 @@ import { useInputStore } from '@/sync/input-store';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
 import { Button } from '@/components/ui/button';
+import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 
 interface QueuedMessageChipProps {
     message: QueuedMessage;
     target: MessageQueueTarget;
-    isSending: boolean;
     onEdit: (message: QueuedMessage) => void;
     onSend: (message: QueuedMessage) => void;
 }
 
-const QueuedMessageChip = memo(({ message, target, isSending, onEdit, onSend }: QueuedMessageChipProps) => {
+const QueuedMessageChip = memo(({ message, target, onEdit, onSend }: QueuedMessageChipProps) => {
     const { t } = useI18n();
     const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: message.id, disabled: isSending });
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: message.id });
 
     // Get first line of message, truncated
     const firstLine = React.useMemo(() => {
@@ -57,7 +57,6 @@ const QueuedMessageChip = memo(({ message, target, isSending, onEdit, onSend }: 
         >
             <button
                 type="button"
-                disabled={isSending}
                 {...attributes}
                 {...listeners}
                 className="flex flex-shrink-0 cursor-grab touch-none select-none items-center justify-center text-muted-foreground hover:text-foreground active:cursor-grabbing"
@@ -71,23 +70,19 @@ const QueuedMessageChip = memo(({ message, target, isSending, onEdit, onSend }: 
                     <span className="ml-1 text-muted-foreground">{t('chat.queuedMessage.attachments', { count: attachmentCount })}</span>
                 )}
             </span>
-            {!message.contextParts?.length ? (
-                <Button
-                    type="button"
-                    variant="secondary"
-                    size="xs"
-                    disabled={isSending}
-                    onClick={() => onEdit(message)}
-                >
-                    <Icon name="edit" className="h-3 w-3" aria-hidden="true" />
-                    {t('chat.queuedMessage.edit')}
-                </Button>
-            ) : null}
             <Button
                 type="button"
                 variant="secondary"
                 size="xs"
-                disabled={isSending}
+                onClick={() => onEdit(message)}
+            >
+                <Icon name="edit" className="h-3 w-3" aria-hidden="true" />
+                {t('chat.queuedMessage.edit')}
+            </Button>
+            <Button
+                type="button"
+                variant="secondary"
+                size="xs"
                 onClick={() => onSend(message)}
             >
                 <Icon name="send-plane" className="h-3 w-3" aria-hidden="true" />
@@ -95,7 +90,6 @@ const QueuedMessageChip = memo(({ message, target, isSending, onEdit, onSend }: 
             </Button>
             <button
                 type="button"
-                disabled={isSending}
                 onClick={() => removeFromQueue(target, message.id)}
                 className="flex items-center justify-center h-6 w-6 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
                 aria-label={t('chat.queuedMessage.removeAria')}
@@ -109,12 +103,12 @@ const QueuedMessageChip = memo(({ message, target, isSending, onEdit, onSend }: 
 QueuedMessageChip.displayName = 'QueuedMessageChip';
 
 interface QueuedMessageChipsProps {
-    onEditMessage: (content: string, attachments?: QueuedMessage['attachments']) => void;
+    /** The message was taken from the queue in full; the composer restores it. */
+    onEditMessage: (message: QueuedMessage) => void;
     onSendMessage: (messageId: string) => void;
 }
 
 const EMPTY_QUEUE: QueuedMessage[] = [];
-const EMPTY_SENDING_IDS: string[] = [];
 
 export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: QueuedMessageChipsProps) => {
     const { t } = useI18n();
@@ -139,12 +133,6 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
             [queueKey]
         )
     );
-    const sendingIds = useMessageQueueStore(
-        React.useCallback(
-            (state) => queueKey ? (state.sendingIds[queueKey] ?? EMPTY_SENDING_IDS) : EMPTY_SENDING_IDS,
-            [queueKey],
-        ),
-    );
     const popToInput = useMessageQueueStore((state) => state.popToInput);
     const reorderQueue = useMessageQueueStore((state) => state.reorderQueue);
 
@@ -163,16 +151,21 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
 
     const handleEdit = React.useCallback((message: QueuedMessage) => {
         if (!target) return;
-        
-        const popped = popToInput(target, message.id);
-        if (popped) {
+
+        // The full message (attachments included) comes back from the queue's
+        // owner; the chip itself only knows the summary.
+        void popToInput(target, message.id).then((popped) => {
+            if (!popped) return;
             if (popped.attachments && popped.attachments.length > 0) {
                 const currentAttachments = useInputStore.getState().attachedFiles;
                 useInputStore.getState().setAttachedFiles([...currentAttachments, ...popped.attachments]);
             }
-            onEditMessage(popped.content, popped.attachments);
-        }
-    }, [target, popToInput, onEditMessage]);
+            onEditMessage(popped);
+        }).catch((error) => {
+            console.warn('[queue] failed to take queued message for editing:', error);
+            toast.error(t('chat.queuedMessage.toast.takeFailed'));
+        });
+    }, [target, popToInput, onEditMessage, t]);
 
     const handleSend = React.useCallback((message: QueuedMessage) => {
         onSendMessage(message.id);
@@ -206,7 +199,6 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
                                     key={message.id}
                                     message={message}
                                     target={target}
-                                    isSending={sendingIds.includes(message.id)}
                                     onEdit={handleEdit}
                                     onSend={handleSend}
                                 />

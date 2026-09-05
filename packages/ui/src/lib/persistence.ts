@@ -20,7 +20,6 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { isCapacitorApp } from '@/lib/platform';
 import { isTerminalShell } from '@/lib/terminalShell';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
-import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID } from '@/lib/theme/themes';
 import { DEFAULT_OPEN_IN_APP_ID } from '@/lib/openInApps';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
@@ -106,11 +105,6 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   }
 
   persistRuntimeSettingsMirror(settings, getRuntimeKey());
-  setOrRemoveLocalStorage('selectedThemeId', settings.themeId || null);
-  setOrRemoveLocalStorage('selectedThemeVariant', settings.themeVariant || null);
-  setOrRemoveLocalStorage('lightThemeId', settings.lightThemeId || null);
-  setOrRemoveLocalStorage('darkThemeId', settings.darkThemeId || null);
-  setOrRemoveLocalStorage('useSystemTheme', typeof settings.useSystemTheme === 'boolean' ? String(settings.useSystemTheme) : null);
   setOrRemoveLocalStorage('lastDirectory', settings.lastDirectory || null);
   if (settings.homeDirectory) {
     localStorage.setItem('homeDirectory', settings.homeDirectory);
@@ -202,20 +196,27 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
 
 export interface SettingsSyncedDetail {
   settings: DesktopSettings;
-  /** Whether listeners may adopt cross-window workspace pointers
-      (activeProjectId / lastDirectory). True only for a bootstrap-grade sync:
-      the settings document is shared by every window of this server, so a
-      mid-session reconciliation adopting them would hijack this window's
-      workspace with another window's choice. */
-  adoptWorkspace: boolean;
+  /** Whether listeners may adopt authoritative state that this window owns a
+      live copy of (workspace pointers, theme). True only for a bootstrap-grade
+      sync: the settings document is shared by every window of this server, so
+      a mid-session reconciliation adopting them would hijack this window's
+      choices with another window's. Every settings save echoes the full
+      document back as a sync event with bootstrap=false — the echo itself is
+      not filtered; listeners gate their adoption on this flag and keep their
+      live state for the fields they own. */
+  bootstrap: boolean;
+  /** Whether this sync may replace this window's theme preferences. VS Code
+      settings broadcasts remain bootstrap-grade for shared workspace pointers,
+      but must not copy one webview's theme into another webview. */
+  adoptTheme: boolean;
 }
 
-const dispatchSettingsSynced = (settings: DesktopSettings, adoptWorkspace: boolean): void => {
+const dispatchSettingsSynced = (settings: DesktopSettings, bootstrap: boolean, adoptTheme = bootstrap): void => {
   if (typeof window === 'undefined') {
     return;
   }
   window.dispatchEvent(new CustomEvent<SettingsSyncedDetail>('openchamber:settings-synced', {
-    detail: { settings, adoptWorkspace },
+    detail: { settings, bootstrap, adoptTheme },
   }));
 };
 
@@ -539,9 +540,11 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
   const defaults = useUIStore.getInitialState();
 
   return {
-    useSystemTheme: true,
-    lightThemeId: DEFAULT_LIGHT_THEME_ID,
-    darkThemeId: DEFAULT_DARK_THEME_ID,
+    // Theme fields are deliberately NOT defaulted: the theme authority is the
+    // ThemeSystemContext (scoped per-runtime entry + bootstrap syncs). A
+    // server document without theme fields means "not set" — inventing
+    // defaults here would clobber the window's theme and write it back to the
+    // server. Absent fields keep the current preferences.
     openInAppId: DEFAULT_OPEN_IN_APP_ID,
     showReasoningTraces: defaults.showReasoningTraces,
     streamingAutoFollowEnabled: defaults.streamingAutoFollowEnabled,
@@ -1901,8 +1904,9 @@ export const invalidateSettingsCache = (): void => {
   _settingsCache = null;
 };
 
-export const syncDesktopSettings = async (options?: { adoptWorkspace?: boolean }): Promise<void> => {
-  const adoptWorkspace = options?.adoptWorkspace !== false;
+export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adoptTheme?: boolean }): Promise<void> => {
+  const bootstrap = options?.bootstrap !== false;
+  const adoptTheme = options?.adoptTheme ?? bootstrap;
   if (typeof window === 'undefined') {
     return;
   }
@@ -2031,7 +2035,7 @@ export const syncDesktopSettings = async (options?: { adoptWorkspace?: boolean }
       if (!isSettingsRuntimeContextCurrent(context)) return;
     }
 
-    dispatchSettingsSynced(authoritativeSettings, adoptWorkspace);
+    dispatchSettingsSynced(authoritativeSettings, bootstrap, adoptTheme);
   };
 
   try {

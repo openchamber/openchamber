@@ -1,5 +1,4 @@
 import { linearIntegrationI18n } from './linear-integration.i18n';
-import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'Śledzenie użycia OpenCode Go',
   'settings.providers.page.openCodeGo.description': 'Połącz panel OpenCode Go, aby wyświetlać limity kroczące, tygodniowe i miesięczne.',
@@ -13,6 +12,8 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.delete': 'Usuń',
   'settings.providers.page.quotaCredentials.saved': 'Dane uwierzytelniające {provider} zostały zapisane.',
   'settings.providers.page.quotaCredentials.accessToken': 'Token dostępu',
+  'settings.providers.page.quotaCredentials.usageToken': 'Token API użycia',
+  'settings.providers.page.quotaCredentials.exeDevTokenInstructions': 'Uruchom to polecenie w terminalu, a następnie wklej token poniżej. Może on tylko odczytywać użycie środków LLM i wygasa po 30 dniach.',
   'settings.providers.page.quotaCredentials.refreshToken': 'Token odświeżania',
   'settings.providers.page.quotaCredentials.tokenPlaceholder': 'Wklej token',
   'settings.providers.page.openCodeGo.saveFailed': 'Nie udało się sprawdzić danych OpenCode Go.',
@@ -2225,5 +2226,6 @@ export const settingsDict = {
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
   ...linearIntegrationI18n.pl,
-  ...thirdPartyIntegrationI18n.pl,
+  'settings.page.integrations.title': 'Integracje',
+  'settings.page.integrations.description': 'Połącz GitHub i Linear, aby OpenChamber mógł pracować z Twoimi issue i pull requestami.',
 };

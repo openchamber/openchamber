@@ -1291,7 +1291,7 @@ export const ContextPanel: React.FC = () => {
         {hasWalkthroughTab ? (
           <div className={cn('absolute inset-0', activeTab?.mode === 'walkthrough' ? 'block' : 'hidden')}>
             <React.Suspense fallback={null}>
-              <WalkthroughView directory={effectiveDirectory} />
+              <WalkthroughView directory={effectiveDirectory} visible={activeTab?.mode === 'walkthrough'} />
             </React.Suspense>
           </div>
         ) : null}

@@ -1,5 +1,4 @@
 import { linearIntegrationI18n } from './linear-integration.i18n';
-import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 사용량 추적',
   'settings.providers.page.openCodeGo.description': 'OpenCode Go 대시보드를 연결하여 롤링, 주간 및 월간 할당량을 표시합니다.',
@@ -13,6 +12,8 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.delete': '삭제',
   'settings.providers.page.quotaCredentials.saved': '{provider} 인증 정보를 저장했습니다.',
   'settings.providers.page.quotaCredentials.accessToken': '액세스 토큰',
+  'settings.providers.page.quotaCredentials.usageToken': '사용량 API 토큰',
+  'settings.providers.page.quotaCredentials.exeDevTokenInstructions': '터미널에서 이 명령을 실행한 다음 아래에 토큰을 붙여 넣으세요. LLM 크레딧 사용량만 읽을 수 있으며 30일 후 만료됩니다.',
   'settings.providers.page.quotaCredentials.refreshToken': '새로 고침 토큰',
   'settings.providers.page.quotaCredentials.tokenPlaceholder': '토큰 붙여넣기',
   'settings.providers.page.openCodeGo.saveFailed': 'OpenCode Go 인증 정보를 검증할 수 없습니다.',
@@ -2232,5 +2233,6 @@ export const settingsDict = {
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
   ...linearIntegrationI18n.ko,
-  ...thirdPartyIntegrationI18n.ko,
+  'settings.page.integrations.title': '통합',
+  'settings.page.integrations.description': 'GitHub와 Linear를 연결하면 OpenChamber가 이슈와 풀 리퀘스트를 다룰 수 있습니다.',
 } as const;

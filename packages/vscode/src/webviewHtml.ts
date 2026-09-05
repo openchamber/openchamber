@@ -202,31 +202,48 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
         var rawLocale = window.localStorage.getItem('openchamber.i18n.v1');
         if (rawLocale) {
           var parsedLocale = JSON.parse(rawLocale);
-          if (parsedLocale && typeof parsedLocale.locale === 'string' && parsedLocale.locale.toLowerCase().indexOf('fr') === 0) {
-            locale = 'fr';
+          if (parsedLocale && typeof parsedLocale.locale === 'string') {
+            var detected = parsedLocale.locale.toLowerCase();
+            if (detected.indexOf('fr') === 0) {
+              locale = 'fr';
+            } else if (detected.indexOf('tr') === 0) {
+              locale = 'tr';
+            }
           }
         }
       } catch {}
 
-      return locale === 'fr'
-        ? {
-            startingApi: 'Démarrage de l’API OpenCode…',
-            initializing: 'Initialisation…',
-            connecting: 'Connexion…',
-            connected: 'Connecté !',
-            connectionError: 'Erreur de connexion',
-            reconnecting: 'Reconnexion…',
-            cliNotFound: 'L’interface en ligne de commande OpenCode est introuvable. Veuillez l’installer d’abord.',
-          }
-        : {
-            startingApi: 'Starting OpenCode API…',
-            initializing: 'Initializing…',
-            connecting: 'Connecting…',
-            connected: 'Connected!',
-            connectionError: 'Connection error',
-            reconnecting: 'Reconnecting…',
-            cliNotFound: 'OpenCode CLI not found. Please install it first.',
-          };
+      if (locale === 'fr') {
+        return {
+          startingApi: 'Démarrage de l’API OpenCode…',
+          initializing: 'Initialisation…',
+          connecting: 'Connexion…',
+          connected: 'Connecté !',
+          connectionError: 'Erreur de connexion',
+          reconnecting: 'Reconnexion…',
+          cliNotFound: 'L’interface en ligne de commande OpenCode est introuvable. Veuillez l’installer d’abord.',
+        };
+      }
+      if (locale === 'tr') {
+        return {
+          startingApi: 'OpenCode API başlatılıyor…',
+          initializing: 'Başlatılıyor…',
+          connecting: 'Bağlanıyor…',
+          connected: 'Bağlandı!',
+          connectionError: 'Bağlantı hatası',
+          reconnecting: 'Yeniden bağlanıyor…',
+          cliNotFound: 'OpenCode CLI bulunamadı. Lütfen önce kurun.',
+        };
+      }
+      return {
+        startingApi: 'Starting OpenCode API…',
+        initializing: 'Initializing…',
+        connecting: 'Connecting…',
+        connected: 'Connected!',
+        connectionError: 'Connection error',
+        reconnecting: 'Reconnecting…',
+        cliNotFound: 'OpenCode CLI not found. Please install it first.',
+      };
     }
 
     (function applyBootstrapLocale() {
@@ -283,11 +300,20 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
           const rawLocale = window.localStorage.getItem('openchamber.i18n.v1');
           if (rawLocale) {
             const parsedLocale = JSON.parse(rawLocale);
-            if (parsedLocale && typeof parsedLocale.locale === 'string' && parsedLocale.locale.toLowerCase().indexOf('fr') === 0) {
-              return {
-                startingDevServer: (host) => 'Démarrage du serveur de développement de la webview (' + host + ')...',
-                waitingDevServer: (host, attempt) => 'En attente du serveur de développement de la webview (' + host + ')... tentative ' + attempt,
-              };
+            if (parsedLocale && typeof parsedLocale.locale === 'string') {
+              const detected = parsedLocale.locale.toLowerCase();
+              if (detected.indexOf('fr') === 0) {
+                return {
+                  startingDevServer: (host) => 'Démarrage du serveur de développement de la webview (' + host + ')...',
+                  waitingDevServer: (host, attempt) => 'En attente du serveur de développement de la webview (' + host + ')... tentative ' + attempt,
+                };
+              }
+              if (detected.indexOf('tr') === 0) {
+                return {
+                  startingDevServer: (host) => 'Webview dev sunucusu başlatılıyor (' + host + ')...',
+                  waitingDevServer: (host, attempt) => 'Webview dev sunucusu bekleniyor (' + host + ')... deneme ' + attempt,
+                };
+              }
             }
           }
         } catch {}

@@ -1,5 +1,4 @@
 import { linearIntegrationI18n } from './linear-integration.i18n';
-import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'Suivi de l’utilisation d’OpenCode Go',
   'settings.providers.page.openCodeGo.description': 'Connectez le tableau de bord OpenCode Go pour afficher les quotas glissant, hebdomadaire et mensuel.',
@@ -13,6 +12,8 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.delete': 'Supprimer',
   'settings.providers.page.quotaCredentials.saved': 'Identifiants de {provider} enregistrés.',
   'settings.providers.page.quotaCredentials.accessToken': 'Jeton d’accès',
+  'settings.providers.page.quotaCredentials.usageToken': 'Jeton API d’utilisation',
+  'settings.providers.page.quotaCredentials.exeDevTokenInstructions': 'Exécutez cette commande dans votre terminal, puis collez le jeton ci-dessous. Il peut uniquement lire l’utilisation des crédits LLM et expire après 30 jours.',
   'settings.providers.page.quotaCredentials.refreshToken': 'Jeton d’actualisation',
   'settings.providers.page.quotaCredentials.tokenPlaceholder': 'Collez le jeton',
   'settings.providers.page.openCodeGo.saveFailed': 'Impossible de valider les identifiants OpenCode Go.',
@@ -2232,5 +2233,6 @@ export const settingsDict = {
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
   ...linearIntegrationI18n.fr,
-  ...thirdPartyIntegrationI18n.fr,
+  'settings.page.integrations.title': 'Intégrations',
+  'settings.page.integrations.description': 'Connectez GitHub et Linear pour qu’OpenChamber puisse travailler avec vos issues et pull requests.',
 } as const;

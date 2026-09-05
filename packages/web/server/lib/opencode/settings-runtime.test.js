@@ -39,6 +39,35 @@ const createRuntime = async () => {
 };
 
 describe('settings runtime', () => {
+  it('uses OpenChamber themes when a new install has no theme preferences', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      await expect(runtime.readSettingsFromDiskMigrated()).resolves.toMatchObject({
+        lightThemeId: 'openchamber-light',
+        darkThemeId: 'openchamber-dark',
+      });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('preserves existing theme preferences during theme migration', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({
+        lightThemeId: 'flexoki-light',
+        darkThemeId: 'flexoki-dark',
+      }), 'utf8');
+
+      await expect(runtime.readSettingsFromDiskMigrated()).resolves.toMatchObject({
+        lightThemeId: 'flexoki-light',
+        darkThemeId: 'flexoki-dark',
+      });
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('round-trips shared sidebar preferences through settings.json', async () => {
     const { runtime, settingsFilePath, cleanup } = await createRuntime();
     const preferences = {

@@ -1,12 +1,12 @@
 import express from 'express';
 import { createProjectIdFromPath } from '../projects/project-id.js';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import {
   buildDeferredRestartResponse,
 } from './config-mutation-response.js';
 import { getClaudeCliAuthStatus } from './claude-cli-auth.js';
+import { OPENCODE_CONFIG_DIR } from './shared.js';
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
@@ -807,7 +807,7 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
   });
 
   // Behavior / Global AGENTS.md endpoints
-  const AGENTS_MD_PATH = path.join(os.homedir(), '.config', 'opencode', 'AGENTS.md');
+  const AGENTS_MD_PATH = path.join(OPENCODE_CONFIG_DIR, 'AGENTS.md');
   const MAX_BEHAVIOR_PROMPT_SIZE = 1024 * 1024; // 1 MB
 
   app.get('/api/behavior/agents-md', async (_req, res) => {
@@ -815,10 +815,10 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
       try {
         await fs.promises.access(AGENTS_MD_PATH);
       } catch {
-        return res.json({ content: '', exists: false });
+        return res.json({ content: '', exists: false, path: AGENTS_MD_PATH });
       }
       const content = await fs.promises.readFile(AGENTS_MD_PATH, 'utf8');
-      return res.json({ content, exists: true });
+      return res.json({ content, exists: true, path: AGENTS_MD_PATH });
     } catch (error) {
       console.error('Failed to read AGENTS.md:', error);
       return res.status(500).json({ error: 'Failed to read AGENTS.md' });

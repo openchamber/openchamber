@@ -13,6 +13,7 @@ const baseOptions = {
   screenWidth: 1200,
   tabs: [],
   linearConnected: true,
+  githubConnected: true,
 } as const;
 
 describe('getVisibleContextRailSurfaces', () => {
@@ -65,12 +66,16 @@ describe('getVisibleContextRailSurfaces', () => {
     expect(surfaces.slice(0, 2).map((surface) => surface.id)).toEqual(['git', 'context']);
   });
 
-  test('places Linear after Pull Request in the default order', () => {
+  test('places Linear right after the walkthrough in the default order', () => {
     const ids = getVisibleContextRailSurfaces(baseOptions).map((surface) => surface.id);
-    const pr = ids.indexOf('pr');
-    const linear = ids.indexOf('linear');
-    expect(pr).toBeGreaterThanOrEqual(0);
-    expect(linear).toBe(pr + 1);
+    const walkthrough = ids.indexOf('walkthrough');
+    expect(walkthrough).toBeGreaterThanOrEqual(0);
+    expect(ids.indexOf('linear')).toBe(walkthrough + 1);
+  });
+
+  test('hides the pull request surface until GitHub is connected', () => {
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, githubConnected: false }).some((s) => s.id === 'pr')).toBe(false);
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, githubConnected: true }).some((s) => s.id === 'pr')).toBe(true);
   });
 
   test('hides Linear until a workspace is connected', () => {

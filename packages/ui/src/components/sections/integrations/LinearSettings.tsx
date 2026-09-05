@@ -9,7 +9,6 @@ import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
 import { focusDesktopWindow, isDesktopShell } from '@/lib/desktop';
 import { Icon } from '@/components/icon/Icon';
-import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { LinearProjectMapping } from './LinearProjectMapping';
 import { LinearSessionComments } from './LinearSessionComments';
 
@@ -172,13 +171,6 @@ export const LinearSettings: React.FC = () => {
   const expanded = isWaiting || open;
 
   return (
-    <SettingsSection
-      title={t('settings.integrations.firstParty.title')}
-      info={t('settings.integrations.firstParty.info')}
-      divider={false}
-      settingsItem="integrations.first-party"
-      contentClassName="space-y-3"
-    >
       <Collapsible
         open={expanded}
         onOpenChange={(nextOpen) => {
@@ -345,6 +337,5 @@ export const LinearSettings: React.FC = () => {
           </CollapsibleContent>
         </div>
       </Collapsible>
-    </SettingsSection>
   );
 };

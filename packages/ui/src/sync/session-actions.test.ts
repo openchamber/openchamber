@@ -21,7 +21,16 @@ let sessionDeleteError: unknown | null = null
 let beforeSessionUpdateResolve: ((sessionId: string) => void) | null = null
 let beforeSessionDeleteResolve: ((sessionId: string) => void) | null = null
 const globalUpsertedSessions: unknown[] = []
+const globalUpsertedSessionBatches: Session[][] = []
 const globalRemovedSessionIds: string[] = []
+// Sessions this client is holding. `archiveSessions` reads them to decide which
+// sessions can be archived by the server in one batch.
+let globalActiveSessions: Session[] = []
+const archiveBatchRequests: Array<{ directory: string; ids: string[] }> = []
+let archiveBatchResponse: { status: number; body: unknown } = {
+  status: 404,
+  body: { error: 'not found' },
+}
 const deletedCleanupIdentities: Array<{ runtimeKey: string; directory: string; sessionId: string }> = []
 const movedSessionDirectories: Array<{ sessionID: string; directory: string }> = []
 
@@ -243,15 +252,31 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
   },
   useGlobalSessionsStore: {
     getState: () => ({
-      activeSessions: [],
+      activeSessions: globalActiveSessions,
       archivedSessions: [],
       upsertSession: (session: unknown) => {
         globalUpsertedSessions.push(session)
+      },
+      upsertSessions: (sessions: Session[]) => {
+        globalUpsertedSessionBatches.push(sessions)
+        globalUpsertedSessions.push(...sessions)
       },
       removeSessions: (ids: Iterable<string>) => {
         globalRemovedSessionIds.push(...ids)
       },
     }),
+  },
+}))
+
+mock.module("@/lib/runtime-fetch", () => ({
+  runtimeFetch: async (path: string, init?: { body?: string }) => {
+    const payload = JSON.parse(String(init?.body ?? "{}"))
+    archiveBatchRequests.push({ directory: payload.directory, ids: payload.ids })
+    void path
+    return new Response(JSON.stringify(archiveBatchResponse.body), {
+      status: archiveBatchResponse.status,
+      headers: { "content-type": "application/json" },
+    })
   },
 }))
 
@@ -396,6 +421,10 @@ describe("confirmed session removal", () => {
     sessionUpdateResult = {}
     beforeSessionUpdateResolve = null
     beforeSessionDeleteResolve = null
+    globalUpsertedSessionBatches.length = 0
+    globalActiveSessions = []
+    archiveBatchRequests.length = 0
+    archiveBatchResponse = { status: 404, body: { error: 'not found' } }
   })
 
   test("does not remove live or persisted state when delete fails", async () => {
@@ -633,6 +662,161 @@ describe("confirmed session removal", () => {
 
     expect(result).toEqual({ archivedIds: ["session-a", "session-b"], failedIds: [] })
     expect(source.getState().session).toEqual([])
+  })
+})
+
+describe("archiving a batch through the server", () => {
+  const liveSession = (id: string, metadata?: Record<string, unknown>): Session => ({
+    id,
+    directory: "/test/project",
+    time: { created: 1 },
+    ...(metadata ? { metadata } : {}),
+  } as unknown as Session)
+
+  const archivedSession = (id: string): Session => ({
+    id,
+    directory: "/test/project",
+    time: { created: 1, archived: 2 },
+  } as unknown as Session)
+
+  beforeEach(() => {
+    replyCalls.length = 0
+    globalUpsertedSessions.length = 0
+    globalUpsertedSessionBatches.length = 0
+    globalActiveSessions = []
+    archiveBatchRequests.length = 0
+    archiveBatchResponse = { status: 404, body: { error: "not found" } }
+    sessionUpdateResult = {}
+    beforeSessionUpdateResolve = null
+  })
+
+  test("archives held sessions in one request and reconciles the stores once", async () => {
+    globalActiveSessions = [liveSession("session-a"), liveSession("session-b")]
+    archiveBatchResponse = {
+      status: 200,
+      body: { archived: [archivedSession("session-a"), archivedSession("session-b")], failedIds: [] },
+    }
+    const source = createStore({}, { session: [liveSession("session-a"), liveSession("session-b")] })
+    const { archiveSessions, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", source]]), () => "/test/project")
+
+    const result = await archiveSessions(["session-a", "session-b"])
+
+    expect(result).toEqual({ archivedIds: ["session-a", "session-b"], failedIds: [] })
+    expect(archiveBatchRequests).toEqual([{ directory: "/test/project", ids: ["session-a", "session-b"] }])
+    // The point of the batch: no per-session SDK call, and one store write for
+    // the whole set instead of one per session.
+    expect(replyCalls.filter((call) => call.method === "session.update")).toEqual([])
+    expect(globalUpsertedSessionBatches).toHaveLength(1)
+    expect(source.getState().session).toEqual([])
+    expect(source.getState().sessionRevision).toBe(1)
+  })
+
+  test("batches sessions held only by the live directory store", async () => {
+    archiveBatchResponse = {
+      status: 200,
+      body: { archived: [archivedSession("session-a")], failedIds: [] },
+    }
+    const source = createStore({}, { session: [liveSession("session-a")] })
+    const { archiveSessions, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", source]]), () => "/test/project")
+
+    const result = await archiveSessions(["session-a"])
+
+    expect(result).toEqual({ archivedIds: ["session-a"], failedIds: [] })
+    expect(archiveBatchRequests).toEqual([{ directory: "/test/project", ids: ["session-a"] }])
+    expect(replyCalls.filter((call) => call.method === "session.update")).toEqual([])
+  })
+
+  test("reports the sessions the server could not archive without losing the rest", async () => {
+    globalActiveSessions = [liveSession("session-a"), liveSession("session-b")]
+    archiveBatchResponse = {
+      status: 200,
+      body: { archived: [archivedSession("session-a")], failedIds: ["session-b"] },
+    }
+    const source = createStore({}, { session: [liveSession("session-a"), liveSession("session-b")] })
+    const { archiveSessions, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", source]]), () => "/test/project")
+
+    const result = await archiveSessions(["session-a", "session-b"])
+
+    expect(result).toEqual({ archivedIds: ["session-a"], failedIds: ["session-b"] })
+    expect(source.getState().session.map((item) => item.id)).toEqual(["session-b"])
+  })
+
+  test("falls back to archiving one by one when the runtime does not serve the route", async () => {
+    globalActiveSessions = [liveSession("session-a"), liveSession("session-b")]
+    archiveBatchResponse = { status: 501, body: { error: "not supported in VS Code" } }
+    sessionUpdateResult = { data: archivedSession("session-a") }
+    const source = createStore({}, { session: [liveSession("session-a"), liveSession("session-b")] })
+    const { archiveSessions, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", source]]), () => "/test/project")
+
+    const result = await archiveSessions(["session-a", "session-b"])
+
+    expect(result).toEqual({ archivedIds: ["session-a", "session-b"], failedIds: [] })
+    expect(replyCalls.filter((call) => call.method === "session.update").map((call) => call.params.sessionID))
+      .toEqual(["session-a", "session-b"])
+    expect(source.getState().session).toEqual([])
+  })
+
+  test("treats a malformed batch answer as unavailable instead of as an empty success", async () => {
+    globalActiveSessions = [liveSession("session-a")]
+    archiveBatchResponse = { status: 200, body: { archived: [{ title: "no id" }], failedIds: [] } }
+    sessionUpdateResult = { data: archivedSession("session-a") }
+    const source = createStore({}, { session: [liveSession("session-a")] })
+    const { archiveSessions, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", source]]), () => "/test/project")
+
+    const result = await archiveSessions(["session-a"])
+
+    expect(result).toEqual({ archivedIds: ["session-a"], failedIds: [] })
+    expect(replyCalls.filter((call) => call.method === "session.update").map((call) => call.params.sessionID))
+      .toEqual(["session-a"])
+  })
+
+  test("keeps review and btw sessions on the per-session path", async () => {
+    const review = liveSession("session-review", { openchamber: { kind: "review", originalSessionID: "session-parent" } })
+    const parentWithFork = liveSession("session-parent", { openchamber: { btwSessionID: "session-fork" } })
+    globalActiveSessions = [liveSession("session-plain"), review, parentWithFork]
+    archiveBatchResponse = {
+      status: 200,
+      body: { archived: [archivedSession("session-plain")], failedIds: [] },
+    }
+    sessionUpdateResult = { data: archivedSession("session-review") }
+    const source = createStore({}, { session: [liveSession("session-plain"), review, parentWithFork] })
+    const { archiveSessions, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", source]]), () => "/test/project")
+
+    await archiveSessions(["session-plain", "session-review", "session-parent"])
+
+    // Unlinking a partner rewrites another session's metadata, so those two
+    // never travel in the batch.
+    expect(archiveBatchRequests).toEqual([{ directory: "/test/project", ids: ["session-plain"] }])
+    expect(replyCalls.filter((call) => call.method === "session.update").map((call) => call.params.sessionID))
+      .toEqual(["session-review", "session-parent"])
+  })
+
+  test("does not reconcile a batch answered after a runtime switch", async () => {
+    globalActiveSessions = [liveSession("session-a")]
+    archiveBatchResponse = {
+      status: 200,
+      body: { archived: [archivedSession("session-a")], failedIds: [] },
+    }
+    const source = createStore({}, { session: [liveSession("session-a")] })
+    const { getRuntimeKey, switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://archive-bulk-a.test", runtimeKey: "archive-bulk-a" })
+    const capturedRuntimeKey = getRuntimeKey()
+    const { archiveSessions, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", source]]), () => "/test/project")
+
+    const pending = archiveSessions(["session-a"], { expectedRuntimeKey: capturedRuntimeKey })
+    switchRuntimeEndpoint({ apiBaseUrl: "http://archive-bulk-b.test", runtimeKey: "archive-bulk-b" })
+    const result = await pending
+
+    expect(result).toEqual({ archivedIds: [], failedIds: ["session-a"] })
+    expect(source.getState().session.map((item) => item.id)).toEqual(["session-a"])
+    expect(globalUpsertedSessionBatches).toEqual([])
   })
 })
 

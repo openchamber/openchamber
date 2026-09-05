@@ -4,6 +4,7 @@ import type { PermissionRequest } from '@/types/permission';
 import type { QuestionRequest } from '@/types/question';
 
 import { ChatInput } from './ChatInput';
+import { ChatColumnSessionContext, type ChatColumnSession } from './chatColumnSession';
 import { DraftPresetChips } from './DraftPresetChips';
 import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
@@ -391,6 +392,13 @@ const ChatViewport = React.memo(({
     const timelineRootRef = React.useRef<HTMLDivElement | null>(null);
     const endPinningReleasedRef = React.useRef(endPinningReleased);
     endPinningReleasedRef.current = endPinningReleased;
+    // Read through a ref: the effect runs once per gate (per opened session).
+    // `revealWaited` flips for the session still on screen the moment another
+    // one is selected — before the deferred swap mounts it — and re-running
+    // the effect then would hide the outgoing timeline for the frames until
+    // the new one arrives.
+    const revealWaitedRef = React.useRef(revealWaited);
+    revealWaitedRef.current = revealWaited;
     React.useLayoutEffect(() => {
         const root = timelineRootRef.current;
         if (!root) return;
@@ -440,7 +448,7 @@ const ChatViewport = React.memo(({
             if (finished) return;
             revealGate.close();
             if (revealGate.holds === 0) {
-                reveal(revealWaited);
+                reveal(revealWaitedRef.current);
                 return;
             }
             revealGate.onEmpty = () => reveal(true);
@@ -452,7 +460,7 @@ const ChatViewport = React.memo(({
             if (frame !== null) window.cancelAnimationFrame(frame);
             revealGate.onEmpty = null;
         };
-    }, [revealGate, revealWaited, scrollRef]);
+    }, [revealGate, scrollRef]);
 
     const scrollContainerProps = React.useMemo(() => ({
         className: 'absolute inset-0 overflow-y-auto overflow-x-hidden z-0 chat-scroll overlay-scrollbar-target',
@@ -740,7 +748,15 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // One gate per opened session; the scroll hook holds it until the
     // viewport is pinned to the end so the first visible frame is already
     // at the bottom.
-    const revealGate = React.useMemo(() => createTimelineRevealGate(), [currentSessionKey]);
+    const revealGateRef = React.useRef<{ key: string | null; gate: TimelineRevealGate } | null>(null);
+    if (revealGateRef.current?.key !== currentSessionKey) {
+        revealGateRef.current = { key: currentSessionKey, gate: createTimelineRevealGate() };
+    }
+    const revealGate = revealGateRef.current.gate;
+    const chatColumnSession = React.useMemo<ChatColumnSession>(
+        () => ({ sessionId: currentSessionId ?? null, directory: currentSessionId ? effectiveSessionDirectory ?? null : null }),
+        [currentSessionId, effectiveSessionDirectory],
+    );
     const ensureSessionRenderable = React.useCallback(
         (sessionId: string) => sync.ensureSessionRenderable(sessionId, false, effectiveSessionDirectory),
         [effectiveSessionDirectory, sync],
@@ -1567,6 +1583,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 
 	return (
 		<div ref={workStatusRowRef} className="flex h-full min-h-0 bg-background">
+		<ChatColumnSessionContext.Provider value={chatColumnSession}>
 		<div data-composer-bound className="relative flex min-w-0 flex-1 flex-col h-full bg-background">
 			{returnToParentButton}
 			{sessionSurface}
@@ -1651,6 +1668,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 onLoadEarlier={handleLoadOlderClick}
             />
         </div>
+        </ChatColumnSessionContext.Provider>
         {/* Kept mounted while it could ever show, so it can animate its own
             collapse; `visible` drives that. Unmounting on the spot is what made
             the chat jump wide before easing narrow again. */}

@@ -12,6 +12,7 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Input } from '@/components/ui/input';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { shouldDismissDropdown } from '@/components/ui/dropdown-navigation';
 import {
     Select,
@@ -44,6 +45,7 @@ export interface DraftTargetProps {
     selectedDirectory: string | null;
     selectedBranchLabel: string | null;
     selectedBranchIsKnown: boolean;
+    hasUncommittedChanges: boolean;
     projectRootBranchOption: BranchOption | null;
     worktreeBranchOptions: readonly BranchOption[];
     branchItems: readonly BranchOption[];
@@ -92,14 +94,39 @@ function ProjectLabel({ project, theme }: { project: DraftTargetProject; theme: 
 }
 
 /** Desktop: inline project and branch selects. */
+/** How long the dirty-directory tooltip announces itself before becoming hover-only. */
+const DIRTY_TOOLTIP_FLASH_MS = 5000;
+
+/**
+ * Opens the tooltip for a few seconds when the dirty state first appears, so
+ * the warning is seen without hovering, then hands control back to hover.
+ */
+function useDirtyFlashTooltip(hasUncommittedChanges: boolean) {
+    const [open, setOpen] = React.useState(false);
+
+    React.useEffect(() => {
+        if (!hasUncommittedChanges) {
+            setOpen(false);
+            return;
+        }
+        setOpen(true);
+        const timer = window.setTimeout(() => setOpen(false), DIRTY_TOOLTIP_FLASH_MS);
+        return () => window.clearTimeout(timer);
+    }, [hasUncommittedChanges]);
+
+    return { open, onOpenChange: setOpen };
+}
+
 export function DraftTargetSelectors(props: DraftTargetProps) {
     const { t } = useI18n();
+    const dirtyTooltip = useDirtyFlashTooltip(props.hasUncommittedChanges);
     const {
         projects,
         selectedProject,
         selectedDirectory,
         selectedBranchLabel,
         selectedBranchIsKnown,
+        hasUncommittedChanges,
         projectRootBranchOption,
         worktreeBranchOptions,
         branchItems,
@@ -176,16 +203,32 @@ export function DraftTargetSelectors(props: DraftTargetProps) {
                     onValueChange={handleDirectoryChange}
                     disableGlobalShortcuts
                 >
-                    <SelectTrigger
-                        ref={worktreeTriggerRef}
-                        onKeyDown={handlePickerKeyDown}
-                        size="sm"
-                        className="h-7 min-w-0 w-fit max-w-[48vw] sm:max-w-[20rem] border-transparent bg-transparent px-1.5 hover:bg-transparent data-[popup-open]:bg-transparent"
-                    >
-                        <SelectValue>
-                            {selectedBranchLabel ?? t('chat.chatInput.branch')}
-                        </SelectValue>
-                    </SelectTrigger>
+                    <Tooltip open={dirtyTooltip.open} onOpenChange={dirtyTooltip.onOpenChange}>
+                        <TooltipTrigger asChild>
+                            <SelectTrigger
+                                ref={worktreeTriggerRef}
+                                onKeyDown={handlePickerKeyDown}
+                                size="sm"
+                                className="h-7 min-w-0 w-fit max-w-[48vw] sm:max-w-[20rem] border-transparent bg-transparent px-1.5 hover:bg-transparent data-[popup-open]:bg-transparent"
+                            >
+                                {hasUncommittedChanges ? (
+                                    <Icon
+                                        name="alert"
+                                        className="size-3.5 shrink-0 text-[var(--status-warning)]"
+                                        aria-label={t('chat.draftDirtyNotice.indicatorAria')}
+                                    />
+                                ) : null}
+                                <SelectValue>
+                                    {selectedBranchLabel ?? t('chat.chatInput.branch')}
+                                </SelectValue>
+                            </SelectTrigger>
+                        </TooltipTrigger>
+                        {hasUncommittedChanges ? (
+                            <TooltipContent showArrow side="top" sideOffset={8} className="max-w-72">
+                                <span className="block whitespace-pre-line">{t('chat.draftDirtyNotice.tooltip')}</span>
+                            </TooltipContent>
+                        ) : null}
+                    </Tooltip>
                     <SelectContent side="top" collisionAvoidance={{ side: 'none' }} constrainToMain className="w-max min-w-48" onKeyDown={handlePickerKeyDown}>
                         {projectRootBranchOption ? (
                             <SelectGroup>
@@ -228,11 +271,12 @@ export function DraftTargetSelectors(props: DraftTargetProps) {
 
 /** Mobile: buttons that open the bottom sheets below. */
 export function MobileDraftTargetTriggers(
-    props: Pick<DraftTargetProps, 'selectedProject' | 'selectedBranchLabel' | 'showBranchSelector' | 'theme'>
+    props: Pick<DraftTargetProps, 'selectedProject' | 'selectedBranchLabel' | 'showBranchSelector' | 'hasUncommittedChanges' | 'theme'>
         & { onOpenPicker: (picker: 'project' | 'branch') => void },
 ) {
     const { t } = useI18n();
-    const { selectedProject, selectedBranchLabel, showBranchSelector, theme, onOpenPicker } = props;
+    const { selectedProject, selectedBranchLabel, showBranchSelector, hasUncommittedChanges, theme, onOpenPicker } = props;
+    const dirtyTooltip = useDirtyFlashTooltip(hasUncommittedChanges);
 
     return (
         <div className="mb-1.5 flex min-w-0 items-center gap-x-2 px-0.5">
@@ -247,14 +291,30 @@ export function MobileDraftTargetTriggers(
                 <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
             </button>
             {showBranchSelector ? (
-                <button
-                    type="button"
-                    className="inline-flex h-7 min-w-0 max-w-[48vw] flex-shrink cursor-pointer items-center gap-1 rounded-lg px-1.5 typography-micro font-medium text-foreground/80 hover:bg-[var(--interactive-hover)]"
-                    onClick={() => onOpenPicker('branch')}
-                >
-                    <span className="truncate">{selectedBranchLabel ?? t('chat.chatInput.branch')}</span>
-                    <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-                </button>
+                <Tooltip open={dirtyTooltip.open} onOpenChange={dirtyTooltip.onOpenChange}>
+                    <TooltipTrigger asChild>
+                        <button
+                            type="button"
+                            className="inline-flex h-7 min-w-0 max-w-[48vw] flex-shrink cursor-pointer items-center gap-1 rounded-lg px-1.5 typography-micro font-medium text-foreground/80 hover:bg-[var(--interactive-hover)]"
+                            onClick={() => onOpenPicker('branch')}
+                        >
+                            {hasUncommittedChanges ? (
+                                <Icon
+                                    name="alert"
+                                    className="h-3.5 w-3.5 flex-shrink-0 text-[var(--status-warning)]"
+                                    aria-label={t('chat.draftDirtyNotice.indicatorAria')}
+                                />
+                            ) : null}
+                            <span className="truncate">{selectedBranchLabel ?? t('chat.chatInput.branch')}</span>
+                            <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                        </button>
+                    </TooltipTrigger>
+                    {hasUncommittedChanges ? (
+                        <TooltipContent showArrow side="top" sideOffset={8} className="max-w-72">
+                            <span className="block whitespace-pre-line">{t('chat.draftDirtyNotice.tooltip')}</span>
+                        </TooltipContent>
+                    ) : null}
+                </Tooltip>
             ) : null}
         </div>
     );

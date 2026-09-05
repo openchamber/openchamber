@@ -15,6 +15,7 @@ import {
   subscribeToSettingsSaveState,
   syncDesktopSettings,
   updateDesktopSettings,
+  type SettingsSyncedDetail,
 } from './persistence';
 import { switchRuntimeEndpoint } from './runtime-switch';
 
@@ -842,6 +843,100 @@ describe('updateDesktopSettings', () => {
 
     expect(useUIStore.getState().autoSaveEnabled).toBe(true);
     expect(saveCalls.some((changes) => changes.autoSaveEnabled === true)).toBe(true);
+  });
+
+  test('does not invent theme defaults when the authoritative snapshot omits theme fields', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    registerSettingsApi(
+      // SAFETY: this mock echoes back exactly the partial changes it received;
+      // the tests below only read fields the changes actually contain.
+      async (changes) => ({ ...changes } as SettingsPayload),
+      async () => ({
+        settings: { draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
+        source: 'web',
+      }),
+    );
+
+    const synced: SettingsSyncedDetail[] = [];
+    const listener = (event: Event): void => {
+      // SAFETY: dispatchSettingsSynced is the only emitter for this key and
+      // always sends a CustomEvent<SettingsSyncedDetail>.
+      const detail = (event as CustomEvent<SettingsSyncedDetail>).detail;
+      if (detail) synced.push(detail);
+    };
+    window.addEventListener('openchamber:settings-synced', listener);
+    try {
+      await syncDesktopSettings();
+    } finally {
+      window.removeEventListener('openchamber:settings-synced', listener);
+    }
+
+    expect(synced.length).toBeGreaterThan(0);
+    const bootstrapSync = synced.find((detail) => detail.bootstrap);
+    expect(bootstrapSync).toBeTruthy();
+    expect(bootstrapSync?.adoptTheme).toBe(true);
+    expect(bootstrapSync?.settings.useSystemTheme).toBe(undefined);
+    expect(bootstrapSync?.settings.lightThemeId).toBe(undefined);
+    expect(bootstrapSync?.settings.darkThemeId).toBe(undefined);
+  });
+
+  test('marks settings save echoes as non-bootstrap syncs', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    registerSettingsApi(
+      // SAFETY: this mock echoes back exactly the partial changes it received;
+      // the assertions below only read fields the changes actually contain.
+      async (changes) => ({ ...changes } as SettingsPayload),
+    );
+
+    const synced: SettingsSyncedDetail[] = [];
+    const listener = (event: Event): void => {
+      // SAFETY: dispatchSettingsSynced is the only emitter for this key and
+      // always sends a CustomEvent<SettingsSyncedDetail>.
+      const detail = (event as CustomEvent<SettingsSyncedDetail>).detail;
+      if (detail) synced.push(detail);
+    };
+    window.addEventListener('openchamber:settings-synced', listener);
+    try {
+      await updateDesktopSettings({ themeVariant: 'dark' });
+    } finally {
+      window.removeEventListener('openchamber:settings-synced', listener);
+    }
+
+    expect(synced.length).toBeGreaterThan(0);
+    expect(synced.every((detail) => detail.bootstrap === false)).toBe(true);
+    expect(synced.every((detail) => detail.adoptTheme === false)).toBe(true);
+    expect(synced.every((detail) => detail.settings.themeVariant === 'dark')).toBe(true);
+  });
+
+  test('allows a bootstrap sync to preserve the current window theme', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    registerSettingsApi(
+      async (changes) => ({ ...changes } as SettingsPayload),
+      async () => ({
+        settings: { activeProjectId: 'project-a', themeVariant: 'dark' },
+        source: 'web',
+      }),
+    );
+
+    const synced: SettingsSyncedDetail[] = [];
+    const listener = (event: Event): void => {
+      const detail = (event as CustomEvent<SettingsSyncedDetail>).detail;
+      if (detail) synced.push(detail);
+    };
+    window.addEventListener('openchamber:settings-synced', listener);
+    try {
+      await syncDesktopSettings({ adoptTheme: false });
+    } finally {
+      window.removeEventListener('openchamber:settings-synced', listener);
+    }
+
+    const broadcastSync = synced.find((detail) => detail.bootstrap && !detail.adoptTheme);
+    expect(broadcastSync).toBeTruthy();
+    expect(broadcastSync?.settings.activeProjectId).toBe('project-a');
+    expect(broadcastSync?.settings.themeVariant).toBe('dark');
   });
 });
 

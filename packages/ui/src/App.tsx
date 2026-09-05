@@ -348,7 +348,12 @@ function App({ apis }: AppProps) {
 
     void refreshGitHubAuthStatus(apis.github, { force: true });
     void refreshLinearAuthStatus(apis.linear, { force: true });
-  }, [apis.github, apis.linear, embeddedSessionChat, refreshGitHubAuthStatus, refreshLinearAuthStatus]);
+    // `apis` is the same object across an instance switch, so without the epoch
+    // this ran once for the whole app session and both statuses kept describing
+    // whichever instance happened to be connected at startup. `isConnected` is
+    // here to re-ask, not to gate: both integrations answer independently of
+    // OpenCode, but a switch can race the transport and the retry is deduped.
+  }, [apis.github, apis.linear, embeddedSessionChat, isConnected, refreshGitHubAuthStatus, refreshLinearAuthStatus, runtimeEndpointEpoch]);
 
   useAppFontEffects();
 

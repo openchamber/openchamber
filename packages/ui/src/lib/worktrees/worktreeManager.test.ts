@@ -26,6 +26,7 @@ const createdWorktree = {
 let createdWorktreeResult: GitWorktreeCreateResult = createdWorktree;
 const bootstrapWatcherCalls: string[] = [];
 const bootstrapWatcherOptions: Array<{ onReady?: () => void }> = [];
+const warningToasts: string[] = [];
 
 const sessionState = {
   availableWorktreesByProject: new Map<string, WorktreeMetadata[]>(),
@@ -38,6 +39,17 @@ const attachmentState = {
 
 mock.module('@/lib/openchamberConfig', () => ({
   substituteCommandVariables: (command: string) => command,
+}));
+
+mock.module('@/components/ui', () => ({
+  toast: {
+    warning: (message: string) => warningToasts.push(message),
+  },
+}));
+
+mock.module('@/lib/i18n', () => ({
+  formatMessage: () => 'session.newWorktree.toast.fetchSourceFailed',
+  useI18nStore: { getState: () => ({ dictionary: {} }) },
 }));
 
 mock.module('@/lib/worktrees/worktreeBootstrap', () => ({
@@ -106,6 +118,7 @@ const {
   getLatestWorktreeMetadata,
   listProjectWorktrees,
   partitionWorktreesByRegisteredProject,
+  removeProjectWorktree,
   validateWorktreeCreate,
   worktreeMapsEqual,
 } = await import('./worktreeManager');
@@ -130,11 +143,23 @@ describe('worktreeManager list invalidation', () => {
     validatePayloads.length = 0;
     bootstrapWatcherCalls.length = 0;
     bootstrapWatcherOptions.length = 0;
+    warningToasts.length = 0;
     createdWorktreeResult = createdWorktree;
     sessionState.availableWorktreesByProject = new Map();
     sessionState.availableWorktrees = [];
     sessionState.worktreeMetadata = new Map();
     attachmentState.attachments = new Map();
+  });
+
+  test('warns when worktree creation falls back after a source fetch failure', async () => {
+    createdWorktreeResult = { ...createdWorktree, sourceFetchFailed: true };
+
+    await createWorktree({ id: 'project-fetch-fallback', path: '/repo' }, {
+      branchName: 'feature',
+      worktreeName: 'feature',
+    });
+
+    expect(warningToasts).toEqual(['session.newWorktree.toast.fetchSourceFailed']);
   });
 
   test('retries an in-flight list when a worktree is created before it resolves', async () => {
@@ -364,6 +389,44 @@ describe('worktreeManager list invalidation', () => {
 
     expect(metadata.worktreeStatus).toBe('pending');
     expect(getLatestWorktreeMetadata(metadata).worktreeStatus).toBe('ready');
+  });
+
+  test('removes a worktree from sidebar topology owned by another registered checkout', async () => {
+    const removed: WorktreeMetadata = {
+      path: '/worktrees/removed',
+      projectDirectory: '/repo',
+      branch: 'removed',
+      label: 'removed',
+    };
+    const sibling: WorktreeMetadata = {
+      path: '/worktrees/sibling',
+      projectDirectory: '/repo',
+      branch: 'sibling',
+      label: 'sibling',
+    };
+    const unrelatedEntries: WorktreeMetadata[] = [{
+      path: '/other/worktree',
+      projectDirectory: '/other',
+      branch: 'other',
+      label: 'other',
+    }];
+    sessionState.availableWorktreesByProject = new Map([
+      ['/worktrees/configured', [removed, sibling]],
+      ['/other', unrelatedEntries],
+    ]);
+    sessionState.availableWorktrees = [removed, sibling, ...unrelatedEntries];
+    sessionState.worktreeMetadata = new Map([
+      ['removed-session', removed],
+      ['sibling-session', sibling],
+    ]);
+
+    await removeProjectWorktree({ id: 'path:/repo', path: '/repo' }, removed);
+
+    expect(sessionState.availableWorktreesByProject.get('/worktrees/configured')).toEqual([sibling]);
+    expect(sessionState.availableWorktreesByProject.get('/other')).toBe(unrelatedEntries);
+    expect(sessionState.availableWorktrees).toEqual([sibling, ...unrelatedEntries]);
+    expect(sessionState.worktreeMetadata.has('removed-session')).toBe(false);
+    expect(sessionState.worktreeMetadata.get('sibling-session')).toBe(sibling);
   });
 });
 

@@ -12,6 +12,7 @@ import type { ProjectRef } from '@/lib/projectContextApi';
 import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { isWindowsArm64 } from '@/lib/platform';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { getRuntimeKey, isTransientRuntimeKey } from '@/lib/runtime-switch';
 
 export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'branch';
 export type ContextPanelMode = 'diff' | 'walkthrough' | 'file' | 'context' | 'plan' | 'chat' | 'browser' | 'git' | 'pr' | 'linear' | 'notes' | 'terminal';
@@ -63,6 +64,38 @@ function sanitizeLinearIssueListTeamId(value: unknown): string {
   if (typeof value !== 'string') return LINEAR_ISSUE_LIST_ALL_TEAMS;
   const teamId = value.trim();
   return teamId || LINEAR_ISSUE_LIST_ALL_TEAMS;
+}
+
+/**
+ * Store the team filter under the connected instance, dropping the entry when
+ * it falls back to all teams so the map does not accumulate defaults. Transient
+ * keys (uninitialised, mobile-disconnected) name no instance and are not written.
+ */
+function writeLinearTeamIdForRuntime(
+  entries: Record<string, string>,
+  teamId: string,
+): Record<string, string> {
+  const runtimeKey = getRuntimeKey();
+  if (isTransientRuntimeKey(runtimeKey)) return entries;
+  const next = { ...entries };
+  if (teamId === LINEAR_ISSUE_LIST_ALL_TEAMS) {
+    delete next[runtimeKey];
+  } else {
+    next[runtimeKey] = teamId;
+  }
+  return next;
+}
+
+function sanitizeLinearIssueListTeamIdByRuntime(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const entries: Record<string, string> = {};
+  // SAFETY: guarded above as a non-array object; every value is re-checked below.
+  for (const [runtimeKey, teamId] of Object.entries(value as Record<string, unknown>)) {
+    if (!runtimeKey.trim() || typeof teamId !== 'string') continue;
+    const sanitized = sanitizeLinearIssueListTeamId(teamId);
+    if (sanitized !== LINEAR_ISSUE_LIST_ALL_TEAMS) entries[runtimeKey] = sanitized;
+  }
+  return entries;
 }
 
 function sanitizeLinearIssueListPriority(value: unknown): LinearIssueListPriority {
@@ -820,7 +853,16 @@ interface UIStore {
   gitChangesViewMode: 'flat' | 'tree';
   linearIssueListStatus: LinearIssueListStatus;
   linearIssueListAssignee: LinearIssueListAssignee;
+  /**
+   * Team filter for the instance currently connected. A Linear team belongs to
+   * one workspace, and each OpenChamber instance has its own Linear login, so
+   * this is derived from `linearIssueListTeamIdByRuntime` rather than persisted
+   * on its own — a team id carried across a switch filters the new instance's
+   * list down to nothing.
+   */
   linearIssueListTeamId: string;
+  /** Team filter per instance, keyed the same way every runtime-scoped cache is. */
+  linearIssueListTeamIdByRuntime: Record<string, string>;
   linearIssueListPriority: LinearIssueListPriority;
   /** One-shot identifier for opening a Linear issue in the rail panel. Not persisted. */
   linearIssueFocus: string | null;
@@ -1023,6 +1065,8 @@ interface UIStore {
   setLinearIssueListStatus: (status: LinearIssueListStatus) => void;
   setLinearIssueListAssignee: (assignee: LinearIssueListAssignee) => void;
   setLinearIssueListTeamId: (teamId: string) => void;
+  /** Re-read the team filter for the instance now connected. */
+  applyLinearIssueListFiltersForRuntime: () => void;
   setLinearIssueListPriority: (priority: LinearIssueListPriority) => void;
   resetLinearIssueListFilters: () => void;
   setLinearIssueFocus: (identifier: string | null) => void;
@@ -1186,6 +1230,7 @@ export const useUIStore = create<UIStore>()(
         linearIssueListStatus: 'all',
         linearIssueListAssignee: 'any',
         linearIssueListTeamId: LINEAR_ISSUE_LIST_ALL_TEAMS,
+        linearIssueListTeamIdByRuntime: {},
         linearIssueListPriority: 'all',
         linearIssueFocus: null,
         isTimelineDialogOpen: false,
@@ -2113,7 +2158,20 @@ export const useUIStore = create<UIStore>()(
         },
 
         setLinearIssueListTeamId: (teamId) => {
-          set({ linearIssueListTeamId: sanitizeLinearIssueListTeamId(teamId) });
+          const sanitized = sanitizeLinearIssueListTeamId(teamId);
+          set((state) => ({
+            linearIssueListTeamId: sanitized,
+            linearIssueListTeamIdByRuntime: writeLinearTeamIdForRuntime(state.linearIssueListTeamIdByRuntime, sanitized),
+          }));
+        },
+
+        applyLinearIssueListFiltersForRuntime: () => {
+          const runtimeKey = getRuntimeKey();
+          set((state) => ({
+            linearIssueListTeamId: isTransientRuntimeKey(runtimeKey)
+              ? LINEAR_ISSUE_LIST_ALL_TEAMS
+              : state.linearIssueListTeamIdByRuntime[runtimeKey] ?? LINEAR_ISSUE_LIST_ALL_TEAMS,
+          }));
         },
 
         setLinearIssueListPriority: (priority) => {
@@ -2121,12 +2179,16 @@ export const useUIStore = create<UIStore>()(
         },
 
         resetLinearIssueListFilters: () => {
-          set({
+          set((state) => ({
             linearIssueListStatus: 'all',
             linearIssueListAssignee: 'any',
             linearIssueListTeamId: LINEAR_ISSUE_LIST_ALL_TEAMS,
+            linearIssueListTeamIdByRuntime: writeLinearTeamIdForRuntime(
+              state.linearIssueListTeamIdByRuntime,
+              LINEAR_ISSUE_LIST_ALL_TEAMS,
+            ),
             linearIssueListPriority: 'all',
-          });
+          }));
         },
 
         setLinearIssueFocus: (identifier) => {
@@ -2581,7 +2643,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 18,
+        version: 19,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -2792,7 +2854,11 @@ export const useUIStore = create<UIStore>()(
 
           state.linearIssueListStatus = sanitizeLinearIssueListStatus(state.linearIssueListStatus);
           state.linearIssueListAssignee = sanitizeLinearIssueListAssignee(state.linearIssueListAssignee);
-          state.linearIssueListTeamId = sanitizeLinearIssueListTeamId(state.linearIssueListTeamId);
+          // v18 -> v19: the team filter became per instance. The legacy flat
+          // value names a team in one workspace with nothing to say which
+          // instance it came from, so it is dropped rather than guessed at.
+          delete state.linearIssueListTeamId;
+          state.linearIssueListTeamIdByRuntime = sanitizeLinearIssueListTeamIdByRuntime(state.linearIssueListTeamIdByRuntime);
           state.linearIssueListPriority = sanitizeLinearIssueListPriority(state.linearIssueListPriority);
 
           state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
@@ -2874,7 +2940,7 @@ export const useUIStore = create<UIStore>()(
           gitChangesViewMode: state.gitChangesViewMode,
           linearIssueListStatus: state.linearIssueListStatus,
           linearIssueListAssignee: state.linearIssueListAssignee,
-          linearIssueListTeamId: state.linearIssueListTeamId,
+          linearIssueListTeamIdByRuntime: state.linearIssueListTeamIdByRuntime,
           linearIssueListPriority: state.linearIssueListPriority,
           nativeNotificationsEnabled: state.nativeNotificationsEnabled,
           notificationMode: state.notificationMode,

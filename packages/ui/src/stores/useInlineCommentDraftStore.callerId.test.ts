@@ -33,12 +33,12 @@ describe('caller-provided draft ids', () => {
 
   test('omitting the id still generates one', () => {
     const id = store().addDraft(target, comment);
-    expect(typeof id === 'string' && /^icd-\d+-\w+$/.test(id)).toBe(true);
+    expect(/^icd-\d+-\w+$/.test(id ?? '')).toBe(true);
   });
 
   test('a blank id is ignored rather than stored', () => {
     const id = store().addDraft(target, { ...comment, id: '   ' });
-    expect(typeof id === 'string' && /^icd-\d+-\w+$/.test(id)).toBe(true);
+    expect(/^icd-\d+-\w+$/.test(id ?? '')).toBe(true);
   });
 
   test('a colliding id is refused, so edits cannot retarget another draft', () => {

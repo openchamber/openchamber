@@ -49,11 +49,11 @@ export function LinearProjectMapping({
       console.error('Failed to load Linear mapping:', error);
       setLoadFailed(true);
     }
-  }, [connected, linear, organizationId]);
+  }, [connected, linear]);
 
   React.useEffect(() => {
     void loadMapping();
-  }, [loadMapping]);
+  }, [loadMapping, organizationId]);
 
   const saveMapping = React.useCallback(async (next: LinearMappingResult) => {
     const teamProjectPaths: { [teamId: string]: string } = {};

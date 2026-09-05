@@ -581,10 +581,10 @@ export const useChatTimelineScroll = ({
     // list's size compensation instead. Deliberately NO snap back to the end
     // afterwards for a mid-conversation reader: a slow drag settles
     // repeatedly, and each snap reads as the very jump this suspension
-    // removes. A reader who WAS at the end is the exception — after rows
-    // re-wrap, stale cached sizes can leave a large phantom gap below the
-    // last row, so re-asserting the end once on settle is what "staying
-    // where the reader is" means for them.
+    // removes. A reader pinned to a STREAMING session is the exception — the
+    // live edge is what they are watching, so the end is re-asserted once on
+    // settle. A pinned reader of an idle session gets no scroll at all: if the
+    // re-wrap moved the viewport off the end, the pin is released instead.
     const widthResizingRef = React.useRef(false);
     React.useEffect(() => {
         if (!scrollNode || typeof ResizeObserver === 'undefined') return;
@@ -604,7 +604,27 @@ export const useChatTimelineScroll = ({
             quietTimer = setTimeout(() => {
                 quietTimer = null;
                 widthResizingRef.current = false;
-                if (isAtEndRef.current && pendingAnchorRef.current === null) {
+                if (!isAtEndRef.current || pendingAnchorRef.current !== null) return;
+                if (!sessionIsWorkingRef.current) {
+                    // An idle pinned reader asked for nothing — a width change
+                    // must not scroll them. If the re-wrap left the viewport
+                    // off the end, release the pin instead of snapping back;
+                    // the scroll-to-bottom pill offers the way home.
+                    const listState = listRef.current?.getState();
+                    const atEndNow = listState ? resolveTimelineIsAtEnd(listState) : undefined;
+                    if (atEndNow === false) {
+                        isAtEndRef.current = false;
+                        setIsPinned(false);
+                        modeRef.current = 'free-scrolling';
+                        liveFollowGenerationRef.current = null;
+                        scheduleShowScrollButton();
+                        queueSave();
+                    }
+                    return;
+                }
+                {
+                    // A streaming session keeps its live edge in view, so the
+                    // end is re-asserted once on settle.
                     // Not scrollToEnd: the list's end offset comes from the
                     // total content length, which still carries pre-wrap row
                     // sizes (and any reserved anchored end space) right after a
@@ -632,7 +652,7 @@ export const useChatTimelineScroll = ({
             observer.disconnect();
             if (quietTimer !== null) clearTimeout(quietTimer);
         };
-    }, [scrollNode]);
+    }, [queueSave, scheduleShowScrollButton, scrollNode]);
 
     // Keep the live edge in view after content growth. Within a viewport of
     // the end the remaining distance is glided so a revealed block and the
@@ -920,6 +940,10 @@ export const useChatTimelineScroll = ({
         if (!content) return;
         const pin = () => {
             if (sessionIsWorkingRef.current) return;
+            // A width resize re-wraps every row; pinning against each mutation
+            // scrolls the idle reader around. The resize settle handler above
+            // decides whether the pin survives the resize.
+            if (widthResizingRef.current) return;
             if (userOwnsScrollRef.current || !isAtEndRef.current || modeRef.current !== 'following-end') return;
             const end = scrollNode.scrollHeight - scrollNode.clientHeight;
             if (end - scrollNode.scrollTop > 1) scrollNode.scrollTop = end;

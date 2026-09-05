@@ -2,7 +2,7 @@
   "name": "openchamber",
   "displayName": "OpenChamber",
   "description": "%extension.description%",
-  "version": "1.21.1",
+  "version": "1.22.1",
   "publisher": "fedaykindev",
   "private": true,
   "repository": {
@@ -37,8 +37,7 @@
   "activationEvents": [
     "onCommand:openchamber.openSidebar",
     "onCommand:openchamber.attachExplorerToChat",
-    "onView:openchamber.chatView",
-    "onStartupFinished"
+    "onView:openchamber.chatView"
   ],
   "contributes": {
     "viewsContainers": {
@@ -289,7 +288,7 @@
   },
   "dependencies": {
     "@openchamber/ui": "workspace:*",
-    "@opencode-ai/sdk": "1.18.25",
+    "@opencode-ai/sdk": "1.18.28",
     "adm-zip": "^0.6.0",
     "jsonc-parser": "^3.3.1",
     "react": "^19.1.1",

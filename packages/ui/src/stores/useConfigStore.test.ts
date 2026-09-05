@@ -544,7 +544,8 @@ describe('useConfigStore provider persistence', () => {
 
     useConfigStore.getState().setCurrentVariantOverride('max', 'high');
     expect(useConfigStore.getState().cycleCurrentVariant()).toBe(undefined);
-    expect(useConfigStore.getState().currentVariant).toBe('high');
+    // Default is a choice to send no effort, not a way back to the inherited one.
+    expect(useConfigStore.getState().currentVariant).toBe(undefined);
     expect(useConfigStore.getState().currentVariantSelection).toEqual({ override: null, inherited: 'high' });
   });
 
@@ -562,7 +563,7 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().currentVariantSelection.override).toBe('high');
     expect(useConfigStore.getState().cycleCurrentVariant()).toBe(undefined);
     expect(useConfigStore.getState().currentVariantSelection.override).toBeNull();
-    expect(useConfigStore.getState().currentVariant).toBe('high');
+    expect(useConfigStore.getState().currentVariant).toBe(undefined);
   });
 
   test('an unavailable explicit variant cycles back to Default', () => {
@@ -576,7 +577,7 @@ describe('useConfigStore provider persistence', () => {
     });
 
     expect(useConfigStore.getState().cycleCurrentVariant()).toBe(undefined);
-    expect(useConfigStore.getState().currentVariant).toBe('low');
+    expect(useConfigStore.getState().currentVariant).toBe(undefined);
     expect(useConfigStore.getState().currentVariantSelection.override).toBeNull();
   });
 
@@ -606,6 +607,73 @@ describe('useConfigStore provider persistence', () => {
 
     useConfigStore.getState().setAgent('plan');
     expect(useConfigStore.getState().currentVariant).toBe('medium');
+  });
+
+  test('an explicit Default effort sends no variant instead of the settings default', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', { low: {}, high: {} })],
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.5',
+      currentVariant: 'low',
+      currentVariantSelection: { override: 'low', inherited: 'low' },
+      settingsDefaultVariant: 'low',
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setCurrentVariantOverride(null, 'low');
+
+    expect(useConfigStore.getState().currentVariant).toBe(undefined);
+    expect(useConfigStore.getState().currentVariantSelection).toEqual({ override: null, inherited: 'low' });
+  });
+
+  test('setAgent keeps a session Default effort instead of restoring the settings default', () => {
+    const sessionId = 'ses_agent_default_effort';
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useSelectionStore.getState().saveAgentModelForSession(sessionId, 'plan', 'openai', 'gpt-5.5');
+    useSelectionStore.getState().saveAgentModelVariantForSession(sessionId, 'plan', 'openai', 'gpt-5.5', null);
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', { low: {}, high: {} })],
+      agents: [testAgent('plan')],
+      settingsDefaultVariant: 'low',
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.5',
+      currentVariant: 'low',
+      currentVariantSelection: { override: undefined, inherited: 'low' },
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setAgent('plan');
+
+    const state = useConfigStore.getState();
+    expect(state.currentVariant).toBe(undefined);
+    expect(state.currentVariantSelection).toEqual({ override: null, inherited: 'low' });
+    expect(state.directoryScoped[DIRECTORY]?.currentVariant).toBe(undefined);
+  });
+
+  test('setAgent reports the same effort through currentVariant and the picker selection', () => {
+    const sessionId = 'ses_agent_effort_in_sync';
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useSelectionStore.getState().saveAgentModelForSession(sessionId, 'plan', 'openai', 'gpt-5.5');
+    useSelectionStore.getState().saveAgentModelVariantForSession(sessionId, 'plan', 'openai', 'gpt-5.5', 'high');
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', { low: {}, high: {} })],
+      agents: [testAgent('plan')],
+      settingsDefaultVariant: 'low',
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.5',
+      currentVariant: 'low',
+      currentVariantSelection: { override: 'low', inherited: 'low' },
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setAgent('plan');
+
+    const state = useConfigStore.getState();
+    expect(state.currentVariant).toBe('high');
+    expect(state.currentVariantSelection).toEqual({ override: 'high', inherited: 'low' });
   });
 
   test('setAgent applies settings default variant for a saved session agent model', () => {

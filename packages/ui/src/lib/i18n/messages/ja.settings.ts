@@ -1,5 +1,4 @@
 import { linearIntegrationI18n } from './linear-integration.i18n';
-import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 使用量追跡',
   'settings.providers.page.openCodeGo.description': 'OpenCode Go ダッシュボードを接続して、ローリング、週間、月間のクォータを表示します。',
@@ -13,6 +12,8 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.delete': '削除',
   'settings.providers.page.quotaCredentials.saved': '{provider} の認証情報を保存しました。',
   'settings.providers.page.quotaCredentials.accessToken': 'アクセストークン',
+  'settings.providers.page.quotaCredentials.usageToken': '使用量 API トークン',
+  'settings.providers.page.quotaCredentials.exeDevTokenInstructions': 'このコマンドをターミナルで実行し、下にトークンを貼り付けてください。LLM クレジット使用量の読み取りのみが可能で、30 日後に期限切れになります。',
   'settings.providers.page.quotaCredentials.refreshToken': '更新トークン',
   'settings.providers.page.quotaCredentials.tokenPlaceholder': 'トークンを貼り付け',
   'settings.providers.page.openCodeGo.saveFailed': 'OpenCode Go の認証情報を検証できませんでした。',
@@ -2232,5 +2233,6 @@ export const settingsDict = {
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'ステア',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'キュー',
   ...linearIntegrationI18n.ja,
-  ...thirdPartyIntegrationI18n.ja,
+  'settings.page.integrations.title': '連携',
+  'settings.page.integrations.description': 'GitHub と Linear を接続すると、OpenChamber が Issue やプルリクエストを扱えるようになります。',
 } as const;

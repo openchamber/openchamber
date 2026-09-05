@@ -192,7 +192,7 @@ export function createContextPart(payload: ContextPartPayload, text?: string): C
     const metadata: ContextPartMetadata = { [CONTEXT_METADATA_KEY]: payload };
     if (payload.kind === 'code-comment') {
         metadata[OPENCODE_COMMENT_METADATA_KEY] = {
-            path: payload.fileLabel.replace(/:\d+(-\d+)?$/, ''),
+            path: payload.fileLabel,
             selection: {
                 startLine: payload.startLine,
                 endLine: payload.endLine,
@@ -342,6 +342,10 @@ const contextPayloadSchema = z.discriminatedUnion('kind', [
     }),
 ]);
 
+/**
+ * Part metadata carrying a context payload, for parsing at a trust boundary
+ * (a queued message coming back from the server, for instance).
+ */
 const openCodeCommentSchema = z.object({
     path: z.string(),
     selection: z.object({
@@ -355,8 +359,18 @@ const openCodeCommentSchema = z.object({
     origin: z.enum(['file', 'review']).optional(),
 });
 
+/**
+ * Part metadata carrying a context payload, for parsing at a trust boundary
+ * (a queued message coming back from the server, for instance). The OpenCode
+ * Desktop mirror rides along so a queued comment keeps it too.
+ */
+export const contextPartMetadataSchema = z.object({
+    [CONTEXT_METADATA_KEY]: contextPayloadSchema,
+    [OPENCODE_COMMENT_METADATA_KEY]: openCodeCommentSchema.optional(),
+});
+
 /** The subset of a message part that context read-back inspects. */
-export type ContextCarrierPart = { type: string; text?: string } & Pick<TextPart, 'metadata'>;
+export type ContextCarrierPart = { type: string } & Pick<TextPart, 'metadata'>;
 
 /**
  * Read the structured context payload from a message part, if it carries one.
@@ -391,43 +405,85 @@ export function readContextPart(part: ContextCarrierPart): ContextPartPayload | 
         };
     }
 
-    const text = part.text ?? '';
-    const desktop = text.match(/^The user made the following comment regarding (this file|line (\d+)|lines (\d+) through (\d+)) of (.+?): ([\s\S]+)$/);
-    if (desktop) {
-        const startLine = desktop[2] ? Number(desktop[2]) : desktop[3] ? Number(desktop[3]) : null;
-        const endLine = desktop[2] ? Number(desktop[2]) : desktop[4] ? Number(desktop[4]) : null;
-        if (startLine === null || endLine === null) {
-            return { kind: 'file-quote', fileLabel: desktop[5], quote: '', text: desktop[6] };
-        }
-        return {
-            kind: 'code-comment',
-            source: 'file',
-            fileLabel: desktop[5],
-            startLine,
-            endLine,
-            language: '',
-            code: '',
-            text: desktop[6],
-        };
-    }
-
-    const legacy = text.match(/^Comment on `(.+?)` lines (\d+)-(\d+)(?: \((original|modified)\))?:\n```([^\n]*)\n([\s\S]*?)\n```\n\n([\s\S]+)$/);
-    if (!legacy) return null;
-    const payload: CodeCommentContext = {
-        kind: 'code-comment',
-        source: legacy[4] ? 'diff' : 'file',
-        fileLabel: legacy[1].replace(/:\d+(-\d+)?$/, ''),
-        startLine: Number(legacy[2]),
-        endLine: Number(legacy[3]),
-        language: legacy[5],
-        code: legacy[6],
-        text: legacy[7],
-    };
-    if (legacy[4] === 'original' || legacy[4] === 'modified') payload.side = legacy[4];
-    return payload;
+    return null;
 }
 
 /** Whether a message carries any user-attached context part. */
 export function hasContextParts(parts: ContextCarrierPart[]): boolean {
     return parts.some((part) => readContextPart(part) !== null);
+}
+
+/**
+ * The composer draft a context payload came from, so reverting or forking a
+ * message can put its attached context back on the chips instead of dropping
+ * it. Linked issues/PRs have no draft form — they are owned by their own
+ * pickers — so they map to null.
+ */
+export function draftFromContextPayload(
+    payload: ContextPartPayload,
+): Omit<InlineCommentDraft, 'id' | 'createdAt' | 'sessionKey'> | null {
+    switch (payload.kind) {
+        case 'code-comment': {
+            const draft: Omit<InlineCommentDraft, 'id' | 'createdAt' | 'sessionKey'> = {
+                source: payload.source,
+                fileLabel: payload.fileLabel,
+                startLine: payload.startLine,
+                endLine: payload.endLine,
+                code: payload.code,
+                language: payload.language,
+                text: payload.text,
+            };
+            if (payload.side) draft.side = payload.side;
+            return draft;
+        }
+        case 'terminal':
+            return {
+                source: 'terminal',
+                fileLabel: payload.terminalLabel,
+                startLine: payload.startLine,
+                endLine: payload.endLine,
+                code: payload.output,
+                language: '',
+                text: '',
+                terminalId: payload.terminalId,
+            };
+        case 'browser-annotation':
+            return {
+                source: 'preview-annotation',
+                fileLabel: payload.pageUrl,
+                startLine: 0,
+                endLine: 0,
+                code: payload.prompt,
+                language: '',
+                text: payload.text,
+            };
+        case 'pr-comment':
+            return { source: 'pr-comment', fileLabel: payload.label, startLine: 0, endLine: 0, code: payload.body, language: '', text: payload.text };
+        case 'pr-check':
+            return { source: 'pr-check', fileLabel: payload.label, startLine: 0, endLine: 0, code: payload.output, language: '', text: payload.text };
+        case 'file-quote':
+            return {
+                source: 'file-quote',
+                fileLabel: payload.fileLabel,
+                startLine: payload.startLine ?? 0,
+                endLine: payload.endLine ?? 0,
+                code: payload.quote,
+                language: '',
+                text: payload.text,
+            };
+        case 'chat-quote':
+            return {
+                source: 'chat-quote',
+                fileLabel: payload.messageId ?? '',
+                startLine: 0,
+                endLine: 0,
+                code: payload.quote,
+                language: '',
+                text: payload.text,
+            };
+        case 'github-issue':
+        case 'github-pr':
+        case 'linear-issue':
+            return null;
+    }
 }

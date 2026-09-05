@@ -159,22 +159,24 @@ and the send path reading the same grammar.
   linked issue/PR) becomes its own synthetic text part carrying structured
   metadata** built by `lib/messages/contextParts.ts`; the timeline reads that
   metadata back to render context blocks. PR instructions precede the PR diff.
-  Queueing captures the current context parts with that queue entry for the same
-  reason it captures provider and model: delivery must use what the user composed,
-  not whatever the draft store holds when the queue drains. A queued message's
-  context parts follow it before the next authored body, preserving that
-  association when several queued messages are delivered together.
-- Local slash-command planning runs before context drafts are consumed. Commands
-  that mutate session/UI state (`/undo`, `/compact`, `/timeline`, and peers)
-  consume only their command text and leave comments/files attached; commands
-  that produce a prompt, including `/btw` and magic prompts, send that context
-  with the produced prompt. Local commands execute through the composer even
-  when follow-ups are configured to queue; their raw slash text is never stored
-  for the generic queue dispatcher. Session actions are planned locally only
-  when a session exists; manually entered actions in a new-session draft stay
-  on the normal send path. A failed prompt command restores every
-  consumed composer input: text, confirmed mentions, files, comment drafts, and
-  pending synthetic context.
+  The same module's `buildComposerContext` captures that context when a message
+  is **queued** instead of sent: the chips leave the composer with the message
+  (as `QueuedContextPart`s on the queue item), the server or the VS Code
+  auto-send delivers them through `queuedContextToParts`, and editing the
+  queued message puts them back. A queued message is placed as captured — its
+  mention, file mentions, and skill instruction were resolved when it was
+  queued, never at delivery — and its context follows it before the next
+  queued message.
+- Local slash commands are planned by `submit/slashCommands.ts` before any
+  attached context is consumed. Commands that act on session or UI state
+  (`/undo`, `/redo`, `/compact`, `/timeline`, `/handoff-review`) take only
+  their command text and leave comments, files, and linked context attached;
+  commands that produce a prompt (`/btw` and the magic prompts) send that
+  context with the prompt they produce. Session actions are planned only when
+  a session exists, so typing one into a new-session draft stays on the normal
+  send path. A local command is never queued as text: queueing runs it
+  instead. A failed prompt command restores everything it consumed: text,
+  confirmed mentions, files, comment drafts, and pending synthetic context.
 - `state/useComposerDraft.ts` — a draft belongs to a (runtime, directory,
   session) identity. Writes are debounced while typing but forced at every edge
   where the page may stop running, because a pending timer is not a saved
@@ -183,7 +185,9 @@ and the send path reading the same grammar.
   recorded before a queued write could resurrect it.
 - `state/useDraftTarget.ts` — the draft can target a directory that does not
   exist yet (a worktree being created). It must survive not appearing in the
-  branch list, or the selector snaps back to the project root mid-creation.
+  branch list, or the selector snaps back to the project root mid-creation. It
+  also owns the advisory dirty state for the selected directory, clearing it as
+  soon as the target changes so a warning never names a previous branch.
 - `ui/DraftTargetSelectors.tsx` owns the controlled project/worktree picker
   state and registers its application shortcuts locally. The selectors only
   consume their shared prefix while the draft target UI is mounted.

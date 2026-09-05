@@ -13,6 +13,7 @@ import * as copilot from './copilot.js';
 import * as crof from './crof.js';
 import * as cursor from './cursor.js';
 import * as deepseek from './deepseek.js';
+import * as exeDev from './exe-dev.js';
 import * as google from './google/index.js';
 import * as kimi from './kimi.js';
 import * as nanogpt from './nanogpt.js';
@@ -58,6 +59,12 @@ const registry = {
     providerName: deepseek.providerName,
     isConfigured: deepseek.isConfigured,
     fetchQuota: deepseek.fetchQuota
+  },
+  'exe-dev': {
+    providerId: exeDev.providerId,
+    providerName: exeDev.providerName,
+    isConfigured: exeDev.isConfigured,
+    fetchQuota: exeDev.fetchQuota
   },
   google: {
     providerId: google.providerId,
