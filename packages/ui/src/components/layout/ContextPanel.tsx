@@ -266,7 +266,10 @@ const EDITOR_TREE_MAX_WIDTH = 480;
 
 // The editor surface's file-tree column: docked on the right, resizable from
 // its left edge, and animated open/closed like the app sidebars.
-const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
+const EditorTreeColumn: React.FC<{
+  visible: boolean;
+  autoRefreshEnabled: boolean;
+}> = ({ visible, autoRefreshEnabled }) => {
   const { t } = useI18n();
   const width = useUIStore((state) => state.contextEditorTreeWidth);
   const setWidth = useUIStore((state) => state.setContextEditorTreeWidth);
@@ -379,7 +382,7 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
         style={{ width: 'var(--oc-editor-tree-width)' }}
         aria-hidden={!visible}
       >
-        <SidebarFilesTree />
+        <SidebarFilesTree autoRefreshEnabled={autoRefreshEnabled} />
       </div>
     </div>
   );
@@ -1227,7 +1230,10 @@ export const ContextPanel: React.FC = () => {
                 </div>
               )}
             </div>
-            <EditorTreeColumn visible={contextEditorTreeVisible} />
+            <EditorTreeColumn
+              visible={contextEditorTreeVisible}
+              autoRefreshEnabled={isOpen && isFileTabActive && contextEditorTreeVisible}
+            />
           </div>
         ) : null}
         {activeChatTab && activeChatSessionID && activeChatSrc ? (

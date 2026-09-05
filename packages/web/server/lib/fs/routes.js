@@ -1,9 +1,19 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
+import nodeFs from 'node:fs';
 import nodeFsPromises from 'node:fs/promises';
 import nodePath from 'node:path';
+import { z } from 'zod';
+import { createFsWatcherRuntime } from './watcher.js';
 
 const EXEC_JOB_TTL_MS = 30 * 60 * 1000;
 const OUTSIDE_FILE_GRANT_TTL_MS = 10 * 60 * 1000;
+const FS_WATCH_MAX_DIRECTORIES = 64;
+const FS_WATCH_HEARTBEAT_MS = 25_000;
+const fsWatchDirectoriesSchema = z.array(z.string().trim().min(1))
+  .min(1)
+  .max(FS_WATCH_MAX_DIRECTORIES);
+const fsWatchNotFoundErrorSchema = z.object({ code: z.literal('ENOENT') });
+const fsWatchErrorMessageSchema = z.object({ message: z.string().min(1) });
 
 const outsideFileGrants = new Map();
 
@@ -511,6 +521,7 @@ export const registerFsRoutes = (app, dependencies) => {
   const {
     os,
     path,
+    fs = nodeFs,
     fsPromises,
     spawn,
     platform = process.platform,
@@ -520,9 +531,15 @@ export const registerFsRoutes = (app, dependencies) => {
     buildAugmentedPath,
     resolveGitBinaryForSpawn,
     openchamberUserConfigRoot,
+    writeSseEvent,
   } = dependencies;
   const realpathCache = createRealpathCache({
     realpath: fsPromises.realpath.bind(fsPromises),
+  });
+  const fsWatcherRuntime = createFsWatcherRuntime({
+    watch: fs.watch.bind(fs),
+    path,
+    platform,
   });
 
   const spawnDetached = (command, args) => new Promise((resolve, reject) => {
@@ -1537,6 +1554,170 @@ export const registerFsRoutes = (app, dependencies) => {
       success: job.success === true,
       results: Array.isArray(job.results) ? job.results : [],
     });
+  });
+
+  app.get('/api/fs/watch', async (req, res) => {
+    const serializedDirectories = z.string().safeParse(req.query?.directories);
+    if (!serializedDirectories.success) {
+      return res.status(400).json({ error: 'directories must be a JSON array' });
+    }
+    let decodedDirectories;
+    try {
+      decodedDirectories = JSON.parse(serializedDirectories.data);
+    } catch {
+      return res.status(400).json({ error: 'directories must be a JSON array' });
+    }
+    const parsedDirectories = fsWatchDirectoriesSchema.safeParse(decodedDirectories);
+    if (!parsedDirectories.success) {
+      return res.status(400).json({ error: `directories must contain between 1 and ${FS_WATCH_MAX_DIRECTORIES} paths` });
+    }
+    const requestedDirectories = parsedDirectories.data;
+
+    let closed = false;
+    let clientClosed = false;
+    let streamReady = false;
+    let heartbeat = null;
+    let watchError = null;
+    const subscriptions = [];
+    const queuedPayloads = [];
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      if (heartbeat) {
+        clearInterval(heartbeat);
+        heartbeat = null;
+      }
+      for (const subscription of subscriptions.splice(0)) {
+        subscription.close();
+      }
+      queuedPayloads.length = 0;
+    };
+    const handleClientClose = () => {
+      clientClosed = true;
+      close();
+    };
+    const emit = (payload) => {
+      if (closed || res.writableEnded || res.destroyed) {
+        close();
+        return false;
+      }
+      if (!streamReady) {
+        queuedPayloads.push(payload);
+        return true;
+      }
+      try {
+        writeSseEvent(res, payload);
+        return true;
+      } catch {
+        close();
+        res.end?.();
+        return false;
+      }
+    };
+    req.on('close', handleClientClose);
+    res.on?.('error', handleClientClose);
+
+    try {
+      const resolvedDirectories = [];
+      const seenRequestedDirectories = new Set();
+      for (const value of requestedDirectories) {
+        const resolved = await resolveWorkspacePathFromContext({
+          req,
+          targetPath: value,
+          resolveProjectDirectory,
+          path,
+          os,
+          normalizeDirectoryPath,
+          openchamberUserConfigRoot,
+        });
+        if (clientClosed) return undefined;
+        if (!resolved.ok) {
+          return res.status(400).json({ error: resolved.error });
+        }
+
+        const requestedDirectory = path.resolve(resolved.resolved);
+        const requestedKey = platform === 'win32' ? requestedDirectory.toLowerCase() : requestedDirectory;
+        if (seenRequestedDirectories.has(requestedKey)) continue;
+
+        // Watch setup is infrequent and must observe a replaced symlink or a
+        // directory recreated with a new inode. Do not reuse the listing
+        // realpath cache here.
+        const canonicalDirectory = await fsPromises.realpath(requestedDirectory);
+        if (clientClosed) return undefined;
+        const stats = await fsPromises.stat(canonicalDirectory);
+        if (clientClosed) return undefined;
+        if (!stats.isDirectory()) {
+          return res.status(400).json({ error: 'Watched path is not a directory' });
+        }
+
+        seenRequestedDirectories.add(requestedKey);
+        resolvedDirectories.push({ requestedDirectory, canonicalDirectory });
+      }
+
+      for (const directory of resolvedDirectories) {
+        if (clientClosed) return undefined;
+        subscriptions.push(fsWatcherRuntime.subscribe({
+          ...directory,
+          onChange: (event) => emit({
+            type: 'openchamber:files-changed',
+            properties: event,
+          }),
+          onError: (error) => {
+            watchError = error;
+            close();
+            if (streamReady) res.end?.();
+          },
+        }));
+      }
+
+      if (closed) {
+        throw watchError || new Error('Filesystem watcher closed during startup');
+      }
+
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders?.();
+      streamReady = true;
+
+      if (!emit({
+        type: 'openchamber:files-watch-ready',
+        properties: {
+          directories: resolvedDirectories.map((entry) => entry.requestedDirectory),
+        },
+      })) return undefined;
+      for (const payload of queuedPayloads.splice(0)) {
+        if (!emit(payload)) return undefined;
+      }
+      heartbeat = setInterval(() => {
+        emit({
+          type: 'openchamber:heartbeat',
+          properties: { timestamp: Date.now() },
+        });
+      }, FS_WATCH_HEARTBEAT_MS);
+      heartbeat.unref?.();
+      return undefined;
+    } catch (error) {
+      close();
+      if (clientClosed || res.writableEnded || res.destroyed) {
+        return undefined;
+      }
+      if (res.headersSent) {
+        res.end?.();
+        return undefined;
+      }
+      if (isOsPermissionError(error)) {
+        return sendOsPermissionDenied(res, 'Access to directory denied');
+      }
+      if (fsWatchNotFoundErrorSchema.safeParse(error).success) {
+        return res.status(404).json({ error: 'Directory not found' });
+      }
+      const parsedError = fsWatchErrorMessageSchema.safeParse(error);
+      const message = parsedError.success ? parsedError.data.message : 'Failed to watch directories';
+      console.error('Failed to watch filesystem directories:', message);
+      return res.status(500).json({ error: message });
+    }
   });
 
   app.get('/api/fs/list', async (req, res) => {

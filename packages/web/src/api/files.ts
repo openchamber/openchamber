@@ -1,22 +1,100 @@
 import type {
   DirectoryListResult,
+  FileChangeEvent,
+  FileWatchHandlers,
   FileSearchQuery,
   FileSearchResult,
   FilesAPI,
 } from '@openchamber/ui/lib/api/types';
+import type { RuntimeUrlResolver } from '@openchamber/ui/lib/runtime-url';
 import {
   FilesystemError,
   parseFilesystemErrorReason,
   type FilesystemErrorReason,
 } from '@openchamber/ui/lib/api/files-errors';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
+import { getRuntimeUrlResolver } from '@openchamber/ui/lib/runtime-url';
+import { subscribeRuntimeEndpointChanged } from '@openchamber/ui/lib/runtime-switch';
+import {
+  acquireRuntimeUrlAuthToken,
+  subscribeRuntimeUrlAuthToken,
+} from '@openchamber/ui/lib/runtime-auth';
+import {
+  getFileTreePathIdentity,
+  isFileTreePathWithinRoot,
+  normalizeFileTreePath,
+} from '@openchamber/ui/lib/fileTreePath';
+import { z } from 'zod';
 
 const normalizePath = (path: string): string => path.replace(/\\/g, '/');
+const MAX_WATCHED_DIRECTORIES = 64;
+const MAX_WATCH_URL_LENGTH = 12_000;
+const WATCH_RECONNECT_BASE_MS = 1_000;
+const WATCH_RECONNECT_MAX_MS = 30_000;
+const WATCH_RECONNECT_INACTIVE_MS = 60_000;
+
+const collectWatchedDirectories = (workspaceDirectory: string, directories: string[]): string[] => {
+  const workspace = normalizeFileTreePath(workspaceDirectory);
+  const seen = new Set<string>();
+  const watched: string[] = [];
+
+  for (const value of directories) {
+    const directory = normalizeFileTreePath(value);
+    const key = getFileTreePathIdentity(directory);
+    if (!directory || seen.has(key)) continue;
+    if (!isFileTreePathWithinRoot(directory, workspace)) continue;
+    seen.add(key);
+    watched.push(directory);
+  }
+
+  return watched;
+};
+
+const fileChangeEnvelopeSchema = z.object({
+  type: z.literal('openchamber:files-changed'),
+  properties: z.object({
+    directory: z.string().min(1),
+  }),
+});
+const fileWatchReadyEnvelopeSchema = z.object({
+  type: z.literal('openchamber:files-watch-ready'),
+});
+
+const isFileWatchReadyEvent = (raw: string): boolean => {
+  try {
+    return fileWatchReadyEnvelopeSchema.safeParse(JSON.parse(raw)).success;
+  } catch {
+    return false;
+  }
+};
+
+const parseFileChangeEvent = (raw: string, watchedDirectoryKeys: Set<string>): FileChangeEvent | null => {
+  try {
+    const parsed = fileChangeEnvelopeSchema.safeParse(JSON.parse(raw));
+    if (!parsed.success) return null;
+    const directory = normalizeFileTreePath(parsed.data.properties.directory);
+    if (!directory || !watchedDirectoryKeys.has(getFileTreePathIdentity(directory))) return null;
+    return { directory };
+  } catch {
+    return null;
+  }
+};
+
+interface FileWatchUrlAuth {
+  acquire: () => () => void;
+  subscribe: (listener: () => void) => () => void;
+}
 
 interface WebFilesAPIOptions {
-  urls?: unknown;
+  urls?: RuntimeUrlResolver;
   getDirectory?: () => string | undefined;
+  watchUrlAuth?: FileWatchUrlAuth;
 }
+
+const defaultWatchUrlAuth: FileWatchUrlAuth = {
+  acquire: () => acquireRuntimeUrlAuthToken(),
+  subscribe: (listener: () => void) => subscribeRuntimeUrlAuthToken(listener),
+};
 
 type WebDirectoryEntry = {
   name?: string;
@@ -66,7 +144,11 @@ const directoryHeaders = (getDirectory?: () => string | undefined, override?: st
   return directory ? { 'x-opencode-directory': directory } : undefined;
 };
 
-export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAPI => ({
+export const createWebFilesAPI = ({
+  urls,
+  getDirectory,
+  watchUrlAuth = defaultWatchUrlAuth,
+}: WebFilesAPIOptions): FilesAPI => ({
   async listDirectory(path: string, options): Promise<DirectoryListResult> {
     const target = normalizePath(path);
     const params = new URLSearchParams();
@@ -98,6 +180,138 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
 
     const result = (await response.json()) as WebDirectoryListResponse;
     return toDirectoryListResult(target, result);
+  },
+
+  watchDirectories(workspaceDirectory, directories, handlers: FileWatchHandlers) {
+    const EventSourceConstructor = globalThis.EventSource;
+    if (!EventSourceConstructor) return null;
+    const workspace = normalizeFileTreePath(workspaceDirectory);
+    const watched = collectWatchedDirectories(workspace, directories);
+    if (!workspace || watched.length === 0 || watched.length > MAX_WATCHED_DIRECTORIES) return null;
+
+    const query = new URLSearchParams({
+      directory: workspace,
+      directories: JSON.stringify(watched),
+    });
+    const watchedDirectoryKeys = new Set(watched.map(getFileTreePathIdentity));
+    const resolveWatchUrl = () => (urls ?? getRuntimeUrlResolver()).sse('/api/fs/watch', query);
+    if (resolveWatchUrl().length > MAX_WATCH_URL_LENGTH) return null;
+    const releaseUrlAuth = watchUrlAuth.acquire();
+
+    let closed = false;
+    let failures = 0;
+    let source: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearReconnectTimer = () => {
+      if (!reconnectTimer) return;
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    };
+    const closeSource = () => {
+      source?.close();
+      source = null;
+    };
+    const isInactive = () => (
+      globalThis.document?.hidden === true
+      || globalThis.navigator?.onLine === false
+    );
+    const scheduleReconnect = () => {
+      if (closed || reconnectTimer) return;
+      const exponentialDelay = Math.min(
+        WATCH_RECONNECT_BASE_MS * (2 ** Math.min(failures, 5)),
+        WATCH_RECONNECT_MAX_MS,
+      );
+      const delay = isInactive()
+        ? Math.max(exponentialDelay, WATCH_RECONNECT_INACTIVE_MS)
+        : exponentialDelay;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, delay);
+    };
+    const connect = () => {
+      if (closed || source) return;
+      let watchUrl = '';
+      try {
+        watchUrl = resolveWatchUrl();
+      } catch {
+        failures += 1;
+        handlers.onError?.();
+        scheduleReconnect();
+        return;
+      }
+      if (watchUrl.length > MAX_WATCH_URL_LENGTH) {
+        failures += 1;
+        handlers.onError?.();
+        scheduleReconnect();
+        return;
+      }
+      let nextSource: EventSource;
+      try {
+        nextSource = new EventSourceConstructor(watchUrl);
+      } catch {
+        failures += 1;
+        handlers.onError?.();
+        scheduleReconnect();
+        return;
+      }
+      source = nextSource;
+      nextSource.onmessage = (message) => {
+        if (source !== nextSource || closed) return;
+        if (isFileWatchReadyEvent(message.data)) {
+          failures = 0;
+          handlers.onReady?.();
+          return;
+        }
+        const event = parseFileChangeEvent(message.data, watchedDirectoryKeys);
+        if (event) handlers.onChange(event);
+      };
+      nextSource.onerror = () => {
+        if (source !== nextSource || closed) return;
+        closeSource();
+        handlers.onError?.();
+        scheduleReconnect();
+        failures += 1;
+      };
+    };
+    const retryWhenActive = () => {
+      if (!reconnectTimer || isInactive()) return;
+      clearReconnectTimer();
+      connect();
+    };
+
+    globalThis.window?.addEventListener('online', retryWhenActive);
+    globalThis.document?.addEventListener('visibilitychange', retryWhenActive);
+    const unsubscribeRuntimeChange = subscribeRuntimeEndpointChanged(() => {
+      if (closed) return;
+      clearReconnectTimer();
+      closeSource();
+      failures = 0;
+      connect();
+    });
+    const unsubscribeUrlAuth = watchUrlAuth.subscribe(() => {
+      if (closed) return;
+      clearReconnectTimer();
+      closeSource();
+      failures = 0;
+      connect();
+    });
+    connect();
+
+    return {
+      close() {
+        if (closed) return;
+        closed = true;
+        clearReconnectTimer();
+        closeSource();
+        globalThis.window?.removeEventListener('online', retryWhenActive);
+        globalThis.document?.removeEventListener('visibilitychange', retryWhenActive);
+        unsubscribeRuntimeChange();
+        unsubscribeUrlAuth();
+        releaseUrlAuth();
+      },
+    };
   },
 
   async search(payload: FileSearchQuery): Promise<FileSearchResult[]> {
