@@ -289,11 +289,13 @@ jobs:
             arch: x64
             host_arch: x86_64
             artifact_arch: x86_64
+            deb_arch: amd64
             manifest: latest-linux.yml
           - runner: ubuntu-24.04-arm
             arch: arm64
             host_arch: aarch64
             artifact_arch: arm64
+            deb_arch: arm64
             manifest: latest-linux-arm64.yml
     runs-on: ${{ matrix.runner }}
     steps:
@@ -358,6 +360,7 @@ jobs:
           node ./scripts/package.mjs --linux --${{ matrix.arch }} --publish=never
           bun run verify:opencode-cli:packaged
           bun run verify:linux-appimage
+          bun run verify:linux-deb
 
       - name: Validate Linux update manifest
         working-directory: packages/electron
@@ -376,6 +379,7 @@ jobs:
           name: desktop-release-smoke-linux-${{ matrix.arch }}
           path: |
             packages/electron/dist/OpenChamber-${{ steps.versions.outputs.app }}-linux-${{ matrix.artifact_arch }}.AppImage
+            packages/electron/dist/openchamber_${{ steps.versions.outputs.app }}_${{ matrix.deb_arch }}.deb
             packages/electron/dist/${{ matrix.manifest }}
           if-no-files-found: error
           retention-days: ${{ fromJSON(inputs.retention_days) }}

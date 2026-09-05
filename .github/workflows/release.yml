@@ -376,11 +376,13 @@ jobs:
             arch: x64
             host_arch: x86_64
             artifact_arch: x86_64
+            deb_arch: amd64
             manifest: latest-linux.yml
           - runner: ubuntu-24.04-arm
             arch: arm64
             host_arch: aarch64
             artifact_arch: arm64
+            deb_arch: arm64
             manifest: latest-linux-arm64.yml
     runs-on: ${{ matrix.runner }}
     steps:
@@ -441,6 +443,7 @@ jobs:
           node ./scripts/package.mjs --linux --${{ matrix.arch }} --publish=never
           bun run verify:opencode-cli:packaged
           bun run verify:linux-appimage
+          bun run verify:linux-deb
 
       - name: Validate Linux update manifest
         working-directory: packages/electron
@@ -459,6 +462,7 @@ jobs:
           name: linux-release-${{ matrix.arch }}
           path: |
             packages/electron/dist/OpenChamber-${{ needs.create-release.outputs.version }}-linux-${{ matrix.artifact_arch }}.AppImage
+            packages/electron/dist/openchamber_${{ needs.create-release.outputs.version }}_${{ matrix.deb_arch }}.deb
             packages/electron/dist/${{ matrix.manifest }}
           if-no-files-found: error
           retention-days: 1
@@ -495,15 +499,17 @@ jobs:
             "artifacts/arm64/OpenChamber-${VERSION}-linux-arm64.AppImage" \
             "$VERSION"
 
-      - name: Upload Linux AppImages and manifests to release
+      - name: Upload Linux AppImages, deb packages, and manifests to release
         if: ${{ github.event.inputs.dry_run != 'true' }}
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ needs.create-release.outputs.version }}
           files: |
             artifacts/x64/OpenChamber-${{ needs.create-release.outputs.version }}-linux-x86_64.AppImage
+            artifacts/x64/openchamber_${{ needs.create-release.outputs.version }}_amd64.deb
             artifacts/x64/latest-linux.yml
             artifacts/arm64/OpenChamber-${{ needs.create-release.outputs.version }}-linux-arm64.AppImage
+            artifacts/arm64/openchamber_${{ needs.create-release.outputs.version }}_arm64.deb
             artifacts/arm64/latest-linux-arm64.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
