@@ -445,6 +445,9 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
 
     if (!script) throw new Error(`Unsupported browser action: ${action}`);
 
+    if (action === 'browser.click' || action === 'browser.type') {
+      webview.focus({ preventScroll: true });
+    }
     const result = await webview.executeJavaScript(script, true);
     if (!result || typeof result !== 'object') {
       throw new Error('The page returned no result');

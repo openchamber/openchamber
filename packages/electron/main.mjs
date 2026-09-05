@@ -32,7 +32,11 @@ import {
   setLinuxAutostartEnabled,
 } from './linux-autostart.mjs';
 import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.mjs';
-import { shouldAllowBrowserPanelCertificateError } from './browser-panel-security.mjs';
+import {
+  browserPanelPermissionAuditDetails,
+  shouldAllowBrowserPanelCertificateError,
+  shouldAllowBrowserPanelPermission,
+} from './browser-panel-security.mjs';
 import { createRelayDevTunnelBridge } from './relay-dev-tunnel.mjs';
 import { attachRendererRecovery } from './renderer-recovery.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
@@ -1204,17 +1208,32 @@ const hardenBrowserPanelSession = () => {
     callback(false);
   });
 
-  panelSession.setPermissionRequestHandler((_contents, permission, callback, details) => {
-    log.info('[electron] browser panel denied a permission request', {
+  panelSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+    const allowed = shouldAllowBrowserPanelPermission({
       permission,
-      origin: details?.requestingUrl || '',
+      requestingUrl: details?.requestingUrl || '',
+      isFocused: contents.isFocused(),
     });
+    if (allowed) {
+      callback(true);
+      return;
+    }
+    log.info('[electron] browser panel denied a permission request', browserPanelPermissionAuditDetails({
+      permission,
+      requestingUrl: details?.requestingUrl || '',
+    }));
     callback(false);
   });
 
   // Asked before some features even request; answering here keeps a page from
   // reporting a capability it would then be denied.
-  panelSession.setPermissionCheckHandler(() => false);
+  panelSession.setPermissionCheckHandler((contents, permission, requestingOrigin) => (
+    shouldAllowBrowserPanelPermission({
+      permission,
+      requestingUrl: requestingOrigin,
+      isFocused: contents?.isFocused() === true,
+    })
+  ));
 
   // Serial, HID and USB device pickers.
   panelSession.setDevicePermissionHandler(() => false);
