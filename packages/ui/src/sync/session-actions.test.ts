@@ -21,6 +21,8 @@ let sessionDeleteError: unknown | null = null
 let beforeSessionUpdateResolve: ((sessionId: string) => void) | null = null
 let beforeSessionDeleteResolve: ((sessionId: string) => void) | null = null
 let beforeControlPlaneMoveResolve: ((sessionId: string) => void) | null = null
+let globalHasLoaded = true
+const deletedChatDirectories: string[] = []
 const globalUpsertedSessions: unknown[] = []
 const globalUpsertedSessionBatches: Session[][] = []
 const globalRemovedSessionIds: string[] = []
@@ -153,6 +155,9 @@ const mockSdk = {
 }
 
 // Mock opencodeClient singleton
+// SAFETY: the actions under test touch only the SDK surface mocked above.
+const actionSdk = mockSdk as unknown as OpencodeClient
+
 mock.module("@/lib/opencode/client", () => ({
   opencodeClient: {
     getScopedSdkClient: (directory: string) => {
@@ -285,6 +290,7 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
     getState: () => ({
       activeSessions: globalActiveSessions,
       archivedSessions: globalArchivedSessions,
+      hasLoaded: globalHasLoaded,
       upsertSession: (session: unknown) => {
         globalUpsertedSessions.push(session)
       },
@@ -383,7 +389,9 @@ mock.module("./send-failure-classification", () => ({
 }))
 
 mock.module("@/lib/chatDirectories", () => ({
-  deleteChatDirectory: async () => {},
+  deleteChatDirectory: async (directory: string) => {
+    deletedChatDirectories.push(directory)
+  },
 }))
 
 mock.module("./session-deletion-cleanup", () => ({
@@ -549,6 +557,8 @@ describe("confirmed session removal", () => {
     archiveBatchRequests.length = 0
     archiveBatchResponse = { status: 404, body: { error: 'not found' } }
     beforeControlPlaneMoveResolve = null
+    globalHasLoaded = true
+    deletedChatDirectories.length = 0
   })
 
   test("does not remove live or persisted state when delete fails", async () => {
@@ -681,6 +691,58 @@ describe("confirmed session removal", () => {
     expect(globalRemovedSessionIds).toEqual(["session-a"])
     expect(replyCalls.filter((call) => call.method === "session.delete").map((call) => call.params.sessionID))
       .toEqual(["session-a", "session-b"])
+  })
+
+  const chatDirectory = "/home/user/.config/openchamber/chats/2026-09-05/session-abc"
+  const chatSession = (id: string, parentID?: string): Session => ({
+    id,
+    slug: id,
+    projectID: "project-chats",
+    directory: chatDirectory,
+    title: id,
+    version: "1",
+    time: { created: 1, updated: 1 },
+    parentID,
+  })
+
+  test("keeps a shared chat directory while another root session still uses it", async () => {
+    const root = chatSession("chat-root")
+    const fork = chatSession("chat-fork")
+    globalActiveSessions = [root, fork]
+    const source = createStore({}, { session: [root, fork] })
+    const { deleteSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(actionSdk, createChildStores([[chatDirectory, source]]), () => chatDirectory)
+
+    expect(await deleteSession("chat-root")).toBe(true)
+    expect(deletedChatDirectories).toEqual([])
+
+    globalActiveSessions = [fork]
+    expect(await deleteSession("chat-fork")).toBe(true)
+    expect(deletedChatDirectories).toEqual([chatDirectory])
+  })
+
+  test("removes the chat directory with its last root even though the root's own subagents share it", async () => {
+    const root = chatSession("chat-root")
+    const subagent = chatSession("chat-subagent", "chat-root")
+    globalActiveSessions = [root, subagent]
+    const source = createStore({}, { session: [root, subagent] })
+    const { deleteSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(actionSdk, createChildStores([[chatDirectory, source]]), () => chatDirectory)
+
+    expect(await deleteSession("chat-root")).toBe(true)
+    expect(deletedChatDirectories).toEqual([chatDirectory])
+  })
+
+  test("keeps the chat directory when the global cache cannot prove it is unused", async () => {
+    const root = chatSession("chat-root")
+    globalActiveSessions = [root]
+    globalHasLoaded = false
+    const source = createStore({}, { session: [root] })
+    const { deleteSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(actionSdk, createChildStores([[chatDirectory, source]]), () => chatDirectory)
+
+    expect(await deleteSession("chat-root")).toBe(true)
+    expect(deletedChatDirectories).toEqual([])
   })
 
   test("does not archive locally until the server returns the archived session", async () => {
@@ -959,6 +1021,8 @@ describe("session restore (unarchive)", () => {
     sessionUpdateResult = {}
     beforeSessionUpdateResolve = null
     beforeControlPlaneMoveResolve = null
+    globalHasLoaded = true
+    deletedChatDirectories.length = 0
   })
 
   test("does not restore locally until the server returns the restored session", async () => {
