@@ -58,7 +58,7 @@ const createOpenCode = () => {
   return { state, fetchImpl };
 };
 
-const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs } = {}) => {
+const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, now } = {}) => {
   let eventHandler = () => {};
   let statusHandler = () => {};
   const broadcasts = [];
@@ -79,6 +79,7 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
     abortHoldMs: 50,
   };
   if (retryDelayMs) options.retryDelayMs = retryDelayMs;
+  if (now) options.now = now;
   const runtime = createMessageQueueRuntime(options);
   return {
     runtime,
@@ -175,9 +176,10 @@ describe('message queue runtime', () => {
   });
 
   it('does not send into a running turn even when the status event says idle', async () => {
-    const { runtime, openCode, emit } = createRuntime();
+    const { runtime, openCode, emit } = createRuntime({ now: () => 10_000 });
     runtime.start();
-    openCode.state.tail = [{ info: { role: 'assistant', time: { created: 1 } } }];
+    // Live unfinished turn: created after this runtime started.
+    openCode.state.tail = [{ info: { role: 'assistant', time: { created: 10_001 } } }];
     await runtime.enqueue(SESSION, DIRECTORY, item());
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle();
@@ -185,10 +187,24 @@ describe('message queue runtime', () => {
 
     // The reply completes: that alone drains the queue (a missed idle event
     // must not strand it).
-    openCode.state.tail = [{ info: { role: 'assistant', time: { created: 1, completed: 2 } } }];
-    emit({ type: 'message.updated', properties: { info: { role: 'assistant', sessionID: SESSION, time: { created: 1, completed: 2 } } } });
+    openCode.state.tail = [{ info: { role: 'assistant', time: { created: 10_001, completed: 10_002 } } }];
+    emit({ type: 'message.updated', properties: { info: { role: 'assistant', sessionID: SESSION, time: { created: 10_001, completed: 10_002 } } } });
     await settle();
     expect(openCode.state.sent).toHaveLength(1);
+  });
+
+  it('delivers past an unfinished tail that predates this runtime (dead pre-restart run)', async () => {
+    const { runtime, openCode, emit } = createRuntime({ now: () => 10_000 });
+    runtime.start();
+    // Assistant reply interrupted by a server restart: unfinished, but older
+    // than this runtime — no completion event will ever arrive for it, so it
+    // must not block a restored queue forever.
+    openCode.state.tail = [{ info: { role: 'assistant', time: { created: 1 } } }];
+    await runtime.enqueue(SESSION, DIRECTORY, item());
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+    expect(openCode.state.sent).toHaveLength(1);
+    expect(openCode.state.sent[0].path).toBe(`/session/${SESSION}/prompt_async`);
   });
 
   it('treats an unreachable OpenCode as unknown, not idle', async () => {
