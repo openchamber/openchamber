@@ -27,6 +27,8 @@ import fields_of_the_shire_dark_Raw from './fields-of-the-shire-dark.json';
 import fields_of_the_shire_light_Raw from './fields-of-the-shire-light.json';
 import onedarkpro_dark_Raw from './onedarkpro-dark.json';
 import onedarkpro_light_Raw from './onedarkpro-light.json';
+import opencode_dark_Raw from './opencode-dark.json';
+import opencode_light_Raw from './opencode-light.json';
 import solarized_dark_Raw from './solarized-dark.json';
 import solarized_light_Raw from './solarized-light.json';
 import tokyonight_dark_Raw from './tokyonight-dark.json';
@@ -67,6 +69,8 @@ export const presetThemes: Theme[] = [
   nord_light_Raw as Theme,
   onedarkpro_dark_Raw as Theme,
   onedarkpro_light_Raw as Theme,
+  opencode_dark_Raw as Theme,
+  opencode_light_Raw as Theme,
   solarized_dark_Raw as Theme,
   solarized_light_Raw as Theme,
   tokyonight_dark_Raw as Theme,
