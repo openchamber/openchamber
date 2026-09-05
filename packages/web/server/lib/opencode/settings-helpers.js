@@ -519,6 +519,12 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.inputSpellcheckEnabled === 'boolean') {
       result.inputSpellcheckEnabled = candidate.inputSpellcheckEnabled;
     }
+    if (candidate.enterToSend === true || candidate.enterToSend === false) {
+      result.enterToSend = candidate.enterToSend;
+    }
+    if (candidate.enterToSendConfigured === true || candidate.enterToSendConfigured === false) {
+      result.enterToSendConfigured = candidate.enterToSendConfigured;
+    }
     if (typeof candidate.showOpenCodeUpdateNotifications === 'boolean') {
       result.showOpenCodeUpdateNotifications = candidate.showOpenCodeUpdateNotifications;
     }

@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { BUILT_IN_SKILL_LOCATION, type DiscoveredSkill, type SkillScope, type SkillSource } from './opencodeConfig';
 import type { BridgeContext } from './bridge';
+import { enterSettingsSchema } from './settings-changes';
 
 const SETTINGS_KEY = 'openchamber.settings';
 const OPENCHAMBER_SHARED_SETTINGS_PATH = path.join(os.homedir(), '.config', 'openchamber', 'settings.json');
@@ -292,6 +293,14 @@ export const readSettings = (ctx?: BridgeContext): Record<string, unknown> => {
 export const persistSettings = async (changes: Record<string, unknown>, ctx?: BridgeContext): Promise<Record<string, unknown>> => {
   const current = readSettings(ctx);
   const restChanges = stripDerived({ ...(changes || {}) });
+  const enterSettings = enterSettingsSchema.parse(restChanges);
+  for (const key of ['enterToSend', 'enterToSendConfigured'] as const) {
+    if (enterSettings[key] === undefined) {
+      delete restChanges[key];
+    } else {
+      restChanges[key] = enterSettings[key];
+    }
+  }
 
   const keysToClear = new Set<string>();
 

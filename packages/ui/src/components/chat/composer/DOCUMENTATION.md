@@ -218,3 +218,18 @@ on the strength of type-check and unit tests.
 
 Run tests per file (`bun test <path>`): `mock.module` is process-global, so
 suites that install module mocks are order-dependent.
+
+## Enter preference
+
+`keyboardPolicy.ts` owns the submission decision. Until the Chat setting is
+changed, desktop Enter sends, mobile and focus mode require Ctrl/Cmd+Enter,
+and Shift-modified Enter does not send. An explicit choice applies across
+shared composers; Ctrl/Cmd+Enter sends in either configured mode.
+
+CodeMirror's deferred mobile Enter loses modifier information. Untouched
+settings restore Shift to keep the original policy. Once configured, with mobile
+autocapitalization enabled, the editor cannot distinguish its Shift flag from
+an intentional Shift press and does not restore Shift. Consequently, deferred
+Shift+Enter can send when Enter-to-send is enabled and cannot serve as the send
+shortcut when it is disabled. Ctrl/Cmd+Enter remains the supported modified
+send shortcut on this path.

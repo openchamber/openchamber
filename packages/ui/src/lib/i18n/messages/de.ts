@@ -2105,6 +2105,8 @@ export const dict = {
   'chat.chatInput.actions.linkGithubPr': 'GitHub-PR verknüpfen',
   'chat.chatInput.actions.modelAgentSettings': 'Modell- und Agenteneinstellungen',
   'chat.chatInput.actions.sendMessageAria': 'Nachricht senden',
+  'chat.chatInput.actions.enterToSend': 'Enter sendet',
+  'chat.chatInput.actions.enterToSendHint': 'Nach der Änderung steuern Enter und Shift+Enter das Verhalten auf jeder Oberfläche. Bis dahin behält jede Oberfläche ihr bestehendes Verhalten bei.',
   'chat.chatInput.actions.queueMessageAria': 'Nachricht in die Warteschlange stellen',
   'chat.chatInput.actions.stopGeneratingAria': 'Generierung stoppen',
   'chat.chatInput.focusMode.toggleAria': 'Fokusmodus umschalten',

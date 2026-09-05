@@ -2318,6 +2318,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.linkGithubPr': 'GitHub PRをリンク',
   'chat.chatInput.actions.modelAgentSettings': 'モデルとエージェント設定',
   'chat.chatInput.actions.sendMessageAria': 'メッセージを送信',
+  'chat.chatInput.actions.enterToSend': 'Enterで送信',
+  'chat.chatInput.actions.enterToSendHint': '変更すると、すべての環境でEnterとShift+Enterの動作を制御します。変更するまでは、各環境の既存の動作が維持されます。',
   'chat.chatInput.actions.queueMessageAria': 'メッセージをキュー',
   'chat.chatInput.actions.stopGeneratingAria': '生成を停止',
   'chat.chatInput.focusMode.toggleAria': 'フォーカスモードの切り替え',

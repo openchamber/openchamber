@@ -261,6 +261,16 @@ describe('updateDesktopSettings', () => {
     }
   });
 
+  test('applies enterToSendConfigured when it arrives without enterToSend', async () => {
+    useUIStore.setState({ enterToSend: false, enterToSendConfigured: false });
+    registerSettingsSave(async () => ({ enterToSendConfigured: true }));
+
+    await updateDesktopSettings({ enterToSendConfigured: true });
+
+    expect(useUIStore.getState().enterToSend).toBe(false);
+    expect(useUIStore.getState().enterToSendConfigured).toBe(true);
+  });
+
   test('reports an error without applying a malformed fallback settings response', async () => {
     const previousFetch = globalThis.fetch;
     const fallbackFetch: typeof fetch = async () => new Response(JSON.stringify('ok'), {

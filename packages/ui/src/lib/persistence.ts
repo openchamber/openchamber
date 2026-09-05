@@ -574,6 +574,8 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     summaryLength: defaults.summaryLength,
     maxLastMessageLength: defaults.maxLastMessageLength,
     inputSpellcheckEnabled: defaults.inputSpellcheckEnabled,
+    enterToSend: defaults.enterToSend,
+    enterToSendConfigured: defaults.enterToSendConfigured,
     showOpenCodeUpdateNotifications: defaults.showOpenCodeUpdateNotifications,
     agentControlToolEnabled: defaults.agentControlToolEnabled,
     agentWebToolEnabled: defaults.agentWebToolEnabled,
@@ -744,6 +746,16 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.inputSpellcheckEnabled === 'boolean' && settings.inputSpellcheckEnabled !== store.inputSpellcheckEnabled) {
     store.setInputSpellcheckEnabled(settings.inputSpellcheckEnabled);
+  }
+  if (settings.enterToSend === true || settings.enterToSend === false) {
+    if (settings.enterToSend !== store.enterToSend) {
+      store.setEnterToSend(settings.enterToSend);
+    }
+  }
+  if (settings.enterToSendConfigured === true || settings.enterToSendConfigured === false) {
+    if (settings.enterToSendConfigured !== store.enterToSendConfigured) {
+      store.setEnterToSendConfigured(settings.enterToSendConfigured);
+    }
   }
   if (
     typeof settings.showOpenCodeUpdateNotifications === 'boolean'
@@ -1456,6 +1468,12 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
 
   if (typeof candidate.inputSpellcheckEnabled === 'boolean') {
     result.inputSpellcheckEnabled = candidate.inputSpellcheckEnabled;
+  }
+  if (candidate.enterToSend === true || candidate.enterToSend === false) {
+    result.enterToSend = candidate.enterToSend;
+  }
+  if (candidate.enterToSendConfigured === true || candidate.enterToSendConfigured === false) {
+    result.enterToSendConfigured = candidate.enterToSendConfigured;
   }
   if (typeof candidate.showOpenCodeUpdateNotifications === 'boolean') {
     result.showOpenCodeUpdateNotifications = candidate.showOpenCodeUpdateNotifications;

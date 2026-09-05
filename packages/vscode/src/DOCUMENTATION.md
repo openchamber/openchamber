@@ -66,6 +66,7 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 
 - `bridge-settings-runtime.ts`
   - Settings read/write and OpenCode skills discovery via API for bridge consumers.
+  - `settings-changes.ts` validates Enter preferences independently before writes; invalid values are omitted without dropping unrelated changes.
 
 - `bridge-system-runtime.ts`
   - System/editor/provider/quota/notification/update-check message handlers.

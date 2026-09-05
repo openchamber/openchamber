@@ -51,6 +51,7 @@ import { ModelControls } from './ModelControls';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
 import { CONTEXT_METADATA_KEY, draftFromContextPayload } from '@/lib/messages/contextParts';
 import { ComposerStatusBar } from './ComposerStatusBar';
+import { shouldSubmitEnter } from './composer/keyboardPolicy';
 import { PendingChangesBar } from './PendingChangesBar';
 import { useChatColumnSession } from './chatColumnSession';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
@@ -490,6 +491,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const agents = getVisibleAgents();
     const isMobile = useUIStore((state) => state.isMobile);
     const hasHardwareKeyboard = useHardwareKeyboard();
+    const enterToSend = useUIStore((state) => state.enterToSend);
+    const enterToSendConfigured = useUIStore((state) => state.enterToSendConfigured);
     const { enabled: isTabletLayout } = useTabletLayout();
     const setImagePreviewOpen = useUIStore((state) => state.setImagePreviewOpen);
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
@@ -1924,15 +1927,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
 
-        // Handle Enter/Ctrl+Enter based on selected follow-up behavior. On
-        // mobile, and in desktop focus mode, plain Enter writes a newline and
-        // only Cmd/Ctrl+Enter sends: both are surfaces for composing long
-        // prompts, where an accidental send costs more than an extra keypress.
-        const requiresModifierToSend = isMobile || isDesktopExpanded;
-        if (e.key === 'Enter' && !e.shiftKey && (!requiresModifierToSend || e.ctrlKey || e.metaKey)) {
+        // Preserve each surface's existing default until the user changes the
+        // setting. Once configured, the choice applies consistently everywhere.
+        const isCtrlEnter = e.ctrlKey || e.metaKey;
+        if (e.key === 'Enter' && shouldSubmitEnter({
+            isMobile,
+            isDesktopExpanded,
+            enterToSend,
+            enterToSendConfigured,
+            shiftKey: e.shiftKey,
+            ctrlKey: e.ctrlKey,
+            metaKey: e.metaKey,
+        })) {
             e.preventDefault();
-
-            const isCtrlEnter = e.ctrlKey || e.metaKey;
 
             // Queueing / steering only works when there's an existing busy
             // session (or an active auto-review run).
@@ -3248,6 +3255,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                                 editable={Boolean(currentSessionId || newSessionDraftOpen)}
                                 autoCorrect={composerAutoCorrect({ isMobile })}
                                 autoCapitalize={isMobile ? 'sentences' : 'none'}
+                                preserveDeferredEnterShift={!enterToSendConfigured || !isMobile}
                                 spellCheck={isMobile || inputSpellcheckEnabled}
                                 fillContainer={isComposerExpanded}
                                 maxLines={isMobile ? MAX_MOBILE_COMPOSER_LINES : MAX_VISIBLE_COMPOSER_LINES}

@@ -210,6 +210,7 @@ const ChatSectionContent: React.FC = () => {
                 'persistDraft',
                 'inputSpellcheck',
                 'largeTextPaste',
+                'enterToSend',
             ]}
         />
     );

@@ -368,6 +368,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['paste', 'clipboard', 'attachment', 'large', 'text', 'file'],
   },
   {
+    id: 'chat.enter-to-send',
+    page: 'chat',
+    titleKey: 'chat.chatInput.actions.enterToSend',
+    keywords: ['enter', 'shift enter', 'send', 'newline'],
+  },
+  {
     id: 'sessions.default-model',
     page: 'sessions',
     titleKey: 'settings.openchamber.defaults.field.defaultModel',
