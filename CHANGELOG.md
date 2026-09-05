@@ -86,6 +86,7 @@ All notable changes to this project will be documented in this file.
 - VS Code: the extension starts in the current workspace folder instead of one restored from storage (thanks to @makeittech).
 - Themes: custom themes loaded through symlinks now work (thanks to @divyam234).
 - Debug: the debug panel (Ctrl/Cmd+Shift+D) has a Requests tab showing in-flight requests and their age over the last five minutes (thanks to @tomzx).
+- Sessions: a session that stops without an error — an empty completion or a serve process that died mid-stream — is now retried via the same provider, capped at 2 attempts; if those fail too, the chat ends with an honest recap explaining what happened and what to try next (thanks to @herjarsa).
 - Reliability: switching sessions quickly no longer saves the wrong scroll position, and the log no longer fills with worktree warnings for non-Git folders (thanks to @herjarsa); startup cleanup of leftover processes no longer blocks the server on Windows (thanks to @bashrusakh).
 
 ## [1.21.0] - 2026-08-26

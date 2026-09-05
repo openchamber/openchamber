@@ -109,14 +109,28 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     reapManagedOrphanedProcesses = reapOrphanedProcesses,
     getWarmupDirectories = async () => [],
     onOpenCodeRestarted = null,
+    // Fired (best-effort, never awaited by the lifecycle) after the OpenCode
+    // server comes up — both the initial bootstrap and every restart. Used by
+    // session-assist to recover sessions stranded by a serve restart.
+    onOpenCodeReady = null,
     now = Date.now,
   } = deps;
+
+  // Best-effort notification that the OpenCode server is (re)started. Never
+  // awaited: a slow or failing consumer (e.g. the session-assist startup
+  // recovery scan) must not delay or break the lifecycle.
+  const notifyOpenCodeReady = () => {
+    if (typeof onOpenCodeReady !== 'function') return;
+    Promise.resolve(onOpenCodeReady()).catch((error) => {
+      console.warn(`[lifecycle] onOpenCodeReady hook failed: ${error?.message || error}`);
+    });
+  };
 
   const killProcessOnPortWin32 = (port) => {
     try {
       // Get-NetTCPConnection reads the same locale-independent WinNT API
       // netstat's display layer translates (e.g. "LISTENING" renders as
-      // "ABHÖREN"/"ÉCOUTE"/"ESCUTANDO" on non-English Windows), so this
+      // "ABH├ûREN"/"├ëCOUTE"/"ESCUTANDO" on non-English Windows), so this
       // works regardless of the OS display language.
       const result = spawnSync(
         'powershell',
@@ -911,6 +925,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     try {
       await state.currentRestartPromise;
+      notifyOpenCodeReady();
     } catch (error) {
       console.error(`Failed to restart OpenCode: ${error.message}`);
       state.lastOpenCodeError = error.message;
@@ -1138,6 +1153,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       },
     );
     if (!bootstrapError) {
+      notifyOpenCodeReady();
       void warmOpenCodeDirectories();
     }
   };
