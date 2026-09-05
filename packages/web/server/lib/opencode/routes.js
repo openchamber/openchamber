@@ -7,6 +7,7 @@ import {
 } from './config-mutation-response.js';
 import { getClaudeCliAuthStatus } from './claude-cli-auth.js';
 import { OPENCODE_CONFIG_DIR } from './shared.js';
+import { getPathMapping } from './path-mapping.js';
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
@@ -568,7 +569,7 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
 
     try {
       const callbackUrl = new URL(buildOpenCodeUrl(`/mcp/${encodeURIComponent(context.name)}/auth/callback`, ''));
-      if (context.directory) callbackUrl.searchParams.set('directory', context.directory);
+      if (context.directory) callbackUrl.searchParams.set('directory', getPathMapping().toRemote(context.directory));
       const upstream = await fetch(callbackUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...getOpenCodeAuthHeaders() },

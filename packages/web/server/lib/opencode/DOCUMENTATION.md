@@ -13,7 +13,8 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/lifecycle.js`: OpenCode process lifecycle runtime (startup, restart, readiness, health monitoring). After readiness it warms the most recently used directories (`getWarmupDirectories` dep, sequential and best-effort) because OpenCode initializes each directory lazily on first request and that cost would otherwise be paid by the user's first interactive session open.
 - `packages/web/server/lib/opencode/provider-env-aliases.js`: mirrors known provider credential env aliases into the managed OpenCode process environment (for example `GEMINI_API_KEY` → `GOOGLE_GENERATIVE_AI_API_KEY`) so OpenCode connection detection and the upstream AI SDK agree on the same key names. Canonical implementation shared by web lifecycle and the VS Code managed spawn path (`packages/vscode/src/provider-env-aliases.ts` re-exports this module).
 - `packages/web/server/lib/opencode/env-runtime.js`: OpenCode CLI/binary resolution and shell environment runtime.
-- `packages/web/server/lib/opencode/env-config.js`: OpenCode-related environment variable parsing and validation (host/port/hostname).
+- `packages/web/server/lib/opencode/env-config.js`: OpenCode-related environment variable parsing and validation (host/port/hostname, plus the `OPENCODE_PATH_MAP` host↔remote path mapping).
+- `packages/web/server/lib/opencode/path-mapping.js`: host↔remote path translation for external OpenCode servers in another filesystem namespace (Docker). Parses `OPENCODE_PATH_MAP` and exposes the process-wide translator used by every OpenCode-bound directory hint.
 - `packages/web/server/lib/opencode/hmr-state-runtime.js`: HMR-persistent runtime state initialization, auth-state bootstrap, and HMR sync helpers.
 - `packages/web/server/lib/opencode/bootstrap-runtime.js`: base app bootstrap runtime for status/auth/tts/notification/OpenChamber route wiring.
 - `packages/web/server/lib/opencode/network-runtime.js`: OpenCode URL construction, health-probe readiness checks, and API prefix runtime.
@@ -177,6 +178,14 @@ Managed health failures are classified as `timeout`, `connection_refused`, `conn
   - `configuredOpenCodeHost`
   - `effectivePort`
   - `configuredOpenCodeHostname`
+  - `pathMappingRules` — validated rules parsed from `OPENCODE_PATH_MAP` (diagnostics mirror of what `path-mapping.js` uses at runtime)
+
+## Public exports (path-mapping.js)
+- `parsePathMappingRules(raw, options?)`: parses `OPENCODE_PATH_MAP` (`HOST=REMOTE` pairs separated by `;`) into validated, longest-prefix-sorted rules. Invalid pairs are skipped with a warning; one bad pair never disables the rest.
+- `createPathMapping({ rules, platform? })`: bidirectional translator. `toRemote(hostPath)` maps host paths to the remote spelling; `toHost(remotePath)` restores the host view. Values outside every prefix pass through untouched, so callers never branch on `enabled`.
+- `getPathMapping()`: process-wide translator, built lazily from `OPENCODE_PATH_MAP`. Disabled (identity) when the variable is unset.
+- `setActivePathMapping(mapping)`: test/composition injection that overrides the process-wide mapping.
+- Contract: with a mapping configured, every OpenCode-bound directory hint carries the remote spelling — proxy headers and `directory` query params, the openchamber-sessions dispatch, scheduled-task runs, session goals (create + runtime loop), the message-queue flush, session-assist, context-obligatory, agent-memory, permission auto-accept, markdown image grants, the directory event WS bridge, MCP OAuth callbacks, post-readiness directory warmup, and openchamber-control SDK calls — while session-list responses and everything user-facing keep host paths. OpenCode-origin paths that fall outside every rule pass through unchanged.
 
 ## Public exports (hmr-state-runtime.js)
 - `createHmrStateRuntime(dependencies)`: creates runtime for HMR state container initialization and runtime<->HMR state synchronization.

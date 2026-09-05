@@ -14,6 +14,8 @@
 import fs from 'fs';
 import path from 'path';
 
+import { getPathMapping } from '../opencode/path-mapping.js';
+
 const QUEUE_FILE_NAME = 'message-queue.json';
 const QUEUE_FILE_VERSION = 1;
 
@@ -346,7 +348,7 @@ export function createMessageQueueRuntime({
   const openCodeFetch = async (fetchPath, { directory, method = 'GET', body, query } = {}) => {
     const base = buildOpenCodeUrl(fetchPath, '');
     const params = new URLSearchParams(query || {});
-    if (directory) params.set('directory', directory);
+    if (directory) params.set('directory', getPathMapping().toRemote(directory));
     const search = params.toString();
     const headers = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
     const init = { method, headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) };

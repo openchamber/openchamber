@@ -4,6 +4,7 @@ import { stripAppImageArgv0Leak } from '../inherited-env.js';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
 import { applyProviderEnvAliases } from './provider-env-aliases.js';
 import { recordStartupPerformance } from './startup-performance.js';
+import { getPathMapping } from './path-mapping.js';
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
@@ -1167,7 +1168,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       try {
         const controller = new AbortController();
         timeout = setTimeout(() => controller.abort(), WARMUP_REQUEST_TIMEOUT_MS);
-        const url = `${buildOpenCodeUrl('/session/status', '')}?directory=${encodeURIComponent(directory)}`;
+        const url = `${buildOpenCodeUrl('/session/status', '')}?directory=${encodeURIComponent(getPathMapping().toRemote(directory))}`;
         await fetch(url, {
           method: 'GET',
           headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },

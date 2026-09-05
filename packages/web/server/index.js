@@ -49,6 +49,7 @@ import {
 import { createFsSearchRuntime as createFsSearchRuntimeFactory } from './lib/fs/search.js';
 import { createOpenCodeLifecycleRuntime } from './lib/opencode/lifecycle.js';
 import { createOpenCodeEnvRuntime } from './lib/opencode/env-runtime.js';
+import { getPathMapping } from './lib/opencode/path-mapping.js';
 import { resolveOpenCodeEnvConfig } from './lib/opencode/env-config.js';
 import { createHmrStateRuntime } from './lib/opencode/hmr-state-runtime.js';
 import { createOpenCodeNetworkRuntime } from './lib/opencode/network-runtime.js';
@@ -837,7 +838,7 @@ const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
   isAgentMemoryEnabled,
   openCodeFetch: async (fetchPath, { directory, method = 'GET', body } = {}) => {
     const params = new URLSearchParams();
-    if (directory) params.set('directory', directory);
+    if (directory) params.set('directory', getPathMapping().toRemote(directory));
     const search = params.toString();
     const response = await fetch(`${buildOpenCodeUrl(fetchPath, '')}${search ? `?${search}` : ''}`, {
       method,

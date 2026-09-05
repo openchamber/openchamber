@@ -1,6 +1,7 @@
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { buildDeferredRestartResponse } from './config-mutation-response.js';
 import { OPENCODE_CONFIG_DIR } from './shared.js';
+import { getPathMapping } from './path-mapping.js';
 
 /**
  * Matches how OpenCode reads its own boolean env flags: any value other than
@@ -131,15 +132,16 @@ export const registerSkillRoutes = (app, dependencies) => {
     }
 
     try {
+      const upstreamDirectory = getPathMapping().toRemote(workingDirectory);
       const client = createOpencodeClient({
         baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''),
-        directory: workingDirectory || undefined,
+        directory: upstreamDirectory || undefined,
         headers: getOpenCodeAuthHeaders(),
         fetch: (request) => fetch(request, { signal: AbortSignal.timeout(8_000) }),
       });
 
       const response = await client.app.skills(
-        workingDirectory ? { directory: workingDirectory } : undefined,
+        workingDirectory ? { directory: upstreamDirectory } : undefined,
       );
       const payload = response?.data;
       if (!Array.isArray(payload)) {

@@ -2,6 +2,7 @@ import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { DateTime } from 'luxon';
 import parser from 'cron-parser';
 import { expandSnippets } from '../opencode/snippets.js';
+import { getPathMapping } from '../opencode/path-mapping.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { discoverLoops } from './loops.js';
 
@@ -483,7 +484,7 @@ export const createScheduledTasksRuntime = (deps) => {
       : { text: '', signature: '' };
 
     const promptUrl = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}/prompt_async`);
-    promptUrl.searchParams.set('directory', projectPath);
+    promptUrl.searchParams.set('directory', getPathMapping().toRemote(projectPath));
     const response = await fetch(promptUrl.toString(), {
       method: 'POST',
       headers: {
@@ -515,7 +516,7 @@ export const createScheduledTasksRuntime = (deps) => {
 
     let commands = [];
     try {
-      const response = await client.command.list({ directory: projectPath });
+      const response = await client.command.list({ directory: getPathMapping().toRemote(projectPath) });
       commands = Array.isArray(response?.data) ? response.data : [];
     } catch {
       return null;
@@ -528,7 +529,7 @@ export const createScheduledTasksRuntime = (deps) => {
   const runScheduledCommand = async ({ client, projectPath, sessionID, task, command }) => {
     await client.session.command({
       sessionID,
-      directory: projectPath,
+      directory: getPathMapping().toRemote(projectPath),
       command: command.command,
       arguments: command.arguments,
       ...(task.execution.agent ? { agent: task.execution.agent } : {}),
@@ -558,7 +559,7 @@ export const createScheduledTasksRuntime = (deps) => {
     });
 
     const sessionResponse = await client.session.create({
-      directory: projectPath,
+      directory: getPathMapping().toRemote(projectPath),
       title,
     });
     const sessionID = sessionResponse?.data?.id;

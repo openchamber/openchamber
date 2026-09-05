@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createContextObligatoryRuntime } from './runtime.js';
+import { createPathMapping, setActivePathMapping } from '../opencode/path-mapping.js';
 
 const json = (body) => new Response(JSON.stringify(body), {
   status: 200,
@@ -186,6 +187,35 @@ describe('context obligatory runtime', () => {
     });
     await runtime.processPayload({ type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'idle' } } });
     expect(fetchImpl).not.toHaveBeenCalled();
+    runtime.stop();
+  });
+
+  it('translates mapped directories in OpenCode requests', async () => {
+    setActivePathMapping(createPathMapping({
+      platform: 'linux',
+      rules: [{ hostPrefix: '/repo', remotePrefix: '/workspace', compareKey: '/repo' }],
+    }));
+    const requests = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const url = new URL(typeof input === 'string' ? input : input.url);
+      requests.push({ path: url.pathname, search: url.search, method: init.method ?? 'GET' });
+      if (url.pathname === '/session/ses_1' && init.method === 'PATCH') return json({});
+      if (url.pathname === '/session/ses_1') return json({ id: 'ses_1', metadata: {} });
+      throw new Error(`Unexpected ${url.pathname}`);
+    }));
+    const runtime = createContextObligatoryRuntime({
+      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+    });
+
+    await runtime.processPayload({ type: 'session.compacted', properties: { sessionID: 'ses_1', directory: '/repo/app' } });
+
+    const fetches = requests.filter((request) => request.path === '/session/ses_1' && request.method === 'GET');
+    expect(fetches.length).toBeGreaterThan(0);
+    for (const fetchRequest of fetches) {
+      expect(fetchRequest.search).toContain('directory=%2Fworkspace%2Fapp');
+    }
+    setActivePathMapping(null);
     runtime.stop();
   });
 });

@@ -19,6 +19,7 @@ import os from 'os';
 import path from 'path';
 
 import { GOAL_OBJECTIVE_CHAR_LIMIT, readObjective } from './objectives.js';
+import { getPathMapping } from '../opencode/path-mapping.js';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -320,7 +321,7 @@ export const createSessionGoalRuntime = ({
   const openCodeFetch = async (fetchPath, { directory, method = 'GET', body, query } = {}) => {
     const base = buildOpenCodeUrl(fetchPath, '');
     const params = new URLSearchParams(query || {});
-    if (directory) params.set('directory', directory);
+    if (directory) params.set('directory', getPathMapping().toRemote(directory));
     const search = params.toString();
     const url = search ? `${base}?${search}` : base;
     const response = await fetch(url, {
