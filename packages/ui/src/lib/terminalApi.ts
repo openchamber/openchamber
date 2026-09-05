@@ -1,30 +1,16 @@
 import type { CreateTerminalOptions, TerminalError, TerminalHandlers, TerminalServerSession, TerminalSession, TerminalSessionPurpose, TerminalShellOption, TerminalStreamEvent } from './api/types';
 import { openRuntimeWebSocket } from './relay/runtime-socket';
-import type { RelayTunnelWebSocket } from './relay/tunnel-client';
+import type { RelayTunnelSocketMessageEvent, RelayTunnelWebSocket } from './relay/tunnel-client';
 import { runtimeFetch } from './runtime-fetch';
 import { getRuntimeUrlResolver } from './runtime-url';
 import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from './runtime-auth';
 import { isTerminalShell } from './terminalShell';
 import { z } from 'zod';
 
-type Message = Record<string, unknown> & {
-  t: string;
-  s?: string;
-  q?: number;
-  d?: string;
-  r?: string;
-  history?: string;
-  status?: TerminalStreamEvent['status'];
-  exitCode?: number;
-  signal?: number | null;
-  runtime?: TerminalStreamEvent['runtime'];
-  ptyBackend?: string;
-  mode?: TerminalSession['mode'];
-  purpose?: TerminalSessionPurposeInput;
-  message?: string;
-  code?: string;
-  fatal?: boolean;
-};
+type ClientMessage =
+  | { t: 'hello' | 'ping'; v: 3 }
+  | { t: 'attach' | 'detach'; v: 3; s: string }
+  | { t: 'write'; v: 3; s: string; d: string };
 type Subscriber = { handlers: TerminalHandlers; lastSequence: number };
 type TerminalProjection = {
   sequence: number;
@@ -87,7 +73,27 @@ const terminalServerSessionSchema = z.object({
   purpose: terminalSessionPurposeSchema.optional(),
 });
 
-const encode = (message: Message): Uint8Array => {
+const terminalMessageMetadata = {
+  mode: terminalModeSchema.optional(),
+  purpose: terminalSessionPurposeSchema.optional(),
+};
+const terminalMessageSchema = z.discriminatedUnion('t', [
+  z.object({ t: z.literal('hello') }),
+  z.object({ t: z.literal('pong') }),
+  z.object({ t: z.literal('error'), s: z.string().optional(), message: z.string().optional(), code: z.string().optional(), fatal: z.boolean().optional() }),
+  z.object({
+    t: z.literal('snapshot'), s: z.string(), q: z.number().int().nonnegative().default(0),
+    history: z.string().default(''), status: terminalStatusSchema,
+    exitCode: z.number().nullish().transform(value => value ?? undefined), signal: z.number().nullable().optional(),
+    runtime: terminalRuntimeSchema.optional(), ptyBackend: z.string().optional(), ...terminalMessageMetadata,
+  }),
+  z.object({ t: z.literal('output'), s: z.string(), q: z.number().int().nonnegative(), d: z.string(), r: z.string().optional() }),
+  z.object({ t: z.literal('exit'), s: z.string(), q: z.number().int().nonnegative(), exitCode: z.number().nullish().transform(value => value ?? undefined), signal: z.number().nullable().optional() }),
+  z.object({ t: z.literal('restarted'), s: z.string(), q: z.number().int().nonnegative(), history: z.string().default(''), ...terminalMessageMetadata }),
+]);
+type TerminalMessage = z.infer<typeof terminalMessageSchema>;
+
+const encode = (message: ClientMessage): Uint8Array => {
   const payload = encoder.encode(JSON.stringify(message));
   const frame = new Uint8Array(payload.length + 1);
   frame[0] = TAG;
@@ -95,15 +101,10 @@ const encode = (message: Message): Uint8Array => {
   return frame;
 };
 
-const decode = async (data: unknown): Promise<Message | null> => {
-  let bytes: Uint8Array;
-  if (data instanceof ArrayBuffer) bytes = new Uint8Array(data);
-  else if (data instanceof Uint8Array) bytes = data;
-  else if (typeof Blob !== 'undefined' && data instanceof Blob) bytes = new Uint8Array(await data.arrayBuffer());
-  else if (typeof data === 'string') bytes = encoder.encode(data);
-  else return null;
+const decode = (data: RelayTunnelSocketMessageEvent['data']): TerminalMessage | null => {
+  let bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : encoder.encode(data);
   if (bytes[0] === TAG) bytes = bytes.subarray(1);
-  try { return JSON.parse(decoder.decode(bytes)) as Message; } catch { return null; }
+  try { return terminalMessageSchema.safeParse(JSON.parse(decoder.decode(bytes))).data ?? null; } catch { return null; }
 };
 
 const responseError = async (response: Response, fallback: string): Promise<Error> => {
@@ -120,18 +121,6 @@ const trimProjection = (value: string): string => {
 };
 
 const terminalSessionListSchema = z.object({ sessions: z.array(z.unknown()) });
-
-const parseTerminalMode = (value: TerminalSession['mode'] | null | undefined): TerminalSession['mode'] | undefined => {
-  return terminalModeSchema.safeParse(value).data;
-};
-
-const parseTerminalStatus = (value: TerminalStreamEvent['status'] | null | undefined): TerminalStreamEvent['status'] => {
-  return terminalStatusSchema.safeParse(value).data ?? 'running';
-};
-
-const parseTerminalRuntime = (value: TerminalStreamEvent['runtime'] | null | undefined): TerminalStreamEvent['runtime'] | undefined => {
-  return terminalRuntimeSchema.safeParse(value).data;
-};
 
 export const parseTerminalSessionPurpose = (value: TerminalSessionPurposeInput): TerminalSessionPurpose | undefined => {
   return terminalSessionPurposeSchema.safeParse(value).data;
@@ -330,12 +319,12 @@ export class TerminalTransport {
     }
   }
 
-  private async handleMessage(raw: unknown): Promise<void> {
-    const message = await decode(raw);
+  private handleMessage(raw: RelayTunnelSocketMessageEvent['data']): void {
+    const message = decode(raw);
     if (!message || message.t === 'hello' || message.t === 'pong') return;
     if (message.t === 'error') {
-      const error = new Error(typeof message.message === 'string' ? message.message : 'Terminal error') as TerminalError;
-      if (typeof message.code === 'string') error.code = message.code;
+      const error: TerminalError = new Error(message.message ?? 'Terminal error');
+      error.code = message.code;
       const targets = message.s ? [message.s] : [...this.subscribers.keys()];
       for (const id of targets) for (const sub of this.subscribers.get(id) ?? []) sub.handlers.onError?.(error, message.fatal === true);
       return;
@@ -347,12 +336,12 @@ export class TerminalTransport {
       const projection: TerminalProjection = {
         sequence: message.q ?? 0,
         history: message.history ?? '',
-        status: parseTerminalStatus(message.status),
-        mode: parseTerminalMode(message.mode),
-        purpose: parseTerminalSessionPurpose(message.purpose),
+        status: message.status,
+        mode: message.mode,
+        purpose: message.purpose,
         exitCode: message.exitCode,
         signal: message.signal ?? null,
-        runtime: parseTerminalRuntime(message.runtime),
+        runtime: message.runtime,
         ptyBackend: message.ptyBackend,
       };
       this.projections.set(message.s, projection);
@@ -362,23 +351,23 @@ export class TerminalTransport {
       }
       return;
     }
-    if (typeof message.q !== 'number') return;
+
     const previous = this.projections.get(message.s);
     if (previous && message.q > previous.sequence) {
-      if (message.t === 'output') this.projections.set(message.s, { ...previous, sequence: message.q, history: trimProjection(previous.history + (typeof message.r === 'string' ? message.r : (typeof message.d === 'string' ? message.d : ''))) });
-      else if (message.t === 'exit') this.projections.set(message.s, { ...previous, sequence: message.q, status: 'exited', exitCode: typeof message.exitCode === 'number' ? message.exitCode : undefined, signal: typeof message.signal === 'number' ? message.signal : null });
-      else if (message.t === 'restarted') this.projections.set(message.s, { ...previous, sequence: message.q, history: message.history ?? '', status: 'running', mode: parseTerminalMode(message.mode) ?? previous.mode, purpose: parseTerminalSessionPurpose(message.purpose) ?? previous.purpose, exitCode: undefined, signal: null });
+      if (message.t === 'output') this.projections.set(message.s, { ...previous, sequence: message.q, history: trimProjection(previous.history + (message.r ?? message.d)) });
+      else if (message.t === 'exit') this.projections.set(message.s, { ...previous, sequence: message.q, status: 'exited', exitCode: message.exitCode, signal: message.signal ?? null });
+      else if (message.t === 'restarted') this.projections.set(message.s, { ...previous, sequence: message.q, history: message.history ?? '', status: 'running', mode: message.mode ?? previous.mode, purpose: message.purpose ?? previous.purpose, exitCode: undefined, signal: null });
     }
     for (const sub of subscribers) {
       if (message.q <= sub.lastSequence) continue;
       sub.lastSequence = message.q;
-      if (message.t === 'output') sub.handlers.onEvent({ type: 'data', sequence: message.q, data: typeof message.d === 'string' ? message.d : '', replayData: typeof message.r === 'string' ? message.r : undefined });
-      else if (message.t === 'exit') sub.handlers.onEvent({ type: 'exit', sequence: message.q, exitCode: typeof message.exitCode === 'number' ? message.exitCode : undefined, signal: typeof message.signal === 'number' ? message.signal : null });
-      else if (message.t === 'restarted') sub.handlers.onEvent({ type: 'snapshot', sequence: message.q, data: message.history ?? '', status: 'running', mode: parseTerminalMode(message.mode) ?? previous?.mode, purpose: parseTerminalSessionPurpose(message.purpose) ?? previous?.purpose });
+      if (message.t === 'output') sub.handlers.onEvent({ type: 'data', sequence: message.q, data: message.d, replayData: message.r });
+      else if (message.t === 'exit') sub.handlers.onEvent({ type: 'exit', sequence: message.q, exitCode: message.exitCode, signal: message.signal ?? null });
+      else if (message.t === 'restarted') sub.handlers.onEvent({ type: 'snapshot', sequence: message.q, data: message.history ?? '', status: 'running', mode: message.mode ?? previous?.mode, purpose: message.purpose ?? previous?.purpose });
     }
   }
 
-  private send(message: Message): boolean {
+  private send(message: ClientMessage): boolean {
     if (!this.socket || this.socket.readyState !== SOCKET_OPEN) return false;
     try { this.socket.send(encode(message)); return true; } catch { return false; }
   }

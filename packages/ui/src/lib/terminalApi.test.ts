@@ -352,7 +352,7 @@ describe('terminal transport', () => {
     transport.dispose();
   });
 
-  test('preserves valid snapshot purpose and safely drops malformed snapshot purpose', async () => {
+  test('preserves valid snapshot purpose and rejects a malformed restarted frame', async () => {
     const socket = new FakeSocket();
     const transport = new TerminalTransport({ refreshAuth: async () => '', openSocket: () => socket });
     const purposes: Array<string | null> = [];
@@ -368,7 +368,7 @@ describe('terminal transport', () => {
     socket.emit({ t: 'snapshot', v: 3, s: 'term-1', q: 1, history: 'prompt', status: 'running', purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-1' } });
     socket.emit({ t: 'restarted', v: 3, s: 'term-1', q: 2, history: 'prompt 2', purpose: { type: 'project-action', actionId: 'build' } });
     await tick();
-    expect(purposes).toEqual(['exec-1', 'exec-1']);
+    expect(purposes).toEqual(['exec-1']);
     transport.dispose();
   });
 

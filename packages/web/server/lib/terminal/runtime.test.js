@@ -191,6 +191,45 @@ describe('terminal runtime', () => {
     return { routes, processes, runtime };
   };
 
+  it('replaces only exited action runs and keeps session capacity available across reruns', async () => {
+    const harness = createHarness();
+    try {
+      const create = harness.routes.post.get('/api/terminal/create');
+      await create({ body: { sessionId: 'interactive', cwd: '/repo' } }, createResponse());
+      for (let index = 0; index < 25; index += 1) {
+        const id = `execution-${index}`;
+        const response = createResponse();
+        await create({ body: { sessionId: id, cwd: '/repo', mode: 'command', command: 'echo hello', purpose: { type: 'project-action', actionId: 'build', executionId: id } } }, response);
+        expect(response.statusCode).toBe(200);
+        const listed = createResponse();
+        harness.routes.get.get('/api/terminal/sessions')({ query: { cwd: '/repo' } }, listed);
+        expect(listed.body.sessions.map(session => session.sessionId)).toEqual(['interactive', id]);
+        expect(harness.processes[0].killed).toBe(false);
+        harness.processes.at(-1).emitExit(0);
+      }
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('retains completed output when the replacement command fails to start', async () => {
+    let available = true;
+    const harness = createHarness({ fs: { promises: { stat: async () => ({ isDirectory: () => available }) } } });
+    try {
+      const create = harness.routes.post.get('/api/terminal/create');
+      const options = { cwd: '/repo', mode: 'command', command: 'echo hello', purpose: { type: 'project-action', actionId: 'build', executionId: 'old' } };
+      await create({ body: { ...options, sessionId: 'old' } }, createResponse());
+      harness.processes[0].emitData('old output');
+      harness.processes[0].emitExit(0);
+      available = false;
+      const response = createResponse();
+      await create({ body: { ...options, sessionId: 'new', purpose: { ...options.purpose, executionId: 'new' } } }, response);
+      expect(response.statusCode).toBe(400);
+      const listed = createResponse();
+      harness.routes.get.get('/api/terminal/sessions')({ query: { cwd: '/repo' } }, listed);
+      expect(listed.body.sessions.map(session => session.sessionId)).toEqual(['old']);
+      expect(harness.processes).toHaveLength(1);
+    } finally { await harness.runtime.shutdown(); }
+  });
+
   it('rejects regular files as terminal working directories', async () => {
     const postRoutes = new Map();
     const app = {

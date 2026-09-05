@@ -23,7 +23,7 @@ import { PROJECT_ACTION_ICONS } from '@/lib/projectActions';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { applyTerminalModifier, terminalControlCharacter, terminalSequenceForKey, type TerminalModifier as Modifier, type TerminalQuickKey as MobileKey } from '@/lib/terminalInput';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
-import { reconcileTerminalSessionAuthority } from '@/lib/projectActionTerminal';
+import { observeTerminalSessions } from '@/lib/terminalSessionObserver';
 
 type TerminalViewProps = {
     visible?: boolean;
@@ -200,29 +200,15 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory }
         directoryRef.current = terminalDirectory;
     }, [terminalDirectory]);
 
-    // The tab list is a per-client projection, so ask the server what actually
-    // exists for this directory and adopt sessions no local tab references
-    // (another device, a fresh browser tab, or a reload with cleared storage).
-    // A failed listing changes nothing: adoption is additive only.
+    // Only a visible panel requests discovery; failed reads preserve known state.
     React.useEffect(() => {
-        if (!terminalHydrated || !terminalDirectory || !terminal.listSessions) {
-            return;
-        }
-        let cancelled = false;
-        const directory = terminalDirectory;
-        void reconcileTerminalSessionAuthority(terminal, directory, {
-            captureStartedActionMutationRevisions,
-        })
-            .then((result) => {
-                if (cancelled || directoryRef.current !== directory || !result) return;
-                reconcileServerSessions(directory, result.sessions, {
-                    startedActionMutationRevisions: result.startedActionMutationRevisions,
-                });
+        if (!terminalHydrated || !terminalDirectory || !isTerminalVisible) return;
+        return observeTerminalSessions(terminal, terminalDirectory, captureStartedActionMutationRevisions, result => {
+            reconcileServerSessions(terminalDirectory, result.sessions, {
+                startedActionMutationRevisions: result.startedActionMutationRevisions,
             });
-        return () => {
-            cancelled = true;
-        };
-    }, [captureStartedActionMutationRevisions, terminalHydrated, terminalDirectory, terminal, reconcileServerSessions]);
+        });
+    }, [captureStartedActionMutationRevisions, isTerminalVisible, terminalHydrated, terminalDirectory, terminal, reconcileServerSessions]);
 
     React.useEffect(() => {
         if (!showQuickKeys && activeModifier !== null) {
@@ -306,12 +292,15 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory }
 
             // Mark active before connect so early events aren't dropped.
             activeTerminalIdRef.current = terminalId;
+            const ownsStream = () => activeTerminalIdRef.current === terminalId
+                && useTerminalStore.getState().getDirectoryState(directory)?.tabs
+                    .some(tab => tab.id === tabId && tab.terminalSessionId === terminalId);
 
             const subscription = terminal.connect(
                 terminalId,
                 {
                     onEvent: (event: TerminalStreamEvent) => {
-                        if (activeTerminalIdRef.current !== terminalId) {
+                        if (!ownsStream()) {
                             return;
                         }
 
@@ -375,7 +364,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory }
                         }
                     },
                     onError: (error, fatal) => {
-                        if (activeTerminalIdRef.current !== terminalId) {
+                        if (!ownsStream()) {
                             return;
                         }
 
@@ -398,10 +387,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory }
                                 return;
                             }
                         }
-                        setConnectionError(
-                            t('terminalView.error.connectionFailed', { message: error.message })
-                        );
-                        setIsFatalError(true);
+                        const superseded = error.code === 'SUPERSEDED';
+                        setConnectionError(superseded ? null : t('terminalView.error.connectionFailed', { message: error.message }));
+                        setIsFatalError(!superseded);
                         setConnecting(directory, tabId, false);
                         setTabLifecycle(directory, tabId, 'exited');
                         setTabSessionId(directory, tabId, null);

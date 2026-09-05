@@ -1,3 +1,4 @@
+import { getRuntimeKey } from './runtime-switch';
 import type { CreateTerminalOptions, TerminalAPI, TerminalServerSession, TerminalSession, TerminalSessionPurpose } from './api/types';
 
 type TerminalActionMutationRevisions = ReadonlyMap<string, number>;
@@ -10,11 +11,10 @@ const normalizeDirectory = (dir: string): string => {
   return normalized;
 };
 
-type ProjectActionTerminalCreateOptions = Omit<Extract<CreateTerminalOptions, { mode: 'command' }>, 'mode' | 'command'>;
+type ProjectActionTerminalCreateOptions = Omit<Extract<CreateTerminalOptions, { mode: 'command' }>, 'mode' | 'command' | 'sessionId'>;
 
 type CreateProjectActionTerminalSessionOptions = {
   terminal: TerminalAPI;
-  previousSessionId: string | null;
   createOptions: ProjectActionTerminalCreateOptions;
   command: string;
   isRunStillExpected: () => boolean;
@@ -46,8 +46,9 @@ const closeTerminalSession = async (terminal: TerminalAPI, sessionId: string): P
   }
 };
 
-const rejectCreatedSession = async (terminal: TerminalAPI, sessionId: string, errorMessage: string): Promise<never> => {
-  await closeTerminalSession(terminal, sessionId);
+const rejectCreatedSession = async (terminal: TerminalAPI, session: TerminalSession, requestedExecutionId: string, errorMessage: string): Promise<never> => {
+  // A deduplicated response belongs to the peer that created it.
+  if (session.sessionId === requestedExecutionId) await closeTerminalSession(terminal, session.sessionId);
   throw createProjectActionTerminalError(errorMessage);
 };
 
@@ -93,33 +94,29 @@ type ReconcileTerminalSessionAuthorityResult = {
 
 export const createProjectActionTerminalSession = async ({
   terminal,
-  previousSessionId,
   createOptions,
   command,
   isRunStillExpected,
   purpose,
 }: CreateProjectActionTerminalSessionOptions): Promise<TerminalSession> => {
-  if (previousSessionId) {
-    await closeTerminalSession(terminal, previousSessionId);
-  }
-
   const created = await terminal.createSession({
     ...createOptions,
+    sessionId: purpose.executionId,
     mode: 'command',
     command: normalizeProjectActionCommand(command),
     purpose,
   });
 
   if (!isCommandTerminalSession(created)) {
-    await rejectCreatedSession(terminal, created.sessionId, COMMAND_MODE_UNSUPPORTED_ERROR);
+    await rejectCreatedSession(terminal, created, purpose.executionId, COMMAND_MODE_UNSUPPORTED_ERROR);
   }
 
   if (!isMatchingProjectActionPurpose(created.purpose, purpose.actionId)) {
-    await rejectCreatedSession(terminal, created.sessionId, PROJECT_ACTION_PURPOSE_UNSUPPORTED_ERROR);
+    await rejectCreatedSession(terminal, created, purpose.executionId, PROJECT_ACTION_PURPOSE_UNSUPPORTED_ERROR);
   }
 
   if (!isRunStillExpected()) {
-    await rejectCreatedSession(terminal, created.sessionId, PROJECT_ACTION_RUN_CANCELLED_ERROR);
+    await rejectCreatedSession(terminal, created, purpose.executionId, PROJECT_ACTION_RUN_CANCELLED_ERROR);
   }
 
   return created;
@@ -228,12 +225,14 @@ export const reconcileTerminalSessionAuthority = (
   }
 
   const normalizedDirectory = normalizeDirectory(directory);
+  const runtimeKey = getRuntimeKey();
+  const flightKey = `${runtimeKey}\u0000${normalizedDirectory}`;
   let terminalFlights = reconcileFlightsByTerminal.get(terminal);
   if (!terminalFlights) {
     terminalFlights = new Map();
     reconcileFlightsByTerminal.set(terminal, terminalFlights);
   }
-  const existing = terminalFlights.get(normalizedDirectory);
+  const existing = terminalFlights.get(flightKey);
   if (existing) {
     return existing;
   }
@@ -241,16 +240,16 @@ export const reconcileTerminalSessionAuthority = (
   const startedActionMutationRevisions = options.captureStartedActionMutationRevisions?.(normalizedDirectory)
     ?? new Map<string, number>();
   const flight = terminal.listSessions(normalizedDirectory)
-    .then((sessions) => ({ sessions, startedActionMutationRevisions }))
+    .then((sessions) => runtimeKey === getRuntimeKey() ? { sessions, startedActionMutationRevisions } : null)
     .catch(() => null)
     .finally(() => {
-      if (terminalFlights.get(normalizedDirectory) === flight) {
-        terminalFlights.delete(normalizedDirectory);
+      if (terminalFlights.get(flightKey) === flight) {
+        terminalFlights.delete(flightKey);
         if (terminalFlights.size === 0) {
           reconcileFlightsByTerminal.delete(terminal);
         }
       }
     });
-  terminalFlights.set(normalizedDirectory, flight);
+  terminalFlights.set(flightKey, flight);
   return flight;
 };

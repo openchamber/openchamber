@@ -335,6 +335,25 @@ describe('TerminalView project action tab indicator', () => {
     expect(targetKey).toContain('/repo');
   });
 
+  test('replacing an exited action does not show a connection failure', async () => {
+    const store = useTerminalStore.getState();
+    const actionTab = store.getDirectoryState('/repo')?.tabs.find(tab => tab.label === 'Build');
+    if (!actionTab) throw new Error('action tab missing');
+    store.setTabSessionId('/repo', actionTab.id, 'srv-build');
+    store.setActiveTab('/repo', actionTab.id);
+    connectBehavior = (_sessionId, handlers) => {
+      void Promise.resolve().then(() => {
+        handlers.onError?.(Object.assign(new Error('Terminal replaced by a new action run'), { code: 'SUPERSEDED' }), true);
+      });
+      return { close: () => undefined };
+    };
+    await act(async () => root.render(React.createElement(TerminalView, { visible: true })));
+    await flushEffects();
+    expect(host.textContent).not.toContain('terminalView.error.connectionFailed');
+    expect(store.getActiveTab('/repo')?.terminalSessionId).toBeNull();
+    expect(store.getActiveTab('/repo')?.lifecycle).toBe('exited');
+  });
+
   test('would fail if revisit attach skipped the active running project-action snapshot restore', async () => {
     const state = useTerminalStore.getState().getDirectoryState('/repo');
     const actionTab = state?.tabs.find((tab) => tab.label === 'Build');

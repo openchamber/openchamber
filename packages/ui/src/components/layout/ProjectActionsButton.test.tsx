@@ -60,6 +60,13 @@ interface MockedDetectedDevServer {
 }
 
 const createCalls: CreateTerminalOptions[] = [];
+const createdSessionId = (index: number): string => {
+  const id = createCalls[index]?.sessionId;
+  if (!id) throw new Error('missing requested terminal ID');
+  return id;
+};
+const firstSessionId = () => createdSessionId(0);
+const secondSessionId = () => createdSessionId(1);
 const sendCalls: string[] = [];
 const forceKillCalls: string[] = [];
 const closeCalls: string[] = [];
@@ -81,7 +88,7 @@ const terminal = {
     createCalls.push(options);
     sessionCounter += 1;
     return {
-      sessionId: `session-${sessionCounter}`,
+      sessionId: options.sessionId ?? `session-${sessionCounter}`,
       cols: 80,
       rows: 24,
       status: 'running' as const,
@@ -243,6 +250,100 @@ describe('ProjectActionsButton lifecycle', () => {
     await act(async () => { await Promise.resolve(); });
   };
 
+
+
+
+  test('adopting a saved URL action does not auto-open a different output URL', async () => {
+    mockedActionsState.actions = [{ id: 'build', name: 'Build', command: 'echo hello', autoOpenUrl: true, openUrl: 'http://localhost:4000' }];
+    const originalList = terminal.listSessions;
+    Object.assign(terminal, { listSessions: async () => [{
+      sessionId: 'peer-run', cwd: '/repo', status: 'running', createdAt: 1, mode: 'command',
+      purpose: { type: 'project-action', actionId: 'build', executionId: 'peer-execution' },
+    }] });
+    try {
+      await renderButton();
+      await act(async () => { emitToSession('peer-run', { type: 'snapshot', sequence: 1, status: 'running', data: 'Local: http://localhost:5173/\n' }); });
+      expect(openExternalCalls).toEqual([]);
+    } finally { terminal.listSessions = originalList; }
+  });
+
+  test('a second run keeps its tab and displays fresh output under a new terminal ID', async () => {
+    const originalCreate = terminal.createSession;
+    Object.assign(terminal, { createSession: async (options: CreateTerminalOptions) => {
+      createCalls.push(options);
+      return { sessionId: options.sessionId, cols: 80, rows: 24, status: 'running', mode: 'command', purpose: options.purpose };
+    } });
+    try {
+      await renderButton();
+      const button = host.querySelector('button');
+      if (!button) throw new Error('missing action button');
+      await act(async () => { button.click(); });
+      const tab = useTerminalStore.getState().getDirectoryState('/repo')?.tabs.find((tab) => tab.purpose.type === 'project-action');
+      if (!tab?.terminalSessionId) throw new Error('missing action terminal');
+      const originalSessionId = tab.terminalSessionId;
+      await act(async () => {
+        emitToSession(originalSessionId, { type: 'snapshot', status: 'running', sequence: 5, data: 'old output' });
+        emitToSession(originalSessionId, { type: 'exit', sequence: 6 });
+      });
+      await act(async () => { button.click(); });
+      expect(secondSessionId()).not.toBe(firstSessionId());
+      await act(async () => {
+        emitToSession(secondSessionId(), { type: 'snapshot', status: 'running', sequence: 1, data: 'new output' });
+      });
+      const buffer = useTerminalStore.getState().getBuffer('/repo', tab.id);
+      expect(buffer.chunks.map(chunk => chunk.data).join('')).toBe('new output');
+    } finally { terminal.createSession = originalCreate; }
+  });
+
+  test('a stale rerun adopts the server run without closing it', async () => {
+    await renderButton();
+    const button = host.querySelector('button');
+    if (!button) throw new Error('missing action button');
+    await act(async () => { button.click(); });
+    await act(async () => { emitToSession(firstSessionId(), { type: 'exit', sequence: 2 }); });
+    const originalList = terminal.listSessions;
+    const serverSession = {
+      sessionId: firstSessionId(), cwd: '/repo', status: 'running', createdAt: 1,
+      mode: 'command', purpose: { type: 'project-action', actionId: 'build', executionId: 'other-client-new-run' },
+    };
+    Object.assign(terminal, { listSessions: async () => [serverSession] });
+    try {
+      await act(async () => { button.click(); });
+      expect(closeCalls).toEqual([]);
+      const tab = useTerminalStore.getState().getDirectoryState('/repo')?.tabs.find((tab) => tab.purpose.type === 'project-action');
+      expect(tab?.purpose).toEqual(serverSession.purpose);
+    } finally {
+      terminal.listSessions = originalList;
+    }
+  });
+
+  test('parent action manual URL opens in the current worktree panel', async () => {
+    effectiveDirectory = '/repo-worktree';
+    mockedActionsState.actions = [{ id: 'build', name: 'Build', command: 'echo hello', runIn: 'parent', autoOpenUrl: true, openUrl: 'http://localhost:4000' }];
+    await renderButton({ projectPath: '/repo', directory: '/repo-worktree' });
+    const button = host.querySelector('button');
+    if (!button) throw new Error('missing action button');
+    await act(async () => { button.click(); });
+    expect(openContextPreviewCalls).toEqual([{ directory: '/repo-worktree', url: 'http://localhost:4000/' }]);
+  });
+
+  test('replaced executions cannot be cleared by their still-open old stream', async () => {
+    await renderButton();
+    const button = host.querySelector('button');
+    if (!button) throw new Error('missing action button');
+    await act(async () => { button.click(); });
+    await act(async () => {
+      useTerminalStore.getState().reconcileServerSessions('/repo', [{
+        sessionId: 'other-session', cwd: '/repo', status: 'running', createdAt: 2,
+        mode: 'command', purpose: { type: 'project-action', actionId: 'build', executionId: 'new-execution' },
+      }]);
+    });
+    await act(async () => { emitToSession(firstSessionId(), { type: 'exit', sequence: 10 }); });
+    const tab = useTerminalStore.getState().getDirectoryState('/repo')?.tabs.find((tab) => tab.purpose.type === 'project-action');
+    expect(tab?.purpose).toEqual({ type: 'project-action', actionId: 'build', executionId: 'new-execution' });
+    expect(tab?.lifecycle).toBe('running');
+  });
+
   test('runs, stops, and reruns on the same action tab while cleaning old subscriptions once', async () => {
     await renderButton();
 
@@ -257,7 +358,7 @@ describe('ProjectActionsButton lifecycle', () => {
     });
 
     const firstTab = useTerminalStore.getState().getDirectoryState('/repo')?.tabs.find((tab) => tab.purpose.type === 'project-action');
-    expect(firstTab?.terminalSessionId).toBe('session-1');
+    expect(firstTab?.terminalSessionId).toBe(firstSessionId());
     expect(firstTab?.purpose.type).toBe('project-action');
     const firstExecution = firstTab?.purpose.type === 'project-action' ? firstTab.purpose.executionId : null;
     expect(firstExecution).not.toBeNull();
@@ -279,16 +380,16 @@ describe('ProjectActionsButton lifecycle', () => {
 
     const rerunTab = useTerminalStore.getState().getDirectoryState('/repo')?.tabs.find((tab) => tab.purpose.type === 'project-action');
     expect(rerunTab?.id).toBe(firstTab?.id);
-    expect(rerunTab?.terminalSessionId).toBe('session-2');
+    expect(rerunTab?.terminalSessionId).toBe(secondSessionId());
     expect(rerunTab?.lifecycle).toBe('running');
     const secondExecution = rerunTab?.purpose.type === 'project-action' ? rerunTab.purpose.executionId : null;
     expect(secondExecution).not.toBeNull();
     expect(secondExecution).not.toBe(firstExecution);
 
     expect(createCalls).toHaveLength(2);
-    expect(sendCalls).toEqual(['session-1:\x03']);
+    expect(sendCalls).toEqual([`${firstSessionId()}:\x03`]);
     expect(forceKillCalls).toEqual([]);
-    expect(closeCalls).toEqual(['session-1']);
+    expect(closeCalls).toEqual([]);
     expect(subscriptions.map((entry) => entry.closed)).toEqual([1, 1, 0]);
   });
 
@@ -372,10 +473,10 @@ describe('ProjectActionsButton lifecycle', () => {
     const autoDiscoverTab = useTerminalStore.getState().getDirectoryState('/repo')?.tabs.find((tab) => (
       tab.purpose.type === 'project-action' && tab.purpose.actionId === '__openchamber_auto_discover_preview__'
     ));
-    expect(autoDiscoverTab?.terminalSessionId).toBe('session-1');
+    expect(autoDiscoverTab?.terminalSessionId).toBe(firstSessionId());
 
     await act(async () => {
-      emitToSession('session-1', {
+      emitToSession(firstSessionId(), {
         type: 'data',
         data: 'Ready at http://127.0.0.1:4321\n',
         sequence: 1,
@@ -490,7 +591,7 @@ describe('ProjectActionsButton lifecycle', () => {
     expect(openExternalCalls).toEqual([]);
 
     await act(async () => {
-      emitToSession('session-1', {
+      emitToSession(firstSessionId(), {
         type: 'data',
         data: 'Server listening at http://127.0.0.1:4000\n',
         sequence: 1,

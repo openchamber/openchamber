@@ -310,7 +310,11 @@ export function createTerminalRuntime({
       applyAppearance(session, { themeMode, terminalBackground, terminalForeground });
       return session;
     }
-    if (!existing && sessions.size + pendingSessionCreates.size >= MAX_SESSIONS) throw new Error('Maximum terminal sessions reached');
+    const superseded = normalizedPurpose.type === 'project-action'
+      ? [...sessions.values()].filter((session) => session.id !== id && session.status === 'exited'
+        && path.resolve(session.cwd) === resolvedCwd && isPurposeActionMatch(getSessionPurpose(session), normalizedPurpose))
+      : [];
+    if (!existing && sessions.size - superseded.length + pendingSessionCreates.size >= MAX_SESSIONS) throw new Error('Maximum terminal sessions reached');
     const pendingEntry = { cwd: resolvedCwd, shell: normalizedShell, loginShell, mode: launchMode.mode, command: launchMode.command, purpose: normalizedPurpose, cancelled: false, promise: null };
     const creation = (async () => {
       const session = existing ?? { id, sequence: 0, history: '', pendingHistoryControlSequence: '', pendingThemeControlSequence: '', eventQueue: [], draining: false, createdAt: Date.now() };
@@ -319,6 +323,11 @@ export function createTerminalRuntime({
         session.process = null;
         await terminateProcess(ptyProcess, true);
         throw new Error('Terminal session was closed during creation');
+      }
+      for (const previous of superseded) {
+        if (sessions.get(previous.id) !== previous || previous.status !== 'exited') continue;
+        sessions.delete(previous.id);
+        closeAttachments(previous.id, 'SUPERSEDED', 'Terminal replaced by a new action run');
       }
       sessions.set(id, session);
       return session;

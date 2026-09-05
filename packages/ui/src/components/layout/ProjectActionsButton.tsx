@@ -42,6 +42,7 @@ import {
   reconcileTerminalSessionAuthority,
   stopProjectActionTerminalSession,
 } from '@/lib/projectActionTerminal';
+import { observeTerminalSessions } from '@/lib/terminalSessionObserver';
 import type { TerminalTab } from '@/stores/useTerminalStore';
 
 type UrlWatchEntry = {
@@ -350,13 +351,16 @@ export const ProjectActionsButton = ({
 
   React.useEffect(() => {
     const watchedDirectories = new Set(watchedTerminalDirectories);
+    for (const watch of Object.values(urlWatchByRunKeyRef.current)) {
+      if (!watchedDirectories.has(watch.directory)) clearExecutionUi(watch.directory, watch.actionId, watch.executionId);
+    }
     for (const executionStateKey of Object.keys(streamCleanupByRunKeyRef.current)) {
       const executionDirectory = executionStateKey.split('::', 1)[0] ?? '';
       if (!watchedDirectories.has(executionDirectory)) {
         closeTrackedSubscription(executionStateKey);
       }
     }
-  }, [closeTrackedSubscription, watchedTerminalDirectories]);
+  }, [clearExecutionUi, closeTrackedSubscription, watchedTerminalDirectories]);
 
   const revealProjectActionTerminal = React.useCallback((hostDirectory: string, executionDirectory: string) => {
     useUIStore.getState().openContextPanelTab(hostDirectory, {
@@ -391,23 +395,13 @@ export const ProjectActionsButton = ({
   }, [loadActions]);
 
   React.useEffect(() => {
-    if (!terminal.listSessions) {
-      return;
-    }
-    let cancelled = false;
-    for (const executionDirectory of watchedTerminalDirectories) {
-      void reconcileTerminalSessionAuthority(terminal, executionDirectory, {
-        captureStartedActionMutationRevisions,
-      }).then((result) => {
-        if (cancelled || !result) return;
-        reconcileServerSessions(executionDirectory, result.sessions, {
-          startedActionMutationRevisions: result.startedActionMutationRevisions,
-        });
-      });
-    }
-    return () => {
-      cancelled = true;
-    };
+    const cleanups = watchedTerminalDirectories.map(executionDirectory => observeTerminalSessions(
+      terminal, executionDirectory, captureStartedActionMutationRevisions,
+      result => reconcileServerSessions(executionDirectory, result.sessions, {
+        startedActionMutationRevisions: result.startedActionMutationRevisions,
+      }),
+    ));
+    return () => { for (const close of cleanups) close(); };
   }, [captureStartedActionMutationRevisions, reconcileServerSessions, terminal, watchedTerminalDirectories]);
 
   React.useEffect(() => {
@@ -528,7 +522,7 @@ export const ProjectActionsButton = ({
               actionId: entry.actionId,
               executionId: entry.executionId,
               lastSeenChunkId: null,
-              openedUrl: false,
+              openedUrl: true,
               tail: '',
               openInPreview: false,
               announced: [],
@@ -734,6 +728,7 @@ export const ProjectActionsButton = ({
     }
     if (startingRunKeysRef.current.has(runKey)) return;
     startingRunKeysRef.current.add(runKey);
+    let requestedExecution: { directory: string; tabId: string; id: string } | null = null;
 
     try {
       const discovered = action.id === AUTO_DISCOVER_ACTION_ID
@@ -760,7 +755,7 @@ export const ProjectActionsButton = ({
       const hasCustomOpenUrl = discovered.autoOpenUrl === true && (discovered.openUrl || '').trim().length > 0;
       const revealTerminal = !hasCustomOpenUrl && action.id !== AUTO_DISCOVER_ACTION_ID;
       const launchContextHostDirectory = contextHostDirectoryRef.current || normalizedDirectory;
-      const { executionDirectory, key, tabId, sessionId } = await getOrCreateActionTab(discovered);
+      const { executionDirectory, key, tabId } = await getOrCreateActionTab(discovered);
       const normalizedCommand = normalizeProjectActionCommand(discovered.command);
       if (!normalizedCommand) {
         throw new Error(t('projectActions.error.failedToRunAction'));
@@ -789,26 +784,23 @@ export const ProjectActionsButton = ({
       }
 
       const priorTab = getActionTab(executionDirectory, discovered.id);
-      const priorExecutionId = priorTab?.purpose.type === 'project-action' ? priorTab.purpose.executionId : null;
-      if (priorExecutionId) {
-        clearExecutionUi(executionDirectory, discovered.id, priorExecutionId);
-      }
-
-      const requestedExecutionId = allocateActionExecution(executionDirectory, tabId, discovered.id);
-      if (!requestedExecutionId) {
-        throw new Error(t('projectActions.error.failedToCreateTerminalSession'));
-      }
-
-      setConnecting(executionDirectory, tabId, true, { expectedExecutionId: requestedExecutionId });
-      let activeSessionId: string | null = null;
-      let adoptedExecutionId = requestedExecutionId;
-      try {
+      let activeSessionId: string;
+      let adoptedExecutionId: string;
+      if (priorTab?.lifecycle === 'running' && priorTab.terminalSessionId
+        && priorTab.purpose.type === 'project-action' && priorTab.purpose.executionId) {
+        activeSessionId = priorTab.terminalSessionId;
+        adoptedExecutionId = priorTab.purpose.executionId;
+      } else {
+        const priorExecutionId = priorTab?.purpose.type === 'project-action' ? priorTab.purpose.executionId : null;
+        if (priorExecutionId) clearExecutionUi(executionDirectory, discovered.id, priorExecutionId);
+        const requestedExecutionId = allocateActionExecution(executionDirectory, tabId, discovered.id);
+        if (!requestedExecutionId) throw new Error(t('projectActions.error.failedToCreateTerminalSession'));
+        requestedExecution = { directory: executionDirectory, tabId, id: requestedExecutionId };
+        setConnecting(executionDirectory, tabId, true, { expectedExecutionId: requestedExecutionId });
         const created = await createProjectActionTerminalSession({
           terminal,
-          previousSessionId: sessionId,
           createOptions: {
             cwd: executionDirectory,
-            sessionId: tabId,
             shell: terminalShell,
             loginShell: terminalLoginShell,
             themeMode: currentTheme.metadata.variant === 'light' ? 'light' : 'dark',
@@ -820,40 +812,41 @@ export const ProjectActionsButton = ({
           purpose: { type: 'project-action', actionId: discovered.id, executionId: requestedExecutionId },
         });
         if (!matchesActionExecution(executionDirectory, tabId, requestedExecutionId)) {
-          await terminal.close(created.sessionId).catch(() => undefined);
+          if (created.sessionId === requestedExecutionId) await terminal.close(created.sessionId).catch(() => undefined);
           return;
         }
         adoptedExecutionId = created.purpose?.type === 'project-action' ? created.purpose.executionId : requestedExecutionId;
-        setTabPurpose(executionDirectory, tabId, { type: 'project-action', actionId: discovered.id, executionId: adoptedExecutionId });
         activeSessionId = created.sessionId;
+        setTabPurpose(executionDirectory, tabId, { type: 'project-action', actionId: discovered.id, executionId: adoptedExecutionId });
         setTabSessionId(executionDirectory, tabId, activeSessionId, { expectedExecutionId: adoptedExecutionId });
-        setTabLifecycle(executionDirectory, tabId, 'running', { expectedExecutionId: adoptedExecutionId });
-      } finally {
         setConnecting(executionDirectory, tabId, false, { expectedExecutionId: adoptedExecutionId });
-      }
-
-      if (!activeSessionId) {
-        throw new Error(t('projectActions.error.failedToCreateTerminalSession'));
-      }
-
-      if (!matchesActionExecution(executionDirectory, tabId, adoptedExecutionId)) {
-        try {
-          await terminal.close(activeSessionId);
-        } catch {
-          // noop
-        }
-        return;
       }
 
       if (revealTerminal && launchContextHostDirectory) {
         revealProjectActionTerminal(launchContextHostDirectory, executionDirectory);
       }
 
+      urlWatchByRunKeyRef.current[key] = {
+        hostDirectory: launchContextHostDirectory,
+        directory: executionDirectory,
+        tabId,
+        actionId: discovered.id,
+        executionId: adoptedExecutionId,
+        lastSeenChunkId: null,
+        openedUrl: Boolean(desktopForwardUrl) || Boolean(manualOpenUrl) || hasCustomOpenUrl,
+        tail: '',
+        openInPreview: discovered.id === AUTO_DISCOVER_ACTION_ID,
+        announced: [],
+        offering: false,
+      };
+
       const executionStateKey = executionKey(executionDirectory, discovered.id, adoptedExecutionId);
       setConnecting(executionDirectory, tabId, true, { expectedExecutionId: adoptedExecutionId });
       const subscription = terminal.connect(
           activeSessionId,
           { onEvent: (event) => {
+            if (!matchesActionExecution(executionDirectory, tabId, adoptedExecutionId)) return;
+            if (event.purpose?.type === 'project-action' && event.purpose.executionId !== adoptedExecutionId) return;
             if (event.type === 'snapshot') {
               useTerminalStore.getState().replaceBuffer(executionDirectory, tabId, event.data ?? '', event.sequence ?? 0);
               useTerminalStore.getState().setConnecting(executionDirectory, tabId, false, { expectedExecutionId: adoptedExecutionId });
@@ -880,6 +873,7 @@ export const ProjectActionsButton = ({
               clearExecutionUi(executionDirectory, discovered.id, adoptedExecutionId);
             }
           }, onError: (_error, fatal) => {
+            if (!matchesActionExecution(executionDirectory, tabId, adoptedExecutionId)) return;
             useTerminalStore.getState().setConnecting(executionDirectory, tabId, false, { expectedExecutionId: adoptedExecutionId });
             if (fatal) {
               useTerminalStore.getState().setTabLifecycle(executionDirectory, tabId, 'exited', { expectedExecutionId: adoptedExecutionId });
@@ -893,6 +887,7 @@ export const ProjectActionsButton = ({
         subscription.close();
         return;
       }
+      streamCleanupByRunKeyRef.current[executionStateKey]?.();
       streamCleanupByRunKeyRef.current[executionStateKey] = subscription.close;
 
       window.clearTimeout(previewWaitTimeoutByRunKeyRef.current[executionStateKey]);
@@ -919,19 +914,6 @@ export const ProjectActionsButton = ({
         }, AUTO_DISCOVER_PREVIEW_WAIT_TIMEOUT_MS);
       }
 
-      urlWatchByRunKeyRef.current[key] = {
-        hostDirectory: launchContextHostDirectory,
-        directory: executionDirectory,
-        tabId,
-        actionId: discovered.id,
-        executionId: adoptedExecutionId,
-        lastSeenChunkId: null,
-        openedUrl: Boolean(desktopForwardUrl) || Boolean(manualOpenUrl) || hasCustomOpenUrl,
-        tail: '',
-        openInPreview: discovered.id === AUTO_DISCOVER_ACTION_ID,
-        announced: [],
-        offering: false,
-      };
 
       if (desktopForwardUrl) {
         setTabPreviewUrl(executionDirectory, tabId, null, { locked: true, expectedExecutionId: adoptedExecutionId });
@@ -939,7 +921,7 @@ export const ProjectActionsButton = ({
         toast.success(t('projectActions.toast.openedForwardedUrl'));
       } else if (manualOpenUrl) {
         setTabPreviewUrl(executionDirectory, tabId, manualOpenUrl, { locked: true, autoOpened: true, expectedExecutionId: adoptedExecutionId });
-        openContextPreview(executionDirectory, manualOpenUrl);
+        openContextPreview(launchContextHostDirectory, manualOpenUrl);
         toast.success(t('projectActions.toast.openedActionUrl'));
       } else if (hasCustomOpenUrl) {
         setTabPreviewUrl(executionDirectory, tabId, null, { locked: true, expectedExecutionId: adoptedExecutionId });
@@ -952,12 +934,11 @@ export const ProjectActionsButton = ({
       }
 
     } catch (error) {
-      const executionDirectory = executionDirectoryFor(action);
-      const currentTab = getActionTab(executionDirectory, action.id);
-      if (currentTab?.purpose.type === 'project-action' && currentTab.purpose.executionId) {
-        clearExecutionUi(executionDirectory, action.id, currentTab.purpose.executionId);
-        setTabLifecycle(executionDirectory, currentTab.id, 'exited', { expectedExecutionId: currentTab.purpose.executionId });
-        setTabPurpose(executionDirectory, currentTab.id, { type: 'project-action', actionId: action.id, executionId: null });
+      if (requestedExecution && matchesActionExecution(requestedExecution.directory, requestedExecution.tabId, requestedExecution.id)) {
+        const { directory: failedDirectory, tabId: failedTabId, id } = requestedExecution;
+        clearExecutionUi(failedDirectory, action.id, id);
+        setTabLifecycle(failedDirectory, failedTabId, 'exited', { expectedExecutionId: id });
+        setTabPurpose(failedDirectory, failedTabId, { type: 'project-action', actionId: action.id, executionId: null });
       }
       if (error instanceof Error && error.message === 'PROJECT_ACTION_RUN_CANCELLED') {
         return;

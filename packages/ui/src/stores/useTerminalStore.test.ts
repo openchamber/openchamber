@@ -331,7 +331,7 @@ describe('terminal state reconciliation', () => {
     const tab = useTerminalStore.getState().getDirectoryState('/repo')!.tabs[0]!;
     expect(tab.lifecycle).toBe('starting');
     expect(tab.purpose).toEqual({ type: 'project-action', actionId: 'build', executionId });
-    expect(tab.terminalSessionId).toBe('srv-old');
+    expect(tab.terminalSessionId).toBeNull();
   });
 
   test('an old listed action session does not overwrite a newer running session after setTabSessionId', () => {
@@ -555,4 +555,50 @@ describe('directoryMayHaveActiveProjectAction', () => {
     })).toBe(true);
     expect(directoryMayHaveActiveProjectAction(undefined)).toBe(false);
   });
+});
+
+test('a retained exited run cannot replace the live run of the same action', () => {
+  const live: TerminalServerSession = { sessionId: 'a', cwd: '/repo', status: 'running', createdAt: 1, mode: 'command', purpose: { type: 'project-action', actionId: 'build', executionId: 'live' } };
+  const old: TerminalServerSession = { sessionId: 'b', cwd: '/repo', status: 'exited', createdAt: 2, mode: 'command', purpose: { type: 'project-action', actionId: 'build', executionId: 'old' } };
+  for (const sessions of [[live, old], [old, live]]) {
+    useTerminalStore.getState().clearAll();
+    useTerminalStore.getState().reconcileServerSessions('/repo', sessions);
+    const tabs = useTerminalStore.getState().getDirectoryState('/repo')?.tabs;
+    expect(tabs?.find((tab) => tab.purpose.type === 'project-action')?.terminalSessionId).toBe('a');
+  }
+});
+
+test('a fresh running listing does not cancel an in-progress stop of the same execution', () => {
+  useTerminalStore.getState().clearAll();
+  const session: TerminalServerSession = { sessionId: 'run', cwd: '/repo', status: 'running', createdAt: 1, purpose: { type: 'project-action', actionId: 'build', executionId: 'run' } };
+  const store = useTerminalStore.getState();
+  store.reconcileServerSessions('/repo', [session]);
+  store.setTabLifecycle('/repo', 'run', 'stopping');
+  store.reconcileServerSessions('/repo', [session], { startedActionMutationRevisions: store.captureStartedActionMutationRevisions('/repo') });
+  expect(store.getActiveTab('/repo')?.lifecycle).toBe('stopping');
+});
+
+test('adopting a replacement resets its buffer while reconnecting to the same run preserves it', () => {
+  useTerminalStore.getState().clearAll();
+  const store = useTerminalStore.getState();
+  const session: TerminalServerSession = { sessionId: 'run', cwd: '/repo', status: 'running', createdAt: 1, purpose: { type: 'project-action', actionId: 'build', executionId: 'run' } };
+  store.reconcileServerSessions('/repo', [session]);
+  store.replaceBuffer('/repo', 'run', 'old output', 5);
+  store.reconcileServerSessions('/repo', [session]);
+  expect(store.getBuffer('/repo', 'run').lastSequence).toBe(5);
+  store.reconcileServerSessions('/repo', [{ ...session, sessionId: 'replacement', purpose: { type: 'project-action', actionId: 'build', executionId: 'replacement' } }]);
+  store.replaceBuffer('/repo', 'run', 'new output', 1);
+  expect(store.getBuffer('/repo', 'run').chunks.map(chunk => chunk.data).join('')).toBe('new output');
+});
+
+
+test('a listing started before closing an action cannot resurrect its tab', () => {
+  useTerminalStore.getState().clearAll();
+  const store = useTerminalStore.getState();
+  const session: TerminalServerSession = { sessionId: 'run', cwd: '/repo', status: 'exited', createdAt: 1, purpose: { type: 'project-action', actionId: 'build', executionId: 'run' } };
+  store.reconcileServerSessions('/repo', [session]);
+  const startedActionMutationRevisions = store.captureStartedActionMutationRevisions('/repo');
+  store.closeTab('/repo', 'run');
+  store.reconcileServerSessions('/repo', [session], { startedActionMutationRevisions });
+  expect(store.getDirectoryState('/repo')?.tabs.some(tab => tab.purpose.type === 'project-action')).toBe(false);
 });

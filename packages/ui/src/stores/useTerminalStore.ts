@@ -195,6 +195,27 @@ const toActionPurposeFromSession = (
   executionId: status === 'running' ? purpose.executionId : null,
 });
 
+const authoritativeTerminalSessions = (sessions: TerminalServerSession[]): TerminalServerSession[] => {
+  const actions = new Map<string, TerminalServerSession>();
+  const terminals: TerminalServerSession[] = [];
+  for (const session of sessions) {
+    if (session.purpose?.type !== 'project-action') {
+      terminals.push(session);
+      continue;
+    }
+    const previous = actions.get(session.purpose.actionId);
+    if (!previous
+      || (session.status === 'running' && previous.status !== 'running')
+      || (session.status === previous.status && (
+        (session.createdAt ?? 0) > (previous.createdAt ?? 0)
+        || (session.createdAt === previous.createdAt && session.sessionId > previous.sessionId)
+      ))) actions.set(session.purpose.actionId, session);
+  }
+  return [...terminals, ...actions.values()];
+};
+
+const resetActionPreview = { previewUrl: null, previewAutoOpened: false, previewUrlLocked: false };
+
 const toAdoptedActionLabel = (actionId: string): string => {
   const trimmed = actionId.trim();
   return trimmed || 'Action';
@@ -452,6 +473,7 @@ export const useTerminalStore = create<TerminalStore>()(
               return state;
             }
             const tabs = [...(existing?.tabs ?? [])];
+            let buffers = state.buffers;
             let tabsChanged = false;
             let activationCandidate: { tabId: string; createdAt: number; index: number } | null = null;
             const listedActionIds = new Set<string>();
@@ -465,7 +487,7 @@ export const useTerminalStore = create<TerminalStore>()(
               : null;
             if (placeholder && serverSessions.length > 0) tabs.length = 0;
 
-            for (const session of serverSessions) {
+            for (const session of authoritativeTerminalSessions(serverSessions)) {
               let matchIndex = tabs.findIndex((tab) => tab.terminalSessionId === session.sessionId || tab.id === session.sessionId);
               const sessionPurpose = session.purpose;
               const staleActionAuthority = sessionPurpose?.type === 'project-action'
@@ -492,10 +514,21 @@ export const useTerminalStore = create<TerminalStore>()(
 
               if (matchIndex >= 0) {
                 const current = tabs[matchIndex]!;
-                const nextLifecycle = current.purpose.type === 'project-action' || sessionPurpose?.type === 'project-action'
+                let nextLifecycle = current.purpose.type === 'project-action' || sessionPurpose?.type === 'project-action'
                   ? toActionLifecycle(session.status)
                   : session.status;
+                if (current.lifecycle === 'stopping' && session.status === 'running'
+                  && current.purpose.type === 'project-action' && nextPurpose.type === 'project-action'
+                  && current.purpose.executionId === nextPurpose.executionId) nextLifecycle = 'stopping';
                 const nextCreatedAt = session.createdAt ?? current.createdAt;
+                const executionChanged = sessionPurpose?.type === 'project-action'
+                  && (current.terminalSessionId !== session.sessionId
+                    || (nextPurpose.type === 'project-action' && nextPurpose.executionId !== null
+                      && (current.purpose.type !== 'project-action' || current.purpose.executionId !== nextPurpose.executionId)));
+                if (executionChanged) {
+                  const keyToDrop = bufferKey(key, current.id);
+                  buffers = dropBufferKeys(buffers, (entry) => entry === keyToDrop) ?? buffers;
+                }
                 const activatesRunningAction = sessionPurpose?.type === 'project-action'
                   && session.status === 'running'
                   && (current.terminalSessionId !== session.sessionId || current.lifecycle !== 'running');
@@ -517,6 +550,7 @@ export const useTerminalStore = create<TerminalStore>()(
                     isConnecting: false,
                     createdAt: nextCreatedAt,
                   };
+                  if (executionChanged) Object.assign(tabs[matchIndex], resetActionPreview);
                   tabsChanged = true;
                 }
                 if (activatesRunningAction) {
@@ -607,7 +641,7 @@ export const useTerminalStore = create<TerminalStore>()(
 
             const newSessions = new Map(state.sessions);
             newSessions.set(key, { tabs: reconciledTabs, activeTabId });
-            return { sessions: newSessions };
+            return { sessions: newSessions, buffers };
           });
         },
 
@@ -715,6 +749,15 @@ export const useTerminalStore = create<TerminalStore>()(
               return state;
             }
 
+            const closedPurpose = existing.tabs[idx].purpose;
+            let actionMutationRevisions = state.actionMutationRevisions;
+            let nextActionMutationRevision = state.nextActionMutationRevision;
+            if (closedPurpose.type === 'project-action') {
+              actionMutationRevisions = new Map(actionMutationRevisions);
+              updateActionMutationRevision(actionMutationRevisions, key, closedPurpose.actionId, nextActionMutationRevision);
+              nextActionMutationRevision += 1;
+            }
+            const mutationState = { actionMutationRevisions, nextActionMutationRevision };
             const nextTabs = existing.tabs.filter((t) => t.id !== tabId);
             const closedBufferKey = bufferKey(key, tabId);
             const nextBuffers = state.buffers.has(closedBufferKey)
@@ -732,7 +775,7 @@ export const useTerminalStore = create<TerminalStore>()(
               if (nextBuffers) {
                 nextState.buffers = nextBuffers;
               }
-              return nextState;
+              return { ...nextState, ...mutationState };
             }
 
             let nextActive = existing.activeTabId;
@@ -753,7 +796,7 @@ export const useTerminalStore = create<TerminalStore>()(
             if (nextBuffers) {
               nextState.buffers = nextBuffers;
             }
-            return nextState;
+            return { ...nextState, ...mutationState };
           });
         },
 
@@ -769,7 +812,14 @@ export const useTerminalStore = create<TerminalStore>()(
               return state;
             }
             const nextTabs = [...existing.tabs];
+            const executionChanged = purpose.type === 'project-action' && purpose.executionId !== null
+              && (current.purpose.type !== 'project-action' || current.purpose.executionId !== purpose.executionId);
             nextTabs[idx] = { ...current, purpose };
+            if (executionChanged) Object.assign(nextTabs[idx], resetActionPreview);
+            const keyToDrop = bufferKey(key, tabId);
+            const buffers = executionChanged
+              ? dropBufferKeys(state.buffers, (entry) => entry === keyToDrop) ?? state.buffers
+              : state.buffers;
             const sessions = new Map(state.sessions);
             sessions.set(key, { ...existing, tabs: nextTabs });
             if (purpose.type !== 'project-action') {
@@ -777,7 +827,7 @@ export const useTerminalStore = create<TerminalStore>()(
             }
             const actionMutationRevisions = new Map(state.actionMutationRevisions);
             updateActionMutationRevision(actionMutationRevisions, key, purpose.actionId, state.nextActionMutationRevision);
-            return { sessions, actionMutationRevisions, nextActionMutationRevision: state.nextActionMutationRevision + 1 };
+            return { sessions, buffers, actionMutationRevisions, nextActionMutationRevision: state.nextActionMutationRevision + 1 };
           });
         },
 
@@ -796,13 +846,17 @@ export const useTerminalStore = create<TerminalStore>()(
               ...nextTabs[idx]!,
               purpose: { type: 'project-action', actionId, executionId },
               lifecycle: 'starting',
+              terminalSessionId: null,
+              ...resetActionPreview,
               isConnecting: false,
             };
             const sessions = new Map(state.sessions);
             sessions.set(key, { ...current, tabs: nextTabs });
             const actionMutationRevisions = new Map(state.actionMutationRevisions);
             updateActionMutationRevision(actionMutationRevisions, key, actionId, state.nextActionMutationRevision);
-            return { sessions, actionMutationRevisions, nextActionMutationRevision: state.nextActionMutationRevision + 1 };
+            const keyToDrop = bufferKey(key, tabId);
+            const buffers = dropBufferKeys(state.buffers, (entry) => entry === keyToDrop) ?? state.buffers;
+            return { sessions, buffers, actionMutationRevisions, nextActionMutationRevision: state.nextActionMutationRevision + 1 };
           });
           return executionId;
         },
@@ -884,10 +938,15 @@ export const useTerminalStore = create<TerminalStore>()(
               return state;
             }
 
+            const current = existing.tabs[idx]!;
+            if (current.lifecycle === lifecycle && !current.isConnecting) return state;
             const nextTabs = [...existing.tabs];
-            nextTabs[idx] = { ...nextTabs[idx], lifecycle, isConnecting: false };
+            nextTabs[idx] = { ...current, lifecycle, isConnecting: false };
             newSessions.set(key, { ...existing, tabs: nextTabs });
-            return { sessions: newSessions };
+            if (current.purpose.type !== 'project-action' || current.lifecycle === lifecycle) return { sessions: newSessions };
+            const actionMutationRevisions = new Map(state.actionMutationRevisions);
+            updateActionMutationRevision(actionMutationRevisions, key, current.purpose.actionId, state.nextActionMutationRevision);
+            return { sessions: newSessions, actionMutationRevisions, nextActionMutationRevision: state.nextActionMutationRevision + 1 };
           });
         },
 

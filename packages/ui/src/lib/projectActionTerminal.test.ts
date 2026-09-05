@@ -45,12 +45,12 @@ describe('project action terminal lifecycle', () => {
     expect(normalizeProjectActionCommand('  printf "hi"\r\nexit\u0007  ')).toBe('printf "hi"\nexit');
   });
 
-  test('closes the previous session before creating a command-mode run', async () => {
+  test('creates a command-mode run under its execution ID', async () => {
     const calls: string[] = [];
     const terminal: TerminalAPI = {
       createSession: async (options) => {
         calls.push(`create:${JSON.stringify(options)}`);
-        return { sessionId: 'tab-1', cols: 80, rows: 24, status: 'running', mode: 'command', purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-1' } };
+        return { sessionId: 'exec-1', cols: 80, rows: 24, status: 'running', mode: 'command', purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-1' } };
       },
       connect: () => ({ close: () => {} }),
       sendInput: async () => {},
@@ -62,27 +62,24 @@ describe('project action terminal lifecycle', () => {
 
     const created = await createProjectActionTerminalSession({
       terminal,
-      previousSessionId: 'stale-session',
       createOptions: {
         cwd: '/repo',
-        sessionId: 'tab-1',
       },
       command: 'echo hello',
       isRunStillExpected: () => true,
       purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-1' },
     });
 
-    expect(created).toEqual({ sessionId: 'tab-1', cols: 80, rows: 24, status: 'running', mode: 'command', purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-1' } });
+    expect(created).toEqual({ sessionId: 'exec-1', cols: 80, rows: 24, status: 'running', mode: 'command', purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-1' } });
     expect(calls).toEqual([
-      'close:stale-session',
-      'create:{"cwd":"/repo","sessionId":"tab-1","mode":"command","command":"echo hello","purpose":{"type":"project-action","actionId":"build","executionId":"exec-1"}}',
+      'create:{"cwd":"/repo","sessionId":"exec-1","mode":"command","command":"echo hello","purpose":{"type":"project-action","actionId":"build","executionId":"exec-1"}}',
     ]);
   });
 
   test('rejects and closes a create response that does not echo command mode', async () => {
     const closed: string[] = [];
     const terminal: TerminalAPI = {
-      createSession: async () => ({ sessionId: 'tab-1', cols: 80, rows: 24, status: 'running' }),
+      createSession: async () => ({ sessionId: 'exec-1', cols: 80, rows: 24, status: 'running' }),
       connect: () => ({ close: () => {} }),
       sendInput: async () => {},
       resize: async () => {},
@@ -93,22 +90,20 @@ describe('project action terminal lifecycle', () => {
 
     await expect(createProjectActionTerminalSession({
       terminal,
-      previousSessionId: null,
       createOptions: {
         cwd: '/repo',
-        sessionId: 'tab-1',
       },
       command: 'echo hello',
       isRunStillExpected: () => true,
       purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-1' },
     })).rejects.toThrow('COMMAND_MODE_UNSUPPORTED');
-    expect(closed).toEqual(['tab-1']);
+    expect(closed).toEqual(['exec-1']);
   });
 
   test('closes a newly created command session when stop removes the run during create', async () => {
     const closed: string[] = [];
     const terminal: TerminalAPI = {
-      createSession: async () => ({ sessionId: 'tab-1', cols: 80, rows: 24, status: 'running', mode: 'command', purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-1' } }),
+      createSession: async () => ({ sessionId: 'exec-1', cols: 80, rows: 24, status: 'running', mode: 'command', purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-1' } }),
       connect: () => ({ close: () => {} }),
       sendInput: async () => {},
       resize: async () => {},
@@ -119,22 +114,20 @@ describe('project action terminal lifecycle', () => {
 
     await expect(createProjectActionTerminalSession({
       terminal,
-      previousSessionId: null,
       createOptions: {
         cwd: '/repo',
-        sessionId: 'tab-1',
       },
       command: 'echo hello',
       isRunStillExpected: () => false,
       purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-1' },
     })).rejects.toThrow('PROJECT_ACTION_RUN_CANCELLED');
-    expect(closed).toEqual(['tab-1']);
+    expect(closed).toEqual(['exec-1']);
   });
 
   test('rejects and closes a create response that does not echo project-action purpose', async () => {
     const closed: string[] = [];
     const terminal: TerminalAPI = {
-      createSession: async () => ({ sessionId: 'tab-1', cols: 80, rows: 24, status: 'running', mode: 'command' }),
+      createSession: async () => ({ sessionId: 'exec-1', cols: 80, rows: 24, status: 'running', mode: 'command' }),
       connect: () => ({ close: () => {} }),
       sendInput: async () => {},
       resize: async () => {},
@@ -145,13 +138,12 @@ describe('project action terminal lifecycle', () => {
 
     await expect(createProjectActionTerminalSession({
       terminal,
-      previousSessionId: null,
-      createOptions: { cwd: '/repo', sessionId: 'tab-1' },
+      createOptions: { cwd: '/repo' },
       command: 'echo hello',
       isRunStillExpected: () => true,
       purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-1' },
     })).rejects.toThrow('PROJECT_ACTION_PURPOSE_UNSUPPORTED');
-    expect(closed).toEqual(['tab-1']);
+    expect(closed).toEqual(['exec-1']);
   });
 
   test('reuses one in-flight authority listing per directory', async () => {
@@ -292,4 +284,20 @@ describe('project action terminal lifecycle', () => {
     expect(restored).toBe(1);
     expect(finalized).toBe(0);
   });
+});
+
+test('cancelling a local request does not close a run adopted from another client', async () => {
+  const closed: string[] = [];
+  const terminal: TerminalAPI = {
+    createSession: async () => ({ sessionId: 'other-client', cols: 80, rows: 24, status: 'running', mode: 'command', purpose: { type: 'project-action', actionId: 'build', executionId: 'other-execution' } }),
+    connect: () => ({ close() {} }),
+    sendInput: async () => {}, resize: async () => {},
+    close: async id => { closed.push(id); },
+  };
+  await expect(createProjectActionTerminalSession({
+    terminal, createOptions: { cwd: '/repo' }, command: 'echo hello',
+    purpose: { type: 'project-action', actionId: 'build', executionId: 'requested-execution' },
+    isRunStillExpected: () => false,
+  })).rejects.toThrow('PROJECT_ACTION_RUN_CANCELLED');
+  expect(closed).toEqual([]);
 });
