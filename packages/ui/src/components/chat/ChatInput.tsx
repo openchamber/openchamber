@@ -1381,7 +1381,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 sessionActions.dismissOpenPermissionsForSession(currentSessionId),
                 sessionActions.dismissOpenQuestionsForSession(currentSessionId),
             ]);
-            if (deniedPermissions || dismissedQuestions) {
+            // An explicit Steer ("delivery === 'steer'") is never downgraded
+            // to the queue: silently converting it is what made steered
+            // follow-ups surface as a queue entry on top of the delivered
+            // message. The blockers above are dismissed either way; after
+            // that, `prompt_async` with delivery "steer" is exactly the user
+            // intent — it steers the active run, and starts the next turn when
+            // the session is in fact already idle.
+            if ((deniedPermissions || dismissedQuestions) && delivery !== 'steer') {
                 void handleQueueMessage();
                 return;
             }
