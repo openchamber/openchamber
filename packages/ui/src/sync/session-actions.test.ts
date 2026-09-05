@@ -297,6 +297,7 @@ import { create, type StoreApi } from "zustand"
 import { INITIAL_STATE } from "./types"
 import type { DirectoryStore } from "./child-store"
 import type { Message, OpencodeClient, Part, Session } from "@opencode-ai/sdk/v2/client"
+import { applyDirectoryEvent } from "./event-reducer"
 
 type OptimisticAddCall = { sessionID: string; directory?: string | null; message: Message; parts: Part[] }
 type OptimisticRemoveCall = { sessionID: string; directory?: string | null; messageID: string }
@@ -473,6 +474,88 @@ describe("confirmed session removal", () => {
     // the live runtime key with itself.
     expect(deletedCleanupIdentities[0]?.runtimeKey).toBe("delete-scope")
     expect(deletedCleanupIdentities[0]?.runtimeKey).toBe(getRuntimeKey())
+  })
+
+  test("treats delete 404 as success and cleans the captured identity", async () => {
+    sessionDeleteError = { status: 404 }
+    const source = createStore({}, {
+      session: [{ id: "session-a", directory: "/test/project", time: { created: 1 } } as Session],
+    })
+    const { deleteSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", source]]), () => "/test/project")
+
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://delete-404-runtime.test", runtimeKey: "delete-404-runtime" })
+
+    expect(await deleteSession("session-a", {
+      expectedRuntimeKey: "delete-404-runtime",
+      directory: "/captured/project",
+    })).toBe(true)
+    expect(source.getState().session).toEqual([])
+    expect(globalRemovedSessionIds).toEqual(["session-a"])
+    expect(deletedCleanupIdentities).toEqual([{
+      runtimeKey: "delete-404-runtime",
+      directory: "/captured/project",
+      sessionId: "session-a",
+    }])
+    expect(replyCalls.filter((call) => call.method === "session.delete").map((call) => call.params.directory)).toEqual([
+      "/captured/project",
+    ])
+  })
+
+  test("clears live session caches directly after confirmed deletion", async () => {
+    const source = createStore({}, {
+      session: [{ id: "session-a", directory: "/test/project", time: { created: 1 } } as Session],
+      sessionTotal: 1,
+      session_status: { "session-a": { type: "idle" } },
+      session_diff: { "session-a": [{ file: "changed.ts" }] },
+      todo: { "session-a": [{ id: "todo-a" }] as never },
+      permission: { "session-a": [{ id: "permission-a" }] as never },
+      question: { "session-a": [{ id: "question-a" }] as never },
+      message: { "session-a": [{ id: "message-a", sessionID: "session-a" }] as never },
+      part: { "message-a": [{ id: "part-a", sessionID: "session-a" }] as never },
+    })
+    const { deleteSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", source]]), () => "/test/project")
+
+    expect(await deleteSession("session-a")).toBe(true)
+    const state = source.getState()
+    expect(state.session).toEqual([])
+    // Root counts are reconciled by the authoritative session.deleted echo.
+    expect(state.sessionTotal).toBe(1)
+    expect(state.session_status["session-a"]).toBe(undefined)
+    expect(state.session_diff["session-a"]).toBe(undefined)
+    expect(state.todo["session-a"]).toBe(undefined)
+    expect(state.permission["session-a"]).toBe(undefined)
+    expect(state.question["session-a"]).toBe(undefined)
+    expect(state.message["session-a"]).toBe(undefined)
+    expect(state.part["message-a"]).toBe(undefined)
+  })
+
+  test("reconciles one root count after direct removal and its session.deleted echo", async () => {
+    const source = createStore({}, {
+      session: [
+        { id: "session-a", directory: "/test/project", time: { created: 1 } } as Session,
+        { id: "session-b", directory: "/test/project", time: { created: 2 } } as Session,
+      ],
+      sessionTotal: 2,
+    })
+    const { deleteSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", source]]), () => "/test/project")
+
+    expect(await deleteSession("session-a")).toBe(true)
+    expect(source.getState().session.map((session) => session.id)).toEqual(["session-b"])
+    expect(source.getState().sessionTotal).toBe(2)
+
+    applyDirectoryEvent(source.getState(), {
+      type: "session.deleted",
+      properties: {
+        sessionID: "session-a",
+        info: { id: "session-a", time: { created: 1 } },
+      },
+    } as never)
+
+    expect(source.getState().sessionTotal).toBe(1)
   })
 
   test("rejects a delete response that arrives after a runtime switch", async () => {

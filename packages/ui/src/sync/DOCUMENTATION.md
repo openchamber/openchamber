@@ -38,6 +38,8 @@ So:
 - Use the **global sessions store** for cold/global session coverage (especially archived pages and unopened directories)
 - Use **aggregated child-store sessions and the global live status index** for live truth across initialized directories
 
+Global archived membership is negative authority for every active session list built from both scopes. A session in the global archived list must not be reintroduced by a live copy that has not caught up yet, and archived wins if a race leaves the same ID in both global lists. Live records may still enrich a global active session's metadata through `mergeLiveSessionWithGlobalSession`; they may not restore archived-away membership. The `sessions` memo in `MobileSessionsSheet.tsx` implements that precedence for the mobile session surfaces.
+
 ## Ownership map
 
 | Layer / Store | Owns | Scope |
@@ -359,6 +361,16 @@ the previous runtime or one this session never belonged to, so the action
 reports failure instead of committing. The deletion already accepted by the
 server stays deleted there; its persisted state is left as harmless stale
 metadata and the next authoritative load reconciles it.
+The mobile multi-session archive/delete callers that span asynchronous SDK calls
+capture the runtime key and each target's directory before the first SDK call.
+Their shared post-order executor stops on the first failure or runtime switch, so
+an ancestor is never mutated after a known descendant failed. Archive skips
+already archived descendants without retimestamping them; hard delete includes
+known archived descendants. The snapshot only covers known descendants: children
+missing from the client snapshot cannot be archived by the client, while unknown
+children deleted by the user remain covered only by the upstream backend delete
+cascade. Stale responses are rejected before they can reconcile the current
+runtime's live or global stores.
 
 ## The golden rule
 
