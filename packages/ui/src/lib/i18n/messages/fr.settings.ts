@@ -1934,6 +1934,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.diffLayoutAria': 'Disposition des différences : {option}',
   'settings.openchamber.visual.field.sessionRecap': 'Générer le récapitulatif de session',
   'settings.openchamber.visual.field.sessionRecapAria': "Générer un récapitulatif quand l'agent termine",
+  'settings.openchamber.visual.field.liveProgressSummary': 'Afficher le résumé de progression en direct',
+  'settings.openchamber.visual.field.liveProgressSummaryAria': 'Afficher toutes les 30 secondes un résumé du Small Model sur le tour actif',
   'settings.openchamber.visual.field.sessionSuggestion': 'Générer une suggestion de prochain message utilisateur',
   'settings.openchamber.visual.field.sessionSuggestionAria': "Générer un prochain message utilisateur suggéré quand l'agent termine",
   'settings.openchamber.visual.field.sessionGoal': 'Activer les objectifs de session',

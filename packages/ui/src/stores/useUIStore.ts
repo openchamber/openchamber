@@ -830,6 +830,7 @@ interface UIStore {
   streamingAutoFollowEnabled: boolean;
   sessionRecapEnabled: boolean;
   sessionSuggestionEnabled: boolean;
+  liveProgressSummaryEnabled: boolean;
   sessionGoalEnabled: boolean;
   sessionGoalDefaultBudgetEnabled: boolean;
   sessionGoalDefaultBudget: number;
@@ -1034,6 +1035,7 @@ interface UIStore {
   setStreamingAutoFollowEnabled: (value: boolean) => void;
   setSessionRecapEnabled: (value: boolean) => void;
   setSessionSuggestionEnabled: (value: boolean) => void;
+  setLiveProgressSummaryEnabled: (value: boolean) => void;
   setSessionGoalEnabled: (value: boolean) => void;
   setSessionGoalDefaultBudgetEnabled: (value: boolean) => void;
   setSessionGoalDefaultBudget: (value: number) => void;
@@ -1213,6 +1215,7 @@ export const useUIStore = create<UIStore>()(
         streamingAutoFollowEnabled: true,
         sessionRecapEnabled: true,
         sessionSuggestionEnabled: true,
+        liveProgressSummaryEnabled: true,
         sessionGoalEnabled: true,
         sessionGoalDefaultBudgetEnabled: false,
         sessionGoalDefaultBudget: 200_000,
@@ -2001,6 +2004,10 @@ export const useUIStore = create<UIStore>()(
 
         setSessionSuggestionEnabled: (value) => {
           set({ sessionSuggestionEnabled: value });
+        },
+
+        setLiveProgressSummaryEnabled: (value) => {
+          set({ liveProgressSummaryEnabled: value });
         },
 
         setSessionGoalEnabled: (value) => {
@@ -2951,6 +2958,7 @@ export const useUIStore = create<UIStore>()(
           streamingAutoFollowEnabled: state.streamingAutoFollowEnabled,
           sessionRecapEnabled: state.sessionRecapEnabled,
           sessionSuggestionEnabled: state.sessionSuggestionEnabled,
+          liveProgressSummaryEnabled: state.liveProgressSummaryEnabled,
           sessionGoalEnabled: state.sessionGoalEnabled,
           sessionGoalDefaultBudgetEnabled: state.sessionGoalDefaultBudgetEnabled,
           sessionGoalDefaultBudget: state.sessionGoalDefaultBudget,

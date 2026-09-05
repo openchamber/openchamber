@@ -12,6 +12,7 @@ type AppearanceSlice = {
   workStatusHiddenSections: string[];
   sessionRecapEnabled: boolean;
   sessionSuggestionEnabled: boolean;
+  liveProgressSummaryEnabled: boolean;
   sessionGoalEnabled: boolean;
   sessionGoalDefaultBudgetEnabled: boolean;
   sessionGoalDefaultBudget: number;
@@ -68,6 +69,7 @@ export const startAppearanceAutoSave = (): void => {
     workStatusHiddenSections: useUIStore.getState().workStatusHiddenSections,
     sessionRecapEnabled: useUIStore.getState().sessionRecapEnabled,
     sessionSuggestionEnabled: useUIStore.getState().sessionSuggestionEnabled,
+    liveProgressSummaryEnabled: useUIStore.getState().liveProgressSummaryEnabled,
     sessionGoalEnabled: useUIStore.getState().sessionGoalEnabled,
     sessionGoalDefaultBudgetEnabled: useUIStore.getState().sessionGoalDefaultBudgetEnabled,
     sessionGoalDefaultBudget: useUIStore.getState().sessionGoalDefaultBudget,
@@ -111,6 +113,7 @@ export const startAppearanceAutoSave = (): void => {
       workStatusHiddenSections: state.workStatusHiddenSections,
       sessionRecapEnabled: state.sessionRecapEnabled,
       sessionSuggestionEnabled: state.sessionSuggestionEnabled,
+      liveProgressSummaryEnabled: state.liveProgressSummaryEnabled,
       sessionGoalEnabled: state.sessionGoalEnabled,
       sessionGoalDefaultBudgetEnabled: state.sessionGoalDefaultBudgetEnabled,
       sessionGoalDefaultBudget: state.sessionGoalDefaultBudget,
@@ -167,6 +170,9 @@ export const startAppearanceAutoSave = (): void => {
     }
     if (current.sessionSuggestionEnabled !== previous.sessionSuggestionEnabled) {
       diff.sessionSuggestionEnabled = current.sessionSuggestionEnabled;
+    }
+    if (current.liveProgressSummaryEnabled !== previous.liveProgressSummaryEnabled) {
+      diff.liveProgressSummaryEnabled = current.liveProgressSummaryEnabled;
     }
     if (current.sessionGoalEnabled !== previous.sessionGoalEnabled) {
       diff.sessionGoalEnabled = current.sessionGoalEnabled;

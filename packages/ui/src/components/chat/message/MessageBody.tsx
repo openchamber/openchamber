@@ -1322,6 +1322,7 @@ const AssistantMessageBody = React.memo(({
     const [isForkSubmitting, setIsForkSubmitting] = React.useState(false);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const collapsibleThinkingBlocks = useUIStore((state) => state.collapsibleThinkingBlocks);
+    const liveProgressSummaryEnabled = useUIStore((state) => state.liveProgressSummaryEnabled);
     const showSplitAssistantMessageActions = useUIStore((state) => state.showSplitAssistantMessageActions);
     const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
     const vscodeApi = useRuntimeAPIs().vscode;
@@ -1330,6 +1331,14 @@ const AssistantMessageBody = React.memo(({
     const isLastAssistantInTurn = turnGroupingContext?.isLastAssistantInTurn ?? false;
     const hasStopFinish = messageFinish === 'stop';
     const effectiveStreamPhase: StreamPhase = hasStopFinish ? 'completed' : streamPhase;
+    const isLiveProgressPhase = _streamPhase === 'streaming' || _streamPhase === 'cooldown';
+    // While the Small Model progress feed is enabled, the active turn should
+    // read like a status update rather than a low-level event log. Completed
+    // turns keep their normal tool and reasoning details.
+    const compactLiveActivity = liveProgressSummaryEnabled && (
+        turnGroupingContext?.isWorking === true
+        || (!isMessageCompleted && isLiveProgressPhase)
+    );
 
     const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
     const sessionProjectRef = React.useMemo(() => {
@@ -1735,9 +1744,12 @@ const AssistantMessageBody = React.memo(({
             if (!shouldRenderActivityGroup || !toggleActivityGroup) {
                 return null;
             }
-            const visibleSegmentParts = showReasoningTraces
-                ? segment.parts
-                : segment.parts.filter((activity) => activity.kind !== 'reasoning');
+            const visibleSegmentParts = segment.parts.filter((activity) => {
+                if (compactLiveActivity && (activity.kind === 'reasoning' || activity.kind === 'tool')) {
+                    return false;
+                }
+                return showReasoningTraces || activity.kind !== 'reasoning';
+            });
             if (visibleSegmentParts.length === 0) {
                 return null;
             }
@@ -1846,6 +1858,10 @@ const AssistantMessageBody = React.memo(({
             }
 
             if (part.type === 'reasoning') {
+                if (compactLiveActivity) {
+                    i += 1;
+                    continue;
+                }
                 const activity = activityByPart.get(part);
                 if (activity?.kind === 'reasoning') {
                     i += 1;
@@ -1885,6 +1901,12 @@ const AssistantMessageBody = React.memo(({
                 const toolPart = part as ToolPartType;
                 const toolName = toolPart.tool?.toLowerCase() ?? '';
                 const toolPartId = toolPart.id ?? `${messageId}-part-${i}-${part.type}`;
+
+                if (compactLiveActivity) {
+                    flushSegmentsAfterTool(toolPartId);
+                    i += 1;
+                    continue;
+                }
 
                 if (isSortedRenderMode && !isActivityOwnerMessage) {
                     flushSegmentsAfterTool(toolPartId);
@@ -1977,6 +1999,7 @@ const AssistantMessageBody = React.memo(({
         animateActivityRows,
         chatRenderMode,
         collapsibleThinkingBlocks,
+        compactLiveActivity,
         collapsedPreviewCount,
         expandedTools,
         isMobile,

@@ -135,6 +135,7 @@ export type DesktopSettings = {
   streamingAutoFollowEnabled?: boolean;
   sessionRecapEnabled?: boolean;
   sessionSuggestionEnabled?: boolean;
+  liveProgressSummaryEnabled?: boolean;
   sessionGoalEnabled?: boolean;
   sessionGoalDefaultBudgetEnabled?: boolean;
   sessionGoalDefaultBudget?: number;

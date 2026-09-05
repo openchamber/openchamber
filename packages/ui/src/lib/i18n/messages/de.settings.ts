@@ -1970,6 +1970,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.diffLayoutAria': 'Diff-Layout: {option}',
   'settings.openchamber.visual.field.sessionRecap': 'Sitzungs-Zusammenfassung generieren',
   'settings.openchamber.visual.field.sessionRecapAria': 'Eine Zusammenfassung nach Abschluss des Agents generieren',
+  'settings.openchamber.visual.field.liveProgressSummary': 'Live-Fortschrittszusammenfassung anzeigen',
+  'settings.openchamber.visual.field.liveProgressSummaryAria': 'Alle 30 Sekunden eine Small-Model-Zusammenfassung des aktiven Durchlaufs anzeigen',
   'settings.openchamber.visual.field.sessionSuggestion': 'Nächste Benutzernachricht vorschlagen',
   'settings.openchamber.visual.field.sessionSuggestionAria': 'Eine vorgeschlagene nächste Benutzernachricht nach Abschluss des Agents generieren',
   'settings.openchamber.visual.field.sessionGoal': 'Sitzungsziele aktivieren',

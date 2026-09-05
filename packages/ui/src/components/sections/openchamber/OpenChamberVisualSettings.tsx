@@ -283,7 +283,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'reportUsage' | 'autoSaveEnabled' | 'sessionTabs';
+type VisibleSetting = 'sessionAssist' | 'liveProgressSummary' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'reportUsage' | 'autoSaveEnabled' | 'sessionTabs';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
@@ -310,8 +310,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const showReasoningTraces = useUIStore(state => state.showReasoningTraces);
     const sessionRecapEnabled = useUIStore(state => state.sessionRecapEnabled);
     const sessionSuggestionEnabled = useUIStore(state => state.sessionSuggestionEnabled);
+    const liveProgressSummaryEnabled = useUIStore(state => state.liveProgressSummaryEnabled);
     const setSessionRecapEnabled = useUIStore(state => state.setSessionRecapEnabled);
     const setSessionSuggestionEnabled = useUIStore(state => state.setSessionSuggestionEnabled);
+    const setLiveProgressSummaryEnabled = useUIStore(state => state.setLiveProgressSummaryEnabled);
     const sessionGoalEnabled = useUIStore(state => state.sessionGoalEnabled);
     const setSessionGoalEnabled = useUIStore(state => state.setSessionGoalEnabled);
     const sessionGoalDefaultBudgetEnabled = useUIStore(state => state.sessionGoalDefaultBudgetEnabled);
@@ -640,6 +642,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || ((shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode) || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled') || (shouldShow('sessionTabs') && !isVSCode && !isMobile);
     const hasBehaviorSettings = shouldShow('mermaidRendering')
         || (shouldShow('sessionGoal') && !isVSCode)
+        || shouldShow('liveProgressSummary')
         || shouldShow('userMessageRendering')
         || shouldShow('chatRenderMode')
         || shouldShow('messageTransport')
@@ -669,6 +672,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || (shouldShow('diffLayout') && !isVSCode)
         || shouldShow('followUpBehavior');
     const showBehaviorFeatureCheckboxes = shouldShow('sessionAssist')
+        || shouldShow('liveProgressSummary')
         || (shouldShow('sessionGoal') && !isVSCode)
         || shouldShow('subagentReadOnlyBanner')
         || shouldShow('collapsibleUserMessages')
@@ -1780,22 +1784,35 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         ariaLabel={t('settings.openchamber.visual.field.draftStartersVisibleAria')}
                                         settingsItem="chat.draft-starters-visible"
                                     />
-                                        {shouldShow('sessionAssist') && (
+                                        {(shouldShow('sessionAssist') || shouldShow('liveProgressSummary')) && (
                                             <>
-                                                <SettingsCheckboxRow
-                                                    checked={sessionRecapEnabled}
-                                                    onChange={setSessionRecapEnabled}
-                                                    label={t('settings.openchamber.visual.field.sessionRecap')}
-                                                    ariaLabel={t('settings.openchamber.visual.field.sessionRecapAria')}
-                                                    settingsItem="chat.session-recap"
-                                                />
-                                                <SettingsCheckboxRow
-                                                    checked={sessionSuggestionEnabled}
-                                                    onChange={setSessionSuggestionEnabled}
-                                                    label={t('settings.openchamber.visual.field.sessionSuggestion')}
-                                                    ariaLabel={t('settings.openchamber.visual.field.sessionSuggestionAria')}
-                                                    settingsItem="chat.session-suggestion"
-                                                />
+                                                {shouldShow('liveProgressSummary') && (
+                                                    <SettingsCheckboxRow
+                                                        checked={liveProgressSummaryEnabled}
+                                                        onChange={setLiveProgressSummaryEnabled}
+                                                        label={t('settings.openchamber.visual.field.liveProgressSummary')}
+                                                        ariaLabel={t('settings.openchamber.visual.field.liveProgressSummaryAria')}
+                                                        settingsItem="chat.live-progress-summary"
+                                                    />
+                                                )}
+                                                {shouldShow('sessionAssist') && (
+                                                    <>
+                                                        <SettingsCheckboxRow
+                                                            checked={sessionRecapEnabled}
+                                                            onChange={setSessionRecapEnabled}
+                                                            label={t('settings.openchamber.visual.field.sessionRecap')}
+                                                            ariaLabel={t('settings.openchamber.visual.field.sessionRecapAria')}
+                                                            settingsItem="chat.session-recap"
+                                                        />
+                                                        <SettingsCheckboxRow
+                                                            checked={sessionSuggestionEnabled}
+                                                            onChange={setSessionSuggestionEnabled}
+                                                            label={t('settings.openchamber.visual.field.sessionSuggestion')}
+                                                            ariaLabel={t('settings.openchamber.visual.field.sessionSuggestionAria')}
+                                                            settingsItem="chat.session-suggestion"
+                                                        />
+                                                    </>
+                                                )}
                                             </>
                                         )}
                                         {shouldShow('subagentReadOnlyBanner') && (

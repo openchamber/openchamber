@@ -325,6 +325,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.sessionSuggestionEnabled === 'boolean') {
       result.sessionSuggestionEnabled = candidate.sessionSuggestionEnabled;
     }
+    if (typeof candidate.liveProgressSummaryEnabled === 'boolean') {
+      result.liveProgressSummaryEnabled = candidate.liveProgressSummaryEnabled;
+    }
     if (typeof candidate.sessionGoalEnabled === 'boolean') {
       result.sessionGoalEnabled = candidate.sessionGoalEnabled;
     }

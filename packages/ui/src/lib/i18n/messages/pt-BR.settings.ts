@@ -2027,6 +2027,8 @@ export const settingsDict = {
   "settings.openchamber.visual.field.diffLayoutAria": "Layout de comparação: {option}",
   "settings.openchamber.visual.field.sessionRecap": "Gerar resumo da sessão",
   "settings.openchamber.visual.field.sessionRecapAria": "Gerar um resumo quando o agente termina",
+  "settings.openchamber.visual.field.liveProgressSummary": "Mostrar resumo do progresso ao vivo",
+  "settings.openchamber.visual.field.liveProgressSummaryAria": "Mostrar a cada 30 segundos um resumo do Small Model sobre o turno ativo",
   "settings.openchamber.visual.field.sessionSuggestion": "Gerar sugestão da próxima mensagem do usuário",
   "settings.openchamber.visual.field.sessionSuggestionAria": "Gerar uma próxima mensagem sugerida do usuário quando o agente termina",
   "settings.openchamber.visual.field.sessionGoal": "Habilitar objetivos de sessão",

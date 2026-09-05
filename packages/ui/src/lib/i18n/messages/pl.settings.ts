@@ -1112,6 +1112,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.showExpandedEditToolsAria': 'Pokaż rozwinięte narzędzia edycji',
   'settings.openchamber.visual.field.sessionRecap': 'Generuj podsumowanie sesji',
   'settings.openchamber.visual.field.sessionRecapAria': 'Generuj podsumowanie po zakończeniu pracy agenta',
+  'settings.openchamber.visual.field.liveProgressSummary': 'Pokazuj podsumowanie postępu na żywo',
+  'settings.openchamber.visual.field.liveProgressSummaryAria': 'Pokazuj co 30 sekund podsumowanie aktywnej tury generowane przez Small Model',
   'settings.openchamber.visual.field.sessionSuggestion': 'Generuj sugestię następnej wiadomości użytkownika',
   'settings.openchamber.visual.field.sessionSuggestionAria': 'Generuj sugerowaną następną wiadomość użytkownika po zakończeniu pracy agenta',
   'settings.openchamber.visual.field.sessionGoal': 'Włącz cele sesji',

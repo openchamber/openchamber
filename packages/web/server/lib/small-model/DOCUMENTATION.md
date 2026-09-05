@@ -142,6 +142,26 @@ other runtime API.
   `POST /api/small-model/generate` (`{ prompt, system?, maxOutputTokens?,
   model?, directory? }` → `{ text, providerID, modelID, source }`).
 
+The active-chat live progress summary uses the same generate route from the
+shared UI. After the active turn has run for 30 seconds, the UI samples a
+bounded, in-memory transcript containing the current user request and recent
+assistant/reasoning/tool parts, then repeats about every 30 seconds while the
+turn remains busy. When a pending or running shell command (`bash`, `shell`,
+`cmd`, or `terminal`) is present, the UI waits 750ms for its input to settle
+and requests a separate one-sentence explanation of what it does and why it is
+running. That command request is keyed to the tool call and bounded command
+input, so output deltas do not trigger another request; completing or replacing
+the command clears the transient line. Both summaries restrict the utility
+call to the session's provider, are never persisted, and treat an unavailable
+Small Model as an invisible no-op. The setting is
+`liveProgressSummaryEnabled` (default on).
+
+While a turn is busy and this setting is enabled, the summary is rendered in the
+scrolling chat timeline and the active turn hides its low-level reasoning and
+tool rows. Completed turns keep their normal expandable details. If the Small
+Model is unavailable or returns unusable output, the card stays generic while
+the main-model turn continues unchanged.
+
 ## Which providers the pickers may offer
 
 `listAuthenticatedProviders()` answers one question for the Small Model and

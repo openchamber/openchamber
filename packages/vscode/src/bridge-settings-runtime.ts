@@ -315,6 +315,10 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
     delete restChanges.sessionSuggestionEnabled;
   }
 
+  if ('liveProgressSummaryEnabled' in restChanges && typeof restChanges.liveProgressSummaryEnabled !== 'boolean') {
+    delete restChanges.liveProgressSummaryEnabled;
+  }
+
   if ('sessionGoalEnabled' in restChanges && typeof restChanges.sessionGoalEnabled !== 'boolean') {
     delete restChanges.sessionGoalEnabled;
   }

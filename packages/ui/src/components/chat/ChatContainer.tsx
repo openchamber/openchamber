@@ -29,6 +29,7 @@ import { QuestionCard } from './QuestionCard';
 import { hasActiveQuestionToolInCurrentTurn, recoverPendingQuestionWithRetry } from '@/sync/question-recovery';
 import { StatusRowContainer } from './StatusRowContainer';
 import { SessionRecapNote } from '@/components/chat/SessionRecapSpacer';
+import { SessionProgressSummary } from '@/components/chat/SessionProgressSummary';
 import { SessionErrorNotice } from '@/components/chat/SessionErrorNotice';
 import ScrollToBottomButton from './components/ScrollToBottomButton';
 import { PromptNavigatorRail } from './components/PromptNavigatorRail';
@@ -45,6 +46,7 @@ import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import { Icon } from "@/components/icon/Icon";
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSessionProgressSummary } from '@/hooks/useSessionProgressSummary';
 
 // New sync system imports
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -244,6 +246,15 @@ const ChatViewport = React.memo(({
     onLoadEarlierPrompts,
 }: ChatViewportProps) => {
     const { t } = useI18n();
+    const progressSummary = useSessionProgressSummary(currentSessionId, directory);
+    const {
+        commandSummary,
+        generatedAt,
+        isActive,
+        isCommandGenerating,
+        isGenerating,
+        summary,
+    } = progressSummary;
     const promptPreviewsByTurnIdRef = React.useRef<Map<string, Part[]>>(new Map());
     // Cache normalized parts per source array so unchanged messages keep the
     // same reference and the memo below can bail out to the previous map.
@@ -378,11 +389,31 @@ const ChatViewport = React.memo(({
             )}
 
             <SessionErrorNotice sessionId={currentSessionId} directory={directory} />
+            <SessionProgressSummary state={{
+                commandSummary,
+                generatedAt,
+                isActive,
+                isCommandGenerating,
+                isGenerating,
+                summary,
+            }} />
             <SessionRecapNote sessionId={currentSessionId} directory={directory} isMobile={isMobile} />
 
             <div className="flex-shrink-0" style={{ height: isMobile ? '40px' : '10vh' }} aria-hidden="true" />
         </>
-    ), [currentSessionId, directory, isMobile, sessionPermissions, sessionQuestions]);
+    ), [
+        currentSessionId,
+        directory,
+        isMobile,
+        commandSummary,
+        generatedAt,
+        isActive,
+        isCommandGenerating,
+        isGenerating,
+        summary,
+        sessionPermissions,
+        sessionQuestions,
+    ]);
 
     // Opening a session paints the timeline as one finished picture: the root
     // stays invisible while any renderer holds a provisional first paint, then

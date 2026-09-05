@@ -2027,6 +2027,8 @@ export const settingsDict = {
   "settings.openchamber.visual.field.diffLayoutAria": "Компонування diff: {option}",
   "settings.openchamber.visual.field.sessionRecap": "Генерувати підсумок сесії",
   "settings.openchamber.visual.field.sessionRecapAria": "Генерувати підсумок після завершення роботи агента",
+  "settings.openchamber.visual.field.liveProgressSummary": "Показувати підсумок перебігу в реальному часі",
+  "settings.openchamber.visual.field.liveProgressSummaryAria": "Показувати підсумок Small Model про активний етап кожні 30 секунд",
   "settings.openchamber.visual.field.sessionSuggestion": "Генерувати пропозицію наступного повідомлення користувача",
   "settings.openchamber.visual.field.sessionSuggestionAria": "Генерувати запропоноване наступне повідомлення користувача після завершення роботи агента",
   "settings.openchamber.visual.field.sessionGoal": "Увімкнути цілі сесії",

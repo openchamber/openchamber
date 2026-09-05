@@ -2050,6 +2050,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.diffLayoutAria': 'Diff layout: {option}',
   'settings.openchamber.visual.field.sessionRecap': 'Generate Session Recap',
   'settings.openchamber.visual.field.sessionRecapAria': 'Generate a recap after the agent finishes',
+  'settings.openchamber.visual.field.liveProgressSummary': 'Show Live Progress Summary',
+  'settings.openchamber.visual.field.liveProgressSummaryAria': 'Show a Small Model summary about the active turn every 30 seconds',
   'settings.openchamber.visual.field.sessionSuggestion': 'Generate Next User Message Suggestion',
   'settings.openchamber.visual.field.sessionSuggestionAria': 'Generate a suggested next user message after the agent finishes',
   'settings.openchamber.visual.field.sessionGoal': 'Enable Session Goals',

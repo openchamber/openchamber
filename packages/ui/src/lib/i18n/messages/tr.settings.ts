@@ -1967,6 +1967,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.diffLayoutAria': 'Diff yerleşimi: {option}',
   'settings.openchamber.visual.field.sessionRecap': 'Session Özeti Oluştur',
   'settings.openchamber.visual.field.sessionRecapAria': 'Agent işini bitirdikten sonra özet oluşturur',
+  'settings.openchamber.visual.field.liveProgressSummary': 'Canlı ilerleme özetini göster',
+  'settings.openchamber.visual.field.liveProgressSummaryAria': 'Etkin tur hakkında her 30 saniyede bir Small Model özeti göster',
   'settings.openchamber.visual.field.sessionSuggestion': 'Sonraki Kullanıcı Mesajı Önerisi Oluştur',
   'settings.openchamber.visual.field.sessionSuggestionAria': 'Agent işini bitirdikten sonra sonraki kullanıcı mesajı için öneri oluşturur',
   'settings.openchamber.visual.field.sessionGoal': 'Session Hedeflerini Etkinleştir',

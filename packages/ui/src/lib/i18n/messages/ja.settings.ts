@@ -2060,6 +2060,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.diffLayoutAria': 'Diff レイアウト: {option}',
   'settings.openchamber.visual.field.sessionRecap': 'セッションの要約を生成',
   'settings.openchamber.visual.field.sessionRecapAria': 'エージェントの完了後に要約を生成します',
+  'settings.openchamber.visual.field.liveProgressSummary': 'ライブ進捗の概要を表示',
+  'settings.openchamber.visual.field.liveProgressSummaryAria': 'アクティブなターンについて30秒ごとにSmall Modelの概要を表示します',
   'settings.openchamber.visual.field.sessionSuggestion': '次のユーザーメッセージの提案を生成',
   'settings.openchamber.visual.field.sessionSuggestionAria': 'エージェントの完了後に次のユーザーメッセージの提案を生成します',
   'settings.openchamber.visual.field.sessionGoal': 'セッションゴールを有効化',

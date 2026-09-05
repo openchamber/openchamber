@@ -552,6 +552,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     workStatusHiddenSections: defaults.workStatusHiddenSections,
     sessionRecapEnabled: defaults.sessionRecapEnabled,
     sessionSuggestionEnabled: defaults.sessionSuggestionEnabled,
+    liveProgressSummaryEnabled: defaults.liveProgressSummaryEnabled,
     sessionGoalEnabled: defaults.sessionGoalEnabled,
     sessionGoalDefaultBudgetEnabled: defaults.sessionGoalDefaultBudgetEnabled,
     sessionGoalDefaultBudget: defaults.sessionGoalDefaultBudget,
@@ -662,6 +663,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.sessionSuggestionEnabled === 'boolean' && settings.sessionSuggestionEnabled !== store.sessionSuggestionEnabled) {
     store.setSessionSuggestionEnabled(settings.sessionSuggestionEnabled);
+  }
+  if (typeof settings.liveProgressSummaryEnabled === 'boolean' && settings.liveProgressSummaryEnabled !== store.liveProgressSummaryEnabled) {
+    store.setLiveProgressSummaryEnabled(settings.liveProgressSummaryEnabled);
   }
   if (typeof settings.sessionGoalEnabled === 'boolean' && settings.sessionGoalEnabled !== store.sessionGoalEnabled) {
     store.setSessionGoalEnabled(settings.sessionGoalEnabled);
@@ -1186,6 +1190,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.sessionSuggestionEnabled === 'boolean') {
     result.sessionSuggestionEnabled = candidate.sessionSuggestionEnabled;
+  }
+  if (typeof candidate.liveProgressSummaryEnabled === 'boolean') {
+    result.liveProgressSummaryEnabled = candidate.liveProgressSummaryEnabled;
   }
   if (typeof candidate.sessionGoalEnabled === 'boolean') {
     result.sessionGoalEnabled = candidate.sessionGoalEnabled;

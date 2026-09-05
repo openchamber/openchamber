@@ -1934,6 +1934,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.diffLayoutAria': '差異佈局：{option}',
   'settings.openchamber.visual.field.sessionRecap': '產生工作階段回顧',
   'settings.openchamber.visual.field.sessionRecapAria': '代理完成後產生回顧',
+  'settings.openchamber.visual.field.liveProgressSummary': '顯示即時進度摘要',
+  'settings.openchamber.visual.field.liveProgressSummaryAria': '每 30 秒顯示一次由 Small Model 產生的目前回合摘要',
   'settings.openchamber.visual.field.sessionSuggestion': '產生下一則使用者訊息建議',
   'settings.openchamber.visual.field.sessionSuggestionAria': '代理完成後產生下一則使用者訊息建議',
   'settings.openchamber.visual.field.sessionGoal': '啟用工作階段目標',

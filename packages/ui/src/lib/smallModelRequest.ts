@@ -12,16 +12,18 @@ const notifySmallModelUnavailable = (): void => {
 
 export async function requestSmallModel(
   init: RequestInit,
-  options: { silentStatuses?: number[] } = {},
+  options: { silent?: boolean; silentStatuses?: number[] } = {},
 ): Promise<Response> {
   try {
     const response = await runtimeFetch('/api/small-model/generate', init);
-    if (!response.ok && !options.silentStatuses?.includes(response.status)) {
+    if (!response.ok && !options.silent && !options.silentStatuses?.includes(response.status)) {
       notifySmallModelUnavailable();
     }
     return response;
   } catch (error) {
-    notifySmallModelUnavailable();
+    if (!options.silent) {
+      notifySmallModelUnavailable();
+    }
     throw error;
   }
 }
