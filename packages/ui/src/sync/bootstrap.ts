@@ -3,6 +3,7 @@ import { retry } from "./retry"
 import type { GlobalState, State } from "./types"
 import { runtimeFetch } from "../lib/runtime-fetch"
 import { emitSyncConfigChanged } from "./sync-refs"
+import { listPendingQuestionsViaV2 } from "../lib/opencode/questions-v2"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
@@ -219,15 +220,31 @@ export async function bootstrapDirectory(input: {
       const beforeSignatures = new Map(
         Object.entries(before.question ?? {}).map(([sessionID, questions]) => [sessionID, requestSignature(questions)]),
       )
-      const x = await sdk.question.list(directory ? { directory } : undefined)
-      if (x.error) {
-        const status = (x as { response?: { status?: number } }).response?.status
-        const err = new Error(`question.list failed${status ? ` (${status})` : ""}: ${String(x.error)}`)
-        if (status !== undefined) (err as Error & { status?: number }).status = status
-        throw err
+      // Native V2 read first (same shared helper as the OpencodeService read
+      // path); the V1 `question.list` call below stays as the fallback for
+      // pre-1.18 servers and V2 failures other than a pre-V2 route-miss 404.
+      let items: QuestionRequest[]
+      const viaV2 = await listPendingQuestionsViaV2(sdk, directory || undefined)
+      if (viaV2) {
+        items = viaV2
+      } else {
+        const x = await sdk.question.list(directory ? { directory } : undefined)
+        if (x.error) {
+          // SAFETY: HeyApi results discriminate on `error`/`response`; the
+          // SDK type does not carry the status across the union, so this
+          // narrowing cast only reads `response.status` when present.
+          const status = (x as { response?: { status?: number } }).response?.status
+          const err = new Error(`question.list failed${status ? ` (${status})` : ""}: ${String(x.error)}`)
+          if (status !== undefined) (err as Error & { status?: number }).status = status
+          throw err
+        }
+        // SAFETY: the V1 question.list payload is the same wire shape this
+        // file already consumed before the V2 path existed; per-item
+        // validation happens in the groupBySession filter below.
+        items = (x.data ?? []) as QuestionRequest[]
       }
       const grouped = groupBySession(
-        (x.data ?? []).filter((q): q is QuestionRequest => !!q?.id && !!q.sessionID),
+        items.filter((q) => !!q?.id && !!q.sessionID),
       )
       const current = getState()
       const merged = { ...current.question }
