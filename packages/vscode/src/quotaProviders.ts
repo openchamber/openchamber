@@ -155,6 +155,10 @@ type DeepseekPayload = {
   }>;
 };
 
+type HyperPayload = {
+  balance?: number | string;
+};
+
 type NeuralwattPayload = {
   balance?: {
     credits_remaining_usd?: number | string;
@@ -851,6 +855,11 @@ export const listConfiguredQuotaProviders = () => {
   const deepseekAuth = normalizeAuthEntry(getAuthEntry(auth, ['deepseek']));
   if (deepseekAuth && ((deepseekAuth as Record<string, unknown>).key || (deepseekAuth as Record<string, unknown>).token)) {
     configured.add('deepseek');
+  }
+
+  const hyperAuth = normalizeAuthEntry(getAuthEntry(auth, ['hyper']));
+  if (hyperAuth && ((hyperAuth as Record<string, unknown>).key || (hyperAuth as Record<string, unknown>).token)) {
+    configured.add('hyper');
   }
 
   let xaiAuth: XaiAuthEntry | null = null;
@@ -2786,6 +2795,106 @@ const fetchDeepseekQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+const HYPER_QUOTA_URL = 'https://hyper.charm.land/v1/credits';
+const HYPER_CREDIT_TO_USD = 0.05;
+
+const fetchHyperQuota = async (): Promise<ProviderResult> => {
+  const auth = readAuthFile();
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['hyper'])) as Record<string, unknown> | null;
+  const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
+
+  if (!apiKey) {
+    return buildResult({
+      providerId: 'hyper',
+      providerName: 'Charm Hyper',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
+  try {
+    const response = await fetch(HYPER_QUOTA_URL, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Accept-Encoding': 'identity',
+      },
+      signal: timeoutSignal,
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'hyper',
+        providerName: 'Charm Hyper',
+        ok: false,
+        configured: true,
+        error: response.status === 401 || response.status === 403
+          ? 'Session expired — please re-authenticate with Charm Hyper'
+          : `API error: ${response.status}`,
+      });
+    }
+
+    const payload = await response.json() as HyperPayload;
+    const rawBalance = payload?.balance;
+    const balance = (typeof rawBalance === 'number' || (typeof rawBalance === 'string' && rawBalance.trim() !== ''))
+      ? toNumber(rawBalance)
+      : null;
+
+    if (balance === null) {
+      return buildResult({
+        providerId: 'hyper',
+        providerName: 'Charm Hyper',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+      });
+    }
+
+    const creditsLabel = Number.isInteger(balance) ? String(balance) : formatMoney(balance);
+    const windows: Record<string, UsageWindow> = {
+      credits_balance: toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel: `$${formatMoney(balance * HYPER_CREDIT_TO_USD)}`,
+      }),
+      credits: toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel: `${creditsLabel} credits`,
+      }),
+    };
+
+    return buildResult({
+      providerId: 'hyper',
+      providerName: 'Charm Hyper',
+      ok: true,
+      configured: true,
+      usage: { windows },
+    });
+  } catch (error) {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
+    const isParseError = error instanceof SyntaxError;
+    return buildResult({
+      providerId: 'hyper',
+      providerName: 'Charm Hyper',
+      ok: false,
+      configured: true,
+      error: isTimeout
+        ? 'Request timed out'
+        : isParseError
+          ? 'Invalid response from provider'
+          : (error instanceof Error ? error.message : 'Request failed'),
+    });
+  }
+};
+
 const fetchXaiQuota = async (): Promise<ProviderResult> => {
   try {
     const entry = resolveXaiAuth();
@@ -2907,6 +3016,8 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
       return fetchCrofQuota();
     case 'deepseek':
       return fetchDeepseekQuota();
+    case 'hyper':
+      return fetchHyperQuota();
     case 'neuralwatt':
       return fetchNeuralwattQuota();
     case 'xai':

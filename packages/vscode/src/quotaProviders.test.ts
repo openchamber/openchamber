@@ -19,6 +19,7 @@ const AUTH = JSON.stringify({
   'opencode-go': { key: 'test-token' },
   'zai-coding-plan': { key: 'test-token' },
   deepseek: { key: 'test-token' },
+  hyper: { key: 'test-token' },
   'github-copilot': { access: 'test-token' },
   anthropic: { access: 'test-token', refresh: 'test-refresh' },
 });
@@ -705,6 +706,90 @@ describe('DeepSeek quota provider (VS Code parity)', () => {
     const result = await fetchQuotaForProvider('deepseek');
 
     assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.credits_balance!.valueLabel, '$0.00');
+  });
+
+  test('teardown: restore fs', () => {
+    const fsMock = fs as unknown as { existsSync: unknown; readFileSync: unknown };
+    fsMock.existsSync = ORIGINAL_FS.existsSync;
+    fsMock.readFileSync = ORIGINAL_FS.readFileSync;
+  });
+});
+
+describe('Charm Hyper quota provider (VS Code parity)', () => {
+  beforeEach(() => {
+    const fsMock = fs as unknown as { existsSync: () => boolean; readFileSync: () => string };
+    fsMock.existsSync = () => true;
+    fsMock.readFileSync = () => AUTH;
+  });
+
+  test('builds credits and credits_balance windows from documented payload (numeric balance)', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({ balance: 100 })));
+
+    const result = await fetchQuotaForProvider('hyper');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.providerId, 'hyper');
+
+    const balanceWindow = result.usage!.windows.credits_balance!;
+    assert.equal(balanceWindow.valueLabel, '$5.00');
+    assert.equal(balanceWindow.usedPercent, null);
+    assert.equal(balanceWindow.windowSeconds, null);
+    assert.equal(balanceWindow.resetAt, null);
+
+    const creditsWindow = result.usage!.windows.credits!;
+    assert.equal(creditsWindow.valueLabel, '100 credits');
+    assert.equal(creditsWindow.usedPercent, null);
+    assert.equal(creditsWindow.windowSeconds, null);
+    assert.equal(creditsWindow.resetAt, null);
+  });
+
+  test('tolerates a string balance', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({ balance: '50' })));
+
+    const result = await fetchQuotaForProvider('hyper');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.credits!.valueLabel, '50 credits');
+    assert.equal(result.usage!.windows.credits_balance!.valueLabel, '$2.50');
+  });
+
+  test('maps 401 to session-expired', async () => {
+    stubFetchFailing(async () => ({}), { ok: false, status: 401 });
+
+    const result = await fetchQuotaForProvider('hyper');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Session expired — please re-authenticate with Charm Hyper');
+  });
+
+  test('reports a normalized timeout error', async () => {
+    stubFetchReturning(() => Promise.reject(new DOMException('The operation timed out.', 'TimeoutError')));
+
+    const result = await fetchQuotaForProvider('hyper');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Request timed out');
+  });
+
+  test('returns no-quota-data on a 200 payload with no balance', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({})));
+
+    const result = await fetchQuotaForProvider('hyper');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'No quota data in response');
+    assert.equal(result.usage, null);
+  });
+
+  test('keeps a literal zero balance as a valid valueLabel', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({ balance: 0 })));
+
+    const result = await fetchQuotaForProvider('hyper');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.credits!.valueLabel, '0 credits');
     assert.equal(result.usage!.windows.credits_balance!.valueLabel, '$0.00');
   });
 
