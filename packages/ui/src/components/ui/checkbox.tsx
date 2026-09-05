@@ -6,6 +6,7 @@ import { Icon } from "@/components/icon/Icon";
 interface CheckboxProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
+  onClick?: (event: React.MouseEvent) => void;
   disabled?: boolean;
   indeterminate?: boolean;
   ariaLabel?: string;
@@ -18,12 +19,21 @@ interface CheckboxProps {
 export const Checkbox = React.memo<CheckboxProps>(function Checkbox({
   checked,
   onChange,
+  onClick,
   disabled = false,
   indeterminate,
   ariaLabel,
   className,
   iconClassName,
 }) {
+  const handleClick = React.useCallback(
+    (event: React.MouseEvent) => {
+      event.stopPropagation();
+      onClick?.(event);
+    },
+    [onClick]
+  );
+
   const boxSize = 'h-[14px] w-[14px] min-h-[14px] min-w-[14px]';
   const iconSize = 'h-[10px] w-[10px] min-h-[10px] min-w-[10px]';
   const isOn = checked || indeterminate;
@@ -31,6 +41,7 @@ export const Checkbox = React.memo<CheckboxProps>(function Checkbox({
     <BaseCheckbox.Root
       checked={checked}
       onCheckedChange={(next) => onChange(Boolean(next))}
+      onClick={handleClick}
       disabled={disabled}
       indeterminate={indeterminate}
       aria-label={ariaLabel}
