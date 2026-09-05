@@ -3110,6 +3110,19 @@ describe("relocateSessionFromMissingDirectory", () => {
     expect(movesOf()).toEqual([])
   })
 
+  test("never relocates to the filesystem root OpenCode reports for its global project", async () => {
+    const chatDirectory = "/Users/tester/.config/openchamber/chats/2026-09-05/session-gone"
+    const chat = { ...worktreeSession("chat", null, chatDirectory), projectID: "global", project: { worktree: "/" } }
+    globalActiveSessions = [chat]
+    openCodeProjects.push({ id: "global", worktree: "/", time: { created: 1, updated: 1 }, sandboxes: [] })
+    directoryAvailability.set(chatDirectory, "missing")
+    const { relocateSessionFromMissingDirectory, setActionRefs } = await import("./session-actions")
+    setActionRefs(actionSdk, stores(), () => chatDirectory)
+
+    expect(await relocateSessionFromMissingDirectory("chat")).toEqual({ status: "unchanged" })
+    expect(movesOf()).toEqual([])
+  })
+
   test("leaves the session alone when OpenCode knows no project for it", async () => {
     globalActiveSessions = [worktreeSession("root", null)]
     directoryAvailability.set(missingWorktree, "missing")

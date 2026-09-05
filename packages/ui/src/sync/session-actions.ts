@@ -1546,6 +1546,8 @@ async function getProjectPrimaryDirectory(projectID?: string): Promise<string | 
 
 type MissingWorktreeRelocation = { sourceDirectory: string; destinationDirectory: string }
 
+const isFilesystemRoot = (directory: string): boolean => directory === "/" || /^[A-Za-z]:\/?$/.test(directory)
+
 async function resolveMissingWorktreeRelocation(
   session: Session & { project?: { worktree?: string | null } | null },
 ): Promise<MissingWorktreeRelocation | null> {
@@ -1563,6 +1565,10 @@ async function resolveMissingWorktreeRelocation(
 
   const projectDirectory = await getProjectPrimaryDirectory(session.projectID)
   if (!projectDirectory || projectDirectory === ownedDirectory) return null
+  // OpenCode files a directory outside any Git repository under its global
+  // project, whose "worktree" is the filesystem root. That is not a home for
+  // a session; a managed chat whose directory vanished stays where it is.
+  if (isFilesystemRoot(projectDirectory)) return null
   return { sourceDirectory: ownedDirectory, destinationDirectory: projectDirectory }
 }
 

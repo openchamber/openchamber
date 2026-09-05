@@ -32,7 +32,7 @@ import { getDeferredSafeStorage } from "@/stores/utils/safeStorage"
 import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
 import { normalizePath } from "@/lib/pathNormalization"
 import type { ProjectEntry } from "@/lib/api/types"
-import { CHAT_DRAFT_PROJECT_ID, createChatDirectory, deleteChatDirectory, getChatsRootFromDirectory, isChatDirectoryPath, warmChatsRootDirectory } from "@/lib/chatDirectories"
+import { CHAT_DRAFT_PROJECT_ID, createChatDirectory, deleteChatDirectory, getChatsRootFromDirectory, isChatDirectoryForHome, isChatDirectoryPath, warmChatsRootDirectory } from "@/lib/chatDirectories"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { composeForkSessionMessage } from "@/lib/messages/executionMeta"
 import { findLatestUserModelChoice } from "@/lib/messages/userModelChoice"
@@ -776,7 +776,7 @@ const pendingDirectoryRecoveries = new Map<string, Promise<MissingDirectoryReloc
  * have nowhere to relocate to, so they are never probed.
  */
 const isRelocatableSessionDirectory = (directory: string, projects: readonly ProjectEntry[]): boolean => {
-  if (isChatDirectoryPath(directory)) return false
+  if (isChatDirectoryForHome(directory, useDirectoryStore.getState().homeDirectory)) return false
   return !projects.some((project) => normalizePath(project.path) === directory)
 }
 
