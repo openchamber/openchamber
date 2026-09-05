@@ -89,8 +89,8 @@ export const shouldPreserveManualModelOverride = ({
   candidate,
 }: {
   selectionSource: 'auto' | 'manual' | undefined
-  savedSessionModel: { providerId: string; modelId: string } | null | undefined
-  candidate: Pick<UserModelChoice, 'providerID' | 'modelID'> | null | undefined
+  savedSessionModel: { providerId: string; modelId: string; variant?: string } | null | undefined
+  candidate: Pick<UserModelChoice, 'providerID' | 'modelID' | 'variant'> | null | undefined
 }): boolean => {
   if (selectionSource !== 'manual' || !savedSessionModel?.providerId || !savedSessionModel.modelId) {
     return false
@@ -98,6 +98,11 @@ export const shouldPreserveManualModelOverride = ({
   if (!candidate?.providerID || !candidate.modelID) {
     return true
   }
+  // A manual override also covers the selected thinking variant, not just the
+  // provider/model pair. Comparing only provider+model let a same-model,
+  // different-variant reload (e.g. picking "max" thinking, then sending)
+  // silently fall through and get clobbered by the historical/default variant.
   return savedSessionModel.providerId !== candidate.providerID
     || savedSessionModel.modelId !== candidate.modelID
+    || (savedSessionModel.variant ?? undefined) !== (candidate.variant ?? undefined)
 }

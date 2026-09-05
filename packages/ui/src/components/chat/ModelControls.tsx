@@ -853,9 +853,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
         // Manual session override wins over historical / synthetic message metadata.
         const savedSessionModel = getSessionModelSelection(currentSessionId);
+        const savedSessionModelWithVariant = savedSessionModel
+            ? {
+                ...savedSessionModel,
+                variant: resolveModelVariantSelection(savedSessionModel.providerId, savedSessionModel.modelId),
+            }
+            : savedSessionModel;
         if (shouldPreserveManualModelOverride({
             selectionSource: useConfigStore.getState().selectionSource,
-            savedSessionModel,
+            savedSessionModel: savedSessionModelWithVariant,
             candidate: latestLoadedUserChoice,
         })) {
             if (savedSessionModel) {
