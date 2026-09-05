@@ -13,7 +13,15 @@ interface ContextUsageDisplayProps {
   colorPercentage?: number;
   contextLimit: number;
   outputLimit?: number;
+  /** Authoritative cost: current session plus descendant sessions. */
   cost?: number | null;
+  /** Authoritative OpenCode cost for the current session only. */
+  sessionCost?: number;
+  totalMessages?: number;
+  userMessages?: number;
+  assistantMessages?: number;
+  tokensPerSecond?: number;
+  lastTokensPerSecond?: number;
   size?: 'default' | 'compact';
   isMobile?: boolean;
   hideIcon?: boolean;
@@ -25,6 +33,10 @@ interface ContextUsageDisplayProps {
   pressed?: boolean;
 }
 
+const formatNumber = (value: number): string => {
+  return value.toLocaleString();
+};
+
 export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
   totalTokens,
   percentage,
@@ -32,6 +44,12 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
   contextLimit,
   outputLimit,
   cost = null,
+  sessionCost,
+  totalMessages,
+  userMessages,
+  assistantMessages,
+  tokensPerSecond,
+  lastTokensPerSecond,
   size = 'default',
   isMobile = false,
   hideIcon = false,
@@ -63,6 +81,12 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
     return tokens.toFixed(1).replace(/\.0$/, '');
   };
 
+  const showCost = typeof cost === 'number' && Number.isFinite(cost) && cost > 0;
+  const showSessionCost = typeof sessionCost === 'number' && Number.isFinite(sessionCost) && sessionCost > 0;
+  const showCostBreakdown = showCost && showSessionCost && Math.abs(cost! - sessionCost!) > 1e-9;
+  const showTokensPerSecond = typeof tokensPerSecond === 'number' && Number.isFinite(tokensPerSecond) && tokensPerSecond > 0;
+  const showLastTokensPerSecond = typeof lastTokensPerSecond === 'number' && Number.isFinite(lastTokensPerSecond) && lastTokensPerSecond > 0;
+
   const getPercentageColor = (pct: number) => {
     if (pct >= 90) return 'text-status-error';
     if (pct >= 75) return 'text-status-warning';
@@ -76,16 +100,32 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
   const circularProgressOffset = circularProgressCircumference * (1 - progressPct / 100);
 
   const safeOutputLimit = typeof outputLimit === 'number' ? Math.max(outputLimit, 0) : 0;
+  const hasStats = showCost || typeof totalMessages === 'number' || showTokensPerSecond || showLastTokensPerSecond;
   const normalizedCost = cost ?? 0;
   const hasCost = normalizedCost > 0 && Number.isFinite(normalizedCost);
   const tooltipLines = [
     t('contextUsage.tooltip.usedTokens', { tokens: formatTokens(totalTokens) }),
     t('contextUsage.tooltip.contextLimit', { tokens: formatTokens(contextLimit) }),
     t('contextUsage.tooltip.outputLimit', { tokens: formatTokens(safeOutputLimit) }),
-    ...(hasCost ? [t('contextUsage.tooltip.cost', { cost: formatMoney(normalizedCost) })] : []),
+    ...(hasStats ? ['---'] : []),
+    ...(showCostBreakdown
+      ? [
+        t('contextSidebar.stats.sessionCost') + ': ' + formatMoney(sessionCost!),
+        t('contextSidebar.stats.totalCost') + ': ' + formatMoney(cost!),
+      ]
+      : showCost ? [t('contextSidebar.stats.cost') + ': ' + formatMoney(cost!)] : []),
+    ...(typeof totalMessages === 'number' ? [t('contextSidebar.stats.messages') + ': ' + formatNumber(totalMessages)] : []),
+    ...(typeof userMessages === 'number' ? [t('contextSidebar.stats.user') + ': ' + formatNumber(userMessages)] : []),
+    ...(typeof assistantMessages === 'number' ? [t('contextSidebar.stats.assistant') + ': ' + formatNumber(assistantMessages)] : []),
+    ...(showTokensPerSecond ? [t('contextSidebar.stats.tokensPerSecond') + ': ' + tokensPerSecond!.toFixed(1) + ' tok/s'] : []),
+    ...(showLastTokensPerSecond ? [t('contextSidebar.stats.lastTokensPerSecond') + ': ' + lastTokensPerSecond!.toFixed(1) + ' tok/s'] : []),
   ];
 
   const isInteractive = !isMobile && typeof onClick === 'function';
+
+  const costSuffix = showCost ? (
+    <span className="text-muted-foreground/60">{`・ ${formatMoney(cost!)}`}</span>
+  ) : null;
 
   const contextContent = (
     <>
@@ -129,6 +169,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
             <span className={getPercentageColor(colorPct)}>{Math.min(percentage, 999).toFixed(1)}</span>%
           </>
         )}
+        {costSuffix}
       </span>
     </>
   );
@@ -202,6 +243,54 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
                 </span>
               </div>
             </div>
+            {hasStats && (
+              <div className="rounded-xl border border-border/40 bg-sidebar/30 px-3 py-2 space-y-1">
+                {showCostBreakdown && (
+                  <div className="flex justify-between items-center">
+                    <span className="typography-meta text-muted-foreground">{t('contextSidebar.stats.sessionCost')}</span>
+                    <span className="typography-meta text-foreground font-medium">{formatMoney(sessionCost!)}</span>
+                  </div>
+                )}
+                {showCost && (
+                  <div className="flex justify-between items-center">
+                    <span className="typography-meta text-muted-foreground">
+                      {showCostBreakdown ? t('contextSidebar.stats.totalCost') : t('contextSidebar.stats.cost')}
+                    </span>
+                    <span className="typography-meta text-foreground font-medium">{formatMoney(cost!)}</span>
+                  </div>
+                )}
+                {typeof totalMessages === 'number' && (
+                  <div className="flex justify-between items-center">
+                    <span className="typography-meta text-muted-foreground">{t('contextSidebar.stats.messages')}</span>
+                    <span className="typography-meta text-foreground font-medium">{formatNumber(totalMessages)}</span>
+                  </div>
+                )}
+                {typeof userMessages === 'number' && (
+                  <div className="flex justify-between items-center">
+                    <span className="typography-meta text-muted-foreground">{t('contextSidebar.stats.user')}</span>
+                    <span className="typography-meta text-foreground font-medium">{formatNumber(userMessages)}</span>
+                  </div>
+                )}
+                {typeof assistantMessages === 'number' && (
+                  <div className="flex justify-between items-center">
+                    <span className="typography-meta text-muted-foreground">{t('contextSidebar.stats.assistant')}</span>
+                    <span className="typography-meta text-foreground font-medium">{formatNumber(assistantMessages)}</span>
+                  </div>
+                )}
+                {showTokensPerSecond && (
+                  <div className="flex justify-between items-center">
+                    <span className="typography-meta text-muted-foreground">{t('contextSidebar.stats.tokensPerSecond')}</span>
+                    <span className="typography-meta text-foreground font-medium">{tokensPerSecond!.toFixed(1)} tok/s</span>
+                  </div>
+                )}
+                {showLastTokensPerSecond && (
+                  <div className="flex justify-between items-center">
+                    <span className="typography-meta text-muted-foreground">{t('contextSidebar.stats.lastTokensPerSecond')}</span>
+                    <span className="typography-meta text-foreground font-medium">{lastTokensPerSecond!.toFixed(1)} tok/s</span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </MobileOverlayPanel>
       </>

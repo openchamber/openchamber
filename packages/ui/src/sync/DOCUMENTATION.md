@@ -44,6 +44,7 @@ So:
 |---|---|---|
 | `ChildStoreManager` and child directory stores | Priority-scheduled directory bootstrap plus `session`, `message`, `part`, `permission`, `question`, etc. | One runtime and one store per directory |
 | `SessionMessageLoader` | Initial message loading, pagination, prefetch, retries, load state, and optimistic reconciliation | One runtime, directory, and session ID |
+| `work-status/useSubagentCostRollup.ts` | Recursive active subtree cost aggregate (session + descendants via `parentID`) from OpenCode's persisted `Session.cost` values | Shared by cost readouts and subagent rows |
 | `global-session-status.ts` | Incremental non-idle session status index reconciled from events and authoritative directory snapshots, plus a reference-stable active-ID membership collection maintained from the same mutations | All known directories in the active runtime |
 | `session-ordering.ts` | Ephemeral lifecycle rank used by every user-visible session list | All known sessions in the active runtime |
 | `session-activity-timing.ts` | Elapsed time of the running turn and of the turn that just finished, plus the persisted starts that survive a reload | All known sessions in the active runtime |

@@ -15,6 +15,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resolveUsageTone } from '@/lib/quota';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { normalizePath } from '@/lib/pathNormalization';
+import { formatMoney } from '@/lib/money';
 import { computeContextUsage } from './contextUsage';
 import { formatCost } from './subagentCost';
 import { useSubagentCostRollup } from './useSubagentCostRollup';
@@ -277,7 +278,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                     <WorkStatusValue>{formatPercent(usagePercent)}</WorkStatusValue>
                     {/* No icon of its own: the sprite has no currency glyph, and
                         spend belongs with consumption anyway. The `$` labels it. */}
-                    {cost !== null ? <WorkStatusValue tone="muted">{formatCost(cost)}</WorkStatusValue> : null}
+                    {cost !== null ? <WorkStatusValue tone="muted">{`・ ${formatMoney(cost)}`}</WorkStatusValue> : null}
                   </>
                 )}
               />

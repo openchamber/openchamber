@@ -43,6 +43,7 @@ import {
 import {
 } from '@/components/ui/collapsible';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
+import { useSubagentCostRollup } from '@/components/chat/work-status/useSubagentCostRollup';
 import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
@@ -246,7 +247,14 @@ const isSameContextUsage = (
     && (a.outputLimit ?? 0) === (b.outputLimit ?? 0)
     && (a.normalizedOutput ?? 0) === (b.normalizedOutput ?? 0)
     && a.thresholdLimit === b.thresholdLimit
-    && (a.lastMessageId ?? '') === (b.lastMessageId ?? '');
+    && (a.lastMessageId ?? '') === (b.lastMessageId ?? '')
+    && (a.cost ?? 0) === (b.cost ?? 0)
+    && (a.sessionCost ?? 0) === (b.sessionCost ?? 0)
+    && (a.totalMessages ?? 0) === (b.totalMessages ?? 0)
+    && (a.userMessages ?? 0) === (b.userMessages ?? 0)
+    && (a.assistantMessages ?? 0) === (b.assistantMessages ?? 0)
+    && (a.tokensPerSecond ?? 0) === (b.tokensPerSecond ?? 0)
+    && (a.lastTokensPerSecond ?? 0) === (b.lastTokensPerSecond ?? 0);
 };
 
 const normalize = (value: string): string => {
@@ -292,7 +300,9 @@ export const Header: React.FC = () => {
   const getContextUsage = useSessionUIStore((state) => state.getContextUsage);
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
   const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
+  const { totalCost, ownCost } = useSubagentCostRollup(currentSessionId ?? null);
   const currentSessionStatus = useGlobalSessionStatus(currentSessionId ?? '');
   const isCurrentSessionMovingToWorktree = useIsSessionWorktreeMovePending(currentSessionId ?? '');
   const currentGlobalSession = useGlobalSessionsStore(useShallow(React.useCallback(
@@ -397,7 +407,17 @@ export const Header: React.FC = () => {
     : null;
   const contextLimit = (limit && typeof limit.context === 'number' ? limit.context : 0);
   const outputLimit = (limit && typeof limit.output === 'number' ? limit.output : 0);
-  const contextUsage = getContextUsage(contextLimit, outputLimit);
+  const usage = getContextUsage(contextLimit, outputLimit);
+  const nextContextUsage = usage ? {
+    ...usage,
+    cost: totalCost !== null && totalCost > 0 ? totalCost : undefined,
+    sessionCost: ownCost > 0 ? ownCost : undefined,
+  } : null;
+  const contextUsageRef = React.useRef<SessionContextUsage | null>(null);
+  const contextUsage = isSameContextUsage(contextUsageRef.current, nextContextUsage)
+    ? contextUsageRef.current
+    : nextContextUsage;
+  contextUsageRef.current = contextUsage;
   const [stableDesktopContextUsage, setStableDesktopContextUsage] = React.useState<SessionContextUsage | null>(null);
   const isContextUsageResolvedForSession = !currentSessionId || currentSessionMessagesResolved;
 
@@ -1638,6 +1658,13 @@ export const Header: React.FC = () => {
               colorPercentage={stableDesktopContextUsage.percentage}
               contextLimit={stableDesktopContextUsage.contextLimit}
               outputLimit={stableDesktopContextUsage.outputLimit ?? 0}
+              cost={stableDesktopContextUsage.cost}
+              sessionCost={stableDesktopContextUsage.sessionCost}
+              totalMessages={stableDesktopContextUsage.totalMessages}
+              userMessages={stableDesktopContextUsage.userMessages}
+              assistantMessages={stableDesktopContextUsage.assistantMessages}
+              tokensPerSecond={stableDesktopContextUsage.tokensPerSecond}
+              lastTokensPerSecond={stableDesktopContextUsage.lastTokensPerSecond}
               size="compact"
               hideIcon
               showPercentIcon

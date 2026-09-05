@@ -29,6 +29,7 @@ import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
 import { useCommandsStore } from "@/stores/useCommandsStore"
 import { useSkillsStore } from "@/stores/useSkillsStore"
 import { getDeferredSafeStorage } from "@/stores/utils/safeStorage"
+import { computeSessionMessageCounts, computeSessionTokenRate } from "@/stores/utils/tokenUtils"
 import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
 import { normalizePath } from "@/lib/pathNormalization"
 import { CHAT_DRAFT_PROJECT_ID, createChatDirectory, deleteChatDirectory, getChatsRootFromDirectory, isChatDirectoryPath, warmChatsRootDirectory } from "@/lib/chatDirectories"
@@ -1503,6 +1504,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     if (!lastTokens) return null
 
+    const { userCount, assistantCount } = computeSessionMessageCounts(messages)
+    const currentSessionDirectory = get().currentSessionDirectory
+    const { avgTokensPerSecond, lastTokensPerSecond } = computeSessionTokenRate(
+      messages,
+      (messageId) => getSyncParts(messageId, currentSessionDirectory ?? undefined),
+    )
+
     const totalTokens = contextTokensFromBreakdown(lastTokens)
     const thresholdLimit = contextLimit > 0 ? contextLimit : 200000
     const percentage = contextLimit > 0 ? Math.round((totalTokens / contextLimit) * 100) : 0
@@ -1516,6 +1524,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       normalizedOutput,
       thresholdLimit,
       lastMessageId,
+      totalMessages: messages.length,
+      userMessages: userCount,
+      assistantMessages: assistantCount,
+      tokensPerSecond: avgTokensPerSecond > 0 ? avgTokensPerSecond : undefined,
+      lastTokensPerSecond: lastTokensPerSecond > 0 ? lastTokensPerSecond : undefined,
     }
   },
 
