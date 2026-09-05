@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
+import type { Part } from '@opencode-ai/sdk/v2';
 
 import { localPathFromFileUrl, parseFileReference, type ParsedFileReference } from './fileReferenceParser';
 
@@ -14,6 +15,7 @@ type FakeElement = {
     setAttribute: (name: string, value: string) => void;
     getAttribute: (name: string) => string | null;
     appendChild: (child: FakeElement) => FakeElement;
+    replaceChildren: (...children: FakeElement[]) => void;
     replaceWith: (replacement: FakeElement) => void;
     remove: () => void;
     querySelector: (selector: string) => FakeElement | null;
@@ -41,11 +43,15 @@ let cachedRendererBlocks: Array<{ id: string; html: string }> | null = null;
 let renderedRendererBlocks: Array<{ id: string; html: string }> = [];
 let renderMarkdownBlocksForTest = async () => renderedRendererBlocks;
 let currentContextVersion = 0;
+let rendererContent = 'cached markdown';
+let rendererStreaming = false;
+let rendererPart: Part | undefined;
 const layoutEffects: Array<() => void> = [];
 const passiveEffects: Array<() => void | (() => void)> = [];
 let hookCursor = 0;
 let hookStates: Array<{ current: null } | undefined> = [];
 let activeFakeDocument: FakeDocument | null = null;
+let restoredRendererDom: FakeElement | null = null;
 
 const makeFakeElement = (ownerDocument: { createElement: () => FakeElement }): FakeElement => {
     void ownerDocument;
@@ -73,6 +79,12 @@ const makeFakeElement = (ownerDocument: { createElement: () => FakeElement }): F
             this.childNodes.push(child);
             this.children.push(child);
             return child;
+        },
+        replaceChildren(...children) {
+            for (const child of this.children) child.parentNode = null;
+            this.childNodes = [];
+            this.children = [];
+            for (const child of children) this.appendChild(child);
         },
         replaceWith(replacement) {
             if (!this.parentNode) return;
@@ -204,11 +216,8 @@ const fakeJsx = (_type: string, props: FakeJsxProps | null, ...children: FakeEle
     // evaluated; this branch only supplies its fake element factory.
     const fakeDocument = activeFakeDocument;
     if (!fakeDocument) throw new Error('Renderer fake document is not installed');
-    const element = ref?.current ?? makeFakeElement(fakeDocument);
-    if (!ref?.current) {
-        element.childNodes.length = 0;
-        element.children.length = 0;
-    }
+    const existingElement = ref?.current;
+    const element = existingElement ?? makeFakeElement(fakeDocument);
     if (props) {
         if (ref) ref.current = element;
         if (props.className) element.setAttribute('class', props.className);
@@ -216,9 +225,25 @@ const fakeJsx = (_type: string, props: FakeJsxProps | null, ...children: FakeEle
     }
     const jsxChildren = props?.children;
     const allChildren = jsxChildren === undefined ? children : Array.isArray(jsxChildren) ? jsxChildren : [jsxChildren];
-    for (const child of allChildren) {
-        if (child) element.appendChild(child);
-    }
+    const nextChildren = allChildren.filter((child): child is FakeElement => Boolean(child));
+    const previousChildren = existingElement?.children ?? [];
+    const reconciledChildren = nextChildren.map((child, index) => {
+        const previousChild = previousChildren[index];
+        if (
+            !previousChild
+            || previousChild.getAttribute('data-markdown-content') !== ''
+            || child.getAttribute('data-markdown-content') !== ''
+        ) {
+            return child;
+        }
+
+        // React reuses this host on a rerender. Its descendants are managed by
+        // the renderer's effects, so reconciliation must not clear them just
+        // because JSX produced a fresh description of the empty host.
+        for (const [name, value] of child.attributes) previousChild.setAttribute(name, value);
+        return previousChild;
+    });
+    element.replaceChildren(...reconciledChildren);
     return element;
 };
 
@@ -257,16 +282,20 @@ mock.module('@/lib/path-utils', () => ({ getDirectoryForFilePath: () => '', isFi
 mock.module('./markdown/markdownCore', () => ({
     getCachedMarkdownBlocks: () => cachedRendererBlocks,
     renderMarkdownBlocks: () => renderMarkdownBlocksForTest(),
-    renderMarkdownSync: () => {
+    renderMarkdownSync: (text: string) => {
         syncRenderCalls += 1;
-        return '<p>cold</p>';
+        return `<p>${text}</p>`;
     },
 }));
 mock.module('./markdown/markdownTheme', () => ({ ensureMarkdownShikiTheme: () => undefined }));
 mock.module('./markdown/markdownSyntaxVars', () => ({ getMarkdownSyntaxVars: () => ({}) }));
 mock.module('./markdown/detachedMarkdownDomCache', () => ({
     detachedMarkdownDomCache: {
-        take: () => null,
+        take: () => {
+            const restored = restoredRendererDom;
+            restoredRendererDom = null;
+            return restored;
+        },
         store: () => undefined,
     },
 }));
@@ -322,6 +351,10 @@ const resetRendererTestState = () => {
     layoutEffects.length = 0;
     passiveEffects.length = 0;
     currentContextVersion = 0;
+    rendererContent = 'cached markdown';
+    rendererStreaming = false;
+    rendererPart = undefined;
+    restoredRendererDom = null;
     rendererThemeIndex = 0;
     rendererUiState.codeBlockLineWrap = false;
 };
@@ -359,10 +392,11 @@ const findBlock = (root: FakeElement, id: string): FakeElement | null => {
 };
 
 const renderMarkdownForTest = () => MarkdownRenderer({
-    content: 'cached markdown',
+    content: rendererContent,
+    part: rendererPart,
     messageId: 'message-1',
     isAnimated: false,
-    isStreaming: false,
+    isStreaming: rendererStreaming,
 });
 
 const withRendererDom = async (run: () => void | Promise<void>): Promise<void> => {
@@ -508,6 +542,68 @@ describe('MarkdownRenderer warm settled path', () => {
         });
     });
 
+    test('preserves restored DOM when the full block cache is evicted', async () => {
+        await withRendererDom(async () => {
+            resetRendererTestState();
+            rendererPart = {
+                id: 'part-restored',
+                sessionID: 'session-restored',
+                messageID: 'message-1',
+                type: 'text',
+                text: rendererContent,
+                time: { start: 0, end: 1 },
+            };
+            const restored = activeFakeDocument?.createElement();
+            if (!restored) throw new Error('Expected renderer fake document');
+            restored.setAttribute('data-md-block', '');
+            restored.setAttribute('data-md-id', 'full:restored');
+            restored.innerHTML = '<p>restored</p>';
+            restoredRendererDom = restored;
+
+            const root = rendererRoot(beginRendererRender());
+            runRendererLayoutEffects();
+
+            const target = root.querySelector('[data-markdown-content]');
+            expect(syncRenderCalls).toBe(0);
+            expect(target?.children).toHaveLength(1);
+            expect(target?.children[0]?.innerHTML).toBe('<p>restored</p>');
+        });
+    });
+
+    test('preserves restored DOM across a context change when the full block cache is unavailable', async () => {
+        await withRendererDom(async () => {
+            resetRendererTestState();
+            rendererPart = {
+                id: 'part-restored-context',
+                sessionID: 'session-restored',
+                messageID: 'message-1',
+                type: 'text',
+                text: rendererContent,
+                time: { start: 0, end: 1 },
+            };
+            const restored = activeFakeDocument?.createElement();
+            if (!restored) throw new Error('Expected renderer fake document');
+            restored.setAttribute('data-md-block', '');
+            restored.setAttribute('data-md-id', 'full:restored-context');
+            restored.innerHTML = '<p>restored</p>';
+            restoredRendererDom = restored;
+
+            const root = rendererRoot(beginRendererRender());
+            runRendererLayoutEffects();
+            const target = root.querySelector('[data-markdown-content]');
+            expect(target?.children[0]?.innerHTML).toBe('<p>restored</p>');
+
+            cachedRendererBlocks = null;
+            renderMarkdownBlocksForTest = () => new Promise<Array<{ id: string; html: string }>>(() => undefined);
+            currentContextVersion = 1;
+            beginRendererRender();
+            runRendererLayoutEffects();
+
+            expect(target?.children).toHaveLength(1);
+            expect(target?.children[0]?.innerHTML).toBe('<p>restored</p>');
+        });
+    });
+
     test('recreates the Mermaid registry after StrictMode-like cleanup without remounting blocks', () => {
         return withRendererDom(() => {
             resetRendererTestState();
@@ -544,6 +640,7 @@ describe('MarkdownRenderer warm settled path', () => {
 
             const root = rendererRoot(beginRendererRender());
             runRendererLayoutEffects();
+            runRendererPassiveEffects();
             const block = findBlock(root, 'full:context');
             const firstDecorationId = block?.getAttribute('data-md-decoration-id');
             expect(firstDecorationId).not.toBeNull();
@@ -591,6 +688,89 @@ describe('MarkdownRenderer warm settled path', () => {
             await Promise.resolve();
 
             expect(morphCalls).toBe(0);
+        });
+    });
+
+    test('replaces stale non-streaming fallback DOM without appending duplicates', async () => {
+        await withRendererDom(async () => {
+            resetRendererTestState();
+            renderMarkdownBlocksForTest = () => new Promise<Array<{ id: string; html: string }>>(() => undefined);
+
+            const root = rendererRoot(beginRendererRender());
+            runRendererLayoutEffects();
+            expect(syncRenderCalls).toBe(1);
+            expect(root.querySelector('[data-markdown-content]')?.children).toHaveLength(1);
+            expect(root.querySelector('[data-markdown-content]')?.children[0]?.innerHTML).toBe('<p>cached markdown</p>');
+
+            rendererContent = 'updated markdown';
+            beginRendererRender();
+            runRendererLayoutEffects();
+
+            const target = root.querySelector('[data-markdown-content]');
+            expect(syncRenderCalls).toBe(2);
+            expect(target?.children).toHaveLength(1);
+            expect(target?.children[0]?.innerHTML).toBe('<p>updated markdown</p>');
+
+            rendererContent = '';
+            beginRendererRender();
+            runRendererLayoutEffects();
+
+            expect(target?.children).toHaveLength(0);
+        });
+    });
+
+    test('preserves pipeline-rendered DOM when streaming settles without a cache key', async () => {
+        await withRendererDom(async () => {
+            resetRendererTestState();
+            rendererStreaming = true;
+            rendererContent = 'streaming pipeline';
+            renderedRendererBlocks = [{ id: 'pipeline:rendered', html: '<p>pipeline</p>' }];
+
+            const root = rendererRoot(beginRendererRender());
+            runRendererLayoutEffects();
+            runRendererPassiveEffects();
+            await Promise.resolve();
+
+            const target = root.querySelector('[data-markdown-content]');
+            const pipelineBlock = target?.children[0];
+            expect(pipelineBlock?.getAttribute('data-md-id')).toBe('pipeline:rendered');
+            expect(syncRenderCalls).toBe(1);
+
+            rendererStreaming = false;
+            renderedRendererBlocks = [{ id: 'pipeline:settled', html: '<p>settled pipeline</p>' }];
+            beginRendererRender();
+            runRendererLayoutEffects();
+
+            expect(syncRenderCalls).toBe(1);
+            expect(target?.children).toHaveLength(1);
+            expect(target?.children[0]).toBe(pipelineBlock);
+
+            runRendererPassiveEffects();
+            await Promise.resolve();
+            expect(target?.children[0]).toBe(pipelineBlock);
+            expect(target?.children[0]?.getAttribute('data-md-id')).toBe('pipeline:settled');
+        });
+    });
+
+    test('keeps streaming fallback first-mount-only behavior', async () => {
+        await withRendererDom(async () => {
+            resetRendererTestState();
+            rendererStreaming = true;
+            rendererContent = 'streaming first';
+            renderMarkdownBlocksForTest = () => new Promise<Array<{ id: string; html: string }>>(() => undefined);
+
+            const root = rendererRoot(beginRendererRender());
+            runRendererLayoutEffects();
+            expect(syncRenderCalls).toBe(1);
+
+            rendererContent = 'streaming second';
+            beginRendererRender();
+            runRendererLayoutEffects();
+
+            const target = root.querySelector('[data-markdown-content]');
+            expect(syncRenderCalls).toBe(1);
+            expect(target?.children).toHaveLength(1);
+            expect(target?.children[0]?.innerHTML).toBe('<p>streaming first</p>');
         });
     });
 

@@ -26,6 +26,7 @@ import {
   renderMarkdownSync,
   type MarkdownImageMode,
 } from './markdown/markdownCore';
+import { contentFingerprint } from './markdown/highlightResultCache';
 import { ensureMarkdownShikiTheme } from './markdown/markdownTheme';
 import { getMarkdownSyntaxVars } from './markdown/markdownSyntaxVars';
 import {
@@ -718,6 +719,14 @@ const domMatchesRenderedBlocks = (
   }
   return true;
 };
+
+const isProvisionalSyncFallbackDom = (target: HTMLElement): boolean => {
+  const blocks = Array.from(target.children);
+  return blocks.length > 0
+    && blocks.length === target.childNodes.length
+    && blocks.every((block) => block.getAttribute('data-md-id')?.startsWith('sync:') === true);
+};
+
 const MARKDOWN_DECORATION_IDS = new WeakMap<DecorateContext, string>();
 let nextMarkdownDecorationId = 0;
 const MARKDOWN_DOM_CACHE_MAX_SOURCE_CHARS = 200_000;
@@ -807,6 +816,17 @@ const useDecorateContext = (
 
 // Runs the async render pipeline into the container and keeps a stable
 // delegated interaction listener attached.
+const areDetachedMarkdownDomKeysEqual = (
+  left: DetachedMarkdownDomKey | null | undefined,
+  right: DetachedMarkdownDomKey | null | undefined,
+): boolean => {
+  if (!left || !right) return left === right;
+  return left.scope === right.scope
+    && left.id === right.id
+    && left.locale === right.locale
+    && left.directory === right.directory;
+};
+
 const useMorphdomMarkdown = ({
   containerRef,
   text,
@@ -888,8 +908,15 @@ const useMorphdomMarkdown = ({
 
   React.useLayoutEffect(() => {
     renderRevisionRef.current += 1;
-    mountedDomRef.current = null;
-  }, [ctx, imageMode, streaming, text]);
+  }, [ctx, domCacheKey, imageMode, streaming, text]);
+
+  React.useLayoutEffect(() => {
+    const mountedDom = mountedDomRef.current;
+    if (!mountedDom) return;
+    if (!domCacheKey || !areDetachedMarkdownDomKeysEqual(mountedDom.key, domCacheKey)) {
+      mountedDomRef.current = null;
+    }
+  }, [domCacheKey, imageMode, streaming, text]);
 
   React.useLayoutEffect(() => {
     if (!domCacheKey) return;
@@ -945,16 +972,32 @@ const useMorphdomMarkdown = ({
 
   // Synchronous first paint: while the async parse is in-flight, show escaped
   // plain text immediately so there is no blank frame on initial mount. Only
-  // runs when the target is empty — subsequent updates keep the prior rich DOM
-  // until the next async render morphs in (no flash). Mirrors OpenCode's
-  // `initialValue: fallback(text)` resource pattern.
+  // runs when the target is empty — subsequent streaming updates keep the prior
+  // fallback until the async render morphs in.
   React.useLayoutEffect(() => {
     const container = containerRef.current;
     const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
     if (!target) return;
     const decorationId = getMarkdownDecorationId(ctx);
+    const cachedBlocks = !streaming ? getCachedMarkdownBlocks(text, imageMode) : null;
+
+    if (
+      !streaming
+      && target.childNodes.length > 0
+      && !mountedDomRef.current
+      && isProvisionalSyncFallbackDom(target)
+      && (!cachedBlocks || !domMatchesRenderedBlocks(target, cachedBlocks, decorationId))
+    ) {
+      // Viewer controllers own transient state on old nodes; clean them up
+      // before replacing stale non-streaming content.
+      if (shouldRefreshMermaidViewers(target)) {
+        mermaidViewerRef.current?.cleanup();
+        mermaidViewerRef.current = null;
+      }
+      target.replaceChildren();
+    }
+
     if (text && target.childNodes.length === 0) {
-      const cachedBlocks = !streaming ? getCachedMarkdownBlocks(text, imageMode) : null;
       if (cachedBlocks) {
         let hasMermaidBlock = false;
         for (const cachedBlock of cachedBlocks) {
@@ -978,6 +1021,7 @@ const useMorphdomMarkdown = ({
         block.style.display = 'contents';
         block.innerHTML = renderMarkdownSync(text, imageMode);
         decorateMarkdown(block, ctx);
+        block.setAttribute('data-md-id', `sync:${contentFingerprint(text)}:${imageMode}`);
         block.setAttribute(MARKDOWN_DECORATION_ID_ATTR, decorationId);
         target.appendChild(block);
         if (shouldRefreshMermaidViewers(block)) refreshMermaidViewers();
@@ -1211,15 +1255,15 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
     // Streaming, unfinished, oversized, and identity-less Markdown continues
     // through the normal rendering pipeline and never retains detached DOM.
     if (isStreaming || !settledSessionID || !settledMessageID || !settledPartID || content.length === 0 || content.length > MARKDOWN_DOM_CACHE_MAX_SOURCE_CHARS) return null;
-    // content.length is a cheap fingerprint: an edited or reverted part that
+    // The content fingerprint ensures an edited or reverted part that
     // re-materializes under the same id must not restore the old DOM.
     return {
       scope: `${runtimeKey}\0${settledSessionID}`,
-      id: `${settledMessageID}\0${settledPartID}\0${imageMode}\0${content.length}`,
+      id: `${settledMessageID}\0${settledPartID}\0${imageMode}\0${contentFingerprint(content)}`,
       locale,
       directory: effectiveDirectory,
     };
-  }, [content.length, effectiveDirectory, imageMode, isStreaming, locale, runtimeKey, settledSessionID, settledMessageID, settledPartID]);
+  }, [content, effectiveDirectory, imageMode, isStreaming, locale, runtimeKey, settledSessionID, settledMessageID, settledPartID]);
   // Identity for the fade-in wrapper: a new part/message restarts the animation.
   const fadeKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
 
