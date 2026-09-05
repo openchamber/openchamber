@@ -94,8 +94,10 @@ beforeEach(() => {
   sdkConnected = true;
 });
 
-afterEach(() => {
+afterEach(async () => {
   delete (globalThis as { __persisted?: unknown }).__persisted;
+  const { setRecentSessionSnapshotWaitMs } = await import('./recentSession');
+  setRecentSessionSnapshotWaitMs(60_000);
 });
 
 describe('resolveRecentSession', () => {
@@ -158,7 +160,8 @@ describe('resolveRecentSession', () => {
     setPersisted('ses_active', '/repo/a');
     storeStatus = 'idle';
     queueSnapshot([], { commit: false });
-    const { resolveRecentSession } = await import('./recentSession');
+    const { resolveRecentSession, setRecentSessionSnapshotWaitMs } = await import('./recentSession');
+    setRecentSessionSnapshotWaitMs(150);
     expect(await resolveRecentSession()).toBeNull();
     expect(clearCalls).toEqual([]);
   }, 10_000);
@@ -174,14 +177,26 @@ describe('resolveRecentSession', () => {
     expect(clearCalls).toEqual([]);
   });
 
-  test('returns when snapshot resolution exceeds the startup timeout', async () => {
+  test('restores a snapshot that lands after the original 6s cutoff (slow mobile reload)', async () => {
+    setPersisted('ses_active', '/repo/a');
+    storeStatus = 'loading';
+    queueSnapshot([{ id: 'ses_active', directory: '/repo/c' }], { delayMs: 250 });
+    const { resolveRecentSession, setRecentSessionSnapshotWaitMs } = await import('./recentSession');
+    setRecentSessionSnapshotWaitMs(1_000);
+    const resolved = await resolveRecentSession();
+    expect(resolved).toEqual({ sessionId: 'ses_active', directory: '/repo/c' });
+    expect(clearCalls).toEqual([]);
+  }, 10_000);
+
+  test('gives up at the extended wait cap when the snapshot never becomes ready', async () => {
     setPersisted('ses_active', '/repo/a');
     storeStatus = 'loading';
     snapshotCalls.push({ reject: false, pending: true, sessions: [] });
-    const { resolveRecentSession } = await import('./recentSession');
+    const { resolveRecentSession, setRecentSessionSnapshotWaitMs } = await import('./recentSession');
+    setRecentSessionSnapshotWaitMs(150);
     const startedAt = Date.now();
     expect(await resolveRecentSession()).toBeNull();
-    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(5_900);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(100);
     expect(clearCalls).toEqual([]);
   }, 10_000);
 
@@ -221,10 +236,11 @@ describe('resolveRecentSession', () => {
     setPersisted('ses_active', '/repo/a');
     storeStatus = 'loading';
     snapshotCalls.push({ reject: false, pending: true, sessions: [] });
-    const { resolveRecentSession } = await import('./recentSession');
+    const { resolveRecentSession, setRecentSessionSnapshotWaitMs } = await import('./recentSession');
+    setRecentSessionSnapshotWaitMs(150);
     const startedAt = Date.now();
     expect(await resolveRecentSession()).toBeNull();
-    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(5_900);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(100);
     expect(clearCalls).toEqual([]);
   }, 10_000);
 });
