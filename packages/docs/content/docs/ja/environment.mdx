@@ -25,6 +25,10 @@ OpenChamber Web サーバーのバインドアドレスです。他のマシン�
 
 OpenChamber のデータディレクトリを上書きします。デフォルトは `~/.config/openchamber` です。
 
+### `OPENCHAMBER_CHATS_DIR`
+
+プロジェクトを持たないチャット用に OpenChamber が作成する管理チャットディレクトリの場所を変更します。デフォルトは `~/.config/openchamber/chats` です。OpenChamber と OpenCode を別のユーザーで実行している場合は、OpenCode サーバーが読み取れるディレクトリを指定してください。既存のチャットは移動されません。
+
 ### `OPENCHAMBER_COMPRESS_API`
 
 API レスポンス圧縮を制御します。`true` または `1` で強制的に有効化し、`false` または `0` で強制的に無効化します。

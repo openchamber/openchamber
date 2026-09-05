@@ -108,13 +108,26 @@ before touching the filesystem). Rationale: metadata rides every
      stop), with a tick-side safety net. Messages sent while paused leave
      the goal alone; Resume re-arms the loop, and resuming over an aborted
      tail skips the audit and goes straight to a continuation nudge;
-   - terminal checks, cheapest first: assistant turn error → `blocked`;
-     `tokensUsed >= tokenBudget` → `budgetLimited`;
-     `turnsUsed >= MAX_AUTO_TURNS` (20) → `blocked`;
-   - if the latest message is a compaction summary, skip the audit and
-     continue unconditionally — running into the context window mid-work is
-     by definition "in progress, not finished" (the summary is a retelling,
-     not evidence, and must not be judged);
+    - terminal checks, cheapest first: assistant turn error → `blocked`;
+      `tokensUsed >= tokenBudget` → `budgetLimited`;
+      `turnsUsed >= MAX_AUTO_TURNS` (20) → `blocked`;
+    - error classification is independent of `finish`: `MessageAbortedError`
+      keeps the pause/resume behavior; only a `finish: "length"` with no
+      error, or `MessageOutputLengthError`, is an in-progress truncation that
+      skips the audit and continues. Any other non-null error wins over a
+      length finish and blocks with its non-empty `error.name`, or
+      `assistant turn failed` when unnamed;
+    - length recovery is bounded separately from the token budget and
+      auto-continuation cap: the first truncation permits one continuation, but
+      a second consecutive completed, non-summary assistant turn that is also
+      truncated settles the goal as `blocked` (`repeated output truncation`).
+      The consecutive state is derived from the loaded message history, not
+      persisted, using `info.time.created` chronology rather than message IDs.
+      Summary messages are not agent turns; an ordinary completed assistant
+      turn naturally breaks the consecutive condition. Explicit Resume grants
+      one new recovery attempt over the same transcript; the continuation
+      consumes that permission, so another truncation blocks again. Resume
+      does not bypass assistant errors or the token budget;
    - otherwise, small-model audit of the objective + the last assistant turn
      only — no conversation history and no continuation prompts
      (`restrictToPreferredProvider`, session's own provider/model preferred):

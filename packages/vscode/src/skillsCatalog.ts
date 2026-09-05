@@ -1,3 +1,4 @@
+import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -418,8 +419,8 @@ async function copyDirectoryNoSymlinks(srcDir: string, dstDir: string) {
 }
 
 function getUserSkillBaseDir() {
-  const pluralPath = path.join(os.homedir(), '.config', 'opencode', 'skills');
-  const legacyPath = path.join(os.homedir(), '.config', 'opencode', 'skill');
+  const pluralPath = path.join(OPENCODE_CONFIG_DIR, 'skills');
+  const legacyPath = path.join(OPENCODE_CONFIG_DIR, 'skill');
   if (fs.existsSync(legacyPath) && !fs.existsSync(pluralPath)) return legacyPath;
   return pluralPath;
 }

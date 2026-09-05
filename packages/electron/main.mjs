@@ -36,6 +36,7 @@ import { shouldAllowBrowserPanelCertificateError } from './browser-panel-securit
 import { createRelayDevTunnelBridge } from './relay-dev-tunnel.mjs';
 import { attachRendererRecovery } from './renderer-recovery.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
+import { fetchUpdateNotes } from '@openchamber/web/server/lib/changelog/update-notes.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -234,7 +235,6 @@ const LOCAL_DESKTOP_CLIENT_DEDUPE_KEY = 'desktop-local';
 // connecting to someone else's server).
 const REMOTE_DESKTOP_CLIENT_KIND = 'desktop';
 const ENV_OVERRIDE_HOST_ID = '__env';
-const CHANGELOG_URL = 'https://raw.githubusercontent.com/openchamber/openchamber/main/CHANGELOG.md';
 const GITHUB_BUG_REPORT_URL = 'https://github.com/openchamber/openchamber/issues/new?template=bug_report.yml';
 const GITHUB_FEATURE_REQUEST_URL = 'https://github.com/openchamber/openchamber/issues/new?template=feature_request.yml';
 const DISCORD_INVITE_URL = 'https://discord.gg/ZYRSdnwwKA';
@@ -3203,24 +3203,7 @@ const installDownloadedUpdate = () => new Promise((resolve, reject) => {
   });
 });
 
-const parseRelevantChangelogNotes = async (fromVersion, toVersion) => {
-  try {
-    const response = await fetch(CHANGELOG_URL, { signal: AbortSignal.timeout(10_000) });
-    if (!response.ok) return null;
-    const changelog = await response.text();
-    const sections = changelog.split(/^##\s+\[/m).slice(1);
-    const relevant = [];
-    for (const section of sections) {
-      const version = section.split(']')[0];
-      if (compareSemver(version, fromVersion) > 0 && compareSemver(version, toVersion) <= 0) {
-        relevant.push(`## [${section}`.trim());
-      }
-    }
-    return relevant.length > 0 ? relevant.join('\n\n') : null;
-  } catch {
-    return null;
-  }
-};
+const parseRelevantChangelogNotes = (fromVersion, toVersion) => fetchUpdateNotes(fromVersion, toVersion, compareSemver);
 
 const buildInstalledAppsCachePath = () => path.join(path.dirname(settingsFilePath()), INSTALLED_APPS_CACHE_FILE);
 

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import { z } from 'zod';
 import type { Event } from '@opencode-ai/sdk/v2';
+import { createInputHistoryIdentity, createInputHistorySubmission, useInputHistoryStore } from './useInputHistoryStore';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import type { AttachedFile } from './types/sessionTypes';
 import { contextPartMetadataSchema, type ContextPartMetadata } from '@/lib/messages/contextParts';
@@ -429,6 +430,26 @@ const removeMessageLocally = (
     return { queuedMessages: { ...state.queuedMessages, [key]: newQueue } };
 };
 
+/** Every projection of one session in this runtime, whatever directory it was keyed under. */
+const clearSessionProjection = (
+    state: Pick<MessageQueueState, 'queuedMessages' | 'sendingIds'>,
+    runtimeKey: string,
+    sessionId: string,
+    revision: number,
+): Pick<MessageQueueState, 'queuedMessages' | 'sendingIds'> => {
+    let queuedMessages = state.queuedMessages;
+    let sendingIds = state.sendingIds;
+    for (const key of new Set([...Object.keys(queuedMessages), ...Object.keys(sendingIds)])) {
+        const parsed = parseMessageQueueKey(key);
+        if (parsed?.runtimeKey !== runtimeKey || parsed.sessionId !== sessionId) continue;
+        if ((appliedRevisions.get(key) ?? -1) > revision) continue;
+        appliedRevisions.set(key, revision);
+        queuedMessages = withoutKey(queuedMessages, key);
+        sendingIds = withoutKey(sendingIds, key);
+    }
+    return { queuedMessages, sendingIds };
+};
+
 export const useMessageQueueStore = create<MessageQueueStore>()(
     devtools(
         persist(
@@ -436,7 +457,14 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                 const applyServerSession = (session: ServerQueueSession, revision: number, expectedRuntimeKey: string) => {
                     if (expectedRuntimeKey !== getRuntimeKey()) return;
                     const target = createMessageQueueTarget(session.sessionId, session.directory, expectedRuntimeKey);
-                    if (!target) return;
+                    if (!target) {
+                        // Servers before 1.22.2 drop a session's directory once its
+                        // queue is empty. A session id is unique across directories,
+                        // so an empty session still says which projection is done.
+                        if (session.items.length > 0) return;
+                        set((state) => clearSessionProjection(state, expectedRuntimeKey, session.sessionId, revision));
+                        return;
+                    }
                     const key = getMessageQueueKey(target);
                     if ((appliedRevisions.get(key) ?? -1) > revision) return;
                     appliedRevisions.set(key, revision);
@@ -521,6 +549,8 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                             set((state) => removeMessageLocally(state, key, id));
                             throw new Error('A queued message needs a provider and model to be delivered later.');
                         }
+                        const historyIdentity = createInputHistoryIdentity(target.runtimeKey, target.directory, target.sessionId);
+                        const historySubmission = createInputHistorySubmission(message.content, message.attachments ?? []);
                         try {
                             const result = await requestJson(serverSessionResponseSchema, `${sessionPath(target.sessionId)}/items`, jsonInit('POST', {
                                 directory: target.directory,
@@ -529,6 +559,9 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                             // The optimistic entry is replaced by the server's copy of the queue.
                             set((state) => removeMessageLocally(state, key, id));
                             applyServerSession(result.session, result.revision, target.runtimeKey);
+                            if (historyIdentity) {
+                                useInputHistoryStore.getState().appendSubmissions(historyIdentity, [historySubmission]);
+                            }
                         } catch (error) {
                             set((state) => removeMessageLocally(state, key, id));
                             throw error;

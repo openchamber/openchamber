@@ -1,3 +1,4 @@
+import { SidebarTerminalActivity } from './SidebarTerminalActivity';
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -618,6 +619,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     setSingleProjectId,
   ]);
   return <>
+    <SidebarTerminalActivity />
     <ProjectSessionSelectionEffect
       projectSections={projectSections}
       activeProjectId={view.activeProjectId}

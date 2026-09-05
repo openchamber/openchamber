@@ -342,6 +342,20 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['follow up', 'queue', 'steer', 'send immediately'],
   },
   {
+    id: 'chat.input-history-scope',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.inputHistoryScope',
+    descriptionKey: 'settings.openchamber.visual.field.inputHistoryScopeDescription',
+    keywords: ['input history', 'composer history', 'global', 'session', 'reuse'],
+  },
+  {
+    id: 'chat.input-history-limit',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.inputHistoryLimit',
+    descriptionKey: 'settings.openchamber.visual.field.inputHistoryLimitDescription',
+    keywords: ['history limit', 'prompt recall', 'remember prompts', 'composer history', 'submitted prompts', 'trim history'],
+  },
+  {
     id: 'chat.persist-drafts',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.persistDraftMessages',
@@ -366,6 +380,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.visual.field.largeTextPaste',
     descriptionKey: 'settings.openchamber.visual.field.largeTextPasteHint',
     keywords: ['paste', 'clipboard', 'attachment', 'large', 'text', 'file'],
+  },
+  {
+    id: 'chat.enter-to-send',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.enterToSend',
+    descriptionKey: 'settings.openchamber.visual.field.enterToSendHint',
+    keywords: ['enter', 'shift enter', 'send', 'newline'],
   },
   {
     id: 'sessions.default-model',

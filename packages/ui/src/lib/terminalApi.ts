@@ -1,17 +1,23 @@
-import type { CreateTerminalOptions, TerminalError, TerminalHandlers, TerminalServerSession, TerminalSession, TerminalShellOption, TerminalStreamEvent } from './api/types';
+import type { CreateTerminalOptions, TerminalError, TerminalHandlers, TerminalServerSession, TerminalSession, TerminalSessionPurpose, TerminalShellOption, TerminalStreamEvent } from './api/types';
 import { openRuntimeWebSocket } from './relay/runtime-socket';
-import type { RelayTunnelWebSocket } from './relay/tunnel-client';
+import type { RelayTunnelSocketMessageEvent, RelayTunnelWebSocket } from './relay/tunnel-client';
 import { runtimeFetch } from './runtime-fetch';
 import { getRuntimeUrlResolver } from './runtime-url';
 import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from './runtime-auth';
 import { isTerminalShell } from './terminalShell';
+import { z } from 'zod';
 
-type Message = Record<string, unknown> & { t: string; s?: string; q?: number };
+type ClientMessage =
+  | { t: 'hello' | 'ping'; v: 3 }
+  | { t: 'attach' | 'detach'; v: 3; s: string }
+  | { t: 'write'; v: 3; s: string; d: string };
 type Subscriber = { handlers: TerminalHandlers; lastSequence: number };
 type TerminalProjection = {
   sequence: number;
   history: string;
   status: TerminalStreamEvent['status'];
+  mode?: TerminalSession['mode'];
+  purpose?: TerminalSessionPurpose;
   exitCode?: number;
   signal?: number | null;
   runtime?: TerminalStreamEvent['runtime'];
@@ -30,8 +36,64 @@ const SOCKET_OPEN = 1;
 const IDLE_SOCKET_GRACE_MS = 15_000;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+const terminalModeSchema = z.enum(['interactive', 'command']);
+const terminalStatusSchema = z.enum(['running', 'exited', 'error']);
+const terminalRuntimeSchema = z.enum(['node', 'bun']);
+type TerminalSessionPurposeInput =
+  | TerminalSessionPurpose
+  | { type: 'project-action'; actionId: string; executionId?: string }
+  | null
+  | undefined;
+type TerminalSessionInput = {
+  sessionId?: string;
+  cols?: number;
+  rows?: number;
+  status?: 'running' | 'exited' | 'error';
+  mode?: 'interactive' | 'command';
+  purpose?: TerminalSessionPurposeInput;
+} | null | undefined;
+const terminalSessionPurposeSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('terminal') }),
+  z.object({ type: z.literal('project-action'), actionId: z.string(), executionId: z.string() }),
+]);
+const terminalSessionSchema = z.object({
+  sessionId: z.string(),
+  cols: z.number(),
+  rows: z.number(),
+  status: terminalStatusSchema,
+  mode: terminalModeSchema.optional(),
+  purpose: terminalSessionPurposeSchema.optional(),
+});
+const terminalServerSessionSchema = z.object({
+  sessionId: z.string(),
+  cwd: z.string(),
+  status: z.enum(['running', 'exited']),
+  createdAt: z.number().nullable().optional().transform((value) => value ?? null),
+  mode: terminalModeSchema.optional(),
+  purpose: terminalSessionPurposeSchema.optional(),
+});
 
-const encode = (message: Message): Uint8Array => {
+const terminalMessageMetadata = {
+  mode: terminalModeSchema.optional(),
+  purpose: terminalSessionPurposeSchema.optional(),
+};
+const terminalMessageSchema = z.discriminatedUnion('t', [
+  z.object({ t: z.literal('hello') }),
+  z.object({ t: z.literal('pong') }),
+  z.object({ t: z.literal('error'), s: z.string().optional(), message: z.string().optional(), code: z.string().optional(), fatal: z.boolean().optional() }),
+  z.object({
+    t: z.literal('snapshot'), s: z.string(), q: z.number().int().nonnegative().default(0),
+    history: z.string().default(''), status: terminalStatusSchema,
+    exitCode: z.number().nullish().transform(value => value ?? undefined), signal: z.number().nullable().optional(),
+    runtime: terminalRuntimeSchema.optional(), ptyBackend: z.string().optional(), ...terminalMessageMetadata,
+  }),
+  z.object({ t: z.literal('output'), s: z.string(), q: z.number().int().nonnegative(), d: z.string(), r: z.string().optional() }),
+  z.object({ t: z.literal('exit'), s: z.string(), q: z.number().int().nonnegative(), exitCode: z.number().nullish().transform(value => value ?? undefined), signal: z.number().nullable().optional() }),
+  z.object({ t: z.literal('restarted'), s: z.string(), q: z.number().int().nonnegative(), history: z.string().default(''), ...terminalMessageMetadata }),
+]);
+type TerminalMessage = z.infer<typeof terminalMessageSchema>;
+
+const encode = (message: ClientMessage): Uint8Array => {
   const payload = encoder.encode(JSON.stringify(message));
   const frame = new Uint8Array(payload.length + 1);
   frame[0] = TAG;
@@ -39,20 +101,37 @@ const encode = (message: Message): Uint8Array => {
   return frame;
 };
 
-const decode = async (data: unknown): Promise<Message | null> => {
-  let bytes: Uint8Array;
-  if (data instanceof ArrayBuffer) bytes = new Uint8Array(data);
-  else if (data instanceof Uint8Array) bytes = data;
-  else if (typeof Blob !== 'undefined' && data instanceof Blob) bytes = new Uint8Array(await data.arrayBuffer());
-  else if (typeof data === 'string') bytes = encoder.encode(data);
-  else return null;
+const decode = (data: RelayTunnelSocketMessageEvent['data']): TerminalMessage | null => {
+  let bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : encoder.encode(data);
   if (bytes[0] === TAG) bytes = bytes.subarray(1);
-  try { return JSON.parse(decoder.decode(bytes)) as Message; } catch { return null; }
+  try { return terminalMessageSchema.safeParse(JSON.parse(decoder.decode(bytes))).data ?? null; } catch { return null; }
 };
 
+/**
+ * Server error code for a terminal request whose working directory no longer
+ * exists (a deleted worktree). Mirrors `TERMINAL_CWD_MISSING_CODE` in
+ * `packages/web/server/lib/terminal/runtime.js`.
+ */
+const TERMINAL_CWD_MISSING_CODE = 'TERMINAL_CWD_MISSING';
+
+export class TerminalRequestError extends Error {
+  readonly code: string | null;
+
+  constructor(message: string, code: string | null) {
+    super(message);
+    this.name = 'TerminalRequestError';
+    this.code = code;
+  }
+}
+
+export const isTerminalCwdMissingError = (error: unknown): boolean =>
+  error instanceof TerminalRequestError && error.code === TERMINAL_CWD_MISSING_CODE;
+
+const terminalErrorBodySchema = z.object({ error: z.string().optional(), code: z.string().optional() });
+
 const responseError = async (response: Response, fallback: string): Promise<Error> => {
-  const body = await response.json().catch(() => null) as { error?: unknown } | null;
-  return new Error(typeof body?.error === 'string' ? body.error : fallback);
+  const body = terminalErrorBodySchema.safeParse(await response.json().catch(() => null)).data;
+  return new TerminalRequestError(body?.error ?? fallback, body?.code ?? null);
 };
 
 const trimProjection = (value: string): string => {
@@ -61,6 +140,16 @@ const trimProjection = (value: string): string => {
   let start = bytes.byteLength - MAX_PROJECTION_BYTES;
   while (start < bytes.byteLength && (bytes[start] & 0xc0) === 0x80) start += 1;
   return decoder.decode(bytes.subarray(start));
+};
+
+const terminalSessionListSchema = z.object({ sessions: z.array(z.unknown()) });
+
+export const parseTerminalSessionPurpose = (value: TerminalSessionPurposeInput): TerminalSessionPurpose | undefined => {
+  return terminalSessionPurposeSchema.safeParse(value).data;
+};
+
+export const parseTerminalSession = (value: TerminalSessionInput): TerminalSession | null => {
+  return terminalSessionSchema.safeParse(value).data ?? null;
 };
 
 type TerminalTransportDependencies = {
@@ -98,7 +187,7 @@ export class TerminalTransport {
     const projection = this.projections.get(sessionId);
     if (projection) {
       subscriber.lastSequence = projection.sequence;
-      handlers.onEvent({ type: 'snapshot', sequence: projection.sequence, data: projection.history, status: projection.status, exitCode: projection.exitCode, signal: projection.signal, runtime: projection.runtime, ptyBackend: projection.ptyBackend });
+      handlers.onEvent({ type: 'snapshot', sequence: projection.sequence, data: projection.history, status: projection.status, mode: projection.mode, purpose: projection.purpose, exitCode: projection.exitCode, signal: projection.signal, runtime: projection.runtime, ptyBackend: projection.ptyBackend });
     }
     const socketWasOpen = this.socket?.readyState === SOCKET_OPEN;
     this.ensureConnected().then(() => {
@@ -252,12 +341,12 @@ export class TerminalTransport {
     }
   }
 
-  private async handleMessage(raw: unknown): Promise<void> {
-    const message = await decode(raw);
+  private handleMessage(raw: RelayTunnelSocketMessageEvent['data']): void {
+    const message = decode(raw);
     if (!message || message.t === 'hello' || message.t === 'pong') return;
     if (message.t === 'error') {
-      const error = new Error(typeof message.message === 'string' ? message.message : 'Terminal error') as TerminalError;
-      if (typeof message.code === 'string') error.code = message.code;
+      const error: TerminalError = new Error(message.message ?? 'Terminal error');
+      error.code = message.code;
       const targets = message.s ? [message.s] : [...this.subscribers.keys()];
       for (const id of targets) for (const sub of this.subscribers.get(id) ?? []) sub.handlers.onError?.(error, message.fatal === true);
       return;
@@ -267,38 +356,40 @@ export class TerminalTransport {
     if (!subscribers) return;
     if (message.t === 'snapshot') {
       const projection: TerminalProjection = {
-        sequence: typeof message.q === 'number' ? message.q : 0,
-        history: typeof message.history === 'string' ? message.history : '',
-        status: message.status as TerminalStreamEvent['status'],
-        exitCode: typeof message.exitCode === 'number' ? message.exitCode : undefined,
-        signal: typeof message.signal === 'number' ? message.signal : null,
-        runtime: message.runtime as TerminalStreamEvent['runtime'],
-        ptyBackend: typeof message.ptyBackend === 'string' ? message.ptyBackend : undefined,
+        sequence: message.q ?? 0,
+        history: message.history ?? '',
+        status: message.status,
+        mode: message.mode,
+        purpose: message.purpose,
+        exitCode: message.exitCode,
+        signal: message.signal ?? null,
+        runtime: message.runtime,
+        ptyBackend: message.ptyBackend,
       };
       this.projections.set(message.s, projection);
       for (const sub of subscribers) {
         sub.lastSequence = projection.sequence;
-        sub.handlers.onEvent({ type: 'snapshot', sequence: projection.sequence, data: projection.history, status: projection.status, exitCode: projection.exitCode, signal: projection.signal, runtime: projection.runtime, ptyBackend: projection.ptyBackend });
+        sub.handlers.onEvent({ type: 'snapshot', sequence: projection.sequence, data: projection.history, status: projection.status, mode: projection.mode, purpose: projection.purpose, exitCode: projection.exitCode, signal: projection.signal, runtime: projection.runtime, ptyBackend: projection.ptyBackend });
       }
       return;
     }
-    if (typeof message.q !== 'number') return;
+
     const previous = this.projections.get(message.s);
     if (previous && message.q > previous.sequence) {
-      if (message.t === 'output') this.projections.set(message.s, { ...previous, sequence: message.q, history: trimProjection(previous.history + (typeof message.r === 'string' ? message.r : (typeof message.d === 'string' ? message.d : ''))) });
-      else if (message.t === 'exit') this.projections.set(message.s, { ...previous, sequence: message.q, status: 'exited', exitCode: typeof message.exitCode === 'number' ? message.exitCode : undefined, signal: typeof message.signal === 'number' ? message.signal : null });
-      else if (message.t === 'restarted') this.projections.set(message.s, { ...previous, sequence: message.q, history: typeof message.history === 'string' ? message.history : '', status: 'running', exitCode: undefined, signal: null });
+      if (message.t === 'output') this.projections.set(message.s, { ...previous, sequence: message.q, history: trimProjection(previous.history + (message.r ?? message.d)) });
+      else if (message.t === 'exit') this.projections.set(message.s, { ...previous, sequence: message.q, status: 'exited', exitCode: message.exitCode, signal: message.signal ?? null });
+      else if (message.t === 'restarted') this.projections.set(message.s, { ...previous, sequence: message.q, history: message.history ?? '', status: 'running', mode: message.mode ?? previous.mode, purpose: message.purpose ?? previous.purpose, exitCode: undefined, signal: null });
     }
     for (const sub of subscribers) {
       if (message.q <= sub.lastSequence) continue;
       sub.lastSequence = message.q;
-      if (message.t === 'output') sub.handlers.onEvent({ type: 'data', sequence: message.q, data: typeof message.d === 'string' ? message.d : '', replayData: typeof message.r === 'string' ? message.r : undefined });
-      else if (message.t === 'exit') sub.handlers.onEvent({ type: 'exit', sequence: message.q, exitCode: typeof message.exitCode === 'number' ? message.exitCode : undefined, signal: typeof message.signal === 'number' ? message.signal : null });
-      else if (message.t === 'restarted') sub.handlers.onEvent({ type: 'snapshot', sequence: message.q, data: typeof message.history === 'string' ? message.history : '', status: 'running' });
+      if (message.t === 'output') sub.handlers.onEvent({ type: 'data', sequence: message.q, data: message.d, replayData: message.r });
+      else if (message.t === 'exit') sub.handlers.onEvent({ type: 'exit', sequence: message.q, exitCode: message.exitCode, signal: message.signal ?? null });
+      else if (message.t === 'restarted') sub.handlers.onEvent({ type: 'snapshot', sequence: message.q, data: message.history ?? '', status: 'running', mode: message.mode ?? previous?.mode, purpose: message.purpose ?? previous?.purpose });
     }
   }
 
-  private send(message: Message): boolean {
+  private send(message: ClientMessage): boolean {
     if (!this.socket || this.socket.readyState !== SOCKET_OPEN) return false;
     try { this.socket.send(encode(message)); return true; } catch { return false; }
   }
@@ -354,27 +445,23 @@ let transport = new TerminalTransport();
 export async function createTerminalSession(options: CreateTerminalOptions): Promise<TerminalSession> {
   const response = await runtimeFetch('/api/terminal/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options) });
   if (!response.ok) throw await responseError(response, 'Failed to create terminal session');
-  return response.json() as Promise<TerminalSession>;
+  const payload: unknown = await response.json().catch(() => null);
+  const parsed = terminalSessionSchema.safeParse(payload).data;
+  if (!parsed) throw new Error('Failed to create terminal session');
+  return parsed;
 }
 export async function listTerminalSessions(cwd: string): Promise<TerminalServerSession[]> {
   const response = await runtimeFetch(`/api/terminal/sessions?cwd=${encodeURIComponent(cwd)}`);
   if (!response.ok) throw await responseError(response, 'Failed to list terminal sessions');
   const payload: unknown = await response.json().catch(() => null);
-  const rawSessions = payload && typeof payload === 'object' && 'sessions' in payload ? payload.sessions : null;
+  const rawSessions = terminalSessionListSchema.safeParse(payload).data?.sessions;
   if (!Array.isArray(rawSessions)) throw new Error('Failed to list terminal sessions');
   const parsed: TerminalServerSession[] = [];
-  for (const entry of rawSessions as unknown[]) {
-    if (typeof entry !== 'object' || entry === null) continue;
-    // SAFETY: every field is verified below before the value is used.
-    const candidate = entry as Partial<Record<keyof TerminalServerSession, unknown>>;
-    if (typeof candidate.sessionId !== 'string' || typeof candidate.cwd !== 'string') continue;
-    if (candidate.status !== 'running' && candidate.status !== 'exited') continue;
-    parsed.push({
-      sessionId: candidate.sessionId,
-      cwd: candidate.cwd,
-      status: candidate.status,
-      createdAt: typeof candidate.createdAt === 'number' ? candidate.createdAt : null,
-    });
+  for (const entry of rawSessions) {
+    const session = terminalServerSessionSchema.safeParse(entry).data;
+    if (session) {
+      parsed.push(session);
+    }
   }
   return parsed;
 }

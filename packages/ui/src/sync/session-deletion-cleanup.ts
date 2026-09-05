@@ -1,6 +1,7 @@
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { clearChatDraft, createChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { createMessageQueueTarget, isServerOwnedMessageQueue, useMessageQueueStore } from '@/stores/messageQueueStore';
+import { createInputHistoryIdentity, useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useTodosPersistStore } from '@/stores/useTodosPersistStore';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
@@ -24,6 +25,8 @@ export const cleanupPersistedSessionState = (identity: {
   useSessionFoldersStore.getState().removeSessionEverywhere(identity.runtimeKey, identity.sessionId);
   useInlineCommentDraftStore.getState().clearSessionDrafts(identity.runtimeKey, identity.directory, identity.sessionId);
   useSessionPinnedStore.getState().clearPinnedSession(identity.runtimeKey, identity.directory, identity.sessionId);
+  const inputHistoryIdentity = createInputHistoryIdentity(identity.runtimeKey, identity.directory, identity.sessionId);
+  if (inputHistoryIdentity) useInputHistoryStore.getState().clearSession(inputHistoryIdentity);
   const chatDraftIdentity = createChatDraftIdentity(identity.runtimeKey, identity.directory, identity.sessionId);
   if (chatDraftIdentity) clearChatDraft(chatDraftIdentity, true);
 };

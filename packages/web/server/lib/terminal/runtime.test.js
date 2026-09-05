@@ -3,7 +3,6 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import express from 'express';
 import { WebSocket } from 'ws';
 
 import { createTerminalRuntime } from './runtime.js';
@@ -22,6 +21,98 @@ function createResponse() {
       return this;
     },
   };
+}
+
+async function openTerminalSocket(socketUrl) {
+  const socket = new WebSocket(socketUrl);
+  const messages = [];
+  socket.on('message', (raw) => messages.push(readTerminalWsControlFrame(raw)));
+  await new Promise((resolve, reject) => {
+    socket.once('open', resolve);
+    socket.once('error', reject);
+  });
+  const next = async (type, sessionId) => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const index = messages.findIndex((message) => message?.t === type && (!sessionId || message.s === sessionId));
+      if (index >= 0) return messages.splice(index, 1)[0];
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    throw new Error(`Timed out waiting for ${type}`);
+  };
+  await next('hello');
+  return { socket, next, messages };
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+function createHttpTestApp() {
+  const routes = { GET: [], POST: [], DELETE: [] };
+  const app = (req, res) => {
+    const methodRoutes = routes[req.method] ?? [];
+    const url = new URL(req.url, 'http://127.0.0.1');
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', async () => {
+      const bodyText = Buffer.concat(chunks).toString('utf8');
+      const route = methodRoutes.find(({ pattern }) => pattern.test(url.pathname));
+      if (!route) {
+        res.statusCode = 404;
+        res.end('Not found');
+        return;
+      }
+      const match = route.pattern.exec(url.pathname);
+      const response = {
+        statusCode: 200,
+        headers: { 'content-type': 'application/json' },
+        body: null,
+        status(code) {
+          this.statusCode = code;
+          return this;
+        },
+        json(payload) {
+          this.body = payload;
+          return this;
+        },
+      };
+      try {
+        await route.handler({
+          method: req.method,
+          url: req.url,
+          query: Object.fromEntries(url.searchParams.entries()),
+          params: route.params.reduce((acc, name, index) => ({ ...acc, [name]: match[index + 1] }), {}),
+          body: bodyText ? JSON.parse(bodyText) : {},
+        }, response);
+      } catch (error) {
+        response.status(500).json({ error: error?.message || 'Route failed' });
+      }
+      res.writeHead(response.statusCode, response.headers);
+      res.end(JSON.stringify(response.body));
+    });
+  };
+  const register = (method, route, handler) => {
+    const params = [];
+    const escaped = route.replace(/:([^/]+)/g, (_, name) => {
+      params.push(name);
+      return '([^/]+)';
+    });
+    routes[method].push({
+      pattern: new RegExp(`^${escaped}$`),
+      params,
+      handler,
+    });
+  };
+  app.get = (route, handler) => register('GET', route, handler);
+  app.post = (route, handler) => register('POST', route, handler);
+  app.delete = (route, handler) => register('DELETE', route, handler);
+  return app;
 }
 
 function createRuntime(server, overrides = {}) {
@@ -54,6 +145,7 @@ describe('terminal runtime', () => {
   const createHarness = (overrides = {}) => {
     const routes = { get: new Map(), post: new Map(), delete: new Map() };
     const processes = [];
+    const spawnDeferred = overrides.spawnDeferred ?? null;
     const app = {
       post(route, handler) { routes.post.set(route, handler); },
       get(route, handler) { routes.get.set(route, handler); },
@@ -61,7 +153,8 @@ describe('terminal runtime', () => {
     };
     const loadPtyProvider = async () => ({
       backend: 'fake-pty',
-      spawn: (shell, args, options) => {
+      spawn: async (shell, args, options) => {
+        await spawnDeferred?.promise;
         const dataHandlers = new Set();
         const exitHandlers = new Set();
         const process = {
@@ -97,6 +190,45 @@ describe('terminal runtime', () => {
     });
     return { routes, processes, runtime };
   };
+
+  it('replaces only exited action runs and keeps session capacity available across reruns', async () => {
+    const harness = createHarness();
+    try {
+      const create = harness.routes.post.get('/api/terminal/create');
+      await create({ body: { sessionId: 'interactive', cwd: '/repo' } }, createResponse());
+      for (let index = 0; index < 25; index += 1) {
+        const id = `execution-${index}`;
+        const response = createResponse();
+        await create({ body: { sessionId: id, cwd: '/repo', mode: 'command', command: 'echo hello', purpose: { type: 'project-action', actionId: 'build', executionId: id } } }, response);
+        expect(response.statusCode).toBe(200);
+        const listed = createResponse();
+        harness.routes.get.get('/api/terminal/sessions')({ query: { cwd: '/repo' } }, listed);
+        expect(listed.body.sessions.map(session => session.sessionId)).toEqual(['interactive', id]);
+        expect(harness.processes[0].killed).toBe(false);
+        harness.processes.at(-1).emitExit(0);
+      }
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('retains completed output when the replacement command fails to start', async () => {
+    let available = true;
+    const harness = createHarness({ fs: { promises: { stat: async () => ({ isDirectory: () => available }) } } });
+    try {
+      const create = harness.routes.post.get('/api/terminal/create');
+      const options = { cwd: '/repo', mode: 'command', command: 'echo hello', purpose: { type: 'project-action', actionId: 'build', executionId: 'old' } };
+      await create({ body: { ...options, sessionId: 'old' } }, createResponse());
+      harness.processes[0].emitData('old output');
+      harness.processes[0].emitExit(0);
+      available = false;
+      const response = createResponse();
+      await create({ body: { ...options, sessionId: 'new', purpose: { ...options.purpose, executionId: 'new' } } }, response);
+      expect(response.statusCode).toBe(400);
+      const listed = createResponse();
+      harness.routes.get.get('/api/terminal/sessions')({ query: { cwd: '/repo' } }, listed);
+      expect(listed.body.sessions.map(session => session.sessionId)).toEqual(['old']);
+      expect(harness.processes).toHaveLength(1);
+    } finally { await harness.runtime.shutdown(); }
+  });
 
   it('rejects regular files as terminal working directories', async () => {
     const postRoutes = new Map();
@@ -134,6 +266,40 @@ describe('terminal runtime', () => {
     }
   });
 
+  it('names a missing working directory so the client can recover the session', async () => {
+    let cwdMissing = false;
+    const harness = createHarness({
+      fs: {
+        promises: {
+          stat: async () => {
+            if (cwdMissing) throw Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+            return { isDirectory: () => true };
+          },
+        },
+      },
+    });
+    try {
+      const create = harness.routes.post.get('/api/terminal/create');
+      const created = createResponse();
+      await create({ body: { sessionId: 'worktree-terminal', cwd: '/repo/.worktrees/feature' } }, created);
+      expect(created.statusCode).toBe(200);
+
+      cwdMissing = true;
+      const recreated = createResponse();
+      await create({ body: { sessionId: 'worktree-terminal-2', cwd: '/repo/.worktrees/feature' } }, recreated);
+      expect(recreated.statusCode).toBe(400);
+      expect(recreated.body).toEqual({ error: 'Invalid working directory', code: 'TERMINAL_CWD_MISSING' });
+
+      const restarted = createResponse();
+      await harness.routes.post.get('/api/terminal/:sessionId/restart')(
+        { params: { sessionId: 'worktree-terminal' }, body: { cwd: '/repo/.worktrees/feature' } },
+        restarted,
+      );
+      expect(restarted.statusCode).toBe(400);
+      expect(restarted.body).toEqual({ error: 'Invalid working directory', code: 'TERMINAL_CWD_MISSING' });
+    } finally { await harness.runtime.shutdown(); }
+  });
+
   it('removes its websocket upgrade listener on shutdown', async () => {
     const server = new EventEmitter();
     const runtime = createRuntime(server);
@@ -150,7 +316,7 @@ describe('terminal runtime', () => {
     try {
       const response = createResponse();
       await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-1', cwd: '/repo', cols: 120, rows: 40, themeMode: 'light', terminalBackground: '#faf8f0', terminalForeground: '#1b1b1b' } }, response);
-      expect(response.body).toEqual({ sessionId: 'term-1', cols: 120, rows: 40, status: 'running' });
+      expect(response.body).toEqual({ sessionId: 'term-1', cols: 120, rows: 40, status: 'running', mode: 'interactive', purpose: { type: 'terminal' } });
       expect(harness.processes[0].options.cwd).toBe('/repo');
       expect(harness.processes[0].options.env.COLORFGBG).toBe('0;15');
       expect(harness.processes[0].options.env.NODE_CHANNEL_FD).toBe('');
@@ -192,7 +358,7 @@ describe('terminal runtime', () => {
       const scoped = createResponse();
       harness.routes.get.get('/api/terminal/sessions')({ query: { cwd: '/repo' } }, scoped);
       expect(scoped.body.sessions).toEqual([
-        { sessionId: 'term-a', cwd: '/repo', status: 'running', createdAt: expect.any(Number) },
+        { sessionId: 'term-a', cwd: '/repo', status: 'running', createdAt: expect.any(Number), mode: 'interactive', purpose: { type: 'terminal' } },
       ]);
 
       const touch = createResponse();
@@ -466,8 +632,7 @@ describe('terminal runtime', () => {
   });
 
   it('runs snapshot-first attach, scoped I/O, replay, reconnect, and close over a real websocket', async () => {
-    const app = express();
-    app.use(express.json());
+    const app = createHttpTestApp();
     const server = http.createServer(app);
     const processes = [];
     const loadPtyProvider = async () => ({
@@ -501,24 +666,6 @@ describe('terminal runtime', () => {
     const socketUrl = `ws://127.0.0.1:${address.port}/api/terminal/ws`;
     const sockets = [];
 
-    const open = async () => {
-      const socket = new WebSocket(socketUrl);
-      sockets.push(socket);
-      const messages = [];
-      socket.on('message', (raw) => messages.push(readTerminalWsControlFrame(raw)));
-      await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
-      const next = async (type, sessionId) => {
-        for (let attempt = 0; attempt < 100; attempt += 1) {
-          const index = messages.findIndex((message) => message?.t === type && (!sessionId || message.s === sessionId));
-          if (index >= 0) return messages.splice(index, 1)[0];
-          await new Promise((resolve) => setTimeout(resolve, 2));
-        }
-        throw new Error(`Timed out waiting for ${type}`);
-      };
-      await next('hello');
-      return { socket, next, messages };
-    };
-
     try {
       const created = await fetch(`${base}/api/terminal/create`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
@@ -531,7 +678,8 @@ describe('terminal runtime', () => {
       });
       expect(secondCreated.status).toBe(200);
 
-      const first = await open();
+      const first = await openTerminalSocket(socketUrl);
+      sockets.push(first.socket);
       first.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'term-live' }));
       first.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'term-second' }));
       expect(await first.next('snapshot', 'term-live')).toMatchObject({ s: 'term-live', q: 0, history: '', status: 'running' });
@@ -559,7 +707,8 @@ describe('terminal runtime', () => {
       expect(secondClosed.status).toBe(200);
       first.socket.close();
 
-      const second = await open();
+      const second = await openTerminalSocket(socketUrl);
+      sockets.push(second.socket);
       second.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'term-live' }));
       expect(await second.next('snapshot')).toMatchObject({ s: 'term-live', q: 2, history: 'ok\r\n', status: 'running' });
       processes[0].emitExit(7);
@@ -589,4 +738,382 @@ describe('terminal runtime', () => {
       await new Promise((resolve) => server.close(resolve));
     }
   }, 15_000);
+
+  it('creates command-mode sessions and echoes the effective mode', async () => {
+    const harness = createHarness({
+      searchPathFor: (name) => name === 'bash' ? '/bin/bash' : '/bin/sh',
+      isExecutable: (candidate) => candidate === '/bin/bash' || candidate === '/bin/sh',
+    });
+    try {
+      const response = createResponse();
+      await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-command', cwd: '/repo', mode: 'command', command: 'printf ready', shell: 'bash', loginShell: true } }, response);
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toEqual({ sessionId: 'term-command', cols: 80, rows: 24, status: 'running', mode: 'command', purpose: { type: 'terminal' } });
+      if (process.platform === 'linux') {
+        expect(harness.processes[0].shell).toMatch(/\/env$/);
+        expect(harness.processes[0].args).toEqual(['-u', 'ARGV0', '/bin/bash', '-l', '-i', '-c', 'printf ready']);
+      } else {
+        expect(harness.processes[0].args).toEqual(['-l', '-i', '-c', 'printf ready']);
+      }
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('rejects invalid terminal mode and command combinations', async () => {
+    const harness = createHarness();
+    try {
+      for (const [body, error] of [
+        [{ cwd: '/repo', mode: 'script' }, 'Invalid terminal mode'],
+        [{ cwd: '/repo', mode: 'command' }, 'Terminal command is required'],
+        [{ cwd: '/repo', mode: 'command', command: '   ' }, 'Terminal command is required'],
+        [{ cwd: '/repo', mode: 'interactive', command: 'echo nope' }, 'Interactive terminal create does not accept a command'],
+        [{ cwd: '/repo', mode: 'command', command: 'x'.repeat(65_537) }, 'Terminal command exceeds the input limit'],
+      ]) {
+        const response = createResponse();
+        await harness.routes.post.get('/api/terminal/create')({ body }, response);
+        expect(response.statusCode).toBe(400);
+        expect(response.body).toEqual({ error });
+      }
+      expect(harness.processes).toHaveLength(0);
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('rejects same-id running creates when mode or command do not match', async () => {
+    const harness = createHarness();
+    try {
+      const create = harness.routes.post.get('/api/terminal/create');
+      await create({ body: { sessionId: 'term-shared', cwd: '/repo' } }, createResponse());
+
+      const modeMismatch = createResponse();
+      await create({ body: { sessionId: 'term-shared', cwd: '/repo', mode: 'command', command: 'printf ready' } }, modeMismatch);
+      expect(modeMismatch.statusCode).toBe(400);
+      expect(modeMismatch.body).toEqual({ error: 'Terminal session is already running with a different mode' });
+
+      await create({ body: { sessionId: 'term-command', cwd: '/repo', mode: 'command', command: 'printf ready' } }, createResponse());
+
+      const commandMismatch = createResponse();
+      await create({ body: { sessionId: 'term-command', cwd: '/repo', mode: 'command', command: 'printf other' } }, commandMismatch);
+      expect(commandMismatch.statusCode).toBe(400);
+      expect(commandMismatch.body).toEqual({ error: 'Terminal session is already running with a different command' });
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('rejects pending creates when command mode does not match the in-flight request', async () => {
+    const spawnDeferred = deferred();
+    const harness = createHarness({ spawnDeferred });
+    try {
+      const create = harness.routes.post.get('/api/terminal/create');
+      const first = createResponse();
+      const conflictingMode = createResponse();
+      const conflictingCommand = createResponse();
+
+      const firstPromise = create({ body: { sessionId: 'term-pending', cwd: '/repo', mode: 'command', command: 'printf ready' } }, first);
+      await Promise.resolve();
+      const secondPromise = create({ body: { sessionId: 'term-pending', cwd: '/repo' } }, conflictingMode);
+      const thirdPromise = create({ body: { sessionId: 'term-pending', cwd: '/repo', mode: 'command', command: 'printf other' } }, conflictingCommand);
+      spawnDeferred.resolve();
+      await Promise.all([firstPromise, secondPromise, thirdPromise]);
+
+      expect(first.statusCode).toBe(200);
+      expect(conflictingMode.statusCode).toBe(400);
+      expect(conflictingMode.body).toEqual({ error: 'Terminal session is already being created with a different mode' });
+      expect(conflictingCommand.statusCode).toBe(400);
+      expect(conflictingCommand.body).toEqual({ error: 'Terminal session is already being created with a different command' });
+      expect(harness.processes).toHaveLength(1);
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('validates purpose payloads and round-trips purpose through create, list, and snapshot without listing command text', async () => {
+    const app = createHttpTestApp();
+    const server = http.createServer(app);
+    const runtime = createRuntime(server, {
+      app,
+      loadPtyProvider: async () => ({
+        backend: 'fake-pty',
+        spawn: async () => ({
+          pid: 42,
+          write() {},
+          resize() {},
+          kill() {},
+          onData() { return { dispose() {} }; },
+          onExit() { return { dispose() {} }; },
+        }),
+      }),
+      terminalTerminationGraceMs: 10,
+      fs: { promises: { stat: async () => ({ isDirectory: () => true }) } },
+      searchPathFor: () => '/bin/sh',
+      isExecutable: () => true,
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+    const base = `http://127.0.0.1:${port}`;
+    const socketUrl = `ws://127.0.0.1:${port}/api/terminal/ws`;
+    const sockets = [];
+
+    try {
+      for (const [body, error] of [
+        [{ cwd: '/repo', purpose: 'terminal' }, 'Invalid terminal purpose'],
+        [{ cwd: '/repo', purpose: { type: 'project-action' } }, 'Terminal project action id is required'],
+        [{ cwd: '/repo', purpose: { type: 'project-action', actionId: 'build' } }, 'Terminal execution id is required'],
+        [{ cwd: '/repo', purpose: { type: 'project-action', actionId: ' ', executionId: 'exec-1' } }, 'Terminal project action id is required'],
+        [{ cwd: '/repo', purpose: { type: 'project-action', actionId: 'build', executionId: ' ' } }, 'Terminal execution id is required'],
+      ]) {
+        const response = await fetch(`${base}/api/terminal/create`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        expect(response.status).toBe(400);
+        expect(await response.json()).toEqual({ error });
+      }
+
+      const created = await fetch(`${base}/api/terminal/create`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: 'action-tab',
+          cwd: '/repo',
+          mode: 'command',
+          command: 'printf ready',
+          purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-1' },
+        }),
+      });
+      expect(created.status).toBe(200);
+      expect(await created.json()).toEqual({
+        sessionId: 'action-tab',
+        cols: 80,
+        rows: 24,
+        status: 'running',
+        mode: 'command',
+        purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-1' },
+      });
+
+      const listed = await fetch(`${base}/api/terminal/sessions?cwd=%2Frepo`);
+      expect(listed.status).toBe(200);
+      expect(await listed.json()).toEqual({
+        sessions: [{
+          sessionId: 'action-tab',
+          cwd: '/repo',
+          status: 'running',
+          createdAt: expect.any(Number),
+          mode: 'command',
+          purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-1' },
+        }],
+      });
+
+      const socket = await openTerminalSocket(socketUrl);
+      sockets.push(socket.socket);
+      socket.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'action-tab' }));
+      expect(await socket.next('snapshot', 'action-tab')).toMatchObject({
+        s: 'action-tab',
+        status: 'running',
+        mode: 'command',
+        purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-1' },
+      });
+    } finally {
+      for (const socket of sockets) socket.terminate();
+      await runtime.shutdown();
+      server.closeAllConnections?.();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }, 15_000);
+
+  it('deduplicates running project actions by resolved cwd and action id across session ids and clients', async () => {
+    const harness = createHarness();
+    try {
+      const create = harness.routes.post.get('/api/terminal/create');
+      const first = createResponse();
+      await create({
+        body: {
+          sessionId: 'action-a',
+          cwd: '/repo/./nested/..',
+          mode: 'command',
+          command: 'npm run build',
+          purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-1' },
+        },
+      }, first);
+      expect(first.statusCode).toBe(200);
+
+      const adopted = createResponse();
+      await create({
+        body: {
+          sessionId: 'action-b',
+          cwd: '/repo',
+          mode: 'command',
+          command: 'npm run build --watch',
+          purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-2' },
+        },
+      }, adopted);
+
+      expect(adopted.statusCode).toBe(200);
+      expect(adopted.body).toEqual({
+        sessionId: 'action-a',
+        cols: 80,
+        rows: 24,
+        status: 'running',
+        mode: 'command',
+        purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-1' },
+      });
+      expect(harness.processes).toHaveLength(1);
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('rejects purpose mismatches when the same session id is reused for a different action', async () => {
+    const harness = createHarness();
+    try {
+      const create = harness.routes.post.get('/api/terminal/create');
+      await create({
+        body: {
+          sessionId: 'action-tab',
+          cwd: '/repo',
+          mode: 'command',
+          command: 'npm run build',
+          purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-1' },
+        },
+      }, createResponse());
+
+      const mismatch = createResponse();
+      await create({
+        body: {
+          sessionId: 'action-tab',
+          cwd: '/repo',
+          mode: 'command',
+          command: 'npm run test',
+          purpose: { type: 'project-action', actionId: 'test', executionId: 'exec-2' },
+        },
+      }, mismatch);
+
+      expect(mismatch.statusCode).toBe(400);
+      expect(mismatch.body).toEqual({ error: 'Terminal session is already running with a different purpose' });
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('keeps an immediately exited command session attachable once listeners are registered', async () => {
+    const app = createHttpTestApp();
+    const server = http.createServer(app);
+    const runtime = createRuntime(server, {
+      app,
+      loadPtyProvider: async () => ({
+        backend: 'fake-pty',
+        spawn: async () => {
+          const dataHandlers = new Set();
+          const exitHandlers = new Set();
+          return {
+            pid: 404,
+            write() {},
+            resize() {},
+            kill() {},
+            onData(handler) { dataHandlers.add(handler); return { dispose: () => dataHandlers.delete(handler) }; },
+            onExit(handler) {
+              exitHandlers.add(handler);
+              queueMicrotask(() => {
+                for (const registered of exitHandlers) registered({ exitCode: 0, signal: 0 });
+              });
+              return { dispose: () => exitHandlers.delete(handler) };
+            },
+          };
+        },
+      }),
+      terminalTerminationGraceMs: 10,
+      fs: { promises: { stat: async () => ({ isDirectory: () => true }) } },
+      searchPathFor: () => '/bin/sh',
+      isExecutable: () => true,
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+    const base = `http://127.0.0.1:${port}`;
+    const socketUrl = `ws://127.0.0.1:${port}/api/terminal/ws`;
+    const sockets = [];
+
+    try {
+      const created = await fetch(`${base}/api/terminal/create`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: 'fast-exit',
+          cwd: '/repo',
+          mode: 'command',
+          command: 'true',
+          purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-fast' },
+        }),
+      });
+      expect(created.status).toBe(200);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const socket = await openTerminalSocket(socketUrl);
+      sockets.push(socket.socket);
+      socket.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'fast-exit' }));
+      expect(await socket.next('snapshot', 'fast-exit')).toMatchObject({
+        s: 'fast-exit',
+        status: 'exited',
+        exitCode: 0,
+        purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-fast' },
+      });
+    } finally {
+      for (const socket of sockets) socket.terminate();
+      await runtime.shutdown();
+      server.closeAllConnections?.();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }, 15_000);
+
+  it('tombstones a pending create when delete arrives first and kills the eventual pty', async () => {
+    const spawnDeferred = deferred();
+    const harness = createHarness({ spawnDeferred });
+    try {
+      const create = harness.routes.post.get('/api/terminal/create');
+      const close = harness.routes.delete.get('/api/terminal/:sessionId');
+      const created = createResponse();
+      const closed = createResponse();
+
+      const createPromise = create({
+        body: {
+          sessionId: 'pending-action',
+          cwd: '/repo',
+          mode: 'command',
+          command: 'npm run build',
+          purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-pending' },
+        },
+      }, created);
+      await Promise.resolve();
+
+      const closePromise = close({ params: { sessionId: 'pending-action' } }, closed);
+      spawnDeferred.resolve();
+      await Promise.all([createPromise, closePromise]);
+
+      expect(closed.statusCode).toBe(200);
+      expect(closed.body).toEqual({ success: true });
+      expect(created.statusCode).toBe(400);
+      expect(created.body).toEqual({ error: 'Terminal session was closed during creation' });
+
+      const listed = createResponse();
+      harness.routes.get.get('/api/terminal/sessions')({ query: {} }, listed);
+      expect(listed.body).toEqual({ sessions: [] });
+      expect(harness.processes).toHaveLength(1);
+      expect(harness.processes[0].killed).toBe(true);
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('rejects restart for command-mode sessions', async () => {
+    const harness = createHarness();
+    try {
+      await harness.routes.post.get('/api/terminal/create')({
+        body: {
+          sessionId: 'action-tab',
+          cwd: '/repo',
+          mode: 'command',
+          command: 'npm run build',
+          purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-1' },
+        },
+      }, createResponse());
+
+      const restarted = createResponse();
+      await harness.routes.post.get('/api/terminal/:sessionId/restart')({ params: { sessionId: 'action-tab' }, body: {} }, restarted);
+
+      expect(restarted.statusCode).toBe(400);
+      expect(restarted.body).toEqual({ error: 'Command-mode terminal sessions cannot be restarted' });
+      expect(harness.processes).toHaveLength(1);
+      expect(harness.processes[0].killed).toBe(false);
+    } finally { await harness.runtime.shutdown(); }
+  });
 });

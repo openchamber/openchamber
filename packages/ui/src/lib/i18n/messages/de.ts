@@ -3,6 +3,7 @@ import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 
 export const dict = {
+  'sessions.sidebar.projectAction.active': 'Projektaktion aktiv',
   ...settingsDict,
   ...linearIssuePickerI18n.de,
   ...linearPanelI18n.de,
@@ -608,6 +609,8 @@ export const dict = {
   'sessions.sidebar.sessionDialogs.worktree.attachedArchived': 'Angefügter Worktree archiviert.',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': 'Angefügte Worktrees archiviert.',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': 'Archivierte Worktrees und entfernte Remote-Branches.',
+  'sessions.missingDirectory.movedToProject': 'Der Ordner dieser Sitzung existiert nicht mehr. Die Sitzung wurde nach {project} verschoben.',
+  'sessions.sidebar.group.worktreeMissing': 'Worktree-Ordner fehlt',
   'sessions.sidebar.sessionDialogs.worktree.label': 'Worktree',
   'sessions.sidebar.sessionDialogs.worktree.pathUnavailable': 'Worktree-Pfad nicht verfügbar.',
   'sessions.sidebar.sessionDialogs.worktree.uncommittedWarning': 'Nicht committete Änderungen werden verworfen.',

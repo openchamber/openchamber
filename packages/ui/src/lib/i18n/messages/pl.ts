@@ -4,6 +4,7 @@ import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'sessions.sidebar.projectAction.active': 'Trwa wykonywanie akcji projektu',
   ...settingsDict,
   ...linearIssuePickerI18n.pl,
   ...linearPanelI18n.pl,
@@ -705,6 +706,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.sessionDialogs.worktree.attachedArchived': 'Dołączone drzewo pracy zarchiwizowane.',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': 'Dołączone drzewa pracy zarchiwizowane.',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': 'Zarchiwizowane drzewa pracy i usunięte zdalne gałęzie.',
+  'sessions.missingDirectory.movedToProject': 'Folder tej sesji już nie istnieje. Sesja została przeniesiona do {project}.',
+  'sessions.sidebar.group.worktreeMissing': 'Brak folderu worktree',
   'sessions.sidebar.sessionDialogs.worktree.label': 'Drzewo pracy',
   'sessions.sidebar.sessionDialogs.worktree.pathUnavailable': 'Ścieżka drzewa pracy niedostępna.',
   'sessions.sidebar.sessionDialogs.worktree.uncommittedWarning': 'Niezatwierdzone zmiany zostaną odrzucone.',

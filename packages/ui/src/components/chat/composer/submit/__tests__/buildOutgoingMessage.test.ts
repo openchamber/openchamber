@@ -334,8 +334,8 @@ describe('capturing composer context for the queue', () => {
         expect(context.map((part) => part.kind)).toEqual(['context', 'synthetic', 'context', 'context', 'context', 'instruction']);
         expect(context[0]?.kind).toBe('context');
         expect(context[0]?.text).toContain('Comment on `src/app.ts` lines 3-5 (modified):');
-        expect(context[0]?.kind === 'context' ? context[0].metadata : null)
-            .toEqual({ [CONTEXT_METADATA_KEY]: contextPayloadFromDraft(commentDraft()) });
+        expect(context[0]?.kind === 'context' ? context[0].metadata[CONTEXT_METADATA_KEY] : null)
+            .toEqual(contextPayloadFromDraft(commentDraft()));
         expect(context[3]).toEqual({
             kind: 'context',
             text: 'pr-diff',

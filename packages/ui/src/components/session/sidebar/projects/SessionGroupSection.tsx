@@ -1,3 +1,4 @@
+import { DirectoryActionIndicator } from '../sessions/DirectoryActionIndicator';
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useShallow } from 'zustand/react/shallow';
@@ -900,6 +901,18 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   // Reserve room for the hover-revealed header actions (new draft + delete
   // worktree) so they never overlap the label / PR badge.
   const hasWorktreeDeleteAction = Boolean(!group.isMain && group.worktree);
+  // git still registers this worktree but its directory is gone. The group
+  // stays so its sessions remain reachable (opening one relocates it); the
+  // icon tells the user why the folder is not there.
+  const worktreeMissingIndicator = group.worktree?.worktreeStatus === 'missing' ? (
+    <span
+      className="inline-flex flex-shrink-0 items-center text-status-warning"
+      title={t('sessions.sidebar.group.worktreeMissing')}
+      aria-label={t('sessions.sidebar.group.worktreeMissing')}
+    >
+      <Icon name="alert" className="h-3 w-3" />
+    </span>
+  ) : null;
   const groupHeaderRightPadding = alwaysShowActions
     ? (hasWorktreeDeleteAction ? 'pr-14' : 'pr-7')
     : (hasWorktreeDeleteAction
@@ -1146,6 +1159,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                     </span>
                   </span>
                   <span className="min-w-0 flex-1 truncate">{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
+                  {worktreeMissingIndicator}
                   {groupActivityIndicator}
                 </span>
               ) : (!group.isMain || group.worktree) ? (
@@ -1167,6 +1181,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                   <span className="min-w-0 truncate typography-ui-label font-semibold text-muted-foreground">
                     {renderHighlightedText(group.label, normalizedSessionSearchQuery)}
                   </span>
+                  {worktreeMissingIndicator}
                   {groupActivityIndicator}
                   {groupPrSummary ? (
                     <span
@@ -1197,6 +1212,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
               </span>
             ) : null}
           </div>
+          {!group.isArchivedBucket && group.directory ? <DirectoryActionIndicator directory={group.directory} className="self-center" /> : null}
         </div>
         {group.isArchivedBucket && allGroupSessions.length > 0 ? (
           <div className={cn('absolute right-0.5 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>

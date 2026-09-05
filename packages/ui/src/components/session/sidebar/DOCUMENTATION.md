@@ -67,6 +67,7 @@ make every row observe unrelated streaming updates.
 - Folder membership may contain both a parent session and its descendants. Rendering treats only the highest assigned ancestors as folder roots because their normal session trees already include assigned descendants; persisted membership remains unchanged for cleanup and move semantics.
 - Sidebar selection holds the clicked row's viewport position across navigation-driven sidebar updates. Wheel or touch input cancels the hold immediately, so programmatic compensation never fights intentional scrolling.
 - Global session subscriptions are structural: create/delete, title, share, archive, directory, parent, and slug changes invalidate the tree. Recency-only `time.updated` changes do not trigger a rebuild. The separate lifecycle rank invalidates ordering only on `settled ↔ active` transitions, with root sessions ranked among roots and child sessions only among siblings of the same parent.
+- A worktree git still registers but whose directory is gone (`prunable` in `git worktree list`) stays in the topology with `worktreeStatus: 'missing'` and a warning icon on its group header. Dropping it would hide every session that lived there, and a hidden session cannot be opened, so it could never be relocated. Opening one of those sessions relocates it to the project root (`recoverMissingSessionDirectory`), and the empty group is removed through the ordinary worktree delete action, which `git worktree remove --force` accepts for a missing directory. Topology refresh stays event-driven: besides `session-created`, the sidebar rediscovers on `subscribeWorktreeTopologyChanged`, which the relocation raises after the server confirmed a directory missing. No idle polling is added.
 - Opening the root-session `Move to worktree` submenu force-refreshes the owning project's worktree topology so externally created worktrees appear without a full reload. While that refresh runs, the menu keeps the last known primary/linked topology visible; if the refresh fails, the stale topology remains and the load failure state stays explicit. Failure cleanup never removes or manages an existing destination worktree.
 - CLI/server-created sessions use the low-frequency OpenChamber control event stream to refresh only the created session directory. The same event retriggers bounded worktree discovery so a newly created external worktree gains ownership without a view reload; it does not re-enable broad session or streaming subscriptions.
 - Recent membership includes active root sessions immediately even when their last committed `time.updated` falls outside the 48-hour window. Children and archived sessions remain excluded, and inactive roots remain timestamp-based. The active-ID subscription is disabled while the sidebar is hidden and ignores retry/status detail changes, avoiding streaming-frequency rerenders.
@@ -75,3 +76,25 @@ make every row observe unrelated streaming updates.
 - Directory permission failures remain visible even when stale sessions are retained. Flat groups inspect every represented root/worktree directory; local Desktop may open the native picker for the exact failed directory, while other runtimes keep the ordinary Retry action.
 - Pins and folder assignments are not pruned from the first startup snapshot or from optimistic mutations. Confirmed local deletion and routed external deletion clean immediately; a later authoritative omission after an established baseline covers missed external delete events.
 - Pending-permission/question row badges fade with the same hover/menu-open rule as the date label, except on non-VS Code always-visible-actions rows, which reserve permanent padding and keep the badges shown. VS Code hover-reveals its actions over the row's right edge even under `alwaysShowActions`, so its badges keep fading (`selectRowBadgeVisibilityClass` in `sessions/sessionNodeItemUtils.ts`).
+
+
+## Project action indicators
+
+`SidebarTerminalActivity` shares terminal discovery with the action header and terminal
+panel while the sidebar is visible. One server listing covers all directories, including
+collapsed projects. The sidebar keeps that loop running only while a project action is
+known to be running anywhere; with nothing running it lists once on mount, to pick up
+runs another client started, and then stays quiet so an idle sidebar costs no polling. It preserves local mutations newer than the listing and keeps known
+state on failure. Terminal discovery is separate from OpenCode session bootstrap.
+
+`DirectoryActionIndicator` reads only its directory's terminal metadata. Output chunks and
+unrelated directories do not rerender it. It displays a static `pulse` icon in `status.info`
+for live project actions, including auto-discovered commands. Persisted idle tabs and ordinary
+interactive terminals do not indicate activity. This indicates process activity, not server
+readiness.
+
+Grouped views show the icon on project-root and worktree headers. Flat project views show
+it on the project-root header and on sessions in linked worktrees. Recent shows it on every
+session with an active action in its own directory. Archived buckets do not show action
+indicators. Indicators stay inside the existing row/header action-padding boundary, so
+hover, keyboard focus, and always-visible action buttons move them left without hiding them.

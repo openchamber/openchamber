@@ -1,3 +1,5 @@
+import { opencodeClient } from '@/lib/opencode/client';
+import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { Session } from "@opencode-ai/sdk/v2/client"
 import { switchRuntimeEndpoint } from "@/lib/runtime-switch"
@@ -69,10 +71,14 @@ const session = (
   time: { created: updated - 1, updated },
 } as Session)
 
-beforeEach(() => {
+beforeEach(async () => {
   storage = new TestStorage()
   Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage })
   switchRuntimeEndpoint({ apiBaseUrl: "https://runtime-default.test", runtimeKey: "runtime-default" })
+  const originalHomeInfo = opencodeClient.getFilesystemHomeInfo
+  opencodeClient.getFilesystemHomeInfo = async () => ({ home: '/home/user' })
+  await ensureChatsRootDirectory()
+  opencodeClient.getFilesystemHomeInfo = originalHomeInfo
 })
 
 afterEach(() => {

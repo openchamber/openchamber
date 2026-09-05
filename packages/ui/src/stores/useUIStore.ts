@@ -9,6 +9,7 @@ import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOpt
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import type { LinearIssueListAssignee, LinearIssueListPriority, LinearIssueListStatus, TerminalShell } from '@/lib/api/types';
 import type { ProjectRef } from '@/lib/projectContextApi';
+import { directoryMayHaveActiveProjectAction, useTerminalStore } from '@/stores/useTerminalStore';
 import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { isWindowsArm64 } from '@/lib/platform';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -108,6 +109,7 @@ type ContextPanelTab = {
   id: string;
   mode: ContextPanelMode;
   targetPath: string | null;
+  targetDirectory: string | null;
   /** Saved project plan this tab shows, for `plan` tabs opened from the notes
       panel. Project plans are addressed by id because their markdown is
       server-owned and has no client-visible path. */
@@ -128,6 +130,7 @@ type ContextPanelTab = {
 type ContextPanelTabDescriptor = {
   mode: ContextPanelMode;
   targetPath?: string | null;
+  targetDirectory?: string | null;
   projectPlanId?: string | null;
   projectPlanRef?: ProjectRef | null;
   dedupeKey?: string | null;
@@ -252,6 +255,15 @@ const normalizeContextTargetPath = (value: string | null | undefined): string | 
   return trimmed.replace(/\\/g, '/');
 };
 
+const normalizeContextTargetDirectory = (value: string | null | undefined): string | null => {
+  const normalizedPath = normalizeContextTargetPath(value);
+  if (!normalizedPath) {
+    return null;
+  }
+
+  return normalizeContextPanelDirectoryKey(normalizedPath) || null;
+};
+
 const normalizeContextTabLabel = (value: string | null | undefined): string | null => {
   if (typeof value !== 'string') {
     return null;
@@ -320,6 +332,9 @@ const buildContextPanelTabID = (mode: ContextPanelMode, dedupeKey: string): stri
 
 const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPanelTab => {
   const normalizedTargetPath = normalizeContextTargetPath(descriptor.targetPath);
+  const normalizedTargetDirectory = descriptor.mode === 'terminal'
+    ? normalizeContextTargetDirectory(descriptor.targetDirectory)
+    : null;
   const dedupeKey = normalizeContextPanelTabDedupeKey(
     descriptor.mode,
     normalizedTargetPath,
@@ -329,6 +344,7 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     id: buildContextPanelTabID(descriptor.mode, dedupeKey),
     mode: descriptor.mode,
     targetPath: normalizedTargetPath,
+    targetDirectory: normalizedTargetDirectory,
     projectPlanId: typeof descriptor.projectPlanId === 'string' && descriptor.projectPlanId.trim()
       ? descriptor.projectPlanId.trim()
       : null,
@@ -392,6 +408,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
     const candidate = entry as {
       mode?: unknown;
       targetPath?: unknown;
+      targetDirectory?: string | null;
       projectPlanId?: unknown;
       projectPlanRef?: unknown;
       dedupeKey?: unknown;
@@ -417,6 +434,9 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
     }
 
     const targetPath = normalizeContextTargetPath(typeof candidate.targetPath === 'string' ? candidate.targetPath : null);
+    const targetDirectory = candidate.mode === 'terminal'
+      ? normalizeContextTargetDirectory(candidate.targetDirectory)
+      : null;
     const projectPlanId = typeof candidate.projectPlanId === 'string' && candidate.projectPlanId.trim()
       ? candidate.projectPlanId.trim()
       : null;
@@ -445,6 +465,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       id,
       mode: candidate.mode,
       targetPath,
+      targetDirectory,
       projectPlanId,
       projectPlanRef,
       dedupeKey,
@@ -511,22 +532,23 @@ const upsertContextPanelTab = (
   const existingIndex = baseTabs.findIndex((tab) => tab.id === nextTab.id);
   const tabs = existingIndex === -1
     ? [...baseTabs, nextTab]
-     : baseTabs.map((tab, index) => (index === existingIndex
-       ? {
-           ...tab,
-           mode: nextTab.mode,
-           targetPath: nextTab.targetPath || tab.targetPath,
-           projectPlanId: nextTab.projectPlanId ?? tab.projectPlanId,
-           projectPlanRef: nextTab.projectPlanRef ?? tab.projectPlanRef,
-           dedupeKey: nextTab.dedupeKey,
-           label: nextTab.label,
-           sessionTitleFallback: nextTab.sessionTitleFallback || tab.sessionTitleFallback,
-           stagedDiff: nextTab.stagedDiff,
-           diffScope: nextTab.diffScope,
-           readOnly: nextTab.readOnly,
-           touchedAt: Date.now(),
-         }
-       : tab));
+    : baseTabs.map((tab, index) => (index === existingIndex
+      ? {
+          ...tab,
+          mode: nextTab.mode,
+          targetPath: nextTab.targetPath || tab.targetPath,
+          targetDirectory: nextTab.targetDirectory,
+          projectPlanId: nextTab.projectPlanId ?? tab.projectPlanId,
+          projectPlanRef: nextTab.projectPlanRef ?? tab.projectPlanRef,
+          dedupeKey: nextTab.dedupeKey,
+          label: nextTab.label,
+          sessionTitleFallback: nextTab.sessionTitleFallback || tab.sessionTitleFallback,
+          stagedDiff: nextTab.stagedDiff,
+          diffScope: nextTab.diffScope,
+          readOnly: nextTab.readOnly,
+          touchedAt: Date.now(),
+        }
+      : tab));
 
   // A background upsert (an agent working a page) keeps the panel exactly as
   // the user left it: closed stays closed, and whatever tab they were on
@@ -652,6 +674,7 @@ const sanitizeContextPanelByDirectory = (
       touchedAt?: unknown;
       mode?: unknown;
       targetPath?: unknown;
+      targetDirectory?: string | null;
       dedupeKey?: unknown;
       label?: unknown;
     };
@@ -663,10 +686,11 @@ const sanitizeContextPanelByDirectory = (
     // no owner and cannot be migrated into an openable saved-plan tab — that
     // combination is dropped by sanitize above. A generic filesystem plan tab
     // (no plan id) revives fine from the descriptor alone.
-    if (tabs.length === 0 && (candidate.mode === 'diff' || candidate.mode === 'file' || candidate.mode === 'context' || candidate.mode === 'plan' || candidate.mode === 'chat')) {
+    if (tabs.length === 0 && (candidate.mode === 'diff' || candidate.mode === 'file' || candidate.mode === 'context' || candidate.mode === 'plan' || candidate.mode === 'chat' || candidate.mode === 'terminal')) {
       tabs = [createContextPanelTab({
         mode: candidate.mode,
         targetPath: typeof candidate.targetPath === 'string' ? candidate.targetPath : null,
+        targetDirectory: candidate.targetDirectory,
         dedupeKey: typeof candidate.dedupeKey === 'string' ? candidate.dedupeKey : null,
         label: typeof candidate.label === 'string' ? candidate.label : null,
       })];
@@ -851,6 +875,7 @@ interface UIStore {
   /** Width of the walkthrough table of contents, in pixels. */
   walkthroughTocWidth: number;
   gitChangesViewMode: 'flat' | 'tree';
+  toolJsonViewMode: 'summary' | 'formatted' | 'raw';
   linearIssueListStatus: LinearIssueListStatus;
   linearIssueListAssignee: LinearIssueListAssignee;
   /**
@@ -918,6 +943,8 @@ interface UIStore {
   projectContextTab: string;
   inputSpellcheckEnabled: boolean;
   largeTextPasteBehavior: LargeTextPasteBehavior;
+  enterToSend: boolean;
+  enterToSendConfigured: boolean;
   wideChatLayoutEnabled: boolean;
   codeBlockLineWrap: boolean;
   showToolFileIcons: boolean;
@@ -1062,6 +1089,7 @@ interface UIStore {
   setDiffWrapLines: (wrap: boolean) => void;
   setWalkthroughTocWidth: (width: number) => void;
   setGitChangesViewMode: (mode: 'flat' | 'tree') => void;
+  setToolJsonViewMode: (mode: 'summary' | 'formatted' | 'raw') => void;
   setLinearIssueListStatus: (status: LinearIssueListStatus) => void;
   setLinearIssueListAssignee: (assignee: LinearIssueListAssignee) => void;
   setLinearIssueListTeamId: (teamId: string) => void;
@@ -1102,6 +1130,8 @@ interface UIStore {
   setProjectContextTab: (value: string) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
   setLargeTextPasteBehavior: (value: LargeTextPasteBehavior) => void;
+  setEnterToSend: (value: boolean) => void;
+  setEnterToSendConfigured: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
   setCodeBlockLineWrap: (value: boolean) => void;
   setShowToolFileIcons: (value: boolean) => void;
@@ -1227,6 +1257,7 @@ export const useUIStore = create<UIStore>()(
         diffWrapLines: false,
         walkthroughTocWidth: 224,
         gitChangesViewMode: 'flat',
+        toolJsonViewMode: 'summary',
         linearIssueListStatus: 'all',
         linearIssueListAssignee: 'any',
         linearIssueListTeamId: LINEAR_ISSUE_LIST_ALL_TEAMS,
@@ -1271,6 +1302,8 @@ export const useUIStore = create<UIStore>()(
         projectContextTab: 'notes',
         inputSpellcheckEnabled: false,
         largeTextPasteBehavior: DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR,
+        enterToSend: false,
+        enterToSendConfigured: false,
         wideChatLayoutEnabled: false,
         codeBlockLineWrap: true,
         showToolFileIcons: true,
@@ -1372,14 +1405,29 @@ export const useUIStore = create<UIStore>()(
           const panelState = state.contextPanelByDirectory[normalizedDirectory];
           const tabs = panelState?.tabs ?? [];
           const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? null;
+          const clearTerminalTarget = () => {
+            if (mode === 'terminal') {
+              const terminalTab = tabs.find((tab) => tab.mode === 'terminal') ?? null;
+              const targetDirectory = terminalTab?.targetDirectory ?? null;
+              if (targetDirectory) {
+                const targetState = useTerminalStore.getState().getDirectoryState(targetDirectory);
+                if (directoryMayHaveActiveProjectAction(targetState)) {
+                  return;
+                }
+              }
+              state.openContextPanelTab(normalizedDirectory, { mode: 'terminal', targetDirectory: null }, { reveal: false });
+            }
+          };
 
           if (panelState?.isOpen && activeTab?.mode === mode) {
+            clearTerminalTarget();
             state.closeContextPanel(normalizedDirectory);
             return;
           }
 
           const tabsOfMode = tabs.filter((tab) => tab.mode === mode);
           if (tabsOfMode.length > 0) {
+            clearTerminalTarget();
             // `>=` so equal timestamps (same-millisecond opens) resolve to the
             // later tab in insertion order.
             const mostRecent = tabsOfMode.reduce((best, tab) => (tab.touchedAt >= best.touchedAt ? tab : best));
@@ -1403,12 +1451,21 @@ export const useUIStore = create<UIStore>()(
             return;
           }
 
+          const nextTab = tab.mode === 'terminal'
+            ? {
+                ...tab,
+                targetDirectory: normalizeContextTargetDirectory(tab.targetDirectory) === normalizedDirectory
+                  ? null
+                  : normalizeContextTargetDirectory(tab.targetDirectory),
+              }
+            : tab;
+
           set((state) => {
             const prev = state.contextPanelByDirectory[normalizedDirectory];
             const current = touchContextPanelState(prev);
             const byDirectory = {
               ...state.contextPanelByDirectory,
-              [normalizedDirectory]: upsertContextPanelTab(current, tab, options),
+              [normalizedDirectory]: upsertContextPanelTab(current, nextTab, options),
             };
 
             return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
@@ -2149,6 +2206,10 @@ export const useUIStore = create<UIStore>()(
           set({ gitChangesViewMode: mode });
         },
 
+        setToolJsonViewMode: (mode) => {
+          set({ toolJsonViewMode: mode });
+        },
+
         setLinearIssueListStatus: (status) => {
           set({ linearIssueListStatus: sanitizeLinearIssueListStatus(status) });
         },
@@ -2545,6 +2606,12 @@ export const useUIStore = create<UIStore>()(
         setLargeTextPasteBehavior: (value) => {
           set({ largeTextPasteBehavior: normalizeLargeTextPasteBehavior(value) });
         },
+        setEnterToSend: (value) => {
+          set({ enterToSend: value });
+        },
+        setEnterToSendConfigured: (value) => {
+          set({ enterToSendConfigured: value });
+        },
         setWideChatLayoutEnabled: (value) => {
           set({ wideChatLayoutEnabled: value });
         },
@@ -2864,6 +2931,12 @@ export const useUIStore = create<UIStore>()(
           state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
           state.largeTextPasteBehavior = normalizeLargeTextPasteBehavior(state.largeTextPasteBehavior);
 
+          if (state.toolJsonViewMode !== 'summary'
+            && state.toolJsonViewMode !== 'formatted'
+            && state.toolJsonViewMode !== 'raw') {
+            state.toolJsonViewMode = 'summary';
+          }
+
           if (typeof state.autoSaveEnabled !== 'boolean') {
             state.autoSaveEnabled = true;
           }
@@ -2938,6 +3011,7 @@ export const useUIStore = create<UIStore>()(
           diffWrapLines: state.diffWrapLines,
           walkthroughTocWidth: state.walkthroughTocWidth,
           gitChangesViewMode: state.gitChangesViewMode,
+          toolJsonViewMode: state.toolJsonViewMode,
           linearIssueListStatus: state.linearIssueListStatus,
           linearIssueListAssignee: state.linearIssueListAssignee,
           linearIssueListTeamIdByRuntime: state.linearIssueListTeamIdByRuntime,
@@ -2965,6 +3039,8 @@ export const useUIStore = create<UIStore>()(
           projectContextSidebarWidth: state.projectContextSidebarWidth,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
           largeTextPasteBehavior: state.largeTextPasteBehavior,
+          enterToSend: state.enterToSend,
+          enterToSendConfigured: state.enterToSendConfigured,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
           codeBlockLineWrap: state.codeBlockLineWrap,
           showToolFileIcons: state.showToolFileIcons,

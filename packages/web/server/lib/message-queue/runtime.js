@@ -220,6 +220,10 @@ export function createMessageQueueRuntime({
   const failures = new Map(); // sessionId → { itemId, failures, nextAttemptAt }
   const abortedAt = new Map(); // sessionId → timestamp
   const holds = new Map(); // sessionId → expiresAt
+  // sessionId → directory, kept after the queue empties: the UI keys its
+  // projection by directory, so the broadcast that removes the last item must
+  // still name it or the client cannot tell which queue just finished.
+  const directories = new Map();
 
   // --- persistence ---------------------------------------------------------
 
@@ -302,7 +306,7 @@ export function createMessageQueueRuntime({
     const queue = queues.get(sessionId);
     return {
       sessionId,
-      directory: queue?.directory ?? '',
+      directory: queue?.directory ?? directories.get(sessionId) ?? '',
       items: (queue?.items ?? []).map(toPublicItem),
       sendingId: sending.get(sessionId) ?? null,
     };
@@ -329,6 +333,7 @@ export function createMessageQueueRuntime({
   };
 
   const setQueueItems = (sessionId, directory, items) => {
+    directories.set(sessionId, directory);
     if (items.length === 0) {
       queues.delete(sessionId);
       return;
@@ -385,8 +390,36 @@ export function createMessageQueueRuntime({
     const name = head.slice(1);
     if (!name) return null;
     const commands = asList(await openCodeFetch('/command', { directory })) ?? [];
-    if (!commands.some((command) => asRecord(command)?.name === name)) return null;
-    return { name, arguments: tail.join(' ') };
+    const match = commands.map(asRecord).find((command) => command?.name === name);
+    if (!match) return null;
+    return {
+      name,
+      arguments: tail.join(' '),
+      isSkill: match.source === 'skill',
+      template: asNonEmptyString(match.template),
+    };
+  };
+
+  /**
+   * The prompt a slash command stands for, expanded the way OpenCode expands
+   * it: `$ARGUMENTS` takes the whole argument string, `$1..$N` take quoted or
+   * bare words with the last position absorbing the rest, and a template with
+   * no placeholder gets the arguments appended. Twin of the UI's
+   * `expandSlashCommandGoalObjective` in `packages/ui/src/sync/session-ui-store.ts`.
+   */
+  const expandCommandTemplate = (template, argumentsText) => {
+    if (template.includes('$ARGUMENTS')) return template.replaceAll('$ARGUMENTS', argumentsText);
+    const positions = [...template.matchAll(/\$(\d+)/g)].map((match) => Number(match[1]));
+    if (positions.length > 0) {
+      const parsed = [...argumentsText.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)]
+        .map((match) => match[1] ?? match[2] ?? match[3] ?? '');
+      const last = Math.max(...positions);
+      return template.replace(/\$(\d+)/g, (_match, value) => {
+        const position = Number(value);
+        return position === last ? parsed.slice(position - 1).join(' ') : (parsed[position - 1] ?? '');
+      });
+    }
+    return argumentsText ? `${template}\n\n${argumentsText}` : template;
   };
 
   const toFilePart = (attachment) => ({
@@ -412,15 +445,30 @@ export function createMessageQueueRuntime({
     const { providerID, modelID, agent, variant } = item.sendConfig;
     const fileParts = item.attachments.map(toFilePart);
     const contextParts = item.context.flatMap(toContextParts);
+    // OpenCode's command route takes file parts only, so a command queued
+    // with captured context cannot go through it. Same rule as the composer:
+    // without context the command route keeps its semantics; with context the
+    // prompt route carries the expanded template (or the skill invocation as an
+    // explicit instruction) together with the context.
     const command = await resolveSlashCommand(item.text, directory);
-    if (command) {
+    if (command && contextParts.length === 0) {
       const body = { command: command.name, arguments: command.arguments, model: `${providerID}/${modelID}` };
       if (agent) body.agent = agent;
       if (variant) body.variant = variant;
-      const extraParts = [...fileParts, ...contextParts];
-      if (extraParts.length > 0) body.parts = extraParts;
+      if (fileParts.length > 0) body.parts = fileParts;
       await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/command`, { directory, method: 'POST', body });
       return;
+    }
+    let text = item.text;
+    const commandParts = [];
+    if (command?.isSkill) {
+      commandParts.push({
+        type: 'text',
+        text: `The user explicitly invoked the ${command.name} skill. Use the corresponding skill tool to handle this request.`,
+        synthetic: true,
+      });
+    } else if (command?.template) {
+      text = expandCommandTemplate(command.template, command.arguments);
     }
 
     // Standing project context rides the prompt exactly as a UI send would
@@ -432,9 +480,10 @@ export function createMessageQueueRuntime({
     // Same order as a UI send: the user's text and files, the context queued
     // with them, then the standing context, then the mentioned agent.
     const parts = [];
-    if (item.text.trim()) parts.push({ type: 'text', text: item.text });
+    if (text.trim()) parts.push({ type: 'text', text });
     parts.push(...fileParts);
     parts.push(...contextParts);
+    parts.push(...commandParts);
     if (knowledge.text) parts.push({ type: 'text', text: knowledge.text, synthetic: true });
     if (item.agentMention) parts.push({ type: 'agent', name: item.agentMention });
     const body = { model: { providerID, modelID } };
@@ -564,6 +613,7 @@ export function createMessageQueueRuntime({
     const existing = queues.get(sessionId);
     const items = [...(existing?.items ?? []), item].slice(-MAX_ITEMS_PER_SESSION);
     queues.set(sessionId, { directory, items });
+    directories.set(sessionId, directory);
     if (queues.size > MAX_SESSIONS) {
       const oldest = Array.from(queues.entries())
         .filter(([id]) => id !== sessionId && !sending.has(id))
@@ -573,6 +623,7 @@ export function createMessageQueueRuntime({
         queues.delete(staleId);
         clearTimer(staleId);
         broadcast(staleId);
+        directories.delete(staleId);
       }
     }
     const result = commit(sessionId);
@@ -675,6 +726,7 @@ export function createMessageQueueRuntime({
       clearTimer(deletedSessionId);
       failures.delete(deletedSessionId);
       commit(deletedSessionId);
+      directories.delete(deletedSessionId);
       return;
     }
 

@@ -9,7 +9,7 @@ import {
 } from './terminal-ws-protocol.js';
 import { sanitizeTerminalHistoryChunk } from './history.js';
 import { consumeTerminalThemeQueries, terminalThemeModeReport } from './theme-response.js';
-import { createTerminalShellResolver, getTerminalShellLoginArgs, normalizeTerminalShell } from './shells.js';
+import { buildTerminalShellLaunch, createTerminalShellResolver, normalizeTerminalShell } from './shells.js';
 import { stripAppImageArgv0Leak, resolveLinuxPtyLaunch } from '../inherited-env.js';
 
 const MAX_SESSIONS = 20;
@@ -17,7 +17,69 @@ const MAX_HISTORY_BYTES = 512 * 1024;
 const MAX_INPUT_CHARS = 65_536;
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const TERMINATION_GRACE_MS = 1000;
+const INTERACTIVE_TERMINAL_MODE = 'interactive';
+const COMMAND_TERMINAL_MODE = 'command';
+// Error code the create/restart routes attach when the requested cwd no longer
+// exists. Mirrored by `TERMINAL_CWD_MISSING_CODE` in packages/ui/src/lib/terminalApi.ts.
+const TERMINAL_CWD_MISSING_CODE = 'TERMINAL_CWD_MISSING';
+const TERMINAL_PURPOSE = Object.freeze({ type: 'terminal' });
+const MAX_PURPOSE_ID_CHARS = 128;
+const OBJECT_TAG = '[object Object]';
 const validateSize = (value, max) => Number.isInteger(value) && value >= 1 && value <= max;
+const isString = (value) => String(value) === value;
+const isObjectRecord = (value) => value != null && !Array.isArray(value) && Object.prototype.toString.call(value) === OBJECT_TAG;
+const normalizeCreateMode = ({ mode, command }) => {
+  const normalizedMode = mode == null ? INTERACTIVE_TERMINAL_MODE : mode;
+  if (normalizedMode !== INTERACTIVE_TERMINAL_MODE && normalizedMode !== COMMAND_TERMINAL_MODE) throw new Error('Invalid terminal mode');
+  if (normalizedMode === INTERACTIVE_TERMINAL_MODE) {
+    if (command != null) throw new Error('Interactive terminal create does not accept a command');
+    return { mode: INTERACTIVE_TERMINAL_MODE, command: null };
+  }
+  if (!isString(command) || !command.trim()) throw new Error('Terminal command is required');
+  const trimmedCommand = command.trim();
+  if (trimmedCommand.length > MAX_INPUT_CHARS) throw new Error('Terminal command exceeds the input limit');
+  return { mode: COMMAND_TERMINAL_MODE, command: trimmedCommand };
+};
+const normalizePurposeId = (value, errorMessage) => {
+  if (!isString(value) || !value.trim()) throw new Error(errorMessage);
+  const normalized = value.trim();
+  if (normalized.length > MAX_PURPOSE_ID_CHARS) throw new Error(errorMessage);
+  return normalized;
+};
+const normalizeTerminalPurpose = (value) => {
+  if (value == null) return TERMINAL_PURPOSE;
+  if (!isObjectRecord(value)) throw new Error('Invalid terminal purpose');
+  if (value.type === 'terminal') return TERMINAL_PURPOSE;
+  if (value.type !== 'project-action') throw new Error('Invalid terminal purpose');
+  return {
+    type: 'project-action',
+    actionId: normalizePurposeId(value.actionId, 'Terminal project action id is required'),
+    executionId: normalizePurposeId(value.executionId, 'Terminal execution id is required'),
+  };
+};
+const getSessionPurpose = (session) => session.purpose ?? TERMINAL_PURPOSE;
+const isPurposeActionMatch = (left, right) => {
+  if (left.type !== right.type) return false;
+  return left.type !== 'project-action' || left.actionId === right.actionId;
+};
+const findRunningActionSession = (sessions, resolvedCwd, purpose, path) => {
+  if (purpose.type !== 'project-action') return null;
+  for (const session of sessions.values()) {
+    if (session.status !== 'running') continue;
+    if (path.resolve(session.cwd) !== resolvedCwd) continue;
+    const sessionPurpose = getSessionPurpose(session);
+    if (sessionPurpose.type === 'project-action' && sessionPurpose.actionId === purpose.actionId) return session;
+  }
+  return null;
+};
+const findPendingActionCreate = (pendingSessionCreates, resolvedCwd, purpose) => {
+  if (purpose.type !== 'project-action') return null;
+  for (const pending of pendingSessionCreates.values()) {
+    if (pending.cancelled || pending.cwd !== resolvedCwd) continue;
+    if (pending.purpose?.type === 'project-action' && pending.purpose.actionId === purpose.actionId) return pending;
+  }
+  return null;
+};
 const trimHistory = (history) => {
   const bytes = Buffer.from(history);
   if (bytes.byteLength <= MAX_HISTORY_BYTES) return history;
@@ -54,13 +116,11 @@ export function createTerminalRuntime({
     return ptyProviderPromise;
   };
 
-  const spawnPty = async ({ cwd, cols, rows, themeMode, shell, loginShell }) => {
+  const spawnPty = async ({ cwd, cols, rows, themeMode, shell, loginShell, mode, command }) => {
     const provider = await getPtyProvider();
     const resolvedShell = await shellResolver.resolve(shell);
     let lastError = null;
     for (const executable of resolvedShell.executables) {
-      const args = loginShell ? getTerminalShellLoginArgs(executable) : [];
-      if (!args) throw new Error(`Terminal shell "${resolvedShell.id}" does not support login mode`);
       try {
         const env = { ...process.env, PATH: buildAugmentedPath(), TERM: 'xterm-256color', COLORTERM: 'truecolor', COLORFGBG: themeMode === 'light' ? '0;15' : '15;0' };
         // The daemon's IPC fd is closed inside the PTY. An explicit override is
@@ -70,9 +130,11 @@ export function createTerminalRuntime({
         // AppImage exports ARGV0; zsh would otherwise rewrite argv[0] for every command (#2588).
         // bun-pty also merges the native OS environ, so wrap with `env -u ARGV0` on Linux.
         stripAppImageArgv0Leak(env);
-        const launch = resolveLinuxPtyLaunch(executable, args);
-        const options = { name: 'xterm-256color', cwd, cols, rows, env, ...(process.platform === 'win32' ? { useConpty: true } : {}) };
-        return { process: provider.spawn(launch.executable, launch.args, options), backend: provider.backend, shell: resolvedShell.id, loginShell };
+        const shellLaunch = buildTerminalShellLaunch(executable, { mode, command, loginShell });
+        const launch = resolveLinuxPtyLaunch(shellLaunch.executable, shellLaunch.args);
+        const options = { name: 'xterm-256color', cwd, cols, rows, env };
+        if (process.platform === 'win32') options.useConpty = true;
+        return { process: await provider.spawn(launch.executable, launch.args, options), backend: provider.backend, shell: resolvedShell.id, loginShell };
       } catch (error) { lastError = error; }
     }
     throw lastError ?? new Error('No executable shell found');
@@ -123,6 +185,7 @@ export function createTerminalRuntime({
   const snapshot = (session) => ({
     t: 'snapshot', v: 3, s: session.id, q: session.sequence, history: session.history,
     status: session.status, exitCode: session.exitCode, signal: session.signal,
+    mode: session.mode ?? INTERACTIVE_TERMINAL_MODE, purpose: getSessionPurpose(session),
     runtime, ptyBackend: session.backend,
   });
 
@@ -175,11 +238,18 @@ export function createTerminalRuntime({
     ptyProcess.onExit(({ exitCode, signal }) => { session.eventQueue.push({ type: 'exit', process: ptyProcess, exitCode, signal }); drainEvents(session); });
   };
 
+  // A working directory that no longer exists (a deleted worktree) is the one
+  // rejection the client can recover from by moving the session to its
+  // project, so the response names it. Every other rejection stays generic.
+  const invalidWorkingDirectory = (code) => Object.assign(new Error('Invalid working directory'), code ? { code } : {});
   const validateCwd = async (cwd) => {
     if (typeof cwd !== 'string' || !cwd.trim()) throw new Error('cwd is required');
-    const stats = await fs.promises.stat(cwd).catch(() => null);
-    if (!stats?.isDirectory()) throw new Error('Invalid working directory');
+    let stats;
+    try { stats = await fs.promises.stat(cwd); }
+    catch (error) { throw invalidWorkingDirectory(error?.code === 'ENOENT' || error?.code === 'ENOTDIR' ? TERMINAL_CWD_MISSING_CODE : undefined); }
+    if (!stats?.isDirectory()) throw invalidWorkingDirectory();
   };
+  const errorBody = (error, fallback) => ({ error: error?.message || fallback, ...(typeof error?.code === 'string' ? { code: error.code } : {}) });
 
   const applyAppearance = (session, { themeMode, terminalBackground, terminalForeground }) => {
     const previous = [session.themeMode, session.terminalBackground, session.terminalForeground];
@@ -192,48 +262,87 @@ export function createTerminalRuntime({
     }
   };
 
-  const startSession = async (session, { cwd, cols, rows, themeMode = 'dark', terminalBackground, terminalForeground, shell, loginShell }, clear = true) => {
+  const startSession = async (session, { cwd, cols, rows, themeMode = 'dark', terminalBackground, terminalForeground, shell, loginShell, mode = INTERACTIVE_TERMINAL_MODE, command = null, purpose = TERMINAL_PURPOSE }, clear = true) => {
     await validateCwd(cwd);
-    const spawned = await spawnPty({ cwd, cols, rows, themeMode, shell, loginShell });
+    const spawned = await spawnPty({ cwd, cols, rows, themeMode, shell, loginShell, mode, command });
     if (clear) { session.history = ''; session.pendingHistoryControlSequence = ''; session.pendingThemeControlSequence = ''; session.themeModeEnabled = false; }
     session.cwd = cwd; session.cols = cols; session.rows = rows; session.process = spawned.process;
     session.backend = spawned.backend; session.shell = spawned.shell; session.loginShell = spawned.loginShell; session.status = 'running'; session.exitCode = null; session.signal = null;
+    session.mode = mode; session.command = mode === COMMAND_TERMINAL_MODE ? command : null;
+    session.purpose = purpose;
     session.themeMode = themeMode === 'light' ? 'light' : 'dark'; session.terminalBackground = terminalBackground; session.terminalForeground = terminalForeground;
     session.lastActivity = Date.now(); session.eventQueue.length = 0;
     wire(session, spawned.process);
+    return spawned.process;
   };
 
-  const createSession = async ({ sessionId, cwd, cols = 80, rows = 24, themeMode, terminalBackground, terminalForeground, shell = 'auto', loginShell = false }) => {
+  const createSession = async ({ sessionId, cwd, cols = 80, rows = 24, themeMode, terminalBackground, terminalForeground, shell = 'auto', loginShell = false, mode, command, purpose }) => {
     if (!validateSize(cols, 1000) || !validateSize(rows, 500)) throw new Error('Invalid terminal dimensions');
     if (typeof loginShell !== 'boolean') throw new Error('Invalid terminal login mode');
     const normalizedShell = normalizeTerminalShell(shell);
     if (!normalizedShell) throw new Error('Invalid terminal shell');
+    const launchMode = normalizeCreateMode({ mode, command });
+    const normalizedPurpose = normalizeTerminalPurpose(purpose);
     const id = typeof sessionId === 'string' && sessionId.trim() ? sessionId.trim() : randomUUID();
     if (id.length > 128) throw new Error('Invalid terminal session id');
     const existing = sessions.get(id);
     const resolvedCwd = path.resolve(cwd);
     if (existing?.status === 'running') {
       if (path.resolve(existing.cwd) !== resolvedCwd) throw new Error('Terminal session belongs to a different working directory');
+      if (!isPurposeActionMatch(getSessionPurpose(existing), normalizedPurpose)) throw new Error('Terminal session is already running with a different purpose');
+      if (normalizedPurpose.type === 'project-action') { applyAppearance(existing, { themeMode, terminalBackground, terminalForeground }); return existing; }
+      if ((existing.mode ?? INTERACTIVE_TERMINAL_MODE) !== launchMode.mode) throw new Error('Terminal session is already running with a different mode');
+      if (launchMode.mode === COMMAND_TERMINAL_MODE && existing.command !== launchMode.command) throw new Error('Terminal session is already running with a different command');
       applyAppearance(existing, { themeMode, terminalBackground, terminalForeground });
       return existing;
+    }
+    const runningActionSession = findRunningActionSession(sessions, resolvedCwd, normalizedPurpose, path);
+    if (runningActionSession) {
+      applyAppearance(runningActionSession, { themeMode, terminalBackground, terminalForeground });
+      return runningActionSession;
     }
     const pending = pendingSessionCreates.get(id);
     if (pending) {
       if (pending.cwd !== resolvedCwd) throw new Error('Terminal session belongs to a different working directory');
+      if (!isPurposeActionMatch(pending.purpose, normalizedPurpose)) throw new Error('Terminal session is already being created with a different purpose');
+      if (normalizedPurpose.type === 'project-action') return pending.promise;
       if (pending.shell !== normalizedShell) throw new Error('Terminal session is already being created with a different shell');
       if (pending.loginShell !== loginShell) throw new Error('Terminal session is already being created with a different login mode');
+      if (pending.mode !== launchMode.mode) throw new Error('Terminal session is already being created with a different mode');
+      if (launchMode.mode === COMMAND_TERMINAL_MODE && pending.command !== launchMode.command) throw new Error('Terminal session is already being created with a different command');
       const session = await pending.promise;
       applyAppearance(session, { themeMode, terminalBackground, terminalForeground });
       return session;
     }
-    if (!existing && sessions.size + pendingSessionCreates.size >= MAX_SESSIONS) throw new Error('Maximum terminal sessions reached');
+    const pendingActionCreate = findPendingActionCreate(pendingSessionCreates, resolvedCwd, normalizedPurpose);
+    if (pendingActionCreate) {
+      const session = await pendingActionCreate.promise;
+      applyAppearance(session, { themeMode, terminalBackground, terminalForeground });
+      return session;
+    }
+    const superseded = normalizedPurpose.type === 'project-action'
+      ? [...sessions.values()].filter((session) => session.id !== id && session.status === 'exited'
+        && path.resolve(session.cwd) === resolvedCwd && isPurposeActionMatch(getSessionPurpose(session), normalizedPurpose))
+      : [];
+    if (!existing && sessions.size - superseded.length + pendingSessionCreates.size >= MAX_SESSIONS) throw new Error('Maximum terminal sessions reached');
+    const pendingEntry = { cwd: resolvedCwd, shell: normalizedShell, loginShell, mode: launchMode.mode, command: launchMode.command, purpose: normalizedPurpose, cancelled: false, promise: null };
     const creation = (async () => {
       const session = existing ?? { id, sequence: 0, history: '', pendingHistoryControlSequence: '', pendingThemeControlSequence: '', eventQueue: [], draining: false, createdAt: Date.now() };
-      await startSession(session, { cwd, cols, rows, themeMode, terminalBackground, terminalForeground, shell: normalizedShell, loginShell });
+      const ptyProcess = await startSession(session, { cwd, cols, rows, themeMode, terminalBackground, terminalForeground, shell: normalizedShell, loginShell, mode: launchMode.mode, command: launchMode.command, purpose: normalizedPurpose });
+      if (pendingEntry.cancelled) {
+        session.process = null;
+        await terminateProcess(ptyProcess, true);
+        throw new Error('Terminal session was closed during creation');
+      }
+      for (const previous of superseded) {
+        if (sessions.get(previous.id) !== previous || previous.status !== 'exited') continue;
+        sessions.delete(previous.id);
+        closeAttachments(previous.id, 'SUPERSEDED', 'Terminal replaced by a new action run');
+      }
       sessions.set(id, session);
       return session;
     })();
-    const pendingEntry = { cwd: resolvedCwd, shell: normalizedShell, loginShell, promise: creation };
+    pendingEntry.promise = creation;
     pendingSessionCreates.set(id, pendingEntry);
     try { return await creation; }
     finally { if (pendingSessionCreates.get(id) === pendingEntry) pendingSessionCreates.delete(id); }
@@ -331,6 +440,8 @@ export function createTerminalRuntime({
         cwd: session.cwd,
         status: session.status,
         createdAt: Number.isInteger(session.createdAt) ? session.createdAt : null,
+        mode: session.mode ?? INTERACTIVE_TERMINAL_MODE,
+        purpose: getSessionPurpose(session),
       });
     }
     res.json({ sessions: list });
@@ -349,8 +460,18 @@ export function createTerminalRuntime({
     res.json({ touched });
   });
   app.post('/api/terminal/create', async (req, res) => {
-    try { const session = await createSession(req.body ?? {}); res.json({ sessionId: session.id, cols: session.cols, rows: session.rows, status: session.status }); }
-    catch (error) { res.status(error?.message === 'Maximum terminal sessions reached' ? 429 : 400).json({ error: error?.message || 'Failed to create terminal session' }); }
+    try {
+      const session = await createSession(req.body ?? {});
+      res.json({
+        sessionId: session.id,
+        cols: session.cols,
+        rows: session.rows,
+        status: session.status,
+        mode: session.mode ?? INTERACTIVE_TERMINAL_MODE,
+        purpose: getSessionPurpose(session),
+      });
+    }
+    catch (error) { res.status(error?.message === 'Maximum terminal sessions reached' ? 429 : 400).json(errorBody(error, 'Failed to create terminal session')); }
   });
   app.post('/api/terminal/:sessionId/resize', (req, res) => {
     const session = sessions.get(req.params.sessionId);
@@ -369,6 +490,7 @@ export function createTerminalRuntime({
   app.post('/api/terminal/:sessionId/restart', async (req, res) => {
     const session = sessions.get(req.params.sessionId);
     if (!session) return res.status(404).json({ error: 'Terminal session not found' });
+    if ((session.mode ?? INTERACTIVE_TERMINAL_MODE) === COMMAND_TERMINAL_MODE) return res.status(400).json({ error: 'Command-mode terminal sessions cannot be restarted' });
     const cwd = req.body?.cwd ?? session.cwd;
     const cols = req.body?.cols ?? session.cols;
     const rows = req.body?.rows ?? session.rows;
@@ -393,12 +515,21 @@ export function createTerminalRuntime({
     try {
       await restart;
       res.json({ sessionId: session.id, cols, rows, status: session.status });
-    } catch (error) { res.status(400).json({ error: error?.message || 'Failed to restart terminal' }); }
+    } catch (error) { res.status(400).json(errorBody(error, 'Failed to restart terminal')); }
     finally { if (pendingSessionRestarts.get(session.id) === restart) pendingSessionRestarts.delete(session.id); }
   });
   app.delete('/api/terminal/:sessionId', async (req, res) => {
     const session = sessions.get(req.params.sessionId);
-    if (!session) return res.status(404).json({ error: 'Terminal session not found' });
+    if (!session) {
+      const pending = pendingSessionCreates.get(req.params.sessionId);
+      if (!pending) return res.status(404).json({ error: 'Terminal session not found' });
+      pending.cancelled = true;
+      try { await pending.promise; }
+      catch (error) {
+        if (error?.message !== 'Terminal session was closed during creation') throw error;
+      }
+      return res.json({ success: true });
+    }
     sessions.delete(session.id);
     closeAttachments(session.id, 'CLOSED', 'Terminal closed');
     await terminateProcess(session.process);

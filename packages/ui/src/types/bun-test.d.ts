@@ -3,8 +3,8 @@
 
 declare module "bun:test" {
   export function describe(name: string, fn: () => void): void;
-  export function test(name: string, fn: () => void | Promise<void>): void;
-  export function expect(value: unknown): {
+  export function test(name: string, fn: () => void | Promise<void>, timeoutMs?: number): void;
+  export interface ExpectResult {
     toEqual(expected: unknown): void;
     toBe(expected: unknown): void;
     toBeTruthy(): void;
@@ -28,7 +28,8 @@ declare module "bun:test" {
       toContain(expected: unknown): void;
       toBeNull(): void;
     };
-  };
+  }
+  export function expect(value: unknown): ExpectResult;
   export function beforeEach(fn: () => void | Promise<void>): void;
   export function afterEach(fn: () => void | Promise<void>): void;
   export function afterAll(fn: () => void | Promise<void>): void;
@@ -40,6 +41,16 @@ declare module "bun:test" {
     mockReturnValue(value: ReturnType<T>): Mock<T>;
     mockReset(): Mock<T>;
   }
+  export interface Spy<T extends (...args: never[]) => void> extends Mock<T> {
+    mock: { calls: Parameters<T>[] };
+    mockImplementation(fn: T): Spy<T>;
+    mockImplementationOnce(fn: T): Spy<T>;
+    mockResolvedValue(value: Awaited<ReturnType<T>>): Spy<T>;
+    mockRejectedValue(value: Error): Spy<T>;
+    mockRejectedValueOnce(value: Error): Spy<T>;
+    mockRestore(): void;
+  }
+  export function spyOn<T, K extends keyof T>(target: T, method: K): Spy<Extract<T[K], (...args: never[]) => void>>;
   export function mock<T extends (...args: never[]) => unknown>(fn?: T): Mock<T>;
   export namespace mock {
     function module(moduleName: string, factory: () => Record<string, unknown>): void;

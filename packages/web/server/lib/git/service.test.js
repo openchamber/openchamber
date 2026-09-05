@@ -517,6 +517,24 @@ describe('getWorktrees', () => {
     expect(Array.isArray(result)).toBe(true);
     expect(warnSpy).not.toHaveBeenCalled();
   });
+  it('flags a worktree whose directory was deleted outside git as prunable', async () => {
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'init']);
+    const worktreePath = path.join(createTempDir(), 'feature');
+    runGit(repo, ['worktree', 'add', worktreePath, '-b', 'feature']);
+
+    const before = await getWorktrees(repo);
+    expect(before.find((entry) => entry.branch === 'feature')).toMatchObject({ prunable: false });
+
+    fs.rmSync(worktreePath, { recursive: true, force: true });
+
+    const after = await getWorktrees(repo);
+    expect(after.find((entry) => entry.branch === 'feature')).toMatchObject({ path: expect.any(String), prunable: true });
+    expect(after.find((entry) => entry.branch === 'main')).toMatchObject({ prunable: false });
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -1,3 +1,5 @@
+import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
+import { opencodeClient } from '@/lib/opencode/client';
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { Event } from '@opencode-ai/sdk/v2/client';
@@ -331,3 +333,8 @@ describe('getDescendantIds', () => {
     expect(new Set(getDescendantIds(childrenMap, 'root')).size).toBe(3);
   });
 });
+
+const originalHomeInfo = opencodeClient.getFilesystemHomeInfo;
+opencodeClient.getFilesystemHomeInfo = async () => ({ home: '/home' });
+await ensureChatsRootDirectory();
+opencodeClient.getFilesystemHomeInfo = originalHomeInfo;

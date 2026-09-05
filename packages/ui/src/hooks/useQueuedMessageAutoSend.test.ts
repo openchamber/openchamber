@@ -268,6 +268,67 @@ describe('buildQueuedAutoSendPayload', () => {
     expect(payload?.primaryAttachments[0]?.filename).toBe('notes.txt');
   });
 
+  test('retains raw queued content and attachments for history submissions', async () => {
+    const attachment = {
+      id: 'file-1',
+      filename: 'notes.txt',
+      mimeType: 'text/plain',
+      size: 5,
+      source: 'local' as const,
+      file: new File(['hello'], 'notes.txt', { type: 'text/plain' }),
+      dataUrl: 'data:text/plain;base64,aGVsbG8=',
+    };
+
+    const payload = buildQueuedAutoSendPayload([
+      {
+        id: 'queued-raw',
+        text: '/plan feature from raw queue',
+        content: '/plan feature from raw queue',
+        createdAt: 1,
+        attachments: [attachment],
+      },
+    ]);
+
+    expect(payload).not.toBeNull();
+    expect(payload?.historySubmissions).toEqual([
+      {
+        text: '/plan feature from raw queue',
+        attachmentKeys: ['local|notes.txt|text/plain|5|data'],
+        restorableAttachments: [],
+      },
+    ]);
+
+    await sendQueuedAutoSendPayload({
+      runtimeKey: 'runtime-original',
+      sessionId: 'session-original',
+      directory: '/repo',
+    }, {
+      ...payload!,
+      primaryText: 'sanitized transport text',
+    }, {
+      providerID: 'provider-1',
+      modelID: 'model-1',
+      agent: 'agent-1',
+      variant: 'variant-1',
+    });
+
+    expect(sendMessageCalls[0]?.[0]).toBe('sanitized transport text');
+    expect(sendMessageCalls[0]?.[9]).toEqual({
+      target: {
+        runtimeKey: 'runtime-original',
+        sessionId: 'session-original',
+        directory: '/repo',
+      },
+        historySubmissions: [
+          {
+            text: '/plan feature from raw queue',
+            attachmentKeys: ['local|notes.txt|text/plain|5|data'],
+            restorableAttachments: [],
+          },
+        ],
+    });
+  });
+
   test('auto-send targets the queued session explicitly', async () => {
     const payload = buildQueuedAutoSendPayload([
       {
@@ -307,6 +368,13 @@ describe('buildQueuedAutoSendPayload', () => {
           sessionId: 'session-original',
           directory: '/repo',
         },
+        historySubmissions: [
+          {
+            text: 'queued message',
+            attachmentKeys: [],
+            restorableAttachments: [],
+          },
+        ],
       },
     ]);
   });

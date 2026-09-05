@@ -4,6 +4,7 @@ import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'sessions.sidebar.projectAction.active': '專案操作正在執行',
   ...settingsDict,
   ...linearIssuePickerI18n['zh-TW'],
   ...linearPanelI18n['zh-TW'],
@@ -718,6 +719,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.sessionDialogs.worktree.attachedArchived': '關聯 worktree 已封存。',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': '關聯 worktree 已封存。',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': 'worktree 已封存且遠端分支已移除。',
+  'sessions.missingDirectory.movedToProject': '此工作階段的資料夾已不存在。工作階段已移至 {project}。',
+  'sessions.sidebar.group.worktreeMissing': '工作樹資料夾遺失',
   'sessions.sidebar.sessionDialogs.worktree.label': 'worktree',
   'sessions.sidebar.sessionDialogs.worktree.pathUnavailable': 'worktree 路徑無法使用。',
   'sessions.sidebar.sessionDialogs.worktree.uncommittedWarning': '未提交的變更將被捨棄。',

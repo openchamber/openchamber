@@ -4,6 +4,7 @@ import type { Todo } from '@opencode-ai/sdk/v2/client';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { createChatDraftIdentity, readChatDraft, writeChatDraft } from '@/lib/chatDraftPersistence';
 import { createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore } from '@/stores/messageQueueStore';
+import { createInputHistoryIdentity, createInputHistorySubmission, selectInputHistoryEntries, useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useTodosPersistStore } from '@/stores/useTodosPersistStore';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
@@ -19,6 +20,7 @@ describe('cleanupPersistedSessionState', () => {
     useInlineCommentDraftStore.setState({ drafts: {}, touchedAt: {} });
     useSessionPinnedStore.setState({ ids: new Set(), touchedAt: {} });
     useSessionFoldersStore.setState({ foldersMap: {}, collapsedFolderIds: new Set() });
+    useInputHistoryStore.setState({ globalBuckets: {}, sessionBuckets: {}, scope: 'session' });
   });
 
   test('clears queue and todos only for the deleted composite session', () => {
@@ -80,5 +82,23 @@ describe('cleanupPersistedSessionState', () => {
     cleanupPersistedSessionState({ runtimeKey: `${runtimeKey}-stale`, directory: '/repo', sessionId: 'session-1' });
 
     expect(useTodosPersistStore.getState().getSessionTodos('/repo', 'session-1')).toEqual([todo]);
+  });
+
+  test('removes only the deleted session input-history bucket', () => {
+    const runtimeKey = getRuntimeKey();
+    const deleted = createInputHistoryIdentity(runtimeKey, '/repo', 'session-1');
+    const retained = createInputHistoryIdentity(runtimeKey, '/repo', 'session-2');
+    if (!deleted || !retained) throw new Error('identity missing');
+
+    useInputHistoryStore.getState().appendSubmissions(deleted, [createInputHistorySubmission('deleted', [])]);
+    useInputHistoryStore.getState().appendSubmissions(retained, [createInputHistorySubmission('retained', [])]);
+
+    cleanupPersistedSessionState({ runtimeKey, directory: '/repo', sessionId: 'session-1' });
+
+    useInputHistoryStore.getState().applyScope('session');
+    expect(selectInputHistoryEntries(useInputHistoryStore.getState(), deleted)).toEqual([]);
+    expect(selectInputHistoryEntries(useInputHistoryStore.getState(), retained).map((entry) => entry.text)).toEqual(['retained']);
+    useInputHistoryStore.getState().applyScope('global');
+    expect(selectInputHistoryEntries(useInputHistoryStore.getState(), deleted).map((entry) => entry.text)).toEqual(['deleted', 'retained']);
   });
 });

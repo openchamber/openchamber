@@ -27,6 +27,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cancel, intro, isCancel, log, outro, select, text } from '@clack/prompts';
+import { RELEASE_PACKAGE_FILES } from './bump-version.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -173,16 +174,20 @@ function step(label, fn) {
   return result;
 }
 
+// The release notes source plus the files generated from it; all go into the release commit.
+// CHANGELOG.md is legacy (older installs read it for update notes); it is
+// refreshed only while it exists.
+const RELEASE_CHANGELOG_FILES = ['changelog', 'packages/vscode/CHANGELOG.md', ...(existsSync(path.join(repoRoot, 'CHANGELOG.md')) ? ['CHANGELOG.md'] : [])];
+
 function printReleaseNextSteps(version) {
   log.success(`Release v${version} prepared locally`);
-  log.info('Next steps:');
-  console.log(`  git add -A`);
+  log.info('Next steps (only the release files are staged, unrelated changes stay out):');
+  console.log(`  git add ${[...RELEASE_PACKAGE_FILES, ...RELEASE_CHANGELOG_FILES].join(' ')}`);
   console.log(`  git commit -m "release v${version}"`);
   console.log(`  git tag v${version}`);
-  console.log(`  git push origin main --tags`);
+  console.log(`  git push origin main v${version}`);
   console.log('');
-  console.log('This will trigger the GitHub Actions release workflow.');
-  console.log(`Make sure CHANGELOG.md contains a section like "## [${version}] - YYYY-MM-DD" before pushing.`);
+  console.log('Pushing the tag is what starts the GitHub Actions release; pushing main alone does not.');
 }
 
 function normalizeAction(action = '') {
@@ -598,6 +603,9 @@ async function createRelease(options) {
     }
   }
   if (!/^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$/.test(version)) throw new Error('Invalid version format. Use semver, e.g. 1.4.7 or 1.4.7-beta.1');
+  // Turns changelog/unreleased.md into changelog/<version>.md dated today and
+  // regenerates the outputs; fails when nothing was written for the release.
+  step('Promoting the changelog', () => run('node', ['scripts/changelog/build.mjs', '--release', version]));
   step('Validating codebase', () => run('bun', ['run', 'release:prepare']));
   step(`Bumping version to ${version}`, () => run('node', ['scripts/bump-version.mjs', version]));
   printReleaseNextSteps(version);

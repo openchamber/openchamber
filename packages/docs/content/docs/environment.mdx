@@ -25,6 +25,10 @@ Starts OpenChamber in headless mode when set to `true` or `1`. API routes stay a
 
 Overrides the OpenChamber data directory. The default is `~/.config/openchamber`.
 
+### `OPENCHAMBER_CHATS_DIR`
+
+Moves the managed chat directories that OpenChamber creates for chats without a project. The default is `~/.config/openchamber/chats`. Set it to a directory the OpenCode server can read when OpenChamber and OpenCode run as different users. Existing chats are not moved.
+
 ### `OPENCHAMBER_COMPRESS_API`
 
 Controls API response compression. Use `true` or `1` to force it on, `false` or `0` to force it off.

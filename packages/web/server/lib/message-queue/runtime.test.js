@@ -315,6 +315,21 @@ describe('message queue runtime', () => {
     expect(runtime.snapshot().sessions).toEqual([]);
   });
 
+  it('names the directory in the broadcast that empties a queue', async () => {
+    // The UI keys its projection by directory; without it the client cannot
+    // tell which queue just delivered its last message and keeps showing it.
+    const { runtime, emit, broadcasts, openCode } = createRuntime();
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item());
+    openCode.state.statuses = {};
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+
+    expect(openCode.state.sent).toHaveLength(1);
+    expect(runtime.snapshot().sessions).toEqual([]);
+    expect(broadcasts.at(-1).properties.session).toEqual({ sessionId: SESSION, directory: DIRECTORY, items: [], sendingId: null });
+  });
+
   it('reorders only with a complete permutation', async () => {
     const { runtime } = createRuntime();
     runtime.start();
@@ -377,19 +392,60 @@ describe('message queue runtime', () => {
     ]);
   });
 
-  it('sends captured context with a slash command too', async () => {
+  it('keeps files on the command route, which is all that route accepts', async () => {
     const { runtime, openCode, emit } = createRuntime();
     runtime.start();
     openCode.state.commands = [{ name: 'review' }];
     await runtime.enqueue(SESSION, DIRECTORY, item({
       content: '/review',
       text: '/review',
-      context: [{ kind: 'synthetic', text: 'focus on tests' }],
+      attachments: [{ id: 'a', filename: 'f.txt', mimeType: 'text/plain', size: 1, source: 'local', dataUrl: 'data:text/plain,hi' }],
     }));
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle();
     expect(openCode.state.sent[0].path).toBe(`/session/${SESSION}/command`);
-    expect(openCode.state.sent[0].body.parts).toEqual([{ type: 'text', text: 'focus on tests', synthetic: true }]);
+    expect(openCode.state.sent[0].body.parts).toEqual([{ type: 'file', mime: 'text/plain', filename: 'f.txt', url: 'data:text/plain,hi' }]);
+  });
+
+  it('sends a command queued with context as its expanded prompt, context included', async () => {
+    // The command route rejects text parts, so a command with captured
+    // context takes the prompt route with the template expanded, exactly as
+    // the composer does.
+    const { runtime, openCode, emit } = createRuntime();
+    runtime.start();
+    openCode.state.commands = [{ name: 'review', source: 'command', template: 'Review $1 with focus on $2' }];
+    const metadata = { openchamberContext: { kind: 'chat-quote', quote: 'q', text: 'why?' } };
+    await runtime.enqueue(SESSION, DIRECTORY, item({
+      content: '/review src "error handling"',
+      text: '/review src "error handling"',
+      context: [{ kind: 'context', text: 'quoted', metadata }],
+    }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+    expect(openCode.state.sent[0].path).toBe(`/session/${SESSION}/prompt_async`);
+    expect(openCode.state.sent[0].body.parts).toEqual([
+      { type: 'text', text: 'Review src with focus on error handling' },
+      { type: 'text', text: 'quoted', synthetic: true, metadata },
+    ]);
+  });
+
+  it('sends a skill queued with context as an explicit invocation, context included', async () => {
+    const { runtime, openCode, emit } = createRuntime();
+    runtime.start();
+    openCode.state.commands = [{ name: 'grill', source: 'skill', template: 'skill body' }];
+    await runtime.enqueue(SESSION, DIRECTORY, item({
+      content: '/grill auth',
+      text: '/grill auth',
+      context: [{ kind: 'synthetic', text: 'focus on tests' }],
+    }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+    expect(openCode.state.sent[0].path).toBe(`/session/${SESSION}/prompt_async`);
+    expect(openCode.state.sent[0].body.parts).toEqual([
+      { type: 'text', text: '/grill auth' },
+      { type: 'text', text: 'focus on tests', synthetic: true },
+      { type: 'text', text: 'The user explicitly invoked the grill skill. Use the corresponding skill tool to handle this request.', synthetic: true },
+    ]);
   });
 
   it('keeps captured context out of snapshots and broadcasts, and hands it back on take', async () => {

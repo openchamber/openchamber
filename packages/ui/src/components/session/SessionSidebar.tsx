@@ -28,6 +28,7 @@ import { useShallow } from 'zustand/react/shallow';
 import {
   listProjectWorktrees,
   partitionWorktreesByRegisteredProject,
+  subscribeWorktreeTopologyChanged,
   worktreeMapsEqual,
 } from '@/lib/worktrees/worktreeManager';
 import { checkIsGitRepository } from '@/lib/gitApi';
@@ -321,6 +322,11 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     return subscribeOpenchamberEvents((event) => {
       if (event.type === 'session-created') requestWorktreeDiscovery();
     });
+  }, [isVSCode]);
+
+  React.useEffect(() => {
+    if (isVSCode) return;
+    return subscribeWorktreeTopologyChanged(() => requestWorktreeDiscovery());
   }, [isVSCode]);
 
   const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);

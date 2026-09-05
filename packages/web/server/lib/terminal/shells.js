@@ -1,5 +1,6 @@
 const TERMINAL_SHELL_IDS = ['bash', 'zsh', 'sh', 'fish', 'pwsh', 'powershell', 'cmd', 'dash', 'ksh', 'nu'];
 const TERMINAL_SHELL_ID_SET = new Set(TERMINAL_SHELL_IDS);
+const isString = (value) => String(value) === value;
 
 export const normalizeTerminalShell = (value) => {
   if (typeof value !== 'string') return null;
@@ -22,6 +23,22 @@ export const getTerminalShellLoginArgs = (executable, platform = process.platfor
   if (id === 'fish' || id === 'nu') return ['--login'];
   if (id === 'pwsh' && platform !== 'win32') return ['-Login'];
   return null;
+};
+
+export const buildTerminalShellLaunch = (executable, { mode = 'interactive', command = null, loginShell = false, platform = process.platform } = {}) => {
+  const loginArgs = loginShell ? getTerminalShellLoginArgs(executable, platform) : [];
+  if (!loginArgs) throw new Error(`Terminal shell "${shellIdFromPath(executable) ?? executable}" does not support login mode`);
+
+  if (mode === 'interactive') return { executable, args: loginArgs };
+
+  const trimmedCommand = isString(command) ? command.trim() : '';
+  if (!trimmedCommand) throw new Error('Terminal command is required');
+
+  const id = shellIdFromPath(executable);
+  if (id === 'nu') return { executable, args: [...loginArgs, '-c', trimmedCommand] };
+  if (id === 'pwsh' || id === 'powershell') return { executable, args: [...loginArgs, '-Command', trimmedCommand] };
+  if (id === 'cmd') return { executable, args: ['/d', '/s', '/c', trimmedCommand] };
+  return { executable, args: [...loginArgs, '-i', '-c', trimmedCommand] };
 };
 
 export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecutable, buildAugmentedPath = () => env.PATH || '', platform = process.platform, env = process.env }) => {

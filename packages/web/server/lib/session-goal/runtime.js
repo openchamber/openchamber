@@ -244,6 +244,57 @@ const messageTokenTotal = (info) => {
   return input + cachedRead + output;
 };
 
+const getErrorName = (error) => error?.name?.trim?.() ?? '';
+
+const isLengthTruncated = (info, errorName = getErrorName(info?.error)) => {
+  const error = info?.error;
+  const hasError = error !== null && error !== undefined;
+  return errorName === 'MessageOutputLengthError' || (!hasError && info?.finish === 'length');
+};
+
+// Summary messages are assistant-shaped, but they are compaction turns rather
+// than agent turns. They must not break or satisfy the consecutive truncation
+// check; only completed, non-summary assistant turns participate. Chronology
+// comes from `time.created`, never from message IDs; array position is only a
+// tie-breaker for equal timestamps.
+const hasRepeatedLengthTail = (messages, latestAssistant, goalCreatedAt) => {
+  const latestInfo = latestAssistant?.info;
+  if (latestInfo?.summary === true) return false;
+  const latestIndex = messages.indexOf(latestAssistant);
+  const latestCreated = latestInfo?.time?.created;
+  if (
+    latestIndex < 0
+    || !(latestInfo?.time?.completed > 0)
+    || !(Number.isFinite(latestCreated) && latestCreated > 0)
+    || !isLengthTruncated(latestInfo)
+  ) return false;
+
+  let previous = null;
+  for (let i = 0; i < messages.length; i += 1) {
+    const info = messages[i]?.info;
+    if (info?.role !== 'assistant' || info.summary === true || !(info.time?.completed > 0)) continue;
+    const created = info.time?.created;
+    // An unknown timestamp cannot safely participate in chronology. Ignore it
+    // rather than letting an unrelated older message hide known chronology.
+    if (!(Number.isFinite(created) && created > 0)) continue;
+    if (i === latestIndex) continue;
+    if (created > latestCreated || (created === latestCreated && i > latestIndex)) continue;
+    if (
+      !previous
+      || created > previous.created
+      || (created === previous.created && i > previous.index)
+    ) {
+      previous = { info, created, index: i };
+    }
+  }
+
+  return Boolean(
+    previous
+    && previous.created > goalCreatedAt
+    && isLengthTruncated(previous.info),
+  );
+};
+
 export const createSessionGoalRuntime = ({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -609,7 +660,11 @@ export const createSessionGoalRuntime = ({
     // resumed over an aborted tail: that is an explicit "keep going", so it
     // falls through to the continuation below (skipping the audit — an
     // aborted reply is not evidence of anything).
-    const abortedTail = lastAssistantInfo.error?.name === 'MessageAbortedError';
+    const error = lastAssistantInfo.error;
+    const errorName = getErrorName(error);
+    const hasError = error !== null && error !== undefined;
+    const abortedTail = errorName === 'MessageAbortedError';
+    const lengthTail = isLengthTruncated(lastAssistantInfo, errorName);
     if (abortedTail && goal.statusReason !== 'resumed') {
       await writeGoal(sessionId, directory, goal.id, () => ({
         status: 'paused',
@@ -623,13 +678,12 @@ export const createSessionGoalRuntime = ({
       return;
     }
 
-    // Turn error → blocked (prevents runaway auto-continuation into failures).
-    if (!abortedTail && lastAssistantInfo.error && typeof lastAssistantInfo.error === 'object') {
-      const reason = typeof lastAssistantInfo.error.name === 'string' && lastAssistantInfo.error.name
-        ? lastAssistantInfo.error.name
-        : 'assistant turn failed';
+    // Non-length turn error → blocked (prevents runaway auto-continuation into
+    // failures). Recognized length cutoffs are in-progress continuations, not
+    // hard failures.
+    if (!abortedTail && !lengthTail && hasError) {
       await settleGoal({
-        sessionId, directory, goal, status: 'blocked', statusReason: reason, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
+        sessionId, directory, goal, status: 'blocked', statusReason: errorName || 'assistant turn failed', tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
       });
       return;
     }
@@ -650,17 +704,28 @@ export const createSessionGoalRuntime = ({
       return;
     }
 
+    // A second consecutive completed, non-summary length-truncated turn is a
+    // bounded recovery failure. Derive this from the loaded transcript rather
+    // than persisting another goal counter.
+    if (lengthTail && goal.statusReason !== 'resumed' && hasRepeatedLengthTail(messages, lastAssistant, goal.createdAt)) {
+      await settleGoal({
+        sessionId, directory, goal, status: 'blocked', statusReason: 'repeated output truncation', tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
+      });
+      return;
+    }
+
     // --- Small-model audit: the sole termination authority besides the hard
     // stops above (turn error, budget, continuation cap). The working agent
     // has no channel to settle its own goal.
     //
-    // Exception: when the latest message is a compaction summary, the agent
-    // by definition ran into the context window mid-work — that IS
-    // "in progress, not finished". No audit call; continue unconditionally.
+    // Exception: when the latest message is a compaction summary or was cut off
+    // by the output token limit (length stop), the agent by definition ran into
+    // the context/output limit mid-work — that IS "in progress, not finished".
+    // No audit call; continue unconditionally.
     let audit = null;
     let blockedStreak = 0;
     let auditFailStreak = goal.auditFailStreak;
-    if (lastAssistantInfo.summary === true || abortedTail) {
+    if (lastAssistantInfo.summary === true || abortedTail || lengthTail) {
       blockedStreak = goal.blockedStreak;
     } else {
       audit = await runAudit({ goal: { ...goal, objective: effectiveObjective }, assistantText, directory, lastAssistantInfo: executionInfo ?? lastAssistantInfo });

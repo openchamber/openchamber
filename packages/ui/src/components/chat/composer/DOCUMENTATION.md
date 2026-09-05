@@ -23,7 +23,7 @@ existing mobile fixed-position rules unchanged.
 |---|---|
 | `language/` | What the text *means*: `@` references, `/` and `#` tokens, markdown, and which picker a caret asks for |
 | `editor/` | The CodeMirror view that renders the language and owns the caret |
-| `state/` | Composer state with a lifecycle: drafts, mobile shell, history, popup placement, draft targeting |
+| `state/` | Composer-local lifecycle state: ArrowUp/ArrowDown browsing, draft stash/restore, mobile shell, popup placement, draft targeting |
 | `submit/` | Turning what the user has into what gets sent |
 | `attachments/` | Files: paths, drop payloads |
 | `ui/` | Presentation |
@@ -167,6 +167,16 @@ and the send path reading the same grammar.
   mention, file mentions, and skill instruction were resolved when it was
   queued, never at delivery — and its context follows it before the next
   queued message.
+- Local slash commands are planned by `submit/slashCommands.ts` before any
+  attached context is consumed. Commands that act on session or UI state
+  (`/undo`, `/redo`, `/compact`, `/timeline`, `/handoff-review`) take only
+  their command text and leave comments, files, and linked context attached;
+  commands that produce a prompt (`/btw` and the magic prompts) send that
+  context with the prompt they produce. Session actions are planned only when
+  a session exists, so typing one into a new-session draft stays on the normal
+  send path. A local command is never queued as text: queueing runs it
+  instead. A failed prompt command restores everything it consumed: text,
+  confirmed mentions, files, comment drafts, and pending synthetic context.
 - `state/useComposerDraft.ts` — a draft belongs to a (runtime, directory,
   session) identity. Writes are debounced while typing but forced at every edge
   where the page may stop running, because a pending timer is not a saved
@@ -181,6 +191,30 @@ and the send path reading the same grammar.
 - `ui/DraftTargetSelectors.tsx` owns the controlled project/worktree picker
   state and registers its application shortcuts locally. The selectors only
   consume their shared prefix while the draft target UI is mounted.
+
+## Input recall ownership
+
+Prompt recall has two owners on purpose.
+
+- `packages/ui/src/stores/useInputHistoryStore.ts` owns the persisted source of
+  truth. It keeps the runtime-scoped global bucket and the runtime + directory
+  + session bucket, each capped by the configurable input-history limit. That
+  setting defaults to 40 entries. Recall reads the current session's bucket by
+  default; the Chat setting can widen it to every project on the runtime.
+- `state/useMessageHistory.ts` owns only keyboard traversal through whichever
+  bucket the composer was given. Moving away from a position stores the
+  composer's current text and attachments as an overlay for that position, so
+  the live draft and any edit made to a recalled prompt survive a round trip
+  through history. Overlays never rewrite stored history; sending resets them.
+- `ChatInput.tsx` applies the recalled text and attachments to the composer and
+  places the caret.
+
+In session scope the composer merges two sources, oldest first: the visible
+transcript's user prompts (`useUserMessageHistory` in `sync-context.tsx`), so
+sessions that predate the persisted store still recall, and the persisted
+session bucket, which adds attachments and keeps prompts a revert hid from the
+timeline. A prompt present in both collapses to the persisted entry. Global
+scope reads the persisted runtime bucket only.
 
 ## Mobile
 
@@ -199,12 +233,29 @@ hardware.
 
 The package has no DOM test environment, so coverage stops at the state and
 logic layers: the language, the submit assembly, path and drop handling, text
-splicing, large-paste detection, paste-offer invalidation, message history, and
-the CodeMirror language extension at the `EditorState` level.
+splicing, large-paste detection, paste-offer invalidation, input-history
+traversal, and the CodeMirror language extension at the `EditorState` level.
 
 Rendering, focus, keyboard behavior, IME and WKWebView are **not covered by
-tests** and are verified by hand. Do not report a change to them as validated
-on the strength of type-check and unit tests.
+tests** and are verified by hand. That includes ArrowUp and ArrowDown recall,
+caret placement after recall, restored drafts, and any edited-entry overlay.
+Do not report a change to them as validated on the strength of type-check and
+unit tests.
 
 Run tests per file (`bun test <path>`): `mock.module` is process-global, so
 suites that install module mocks are order-dependent.
+
+## Enter preference
+
+`keyboardPolicy.ts` owns the submission decision. Until the Chat setting is
+changed, desktop Enter sends, mobile and focus mode require Ctrl/Cmd+Enter,
+and Shift-modified Enter does not send. An explicit choice applies across
+shared composers; Ctrl/Cmd+Enter sends in either configured mode.
+
+CodeMirror's deferred mobile Enter loses modifier information. Untouched
+settings restore Shift to keep the original policy. Once configured, with mobile
+autocapitalization enabled, the editor cannot distinguish its Shift flag from
+an intentional Shift press and does not restore Shift. Consequently, deferred
+Shift+Enter can send when Enter-to-send is enabled and cannot serve as the send
+shortcut when it is disabled. Ctrl/Cmd+Enter remains the supported modified
+send shortcut on this path.

@@ -4,6 +4,7 @@ import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'sessions.sidebar.projectAction.active': 'Ação do projeto em execução',
   ...settingsDict,
   ...linearIssuePickerI18n['pt-BR'],
   ...linearPanelI18n['pt-BR'],
@@ -705,6 +706,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.sessionDialogs.worktree.attachedArchived": "Worktree adjunto archivado.",
   "sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural": "Worktrees adjuntos archivados.",
   "sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved": "Worktrees archivados e branches remotas excluídas.",
+  "sessions.missingDirectory.movedToProject": "A pasta desta sessão não existe mais. A sessão foi movida para {project}.",
+  "sessions.sidebar.group.worktreeMissing": "A pasta do worktree está ausente",
   "sessions.sidebar.sessionDialogs.worktree.label": "Worktree",
   "sessions.sidebar.sessionDialogs.worktree.pathUnavailable": "Caminho de worktree não disponível.",
   "sessions.sidebar.sessionDialogs.worktree.uncommittedWarning": "As alterações sem commit serão perdidas.",

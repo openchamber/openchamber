@@ -684,6 +684,15 @@ const parseWorktreePorcelain = (raw) => {
       const branchRef = line.substring('branch '.length).trim();
       current.branchRef = branchRef;
       current.branch = cleanBranchName(branchRef);
+      continue;
+    }
+
+    // git marks a worktree whose directory is gone (deleted outside git) as
+    // prunable; it stays registered until `git worktree prune`. The sidebar
+    // needs that distinction: the directory is missing, but the sessions that
+    // lived there are not.
+    if (line === 'prunable' || line.startsWith('prunable ')) {
+      current.prunable = true;
     }
   }
 
@@ -4036,6 +4045,7 @@ export async function getWorktrees(directory) {
       name: path.basename(entry.worktree || ''),
       branch: entry.branch || '',
       path: entry.worktree,
+      prunable: entry.prunable === true,
     }));
   } catch (error) {
     // Worktrees are an optional feature. When the caller passes a directory

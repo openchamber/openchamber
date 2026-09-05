@@ -4,6 +4,7 @@ import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'sessions.sidebar.projectAction.active': '프로젝트 작업 실행 중',
   ...settingsDict,
   ...linearIssuePickerI18n.ko,
   ...linearPanelI18n.ko,
@@ -705,6 +706,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.sessionDialogs.worktree.attachedArchived': '첨부됨 워크트리 보관됨.',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': '첨부됨 워크트리 보관됨.',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': '워크트리가 보관되고 리모트 브랜치가 제거되었습니다.',
+  'sessions.missingDirectory.movedToProject': '이 세션의 폴더가 더 이상 존재하지 않습니다. 세션을 {project}(으)로 이동했습니다.',
+  'sessions.sidebar.group.worktreeMissing': '워크트리 폴더가 없습니다',
   'sessions.sidebar.sessionDialogs.worktree.label': '워크트리',
   'sessions.sidebar.sessionDialogs.worktree.pathUnavailable': '워크트리 경로를 사용할 수 없습니다.',
   'sessions.sidebar.sessionDialogs.worktree.uncommittedWarning': '커밋하지 않은 변경 사항은 버려집니다.',

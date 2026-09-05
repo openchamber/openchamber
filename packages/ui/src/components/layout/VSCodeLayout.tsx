@@ -27,6 +27,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useTerminalSessionKeepalive } from '@/hooks/useTerminalSessionKeepalive';
 import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
@@ -529,6 +530,7 @@ export const VSCodeLayout: React.FC = () => {
   }, [usesExpandedLayout, currentView, viewMode]);
 
   useSessionListSync({ isVSCode: true });
+  useTerminalSessionKeepalive();
 
   return (
     <>

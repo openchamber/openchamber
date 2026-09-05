@@ -4,9 +4,23 @@ import { AgentManagerPanelProvider } from './AgentManagerPanelProvider';
 import { SessionEditorPanelProvider } from './SessionEditorPanelProvider';
 import { createOpenCodeManager, type OpenCodeManager } from './opencode';
 import { startGlobalEventWatcher, stopGlobalEventWatcher, setChatViewProvider } from './sessionActivityWatcher';
+import { pathsEqualWithNormalizedDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
+import { InlineCommentThreads, SIDEBAR_SURFACE_ID } from './InlineCommentThreads';
 
 let chatViewProvider: ChatViewProvider | undefined;
+
+/** The webview's `{ drafts: [{ id, text }] }` snapshot, or null when it is not one. */
+function readDraftSnapshot(snapshot: unknown): Array<{ id: string; text: string }> | null {
+  if (typeof snapshot !== 'object' || snapshot === null || !('drafts' in snapshot) || !Array.isArray(snapshot.drafts)) return null;
+  const drafts: Array<{ id: string; text: string }> = [];
+  for (const entry of snapshot.drafts) {
+    if (typeof entry !== 'object' || entry === null || !('id' in entry) || typeof entry.id !== 'string') continue;
+    const text = 'text' in entry && typeof entry.text === 'string' ? entry.text : '';
+    drafts.push({ id: entry.id, text });
+  }
+  return drafts;
+}
 let agentManagerProvider: AgentManagerPanelProvider | undefined;
 let sessionEditorProvider: SessionEditorPanelProvider | undefined;
 let openCodeManager: OpenCodeManager | undefined;
@@ -470,6 +484,96 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // Comments are written where the code is: the thread opens on the selected
+  // lines and stays there until the message is sent. The composer chips remain
+  // the authoritative list, so the threads follow what the webview reports.
+  const inlineCommentThreads = new InlineCommentThreads({
+    submitDraft: async (payload) => {
+      // Same routing as Add to Context: a session tab the user is working in
+      // takes the comment; otherwise it goes to the sidebar, revealing it when
+      // needed. Opening a fresh tab for a comment left the user's sidebar chat
+      // ignored and a new tab in the way.
+      const panelId = sessionEditorProvider?.addLineCommentToActivePanel(payload);
+      if (panelId) {
+        return panelId;
+      }
+      if (!(await revealChatViewForPayload())) {
+        return null;
+      }
+      if (!chatViewProvider) {
+        vscode.window.showWarningMessage(t('OpenChamber: Chat sidebar is not ready'));
+        return null;
+      }
+      chatViewProvider.addLineComment(payload);
+      return SIDEBAR_SURFACE_ID;
+    },
+    removeDraft: (draftId) => {
+      // Every surface is told, because each webview holds its own draft store
+      // and only the one actually holding the draft can drop it. Removal is
+      // idempotent everywhere else.
+      sessionEditorProvider?.removeLineComment(draftId);
+      chatViewProvider?.removeLineComment(draftId);
+    },
+    reportUndelivered: () => {
+      vscode.window.showWarningMessage(t('OpenChamber [Add Comment]: The comment never reached the chat and was discarded'));
+    },
+    avatar: vscode.Uri.joinPath(context.extensionUri, 'assets', 'app-icon.png'),
+    strings: {
+      threadLabel: ({ startLine, endLine }) => (startLine === endLine
+        ? t('Comment on line {0}', String(startLine))
+        : t('Comment on lines {0}-{1}', String(startLine), String(endLine))),
+      author: t('OpenChamber'),
+      notSent: t('Not sent yet'),
+    },
+  });
+  context.subscriptions.push(inlineCommentThreads);
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openchamber.addLineComment', () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        vscode.window.showWarningMessage(t('OpenChamber [Add Comment]: No active editor'));
+        return;
+      }
+      // Same rule the gutter `+` follows, so the two entry points cannot
+      // disagree about where a comment is allowed.
+      if (!inlineCommentThreads.canCommentOn(editor.document.uri)) {
+        vscode.window.showWarningMessage(t('OpenChamber [Add Comment]: File is outside the workspace'));
+        return;
+      }
+      inlineCommentThreads.openThread(editor.document.uri, editor.selection);
+    })
+  );
+
+  // Invoked by the thread's own Comment button, and by the gutter `+` flow,
+  // which both arrive as a CommentReply carrying the typed text.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openchamber.submitLineComment', async (reply: vscode.CommentReply) => {
+      await inlineCommentThreads.submitReply(reply);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openchamber.removeLineComment', (thread: vscode.CommentThread) => {
+      inlineCommentThreads.removeThread(thread);
+    })
+  );
+
+  // The webview reports its whole draft list whenever it changes; the threads
+  // follow it. Not contributed in package.json: internal wiring, not a command
+  // a user should find in the palette.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openchamber.internal.inlineCommentsSync', (message: { snapshot: unknown; surfaceId: string }) => {
+      // The snapshot crossed the webview boundary as JSON; the surface id was
+      // stamped by the provider that received it, so an untagged snapshot
+      // cannot be attributed and is ignored rather than applied to threads it
+      // may know nothing about.
+      const drafts = readDraftSnapshot(message.snapshot);
+      if (!drafts || !message.surfaceId) return;
+      inlineCommentThreads.reconcile(message.surfaceId, drafts);
+    })
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand('openchamber.newSession', async (directory?: unknown) => {
       const candidates = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
@@ -537,7 +641,9 @@ export async function activate(context: vscode.ExtensionContext) {
       const debug = openCodeManager?.getDebugInfo();
       const resolvedApiUrl = openCodeManager?.getApiUrl();
       const workingDirectory = openCodeManager?.getWorkingDirectory() ?? '';
-      const workingDirectoryMatchesWorkspace = Boolean(primaryWorkspace && workingDirectory === primaryWorkspace);
+      const workingDirectoryMatchesWorkspace = Boolean(
+        primaryWorkspace && pathsEqualWithNormalizedDriveLetter(workingDirectory, primaryWorkspace)
+      );
       let resolvedApiPath = '';
       if (resolvedApiUrl) {
         try {

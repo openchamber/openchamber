@@ -4,6 +4,7 @@ import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'sessions.sidebar.projectAction.active': 'Виконується дія проєкту',
   ...settingsDict,
   ...linearIssuePickerI18n.uk,
   ...linearPanelI18n.uk,
@@ -705,6 +706,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.sessionDialogs.worktree.attachedArchived": "Прикріплене worktree заархівовано.",
   "sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural": "Прикріплені worktree заархівовано.",
   "sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved": "Worktree заархівовано, віддалені гілки видалено.",
+  "sessions.missingDirectory.movedToProject": "Теки цієї сесії більше не існує. Сесію перенесено до {project}.",
+  "sessions.sidebar.group.worktreeMissing": "Теки worktree немає",
   "sessions.sidebar.sessionDialogs.worktree.label": "Worktree",
   "sessions.sidebar.sessionDialogs.worktree.pathUnavailable": "Шлях worktree недоступний.",
   "sessions.sidebar.sessionDialogs.worktree.uncommittedWarning": "Незакомічені зміни буде скасовано.",

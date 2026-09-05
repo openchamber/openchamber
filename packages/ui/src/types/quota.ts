@@ -19,6 +19,7 @@ export type QuotaProviderId =
   | 'crof'
   | 'deepseek'
   | 'exe-dev'
+  | 'hyper'
   | 'neuralwatt'
   | 'xai';
 

@@ -19,13 +19,14 @@ const AUTH = JSON.stringify({
   'opencode-go': { key: 'test-token' },
   'zai-coding-plan': { key: 'test-token' },
   deepseek: { key: 'test-token' },
+  hyper: { key: 'test-token' },
   'github-copilot': { access: 'test-token' },
   anthropic: { access: 'test-token', refresh: 'test-refresh' },
 });
 ((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
 ((fs as unknown) as { readFileSync: () => string }).readFileSync = () => AUTH;
 
-import { fetchQuotaForProvider } from './quotaProviders';
+import { fetchHyperQuota, fetchQuotaForProvider } from './quotaProviders';
 
 type MockResponseInit = { ok?: boolean; status?: number };
 
@@ -83,6 +84,13 @@ const stubFetchReturning = (resolver: () => Promise<unknown>): void => {
 const stubFetchFailing = (json: () => Promise<unknown>, init: MockResponseInit): void => {
   globalThis.fetch = (async () => ({ json, ...init }) as unknown as Response) as typeof fetch;
 };
+
+test('dispatches Charm Hyper through the generic quota API', async () => {
+  stubFetchReturning(async () => Response.json({ balance: 100 }));
+  const result = await fetchQuotaForProvider('hyper');
+  assert.equal(result.ok, true);
+  assert.equal(result.usage?.windows.credits?.valueLabel, '100');
+});
 
 describe('OpenCode Go quota provider (VS Code parity)', () => {
   test('uses the opencode-go key from auth.json', async () => {
@@ -713,4 +721,131 @@ describe('DeepSeek quota provider (VS Code parity)', () => {
     fsMock.existsSync = ORIGINAL_FS.existsSync;
     fsMock.readFileSync = ORIGINAL_FS.readFileSync;
   });
+});
+
+describe('Charm Hyper quota provider (VS Code parity)', () => {
+  const readAuth = () => ({ hyper: { key: 'test-token' } });
+
+  for (const { balance, credits, dollars } of [
+    { balance: 100, credits: '100', dollars: '$5.00' },
+    { balance: '50', credits: '50', dollars: '$2.50' },
+    { balance: 25.5, credits: '25.50', dollars: '$1.28' },
+    { balance: 0, credits: '0', dollars: '$0.00' },
+    { balance: '0', credits: '0', dollars: '$0.00' },
+  ]) {
+    test(`formats balance ${JSON.stringify(balance)} without an untranslated unit`, async () => {
+      const result = await fetchHyperQuota({ readAuth, fetchImpl: async () => Response.json({ balance }) });
+      assert.equal(result.ok, true);
+      assert.equal(result.providerId, 'hyper');
+      assert.equal(result.configured, true);
+      assert.ok(result.usage);
+      assert.equal(result.usage.windows.credits?.valueLabel, credits);
+      assert.equal(result.usage.windows.credits_balance?.valueLabel, dollars);
+      for (const window of Object.values(result.usage.windows)) {
+        assert.equal(window.usedPercent, null);
+        assert.equal(window.remainingPercent, null);
+        assert.equal(window.windowSeconds, null);
+        assert.equal(window.resetAt, null);
+        assert.equal(window.resetAfterSeconds, null);
+      }
+    });
+  }
+
+  for (const payload of [
+    {}, null, [], { balance: '' }, { balance: ' \t ' }, { balance: 'NaN' },
+    { balance: 'Infinity' }, { balance: null }, { balance: true }, { balance: [] },
+    { balance: {} },
+  ]) {
+    test(`rejects invalid payload ${JSON.stringify(payload)} instead of showing zero`, async () => {
+      const result = await fetchHyperQuota({ readAuth, fetchImpl: async () => Response.json(payload) });
+      assert.equal(result.ok, false);
+      assert.equal(result.configured, true);
+      assert.equal(result.error, 'No quota data in response');
+      assert.equal(result.usage, null);
+    });
+  }
+
+  for (const [index, auth] of [
+    { hyper: { key: 'test-token' } },
+    { hyper: { token: 'test-token' } },
+    { hyper: 'test-token' },
+    { hyper: { key: '  ', token: 'test-token' } },
+    { hyper: { key: 42, token: 'test-token' } },
+  ].entries()) {
+    test(`uses validated credential variant ${index} for the documented request`, async () => {
+      let requests = 0;
+      const result = await fetchHyperQuota({
+        readAuth: () => auth,
+        fetchImpl: async (url, options) => {
+          requests += 1;
+          assert.equal(url, 'https://hyper.charm.land/v1/credits');
+          assert.equal(options.method, 'GET');
+          assert.equal(new Headers(options.headers).get('Authorization'), 'Bearer test-token');
+          assert.ok(options.signal instanceof AbortSignal);
+          return Response.json({ balance: 100 });
+        },
+      });
+      assert.equal(requests, 1);
+      assert.equal(result.ok, true);
+      assert.equal(JSON.stringify(result).includes('test-token'), false);
+    });
+  }
+
+  for (const [index, readInvalidAuth] of [
+    () => ({}),
+    () => ({ hyper: { key: '' } }),
+    () => ({ hyper: { key: '  ' } }),
+    () => ({ hyper: { key: 42 } }),
+  ].entries()) {
+    test(`does not request usage with missing or invalid credential variant ${index}`, async () => {
+      let requests = 0;
+      const result = await fetchHyperQuota({
+        readAuth: readInvalidAuth,
+        fetchImpl: async () => {
+          requests += 1;
+          return Response.json({ balance: 100 });
+        },
+      });
+      assert.equal(requests, 0);
+      assert.equal(result.ok, false);
+      assert.equal(result.configured, false);
+      assert.equal(result.error, 'Not configured');
+    });
+  }
+
+  for (const { status, error } of [
+    { status: 401, error: 'Session expired — please re-authenticate with Charm Hyper' },
+    { status: 403, error: 'Session expired — please re-authenticate with Charm Hyper' },
+    { status: 429, error: 'API error: 429' },
+    { status: 500, error: 'API error: 500' },
+  ]) {
+    test(`reports HTTP ${status} as a failure`, async () => {
+      const result = await fetchHyperQuota({ readAuth, fetchImpl: async () => new Response(null, { status }) });
+      assert.equal(result.ok, false);
+      assert.equal(result.configured, true);
+      assert.equal(result.error, error);
+      assert.equal(result.usage, null);
+    });
+  }
+
+  test('reports invalid JSON as a parse failure', async () => {
+    const result = await fetchHyperQuota({ readAuth, fetchImpl: async () => new Response('{') });
+    assert.equal(result.error, 'Invalid response from provider');
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.usage, null);
+  });
+
+  for (const { failure, message } of [
+    { failure: new DOMException('Timed out', 'TimeoutError'), message: 'Request timed out' },
+    { failure: new Error('Network unavailable'), message: 'Network unavailable' },
+  ]) {
+    test(`reports ${message}`, async () => {
+      const result = await fetchHyperQuota({ readAuth, fetchImpl: async () => { throw failure; } });
+      assert.equal(result.error, message);
+      assert.equal(result.ok, false);
+      assert.equal(result.configured, true);
+      assert.equal(result.usage, null);
+    });
+  }
 });
