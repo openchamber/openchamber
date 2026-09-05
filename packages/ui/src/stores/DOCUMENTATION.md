@@ -64,7 +64,11 @@ These stores coordinate persistent project/session metadata across multiple view
 
 `useProjectContextStore.ts` caches server-owned project notes, todos, and plan links, keyed by the path-derived project id. It replaced a pair of `window` CustomEvents that made every mounted notes panel re-read the whole project config. Writes are optimistic and roll back on failure; they are serialized per project, because the server's own store does a read-modify-write and two concurrent saves would otherwise race it. A load that resolves while a write is in flight keeps the local value for that field group only, so a slow snapshot cannot undo newer typing while still delivering the plan list it fetched. A failed load sets `error` and preserves the cached snapshot — an unreachable server must never render as "this project has no notes". Note and plan creation are deliberately not optimistic, since ids and timestamps are assigned by the server. Notes, todos, and plans are written through separate routes and tracked by separate in-flight flags, so a todo toggle cannot clobber a note edit in the same window. Pinned notes and plans are assembled into a synthetic context part by `lib/projectContextPinning.ts` at send time; that module tracks per-session what it already sent so an unchanged pinned set is not re-sent every turn.
 
-`messageQueueStore.ts` keeps a queued message until its own send resolves, so between dispatch and resolution the entry is still visible to every reader. Dispatchers must therefore mark the send (`markSending`/`clearSending`) and read `getSendableQueue()` — or filter `sendingIds` themselves — instead of dispatching straight from `queuedMessages`; otherwise a composer submit merges a message the auto-send hook is already delivering and it is sent twice (the window is seconds over a relay). `clearQueue()` retains in-flight entries for the same reason. `sendingIds` is deliberately not persisted: a restart has no in-flight sends, and a stale flag would strand a queued message. Desktop queues use the configured host id as runtime identity, not the current API URL, because an SSH reconnect allocates a new local forwarding port while the remote host remains the same.
+`messageQueueStore.ts` has two owners, decided by `isServerOwnedMessageQueue()`. On web, desktop, and mobile the OpenChamber server owns the queue (`packages/web/server/lib/message-queue/`): it delivers queued messages when the session goes idle whether or not any UI is open, and the store is a projection of it — `hydrate()` loads the server snapshot for the active runtime, `openchamber:message-queue.updated` broadcasts keep it current, and every mutation is optimistic locally then settled on the server's copy of that session (a failed round-trip re-reads the server instead of guessing). A per-key server revision rejects stale snapshots. An empty session that arrives without a directory (servers before 1.22.2 dropped it once the queue emptied) clears every projection of that session id in the runtime, because a session id is unique across directories. Projection items carry attachment metadata only and no captured context; `popToInput()`/`takeForSend()` remove the message on the server and get the full payload back, which is why both are async.
+
+A queued message is captured whole, so whoever delivers it sends exactly what the composer would have: `text` (the content with its agent mention stripped and `@file` mentions already resolved into `attachments`), `agentMention`, and `context` — every chip the composer had attached (inline comments, terminal selections, browser annotations, PR comments/checks, quotes, linked issue/PR/Linear references, pending synthetic parts) plus the skill instruction derived from the text. `QueuedContextPart` distinguishes attached items (restored to the chips when the message is edited) from derived instructions (re-derived on send, never restored) and from synthetic parts other surfaces handed the composer (restored as pending). Context is captured by `buildComposerContext` and delivered by `queuedContextToParts` (`components/chat/composer/submit/buildOutgoingMessage.ts`), the same functions the composer uses for its own send. Nothing is re-resolved at delivery: the server has no agent list, no confirmed mentions, and no draft store. Messages a previous build left in this browser are uploaded once on the first hydration of a runtime and then dropped from persistence for that runtime (`partialize` skips server-owned runtime keys). VS Code has no server and keeps the local queue with the foreground auto-send hook (`useQueuedMessageAutoSend`, enabled only there); `useMessageQueueHoldSync` tells the server to hold a session's queue while a UI-driven auto-review run is going.
+
+In the local (VS Code) mode the store keeps a queued message until its own send resolves, so between dispatch and resolution the entry is still visible to every reader. Dispatchers must therefore mark the send (`markSending`/`clearSending`) and read `getSendableQueue()` — or filter `sendingIds` themselves — instead of dispatching straight from `queuedMessages`; otherwise a composer submit merges a message the auto-send hook is already delivering and it is sent twice (the window is seconds over a relay). `clearQueue()` retains in-flight entries for the same reason. `sendingIds` is deliberately not persisted: a restart has no in-flight sends, and a stale flag would strand a queued message; in the server-owned mode it mirrors the server's in-flight item. Desktop queues use the configured host id as runtime identity, not the current API URL, because an SSH reconnect allocates a new local forwarding port while the remote host remains the same.
 
 `useGlobalSessionsStore.ts` owns cold/global active and archived session coverage. Its entity map and active root, parent/child, and directory indexes are maintained in the same transaction as the compatibility arrays and `sessionsByDirectory`. Full authoritative snapshots may rebuild those indexes once; direct create, update, move, archive, and delete mutations update only affected hierarchy and directory buckets. Metadata-only updates preserve the structure reference. It is complementary to directory child stores: it is not the source of live busy/retry status or session messages.
 
@@ -111,6 +115,10 @@ run monitor, and made Zustand persist rewrite the session-storage snapshot per c
 
 Invariants to preserve when editing:
 
+- Directory keys come from `normalizeTerminalDirectory` (`lib/pathNormalization.ts`) and
+  nothing else. Server `cwd` strings, sidebar project paths and the panel's own directory
+  all pass through it, so a folder has exactly one entry on every platform. Read `sessions`
+  through `getDirectoryState`, never by indexing the map with a path normalized elsewhere.
 - Output actions (`appendToBuffer`, `replaceBuffer`) must leave `sessions` referentially
   unchanged; only `buffers` and `nextChunkId` may change.
 - Buffer entries are owned by their tab. `closeTab`, `removeDirectory`, `clearAll`, and
@@ -120,6 +128,25 @@ Invariants to preserve when editing:
   projection while both are referentially unchanged, and the storage adapter skips a write
   for an unchanged projection, so streaming output performs no persistence work.
 - Consumers that react to output must subscribe to `buffers`, not `sessions`.
+- Action tab IDs remain stable while each command execution receives a fresh terminal ID.
+  Starting or adopting a different execution resets its buffer sequence and preview together;
+  reconnecting to the same execution and observing its exit preserve scrollback.
+- Reconciliation selects one record per action before updating tabs. A running execution wins
+  over retained exited records independently of listing order. An in-progress stop remains
+  stopping until the same execution exits or explicit termination failure restores running.
+- `terminalSessionObserver` shares one five-second refresh loop per terminal adapter across
+  the visible sidebar, headers and panels. The existing empty-cwd listing returns all server
+  sessions in one request; directory subscribers receive only their own records. A sidebar
+  subscriber reconciles the complete list, including omitted known action directories.
+  Focus and online recovery refresh immediately. Hidden/offline clients pause, failed reads
+  preserve state, and the last consumer stops the loop. Replaced runtimes cannot publish old
+  responses. Mutation revisions are captured for every subscribed scope before the request.
+- Passive action adoption may restore output but has no launch-time authority to open browser
+  tabs. Preview navigation belongs to the initiating host directory even for a parent action.
+- Server session listings capture the directory's per-action mutation revisions when the
+  request starts. Coalesced callers share that first snapshot. A response cannot replace or
+  remove an action execution mutated after its request began, while a fresh successful empty
+  response still clears an omitted run.
 
 ## Git / PR Stores
 
@@ -154,7 +181,8 @@ Important properties:
 - status, branches, log, identity, repository probes, and prefetch diffs commit through runtime and per-channel generations
 - status mutations advance a revision so older refreshes cannot undo optimistic or confirmed index changes
 - a successful status-affecting git mutation also advances that revision: the HTTP adapter's cache invalidation notifies the store through `lib/gitStatusInvalidation.ts` (the VS Code bridge adapter has no client-side status cache, so it emits nothing today)
-- `fetchAll({ force: true })` forces the status fetch as well as the log refresh
+- `fetchStatus({ force: true })` and `fetchAll({ force: true })` cross both the store and runtime transport caches; a forced reconciliation must reach the active runtime rather than reuse an unexpired browser status snapshot
+- status requests do not start while a managed worktree bootstrap is pending, and a response admitted before bootstrap began is discarded if it completes after the directory enters `pending`; the `--no-checkout` population window is not user working-tree state
 - branch persistence is versioned, bounded, runtime-scoped, and claims the ambiguous legacy cache once
 - diff data has per-directory and aggregate count/UTF-8-byte limits; oversized single entries are rejected
 
@@ -218,11 +246,29 @@ Each of them therefore keeps two things:
   tracks the **active** project only.
 
 Thinking variants keep the effective value in `currentVariant` so existing send
-paths capture a stable configuration. The transient `currentVariantSelection`
-distinguishes automatic initialization from a picker or shortcut choosing an
-explicit override or `Default`; returning to `Default` restores its inherited
-effective value. Only explicit overrides are stored in the per-session
-selection store.
+paths capture a stable configuration. `currentVariantSelection` says where that
+value came from: a string is an effort chosen in the picker or by the shortcut,
+`null` is an explicit `Default`, and `undefined` is automatic initialization,
+which lets the inherited default apply.
+
+`Default` sends no effort at all. It cannot resolve back to the inherited
+default: the settings default would take effect again, and the next assistant
+reply echoes that effort back as an explicit choice, so the picker jumps off
+`Default` one message after the user chose it. For the same reason the
+per-session selection store records an explicit `Default` (as `null`) instead of
+clearing the entry — a cleared entry is indistinguishable from never having
+chosen, and the settings default wins again on the next agent or session switch.
+
+Only a place where the user chose may write `null`. Restore paths — message
+history, a preserved manual override — pass their own "found nothing" through
+as `undefined`, because a session whose history carries no effort is not a
+session where `Default` was picked. A restore that manufactures `null` latches
+the session onto `Default`: `null` outranks the agent and settings defaults by
+design, so the concrete effort it displaced can never come back.
+
+Every write of `currentVariant` writes `currentVariantSelection` with it. They
+are one selection; updating only the effective value leaves the picker showing
+one effort while sends carry another.
 
 Every loader and mutation takes an explicit directory; omitting it means the
 active project, which is what non-Settings callers pass. A load for another
@@ -315,9 +361,11 @@ Do not raise limits casually.
 Expected model:
 
 - `GitView` / `DiffView` ensure current-directory Git state when visible
+- the Git view gates its status-derived content and actions while a managed worktree bootstrap is pending, then keeps the gate closed until one forced fresh status read succeeds; refresh failure exposes retry without revealing the cached bootstrap snapshot
 - explicit Git actions refresh status/branches/log as needed
 - every status-affecting git mutation invalidates the HTTP adapter's status cache on its success path (failed mutations invalidate nothing), so the follow-up refresh is authoritative instead of the pre-mutation cache entry
-- a mounted file-mutating tool issues a one-shot Git refresh hint when it transitions from active to successfully finalized; remounting historical completed tools does not replay the hint
+- the sync event handler issues one Git refresh hint when a live file-mutating tool first reaches `completed`; this does not depend on `ToolPart` mounting, and duplicate terminal events do not replay the hint
+- every Git refresh hint invalidates the store request generation and the HTTP status cache before visible consumers request status, so they share one post-mutation read instead of accepting a cached or pre-mutation response
 - a successful dirty save from the in-app file editor issues a path-scoped Git refresh hint; clean autosave checks remain no-ops
 - refresh hints with authoritative file paths invalidate only those cached and currently rendered diffs before status refresh; pathless tools request status reconciliation without broadly remounting DiffView
 - targeted diff remounts preserve the user's current file-section anchor and intra-file offset before paint instead of resetting the stacked view to the top

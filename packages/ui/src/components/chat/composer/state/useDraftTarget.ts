@@ -17,6 +17,7 @@
 import React from 'react';
 
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useWorktreeBootstrapPending } from '@/hooks/useWorktreeBootstrapPending';
 import { formatDirectoryName } from '@/lib/utils';
 import { useGitBranches, useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -191,6 +192,14 @@ export function useDraftTarget(enabled: boolean) {
         [newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.directoryOverride, selectedDraftProjectPath],
     );
 
+    // The draft's own pending flags clear once the directory exists, which is
+    // before setup commands and the initial git reset finish; the bootstrap
+    // state covers that remaining window (and creations the draft never knew
+    // about, such as the New Worktree dialog), so the probe never reads the
+    // transient bootstrap files as the branch being dirty.
+    const selectedDraftDirectoryBootstrapPending = useWorktreeBootstrapPending(selectedDraftDirectory);
+    const draftDirectoryNeedsFreshStatusRef = React.useRef<string | null>(null);
+
     React.useEffect(() => {
         if (
             !enabled
@@ -198,15 +207,26 @@ export function useDraftTarget(enabled: boolean) {
             || selectedDraftProject?.kind === 'chat'
             || newSessionDraft?.pendingWorktreeRequestId
             || newSessionDraft?.bootstrapPendingDirectory
+            || selectedDraftDirectoryBootstrapPending
         ) {
+            if (selectedDraftDirectoryBootstrapPending && selectedDraftDirectory) {
+                draftDirectoryNeedsFreshStatusRef.current = selectedDraftDirectory;
+            }
             setDirtyDraftDirectory(null);
             return;
         }
 
         let cancelled = false;
         setDirtyDraftDirectory(null);
-        getGitStatus(selectedDraftDirectory, { mode: 'light' })
+        const needsFreshStatus = draftDirectoryNeedsFreshStatusRef.current === selectedDraftDirectory;
+        const statusRequest = needsFreshStatus
+            ? getGitStatus(selectedDraftDirectory, { mode: 'light', fresh: true })
+            : getGitStatus(selectedDraftDirectory, { mode: 'light' });
+        statusRequest
             .then((status) => {
+                if (!cancelled && needsFreshStatus && draftDirectoryNeedsFreshStatusRef.current === selectedDraftDirectory) {
+                    draftDirectoryNeedsFreshStatusRef.current = null;
+                }
                 if (!cancelled && (status.files?.length ?? 0) > 0) {
                     setDirtyDraftDirectory(selectedDraftDirectory);
                 }
@@ -218,7 +238,7 @@ export function useDraftTarget(enabled: boolean) {
         return () => {
             cancelled = true;
         };
-    }, [enabled, newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.pendingWorktreeRequestId, selectedDraftDirectory, selectedDraftProject?.kind]);
+    }, [enabled, newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.pendingWorktreeRequestId, selectedDraftDirectory, selectedDraftDirectoryBootstrapPending, selectedDraftProject?.kind]);
 
     const shouldKeepMissingSelectedDraftDirectory = React.useMemo(() => {
         const pendingDirectory = normalizePath(newSessionDraft?.bootstrapPendingDirectory ?? null);

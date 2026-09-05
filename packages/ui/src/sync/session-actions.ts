@@ -33,6 +33,8 @@ import { getBtwOriginalSessionID, getBtwSessionID, isBtwSession, withoutBtwSessi
 import { withLinkedIssue, type LinkedIssue } from "@/lib/linkedIssues"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
+import { requestSessionArchiveBatch } from "./session-archive-batch"
+import { registerBulkArchiveEchoes, releaseBulkArchiveEchoes } from "./bulk-archive-echo"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { markAmbiguousTransportFailure } from "@/lib/relay/transport-error"
 import { getErrorStatus, isAmbiguousSendFailure } from "./send-failure-classification"
@@ -75,20 +77,29 @@ let _optimisticAdd: ((input: OptimisticAddInput) => void) | null = null
 let _optimisticRemove: ((input: OptimisticRemoveInput) => void) | null = null
 let _optimisticConfirm: ((input: OptimisticConfirmInput) => void) | null = null
 
-function sessionMutationPatch(
+/**
+ * Revision patch for one or more sessions changing in the same store write.
+ *
+ * A batch bumps the revision once, because it is one state change: consumers
+ * compare revisions to decide whether their view of the list is stale, and a
+ * batch leaves them stale exactly once rather than once per session.
+ */
+function sessionsMutationPatch(
   state: ReturnType<DirectoryStoreApi["getState"]>,
-  sessionId: string,
+  sessionIds: Iterable<string>,
   deleted: boolean,
 ) {
   const revision = (state.sessionRevision ?? 0) + 1
   const sessionEventRevision = { ...(state.sessionEventRevision ?? {}) }
   const sessionDeletedRevision = { ...(state.sessionDeletedRevision ?? {}) }
-  if (deleted) {
-    sessionDeletedRevision[sessionId] = revision
-    delete sessionEventRevision[sessionId]
-  } else {
-    sessionEventRevision[sessionId] = revision
-    delete sessionDeletedRevision[sessionId]
+  for (const sessionId of sessionIds) {
+    if (deleted) {
+      sessionDeletedRevision[sessionId] = revision
+      delete sessionEventRevision[sessionId]
+    } else {
+      sessionEventRevision[sessionId] = revision
+      delete sessionDeletedRevision[sessionId]
+    }
   }
   return {
     sessionListSource: "live" as const,
@@ -96,6 +107,14 @@ function sessionMutationPatch(
     sessionEventRevision,
     sessionDeletedRevision,
   }
+}
+
+function sessionMutationPatch(
+  state: ReturnType<DirectoryStoreApi["getState"]>,
+  sessionId: string,
+  deleted: boolean,
+) {
+  return sessionsMutationPatch(state, [sessionId], deleted)
 }
 
 function invalidateSessionLoads(sessionId: string, directories: Iterable<string | null | undefined>): void {
@@ -284,8 +303,11 @@ function reconcileSessionMove(
   const destinationStore = stores?.ensureChild(destinationDirectory, { bootstrap: false })
   const sourceState = sourceStore?.getState()
   const destinationState = destinationStore?.getState()
-  const liveSession = sourceState?.session.find((candidate) => candidate.id === session.id) ?? session
-  const movedSession = { ...liveSession, directory: destinationDirectory } as Session
+  const liveSession = sourceState?.session.find((candidate) => candidate.id === session.id)
+  const movedSession = {
+    ...mergeSessionDirectoryMetadata(session, liveSession),
+    directory: destinationDirectory,
+  } as Session
 
   if (!destinationStore || !destinationState || sourceStore === destinationStore) {
     return movedSession
@@ -351,6 +373,7 @@ export async function moveSessionToDirectory(
   sourceDirectory: string,
   destinationDirectory: string,
   moveChanges = true,
+  expectedRuntimeKey?: string,
 ): Promise<void> {
   const result = await opencodeClient.getSdkClient().experimental.controlPlane.moveSession({
     sessionID: session.id,
@@ -358,6 +381,10 @@ export async function moveSessionToDirectory(
     moveChanges,
   })
   assertSdkSuccess(result, "Move session")
+
+  // If the runtime changed during the control-plane request, the server move
+  // already happened, but we must not publish stale local state to the UI/stores.
+  if (isStaleRuntime(expectedRuntimeKey)) return
 
   invalidateSessionLoads(session.id, [sourceDirectory, destinationDirectory])
 
@@ -1039,6 +1066,50 @@ function removeSessionFromLiveStores(sessionId: string, preferredDirectory?: str
   return snapshots
 }
 
+/**
+ * Remove a batch of server-confirmed sessions from every live child store.
+ *
+ * Each affected store is written once for the whole batch. Removing the
+ * sessions one at a time notified every subscriber — and therefore re-rendered
+ * the sidebar — once per session, which is what made archiving a worktree's
+ * sessions block the main thread for seconds.
+ */
+function removeSessionsFromLiveStores(sessionIds: Iterable<string>, preferredDirectory?: string): SessionListSnapshot[] {
+  const ids = new Set(sessionIds)
+  if (!_childStores || ids.size === 0) return []
+
+  const snapshots: SessionListSnapshot[] = []
+  const visited = new Set<string>()
+  const candidates: Array<[string, DirectoryStoreApi]> = []
+
+  if (preferredDirectory) {
+    const preferredStore = _childStores.children.get(preferredDirectory)
+    if (preferredStore) {
+      candidates.push([preferredDirectory, preferredStore])
+      visited.add(preferredDirectory)
+    }
+  }
+
+  for (const entry of _childStores.children.entries()) {
+    if (visited.has(entry[0])) continue
+    candidates.push(entry)
+  }
+
+  for (const [directory, store] of candidates) {
+    const current = store.getState()
+    const removed = current.session.filter((session) => ids.has(session.id)).map((session) => session.id)
+    if (removed.length === 0) continue
+
+    snapshots.push({ directory })
+    store.setState({
+      session: current.session.filter((session) => !ids.has(session.id)),
+      ...sessionsMutationPatch(current, removed, true),
+    })
+  }
+
+  return snapshots
+}
+
 function cleanupSessionWorktreeMetadata(sessionId: string): void {
   useSessionUIStore.getState().setWorktreeMetadata(sessionId, null)
 }
@@ -1252,7 +1323,14 @@ export type ArchiveSessionsOptions = {
 }
 
 /**
- * Archive several sessions sequentially, preserving partial results.
+ * Archive several sessions, preserving partial results.
+ *
+ * Sessions that carry no review or btw link are archived by their directory's
+ * server in one request, and the whole answer is reconciled with a single store
+ * write. The remainder — review sessions, btw forks, sessions with an active
+ * btw fork, and any session this client does not hold — keep the per-session
+ * path, because unlinking a partner is UI-owned work that reads and rewrites
+ * another session's metadata.
  *
  * One failed session never blocks or erases the others: it is reported in
  * `failedIds` while the remaining IDs are still attempted. When
@@ -1269,10 +1347,55 @@ export async function archiveSessions(
   const archivedIds: string[] = []
   const failedIds: string[] = []
   const expectedRuntimeKey = options?.expectedRuntimeKey ?? getRuntimeKey()
+  if (ids.length === 0) return { archivedIds, failedIds }
 
-  for (const [index, id] of ids.entries()) {
+  const plan = planArchiveBatches(ids)
+
+  for (const [directory, batchIds] of plan.batchesByDirectory) {
     if (isStaleRuntime(expectedRuntimeKey)) {
-      failedIds.push(...ids.slice(index))
+      failedIds.push(...batchIds)
+      continue
+    }
+
+    const archivedAt = Date.now()
+    registerBulkArchiveEchoes(
+      expectedRuntimeKey,
+      batchIds.map((id) => ({ id, archivedAt })),
+    )
+    const result = await requestSessionArchiveBatch(directory, batchIds, archivedAt)
+    if (isStaleRuntime(expectedRuntimeKey)) {
+      failedIds.push(...batchIds)
+      continue
+    }
+
+    if (result.outcome === "archived") {
+      releaseBulkArchiveEchoes(expectedRuntimeKey, batchIds)
+      registerBulkArchiveEchoes(
+        expectedRuntimeKey,
+        result.archived.flatMap((session) => (
+          session.time?.archived === undefined
+            ? []
+            : [{ id: session.id, archivedAt: session.time.archived }]
+        )),
+      )
+      commitArchivedSessions(result.archived, directory)
+      archivedIds.push(...result.archived.map((session) => session.id))
+      failedIds.push(...result.failedIds)
+      continue
+    }
+
+    // The runtime does not serve the batch route, or its answer could not be
+    // trusted. Archiving each session individually is slower but reaches the
+    // same state, and re-archiving a session the server already archived writes
+    // the same field again.
+    console.warn("[session-actions] archive batch unavailable, archiving one by one", result.reason)
+    releaseBulkArchiveEchoes(expectedRuntimeKey, batchIds)
+    plan.individualIds.push(...batchIds)
+  }
+
+  for (const [index, id] of plan.individualIds.entries()) {
+    if (isStaleRuntime(expectedRuntimeKey)) {
+      failedIds.push(...plan.individualIds.slice(index))
       break
     }
     if (await archiveSession(id, expectedRuntimeKey)) archivedIds.push(id)
@@ -1280,6 +1403,82 @@ export async function archiveSessions(
   }
 
   return { archivedIds, failedIds }
+}
+
+/**
+ * A session whose archive also has to rewrite another session's metadata.
+ *
+ * Review sessions and btw forks point at a parent that must be unlinked, and a
+ * parent with an active btw fork has to delete that fork. Those are
+ * read-modify-write pairs on a second session, so they stay on the per-session
+ * path instead of the server batch.
+ */
+function hasLinkedSessionCleanup(session: Session): boolean {
+  return isReviewSession(session) || isBtwSession(session) || Boolean(getBtwSessionID(session))
+}
+
+/**
+ * Split the requested IDs into per-directory server batches and the sessions
+ * that must be archived individually.
+ *
+ * Link classification reads this client's session records rather than
+ * refetching each session: those records are kept current by the same
+ * `session.updated` events that publish a link created anywhere else, so a
+ * fetch per session would buy no authority the store does not already have.
+ * A session this client does not hold is classified as individual, which
+ * restores the per-session fetch for exactly the cases where the store has
+ * nothing to say.
+ */
+function planArchiveBatches(ids: string[]) {
+  const global = useGlobalSessionsStore.getState()
+  const knownSessions = new Map<string, Session>()
+  for (const session of [...global.activeSessions, ...global.archivedSessions]) {
+    knownSessions.set(session.id, session)
+  }
+  for (const store of _childStores?.children.values() ?? []) {
+    for (const session of store.getState().session) knownSessions.set(session.id, session)
+  }
+
+  const batchesByDirectory = new Map<string, string[]>()
+  const individualIds: string[] = []
+
+  for (const id of ids) {
+    const session = knownSessions.get(id)
+    const directory = session
+      ? resolveGlobalSessionDirectory(session) ?? getSessionDirectory(id)
+      : undefined
+    if (!session || !directory || hasLinkedSessionCleanup(session)) {
+      individualIds.push(id)
+      continue
+    }
+    const batch = batchesByDirectory.get(directory)
+    if (batch) batch.push(id)
+    else batchesByDirectory.set(directory, [id])
+  }
+
+  return { batchesByDirectory, individualIds }
+}
+
+/**
+ * Reconcile a server-confirmed archive batch with one write per store.
+ *
+ * This mirrors what `archiveSession` does for a single session — drop it from
+ * the live directory stores, invalidate its cached messages, move it to the
+ * archived bucket, and clear it if it was open — with the per-session store
+ * notifications collapsed into one.
+ */
+function commitArchivedSessions(sessions: Session[], directory: string): void {
+  if (sessions.length === 0) return
+
+  const ids = sessions.map((session) => session.id)
+  const snapshots = removeSessionsFromLiveStores(ids, directory)
+  const directories = [...snapshots.map((snapshot) => snapshot.directory), directory]
+  for (const id of ids) invalidateSessionLoads(id, directories)
+
+  useGlobalSessionsStore.getState().upsertSessions(sessions)
+
+  const ui = useSessionUIStore.getState()
+  if (ui.currentSessionId && ids.includes(ui.currentSessionId)) ui.setCurrentSession(null)
 }
 
 /**
@@ -1299,6 +1498,65 @@ export async function archiveSessions(
  */
 const UNARCHIVED_TIMESTAMP = 0
 
+async function getProjectPrimaryDirectory(projectID?: string): Promise<string | null> {
+  if (!projectID) return null
+
+  try {
+    const result = await sdk().project.list()
+    const projects = assertSdkData(result, "project.list")
+    const projectDirectory = projects.find((candidate) => candidate.id === projectID)?.worktree?.trim()
+    return projectDirectory ? normalizePath(projectDirectory) ?? projectDirectory : null
+  } catch {
+    return null
+  }
+}
+
+type MissingWorktreeRestore = { sourceDirectory: string; destinationDirectory: string }
+
+async function resolveMissingWorktreeRestore(
+  session: Session & { project?: { worktree?: string | null } | null },
+): Promise<MissingWorktreeRestore | null> {
+  const ownedDirectory = resolveSessionOwnedDirectory(session)
+  const projectWorktree = session.project?.worktree?.trim()
+  if (!ownedDirectory || !projectWorktree) return null
+
+  let availability: Awaited<ReturnType<typeof opencodeClient.getDirectoryAvailability>>
+  try {
+    availability = await opencodeClient.getDirectoryAvailability(ownedDirectory)
+  } catch {
+    return null
+  }
+  if (availability !== "missing") return null
+
+  const projectDirectory = await getProjectPrimaryDirectory(session.projectID)
+  if (!projectDirectory || projectDirectory === ownedDirectory) return null
+  return { sourceDirectory: ownedDirectory, destinationDirectory: projectDirectory }
+}
+
+function getRestoreSubtree(rootSession: Session, sourceDirectory: string): Array<{ session: Session; sourceDirectory: string }> {
+  const global = useGlobalSessionsStore.getState()
+  const sessionsById = new Map<string, Session>()
+
+  for (const session of [...global.activeSessions, ...global.archivedSessions]) {
+    const current = sessionsById.get(session.id)
+    if (!current || Boolean(session.time?.archived)) sessionsById.set(session.id, session)
+  }
+  sessionsById.set(rootSession.id, rootSession)
+
+  return [...computeSubtreeIds([...sessionsById.values()], rootSession.id)]
+    .map((id) => sessionsById.get(id))
+    .filter((session): session is Session => Boolean(session))
+    .map((session) => ({ session, ownedDirectory: resolveSessionOwnedDirectory(session) }))
+    // Keep a node while it is still archived or still stranded in the
+    // confirmed-missing worktree. The second clause matters on retry: a prior
+    // attempt may have already unarchived the root (server echo made it active)
+    // but failed to move it, so filtering on `archived` alone would drop the
+    // root and report a false success while it stays in the deleted worktree.
+    .filter((entry) => Boolean(entry.session.time?.archived) || entry.ownedDirectory === sourceDirectory)
+    .map((entry) => (entry.ownedDirectory ? { session: entry.session, sourceDirectory: entry.ownedDirectory } : null))
+    .filter((entry): entry is { session: Session; sourceDirectory: string } => entry !== null)
+}
+
 /**
  * Restore one archived session back to the active list.
  *
@@ -1311,8 +1569,34 @@ const UNARCHIVED_TIMESTAMP = 0
  */
 export async function unarchiveSession(sessionId: string, expectedRuntimeKey = getRuntimeKey()): Promise<boolean> {
   if (isStaleRuntime(expectedRuntimeKey)) return false
+  const globalSession = getGlobalSessionSnapshot(sessionId)
   const sessionDirectory = getSessionDirectory(sessionId)
   try {
+    const restore = globalSession
+      ? await resolveMissingWorktreeRestore(globalSession)
+      : null
+    if (isStaleRuntime(expectedRuntimeKey)) return false
+
+    if (globalSession && restore) {
+      for (const { session, sourceDirectory } of getRestoreSubtree(globalSession, restore.sourceDirectory)) {
+        const restored = await opencodeClient.updateSession(
+          session.id,
+          { time: { archived: UNARCHIVED_TIMESTAMP } },
+          sourceDirectory,
+        )
+        if (isStaleRuntime(expectedRuntimeKey)) return false
+        if (!restored) {
+          throw new Error("session.update failed: server did not return the restored session")
+        }
+        if (restored.time?.archived) {
+          throw new Error("session.update failed: server kept the session archived")
+        }
+        await moveSessionToDirectory(restored, sourceDirectory, restore.destinationDirectory, false, expectedRuntimeKey)
+        if (isStaleRuntime(expectedRuntimeKey)) return false
+      }
+      return true
+    }
+
     const restored = await opencodeClient.updateSession(sessionId, { time: { archived: UNARCHIVED_TIMESTAMP } }, sessionDirectory)
     if (isStaleRuntime(expectedRuntimeKey)) return false
     if (!restored) {

@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils';
 import { Icon } from '@/components/icon/Icon';
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
+import { isIMECompositionEvent } from '@/lib/ime';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
 
 export interface InlineCommentInputProps {
@@ -121,6 +122,8 @@ export function InlineCommentInput({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (isIMECompositionEvent(e)) return;
+
     // As the placeholder promises: Cmd/Ctrl+Enter attaches, plain Enter
     // breaks the line, Escape cancels.
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {

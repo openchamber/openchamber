@@ -1301,12 +1301,10 @@ class OpencodeService {
    * endpoint introduced in OpenCode SDK v1.17.12. Wraps
    * `session.permission.get`.
    *
-   * Returns a tagged `FetchPermissionResult` so the caller can distinguish
-   * a confirmed-resolved permission (HTTP 404) from a fetch failure
-   * (network error, malformed response, or pre-v1.17.12 server without
-   * the V2 endpoint). The auto-accept flow uses this distinction to drop
-   * resolved permissions from the resync output, preventing stale
-   * `permission.list` entries from sticking around in the UI.
+   * Returns the state of the V2 permission authority. Its HTTP 404 result
+   * does not prove that a request from `permission.list` has settled:
+   * list-derived reconciliation must use that list's own reply path.
+   * Fetch failures remain distinct from the V2 resolved result.
    */
   async fetchPermission(
     sessionID: string,
@@ -1663,52 +1661,7 @@ class OpencodeService {
   // SSE infrastructure removed — EventPipeline in sync/event-pipeline.ts handles
   // all SSE event ingestion via the SDK's global.event() async iterator.
 
-  // File Operations
-  async readFile(path: string): Promise<string> {
-    try {
-      const response = await this.client.file.read({
-        path,
-        ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
-      });
-      return String(unwrapSdkData(response, 'file.read'));
-    } catch {
-      // Return placeholder for development
-      return `// Content of ${path}\n// This would be loaded from the server`;
-    }
-  }
-
-  async listFiles(directory?: string): Promise<Record<string, unknown>[]> {
-    try {
-      const targetDir = directory || this.currentDirectory || '/';
-      const response = await this.client.file.list({
-        path: targetDir,
-        ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
-      });
-      const data = unwrapSdkData(response, 'file.list');
-      return Array.isArray(data) ? data as Record<string, unknown>[] : [];
-    } catch {
-      // Return mock data for development
-      return [];
-    }
-  }
-
   // Command Management
-  async listCommands(): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string }>> {
-    const response = await this.client.command.list(
-      this.currentDirectory ? { directory: this.currentDirectory } : undefined
-    );
-    const commands = unwrapSdkData(response, 'command.list');
-    // Return only lightweight info for autocomplete
-    return (commands || []).map((cmd: Record<string, unknown>) => ({
-      name: cmd.name as string,
-      description: cmd.description as string | undefined,
-      agent: cmd.agent as string | undefined,
-      model: cmd.model as string | undefined,
-      source: cmd.source as string | undefined,
-      // Intentionally excluding template to keep memory usage low
-    }));
-  }
-
   async listCommandsWithDetails(directory?: string | null): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string; template?: string }>> {
     const requestDirectory = this.normalizeCandidatePath(directory ?? null) ?? this.currentDirectory;
     const response = await this.client.command.list(
@@ -1724,58 +1677,6 @@ class OpencodeService {
       source: cmd.source as string | undefined,
       template: cmd.template as string | undefined,
     }));
-  }
-
-  async listSkillsWithDetails(): Promise<Array<{ name: string; description?: string; location: string; content?: string }>> {
-    try {
-      const response = await this.client.app.skills(
-        this.currentDirectory ? { directory: this.currentDirectory } : undefined,
-      );
-      const data = response.data;
-      if (!Array.isArray(data)) {
-        return [];
-      }
-
-      const skills: Array<{ name: string; description?: string; location: string; content?: string }> = [];
-      for (const item of data as Array<Record<string, unknown>>) {
-          const name = typeof item.name === 'string' ? item.name.trim() : '';
-          const location = typeof item.location === 'string' ? item.location : '';
-          if (!name || !location) {
-            continue;
-          }
-          const skill: { name: string; description?: string; location: string; content?: string } = { name, location };
-          if (typeof item.description === 'string') skill.description = item.description;
-          if (typeof item.content === 'string') skill.content = item.content;
-          skills.push(skill);
-      }
-      return skills;
-    } catch {
-      return [];
-    }
-  }
-
-  async getCommandDetails(name: string): Promise<{ name: string; template: string; description?: string; agent?: string; model?: string } | null> {
-    try {
-      const response = await this.client.command.list(
-        this.currentDirectory ? { directory: this.currentDirectory } : undefined
-      );
-
-      if (response.data) {
-        const command = response.data.find((cmd: Record<string, unknown>) => cmd.name === name);
-        if (command) {
-          return {
-            name: command.name as string,
-            template: command.template as string,
-            description: command.description as string | undefined,
-            agent: command.agent as string | undefined,
-            model: command.model as string | undefined
-          };
-        }
-      }
-      return null;
-    } catch {
-      return null;
-    }
   }
 
   // Lightweight readiness check. Full diagnostics still live at /health.

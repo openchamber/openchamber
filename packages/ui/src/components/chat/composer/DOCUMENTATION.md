@@ -159,8 +159,24 @@ and the send path reading the same grammar.
   linked issue/PR) becomes its own synthetic text part carrying structured
   metadata** built by `lib/messages/contextParts.ts`; the timeline reads that
   metadata back to render context blocks. PR instructions precede the PR diff.
-  Queueing a message leaves context drafts in their store on purpose — the send
-  that later delivers the queue consumes them.
+  The same module's `buildComposerContext` captures that context when a message
+  is **queued** instead of sent: the chips leave the composer with the message
+  (as `QueuedContextPart`s on the queue item), the server or the VS Code
+  auto-send delivers them through `queuedContextToParts`, and editing the
+  queued message puts them back. A queued message is placed as captured — its
+  mention, file mentions, and skill instruction were resolved when it was
+  queued, never at delivery — and its context follows it before the next
+  queued message.
+- Local slash commands are planned by `submit/slashCommands.ts` before any
+  attached context is consumed. Commands that act on session or UI state
+  (`/undo`, `/redo`, `/compact`, `/timeline`, `/handoff-review`) take only
+  their command text and leave comments, files, and linked context attached;
+  commands that produce a prompt (`/btw` and the magic prompts) send that
+  context with the prompt they produce. Session actions are planned only when
+  a session exists, so typing one into a new-session draft stays on the normal
+  send path. A local command is never queued as text: queueing runs it
+  instead. A failed prompt command restores everything it consumed: text,
+  confirmed mentions, files, comment drafts, and pending synthetic context.
 - `state/useComposerDraft.ts` — a draft belongs to a (runtime, directory,
   session) identity. Writes are debounced while typing but forced at every edge
   where the page may stop running, because a pending timer is not a saved

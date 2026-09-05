@@ -1,5 +1,4 @@
 import { linearIntegrationI18n } from './linear-integration.i18n';
-import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'Відстеження використання OpenCode Go',
   'settings.providers.page.openCodeGo.description': 'Підключіть панель OpenCode Go, щоб бачити ковзну, тижневу та місячну квоту.',
@@ -439,6 +438,11 @@ export const settingsDict = {
   "settings.projects.actions.field.actionNamePlaceholder": "Назва дії",
   "settings.projects.actions.field.command": "Команда",
   "settings.projects.actions.field.commandPlaceholder": "напр. bun run lint",
+  "settings.projects.actions.runIn.label": "Запускати в",
+  "settings.projects.actions.runIn.info": "Виберіть, де запускати цю дію, коли її запущено з пов'язаного worktree.",
+  "settings.projects.actions.runIn.project": "Батьківський checkout",
+  "settings.projects.actions.runIn.worktree": "Поточний worktree",
+  "settings.projects.actions.runIn.aria": "Робоча тека для цієї дії",
   "settings.projects.actions.field.autoOpenUrl": "Автоматичне відкриття URL",
   "settings.projects.actions.field.autoOpenUrlForAria": "Автоматичне відкриття URL для {title}",
   "settings.projects.actions.field.autoOpenUrlDescription": "Відкрити URL із виведення або власний URL нижче",
@@ -2234,5 +2238,6 @@ export const settingsDict = {
   "settings.openchamber.visual.option.followUpBehavior.steer.label": "Steer",
   "settings.openchamber.visual.option.followUpBehavior.queue.label": "Queue",
   ...linearIntegrationI18n.uk,
-  ...thirdPartyIntegrationI18n.uk,
+  'settings.page.integrations.title': 'Інтеграції',
+  'settings.page.integrations.description': 'Підключіть GitHub і Linear, щоб OpenChamber міг працювати з вашими задачами та pull request-ами.',
 } as const;

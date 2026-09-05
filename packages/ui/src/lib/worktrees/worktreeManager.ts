@@ -606,14 +606,16 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
 
   // Update sidebar store so removed worktree disappears immediately
   const normalizedWorktreePath = normalizePath(worktree.path);
-  const sidebarProjectKey = projectDirectory;
   const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
   const updatedByProject = new Map(currentByProject);
-  const projectWorktrees = updatedByProject.get(sidebarProjectKey) ?? [];
-  updatedByProject.set(
-    sidebarProjectKey,
-    projectWorktrees.filter((w) => normalizePath(w.path) !== normalizedWorktreePath),
-  );
+  for (const [projectKey, projectWorktrees] of currentByProject) {
+    const remainingWorktrees = projectWorktrees.filter(
+      (candidate) => normalizePath(candidate.path) !== normalizedWorktreePath,
+    );
+    if (remainingWorktrees.length !== projectWorktrees.length) {
+      updatedByProject.set(projectKey, remainingWorktrees);
+    }
+  }
 
   // Clean up worktreeMetadata for sessions in the removed worktree
   const currentMetadata = useSessionUIStore.getState().worktreeMetadata;

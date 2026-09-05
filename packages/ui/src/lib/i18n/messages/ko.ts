@@ -4,6 +4,7 @@ import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'sessions.sidebar.projectAction.active': '프로젝트 작업 실행 중',
   ...settingsDict,
   ...linearIssuePickerI18n.ko,
   ...linearPanelI18n.ko,
@@ -1643,7 +1644,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.autoReview.reviewSessionLabel': '리뷰 세션',
   'chat.autoReview.actions.open': '열기',
   'chat.autoReview.actions.stop': '중지',
-  'chat.draftDirtyNotice.tooltip': '이 브랜치에는 커밋되지 않은 파일이 있습니다.\n새 세션에서도 보입니다. 커밋 또는 워크트리로 분리할 수 있습니다.',
+  'chat.draftDirtyNotice.tooltip': '이 브랜치에 커밋되지 않은 변경 사항이 있습니다.\n새 세션의 변경 사항과 충돌할 수 있습니다. 먼저 커밋하거나 다른 워크트리를 사용하는 것이 좋습니다.',
   'chat.draftDirtyNotice.indicatorAria': '이 디렉터리에 커밋되지 않은 변경 사항이 있습니다',
   'diffView.hunk.label': '허크',
   'diffView.hunk.stage': '스테이지',
@@ -2210,6 +2211,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.queuedMessage.send': 'send',
   'chat.queuedMessage.removeAria': '큐에서 제거',
   'chat.queuedMessage.reorderAria': '드래그하여 순서 변경',
+  'chat.queuedMessage.toast.queueFailed': '메시지를 대기열에 추가하지 못했습니다. 입력창으로 되돌렸습니다.',
+  'chat.queuedMessage.toast.takeFailed': '대기열의 메시지를 불러오지 못했습니다. 다시 시도해 주세요.',
   'chat.container.returnToParent.aria': '상위 세션으로 돌아가기',
   'chat.container.returnToParent.titleNamed': '돌아가기: {title}',
   'chat.container.returnToParent.title': '상위 세션으로 돌아가기',

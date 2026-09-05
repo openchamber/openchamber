@@ -4,6 +4,7 @@ import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'sessions.sidebar.projectAction.active': 'Acción del proyecto en curso',
   ...settingsDict,
   ...linearIssuePickerI18n.es,
   ...linearPanelI18n.es,
@@ -1619,7 +1620,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.autoReview.reviewSessionLabel': 'Sesión de revisión',
   'chat.autoReview.actions.open': 'Abrir',
   'chat.autoReview.actions.stop': 'Detener',
-  'chat.draftDirtyNotice.tooltip': 'Esta rama tiene archivos sin confirmar.\nLa nueva sesión los verá. Un commit o un worktree los mantiene separados.',
+  'chat.draftDirtyNotice.tooltip': 'Tienes cambios sin confirmar en esta rama.\nUna nueva sesión podría entrar en conflicto con ellos. Quizás quieras confirmarlos primero o usar otro worktree.',
   'chat.draftDirtyNotice.indicatorAria': 'Cambios sin confirmar en este directorio',
   "diffView.hunk.label": "Fragmentos",
   "diffView.hunk.stage": "Preparar",
@@ -2186,6 +2187,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.queuedMessage.send": "send",
   "chat.queuedMessage.removeAria": "Eliminar de la cola",
   "chat.queuedMessage.reorderAria": "Arrastra para reordenar",
+  "chat.queuedMessage.toast.queueFailed": "No se pudo poner el mensaje en cola. Vuelve a estar en el editor.",
+  "chat.queuedMessage.toast.takeFailed": "No se pudo cargar el mensaje en cola. Inténtalo de nuevo.",
   "chat.container.returnToParent.aria": "Volver a la sesión principal",
   "chat.container.returnToParent.titleNamed": "Volver a: {title}",
   "chat.container.returnToParent.title": "Volver a la sesión principal",

@@ -1,54 +1,53 @@
 ---
 title: 統合機能
-description: Claude または Cursor のサブスクリプションをプロバイダーとして使う。
+description: GitHub と Linear を OpenChamber に接続する。
 ---
 
 # 統合機能
 
-統合機能（インテグレーション）は、すでに持っているサブスクリプションを使って OpenChamber にプロバイダーを追加する小さなプラグインです。**Settings → Integrations** で管理します。
+**設定 → 統合機能** では、OpenChamber が連携するサービスにサインインします。サインイン情報は OpenChamber サーバーに保存されるため、Web、デスクトップ、ペアリングした端末で共有されます。
 
-> **実験的な機能。** プロバイダーの方針を尊重するよう努めていますが、アカウントの制限や停止は各プロバイダーの判断に委ねられます。自己責任で連携を使用してください。
+## GitHub
 
-利用できる統合機能：
+**GitHub** カードを展開し、**Connect GitHub** を選んで短いデバイスコードでサインインします。接続後は、Issue やプルリクエストからセッションを開始し、メッセージに添付し、PR を作成・更新できます。GitHub でできることは [GitHub Issues と PR](/ja/github/) にまとめています。
 
-- **Claude Code** — Claude Pro または Max プラン、API キー不要
-- **Cursor** — Cursor プランのモデル利用枠
+## Linear
 
-## 統合機能をインストールする
+### ワークスペースを接続する
 
-1. **Settings → Integrations** を開きます。
-2. 統合機能を見つけて **Install** を選びます。
-3. 求められたら OpenCode を再起動します — 再起動後にプロバイダーが現れます。
-4. **Set up** を選んでサインインします。するとチャットのモデル選択にモデルが表示されます。
+1. **Linear** カードを展開し、**Connect** を選びます。
+2. 開いたブラウザータブでアクセスを承認します。承認するまでカードには **Waiting for Linear** と表示されます。
 
-統合機能はユーザー単位でインストールされるため、すべてのプロジェクトで使えます。同じカードからいつでも更新や削除ができます。
+別の Linear 組織は **Add workspace** で接続します。現在のワークスペースは常に 1 つで、**Switch to** で切り替え、**Disconnect** は現在のものだけを外します。プロジェクトの対応付けは残ります。
 
-## Claude Code
+### Issue を閲覧する
 
-Claude Code は Claude Pro または Max プランを使います — API キーも Claude アプリも不要です。
+ワークスペースを接続すると、右側のコンテキストレールに **Linear** パネルが現れます。現在のワークスペースの Issue を一覧し、次の操作ができます。
 
-1. 統合機能をインストールします（上記）。
-2. **Set up** を選んでサインインします。Claude Code CLI がまだない場合は、セットアップがまずインストールを提案し、その後サインインします。
+- ステータス（**Backlog**、**To Do**、**In Progress**、**In Review**、**Done**、**Canceled**、**Duplicate**）、担当者（**Anyone** または **Assigned to me**）、チーム、優先度で絞り込む
+- タイトル、識別子、Linear の URL で検索する
+- Issue を開いて説明、コメント、ラベル、優先度を読む
+- **Status** を変更する、または **Close issue** を選ぶ
+- 現在の **Workspace** を切り替える
 
-Claude Code は、ここで唯一プロバイダーの CLI のインストールとサインインを必要とする統合機能です。Cursor は CLI を必要としません。
+### Issue からセッションを開始する
 
-**Claude アカウントが守られる仕組み：** この統合機能は Anthropic の公式 Claude Agent SDK と、インストール済みの Claude Code CLI を使用します。OAuth の乗っ取り、ブラウザートークンの抽出や再生、未対応クライアントへの偽装、Anthropic の認証フローの回避は一切行いません。Anthropic がサポートする正規のアクセス経路を使うため、トークン乗っ取りや不正な認証の回避につきもののアカウント停止リスクはありません。
+- Linear パネルで Issue を開き、**Start session** を選びます。ボタンは Issue をスクロールしてもフッターに残ります。
+- チャットで **New Session From Linear Issue** を選ぶと一覧から選べます。新しいブランチが欲しければ **Create in worktree** を使います。
+- **New Worktree** ダイアログで **Start from Linear Issue** を選びます。
 
-## Cursor
+セッションは Issue のチームに対応付けられたプロジェクトで開き、Issue が最初のプロンプトになります。チームの対応付けは Linear カードで行います。**Default project** が全チームに適用され、**Team projects** でチームごとに上書きできます。対応付けのないチームでは、先に対応付けを求められます。最初のメッセージは Magic Prompt の **Issue Review** から作られ、**設定 → Magic Prompts → Linear** で編集できます。
 
-Cursor は Cursor プランに含まれるモデルを OpenChamber で使えるようにします。
+### Issue をメッセージに添付する
 
-1. 統合機能をインストールします（上記）。
-2. **Set up** を選び、リンクを開いてブラウザーでアクセスを許可します。API キーは不要です。サインイン後、モデル一覧は自動的に読み込まれます。
+チャットのコンポーザーで **Link Linear Issue** を選びます。Issue は次のメッセージにコンテキストとして添付され、セッションの作業ステータスパネルにリンクが残ります。
 
-## 更新と削除
+### セッションコメント
 
-- **Update** はプラグインの最新の公開バージョンをインストールします。
-- **Remove** は OpenCode の設定からプラグインを削除します。OpenCode が再読み込みされるとプロバイダーは読み込まれなくなります。
-
-カードに手動での管理が必要だと表示された場合は、**Manage plugins** を選んで重複を整理してください。
+Linear カードで **Session comments** をオンにすると、Issue から開始したセッションが開始時、完了時、失敗時にその Issue へコメントを投稿します。各コメントにはセッションを開くリンクが付きます。コメントは、この OpenChamber サーバーが公開アドレスを持つ場合にのみ投稿されます（Issue の関係者全員がリンクを開けるようにするため）。ローカルやプライベートなアドレスでは何も投稿されません。
 
 ## 関連情報
 
-- [プロバイダー、モデル、エージェント](/ja/providers/) — 他のプロバイダーの接続とモデルの選択
-- [使用量とクォータ](/ja/usage/) — 利用量を追跡
+- [GitHub Issues と PR](/ja/github/) — OpenChamber で GitHub にできること
+- [ワークツリーセッション](/ja/worktrees/) — Issue からのセッションを開始できる場所
+- [Magic Prompts](/ja/magic-prompts/) — Linear セッションの最初のプロンプトを編集する

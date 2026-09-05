@@ -10,7 +10,7 @@ import { credentialStatus, deleteCredential, importCursorCredential, normalizeCr
 import { getSessionActivitySnapshot } from './sessionActivityWatcher';
 import { getOpenCodeUpgradeStatus, upgradeManagedOpenCode } from './opencode-upgrade-runtime';
 import { buildDeferredRestartResponse } from './config-mutation-response';
-import { normalizeWindowsDriveLetter } from './pathUtils';
+import { normalizeWindowsDriveLetter, pathsEqualWithNormalizedDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 import type { BridgeContext, BridgeResponse } from './bridge';
 
@@ -608,10 +608,10 @@ export async function handleSystemBridgeMessage(
         }
         const folders = vscode.workspace.workspaceFolders ?? [];
         const uri = vscode.Uri.file(normalizeWindowsDriveLetter(targetPath.trim()));
-        // VS Code reports workspace folder paths with lowercase Windows drive
-        // letters (see pathUtils), so normalize both sides before comparing.
+        // `Uri.fsPath` lowercases the Windows drive letter again, so both sides
+        // have to go through the shared comparison (see pathUtils).
         const alreadyAdded = folders.some(
-          (folder) => normalizeWindowsDriveLetter(folder.uri.fsPath) === uri.fsPath,
+          (folder) => pathsEqualWithNormalizedDriveLetter(folder.uri.fsPath, uri.fsPath),
         );
         if (!alreadyAdded) {
           const updated = await vscode.workspace.updateWorkspaceFolders(folders.length, null, { uri });

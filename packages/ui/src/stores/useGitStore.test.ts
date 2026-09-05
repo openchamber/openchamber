@@ -3,6 +3,7 @@ import type { GitStatus } from '@/lib/api/types';
 import { useGitStore } from './useGitStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { notifyGitStatusInvalidated } from '@/lib/gitStatusInvalidation';
+import { clearWorktreeBootstrapState, markWorktreeBootstrapPending } from '@/lib/worktrees/worktreeBootstrap';
 
 // The real transport has no server in tests and fails as a generic error.
 // Tests that exercise other failure modes swap this implementation; the
@@ -86,6 +87,7 @@ const createGitApi = (getGitStatus: GitAPI['getGitStatus']): GitAPI => ({
 
 describe('useGitStore', () => {
   beforeEach(() => {
+    clearWorktreeBootstrapState('/repo');
     useGitStore.getState().resetForRuntimeSwitch(getRuntimeKey());
   });
 
@@ -198,8 +200,10 @@ describe('useGitStore', () => {
     setDirectoryStatus(createStatus());
     const requests: Deferred<GitStatus>[] = [];
     let statusCalls = 0;
-    const git = createGitApi(() => {
+    const statusOptions: Array<{ mode?: 'light'; fresh?: boolean } | undefined> = [];
+    const git = createGitApi((_directory, options) => {
       statusCalls += 1;
+      statusOptions.push(options);
       const request = createDeferred<GitStatus>();
       requests.push(request);
       return request.promise;
@@ -212,12 +216,63 @@ describe('useGitStore', () => {
     const all = useGitStore.getState().fetchAll('/repo', git, { force: true });
     await Promise.resolve();
     expect(statusCalls).toBe(2);
+    expect(statusOptions).toEqual([undefined, { fresh: true }]);
 
     requests[1].resolve({ ...createStatus(), current: 'feature' });
     requests[0].resolve(createStatus());
     await Promise.allSettled([inFlight, all]);
 
     expect(useGitStore.getState().getDirectoryState('/repo')?.status?.current).toBe('feature');
+  });
+
+  test('does not request status while worktree bootstrap is pending', async () => {
+    setDirectoryStatus(createStatus());
+    let statusCalls = 0;
+    const git = createGitApi(async () => {
+      statusCalls += 1;
+      return createStatus(undefined, [{ path: 'bootstrap.ts', index: 'D', working_dir: ' ' }]);
+    });
+
+    markWorktreeBootstrapPending('/repo');
+    const changed = await useGitStore.getState().fetchStatus('/repo', git, { force: true });
+
+    expect(changed).toBe(false);
+    expect(statusCalls).toBe(0);
+    expect(useGitStore.getState().getDirectoryState('/repo')?.status?.files).toEqual([]);
+  });
+
+  test('does not publish a status response after bootstrap becomes pending', async () => {
+    setDirectoryStatus(createStatus());
+    const request = createDeferred<GitStatus>();
+    const git = createGitApi(() => request.promise);
+
+    const loading = useGitStore.getState().fetchStatus('/repo', git, { silent: true });
+    await Promise.resolve();
+    markWorktreeBootstrapPending('/repo');
+    request.resolve(createStatus(undefined, [{ path: 'bootstrap.ts', index: 'D', working_dir: ' ' }]));
+
+    expect(await loading).toBe(false);
+    expect(useGitStore.getState().getDirectoryState('/repo')?.status?.files).toEqual([]);
+  });
+
+  test('can propagate a forced status failure to a reconciliation owner', async () => {
+    setDirectoryStatus(createStatus());
+    const git = createGitApi(async () => {
+      throw new Error('offline');
+    });
+    const originalConsoleError = console.error;
+    console.error = () => undefined;
+
+    try {
+      await expect(useGitStore.getState().fetchStatus('/repo', git, {
+        force: true,
+        silent: true,
+        throwOnError: true,
+      })).rejects.toThrow('offline');
+      expect(useGitStore.getState().getDirectoryState('/repo')?.status?.files).toEqual([]);
+    } finally {
+      console.error = originalConsoleError;
+    }
   });
 
   test('does not let an older status fetch undo an optimistic mutation', async () => {

@@ -14,7 +14,6 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
 import { useUIStore } from '@/stores/useUIStore';
-import { sessionEvents } from '@/lib/sessionEvents';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
@@ -23,6 +22,7 @@ import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import type { ToolPopupContent } from '../types';
 import { PlainDiffFallback } from './PlainDiffFallback';
+import { isToolDiffPreviewOversized } from './toolDiffPreview';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
 import {
@@ -57,7 +57,6 @@ import {
     extractFirstChangedLineFromDiff,
     getDiffPatchEntries,
     getFirstChangedLineFromMetadata,
-    getMutatedToolPaths,
     getPatchText,
     getPrimaryDiffFromMetadata,
     getPrimaryToolPath,
@@ -107,14 +106,6 @@ const normalizeToolName = (toolName: string | undefined | null): string => {
 
     return trimmed;
 };
-
-const GIT_REFRESH_MUTATING_TOOLS = new Set([
-    'bash',
-    'edit',
-    'write',
-    'apply_patch',
-    'patch',
-]);
 
 const formatDuration = (start: number, end?: number, now: number = Date.now()) => {
     const duration = Math.max(0, (end ?? now) - start);
@@ -1210,11 +1201,15 @@ const renderAnimatedPathWithIcon = (path: string, animate = true, grow = true, s
 // Suspense fallback, mirroring the preview's own error fallback.
 const LazyToolPartDiffPreview = lazyWithChunkRecovery(() => import('./ToolPartDiffPreview'));
 
-const DiffPreview: React.FC<{ diff: string; diffViewMode: DiffViewMode }> = ({ diff, diffViewMode }) => (
-    <React.Suspense fallback={<PlainDiffFallback diff={diff} />}>
-        <LazyToolPartDiffPreview diff={diff} diffViewMode={diffViewMode} />
-    </React.Suspense>
-);
+const DiffPreview: React.FC<{ diff: string; diffViewMode: DiffViewMode }> = ({ diff, diffViewMode }) => {
+    if (isToolDiffPreviewOversized(diff)) return <PlainDiffFallback diff={diff} />;
+
+    return (
+        <React.Suspense fallback={<PlainDiffFallback diff={diff} />}>
+            <LazyToolPartDiffPreview diff={diff} diffViewMode={diffViewMode} />
+        </React.Suspense>
+    );
+};
 
 interface ToolExpandedContentProps {
     part: ToolPartType;
@@ -1699,19 +1694,16 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
     const status = state?.status as string | undefined;
     const isFinalized = status === 'completed' || status === 'error' || status === 'aborted' || status === 'failed' || status === 'timeout' || status === 'cancelled';
-    const isSuccessfullyFinalized = status === 'completed';
     const isError = status === 'error' || status === 'failed';
 
     const [activeLatched, setActiveLatched] = React.useState<boolean>(!isFinalized);
     const previousPartIdRef = React.useRef<string | undefined>(part.id);
-    const observedActiveGitToolRef = React.useRef(!isFinalized);
 
     React.useEffect(() => {
         if (previousPartIdRef.current === part.id) {
             return;
         }
         previousPartIdRef.current = part.id;
-        observedActiveGitToolRef.current = !isFinalized;
         // Reset latch only when tool identity changes.
         setActiveLatched(!isFinalized);
     }, [isFinalized, part.id]);
@@ -1721,36 +1713,6 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             setActiveLatched(true);
         }
     }, [isFinalized]);
-
-    React.useEffect(() => {
-        if (!isFinalized) {
-            observedActiveGitToolRef.current = true;
-            return;
-        }
-
-        // Historical completed tools can remount when the timeline changes.
-        // Refresh only for a tool whose active state this instance observed.
-        const finalizedAfterObservedActive = observedActiveGitToolRef.current;
-        if (!finalizedAfterObservedActive) {
-            return;
-        }
-
-        if (!isSuccessfullyFinalized || !GIT_REFRESH_MUTATING_TOOLS.has(normalizedPartTool)) {
-            observedActiveGitToolRef.current = false;
-            return;
-        }
-        if (!currentDirectory) {
-            return;
-        }
-
-        observedActiveGitToolRef.current = false;
-        const paths = getMutatedToolPaths(normalizedPartTool, input, metadata)
-            .map((path) => getRelativePath(path, currentDirectory));
-        sessionEvents.requestGitRefresh({
-            directory: currentDirectory,
-            ...(paths.length > 0 ? { paths } : {}),
-        });
-    }, [currentDirectory, input, isFinalized, isSuccessfullyFinalized, metadata, normalizedPartTool]);
 
     const expandedContentRef = React.useRef<HTMLDivElement>(null);
 

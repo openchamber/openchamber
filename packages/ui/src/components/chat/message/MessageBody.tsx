@@ -56,6 +56,7 @@ import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedC
 import { useProviderLogo } from '@/hooks/useProviderLogo';
 import { getAgentColor } from '@/lib/agentColors';
 import { isCapacitorMobileApp } from '@/apps/mobileNativeChrome';
+import { WorktreeRequiresGitRepositoryError } from '@/lib/worktrees/worktreeCreate';
 
 
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
@@ -1331,17 +1332,14 @@ const AssistantMessageBody = React.memo(({
     const effectiveStreamPhase: StreamPhase = hasStopFinish ? 'completed' : streamPhase;
 
     const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
-    const currentProjectRef = React.useMemo(() => {
-        if (!canUseProjectPlanActions) {
-            return null;
-        }
-
+    const sessionProjectRef = React.useMemo(() => {
         const directory = effectiveDirectory
             ?? (currentSessionId ? getDirectoryForSession(currentSessionId) : null)
             ?? '';
         const resolved = resolveProjectForSessionDirectory(projects, availableWorktreesByProject, directory);
         return resolved ? { id: resolved.id, path: resolved.path } : null;
-    }, [availableWorktreesByProject, canUseProjectPlanActions, currentSessionId, effectiveDirectory, getDirectoryForSession, projects]);
+    }, [availableWorktreesByProject, currentSessionId, effectiveDirectory, getDirectoryForSession, projects]);
+    const currentProjectRef = canUseProjectPlanActions ? sessionProjectRef : null;
 
     const isActiveTool = React.useCallback((toolPart: ToolPartType): boolean => {
         const state = (toolPart as Record<string, unknown>).state as Record<string, unknown> | undefined ?? {};
@@ -1377,28 +1375,48 @@ const AssistantMessageBody = React.memo(({
         (event: React.MouseEvent<HTMLButtonElement>) => {
             event.stopPropagation();
             event.preventDefault();
-            if (!createSessionFromAssistantMessage || !assistantPlanText.trim()) {
+            if (!assistantPlanText.trim()) {
                 return;
             }
             setIsForkDialogOpen(true);
         },
-        [createSessionFromAssistantMessage, assistantPlanText]
+        [assistantPlanText]
     );
 
     const handleConfirmFork = React.useCallback(
         async (execution: ForkSessionExecution) => {
-            if (!createSessionFromAssistantMessage) {
-                return;
-            }
             setIsForkSubmitting(true);
             try {
-                await createSessionFromAssistantMessage(messageId, execution);
+                if (!sessionId) {
+                    throw new Error('Source session is unavailable');
+                }
+                const sourceDirectory = effectiveDirectory ?? getDirectoryForSession(sessionId);
+                if (!sourceDirectory) {
+                    throw new Error('Source session directory is unavailable');
+                }
+                await createSessionFromAssistantMessage({
+                    sessionId,
+                    directory: sourceDirectory,
+                    text: assistantPlanText,
+                }, execution);
                 setIsForkDialogOpen(false);
+            } catch (error) {
+                console.error('Failed to start a session from an assistant message:', error);
+                if (error instanceof WorktreeRequiresGitRepositoryError) {
+                    toast.error(t('rightSidebar.contextNotesTodo.toast.worktreeRequiresGitRepo'));
+                    return;
+                }
+
+                const description = error instanceof Error ? error.message : undefined;
+                toast.error(
+                    t('rightSidebar.contextNotesTodo.toast.createSessionFailed'),
+                    description ? { description } : undefined
+                );
             } finally {
                 setIsForkSubmitting(false);
             }
         },
-        [createSessionFromAssistantMessage, messageId]
+        [assistantPlanText, createSessionFromAssistantMessage, effectiveDirectory, getDirectoryForSession, sessionId, t]
     );
 
     const handleForkMultiRunClick = React.useCallback(
@@ -2136,6 +2154,8 @@ const AssistantMessageBody = React.memo(({
                      open={isForkDialogOpen}
                      onOpenChange={setIsForkDialogOpen}
                      projectDirectory={effectiveDirectory ?? null}
+                     sourceSessionId={sessionId ?? null}
+                     worktreeProjectDirectory={sessionProjectRef?.path ?? null}
                      submitting={isForkSubmitting}
                      onConfirm={handleConfirmFork}
                  />

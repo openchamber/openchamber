@@ -118,6 +118,7 @@ const {
   getLatestWorktreeMetadata,
   listProjectWorktrees,
   partitionWorktreesByRegisteredProject,
+  removeProjectWorktree,
   validateWorktreeCreate,
   worktreeMapsEqual,
 } = await import('./worktreeManager');
@@ -388,6 +389,44 @@ describe('worktreeManager list invalidation', () => {
 
     expect(metadata.worktreeStatus).toBe('pending');
     expect(getLatestWorktreeMetadata(metadata).worktreeStatus).toBe('ready');
+  });
+
+  test('removes a worktree from sidebar topology owned by another registered checkout', async () => {
+    const removed: WorktreeMetadata = {
+      path: '/worktrees/removed',
+      projectDirectory: '/repo',
+      branch: 'removed',
+      label: 'removed',
+    };
+    const sibling: WorktreeMetadata = {
+      path: '/worktrees/sibling',
+      projectDirectory: '/repo',
+      branch: 'sibling',
+      label: 'sibling',
+    };
+    const unrelatedEntries: WorktreeMetadata[] = [{
+      path: '/other/worktree',
+      projectDirectory: '/other',
+      branch: 'other',
+      label: 'other',
+    }];
+    sessionState.availableWorktreesByProject = new Map([
+      ['/worktrees/configured', [removed, sibling]],
+      ['/other', unrelatedEntries],
+    ]);
+    sessionState.availableWorktrees = [removed, sibling, ...unrelatedEntries];
+    sessionState.worktreeMetadata = new Map([
+      ['removed-session', removed],
+      ['sibling-session', sibling],
+    ]);
+
+    await removeProjectWorktree({ id: 'path:/repo', path: '/repo' }, removed);
+
+    expect(sessionState.availableWorktreesByProject.get('/worktrees/configured')).toEqual([sibling]);
+    expect(sessionState.availableWorktreesByProject.get('/other')).toBe(unrelatedEntries);
+    expect(sessionState.availableWorktrees).toEqual([sibling, ...unrelatedEntries]);
+    expect(sessionState.worktreeMetadata.has('removed-session')).toBe(false);
+    expect(sessionState.worktreeMetadata.get('sibling-session')).toBe(sibling);
   });
 });
 

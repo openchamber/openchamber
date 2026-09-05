@@ -98,6 +98,9 @@ const startFakeRelay = () => {
         wsUrl: `ws://127.0.0.1:${port}`,
         state,
         stop: () => new Promise((r) => {
+          // A socket a failed test left open would hold server.close() until
+          // the hook timeout; drop them so a failure is reported once.
+          for (const client of wss.clients) client.terminate();
           wss.close();
           server.close(() => r());
         }),
@@ -162,7 +165,6 @@ const runScriptedClient = async ({ relayUrl, serverId, hostEncPubJwk }) => {
   url.searchParams.set('role', 'client');
   url.searchParams.set('serverId', serverId);
   url.searchParams.set('connectionId', connectionId);
-  const ws = new WebSocket(url.toString());
 
   const hostPub = await globalThis.crypto.subtle.importKey(
     'jwk',
@@ -182,6 +184,12 @@ const runScriptedClient = async ({ relayUrl, serverId, hostEncPubJwk }) => {
     resolveDone = resolve;
   });
 
+  // Dialed only now, with the key material ready and the listeners attached
+  // in the same tick. Dialing before the WebCrypto awaits above let a loopback
+  // socket open while the key generation was still queued on the threadpool,
+  // and an `open` event with no listener means no hello, no ready, and a
+  // client that waits forever. Loaded CI runners hit exactly that.
+  const ws = new WebSocket(url.toString());
   ws.on('open', async () => {
     ws.send(JSON.stringify({
       t: 'hello',

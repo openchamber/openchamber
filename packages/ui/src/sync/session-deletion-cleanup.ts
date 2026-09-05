@@ -1,6 +1,6 @@
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { clearChatDraft, createChatDraftIdentity } from '@/lib/chatDraftPersistence';
-import { createMessageQueueTarget, useMessageQueueStore } from '@/stores/messageQueueStore';
+import { createMessageQueueTarget, isServerOwnedMessageQueue, useMessageQueueStore } from '@/stores/messageQueueStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useTodosPersistStore } from '@/stores/useTodosPersistStore';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
@@ -14,7 +14,12 @@ export const cleanupPersistedSessionState = (identity: {
   if (identity.runtimeKey !== getRuntimeKey() || !identity.directory || identity.directory === 'global' || !identity.sessionId) return;
 
   const queueTarget = createMessageQueueTarget(identity.sessionId, identity.directory, identity.runtimeKey);
-  if (queueTarget) useMessageQueueStore.getState().clearQueue(queueTarget);
+  if (queueTarget) {
+    // A server-owned queue drops the deleted session itself; only the local
+    // projection needs to go. VS Code owns its queue and clears it here.
+    if (isServerOwnedMessageQueue()) useMessageQueueStore.getState().forgetQueue(queueTarget);
+    else useMessageQueueStore.getState().clearQueue(queueTarget);
+  }
   useTodosPersistStore.getState().clearSessionTodos(identity.runtimeKey, identity.directory, identity.sessionId);
   useSessionFoldersStore.getState().removeSessionEverywhere(identity.runtimeKey, identity.sessionId);
   useInlineCommentDraftStore.getState().clearSessionDrafts(identity.runtimeKey, identity.directory, identity.sessionId);

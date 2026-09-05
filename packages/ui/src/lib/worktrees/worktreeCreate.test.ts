@@ -15,9 +15,11 @@ let gitStatus: {
   behind: number;
 } | null = null;
 let branchTracking: MockBranchTracking = {};
+let isGitRepository = true;
 const createdPayloads: CreateWorktreeArgs[] = [];
 
 mock.module('@/lib/gitApi', () => ({
+  checkIsGitRepository: () => Promise.resolve(isGitRepository),
   getGitStatus: () => (gitStatus ? Promise.resolve(gitStatus) : Promise.reject(new Error('no status'))),
   getGitBranches: () => Promise.resolve({
     all: [],
@@ -52,7 +54,11 @@ mock.module('@/lib/worktrees/worktreeManager', () => ({
   },
 }));
 
-const { createWorktreeWithDefaults, withWorktreeRemoteStartRef } = await import('./worktreeCreate');
+const {
+  createWorktreeWithDefaults,
+  withWorktreeRemoteStartRef,
+  WorktreeRequiresGitRepositoryError,
+} = await import('./worktreeCreate');
 
 const baseArgs = (overrides: CreateWorktreeArgs = {}): CreateWorktreeArgs => ({
   preferredName: 'openchamber/feature',
@@ -168,7 +174,15 @@ describe('createWorktreeWithDefaults remote source integration', () => {
     projectRoot = '/repo';
     gitStatus = { current: 'main', tracking: 'origin/main', ahead: 0, behind: 0 };
     branchTracking = { main: 'origin/main' };
+    isGitRepository = true;
     createdPayloads.length = 0;
+  });
+
+  test('rejects a non-Git project before asking the runtime to create a worktree', async () => {
+    isGitRepository = false;
+
+    await expect(createWorktreeWithDefaults(project, baseArgs())).rejects.toThrow(WorktreeRequiresGitRepositoryError);
+    expect(createdPayloads).toHaveLength(0);
   });
 
   test('sets the new branch\'s own upstream when using the tracked remote source', async () => {

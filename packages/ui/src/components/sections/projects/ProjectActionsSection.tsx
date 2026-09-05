@@ -21,7 +21,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
-import { Icon } from "@/components/icon/Icon";
+import { Icon } from '@/components/icon/Icon';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { isDesktopShell } from '@/lib/desktop';
 import {
@@ -40,7 +40,10 @@ import {
   PROJECT_SETTINGS_CONTROL_WIDTH,
   ProjectSettingsSubsection,
 } from '@/components/sections/projects/ProjectSettingsSubsection';
-import { SETTINGS_SELECT_SIZE } from '@/components/sections/shared/SettingsSection';
+import {
+  SETTINGS_SELECT_SIZE,
+  SETTINGS_SELECT_TRIGGER_CLASS,
+} from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -48,6 +51,7 @@ import { cn } from '@/lib/utils';
 type EditableProjectAction = OpenChamberProjectAction;
 
 const AUTO_SAVE_DELAY_MS = 450;
+const PROJECT_RUN_IN_PARENT_VALUE = '__project__';
 
 const createActionId = (): string => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -340,6 +344,43 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
                         placeholder={t('settings.projects.actions.field.commandPlaceholder')}
                         className="min-h-[88px] w-full font-mono text-xs"
                       />
+                    </div>
+
+                    <div className="py-1">
+                      <div className="mb-0.5 flex items-center gap-2">
+                        <p className="typography-meta text-muted-foreground">{t('settings.projects.actions.runIn.label')}</p>
+                        <SettingsInfoHint contentClassName="max-w-xs">
+                          {t('settings.projects.actions.runIn.info')}
+                        </SettingsInfoHint>
+                      </div>
+                      <Select
+                        value={action.runIn === 'parent' ? PROJECT_RUN_IN_PARENT_VALUE : 'worktree'}
+                        onValueChange={(value) => {
+                          updateAction(action.id, (current) => {
+                            if (value === PROJECT_RUN_IN_PARENT_VALUE) {
+                              return { ...current, runIn: 'parent' };
+                            }
+
+                            return { ...current, runIn: undefined };
+                          });
+                        }}
+                      >
+                        <SelectTrigger
+                          size={SETTINGS_SELECT_SIZE}
+                          className={SETTINGS_SELECT_TRIGGER_CLASS}
+                          aria-label={t('settings.projects.actions.runIn.aria')}
+                        >
+                          <SelectValue>
+                            {(value) => value === 'worktree'
+                              ? t('settings.projects.actions.runIn.worktree')
+                              : t('settings.projects.actions.runIn.project')}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={PROJECT_RUN_IN_PARENT_VALUE}>{t('settings.projects.actions.runIn.project')}</SelectItem>
+                          <SelectItem value="worktree">{t('settings.projects.actions.runIn.worktree')}</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
 
                     <div className="py-1">

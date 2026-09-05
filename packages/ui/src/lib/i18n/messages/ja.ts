@@ -4,6 +4,7 @@ import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'sessions.sidebar.projectAction.active': 'プロジェクトアクション実行中',
   ...settingsDict,
   ...linearIssuePickerI18n.ja,
   ...linearPanelI18n.ja,
@@ -1646,7 +1647,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.autoReview.reviewSessionLabel': 'レビューセッション',
   'chat.autoReview.actions.open': '開く',
   'chat.autoReview.actions.stop': '停止',
-  'chat.draftDirtyNotice.tooltip': 'このブランチには未コミットのファイルがあります。\n新しいセッションからも見えます。コミットまたはワークツリーで分けられます。',
+  'chat.draftDirtyNotice.tooltip': 'このブランチにはコミットされていない変更があります。\n新しいセッションの変更と競合する可能性があります。先にコミットするか、別のワークツリーを使うとよいかもしれません。',
   'chat.draftDirtyNotice.indicatorAria': 'このディレクトリに未コミットの変更があります',
   'rightSidebar.contextNotesTodo.plan.defaultTitle': '計画',
   'rightSidebar.contextNotesTodo.empty.selectProject': 'プロジェクトを選択してメモとTODOを追加します。',
@@ -2204,6 +2205,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.queuedMessage.send': '送信',
   'chat.queuedMessage.removeAria': 'キューから削除',
   'chat.queuedMessage.reorderAria': 'ドラッグして並び替え',
+  'chat.queuedMessage.toast.queueFailed': 'メッセージをキューに追加できませんでした。入力欄に戻しました。',
+  'chat.queuedMessage.toast.takeFailed': 'キューのメッセージを読み込めませんでした。もう一度お試しください。',
   'chat.container.returnToParent.aria': '親セッションに戻る',
   'chat.container.returnToParent.titleNamed': '戻る: {title}',
   'chat.container.returnToParent.title': '親セッションに戻る',

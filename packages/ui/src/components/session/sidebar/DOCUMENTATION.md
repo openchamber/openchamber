@@ -75,3 +75,25 @@ make every row observe unrelated streaming updates.
 - Directory permission failures remain visible even when stale sessions are retained. Flat groups inspect every represented root/worktree directory; local Desktop may open the native picker for the exact failed directory, while other runtimes keep the ordinary Retry action.
 - Pins and folder assignments are not pruned from the first startup snapshot or from optimistic mutations. Confirmed local deletion and routed external deletion clean immediately; a later authoritative omission after an established baseline covers missed external delete events.
 - Pending-permission/question row badges fade with the same hover/menu-open rule as the date label, except on non-VS Code always-visible-actions rows, which reserve permanent padding and keep the badges shown. VS Code hover-reveals its actions over the row's right edge even under `alwaysShowActions`, so its badges keep fading (`selectRowBadgeVisibilityClass` in `sessions/sessionNodeItemUtils.ts`).
+
+
+## Project action indicators
+
+`SidebarTerminalActivity` shares terminal discovery with the action header and terminal
+panel while the sidebar is visible. One server listing covers all directories, including
+collapsed projects. The sidebar keeps that loop running only while a project action is
+known to be running anywhere; with nothing running it lists once on mount, to pick up
+runs another client started, and then stays quiet so an idle sidebar costs no polling. It preserves local mutations newer than the listing and keeps known
+state on failure. Terminal discovery is separate from OpenCode session bootstrap.
+
+`DirectoryActionIndicator` reads only its directory's terminal metadata. Output chunks and
+unrelated directories do not rerender it. It displays a static `pulse` icon in `status.info`
+for live project actions, including auto-discovered commands. Persisted idle tabs and ordinary
+interactive terminals do not indicate activity. This indicates process activity, not server
+readiness.
+
+Grouped views show the icon on project-root and worktree headers. Flat project views show
+it on the project-root header and on sessions in linked worktrees. Recent shows it on every
+session with an active action in its own directory. Archived buckets do not show action
+indicators. Indicators stay inside the existing row/header action-padding boundary, so
+hover, keyboard focus, and always-visible action buttons move them left without hiding them.

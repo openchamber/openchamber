@@ -117,7 +117,10 @@ function getBunBinary() {
     return process.env.BUN_BINARY.trim();
   }
   if (typeof process.env.BUN_INSTALL === 'string' && process.env.BUN_INSTALL.trim().length > 0) {
-    return path.join(process.env.BUN_INSTALL.trim(), 'bin', 'bun');
+    // The Windows installer places bun.exe there; spawnSync does not append
+    // the extension to an explicit path, so without it the probe fails and
+    // the CLI silently falls back to Node.
+    return path.join(process.env.BUN_INSTALL.trim(), 'bin', process.platform === 'win32' ? 'bun.exe' : 'bun');
   }
   return 'bun';
 }

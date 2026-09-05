@@ -69,7 +69,7 @@ export const createVSCodeGitAPI = (): GitAPI => ({
     return sendBridgeMessage<boolean>('api:git/check', { directory });
   },
 
-  getGitStatus: async (directory: string, options?: { mode?: 'light' }): Promise<GitStatus> => {
+  getGitStatus: async (directory: string, options?: { mode?: 'light'; fresh?: boolean }): Promise<GitStatus> => {
     return sendBridgeMessage<GitStatus>('api:git/status', { directory, mode: options?.mode });
   },
 

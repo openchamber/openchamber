@@ -783,6 +783,15 @@ export const Header: React.FC = () => {
   const beginHeaderSessionRenameRef = React.useRef(beginHeaderSessionRename);
   beginHeaderSessionRenameRef.current = beginHeaderSessionRename;
 
+  // The rename field opens with the whole title selected, so the first
+  // keystroke replaces it. Stable ref callback: an inline one would re-run on
+  // every render and re-select the text mid-edit.
+  const focusHeaderRenameInput = React.useCallback((node: HTMLInputElement | null) => {
+    if (!node) return;
+    node.focus();
+    node.select();
+  }, []);
+
   React.useEffect(() => {
     setIsHeaderSessionMenuOpen(false);
     setPendingHeaderRetentionAction(null);
@@ -1422,9 +1431,9 @@ export const Header: React.FC = () => {
                   }}
                 >
                   <input
+                    ref={focusHeaderRenameInput}
                     value={headerSessionTitleDraft}
                     onChange={(event) => setHeaderSessionTitleDraft(event.target.value)}
-                    autoFocus
                     onKeyDown={(event) => {
                       event.stopPropagation();
                       if (event.key === 'Escape') {
@@ -1579,9 +1588,9 @@ export const Header: React.FC = () => {
                   }}
                 >
                   <input
+                    ref={focusHeaderRenameInput}
                     value={headerSessionTitleDraft}
                     onChange={(event) => setHeaderSessionTitleDraft(event.target.value)}
-                    autoFocus
                     onKeyDown={(event) => {
                       event.stopPropagation();
                       if (event.key === 'Escape') {

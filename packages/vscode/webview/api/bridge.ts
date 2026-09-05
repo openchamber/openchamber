@@ -84,6 +84,18 @@ export function sendBridgeMessage<T = unknown>(type: string, payload?: unknown):
   return sendBridgeMessageWithOptions<T>(type, payload);
 }
 
+/**
+ * Tells the extension something without waiting for an answer.
+ *
+ * Requests are tracked until a response arrives, so a message the extension
+ * never replies to would leak a pending entry on every call. State the webview
+ * pushes outward (editor comment threads following the composer's drafts) has
+ * no answer to wait for, so it does not go through the request path at all.
+ */
+export function postBridgeNotification<Payload extends object>(type: string, payload: Payload): void {
+  getVSCodeAPI().postMessage({ type, payload });
+}
+
 export function sendBridgeMessageWithOptions<T = unknown>(
   type: string,
   payload?: unknown,

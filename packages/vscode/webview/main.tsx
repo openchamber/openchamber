@@ -1,5 +1,7 @@
 import { createVSCodeAPIs } from './api';
-import { onCommand, onThemeChange, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, startSseProxy, stopSseProxy } from './api/bridge';
+import { createRemovalTombstones } from './inlineCommentRemovals';
+import { resolveCommentTarget } from './inlineCommentTarget';
+import { onCommand, onThemeChange, postBridgeNotification, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, startSseProxy, stopSseProxy } from './api/bridge';
 import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve } from './api/streamPerf';
 import { extractBodyBase64, extractBodyText, extractJsonBody, hasInitBody } from './requestBodyTransport';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
@@ -382,6 +384,14 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
 
   if (normalizedPathname.startsWith('/api/openchamber/tunnel/')) {
     return unsupportedWebRouteResponse('Remote tunnel settings');
+  }
+
+  // Archiving a batch of sessions server-side needs an OpenChamber server
+  // process; the extension host has none. Answering explicitly keeps the
+  // shared UI on its per-session archive path instead of leaving the request
+  // to the generic proxy.
+  if (normalizedPathname === '/api/openchamber/sessions/archive') {
+    return unsupportedWebRouteResponse('Server-side session archiving');
   }
 
   if (/^\/api\/projects\/[^/]+\/scheduled-tasks(?:\/[^/]+)?$/.test(normalizedPathname)) {
@@ -1318,6 +1328,166 @@ onCommand('addContextSelection', (payload) => {
     void useInputStore.getState().addVSCodeSelectionAttachment(trimmedPath, file).finally(() => {
       focusChatInput();
     });
+  });
+});
+
+// Comments dropped from their editor thread before the draft reached this
+// store. See the module for why the window exists.
+const removedComments = createRemovalTombstones();
+
+onCommand('addLineComment', (payload) => {
+  // SAFETY: the payload crossed the extension boundary as JSON; every field is
+  // read as unknown here and trusted only after the checks below.
+  const record = payload as {
+    draftId?: unknown;
+    filePath?: unknown;
+    relativePath?: unknown;
+    source?: unknown;
+    side?: unknown;
+    startLine?: unknown;
+    endLine?: unknown;
+    code?: unknown;
+    language?: unknown;
+    comment?: unknown;
+    targetSessionId?: unknown;
+  };
+
+  // The editor thread mints the id so it can track its own draft without a
+  // round trip. Absent when the comment came from anywhere else.
+  const draftId = typeof record.draftId === 'string' && record.draftId ? record.draftId : undefined;
+  // A session panel is told which session the comment is for, so it can wait
+  // until it actually shows that session. The sidebar files wherever it is.
+  const targetSessionId = typeof record.targetSessionId === 'string' && record.targetSessionId ? record.targetSessionId : undefined;
+  const relativePath = typeof record.relativePath === 'string' ? record.relativePath : '';
+  const source = record.source === 'diff' ? 'diff' : 'file';
+  const side = record.side === 'original' || record.side === 'modified' ? record.side : undefined;
+  const startLine = typeof record.startLine === 'number' ? record.startLine : 1;
+  const endLine = typeof record.endLine === 'number' ? record.endLine : startLine;
+  const code = typeof record.code === 'string' ? record.code : '';
+  const language = typeof record.language === 'string' ? record.language : 'text';
+  const comment = typeof record.comment === 'string' ? record.comment.trim() : '';
+
+  if (!relativePath) {
+    console.warn('[openchamber] inline comment arrived without a path; dropping', record);
+    return;
+  }
+
+  void Promise.all([
+    import('@/sync/session-ui-store'),
+    import('@/stores/useDirectoryStore'),
+    import('@/stores/useInlineCommentDraftStore'),
+  ]).then(async ([{ useSessionUIStore }, { useDirectoryStore }, { useInlineCommentDraftStore }]) => {
+    // Inline drafts are owned by runtime + directory + session. Both halves are
+    // read together, from one store snapshot: read apart, a session that
+    // finished loading between them would pair its key with the previous
+    // session's directory, and the draft would land under a key ChatInput never
+    // reads. Directory precedence matches the composer's own.
+    const resolveTarget = () => {
+      const sessionState = useSessionUIStore.getState();
+      const currentSessionId = sessionState.currentSessionId ?? null;
+      const draft = sessionState.newSessionDraft;
+      return resolveCommentTarget({
+        currentSessionId,
+        sessionDirectory: currentSessionId ? sessionState.getDirectoryForSession(currentSessionId) ?? null : null,
+        draftOpen: Boolean(draft?.open),
+        draftDirectory: draft?.open ? draft.bootstrapPendingDirectory ?? draft.directoryOverride ?? null : null,
+        currentDirectory: useDirectoryStore.getState().currentDirectory ?? null,
+      }, targetSessionId);
+    };
+
+    // A comment can arrive before the chat surface shows its session: a panel
+    // opened for the comment knows its directory long before the session list
+    // has loaded and the session is selected. Filing before that put the draft
+    // under a key this composer never reads. Wait for the surface to land on
+    // the session (or an open draft) instead, within the extension's own
+    // confirmation deadline.
+    let target = resolveTarget();
+    for (let attempt = 0; !target && attempt < 80; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      target = resolveTarget();
+    }
+    if (!target) {
+      console.warn('[openchamber] chat surface never showed the session; dropping inline comment', { relativePath, startLine, targetSessionId });
+      return;
+    }
+
+    // Checked after the wait, which is the window the removal can land in.
+    if (removedComments.consume(draftId)) {
+      return;
+    }
+
+    useInlineCommentDraftStore.getState().addDraft(target, {
+      id: draftId,
+      source,
+      fileLabel: relativePath,
+      startLine,
+      endLine,
+      side,
+      code,
+      language,
+      text: comment,
+    });
+  });
+});
+
+// The editor's comment threads mirror the composer's drafts, so every change to
+// the draft store is reported as a whole snapshot. Sending the full list rather
+// than add/remove events means a dropped notification cannot leave a thread
+// anchored to a comment that is no longer attached; sending the message empties
+// the list, which clears the threads through the same path.
+void import('@/stores/useInlineCommentDraftStore').then(({ useInlineCommentDraftStore }) => {
+  let lastSignature = '';
+
+  const publish = (drafts: Record<string, Array<{ id: string; text: string }>>) => {
+    const flat = Object.values(drafts)
+      .flat()
+      .map((draft) => ({ id: draft.id, text: draft.text }));
+    const signature = JSON.stringify(flat);
+    if (signature === lastSignature) return;
+    lastSignature = signature;
+    postBridgeNotification('inlineComments:sync', { drafts: flat });
+  };
+
+  publish(useInlineCommentDraftStore.getState().drafts);
+  useInlineCommentDraftStore.subscribe((state) => publish(state.drafts));
+});
+
+onCommand('removeLineComment', (payload) => {
+  if (typeof payload !== 'object' || payload === null || !('draftId' in payload)) return;
+  const { draftId } = payload;
+  if (typeof draftId !== 'string' || !draftId) {
+    return;
+  }
+
+  // Recorded even when the draft is already here: the store removal below is
+  // the normal path, and this only matters when the draft has not landed yet.
+  removedComments.remember(draftId);
+
+  void Promise.all([
+    import('@/stores/useInlineCommentDraftStore'),
+    import('@/lib/runtime-switch'),
+  ]).then(([{ useInlineCommentDraftStore }, { getRuntimeKey }]) => {
+    const state = useInlineCommentDraftStore.getState();
+    const runtimeKey = getRuntimeKey();
+
+    // The thread knows its draft id but not which target holds it. Search for
+    // the owning key, and only within the current runtime: `removeDraft`
+    // recomputes the key from the live runtime, so a target rebuilt from
+    // another runtime's key would delete from the wrong place.
+    for (const [key, drafts] of Object.entries(state.drafts)) {
+      if (!drafts.some((draft) => draft.id === draftId)) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(key);
+      } catch {
+        continue;
+      }
+      if (!Array.isArray(parsed) || parsed.length !== 3 || !parsed.every((segment) => typeof segment === 'string')) continue;
+      const [keyRuntime, directory, sessionKey] = parsed;
+      if (keyRuntime !== runtimeKey) continue;
+      state.removeDraft({ directory, sessionKey }, draftId);
+      return;
+    }
   });
 });
 

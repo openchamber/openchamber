@@ -3,6 +3,7 @@ import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 
 export const dict = {
+  'sessions.sidebar.projectAction.active': 'Proje eylemi çalışıyor',
   ...settingsDict,
   ...linearIssuePickerI18n.tr,
   ...linearPanelI18n.tr,
@@ -1603,7 +1604,7 @@ export const dict = {
   'chat.autoReview.reviewSessionLabel': 'İnceleme session\'ı',
   'chat.autoReview.actions.open': 'Aç',
   'chat.autoReview.actions.stop': 'Durdur',
-  'chat.draftDirtyNotice.tooltip': 'Bu dalda commit edilmemiş dosyalar var.\nYeni oturum onları görecek. Bir commit veya worktree onları ayrı tutar.',
+  'chat.draftDirtyNotice.tooltip': 'Bu dalda commit edilmemiş değişiklikleriniz var.\nYeni bir oturum bunlarla çakışabilir. Önce commit etmeyi veya başka bir worktree kullanmayı düşünebilirsiniz.',
   'chat.draftDirtyNotice.indicatorAria': 'Bu dizinde commit edilmemiş değişiklikler var',
   'diffView.hunk.label': 'Hunk\'lar',
   'diffView.hunk.stage': 'Stage',
@@ -2167,6 +2168,8 @@ export const dict = {
   'chat.queuedMessage.send': 'gönder',
   'chat.queuedMessage.removeAria': 'Kuyruktan kaldır',
   'chat.queuedMessage.reorderAria': 'Yeniden sıralamak için sürükle',
+  'chat.queuedMessage.toast.queueFailed': 'Mesaj kuyruğa eklenemedi. Yazma alanına geri kondu.',
+  'chat.queuedMessage.toast.takeFailed': 'Kuyruktaki mesaj yüklenemedi. Lütfen tekrar deneyin.',
   'chat.container.returnToParent.aria': 'Üst session\'a dön',
   'chat.container.returnToParent.titleNamed': 'Şuraya dön: {title}',
   'chat.container.returnToParent.title': 'Üst session\'a dön',

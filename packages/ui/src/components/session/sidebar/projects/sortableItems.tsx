@@ -1,3 +1,4 @@
+import { DirectoryActionIndicator } from '../sessions/DirectoryActionIndicator';
 import React from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -103,6 +104,7 @@ export const ProjectHeaderIdentity: React.FC<ProjectHeaderIdentityProps> = ({
 export interface SortableProjectItemProps extends ProjectIdentityProps {
   disabled?: boolean;
   projectDescription: string;
+  projectDirectory?: string;
   isCollapsed: boolean;
   isRepo: boolean;
   isDesktopShell: boolean;
@@ -132,6 +134,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   disabled = false,
   projectLabel,
   projectDescription,
+  projectDirectory,
   projectIcon,
   projectColor,
   projectIconImage,
@@ -290,13 +293,14 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                         // Reserve hover space for the absolute action buttons,
                         // matching the collapse-toggle branch below.
                         isRepo && !hideDirectoryControls
-                          ? (alwaysShowActions ? 'pr-20' : 'pr-7 group-hover/project:pr-20 group-focus-within/project:pr-20')
-                          : (alwaysShowActions ? 'pr-14' : 'pr-7 group-hover/project:pr-14 group-focus-within/project:pr-14'),
+                          ? (alwaysShowActions || isMenuOpen ? 'pr-20' : 'pr-0 group-hover/project:pr-20 group-focus-within/project:pr-20')
+                          : (alwaysShowActions || isMenuOpen ? 'pr-14' : 'pr-0 group-hover/project:pr-14 group-focus-within/project:pr-14'),
                       )}
                       aria-label={t('sessions.sidebar.project.selectAria', { project: projectLabel })}
                     >
                       <ProjectHeaderIdentity id={id} projectLabel={projectLabel} projectIcon={projectIcon} projectColor={projectColor} projectIconImage={projectIconImage} projectIconBackground={projectIconBackground} />
                       <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                      {projectDirectory ? <DirectoryActionIndicator directory={projectDirectory} className="ml-auto" /> : null}
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="max-h-[70vh] min-w-[220px] overflow-y-auto">
@@ -320,8 +324,8 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       className={cn(
                         'flex-1 min-w-0 flex items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-md cursor-grab active:cursor-grabbing transition-[padding]',
                         isRepo && !hideDirectoryControls
-                          ? (alwaysShowActions ? 'pr-20' : 'pr-7 group-hover/project:pr-20 group-focus-within/project:pr-20')
-                          : (alwaysShowActions ? 'pr-14' : 'pr-7 group-hover/project:pr-14 group-focus-within/project:pr-14'),
+                          ? (alwaysShowActions || isMenuOpen ? 'pr-20' : 'pr-0 group-hover/project:pr-20 group-focus-within/project:pr-20')
+                          : (alwaysShowActions || isMenuOpen ? 'pr-14' : 'pr-0 group-hover/project:pr-14 group-focus-within/project:pr-14'),
                       )}
                     >
                     <ProjectHeaderIdentity
@@ -337,6 +341,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                     {statusIndicator ? (
                       <span className="ml-1 inline-flex flex-shrink-0 items-center">{statusIndicator}</span>
                     ) : null}
+                    {projectDirectory ? <DirectoryActionIndicator directory={projectDirectory} className="ml-auto" /> : null}
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>

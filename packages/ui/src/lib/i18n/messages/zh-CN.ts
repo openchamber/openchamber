@@ -4,6 +4,7 @@ import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'sessions.sidebar.projectAction.active': '项目操作正在运行',
   ...settingsDict,
   ...linearIssuePickerI18n['zh-CN'],
   ...linearPanelI18n['zh-CN'],
@@ -1607,7 +1608,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.autoReview.reviewSessionLabel': '审查会话',
   'chat.autoReview.actions.open': '打开',
   'chat.autoReview.actions.stop': '停止',
-  'chat.draftDirtyNotice.tooltip': '此分支有未提交的文件。\n新会话会看到它们。提交或工作树可将它们分开。',
+  'chat.draftDirtyNotice.tooltip': '此分支有未提交的更改。\n新会话可能会与这些更改冲突。你可以考虑先提交这些更改，或使用其他工作树。',
   'chat.draftDirtyNotice.indicatorAria': '此目录有未提交的更改',
   'diffView.hunk.label': '代码块',
   'diffView.hunk.stage': '暂存',
@@ -2174,6 +2175,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.queuedMessage.send': 'send',
   'chat.queuedMessage.removeAria': '从队列移除',
   'chat.queuedMessage.reorderAria': '拖动以重新排序',
+  'chat.queuedMessage.toast.queueFailed': '无法将消息加入队列，已放回输入框。',
+  'chat.queuedMessage.toast.takeFailed': '无法加载队列中的消息，请重试。',
   'chat.container.returnToParent.aria': '返回父会话',
   'chat.container.returnToParent.titleNamed': '返回到：{title}',
   'chat.container.returnToParent.title': '返回父会话',

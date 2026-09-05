@@ -1,5 +1,4 @@
 import { linearIntegrationI18n } from './linear-integration.i18n';
-import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go kullanım takibi',
   'settings.providers.page.openCodeGo.description': 'Kayan, haftalık ve aylık kotayı göstermek için OpenCode Go kontrol panelini bağlayın.',
@@ -467,6 +466,11 @@ export const settingsDict = {
   'settings.projects.actions.field.actionNamePlaceholder': 'Eylem adı',
   'settings.projects.actions.field.command': 'Komut',
   'settings.projects.actions.field.commandPlaceholder': 'örn. bun run lint',
+  'settings.projects.actions.runIn.label': 'Çalıştırma konumu',
+  'settings.projects.actions.runIn.info': 'Bağlı bir worktree\'den başlatıldığında bu eylemin nerede çalışacağını seçin.',
+  'settings.projects.actions.runIn.project': 'Üst checkout',
+  'settings.projects.actions.runIn.worktree': 'Geçerli worktree',
+  'settings.projects.actions.runIn.aria': 'Bu eylemin çalışma dizini',
   'settings.projects.actions.field.autoOpenUrl': 'URL\'yi otomatik aç',
   'settings.projects.actions.field.autoOpenUrlForAria': '{title} için URL\'yi otomatik aç',
   'settings.projects.actions.field.autoOpenUrlDescription': 'Çıktıdaki URL\'yi veya aşağıdaki özel URL\'yi aç',
@@ -2223,6 +2227,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.sessionTabs': 'Session\'ları başlıkta sekme olarak göster',
   'settings.openchamber.visual.field.sessionTabsAria': 'Başlıktaki session sekmelerini aç/kapat',
   'settings.openchamber.visual.field.sessionTabsInfo': 'Açtığınız session\'lar başlıkta sekmeler olarak dizilir. Kapatırsanız düz session başlığına döner.',
-  ...thirdPartyIntegrationI18n.tr,
+  'settings.page.integrations.title': 'Entegrasyonlar',
+  'settings.page.integrations.description': 'OpenChamber’ın issue’lar ve pull request’lerle çalışabilmesi için GitHub ve Linear’ı bağlayın.',
   ...linearIntegrationI18n.tr,
 };

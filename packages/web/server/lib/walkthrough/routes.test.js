@@ -15,6 +15,7 @@ describe('walkthrough routes', () => {
   let job;
 
   let lastArgs;
+  let generateCalls = 0;
 
   const service = {
     async getWalkthrough(args) {
@@ -23,6 +24,7 @@ describe('walkthrough routes', () => {
     },
     async generateWalkthrough(args) {
       lastArgs = args;
+      generateCalls += 1;
       if (job) return job;
       job = new Promise((resolve) => {
         releaseJob = () => resolve({ walkthrough: { title: 'DONE' }, hunks: [], hunkCount: 1 });
@@ -54,12 +56,27 @@ describe('walkthrough routes', () => {
   });
 
   afterEach(async () => {
+    // A response a failed test never received keeps its keep-alive socket
+    // open, and server.close() would wait on it until the hook timeout.
+    server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
   });
 
+  // Resolves once the route has asked the service to generate one more time
+  // than `seen`. A fixed sleep assumed the request had arrived by then; on a
+  // loaded runner it had not, and the step that followed acted on a request
+  // the server had not seen yet.
+  const untilGenerateCalled = async (seen) => {
+    for (let attempt = 0; attempt < 300 && generateCalls <= seen; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    if (generateCalls <= seen) throw new Error('the route never asked the service to generate');
+  };
+
   it('answers a generation request that nobody interrupted', async () => {
+    const seen = generateCalls;
     const pending = generate();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await untilGenerateCalled(seen);
     releaseJob();
 
     const body = await (await pending).json();
@@ -69,8 +86,9 @@ describe('walkthrough routes', () => {
 
   it('delivers the result to a client that reconnected after a refresh', async () => {
     const controller = new AbortController();
+    const seen = generateCalls;
     generate(controller.signal).catch(() => {});
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await untilGenerateCalled(seen);
     controller.abort();
     await new Promise((resolve) => setTimeout(resolve, 20));
 
@@ -80,8 +98,9 @@ describe('walkthrough routes', () => {
     )).json();
     expect(read.generating).toBe(true);
 
+    const seenBeforeReattach = generateCalls;
     const reattached = generate();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await untilGenerateCalled(seenBeforeReattach);
     releaseJob();
 
     const body = await (await reattached).json();
@@ -108,12 +127,13 @@ describe('walkthrough routes', () => {
     );
     expect(lastArgs.language).toBe('uk');
 
+    const seen = generateCalls;
     const pending = fetch(`${base}/api/walkthrough/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ directory: '/repo', source: SOURCE, language: 'ja' }),
     });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await untilGenerateCalled(seen);
     releaseJob();
     await pending;
 
@@ -129,8 +149,9 @@ describe('walkthrough routes', () => {
   });
 
   it('cancels through its own endpoint rather than a dropped connection', async () => {
+    const seen = generateCalls;
     generate().catch(() => {});
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await untilGenerateCalled(seen);
 
     const response = await fetch(`${base}/api/walkthrough/cancel`, {
       method: 'POST',

@@ -179,6 +179,13 @@ including edits the user made by hand and excluding session edits that are
 already committed. If a session-authored count is ever needed, it has to come
 from aggregating message summaries, not from `Session.summary`.
 
+One exception: while the directory is a worktree whose creation has not
+finished (`useWorktreeBootstrapPending`), the working tree transiently holds
+bootstrap files that the initial git reset is about to remove. Those are not
+changes on the branch, so the panel neither fetches status nor renders the
+changed-files row until the bootstrap settles, then forces one status fetch so
+the row reflects the reset tree rather than a mid-creation snapshot.
+
 ## Section order
 
 Ordering is by durability, not category:

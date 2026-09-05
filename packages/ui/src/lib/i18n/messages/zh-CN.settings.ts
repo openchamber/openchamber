@@ -1,5 +1,4 @@
 import { linearIntegrationI18n } from './linear-integration.i18n';
-import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 用量跟踪',
   'settings.providers.page.openCodeGo.description': '连接 OpenCode Go 控制面板以显示滚动、每周和每月配额。',
@@ -439,6 +438,11 @@ export const settingsDict = {
   'settings.projects.actions.field.actionNamePlaceholder': '操作名称',
   'settings.projects.actions.field.command': '命令',
   'settings.projects.actions.field.commandPlaceholder': '例如 bun run lint',
+  'settings.projects.actions.runIn.label': '运行位置',
+  'settings.projects.actions.runIn.info': '选择从关联 worktree 启动时此操作的运行位置。',
+  'settings.projects.actions.runIn.project': '父检出目录',
+  'settings.projects.actions.runIn.worktree': '当前 worktree',
+  'settings.projects.actions.runIn.aria': '此操作的工作目录',
   'settings.projects.actions.field.autoOpenUrl': '自动打开 URL',
   'settings.projects.actions.field.autoOpenUrlForAria': '为 {title} 自动打开 URL',
   'settings.projects.actions.field.autoOpenUrlDescription': '从输出中打开 URL，或使用下面的自定义 URL',
@@ -2234,5 +2238,6 @@ export const settingsDict = {
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
   ...linearIntegrationI18n['zh-CN'],
-  ...thirdPartyIntegrationI18n['zh-CN'],
+  'settings.page.integrations.title': '集成',
+  'settings.page.integrations.description': '连接 GitHub 和 Linear，让 OpenChamber 可以处理你的 issue 和拉取请求。',
 } as const;

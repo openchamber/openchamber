@@ -1,5 +1,4 @@
 import { linearIntegrationI18n } from './linear-integration.i18n';
-import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go usage tracking',
   'settings.providers.page.openCodeGo.description': 'Connect the OpenCode Go dashboard to show rolling, weekly, and monthly quota.',
@@ -471,6 +470,11 @@ export const settingsDict = {
   'settings.projects.actions.field.actionNamePlaceholder': 'Action name',
   'settings.projects.actions.field.command': 'Command',
   'settings.projects.actions.field.commandPlaceholder': 'e.g. bun run lint',
+  'settings.projects.actions.runIn.label': 'Run in',
+  'settings.projects.actions.runIn.info': 'Choose where this action runs when started from a linked worktree.',
+  'settings.projects.actions.runIn.project': 'Parent checkout',
+  'settings.projects.actions.runIn.worktree': 'Current worktree',
+  'settings.projects.actions.runIn.aria': 'Working directory for this action',
   'settings.projects.actions.field.autoOpenUrl': 'Auto-open URL',
   'settings.projects.actions.field.autoOpenUrlForAria': 'Auto-open URL for {title}',
   'settings.projects.actions.field.autoOpenUrlDescription': 'Open URL from output or custom URL below',
@@ -2224,5 +2228,6 @@ export const settingsDict = {
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
   ...linearIntegrationI18n.en,
-  ...thirdPartyIntegrationI18n.en,
+  'settings.page.integrations.title': 'Integrations',
+  'settings.page.integrations.description': 'Connect GitHub and Linear so OpenChamber can work with your issues and pull requests.',
 } as const;

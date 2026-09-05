@@ -1,54 +1,53 @@
 ---
 title: Integracje
-description: Używaj subskrypcji Claude lub Cursor jako dostawcy.
+description: Połącz GitHub i Linear z OpenChamber.
 ---
 
 # Integracje
 
-Integracja to mała wtyczka, która dodaje dostawcę do OpenChamber na podstawie subskrypcji, którą już masz. Zarządzasz nimi w **Settings → Integrations**.
+W **Ustawienia → Integracje** logujesz się do usług, z którymi pracuje OpenChamber. Logowanie jest zapisywane na serwerze OpenChamber, więc web, desktop i sparowany telefon korzystają z niego wspólnie.
 
-> **Funkcja eksperymentalna.** Staramy się przestrzegać zasad dostawców, ale ograniczenia i zawieszenia kont pozostają decyzją każdego dostawcy. Używaj integracji na własne ryzyko.
+## GitHub
 
-Dostępne integracje:
+Rozwiń kartę **GitHub** i wybierz **Connect GitHub**, aby zalogować się krótkim kodem urządzenia. Po połączeniu OpenChamber może rozpoczynać sesje z issues i pull requestów, dołączać je do wiadomości oraz otwierać i aktualizować PR-y. Wszystko, co potrafi GitHub, opisuje strona [Issues i PR na GitHub](/pl/github/).
 
-- **Claude Code** — Twój plan Claude Pro lub Max, bez kluczy API
-- **Cursor** — limity modeli z Twojego planu Cursor
+## Linear
 
-## Instalacja integracji
+### Połącz przestrzeń roboczą
 
-1. Otwórz **Settings → Integrations**.
-2. Znajdź integrację i wybierz **Install**.
-3. Uruchom OpenCode ponownie, gdy o to poproszą — dostawca pojawi się po restarcie.
-4. Wybierz **Set up** i zaloguj się. Modele pojawią się potem w selektorze modeli na czacie.
+1. Rozwiń kartę **Linear** i wybierz **Connect**.
+2. Zatwierdź dostęp w karcie przeglądarki, która się otworzy. Do tego czasu karta pokazuje **Waiting for Linear**.
 
-Integracje instalują się dla Twojego użytkownika, więc działają w każdym projekcie. W każdej chwili możesz je zaktualizować lub usunąć z tej samej karty.
+Kolejną organizację Linear połączysz przez **Add workspace**. Bieżąca jest zawsze jedna przestrzeń: przełączaj przez **Switch to**, a **Disconnect** usuwa tylko bieżącą. Mapowanie projektów zostaje.
 
-## Claude Code
+### Przeglądaj issues
 
-Claude Code korzysta z Twojego planu Claude Pro lub Max — bez kluczy API i bez osobnej aplikacji Claude.
+Gdy przestrzeń robocza jest połączona, w prawym pasku kontekstu pojawia się panel **Linear**. Wyświetla issues bieżącej przestrzeni i pozwala:
 
-1. Zainstaluj integrację (patrz wyżej).
-2. Wybierz **Set up** i zaloguj się. Jeśli nie masz jeszcze Claude Code CLI, konfiguracja zaoferuje najpierw jego instalację, a potem logowanie.
+- filtrować po statusie (**Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**), osobie przypisanej (**Anyone** lub **Assigned to me**), zespole i priorytecie
+- szukać po tytule, identyfikatorze lub adresie URL Linear
+- otworzyć issue, aby przeczytać opis, komentarze, etykiety i priorytet
+- zmienić jego **Status** lub wybrać **Close issue**
+- przełączyć bieżący **Workspace**
 
-Claude Code jest jedyną integracją tutaj, która wymaga zainstalowanego i zalogowanego CLI swojego dostawcy. Cursor nie wymaga swojego CLI.
+### Rozpocznij sesję z issue
 
-**Jak chronione jest Twoje konto Claude:** ta integracja używa oficjalnego Claude Agent SDK od Anthropic i Twojego zainstalowanego Claude Code CLI. Nie przechwytuje OAuth, nie wyodrębnia ani nie odtwarza tokenów przeglądarki, nie podszywa się pod nieobsługiwany klient i nie omija uwierzytelniania Anthropic. Działa na obsługiwanej przez Anthropic ścieżce dostępu, więc nie niesie ryzyka zablokowania konta związanego z przechwytywaniem tokenów lub nieautoryzowanymi obejściami uwierzytelniania.
+- W panelu Linear otwórz issue i wybierz **Start session**. Przycisk zostaje w stopce, gdy przewijasz issue.
+- W czacie wybierz **New Session From Linear Issue**, aby wybrać z listy, z opcją **Create in worktree**, jeśli chcesz świeżej gałęzi.
+- W oknie **New Worktree** wybierz **Start from Linear Issue**.
 
-## Cursor
+Sesja otwiera się w projekcie zmapowanym do zespołu issue, a issue staje się pierwszym promptem. Zespoły mapujesz na karcie Linear: **Default project** obejmuje wszystkie zespoły, a **Team projects** nadpisuje go dla poszczególnych. Niezmapowany zespół najpierw poprosi o mapowanie. Pierwsza wiadomość powstaje z magic promptu **Issue Review**, który edytujesz w **Ustawienia → Magic Prompts → Linear**.
 
-Cursor udostępnia w OpenChamber modele zawarte w Twoim planie Cursor.
+### Dołącz issue do wiadomości
 
-1. Zainstaluj integrację (patrz wyżej).
-2. Wybierz **Set up**, otwórz link i zatwierdź dostęp w przeglądarce. Klucz API nie jest potrzebny. Lista modeli wczyta się automatycznie po zalogowaniu.
+W polu czatu wybierz **Link Linear Issue**. Issue trafia jako kontekst do Twojej następnej wiadomości, a panel statusu pracy sesji zachowuje do niego link.
 
-## Aktualizacja i usuwanie
+### Komentarze sesji
 
-- **Update** instaluje najnowszą opublikowaną wersję wtyczki.
-- **Remove** usuwa wtyczkę z konfiguracji OpenCode. Dostawca przestanie się ładować po odświeżeniu OpenCode.
-
-Jeśli karta wskazuje, że wpisy wymagają ręcznego zarządzania, wybierz **Manage plugins** i wyczyść tam duplikaty.
+Włącz **Session comments** na karcie Linear, a sesja rozpoczęta z issue doda na nim komentarz przy starcie, zakończeniu lub błędzie, każdy z linkiem otwierającym sesję. Komentarze są publikowane tylko wtedy, gdy ten serwer OpenChamber ma publiczny adres, aby link działał dla wszystkich w issue; przy adresie lokalnym lub prywatnym nic nie jest publikowane.
 
 ## Powiązane
 
-- [Dostawcy, modele i agenci](/pl/providers/) — podłączanie innych dostawców i wybór modeli
-- [Zużycie i limity](/pl/usage/) — śledź, ile wykorzystałeś
+- [Issues i PR na GitHub](/pl/github/) — wszystko, co GitHub potrafi w OpenChamber
+- [Sesje worktree](/pl/worktrees/) — gdzie mogą zaczynać się sesje z issue
+- [Magic Prompts](/pl/magic-prompts/) — edytuj prompt, od którego zaczyna się sesja Linear

@@ -1,5 +1,4 @@
 import { linearIntegrationI18n } from './linear-integration.i18n';
-import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 使用量追跡',
   'settings.providers.page.openCodeGo.description': 'OpenCode Go ダッシュボードを接続して、ローリング、週間、月間のクォータを表示します。',
@@ -472,6 +471,11 @@ export const settingsDict = {
   'settings.projects.actions.field.actionNamePlaceholder': 'アクション名',
   'settings.projects.actions.field.command': 'コマンド',
   'settings.projects.actions.field.commandPlaceholder': '例: bun run lint',
+  'settings.projects.actions.runIn.label': '実行場所',
+  'settings.projects.actions.runIn.info': 'リンクされたワークツリーから起動したときにこのアクションを実行する場所を選択します。',
+  'settings.projects.actions.runIn.project': '親チェックアウト',
+  'settings.projects.actions.runIn.worktree': '現在のワークツリー',
+  'settings.projects.actions.runIn.aria': 'このアクションの作業ディレクトリ',
   'settings.projects.actions.field.autoOpenUrl': 'URL を自動開く',
   'settings.projects.actions.field.autoOpenUrlForAria': '{title} の URL を自動開く',
   'settings.projects.actions.field.autoOpenUrlDescription': '出力または以下のカスタム URL から URL を開く',
@@ -2234,5 +2238,6 @@ export const settingsDict = {
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'ステア',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'キュー',
   ...linearIntegrationI18n.ja,
-  ...thirdPartyIntegrationI18n.ja,
+  'settings.page.integrations.title': '連携',
+  'settings.page.integrations.description': 'GitHub と Linear を接続すると、OpenChamber が Issue やプルリクエストを扱えるようになります。',
 } as const;
