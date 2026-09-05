@@ -49,26 +49,38 @@ export function clearAppImageArgv0FromProcessEnv() {
 }
 
 /**
- * Resolve a Linux PTY launch that drops native `ARGV0` before the shell starts.
+ * Resolve a PTY launch that drops native-inherited vars before the shell starts.
  *
- * `bun-pty` merges the OS environ into the child, so deleting `ARGV0` from the
- * JS env object alone is not enough. Wrapping with `env -u ARGV0` unsets it
- * before execing the real shell. No-op on non-Linux platforms.
+ * `bun-pty` merges the OS environ into the child, so deleting vars from the
+ * JS env object alone is not enough. Wrapping with `env -u` unsets them
+ * before execing the real shell.
+ *
+ * - Linux: `ARGV0` (AppImage) + `NODE_CHANNEL_FD`/`BUN_WATCH_PID` (Bun serve daemon IPC).
+ * - macOS: `NODE_CHANNEL_FD`/`BUN_WATCH_PID` (Bun serve daemon IPC; also seen in #2752).
+ * No-op on other platforms.
  *
  * @param {string} executable
  * @param {string[]} args
  * @returns {{ executable: string, args: string[] }}
  */
 export function resolveLinuxPtyLaunch(executable, args = []) {
-  if (process.platform !== 'linux') {
+  const isLinux = process.platform === 'linux';
+  const isDarwin = process.platform === 'darwin';
+  if (!isLinux && !isDarwin) {
     return { executable, args };
   }
   const envBinary = LINUX_ENV_BINARIES.find((candidate) => existsSync(candidate));
   if (!envBinary) {
     return { executable, args };
   }
+  if (isLinux) {
+    return {
+      executable: envBinary,
+      args: ['-u', 'ARGV0', '-u', 'NODE_CHANNEL_FD', '-u', 'BUN_WATCH_PID', executable, ...args],
+    };
+  }
   return {
     executable: envBinary,
-    args: ['-u', 'ARGV0', executable, ...args],
+    args: ['-u', 'NODE_CHANNEL_FD', '-u', 'BUN_WATCH_PID', executable, ...args],
   };
 }

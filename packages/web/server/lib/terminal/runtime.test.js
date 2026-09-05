@@ -146,6 +146,10 @@ describe('terminal runtime', () => {
   });
 
   it('creates client-identified sessions and forwards bounded resize operations', async () => {
+    const prevNodeChannelFd = process.env.NODE_CHANNEL_FD;
+    const prevBunWatchPid = process.env.BUN_WATCH_PID;
+    process.env.NODE_CHANNEL_FD = '3';
+    process.env.BUN_WATCH_PID = '123';
     const harness = createHarness();
     try {
       const response = createResponse();
@@ -153,12 +157,16 @@ describe('terminal runtime', () => {
       expect(response.body).toEqual({ sessionId: 'term-1', cols: 120, rows: 40, status: 'running' });
       expect(harness.processes[0].options.cwd).toBe('/repo');
       expect(harness.processes[0].options.env.COLORFGBG).toBe('0;15');
-      expect(harness.processes[0].options.env.NODE_CHANNEL_FD).toBe('');
+      expect(harness.processes[0].options.env.NODE_CHANNEL_FD).toBeUndefined();
+      expect(harness.processes[0].options.env.BUN_WATCH_PID).toBeUndefined();
       expect(harness.processes[0].options.env).not.toHaveProperty('ARGV0');
       expect(harness.processes[0].options.env).not.toHaveProperty('ELECTRON_RUN_AS_NODE');
       if (process.platform === 'linux') {
         expect(harness.processes[0].shell).toMatch(/\/env$/);
-        expect(harness.processes[0].args.slice(0, 3)).toEqual(['-u', 'ARGV0', expect.any(String)]);
+        expect(harness.processes[0].args.slice(0, 7)).toEqual(['-u', 'ARGV0', '-u', 'NODE_CHANNEL_FD', '-u', 'BUN_WATCH_PID', expect.any(String)]);
+      } else if (process.platform === 'darwin') {
+        expect(harness.processes[0].shell).toMatch(/\/env$/);
+        expect(harness.processes[0].args.slice(0, 5)).toEqual(['-u', 'NODE_CHANNEL_FD', '-u', 'BUN_WATCH_PID', expect.any(String)]);
       }
       harness.processes[0].emitData('\u001b[?2031h\u001b]10;?\u0007\u001b]11;?\u0007\u001b[0c');
       expect(harness.processes[0].writes).toEqual(['\u001b]10;rgb:1b1b/1b1b/1b1b\u001b\\', '\u001b]11;rgb:fafa/f8f8/f0f0\u001b\\', '\u001b[?1;2c']);
@@ -176,7 +184,13 @@ describe('terminal runtime', () => {
       const invalid = createResponse();
       harness.routes.post.get('/api/terminal/:sessionId/resize')({ params: { sessionId: 'term-1' }, body: { cols: 1001, rows: 60 } }, invalid);
       expect(invalid.statusCode).toBe(400);
-    } finally { await harness.runtime.shutdown(); }
+    } finally {
+      if (prevNodeChannelFd === undefined) delete process.env.NODE_CHANNEL_FD;
+      else process.env.NODE_CHANNEL_FD = prevNodeChannelFd;
+      if (prevBunWatchPid === undefined) delete process.env.BUN_WATCH_PID;
+      else process.env.BUN_WATCH_PID = prevBunWatchPid;
+      await harness.runtime.shutdown();
+    }
   });
 
   it('lists sessions scoped to a working directory and refreshes activity via touch', async () => {
@@ -253,7 +267,10 @@ describe('terminal runtime', () => {
       expect(created.statusCode).toBe(200);
       if (process.platform === 'linux') {
         expect(harness.processes[0].shell).toMatch(/\/env$/);
-        expect(harness.processes[0].args).toEqual(['-u', 'ARGV0', '/bin/zsh', '-l']);
+        expect(harness.processes[0].args).toEqual(['-u', 'ARGV0', '-u', 'NODE_CHANNEL_FD', '-u', 'BUN_WATCH_PID', '/bin/zsh', '-l']);
+      } else if (process.platform === 'darwin') {
+        expect(harness.processes[0].shell).toMatch(/\/env$/);
+        expect(harness.processes[0].args).toEqual(['-u', 'NODE_CHANNEL_FD', '-u', 'BUN_WATCH_PID', '/bin/zsh', '-l']);
       } else {
         expect(harness.processes[0].shell).toBe('/bin/zsh');
         expect(harness.processes[0].args).toEqual(['-l']);
@@ -264,7 +281,10 @@ describe('terminal runtime', () => {
       expect(restarted.statusCode).toBe(200);
       if (process.platform === 'linux') {
         expect(harness.processes[1].shell).toMatch(/\/env$/);
-        expect(harness.processes[1].args).toEqual(['-u', 'ARGV0', '/bin/bash', '-l']);
+        expect(harness.processes[1].args).toEqual(['-u', 'ARGV0', '-u', 'NODE_CHANNEL_FD', '-u', 'BUN_WATCH_PID', '/bin/bash', '-l']);
+      } else if (process.platform === 'darwin') {
+        expect(harness.processes[1].shell).toMatch(/\/env$/);
+        expect(harness.processes[1].args).toEqual(['-u', 'NODE_CHANNEL_FD', '-u', 'BUN_WATCH_PID', '/bin/bash', '-l']);
       } else {
         expect(harness.processes[1].shell).toBe('/bin/bash');
         expect(harness.processes[1].args).toEqual(['-l']);
