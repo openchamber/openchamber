@@ -1,8 +1,8 @@
 /** Settings → Integrations cards for installed guests. */
 export const guestIntegrationsI18n = {
   en: {
-    'settings.integrations.guests.title': 'Extension panels',
-    'settings.integrations.guests.info': 'Installed rail panels that declared an Integrations card. Tokens stay on this computer.',
+    'settings.integrations.guests.title': 'Extension accounts',
+    'settings.integrations.guests.info': 'Connect accounts for extensions installed under Settings → Extensions. Tokens stay on this computer.',
     'settings.integrations.guests.status.connected': 'Connected',
     'settings.integrations.guests.status.notConnected': 'Not connected',
     'settings.integrations.guests.status.waiting': 'Waiting for authorization',
@@ -28,8 +28,8 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.tokenInvalid': 'That API token was refused.',
   },
   de: {
-    'settings.integrations.guests.title': 'Erweiterungspanels',
-    'settings.integrations.guests.info': 'Installierte Leisten-Panels mit Integrationskarte. Tokens bleiben auf diesem Rechner.',
+    'settings.integrations.guests.title': 'Erweiterungskonten',
+    'settings.integrations.guests.info': 'Konten für Erweiterungen verbinden, die unter Einstellungen → Erweiterungen installiert sind. Tokens bleiben auf diesem Rechner.',
     'settings.integrations.guests.status.connected': 'Verbunden',
     'settings.integrations.guests.status.notConnected': 'Nicht verbunden',
     'settings.integrations.guests.status.waiting': 'Warte auf Autorisierung',
@@ -55,8 +55,8 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.tokenInvalid': 'Dieser API-Token wurde abgelehnt.',
   },
   fr: {
-    'settings.integrations.guests.title': 'Panneaux d’extension',
-    'settings.integrations.guests.info': 'Panneaux de rail installés qui déclarent une carte Intégrations. Les jetons restent sur cet ordinateur.',
+    'settings.integrations.guests.title': 'Comptes d’extensions',
+    'settings.integrations.guests.info': 'Connectez les comptes des extensions installées dans Réglages → Extensions. Les jetons restent sur cet ordinateur.',
     'settings.integrations.guests.status.connected': 'Connecté',
     'settings.integrations.guests.status.notConnected': 'Non connecté',
     'settings.integrations.guests.status.waiting': 'En attente d’autorisation',
@@ -82,8 +82,8 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.tokenInvalid': 'Ce jeton API a été refusé.',
   },
   es: {
-    'settings.integrations.guests.title': 'Paneles de extensión',
-    'settings.integrations.guests.info': 'Paneles del rail instalados que declaran una tarjeta de Integraciones. Los tokens se quedan en este equipo.',
+    'settings.integrations.guests.title': 'Cuentas de extensiones',
+    'settings.integrations.guests.info': 'Conecta las cuentas de las extensiones instaladas en Ajustes → Extensiones. Los tokens se quedan en este equipo.',
     'settings.integrations.guests.status.connected': 'Conectado',
     'settings.integrations.guests.status.notConnected': 'Sin conectar',
     'settings.integrations.guests.status.waiting': 'Esperando autorización',
@@ -109,8 +109,8 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.tokenInvalid': 'Ese token de API fue rechazado.',
   },
   ja: {
-    'settings.integrations.guests.title': '拡張パネル',
-    'settings.integrations.guests.info': 'Integrations カードを宣言したレールパネルです。トークンはこのコンピュータに残ります。',
+    'settings.integrations.guests.title': '拡張機能のアカウント',
+    'settings.integrations.guests.info': '設定 → 拡張機能 で入れた拡張のアカウントを接続します。トークンはこのパソコンに残ります。',
     'settings.integrations.guests.status.connected': '接続済み',
     'settings.integrations.guests.status.notConnected': '未接続',
     'settings.integrations.guests.status.waiting': '認可を待っています',
@@ -136,8 +136,8 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.tokenInvalid': 'その API トークンは拒否されました。',
   },
   ko: {
-    'settings.integrations.guests.title': '확장 패널',
-    'settings.integrations.guests.info': 'Integrations 카드를 선언한 레일 패널입니다. 토큰은 이 컴퓨터에 남습니다.',
+    'settings.integrations.guests.title': '확장 계정',
+    'settings.integrations.guests.info': '설정 → 확장에 설치한 확장의 계정을 연결합니다. 토큰은 이 컴퓨터에 남습니다.',
     'settings.integrations.guests.status.connected': '연결됨',
     'settings.integrations.guests.status.notConnected': '연결 안 됨',
     'settings.integrations.guests.status.waiting': '권한 부여 대기 중',
@@ -163,8 +163,8 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.tokenInvalid': '그 API 토큰이 거부되었습니다.',
   },
   pl: {
-    'settings.integrations.guests.title': 'Panele rozszerzeń',
-    'settings.integrations.guests.info': 'Zainstalowane panele szyny z kartą Integracje. Tokeny zostają na tym komputerze.',
+    'settings.integrations.guests.title': 'Konta rozszerzeń',
+    'settings.integrations.guests.info': 'Połącz konta rozszerzeń zainstalowanych w Ustawienia → Rozszerzenia. Tokeny zostają na tym komputerze.',
     'settings.integrations.guests.status.connected': 'Połączono',
     'settings.integrations.guests.status.notConnected': 'Niepołączone',
     'settings.integrations.guests.status.waiting': 'Czekam na autoryzację',
@@ -190,8 +190,8 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.tokenInvalid': 'Ten token API został odrzucony.',
   },
   'pt-BR': {
-    'settings.integrations.guests.title': 'Painéis de extensão',
-    'settings.integrations.guests.info': 'Painéis do trilho instalados que declaram um cartão de Integrações. Os tokens ficam neste computador.',
+    'settings.integrations.guests.title': 'Contas de extensões',
+    'settings.integrations.guests.info': 'Conecte contas das extensões instaladas em Configurações → Extensões. Os tokens ficam neste computador.',
     'settings.integrations.guests.status.connected': 'Conectado',
     'settings.integrations.guests.status.notConnected': 'Não conectado',
     'settings.integrations.guests.status.waiting': 'Aguardando autorização',
@@ -217,8 +217,8 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.tokenInvalid': 'Esse token de API foi recusado.',
   },
   uk: {
-    'settings.integrations.guests.title': 'Панелі розширень',
-    'settings.integrations.guests.info': 'Встановлені панелі на рейці з карткою Integrations. Токени лишаються на цьому комп’ютері.',
+    'settings.integrations.guests.title': 'Облікові записи розширень',
+    'settings.integrations.guests.info': 'Підключайте облікові записи розширень із Налаштування → Розширення. Токени лишаються на цьому комп’ютері.',
     'settings.integrations.guests.status.connected': 'Під’єднано',
     'settings.integrations.guests.status.notConnected': 'Не під’єднано',
     'settings.integrations.guests.status.waiting': 'Чекаємо на дозвіл',
@@ -244,8 +244,8 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.tokenInvalid': 'Цей API-токен відхилено.',
   },
   'zh-CN': {
-    'settings.integrations.guests.title': '扩展面板',
-    'settings.integrations.guests.info': '声明了 Integrations 卡片的已安装侧栏面板。令牌留在这台电脑上。',
+    'settings.integrations.guests.title': '扩展账户',
+    'settings.integrations.guests.info': '为「设置 → 扩展」中安装的扩展连接账户。令牌保存在本机。',
     'settings.integrations.guests.status.connected': '已连接',
     'settings.integrations.guests.status.notConnected': '未连接',
     'settings.integrations.guests.status.waiting': '正在等待授权',
@@ -271,8 +271,8 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.tokenInvalid': '该 API 令牌被拒绝。',
   },
   'zh-TW': {
-    'settings.integrations.guests.title': '擴充面板',
-    'settings.integrations.guests.info': '已宣告 Integrations 卡片的側欄面板。權杖留在這台電腦。',
+    'settings.integrations.guests.title': '擴充功能帳戶',
+    'settings.integrations.guests.info': '為「設定 → 擴充功能」中安裝的擴充功能連接帳戶。權杖會留在這台電腦。',
     'settings.integrations.guests.status.connected': '已連線',
     'settings.integrations.guests.status.notConnected': '未連線',
     'settings.integrations.guests.status.waiting': '正在等待授權',
@@ -298,8 +298,8 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.tokenInvalid': '該 API 權杖被拒絕。',
   },
   tr: {
-    'settings.integrations.guests.title': 'Uzantı panelleri',
-    'settings.integrations.guests.info': 'Integrations kartı tanımlayan yüklü ray panelleri. Jetonlar bu bilgisayarda kalır.',
+    'settings.integrations.guests.title': 'Uzantı hesapları',
+    'settings.integrations.guests.info': 'Ayarlar → Uzantılar altında yüklü uzantıların hesaplarını bağlayın. Jetonlar bu bilgisayarda kalır.',
     'settings.integrations.guests.status.connected': 'Bağlı',
     'settings.integrations.guests.status.notConnected': 'Bağlı değil',
     'settings.integrations.guests.status.waiting': 'Yetkilendirme bekleniyor',

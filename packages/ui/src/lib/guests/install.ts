@@ -123,3 +123,16 @@ export const uninstallGuest = async (id: string): Promise<UninstallGuestResult> 
     return { ok: false, code: 'failed' };
   }
 };
+
+export const setGuestEnabled = async (id: string, enabled: boolean): Promise<boolean> => {
+  try {
+    const response = await runtimeFetch(`/api/guests/${id}/enabled`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+};

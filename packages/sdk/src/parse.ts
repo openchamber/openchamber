@@ -113,9 +113,31 @@ export const resolveIntegrationApi = (
   return null;
 };
 
+export type SocketPlatform = 'linux' | 'darwin' | 'win32';
+
+/** Declared socket the agent may dial. Candidates are per host platform. */
+export type SocketBinding = {
+  id: string;
+  candidatesByPlatform: Partial<Record<SocketPlatform, string[]>>;
+};
+
 export type AgentPermissions = {
+  sockets?: SocketBinding[];
+  exec?: string[];
+};
+
+/** Catalog grant chip: ids only. Paths live on `socketBindings`. */
+export type PublicAgentPermissions = {
   sockets?: string[];
   exec?: string[];
+};
+
+/** Resolved socket for this host after override + candidate scan. */
+export type PublicSocketBinding = {
+  id: string;
+  candidates: string[];
+  resolved: string | null;
+  override: string | null;
 };
 
 export type AgentContribution = {
@@ -127,7 +149,8 @@ export type AgentContribution = {
 /** Catalog card for a local agent. Drops nothing secret; grant is host state. */
 export type PublicAgent = {
   runtime: 'host';
-  permissions?: AgentPermissions;
+  permissions?: PublicAgentPermissions;
+  socketBindings?: PublicSocketBinding[];
   granted: boolean;
 };
 
@@ -159,6 +182,7 @@ export type ParseManifestErrorCode =
   | 'missing-openchamber'
   | 'unsupported-api-version'
   | 'invalid-engines'
+  | 'invalid-version'
   | 'missing-panel'
   | 'invalid-panel-id'
   | 'invalid-panel-name'
@@ -177,6 +201,8 @@ export type ParseManifestFailure = {
 export type ParseManifestSuccess = {
   ok: true;
   manifest: OpenChamberManifest;
+  /** npm `package.json` version when parsing a package envelope. */
+  version?: string;
 };
 
 export type ParseManifestResult = ParseManifestSuccess | ParseManifestFailure;
@@ -295,10 +321,69 @@ export const toPublicIntegration = (integration: IntegrationContribution): Publi
   return next;
 };
 
-const agentPermissionsSchema = z.object({
-  sockets: z.array(z.string().trim().min(1).max(512)).max(32).optional(),
-  exec: z.array(z.string().trim().min(1).max(128)).max(32).optional(),
+const SOCKET_PLATFORMS = ['linux', 'darwin', 'win32'] as const;
+
+const socketPathSchema = z.string().trim().min(1).max(512);
+
+const socketCandidatesSchema = z.object({
+  linux: z.array(socketPathSchema).max(16).optional(),
+  darwin: z.array(socketPathSchema).max(16).optional(),
+  win32: z.array(socketPathSchema).max(16).optional(),
 }).strict();
+
+const socketBindingObjectSchema = z.object({
+  id: z.string().trim().regex(PANEL_ID).max(64),
+  path: socketPathSchema.optional(),
+  candidates: socketCandidatesSchema.optional(),
+}).strict().refine(
+  (value) => Boolean(value.path) || Boolean(value.candidates),
+  { message: 'socket binding needs path or candidates' },
+);
+
+const normalizeSocketObject = (
+  entry: z.infer<typeof socketBindingObjectSchema>,
+): SocketBinding => {
+  const candidatesByPlatform: SocketBinding['candidatesByPlatform'] = {};
+  if (entry.candidates) {
+    for (const platform of SOCKET_PLATFORMS) {
+      const list = entry.candidates[platform];
+      if (list && list.length > 0) {
+        candidatesByPlatform[platform] = [...list];
+      }
+    }
+  } else if (entry.path) {
+    for (const platform of SOCKET_PLATFORMS) {
+      candidatesByPlatform[platform] = [entry.path];
+    }
+  }
+  return { id: entry.id, candidatesByPlatform };
+};
+
+const socketEntrySchema = z.union([
+  socketPathSchema.transform((path): SocketBinding => ({
+    id: path,
+    candidatesByPlatform: {
+      linux: [path],
+      darwin: [path],
+      win32: [path],
+    },
+  })),
+  socketBindingObjectSchema.transform(normalizeSocketObject),
+]);
+
+const agentPermissionsSchema = z.object({
+  sockets: z.array(socketEntrySchema).max(32).optional(),
+  exec: z.array(z.string().trim().min(1).max(128)).max(32).optional(),
+}).strict().transform((value) => {
+  const next: AgentPermissions = {};
+  if (value.sockets && value.sockets.length > 0) {
+    next.sockets = value.sockets;
+  }
+  if (value.exec && value.exec.length > 0) {
+    next.exec = [...value.exec];
+  }
+  return next;
+});
 
 const agentSchema = z.object({
   entry: z.string().trim().refine(isSafeAssetPath),
@@ -322,6 +407,7 @@ export const openChamberManifestSchema = z.object({
 export const toPublicAgent = (
   agent: AgentContribution | undefined,
   granted: boolean,
+  socketBindings?: PublicSocketBinding[],
 ): PublicAgent | undefined => {
   if (!agent) {
     return undefined;
@@ -331,19 +417,35 @@ export const toPublicAgent = (
     granted,
   };
   if (agent.permissions) {
-    const permissions: AgentPermissions = {};
-    if (agent.permissions.sockets) {
-      permissions.sockets = [...agent.permissions.sockets];
+    const permissions: PublicAgentPermissions = {};
+    if (agent.permissions.sockets && agent.permissions.sockets.length > 0) {
+      permissions.sockets = agent.permissions.sockets.map((binding) => binding.id);
     }
-    if (agent.permissions.exec) {
+    if (agent.permissions.exec && agent.permissions.exec.length > 0) {
       permissions.exec = [...agent.permissions.exec];
     }
-    next.permissions = permissions;
+    if (permissions.sockets || permissions.exec) {
+      next.permissions = permissions;
+    }
+  }
+  if (socketBindings && socketBindings.length > 0) {
+    next.socketBindings = socketBindings.map((binding) => ({
+      id: binding.id,
+      candidates: [...binding.candidates],
+      resolved: binding.resolved,
+      override: binding.override,
+    }));
   }
   return next;
 };
 
+/** Guest package version: `1.2.3`, optional prerelease / build. */
+export const PACKAGE_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+
+const packageVersionSchema = z.string().trim().regex(PACKAGE_VERSION_PATTERN).max(64);
+
 export const packageManifestSchema = z.object({
+  version: packageVersionSchema.optional(),
   openchamber: openChamberManifestSchema,
 });
 
@@ -369,6 +471,12 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
     return fail(
       'unsupported-api-version',
       `Unsupported apiVersion. This host accepts ${OPENCHAMBER_SDK_MANIFEST_API_VERSIONS.join(' and ')}.`,
+    );
+  }
+  if (path === 'version' || path.endsWith('.version')) {
+    return fail(
+      'invalid-version',
+      'package.json version must be semver like 1.0.0.',
     );
   }
   if (path.includes('engines')) {
@@ -428,7 +536,14 @@ export const parseManifest = (document: ManifestDocument): ParseManifestResult =
   if ('openchamber' in document) {
     const parsed = packageManifestSchema.safeParse(document);
     if (parsed.success) {
-      return { ok: true, manifest: parsed.data.openchamber };
+      const success: ParseManifestSuccess = {
+        ok: true,
+        manifest: parsed.data.openchamber,
+      };
+      if (parsed.data.version) {
+        success.version = parsed.data.version;
+      }
+      return success;
     }
     const issue = parsed.error.issues[0];
     if (!issue) {
@@ -445,7 +560,14 @@ export const parseManifestJson = (json: string): ParseManifestResult => {
     if (packageEnvelopeSchema.safeParse(raw).success) {
       const parsed = packageManifestSchema.safeParse(raw);
       if (parsed.success) {
-        return { ok: true, manifest: parsed.data.openchamber };
+        const success: ParseManifestSuccess = {
+          ok: true,
+          manifest: parsed.data.openchamber,
+        };
+        if (parsed.data.version) {
+          success.version = parsed.data.version;
+        }
+        return success;
       }
       const issue = parsed.error.issues[0];
       if (!issue) {

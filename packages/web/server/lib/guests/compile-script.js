@@ -28,17 +28,25 @@ export const compileGuestScript = async (jsPath) => {
     });
     if (!result.success) {
       const message = result.logs.map((log) => log.message).join('\n');
-      throw new Error(message || 'Guest script build failed');
+      console.warn(
+        'Guest script compile failed; serving on-disk JS instead.',
+        message || 'Guest script build failed',
+      );
+      return null;
     }
     const artifact = result.outputs[0];
     if (!artifact) {
-      throw new Error('Guest script build produced no output');
+      console.warn('Guest script compile produced no output; serving on-disk JS instead.');
+      return null;
     }
     return Buffer.from(await artifact.text());
   } catch (error) {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
       return null;
     }
-    throw error;
+    // oc-dev compiles sibling .ts when present. Missing workspace links (or other
+    // resolve errors) must not blank the panel when panel/main.js was already bundled.
+    console.warn('Guest script compile failed; serving on-disk JS instead.', error);
+    return null;
   }
 };

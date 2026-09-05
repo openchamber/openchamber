@@ -5,6 +5,7 @@ import { parseManifestJson, resolveAttachMode, toPublicAgent, toPublicIntegratio
 
 import { listRelativeGuestScriptHrefs, resolveGuestHtmlRelativePath } from './html-tokens.js';
 import { readExtensionStore } from './persist.js';
+import { buildPublicSocketBindings } from './sockets.js';
 
 const PANEL_ID = /^[a-z][a-z0-9-]*$/;
 
@@ -127,6 +128,9 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (!parsed.ok) {
     return { ok: false, code: 'invalid-manifest' };
   }
+  if (!skipEngineCheck && !parsed.version) {
+    return { ok: false, code: 'invalid-manifest' };
+  }
   const engine = parsed.manifest.engines?.openchamber;
   if (engine && !skipEngineCheck) {
     const hostVersion = typeof openchamberVersion === 'string' ? openchamberVersion : '';
@@ -159,6 +163,9 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
     entry: panel.entry,
     packageRoot,
   };
+  if (parsed.version) {
+    guest.version = parsed.version;
+  }
   if (parsed.manifest.engines) {
     guest.engines = parsed.manifest.engines;
   }
@@ -199,7 +206,11 @@ export const toPublicGuest = (guest) => {
     entry: guest.entry,
     source: guest.source,
     path: guest.path ?? null,
+    enabled: guest.enabled !== false,
   };
+  if (typeof guest.version === 'string' && guest.version) {
+    row.version = guest.version;
+  }
   const attach = resolveAttachMode(guest.attach);
   if (attach) {
     row.attach = attach;
@@ -207,7 +218,11 @@ export const toPublicGuest = (guest) => {
   if (guest.integration) {
     row.integration = toPublicIntegration(guest.integration);
   }
-  const agent = toPublicAgent(guest.agent, Boolean(guest.agentGranted));
+  const agent = toPublicAgent(
+    guest.agent,
+    Boolean(guest.agentGranted),
+    guest.socketBindings,
+  );
   if (agent) {
     row.agent = agent;
   }
@@ -232,9 +247,17 @@ export const listInstalledGuests = async ({ persistPath } = {}) => {
     }
     seen.add(guest.id);
     const source = stored.sources[root] ?? stored.sources[storedPath] ?? 'path';
+    const socketBindings = guest.agent?.permissions?.sockets?.length
+      ? await buildPublicSocketBindings(
+        guest.agent.permissions.sockets,
+        stored.agentSocketOverrides?.[guest.id] ?? {},
+      )
+      : undefined;
     guests.push({
       ...withSource(guest, source, root),
       agentGranted: Boolean(stored.agentGrants?.[guest.id]),
+      enabled: !stored.disabledGuests?.[guest.id],
+      socketBindings,
     });
   }
 

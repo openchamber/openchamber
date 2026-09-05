@@ -446,7 +446,7 @@ export const GuestIntegrationsSection: React.FC<{ divider?: boolean }> = ({ divi
     return null;
   }
 
-  const cards = guests.filter((guest) => guest.integration);
+  const cards = guests.filter((guest) => guest.integration && guest.enabled !== false);
   if (cards.length === 0) {
     return null;
   }

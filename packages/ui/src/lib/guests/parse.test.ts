@@ -10,6 +10,7 @@ describe('parseGuestCatalogJson', () => {
         name: 'Hello',
         icon: 'window',
         entry: 'panel/index.html',
+        version: '1.0.0',
         source: 'path',
         path: '/tmp/hello',
       }, {
@@ -33,6 +34,7 @@ describe('parseGuestCatalogJson', () => {
         name: 'Hello',
         icon: 'window',
         entry: 'panel/index.html',
+        version: '1.0.0',
         source: 'path',
         path: '/tmp/hello',
       },
@@ -119,9 +121,15 @@ describe('parseGuestCatalogJson', () => {
           runtime: 'host',
           granted: false,
           permissions: {
-            sockets: ['/var/run/docker.sock'],
+            sockets: ['docker'],
             exec: ['docker'],
           },
+          socketBindings: [{
+            id: 'docker',
+            candidates: ['/var/run/docker.sock'],
+            resolved: '/var/run/docker.sock',
+            override: null,
+          }],
         },
       }],
     }))).toEqual([
@@ -134,9 +142,15 @@ describe('parseGuestCatalogJson', () => {
           runtime: 'host',
           granted: false,
           permissions: {
-            sockets: ['/var/run/docker.sock'],
+            sockets: ['docker'],
             exec: ['docker'],
           },
+          socketBindings: [{
+            id: 'docker',
+            candidates: ['/var/run/docker.sock'],
+            resolved: '/var/run/docker.sock',
+            override: null,
+          }],
         },
       },
     ]);

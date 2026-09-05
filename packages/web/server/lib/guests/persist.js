@@ -9,6 +9,11 @@ const storeSchema = z.object({
   paths: z.array(z.string().min(1).refine((entry) => !entry.includes('\0'))),
   sources: z.record(z.string(), z.enum(GUEST_SOURCES)).optional(),
   agentGrants: z.record(z.string(), z.literal(true)).optional(),
+  disabledGuests: z.record(z.string(), z.literal(true)).optional(),
+  agentSocketOverrides: z.record(
+    z.string(),
+    z.record(z.string(), z.string().min(1).refine((entry) => !entry.includes('\0'))),
+  ).optional(),
 });
 
 const parseStore = (raw) => {
@@ -47,6 +52,14 @@ export const isCopiedGuestRoot = (root, persistPath) => {
   return resolved === copies || resolved.startsWith(`${copies}${path.sep}`);
 };
 
+const emptyStore = () => ({
+  paths: [],
+  sources: {},
+  agentGrants: {},
+  disabledGuests: {},
+  agentSocketOverrides: {},
+});
+
 export const readExtensionStore = async (persistPath) => {
   try {
     const raw = await fs.readFile(persistPath, 'utf8');
@@ -58,16 +71,27 @@ export const readExtensionStore = async (persistPath) => {
       paths: parsed.paths,
       sources: parsed.sources ?? {},
       agentGrants: parsed.agentGrants ?? {},
+      disabledGuests: parsed.disabledGuests ?? {},
+      agentSocketOverrides: parsed.agentSocketOverrides ?? {},
     };
   } catch (error) {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-      return { paths: [], sources: {}, agentGrants: {} };
+      return emptyStore();
     }
     throw error;
   }
 };
 
-export const writeExtensionStore = async (persistPath, { paths, sources = {}, agentGrants = {} }) => {
+export const writeExtensionStore = async (
+  persistPath,
+  {
+    paths,
+    sources = {},
+    agentGrants = {},
+    disabledGuests = {},
+    agentSocketOverrides = {},
+  },
+) => {
   const cleaned = {};
   for (const entry of paths) {
     const source = sources[entry];
@@ -81,12 +105,38 @@ export const writeExtensionStore = async (persistPath, { paths, sources = {}, ag
       grants[id] = true;
     }
   }
+  const disabled = {};
+  for (const [id, isDisabled] of Object.entries(disabledGuests)) {
+    if (isDisabled) {
+      disabled[id] = true;
+    }
+  }
+  /** @type {Record<string, Record<string, string>>} */
+  const socketOverrides = {};
+  for (const [guestId, bySocket] of Object.entries(agentSocketOverrides)) {
+    /** @type {Record<string, string>} */
+    const cleanedSockets = {};
+    for (const [socketId, socketPath] of Object.entries(bySocket ?? {})) {
+      if (typeof socketPath === 'string' && socketPath.trim() && !socketPath.includes('\0')) {
+        cleanedSockets[socketId] = socketPath.trim();
+      }
+    }
+    if (Object.keys(cleanedSockets).length > 0) {
+      socketOverrides[guestId] = cleanedSockets;
+    }
+  }
   const payload = { paths };
   if (Object.keys(cleaned).length > 0) {
     payload.sources = cleaned;
   }
   if (Object.keys(grants).length > 0) {
     payload.agentGrants = grants;
+  }
+  if (Object.keys(disabled).length > 0) {
+    payload.disabledGuests = disabled;
+  }
+  if (Object.keys(socketOverrides).length > 0) {
+    payload.agentSocketOverrides = socketOverrides;
   }
   await fs.mkdir(path.dirname(persistPath), { recursive: true });
   const tmp = `${persistPath}.tmp-${process.pid}`;
@@ -111,5 +161,7 @@ export const writeExtensionPaths = async (paths, persistPath) => {
     paths,
     sources,
     agentGrants: current.agentGrants,
+    disabledGuests: current.disabledGuests,
+    agentSocketOverrides: current.agentSocketOverrides,
   });
 };

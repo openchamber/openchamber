@@ -11,6 +11,7 @@ export {
   HOST_LINEAR_API_ORIGIN,
   isGuestPackageSvgIcon,
   openChamberManifestSchema,
+  PACKAGE_VERSION_PATTERN,
   packageManifestSchema,
   parseManifest,
   parseManifestJson,
@@ -43,8 +44,12 @@ export type {
   ParseManifestResult,
   ParseManifestSuccess,
   PublicAgent,
+  PublicAgentPermissions,
   PublicIntegration,
+  PublicSocketBinding,
   ResolvedGuestApi,
+  SocketBinding,
+  SocketPlatform,
   ManifestDocument,
 } from './parse.ts';
 export { connectHost, HostRequestError } from './host.ts';

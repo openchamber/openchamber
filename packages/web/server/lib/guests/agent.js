@@ -11,6 +11,7 @@ import {
 } from '@openchamber/sdk';
 
 import { readExtensionStore, writeExtensionStore } from './persist.js';
+import { resolveAgentSocketEnv } from './sockets.js';
 
 const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 const AGENT_READY_TIMEOUT_MS = 15_000;
@@ -126,7 +127,65 @@ export const setAgentGranted = async (guestId, persistPath, granted) => {
     paths: store.paths,
     sources: store.sources,
     agentGrants,
+    disabledGuests: store.disabledGuests,
+    agentSocketOverrides: store.agentSocketOverrides,
   });
+};
+
+/**
+ * @param {string} guestId
+ * @param {string} persistPath
+ * @param {boolean} enabled
+ */
+export const setGuestEnabled = async (guestId, persistPath, enabled) => {
+  const store = await readExtensionStore(persistPath);
+  const disabledGuests = { ...(store.disabledGuests ?? {}) };
+  if (enabled) {
+    delete disabledGuests[guestId];
+  } else {
+    disabledGuests[guestId] = true;
+  }
+  await writeExtensionStore(persistPath, {
+    paths: store.paths,
+    sources: store.sources,
+    agentGrants: store.agentGrants,
+    disabledGuests,
+    agentSocketOverrides: store.agentSocketOverrides,
+  });
+  if (!enabled) {
+    await stopGuestAgent(guestId);
+  }
+};
+
+/**
+ * @param {string} guestId
+ * @param {string} socketId
+ * @param {string} persistPath
+ * @param {string | null} socketPath empty/null clears the override
+ */
+export const setAgentSocketOverride = async (guestId, socketId, persistPath, socketPath) => {
+  const store = await readExtensionStore(persistPath);
+  const agentSocketOverrides = { ...(store.agentSocketOverrides ?? {}) };
+  const forGuest = { ...(agentSocketOverrides[guestId] ?? {}) };
+  const trimmed = typeof socketPath === 'string' ? socketPath.trim() : '';
+  if (trimmed) {
+    forGuest[socketId] = trimmed;
+  } else {
+    delete forGuest[socketId];
+  }
+  if (Object.keys(forGuest).length > 0) {
+    agentSocketOverrides[guestId] = forGuest;
+  } else {
+    delete agentSocketOverrides[guestId];
+  }
+  await writeExtensionStore(persistPath, {
+    paths: store.paths,
+    sources: store.sources,
+    agentGrants: store.agentGrants,
+    disabledGuests: store.disabledGuests,
+    agentSocketOverrides,
+  });
+  await stopGuestAgent(guestId);
 };
 
 /**
@@ -204,9 +263,17 @@ const collectProcessOutput = (child, maxChars = 2_000) => {
  *   guestId: string,
  *   packageRoot: string,
  *   entry: string,
+ *   socketBindings?: Array<{ id: string, candidatesByPlatform?: Partial<Record<'linux' | 'darwin' | 'win32', string[]>> }>,
+ *   socketOverrides?: Record<string, string>,
  * }} params
  */
-const startGuestAgent = async ({ guestId, packageRoot, entry }) => {
+const startGuestAgent = async ({
+  guestId,
+  packageRoot,
+  entry,
+  socketBindings = [],
+  socketOverrides = {},
+}) => {
   const existing = runtimes.get(guestId);
   if (existing?.status === 'ready' && existing.child.exitCode === null && !existing.child.signalCode) {
     return existing;
@@ -228,12 +295,18 @@ const startGuestAgent = async ({ guestId, packageRoot, entry }) => {
 
   const port = await reserveLoopbackPort();
   const token = crypto.randomBytes(24).toString('hex');
+  const socketEnv = socketBindings.length > 0
+    ? await resolveAgentSocketEnv(socketBindings, socketOverrides)
+    : {};
   const env = {
     ...process.env,
     OPENCHAMBER_AGENT_PORT: String(port),
     OPENCHAMBER_AGENT_TOKEN: token,
     ELECTRON_RUN_AS_NODE: '1',
   };
+  if (Object.keys(socketEnv).length > 0) {
+    env.OPENCHAMBER_AGENT_SOCKETS = JSON.stringify(socketEnv);
+  }
   const child = spawn(process.execPath, [absoluteEntry], {
     cwd: packageRoot,
     env,
@@ -282,6 +355,8 @@ const startGuestAgent = async ({ guestId, packageRoot, entry }) => {
  *   guestId: string,
  *   packageRoot: string,
  *   entry: string,
+ *   socketBindings?: Array<{ id: string, candidatesByPlatform?: Partial<Record<'linux' | 'darwin' | 'win32', string[]>> }>,
+ *   socketOverrides?: Record<string, string>,
  * }} params
  */
 const ensureGuestAgent = async (params) => {
@@ -306,7 +381,7 @@ const ensureGuestAgent = async (params) => {
  * @param {{
  *   guestId: string,
  *   packageRoot: string,
- *   agent: { entry: string, permissions?: { sockets?: string[], exec?: string[] } },
+ *   agent: { entry: string, permissions?: { sockets?: Array<{ id: string, candidatesByPlatform?: Partial<Record<'linux' | 'darwin' | 'win32', string[]>> }>, exec?: string[] } },
  *   persistPath: string,
  *   method: string,
  *   path: string,
@@ -316,6 +391,7 @@ const ensureGuestAgent = async (params) => {
  */
 export const proxyGuestAgentRequest = async ({
   guestId,
+  guestName,
   packageRoot,
   agent,
   persistPath,
@@ -330,6 +406,14 @@ export const proxyGuestAgentRequest = async ({
   if (!isGuestRequestPath(requestPath)) {
     throw new GuestAgentError('Request path must stay on the agent.', 'BAD_PATH');
   }
+  const store = await readExtensionStore(persistPath);
+  if (store.disabledGuests?.[guestId]) {
+    const label = typeof guestName === 'string' && guestName.trim() ? guestName.trim() : 'This extension';
+    throw new GuestAgentError(
+      `${label} is disabled in Settings → Extensions.`,
+      'DISABLED',
+    );
+  }
   const needsGrant = Boolean(
     (agent.permissions?.sockets && agent.permissions.sockets.length > 0)
     || (agent.permissions?.exec && agent.permissions.exec.length > 0),
@@ -338,12 +422,17 @@ export const proxyGuestAgentRequest = async ({
     throw new GuestAgentError('Allow this extension\'s local agent in Settings → Extensions.', 'NO_AGENT');
   }
 
+  const socketOverrides = store.agentSocketOverrides?.[guestId] ?? {};
+  const socketBindings = agent.permissions?.sockets ?? [];
+
   let runtime = runtimes.get(guestId);
   if (!runtime || runtime.status !== 'ready' || runtime.child.exitCode !== null || runtime.child.signalCode) {
     runtime = await ensureGuestAgent({
       guestId,
       packageRoot,
       entry: agent.entry,
+      socketBindings,
+      socketOverrides,
     });
   }
 

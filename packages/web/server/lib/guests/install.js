@@ -44,10 +44,12 @@ const persistGuest = async (guest, root, source, persistPath) => {
     paths: [...stored.paths, root],
     sources: { ...stored.sources, [root]: source },
     agentGrants: stored.agentGrants,
+    disabledGuests: stored.disabledGuests,
+    agentSocketOverrides: stored.agentSocketOverrides,
   });
   return {
     ok: true,
-    guest: toPublicGuest({ ...guest, source, path: root, agentGranted: false }),
+    guest: toPublicGuest({ ...guest, source, path: root, agentGranted: false, enabled: true }),
   };
 };
 
@@ -224,7 +226,17 @@ export const uninstallGuest = async (id, persistPath) => {
   }
   const agentGrants = { ...(stored.agentGrants ?? {}) };
   delete agentGrants[id];
-  await writeExtensionStore(persistPath, { paths: kept, sources, agentGrants });
+  const disabledGuests = { ...(stored.disabledGuests ?? {}) };
+  delete disabledGuests[id];
+  const agentSocketOverrides = { ...(stored.agentSocketOverrides ?? {}) };
+  delete agentSocketOverrides[id];
+  await writeExtensionStore(persistPath, {
+    paths: kept,
+    sources,
+    agentGrants,
+    disabledGuests,
+    agentSocketOverrides,
+  });
   await stopGuestAgent(id);
   if (removedRoot && isCopiedGuestRoot(removedRoot, persistPath)) {
     await fs.rm(removedRoot, { recursive: true, force: true });

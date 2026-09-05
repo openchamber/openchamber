@@ -70,6 +70,36 @@ describe('guest agent proxy', () => {
     }
   });
 
+  test('refuses when the extension is disabled', async () => {
+    const { dir, persistPath, packageRoot } = await writeFixture();
+    try {
+      await writeExtensionStore(persistPath, {
+        paths: [packageRoot],
+        sources: {},
+        agentGrants: { docker: true },
+        disabledGuests: { docker: true },
+      });
+      await expect(proxyGuestAgentRequest({
+        guestId: 'docker',
+        guestName: 'Docker',
+        packageRoot,
+        agent: {
+          entry: 'agent/main.js',
+          permissions: { exec: ['docker'] },
+        },
+        persistPath,
+        method: 'GET',
+        path: '/ping',
+      })).rejects.toMatchObject({
+        code: 'DISABLED',
+        message: 'Docker is disabled in Settings → Extensions.',
+      });
+      expect(getAgentStatus('docker')).toBe('stopped');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test('spawns, proxies, and reports ready', async () => {
     const { dir, persistPath, packageRoot } = await writeFixture();
     try {

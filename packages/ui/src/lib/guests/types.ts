@@ -7,9 +7,13 @@ export type InstalledGuest = {
   name: string;
   icon: string;
   entry: string;
+  /** npm package.json version when the package declared one. */
+  version?: string;
   attach?: AttachContribution;
   integration?: PublicIntegration;
   agent?: PublicAgent;
   source?: GuestSource;
   path?: string | null;
+  /** False when the user disabled the extension. Omitted/true means enabled. */
+  enabled?: boolean;
 };

@@ -10,7 +10,7 @@ This package is the language. It does not mount React into the app. A panel stil
 
 This package ships TypeScript source. **Bun is required** — it resolves and compiles `.ts` imports natively. Node.js without a bundler will not work.
 
-Local agent processes (`contributes.agent`, `agentRequest`, sockets / exec grant) are described in [GUEST_AGENTS.md](./GUEST_AGENTS.md). Optional `engines.openchamber` (`1.22.0` or `>=1.22.0`) is the minimum OpenChamber version for install.
+Local agent processes (`contributes.agent`, `agentRequest`, sockets / exec grant) are described in [GUEST_AGENTS.md](./GUEST_AGENTS.md). Optional `engines.openchamber` (`1.22.0` or `>=1.22.0`) is the minimum OpenChamber version for install. Package `version` is semver and required on install.
 
 ## Where this runs
 
@@ -37,6 +37,7 @@ In `package.json`:
 ```json
 {
   "name": "@acme/hello-panel",
+  "version": "1.0.0",
   "openchamber": {
     "apiVersion": 1,
     "contributes": {
@@ -62,7 +63,7 @@ In `package.json`:
 }
 ```
 
-`id` is kebab-case. `icon` is a Remixicon name (`RiWindowLine` → `window`) or a package SVG path like `icon.svg`. URLs and absolute paths fail parse. `entry` is a path inside the package. `../` and absolute paths fail parse.
+`version` is semver (`1.0.0`). Install requires it. Settings → Extensions shows `v1.0.0` on the card. `id` is kebab-case. `icon` is a Remixicon name (`RiWindowLine` → `window`) or a package SVG path like `icon.svg`. URLs and absolute paths fail parse. `entry` is a path inside the package. `../` and absolute paths fail parse.
 
 `attach: true` or `"panel"` adds a + menu row that opens the rail. `"attach": "dialog"` opens a host window with the same iframe. `ready.surface` is `panel` or `dialog` so the guest can draw a rail form in one and an attach picker in the other. Omit attach and the panel stays off those menus. VS Code and mobile have no guest rail. That is the 1.0 contract, not a gap in the docs.
 
@@ -203,7 +204,7 @@ What exists in code today:
 - `engines.openchamber` — optional `1.22.0` or `>=1.22.0`. Install refuses older hosts with `host-too-old`
 - `connectHost`: theme, locale, directory, session `{ id, title, busy, model?, agent? }`, connection, settings, toast, `openUrl`, `openSurface`, `writeClipboard`, `compose`, `attach` (`kind` issue or pull), `startSession` (same fields plus `worktree`, returns `{ sessionId, sent }`), `prompt` (current session, returns `{ sent }`), `sessionLink` (current session), `onSessionLifecycle` (`started` / `completed` / `failure`), `close`, `oauthStart`, `oauthDisconnect`, `request`, `agentRequest`, `agentStatus`
 - Host hole on web and desktop: `GET /api/guests`, Settings → Extensions (folder, local ZIP, or https git / zip URL, stored per OpenChamber instance), Settings → Integrations, a rail iframe, the composer + menu, and the attach window. Zip and git copies live under `{dataDir}/guests/{id}`. VS Code and mobile mark the catalog unsupported. Ship a classic IIFE with the bundle command above. The packaged app does not compile TypeScript.
-- `HostRequestError.code`: `HOST_UNAVAILABLE`, `HOST_TIMEOUT` (20s), `HOST_REJECTED`, `DISCONNECTED`, `BAD_PATH`, `NO_INTEGRATION`, `NO_SESSION`, `SESSION_BUSY`, `NO_AGENT`, `AGENT_FAILED`. An unknown wire code becomes `HOST_REJECTED`.
+- `HostRequestError.code`: `HOST_UNAVAILABLE`, `HOST_TIMEOUT` (20s), `HOST_REJECTED`, `DISCONNECTED`, `DISABLED`, `BAD_PATH`, `NO_INTEGRATION`, `NO_SESSION`, `SESSION_BUSY`, `NO_AGENT`, `AGENT_FAILED`. An unknown wire code becomes `HOST_REJECTED`.
 - `@openchamber/sdk/ui`: `applyHostReady`, `mountIssuePage`, `mountIssueCard`, `mountAttachIssues`, `mountPullRequest`, `mountButton`, `mountTextField`, `mountEmpty`. The guest passes rows. A row may carry `badge` and `subtitle`. The picker can `hasMore`, show one `toggle`, a `session` checkbox, and an `action`. The host does not search.
 
 Frozen on `apiVersion` 1. No new RPC and no second `host.provider` until this set has lived with third-party guests. Named, not typed yet. No slot means no hole in the host. Do not go around it through `RuntimeAPIs`.

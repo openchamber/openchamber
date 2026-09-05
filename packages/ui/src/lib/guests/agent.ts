@@ -97,3 +97,30 @@ export const grantGuestAgent = async (guestId: string): Promise<boolean> => {
     return false;
   }
 };
+
+const socketOverrideResultSchema = z.object({
+  guest: z.object({
+    id: z.string().min(1),
+  }).passthrough(),
+});
+
+export const setGuestAgentSocketPath = async (
+  guestId: string,
+  socketId: string,
+  socketPath: string | null,
+): Promise<boolean> => {
+  try {
+    const response = await runtimeFetch(`/api/guests/${guestId}/agent/sockets`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: socketId, path: socketPath }),
+    });
+    if (!response.ok) {
+      return false;
+    }
+    const parsed = socketOverrideResultSchema.safeParse(await response.json().catch(() => null));
+    return parsed.success;
+  } catch {
+    return false;
+  }
+};

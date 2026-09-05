@@ -14,6 +14,13 @@ const publicIntegrationSchema = z.object({
   })).optional(),
 });
 
+const publicSocketBindingSchema = z.object({
+  id: z.string().trim().min(1),
+  candidates: z.array(z.string()),
+  resolved: z.string().nullable(),
+  override: z.string().nullable(),
+});
+
 const publicAgentSchema = z.object({
   runtime: z.literal('host'),
   granted: z.boolean(),
@@ -21,6 +28,7 @@ const publicAgentSchema = z.object({
     sockets: z.array(z.string().trim().min(1)).optional(),
     exec: z.array(z.string().trim().min(1)).optional(),
   }).optional(),
+  socketBindings: z.array(publicSocketBindingSchema).optional(),
 });
 
 const installedGuestSchema = z.object({
@@ -28,11 +36,13 @@ const installedGuestSchema = z.object({
   name: z.string().trim().min(1),
   icon: z.string().trim().min(1),
   entry: z.string().trim().min(1),
+  version: z.string().trim().min(1).max(64).optional(),
   attach: z.union([z.boolean(), z.enum(['panel', 'dialog'])]).optional(),
   integration: publicIntegrationSchema.optional(),
   agent: publicAgentSchema.optional(),
   source: z.enum(['bundled', 'path', 'zip', 'git']).optional(),
   path: z.string().nullable().optional(),
+  enabled: z.boolean().optional(),
 });
 
 const catalogSchema = z.object({

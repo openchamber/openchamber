@@ -14,7 +14,7 @@ import {
 import { compileGuestScript } from './compile-script.js';
 import { injectGuestAssetTokens, parseGuestUrlToken } from './html-tokens.js';
 import { installGuest, parseInstallRequest, uninstallGuest } from './install.js';
-import { extensionsPersistPath } from './persist.js';
+import { extensionsPersistPath, readExtensionStore } from './persist.js';
 import { getGuestAuth, guestAuthPersistPath, patchGuestAuth } from './auth-store.js';
 import {
   disconnectHostGuest,
@@ -36,6 +36,8 @@ import {
   getAgentStatus,
   proxyGuestAgentRequest,
   setAgentGranted,
+  setAgentSocketOverride,
+  setGuestEnabled,
 } from './agent.js';
 
 const json16 = express.json({ limit: '16kb' });
@@ -55,6 +57,19 @@ const requestBodySchema = z.object({
   path: z.string().trim().min(1).refine(isGuestRequestPath),
   query: z.record(z.string().min(1).max(128), z.string().max(2000)).optional(),
   body: z.string().max(64_000).optional(),
+});
+
+const socketOverrideBodySchema = z.object({
+  id: z.string().trim().regex(/^[a-z][a-z0-9-]*$/).max(64),
+  path: z.union([
+    z.string().trim().min(1).max(512).refine((value) => !value.includes('\0')),
+    z.literal(''),
+    z.null(),
+  ]).optional(),
+});
+
+const enabledBodySchema = z.object({
+  enabled: z.boolean(),
 });
 
 const queryValue = (req, key) => {
@@ -353,6 +368,13 @@ export const registerGuestRoutes = (app, { openchamberDataDir, openchamberVersio
       if (!guest?.integration) {
         return res.status(404).json({ error: 'not-found' });
       }
+      const store = await readExtensionStore(persistPath);
+      if (store.disabledGuests?.[guest.id]) {
+        throw new GuestOAuthError(
+          `${guest.name} is disabled in Settings → Extensions.`,
+          'DISABLED',
+        );
+      }
       const parsed = requestBodySchema.safeParse(req.body);
       if (!parsed.success) {
         return res.status(400).json({ error: 'invalid-request' });
@@ -388,6 +410,7 @@ export const registerGuestRoutes = (app, { openchamberDataDir, openchamberVersio
       }
       const result = await proxyGuestAgentRequest({
         guestId: guest.id,
+        guestName: guest.name,
         packageRoot: guest.packageRoot,
         agent: guest.agent,
         persistPath,
@@ -435,6 +458,59 @@ export const registerGuestRoutes = (app, { openchamberDataDir, openchamberVersio
     } catch (error) {
       console.error('Failed to grant guest agent:', error);
       res.status(500).json({ error: 'Failed to grant guest agent' });
+    }
+  });
+
+  app.put('/api/guests/:id/enabled', json16, async (req, res) => {
+    try {
+      const guest = await loadGuest(req.params.id);
+      if (!guest) {
+        return res.status(404).json({ error: 'not-found' });
+      }
+      const parsed = enabledBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: 'invalid-request' });
+      }
+      await setGuestEnabled(guest.id, persistPath, parsed.data.enabled);
+      const next = await loadGuest(guest.id);
+      if (!next) {
+        return res.status(404).json({ error: 'not-found' });
+      }
+      res.json({ guest: toPublicGuest(next) });
+    } catch (error) {
+      console.error('Failed to update guest enabled state:', error);
+      res.status(500).json({ error: 'Failed to update guest enabled state' });
+    }
+  });
+
+  app.put('/api/guests/:id/agent/sockets', json16, async (req, res) => {
+    try {
+      const guest = await loadGuest(req.params.id);
+      if (!guest?.agent) {
+        return res.status(404).json({ error: 'not-found' });
+      }
+      const parsed = socketOverrideBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: 'invalid-request' });
+      }
+      const declared = guest.agent.permissions?.sockets ?? [];
+      if (!declared.some((binding) => binding.id === parsed.data.id)) {
+        return res.status(400).json({ error: 'unknown-socket', message: 'Socket id is not declared by this agent.' });
+      }
+      await setAgentSocketOverride(
+        guest.id,
+        parsed.data.id,
+        persistPath,
+        parsed.data.path ?? null,
+      );
+      const next = await loadGuest(guest.id);
+      if (!next) {
+        return res.status(404).json({ error: 'not-found' });
+      }
+      res.json({ guest: toPublicGuest(next) });
+    } catch (error) {
+      console.error('Failed to update guest agent socket path:', error);
+      res.status(500).json({ error: 'Failed to update guest agent socket path' });
     }
   });
 

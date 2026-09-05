@@ -41,7 +41,30 @@ describe('parseManifest', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.manifest.contributes.panel.id).toBe('acme-hello');
+      expect(result.version).toBeUndefined();
     }
+  });
+
+  test('reads package.json version', () => {
+    const result = parseManifestJson(JSON.stringify({
+      name: '@acme/hello-panel',
+      version: '1.2.3',
+      openchamber: validBlock,
+    }));
+    expect(result).toMatchObject({
+      ok: true,
+      version: '1.2.3',
+      manifest: { contributes: { panel: { id: 'acme-hello' } } },
+    });
+  });
+
+  test('rejects a bad package.json version', () => {
+    const result = parseManifestJson(JSON.stringify({
+      name: '@acme/hello-panel',
+      version: 'latest',
+      openchamber: validBlock,
+    }));
+    expect(result).toMatchObject({ ok: false, code: 'invalid-version' });
   });
 
   test('trims strings and drops extra keys', () => {
@@ -114,11 +137,69 @@ describe('parseManifest', () => {
         entry: 'agent/main.js',
         runtime: 'host',
         permissions: {
-          sockets: ['/var/run/docker.sock'],
+          sockets: [{
+            id: '/var/run/docker.sock',
+            candidatesByPlatform: {
+              linux: ['/var/run/docker.sock'],
+              darwin: ['/var/run/docker.sock'],
+              win32: ['/var/run/docker.sock'],
+            },
+          }],
           exec: ['docker'],
         },
       });
     }
+  });
+
+  test('accepts object socket bindings with per-platform candidates', () => {
+    const result = parseManifest({
+      apiVersion: 1,
+      contributes: {
+        panel: validBlock.contributes.panel,
+        agent: {
+          entry: 'agent/main.js',
+          runtime: 'host',
+          permissions: {
+            sockets: [{
+              id: 'docker',
+              candidates: {
+                linux: ['/var/run/docker.sock'],
+                darwin: ['~/.docker/run/docker.sock'],
+                win32: ['//./pipe/docker_engine'],
+              },
+            }],
+          },
+        },
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.manifest.contributes.agent?.permissions?.sockets).toEqual([{
+        id: 'docker',
+        candidatesByPlatform: {
+          linux: ['/var/run/docker.sock'],
+          darwin: ['~/.docker/run/docker.sock'],
+          win32: ['//./pipe/docker_engine'],
+        },
+      }]);
+    }
+  });
+
+  test('rejects a socket binding without path or candidates', () => {
+    const result = parseManifest({
+      apiVersion: 1,
+      contributes: {
+        panel: validBlock.contributes.panel,
+        agent: {
+          entry: 'agent/main.js',
+          runtime: 'host',
+          permissions: {
+            sockets: [{ id: 'docker' }],
+          },
+        },
+      },
+    });
+    expect(result).toMatchObject({ ok: false, code: 'invalid-agent' });
   });
 
   test('rejects apiVersion 2', () => {

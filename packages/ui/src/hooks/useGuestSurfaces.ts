@@ -34,7 +34,9 @@ export const useGuestSurfaces = (): ContextSurfaceDescriptor[] => {
 
   return React.useMemo(() => {
     const authenticatedAsset = getRuntimeUrlResolver().authenticatedAsset;
-    return guests.map((guest) => guestSurfaceFromInstalled(guest, authenticatedAsset));
+    return guests
+      .filter((guest) => guest.enabled !== false)
+      .map((guest) => guestSurfaceFromInstalled(guest, authenticatedAsset));
   }, [guests, runtimeKey]);
 };
 
@@ -55,6 +57,7 @@ export const useGuestAttachItems = (): GuestAttachItem[] => {
     const authenticatedAsset = getRuntimeUrlResolver().authenticatedAsset;
     const items: GuestAttachItem[] = [];
     for (const guest of guests) {
+      if (guest.enabled === false) continue;
       const mode = resolveAttachMode(guest.attach);
       if (!mode) continue;
       items.push({

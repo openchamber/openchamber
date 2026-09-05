@@ -84,6 +84,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
   const guestId = pluginIdFromMode(mode);
   const guest = useGuestsStore((state) => state.guests.find((entry) => entry.id === guestId) ?? null);
+  const guestEnabled = guest?.enabled !== false;
   const oauthStatus = useGuestOauthStore((state) => state.byId[guestId]);
   const setOauthStatus = useGuestOauthStore((state) => state.setStatus);
   const refreshOauth = useGuestOauthStore((state) => state.refresh);
@@ -145,6 +146,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   sessionBusyRef.current = sessionBusy;
   const guestIdRef = React.useRef(guestId);
   guestIdRef.current = guestId;
+  const guestEnabledRef = React.useRef(guestEnabled);
+  guestEnabledRef.current = guestEnabled;
   const guestAuthRef = React.useRef(guest?.integration?.auth);
   guestAuthRef.current = guest?.integration?.auth;
   const translateRef = React.useRef(t);
@@ -181,6 +184,12 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     void refreshOauth(guest.id);
   }, [guest?.id, guest?.integration, refreshOauth]);
 
+  React.useEffect(() => {
+    if (guest && !guestEnabled) {
+      onDismiss?.();
+    }
+  }, [guest, guestEnabled, onDismiss]);
+
   // Remount when agent grant flips so the guest leaves its "unavailable" empty state.
   // Resolve the frame from the ref on every message: a key remount replaces the
   // element without changing `src`, so a captured contentWindow would go stale.
@@ -201,6 +210,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
 
       void answerGuestMessage(message, {
         toast: (kind, toastMessage) => {
+          // Full pause: a disabled guest must not spam host toasts while the frame tears down.
+          if (!guestEnabledRef.current) return;
           if (kind === 'success') toast.success(toastMessage);
           else if (kind === 'error') toast.error(toastMessage);
           else toast.info(toastMessage);
@@ -256,6 +267,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           onDismiss?.();
         },
         oauthStart: async () => {
+          if (!guestEnabledRef.current) return false;
           const id = guestIdRef.current;
           const previous = useGuestOauthStore.getState().byId[id]?.connection ?? EMPTY_GUEST_CONNECTION;
           const authorizationUrl = await startGuestOauth(id);
@@ -288,6 +300,13 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           return true;
         },
         request: async (request) => {
+          if (!guestEnabledRef.current) {
+            return {
+              ok: false,
+              code: 'DISABLED',
+              message: 'This extension is disabled in Settings → Extensions.',
+            };
+          }
           const hosted = await fetchHostLinearIssueGet(guestAuthRef.current, request);
           if (hosted !== undefined) {
             if (!hosted) {
@@ -301,7 +320,16 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           }
           return result;
         },
-        agentRequest: (request) => proxyGuestAgentRequest(guestIdRef.current, request),
+        agentRequest: (request) => {
+          if (!guestEnabledRef.current) {
+            return Promise.resolve({
+              ok: false as const,
+              code: 'DISABLED' as const,
+              message: 'This extension is disabled in Settings → Extensions.',
+            });
+          }
+          return proxyGuestAgentRequest(guestIdRef.current, request);
+        },
         agentStatus: () => loadGuestAgentStatus(guestIdRef.current),
       }).then((reply) => {
         if (reply) postToGuest(reply);
@@ -335,6 +363,10 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         {t('contextPanel.plugin.loadFailed')}
       </div>
     );
+  }
+
+  if (!guestEnabled) {
+    return null;
   }
 
   return (

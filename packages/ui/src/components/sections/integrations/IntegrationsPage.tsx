@@ -26,7 +26,7 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({
   const hasLinear = Boolean(getRegisteredRuntimeAPIs()?.linear);
   const hasBuiltIn = hasGitHub || hasLinear;
   const hasGuestIntegrations = useGuestsStore(
-    (state) => !isVSCodeRuntime() && state.guests.some((guest) => Boolean(guest.integration)),
+    (state) => !isVSCodeRuntime() && state.guests.some((guest) => Boolean(guest.integration) && guest.enabled !== false),
   );
 
   return (
