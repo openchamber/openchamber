@@ -96,7 +96,7 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
 - **Native chrome** — status bar (iOS overlay + safe-area; Android inset + themed background),
   keyboard handling (iOS CSS inset; Android native `adjustResize`), edge-swipe session switch,
   back-button handling, app-icon badge.
-- **App icons** — iOS `AppIcon`; Android adaptive launcher icon; notification small icon
+- **App icons** — iOS `AppIcon`; Android adaptive and themed launcher icon; notification small icon
   (`ic_stat_notify`).
 
 ## Push / notifications architecture
@@ -130,8 +130,10 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
 - Manifest: permissions `INTERNET`, `CAMERA` (+ optional camera feature), `POST_NOTIFICATIONS`
   (Android 13+; older versions allow notifications by default). `windowSoftInputMode=adjustResize`.
   FCM `default_notification_icon=@drawable/ic_stat_notify`.
-- Adaptive launcher icon: full-bleed color background + `ic_launcher_foreground` (sources under
-  `packages/mobile/assets/`, regenerable with `@capacitor/assets`).
+- Adaptive and themed launcher icon: full-bleed color background + `ic_launcher_foreground` (sources under
+  `packages/mobile/assets/`, regenerable with `@capacitor/assets`). The `<monochrome>` layer
+  (`ic_launcher_monochrome.png`) is hand-maintained: regeneration rewrites `ic_launcher.xml`
+  without it, so re-add the layer afterwards.
 
 ## Quirks / gotchas
 
