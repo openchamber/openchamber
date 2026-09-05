@@ -24,7 +24,7 @@ const ICON_BUTTON_CLASS =
  * so the header can reserve matching space when the sidebar is collapsed.
  */
 export const TitlebarLeftControls: React.FC = () => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const clusterRef = React.useRef<HTMLDivElement | null>(null);
@@ -37,10 +37,11 @@ export const TitlebarLeftControls: React.FC = () => {
     void invokeDesktop('desktop_show_app_menu', {
       x: rect.left,
       y: rect.bottom,
+      locale,
     }).catch((error) => {
       console.warn('[titlebar] failed to open app menu', error);
     });
-  }, []);
+  }, [locale]);
 
   React.useEffect(() => {
     if (typeof document === 'undefined') {
