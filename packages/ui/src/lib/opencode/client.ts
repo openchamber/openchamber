@@ -689,25 +689,27 @@ class OpencodeService {
     return unwrapSdkData(response, 'session.messages');
   }
 
-  async getSessionTodos(sessionId: string): Promise<Array<{ id: string; content: string; status: string; priority: string }>> {
-    try {
-      const response = await this.client.session.todo({
-        sessionID: sessionId,
-        ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
-      });
-      if (response.error) {
-        return [];
-      }
-
-      const data = response.data;
-      if (!data || !Array.isArray(data)) {
-        return [];
-      }
-
-      return data as Array<{ id: string; content: string; status: string; priority: string }>;
-    } catch {
+  async getSessionTodos(
+    sessionId: string,
+    directory?: string,
+  ): Promise<Array<{ id: string; content: string; status: string; priority: string }>> {
+    // Authoritative re-fetch (used after revert/unrevert). Throws on transport or
+    // API error so callers can distinguish "no todos" (empty array) from "could
+    // not read todos" — swallowing to [] here previously let a transient failure
+    // wipe a session's visible todo list.
+    const resolvedDirectory = directory ?? this.currentDirectory;
+    const response = await this.client.session.todo({
+      sessionID: sessionId,
+      ...(resolvedDirectory ? { directory: resolvedDirectory } : {}),
+    });
+    if (response.error) {
+      throw new Error(`session.todo failed for ${sessionId}`);
+    }
+    const data = response.data;
+    if (!data || !Array.isArray(data)) {
       return [];
     }
+    return data as Array<{ id: string; content: string; status: string; priority: string }>;
   }
 
   /**

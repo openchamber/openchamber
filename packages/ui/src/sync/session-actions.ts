@@ -36,6 +36,7 @@ import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { requestSessionArchiveBatch } from "./session-archive-batch"
 import { registerBulkArchiveEchoes, releaseBulkArchiveEchoes } from "./bulk-archive-echo"
 import { getRuntimeKey } from "@/lib/runtime-switch"
+import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { markAmbiguousTransportFailure } from "@/lib/relay/transport-error"
 import { getErrorStatus, isAmbiguousSendFailure } from "./send-failure-classification"
 import { getStaleRunningToolMessageID } from "./materialization"
@@ -531,6 +532,9 @@ async function fetchSessionMessages(sessionId: string, directory?: string | null
 }
 
 async function cascadeRevertToDescendants(rootId: string, cutoff: number): Promise<void> {
+  // NOTE: descendants' todo lists are intentionally not cleared/refetched here.
+  // #2813 covers the reverted session's own composer task list; cascading todo
+  // clear/refetch to subagent sessions is a known follow-up.
   for (const { session, directory } of getDescendantSessions(rootId)) {
     try {
       // A running descendant would keep writing messages past the revert
@@ -2239,6 +2243,24 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     patch.session = sessions
   }
 
+  // Reverting hides the messages at/after the revert point, so the todo list
+  // they produced must not linger in the composer status (which prefers the
+  // live list and falls back to the persisted one). Clear both optimistically
+  // and roll both back if the revert API fails.
+  const prevLiveTodos = state.todo?.[sessionId]
+  if (prevLiveTodos) {
+    const nextTodo = { ...state.todo }
+    delete nextTodo[sessionId]
+    patch.todo = nextTodo
+  }
+  const canPersist = !!directory && directory !== "global"
+  const prevPersistedTodos = canPersist
+    ? useTodosPersistStore.getState().getSessionTodos(directory!, sessionId)
+    : undefined
+  if (canPersist) {
+    useTodosPersistStore.getState().clearSessionTodos(getRuntimeKey(), directory!, sessionId)
+  }
+
   store.setState(patch)
 
   // Save input store state before mutations — if the API fails we need to
@@ -2289,9 +2311,16 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     if (idx >= 0) {
       rollback[idx] = { ...rollback[idx], revert: prevRevert } as Session
     }
-    store.setState({
-      session: rollback,
-    })
+    // Restore the todo list we optimistically cleared so a failed revert does
+    // not leave the composer showing an empty task list.
+    const rollbackPatch: Record<string, unknown> = { session: rollback }
+    if (prevLiveTodos) {
+      rollbackPatch.todo = { ...current.todo, [sessionId]: prevLiveTodos }
+    }
+    store.setState(rollbackPatch)
+    if (canPersist && prevPersistedTodos) {
+      useTodosPersistStore.getState().setSessionTodos(directory!, sessionId, prevPersistedTodos)
+    }
     // Rollback input store: restore previous text and attachments
     useInputStore.setState({
       pendingInputText: prevInputText,
@@ -2368,6 +2397,22 @@ export async function unrevertSession(sessionId: string): Promise<void> {
     sessions[idx] = unrevertedSession
     store.setState({ session: sessions })
   }
+
+  // Unrevert restores messages that produced a todo list; re-fetch the
+  // authoritative todos so the composer status matches the restored session
+  // instead of staying empty (revert cleared them). Best-effort: on error, leave
+  // the current state untouched rather than wiping it to empty.
+  try {
+    const todos = await opencodeClient.getSessionTodos(sessionId, directory)
+    const after = store.getState()
+    store.setState({ todo: { ...after.todo, [sessionId]: todos } })
+    if (directory && directory !== "global") {
+      useTodosPersistStore.getState().setSessionTodos(directory, sessionId, todos)
+    }
+  } catch {
+    // ignore — a failed re-fetch must not fail the unrevert
+  }
+
   for (let attempt = 0; attempt < UNREVERT_REFETCH_ATTEMPTS; attempt += 1) {
     if (attempt > 0) await wait(UNREVERT_REFETCH_RETRY_MS)
     await refetchSessionMessages(sessionId)
