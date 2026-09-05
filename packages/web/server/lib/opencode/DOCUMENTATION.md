@@ -369,6 +369,9 @@ an authoritative loopback callback URL even when OpenChamber binds port `0`.
     - Foreground servers running under a systemd user unit queue installation in
       a separate transient unit and restart the configured service afterwards.
       `OPENCHAMBER_SYSTEMD_UNIT` overrides the default `openchamber.service`.
+    - Foreground servers running under a macOS launchd User LaunchAgent update the
+      package and trigger a `launchctl kickstart` (with unload/load fallback) against
+      `~/Library/LaunchAgents/dev.openchamber.web.plist`.
   - `GET /api/openchamber/models-metadata`
   - `GET /api/zen/models`
 

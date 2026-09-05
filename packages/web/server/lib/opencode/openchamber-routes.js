@@ -1,4 +1,5 @@
 const SYSTEMD_SERVICE_UNIT_PATTERN = /^[A-Za-z0-9:_.@-]+\.service$/;
+const LAUNCHD_SERVICE_ID = 'dev.openchamber.web';
 
 function resolveSystemdServiceUnit(environment) {
   if (!environment.INVOCATION_ID) {
@@ -12,6 +13,10 @@ function resolveSystemdServiceUnit(environment) {
   return SYSTEMD_SERVICE_UNIT_PATTERN.test(unit) ? unit : null;
 }
 
+function resolveLaunchdPlistPath(pathModule, osModule) {
+  return pathModule.join(osModule.homedir(), 'Library', 'LaunchAgents', `${LAUNCHD_SERVICE_ID}.plist`);
+}
+
 function quotePosixShell(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
@@ -19,6 +24,7 @@ function quotePosixShell(value) {
 export const registerOpenChamberRoutes = (app, dependencies) => {
   const {
     fs,
+    os,
     path,
     process,
     server,
@@ -128,54 +134,60 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       }
       const launchMode = storedOptions.launchMode === 'foreground' ? 'foreground' : 'daemon';
       const isForegroundService = launchMode === 'foreground';
-      const systemdServiceUnit = isForegroundService ? resolveSystemdServiceUnit(process.env) : null;
+      const isDarwin = process.platform === 'darwin';
+      const systemdServiceUnit = isForegroundService && !isDarwin ? resolveSystemdServiceUnit(process.env) : null;
+      const osModule = os || (await import('os'));
+      const launchdPlistPath = isDarwin ? resolveLaunchdPlistPath(path, osModule) : null;
+      const isLaunchdService = Boolean(isDarwin && isForegroundService && launchdPlistPath && fs.existsSync(launchdPlistPath));
 
       if (isForegroundService) {
-        if (!systemdServiceUnit) {
+        if (!systemdServiceUnit && !isLaunchdService) {
           return res.status(409).json({
             error: 'Foreground servers must be updated by their service manager. Set OPENCHAMBER_SYSTEMD_UNIT when running under systemd, or run openchamber update and restart the service.',
           });
         }
 
-        const updateJobName = `openchamber-update-${Date.now()}`;
-        const updateLogPath = `journalctl --user-unit ${updateJobName}.service`;
-        const updateScript = [
-          'set -eu',
-          updateCmd,
-          `systemctl --user restart ${quotePosixShell(systemdServiceUnit)}`,
-        ].join('\n');
-        const systemdRun = spawnSync('systemd-run', [
-          '--user',
-          `--unit=${updateJobName}`,
-          '--collect',
-          '--service-type=exec',
-          `--setenv=PATH=${process.env.PATH || ''}`,
-          '/bin/sh',
-          '-c',
-          updateScript,
-        ], {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'pipe'],
-          timeout: 5000,
-        });
+        if (systemdServiceUnit) {
+          const updateJobName = `openchamber-update-${Date.now()}`;
+          const updateLogPath = `journalctl --user-unit ${updateJobName}.service`;
+          const updateScript = [
+            'set -eu',
+            updateCmd,
+            `systemctl --user restart ${quotePosixShell(systemdServiceUnit)}`,
+          ].join('\n');
+          const systemdRun = spawnSync('systemd-run', [
+            '--user',
+            `--unit=${updateJobName}`,
+            '--collect',
+            '--service-type=exec',
+            `--setenv=PATH=${process.env.PATH || ''}`,
+            '/bin/sh',
+            '-c',
+            updateScript,
+          ], {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+            timeout: 5000,
+          });
 
-        if (systemdRun.status !== 0) {
-          const detail = (systemdRun.stderr || systemdRun.stdout || '').trim();
-          return res.status(409).json({
-            error: detail || `Could not queue update job for ${systemdServiceUnit}`,
+          if (systemdRun.status !== 0) {
+            const detail = (systemdRun.stderr || systemdRun.stdout || '').trim();
+            return res.status(409).json({
+              error: detail || `Could not queue update job for ${systemdServiceUnit}`,
+            });
+          }
+
+          return res.json({
+            success: true,
+            message: 'Update queued; OpenChamber will restart after installation completes',
+            version: updateInfo.version,
+            packageManager: pm,
+            autoRestart: true,
+            restartManager: 'systemd',
+            jobId: updateJobName,
+            logPath: updateLogPath,
           });
         }
-
-        return res.json({
-          success: true,
-          message: 'Update queued; OpenChamber will restart after installation completes',
-          version: updateInfo.version,
-          packageManager: pm,
-          autoRestart: true,
-          restartManager: 'systemd',
-          jobId: updateJobName,
-          logPath: updateLogPath,
-        });
       }
 
       const isWindows = process.platform === 'win32';
@@ -185,43 +197,50 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         return `"${stringValue.replace(/"/g, '""')}"`;
       };
 
-      const cliPath = path.resolve(__dirname, '..', 'bin', 'cli.js');
-      const restartParts = [
-        isWindows ? quoteCmd(process.execPath) : quotePosix(process.execPath),
-        isWindows ? quoteCmd(cliPath) : quotePosix(cliPath),
-        'serve',
-        '--port',
-        String(storedOptions.port),
-      ];
-      let restartCmdPrimary = restartParts.join(' ');
-      let restartCmdFallback = `openchamber serve --port ${storedOptions.port}`;
-      if (storedOptions.host) {
-        if (isWindows) {
-          const escapedHost = storedOptions.host.replace(/"/g, '""');
-          restartCmdPrimary += ` --host "${escapedHost}"`;
-          restartCmdFallback += ` --host "${escapedHost}"`;
-        } else {
-          const escapedHost = storedOptions.host.replace(/'/g, "'\\''");
-          restartCmdPrimary += ` --host '${escapedHost}'`;
-          restartCmdFallback += ` --host '${escapedHost}'`;
+      let restartCmd = '';
+      if (isLaunchdService) {
+        const quotedPlistPath = quotePosixShell(launchdPlistPath);
+        restartCmd = `launchctl kickstart -k gui/$(id -u)/${LAUNCHD_SERVICE_ID} || (launchctl unload ${quotedPlistPath} && launchctl load ${quotedPlistPath})`;
+      } else {
+        const cliPath = path.resolve(__dirname, '..', 'bin', 'cli.js');
+        const restartParts = [
+          isWindows ? quoteCmd(process.execPath) : quotePosix(process.execPath),
+          isWindows ? quoteCmd(cliPath) : quotePosix(cliPath),
+          'serve',
+          '--port',
+          String(storedOptions.port),
+        ];
+        let restartCmdPrimary = restartParts.join(' ');
+        let restartCmdFallback = `openchamber serve --port ${storedOptions.port}`;
+        if (storedOptions.host) {
+          if (isWindows) {
+            const escapedHost = storedOptions.host.replace(/"/g, '""');
+            restartCmdPrimary += ` --host "${escapedHost}"`;
+            restartCmdFallback += ` --host "${escapedHost}"`;
+          } else {
+            const escapedHost = storedOptions.host.replace(/'/g, "'\\''");
+            restartCmdPrimary += ` --host '${escapedHost}'`;
+            restartCmdFallback += ` --host '${escapedHost}'`;
+          }
         }
-      }
-      if (storedOptions.uiPassword) {
-        if (isWindows) {
-          const escapedPw = storedOptions.uiPassword.replace(/"/g, '""');
-          restartCmdPrimary += ` --ui-password "${escapedPw}"`;
-          restartCmdFallback += ` --ui-password "${escapedPw}"`;
-        } else {
-          const escapedPw = storedOptions.uiPassword.replace(/'/g, "'\\''");
-          restartCmdPrimary += ` --ui-password '${escapedPw}'`;
-          restartCmdFallback += ` --ui-password '${escapedPw}'`;
+        if (storedOptions.uiPassword) {
+          if (isWindows) {
+            const escapedPw = storedOptions.uiPassword.replace(/"/g, '""');
+            restartCmdPrimary += ` --ui-password "${escapedPw}"`;
+            restartCmdFallback += ` --ui-password "${escapedPw}"`;
+          } else {
+            const escapedPw = storedOptions.uiPassword.replace(/'/g, "'\\''");
+            restartCmdPrimary += ` --ui-password '${escapedPw}'`;
+            restartCmdFallback += ` --ui-password '${escapedPw}'`;
+          }
         }
+        if (storedOptions.apiOnly === true) {
+          restartCmdPrimary += ' --api-only';
+          restartCmdFallback += ' --api-only';
+        }
+        restartCmd = `(${restartCmdPrimary}) || (${restartCmdFallback})`;
       }
-      if (storedOptions.apiOnly === true) {
-        restartCmdPrimary += ' --api-only';
-        restartCmdFallback += ' --api-only';
-      }
-      const restartCmd = isForegroundService ? '' : `(${restartCmdPrimary}) || (${restartCmdFallback})`;
+
       const updateLogPath = path.join(openchamberDataDir, 'update-install.log');
       const logPreamble = [
         '',
