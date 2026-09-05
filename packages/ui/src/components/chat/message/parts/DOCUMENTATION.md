@@ -83,6 +83,10 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   only when the server verifies the exact source in the owning assistant
   message and the real file is inside OpenCode's dedicated temporary directory.
 - `read` and `skill` are **static navigation tools** and render via `StaticToolRow`.
+  When a `read` target is an image, `StaticToolRow` also renders
+  `ReadToolImageThumbnail`, viewport-gated like the Markdown image gallery, and
+  opens the shared image preview dialog on click; the filename button keeps
+  navigating to the file, unchanged.
 - Every other tool, including search/fetch, OpenCode built-ins, custom tools, plugins, and MCP tools, is **expandable** and renders through `ToolPart`.
 - The managed `openchamber` plugin tool uses the expandable path and hides its broad protocol input. The plugin supplies the selected action's human description as the native tool title; the UI renders that metadata without owning an action map. The full versioned result envelope renders through the same neutral JSON summary/tree/raw views as other tools, without a tool-specific output card.
 - `ToolPart` defers expanded content after a user toggle, preventing large tool input/output payloads from mounting during the initial chat render.

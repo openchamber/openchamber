@@ -3,12 +3,6 @@ import { toast } from 'sonner';
 import { Icon } from '@/components/icon/Icon';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
-import {
-  acquireRuntimeUrlAuthToken,
-  refreshRuntimeUrlAuthToken,
-  subscribeRuntimeUrlAuthToken,
-} from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import type { ToolPopupContent } from './message/types';
 import {
@@ -24,43 +18,7 @@ import {
   resolveWorkspaceMarkdownImageSource,
   type PreparedMarkdownImage,
 } from './markdown/markdownImageAssets';
-
-const useAssetAuth = (enabled: boolean): { ready: boolean; nonce: number } => {
-  const [ready, setReady] = React.useState(false);
-  const [nonce, setNonce] = React.useState(0);
-  const apiBaseUrl = getRuntimeApiBaseUrl();
-
-  React.useEffect(() => {
-    if (!enabled) {
-      setReady(false);
-      return;
-    }
-    let cancelled = false;
-    let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    const release = acquireRuntimeUrlAuthToken(apiBaseUrl);
-    const unsubscribe = subscribeRuntimeUrlAuthToken(() => {
-      if (!cancelled) setNonce((current) => current + 1);
-    });
-    const refresh = () => {
-      void refreshRuntimeUrlAuthToken(apiBaseUrl)
-        .then(() => {
-          if (!cancelled) setReady(true);
-        })
-        .catch(() => {
-          if (!cancelled) retryTimer = setTimeout(refresh, 1000);
-        });
-    };
-    refresh();
-    return () => {
-      cancelled = true;
-      if (retryTimer) clearTimeout(retryTimer);
-      release();
-      unsubscribe();
-    };
-  }, [apiBaseUrl, enabled]);
-
-  return { ready: !enabled || ready, nonce };
-};
+import { useRuntimeAssetAuth } from './markdown/useRuntimeAssetAuth';
 
 const MarkdownImageThumbnail: React.FC<{
   candidate: MarkdownImageCandidate;
@@ -268,7 +226,7 @@ export const MarkdownImageGallery: React.FC<{
 
   const visibleCandidates = candidates.filter((candidate) => prepared?.get(candidate.source)?.status !== 'missing');
   const hasPreparedAssets = [...(prepared?.values() ?? [])].some((value) => value.status === 'ready');
-  const assetAuth = useAssetAuth(hasPreparedAssets);
+  const assetAuth = useRuntimeAssetAuth(hasPreparedAssets);
   if (visibleCandidates.length === 0) return null;
 
   return (

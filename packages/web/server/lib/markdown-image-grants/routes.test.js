@@ -189,6 +189,25 @@ describe('session image assets', () => {
     ]);
   });
 
+  it('authorizes a read tool call target with no markdown reference', async () => {
+    const source = 'read-target.png';
+    const fixture = await createFixture({ sources: [source], markdown: 'No image markdown here.' });
+    await fs.writeFile(path.join(fixture.directory, source), PNG);
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      info: { id: 'msg_1', role: 'assistant' },
+      parts: [
+        { type: 'text', text: 'No image markdown here.' },
+        { type: 'tool', tool: 'read', state: { status: 'completed', input: { filePath: source } } },
+      ],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [source]);
+
+    expect(response.body.results).toEqual([
+      expect.objectContaining({ source, status: 'ready' }),
+    ]);
+  });
+
   it('rejects a source that the message does not reference', async () => {
     const fixture = await createFixture({ markdown: 'No image here.' });
     const response = await prepare(fixture.app, fixture.directory, fixture.sources);

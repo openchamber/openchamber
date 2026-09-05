@@ -191,6 +191,20 @@ const markdownImageSources = (message) => {
   return sources;
 };
 
+// The `read` tool's file path is as authoritative as markdown image syntax —
+// both come from the assistant's own message, not the requesting client — so
+// a grant for a read-tool target is scoped the same way.
+const readToolFilePaths = (message) => {
+  const paths = new Set();
+  for (const part of Array.isArray(message?.parts) ? message.parts : []) {
+    if (part?.type !== 'tool' || String(part?.tool).toLowerCase() !== 'read') continue;
+    const input = part?.state?.input;
+    const filePath = asString(input?.filePath || input?.file_path || input?.path);
+    if (filePath) paths.add(filePath);
+  }
+  return paths;
+};
+
 const fetchMessage = async ({ sessionId, messageId, directory, buildOpenCodeUrl, getOpenCodeAuthHeaders }) => {
   const url = new URL(buildOpenCodeUrl(
     `/session/${encodeURIComponent(sessionId)}/message/${encodeURIComponent(messageId)}`,
@@ -293,7 +307,7 @@ export const registerMarkdownImageGrantRoutes = (app, dependencies) => {
           return res.status(404).json({ error: 'Assistant message not found' });
         }
         // Assistant text is authoritative: a remote client cannot mint grants for unreferenced paths.
-        const referenced = markdownImageSources(message);
+        const referenced = new Set([...markdownImageSources(message), ...readToolFilePaths(message)]);
         const results = [];
         for (const source of sources) {
           if (!referenced.has(source)) {

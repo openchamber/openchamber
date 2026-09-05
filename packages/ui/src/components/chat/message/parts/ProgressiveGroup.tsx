@@ -13,8 +13,9 @@ import { Text } from '@/components/ui/text';
 import { Icon } from "@/components/icon/Icon";
 import { FadeInOnReveal } from '../FadeInOnReveal';
 import { getToolIcon } from './toolPresentation';
-import { getToolMetadata } from '@/lib/toolHelpers';
+import { getToolMetadata, isImageFile } from '@/lib/toolHelpers';
 import { isExpandableTool, isStandaloneTool, isStaticTool } from './toolRenderUtils';
+import { ReadToolImageThumbnail } from './ReadToolImageThumbnail';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -44,6 +45,7 @@ interface ProgressiveGroupProps {
     animateRows?: boolean;
     animatedToolIds?: Set<string>;
     renderJustificationActions?: (activity: TurnActivityPart) => React.ReactNode;
+    sessionId?: string;
 }
 
 const ExternalLinkFavicon: React.FC<{ href: string }> = ({ href }) => {
@@ -429,18 +431,24 @@ interface StaticGroupedToolRowProps {
     toolName: string;
     activities: TurnActivityPart[];
     animateTailText: boolean;
+    sessionId?: string;
+    onShowPopup?: (content: ToolPopupContent) => void;
 }
 
 const StaticGroupedToolRow: React.FC<StaticGroupedToolRowProps> = ({
     toolName,
     activities,
     animateTailText,
+    sessionId,
+    onShowPopup,
 }) => {
     const content = (
         <StaticToolRow
             toolName={toolName}
             activities={activities}
             animateTailText={animateTailText}
+            sessionId={sessionId}
+            onShowPopup={onShowPopup}
         />
     );
 
@@ -460,6 +468,8 @@ const StaticGroupedToolRow: React.FC<StaticGroupedToolRowProps> = ({
 const MemoStaticGroupedToolRow = React.memo(StaticGroupedToolRow, (prev, next) => {
     return prev.toolName === next.toolName
         && prev.animateTailText === next.animateTailText
+        && prev.sessionId === next.sessionId
+        && prev.onShowPopup === next.onShowPopup
         && areActivityListsEqual(prev.activities, next.activities);
 });
 
@@ -552,11 +562,21 @@ const areActivityListsEqual = (left: TurnActivityPart[], right: TurnActivityPart
     return true;
 };
 
+interface ReadFileEntry {
+    path: string;
+    displayPath: string;
+    offset?: number;
+    messageId: string;
+    isImage: boolean;
+}
+
 const StaticToolRowInner: React.FC<{
     toolName: string;
     activities: TurnActivityPart[];
     animateTailText: boolean;
-}> = ({ toolName, activities, animateTailText }) => {
+    sessionId?: string;
+    onShowPopup?: (content: ToolPopupContent) => void;
+}> = ({ toolName, activities, animateTailText, sessionId, onShowPopup }) => {
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
     const displayName = getToolMetadata(toolName).displayName;
     const icon = getToolIcon(toolName);
@@ -597,10 +617,10 @@ const StaticToolRowInner: React.FC<{
         return entries;
     }, [activities, skillByName, toolName]);
 
-    const readFileEntries = React.useMemo(() => {
-        if (!isReadGroup) return [] as Array<{ path: string; displayPath: string; offset?: number }>;
+    const readFileEntries = React.useMemo<ReadFileEntry[]>(() => {
+        if (!isReadGroup) return [];
 
-        const entries: Array<{ path: string; displayPath: string; offset?: number }> = [];
+        const entries: ReadFileEntry[] = [];
         for (const activity of activities) {
             const filePath = getToolFilePath(activity);
             const offset = getToolReadOffset(activity);
@@ -608,7 +628,7 @@ const StaticToolRowInner: React.FC<{
             if (entries.some((entry) => entry.path === filePath)) continue;
             const displayPath = getRelativeFilePath(filePath, currentDirectory);
             if (!displayPath) continue;
-            entries.push({ path: filePath, displayPath, offset });
+            entries.push({ path: filePath, displayPath, offset, messageId: activity.messageId, isImage: isImageFile(filePath) });
         }
         return entries;
     }, [activities, currentDirectory, isReadGroup]);
@@ -693,21 +713,32 @@ const StaticToolRowInner: React.FC<{
             </MinDurationShineText>
             {isReadGroup && readFileEntries.length > 0
                 ? readFileEntries.map((entry) => (
-                    <button
-                        key={entry.path}
-                        type="button"
-                        onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            handleFileClick(entry.path, entry.offset);
-                        }}
-                        className={cn('inline-flex !min-h-0 items-center justify-start gap-1 min-w-0 flex-1 text-left hover:opacity-90', TOOL_ROW_DESCRIPTION_CLASS)}
-                        style={{ color: 'var(--tools-description)' }}
-                        title={entry.offset ? `${entry.displayPath}:${entry.offset}` : entry.displayPath}
-                    >
-                        {showToolFileIcons ? <FileTypeIcon filePath={entry.path} className="h-3.5 w-3.5" /> : null}
-                        {renderReadFilePath(entry.displayPath, animateTailText)}
-                    </button>
+                    <span key={entry.path} className="inline-flex min-w-0 flex-1 items-center gap-1">
+                        {entry.isImage ? (
+                            <ReadToolImageThumbnail
+                                filePath={entry.path}
+                                filename={entry.displayPath}
+                                directory={currentDirectory}
+                                sessionId={sessionId}
+                                messageId={entry.messageId}
+                                onShowPopup={onShowPopup}
+                            />
+                        ) : null}
+                        <button
+                            type="button"
+                            onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                handleFileClick(entry.path, entry.offset);
+                            }}
+                            className={cn('inline-flex !min-h-0 items-center justify-start gap-1 min-w-0 flex-1 text-left hover:opacity-90', TOOL_ROW_DESCRIPTION_CLASS)}
+                            style={{ color: 'var(--tools-description)' }}
+                            title={entry.offset ? `${entry.displayPath}:${entry.offset}` : entry.displayPath}
+                        >
+                            {showToolFileIcons && !entry.isImage ? <FileTypeIcon filePath={entry.path} className="h-3.5 w-3.5" /> : null}
+                            {renderReadFilePath(entry.displayPath, animateTailText)}
+                        </button>
+                    </span>
                 ))
                 : null}
             {isSearchGroup && descriptions.length > 0
@@ -777,6 +808,8 @@ const StaticToolRowInner: React.FC<{
 export const StaticToolRow = React.memo(StaticToolRowInner, (prev, next) => {
     return prev.toolName === next.toolName
         && prev.animateTailText === next.animateTailText
+        && prev.sessionId === next.sessionId
+        && prev.onShowPopup === next.onShowPopup
         && areActivityListsEqual(prev.activities, next.activities);
 });
 
@@ -826,6 +859,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     animateRows = true,
     animatedToolIds,
     renderJustificationActions,
+    sessionId,
 }) => {
     const previewCount = showHeader && !isExpanded
         ? Math.max(0, Math.floor(collapsedPreviewCount))
@@ -916,6 +950,8 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                         toolName={row.toolName}
                         activities={row.activities}
                         animateTailText={row.activities.some((activity) => animatedToolIds?.has(activity.id))}
+                        sessionId={sessionId}
+                        onShowPopup={onShowPopup}
                     />
                 );
 
