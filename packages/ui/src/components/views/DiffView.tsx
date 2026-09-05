@@ -6,7 +6,7 @@ import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
 import { NestedRepoPicker } from '@/components/views/git/NestedRepoPicker';
 import { useGitStore, useGitStatus, useIsGitRepo, useGitLoadingStatus } from '@/stores/useGitStore';
 import { useGitBaseBranchStore, gitBaseBranchEntryKey } from '@/stores/useGitBaseBranchStore';
-import { coerceDiffScope, branchRangeKey, isBranchScopeAvailable, isBranchScopeDefinitelyUnavailable, useRangeKeyedCache, useBoundedDirectoryRetry } from './branchDiffScope';
+import { coerceDiffScope, branchRangeKey, candidateBranchesForBasePicker, isBranchScopeAvailable, isBranchScopeDefinitelyUnavailable, resolveRepositoryDefaultBranch, useRangeKeyedCache, useBoundedDirectoryRetry } from './branchDiffScope';
 import { getBranchBase, getGitRangeDiff, getGitRangeFiles } from '@/lib/gitApi';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { cn } from '@/lib/utils';
@@ -987,6 +987,29 @@ interface DiffViewProps {
     flushContent?: boolean;
 }
 
+/**
+ * The pinned "current base" row above the branch file list (desktop twin of
+ * the mobile surface's base row). Tapping it opens the inline change-base
+ * picker. Shown for every resolved-base state (list, empty, error, reloading)
+ * so the base stays visible and changeable even with no changes on the branch.
+ */
+const BranchBaseEntryRow = React.memo<{ branchBase: string; onOpenPicker: () => void }>(({ branchBase, onOpenPicker }) => {
+    const { t } = useI18n();
+    return (
+        <button
+            type="button"
+            onClick={onOpenPicker}
+            className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-[var(--surface-elevated)]/40 px-3 py-1.5 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
+        >
+            <Icon name="git-branch" className="size-4 shrink-0 text-primary" />
+            <span className="truncate typography-ui-label text-foreground">
+                {t('gitView.pr.field.baseBranch')}: {branchBase}
+            </span>
+            <Icon name="arrow-down-s" className="size-4 shrink-0 text-muted-foreground" />
+        </button>
+    );
+});
+
 export const DiffView: React.FC<DiffViewProps> = ({
     hideStackedFileSidebar = false,
     stackedDefaultCollapsedAll = false,
@@ -1163,12 +1186,10 @@ export const DiffView: React.FC<DiffViewProps> = ({
         BRANCH_METADATA_MAX_ATTEMPTS
     );
 
-    const repositoryDefaultBranch = React.useMemo(() => {
-        const trackingRemote = status?.tracking?.trim().split('/')[0];
-        return (trackingRemote && branches?.defaultBranches?.[trackingRemote])
-            ?? branches?.defaultBranches?.origin
-            ?? null;
-    }, [branches, status?.tracking]);
+    const repositoryDefaultBranch = React.useMemo(
+        () => resolveRepositoryDefaultBranch(status?.tracking ?? null, branches?.defaultBranches),
+        [branches?.defaultBranches, status?.tracking]
+    );
     // Offered only while the default branch is known and the current branch is
     // not it (an unknown default must not flash the option on a guess), and
     // only outside VS Code (the extension has no context diff panel).
@@ -1208,6 +1229,14 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const [detectedBranchBase, setDetectedBranchBase] = React.useState<string | null>(null);
     const [isBranchBaseResolved, setIsBranchBaseResolved] = React.useState(false);
     const [basePickerSearch, setBasePickerSearch] = React.useState('');
+    // Change-base mode: while a base is resolved, the branch body carries a
+    // pinned base row whose tap swaps the list for an inline picker. The
+    // in-flight flag hides the previous base's file list between picking a new
+    // base and the range reload publishing its files (the reload effect below
+    // runs after this component's render of the pick commit).
+    const [isBasePickerOpen, setIsBasePickerOpen] = React.useState(false);
+    const [baseChangeInFlight, setBaseChangeInFlight] = React.useState(false);
+    const sawRangeReloadRef = React.useRef(false);
 
     // A context tab persists its scope across branch checkouts and runtime
     // switches. When the Branch scope is CONFIRMED unavailable (checked out the
@@ -1285,6 +1314,30 @@ export const DiffView: React.FC<DiffViewProps> = ({
             reloadBranchFiles();
         }
     }, [activeDiffScope, reloadBranchFiles]);
+
+    // The range reload clears branchFiles in the effect above, which runs after
+    // this component renders the pick commit — so "files became non-null" alone
+    // cannot end the hold: the first non-null read is still the OLD base's
+    // list. Only a reload pass (files === null) proves the new range replaced
+    // it. An error also ends the hold; the error frame renders above the
+    // loading state.
+    React.useEffect(() => {
+        if (!baseChangeInFlight) {
+            sawRangeReloadRef.current = false;
+            return;
+        }
+        if (branchFilesError) {
+            setBaseChangeInFlight(false);
+            return;
+        }
+        if (branchFiles === null) {
+            sawRangeReloadRef.current = true;
+            return;
+        }
+        if (sawRangeReloadRef.current) {
+            setBaseChangeInFlight(false);
+        }
+    }, [baseChangeInFlight, branchFiles, branchFilesError]);
 
     // Range diffs are fetched per expanded file: unlike working/staged diffs
     // there is no per-file cache channel, so patch data lives in a range-keyed
@@ -1991,12 +2044,30 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 );
             }
 
+            // Picking the current base keeps the list untouched; only a real
+            // change needs the in-flight hold so the previous base's file list
+            // never flashes under the new base row.
+            const handlePickBase = (branch: string) => {
+                const changed = branch !== branchBase;
+                if (effectiveDirectory && currentBranch) {
+                    setBaseOverride(effectiveDirectory, currentBranch, branch);
+                }
+                setIsBasePickerOpen(false);
+                if (changed) setBaseChangeInFlight(true);
+            };
+
+            const openBasePicker = () => {
+                setBasePickerSearch('');
+                setIsBasePickerOpen(true);
+            };
+
+            // Shared candidate pool for both pickers (fallback and change-base):
+            // every known branch except the current one, remote prefixes
+            // stripped, sorted. Search narrows it per picker.
+            const candidateBranches = candidateBranchesForBasePicker(branches?.all, currentBranch);
+
             if (!branchBase) {
-                const eligibleBranches = (branches?.all ?? [])
-                    .map((name: string) => name.replace(/^remotes\//, ''))
-                    .filter((name: string) => name !== currentBranch && !name.endsWith(`/${currentBranch}`))
-                    .sort();
-                const candidateBranches = rankByQuery(eligibleBranches, basePickerSearch, (name) => [name]);
+                const filteredCandidates = rankByQuery(candidateBranches, basePickerSearch, (name) => [name]);
                 return (
                     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
                         <Icon name="git-branch" className="size-6 text-muted-foreground" />
@@ -2011,17 +2082,17 @@ export const DiffView: React.FC<DiffViewProps> = ({
                             className="w-full max-w-sm rounded-md border border-border/60 bg-[var(--surface-elevated)] px-2.5 py-1.5 typography-meta text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
                         />
                         <ScrollableOverlay outerClassName="max-h-48 w-full max-w-sm min-h-0" className="px-1 py-1">
-                            {candidateBranches.length === 0 ? (
+                            {filteredCandidates.length === 0 ? (
                                 <div className="px-2 py-3 typography-meta text-muted-foreground">
                                     {t('gitView.branch.empty')}
                                 </div>
                             ) : (
                                 <div className="flex flex-col gap-0.5">
-                                    {candidateBranches.map((branch: string) => (
+                                    {filteredCandidates.map((branch: string) => (
                                         <button
                                             key={branch}
                                             type="button"
-                                            onClick={() => effectiveDirectory && currentBranch && setBaseOverride(effectiveDirectory, currentBranch, branch)}
+                                            onClick={() => handlePickBase(branch)}
                                             className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
                                         >
                                             <Icon name="git-branch" className="size-3.5 text-primary" />
@@ -2035,9 +2106,65 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 );
             }
 
-            if (branchFilesError) {
+            if (isBasePickerOpen) {
+                const filteredCandidates = rankByQuery(candidateBranches, basePickerSearch, (name) => [name]);
                 return (
-                    <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+                    <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6">
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setIsBasePickerOpen(false)}
+                                className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
+                                aria-label={t('header.actions.backAria')}
+                            >
+                                <Icon name="arrow-left" className="size-4" />
+                            </button>
+                            <span className="truncate typography-ui-label font-semibold text-foreground">
+                                {t('gitView.pr.field.baseBranch')}: {branchBase}
+                            </span>
+                        </div>
+                        <input
+                            type="text"
+                            value={basePickerSearch}
+                            onChange={(event) => setBasePickerSearch(event.target.value)}
+                            placeholder={t('gitView.branch.searchPlaceholder')}
+                            aria-label={t('gitView.branch.searchPlaceholder')}
+                            className="w-full max-w-sm rounded-md border border-border/60 bg-[var(--surface-elevated)] px-2.5 py-1.5 typography-meta text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
+                        />
+                        <ScrollableOverlay outerClassName="max-h-48 w-full max-w-sm min-h-0" className="px-1 py-1">
+                            {filteredCandidates.length === 0 ? (
+                                <div className="px-2 py-3 typography-meta text-muted-foreground">
+                                    {t('gitView.branch.empty')}
+                                </div>
+                            ) : (
+                                <div className="flex flex-col gap-0.5">
+                                    {filteredCandidates.map((branch: string) => (
+                                        <button
+                                            key={branch}
+                                            type="button"
+                                            onClick={() => handlePickBase(branch)}
+                                            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
+                                        >
+                                            <Icon name="git-branch" className="size-3.5 text-primary" />
+                                            <span className="truncate typography-ui-label text-foreground" title={branch}>{branch}</span>
+                                            {branch === branchBase ? <Icon name="check" className="ml-auto size-3.5 shrink-0 text-primary" /> : null}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </ScrollableOverlay>
+                    </div>
+                );
+            }
+
+            // The base row stays pinned above the body for every resolved-base
+            // state (error, reloading, empty, list). The body container is a
+            // flex column so both the centered state frames and the stacked
+            // diff view fill the remaining space.
+            let branchBody: React.ReactNode;
+            if (branchFilesError) {
+                branchBody = (
+                    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
                         <div className="typography-ui-label font-semibold text-foreground">{t('diffView.branch.loadError')}</div>
                         <div className="max-w-sm typography-micro text-muted-foreground">{branchFilesError}</div>
                         <Button
@@ -2049,24 +2176,35 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         </Button>
                     </div>
                 );
-            }
-
-            if (branchFiles === null) {
-                return (
-                    <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
+            } else if (branchFiles === null || baseChangeInFlight) {
+                branchBody = (
+                    <div className="flex min-h-0 flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
                         <Icon name="loader-4" className="size-4 animate-spin" />
                         {t('diffView.branch.loadingFiles')}
                     </div>
                 );
+            } else if (changedFiles.length === 0) {
+                branchBody = (
+                    <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
+                        {t('diffView.branch.empty', { base: branchBase })}
+                    </div>
+                );
+            } else {
+                branchBody = renderStackedDiffView();
             }
+
+            return (
+                <div className="flex min-h-0 flex-1 flex-col">
+                    <BranchBaseEntryRow branchBase={branchBase} onOpenPicker={openBasePicker} />
+                    <div className="flex min-h-0 flex-1 flex-col">{branchBody}</div>
+                </div>
+            );
         }
 
         if (changedFiles.length === 0) {
             return (
                 <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                    {activeDiffScope === 'turn' ? t('diffView.state.noLastTurnChanges')
-                        : activeDiffScope === 'branch' && branchBase ? t('diffView.branch.empty', { base: branchBase })
-                        : t('diffView.state.cleanWorkingTree')}
+                    {activeDiffScope === 'turn' ? t('diffView.state.noLastTurnChanges') : t('diffView.state.cleanWorkingTree')}
                 </div>
             );
         }

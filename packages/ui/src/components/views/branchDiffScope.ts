@@ -1,9 +1,14 @@
 import React from 'react';
 
+import type { FileDiffMetadata } from '@pierre/diffs';
+
+import { fileDiffFromPatch } from '@/lib/diff/patchFileDiff';
+
 /**
- * Pure helpers backing the "Branch" diff scope in DiffView. Extracted so the
- * coercion, availability, and range-cache invalidation contracts are testable
- * without mounting the full diff surface.
+ * Pure helpers backing the "Branch" diff scope in DiffView and the mobile
+ * branch diff hook. Extracted so the coercion, availability, default-branch
+ * resolution, and range-cache invalidation contracts are testable without
+ * mounting the full diff surface.
  */
 
 /**
@@ -52,6 +57,42 @@ export const isBranchScopeDefinitelyUnavailable = (
 };
 
 /**
+ * Resolve the repository's default branch from branch-list metadata. Prefers
+ * the remote the current branch tracks (the raw `tracking` value is
+ * `origin/feature` shaped), then falls back to the conventional `origin`
+ * remote. A null result means the metadata does not know a default: the Branch
+ * option must stay hidden instead of flashing on a guess.
+ */
+export const resolveRepositoryDefaultBranch = (
+  tracking: string | null,
+  defaultBranches: Record<string, string> | undefined
+): string | null => {
+  const trackingRemote = tracking?.trim().split('/')[0];
+  return (trackingRemote && defaultBranches?.[trackingRemote])
+    ?? defaultBranches?.origin
+    ?? null;
+};
+
+/**
+ * The base-picker candidate list: every known branch except the current one.
+ * `remotes/`-prefixed names are shown as their plain remote name, and the
+ * current branch's own remote-tracking form (`origin/feature`) is excluded so
+ * the picker cannot offer the branch itself as its base. Mirrors the desktop
+ * picker's filtering; the search term stays a caller-owned UI concern.
+ */
+export const candidateBranchesForBasePicker = (
+  allBranches: readonly string[] | undefined,
+  currentBranch: string | null
+): string[] =>
+  (allBranches ?? [])
+    .map((name) => name.replace(/^remotes\//, ''))
+    .filter((name) => (
+      currentBranch === null
+      || (name !== currentBranch && !name.endsWith(`/${currentBranch}`))
+    ))
+    .sort();
+
+/**
  * A context tab persists its scope across branch checkouts and runtime
  * switches. When the Branch scope stops being offered (checked out the
  * default branch, VS Code runtime), fall back to a always-available one instead
@@ -70,6 +111,27 @@ export const coerceDiffScope = <T extends string>(
  */
 export const branchRangeKey = (directory: string, base: string, head: string): string =>
   JSON.stringify([directory, base, head]);
+
+/**
+ * Detect a git binary patch from its markers. A binary patch carries no
+ * textual content and must not be fed to the diff parser, so callers render
+ * the binary placeholder instead.
+ */
+export const isBinaryPatch = (patch: string): boolean =>
+  /^Binary files .+ differ$/m.test(patch) || /^GIT binary patch$/m.test(patch);
+
+/**
+ * One file's range diff: either a parsed text diff or a binary marker with no
+ * parseable content. The mobile hook owns the named `BranchFileDiff` type for
+ * its public contract; this helper returns the same structural shape.
+ */
+export const branchFileDiffFromPatch = (
+  path: string,
+  patch: string
+): { fileDiff: FileDiffMetadata | null; isBinary: boolean } =>
+  isBinaryPatch(patch)
+    ? { fileDiff: null, isBinary: true }
+    : { fileDiff: fileDiffFromPatch(path, patch), isBinary: false };
 
 /**
  * Bounded per-directory retry for a request whose failure leaves no result and

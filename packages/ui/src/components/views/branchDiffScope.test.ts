@@ -3,13 +3,27 @@ import { createRoot, type Root } from 'react-dom/client';
 import { describe, expect, test } from 'bun:test';
 
 import {
+    branchFileDiffFromPatch,
     branchRangeKey,
+    candidateBranchesForBasePicker,
     coerceDiffScope,
+    isBinaryPatch,
     isBranchScopeAvailable,
     isBranchScopeDefinitelyUnavailable,
+    resolveRepositoryDefaultBranch,
     useRangeKeyedCache,
     useBoundedDirectoryRetry,
 } from './branchDiffScope';
+
+const TEXT_PATCH = [
+    'diff --git a/README.md b/README.md',
+    '--- a/README.md',
+    '+++ b/README.md',
+    '@@ -1 +1,2 @@',
+    '-hello',
+    '+hello',
+    '+world',
+].join('\n');
 
 describe('coerceDiffScope', () => {
     test('keeps the branch scope while it is offered', () => {
@@ -141,6 +155,76 @@ describe('branchRangeKey', () => {
             branchRangeKey('/other', 'main', 'feature-a'),
         ];
         expect(new Set(keys).size).toBe(4);
+    });
+});
+
+describe('resolveRepositoryDefaultBranch', () => {
+    test('prefers the default branch of the tracked remote', () => {
+        expect(resolveRepositoryDefaultBranch('origin/feature', { origin: 'main', upstream: 'develop' })).toBe('main');
+        expect(resolveRepositoryDefaultBranch('upstream/feature', { origin: 'main', upstream: 'develop' })).toBe('develop');
+    });
+
+    test('falls back to the origin default when tracking is missing', () => {
+        expect(resolveRepositoryDefaultBranch(null, { origin: 'main' })).toBe('main');
+    });
+
+    test('trims whitespace before extracting the tracked remote', () => {
+        expect(resolveRepositoryDefaultBranch('  origin/feature  ', { origin: 'main' })).toBe('main');
+    });
+
+    test('returns null when the metadata knows no default branch', () => {
+        expect(resolveRepositoryDefaultBranch('origin/feature', {})).toBeNull();
+        expect(resolveRepositoryDefaultBranch('origin/feature', undefined)).toBeNull();
+        expect(resolveRepositoryDefaultBranch('other/feature', { upstream: 'develop' })).toBeNull();
+    });
+});
+
+describe('isBinaryPatch', () => {
+    test('recognizes both binary markers', () => {
+        expect(isBinaryPatch('Binary files a/logo.png and b/logo.png differ')).toBe(true);
+        expect(isBinaryPatch('GIT binary patch')).toBe(true);
+    });
+
+    test('recognizes the marker on its own line inside a multi-line patch', () => {
+        expect(isBinaryPatch('diff --git a/logo.png b/logo.png\nGIT binary patch\nliteral 42\n...')).toBe(true);
+    });
+
+    test('rejects textual and empty patches', () => {
+        expect(isBinaryPatch(TEXT_PATCH)).toBe(false);
+        expect(isBinaryPatch('')).toBe(false);
+    });
+});
+
+describe('branchFileDiffFromPatch', () => {
+    test('binary patches carry no parseable file diff', () => {
+        expect(branchFileDiffFromPatch('logo.png', 'Binary files a/logo.png and b/logo.png differ'))
+            .toEqual({ fileDiff: null, isBinary: true });
+    });
+
+    test('text patches are parsed into a file diff', () => {
+        const result = branchFileDiffFromPatch('README.md', TEXT_PATCH);
+        expect(result.isBinary).toBe(false);
+        expect(result.fileDiff).not.toBeNull();
+        expect(result.fileDiff?.name).toBe('README.md');
+    });
+});
+
+describe('candidateBranchesForBasePicker', () => {
+    test('strips the remotes/ prefix and excludes the current branch in both forms', () => {
+        const candidates = candidateBranchesForBasePicker(
+            ['main', 'develop', 'feature/a', 'remotes/origin/feature/a', 'remotes/origin/beta'],
+            'feature/a'
+        );
+        expect(candidates).toEqual(['develop', 'main', 'origin/beta']);
+    });
+
+    test('keeps every branch when there is no current branch', () => {
+        expect(candidateBranchesForBasePicker(['main', 'remotes/origin/dev'], null)).toEqual(['main', 'origin/dev']);
+    });
+
+    test('handles an empty or missing branch list', () => {
+        expect(candidateBranchesForBasePicker(undefined, 'main')).toEqual([]);
+        expect(candidateBranchesForBasePicker([], 'main')).toEqual([]);
     });
 });
 
