@@ -214,6 +214,12 @@ export function createMessageQueueRuntime({
   let writePromise = Promise.resolve();
   let stopped = false;
 
+  // A restart kills every run, so an unfinished assistant message older than
+  // this marker cannot be live evidence of a streaming turn — treating it as
+  // one strands restored queue items forever, because no completion event
+  // will ever arrive for a run that died with the previous server.
+  const runtimeStartedAt = now();
+
   /** In-memory only — a restart has no in-flight sends. */
   const sending = new Map(); // sessionId → itemId
   const timers = new Map(); // sessionId → timeout
@@ -380,7 +386,15 @@ export function createMessageQueueRuntime({
     }).catch(() => null));
     if (!messages) return null;
     const last = asRecord(asRecord(messages[messages.length - 1])?.info);
-    if (last?.role === 'assistant' && asCount(asRecord(last.time)?.completed) === null) return false;
+    const lastTime = asRecord(last?.time);
+    if (last?.role === 'assistant' && asCount(lastTime?.completed) === null) {
+      const created = asCount(lastTime?.created);
+      if (created === null || created >= runtimeStartedAt) return false;
+      // Unfinished tail from before this runtime started: its run died with
+      // the previous server, so it must not block delivery. (A missing
+      // created timestamp stays conservative and blocks, as before.)
+      console.log(`[message-queue] ignoring pre-boot unfinished tail for ${sessionId}`);
+    }
     return true;
   };
 
