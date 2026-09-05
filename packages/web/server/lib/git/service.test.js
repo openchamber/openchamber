@@ -451,6 +451,7 @@ describe('getStatus', () => {
 
 describe('worktree root resolution', () => {
   it.each(['repo', 'repo space', 'repo-\u4e2d\u6587'])('uses filesystem paths returned by Git for %s', async (name) => {
+    if (!canRunGit()) return;
     const parent = createTempDir();
     const repo = path.join(parent, name);
     const subdirectory = path.join(repo, 'packages', 'app');
@@ -483,6 +484,7 @@ describe('worktree root resolution', () => {
   });
 
   it('creates and queries a managed worktree using native filesystem paths', async () => {
+    if (!canRunGit()) return;
     const previousDataHome = process.env.XDG_DATA_HOME;
     const parent = createTempDir();
     process.env.XDG_DATA_HOME = path.join(parent, 'data space');
@@ -1733,7 +1735,7 @@ describe.runIf(canRunGit())('getUnpushedBranchCounts', () => {
   });
 });
 
-describe('Git revision arguments', () => {
+describe.runIf(canRunGit())('Git revision arguments', () => {
   it.each([undefined, 'glob'])('preserves revision syntax with inherited MSYS=%j', async (msys) => {
     const { repository } = createRepositoryWithRemote();
     runGit(repository, ['branch', '--set-upstream-to=origin/react', 'next']);
@@ -1752,6 +1754,39 @@ describe('Git revision arguments', () => {
       if (previousMsys === undefined) delete process.env.MSYS;
       else process.env.MSYS = previousMsys;
     }
+  });
+});
+
+describe.runIf(canRunGit())('Git inherited environment', () => {
+  it('runs repository operations without applying blocked environment overrides or mutating the parent', async () => {
+    const { tmpDir } = await createTempRepo();
+    const overrides = {
+      EDITOR: 'unused-editor', PAGER: 'unused-pager', PREFIX: '/unused-prefix',
+      SSH_ASKPASS: 'unused-askpass', GIT_ASKPASS: 'unused-askpass',
+      GIT_SSH: 'unused-ssh', GIT_SSH_COMMAND: 'unused-ssh',
+      GIT_PAGER: 'unused-pager', GIT_EDITOR: 'unused-editor',
+      GIT_SEQUENCE_EDITOR: 'unused-editor', GIT_EXEC_PATH: '/unused-exec',
+      GIT_EXTERNAL_DIFF: 'unused-diff', GIT_PROXY_COMMAND: 'unused-proxy',
+      GIT_TEMPLATE_DIR: '/unused-template', GIT_CONFIG: '/unused-config',
+      GIT_CONFIG_GLOBAL: '/unused-global', GIT_CONFIG_SYSTEM: '/unused-system',
+      GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'user.name', GIT_CONFIG_VALUE_0: 'Injected User',
+      eDiToR: 'unused-editor', gIt_CoNfIg_CoUnT: '1',
+      MSYS: 'glob',
+    };
+    const previous = Object.fromEntries(Object.keys(overrides).map((key) => [key, process.env[key]]));
+    try {
+      Object.assign(process.env, overrides);
+      expect(fs.realpathSync(await getRepositoryRoot(tmpDir))).toBe(fs.realpathSync(tmpDir));
+      expect((await getStatus(tmpDir)).isClean).toBe(true);
+      await setLocalIdentity(tmpDir, { userName: 'Configured User', userEmail: 'test@example.com' });
+      expect(Object.fromEntries(Object.keys(overrides).map((key) => [key, process.env[key]]))).toEqual(overrides);
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+    expect(runGit(tmpDir, ['config', '--local', '--get', 'user.name']).trim()).toBe('Configured User');
   });
 });
 

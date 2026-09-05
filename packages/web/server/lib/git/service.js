@@ -360,6 +360,16 @@ const buildGitEnv = async () => {
 
 const createGit = async (directory, { allowUnsafeSshCommand = false } = {}) => {
   const env = await buildGitEnv();
+  // simple-git scans explicit env values, including inherited ones. Remove its
+  // blocked overrides from this copy so ordinary shell settings cannot reject
+  // every command; keep argument checks and the parent environment intact.
+  for (const key of Object.keys(env)) {
+    const name = key.trim().toUpperCase();
+    if (/^(EDITOR|PAGER|PREFIX|SSH_ASKPASS|GIT_(ASKPASS|EDITOR|EXEC_PATH|EXTERNAL_DIFF|PAGER|PROXY_COMMAND|SEQUENCE_EDITOR|SSH|SSH_COMMAND|TEMPLATE_DIR))$/.test(name)
+      || name === 'GIT_CONFIG' || name.startsWith('GIT_CONFIG_')) {
+      delete env[key];
+    }
+  }
   const spawnOptions = { windowsHide: true };
   const binary = getGitBinary();
   const hasCustomBinary = typeof binary === 'string' && binary.trim() && binary !== 'git' && binary !== 'git.exe';
