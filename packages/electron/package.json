@@ -3,7 +3,11 @@
   "version": "1.22.1",
   "private": true,
   "description": "Electron desktop runtime for OpenChamber",
-  "author": "OpenChamber",
+  "homepage": "https://github.com/openchamber/openchamber",
+  "author": {
+    "name": "OpenChamber",
+    "email": "security@openchamber.dev"
+  },
   "type": "module",
   "main": "./dist-bundle/main.mjs",
   "dependencies": {
@@ -26,7 +30,7 @@
     "Bun available for sidecar compilation",
     "macOS: Xcode + build tools for notarized packaging",
     "Windows: NSIS installed for installer creation",
-    "Linux: native x64 or arm64 host (no cross-arch packaging); FUSE/libfuse2 to run AppImages, or APPIMAGE_EXTRACT_AND_RUN=1"
+    "Linux: native x64 or arm64 host (no cross-arch packaging); dpkg-deb for Debian packages; FUSE/libfuse2 to run AppImages, or APPIMAGE_EXTRACT_AND_RUN=1"
   ],
   "scripts": {
     "dev": "node ./scripts/electron-dev.mjs",
@@ -113,11 +117,13 @@
       "artifactName": "${productName}-${version}-win-${arch}.${ext}"
     },
     "linux": {
+      "maintainer": "OpenChamber <security@openchamber.dev>",
       "target": [
-        "AppImage"
+        "AppImage",
+        "deb"
       ],
       "category": "Development",
-      "icon": "resources/icons/icon.png",
+      "icon": "resources/icons/app-icon.png",
       "executableName": "openchamber",
       "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
       "desktop": {

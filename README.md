@@ -79,7 +79,7 @@ Run a prompt once, daily, weekly, or on a cron schedule. Scheduled tasks can use
 
 Download the latest release from [GitHub Releases](https://github.com/openchamber/openchamber/releases/latest). Desktop bundles the matching OpenCode CLI, so no separate OpenCode installation is required.
 
-Linux releases are available as x86_64 and ARM64 AppImages. Make the downloaded AppImage executable and keep it in a writable location for in-app updates:
+Linux releases are available as x86_64 and ARM64 AppImages, plus Debian packages for Debian-based distributions. Make the downloaded AppImage executable and keep it in a writable location for in-app updates:
 
 ```bash
 chmod +x OpenChamber-*.AppImage
@@ -87,6 +87,8 @@ chmod +x OpenChamber-*.AppImage
 ```
 
 Linux AppImages require FUSE (`libfuse.so.2`). Without FUSE, run with `APPIMAGE_EXTRACT_AND_RUN=1`.
+
+Debian packages are installed through the system package manager and do not use the AppImage in-app update flow.
 
 ### VS Code
 
