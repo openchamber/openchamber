@@ -1019,6 +1019,8 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_go_to_line.label': '跳轉到行（檔案編輯器）',
   'settings.openchamber.keyboardShortcuts.action.open_command_palette.label': '開啟命令面板',
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': '聚焦輸入方塊',
+  'settings.openchamber.keyboardShortcuts.action.send_message.label': '傳送訊息',
+  'settings.openchamber.keyboardShortcuts.action.insert_newline.label': '插入換行',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': '開啟設定',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': '切換終端機停靠區',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': '切換終端機展開',

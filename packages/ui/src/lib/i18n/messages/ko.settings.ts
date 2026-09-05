@@ -1112,6 +1112,8 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_go_to_line.label': '줄로 이동(파일 편집기)',
   'settings.openchamber.keyboardShortcuts.action.open_command_palette.label': '명령 팔레트 열기',
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': '입력에 포커스',
+  'settings.openchamber.keyboardShortcuts.action.send_message.label': '보내기 메시지',
+  'settings.openchamber.keyboardShortcuts.action.insert_newline.label': '새 줄 삽입',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': '설정 열기',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': '터미널 dock 토글',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': '터미널 확장 토글',

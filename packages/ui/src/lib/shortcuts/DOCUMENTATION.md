@@ -4,6 +4,8 @@ Application commands use `useKeybind(actionId, handler)` or `useKeybinds(binding
 
 Do not add a component-level `window` or `document` keydown listener for an application command. Declare the action in `config.ts`, then register its handler near the state or UI it owns. This keeps definitions and dispatch centralized without lifting component state or passing callbacks through unrelated components.
 
+`send_message` and `insert_newline` are the exception to global registration: their defaults are bare `enter` and `shift+enter`, which must never trigger outside the chat composer (typing Enter in any other field would send). They stay in the schema so Settings can display and persist overrides, but the composer dispatches them itself from its editor keydown — the global dispatcher never registers them.
+
 # Schema contract
 
 `config.ts` is the declaration-only source for application commands. It organizes entries into `session`, `models`, `panels`, `navigation`, and `application` groups, then explicitly concatenates them into `SHORTCUT_SCHEMA`. Every entry declares an ID, default binding, and whether users can customize it. Customizable entries also declare their Settings translation key, so Settings must not maintain an action-ID switch or English fallback labels.

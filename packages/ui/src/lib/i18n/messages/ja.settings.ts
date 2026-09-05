@@ -1145,6 +1145,8 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_go_to_line.label': '指定行に移動（ファイルエディター）',
   'settings.openchamber.keyboardShortcuts.action.open_command_palette.label': 'コマンドパレットを開く',
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': '入力をフォーカス',
+  'settings.openchamber.keyboardShortcuts.action.send_message.label': 'メッセージを送信',
+  'settings.openchamber.keyboardShortcuts.action.insert_newline.label': '改行を挿入',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': '設定を開く',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': 'ターミナルドックの切替',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': 'ターミナル拡大の切替',

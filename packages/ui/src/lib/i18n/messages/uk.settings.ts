@@ -1112,6 +1112,8 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.action.open_go_to_line.label": "Перейти до рядка (редактор файлів)",
   "settings.openchamber.keyboardShortcuts.action.open_command_palette.label": "Відкрити палітру команд",
   "settings.openchamber.keyboardShortcuts.action.focus_input.label": "Фокус на полі вводу",
+  "settings.openchamber.keyboardShortcuts.action.send_message.label": "Надіслати повідомлення",
+  "settings.openchamber.keyboardShortcuts.action.insert_newline.label": "Вставити новий рядок",
   "settings.openchamber.keyboardShortcuts.action.open_settings.label": "Відкрити налаштування",
   "settings.openchamber.keyboardShortcuts.action.toggle_terminal.label": "Перемкнути панель терміналу",
   "settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label": "Розгорнути або згорнути термінал",

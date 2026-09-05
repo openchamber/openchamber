@@ -1112,6 +1112,8 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.action.open_go_to_line.label": "Ir a línea (editor de archivos)",
   "settings.openchamber.keyboardShortcuts.action.open_command_palette.label": "Abrir paleta de comandos",
   "settings.openchamber.keyboardShortcuts.action.focus_input.label": "Enfocar entrada",
+  "settings.openchamber.keyboardShortcuts.action.send_message.label": "Enviar mensaje",
+  "settings.openchamber.keyboardShortcuts.action.insert_newline.label": "Insertar nueva línea",
   "settings.openchamber.keyboardShortcuts.action.open_settings.label": "Abrir configuración",
   "settings.openchamber.keyboardShortcuts.action.toggle_terminal.label": "Mostrar u ocultar panel de terminal",
   "settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label": "Expandir o contraer terminal",

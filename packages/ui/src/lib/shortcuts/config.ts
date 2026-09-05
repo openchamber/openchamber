@@ -39,6 +39,18 @@ const SHORTCUT_GROUPS = {
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.focus_input.label',
     },
     {
+      id: 'send_message',
+      defaultBinding: 'enter',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.send_message.label',
+    },
+    {
+      id: 'insert_newline',
+      defaultBinding: 'shift+enter',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.insert_newline.label',
+    },
+    {
       id: 'open_timeline_dialog',
       defaultBinding: 'mod+k t',
       customizable: true,

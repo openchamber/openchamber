@@ -1140,6 +1140,8 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_go_to_line.label': 'Satıra git (dosya düzenleyici)',
   'settings.openchamber.keyboardShortcuts.action.open_command_palette.label': 'Komut paletini aç',
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': 'Girdi alanına odaklan',
+  'settings.openchamber.keyboardShortcuts.action.send_message.label': 'Mesaj gönder',
+  'settings.openchamber.keyboardShortcuts.action.insert_newline.label': 'Yeni satır ekle',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': 'Ayarları aç',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': 'Terminal dock\'unu aç/kapat',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': 'Terminali genişlet/daralt',
