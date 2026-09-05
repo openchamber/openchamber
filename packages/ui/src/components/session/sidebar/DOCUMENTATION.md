@@ -45,9 +45,13 @@ their shared managed root for folders and never expose worktree actions. Project
 display can be all projects or one selected project. The mobile sessions sheet
 (`apps/MobileSessionsSheet.tsx`) partitions the same way through
 `partitionSidebarSessions` and lists Chats as a collapsible section above the
-project tree, with no Recent projection. VS Code excludes worktrees and managed
-Chats, while retaining its workspace-scoped grouped list and inline archived
-buckets.
+project tree, with a phone-drawer Pinned section between them when needed. A
+pinned root's complete in-snapshot child tree renders there through the same
+expansion behavior and is omitted from every other drawer bucket, including
+managed Chats and the project tree. The iPad/sidebar variant keeps its existing
+layout and actions. There is no Recent projection.
+VS Code excludes worktrees and managed Chats, while retaining its
+workspace-scoped grouped list and inline archived buckets.
 
 Directory demand always includes known project roots and worktrees. Visibility
 only changes priority. Row mounts must not start bootstrap work. Selection and
