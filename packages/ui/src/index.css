@@ -1862,11 +1862,6 @@ input[aria-label="Terminal input"] {
 
 }
 
-/* Settings dialog: hide the overlay scrollbar; wheel/keyboard scroll still works. */
-[data-settings-view="true"] .overlay-scrollbar {
-  display: none;
-}
-
 /* Desktop app shell (Electron/native window): native apps use the arrow cursor
    for clickable controls, not the web's hand/pointer. Neutralize pointer
    cursors under the desktop runtime only — web in a browser keeps them.

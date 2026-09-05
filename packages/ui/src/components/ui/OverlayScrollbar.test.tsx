@@ -282,4 +282,89 @@ describe('OverlayScrollbar', () => {
     expect(scrollbar.dataset.visible).toBe('true');
   });
 
+  test('re-measures on hover so a horizontally overflowing container shows its horizontal thumb', async () => {
+    await renderScrollbar({ disableHorizontal: false });
+    const scrollbar = host.querySelector<HTMLElement>('.overlay-scrollbar');
+    if (!scrollbar) throw new Error('OverlayScrollbar did not render its container');
+    const horizontalThumb = host.querySelector<HTMLElement>('[data-overlay-scrollbar-thumb="horizontal"]');
+    if (!horizontalThumb) throw new Error('OverlayScrollbar did not render its horizontal thumb');
+
+    // Horizontal overflow appears after mount without a resize, so the mount
+    // measure saw no overflow and the thumb is hidden. The hover re-measure is
+    // the only path that can reveal it now (no ResizeObserver is triggered here).
+    expect(horizontalThumb.hidden).toBe(true);
+    Object.defineProperty(scroller, 'scrollWidth', { configurable: true, get: () => 300 });
+
+    scroller.dispatchEvent(new window.PointerEvent('pointerenter', { bubbles: false, pointerType: 'mouse' }));
+    await flushFrames();
+
+    expect(scrollbar.dataset.visible).toBe('true');
+    expect(horizontalThumb.hidden).toBe(false);
+    expect(horizontalThumb.style.width).not.toBe('');
+  });
+
+  test('keeps the horizontal thumb hidden on hover when there is no horizontal overflow', async () => {
+    await renderScrollbar({ disableHorizontal: false });
+    const horizontalThumb = host.querySelector<HTMLElement>('[data-overlay-scrollbar-thumb="horizontal"]');
+    if (!horizontalThumb) throw new Error('OverlayScrollbar did not render its horizontal thumb');
+
+    expect(horizontalThumb.hidden).toBe(true);
+    scroller.dispatchEvent(new window.PointerEvent('pointerenter', { bubbles: false, pointerType: 'mouse' }));
+    await flushFrames();
+
+    expect(horizontalThumb.hidden).toBe(true);
+  });
+
+  test('does not reveal the thumb on touch taps (pointerType guard)', async () => {
+    await renderScrollbar();
+    const scrollbar = host.querySelector<HTMLElement>('.overlay-scrollbar');
+    if (!scrollbar) throw new Error('OverlayScrollbar did not render its container');
+
+    scroller.dispatchEvent(new window.PointerEvent('pointerenter', { bubbles: false, pointerType: 'touch' }));
+    await flushFrames();
+
+    expect(scrollbar.dataset.visible).toBe('false');
+  });
+
+  test('keeps the thumb visible while the pointer crosses from container onto the thumb', async () => {
+    await renderScrollbar();
+    const scrollbar = host.querySelector<HTMLElement>('.overlay-scrollbar');
+    if (!scrollbar) throw new Error('OverlayScrollbar did not render its container');
+    const thumb = host.querySelector<HTMLElement>('[data-overlay-scrollbar-thumb="vertical"]');
+    if (!thumb) throw new Error('OverlayScrollbar did not render its vertical thumb');
+
+    // Enter the container: thumb reveals.
+    scroller.dispatchEvent(new window.PointerEvent('pointerenter', { bubbles: false, pointerType: 'mouse' }));
+    expect(scrollbar.dataset.visible).toBe('true');
+
+    // Leave the container (pointer moves toward the sibling thumb): this arms
+    // the hide timer. The thumb's pointerover fires after the container's
+    // pointerleave, so the fire-time re-check must keep the thumb visible.
+    scroller.dispatchEvent(new window.PointerEvent('pointerleave', { bubbles: false, pointerType: 'mouse' }));
+    thumb.dispatchEvent(new window.PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }));
+    await flushFrames();
+
+    expect(scrollbar.dataset.visible).toBe('true');
+  });
+
+  test('hides the thumb after the pointer leaves the container', async () => {
+    await renderScrollbar({ hideDelayMs: 0 });
+    const scrollbar = host.querySelector<HTMLElement>('.overlay-scrollbar');
+    if (!scrollbar) throw new Error('OverlayScrollbar did not render its container');
+
+    scroller.dispatchEvent(new window.PointerEvent('pointerenter', { bubbles: false, pointerType: 'mouse' }));
+    expect(scrollbar.dataset.visible).toBe('true');
+
+    scroller.dispatchEvent(new window.PointerEvent('pointerleave', { bubbles: false, pointerType: 'mouse' }));
+    await flushFrames();
+
+    // The hide path is a setTimeout (hideDelayMs: 0 still schedules a 0ms
+    // timer). happy-dom runs real timers, so we must let the macrotask fire
+    // before asserting; rAF frames alone are not enough.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await flushFrames();
+
+    expect(scrollbar.dataset.visible).toBe('false');
+  });
+
 });

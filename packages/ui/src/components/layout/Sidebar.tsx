@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 const SIDEBAR_CONTENT_WIDTH = 280;
 const SIDEBAR_MIN_WIDTH = 280;
@@ -174,9 +175,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                 aria-hidden={!isOpen}
             >
                 {topBar}
-                <div className="min-h-0 flex-1 overflow-y-auto">
+                <ScrollableOverlay outerClassName="flex-1 min-h-0" disableHorizontal>
                     <ErrorBoundary>{children}</ErrorBoundary>
-                </div>
+                </ScrollableOverlay>
             </div>
         </aside>
     );
