@@ -1210,13 +1210,13 @@ export function NewWorktreeDialog({
 
   // Footer content
   const footerContent = (
-    <div className={cn('flex gap-2', isMobile ? 'flex-col w-full' : 'flex-row items-center')}>
+    <div className={cn('flex gap-2', isMobile ? 'flex-col w-full' : 'flex-row items-start flex-wrap')}>
       {/* Validation error */}
-      <div className={cn('flex items-center gap-1.5 text-destructive', isMobile ? 'w-full justify-center order-first' : 'mr-auto')}> 
+      <div className={cn('flex items-start gap-1.5 text-destructive min-w-0 flex-1', isMobile ? 'w-full justify-center order-first' : 'mr-auto')}> 
         {validation.touched && (validation.branchError || validation.worktreeError) && (
           <>
-            <Icon name="error-warning" className="h-3.5 w-3.5" />
-            <span className="typography-micro">
+            <Icon name="error-warning" className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            <span className="typography-micro break-all whitespace-normal min-w-0 flex-1 text-left">
               {validation.branchError || validation.worktreeError}
             </span>
           </>
@@ -2215,13 +2215,13 @@ export function NewWorktreeDialog({
             </div>
 
             {/* Footer */}
-            <DialogFooter className="mt-1 flex items-center justify-between">
+            <DialogFooter className="mt-1 flex flex-wrap items-start justify-between gap-2">
               {/* Validation error - inline with buttons */}
-              <div className="flex items-center gap-1.5 text-destructive">
+              <div className="flex min-w-0 flex-1 items-start gap-1.5 text-destructive">
                 {validation.touched && (validation.branchError || validation.worktreeError) && (
                   <>
-                    <Icon name="error-warning" className="h-3.5 w-3.5" />
-                    <span className="typography-micro">
+                    <Icon name="error-warning" className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span className="typography-micro break-all whitespace-normal min-w-0 flex-1 text-left">
                       {validation.branchError || validation.worktreeError}
                     </span>
                   </>
