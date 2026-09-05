@@ -1,3 +1,5 @@
+import { sessionCookieNameForRequest } from '../ui-auth/session-cookie.js';
+
 export const createRequestSecurityRuntime = (deps) => {
   const { readSettingsFromDiskMigrated } = deps;
   // Origins of packaged (non-browser) clients whose WebView origin never
@@ -17,12 +19,15 @@ export const createRequestSecurityRuntime = (deps) => {
     if (!cookieHeader || typeof cookieHeader !== 'string') {
       return null;
     }
-    const segments = cookieHeader.split(';');
-    for (const segment of segments) {
+    // Match the exact slot for the host:port this request arrived on. A browser
+    // shares one jar across ports on a host, so reading by the request's own
+    // port is what keeps two LAN instances (issue #2377) from consuming each
+    // other's session. This mirrors ui-auth's per-request cookie resolution,
+    // so the set side, this CSRF read, and ui-auth never diverge.
+    const expected = sessionCookieNameForRequest(req);
+    for (const segment of cookieHeader.split(';')) {
       const [rawName, ...rest] = segment.split('=');
-      const name = rawName?.trim();
-      if (!name) continue;
-      if (name !== 'oc_ui_session') continue;
+      if (rawName?.trim() !== expected) continue;
       const value = rest.join('=').trim();
       try {
         return decodeURIComponent(value || '');
