@@ -1,0 +1,111 @@
+---
+title: Zbuduj panel gościa
+description: Panel HTML na belce OpenChamber, który rozmawia z hostem przez connectHost.
+---
+
+# Zbuduj panel gościa
+
+`@openchamber/sdk` stawia panel trzeciej strony na belce OpenChamber. Panel to HTML w iframe. Z OpenChamber rozmawia przez `connectHost()`.
+
+Działa w sieci i na desktopie. VS Code i mobile oznaczają katalog jako unsupported. Nie ładują iframe.
+
+## Co oddajesz
+
+Folder z trzema rzeczami:
+
+- `package.json` z blokiem `openchamber`
+- `panel/index.html`
+- `panel/main.js`, klasyczne IIFE. Iframe nie ładuje ESM.
+
+`oc-dev` nadal kompiluje `panel/main.ts`, gdy serwuje `panel/main.js`. Spakowany OpenChamber i `openchamber serve` tego nie robią. Oddaj IIFE.
+
+```bash
+bun run --filter @openchamber/sdk bundle -- panel/main.ts panel/main.js
+```
+
+W HTML wskaż ten plik.
+
+## Zainstaluj, gdy piszesz
+
+1. Uruchom OpenChamber w sieci albo na desktopie.
+2. Otwórz **Settings → Extensions**.
+3. Dodaj ścieżkę folderu, lokalny `.zip` albo adres git / zip https.
+
+Na belce powinna pojawić się twoja ikona. Kliknij, a załaduje się twój HTML. Dwa panele nie mogą mieć tego samego `id`.
+
+
+Instalacja z **folderu** zostawia ścieżkę w `extensions.json`. Uninstall usuwa tylko wiersz katalogu.
+
+**Zip** (lub https zip / URL git) trafia do `guests/{id}` w data dir OpenChamber. Host rozpakowuje archiwum, sprawdza manifest i działa z kopii. Uninstall kasuje kopię. W zipie: `package.json`, `panel/index.html`, `panel/main.js` oraz zadeklarowane `icon.svg` / `agent/main.js`. Bez `node_modules` i TypeScriptu.
+
+## Manifest
+
+```json
+{
+  "name": "@acme/hello-panel",
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": {
+        "id": "acme-hello",
+        "name": "Hello",
+        "icon": "window",
+        "entry": "panel/index.html"
+      },
+      "attach": "dialog",
+      "integration": {
+        "name": "Acme",
+        "description": "Tasks from Acme",
+        "oauth": {
+          "authorizeUrl": "https://acme.example/oauth/authorize",
+          "tokenUrl": "https://acme.example/oauth/token",
+          "apiOrigin": "https://api.acme.example"
+        },
+        "settings": [{ "id": "list-id", "label": "List ID" }]
+      }
+    }
+  }
+}
+```
+
+`apiVersion` to `1`. Każda inna wartość to odmowa.
+
+`engines.openchamber` jest opcjonalne. Użyj `1.22.0` albo `>=1.22.0`. Instalacja jest odrzucana, gdy ta wersja OpenChamber jest starsza.
+
+`contributes.agent` jest opcjonalne. Wskazuje lokalny proces uruchamiany przez hosta (sockety Dockera i podobne). Panel woła `agentRequest`; proces należy do hosta. Zobacz `GUEST_AGENTS.md` w pakiecie.
+
+`id` jest kebab-case. `icon` to nazwa Remixicon w tym samym kebab-case co na belce: `RiWindowLine` staje się `window`. Albo podaj ścieżkę SVG w pakiecie, np. `icon.svg`. URL i ścieżki bezwzględne odpadają na parse. `entry` zostaje w pakiecie. `../` i ścieżki bezwzględne odpadają na parse.
+
+`attach` jest opcjonalny.
+
+- `true` albo `"panel"` dodaje wiersz w menu +, który otwiera belkę
+- `"dialog"` otwiera okno hosta wokół tego samego iframe
+- pomiń albo ustaw `false` i panel zostaje poza tymi menu
+
+`ready.surface` to `panel` albo `dialog`, więc listę rysujesz na belce, a picker w oknie.
+
+`integration` jest opcjonalny. Host rysuje kartę w **Settings → Integrations**. Goście OAuth wklejają tam client id. Goście token wklejają token API. `host: { "provider": "linear" }` bierze first-party połączenie Linear i nie pyta o client id. Gość nie widzi tokenu.
+
+Zobacz [API hosta](/pl/sdk/host/) o `request`, OAuth, attach i błędach.
+
+## Pierwsze linie w panelu
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+
+host.onReady((ctx) => {
+  document.body.dataset.theme = ctx.theme.mode;
+  document.body.dataset.surface = ctx.surface;
+});
+```
+
+`connectHost` odrzuca, gdy skrypt nie jest w iframe.
+
+Importuj zestaw z `@openchamber/sdk/ui`, jeśli chcesz listę, kartę albo picker attach. Zestaw możesz pominąć i rysować własny DOM. Zobacz [Zestaw UI](/pl/sdk/ui/).
+
+## Powiązane
+
+- [API hosta](/pl/sdk/host/) — metody `connectHost`, limity i kody błędów
+- [Zestaw UI](/pl/sdk/ui/) — lista, karta, picker attach i okno pull

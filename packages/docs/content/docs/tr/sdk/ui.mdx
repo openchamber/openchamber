@@ -1,0 +1,65 @@
+---
+title: UI kiti
+description: @openchamber/sdk/ui ile görev listesi, kart, attach seçici veya pull penceresi çizin.
+---
+
+# UI kiti
+
+Panelin host takipçilerine benzemesini istiyorsanız `@openchamber/sdk/ui` içe aktarın. Kit, host token’larından DOM çizer. Sağlayıcıyla konuşmaz. `host.request` ve `host.attach` sizin çağrınız olarak kalır.
+
+Kiti atlayıp kendi DOM’unuzu da çizebilirsiniz.
+
+Herhangi bir mount’tan önce `applyHostReady` çağırın.
+
+```ts
+import { applyHostReady, mountIssuePage } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  mountIssuePage(document.querySelector("#root")!, {
+    items: tasks,
+    filters,
+    onSelect: (item) => {
+      void host.attach({
+        providerId: "acme-hello",
+        id: item.id,
+        title: item.title,
+        url: item.url ?? "",
+      });
+    },
+  });
+});
+```
+
+## Neyi mount edersiniz
+
+| Çağrı | Nereye gider |
+| --- | --- |
+| `mountIssuePage` | ray listesi. Sıkı süzgeçler, ikon arama, tanımlayıcı artı başlık satırları. |
+| `mountIssueCard` | satır tıklamasından sonra görev. Geri, durum, meta, açıklama, yorumlar, altlık düğmesi. |
+| `mountAttachIssues` | + menü seçicisi. Arama açık kalır. Seçince `host.attach` ve `host.close`. |
+| `mountPullRequest` | pull veya birleştirme isteği penceresi. Sekmeler Overview, Checks ve Comments. |
+| `mountButton` | ortak bağlan düğmesi |
+| `mountTextField` | ortak bağlan alanı |
+| `mountEmpty` | ortak boş durum |
+
+Açıklama ve yorumlar düz metin kalır. Kit `![alt](https://…)` ve `[label](https://…)` öğelerini medyaya kaldırır. Avatar URL’leri attach yüküne girmez.
+
+`mountPullRequest` kayıt, kontroller ve yorumlarla `mode: "view"` veya bir submit işleyicisiyle `mode: "create"` alır. Altlık geri çağrıları attach, yeni oturum, yeni worktree, ready ve merge’dir. Kit çizer. Git host’ta kalır.
+
+## Süzgeçler ve satırlar
+
+Bir süzgeçteki `value` başlangıç seçimidir. Bundan sonra yeni bir `items` listesiyle `update` ettiğinizde bileşen kullanıcının seçimlerini tutar. `value`’yu yalnızca yeniden mount ederken tekrar verin.
+
+`slot` bir süzgeci yerleştirir. `start` solda büyür ve etiketini tutar. `end` sağa paketlenir ve panel 520px altındayken ikona döner. `slot` yoksa ilk süzgeç `start`, geri kalanı `end` olur.
+
+Bir satır `badge` ve `subtitle` taşıyabilir. GitHub seçicisinin bir repo veya `head → base` göstermesi gibi.
+
+`hasMore` / `onMore` sonraki uzak sayfayı yükler. `toggle` bir onay kutusudur. Anlamı konuk `attach.text`’e koyar. `session` ikinci bir onay kutusudur, Create in worktree gibi. İşaretliyse `attach` yerine `host.startSession({ worktree: true })` çağırın. `action` bir sayfa düğmesidir.
+
+Host aramaz ve konuk süzgeçlerini saklamaz.
+
+## İlgili
+
+- [Konuk panel oluştur](/tr/sdk/) — klasör, paket ve manifest
+- [Host API](/tr/sdk/host/) — `connectHost`, attach ve hatalar

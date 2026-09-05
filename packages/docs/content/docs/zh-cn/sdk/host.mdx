@@ -1,0 +1,196 @@
+---
+title: 宿主 API
+description: 访客面板的 connectHost 方法、request 规则、限制和错误码。
+---
+
+# 宿主 API
+
+这一页是精确的 `connectHost` 参考：方法、限制和错误码。文件夹、打包和清单见 [构建访客面板](/zh-cn/sdk/)。
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+```
+
+没有 `window`、或不在 iframe 里时，`connectHost` 会抛 `HOST_UNAVAILABLE`。拆下面板时调用 `dispose()`。未完成的调用会以 `HOST_UNAVAILABLE` 拒绝。
+
+## ready 和之后的推送
+
+`onReady` 在第一次宿主快照时触发，宿主刷新时再触发。
+
+| 字段 | 是什么 |
+| --- | --- |
+| `theme.mode` | `light` 或 `dark` |
+| `theme.tokens` | 宿主颜色、字体和圆角。挂载 UI 前传给 `applyHostReady`。 |
+| `locale` | 宿主语言标签 |
+| `directory` | 当前项目目录，或 `null` |
+| `session` | `{ id, title }` 或 `null`。没有标题时回退到会话 id。 |
+| `surface` | 栏上是 `panel`，attach 窗口是 `dialog`。这不是 `openSurface`。 |
+| `connection` | `{ connected, account }` |
+| `settings` | 只含已声明的集成字段 |
+
+访问令牌不会出现在 `ready` 或 `request` 结果里。
+
+订阅晚了时，`onDirectory`、`onSession`、`onSessionLifecycle`、`onConnection`、`onSettings` 会重放最近一次 ready。之后的宿主推送会像 `onReady` 一样保持这些监听器最新。
+
+## 方法
+
+| 调用 | 做什么 |
+| --- | --- |
+| `toast({ kind, message })` | 宿主 toast。`kind` 是 `info`、`success` 或 `error`。 |
+| `openUrl(url)` | 在宿主里打开 URL |
+| `openSurface(surfaceId)` | 把宿主界面切到那个 surface |
+| `writeClipboard(text)` | 在宿主里复制。1–32000 个字符。 |
+| `compose({ text, mode? })` | 写入聊天框。不发送。默认 `mode` 是 `append`。要覆盖就传 `replace`。trim 后 1–16000。 |
+| `attach({ ... })` | 在输入框放一枚芯片，与 GitHub、Linear 互斥 |
+| `startSession({ ... })` | 创建会话，并把同一份快照写上去。返回 `{ sessionId, sent }`。 |
+| `prompt({ text, send? })` | 在当前会话写入或发送。省略 `send`，或传 `false`，会替换草稿。`send: true` 发送。返回 `{ sent }`。 |
+| `sessionLink({ ... })` | 把 attach 快照写到当前会话。不创建会话。 |
+| `close()` | 关掉 attach 窗口。在栏上是空操作。 |
+| `oauthStart()` | 打开供应商授权 URL；宿主 Linear 访客则打开官方 Linear URL |
+| `oauthDisconnect()` | 丢掉该访客的令牌；宿主 Linear 访客则断开 Linear 连接 |
+| `request({ method, path, query?, body? })` | 只在已声明的 `apiOrigin` 上 GET 或写入 |
+| `agentRequest({ method, path, query?, body? })` | proxy to this guest's local agent on loopback. Same path rules as `request`, but the origin is the agent the host started. |
+| `agentStatus()` | `stopped`, `starting`, `ready`, or `failed` |
+
+## attach 和 startSession
+
+两者用同一套标识字段：
+
+```ts
+await host.attach({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.attach({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  author: "ada",
+  branches: { head: "feature", base: "main" },
+  text: "Optional notes for the model",
+});
+
+await host.startSession({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  worktree: true,
+  text: "Optional first message",
+});
+```
+
+`id` 是你的标识，不是 GitHub 编号。`kind` 是 `issue` 或 `pull`，默认 `issue`。`text` 是可选的模型上下文，trim 后 1–16000。
+
+`startSession` 在当前项目里创建会话。`worktree: true` 让宿主先做 worktree。访客不跟 git 说话。没有项目、worktree 失败、会话创建失败，都是宿主错误。选了模型时，`text` 会成为第一条消息。
+
+## prompt、sessionLink 和 sessionLifecycle
+
+```ts
+await host.sessionLink({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.prompt({ text: "Fix the login" });
+await host.prompt({ text: "Fix the login", send: true });
+
+host.onSessionLifecycle((event) => {
+  document.body.dataset.phase = event.phase;
+});
+```
+
+`sessionLink` 使用和 `attach` 一样的标识字段。把那份快照写到当前会话。不创建会话。没有项目或没有会话就是拒绝。
+
+`prompt` 在当前会话写入或发送。省略 `send`，或传 `false`，会替换草稿。`send: true` 走和 `startSession` 相同的模型路径发送。没有会话是 `NO_SESSION`。发送时会话忙碌是 `SESSION_BUSY`。忙碌时 compose 仍然可用。结果是 `{ sent }`：`sent`、`no-model`、`skipped` 或 `failed`。访客不选模型或代理。
+| `NO_AGENT` | no agent declared, not granted when required, or not running |
+| `AGENT_FAILED` | the agent crashed or never became ready |
+
+`onSessionLifecycle` 是宿主推送。实时状态 `busy` 和 `retry` 是 `started`。`idle` 是 `completed`。未知状态类型是 `failure`。这不是中止。晚到的监听器会拿到上一阶段。如果还没有单独的推送，就从 `ready.session.busy` 来。
+
+客户端在宿主看到消息之前会裁这些上限：
+
+| 字段 | 最大 |
+| --- | --- |
+| `id` | 128 |
+| `title` | 200 |
+| `url` | 2000 |
+| `text` | 16000 |
+| `author` | 80 |
+| 每个分支名 | 200 |
+
+## request
+
+```ts
+const user = await host.request({ method: "GET", path: "/api/v2/user" });
+```
+
+`path` 必须以 `/` 开头，停在已声明的 `apiOrigin` 上，且不能带协议。宿主会附上 `Authorization`。Token 访客发送原始 token。OAuth 和宿主 Linear 发送 Bearer。结果是 `{ status, body }`。访客解析 JSON。
+
+宿主 Linear 访客也可以用同一次调用做 `GET /api/linear/issues/get`。宿主从官方 Linear 路由回答。
+
+沉默 20 秒就是 `HOST_TIMEOUT`。
+
+```ts
+try {
+  await host.request({ method: "GET", path: "/api/v2/user" });
+} catch (error) {
+  if (error instanceof HostRequestError && error.code === "DISCONNECTED") {
+    await host.oauthStart();
+  }
+}
+```
+
+
+## agentRequest
+
+When the manifest declares `contributes.agent`, the panel talks to that process through the host. The iframe never opens the socket or receives the agent token.
+
+```ts
+const status = await host.agentStatus();
+const result = await host.agentRequest({ method: "GET", path: "/containers" });
+```
+
+`path` must start with `/` and never include a scheme. The host proxies only to that guest's loopback port. Non-empty `sockets` / `exec` need an **Allow local agent** grant in Settings → Extensions before the first request. Full contract: package file `GUEST_AGENTS.md`.
+
+## 错误码
+
+失败的调用会抛 `HostRequestError`。`code` 是下面之一。未知的线路码会变成 `HOST_REJECTED`。`error` 字符串保留。
+
+| 码 | 何时 |
+| --- | --- |
+| `HOST_UNAVAILABLE` | 没有 window、不在 iframe，或已经 `dispose()` |
+| `HOST_TIMEOUT` | 宿主沉默了 20 秒 |
+| `HOST_REJECTED` | 宿主拒绝了，或码缺失/未知 |
+| `DISCONNECTED` | 访客没有 token，也没有 Linear 连接 |
+| `BAD_PATH` | `path` 离开了 `apiOrigin`，或格式不对 |
+| `NO_INTEGRATION` | 清单里没有 `integration` |
+| `NO_SESSION` | 没有打开的会话时调用 `prompt` 或 `sessionLink` |
+| `SESSION_BUSY` | 会话忙碌时调用 `prompt({ send: true })` |
+
+## 作为宿主供应商的 Linear
+
+`host.provider: "linear"` 复用官方 Linear 连接。`apiOrigin` 只能是 `https://api.linear.app`。这是启动用的特例，不是模式。不要在 `apiVersion` 1 上加第二个宿主供应商。
+
+## 在 apiVersion 1 上冻结
+
+这些名字已预留。宿主里还没有对应的洞。
+
+- 宿主上的 `issues.search` / `issues.get`。芯片是 `attach`。列表由访客画。
+- 公开的 OAuth 中介
+- 命令、快捷键、git remote、magic prompts
+
+## 相关
+
+- [构建访客面板](/zh-cn/sdk/) — 文件夹、ZIP、git URL、打包和清单
+- [UI 套件](/zh-cn/sdk/ui/) — 列表、卡片、attach 选择器和 pull 窗口

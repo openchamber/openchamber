@@ -1,0 +1,110 @@
+---
+title: Build a guest panel
+description: Ship an HTML panel that runs on the OpenChamber rail and talks through connectHost.
+---
+
+# Build a guest panel
+
+Use `@openchamber/sdk` to put a third-party panel on the OpenChamber rail. The panel is HTML in an iframe. It talks to OpenChamber through `connectHost()`.
+
+This runs on web and desktop. VS Code and mobile mark the guest catalog unsupported. They do not load the iframe.
+
+## What you ship
+
+A folder with three things:
+
+- a `package.json` that has an `openchamber` block
+- `panel/index.html`
+- `panel/main.js`, a classic IIFE. The iframe cannot load ESM.
+
+`oc-dev` still compiles `panel/main.ts` when it serves `panel/main.js`. Packaged OpenChamber and `openchamber serve` will not. Ship the IIFE.
+
+```bash
+bun run --filter @openchamber/sdk bundle -- panel/main.ts panel/main.js
+```
+
+Point the HTML at that file.
+
+## Install it while you work
+
+1. Run OpenChamber on web or desktop.
+2. Open **Settings → Extensions**.
+3. Add a folder path, a local `.zip`, or an https git / zip URL.
+
+The rail should show your icon. Click it and your HTML loads. Two panels cannot share the same `id`.
+
+A **folder** install keeps your path in `extensions.json`. Uninstall removes the catalog row only.
+
+A **zip** (or https zip / git URL) is copied into OpenChamber's data dir under `guests/{id}`. The host unpacks the archive, checks the manifest, then runs from that copy. Uninstall deletes the copy. The original zip file stays where you left it. Ship `package.json`, `panel/index.html`, `panel/main.js`, and any `icon.svg` / `agent/main.js` you declared. Do not put `node_modules` or TypeScript sources in the zip. The packaged app will not compile them.
+
+## Manifest
+
+```json
+{
+  "name": "@acme/hello-panel",
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": {
+        "id": "acme-hello",
+        "name": "Hello",
+        "icon": "window",
+        "entry": "panel/index.html"
+      },
+      "attach": "dialog",
+      "integration": {
+        "name": "Acme",
+        "description": "Tasks from Acme",
+        "oauth": {
+          "authorizeUrl": "https://acme.example/oauth/authorize",
+          "tokenUrl": "https://acme.example/oauth/token",
+          "apiOrigin": "https://api.acme.example"
+        },
+        "settings": [{ "id": "list-id", "label": "List ID" }]
+      }
+    }
+  }
+}
+```
+
+`apiVersion` is `1`. Any other value is a refusal.
+
+`engines.openchamber` is optional. Use `1.22.0` or `>=1.22.0`. Install refuses when this OpenChamber build is older.
+
+`contributes.agent` is optional. It names a host-spawned local process for Docker sockets and similar. The panel calls `agentRequest`; the host owns the process. See the package file `GUEST_AGENTS.md`.
+
+`id` is kebab-case. `icon` is a Remixicon name (`RiWindowLine` becomes `window`) or a package SVG path like `icon.svg`. URLs and absolute paths fail parse. `entry` stays inside the package. `../` and absolute paths fail parse.
+
+`attach` is optional.
+
+- `true` or `"panel"` adds a + menu row that opens the rail
+- `"dialog"` opens a host window around the same iframe
+- omit it or set `false` and the panel stays off those menus
+
+`ready.surface` is `panel` or `dialog`, so you can draw a list on the rail and a picker in the window.
+
+`integration` is optional. The host draws a card at **Settings → Integrations**. OAuth guests paste a client id there. Token guests paste an API token. `host: { "provider": "linear" }` reuses the OpenChamber Linear connection and never asks for a client id. The guest never sees the token.
+
+See [Host API](/sdk/host/) for `request`, OAuth, attach, and errors.
+
+## First lines in the panel
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+
+host.onReady((ctx) => {
+  document.body.dataset.theme = ctx.theme.mode;
+  document.body.dataset.surface = ctx.surface;
+});
+```
+
+`connectHost` rejects when the script is not in an iframe.
+
+Import the drawing kit from `@openchamber/sdk/ui` if you want the issue list, the issue card, or the attach picker. You can skip the kit and draw your own DOM. See [UI kit](/sdk/ui/).
+
+## Related
+
+- [Host API](/sdk/host/) — `connectHost` methods, limits, and error codes
+- [UI kit](/sdk/ui/) — issue list, card, attach picker, and pull window

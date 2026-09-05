@@ -1,0 +1,111 @@
+---
+title: Crear un panel invitado
+description: Un panel HTML en la barra de OpenChamber que habla con el host a través de connectHost.
+---
+
+# Crear un panel invitado
+
+`@openchamber/sdk` pone un panel de terceros en la barra de OpenChamber. El panel es HTML en un iframe. Habla con OpenChamber a través de `connectHost()`.
+
+Esto corre en web y escritorio. VS Code y móvil marcan el catálogo como unsupported. No cargan el iframe.
+
+## Qué entregas
+
+Una carpeta con tres cosas:
+
+- un `package.json` con un bloque `openchamber`
+- `panel/index.html`
+- `panel/main.js`, un IIFE clásico. El iframe no carga ESM.
+
+`oc-dev` sigue compilando `panel/main.ts` cuando sirve `panel/main.js`. OpenChamber empaquetado y `openchamber serve` no lo hacen. Entrega el IIFE.
+
+```bash
+bun run --filter @openchamber/sdk bundle -- panel/main.ts panel/main.js
+```
+
+Apunta el HTML a ese archivo.
+
+## Instálalo mientras trabajas
+
+1. Arranca OpenChamber en web o escritorio.
+2. Abre **Settings → Extensions**.
+3. Añade una ruta de carpeta, un `.zip` local o una URL git / zip https.
+
+La barra debería mostrar tu icono. Haz clic y se carga tu HTML. Dos paneles no pueden compartir el mismo `id`.
+
+
+Una instalación por **carpeta** guarda tu ruta en `extensions.json`. Uninstall solo quita la fila del catálogo.
+
+Un **zip** (o zip https / URL git) se copia a `guests/{id}` en el data dir de OpenChamber. El host descomprime, valida el manifiesto y ejecuta desde esa copia. Uninstall borra la copia. Incluye `package.json`, `panel/index.html`, `panel/main.js` y `icon.svg` / `agent/main.js` declarados. Sin `node_modules` ni TypeScript.
+
+## Manifiesto
+
+```json
+{
+  "name": "@acme/hello-panel",
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": {
+        "id": "acme-hello",
+        "name": "Hello",
+        "icon": "window",
+        "entry": "panel/index.html"
+      },
+      "attach": "dialog",
+      "integration": {
+        "name": "Acme",
+        "description": "Tasks from Acme",
+        "oauth": {
+          "authorizeUrl": "https://acme.example/oauth/authorize",
+          "tokenUrl": "https://acme.example/oauth/token",
+          "apiOrigin": "https://api.acme.example"
+        },
+        "settings": [{ "id": "list-id", "label": "List ID" }]
+      }
+    }
+  }
+}
+```
+
+`apiVersion` es `1`. Cualquier otro valor es un rechazo.
+
+`engines.openchamber` es opcional. Usa `1.22.0` o `>=1.22.0`. La instalación se rechaza si esta versión de OpenChamber es más antigua.
+
+`contributes.agent` es opcional. Nombra un proceso local que arranca el host para sockets de Docker y similares. El panel llama `agentRequest`; el host posee el proceso. Ver `GUEST_AGENTS.md` en el paquete.
+
+`id` va en kebab-case. `icon` es un nombre Remixicon en el mismo kebab-case que usa la barra: `RiWindowLine` pasa a `window`. O incluye una ruta SVG del paquete como `icon.svg`. Las URL y las rutas absolutas fallan el parse. `entry` se queda dentro del paquete. `../` y las rutas absolutas fallan el parse.
+
+`attach` es opcional.
+
+- `true` o `"panel"` añade una fila al menú + que abre la barra
+- `"dialog"` abre una ventana del host alrededor del mismo iframe
+- omítelo o pon `false` y el panel no sale en esos menús
+
+`ready.surface` es `panel` o `dialog`, para dibujar una lista en la barra y un selector en la ventana.
+
+`integration` es opcional. El host dibuja una tarjeta en **Settings → Integrations**. Los invitados OAuth pegan ahí un client id. Los invitados token pegan un token de API. `host: { "provider": "linear" }` reutiliza la conexión Linear de primera parte y nunca pide un client id. El invitado no ve el token.
+
+Mira [API del host](/es/sdk/host/) para `request`, OAuth, attach y errores.
+
+## Primeras líneas en el panel
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+
+host.onReady((ctx) => {
+  document.body.dataset.theme = ctx.theme.mode;
+  document.body.dataset.surface = ctx.surface;
+});
+```
+
+`connectHost` rechaza si el script no está en un iframe.
+
+Importa el kit de `@openchamber/sdk/ui` si quieres la lista, la tarjeta o el selector de attach. Puedes saltarte el kit y dibujar tu propio DOM. Mira [Kit de UI](/es/sdk/ui/).
+
+## Relacionado
+
+- [API del host](/es/sdk/host/) — métodos de `connectHost`, límites y códigos de error
+- [Kit de UI](/es/sdk/ui/) — lista, tarjeta, selector de attach y ventana pull

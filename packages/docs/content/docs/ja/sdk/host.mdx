@@ -1,0 +1,196 @@
+---
+title: ホスト API
+description: ゲストパネル向けの connectHost メソッド、request の規則、上限、エラーコード。
+---
+
+# ホスト API
+
+このページは `connectHost` の正確な参照です。メソッド、上限、エラーコード。フォルダ、バンドル、マニフェストは [ゲストパネルを作る](/ja/sdk/) にあります。
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+```
+
+`window` がない、または iframe の外だと `connectHost` は `HOST_UNAVAILABLE` を投げます。パネルを外すときは `dispose()` を呼んでください。飛行中の呼び出しは `HOST_UNAVAILABLE` で落ちます。
+
+## ready とその後の push
+
+`onReady` は最初のホストスナップショットで発火し、ホストが更新したときにもう一度発火します。
+
+| フィールド | 中身 |
+| --- | --- |
+| `theme.mode` | `light` または `dark` |
+| `theme.tokens` | ホストの色、フォント、半径。UI をマウントする前に `applyHostReady` へ渡す。 |
+| `locale` | ホストの言語タグ |
+| `directory` | 今のプロジェクトディレクトリ。なければ `null` |
+| `session` | `{ id, title }` または `null`。タイトルがなければセッション id。 |
+| `surface` | レールは `panel`、attach 窓は `dialog`。`openSurface` ではない。 |
+| `connection` | `{ connected, account }` |
+| `settings` | 宣言した integration フィールドだけ |
+
+アクセストークンは `ready` にも `request` の結果にも出ません。
+
+遅れて購読しても、`onDirectory`、`onSession`、`onSessionLifecycle`、`onConnection`、`onSettings` は最後の ready を再生します。その後のホスト push も、`onReady` と同じくこれらのリスナーを更新します。
+
+## メソッド
+
+| 呼び出し | すること |
+| --- | --- |
+| `toast({ kind, message })` | ホストのトースト。`kind` は `info`、`success`、`error`。 |
+| `openUrl(url)` | ホストで URL を開く |
+| `openSurface(surfaceId)` | ホストのクロムをそのサーフェスへ切る |
+| `writeClipboard(text)` | ホストでコピー。1–32000 文字。 |
+| `compose({ text, mode? })` | チャット欄に書く。送信はしない。既定の `mode` は `append`。上書きするなら `replace`。trim 後 1–16000 文字。 |
+| `attach({ ... })` | コンポーザーにチップを置く。GitHub と Linear と排他。 |
+| `startSession({ ... })` | セッションを作り、同じスナップショットを書く。戻り値は `{ sessionId, sent }`。 |
+| `prompt({ text, send? })` | 今のセッションに書くか送る。`send` なし、または `false` は下書きを置き換える。`send: true` は送信。戻り値は `{ sent }`。 |
+| `sessionLink({ ... })` | 今のセッションに attach スナップショットを書く。セッションは作らない。 |
+| `close()` | attach 窓を閉じる。レールでは何もしない。 |
+| `oauthStart()` | プロバイダの authorize URL を開く。ホスト Linear ゲストならファーストパーティの Linear URL。 |
+| `oauthDisconnect()` | このゲストのトークンを捨てる。ホスト Linear ゲストなら Linear 接続を切る。 |
+| `request({ method, path, query?, body? })` | 宣言した `apiOrigin` 上だけの GET または書き込み |
+| `agentRequest({ method, path, query?, body? })` | proxy to this guest's local agent on loopback. Same path rules as `request`, but the origin is the agent the host started. |
+| `agentStatus()` | `stopped`, `starting`, `ready`, or `failed` |
+
+## attach と startSession
+
+どちらも同じ識別フィールドを取ります。
+
+```ts
+await host.attach({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.attach({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  author: "ada",
+  branches: { head: "feature", base: "main" },
+  text: "Optional notes for the model",
+});
+
+await host.startSession({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  worktree: true,
+  text: "Optional first message",
+});
+```
+
+`id` はあなたの識別子です。GitHub の番号ではありません。`kind` は `issue` または `pull` で、既定は `issue` です。`text` は任意のモデル向け文脈で、trim 後 1–16000 です。
+
+`startSession` は今のプロジェクトにセッションを作ります。`worktree: true` は先に worktree を作るようホストに頼みます。ゲストは git と話しません。プロジェクトがない、worktree が落ちた、セッション作成が落ちた、はホストエラーです。モデルが選ばれていれば `text` が最初のメッセージになります。
+
+## prompt、sessionLink、sessionLifecycle
+
+```ts
+await host.sessionLink({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.prompt({ text: "Fix the login" });
+await host.prompt({ text: "Fix the login", send: true });
+
+host.onSessionLifecycle((event) => {
+  document.body.dataset.phase = event.phase;
+});
+```
+
+`sessionLink` は `attach` と同じ識別フィールドを取ります。今のセッションにそのスナップショットを書きます。セッションは作りません。プロジェクトもセッションもないときは拒否です。
+
+`prompt` は今のセッションに書くか送ります。`send` なし、または `false` は下書きを置き換えます。`send: true` は `startSession` と同じモデル経路で送ります。セッションなしは `NO_SESSION`。送信時に忙しいセッションは `SESSION_BUSY`。busy 中でも compose は動きます。結果は `{ sent }` で、`sent`、`no-model`、`skipped`、`failed` です。ゲストはモデルもエージェントも選びません。
+| `NO_AGENT` | no agent declared, not granted when required, or not running |
+| `AGENT_FAILED` | the agent crashed or never became ready |
+
+`onSessionLifecycle` はホストの push です。ライブ状態の `busy` と `retry` は `started`。`idle` は `completed`。未知の状態型は `failure`。中断ではありません。遅いリスナーは最後の段階を受け取ります。専用 push がまだ来ていなければ `ready.session.busy` からです。
+
+ホストが見る前にクライアントが切る上限です。
+
+| フィールド | 最大 |
+| --- | --- |
+| `id` | 128 |
+| `title` | 200 |
+| `url` | 2000 |
+| `text` | 16000 |
+| `author` | 80 |
+| 各ブランチ名 | 200 |
+
+## request
+
+```ts
+const user = await host.request({ method: "GET", path: "/api/v2/user" });
+```
+
+`path` は `/` で始まり、宣言した `apiOrigin` に留まり、スキームを含んではいけません。ホストが `Authorization` を付けます。トークンゲストは生トークンを送ります。OAuth とホスト Linear は Bearer です。結果は `{ status, body }` です。ゲストが JSON を parse します。
+
+ホスト Linear ゲストは同じ呼び出しで `GET /api/linear/issues/get` もできます。ホストはファーストパーティの Linear ルートで答えます。
+
+20 秒の沈黙は `HOST_TIMEOUT` です。
+
+```ts
+try {
+  await host.request({ method: "GET", path: "/api/v2/user" });
+} catch (error) {
+  if (error instanceof HostRequestError && error.code === "DISCONNECTED") {
+    await host.oauthStart();
+  }
+}
+```
+
+
+## agentRequest
+
+When the manifest declares `contributes.agent`, the panel talks to that process through the host. The iframe never opens the socket or receives the agent token.
+
+```ts
+const status = await host.agentStatus();
+const result = await host.agentRequest({ method: "GET", path: "/containers" });
+```
+
+`path` must start with `/` and never include a scheme. The host proxies only to that guest's loopback port. Non-empty `sockets` / `exec` need an **Allow local agent** grant in Settings → Extensions before the first request. Full contract: package file `GUEST_AGENTS.md`.
+
+## エラーコード
+
+失敗した呼び出しは `HostRequestError` を投げます。`code` は次のいずれかです。未知のワイヤコードは `HOST_REJECTED` になります。`error` 文字列はそのままです。
+
+| コード | いつ |
+| --- | --- |
+| `HOST_UNAVAILABLE` | window がない、iframe でない、または `dispose()` 済み |
+| `HOST_TIMEOUT` | ホストが 20 秒黙った |
+| `HOST_REJECTED` | ホストが拒否した、またはコードが無い／未知 |
+| `DISCONNECTED` | ゲストにトークンも Linear 接続もない |
+| `BAD_PATH` | `path` が `apiOrigin` を出た、または壊れていた |
+| `NO_INTEGRATION` | マニフェストに `integration` がない |
+| `NO_SESSION` | 開いているセッションなしで `prompt` または `sessionLink` |
+| `SESSION_BUSY` | セッションが忙しいときに `prompt({ send: true })` |
+
+## ホストプロバイダとしての Linear
+
+`host.provider: "linear"` はファーストパーティの Linear 接続を使います。`apiOrigin` は `https://api.linear.app` だけです。これは起動用で、型ではありません。`apiVersion` 1 に第二のホストプロバイダを足さないでください。
+
+## apiVersion 1 で凍結
+
+これらの名前は予約です。ホスト側の穴はまだありません。
+
+- ホスト上の `issues.search` / `issues.get`。チップは `attach`。一覧はゲストが描く
+- 公開 OAuth ブローカー
+- コマンド、ショートカット、git remote、magic prompts
+
+## 関連
+
+- [ゲストパネルを作る](/ja/sdk/) — フォルダ、ZIP、git URL、バンドル、マニフェスト
+- [UI キット](/ja/sdk/ui/) — 一覧、カード、attach ピッカー、pull 窓

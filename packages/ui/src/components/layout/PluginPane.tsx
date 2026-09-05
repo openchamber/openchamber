@@ -26,6 +26,7 @@ import {
   toGuestSessionSnapshot,
 } from '@/lib/guests/host-bridge';
 import { fetchHostLinearIssueGet } from '@/lib/guests/host-linear-request';
+import { loadGuestAgentStatus, proxyGuestAgentRequest } from '@/lib/guests/agent';
 import {
   AUTHORIZATION_POLL_MS,
   AUTHORIZATION_WATCH_MS,
@@ -180,12 +181,15 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     void refreshOauth(guest.id);
   }, [guest?.id, guest?.integration, refreshOauth]);
 
-  React.useEffect(() => {
-    const frame = iframeRef.current;
-    if (!frame) return;
+  // Remount when agent grant flips so the guest leaves its "unavailable" empty state.
+  // Resolve the frame from the ref on every message: a key remount replaces the
+  // element without changing `src`, so a captured contentWindow would go stale.
+  const frameKey = `${guestId}:agent-${guest?.agent?.granted ? '1' : '0'}`;
 
+  React.useEffect(() => {
     const onMessage = (event: MessageEvent) => {
-      if (event.source !== frame.contentWindow) return;
+      const frame = iframeRef.current;
+      if (!frame || event.source !== frame.contentWindow) return;
       const parsed = guestMessageSchema.safeParse(event.data);
       if (!parsed.success) return;
       const message = parsed.data;
@@ -297,6 +301,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           }
           return result;
         },
+        agentRequest: (request) => proxyGuestAgentRequest(guestIdRef.current, request),
+        agentStatus: () => loadGuestAgentStatus(guestIdRef.current),
       }).then((reply) => {
         if (reply) postToGuest(reply);
       });
@@ -307,7 +313,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       window.removeEventListener('message', onMessage);
       stopOauthPoll();
     };
-  }, [onDismiss, postToGuest, pushHostState, refreshOauth, setOauthStatus, src, stopOauthPoll]);
+  }, [frameKey, onDismiss, postToGuest, pushHostState, refreshOauth, setOauthStatus, src, stopOauthPoll]);
 
   React.useEffect(() => {
     pushHostState();
@@ -334,6 +340,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   return (
     <iframe
       ref={iframeRef}
+      key={frameKey}
       title={guest.name}
       src={src}
       sandbox="allow-scripts"

@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenChamber SDK</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #111114;
+        --panel: #1a1a1f;
+        --line: #2a2a32;
+        --text: #ececf1;
+        --muted: #9a9aa8;
+        --accent: #c9a36a;
+        --code: #0e0e12;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; min-height: 100%; }
+      body {
+        font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .shell {
+        display: grid;
+        grid-template-columns: 240px minmax(0, 760px);
+        gap: 48px;
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 32px 24px 80px;
+      }
+      nav {
+        position: sticky;
+        top: 24px;
+        align-self: start;
+      }
+      nav h1 {
+        font-size: 13px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 0 0 16px;
+        font-weight: 600;
+      }
+      nav a {
+        display: block;
+        color: var(--text);
+        text-decoration: none;
+        padding: 6px 0;
+      }
+      nav a:hover { color: var(--accent); }
+      .langs { display: flex; gap: 8px; margin-bottom: 20px; }
+      .langs button {
+        background: transparent;
+        border: 1px solid var(--line);
+        color: var(--muted);
+        padding: 4px 10px;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .langs button[aria-pressed="true"] {
+        color: var(--text);
+        border-color: var(--accent);
+      }
+      article h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 12px; }
+      article h2 { font-size: 1.25rem; margin: 2.2rem 0 0.7rem; }
+      article p, article li { color: var(--text); }
+      article .lead, article p { margin: 0 0 1rem; }
+      article ul, article ol { padding-left: 1.2rem; }
+      article li { margin: 0.35rem 0; }
+      article a { color: var(--accent); }
+      .muted { color: var(--muted); }
+      pre {
+        background: var(--code);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 14px 16px;
+        overflow: auto;
+        font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      code {
+        font: 0.92em ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      p code, li code, td code {
+        background: var(--panel);
+        padding: 0.1em 0.35em;
+        border-radius: 4px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.95rem;
+        margin: 0 0 1.2rem;
+      }
+      th, td {
+        text-align: left;
+        vertical-align: top;
+        border-bottom: 1px solid var(--line);
+        padding: 8px 10px 8px 0;
+      }
+      th { color: var(--muted); font-weight: 600; }
+      section { padding-top: 8px; }
+      section + section { margin-top: 56px; border-top: 1px solid var(--line); padding-top: 40px; }
+      [data-lang] { display: none; }
+      html[lang="en"] [data-lang="en"],
+      html[lang="uk"] [data-lang="uk"] { display: block; }
+      html[lang="en"] span[data-lang="en"],
+      html[lang="uk"] span[data-lang="uk"] { display: inline; }
+      @media (max-width: 800px) {
+        .shell { grid-template-columns: 1fr; gap: 24px; }
+        nav { position: static; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <nav>
+        <div class="langs">
+          <button type="button" data-set-lang="uk" aria-pressed="true">UK</button>
+          <button type="button" data-set-lang="en" aria-pressed="false">EN</button>
+        </div>
+        <h1>OpenChamber SDK</h1>
+        <a href="#build"><span data-lang="uk">Зібрати панель</span><span data-lang="en">Build a panel</span></a>
+        <a href="#host"><span data-lang="uk">API хоста</span><span data-lang="en">Host API</span></a>
+        <a href="#ui"><span data-lang="uk">UI-набір</span><span data-lang="en">UI kit</span></a>
+      </nav>
+      <main>
+        <section id="build">
+          <div data-lang="uk">
+            <h1>Зібрати гостьову панель</h1>
+            <p class="lead"> <code>@openchamber/sdk</code> ставить сторонню панель на рейку OpenChamber. Панель — це HTML в iframe. З OpenChamber вона розмовляє через <code>connectHost()</code>.</p>
+            <p>Це працює у вебі та на десктопі. VS Code і мобільний застосунок позначають каталог як unsupported. Вони iframe не вантажать.</p>
+            <h2>Що віддаєте</h2>
+            <ul>
+              <li><code>package.json</code> з блоком <code>openchamber</code></li>
+              <li><code>panel/index.html</code></li>
+              <li><code>panel/main.js</code>, класичний IIFE. Iframe не вантажить ESM.</li>
+            </ul>
+            <p><code>oc-dev</code> усе ще компілює <code>panel/main.ts</code>, коли віддає <code>panel/main.js</code>. Упакований OpenChamber і <code>openchamber serve</code> цього не роблять. Віддавайте IIFE.</p>
+          </div>
+          <div data-lang="en">
+            <h1>Build a guest panel</h1>
+            <p class="lead">Use <code>@openchamber/sdk</code> to put a third-party panel on the OpenChamber rail. The panel is HTML in an iframe. It talks to OpenChamber through <code>connectHost()</code>.</p>
+            <p>This runs on web and desktop. VS Code and mobile mark the guest catalog unsupported. They do not load the iframe.</p>
+            <h2>What you ship</h2>
+            <ul>
+              <li>a <code>package.json</code> that has an <code>openchamber</code> block</li>
+              <li><code>panel/index.html</code></li>
+              <li><code>panel/main.js</code>, a classic IIFE. The iframe cannot load ESM.</li>
+            </ul>
+            <p><code>oc-dev</code> still compiles <code>panel/main.ts</code> when it serves <code>panel/main.js</code>. Packaged OpenChamber and <code>openchamber serve</code> will not. Ship the IIFE.</p>
+          </div>
+          <pre><code>bun run --filter @openchamber/sdk bundle -- panel/main.ts panel/main.js</code></pre>
+          <div data-lang="uk">
+            <h2>Як поставити, поки пишете</h2>
+            <ol>
+              <li>Запустіть OpenChamber у вебі або на десктопі.</li>
+              <li>Відкрийте <strong>Settings → Extensions</strong>.</li>
+              <li>Додайте шлях до теки, локальний <code>.zip</code> або https git / zip URL.</li>
+            </ol>
+            <p>На рейці має з'явитися ваша іконка. Клік — і вантажиться ваш HTML. Дві панелі не можуть мати той самий <code>id</code>.</p>
+            <p>Інсталяція з теки лишає ваш шлях. Zip або git URL копіюється в data dir як <code>guests/{id}</code>. У архіві мають бути <code>package.json</code>, <code>panel/index.html</code>, <code>panel/main.js</code> і задекларовані <code>icon.svg</code> / agent entry. Без <code>node_modules</code> і TypeScript.</p>
+            <h2>Маніфест</h2>
+          </div>
+          <div data-lang="en">
+            <h2>Install it while you work</h2>
+            <ol>
+              <li>Run OpenChamber on web or desktop.</li>
+              <li>Open <strong>Settings → Extensions</strong>.</li>
+              <li>Add a folder path, a local <code>.zip</code>, or an https git / zip URL.</li>
+            </ol>
+            <p>The rail should show your icon. Click it and your HTML loads. Two panels cannot share the same <code>id</code>.</p>
+            <p>A folder install keeps your path. A zip or git URL is copied under the OpenChamber data dir as <code>guests/{id}</code>. Ship <code>package.json</code>, <code>panel/index.html</code>, <code>panel/main.js</code>, and any declared <code>icon.svg</code> / agent entry. Skip <code>node_modules</code> and TypeScript sources.</p>
+            <h2>Manifest</h2>
+          </div>
+          <pre><code>{
+  "name": "@acme/hello-panel",
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": {
+        "id": "acme-hello",
+        "name": "Hello",
+        "icon": "window",
+        "entry": "panel/index.html"
+      },
+      "attach": "dialog",
+      "integration": {
+        "name": "Acme",
+        "description": "Tasks from Acme",
+        "oauth": {
+          "authorizeUrl": "https://acme.example/oauth/authorize",
+          "tokenUrl": "https://acme.example/oauth/token",
+          "apiOrigin": "https://api.acme.example"
+        },
+        "settings": [{ "id": "list-id", "label": "List ID" }]
+      }
+    }
+  }
+}</code></pre>
+          <div data-lang="uk">
+            <p><code>apiVersion</code> — <code>1</code>. Будь-яке інше значення — відмова.</p>
+            <p><code>engines.openchamber</code> — опційно. <code>1.22.0</code> або <code>&gt;=1.22.0</code>. Інсталяція відхиляється, якщо ця збірка OpenChamber старіша.</p>
+            <p><code>contributes.agent</code> — опційно. Локальний процес на хості для Docker-сокетів тощо. Панель кличе <code>agentRequest</code>. Деталі в <code>GUEST_AGENTS.md</code>.</p>
+            <p><code>id</code> — kebab-case. <code>icon</code> — ім'я Remixicon (<code>RiWindowLine</code> → <code>window</code>) або шлях до SVG у пакеті на кшталт <code>icon.svg</code>. URL і абсолютні шляхи не пройдуть parse. <code>entry</code> лишається всередині пакета.</p>
+            <ul>
+              <li><code>true</code> або <code>"panel"</code> додає рядок у меню +, який відкриває рейку</li>
+              <li><code>"dialog"</code> відкриває вікно хоста навколо того самого iframe</li>
+              <li>пропустіть або поставте <code>false</code> — панель не з'явиться в тих меню</li>
+            </ul>
+            <p><code>ready.surface</code> — <code>panel</code> або <code>dialog</code>. <code>integration</code> малює картку в <strong>Settings → Integrations</strong>. Гість токен не бачить.</p>
+            <h2>Перші рядки в панелі</h2>
+          </div>
+          <div data-lang="en">
+            <p><code>apiVersion</code> is <code>1</code>. Any other value is a refusal.</p>
+            <p><code>engines.openchamber</code> is optional. Use <code>1.22.0</code> or <code>&gt;=1.22.0</code>. Install refuses when this OpenChamber build is older.</p>
+            <p><code>contributes.agent</code> is optional. It names a host-spawned local process for Docker sockets and similar. The panel calls <code>agentRequest</code>. See <code>GUEST_AGENTS.md</code>.</p>
+            <p><code>id</code> is kebab-case. <code>icon</code> is a Remixicon name (<code>RiWindowLine</code> becomes <code>window</code>) or a package SVG path like <code>icon.svg</code>. URLs and absolute paths fail parse. <code>entry</code> stays inside the package.</p>
+            <ul>
+              <li><code>true</code> or <code>"panel"</code> adds a + menu row that opens the rail</li>
+              <li><code>"dialog"</code> opens a host window around the same iframe</li>
+              <li>omit it or set <code>false</code> and the panel stays off those menus</li>
+            </ul>
+            <p><code>ready.surface</code> is <code>panel</code> or <code>dialog</code>. <code>integration</code> draws a card at <strong>Settings → Integrations</strong>. The guest never sees the token.</p>
+            <h2>First lines in the panel</h2>
+          </div>
+          <pre><code>import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+
+host.onReady((ctx) => {
+  document.body.dataset.theme = ctx.theme.mode;
+  document.body.dataset.surface = ctx.surface;
+});</code></pre>
+          <div data-lang="uk">
+            <p><code>connectHost</code> відхиляє виклик, якщо скрипт не в iframe. Набір можна пропустити і малювати власний DOM.</p>
+          </div>
+          <div data-lang="en">
+            <p><code>connectHost</code> rejects when the script is not in an iframe. You can skip the kit and draw your own DOM.</p>
+          </div>
+        </section>
+
+        <section id="host">
+          <div data-lang="uk">
+            <h1>API хоста</h1>
+            <p class="lead">Точні методи <code>connectHost</code>, ліміти й коди помилок.</p>
+          </div>
+          <div data-lang="en">
+            <h1>Host API</h1>
+            <p class="lead">The exact <code>connectHost</code> methods, limits, and error codes.</p>
+          </div>
+          <pre><code>import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();</code></pre>
+          <div data-lang="uk">
+            <p><code>connectHost</code> кидає <code>HOST_UNAVAILABLE</code>, коли немає <code>window</code> або скрипт не в iframe. <code>dispose()</code> відхиляє запити в польоті як <code>HOST_UNAVAILABLE</code>.</p>
+            <h2>Ready і пізніші пуші</h2>
+          </div>
+          <div data-lang="en">
+            <p><code>connectHost</code> throws <code>HOST_UNAVAILABLE</code> when there is no <code>window</code>, or when the script is not in an iframe. <code>dispose()</code> rejects in-flight calls as <code>HOST_UNAVAILABLE</code>.</p>
+            <h2>Ready and later pushes</h2>
+          </div>
+          <table>
+            <thead><tr><th>Field</th><th><span data-lang="uk">Що це</span><span data-lang="en">What it is</span></th></tr></thead>
+            <tbody>
+              <tr><td><code>theme.mode</code></td><td><code>light</code> / <code>dark</code></td></tr>
+              <tr><td><code>theme.tokens</code></td><td><span data-lang="uk">кольори, шрифти й радіуси хоста. Спершу <code>applyHostReady</code>.</span><span data-lang="en">host colors, fonts, and radii. Call <code>applyHostReady</code> first.</span></td></tr>
+              <tr><td><code>locale</code></td><td><span data-lang="uk">мовний тег хоста</span><span data-lang="en">host language tag</span></td></tr>
+              <tr><td><code>directory</code></td><td><span data-lang="uk">тека проєкту або</span><span data-lang="en">project directory or</span> <code>null</code></td></tr>
+              <tr><td><code>session</code></td><td><code>{ id, title }</code> / <code>null</code></td></tr>
+              <tr><td><code>surface</code></td><td><code>panel</code> / <code>dialog</code></td></tr>
+              <tr><td><code>connection</code></td><td><code>{ connected, account }</code></td></tr>
+              <tr><td><code>settings</code></td><td><span data-lang="uk">лише заявлені поля інтеграції</span><span data-lang="en">declared integration fields only</span></td></tr>
+            </tbody>
+          </table>
+          <p class="muted"><span data-lang="uk">Токени доступу не з'являються ні в ready, ні в результаті request. onDirectory / onSession / onSessionLifecycle / onConnection / onSettings повторюють останній ready.</span><span data-lang="en">Access tokens never appear in ready or a request result. onDirectory / onSession / onSessionLifecycle / onConnection / onSettings replay the last ready.</span></p>
+          <div data-lang="uk"><h2>Методи</h2></div>
+          <div data-lang="en"><h2>Methods</h2></div>
+          <table>
+            <tbody>
+              <tr><td><code>toast</code></td><td>info / success / error</td></tr>
+              <tr><td><code>openUrl</code></td><td><span data-lang="uk">відкрити URL у хості</span><span data-lang="en">open a URL in the host</span></td></tr>
+              <tr><td><code>openSurface</code></td><td><span data-lang="uk">перемкнути хром хоста</span><span data-lang="en">switch host chrome</span></td></tr>
+              <tr><td><code>writeClipboard</code></td><td>1–32000</td></tr>
+              <tr><td><code>compose</code></td><td><span data-lang="uk">пише в чат, не надсилає. Типово append.</span><span data-lang="en">writes the chat box, does not send. Default append.</span></td></tr>
+              <tr><td><code>attach</code></td><td><span data-lang="uk">чіп на композері</span><span data-lang="en">chip on the composer</span></td></tr>
+              <tr><td><code>startSession</code></td><td><span data-lang="uk">нова сесія + той самий знімок</span><span data-lang="en">new session plus the same snapshot</span></td></tr>
+              <tr><td><code>prompt</code></td><td><span data-lang="uk">написати або надіслати в поточну сесію</span><span data-lang="en">write or send on the current session</span></td></tr>
+              <tr><td><code>sessionLink</code></td><td><span data-lang="uk">знімок attach на поточну сесію</span><span data-lang="en">attach snapshot on the current session</span></td></tr>
+              <tr><td><code>onSessionLifecycle</code></td><td>started / completed / failure</td></tr>
+              <tr><td><code>close</code></td><td><span data-lang="uk">закрити вікно attach</span><span data-lang="en">dismiss the attach window</span></td></tr>
+              <tr><td><code>oauthStart</code> / <code>oauthDisconnect</code></td><td>OAuth / Linear</td></tr>
+              <tr><td><code>request</code></td><td><span data-lang="uk">лише заявлений apiOrigin</span><span data-lang="en">declared apiOrigin only</span></td></tr>
+            </tbody>
+          </table>
+          <pre><code>await host.attach({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.startSession({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  worktree: true,
+  text: "Optional first message",
+});
+
+await host.sessionLink({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.prompt({ text: "Fix the login", send: true });
+host.onSessionLifecycle((event) => {
+  document.body.dataset.phase = event.phase;
+});</code></pre>
+          <div data-lang="uk">
+            <p><code>id</code> — ваш ідентифікатор, не номер GitHub. <code>kind</code> — <code>issue</code> або <code>pull</code>. <code>worktree: true</code> просить хост спершу зробити worktree. Гість з git не розмовляє.</p>
+            <h2>request</h2>
+          </div>
+          <div data-lang="en">
+            <p><code>id</code> is your identifier, not a GitHub number. <code>kind</code> is <code>issue</code> or <code>pull</code>. <code>worktree: true</code> asks the host to make a worktree first. The guest does not talk to git.</p>
+            <h2>request</h2>
+          </div>
+          <pre><code>try {
+  await host.request({ method: "GET", path: "/api/v2/user" });
+} catch (error) {
+  if (error instanceof HostRequestError && error.code === "DISCONNECTED") {
+    await host.oauthStart();
+  }
+}</code></pre>
+          <p><span data-lang="uk"><code>path</code> починається з <code>/</code>, лишається на <code>apiOrigin</code>, без схеми. Тиша 20 секунд — <code>HOST_TIMEOUT</code>.</span><span data-lang="en"><code>path</code> starts with <code>/</code>, stays on <code>apiOrigin</code>, no scheme. Silence for 20 seconds is <code>HOST_TIMEOUT</code>.</span></p>
+          <div data-lang="uk"><h2>Коди помилок</h2></div>
+          <div data-lang="en"><h2>Error codes</h2></div>
+          <table>
+            <thead><tr><th>Code</th><th><span data-lang="uk">Коли</span><span data-lang="en">When</span></th></tr></thead>
+            <tbody>
+              <tr><td><code>HOST_UNAVAILABLE</code></td><td><span data-lang="uk">немає window, не iframe, або dispose</span><span data-lang="en">no window, not an iframe, or dispose</span></td></tr>
+              <tr><td><code>HOST_TIMEOUT</code></td><td>20s</td></tr>
+              <tr><td><code>HOST_REJECTED</code></td><td><span data-lang="uk">відмова хоста або невідомий код</span><span data-lang="en">host refused, or unknown code</span></td></tr>
+              <tr><td><code>DISCONNECTED</code></td><td><span data-lang="uk">немає токена / Linear</span><span data-lang="en">no token / Linear</span></td></tr>
+              <tr><td><code>BAD_PATH</code></td><td>apiOrigin</td></tr>
+              <tr><td><code>NO_INTEGRATION</code></td><td>manifest</td></tr>
+              <tr><td><code>NO_SESSION</code></td><td>prompt / sessionLink</td></tr>
+              <tr><td><code>SESSION_BUSY</code></td><td>prompt send</td></tr>
+            </tbody>
+          </table>
+          <div data-lang="uk">
+            <h2>Linear і заморозка</h2>
+            <p><code>host.provider: "linear"</code> бере першостороннє підключення Linear. <code>apiOrigin</code> лише <code>https://api.linear.app</code>. Другого провайдера хоста на <code>apiVersion</code> 1 немає.</p>
+            <p>Зарезервовано, діри ще немає: <code>issues.search</code> / <code>get</code>, публічний OAuth-брокер.</p>
+          </div>
+          <div data-lang="en">
+            <h2>Linear and the freeze</h2>
+            <p><code>host.provider: "linear"</code> reuses the first-party Linear connection. <code>apiOrigin</code> is <code>https://api.linear.app</code> only. Do not add a second host provider on <code>apiVersion</code> 1.</p>
+            <p>Reserved, no host hole yet: <code>issues.search</code> / <code>get</code>, a public OAuth broker.</p>
+          </div>
+        </section>
+
+        <section id="ui">
+          <div data-lang="uk">
+            <h1>UI-набір</h1>
+            <p class="lead">Імпортуйте <code>@openchamber/sdk/ui</code>, якщо панель має виглядати як трекери хоста. Набір малює DOM. З провайдером він не розмовляє.</p>
+            <p>Набір можна пропустити і малювати власний DOM. Спершу <code>applyHostReady</code>.</p>
+          </div>
+          <div data-lang="en">
+            <h1>UI kit</h1>
+            <p class="lead">Import <code>@openchamber/sdk/ui</code> when you want the panel to look like the host trackers. The kit paints DOM. It does not talk to the provider.</p>
+            <p>You can skip the kit and draw your own DOM. Call <code>applyHostReady</code> first.</p>
+          </div>
+          <pre><code>import { applyHostReady, mountIssuePage } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  mountIssuePage(document.querySelector("#root")!, {
+    items: tasks,
+    filters,
+    onSelect: (item) => {
+      void host.attach({
+        providerId: "acme-hello",
+        id: item.id,
+        title: item.title,
+        url: item.url ?? "",
+      });
+    },
+  });
+});</code></pre>
+          <table>
+            <tbody>
+              <tr><td><code>mountIssuePage</code></td><td><span data-lang="uk">список на рейці</span><span data-lang="en">rail list</span></td></tr>
+              <tr><td><code>mountIssueCard</code></td><td><span data-lang="uk">задача після кліку</span><span data-lang="en">issue after a row click</span></td></tr>
+              <tr><td><code>mountAttachIssues</code></td><td><span data-lang="uk">пікер меню +</span><span data-lang="en">+ menu picker</span></td></tr>
+              <tr><td><code>mountPullRequest</code></td><td>Overview / Checks / Comments</td></tr>
+              <tr><td><code>mountButton</code> / <code>mountTextField</code> / <code>mountEmpty</code></td><td><span data-lang="uk">спільний connect chrome</span><span data-lang="en">shared connect chrome</span></td></tr>
+            </tbody>
+          </table>
+          <div data-lang="uk">
+            <p><code>value</code> на фільтрі — початковий вибір. Далі компонент тримає вибір користувача при <code>update</code>. <code>start</code> росте ліворуч, <code>end</code> пакується праворуч і стає іконкою вужче 520px.</p>
+            <p>Хост не шукає і не зберігає гостьові фільтри.</p>
+          </div>
+          <div data-lang="en">
+            <p><code>value</code> on a filter is the starting choice. After that the component keeps the user's picks on <code>update</code>. <code>start</code> grows on the left. <code>end</code> packs right and becomes an icon under 520px.</p>
+            <p>The host does not search and does not persist guest filters.</p>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script>
+      const root = document.documentElement;
+      const buttons = [...document.querySelectorAll("[data-set-lang]")];
+      const setLang = (lang) => {
+        root.lang = lang;
+        buttons.forEach((button) => {
+          button.setAttribute("aria-pressed", String(button.dataset.setLang === lang));
+        });
+        try { localStorage.setItem("oc-sdk-docs-lang", lang); } catch {}
+      };
+      buttons.forEach((button) => {
+        button.addEventListener("click", () => setLang(button.dataset.setLang));
+      });
+      try {
+        const saved = localStorage.getItem("oc-sdk-docs-lang");
+        if (saved === "en" || saved === "uk") setLang(saved);
+      } catch {}
+    </script>
+  </body>
+</html>

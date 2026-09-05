@@ -1,0 +1,111 @@
+---
+title: Ein Gast-Panel bauen
+description: Ein HTML-Panel für die OpenChamber-Leiste, das über connectHost mit dem Host spricht.
+---
+
+# Ein Gast-Panel bauen
+
+Mit `@openchamber/sdk` stellst du ein Drittanbieter-Panel auf die OpenChamber-Leiste. Das Panel ist HTML in einem iframe. Es spricht mit OpenChamber über `connectHost()`.
+
+Das läuft im Web und auf dem Desktop. VS Code und Mobile markieren den Katalog als unsupported. Sie laden den iframe nicht.
+
+## Was du auslieferst
+
+Ein Ordner mit drei Dingen:
+
+- einer `package.json` mit einem `openchamber`-Block
+- `panel/index.html`
+- `panel/main.js`, ein klassisches IIFE. Der iframe lädt kein ESM.
+
+`oc-dev` kompiliert `panel/main.ts` weiterhin, wenn es `panel/main.js` ausliefert. Das paketierte OpenChamber und `openchamber serve` tun das nicht. Liefere das IIFE.
+
+```bash
+bun run --filter @openchamber/sdk bundle -- panel/main.ts panel/main.js
+```
+
+Zeig im HTML auf diese Datei.
+
+## Lokal installieren
+
+1. Starte OpenChamber im Web oder auf dem Desktop.
+2. Öffne **Settings → Extensions**.
+3. Füg einen Ordnerpfad, eine lokale `.zip` oder eine https-Git-/ZIP-URL hinzu.
+
+Auf der Leiste sollte dein Icon erscheinen. Klick drauf, und dein HTML lädt. Zwei Panels können nicht dieselbe `id` haben.
+
+
+Eine **Ordner**-Installation behält deinen Pfad in `extensions.json`. Uninstall entfernt nur den Katalogeintrag.
+
+Ein **Zip** (oder https-Zip / Git-URL) wird nach `guests/{id}` im OpenChamber-Datenverzeichnis kopiert. Der Host entpackt das Archiv, prüft das Manifest und läuft von der Kopie. Uninstall löscht die Kopie. Im Zip: `package.json`, `panel/index.html`, `panel/main.js` und deklarierte `icon.svg` / `agent/main.js`. Kein `node_modules`, kein TypeScript.
+
+## Manifest
+
+```json
+{
+  "name": "@acme/hello-panel",
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": {
+        "id": "acme-hello",
+        "name": "Hello",
+        "icon": "window",
+        "entry": "panel/index.html"
+      },
+      "attach": "dialog",
+      "integration": {
+        "name": "Acme",
+        "description": "Tasks from Acme",
+        "oauth": {
+          "authorizeUrl": "https://acme.example/oauth/authorize",
+          "tokenUrl": "https://acme.example/oauth/token",
+          "apiOrigin": "https://api.acme.example"
+        },
+        "settings": [{ "id": "list-id", "label": "List ID" }]
+      }
+    }
+  }
+}
+```
+
+`apiVersion` ist `1`. Jeder andere Wert ist eine Ablehnung.
+
+`engines.openchamber` ist optional. Nutze `1.22.0` oder `>=1.22.0`. Die Installation scheitert, wenn diese OpenChamber-Version zu alt ist.
+
+`contributes.agent` ist optional. Es benennt einen vom Host gestarteten lokalen Prozess für Docker-Sockets und Ähnliches. Das Panel ruft `agentRequest` auf; der Host besitzt den Prozess. Siehe `GUEST_AGENTS.md` im Paket.
+
+`id` ist kebab-case. `icon` ist ein Remixicon-Name im selben kebab-case wie auf der Leiste: `RiWindowLine` wird `window`. Oder liefere einen Paket-SVG-Pfad wie `icon.svg`. URLs und absolute Pfade fallen durch den Parse. `entry` bleibt im Paket. `../` und absolute Pfade fallen durch den Parse.
+
+`attach` ist optional.
+
+- `true` oder `"panel"` legt eine + Menüzeile an, die die Leiste öffnet
+- `"dialog"` öffnet ein Host-Fenster um denselben iframe
+- weglassen oder `false` und das Panel bleibt aus diesen Menüs draußen
+
+`ready.surface` ist `panel` oder `dialog`, damit du auf der Leiste eine Liste und im Fenster einen Picker zeichnen kannst.
+
+`integration` ist optional. Der Host zeichnet eine Karte unter **Settings → Integrations**. OAuth-Gäste fügen dort eine Client-ID ein. Token-Gäste fügen einen API-Token ein. `host: { "provider": "linear" }` nutzt die First-Party-Linear-Verbindung und fragt nie nach einer Client-ID. Der Gast sieht den Token nicht.
+
+Siehe [Host-API](/de/sdk/host/) für `request`, OAuth, Attach und Fehler.
+
+## Erste Zeilen im Panel
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+
+host.onReady((ctx) => {
+  document.body.dataset.theme = ctx.theme.mode;
+  document.body.dataset.surface = ctx.surface;
+});
+```
+
+`connectHost` lehnt ab, wenn das Skript nicht in einem iframe läuft.
+
+Importier das Zeichen-Kit aus `@openchamber/sdk/ui`, wenn du die Issue-Liste, die Karte oder den Attach-Picker willst. Du kannst das Kit weglassen und eigenes DOM zeichnen. Siehe [UI-Kit](/de/sdk/ui/).
+
+## Verwandt
+
+- [Host-API](/de/sdk/host/) — `connectHost`-Methoden, Limits und Fehlercodes
+- [UI-Kit](/de/sdk/ui/) — Liste, Karte, Attach-Picker und Pull-Fenster

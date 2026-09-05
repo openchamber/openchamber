@@ -83,7 +83,11 @@ export type SessionLifecycleEvent = {
   phase: SessionLifecyclePhase;
 };
 
-export type HostResultPayload = GuestRequestResult | StartSessionResult | PromptResult;
+export type HostResultPayload =
+  | GuestRequestResult
+  | StartSessionResult
+  | PromptResult
+  | AgentStatusResult;
 
 export const isStartSessionResult = (
   value: HostResultPayload | undefined,
@@ -166,9 +170,19 @@ export const HOST_REQUEST_ERROR_CODES = [
   'DISCONNECTED',
   'BAD_PATH',
   'NO_INTEGRATION',
+  'NO_AGENT',
+  'AGENT_FAILED',
   'NO_SESSION',
   'SESSION_BUSY',
 ] as const;
+
+export const AGENT_STATUS_VALUES = ['stopped', 'starting', 'ready', 'failed'] as const;
+
+export type AgentStatus = (typeof AGENT_STATUS_VALUES)[number];
+
+export type AgentStatusResult = {
+  status: AgentStatus;
+};
 
 export type HostRequestErrorCode = (typeof HOST_REQUEST_ERROR_CODES)[number];
 
@@ -304,10 +318,23 @@ const promptResultPayloadSchema = z.object({
   sent: z.enum(START_SESSION_SENT),
 });
 
+const agentStatusResultPayloadSchema = z.object({
+  status: z.enum(AGENT_STATUS_VALUES),
+});
+
+export const isAgentStatusResult = (
+  value: HostResultPayload | undefined,
+): value is AgentStatusResult => agentStatusResultPayloadSchema.safeParse(value).success;
+
+export const isGuestRequestResult = (
+  value: HostResultPayload | undefined,
+): value is GuestRequestResult => requestResultPayloadSchema.safeParse(value).success;
+
 const hostResultPayloadSchema = z.union([
   startSessionResultPayloadSchema,
   requestResultPayloadSchema,
   promptResultPayloadSchema,
+  agentStatusResultPayloadSchema,
 ]);
 
 const readyPayloadSchema = z.object({
@@ -527,6 +554,22 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
       body: z.string().max(GUEST_REQUEST_BODY_MAX).optional(),
     }),
   }),
+  z.object({
+    ...envelope,
+    type: z.literal('agent-request'),
+    id: z.string().min(1),
+    payload: z.object({
+      method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
+      path: z.string().trim().min(1).max(GUEST_REQUEST_PATH_MAX).refine(isGuestRequestPath),
+      query: z.record(z.string().min(1).max(128), z.string().max(2_000)).optional(),
+      body: z.string().max(GUEST_REQUEST_BODY_MAX).optional(),
+    }),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('agent-status'),
+    id: z.string().min(1),
+  }),
 ]);
 
 export type HostMessage = z.infer<typeof hostMessageSchema>;
@@ -548,6 +591,8 @@ export type GuestCloseMessage = Extract<GuestMessage, { type: 'close' }>;
 export type GuestOauthStartMessage = Extract<GuestMessage, { type: 'oauth-start' }>;
 export type GuestOauthDisconnectMessage = Extract<GuestMessage, { type: 'oauth-disconnect' }>;
 export type GuestRequestMessage = Extract<GuestMessage, { type: 'request' }>;
+export type GuestAgentRequestMessage = Extract<GuestMessage, { type: 'agent-request' }>;
+export type GuestAgentStatusMessage = Extract<GuestMessage, { type: 'agent-status' }>;
 export type HostReadyMessage = Extract<HostMessage, { type: 'ready' }>;
 export type HostDirectoryMessage = Extract<HostMessage, { type: 'directory' }>;
 export type HostSessionMessage = Extract<HostMessage, { type: 'session' }>;

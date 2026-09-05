@@ -42,6 +42,14 @@ const effects = (overrides: {
     | { ok: true; result: { status: number; body: string } }
     | { ok: false; code: 'HOST_REJECTED' | 'DISCONNECTED' | 'BAD_PATH' | 'NO_INTEGRATION'; message: string }
   >;
+  agentRequest?: (request: GuestRequest) => Promise<
+    | { ok: true; result: { status: number; body: string } }
+    | { ok: false; code: 'HOST_REJECTED' | 'NO_AGENT' | 'AGENT_FAILED' | 'BAD_PATH'; message: string }
+  >;
+  agentStatus?: () => Promise<
+    | { ok: true; result: { status: 'stopped' | 'starting' | 'ready' | 'failed' } }
+    | { ok: false; code: 'HOST_REJECTED' | 'NO_AGENT'; message: string }
+  >;
 } = {}) => ({
   toast: overrides.toast ?? (() => {}),
   openUrl: overrides.openUrl ?? (async () => true),
@@ -56,6 +64,8 @@ const effects = (overrides: {
   oauthStart: overrides.oauthStart ?? (async () => true),
   oauthDisconnect: overrides.oauthDisconnect ?? (async () => true),
   request: overrides.request ?? (async () => ({ ok: true, result: { status: 200, body: '{}' } })),
+  agentRequest: overrides.agentRequest ?? (async () => ({ ok: true, result: { status: 200, body: '{}' } })),
+  agentStatus: overrides.agentStatus ?? (async () => ({ ok: true, result: { status: 'ready' as const } })),
 });
 
 describe('answerGuestMessage', () => {
@@ -430,6 +440,68 @@ describe('answerGuestMessage', () => {
       ok: false,
       error: 'Not connected.',
       code: 'DISCONNECTED',
+    });
+  });
+
+  test('proxies agentRequest and agentStatus', async () => {
+    const agent = await answerGuestMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: 1,
+      type: 'agent-request',
+      id: 'oc-12',
+      payload: { method: 'GET', path: '/containers' },
+    }, effects({
+      agentRequest: async () => ({ ok: true, result: { status: 200, body: '[]' } }),
+    }));
+    expect(agent).toEqual({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: 1,
+      type: 'result',
+      id: 'oc-12',
+      ok: true,
+      payload: { status: 200, body: '[]' },
+    });
+
+    const status = await answerGuestMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: 1,
+      type: 'agent-status',
+      id: 'oc-13',
+    }, effects({
+      agentStatus: async () => ({ ok: true, result: { status: 'ready' } }),
+    }));
+    expect(status).toEqual({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: 1,
+      type: 'result',
+      id: 'oc-13',
+      ok: true,
+      payload: { status: 'ready' },
+    });
+  });
+
+  test('forwards NO_AGENT from agentRequest', async () => {
+    const reply = await answerGuestMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: 1,
+      type: 'agent-request',
+      id: 'oc-14',
+      payload: { method: 'GET', path: '/containers' },
+    }, effects({
+      agentRequest: async () => ({
+        ok: false,
+        code: 'NO_AGENT',
+        message: 'Allow this extension\'s local agent in Settings → Extensions.',
+      }),
+    }));
+    expect(reply).toEqual({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: 1,
+      type: 'result',
+      id: 'oc-14',
+      ok: false,
+      error: 'Allow this extension\'s local agent in Settings → Extensions.',
+      code: 'NO_AGENT',
     });
   });
 });

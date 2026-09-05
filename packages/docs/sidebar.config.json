@@ -666,6 +666,71 @@
       ]
     },
     {
+      "label": "Extensions",
+      "translations": {
+        "uk": "Розширення",
+        "zh-CN": "扩展",
+        "es": "Extensiones",
+        "pt-BR": "Extensões",
+        "ko": "확장",
+        "pl": "Rozszerzenia",
+        "fr": "Extensions",
+        "ja": "拡張機能",
+        "de": "Erweiterungen",
+        "tr": "Eklentiler"
+      },
+      "items": [
+        {
+          "label": "Build a panel",
+          "link": "/sdk/",
+          "translations": {
+            "uk": "Зібрати панель",
+            "zh-CN": "构建面板",
+            "es": "Crear un panel",
+            "pt-BR": "Criar um painel",
+            "ko": "패널 만들기",
+            "pl": "Zbuduj panel",
+            "fr": "Créer un panneau",
+            "ja": "パネルを作る",
+            "de": "Ein Panel bauen",
+            "tr": "Panel oluştur"
+          }
+        },
+        {
+          "label": "Host API",
+          "link": "/sdk/host/",
+          "translations": {
+            "uk": "API хоста",
+            "zh-CN": "宿主 API",
+            "es": "API del host",
+            "pt-BR": "API do host",
+            "ko": "호스트 API",
+            "pl": "API hosta",
+            "fr": "API host",
+            "ja": "ホスト API",
+            "de": "Host-API",
+            "tr": "Host API"
+          }
+        },
+        {
+          "label": "UI kit",
+          "link": "/sdk/ui/",
+          "translations": {
+            "uk": "UI-набір",
+            "zh-CN": "UI 套件",
+            "es": "Kit de UI",
+            "pt-BR": "Kit de UI",
+            "ko": "UI 키트",
+            "pl": "Zestaw UI",
+            "fr": "Kit UI",
+            "ja": "UI キット",
+            "de": "UI-Kit",
+            "tr": "UI kiti"
+          }
+        }
+      ]
+    },
+    {
       "label": "Desktop",
       "translations": {
         "uk": "Десктоп",

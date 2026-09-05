@@ -8,6 +8,7 @@ const GUEST_SOURCES = ['path', 'zip', 'git'];
 const storeSchema = z.object({
   paths: z.array(z.string().min(1).refine((entry) => !entry.includes('\0'))),
   sources: z.record(z.string(), z.enum(GUEST_SOURCES)).optional(),
+  agentGrants: z.record(z.string(), z.literal(true)).optional(),
 });
 
 const parseStore = (raw) => {
@@ -53,16 +54,20 @@ export const readExtensionStore = async (persistPath) => {
     if (!parsed) {
       throw new Error('Invalid extensions store');
     }
-    return { paths: parsed.paths, sources: parsed.sources ?? {} };
+    return {
+      paths: parsed.paths,
+      sources: parsed.sources ?? {},
+      agentGrants: parsed.agentGrants ?? {},
+    };
   } catch (error) {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-      return { paths: [], sources: {} };
+      return { paths: [], sources: {}, agentGrants: {} };
     }
     throw error;
   }
 };
 
-export const writeExtensionStore = async (persistPath, { paths, sources = {} }) => {
+export const writeExtensionStore = async (persistPath, { paths, sources = {}, agentGrants = {} }) => {
   const cleaned = {};
   for (const entry of paths) {
     const source = sources[entry];
@@ -70,7 +75,19 @@ export const writeExtensionStore = async (persistPath, { paths, sources = {} }) 
       cleaned[entry] = source;
     }
   }
-  const payload = Object.keys(cleaned).length > 0 ? { paths, sources: cleaned } : { paths };
+  const grants = {};
+  for (const [id, granted] of Object.entries(agentGrants)) {
+    if (granted) {
+      grants[id] = true;
+    }
+  }
+  const payload = { paths };
+  if (Object.keys(cleaned).length > 0) {
+    payload.sources = cleaned;
+  }
+  if (Object.keys(grants).length > 0) {
+    payload.agentGrants = grants;
+  }
   await fs.mkdir(path.dirname(persistPath), { recursive: true });
   const tmp = `${persistPath}.tmp-${process.pid}`;
   await fs.writeFile(tmp, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
@@ -90,5 +107,9 @@ export const writeExtensionPaths = async (paths, persistPath) => {
       sources[entry] = current.sources[entry];
     }
   }
-  await writeExtensionStore(persistPath, { paths, sources });
+  await writeExtensionStore(persistPath, {
+    paths,
+    sources,
+    agentGrants: current.agentGrants,
+  });
 };

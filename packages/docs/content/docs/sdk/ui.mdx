@@ -1,0 +1,65 @@
+---
+title: UI kit
+description: Draw an issue list, card, attach picker, or pull window with @openchamber/sdk/ui.
+---
+
+# UI kit
+
+Import `@openchamber/sdk/ui` when you want the panel to look like the host trackers. The kit paints DOM from host tokens. It does not talk to the provider. You still call `host.request` and `host.attach`.
+
+You can skip the kit and draw your own DOM.
+
+Call `applyHostReady` before any mount.
+
+```ts
+import { applyHostReady, mountIssuePage } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  mountIssuePage(document.querySelector("#root")!, {
+    items: tasks,
+    filters,
+    onSelect: (item) => {
+      void host.attach({
+        providerId: "acme-hello",
+        id: item.id,
+        title: item.title,
+        url: item.url ?? "",
+      });
+    },
+  });
+});
+```
+
+## What to mount
+
+| Call | Where it belongs |
+| --- | --- |
+| `mountIssuePage` | rail list. Compact filters, search as an icon, identifier plus title rows. |
+| `mountIssueCard` | issue after a row click. Back, status, metadata, description, comments, footer button. |
+| `mountAttachIssues` | + menu picker. Search stays open. On select, call `host.attach` and `host.close`. |
+| `mountPullRequest` | pull or merge-request window. Tabs are Overview, Checks, and Comments. |
+| `mountButton` | shared connect button |
+| `mountTextField` | shared connect field |
+| `mountEmpty` | shared empty state |
+
+Description and comments stay plain text. The kit lifts `![alt](https://…)` and `[label](https://…)` into media. Avatar URLs stay off the attach payload.
+
+`mountPullRequest` takes `mode: "view"` with a record, checks, and comments, or `mode: "create"` with a submit handler. Footer callbacks are attach, new session, new worktree, ready, and merge. The kit paints. Git stays on the host.
+
+## Filters and rows
+
+`value` on a filter is the starting choice. After that the component keeps the user's picks when you `update` with a new `items` list. Pass `value` again only when you remount.
+
+`slot` places a filter. `start` grows on the left and keeps its label. `end` packs to the right and turns into an icon when the panel is under 520px. Skip `slot` and the first filter is `start`, the rest are `end`.
+
+A row may carry `badge` and `subtitle`. Use those when the GitHub picker would show a repo or `head → base`.
+
+`hasMore` / `onMore` loads the next remote page. `toggle` is one checkbox. The guest puts the meaning in `attach.text`. `session` is a second checkbox, like Create in worktree. When it is checked, call `host.startSession({ worktree: true })` instead of `attach`. `action` is a page button.
+
+The host does not search and does not persist guest filters.
+
+## Related
+
+- [Build a guest panel](/sdk/) — folder, bundle, and manifest
+- [Host API](/sdk/host/) — `connectHost`, attach, and errors

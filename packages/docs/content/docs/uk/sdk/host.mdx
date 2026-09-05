@@ -1,0 +1,196 @@
+---
+title: API хоста
+description: Методи connectHost, правила request, ліміти й коди помилок для гостьових панелей.
+---
+
+# API хоста
+
+Ця сторінка — точні методи `connectHost`, ліміти й коди помилок. Тека, бандл і маніфест — у [Зібрати гостьову панель](/uk/sdk/).
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+```
+
+`connectHost` кидає `HOST_UNAVAILABLE`, коли немає `window` або скрипт не в iframe. Викличте `dispose()`, коли панель знімаєте. Запити в польоті тоді відхиляються як `HOST_UNAVAILABLE`.
+
+## Ready і пізніші пуші
+
+`onReady` спрацьовує з першим знімком хоста і знову, коли хост його оновлює.
+
+| Поле | Що це |
+| --- | --- |
+| `theme.mode` | `light` або `dark` |
+| `theme.tokens` | кольори, шрифти й радіуси хоста. Передайте це в `applyHostReady` перед монтуванням UI. |
+| `locale` | мовний тег хоста |
+| `directory` | поточна тека проєкту або `null` |
+| `session` | `{ id, title, busy }` або `null`. Якщо заголовка немає, лишається id сесії. `busy` — живий статус хоста. `model` і `agent` є, коли їх має запис сесії. |
+| `surface` | `panel` на рейці, `dialog` у вікні attach. Це не `openSurface`. |
+| `connection` | `{ connected, account }` |
+| `settings` | лише заявлені поля інтеграції |
+
+Токени доступу не з'являються ні в `ready`, ні в результаті `request`.
+
+`onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection` і `onSettings` повторюють останній ready, якщо підписалися пізно. Пізніші пуші хоста тримають ці слухачі актуальними так само, як `onReady`.
+
+## Методи
+
+| Виклик | Що робить |
+| --- | --- |
+| `toast({ kind, message })` | тост хоста. `kind` — `info`, `success` або `error`. |
+| `openUrl(url)` | відкрити URL у хості |
+| `openSurface(surfaceId)` | перемкнути хром хоста на цю поверхню |
+| `writeClipboard(text)` | копіювати в хості. 1–32000 символів. |
+| `compose({ text, mode? })` | написати в поле чату. Не надсилає. Типовий `mode` — `append`. Передайте `replace`, щоб перезаписати. Текст — 1–16000 після trim. |
+| `attach({ ... })` | поставити чіп на композер, ексклюзивно з GitHub і Linear |
+| `startSession({ ... })` | створити сесію і записати той самий знімок на неї. Повертає `{ sessionId, sent }`. |
+| `prompt({ text, send? })` | написати або надіслати в поточну сесію. Без `send`, або `false`, замінює чернетку. `send: true` надсилає. Повертає `{ sent }`. |
+| `sessionLink({ ... })` | записати знімок attach на поточну сесію. Сесію не створює. |
+| `close()` | закрити вікно attach. На рейці нічого не робить. |
+| `oauthStart()` | відкрити authorize URL провайдера або першосторонній Linear URL для Linear-гостя хоста |
+| `oauthDisconnect()` | скинути токени цього гостя або Linear-підключення для Linear-гостя хоста |
+| `request({ method, path, query?, body? })` | GET або запис лише на заявлений `apiOrigin` |
+| `agentRequest({ method, path, query?, body? })` | proxy to this guest's local agent on loopback. Same path rules as `request`, but the origin is the agent the host started. |
+| `agentStatus()` | `stopped`, `starting`, `ready`, or `failed` |
+
+## Attach і startSession
+
+Обидва беруть ті самі поля ідентифікатора:
+
+```ts
+await host.attach({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.attach({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  author: "ada",
+  branches: { head: "feature", base: "main" },
+  text: "Optional notes for the model",
+});
+
+await host.startSession({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  worktree: true,
+  text: "Optional first message",
+});
+```
+
+`id` — ваш ідентифікатор, не номер GitHub. `kind` — `issue` або `pull`, типово `issue`. `text` — необов'язковий контекст для моделі, 1–16000 після trim.
+
+`startSession` створює сесію в поточному проєкті. `worktree: true` просить хост спершу зробити worktree. Гість з git не розмовляє. Немає проєкту, впав worktree або впало створення сесії — це помилка хоста. `text` стає першим повідомленням, якщо вибрано модель. Результат — `{ sessionId, sent }`. `sent` — `sent`, `no-model`, `skipped` або `failed`. Після `no-model` і `failed` сесія вже є.
+
+## prompt, sessionLink і sessionLifecycle
+
+```ts
+await host.sessionLink({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.prompt({ text: "Fix the login" });
+await host.prompt({ text: "Fix the login", send: true });
+
+host.onSessionLifecycle((event) => {
+  document.body.dataset.phase = event.phase;
+});
+```
+
+`sessionLink` бере ті самі поля ідентифікатора, що й `attach`. Пише той знімок на поточну сесію. Сесію не створює. Немає проєкту або немає сесії — відмова.
+
+`prompt` пише або надсилає в поточну сесію. Без `send`, або `false`, замінює чернетку. `send: true` надсилає тим самим шляхом моделі, що й `startSession`. Немає сесії — `NO_SESSION`. Сесія зайнята при send — `SESSION_BUSY`. Compose під час busy все одно працює. Результат — `{ sent }`: `sent`, `no-model`, `skipped` або `failed`. Гість не вибирає модель чи агента.
+| `NO_AGENT` | no agent declared, not granted when required, or not running |
+| `AGENT_FAILED` | the agent crashed or never became ready |
+
+`onSessionLifecycle` — пуш хоста. Живий статус `busy` і `retry` — це `started`. `idle` — `completed`. Невідомий тип статусу — `failure`. Це не abort і не падіння. Пізній слухач отримує останню фазу, з `ready.session.busy`, якщо окремого пуша ще не було.
+
+Ліміти, які клієнт обрізає до того, як хост побачить повідомлення:
+
+| Поле | Макс |
+| --- | --- |
+| `id` | 128 |
+| `title` | 200 |
+| `url` | 2000 |
+| `text` | 16000 |
+| `author` | 80 |
+| кожна назва гілки | 200 |
+
+## request
+
+```ts
+const user = await host.request({ method: "GET", path: "/api/v2/user" });
+```
+
+`path` має починатися з `/`, лишатися на заявленому `apiOrigin` і не містити схеми. Хост додає `Authorization`. Token-гості шлють сирий токен. OAuth і Linear хоста шлють Bearer. Результат — `{ status, body }`. Гість парсить JSON.
+
+Linear-гість хоста може також зробити `GET /api/linear/issues/get` цим самим викликом. Хост відповідає з першостороннього маршруту Linear.
+
+Тиша 20 секунд — це `HOST_TIMEOUT`.
+
+```ts
+try {
+  await host.request({ method: "GET", path: "/api/v2/user" });
+} catch (error) {
+  if (error instanceof HostRequestError && error.code === "DISCONNECTED") {
+    await host.oauthStart();
+  }
+}
+```
+
+
+## agentRequest
+
+When the manifest declares `contributes.agent`, the panel talks to that process through the host. The iframe never opens the socket or receives the agent token.
+
+```ts
+const status = await host.agentStatus();
+const result = await host.agentRequest({ method: "GET", path: "/containers" });
+```
+
+`path` must start with `/` and never include a scheme. The host proxies only to that guest's loopback port. Non-empty `sockets` / `exec` need an **Allow local agent** grant in Settings → Extensions before the first request. Full contract: package file `GUEST_AGENTS.md`.
+
+## Коди помилок
+
+Невдалі виклики кидають `HostRequestError`. `code` — один із цих. Невідомий код з дроту стає `HOST_REJECTED`. Рядок `error` лишається.
+
+| Код | Коли |
+| --- | --- |
+| `HOST_UNAVAILABLE` | немає window, не iframe, або вже викликали `dispose()` |
+| `HOST_TIMEOUT` | хост мовчав 20 секунд |
+| `HOST_REJECTED` | хост відмовив, або код був відсутній чи невідомий |
+| `DISCONNECTED` | у гостя немає токена або Linear-підключення |
+| `BAD_PATH` | `path` вийшов за `apiOrigin` або був кривий |
+| `NO_INTEGRATION` | у маніфесті немає `integration` |
+| `NO_SESSION` | `prompt` або `sessionLink` без відкритої сесії |
+| `SESSION_BUSY` | `prompt({ send: true })` поки сесія зайнята |
+
+## Linear як провайдер хоста
+
+`host.provider: "linear"` бере першостороннє підключення Linear. `apiOrigin` лише `https://api.linear.app`. Це bootstrap, не зразок. Другого провайдера хоста на `apiVersion` 1 не додавайте.
+
+## Заморожено на apiVersion 1
+
+Ці імена зарезервовані. Діри в хості під них ще немає.
+
+- `issues.search` / `issues.get` на хості. Чіп — це `attach`. Список малює гість.
+- публічний OAuth-брокер
+- команди, шорткати, git remote, magic prompts
+
+## Пов'язане
+
+- [Зібрати гостьову панель](/uk/sdk/) — тека, ZIP, git URL, бандл і маніфест
+- [UI-набір](/uk/sdk/ui/) — список, картка, пікер attach і вікно pull

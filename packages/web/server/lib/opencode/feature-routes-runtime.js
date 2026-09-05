@@ -133,6 +133,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       writeSseEvent,
       emitSessionCreatedEvent,
       permissionAutoAcceptRuntime,
+      openchamberVersion,
     } = routeDependencies;
 
     registerSettingsUtilityRoutes(app, {
@@ -303,7 +304,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerSessionGoalRoutes(app);
     registerGitHubRoutes(app);
     registerLinearRoutes(app);
-    registerGuestRoutes(app, { openchamberDataDir });
+    registerGuestRoutes(app, { openchamberDataDir, openchamberVersion });
     registerGitRoutes(app);
     registerDevServerRoutes(app, { scanner: devServerScanner, getOwnPorts });
     registerMagicPromptRoutes(app, {

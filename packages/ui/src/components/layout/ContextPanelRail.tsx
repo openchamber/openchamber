@@ -18,6 +18,7 @@ import { CSS } from '@dnd-kit/utilities';
 
 import { Icon } from '@/components/icon/Icon';
 import { DiffViewIcon } from '@/components/icons/DiffIcon';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useDeviceInfo } from '@/lib/device';
@@ -110,9 +111,13 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
             )}
           >
             {surface.id === 'diff' ? (
-              <DiffViewIcon />
+              <DiffViewIcon className="h-[18px] w-[18px]" />
             ) : (
-              <Icon name={surface.icon} className="h-[18px] w-[18px]" />
+              <GuestIcon
+                icon={surface.icon}
+                iconSrc={surface.iconSrc}
+                className="h-[18px] w-[18px]"
+              />
             )}
             {showOrderNumber && orderNumber != null ? (
               <span

@@ -30,11 +30,18 @@ const requiredKeys = [
   'settings.extensions.toast.idTaken',
   'settings.extensions.toast.alreadyInstalled',
   'settings.extensions.toast.missingBuild',
+  'settings.extensions.toast.hostTooOld',
   'settings.extensions.toast.cloneFailed',
   'settings.extensions.toast.extractFailed',
   'settings.extensions.toast.failed',
   'settings.extensions.toast.removeFailed',
   'settings.extensions.toast.loadFailed',
+  'settings.extensions.agent.allow',
+  'settings.extensions.agent.allow.aria',
+  'settings.extensions.agent.allowed',
+  'settings.extensions.agent.permissions',
+  'settings.extensions.toast.agentGranted',
+  'settings.extensions.toast.agentGrantFailed',
 ] as const;
 
 const allowEnglishLoanword = new Set([

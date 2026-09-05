@@ -1,0 +1,65 @@
+---
+title: UI-Kit
+description: Issue-Liste, Karte, Attach-Picker oder Pull-Fenster mit @openchamber/sdk/ui zeichnen.
+---
+
+# UI-Kit
+
+Importier `@openchamber/sdk/ui`, wenn das Panel wie die Host-Tracker aussehen soll. Das Kit malt DOM aus Host-Tokens. Mit dem Provider spricht es nicht. `host.request` und `host.attach` bleiben bei dir.
+
+Du kannst das Kit weglassen und eigenes DOM zeichnen.
+
+Ruf `applyHostReady` vor jedem Mount auf.
+
+```ts
+import { applyHostReady, mountIssuePage } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  mountIssuePage(document.querySelector("#root")!, {
+    items: tasks,
+    filters,
+    onSelect: (item) => {
+      void host.attach({
+        providerId: "acme-hello",
+        id: item.id,
+        title: item.title,
+        url: item.url ?? "",
+      });
+    },
+  });
+});
+```
+
+## Was du mountest
+
+| Aufruf | Wohin es gehört |
+| --- | --- |
+| `mountIssuePage` | Liste auf der Leiste. Kompakte Filter, Suche als Icon, Zeilen aus Identifier plus Titel. |
+| `mountIssueCard` | Issue nach einem Zeilenklick. Zurück, Status, Metadaten, Beschreibung, Kommentare, Footer-Button. |
+| `mountAttachIssues` | Picker im + Menü. Die Suche bleibt offen. Nach der Auswahl `host.attach` und `host.close`. |
+| `mountPullRequest` | Pull- oder Merge-Request-Fenster. Tabs sind Overview, Checks und Comments. |
+| `mountButton` | gemeinsamer Connect-Button |
+| `mountTextField` | gemeinsames Connect-Feld |
+| `mountEmpty` | gemeinsamer Leerzustand |
+
+Beschreibung und Kommentare bleiben Plaintext. Das Kit hebt `![alt](https://…)` und `[label](https://…)` in Medien. Avatar-URLs bleiben vom Attach-Payload weg.
+
+`mountPullRequest` nimmt `mode: "view"` mit Record, Checks und Kommentaren, oder `mode: "create"` mit einem Submit-Handler. Footer-Callbacks sind Attach, neue Session, neues Worktree, Ready und Merge. Das Kit malt. Git bleibt auf dem Host.
+
+## Filter und Zeilen
+
+`value` an einem Filter ist die Startwahl. Danach behält die Komponente die Nutzerwahl, wenn du mit einer neuen `items`-Liste `update` aufrufst. Gib `value` nur beim Remount erneut mit.
+
+`slot` platziert einen Filter. `start` wächst links und behält das Label. `end` packt nach rechts und wird zum Icon, wenn das Panel unter 520px liegt. Ohne `slot` ist der erste Filter `start`, der Rest `end`.
+
+Eine Zeile darf `badge` und `subtitle` tragen. So zeigt der GitHub-Picker ein Repo oder `head → base`.
+
+`hasMore` / `onMore` lädt die nächste Remote-Seite. `toggle` ist eine Checkbox. Die Bedeutung legt der Gast in `attach.text`. `session` ist eine zweite Checkbox, wie Create in worktree. Ist sie an, ruf `host.startSession({ worktree: true })` statt `attach`. `action` ist ein Seitenbutton.
+
+Der Host sucht nicht und speichert keine Gast-Filter.
+
+## Verwandt
+
+- [Ein Gast-Panel bauen](/de/sdk/) — Ordner, Bundle und Manifest
+- [Host-API](/de/sdk/host/) — `connectHost`, Attach und Fehler

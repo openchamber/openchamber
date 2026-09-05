@@ -1,0 +1,110 @@
+---
+title: Зібрати гостьову панель
+description: Зробіть HTML-панель, яка стоїть на рейці OpenChamber і розмовляє через connectHost.
+---
+
+# Зібрати гостьову панель
+
+`@openchamber/sdk` ставить сторонню панель на рейку OpenChamber. Панель — це HTML в iframe. З OpenChamber вона розмовляє через `connectHost()`.
+
+Це працює у вебі та на десктопі. VS Code і мобільний застосунок позначають каталог як unsupported. Вони iframe не вантажать.
+
+## Що віддаєте
+
+Тека з трьома речами:
+
+- `package.json` з блоком `openchamber`
+- `panel/index.html`
+- `panel/main.js`, класичний IIFE. Iframe не вантажить ESM.
+
+`oc-dev` усе ще компілює `panel/main.ts`, коли віддає `panel/main.js`. Упакований OpenChamber і `openchamber serve` цього не роблять. Віддавайте IIFE.
+
+```bash
+bun run --filter @openchamber/sdk bundle -- panel/main.ts panel/main.js
+```
+
+У HTML вкажіть цей файл.
+
+## Як поставити, поки пишете
+
+1. Запустіть OpenChamber у вебі або на десктопі.
+2. Відкрийте **Settings → Extensions**.
+3. Додайте шлях до теки, локальний `.zip` або https git / zip URL.
+
+На рейці має з'явитися ваша іконка. Клік — і вантажиться ваш HTML. Дві панелі не можуть мати той самий `id`.
+
+**Тека** лишає ваш шлях у `extensions.json`. Uninstall знімає лише рядок у каталозі.
+
+**Zip** (або https zip / git URL) копіюється в data dir OpenChamber як `guests/{id}`. Хост розпаковує архів, перевіряє маніфест і далі працює з копії. Uninstall видаляє копію. Оригінальний zip лишається на місці. У архіві мають бути `package.json`, `panel/index.html`, `panel/main.js` і задекларовані `icon.svg` / `agent/main.js`. Без `node_modules` і TypeScript — упакований застосунок їх не скомпілює.
+
+## Маніфест
+
+```json
+{
+  "name": "@acme/hello-panel",
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": {
+        "id": "acme-hello",
+        "name": "Hello",
+        "icon": "window",
+        "entry": "panel/index.html"
+      },
+      "attach": "dialog",
+      "integration": {
+        "name": "Acme",
+        "description": "Tasks from Acme",
+        "oauth": {
+          "authorizeUrl": "https://acme.example/oauth/authorize",
+          "tokenUrl": "https://acme.example/oauth/token",
+          "apiOrigin": "https://api.acme.example"
+        },
+        "settings": [{ "id": "list-id", "label": "List ID" }]
+      }
+    }
+  }
+}
+```
+
+`apiVersion` — `1`. Будь-яке інше значення — відмова.
+
+`engines.openchamber` — опційно. Пишіть `1.22.0` або `>=1.22.0`. Інсталяція відхиляється, якщо ця збірка OpenChamber старіша.
+
+`contributes.agent` — опційно. Називає локальний процес, який піднімає хост (Docker-сокети тощо). Панель кличе `agentRequest`; процес належить хосту. Див. `GUEST_AGENTS.md` у пакеті.
+
+`id` — kebab-case. `icon` — ім'я Remixicon у тому ж kebab-case, що на рейці: `RiWindowLine` стає `window`. Або поклади шлях до SVG у пакеті на кшталт `icon.svg`. URL і абсолютні шляхи не пройдуть parse. `entry` лишається всередині пакета. `../` і абсолютні шляхи не пройдуть parse.
+
+`attach` необов'язковий.
+
+- `true` або `"panel"` додає рядок у меню +, який відкриває рейку
+- `"dialog"` відкриває вікно хоста навколо того самого iframe
+- пропустіть або поставте `false` — панель не з'явиться в тих меню
+
+`ready.surface` — `panel` або `dialog`, тож список можна малювати на рейці, а пікер — у вікні.
+
+`integration` необов'язковий. Хост малює картку в **Settings → Integrations**. OAuth-гості вставляють там client id. Token-гості вставляють API-токен. `host: { "provider": "linear" }` бере першостороннє підключення Linear і client id не просить. Гість токен не бачить.
+
+Дивіться [API хоста](/uk/sdk/host/) про `request`, OAuth, attach і помилки.
+
+## Перші рядки в панелі
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+
+host.onReady((ctx) => {
+  document.body.dataset.theme = ctx.theme.mode;
+  document.body.dataset.surface = ctx.surface;
+});
+```
+
+`connectHost` відхиляє виклик, якщо скрипт не в iframe.
+
+Імпортуйте набір з `@openchamber/sdk/ui`, якщо потрібні список задач, картка або пікер attach. Набір можна пропустити і малювати власний DOM. Дивіться [UI-набір](/uk/sdk/ui/).
+
+## Пов'язане
+
+- [API хоста](/uk/sdk/host/) — методи `connectHost`, ліміти й коди помилок
+- [UI-набір](/uk/sdk/ui/) — список, картка, пікер attach і вікно pull

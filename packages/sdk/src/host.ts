@@ -22,6 +22,9 @@ import {
   type SessionSnapshot,
   type StartSessionResult,
   type ToastRequest,
+  type AgentStatusResult,
+  isAgentStatusResult,
+  isGuestRequestResult,
   isPromptResult,
   isStartSessionResult,
 } from './protocol.ts';
@@ -63,6 +66,8 @@ export type HostClient = {
   oauthStart: () => Promise<void>;
   oauthDisconnect: () => Promise<void>;
   request: (request: GuestRequest) => Promise<GuestRequestResult>;
+  agentRequest: (request: GuestRequest) => Promise<GuestRequestResult>;
+  agentStatus: () => Promise<AgentStatusResult>;
   dispose: () => void;
 };
 
@@ -361,8 +366,31 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       id: nextId(ids),
       payload,
     }).then((result) => {
-      if (!result || isStartSessionResult(result) || isPromptResult(result)) {
+      if (!isGuestRequestResult(result)) {
         throw new HostRequestError('HOST_REJECTED', 'Host request result was empty.');
+      }
+      return result;
+    }),
+    agentRequest: (payload) => send({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: OPENCHAMBER_SDK_API_VERSION,
+      type: 'agent-request',
+      id: nextId(ids),
+      payload,
+    }).then((result) => {
+      if (!isGuestRequestResult(result)) {
+        throw new HostRequestError('HOST_REJECTED', 'Host agent request result was empty.');
+      }
+      return result;
+    }),
+    agentStatus: () => send({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: OPENCHAMBER_SDK_API_VERSION,
+      type: 'agent-status',
+      id: nextId(ids),
+    }).then((result) => {
+      if (!isAgentStatusResult(result)) {
+        throw new HostRequestError('HOST_REJECTED', 'Host did not return agent status.');
       }
       return result;
     }),

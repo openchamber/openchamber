@@ -1,0 +1,65 @@
+---
+title: UI 키트
+description: @openchamber/sdk/ui로 이슈 목록, 카드, attach 피커, pull 창을 그린다.
+---
+
+# UI 키트
+
+패널이 호스트 트래커처럼 보여야 하면 `@openchamber/sdk/ui`를 import하세요. 키트는 호스트 토큰으로 DOM을 그립니다. 공급자와는 말하지 않습니다. `host.request`와 `host.attach`는 직접 호출합니다.
+
+키트를 건너뛰고 자체 DOM을 그려도 됩니다.
+
+마운트 전에 `applyHostReady`를 호출하세요.
+
+```ts
+import { applyHostReady, mountIssuePage } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  mountIssuePage(document.querySelector("#root")!, {
+    items: tasks,
+    filters,
+    onSelect: (item) => {
+      void host.attach({
+        providerId: "acme-hello",
+        id: item.id,
+        title: item.title,
+        url: item.url ?? "",
+      });
+    },
+  });
+});
+```
+
+## 무엇을 마운트할지
+
+| 호출 | 자리 |
+| --- | --- |
+| `mountIssuePage` | 레일 목록. 작은 필터, 아이콘 검색, 식별자+제목 행. |
+| `mountIssueCard` | 행 클릭 뒤의 이슈. 뒤로, 상태, 메타, 설명, 댓글, 푸터 버튼. |
+| `mountAttachIssues` | + 메뉴 피커. 검색은 열린 채. 고르면 `host.attach`와 `host.close`. |
+| `mountPullRequest` | pull 또는 머지 리퀘스트 창. 탭은 Overview, Checks, Comments. |
+| `mountButton` | 공유 연결 버튼 |
+| `mountTextField` | 공유 연결 필드 |
+| `mountEmpty` | 공유 빈 상태 |
+
+설명과 댓글은 일반 텍스트로 남습니다. 키트는 `![alt](https://…)`와 `[label](https://…)`을 미디어로 올립니다. 아바타 URL은 attach 페이로드에 넣지 않습니다.
+
+`mountPullRequest`는 레코드, 체크, 댓글이 있는 `mode: "view"`나 submit 핸들러가 있는 `mode: "create"`를 받습니다. 푸터 콜백은 attach, 새 세션, 새 worktree, ready, merge입니다. 키트가 그립니다. git은 호스트에 남습니다.
+
+## 필터와 행
+
+필터의 `value`는 시작 선택입니다. 이후 새 `items`로 `update`해도 컴포넌트는 사용자 선택을 유지합니다. `value`를 다시 넘기는 것은 리마운트할 때뿐입니다.
+
+`slot`은 필터 위치입니다. `start`는 왼쪽으로 늘고 라벨을 남깁니다. `end`는 오른쪽에 붙고 패널이 520px 아래면 아이콘이 됩니다. `slot`을 빼면 첫 필터가 `start`, 나머지가 `end`입니다.
+
+행은 `badge`와 `subtitle`을 가질 수 있습니다. GitHub 피커가 저장소나 `head → base`를 보여주는 것과 같습니다.
+
+`hasMore` / `onMore`는 다음 원격 페이지를 로드합니다. `toggle`은 체크박스 하나입니다. 의미는 게스트가 `attach.text`에 넣습니다. `session`은 두 번째 체크박스이며 Create in worktree와 같습니다. 켜져 있으면 `attach` 대신 `host.startSession({ worktree: true })`를 호출하세요. `action`은 페이지 버튼입니다.
+
+호스트는 검색하지 않고 게스트 필터도 저장하지 않습니다.
+
+## 관련
+
+- [게스트 패널 만들기](/ko/sdk/) — 폴더, 번들, 매니페스트
+- [호스트 API](/ko/sdk/host/) — `connectHost`, attach, 오류

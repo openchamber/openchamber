@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
-import { OPENCHAMBER_SDK_API_VERSION } from './api-version.ts';
+import { OPENCHAMBER_SDK_MANIFEST_API_VERSIONS } from './api-version.ts';
+import type { OpenChamberManifestApiVersion } from './api-version.ts';
+import { OPENCHAMBER_ENGINE_PATTERN } from './host-version.ts';
 
 const PANEL_ID = /^[a-z][a-z0-9-]*$/;
 
@@ -111,10 +113,29 @@ export const resolveIntegrationApi = (
   return null;
 };
 
+export type AgentPermissions = {
+  sockets?: string[];
+  exec?: string[];
+};
+
+export type AgentContribution = {
+  entry: string;
+  runtime: 'host';
+  permissions?: AgentPermissions;
+};
+
+/** Catalog card for a local agent. Drops nothing secret; grant is host state. */
+export type PublicAgent = {
+  runtime: 'host';
+  permissions?: AgentPermissions;
+  granted: boolean;
+};
+
 export type OpenChamberContributes = {
   panel: PanelContribution;
   attach?: AttachContribution;
   integration?: IntegrationContribution;
+  agent?: AgentContribution;
 };
 
 export const resolveAttachMode = (attach: AttachContribution | undefined): AttachMode | null => {
@@ -123,8 +144,13 @@ export const resolveAttachMode = (attach: AttachContribution | undefined): Attac
   return null;
 };
 
+export type OpenChamberEngines = {
+  openchamber: string;
+};
+
 export type OpenChamberManifest = {
-  apiVersion: typeof OPENCHAMBER_SDK_API_VERSION;
+  apiVersion: OpenChamberManifestApiVersion;
+  engines?: OpenChamberEngines;
   contributes: OpenChamberContributes;
 };
 
@@ -132,13 +158,15 @@ export type ParseManifestErrorCode =
   | 'not-object'
   | 'missing-openchamber'
   | 'unsupported-api-version'
+  | 'invalid-engines'
   | 'missing-panel'
   | 'invalid-panel-id'
   | 'invalid-panel-name'
   | 'invalid-panel-icon'
   | 'invalid-panel-entry'
   | 'invalid-attach'
-  | 'invalid-integration';
+  | 'invalid-integration'
+  | 'invalid-agent';
 
 export type ParseManifestFailure = {
   ok: false;
@@ -163,6 +191,15 @@ const isSafeAssetPath = (value: string): boolean => {
   }
   return /^[a-zA-Z0-9][a-zA-Z0-9._/-]*$/.test(value);
 };
+
+/** Package SVG path for the rail, e.g. `icon.svg`. Remixicon names use `PANEL_ID`. */
+export const isGuestPackageSvgIcon = (value: string): boolean => (
+  isSafeAssetPath(value) && value.toLowerCase().endsWith('.svg')
+);
+
+const isPanelIcon = (value: string): boolean => (
+  PANEL_ID.test(value) || isGuestPackageSvgIcon(value)
+);
 
 const isHttpsUrl = (value: string): boolean => {
   try {
@@ -201,7 +238,7 @@ const ACCOUNT_NAME = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)*$/;
 const panelSchema = z.object({
   id: z.string().trim().regex(PANEL_ID),
   name: z.string().trim().min(1),
-  icon: z.string().trim().regex(PANEL_ID),
+  icon: z.string().trim().refine(isPanelIcon),
   entry: z.string().trim().refine(isSafeAssetPath),
 });
 
@@ -258,14 +295,53 @@ export const toPublicIntegration = (integration: IntegrationContribution): Publi
   return next;
 };
 
+const agentPermissionsSchema = z.object({
+  sockets: z.array(z.string().trim().min(1).max(512)).max(32).optional(),
+  exec: z.array(z.string().trim().min(1).max(128)).max(32).optional(),
+}).strict();
+
+const agentSchema = z.object({
+  entry: z.string().trim().refine(isSafeAssetPath),
+  runtime: z.literal('host'),
+  permissions: agentPermissionsSchema.optional(),
+});
+
 export const openChamberManifestSchema = z.object({
-  apiVersion: z.literal(OPENCHAMBER_SDK_API_VERSION),
+  apiVersion: z.literal(OPENCHAMBER_SDK_MANIFEST_API_VERSIONS[0]),
+  engines: z.object({
+    openchamber: z.string().trim().regex(OPENCHAMBER_ENGINE_PATTERN),
+  }).strict().optional(),
   contributes: z.object({
     panel: panelSchema,
     attach: z.union([z.boolean(), z.enum(['panel', 'dialog'])]).optional(),
     integration: integrationSchema.optional(),
+    agent: agentSchema.optional(),
   }),
 });
+
+export const toPublicAgent = (
+  agent: AgentContribution | undefined,
+  granted: boolean,
+): PublicAgent | undefined => {
+  if (!agent) {
+    return undefined;
+  }
+  const next: PublicAgent = {
+    runtime: agent.runtime,
+    granted,
+  };
+  if (agent.permissions) {
+    const permissions: AgentPermissions = {};
+    if (agent.permissions.sockets) {
+      permissions.sockets = [...agent.permissions.sockets];
+    }
+    if (agent.permissions.exec) {
+      permissions.exec = [...agent.permissions.exec];
+    }
+    next.permissions = permissions;
+  }
+  return next;
+};
 
 export const packageManifestSchema = z.object({
   openchamber: openChamberManifestSchema,
@@ -292,7 +368,13 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
   if (path.includes('apiVersion') || issue.code === 'invalid_value') {
     return fail(
       'unsupported-api-version',
-      `Unsupported apiVersion. This host speaks ${OPENCHAMBER_SDK_API_VERSION}.`,
+      `Unsupported apiVersion. This host accepts ${OPENCHAMBER_SDK_MANIFEST_API_VERSIONS.join(' and ')}.`,
+    );
+  }
+  if (path.includes('engines')) {
+    return fail(
+      'invalid-engines',
+      'engines.openchamber must be a version like 1.22.0 or >=1.22.0.',
     );
   }
   if (path.endsWith('id')) {
@@ -302,7 +384,10 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
     return fail('invalid-panel-name', 'panel.name must be a non-empty string.');
   }
   if (path.endsWith('icon')) {
-    return fail('invalid-panel-icon', 'panel.icon must be a Remixicon name.');
+    return fail(
+      'invalid-panel-icon',
+      'panel.icon must be a Remixicon name or a package .svg path.',
+    );
   }
   if (path.endsWith('entry')) {
     return fail('invalid-panel-entry', 'panel.entry must be a relative path inside the package.');
@@ -314,6 +399,12 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
     return fail(
       'invalid-integration',
       'contributes.integration needs a name, description, and oauth, token, or host.',
+    );
+  }
+  if (path.includes('agent')) {
+    return fail(
+      'invalid-agent',
+      'contributes.agent needs entry, runtime "host", and optional permissions.',
     );
   }
   if (path.includes('openchamber') && issue.code === 'invalid_type') {

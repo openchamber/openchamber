@@ -1,0 +1,196 @@
+---
+title: Host API
+description: Konuk paneller için connectHost metodları, request kuralları, limitler ve hata kodları.
+---
+
+# Host API
+
+Bu sayfa tam `connectHost` başvurusudur: metodlar, limitler ve hata kodları. Klasör, paket ve manifest [Konuk panel oluştur](/tr/sdk/)’da.
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+```
+
+`window` yoksa veya betik iframe’de değilse `connectHost` `HOST_UNAVAILABLE` fırlatır. Paneli indirirken `dispose()` çağırın. Uçuştaki çağrılar o zaman `HOST_UNAVAILABLE` ile reddedilir.
+
+## Ready ve sonraki push’lar
+
+`onReady` ilk host anlığıyla ateşlenir, host yenileyince bir kez daha.
+
+| Alan | Nedir |
+| --- | --- |
+| `theme.mode` | `light` veya `dark` |
+| `theme.tokens` | host renkleri, yazı tipleri ve yarıçaplar. UI mount etmeden önce `applyHostReady`’e verin. |
+| `locale` | host dil etiketi |
+| `directory` | geçerli proje klasörü, yoksa `null` |
+| `session` | `{ id, title }` veya `null`. Başlık yoksa oturum id kalır. |
+| `surface` | rayda `panel`, attach penceresinde `dialog`. Bu `openSurface` değildir. |
+| `connection` | `{ connected, account }` |
+| `settings` | yalnızca bildirilmiş entegrasyon alanları |
+
+Erişim token’ları `ready`’de veya bir `request` sonucunda asla durmaz.
+
+Geç abone olursanız `onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection` ve `onSettings` son ready’yi tekrar oynatır. Sonraki host push’ları bu dinleyicileri `onReady` gibi güncel tutar.
+
+## Metodlar
+
+| Çağrı | Ne yapar |
+| --- | --- |
+| `toast({ kind, message })` | host toast’u. `kind` `info`, `success` veya `error`. |
+| `openUrl(url)` | host’ta bir URL aç |
+| `openSurface(surfaceId)` | host kromunu o yüzeye geçir |
+| `writeClipboard(text)` | host’ta kopyala. 1–32000 karakter. |
+| `compose({ text, mode? })` | sohbet kutusuna yaz. Göndermez. Varsayılan `mode` `append`. Üstüne yazmak için `replace`. Metin trim sonrası 1–16000. |
+| `attach({ ... })` | besteciye bir yonga koy, GitHub ve Linear ile dışlayıcı |
+| `startSession({ ... })` | bir oturum oluştur ve aynı anlığı ona yaz. `{ sessionId, sent }` döner. |
+| `prompt({ text, send? })` | geçerli oturuma yaz veya gönder. `send` yoksa veya `false` ise taslağı değiştirir. `send: true` gönderir. `{ sent }` döner. |
+| `sessionLink({ ... })` | attach anlığını geçerli oturuma yaz. Oturum oluşturmaz. |
+| `close()` | attach penceresini kapat. Rayda no-op. |
+| `oauthStart()` | sağlayıcı authorize URL’sini aç, veya host Linear konuğu için birinci taraf Linear URL’sini |
+| `oauthDisconnect()` | bu konuğun token’larını at, veya host Linear konuğu için Linear bağlantısını |
+| `request({ method, path, query?, body? })` | yalnızca bildirilmiş `apiOrigin` üzerinde GET veya yazma |
+| `agentRequest({ method, path, query?, body? })` | proxy to this guest's local agent on loopback. Same path rules as `request`, but the origin is the agent the host started. |
+| `agentStatus()` | `stopped`, `starting`, `ready`, or `failed` |
+
+## Attach ve startSession
+
+İkisi de aynı kimlik alanlarını alır:
+
+```ts
+await host.attach({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.attach({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  author: "ada",
+  branches: { head: "feature", base: "main" },
+  text: "Optional notes for the model",
+});
+
+await host.startSession({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  worktree: true,
+  text: "Optional first message",
+});
+```
+
+`id` sizin tanımlayıcınızdır, bir GitHub numarası değil. `kind` `issue` veya `pull`’dur, varsayılan `issue`. `text` isteğe bağlı model bağlamıdır, trim sonrası 1–16000.
+
+`startSession` geçerli projede bir oturum oluşturur. `worktree: true` host’tan önce bir worktree yapmasını ister. Konuk git ile konuşmaz. Proje yok, worktree düştü veya oturum oluşturma düştüyse bu bir host hatasıdır. Model seçiliyse `text` ilk mesaj olur.
+
+## prompt, sessionLink ve sessionLifecycle
+
+```ts
+await host.sessionLink({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.prompt({ text: "Fix the login" });
+await host.prompt({ text: "Fix the login", send: true });
+
+host.onSessionLifecycle((event) => {
+  document.body.dataset.phase = event.phase;
+});
+```
+
+`sessionLink` `attach` ile aynı kimlik alanlarını alır. O anlığı geçerli oturuma yazar. Oturum oluşturmaz. Proje yoksa veya oturum yoksa red.
+
+`prompt` geçerli oturuma yazar veya gönderir. `send` yoksa veya `false` ise taslağı değiştirir. `send: true` `startSession` ile aynı model yolundan gönderir. Oturum yoksa `NO_SESSION`. Gönderirken meşgul oturum `SESSION_BUSY`. Compose, busy sırasında da çalışır. Sonuç `{ sent }`: `sent`, `no-model`, `skipped` veya `failed`. Konuk model veya agent seçmez.
+| `NO_AGENT` | no agent declared, not granted when required, or not running |
+| `AGENT_FAILED` | the agent crashed or never became ready |
+
+`onSessionLifecycle` bir host push’udur. Canlı durum `busy` ve `retry` `started` olur. `idle` `completed` olur. Bilinmeyen durum tipi `failure` olur. Bu abort değildir. Geç bir dinleyici son evreyi alır. Ayrı bir push gelmediyse `ready.session.busy`’den gelir.
+
+Host mesajı görmeden önce istemcinin kestiği limitler:
+
+| Alan | Maks |
+| --- | --- |
+| `id` | 128 |
+| `title` | 200 |
+| `url` | 2000 |
+| `text` | 16000 |
+| `author` | 80 |
+| her dal adı | 200 |
+
+## request
+
+```ts
+const user = await host.request({ method: "GET", path: "/api/v2/user" });
+```
+
+`path` `/` ile başlamalı, bildirilmiş `apiOrigin`’de kalmalı ve şema içermemelidir. Host `Authorization` ekler. Token konukları ham token gönderir. OAuth ve host Linear Bearer gönderir. Sonuç `{ status, body }`’dir. Konuk JSON parse eder.
+
+Bir host Linear konuğu aynı çağrıyla `GET /api/linear/issues/get` de yapabilir. Host birinci taraf Linear rotasından cevap verir.
+
+20 saniye sessizlik `HOST_TIMEOUT`’tur.
+
+```ts
+try {
+  await host.request({ method: "GET", path: "/api/v2/user" });
+} catch (error) {
+  if (error instanceof HostRequestError && error.code === "DISCONNECTED") {
+    await host.oauthStart();
+  }
+}
+```
+
+
+## agentRequest
+
+When the manifest declares `contributes.agent`, the panel talks to that process through the host. The iframe never opens the socket or receives the agent token.
+
+```ts
+const status = await host.agentStatus();
+const result = await host.agentRequest({ method: "GET", path: "/containers" });
+```
+
+`path` must start with `/` and never include a scheme. The host proxies only to that guest's loopback port. Non-empty `sockets` / `exec` need an **Allow local agent** grant in Settings → Extensions before the first request. Full contract: package file `GUEST_AGENTS.md`.
+
+## Hata kodları
+
+Başarısız çağrılar `HostRequestError` fırlatır. `code` bunlardan biridir. Bilinmeyen tel kodu `HOST_REJECTED` olur. `error` dizgesi kalır.
+
+| Kod | Ne zaman |
+| --- | --- |
+| `HOST_UNAVAILABLE` | window yok, iframe değil veya `dispose()` çalıştı |
+| `HOST_TIMEOUT` | host 20 saniye sustu |
+| `HOST_REJECTED` | host reddetti, veya kod yoktu ya da bilinmiyordu |
+| `DISCONNECTED` | konukta token veya Linear bağlantısı yok |
+| `BAD_PATH` | `path` `apiOrigin`’den çıktı veya bozuktu |
+| `NO_INTEGRATION` | manifest’te `integration` yok |
+| `NO_SESSION` | açık oturum yokken `prompt` veya `sessionLink` |
+| `SESSION_BUSY` | oturum meşgulken `prompt({ send: true })` |
+
+## Host sağlayıcı olarak Linear
+
+`host.provider: "linear"` birinci taraf Linear bağlantısını kullanır. `apiOrigin` yalnızca `https://api.linear.app`’tir. Bu bir bootstrap’tir, kalıp değil. `apiVersion` 1’e ikinci bir host sağlayıcı eklemeyin.
+
+## apiVersion 1’de dondurulmuş
+
+Bu adlar ayrılmıştır. Host’ta henüz delik yoktur.
+
+- host’ta `issues.search` / `issues.get`. Yonga `attach`’tir. Listeyi konuk çizer.
+- genel bir OAuth aracısı
+- komutlar, kısayollar, git remote’ları, magic prompts
+
+## İlgili
+
+- [Konuk panel oluştur](/tr/sdk/) — klasör, ZIP, git URL, paket ve manifest
+- [UI kiti](/tr/sdk/ui/) — liste, kart, attach seçici ve pull penceresi

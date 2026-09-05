@@ -13,8 +13,14 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./ui": "./src/ui/index.ts"
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./ui": {
+      "types": "./src/ui/index.ts",
+      "default": "./src/ui/index.ts"
+    }
   },
   "publishConfig": {
     "access": "public"
@@ -31,7 +37,8 @@
     "!src/**/*.test.ts",
     "scripts/bundle-guest.ts",
     "README.md",
-    "DOCUMENTATION.md"
+    "DOCUMENTATION.md",
+    "GUEST_AGENTS.md"
   ],
   "dependencies": {
     "zod": "^4.3.6"

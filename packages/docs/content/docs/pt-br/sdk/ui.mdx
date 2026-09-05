@@ -1,0 +1,65 @@
+---
+title: Kit de UI
+description: Desenhe uma lista, um cartão, um seletor de attach ou uma janela pull com @openchamber/sdk/ui.
+---
+
+# Kit de UI
+
+Importe `@openchamber/sdk/ui` se quiser que o painel pareça com os trackers do host. O kit pinta DOM com os tokens do host. Ele não fala com o provedor. Você ainda chama `host.request` e `host.attach`.
+
+Pode pular o kit e desenhar o próprio DOM.
+
+Chame `applyHostReady` antes de qualquer mount.
+
+```ts
+import { applyHostReady, mountIssuePage } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  mountIssuePage(document.querySelector("#root")!, {
+    items: tasks,
+    filters,
+    onSelect: (item) => {
+      void host.attach({
+        providerId: "acme-hello",
+        id: item.id,
+        title: item.title,
+        url: item.url ?? "",
+      });
+    },
+  });
+});
+```
+
+## O que montar
+
+| Chamada | Onde fica |
+| --- | --- |
+| `mountIssuePage` | lista na barra. Filtros compactos, busca como ícone, linhas de identificador mais título. |
+| `mountIssueCard` | issue depois de um clique na linha. Voltar, status, metadados, descrição, comentários, botão no rodapé. |
+| `mountAttachIssues` | seletor do menu +. A busca fica aberta. Ao escolher, chame `host.attach` e `host.close`. |
+| `mountPullRequest` | janela de pull ou merge request. Abas Overview, Checks e Comments. |
+| `mountButton` | botão de conexão compartilhado |
+| `mountTextField` | campo de conexão compartilhado |
+| `mountEmpty` | estado vazio compartilhado |
+
+Descrição e comentários ficam em texto puro. O kit levanta `![alt](https://…)` e `[label](https://…)` para mídia. URLs de avatar ficam fora do payload de attach.
+
+`mountPullRequest` aceita `mode: "view"` com um record, checks e comentários, ou `mode: "create"` com um handler de submit. Callbacks do rodapé são attach, nova sessão, novo worktree, ready e merge. O kit pinta. Git fica no host.
+
+## Filtros e linhas
+
+`value` num filtro é a escolha inicial. Depois o componente guarda as escolhas do usuário quando você faz `update` com uma lista `items` nova. Passe `value` de novo só no remount.
+
+`slot` posiciona um filtro. `start` cresce à esquerda e guarda o rótulo. `end` se empacota à direita e vira ícone quando o painel fica abaixo de 520px. Sem `slot`, o primeiro filtro é `start` e o resto `end`.
+
+Uma linha pode carregar `badge` e `subtitle`. Como o seletor do GitHub mostra um repo ou `head → base`.
+
+`hasMore` / `onMore` carrega a próxima página remota. `toggle` é um checkbox. O convidado põe o sentido em `attach.text`. `session` é um segundo checkbox, como Create in worktree. Se estiver marcado, chame `host.startSession({ worktree: true })` em vez de `attach`. `action` é um botão da página.
+
+O host não busca e não persiste filtros do convidado.
+
+## Relacionado
+
+- [Criar um painel convidado](/pt-br/sdk/) — pasta, bundle e manifesto
+- [API do host](/pt-br/sdk/host/) — `connectHost`, attach e erros

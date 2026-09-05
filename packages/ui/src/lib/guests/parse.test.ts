@@ -108,6 +108,40 @@ describe('parseGuestCatalogJson', () => {
     ]);
   });
 
+  test('keeps a public agent slice', () => {
+    expect(parseGuestCatalogJson(JSON.stringify({
+      guests: [{
+        id: 'docker',
+        name: 'Docker',
+        icon: 'box-3',
+        entry: 'panel/index.html',
+        agent: {
+          runtime: 'host',
+          granted: false,
+          permissions: {
+            sockets: ['/var/run/docker.sock'],
+            exec: ['docker'],
+          },
+        },
+      }],
+    }))).toEqual([
+      {
+        id: 'docker',
+        name: 'Docker',
+        icon: 'box-3',
+        entry: 'panel/index.html',
+        agent: {
+          runtime: 'host',
+          granted: false,
+          permissions: {
+            sockets: ['/var/run/docker.sock'],
+            exec: ['docker'],
+          },
+        },
+      },
+    ]);
+  });
+
   test('rejects junk instead of returning an empty catalog', () => {
     expect(parseGuestCatalogJson('null')).toBeNull();
     expect(parseGuestCatalogJson('{"guests":[{"id":"Nope"}]}')).toBeNull();

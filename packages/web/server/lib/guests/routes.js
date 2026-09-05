@@ -31,6 +31,12 @@ import {
   toPublicGuestAuth,
 } from './oauth.js';
 import { proxyGuestRequest } from './request.js';
+import {
+  GuestAgentError,
+  getAgentStatus,
+  proxyGuestAgentRequest,
+  setAgentGranted,
+} from './agent.js';
 
 const json16 = express.json({ limit: '16kb' });
 const json80 = express.json({ limit: '80kb' });
@@ -108,9 +114,10 @@ const declaredSettings = (guest) => {
   return new Map(fields.map((field) => [field.id, field]));
 };
 
-export const registerGuestRoutes = (app, { openchamberDataDir }) => {
+export const registerGuestRoutes = (app, { openchamberDataDir, openchamberVersion }) => {
   const persistPath = extensionsPersistPath(openchamberDataDir);
   const authPath = guestAuthPersistPath(openchamberDataDir);
+  const versionOptions = { openchamberVersion };
 
   const loadGuest = async (id) => {
     if (!isGuestPanelId(id)) {
@@ -138,10 +145,14 @@ export const registerGuestRoutes = (app, { openchamberDataDir }) => {
         const hasUrl = typeof req.body?.url === 'string';
         return res.status(400).json({ error: hasUrl ? 'invalid-url' : 'invalid-path' });
       }
-      const result = await installGuest(request, persistPath);
+      const result = await installGuest(request, persistPath, versionOptions);
       if (!result.ok) {
         const status = result.code === 'id-taken' || result.code === 'already-installed' ? 409 : 400;
-        return res.status(status).json({ error: result.code });
+        const body = { error: result.code };
+        if (result.code === 'host-too-old' && result.required) {
+          body.required = result.required;
+        }
+        return res.status(status).json(body);
       }
       res.status(201).json({ guest: result.guest });
     } catch (error) {
@@ -362,6 +373,68 @@ export const registerGuestRoutes = (app, { openchamberDataDir }) => {
       }
       console.error('Failed to proxy guest request:', error);
       res.status(500).json({ error: 'Failed to proxy guest request' });
+    }
+  });
+
+  app.post('/api/guests/:id/agent/request', json80, async (req, res) => {
+    try {
+      const guest = await loadGuest(req.params.id);
+      if (!guest?.agent) {
+        return res.status(404).json({ error: 'not-found' });
+      }
+      const parsed = requestBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: 'invalid-request' });
+      }
+      const result = await proxyGuestAgentRequest({
+        guestId: guest.id,
+        packageRoot: guest.packageRoot,
+        agent: guest.agent,
+        persistPath,
+        method: parsed.data.method,
+        path: parsed.data.path,
+        query: parsed.data.query,
+        body: parsed.data.body,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof GuestAgentError) {
+        const status = error.code === 'AGENT_FAILED' ? 502 : 400;
+        return res.status(status).json({ error: error.code, message: error.message });
+      }
+      console.error('Failed to proxy guest agent request:', error);
+      res.status(500).json({ error: 'Failed to proxy guest agent request' });
+    }
+  });
+
+  app.get('/api/guests/:id/agent/status', async (req, res) => {
+    try {
+      const guest = await loadGuest(req.params.id);
+      if (!guest?.agent) {
+        return res.status(404).json({ error: 'not-found' });
+      }
+      res.json({ status: getAgentStatus(guest.id) });
+    } catch (error) {
+      console.error('Failed to read guest agent status:', error);
+      res.status(500).json({ error: 'Failed to read guest agent status' });
+    }
+  });
+
+  app.put('/api/guests/:id/agent/grant', json16, async (req, res) => {
+    try {
+      const guest = await loadGuest(req.params.id);
+      if (!guest?.agent) {
+        return res.status(404).json({ error: 'not-found' });
+      }
+      await setAgentGranted(guest.id, persistPath, true);
+      const next = await loadGuest(guest.id);
+      if (!next) {
+        return res.status(404).json({ error: 'not-found' });
+      }
+      res.json({ guest: toPublicGuest(next) });
+    } catch (error) {
+      console.error('Failed to grant guest agent:', error);
+      res.status(500).json({ error: 'Failed to grant guest agent' });
     }
   });
 

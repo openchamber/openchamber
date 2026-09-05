@@ -1,0 +1,111 @@
+---
+title: 게스트 패널 만들기
+description: OpenChamber 레일에 올리는 HTML 패널을 만들고 connectHost로 호스트와 대화한다.
+---
+
+# 게스트 패널 만들기
+
+`@openchamber/sdk`는 서드파티 패널을 OpenChamber 레일에 올립니다. 패널은 iframe 안의 HTML입니다. OpenChamber와는 `connectHost()`로 대화합니다.
+
+웹과 데스크톱에서 동작합니다. VS Code와 모바일은 카탈로그를 unsupported로 표시합니다. iframe을 로드하지 않습니다.
+
+## 넘기는 것
+
+폴더에 세 가지가 필요합니다.
+
+- `openchamber` 블록이 있는 `package.json`
+- `panel/index.html`
+- `panel/main.js`. 고전 IIFE입니다. iframe은 ESM을 로드하지 못합니다.
+
+`oc-dev`는 `panel/main.js`를 줄 때 여전히 `panel/main.ts`를 컴파일합니다. 패키징된 OpenChamber와 `openchamber serve`는 하지 않습니다. IIFE를 넘기세요.
+
+```bash
+bun run --filter @openchamber/sdk bundle -- panel/main.ts panel/main.js
+```
+
+HTML은 그 파일을 가리킵니다.
+
+## 작업 중 설치
+
+1. 웹 또는 데스크톱에서 OpenChamber를 실행합니다.
+2. **Settings → Extensions**를 엽니다.
+3. 폴더 경로, 로컬 `.zip`, 또는 https git / zip URL을 추가합니다.
+
+레일에 아이콘이 보여야 합니다. 클릭하면 HTML이 로드됩니다. 두 패널은 같은 `id`를 쓸 수 없습니다.
+
+
+**폴더** 설치는 `extensions.json`에 경로를 남깁니다. Uninstall은 카탈로그 행만 제거합니다.
+
+**zip**(또는 https zip / git URL)은 OpenChamber data dir의 `guests/{id}`로 복사됩니다. 호스트가 압축을 풀고 매니페스트를 확인한 뒤 그 복사본으로 실행합니다. Uninstall은 복사본을 삭제합니다. zip에는 `package.json`, `panel/index.html`, `panel/main.js`와 선언한 `icon.svg` / `agent/main.js`만 넣으세요. `node_modules`와 TypeScript는 넣지 마세요.
+
+## 매니페스트
+
+```json
+{
+  "name": "@acme/hello-panel",
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": {
+        "id": "acme-hello",
+        "name": "Hello",
+        "icon": "window",
+        "entry": "panel/index.html"
+      },
+      "attach": "dialog",
+      "integration": {
+        "name": "Acme",
+        "description": "Tasks from Acme",
+        "oauth": {
+          "authorizeUrl": "https://acme.example/oauth/authorize",
+          "tokenUrl": "https://acme.example/oauth/token",
+          "apiOrigin": "https://api.acme.example"
+        },
+        "settings": [{ "id": "list-id", "label": "List ID" }]
+      }
+    }
+  }
+}
+```
+
+`apiVersion`은 `1`입니다. 다른 값은 거부입니다.
+
+`engines.openchamber`는 선택입니다. `1.22.0` 또는 `>=1.22.0`을 쓰세요. 이 OpenChamber가 더 오래되면 설치가 거절됩니다.
+
+`contributes.agent`는 선택입니다. Docker 소켓 등을 위해 호스트가 띄우는 로컬 프로세스를 지정합니다. 패널은 `agentRequest`를 호출하고, 프로세스는 호스트가 소유합니다. 패키지의 `GUEST_AGENTS.md`를 보세요.
+
+`id`는 kebab-case입니다. `icon`은 레일과 같은 kebab-case Remixicon 이름입니다. `RiWindowLine`은 `window`가 됩니다. 또는 `icon.svg` 같은 패키지 SVG 경로를 넣습니다. URL과 절대 경로는 parse에 실패합니다. `entry`는 패키지 안에 둡니다. `../`와 절대 경로는 parse에 실패합니다.
+
+`attach`는 선택입니다.
+
+- `true` 또는 `"panel"`은 레일을 여는 + 메뉴 행을 넣습니다
+- `"dialog"`는 같은 iframe을 호스트 창으로 엽니다
+- 생략하거나 `false`로 두면 그 메뉴에 나오지 않습니다
+
+`ready.surface`는 `panel` 또는 `dialog`입니다. 레일에는 목록, 창에는 피커를 그릴 수 있습니다.
+
+`integration`은 선택입니다. 호스트는 **Settings → Integrations**에 카드를 그립니다. OAuth 게스트는 거기에 client id를 붙입니다. 토큰 게스트는 API 토큰을 붙입니다. `host: { "provider": "linear" }`는 퍼스트파티 Linear 연결을 쓰고 client id를 묻지 않습니다. 게스트는 토큰을 보지 않습니다.
+
+`request`, OAuth, attach, 오류는 [호스트 API](/ko/sdk/host/)를 보세요.
+
+## 패널의 첫 줄
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+
+host.onReady((ctx) => {
+  document.body.dataset.theme = ctx.theme.mode;
+  document.body.dataset.surface = ctx.surface;
+});
+```
+
+스크립트가 iframe 밖이면 `connectHost`는 거부합니다.
+
+목록, 카드, attach 피커가 필요하면 `@openchamber/sdk/ui`를 가져오세요. 키트를 건너뛰고 자체 DOM을 그려도 됩니다. [UI 키트](/ko/sdk/ui/)를 보세요.
+
+## 관련
+
+- [호스트 API](/ko/sdk/host/) — `connectHost` 메서드, 한도, 오류 코드
+- [UI 키트](/ko/sdk/ui/) — 목록, 카드, attach 피커, pull 창

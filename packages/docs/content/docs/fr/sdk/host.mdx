@@ -1,0 +1,196 @@
+---
+title: API host
+description: Méthodes connectHost, règles de request, limites et codes d’erreur pour les panneaux invités.
+---
+
+# API host
+
+Cette page donne les méthodes exactes de `connectHost`, les limites et les codes d’erreur. Dossier, bundle et manifeste sont dans [Créer un panneau invité](/fr/sdk/).
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+```
+
+`connectHost` lève `HOST_UNAVAILABLE` s’il n’y a pas de `window`, ou si le script n’est pas dans un iframe. Appelle `dispose()` quand tu démontes le panneau. Les appels en vol sont alors rejetés en `HOST_UNAVAILABLE`.
+
+## Ready et poussées suivantes
+
+`onReady` part avec le premier snapshot du host, puis encore quand le host le rafraîchit.
+
+| Champ | Ce que c’est |
+| --- | --- |
+| `theme.mode` | `light` ou `dark` |
+| `theme.tokens` | couleurs, polices et rayons du host. Passe-les à `applyHostReady` avant de monter l’UI. |
+| `locale` | tag de langue du host |
+| `directory` | dossier du projet courant, ou `null` |
+| `session` | `{ id, title }` ou `null`. Sans titre, on garde l’id de session. |
+| `surface` | `panel` sur la barre, `dialog` dans la fenêtre attach. Ce n’est pas `openSurface`. |
+| `connection` | `{ connected, account }` |
+| `settings` | uniquement les champs d’intégration déclarés |
+
+Les jetons d’accès n’apparaissent jamais dans `ready` ni dans un résultat `request`.
+
+`onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection` et `onSettings` rejouent le dernier ready si tu t’abonnes tard. Les poussées suivantes du host tiennent ces écouteurs à jour, comme `onReady`.
+
+## Méthodes
+
+| Appel | Ce qu’il fait |
+| --- | --- |
+| `toast({ kind, message })` | toast du host. `kind` vaut `info`, `success` ou `error`. |
+| `openUrl(url)` | ouvrir une URL dans le host |
+| `openSurface(surfaceId)` | basculer le chrome du host sur cette surface |
+| `writeClipboard(text)` | copier dans le host. 1–32000 caractères. |
+| `compose({ text, mode? })` | écrire dans la zone de chat. N’envoie pas. `mode` par défaut : `append`. Passe `replace` pour écraser. Texte 1–16000 après trim. |
+| `attach({ ... })` | poser une puce sur le composeur, exclusive avec GitHub et Linear |
+| `startSession({ ... })` | créer une session et y écrire le même snapshot. Renvoie `{ sessionId, sent }`. |
+| `prompt({ text, send? })` | écrire ou envoyer sur la session courante. Sans `send`, ou `false`, remplace le brouillon. `send: true` envoie. Renvoie `{ sent }`. |
+| `sessionLink({ ... })` | écrire le snapshot attach sur la session courante. Ne crée pas de session. |
+| `close()` | fermer la fenêtre attach. No-op sur la barre. |
+| `oauthStart()` | ouvrir l’URL d’autorisation du fournisseur, ou l’URL Linear first-party pour un invité Linear host |
+| `oauthDisconnect()` | jeter les jetons de cet invité, ou la connexion Linear pour un invité Linear host |
+| `request({ method, path, query?, body? })` | GET ou écriture uniquement sur l’`apiOrigin` déclaré |
+| `agentRequest({ method, path, query?, body? })` | proxy to this guest's local agent on loopback. Same path rules as `request`, but the origin is the agent the host started. |
+| `agentStatus()` | `stopped`, `starting`, `ready`, or `failed` |
+
+## Attach et startSession
+
+Les deux prennent les mêmes champs d’identité :
+
+```ts
+await host.attach({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.attach({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  author: "ada",
+  branches: { head: "feature", base: "main" },
+  text: "Optional notes for the model",
+});
+
+await host.startSession({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  worktree: true,
+  text: "Optional first message",
+});
+```
+
+`id` est ton identifiant, pas un numéro GitHub. `kind` vaut `issue` ou `pull`, défaut `issue`. `text` est un contexte modèle optionnel, 1–16000 après trim.
+
+`startSession` crée une session dans le projet courant. `worktree: true` demande au host de faire d’abord un worktree. L’invité ne parle pas à git. Pas de projet, worktree raté ou session ratée : erreur host. `text` devient le premier message si un modèle est choisi.
+
+## prompt, sessionLink et sessionLifecycle
+
+```ts
+await host.sessionLink({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.prompt({ text: "Fix the login" });
+await host.prompt({ text: "Fix the login", send: true });
+
+host.onSessionLifecycle((event) => {
+  document.body.dataset.phase = event.phase;
+});
+```
+
+`sessionLink` prend les mêmes champs d’identifiant que `attach`. Il écrit ce snapshot sur la session courante. Il n’en crée pas. Pas de projet ou pas de session : refus.
+
+`prompt` écrit ou envoie sur la session courante. Sans `send`, ou `false`, il remplace le brouillon. `send: true` envoie par le même chemin modèle que `startSession`. Pas de session : `NO_SESSION`. Session occupée à l’envoi : `SESSION_BUSY`. Compose marche encore pendant busy. Le résultat est `{ sent }` : `sent`, `no-model`, `skipped` ou `failed`. L’invité ne choisit ni modèle ni agent.
+| `NO_AGENT` | no agent declared, not granted when required, or not running |
+| `AGENT_FAILED` | the agent crashed or never became ready |
+
+`onSessionLifecycle` est une poussée host. Le statut live `busy` et `retry` valent `started`. `idle` vaut `completed`. Un type de statut inconnu vaut `failure`. Ce n’est pas un abort. Un écouteur tardif reçoit la dernière phase, depuis `ready.session.busy` si aucune poussée dédiée n’est encore arrivée.
+
+Limites que le client coupe avant que le host voie le message :
+
+| Champ | Max |
+| --- | --- |
+| `id` | 128 |
+| `title` | 200 |
+| `url` | 2000 |
+| `text` | 16000 |
+| `author` | 80 |
+| chaque nom de branche | 200 |
+
+## request
+
+```ts
+const user = await host.request({ method: "GET", path: "/api/v2/user" });
+```
+
+`path` doit commencer par `/`, rester sur l’`apiOrigin` déclaré, et ne jamais inclure de schéma. Le host ajoute `Authorization`. Les invités token envoient le jeton brut. OAuth et Linear host envoient Bearer. Le résultat est `{ status, body }`. L’invité parse le JSON.
+
+Un invité Linear host peut aussi faire `GET /api/linear/issues/get` via le même appel. Le host répond depuis la route Linear first-party.
+
+20 secondes de silence donnent `HOST_TIMEOUT`.
+
+```ts
+try {
+  await host.request({ method: "GET", path: "/api/v2/user" });
+} catch (error) {
+  if (error instanceof HostRequestError && error.code === "DISCONNECTED") {
+    await host.oauthStart();
+  }
+}
+```
+
+
+## agentRequest
+
+When the manifest declares `contributes.agent`, the panel talks to that process through the host. The iframe never opens the socket or receives the agent token.
+
+```ts
+const status = await host.agentStatus();
+const result = await host.agentRequest({ method: "GET", path: "/containers" });
+```
+
+`path` must start with `/` and never include a scheme. The host proxies only to that guest's loopback port. Non-empty `sockets` / `exec` need an **Allow local agent** grant in Settings → Extensions before the first request. Full contract: package file `GUEST_AGENTS.md`.
+
+## Codes d’erreur
+
+Les appels ratés lèvent `HostRequestError`. `code` est l’un de ceux-ci. Un code fil inconnu devient `HOST_REJECTED`. La chaîne `error` reste.
+
+| Code | Quand |
+| --- | --- |
+| `HOST_UNAVAILABLE` | pas de window, pas d’iframe, ou `dispose()` déjà appelé |
+| `HOST_TIMEOUT` | le host s’est tu pendant 20 secondes |
+| `HOST_REJECTED` | le host a refusé, ou le code manquait ou était inconnu |
+| `DISCONNECTED` | l’invité n’a ni jeton ni connexion Linear |
+| `BAD_PATH` | `path` a quitté `apiOrigin` ou était mal formé |
+| `NO_INTEGRATION` | le manifeste n’a pas d’`integration` |
+| `NO_SESSION` | `prompt` ou `sessionLink` sans session ouverte |
+| `SESSION_BUSY` | `prompt({ send: true })` pendant que la session était occupée |
+
+## Linear comme fournisseur host
+
+`host.provider: "linear"` réutilise la connexion Linear first-party. `apiOrigin` est uniquement `https://api.linear.app`. C’est un bootstrap, pas un modèle. N’ajoute pas un second fournisseur host sur `apiVersion` 1.
+
+## Gelé sur apiVersion 1
+
+Ces noms sont réservés. Il n’y a pas encore de trou host pour eux.
+
+- `issues.search` / `issues.get` sur le host. La puce est `attach`. L’invité dessine la liste.
+- un courtier OAuth public
+- commandes, raccourcis, remotes git, magic prompts
+
+## Voir aussi
+
+- [Créer un panneau invité](/fr/sdk/) — dossier, ZIP, URL git, bundle et manifeste
+- [Kit UI](/fr/sdk/ui/) — liste, carte, sélecteur attach et fenêtre pull

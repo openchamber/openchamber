@@ -26,6 +26,8 @@ export type ContextSurfaceDescriptor = {
   /** The context panel tab mode this surface activates. 1:1 in the current model. */
   mode: ContextPanelMode;
   icon: IconName;
+  /** Authenticated package SVG for a guest rail mark. Prefer over `icon` when set. */
+  iconSrc?: string;
   /** Guest-provided name. When set, the rail prefers this over `labelKey`. */
   label?: string;
   labelKey: I18nKey;

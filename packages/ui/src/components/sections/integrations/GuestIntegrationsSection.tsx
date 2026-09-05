@@ -1,6 +1,7 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { SettingsSection, SettingsStackedField } from '@/components/sections/shared/SettingsSection';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
@@ -25,7 +26,8 @@ import { useGuestOauthStore } from '@/lib/guests/oauth-store';
 import { useGuestsStore } from '@/lib/guests/store';
 import type { InstalledGuest } from '@/lib/guests/types';
 import { reportSettingsSaveState } from '@/lib/persistence';
-import { resolveGuestIconName } from '@/lib/guests/icon';
+import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
+import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { openExternalUrl } from '@/lib/url';
 import { cn } from '@/lib/utils';
 
@@ -38,6 +40,10 @@ const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ guest }) =>
   const integration = guest.integration;
   const status = useGuestOauthStore((state) => state.byId[guest.id]);
   const setStatus = useGuestOauthStore((state) => state.setStatus);
+  const iconSrc = React.useMemo(
+    () => guestPackageIconSrc(guest.id, guest.icon, getRuntimeUrlResolver().authenticatedAsset),
+    [guest.id, guest.icon],
+  );
   const refresh = useGuestOauthStore((state) => state.refresh);
   const [open, setOpen] = React.useState(false);
   const [isBusy, setIsBusy] = React.useState(false);
@@ -270,7 +276,11 @@ const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ guest }) =>
           className="flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left hover:bg-[var(--interactive-hover)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--interactive-focus-ring)]"
         >
           <div className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-[var(--surface-muted)]">
-            <Icon name={resolveGuestIconName(guest.icon)} className="size-5 text-foreground" />
+            <GuestIcon
+              icon={resolveGuestIconName(guest.icon)}
+              iconSrc={iconSrc}
+              className="size-5 text-foreground"
+            />
           </div>
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold text-foreground">{name}</div>

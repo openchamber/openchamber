@@ -1,0 +1,111 @@
+---
+title: Criar um painel convidado
+description: Um painel HTML na barra do OpenChamber que fala com o host pelo connectHost.
+---
+
+# Criar um painel convidado
+
+`@openchamber/sdk` coloca um painel de terceiros na barra do OpenChamber. O painel é HTML num iframe. Ele fala com o OpenChamber pelo `connectHost()`.
+
+Isso roda na web e no desktop. VS Code e mobile marcam o catálogo como unsupported. Eles não carregam o iframe.
+
+## O que você entrega
+
+Uma pasta com três coisas:
+
+- um `package.json` com um bloco `openchamber`
+- `panel/index.html`
+- `panel/main.js`, um IIFE clássico. O iframe não carrega ESM.
+
+O `oc-dev` ainda compila `panel/main.ts` quando serve `panel/main.js`. O OpenChamber empacotado e o `openchamber serve` não fazem isso. Entregue o IIFE.
+
+```bash
+bun run --filter @openchamber/sdk bundle -- panel/main.ts panel/main.js
+```
+
+Aponte o HTML para esse arquivo.
+
+## Instale enquanto trabalha
+
+1. Abra o OpenChamber na web ou no desktop.
+2. Abra **Settings → Extensions**.
+3. Adicione um caminho de pasta, um `.zip` local ou uma URL git / zip https.
+
+A barra deve mostrar o seu ícone. Clique e o HTML carrega. Dois painéis não podem ter o mesmo `id`.
+
+
+Uma instalação por **pasta** guarda o caminho em `extensions.json`. Uninstall só remove a linha do catálogo.
+
+Um **zip** (ou zip https / URL git) é copiado para `guests/{id}` no data dir do OpenChamber. O host descompacta, valida o manifesto e roda a partir dessa cópia. Uninstall apaga a cópia. Inclua `package.json`, `panel/index.html`, `panel/main.js` e `icon.svg` / `agent/main.js` declarados. Sem `node_modules` nem TypeScript.
+
+## Manifesto
+
+```json
+{
+  "name": "@acme/hello-panel",
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": {
+        "id": "acme-hello",
+        "name": "Hello",
+        "icon": "window",
+        "entry": "panel/index.html"
+      },
+      "attach": "dialog",
+      "integration": {
+        "name": "Acme",
+        "description": "Tasks from Acme",
+        "oauth": {
+          "authorizeUrl": "https://acme.example/oauth/authorize",
+          "tokenUrl": "https://acme.example/oauth/token",
+          "apiOrigin": "https://api.acme.example"
+        },
+        "settings": [{ "id": "list-id", "label": "List ID" }]
+      }
+    }
+  }
+}
+```
+
+`apiVersion` é `1`. Qualquer outro valor é recusa.
+
+`engines.openchamber` é opcional. Use `1.22.0` ou `>=1.22.0`. A instalação é recusada quando esta versão do OpenChamber é mais antiga.
+
+`contributes.agent` é opcional. Nomeia um processo local iniciado pelo host para sockets Docker e afins. O painel chama `agentRequest`; o host possui o processo. Veja `GUEST_AGENTS.md` no pacote.
+
+`id` é kebab-case. `icon` é um nome Remixicon no mesmo kebab-case da barra: `RiWindowLine` vira `window`. Ou envie um caminho SVG do pacote como `icon.svg`. URLs e caminhos absolutos falham no parse. `entry` fica dentro do pacote. `../` e caminhos absolutos falham no parse.
+
+`attach` é opcional.
+
+- `true` ou `"panel"` adiciona uma linha no menu + que abre a barra
+- `"dialog"` abre uma janela do host em volta do mesmo iframe
+- omita ou ponha `false` e o painel fica fora desses menus
+
+`ready.surface` é `panel` ou `dialog`, para desenhar uma lista na barra e um seletor na janela.
+
+`integration` é opcional. O host desenha um cartão em **Settings → Integrations**. Convidados OAuth colam um client id ali. Convidados token colam um token de API. `host: { "provider": "linear" }` reusa a conexão Linear de primeira parte e nunca pede client id. O convidado não vê o token.
+
+Veja [API do host](/pt-br/sdk/host/) para `request`, OAuth, attach e erros.
+
+## Primeiras linhas no painel
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+
+host.onReady((ctx) => {
+  document.body.dataset.theme = ctx.theme.mode;
+  document.body.dataset.surface = ctx.surface;
+});
+```
+
+`connectHost` recusa se o script não está num iframe.
+
+Importe o kit de `@openchamber/sdk/ui` se quiser a lista, o cartão ou o seletor de attach. Pode pular o kit e desenhar o próprio DOM. Veja [Kit de UI](/pt-br/sdk/ui/).
+
+## Relacionado
+
+- [API do host](/pt-br/sdk/host/) — métodos do `connectHost`, limites e códigos de erro
+- [Kit de UI](/pt-br/sdk/ui/) — lista, cartão, seletor de attach e janela pull

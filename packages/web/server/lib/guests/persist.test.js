@@ -47,7 +47,7 @@ describe('extension persist', () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-ext-'));
     const file = extensionsPersistPath(dir);
     await fs.writeFile(file, `${JSON.stringify({ paths: ['/one'] })}\n`, 'utf8');
-    expect(await readExtensionStore(file)).toEqual({ paths: ['/one'], sources: {} });
+    expect(await readExtensionStore(file)).toEqual({ paths: ['/one'], sources: {}, agentGrants: {} });
     await writeExtensionStore(file, {
       paths: ['/one', '/two'],
       sources: { '/one': 'path', '/two': 'zip' },
@@ -55,15 +55,33 @@ describe('extension persist', () => {
     expect(await readExtensionStore(file)).toEqual({
       paths: ['/one', '/two'],
       sources: { '/two': 'zip' },
+      agentGrants: {},
     });
     await writeExtensionPaths(['/two'], file);
     expect(await readExtensionStore(file)).toEqual({
       paths: ['/two'],
       sources: { '/two': 'zip' },
+      agentGrants: {},
     });
     expect(guestCopiesDir(file)).toBe(path.join(dir, 'guests'));
     expect(isCopiedGuestRoot(path.join(dir, 'guests', 'hello'), file)).toBe(true);
     expect(isCopiedGuestRoot(path.join(dir, 'other', 'hello'), file)).toBe(false);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test('round-trips agent grants', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-ext-'));
+    const file = extensionsPersistPath(dir);
+    await writeExtensionStore(file, {
+      paths: ['/one'],
+      sources: {},
+      agentGrants: { docker: true },
+    });
+    expect(await readExtensionStore(file)).toEqual({
+      paths: ['/one'],
+      sources: {},
+      agentGrants: { docker: true },
+    });
     await fs.rm(dir, { recursive: true, force: true });
   });
 

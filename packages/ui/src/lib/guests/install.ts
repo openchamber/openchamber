@@ -13,10 +13,12 @@ const errorSchema = z.object({
     'id-taken',
     'already-installed',
     'missing-build',
+    'host-too-old',
     'bundled',
     'clone-failed',
     'extract-failed',
   ]),
+  required: z.string().trim().min(1).max(64).optional(),
 });
 
 export type InstallGuestErrorCode =
@@ -27,6 +29,7 @@ export type InstallGuestErrorCode =
   | 'id-taken'
   | 'already-installed'
   | 'missing-build'
+  | 'host-too-old'
   | 'bundled'
   | 'clone-failed'
   | 'extract-failed'
@@ -34,7 +37,7 @@ export type InstallGuestErrorCode =
 
 type InstallGuestResult =
   | { ok: true; guest: InstalledGuest }
-  | { ok: false; code: InstallGuestErrorCode };
+  | { ok: false; code: InstallGuestErrorCode; required?: string };
 
 type UninstallGuestResult =
   | { ok: true }
@@ -64,12 +67,20 @@ export const parseInstallInput = (raw: string): ParseInstallInputResult => {
   return { ok: false, code: 'invalid-path' };
 };
 
-const readErrorCode = async (response: Response): Promise<InstallGuestErrorCode> => {
+const readInstallError = async (
+  response: Response,
+): Promise<{ code: InstallGuestErrorCode; required?: string }> => {
   try {
     const parsed = errorSchema.safeParse(JSON.parse(await response.text()));
-    return parsed.success ? parsed.data.error : 'failed';
+    if (!parsed.success) {
+      return { code: 'failed' };
+    }
+    if (parsed.data.error === 'host-too-old' && parsed.data.required) {
+      return { code: 'host-too-old', required: parsed.data.required };
+    }
+    return { code: parsed.data.error };
   } catch {
-    return 'failed';
+    return { code: 'failed' };
   }
 };
 
@@ -85,7 +96,10 @@ export const installGuest = async (input: string): Promise<InstallGuestResult> =
       body: JSON.stringify(parsed.request),
     });
     if (!response.ok) {
-      return { ok: false, code: await readErrorCode(response) };
+      const error = await readInstallError(response);
+      return error.required
+        ? { ok: false, code: error.code, required: error.required }
+        : { ok: false, code: error.code };
     }
     const guest = parseInstalledGuestJson(await response.text());
     if (!guest) {
@@ -103,7 +117,8 @@ export const uninstallGuest = async (id: string): Promise<UninstallGuestResult> 
     if (response.status === 204) {
       return { ok: true };
     }
-    return { ok: false, code: await readErrorCode(response) };
+    const error = await readInstallError(response);
+    return { ok: false, code: error.code };
   } catch {
     return { ok: false, code: 'failed' };
   }

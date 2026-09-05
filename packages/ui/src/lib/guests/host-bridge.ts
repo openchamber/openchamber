@@ -46,6 +46,11 @@ type HostBridgeEffects = {
   oauthStart: () => Promise<boolean>;
   oauthDisconnect: () => Promise<boolean>;
   request: (request: GuestRequest) => Promise<GuestRequestProxyResult>;
+  agentRequest: (request: GuestRequest) => Promise<GuestRequestProxyResult>;
+  agentStatus: () => Promise<
+    | { ok: true; result: { status: import('@openchamber/sdk').AgentStatus } }
+    | { ok: false; code: HostRequestErrorCode; message: string }
+  >;
 };
 
 export const buildReadyMessage = (payload: HostReadyContext): HostMessage => ({
@@ -255,6 +260,20 @@ export const answerGuestMessage = async (
     }
     case 'request': {
       const result = await effects.request(message.payload);
+      if (!result.ok) {
+        return errorResult(message.id, result.message, result.code);
+      }
+      return okResult(message.id, result.result);
+    }
+    case 'agent-request': {
+      const result = await effects.agentRequest(message.payload);
+      if (!result.ok) {
+        return errorResult(message.id, result.message, result.code);
+      }
+      return okResult(message.id, result.result);
+    }
+    case 'agent-status': {
+      const result = await effects.agentStatus();
       if (!result.ok) {
         return errorResult(message.id, result.message, result.code);
       }

@@ -1,0 +1,196 @@
+---
+title: 호스트 API
+description: 게스트 패널용 connectHost 메서드, request 규칙, 한도, 오류 코드.
+---
+
+# 호스트 API
+
+이 페이지는 `connectHost`의 정확한 참조입니다. 메서드, 한도, 오류 코드. 폴더, 번들, 매니페스트는 [게스트 패널 만들기](/ko/sdk/)에 있습니다.
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+```
+
+`window`가 없거나 iframe 밖이면 `connectHost`는 `HOST_UNAVAILABLE`을 던집니다. 패널을 내릴 때 `dispose()`를 호출하세요. 비행 중인 호출은 그때 `HOST_UNAVAILABLE`로 거절됩니다.
+
+## ready와 이후 push
+
+`onReady`는 첫 호스트 스냅샷에서 울리고, 호스트가 고칠 때 다시 울립니다.
+
+| 필드 | 내용 |
+| --- | --- |
+| `theme.mode` | `light` 또는 `dark` |
+| `theme.tokens` | 호스트 색, 글꼴, 반지름. UI를 마운트하기 전에 `applyHostReady`에 넘깁니다. |
+| `locale` | 호스트 언어 태그 |
+| `directory` | 현재 프로젝트 디렉터리, 없으면 `null` |
+| `session` | `{ id, title }` 또는 `null`. 제목이 없으면 세션 id. |
+| `surface` | 레일은 `panel`, attach 창은 `dialog`. `openSurface`가 아닙니다. |
+| `connection` | `{ connected, account }` |
+| `settings` | 선언한 통합 필드만 |
+
+액세스 토큰은 `ready`에도 `request` 결과에도 나오지 않습니다.
+
+늦게 구독해도 `onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings`는 마지막 ready를 재생합니다. 이후 호스트 push도 `onReady`와 같이 이 리스너를 최신으로 유지합니다.
+
+## 메서드
+
+| 호출 | 하는 일 |
+| --- | --- |
+| `toast({ kind, message })` | 호스트 토스트. `kind`는 `info`, `success`, `error`. |
+| `openUrl(url)` | 호스트에서 URL 열기 |
+| `openSurface(surfaceId)` | 호스트 크롬을 그 서피스로 전환 |
+| `writeClipboard(text)` | 호스트에서 복사. 1–32000자. |
+| `compose({ text, mode? })` | 채팅 칸에 쓰기. 보내지는 않습니다. 기본 `mode`는 `append`. 덮어쓰려면 `replace`. trim 후 1–16000자. |
+| `attach({ ... })` | 컴포저에 칩을 둡니다. GitHub, Linear와 배타. |
+| `startSession({ ... })` | 세션을 만들고 같은 스냅샷을 씁니다. `{ sessionId, sent }`를 반환합니다. |
+| `prompt({ text, send? })` | 현재 세션에 쓰거나 보냅니다. `send`를 빼거나 `false`면 초안을 바꿉니다. `send: true`는 전송입니다. `{ sent }`를 반환합니다. |
+| `sessionLink({ ... })` | 현재 세션에 attach 스냅샷을 씁니다. 세션을 만들지 않습니다. |
+| `close()` | attach 창을 닫습니다. 레일에서는 아무것도 하지 않습니다. |
+| `oauthStart()` | 공급자 authorize URL을 엽니다. 호스트 Linear 게스트면 퍼스트파티 Linear URL. |
+| `oauthDisconnect()` | 이 게스트의 토큰을 버립니다. 호스트 Linear 게스트면 Linear 연결을 끊습니다. |
+| `request({ method, path, query?, body? })` | 선언한 `apiOrigin`에서만 GET 또는 쓰기 |
+| `agentRequest({ method, path, query?, body? })` | proxy to this guest's local agent on loopback. Same path rules as `request`, but the origin is the agent the host started. |
+| `agentStatus()` | `stopped`, `starting`, `ready`, or `failed` |
+
+## attach와 startSession
+
+둘 다 같은 식별 필드를 받습니다.
+
+```ts
+await host.attach({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.attach({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  author: "ada",
+  branches: { head: "feature", base: "main" },
+  text: "Optional notes for the model",
+});
+
+await host.startSession({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  worktree: true,
+  text: "Optional first message",
+});
+```
+
+`id`는 당신 식별자입니다. GitHub 번호가 아닙니다. `kind`는 `issue` 또는 `pull`이고 기본은 `issue`입니다. `text`는 선택 모델 맥락이며 trim 후 1–16000입니다.
+
+`startSession`은 현재 프로젝트에 세션을 만듭니다. `worktree: true`는 호스트에게 먼저 worktree를 만들라고 합니다. 게스트는 git과 말하지 않습니다. 프로젝트 없음, 실패한 worktree, 실패한 세션 생성은 호스트 오류입니다. 모델이 선택돼 있으면 `text`가 첫 메시지가 됩니다.
+
+## prompt, sessionLink, sessionLifecycle
+
+```ts
+await host.sessionLink({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.prompt({ text: "Fix the login" });
+await host.prompt({ text: "Fix the login", send: true });
+
+host.onSessionLifecycle((event) => {
+  document.body.dataset.phase = event.phase;
+});
+```
+
+`sessionLink`는 `attach`와 같은 식별 필드를 받습니다. 현재 세션에 그 스냅샷을 씁니다. 세션을 만들지 않습니다. 프로젝트나 세션이 없으면 거절입니다.
+
+`prompt`는 현재 세션에 쓰거나 보냅니다. `send`를 빼거나 `false`면 초안을 바꿉니다. `send: true`는 `startSession`과 같은 모델 경로로 보냅니다. 세션 없음은 `NO_SESSION`. 보낼 때 바쁜 세션은 `SESSION_BUSY`. busy 중에도 compose는 됩니다. 결과는 `{ sent }`이며 `sent`, `no-model`, `skipped`, `failed`입니다. 게스트는 모델이나 에이전트를 고르지 않습니다.
+| `NO_AGENT` | no agent declared, not granted when required, or not running |
+| `AGENT_FAILED` | the agent crashed or never became ready |
+
+`onSessionLifecycle`은 호스트 push입니다. 라이브 상태 `busy`와 `retry`는 `started`입니다. `idle`은 `completed`입니다. 알 수 없는 상태 타입은 `failure`입니다. 중단이 아닙니다. 늦은 리스너는 마지막 단계를 받습니다. 전용 push가 아직 없으면 `ready.session.busy`에서 옵니다.
+
+호스트가 보기 전에 클라이언트가 자르는 한도입니다.
+
+| 필드 | 최대 |
+| --- | --- |
+| `id` | 128 |
+| `title` | 200 |
+| `url` | 2000 |
+| `text` | 16000 |
+| `author` | 80 |
+| 각 브랜치 이름 | 200 |
+
+## request
+
+```ts
+const user = await host.request({ method: "GET", path: "/api/v2/user" });
+```
+
+`path`는 `/`로 시작하고, 선언한 `apiOrigin`에 머물며, 스킴을 넣으면 안 됩니다. 호스트가 `Authorization`을 붙입니다. 토큰 게스트는 생 토큰을 보냅니다. OAuth와 호스트 Linear는 Bearer입니다. 결과는 `{ status, body }`입니다. 게스트가 JSON을 parse합니다.
+
+호스트 Linear 게스트는 같은 호출로 `GET /api/linear/issues/get`도 할 수 있습니다. 호스트는 퍼스트파티 Linear 경로로 답합니다.
+
+20초 침묵은 `HOST_TIMEOUT`입니다.
+
+```ts
+try {
+  await host.request({ method: "GET", path: "/api/v2/user" });
+} catch (error) {
+  if (error instanceof HostRequestError && error.code === "DISCONNECTED") {
+    await host.oauthStart();
+  }
+}
+```
+
+
+## agentRequest
+
+When the manifest declares `contributes.agent`, the panel talks to that process through the host. The iframe never opens the socket or receives the agent token.
+
+```ts
+const status = await host.agentStatus();
+const result = await host.agentRequest({ method: "GET", path: "/containers" });
+```
+
+`path` must start with `/` and never include a scheme. The host proxies only to that guest's loopback port. Non-empty `sockets` / `exec` need an **Allow local agent** grant in Settings → Extensions before the first request. Full contract: package file `GUEST_AGENTS.md`.
+
+## 오류 코드
+
+실패한 호출은 `HostRequestError`를 던집니다. `code`는 다음 중 하나입니다. 알 수 없는 와이어 코드는 `HOST_REJECTED`가 됩니다. `error` 문자열은 남습니다.
+
+| 코드 | 언제 |
+| --- | --- |
+| `HOST_UNAVAILABLE` | window 없음, iframe 아님, 또는 `dispose()` 이미 실행 |
+| `HOST_TIMEOUT` | 호스트가 20초 침묵 |
+| `HOST_REJECTED` | 호스트가 거절했거나 코드가 없거나 알 수 없음 |
+| `DISCONNECTED` | 게스트에 토큰도 Linear 연결도 없음 |
+| `BAD_PATH` | `path`가 `apiOrigin`을 벗어났거나 깨짐 |
+| `NO_INTEGRATION` | 매니페스트에 `integration` 없음 |
+| `NO_SESSION` | 열린 세션 없이 `prompt` 또는 `sessionLink` |
+| `SESSION_BUSY` | 세션이 바쁠 때 `prompt({ send: true })` |
+
+## 호스트 공급자로서의 Linear
+
+`host.provider: "linear"`는 퍼스트파티 Linear 연결을 씁니다. `apiOrigin`은 `https://api.linear.app`뿐입니다. 부트스트랩이지 패턴이 아닙니다. `apiVersion` 1에 두 번째 호스트 공급자를 넣지 마세요.
+
+## apiVersion 1에서 동결
+
+이 이름은 예약입니다. 호스트에 아직 구멍이 없습니다.
+
+- 호스트의 `issues.search` / `issues.get`. 칩은 `attach`. 목록은 게스트가 그립니다.
+- 공개 OAuth 브로커
+- 명령, 단축키, git 원격, magic prompts
+
+## 관련
+
+- [게스트 패널 만들기](/ko/sdk/) — 폴더, ZIP, git URL, 번들, 매니페스트
+- [UI 키트](/ko/sdk/ui/) — 목록, 카드, attach 피커, pull 창

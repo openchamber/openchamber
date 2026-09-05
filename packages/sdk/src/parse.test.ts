@@ -89,8 +89,65 @@ describe('parseManifest', () => {
   });
 
   test('rejects an unknown apiVersion', () => {
-    const result = parseManifestJson(JSON.stringify({ ...validBlock, apiVersion: 2 }));
+    const result = parseManifestJson(JSON.stringify({ ...validBlock, apiVersion: 99 }));
     expect(result).toMatchObject({ ok: false, code: 'unsupported-api-version' });
+  });
+
+  test('accepts an agent on apiVersion 1', () => {
+    const result = parseManifest({
+      apiVersion: 1,
+      contributes: {
+        panel: validBlock.contributes.panel,
+        agent: {
+          entry: 'agent/main.js',
+          runtime: 'host',
+          permissions: {
+            sockets: ['/var/run/docker.sock'],
+            exec: ['docker'],
+          },
+        },
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.manifest.contributes.agent).toEqual({
+        entry: 'agent/main.js',
+        runtime: 'host',
+        permissions: {
+          sockets: ['/var/run/docker.sock'],
+          exec: ['docker'],
+        },
+      });
+    }
+  });
+
+  test('rejects apiVersion 2', () => {
+    const result = parseManifestJson(JSON.stringify({
+      apiVersion: 2,
+      contributes: {
+        panel: validBlock.contributes.panel,
+      },
+    }));
+    expect(result).toMatchObject({ ok: false, code: 'unsupported-api-version' });
+  });
+
+  test('keeps engines.openchamber', () => {
+    const result = parseManifest({
+      ...validBlock,
+      engines: { openchamber: '>=1.22.0' },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.manifest.engines).toEqual({ openchamber: '>=1.22.0' });
+    }
+  });
+
+  test('rejects a junk engines.openchamber range', () => {
+    const result = parseManifest({
+      ...validBlock,
+      engines: { openchamber: '^1.22.0' },
+    });
+    expect(result).toMatchObject({ ok: false, code: 'invalid-engines' });
   });
 
   test('keeps attach when it is true', () => {
@@ -349,11 +406,22 @@ describe('parseManifest', () => {
       ...validBlock,
       contributes: { panel: { ...validBlock.contributes.panel, icon: 'icon.svg' } },
     }));
-    expect(packagedSvg).toMatchObject({
-      ok: false,
-      code: 'invalid-panel-icon',
-      message: 'panel.icon must be a Remixicon name.',
-    });
+    expect(packagedSvg).toMatchObject({ ok: true });
+    if (packagedSvg.ok) {
+      expect(packagedSvg.manifest.contributes.panel.icon).toBe('icon.svg');
+    }
+
+    const nestedSvg = parseManifestJson(JSON.stringify({
+      ...validBlock,
+      contributes: { panel: { ...validBlock.contributes.panel, icon: 'assets/mark.svg' } },
+    }));
+    expect(nestedSvg).toMatchObject({ ok: true });
+
+    const pngIcon = parseManifestJson(JSON.stringify({
+      ...validBlock,
+      contributes: { panel: { ...validBlock.contributes.panel, icon: 'icon.png' } },
+    }));
+    expect(pngIcon).toMatchObject({ ok: false, code: 'invalid-panel-icon' });
   });
 
   test('reads a token integration', () => {

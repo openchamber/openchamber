@@ -8,6 +8,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { GuestAttachDialog } from '@/components/layout/GuestAttachDialog';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { useGuestAttachItems } from '@/hooks/useGuestSurfaces';
 import { guestSessionTitle, guestWorktreeBranch } from '@/lib/guests/start-session';
 import { Input } from '@/components/ui/input';
@@ -1243,9 +1244,11 @@ export function NewWorktreeDialog({
   // GitHub connection check
   const isGitHubConnected = githubAuthChecked && githubAuthStatus?.connected === true;
   const isLinearConnected = Boolean(linear) && linearAuthChecked && linearAuthStatus?.connected === true;
-  const linkedGuestIcon = newBranchState.linkedGuest
-    ? dialogGuests.find((entry) => entry.id === newBranchState.linkedGuest?.providerId)?.icon
+  const linkedGuest = newBranchState.linkedGuest
+    ? dialogGuests.find((entry) => entry.id === newBranchState.linkedGuest?.providerId)
     : undefined;
+  const linkedGuestIcon = linkedGuest?.icon;
+  const linkedGuestIconSrc = linkedGuest?.iconSrc;
   const hasLinkedItem = Boolean(
     newBranchState.linkedIssue
     || newBranchState.linkedPr
@@ -1309,7 +1312,7 @@ export function NewWorktreeDialog({
           title={t('session.newWorktree.actions.startFromGuest', { name: guest.name })}
           aria-label={t('session.newWorktree.actions.startFromGuest', { name: guest.name })}
         >
-          <Icon name={guest.icon} className="size-4" />
+          <GuestIcon icon={guest.icon} iconSrc={guest.iconSrc} className="size-4" />
         </Button>
       ))}
     </div>
@@ -1809,7 +1812,11 @@ export function NewWorktreeDialog({
                 {/* Row 1: Type, number, title, actions */}
                 <div className="flex items-center gap-2">
                   {newBranchState.linkedGuest ? (
-                    <Icon name={linkedGuestIcon ?? 'window'} className="h-3.5 w-3.5 shrink-0" />
+                    <GuestIcon
+                      icon={linkedGuestIcon ?? 'window'}
+                      iconSrc={linkedGuestIconSrc}
+                      className="h-3.5 w-3.5 shrink-0"
+                    />
                   ) : (
                     <Icon
                       name={newBranchState.linkedLinearIssue ? 'linear' : 'github'}
@@ -2296,7 +2303,11 @@ export function NewWorktreeDialog({
                   {/* Row 1: Type, number, title, actions */}
                   <div className="flex items-center gap-2">
                     {newBranchState.linkedGuest ? (
-                      <Icon name={linkedGuestIcon ?? 'window'} className="h-3.5 w-3.5 shrink-0" />
+                      <GuestIcon
+                      icon={linkedGuestIcon ?? 'window'}
+                      iconSrc={linkedGuestIconSrc}
+                      className="h-3.5 w-3.5 shrink-0"
+                    />
                     ) : (
                       <Icon
                         name={newBranchState.linkedLinearIssue ? 'linear' : 'github'}

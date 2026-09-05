@@ -1,0 +1,65 @@
+---
+title: UI-набір
+description: Намалюйте список задач, картку, пікер attach або вікно pull через @openchamber/sdk/ui.
+---
+
+# UI-набір
+
+Імпортуйте `@openchamber/sdk/ui`, якщо панель має виглядати як трекери хоста. Набір малює DOM з токенів хоста. З провайдером він не розмовляє. `host.request` і `host.attach` лишаються вашими.
+
+Набір можна пропустити і малювати власний DOM.
+
+Викличте `applyHostReady` перед будь-яким mount.
+
+```ts
+import { applyHostReady, mountIssuePage } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  mountIssuePage(document.querySelector("#root")!, {
+    items: tasks,
+    filters,
+    onSelect: (item) => {
+      void host.attach({
+        providerId: "acme-hello",
+        id: item.id,
+        title: item.title,
+        url: item.url ?? "",
+      });
+    },
+  });
+});
+```
+
+## Що монтувати
+
+| Виклик | Де стоїть |
+| --- | --- |
+| `mountIssuePage` | список на рейці. Компактні фільтри, пошук іконкою, рядки ідентифікатор плюс заголовок. |
+| `mountIssueCard` | задача після кліку по рядку. Назад, статус, метадані, опис, коментарі, кнопка в футері. |
+| `mountAttachIssues` | пікер меню +. Пошук лишається відкритим. Після вибору викличте `host.attach` і `host.close`. |
+| `mountPullRequest` | вікно pull або merge request. Вкладки Overview, Checks і Comments. |
+| `mountButton` | спільна кнопка підключення |
+| `mountTextField` | спільне поле підключення |
+| `mountEmpty` | спільний порожній стан |
+
+Опис і коментарі лишаються звичайним текстом. Набір піднімає `![alt](https://…)` і `[label](https://…)` у медіа. URL аватарів у payload attach не потрапляють.
+
+`mountPullRequest` бере `mode: "view"` із записом, чеками й коментарями або `mode: "create"` з обробником submit. Колбеки футера — attach, нова сесія, новий worktree, ready і merge. Набір малює. Git лишається на хості.
+
+## Фільтри й рядки
+
+`value` на фільтрі — початковий вибір. Далі компонент тримає вибір користувача, коли ви `update` з новим списком `items`. Передавайте `value` знову лише при повторному mount.
+
+`slot` ставить фільтр. `start` росте ліворуч і лишає підпис. `end` пакується праворуч і стає іконкою, коли панель вужча за 520px. Пропустіть `slot` — перший фільтр буде `start`, решта `end`.
+
+Рядок може нести `badge` і `subtitle`. Так само, як пікер GitHub показує репо або `head → base`.
+
+`hasMore` / `onMore` вантажить наступну віддалену сторінку. `toggle` — один чекбокс. Сенс гість кладе в `attach.text`. `session` — другий чекбокс, як Create in worktree. Якщо він увімкнений, викличте `host.startSession({ worktree: true })` замість `attach`. `action` — кнопка на сторінці.
+
+Хост не шукає і не зберігає гостьові фільтри.
+
+## Пов'язане
+
+- [Зібрати гостьову панель](/uk/sdk/) — тека, бандл і маніфест
+- [API хоста](/uk/sdk/host/) — `connectHost`, attach і помилки

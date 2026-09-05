@@ -1,0 +1,65 @@
+---
+title: UI キット
+description: @openchamber/sdk/ui で課題一覧、カード、attach ピッカー、pull 窓を描く。
+---
+
+# UI キット
+
+ホストのトラッカーと同じ見た目にしたいとき、`@openchamber/sdk/ui` を import します。キットはホストトークンから DOM を描きます。プロバイダとは話しません。`host.request` と `host.attach` は自分で呼びます。
+
+キットは使わなくてもよく、自分の DOM を描いて構いません。
+
+マウントの前に `applyHostReady` を呼んでください。
+
+```ts
+import { applyHostReady, mountIssuePage } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  mountIssuePage(document.querySelector("#root")!, {
+    items: tasks,
+    filters,
+    onSelect: (item) => {
+      void host.attach({
+        providerId: "acme-hello",
+        id: item.id,
+        title: item.title,
+        url: item.url ?? "",
+      });
+    },
+  });
+});
+```
+
+## 何をマウントするか
+
+| 呼び出し | 置き場 |
+| --- | --- |
+| `mountIssuePage` | レールの一覧。コンパクトなフィルタ、アイコンの検索、識別子＋タイトルの行。 |
+| `mountIssueCard` | 行クリック後の課題。戻る、状態、メタ、説明、コメント、フッタボタン。 |
+| `mountAttachIssues` | + メニューのピッカー。検索は開いたまま。選んだら `host.attach` と `host.close`。 |
+| `mountPullRequest` | pull またはマージリクエストの窓。タブは Overview、Checks、Comments。 |
+| `mountButton` | 共通の接続ボタン |
+| `mountTextField` | 共通の接続フィールド |
+| `mountEmpty` | 共通の空状態 |
+
+説明とコメントはプレーンテキストのままです。キットは `![alt](https://…)` と `[label](https://…)` をメディアに上げます。アバター URL は attach のペイロードに入れません。
+
+`mountPullRequest` はレコード、チェック、コメント付きの `mode: "view"`、または submit ハンドラ付きの `mode: "create"` を取ります。フッタのコールバックは attach、新規セッション、新規 worktree、ready、merge です。キットは描きます。git はホスト側です。
+
+## フィルタと行
+
+フィルタの `value` は初期選択です。その後、新しい `items` で `update` しても、コンポーネントはユーザーの選択を保ちます。`value` を再度渡すのはリマウントのときだけです。
+
+`slot` はフィルタの位置です。`start` は左に伸び、ラベルを残します。`end` は右に詰まり、パネルが 520px 未満になるとアイコンになります。`slot` を省略すると、最初が `start`、残りが `end` です。
+
+行は `badge` と `subtitle` を持てます。GitHub ピッカーがリポジトリや `head → base` を出すのと同じです。
+
+`hasMore` / `onMore` は次の遠隔ページを読みます。`toggle` はチェックボックス 1 つです。意味はゲストが `attach.text` に入れます。`session` は 2 つ目のチェックで、Create in worktree と同じです。入っていれば `attach` の代わりに `host.startSession({ worktree: true })` を呼びます。`action` はページ上のボタンです。
+
+ホストは検索せず、ゲストのフィルタも保存しません。
+
+## 関連
+
+- [ゲストパネルを作る](/ja/sdk/) — フォルダ、バンドル、マニフェスト
+- [ホスト API](/ja/sdk/host/) — `connectHost`、attach、エラー

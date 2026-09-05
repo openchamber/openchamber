@@ -10,6 +10,7 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -140,7 +141,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                                         requestAnimationFrame(() => onOpenGuestAttach?.(guest.id));
                                     }}
                                 >
-                                    <Icon name={guest.icon} className="size-4" />
+                                    <GuestIcon icon={guest.icon} iconSrc={guest.iconSrc} className="size-4" />
                                     {guest.name}
                                 </DropdownMenuItem>
                             ))}

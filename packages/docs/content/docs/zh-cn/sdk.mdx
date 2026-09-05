@@ -1,0 +1,111 @@
+---
+title: 构建访客面板
+description: 做一块跑在 OpenChamber 栏上的 HTML 面板，通过 connectHost 和宿主对话。
+---
+
+# 构建访客面板
+
+`@openchamber/sdk` 把第三方面板放到 OpenChamber 栏上。面板是 iframe 里的 HTML。它通过 `connectHost()` 和 OpenChamber 说话。
+
+这只在网页和桌面端运行。VS Code 和移动端会把目录标成 unsupported。它们不加载 iframe。
+
+## 你要交付什么
+
+一个文件夹，里面有三样东西：
+
+- 带 `openchamber` 块的 `package.json`
+- `panel/index.html`
+- `panel/main.js`，经典 IIFE。iframe 加载不了 ESM。
+
+`oc-dev` 在提供 `panel/main.js` 时仍会编译 `panel/main.ts`。打包后的 OpenChamber 和 `openchamber serve` 不会。请交付 IIFE。
+
+```bash
+bun run --filter @openchamber/sdk bundle -- panel/main.ts panel/main.js
+```
+
+在 HTML 里指向这个文件。
+
+## 开发时怎么装
+
+1. 在网页或桌面端启动 OpenChamber。
+2. 打开 **Settings → Extensions**。
+3. 加上文件夹路径、本地 `.zip`，或 https 的 git / zip URL。
+
+栏上应出现你的图标。点一下就会加载你的 HTML。两个面板不能用同一个 `id`。
+
+
+**文件夹**安装会把路径留在 `extensions.json`。卸载只去掉目录行。
+
+**zip**（或 https zip / git URL）会复制到 OpenChamber data dir 的 `guests/{id}`。主机解压、校验清单，再从该副本运行。卸载会删除副本。zip 里放 `package.json`、`panel/index.html`、`panel/main.js` 以及声明的 `icon.svg` / `agent/main.js`。不要放 `node_modules` 或 TypeScript。
+
+## 清单
+
+```json
+{
+  "name": "@acme/hello-panel",
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": {
+        "id": "acme-hello",
+        "name": "Hello",
+        "icon": "window",
+        "entry": "panel/index.html"
+      },
+      "attach": "dialog",
+      "integration": {
+        "name": "Acme",
+        "description": "Tasks from Acme",
+        "oauth": {
+          "authorizeUrl": "https://acme.example/oauth/authorize",
+          "tokenUrl": "https://acme.example/oauth/token",
+          "apiOrigin": "https://api.acme.example"
+        },
+        "settings": [{ "id": "list-id", "label": "List ID" }]
+      }
+    }
+  }
+}
+```
+
+`apiVersion` 是 `1`。其他值会被拒绝。
+
+`engines.openchamber` 可选。使用 `1.22.0` 或 `>=1.22.0`。若当前 OpenChamber 更旧，安装会被拒绝。
+
+`contributes.agent` 可选。它声明由宿主启动的本地进程（Docker socket 等）。面板调用 `agentRequest`，进程归宿主所有。见包内 `GUEST_AGENTS.md`。
+
+`id` 用 kebab-case。`icon` 是栏上同款 kebab-case 的 Remixicon 名：`RiWindowLine` 变成 `window`。也可以放包内 SVG 路径，例如 `icon.svg`。URL 和绝对路径会解析失败。`entry` 必须留在包内。`../` 和绝对路径会解析失败。
+
+`attach` 可选。
+
+- `true` 或 `"panel"` 会在 + 菜单加一行，打开栏
+- `"dialog"` 用宿主窗口包住同一个 iframe
+- 省略或设为 `false`，面板就不会出现在那些菜单里
+
+`ready.surface` 是 `panel` 或 `dialog`，所以你可以在栏上画列表，在窗口里画选择器。
+
+`integration` 可选。宿主会在 **Settings → Integrations** 画一张卡片。OAuth 访客在那里粘贴 client id。Token 访客粘贴 API token。`host: { "provider": "linear" }` 复用 OpenChamber 的官方 Linear 连接，不会要 client id。访客看不到 token。
+
+`request`、OAuth、attach 和错误见 [宿主 API](/zh-cn/sdk/host/)。
+
+## 面板里的前几行
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+
+host.onReady((ctx) => {
+  document.body.dataset.theme = ctx.theme.mode;
+  document.body.dataset.surface = ctx.surface;
+});
+```
+
+脚本不在 iframe 里时，`connectHost` 会拒绝。
+
+需要任务列表、卡片或 attach 选择器时，从 `@openchamber/sdk/ui` 引入绘图套件。也可以跳过套件，自己画 DOM。见 [UI 套件](/zh-cn/sdk/ui/)。
+
+## 相关
+
+- [宿主 API](/zh-cn/sdk/host/) — `connectHost` 方法、限制和错误码
+- [UI 套件](/zh-cn/sdk/ui/) — 列表、卡片、attach 选择器和 pull 窗口

@@ -1,0 +1,111 @@
+---
+title: Konuk panel oluştur
+description: OpenChamber rayında duran bir HTML paneli yapın; host ile connectHost üzerinden konuşur.
+---
+
+# Konuk panel oluştur
+
+`@openchamber/sdk` üçüncü taraf bir paneli OpenChamber rayına koyar. Panel, iframe içindeki HTML’dir. OpenChamber ile `connectHost()` üzerinden konuşur.
+
+Bu web ve masaüstünde çalışır. VS Code ve mobil katalogu unsupported işaretler. iframe yüklemezler.
+
+## Ne teslim edersiniz
+
+Üç şey içeren bir klasör:
+
+- `openchamber` bloğu olan bir `package.json`
+- `panel/index.html`
+- `panel/main.js`, klasik bir IIFE. iframe ESM yükleyemez.
+
+`oc-dev`, `panel/main.js` verirken hâlâ `panel/main.ts` derler. Paketlenmiş OpenChamber ve `openchamber serve` bunu yapmaz. IIFE’yi teslim edin.
+
+```bash
+bun run --filter @openchamber/sdk bundle -- panel/main.ts panel/main.js
+```
+
+HTML’de bu dosyayı gösterin.
+
+## Yazarken nasıl takarsınız
+
+1. OpenChamber’ı web veya masaüstünde çalıştırın.
+2. **Settings → Extensions**’ı açın.
+3. Bir klasör yolu, yerel bir `.zip` veya https git / zip URL’si ekleyin.
+
+Rayda ikonunuz görünmeli. Tıklayınca HTML yüklenir. İki panel aynı `id` değerini paylaşamaz.
+
+
+**Klasör** kurulumu yolu `extensions.json` içinde tutar. Uninstall yalnızca katalog satırını kaldırır.
+
+**Zip** (veya https zip / git URL) OpenChamber data dir altında `guests/{id}` olarak kopyalanır. Host arşivi açar, manifesti kontrol eder ve kopyadan çalışır. Uninstall kopyayı siler. Zip’e `package.json`, `panel/index.html`, `panel/main.js` ve bildirilen `icon.svg` / `agent/main.js` koyun. `node_modules` ve TypeScript koymayın.
+
+## Manifest
+
+```json
+{
+  "name": "@acme/hello-panel",
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": {
+        "id": "acme-hello",
+        "name": "Hello",
+        "icon": "window",
+        "entry": "panel/index.html"
+      },
+      "attach": "dialog",
+      "integration": {
+        "name": "Acme",
+        "description": "Tasks from Acme",
+        "oauth": {
+          "authorizeUrl": "https://acme.example/oauth/authorize",
+          "tokenUrl": "https://acme.example/oauth/token",
+          "apiOrigin": "https://api.acme.example"
+        },
+        "settings": [{ "id": "list-id", "label": "List ID" }]
+      }
+    }
+  }
+}
+```
+
+`apiVersion` `1`’dir. Başka her değer reddir.
+
+`engines.openchamber` isteğe bağlıdır. `1.22.0` veya `>=1.22.0` kullanın. Bu OpenChamber sürümü daha eskiyse kurulum reddedilir.
+
+`contributes.agent` isteğe bağlıdır. Docker soketleri ve benzeri için host’un başlattığı yerel süreci adlandırır. Panel `agentRequest` çağırır; süreç host’a aittir. Paketteki `GUEST_AGENTS.md` dosyasına bakın.
+
+`id` kebab-case’tir. `icon`, rayın kullandığı aynı kebab-case Remixicon adıdır: `RiWindowLine` `window` olur. Ya da `icon.svg` gibi paket içi bir SVG yolu koy. URL’ler ve mutlak yollar parse’dan düşer. `entry` paketin içinde kalır. `../` ve mutlak yollar parse’dan düşer.
+
+`attach` isteğe bağlıdır.
+
+- `true` veya `"panel"` rayı açan bir + menü satırı ekler
+- `"dialog"` aynı iframe’i bir host penceresinde açar
+- atlayın veya `false` koyun, panel o menülerde durmaz
+
+`ready.surface` `panel` veya `dialog`’dur. Listesini rayda, seçiciyi pencerede çizebilirsiniz.
+
+`integration` isteğe bağlıdır. Host, **Settings → Integrations**’ta bir kart çizer. OAuth konukları oraya client id yapıştırır. Token konukları bir API token yapıştırır. `host: { "provider": "linear" }` birinci taraf Linear bağlantısını kullanır ve client id sormaz. Konuk token’ı görmez.
+
+`request`, OAuth, attach ve hatalar için [Host API](/tr/sdk/host/)’ye bakın.
+
+## Paneldeki ilk satırlar
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+
+host.onReady((ctx) => {
+  document.body.dataset.theme = ctx.theme.mode;
+  document.body.dataset.surface = ctx.surface;
+});
+```
+
+Betik iframe’de değilse `connectHost` reddeder.
+
+Liste, kart veya attach seçici istiyorsanız `@openchamber/sdk/ui` kitini içe aktarın. Kiti atlayıp kendi DOM’unuzu da çizebilirsiniz. [UI kiti](/tr/sdk/ui/)’ne bakın.
+
+## İlgili
+
+- [Host API](/tr/sdk/host/) — `connectHost` metodları, limitler ve hata kodları
+- [UI kiti](/tr/sdk/ui/) — liste, kart, attach seçici ve pull penceresi

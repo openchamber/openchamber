@@ -92,6 +92,7 @@ import { createApnsRuntime } from './lib/notifications/apns-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
 import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
+import { stopAllGuestAgents } from './lib/guests/agent.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { createProjectContextRuntime } from './lib/project-context/runtime.js';
 import { createAgentMemoryRuntime } from './lib/agent-memory/runtime.js';
@@ -1876,6 +1877,7 @@ async function main(options = {}) {
     resolveGitBinaryForSpawn,
     createFsSearchRuntime: createFsSearchRuntimeFactory,
     openchamberDataDir: OPENCHAMBER_DATA_DIR,
+    openchamberVersion: OPENCHAMBER_VERSION,
     openchamberUserConfigRoot: OPENCHAMBER_USER_CONFIG_ROOT,
     normalizeDirectoryPath,
     resolveProjectDirectory,
@@ -2031,6 +2033,9 @@ async function main(options = {}) {
       } catch {
         // best-effort shutdown of the dictation worker
       }
+      void stopAllGuestAgents().catch(() => {
+        // best-effort teardown of guest agent processes
+      });
       return gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false });
     }
   };

@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { parseManifestJson, resolveAttachMode, toPublicIntegration } from '@openchamber/sdk';
+import { parseManifestJson, resolveAttachMode, toPublicAgent, toPublicIntegration, hostMeetsOpenChamberEngine, openChamberEngineMinimum } from '@openchamber/sdk';
 
 import { listRelativeGuestScriptHrefs, resolveGuestHtmlRelativePath } from './html-tokens.js';
 import { readExtensionStore } from './persist.js';
@@ -116,7 +116,7 @@ const guestBuiltScriptsReady = async (packageRoot, entry) => {
   return true;
 };
 
-export const inspectGuestPackage = async (packageRoot) => {
+export const inspectGuestPackage = async (packageRoot, { openchamberVersion, skipEngineCheck } = {}) => {
   let raw;
   try {
     raw = await fs.readFile(path.join(packageRoot, 'package.json'), 'utf8');
@@ -127,10 +127,27 @@ export const inspectGuestPackage = async (packageRoot) => {
   if (!parsed.ok) {
     return { ok: false, code: 'invalid-manifest' };
   }
+  const engine = parsed.manifest.engines?.openchamber;
+  if (engine && !skipEngineCheck) {
+    const hostVersion = typeof openchamberVersion === 'string' ? openchamberVersion : '';
+    if (!hostMeetsOpenChamberEngine(hostVersion, engine)) {
+      return {
+        ok: false,
+        code: 'host-too-old',
+        required: openChamberEngineMinimum(engine) ?? engine,
+      };
+    }
+  }
   const panel = parsed.manifest.contributes.panel;
   const entryPath = await resolveGuestAssetPath(packageRoot, panel.entry);
   if (!entryPath) {
     return { ok: false, code: 'invalid-manifest' };
+  }
+  if (panel.icon.toLowerCase().endsWith('.svg')) {
+    const iconPath = await resolveGuestAssetPath(packageRoot, panel.icon);
+    if (!iconPath) {
+      return { ok: false, code: 'invalid-manifest' };
+    }
   }
   if (!await guestBuiltScriptsReady(packageRoot, panel.entry)) {
     return { ok: false, code: 'missing-build' };
@@ -142,6 +159,9 @@ export const inspectGuestPackage = async (packageRoot) => {
     entry: panel.entry,
     packageRoot,
   };
+  if (parsed.manifest.engines) {
+    guest.engines = parsed.manifest.engines;
+  }
   const attach = resolveAttachMode(parsed.manifest.contributes.attach);
   if (attach) {
     guest.attach = attach;
@@ -149,11 +169,18 @@ export const inspectGuestPackage = async (packageRoot) => {
   if (parsed.manifest.contributes.integration) {
     guest.integration = parsed.manifest.contributes.integration;
   }
+  if (parsed.manifest.contributes.agent) {
+    const agentEntry = await resolveGuestAssetPath(packageRoot, parsed.manifest.contributes.agent.entry);
+    if (!agentEntry) {
+      return { ok: false, code: 'missing-build' };
+    }
+    guest.agent = parsed.manifest.contributes.agent;
+  }
   return { ok: true, guest };
 };
 
-const loadGuestFromPackageRoot = async (packageRoot) => {
-  const result = await inspectGuestPackage(packageRoot);
+const loadGuestFromPackageRoot = async (packageRoot, options) => {
+  const result = await inspectGuestPackage(packageRoot, options);
   return result.ok ? result.guest : null;
 };
 
@@ -180,10 +207,14 @@ export const toPublicGuest = (guest) => {
   if (guest.integration) {
     row.integration = toPublicIntegration(guest.integration);
   }
+  const agent = toPublicAgent(guest.agent, Boolean(guest.agentGranted));
+  if (agent) {
+    row.agent = agent;
+  }
   return row;
 };
 
-export const listInstalledGuests = async ({ persistPath }) => {
+export const listInstalledGuests = async ({ persistPath } = {}) => {
   const guests = [];
   const seen = new Set();
 
@@ -193,13 +224,18 @@ export const listInstalledGuests = async ({ persistPath }) => {
     if (!root) {
       continue;
     }
-    const guest = await loadGuestFromPackageRoot(root);
+    // Already-installed packages stay listed even if engines.openchamber is newer
+    // than this host. Install is the gate.
+    const guest = await loadGuestFromPackageRoot(root, { skipEngineCheck: true });
     if (!guest || seen.has(guest.id)) {
       continue;
     }
     seen.add(guest.id);
     const source = stored.sources[root] ?? stored.sources[storedPath] ?? 'path';
-    guests.push(withSource(guest, source, root));
+    guests.push({
+      ...withSource(guest, source, root),
+      agentGranted: Boolean(stored.agentGrants?.[guest.id]),
+    });
   }
 
   return guests;

@@ -1,6 +1,15 @@
-export { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-version.ts';
+export { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL, OPENCHAMBER_SDK_MANIFEST_API_VERSIONS } from './api-version.ts';
+export type { OpenChamberManifestApiVersion } from './api-version.ts';
+export {
+  compareOpenChamberVersions,
+  hostMeetsOpenChamberEngine,
+  openChamberEngineMinimum,
+  OPENCHAMBER_ENGINE_PATTERN,
+  parseOpenChamberVersion,
+} from './host-version.ts';
 export {
   HOST_LINEAR_API_ORIGIN,
+  isGuestPackageSvgIcon,
   openChamberManifestSchema,
   packageManifestSchema,
   parseManifest,
@@ -8,9 +17,12 @@ export {
   resolveAttachMode,
   resolveIntegrationApi,
   resolveIntegrationAuth,
+  toPublicAgent,
   toPublicIntegration,
 } from './parse.ts';
 export type {
+  AgentContribution,
+  AgentPermissions,
   AttachContribution,
   AttachMode,
   GuestAuthorization,
@@ -23,12 +35,14 @@ export type {
   IntegrationSettingField,
   IntegrationToken,
   OpenChamberContributes,
+  OpenChamberEngines,
   OpenChamberManifest,
   PanelContribution,
   ParseManifestErrorCode,
   ParseManifestFailure,
   ParseManifestResult,
   ParseManifestSuccess,
+  PublicAgent,
   PublicIntegration,
   ResolvedGuestApi,
   ManifestDocument,
@@ -41,7 +55,9 @@ export {
   clampStartSessionRequest,
   guestMessageSchema,
   hostMessageSchema,
+  isAgentStatusResult,
   isGuestRequestPath,
+  isGuestRequestResult,
   isHostRequestErrorCode,
   isPromptResult,
   isStartSessionResult,
@@ -50,6 +66,8 @@ export {
   resolveHostRequestErrorCode,
 } from './protocol.ts';
 export type {
+  AgentStatus,
+  AgentStatusResult,
   HostRequestErrorCode,
   AttachBranches,
   AttachIssueRequest,
@@ -63,6 +81,8 @@ export type {
   StartSessionResult,
   StartSessionSent,
   ComposeRequest,
+  GuestAgentRequestMessage,
+  GuestAgentStatusMessage,
   GuestAttachMessage,
   GuestClipboardWriteMessage,
   GuestCloseMessage,
@@ -102,6 +122,7 @@ export type {
 } from './protocol.ts';
 export {
   EMPTY_GUEST_CONNECTION,
+  AGENT_STATUS_VALUES,
   HOST_REQUEST_ERROR_CODES,
   SESSION_LIFECYCLE_PHASES,
   START_SESSION_SENT,

@@ -1,0 +1,65 @@
+---
+title: UI 套件
+description: 用 @openchamber/sdk/ui 画任务列表、卡片、attach 选择器或 pull 窗口。
+---
+
+# UI 套件
+
+想让面板看起来像宿主的跟踪器时，引入 `@openchamber/sdk/ui`。套件用宿主 token 画 DOM。它不跟供应商说话。你还是自己调 `host.request` 和 `host.attach`。
+
+可以跳过套件，自己画 DOM。
+
+任何挂载之前先调用 `applyHostReady`。
+
+```ts
+import { applyHostReady, mountIssuePage } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  mountIssuePage(document.querySelector("#root")!, {
+    items: tasks,
+    filters,
+    onSelect: (item) => {
+      void host.attach({
+        providerId: "acme-hello",
+        id: item.id,
+        title: item.title,
+        url: item.url ?? "",
+      });
+    },
+  });
+});
+```
+
+## 挂什么
+
+| 调用 | 放哪里 |
+| --- | --- |
+| `mountIssuePage` | 栏上的列表。紧凑筛选、图标搜索、标识加标题的行。 |
+| `mountIssueCard` | 点行之后的任务。返回、状态、元数据、描述、评论、页脚按钮。 |
+| `mountAttachIssues` | + 菜单选择器。搜索保持打开。选中后调用 `host.attach` 和 `host.close`。 |
+| `mountPullRequest` | pull 或合并请求窗口。标签是 Overview、Checks、Comments。 |
+| `mountButton` | 共用的连接按钮 |
+| `mountTextField` | 共用的连接字段 |
+| `mountEmpty` | 共用的空状态 |
+
+描述和评论保持纯文本。套件会把 `![alt](https://…)` 和 `[label](https://…)` 提成媒体。头像 URL 不进 attach 载荷。
+
+`mountPullRequest` 接受带记录、检查和评论的 `mode: "view"`，或带提交处理函数的 `mode: "create"`。页脚回调是 attach、新会话、新 worktree、ready 和 merge。套件负责画。git 留在宿主。
+
+## 筛选和行
+
+筛选上的 `value` 是起始选择。之后你用新的 `items` 做 `update` 时，组件会保住用户的选择。只有重新挂载时才再传 `value`。
+
+`slot` 放筛选位置。`start` 在左边伸长并保留标签。`end` 挤到右边，面板窄于 520px 时变成图标。不写 `slot` 时，第一个筛选是 `start`，其余是 `end`。
+
+一行可以带 `badge` 和 `subtitle`。就像 GitHub 选择器显示仓库或 `head → base`。
+
+`hasMore` / `onMore` 加载下一远程页。`toggle` 是一个复选框。含义由访客写进 `attach.text`。`session` 是第二个复选框，像 Create in worktree。勾上时调用 `host.startSession({ worktree: true })`，不要调 `attach`。`action` 是页上的按钮。
+
+宿主不搜索，也不持久化访客筛选。
+
+## 相关
+
+- [构建访客面板](/zh-cn/sdk/) — 文件夹、打包和清单
+- [宿主 API](/zh-cn/sdk/host/) — `connectHost`、attach 和错误

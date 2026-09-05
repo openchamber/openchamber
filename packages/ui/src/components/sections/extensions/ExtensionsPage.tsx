@@ -10,9 +10,10 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
+import { grantGuestAgent } from '@/lib/guests/agent';
 import { installGuest, uninstallGuest, type InstallGuestErrorCode } from '@/lib/guests/install';
 import { loadGuestCatalog } from '@/lib/guests/load-catalog';
-import type { GuestSource } from '@/lib/guests/types';
+import type { GuestSource, InstalledGuest } from '@/lib/guests/types';
 import { useGuestsStore } from '@/lib/guests/store';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 
@@ -24,6 +25,7 @@ const errorToastKey = (code: InstallGuestErrorCode): I18nKey => {
   if (code === 'id-taken') return 'settings.extensions.toast.idTaken';
   if (code === 'already-installed') return 'settings.extensions.toast.alreadyInstalled';
   if (code === 'missing-build') return 'settings.extensions.toast.missingBuild';
+  if (code === 'host-too-old') return 'settings.extensions.toast.hostTooOld';
   if (code === 'clone-failed') return 'settings.extensions.toast.cloneFailed';
   if (code === 'extract-failed') return 'settings.extensions.toast.extractFailed';
   return 'settings.extensions.toast.failed';
@@ -34,6 +36,24 @@ const sourceKey = (source?: GuestSource): I18nKey => {
   if (source === 'zip') return 'settings.extensions.source.zip';
   if (source === 'git') return 'settings.extensions.source.git';
   return 'settings.extensions.source.bundled';
+};
+
+const agentNeedsGrant = (guest: InstalledGuest): boolean => {
+  const agent = guest.agent;
+  if (!agent || agent.granted) {
+    return false;
+  }
+  const sockets = agent.permissions?.sockets?.length ?? 0;
+  const exec = agent.permissions?.exec?.length ?? 0;
+  return sockets > 0 || exec > 0;
+};
+
+const agentPermissionList = (guest: InstalledGuest): string => {
+  const parts = [
+    ...(guest.agent?.permissions?.sockets ?? []),
+    ...(guest.agent?.permissions?.exec ?? []),
+  ];
+  return parts.join(', ');
 };
 
 export const ExtensionsPage: React.FC = () => {
@@ -58,7 +78,15 @@ export const ExtensionsPage: React.FC = () => {
     const result = await installGuest(trimmed);
     setBusy(false);
     if (!result.ok) {
-      toast.error(t(errorToastKey(result.code)));
+      if (result.code === 'host-too-old') {
+        toast.error(
+          result.required
+            ? t('settings.extensions.toast.hostTooOld', { version: result.required })
+            : t('settings.extensions.toast.failed'),
+        );
+      } else {
+        toast.error(t(errorToastKey(result.code)));
+      }
       return;
     }
     setInstallValue('');
@@ -75,6 +103,18 @@ export const ExtensionsPage: React.FC = () => {
       return;
     }
     toast.success(t('settings.extensions.toast.removed', { name }));
+    await loadGuestCatalog();
+  };
+
+  const allowAgent = async (id: string, name: string) => {
+    setBusy(true);
+    const ok = await grantGuestAgent(id);
+    setBusy(false);
+    if (!ok) {
+      toast.error(t('settings.extensions.toast.agentGrantFailed'));
+      return;
+    }
+    toast.success(t('settings.extensions.toast.agentGranted', { name }));
     await loadGuestCatalog();
   };
 
@@ -102,19 +142,43 @@ export const ExtensionsPage: React.FC = () => {
                   {t(sourceKey(guest.source))}
                   {guest.path ? ` · ${guest.path}` : ` · ${guest.id}`}
                 </div>
+                {guest.agent?.granted ? (
+                  <div className="typography-meta text-muted-foreground">
+                    {t('settings.extensions.agent.allowed')}
+                  </div>
+                ) : null}
+                {agentNeedsGrant(guest) ? (
+                  <div className="typography-meta truncate text-muted-foreground">
+                    {t('settings.extensions.agent.permissions', { list: agentPermissionList(guest) })}
+                  </div>
+                ) : null}
               </div>
-              {guest.source && guest.source !== 'bundled' ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  disabled={busy}
-                  aria-label={t('settings.extensions.remove.aria', { name: guest.name })}
-                  onClick={() => void remove(guest.id, guest.name)}
-                >
-                  {t('settings.extensions.remove')}
-                </Button>
-              ) : null}
+              <div className="flex shrink-0 items-center gap-1">
+                {agentNeedsGrant(guest) ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    disabled={busy}
+                    aria-label={t('settings.extensions.agent.allow.aria', { name: guest.name })}
+                    onClick={() => void allowAgent(guest.id, guest.name)}
+                  >
+                    {t('settings.extensions.agent.allow')}
+                  </Button>
+                ) : null}
+                {guest.source && guest.source !== 'bundled' ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    disabled={busy}
+                    aria-label={t('settings.extensions.remove.aria', { name: guest.name })}
+                    onClick={() => void remove(guest.id, guest.name)}
+                  >
+                    {t('settings.extensions.remove')}
+                  </Button>
+                ) : null}
+              </div>
             </div>
           ))}
         </div>

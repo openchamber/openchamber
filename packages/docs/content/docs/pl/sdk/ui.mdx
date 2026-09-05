@@ -1,0 +1,65 @@
+---
+title: Zestaw UI
+description: Narysuj listę, kartę, picker attach albo okno pull przez @openchamber/sdk/ui.
+---
+
+# Zestaw UI
+
+Importuj `@openchamber/sdk/ui`, jeśli panel ma wyglądać jak trackery hosta. Zestaw maluje DOM z tokenów hosta. Z dostawcą nie rozmawia. Nadal wołasz `host.request` i `host.attach`.
+
+Zestaw możesz pominąć i rysować własny DOM.
+
+Wywołaj `applyHostReady` przed każdym mountem.
+
+```ts
+import { applyHostReady, mountIssuePage } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  mountIssuePage(document.querySelector("#root")!, {
+    items: tasks,
+    filters,
+    onSelect: (item) => {
+      void host.attach({
+        providerId: "acme-hello",
+        id: item.id,
+        title: item.title,
+        url: item.url ?? "",
+      });
+    },
+  });
+});
+```
+
+## Co montować
+
+| Wywołanie | Gdzie stoi |
+| --- | --- |
+| `mountIssuePage` | lista na belce. Zwarte filtry, szukanie jako ikona, wiersze identyfikator plus tytuł. |
+| `mountIssueCard` | zadanie po kliknięciu wiersza. Wstecz, status, metadane, opis, komentarze, przycisk w stopce. |
+| `mountAttachIssues` | picker menu +. Szukanie zostaje otwarte. Po wyborze wołaj `host.attach` i `host.close`. |
+| `mountPullRequest` | okno pull albo merge request. Zakładki Overview, Checks i Comments. |
+| `mountButton` | wspólny przycisk połączenia |
+| `mountTextField` | wspólne pole połączenia |
+| `mountEmpty` | wspólny pusty stan |
+
+Opis i komentarze zostają zwykłym tekstem. Zestaw podnosi `![alt](https://…)` i `[label](https://…)` do mediów. URL-e awatarów nie wchodzą do payloadu attach.
+
+`mountPullRequest` bierze `mode: "view"` z rekordem, checkami i komentarzami albo `mode: "create"` z handlerem submit. Callbacki stopki to attach, nowa sesja, nowy worktree, ready i merge. Zestaw maluje. Git zostaje na hoście.
+
+## Filtry i wiersze
+
+`value` na filtrze to startowy wybór. Potem komponent trzyma wybory użytkownika, gdy robisz `update` z nową listą `items`. Podaj `value` znowu tylko przy remoncie.
+
+`slot` stawia filtr. `start` rośnie w lewo i zostawia etykietę. `end` pakuje się w prawo i staje się ikoną, gdy panel schodzi poniżej 520px. Bez `slot` pierwszy filtr to `start`, reszta `end`.
+
+Wiersz może nieść `badge` i `subtitle`. Tak samo picker GitHub pokazuje repo albo `head → base`.
+
+`hasMore` / `onMore` ładuje następną zdalną stronę. `toggle` to jeden checkbox. Sens gość kładzie w `attach.text`. `session` to drugi checkbox, jak Create in worktree. Gdy jest zaznaczony, wołaj `host.startSession({ worktree: true })` zamiast `attach`. `action` to przycisk na stronie.
+
+Host nie szuka i nie zapisuje filtrów gościa.
+
+## Powiązane
+
+- [Zbuduj panel gościa](/pl/sdk/) — folder, bundle i manifest
+- [API hosta](/pl/sdk/host/) — `connectHost`, attach i błędy

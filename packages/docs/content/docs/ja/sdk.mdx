@@ -1,0 +1,111 @@
+---
+title: ゲストパネルを作る
+description: OpenChamber のレールに載る HTML パネルを作り、connectHost でホストと話す。
+---
+
+# ゲストパネルを作る
+
+`@openchamber/sdk` は第三者のパネルを OpenChamber のレールに載せます。パネルは iframe 内の HTML です。OpenChamber とは `connectHost()` で話します。
+
+動くのはウェブとデスクトップです。VS Code とモバイルはカタログを unsupported にします。iframe は読み込みません。
+
+## 渡すもの
+
+フォルダに次の 3 つです。
+
+- `openchamber` ブロックのある `package.json`
+- `panel/index.html`
+- `panel/main.js`。古典的な IIFE。iframe は ESM を読めません。
+
+`oc-dev` は `panel/main.js` を出すとき、まだ `panel/main.ts` をコンパイルします。パッケージ済みの OpenChamber と `openchamber serve` はしません。IIFE を渡してください。
+
+```bash
+bun run --filter @openchamber/sdk bundle -- panel/main.ts panel/main.js
+```
+
+HTML はそのファイルを指します。
+
+## 作業中の入れ方
+
+1. ウェブかデスクトップで OpenChamber を起動する。
+2. **Settings → Extensions** を開く。
+3. フォルダパス、ローカルの `.zip`、または https の git / zip URL を追加する。
+
+レールにアイコンが出ます。クリックすると HTML が載ります。同じ `id` をふたつのパネルで使えません。
+
+
+**フォルダ**インストールは `extensions.json` にパスを残します。Uninstall はカタログ行だけ外します。
+
+**zip**（または https zip / git URL）は OpenChamber のデータ dir の `guests/{id}` にコピーされます。ホストが展開し、マニフェストを確認してそのコピーから動かします。Uninstall はコピーを消します。zip には `package.json`、`panel/index.html`、`panel/main.js`、宣言した `icon.svg` / `agent/main.js` を入れてください。`node_modules` と TypeScript は入れないでください。
+
+## マニフェスト
+
+```json
+{
+  "name": "@acme/hello-panel",
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": {
+        "id": "acme-hello",
+        "name": "Hello",
+        "icon": "window",
+        "entry": "panel/index.html"
+      },
+      "attach": "dialog",
+      "integration": {
+        "name": "Acme",
+        "description": "Tasks from Acme",
+        "oauth": {
+          "authorizeUrl": "https://acme.example/oauth/authorize",
+          "tokenUrl": "https://acme.example/oauth/token",
+          "apiOrigin": "https://api.acme.example"
+        },
+        "settings": [{ "id": "list-id", "label": "List ID" }]
+      }
+    }
+  }
+}
+```
+
+`apiVersion` は `1` です。それ以外は拒否です。
+
+`engines.openchamber` は任意です。`1.22.0` または `>=1.22.0` を使います。この OpenChamber が古いとインストールは拒否されます。
+
+`contributes.agent` は任意です。Docker ソケットなど向けにホストが起動するローカルプロセスを指定します。パネルは `agentRequest` を呼び、プロセスはホストが持ちます。パッケージの `GUEST_AGENTS.md` を参照。
+
+`id` は kebab-case です。`icon` はレールと同じ kebab-case の Remixicon 名です。`RiWindowLine` は `window` になります。または `icon.svg` のようなパッケージ内 SVG パスを置きます。URL と絶対パスは parse に落ちます。`entry` はパッケージ内に留めます。`../` と絶対パスは parse に落ちます。
+
+`attach` は任意です。
+
+- `true` または `"panel"` は、レールを開く + メニュー行を足します
+- `"dialog"` は同じ iframe をホストの窓で開きます
+- 省略するか `false` にすると、それらのメニューには出ません
+
+`ready.surface` は `panel` か `dialog` です。レールに一覧、窓にピッカーを描けます。
+
+`integration` は任意です。ホストは **Settings → Integrations** にカードを描きます。OAuth ゲストはそこに client id を貼ります。トークンゲストは API トークンを貼ります。`host: { "provider": "linear" }` はファーストパーティの Linear 接続を使い、client id は聞きません。ゲストはトークンを見ません。
+
+`request`、OAuth、attach、エラーは [ホスト API](/ja/sdk/host/) を見てください。
+
+## パネルの最初の行
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+
+host.onReady((ctx) => {
+  document.body.dataset.theme = ctx.theme.mode;
+  document.body.dataset.surface = ctx.surface;
+});
+```
+
+iframe の外では `connectHost` は拒否します。
+
+一覧、カード、attach ピッカーが要るなら `@openchamber/sdk/ui` を入れてください。キットは使わなくてもよく、自分の DOM を描いて構いません。[UI キット](/ja/sdk/ui/) を見てください。
+
+## 関連
+
+- [ホスト API](/ja/sdk/host/) — `connectHost` のメソッド、上限、エラーコード
+- [UI キット](/ja/sdk/ui/) — 一覧、カード、attach ピッカー、pull 窓
