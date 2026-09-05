@@ -26,6 +26,7 @@ type WorktreeListEntry = {
   branch?: string;
   head?: string;
   name?: string;
+  prunable?: boolean;
 };
 
 const deriveHeadStateFromWorktreeEntry = (entry: WorktreeListEntry): 'branch' | 'detached' | 'unborn' => {
@@ -44,7 +45,11 @@ const deriveCanonicalWorktreeFields = (
 ): Pick<WorktreeMetadata, 'worktreeRoot' | 'worktreeStatus' | 'headState' | 'worktreeSource'> => {
   return {
     worktreeRoot: worktreePath,
-    worktreeStatus: 'ready',
+    // A prunable worktree is still registered by git but its directory is
+    // gone. It stays in the topology as `missing` so the sessions that lived
+    // there keep their group in the sidebar and can be opened and relocated;
+    // dropping it would hide those sessions with no way back.
+    worktreeStatus: entry.prunable === true ? 'missing' : 'ready',
     headState: deriveHeadStateFromWorktreeEntry(entry),
     worktreeSource: 'existing',
   };
@@ -299,6 +304,7 @@ export const worktreeMapsEqual = (
         || next.projectDirectory !== current.projectDirectory
         || next.worktreeRoot !== current.worktreeRoot
         || next.headState !== current.headState
+        || next.worktreeStatus !== current.worktreeStatus
         || next.worktreeSource !== current.worktreeSource
         || next.source !== current.source) return false;
     }
@@ -392,6 +398,29 @@ const getWorktreeListGeneration = (projectDirectory: string): number => {
 const invalidateWorktreeList = (projectDirectory: string): void => {
   _worktreeListGeneration.set(projectDirectory, getWorktreeListGeneration(projectDirectory) + 1);
   _worktreeListCache.delete(projectDirectory);
+};
+
+type WorktreeTopologyListener = (projectDirectory: string) => void;
+const worktreeTopologyListeners = new Set<WorktreeTopologyListener>();
+
+/**
+ * Subscribe to in-app evidence that a project's worktree topology changed
+ * outside the flows that publish it themselves (a session relocated out of a
+ * directory the server confirmed missing). The sidebar rediscovers on this
+ * signal the same way it does for the server's `session-created` event, so
+ * the topology stays event-driven with no idle polling.
+ */
+export const subscribeWorktreeTopologyChanged = (listener: WorktreeTopologyListener): (() => void) => {
+  worktreeTopologyListeners.add(listener);
+  return () => {
+    worktreeTopologyListeners.delete(listener);
+  };
+};
+
+export const notifyWorktreeTopologyChanged = (projectDirectory: string): void => {
+  const normalized = normalizePath(projectDirectory);
+  invalidateWorktreeList(normalized);
+  for (const listener of worktreeTopologyListeners) listener(normalized);
 };
 
 const readProjectWorktrees = async (projectDirectory: string): Promise<WorktreeMetadata[]> => {

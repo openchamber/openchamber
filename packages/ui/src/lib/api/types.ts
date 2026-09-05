@@ -406,6 +406,8 @@ export interface GitWorktreeInfo {
   name: string;
   branch: string;
   path: string;
+  /** git still registers the worktree, but its directory is gone (deleted outside git). */
+  prunable?: boolean;
 }
 
 export interface GitWorktreeValidationError {

@@ -707,6 +707,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': '添付のワークツリーをアーカイブしました。',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': 'ワークツリーをアーカイブし、リモートブランチを削除しました。',
   'sessions.missingDirectory.movedToProject': 'このセッションのフォルダーは存在しません。セッションを {project} に移動しました。',
+  'sessions.sidebar.group.worktreeMissing': 'ワークツリーのフォルダーがありません',
   'sessions.sidebar.sessionDialogs.worktree.label': 'ワークツリー',
   'sessions.sidebar.sessionDialogs.worktree.pathUnavailable': 'ワークツリーパスは利用できません。',
   'sessions.sidebar.sessionDialogs.worktree.uncommittedWarning': '未コミットの変更は破棄されます。',

@@ -1221,6 +1221,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           // and OpenCode client all follow the session to its new home.
           get().setCurrentSession(sessionId, result.destinationDirectory)
         }
+        // The server just confirmed a worktree directory is gone; the sidebar's
+        // worktree topology for that project is stale, so let it rediscover.
+        const { notifyWorktreeTopologyChanged } = await import("@/lib/worktrees/worktreeManager")
+        notifyWorktreeTopologyChanged(result.destinationDirectory)
         await notifySessionRelocated(result.destinationDirectory)
         return result
       })

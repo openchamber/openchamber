@@ -901,6 +901,18 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   // Reserve room for the hover-revealed header actions (new draft + delete
   // worktree) so they never overlap the label / PR badge.
   const hasWorktreeDeleteAction = Boolean(!group.isMain && group.worktree);
+  // git still registers this worktree but its directory is gone. The group
+  // stays so its sessions remain reachable (opening one relocates it); the
+  // icon tells the user why the folder is not there.
+  const worktreeMissingIndicator = group.worktree?.worktreeStatus === 'missing' ? (
+    <span
+      className="inline-flex flex-shrink-0 items-center text-status-warning"
+      title={t('sessions.sidebar.group.worktreeMissing')}
+      aria-label={t('sessions.sidebar.group.worktreeMissing')}
+    >
+      <Icon name="alert" className="h-3 w-3" />
+    </span>
+  ) : null;
   const groupHeaderRightPadding = alwaysShowActions
     ? (hasWorktreeDeleteAction ? 'pr-14' : 'pr-7')
     : (hasWorktreeDeleteAction
@@ -1147,6 +1159,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                     </span>
                   </span>
                   <span className="min-w-0 flex-1 truncate">{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
+                  {worktreeMissingIndicator}
                   {groupActivityIndicator}
                 </span>
               ) : (!group.isMain || group.worktree) ? (
@@ -1168,6 +1181,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                   <span className="min-w-0 truncate typography-ui-label font-semibold text-muted-foreground">
                     {renderHighlightedText(group.label, normalizedSessionSearchQuery)}
                   </span>
+                  {worktreeMissingIndicator}
                   {groupActivityIndicator}
                   {groupPrSummary ? (
                     <span

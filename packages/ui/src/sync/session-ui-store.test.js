@@ -14,6 +14,7 @@ import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { subscribeWorktreeTopologyChanged } from '@/lib/worktrees/worktreeManager';
 import { createContextPart } from '@/lib/messages/contextParts';
 
 /**
@@ -1348,13 +1349,17 @@ describe('missing session directory recovery', () => {
     useSessionUIStore.getState().setWorktreeMetadata('root', { path: missingWorktree, branch: 'gone' });
     useSessionUIStore.getState().setWorktreeMetadata('child', { path: missingWorktree, branch: 'gone' });
 
+    const topologyChanges = [];
+    const unsubscribe = subscribeWorktreeTopologyChanged((directory) => topologyChanges.push(directory));
     const store = useSessionUIStore.getState();
     const [first, second] = await Promise.all([
       store.recoverMissingSessionDirectory('root'),
       store.recoverMissingSessionDirectory('root'),
     ]);
+    unsubscribe();
 
     expect(first).toBe(second);
+    expect(topologyChanges).toEqual([projectDirectory]);
     expect(first.status).toBe('moved');
     expect(moves.map((move) => move.sessionID)).toEqual(['root', 'child']);
     expect(moves.every((move) => move.destination.directory === projectDirectory && move.moveChanges === false)).toBe(true);
