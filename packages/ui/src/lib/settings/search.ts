@@ -254,6 +254,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['autoscroll', 'auto-scroll', 'follow', 'stick to bottom', 'streaming'],
   },
   {
+    id: 'chat.speed-metrics',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.messageSpeedMetrics',
+    descriptionKey: 'settings.openchamber.visual.field.messageSpeedMetricsInfo',
+    keywords: ['speed', 'ttft', 'tokens per second', 'tok/s', 'throughput', 'latency', 'metrics'],
+  },
+  {
     id: 'chat.sticky-user-header',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.stickyUserHeader',

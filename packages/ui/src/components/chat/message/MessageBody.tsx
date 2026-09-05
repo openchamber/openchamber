@@ -9,6 +9,7 @@ import { MessageFilesDisplay } from '../FileAttachment';
 import { TurnChangedFilesDropdown } from '../TurnChangedFilesDropdown';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
 import type { StreamPhase, ToolPopupContent, AgentMentionInfo } from './types';
+import type { MessageSpeedMetrics } from '../lib/messageSpeedMetrics';
 import type { TurnActivityGroup, TurnChangedFile, TurnGroupingContext } from '../lib/turns/types';
 import { cn } from '@/lib/utils';
 import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
@@ -398,6 +399,12 @@ const formatTurnDuration = (durationMs: number): string => {
     return `${minutes}m ${seconds}s`;
 };
 
+/** Decode-throughput figure: whole tokens from ten up, one decimal below. */
+const formatTokensPerSecondRate = (tokensPerSecond: number): string => {
+    const clamped = Math.max(0, tokensPerSecond);
+    return clamped >= 10 ? String(Math.round(clamped)) : String(Math.round(clamped * 10) / 10);
+};
+
 interface MessageBodyProps {
     sessionId?: string;
     messageId: string;
@@ -439,6 +446,8 @@ interface MessageBodyProps {
     footerModelName?: string;
     footerAgentName?: string;
     footerVariant?: string;
+    speedMetrics?: MessageSpeedMetrics | null;
+    showSpeedMetrics?: boolean;
     isDarkTheme?: boolean;
 }
 
@@ -1122,6 +1131,8 @@ const AssistantMessageBody = React.memo(({
     footerModelName,
     footerAgentName,
     footerVariant,
+    speedMetrics = null,
+    showSpeedMetrics = false,
     isDarkTheme = false,
 }: Omit<MessageBodyProps, 'isUser'>) => {
     const { t, locale } = useI18n();
@@ -2248,6 +2259,28 @@ const AssistantMessageBody = React.memo(({
                                     </span>
                                 </TooltipTrigger>
                                 <TooltipContent>{turnDurationText}</TooltipContent>
+                            </Tooltip>
+                        ) : null}
+                        {showSpeedMetrics && speedMetrics?.ttftMs !== undefined ? (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
+                                        <Icon name="timer-flash" className="h-3.5 w-3.5" />
+                                        <span className="message-footer__label">{t('chat.messageBody.metrics.ttft', { duration: formatTurnDuration(speedMetrics.ttftMs) })}</span>
+                                    </span>
+                                </TooltipTrigger>
+                                <TooltipContent sideOffset={6}>{t('chat.messageBody.metrics.ttftInfo')}</TooltipContent>
+                            </Tooltip>
+                        ) : null}
+                        {showSpeedMetrics && speedMetrics ? (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
+                                        <Icon name="speed-up" className="h-3.5 w-3.5" />
+                                        <span className="message-footer__label">{t('chat.messageBody.metrics.tokensPerSecond', { rate: formatTokensPerSecondRate(speedMetrics.tokensPerSecond) })}</span>
+                                    </span>
+                                </TooltipTrigger>
+                                <TooltipContent sideOffset={6}>{t('chat.messageBody.metrics.tokensPerSecondInfo')}</TooltipContent>
                             </Tooltip>
                         ) : null}
                         {footerTimestamp ? (

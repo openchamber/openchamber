@@ -351,6 +351,16 @@ describe('settings helpers', () => {
     expect(response.collapsibleThinkingBlocks).toBe(true);
   });
 
+  it('persists boolean showMessageSpeedMetrics and defaults to false when absent', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ showMessageSpeedMetrics: true })).toEqual({ showMessageSpeedMetrics: true });
+    expect(helpers.sanitizeSettingsUpdate({ showMessageSpeedMetrics: 'true' })).toEqual({});
+
+    expect(helpers.formatSettingsResponse({ showMessageSpeedMetrics: true }).showMessageSpeedMetrics).toBe(true);
+    expect(helpers.formatSettingsResponse({}).showMessageSpeedMetrics).toBe(false);
+  });
+
   it('includes transient desktop LAN access runtime status in desktop settings response', () => {
     const helpers = createTestHelpers();
     const previousRuntime = process.env.OPENCHAMBER_RUNTIME;

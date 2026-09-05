@@ -321,6 +321,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setShowReasoningTraces = useUIStore(state => state.setShowReasoningTraces);
     const streamingAutoFollowEnabled = useUIStore(state => state.streamingAutoFollowEnabled);
     const setStreamingAutoFollowEnabled = useUIStore(state => state.setStreamingAutoFollowEnabled);
+    const showMessageSpeedMetrics = useUIStore(state => state.showMessageSpeedMetrics);
+    const setShowMessageSpeedMetrics = useUIStore(state => state.setShowMessageSpeedMetrics);
     const collapsibleThinkingBlocks = useUIStore(state => state.collapsibleThinkingBlocks);
     const setCollapsibleThinkingBlocks = useUIStore(state => state.setCollapsibleThinkingBlocks);
 
@@ -1882,6 +1884,14 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         ariaLabel={t('settings.openchamber.visual.field.streamingAutoFollowAria')}
                                         info={t('settings.openchamber.visual.field.streamingAutoFollowInfo')}
                                         settingsItem="chat.streaming-auto-follow"
+                                    />
+                                    <SettingsCheckboxRow
+                                        checked={showMessageSpeedMetrics}
+                                        onChange={setShowMessageSpeedMetrics}
+                                        label={t('settings.openchamber.visual.field.messageSpeedMetrics')}
+                                        ariaLabel={t('settings.openchamber.visual.field.messageSpeedMetricsAria')}
+                                        info={t('settings.openchamber.visual.field.messageSpeedMetricsInfo')}
+                                        settingsItem="chat.speed-metrics"
                                     />
                                 </SettingsSection>
 

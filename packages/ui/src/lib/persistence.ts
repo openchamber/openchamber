@@ -548,6 +548,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     openInAppId: DEFAULT_OPEN_IN_APP_ID,
     showReasoningTraces: defaults.showReasoningTraces,
     streamingAutoFollowEnabled: defaults.streamingAutoFollowEnabled,
+    showMessageSpeedMetrics: defaults.showMessageSpeedMetrics,
     workStatusPanelEnabled: defaults.workStatusPanelEnabled,
     workStatusHiddenSections: defaults.workStatusHiddenSections,
     sessionRecapEnabled: defaults.sessionRecapEnabled,
@@ -656,6 +657,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.streamingAutoFollowEnabled === 'boolean' && settings.streamingAutoFollowEnabled !== store.streamingAutoFollowEnabled) {
     store.setStreamingAutoFollowEnabled(settings.streamingAutoFollowEnabled);
+  }
+  if (typeof settings.showMessageSpeedMetrics === 'boolean' && settings.showMessageSpeedMetrics !== store.showMessageSpeedMetrics) {
+    store.setShowMessageSpeedMetrics(settings.showMessageSpeedMetrics);
   }
   if (typeof settings.sessionRecapEnabled === 'boolean' && settings.sessionRecapEnabled !== store.sessionRecapEnabled) {
     store.setSessionRecapEnabled(settings.sessionRecapEnabled);
@@ -1180,6 +1184,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.streamingAutoFollowEnabled === 'boolean') {
     result.streamingAutoFollowEnabled = candidate.streamingAutoFollowEnabled;
+  }
+  if (typeof candidate.showMessageSpeedMetrics === 'boolean') {
+    result.showMessageSpeedMetrics = candidate.showMessageSpeedMetrics;
   }
   if (typeof candidate.sessionRecapEnabled === 'boolean') {
     result.sessionRecapEnabled = candidate.sessionRecapEnabled;

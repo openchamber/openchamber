@@ -319,6 +319,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.showReasoningTraces === 'boolean') {
       result.showReasoningTraces = candidate.showReasoningTraces;
     }
+    if (typeof candidate.showMessageSpeedMetrics === 'boolean') {
+      result.showMessageSpeedMetrics = candidate.showMessageSpeedMetrics;
+    }
     if (typeof candidate.sessionRecapEnabled === 'boolean') {
       result.sessionRecapEnabled = candidate.sessionRecapEnabled;
     }
@@ -954,6 +957,12 @@ export const createSettingsHelpers = (dependencies) => {
           ? settings.showReasoningTraces
           : typeof sanitized.showReasoningTraces === 'boolean'
             ? sanitized.showReasoningTraces
+            : false,
+      showMessageSpeedMetrics:
+        typeof settings.showMessageSpeedMetrics === 'boolean'
+          ? settings.showMessageSpeedMetrics
+          : typeof sanitized.showMessageSpeedMetrics === 'boolean'
+            ? sanitized.showMessageSpeedMetrics
             : false,
       collapsibleThinkingBlocks:
         typeof settings.collapsibleThinkingBlocks === 'boolean'
