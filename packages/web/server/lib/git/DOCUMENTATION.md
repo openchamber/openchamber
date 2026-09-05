@@ -183,7 +183,9 @@ The following functions are internal helpers used by exported functions:
 ### Cross-Platform Considerations
 - Use `normalizeDirectoryPath` for all directory inputs to handle `~` and path separators.
 - Use `canonicalPath` for path comparisons to handle case-insensitive filesystems (Windows).
-- Windows Git commands use MSYS/MinGW paths; avoid direct Windows paths in git commands.
+- MSYS2 Git can return `/c/repos/project` on Windows. Pass Git filesystem-path output through `normalizeGitOutputPath` before resolving it or using it with Node filesystem and process APIs. It converts drive mounts to `C:/repos/project` on Windows and preserves other paths, including POSIX paths on Linux and macOS.
+- Apply this conversion to repository roots, Git metadata paths, and worktree list paths. Repository-relative filenames, diff content, and user-supplied paths keep their existing handling. Custom MSYS mount points are outside this conversion.
+- On Windows, `buildGitEnv` appends `noglob` to the child process's `MSYS` options so MSYS2 passes revision arguments such as `HEAD^{commit}` and `branch@{upstream}` literally. Other options and the parent environment remain unchanged. Both simple-git and direct Git commands use this environment.
 
 ### Error Handling
 - All exported functions should throw errors with descriptive messages.
