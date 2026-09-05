@@ -18,6 +18,16 @@ import { FilesystemError, parseFilesystemErrorReason } from "@/lib/api/files-err
 import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
 
+import {
+  listPendingQuestionsViaV2,
+  resetQuestionsV2FallbackWarningsForTests,
+} from "./questions-v2";
+
+// Re-exported so existing callers (notably the V2 read test that destructures
+// `resetQuestionsV2FallbackWarningsForTests` from `./client`) keep working
+// after the helper moved into its own module.
+export { resetQuestionsV2FallbackWarningsForTests };
+
 /**
  * Tagged result of `OpencodeService.fetchPermission()`. The caller can
  * distinguish a server-confirmed "no longer pending" permission (HTTP
@@ -1437,6 +1447,13 @@ class OpencodeService {
 
     const fetchForDirectory = async (directory?: string | null): Promise<QuestionRequest[]> => {
       const trimmed = typeof directory === 'string' ? directory.trim() : '';
+      // Native V2 read first; the V1 `question.list` call below stays as the
+      // fallback for pre-1.18 servers and any V2 failure (see
+      // {@link listPendingQuestionsViaV2}).
+      const viaV2 = await this.fetchPendingQuestionsV2(trimmed || undefined);
+      if (viaV2) {
+        return viaV2;
+      }
       const result = await this.client.question.list(trimmed ? { directory: trimmed } : undefined);
       if (result.error) {
         throw new Error(`question.list failed: ${formatSdkError(result.error)}`);
@@ -1475,6 +1492,18 @@ class OpencodeService {
     }
 
     return merged;
+  }
+
+  /**
+   * Thin facade over the shared V2 question-read helper (see
+   * {@link listPendingQuestionsViaV2}). Kept on the class so the
+   * `OpencodeService.listPendingQuestions` call site reads as a single
+   * V2-then-V1 sequence; all V2 semantics (schema, warn-once, fallback
+   * classification) live in `questions-v2.ts` and are shared with the
+   * directory-bootstrap caller (#3288 / unit-5).
+   */
+  private async fetchPendingQuestionsV2(directory?: string): Promise<QuestionRequest[] | null> {
+    return listPendingQuestionsViaV2(this.client, directory);
   }
 
   // Configuration
