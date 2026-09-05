@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { BUILT_IN_SKILL_LOCATION, type DiscoveredSkill, type SkillScope, type SkillSource } from './opencodeConfig';
 import type { BridgeContext } from './bridge';
+import { mergeSettingsForPersistence } from './settings-persistence';
 
 const SETTINGS_KEY = 'openchamber.settings';
 const OPENCHAMBER_SHARED_SETTINGS_PATH = path.join(os.homedir(), '.config', 'openchamber', 'settings.json');
@@ -173,12 +174,15 @@ const readSharedSettingsFromDisk = (): Record<string, unknown> => {
   }
 };
 
-const writeSharedSettingsToDisk = async (changes: Record<string, unknown>): Promise<void> => {
+const writeSharedSettingsToDisk = async (
+  changes: Record<string, unknown>,
+  keysToClear: ReadonlySet<string> = new Set(),
+): Promise<void> => {
   let tmp: string | null = null;
   try {
     await fs.promises.mkdir(path.dirname(OPENCHAMBER_SHARED_SETTINGS_PATH), { recursive: true });
     const current = readSharedSettingsFromDisk();
-    const next: Record<string, unknown> = { ...current, ...changes };
+    const next = mergeSettingsForPersistence(current, changes, keysToClear);
     // Atomic write: tmp file + rename. Readers never see a partial/truncated
     // JSON that would fail to parse and silently get coerced to {}.
     tmp = `${OPENCHAMBER_SHARED_SETTINGS_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -334,17 +338,18 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
     restChanges.opencodeBinary = restChanges.opencodeBinary.trim();
   }
 
+  if ('chatMessageWidthMode' in restChanges) {
+    keysToClear.add('wideChatLayoutEnabled');
+  }
+
   // Persistable state = current persisted (no derived fields) + sanitized changes.
   const persistedCurrent = readPersistedSettings(ctx);
-  const persistable: Record<string, unknown> = { ...persistedCurrent, ...restChanges };
-  for (const key of keysToClear) {
-    delete persistable[key];
-  }
+  const persistable = mergeSettingsForPersistence(persistedCurrent, restChanges, keysToClear);
 
   // Write to the shared file (canonical, cross-client). Also mirror into
   // globalState so older builds can still read recent values if a user
   // downgrades the extension.
-  await writeSharedSettingsToDisk(persistable);
+  await writeSharedSettingsToDisk(persistable, keysToClear);
   await ctx?.context?.globalState.update(SETTINGS_KEY, persistable);
 
   // Return the same shape as readSettings (with derived fields re-applied).

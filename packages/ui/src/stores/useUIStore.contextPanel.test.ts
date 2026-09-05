@@ -375,6 +375,12 @@ describe('useUIStore context panel tabs', () => {
   });
 });
 
+describe('useUIStore timeline defaults', () => {
+  test('keeps timeline activity collapsed by default', () => {
+    expect(useUIStore.getInitialState().activityRenderMode).toBe('collapsed');
+  });
+});
+
 describe('useUIStore openContextSurface', () => {
   const directory = '/repo';
 
@@ -714,5 +720,26 @@ describe('context panel tab limits', () => {
     const tabs = state?.tabs ?? [];
     expect(tabs.some((tab) => tab.id === state?.activeTabId)).toBe(true);
     expect(tabs.some((tab) => tab.targetPath === 'http://localhost:3019/')).toBe(true);
+  });
+});
+
+describe('useUIStore persistence migrations', () => {
+  test('migrates the legacy chat width toggle from a version 18 snapshot', async () => {
+    const migrate = useUIStore.persist.getOptions().migrate;
+    const migrated = await migrate?.({ wideChatLayoutEnabled: true }, 18);
+
+    expect(migrated).toEqual({
+      autoSaveEnabled: true,
+      chatMessageWidthMode: 'wide',
+      contextPanelByDirectory: {},
+      contextRailHiddenSurfaces: [],
+      contextRailOrder: [],
+      fileEditorKeymap: 'default',
+      largeTextPasteBehavior: 'ask',
+      linearIssueListAssignee: 'any',
+      linearIssueListPriority: 'all',
+      linearIssueListStatus: 'all',
+      linearIssueListTeamIdByRuntime: {},
+    });
   });
 });

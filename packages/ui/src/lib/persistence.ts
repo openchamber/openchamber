@@ -1,7 +1,7 @@
 import type { DesktopSettings } from '@/lib/desktop';
 import { sanitizeWorkStatusHiddenSections } from '@/components/chat/work-status/sections';
 import { createProjectIdFromPath } from '@/lib/projectId';
-import { useUIStore } from '@/stores/useUIStore';
+import { normalizeChatMessageWidthMode, useUIStore } from '@/stores/useUIStore';
 import { isMonoFontOption, isUiFontOption } from '@/lib/fontOptions';
 import {
   DEFAULT_FOLLOW_UP_BEHAVIOR,
@@ -595,7 +595,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     messageStreamTransport: 'auto',
     stickyUserHeader: defaults.stickyUserHeader,
     promptNavigatorEnabled: defaults.promptNavigatorEnabled,
-    wideChatLayoutEnabled: defaults.wideChatLayoutEnabled,
+    chatMessageWidthMode: defaults.chatMessageWidthMode,
     showSplitAssistantMessageActions: defaults.showSplitAssistantMessageActions,
     draftStartersVisible: defaults.draftStartersVisible,
     reportUsage: defaults.reportUsage,
@@ -861,8 +861,11 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.promptNavigatorEnabled === 'boolean' && settings.promptNavigatorEnabled !== store.promptNavigatorEnabled) {
     store.setPromptNavigatorEnabled(settings.promptNavigatorEnabled);
   }
-  if (typeof settings.wideChatLayoutEnabled === 'boolean' && settings.wideChatLayoutEnabled !== store.wideChatLayoutEnabled) {
-    store.setWideChatLayoutEnabled(settings.wideChatLayoutEnabled);
+  const chatMessageWidthMode = typeof settings.chatMessageWidthMode === 'string'
+    ? normalizeChatMessageWidthMode(settings.chatMessageWidthMode)
+    : null;
+  if (chatMessageWidthMode && chatMessageWidthMode !== store.chatMessageWidthMode) {
+    store.setChatMessageWidthMode(chatMessageWidthMode);
   }
   if (
     typeof settings.showSplitAssistantMessageActions === 'boolean'
@@ -1530,8 +1533,11 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.promptNavigatorEnabled === 'boolean') {
     result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
   }
-  if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
-    result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
+  if (typeof candidate.chatMessageWidthMode === 'string') {
+    result.chatMessageWidthMode = normalizeChatMessageWidthMode(candidate.chatMessageWidthMode);
+  }
+  if (!result.chatMessageWidthMode && typeof candidate.wideChatLayoutEnabled === 'boolean') {
+    result.chatMessageWidthMode = candidate.wideChatLayoutEnabled ? 'wide' : 'narrow';
   }
   if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
     result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;

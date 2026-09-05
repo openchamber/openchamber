@@ -20,6 +20,7 @@ export type ContextPanelMode = 'diff' | 'walkthrough' | 'file' | 'context' | 'pl
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
+export type ChatMessageWidthMode = 'narrow' | 'wide' | 'fluid';
 export type ActivityRenderMode = 'collapsed' | 'summary';
 export type SessionRetentionAction = 'archive' | 'delete';
 export type TimeFormatPreference = 'auto' | '12h' | '24h';
@@ -103,6 +104,11 @@ function sanitizeLinearIssueListPriority(value: unknown): LinearIssueListPriorit
   return value === 'none' || value === 'urgent' || value === 'high' || value === 'medium' || value === 'low' || value === 'all'
     ? value
     : 'all';
+}
+
+export function normalizeChatMessageWidthMode(value: unknown): ChatMessageWidthMode {
+  if (value === 'wide' || value === 'fluid') return value;
+  return 'narrow';
 }
 
 type ContextPanelTab = {
@@ -942,7 +948,7 @@ interface UIStore {
   projectContextTab: string;
   inputSpellcheckEnabled: boolean;
   largeTextPasteBehavior: LargeTextPasteBehavior;
-  wideChatLayoutEnabled: boolean;
+  chatMessageWidthMode: ChatMessageWidthMode;
   codeBlockLineWrap: boolean;
   showToolFileIcons: boolean;
   showTurnChangedFiles: boolean;
@@ -1126,7 +1132,7 @@ interface UIStore {
   setProjectContextTab: (value: string) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
   setLargeTextPasteBehavior: (value: LargeTextPasteBehavior) => void;
-  setWideChatLayoutEnabled: (value: boolean) => void;
+  setChatMessageWidthMode: (value: ChatMessageWidthMode) => void;
   setCodeBlockLineWrap: (value: boolean) => void;
   setShowToolFileIcons: (value: boolean) => void;
   setShowTurnChangedFiles: (value: boolean) => void;
@@ -1218,7 +1224,7 @@ export const useUIStore = create<UIStore>()(
         sessionGoalDefaultBudget: 200_000,
         collapsibleThinkingBlocks: true,
         chatRenderMode: 'live',
-        activityRenderMode: 'summary',
+        activityRenderMode: 'collapsed',
         showDeletionDialog: true,
         showOpenCodeRestartConfirm: true,
         autoDeleteEnabled: false,
@@ -1295,7 +1301,7 @@ export const useUIStore = create<UIStore>()(
         projectContextTab: 'notes',
         inputSpellcheckEnabled: false,
         largeTextPasteBehavior: DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR,
-        wideChatLayoutEnabled: false,
+        chatMessageWidthMode: 'narrow',
         codeBlockLineWrap: true,
         showToolFileIcons: true,
         showTurnChangedFiles: false,
@@ -2593,8 +2599,8 @@ export const useUIStore = create<UIStore>()(
         setLargeTextPasteBehavior: (value) => {
           set({ largeTextPasteBehavior: normalizeLargeTextPasteBehavior(value) });
         },
-        setWideChatLayoutEnabled: (value) => {
-          set({ wideChatLayoutEnabled: value });
+        setChatMessageWidthMode: (value) => {
+          set({ chatMessageWidthMode: normalizeChatMessageWidthMode(value) });
         },
         setCodeBlockLineWrap: (value) => {
           set({ codeBlockLineWrap: value });
@@ -2775,6 +2781,14 @@ export const useUIStore = create<UIStore>()(
             }
           }
 
+          // v18 -> v19: replace the old boolean wide layout toggle with a width mode.
+          if (version < 19) {
+            if (state.chatMessageWidthMode !== 'wide' && state.chatMessageWidthMode !== 'fluid') {
+              state.chatMessageWidthMode = state.wideChatLayoutEnabled === true ? 'wide' : 'narrow';
+            }
+            delete state.wideChatLayoutEnabled;
+          }
+
           // v12 -> v13: promote FilesView localStorage autosave toggle into the store.
           if (version < 13) {
             if (typeof state.autoSaveEnabled !== 'boolean') {
@@ -2911,6 +2925,7 @@ export const useUIStore = create<UIStore>()(
 
           state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
           state.largeTextPasteBehavior = normalizeLargeTextPasteBehavior(state.largeTextPasteBehavior);
+          state.chatMessageWidthMode = normalizeChatMessageWidthMode(state.chatMessageWidthMode);
 
           if (typeof state.autoSaveEnabled !== 'boolean') {
             state.autoSaveEnabled = true;
@@ -3013,7 +3028,7 @@ export const useUIStore = create<UIStore>()(
           projectContextSidebarWidth: state.projectContextSidebarWidth,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
           largeTextPasteBehavior: state.largeTextPasteBehavior,
-          wideChatLayoutEnabled: state.wideChatLayoutEnabled,
+          chatMessageWidthMode: state.chatMessageWidthMode,
           codeBlockLineWrap: state.codeBlockLineWrap,
           showToolFileIcons: state.showToolFileIcons,
           showTurnChangedFiles: state.showTurnChangedFiles,

@@ -123,7 +123,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   // When set, the Changes surface opens directly into the per-file diff for this path.
   const [pendingChangesDiff, setPendingChangesDiff] = React.useState<{ path: string; staged: boolean } | null>(null);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
-  const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
+  const chatMessageWidthMode = useUIStore((state) => state.chatMessageWidthMode);
   const updateAvailable = useUpdateStore((state) => state.available);
   const updateRuntimeType = useUpdateStore((state) => state.runtimeType);
   const showCapacitorOnlyFeatures = React.useMemo(() => isCapacitorMobileApp(), []);
@@ -216,17 +216,19 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     };
   }, [sidebarWidth, workspacePanelWidth]);
 
-  // Wide chat layout: the shared chat columns key off this root class, but only
-  // the desktop App set it — so on a tablet, where the chat column is finally
-  // wide enough for the setting to mean something, it did nothing. Applied for
-  // every mobile surface; on a phone the viewport is narrower than even the
-  // normal clamp, so it is a no-op there.
+  // Message width: the shared chat columns key off these root classes. Applied
+  // for every mobile surface; on a phone the viewport is narrower than the
+  // normal clamp, so wider modes are a no-op there.
   React.useEffect(() => {
     if (typeof document === 'undefined') return;
     const root = document.documentElement;
-    root.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);
-    return () => root.classList.remove('wide-chat-layout');
-  }, [wideChatLayoutEnabled]);
+    root.classList.toggle('chat-message-width-wide', chatMessageWidthMode === 'wide');
+    root.classList.toggle('chat-message-width-fluid', chatMessageWidthMode === 'fluid');
+    return () => {
+      root.classList.remove('chat-message-width-wide');
+      root.classList.remove('chat-message-width-fluid');
+    };
+  }, [chatMessageWidthMode]);
 
   // The draft screen keeps its starter chips while the keyboard is up when
   // there is room for both: a tablet in portrait, or any tablet orientation

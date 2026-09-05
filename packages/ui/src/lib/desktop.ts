@@ -6,6 +6,7 @@ import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeBootstrapPresent } from '@/lib/vscodeBootstrap';
+import type { ChatMessageWidthMode } from '@/stores/useUIStore';
 
 type ManagedRemoteTunnelPreset = {
   id: string;
@@ -181,7 +182,7 @@ export type DesktopSettings = {
   collapsibleUserMessages?: boolean;
   stickyUserHeader?: boolean;
   promptNavigatorEnabled?: boolean;
-  wideChatLayoutEnabled?: boolean;
+  chatMessageWidthMode?: ChatMessageWidthMode;
   showSplitAssistantMessageActions?: boolean;
   fontSize?: number;
   terminalFontSize?: number;

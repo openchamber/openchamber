@@ -144,7 +144,7 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
 
 ## Native Features Owned Here
 
-- Floating Mini Chat windows.
+- Floating Mini Chat windows use the same message-width setting as the main window.
 - New Mini Chat windows default to the managed Chats target. Explicit project/worktree drafts retain their target, existing managed chat sessions reopen in their own directory, and the compact header omits project/branch metadata for Chats. Opening a managed draft back in the main window preserves that target.
 - Multiple native windows.
 - Native notifications.
