@@ -177,7 +177,7 @@ function step(label, fn) {
 // The release notes source plus the files generated from it; all go into the release commit.
 // CHANGELOG.md is legacy (older installs read it for update notes); it is
 // refreshed only while it exists.
-const RELEASE_CHANGELOG_FILES = ['changelog', 'packages/vscode/CHANGELOG.md', ...(fs.existsSync('CHANGELOG.md') ? ['CHANGELOG.md'] : [])];
+const RELEASE_CHANGELOG_FILES = ['changelog', 'packages/vscode/CHANGELOG.md', ...(existsSync('CHANGELOG.md') ? ['CHANGELOG.md'] : [])];
 
 function printReleaseNextSteps(version) {
   log.success(`Release v${version} prepared locally`);
