@@ -777,6 +777,74 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().terminalLoginShells).toEqual(['zsh', 'fish']);
   });
 
+  test('defaults omitted git review layout to separate during settings sync', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    useUIStore.getState().setGitReviewLayout('combined');
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: { draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
+      source: 'web',
+    }));
+
+    await syncDesktopSettings();
+
+    expect(useUIStore.getState().gitReviewLayout).toBe('separate');
+  });
+
+  test('hydrates the persisted git review layout from server settings', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    useUIStore.getState().setGitReviewLayout('separate');
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: {
+        gitReviewLayout: 'combined',
+        draftStartersCraftGoalAdded: true,
+        draftStartersScheduleTaskAdded: true,
+      },
+      source: 'web',
+    }));
+
+    await syncDesktopSettings();
+
+    expect(useUIStore.getState().gitReviewLayout).toBe('combined');
+  });
+
+  test('resets an invalid git review layout from server settings to separate', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    useUIStore.getState().setGitReviewLayout('combined');
+    const settings: SettingsPayload = {
+      draftStartersCraftGoalAdded: true,
+      draftStartersScheduleTaskAdded: true,
+    };
+    Object.defineProperty(settings, 'gitReviewLayout', {
+      value: 'invalid',
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+    registerSettingsApi(async () => ({}), async () => ({
+      settings,
+      source: 'web',
+    }));
+
+    await syncDesktopSettings();
+
+    expect(useUIStore.getState().gitReviewLayout).toBe('separate');
+  });
+
+  test('treats git review layout save responses as partial patches', async () => {
+    getWindow();
+    useUIStore.getState().setTerminalShell('fish');
+    useUIStore.getState().setGitReviewLayout('separate');
+    registerSettingsSave(async () => ({ gitReviewLayout: 'combined' }));
+
+    await updateDesktopSettings({ gitReviewLayout: 'combined' });
+
+    expect(useUIStore.getState().gitReviewLayout).toBe('combined');
+    expect(useUIStore.getState().terminalShell).toBe('fish');
+  });
+
   test('autosaves all model selector settings fields', async () => {
     getWindow();
     const saveCalls: Array<Partial<SettingsPayload>> = [];
@@ -833,6 +901,22 @@ describe('updateDesktopSettings', () => {
     expect(saveCalls.some((changes) => changes.terminalShell === 'zsh')).toBe(true);
     expect(saveCalls.some((changes) => changes.terminalLoginShells?.includes('zsh'))).toBe(true);
     expect(saveCalls.some((changes) => changes.toolJsonViewMode === 'formatted')).toBe(true);
+  });
+
+  test('autosaves git review layout changes to shared settings', async () => {
+    getWindow();
+    useUIStore.getState().setGitReviewLayout('separate');
+    const saveCalls: Array<Partial<SettingsPayload>> = [];
+    registerSettingsSave(async (changes) => {
+      saveCalls.push(changes);
+      return changes as SettingsPayload;
+    });
+    startAppearanceAutoSave();
+
+    useUIStore.getState().setGitReviewLayout('combined');
+    await delay(500);
+
+    expect(saveCalls.some((changes) => changes.gitReviewLayout === 'combined')).toBe(true);
   });
 
   test('applies persisted autoSaveEnabled from server settings', async () => {

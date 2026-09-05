@@ -1,4 +1,5 @@
 import type { IconName } from '@/components/icon/icons';
+import { getWorkingTreeDiffDestination, type GitReviewLayout } from '@/lib/getWorkingTreeDiffDestination';
 import type { I18nKey } from '@/lib/i18n';
 import type { ContextPanelMode } from '@/stores/useUIStore';
 
@@ -201,6 +202,8 @@ type VisibleRailSurfacesOptions = {
       shortcuts, which share this filter). */
   hiddenSurfaces?: readonly string[];
   planModeEnabled: boolean;
+  reviewLayout?: GitReviewLayout;
+  isMobile?: boolean;
   isVSCode: boolean;
   screenWidth: number;
   tabs: readonly { mode: ContextPanelMode }[];
@@ -221,11 +224,19 @@ type VisibleRailSurfacesOptions = {
  * existing tab keeps them visible even if the content source went away.
  */
 export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOptions): ContextSurfaceDescriptor[] => {
+  const diffDestination = getWorkingTreeDiffDestination({
+    reviewLayout: options.reviewLayout ?? 'separate',
+    isMobile: options.isMobile ?? false,
+    isVSCode: options.isVSCode,
+  });
   return sortContextSurfaces(options.railOrder).filter((surface) => {
     if (options.hiddenSurfaces?.includes(surface.id)) {
       return false;
     }
     if (surface.id === 'plan' && !options.planModeEnabled) {
+      return false;
+    }
+    if (surface.id === 'diff' && diffDestination === 'main') {
       return false;
     }
     // The walkthrough needs room for a stop list beside real code, and its

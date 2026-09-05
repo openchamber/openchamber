@@ -2,6 +2,7 @@ import simpleGit from 'simple-git';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { createHash } from 'node:crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { createRequire } from 'module';
@@ -719,7 +720,7 @@ const normalizeStartRef = (value) => {
 };
 
 function isValidCommitHash(hash) {
-  return typeof hash === 'string' && /^[0-9a-fA-F]{7,40}$/.test(hash);
+  return typeof hash === 'string' && /^[0-9a-fA-F]{7,64}$/.test(hash);
 }
 
 const parseRemoteBranchRef = (value) => {
@@ -963,6 +964,265 @@ const runGitCommandOrThrow = async (cwd, args, fallbackMessage) => {
   return result;
 };
 
+const FULL_GIT_OBJECT_ID_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
+const EMPTY_TREE_HASHES_BY_FORMAT = {
+  sha1: '4b825dc642cb6eb9a060e54bf8d69288fbee4904',
+  sha256: '6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321',
+};
+const MAX_COMMIT_FILE_PREVIEW_BYTES = 8 * 1024 * 1024;
+
+const isZeroObjectId = (value) => /^[0]+$/.test(String(value || ''));
+
+const parseNonNegativeInt = (value, fallbackLabel) => {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`Malformed ${fallbackLabel}`);
+  }
+  return parsed;
+};
+
+const normalizeCommitHash = (value, fieldName) => {
+  const normalized = String(value || '').trim();
+  if (!FULL_GIT_OBJECT_ID_PATTERN.test(normalized)) {
+    throw new Error(`${fieldName} must be a full commit SHA`);
+  }
+  return normalized;
+};
+
+const isRecordLike = (value) => Object(value) === value && !Array.isArray(value);
+
+const normalizeNonEmptyString = (value, fieldName) => {
+  if (Object.prototype.toString.call(value) !== '[object String]' || value.length === 0) {
+    throw new Error(`${fieldName} must be a repository-relative path or null`);
+  }
+  return String(value);
+};
+
+const normalizeCommitChangesRequest = (request) => {
+  if (!isRecordLike(request)) {
+    throw new Error('commit file request is required');
+  }
+  return {
+    commitHash: normalizeCommitHash(request.commitHash, 'commitHash'),
+    parentHash: request.parentHash === null ? null : normalizeCommitHash(request.parentHash, 'parentHash'),
+  };
+};
+
+const normalizeCommitPreviewRequest = (request) => {
+  const normalized = normalizeCommitChangesRequest(request);
+  const normalizePath = (value, fieldName) => {
+    if (value === null) {
+      return null;
+    }
+    return normalizeNonEmptyString(value, fieldName);
+  };
+  const originalPath = normalizePath(request.originalPath, 'originalPath');
+  const modifiedPath = normalizePath(request.modifiedPath, 'modifiedPath');
+  if (originalPath === null && modifiedPath === null) {
+    throw new Error('originalPath or modifiedPath is required');
+  }
+  if (normalized.parentHash === null && originalPath !== null) {
+    throw new Error('root commit previews cannot request an originalPath');
+  }
+  return {
+    ...normalized,
+    originalPath,
+    modifiedPath,
+  };
+};
+
+const resolveCommitObjectPath = (directoryPath, repoRoot, filePath) => {
+  const candidates = Array.from(new Set([
+    path.resolve(repoRoot, filePath),
+    path.resolve(directoryPath, filePath),
+  ])).filter((candidate) => isInsideOrSameDirectory(repoRoot, candidate));
+
+  if (candidates.length === 0) {
+    throw new Error(`Path is outside repository: ${filePath}`);
+  }
+
+  return toGitPath(path.relative(repoRoot, candidates[0]));
+};
+
+const readCommitParentIds = async (repoRoot, commitHash) => {
+  const result = await runGitCommandOrThrow(
+    repoRoot,
+    ['rev-list', '--parents', '-n', '1', commitHash],
+    `Failed to resolve parents for commit ${commitHash}`,
+  );
+  const parts = String(result.stdout || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0 || parts[0] !== commitHash) {
+    throw new Error(`Failed to resolve parents for commit ${commitHash}`);
+  }
+  return parts.slice(1);
+};
+
+const getEmptyTreeHash = async (repoRoot) => {
+  const result = await runGitCommandOrThrow(
+    repoRoot,
+    ['rev-parse', '--show-object-format'],
+    'Failed to resolve repository object format',
+  );
+  const objectFormat = String(result.stdout || '').trim();
+  const hash = EMPTY_TREE_HASHES_BY_FORMAT[objectFormat];
+  if (!hash) {
+    throw new Error(`Unsupported git object format: ${objectFormat}`);
+  }
+  return hash;
+};
+
+const ensureCommitObjectExists = async (repoRoot, commitHash, fieldName) => {
+  const result = await runGitCommand(repoRoot, ['rev-parse', '--verify', '--quiet', `${commitHash}^{commit}`]);
+  if (!result.success) {
+    if (fieldName === 'parentHash') {
+      throw new Error(`Parent commit ${commitHash} is unavailable in this repository; fetch more history and try again`);
+    }
+    throw new Error(`Commit ${commitHash} is unavailable in this repository`);
+  }
+};
+
+const parseRawChangeRecord = (header) => {
+  const match = /^:([0-7]{6}) ([0-7]{6}) ([0-9a-f]+) ([0-9a-f]+) ([A-Z])(\d{0,3})$/i.exec(header);
+  if (!match) {
+    throw new Error(`Malformed raw change record: ${header}`);
+  }
+  return {
+    oldMode: match[1],
+    newMode: match[2],
+    oldObjectId: match[3],
+    newObjectId: match[4],
+    status: match[5].toUpperCase(),
+  };
+};
+
+const determineCommitFileKind = (oldMode, newMode) => {
+  if (oldMode === '160000' || newMode === '160000') {
+    return 'gitlink';
+  }
+  if (oldMode === '120000' || newMode === '120000') {
+    return 'symlink';
+  }
+  return 'file';
+};
+
+export function parseCommitChangesRaw(directory, raw) {
+  const input = String(raw || '');
+  if (!input) {
+    return [];
+  }
+
+  let cursor = 0;
+  const rawRecords = [];
+  while (cursor < input.length && input[cursor] === ':') {
+    const headerEnd = input.indexOf('\0', cursor);
+    if (headerEnd === -1) {
+      throw new Error(`Malformed raw change block for ${directory}`);
+    }
+    const header = input.slice(cursor, headerEnd);
+    const parsedHeader = parseRawChangeRecord(header);
+    cursor = headerEnd + 1;
+
+    const pathEnd = input.indexOf('\0', cursor);
+    if (pathEnd === -1) {
+      throw new Error(`Malformed raw path block for ${directory}`);
+    }
+    const pathValue = input.slice(cursor, pathEnd);
+    cursor = pathEnd + 1;
+
+    let originalPath;
+    let modifiedPath = pathValue;
+    if (parsedHeader.status === 'R' || parsedHeader.status === 'C') {
+      const renamedPathEnd = input.indexOf('\0', cursor);
+      if (renamedPathEnd === -1) {
+        throw new Error(`Malformed raw rename block for ${directory}`);
+      }
+      originalPath = pathValue;
+      modifiedPath = input.slice(cursor, renamedPathEnd);
+      cursor = renamedPathEnd + 1;
+    }
+
+    rawRecords.push({
+      ...parsedHeader,
+      originalPath,
+      path: modifiedPath,
+    });
+  }
+
+  const numstatRecords = [];
+  while (cursor < input.length) {
+    const addedEnd = input.indexOf('\t', cursor);
+    if (addedEnd === -1) {
+      throw new Error(`Malformed numstat block for ${directory}`);
+    }
+    const deletedEnd = input.indexOf('\t', addedEnd + 1);
+    if (deletedEnd === -1) {
+      throw new Error(`Malformed numstat block for ${directory}`);
+    }
+    const recordEnd = input.indexOf('\0', deletedEnd + 1);
+    if (recordEnd === -1) {
+      throw new Error(`Malformed numstat block for ${directory}`);
+    }
+
+    const insertionsRaw = input.slice(cursor, addedEnd);
+    const deletionsRaw = input.slice(addedEnd + 1, deletedEnd);
+    const pathValue = input.slice(deletedEnd + 1, recordEnd);
+    cursor = recordEnd + 1;
+
+    if (pathValue === '') {
+      const originalEnd = input.indexOf('\0', cursor);
+      if (originalEnd === -1) {
+        throw new Error(`Malformed rename numstat block for ${directory}`);
+      }
+      const modifiedEnd = input.indexOf('\0', originalEnd + 1);
+      if (modifiedEnd === -1) {
+        throw new Error(`Malformed rename numstat block for ${directory}`);
+      }
+      numstatRecords.push({
+        insertionsRaw,
+        deletionsRaw,
+        originalPath: input.slice(cursor, originalEnd),
+        path: input.slice(originalEnd + 1, modifiedEnd),
+      });
+      cursor = modifiedEnd + 1;
+      continue;
+    }
+
+    numstatRecords.push({
+      insertionsRaw,
+      deletionsRaw,
+      originalPath: undefined,
+      path: pathValue,
+    });
+  }
+
+  if (rawRecords.length !== numstatRecords.length) {
+    throw new Error(`Commit metadata block length mismatch for ${directory}`);
+  }
+
+  return rawRecords.map((rawRecord, index) => {
+    const numstatRecord = numstatRecords[index];
+    const isRename = rawRecord.status === 'R' || rawRecord.status === 'C';
+    if (rawRecord.path !== numstatRecord.path || (isRename && rawRecord.originalPath !== numstatRecord.originalPath)) {
+      throw new Error(`Commit metadata block association mismatch for ${directory}`);
+    }
+
+    const kind = determineCommitFileKind(rawRecord.oldMode, rawRecord.newMode);
+    const usesDashCounts = numstatRecord.insertionsRaw === '-' && numstatRecord.deletionsRaw === '-';
+    const isBinary = usesDashCounts && kind === 'file';
+    return {
+      path: rawRecord.path,
+      originalPath: rawRecord.originalPath,
+      status: rawRecord.status === 'T' ? 'M' : rawRecord.status,
+      kind,
+      originalObjectId: isZeroObjectId(rawRecord.oldObjectId) ? undefined : rawRecord.oldObjectId,
+      objectId: isZeroObjectId(rawRecord.newObjectId) ? undefined : rawRecord.newObjectId,
+      insertions: usesDashCounts ? 0 : parseNonNegativeInt(numstatRecord.insertionsRaw, 'numstat insertions'),
+      deletions: usesDashCounts ? 0 : parseNonNegativeInt(numstatRecord.deletionsRaw, 'numstat deletions'),
+      isBinary,
+    };
+  });
+}
+
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 const isIndexLockError = (result) => {
@@ -998,6 +1258,9 @@ const getFileIdentity = async (filePath) => {
 // enabled; without it, `git reset --hard` during bootstrap fails with
 // "Filename too long" and leaves a half-populated worktree (issue #2746).
 const WORKTREE_POPULATE_RESET_ARGS = ['-c', 'core.longpaths=true', 'reset', '--hard'];
+const GIT_HISTORY_DEFAULT_LIMIT = 50;
+const GIT_HISTORY_MAX_LIMIT = 100;
+const GIT_HISTORY_MAX_REFS = 32;
 
 const isFilenameTooLongError = (message) => /file ?name too long/i.test(String(message || ''));
 
@@ -1219,6 +1482,17 @@ const normalizeIntegrateBranch = (value, fieldName) => {
   return branch;
 };
 
+const normalizeTagName = (value) => {
+  const tagName = String(value || '').trim();
+  if (!tagName) {
+    throw new Error('Tag name is required');
+  }
+  if (tagName.startsWith('-') || tagName.includes('\0')) {
+    throw new Error('Invalid tag name');
+  }
+  return tagName;
+};
+
 const normalizeIntegrateSha = (value) => {
   const sha = String(value || '').trim();
   if (!/^[0-9a-fA-F]{4,64}$/.test(sha)) {
@@ -1297,7 +1571,7 @@ export async function computeIntegratePlan(input = {}) {
   const cherry = await runGitCommandOrThrow(repoRoot, ['cherry', targetBranch, sourceBranch], 'Failed to compute cherry commits');
   const plus = new Set();
   for (const line of trimGitLines(cherry.stdout)) {
-    const match = line.match(/^\+\s+([0-9a-f]{7,40})\b/i);
+    const match = line.match(/^\+\s+([0-9a-f]{7,64})\b/i);
     if (match) {
       plus.add(match[1]);
     }
@@ -3730,8 +4004,9 @@ async function getRemoteDefaultBranches(git) {
         const [ref, symbolicRef] = line.split(' ');
         const match = ref.match(/^refs\/remotes\/([^/]+)\/HEAD$/);
         const prefix = match ? `refs/remotes/${match[1]}/` : '';
-        return match && typeof symbolicRef === 'string' && symbolicRef.startsWith(prefix)
-          ? [[match[1], symbolicRef.slice(prefix.length)]]
+        const symbolicTarget = String(symbolicRef || '');
+        return match && symbolicTarget.startsWith(prefix)
+          ? [[match[1], symbolicTarget.slice(prefix.length)]]
           : [];
       })
     );
@@ -3768,6 +4043,313 @@ async function getRemoteDefaultBranches(git) {
   }
 
   return defaults;
+}
+
+const createGitHistoryError = (message, statusCode = 400, code = 'invalid_git_history_request') => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  return error;
+};
+
+const encodeGitHistoryCursor = (payload) => Buffer.from(JSON.stringify(payload)).toString('base64url');
+
+const decodeGitHistoryCursor = (cursor) => {
+  try {
+    const parsed = JSON.parse(Buffer.from(String(cursor || ''), 'base64url').toString('utf8'));
+    if (!parsed || Array.isArray(parsed) || Object(parsed) !== parsed) {
+      throw new Error('invalid');
+    }
+    const snapshot = String(parsed.snapshot ?? '');
+    if (!Number.isInteger(parsed.offset) || parsed.offset < 0 || parsed.snapshot !== snapshot) {
+      throw new Error('invalid');
+    }
+    return { offset: parsed.offset, snapshot };
+  } catch {
+    throw createGitHistoryError('stale cursor', 409, 'stale_git_history_cursor');
+  }
+};
+
+const normalizeGitHistoryLimit = (value) => {
+  if (value == null) return GIT_HISTORY_DEFAULT_LIMIT;
+  const limit = Number.parseInt(String(value), 10);
+  if (!Number.isInteger(limit) || limit < 1 || limit > GIT_HISTORY_MAX_LIMIT) {
+    throw createGitHistoryError(`limit must be between 1 and ${GIT_HISTORY_MAX_LIMIT}`);
+  }
+  return limit;
+};
+
+const mapGitHistoryRef = (id, name, revision) => {
+  if (id.startsWith('refs/heads/')) {
+    return { id, name, revision, kind: 'local', category: 'branches' };
+  }
+  if (id.startsWith('refs/remotes/')) {
+    return { id, name, revision, kind: 'remote', category: 'remote-branches' };
+  }
+  return { id, name, revision, kind: 'tag', category: 'tags' };
+};
+
+// Hash snapshot so pagination cursor stays small while ref changes invalidate it.
+const buildGitHistorySnapshot = (refs, current) => createHash('sha256')
+  .update([...refs, ...(current ? [current] : [])]
+    .map((ref) => `${ref.id}:${ref.revision || ''}`)
+    .sort((left, right) => left.localeCompare(right))
+    .join('|'))
+  .digest('hex');
+
+const buildGitHistoryBaseRef = ({ refsById, refs, headBranch, upstream, defaultBranches }) => {
+  if (!upstream && Object.keys(defaultBranches).length === 0) {
+    return null;
+  }
+  const upstreamName = String(upstream?.name || '');
+  const remoteName = upstreamName.includes('/')
+    ? upstreamName.split('/')[0]
+    : 'origin';
+  const candidates = [defaultBranches[remoteName], defaultBranches.origin, 'main', 'master', 'develop']
+    .map((candidate) => String(candidate || '').trim())
+    .filter(Boolean)
+    .filter((candidate) => candidate !== headBranch);
+
+  for (const candidate of candidates) {
+    const localId = `refs/heads/${candidate}`;
+    if (refsById.has(localId)) {
+      return refsById.get(localId);
+    }
+    const remoteMatches = refs.filter((ref) => ref.kind === 'remote' && ref.name.endsWith(`/${candidate}`));
+    if (remoteMatches.length > 0) {
+      return remoteMatches[0];
+    }
+  }
+
+  return null;
+};
+
+const parseGitHistoryRefs = async (git) => {
+  const raw = await git.raw([
+    'for-each-ref',
+    '--format=%(refname)\t%(refname:short)\t%(objectname)',
+    'refs/heads',
+    'refs/remotes',
+    'refs/tags',
+  ]);
+
+  return String(raw || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [id, name, revision] = line.split('\t');
+      return { id, name, revision: revision || null };
+    })
+    .filter((ref) => ref.id && ref.name && !ref.id.endsWith('/HEAD'))
+    .map((ref) => mapGitHistoryRef(ref.id, ref.name, ref.revision));
+};
+
+const parseGitHistoryStatistics = (lines) => {
+  let files = 0;
+  let insertions = 0;
+  let deletions = 0;
+  for (const line of lines) {
+    const filesMatch = line.match(/(\d+)\s+files?\s+changed/);
+    const insertionsMatch = line.match(/(\d+)\s+insertions?\(\+\)/);
+    const deletionsMatch = line.match(/(\d+)\s+deletions?\(-\)/);
+    if (filesMatch) files = Number.parseInt(filesMatch[1], 10);
+    if (insertionsMatch) insertions = Number.parseInt(insertionsMatch[1], 10);
+    if (deletionsMatch) deletions = Number.parseInt(deletionsMatch[1], 10);
+  }
+  return { files, insertions, deletions };
+};
+
+const buildGitHistoryDecorations = (value, refsById, current, itemId) => {
+  const references = [];
+  const seen = new Set();
+  const pushRef = (ref) => {
+    if (!ref) return;
+    const key = `${ref.id}:${ref.kind}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    references.push(ref);
+  };
+  const pushHead = () => pushRef({
+    id: 'HEAD',
+    name: current?.name || 'HEAD',
+    revision: current?.revision || itemId,
+    kind: 'head',
+    category: 'branches',
+  });
+
+  for (const token of String(value || '').split(',').map((entry) => entry.trim()).filter(Boolean)) {
+    if (token === 'HEAD') {
+      pushHead();
+      continue;
+    }
+    if (token.startsWith('HEAD -> ')) {
+      pushHead();
+      pushRef(refsById.get(token.slice('HEAD -> '.length).trim()));
+      continue;
+    }
+    if (token.startsWith('tag: ')) {
+      pushRef(refsById.get(token.slice('tag: '.length).trim()));
+      continue;
+    }
+    pushRef(refsById.get(token));
+  }
+
+  return references;
+};
+
+const resolveGitHistoryRequest = async (directory) => {
+  const { git } = await createRepositoryGitContext(directory);
+  const refs = await parseGitHistoryRefs(git);
+  const refsById = new Map(refs.map((ref) => [ref.id, ref]));
+  const defaultBranches = await getRemoteDefaultBranches(git);
+
+  const headRef = await git.raw(['symbolic-ref', '-q', 'HEAD']).then((value) => String(value || '').trim()).catch(() => '');
+  const headRevision = await git.raw(['rev-parse', 'HEAD']).then((value) => String(value || '').trim()).catch(() => '');
+  const headBranch = headRef.startsWith('refs/heads/') ? headRef.slice('refs/heads/'.length) : '';
+  const current = headRevision ? {
+    id: 'HEAD',
+    name: headBranch || 'HEAD',
+    revision: headRevision,
+    kind: 'head',
+    category: 'branches',
+  } : null;
+
+  const upstreamName = await git.raw(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'])
+    .then((value) => String(value || '').trim())
+    .catch(() => '');
+  const upstream = upstreamName
+    ? refsById.get(upstreamName.startsWith('refs/') ? upstreamName : `refs/remotes/${upstreamName}`) || null
+    : null;
+  const base = buildGitHistoryBaseRef({ refsById, refs, headBranch, upstream, defaultBranches });
+
+  return {
+    refs,
+    refsById,
+    current,
+    upstream,
+    base,
+    snapshot: buildGitHistorySnapshot(refs, current),
+  };
+};
+
+const validateGitHistoryRequestedRefs = (refsResponse, requestedRefs) => {
+  const refs = Array.isArray(requestedRefs) ? requestedRefs : [];
+  if (refs.length === 0) {
+    throw createGitHistoryError('at least one ref is required');
+  }
+  if (refs.length > GIT_HISTORY_MAX_REFS) {
+    throw createGitHistoryError(`refs must contain at most ${GIT_HISTORY_MAX_REFS} values`);
+  }
+
+  const allowed = new Set(refsResponse.refs.map((ref) => ref.id));
+  if (refsResponse.current) {
+    allowed.add('HEAD');
+  }
+
+  return Array.from(new Set(refs.map((ref) => String(ref || '').trim()))).map((ref) => {
+    if (!ref) {
+      throw createGitHistoryError('refs must not be empty');
+    }
+    if (ref.startsWith('-') || ref.includes('\0')) {
+      throw createGitHistoryError('refs must not contain option-like values');
+    }
+    if (!allowed.has(ref)) {
+      throw createGitHistoryError(`Unknown ref: ${ref}`);
+    }
+    return ref;
+  });
+};
+
+const validateGitHistorySelection = (refsResponse, options = {}) => {
+  const refs = Array.isArray(options.refs) ? options.refs : [];
+  const all = options.all === true;
+
+  if (all && refs.length > 0) {
+    throw createGitHistoryError('all cannot be combined with explicit refs');
+  }
+  if (all) {
+    return { all: true, refs: [] };
+  }
+
+  return {
+    all: false,
+    refs: validateGitHistoryRequestedRefs(refsResponse, refs),
+  };
+};
+
+export async function getGitHistoryRefs(directory) {
+  const refsResponse = await resolveGitHistoryRequest(directory);
+  return {
+    refs: refsResponse.refs,
+    current: refsResponse.current,
+    upstream: refsResponse.upstream,
+    base: refsResponse.base,
+    snapshot: refsResponse.snapshot,
+  };
+}
+
+export async function getGitHistory(directory, options = {}) {
+  const refsResponse = await resolveGitHistoryRequest(directory);
+  const selection = validateGitHistorySelection(refsResponse, options);
+  const limit = normalizeGitHistoryLimit(options.limit);
+  const cursor = options.cursor ? decodeGitHistoryCursor(options.cursor) : { offset: 0, snapshot: refsResponse.snapshot };
+  if (cursor.snapshot !== refsResponse.snapshot) {
+    throw createGitHistoryError('stale cursor', 409, 'stale_git_history_cursor');
+  }
+
+  const { git } = await createRepositoryGitContext(directory);
+  const result = await git.raw([
+    'log',
+    '--topo-order',
+    '--decorate=full',
+    '--date=iso-strict',
+    `--skip=${cursor.offset}`,
+    `--max-count=${limit + 1}`,
+    '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%D',
+    '--shortstat',
+    ...(selection.all ? ['--all'] : selection.refs),
+  ]);
+
+  const entries = String(result || '')
+    .split('\x1e')
+    .map((record) => record.replace(/^\n+/, '').trimEnd())
+    .filter(Boolean)
+    .map((record) => {
+      const lines = record.split(/\r?\n/).filter(Boolean);
+      const [id, parentsRaw = '', author = '', authorEmail = '', timestamp = '', subject = '', decorations = ''] = (lines.shift() || '').split('\x1f');
+      return {
+        id,
+        parentIds: parentsRaw ? parentsRaw.split(' ').filter(Boolean) : [],
+        subject,
+        message: subject,
+        author,
+        authorEmail,
+        timestamp,
+        statistics: parseGitHistoryStatistics(lines),
+        references: buildGitHistoryDecorations(decorations, refsResponse.refsById, refsResponse.current, id),
+      };
+    });
+
+  const hasMore = entries.length > limit;
+  const items = hasMore ? entries.slice(0, limit) : entries;
+  return {
+    items,
+    nextCursor: hasMore ? encodeGitHistoryCursor({ offset: cursor.offset + limit, snapshot: refsResponse.snapshot }) : null,
+    hasMore,
+    refsSnapshot: refsResponse.snapshot,
+  };
+}
+
+export async function getGitHistoryMergeBase(directory, options = {}) {
+  const refsResponse = await resolveGitHistoryRequest(directory);
+  const refs = validateGitHistoryRequestedRefs(refsResponse, options.refs);
+  if (refs.length < 2) {
+    return { mergeBase: null };
+  }
+
+  const result = await runGitCommand(directory, ['merge-base', ...refs]);
+  return { mergeBase: result.success ? String(result.stdout || '').trim() || null : null };
 }
 
 async function filterActiveRemoteBranches(git, remoteBranches) {
@@ -3907,6 +4489,23 @@ const resolveBranchCheckoutTarget = async (git, branchName) => {
   const localExists = await gitRefExists(git, `refs/heads/${localBranch}`);
   return { branch: localBranch, remoteRef: localExists ? null : remoteRef };
 };
+
+export async function createTag(directory, tagName, commitHash) {
+  const normalizedTagName = normalizeTagName(tagName);
+  if (!isValidCommitHash(commitHash)) {
+    throw new Error('Invalid commit hash');
+  }
+
+  const { git } = await createRepositoryGitContext(directory);
+
+  try {
+    await git.raw(['tag', '--', normalizedTagName, commitHash]);
+    return { success: true, tag: normalizedTagName };
+  } catch (error) {
+    console.error('Failed to create tag:', error);
+    throw error;
+  }
+}
 
 export async function checkoutBranch(directory, branchName) {
   const { git } = await createRepositoryGitContext(directory);
@@ -4917,81 +5516,38 @@ export async function canonicalizeWorktreeState(directory) {
   };
 }
 
-export async function getCommitFiles(directory, commitHash) {
-  const { git } = await createRepositoryGitContext(directory);
+export async function getCommitFiles(directory, request) {
+  const { repoRoot, git } = await createRepositoryGitContext(directory);
+  const { commitHash, parentHash } = normalizeCommitChangesRequest(request);
 
   try {
+    await ensureCommitObjectExists(repoRoot, commitHash, 'commitHash');
 
-    const numstatRaw = await git.raw([
-      'show',
+    let baseRef = parentHash;
+    if (baseRef === null) {
+      const parentIds = await readCommitParentIds(repoRoot, commitHash);
+      if (parentIds.length > 0) {
+        throw new Error(`parentHash is required for non-root commit ${commitHash}`);
+      }
+      baseRef = await getEmptyTreeHash(repoRoot);
+    } else {
+      await ensureCommitObjectExists(repoRoot, baseRef, 'parentHash');
+    }
+
+    const diffRaw = await git.raw([
+      'diff',
+      '--raw',
       '--numstat',
-      '--format=',
-      commitHash
+      '--no-abbrev',
+      '--diff-filter=ADMRT',
+      '-z',
+      '--find-renames=50%',
+      baseRef,
+      commitHash,
+      '--',
     ]);
 
-    const files = [];
-    const lines = numstatRaw.trim().split('\n').filter(Boolean);
-
-    for (const line of lines) {
-      const parts = line.split('\t');
-      if (parts.length < 3) continue;
-
-      const [insertionsRaw, deletionsRaw, ...pathParts] = parts;
-      const filePath = pathParts.join('\t');
-      if (!filePath) continue;
-
-      const insertions = insertionsRaw === '-' ? 0 : parseInt(insertionsRaw, 10) || 0;
-      const deletions = deletionsRaw === '-' ? 0 : parseInt(deletionsRaw, 10) || 0;
-      const isBinary = insertionsRaw === '-' && deletionsRaw === '-';
-
-      let changeType = 'M';
-      let displayPath = filePath;
-
-      if (filePath.includes(' => ')) {
-        changeType = 'R';
-
-        const match = filePath.match(/(?:\{[^}]*\s=>\s[^}]*\}|.*\s=>\s.*)/);
-        if (match) {
-          displayPath = filePath;
-        }
-      }
-
-      files.push({
-        path: displayPath,
-        insertions,
-        deletions,
-        isBinary,
-        changeType
-      });
-    }
-
-    const nameStatusRaw = await git.raw([
-      'show',
-      '--name-status',
-      '--format=',
-      commitHash
-    ]).catch(() => '');
-
-    const statusMap = new Map();
-    const statusLines = nameStatusRaw.trim().split('\n').filter(Boolean);
-    for (const line of statusLines) {
-      const match = line.match(/^([AMDRC])\d*\t(.+)$/);
-      if (match) {
-        const [, status, pathPart] = match;
-        statusMap.set(extractGitStatusPath(status, pathPart), status);
-      }
-    }
-
-    for (const file of files) {
-      const basePath = extractGitNumstatDestinationPath(file.path);
-
-      const status = statusMap.get(basePath) || statusMap.get(file.path);
-      if (status) {
-        file.changeType = status;
-      }
-    }
-
-    return { files };
+    return { files: parseCommitChangesRaw(repoRoot, diffRaw) };
   } catch (error) {
     console.error('Failed to get commit files:', error);
     throw error;
@@ -5326,51 +5882,70 @@ export async function getConflictDetails(directory) {
   }
 }
 
-export async function getCommitFileDiff(directory, hash, filePath, isBinary) {
-  if (!directory || !hash || !filePath) {
-    throw new Error('directory, hash, and path are required for getCommitFileDiff');
+export async function getCommitFileDiff(directory, request) {
+  if (!directory) {
+    throw new Error('directory is required for getCommitFileDiff');
   }
 
-  if (isBinary) {
-    return { original: '', modified: '', isBinary: true };
-  }
-
+  const normalizedRequest = normalizeCommitPreviewRequest(request);
   const { directoryPath, repoRoot } = await createRepositoryGitContext(directory);
-  const candidates = Array.from(new Set([
-    toGitPath(path.relative(repoRoot, path.resolve(repoRoot, filePath))),
-    toGitPath(path.relative(repoRoot, path.resolve(directoryPath, filePath))),
-  ])).filter((candidate) => candidate && !candidate.startsWith('..') && !path.isAbsolute(candidate));
 
-  let originalResult = null;
-  let modifiedResult = null;
+  const originalPath = normalizedRequest.originalPath === null
+    ? null
+    : resolveCommitObjectPath(directoryPath, repoRoot, normalizedRequest.originalPath);
+  const modifiedPath = normalizedRequest.modifiedPath === null
+    ? null
+    : resolveCommitObjectPath(directoryPath, repoRoot, normalizedRequest.modifiedPath);
 
-  for (const candidate of candidates) {
-    const [candidateOriginalResult, candidateModifiedResult] = await Promise.all([
-      runGitCommand(repoRoot, ['show', `${hash}^:${candidate}`]),
-      runGitCommand(repoRoot, ['show', `${hash}:${candidate}`]),
-    ]);
+  await ensureCommitObjectExists(repoRoot, normalizedRequest.commitHash, 'commitHash');
+  if (normalizedRequest.parentHash !== null) {
+    await ensureCommitObjectExists(repoRoot, normalizedRequest.parentHash, 'parentHash');
+  }
 
-    if (candidateOriginalResult.success || candidateModifiedResult.success) {
-      originalResult = candidateOriginalResult;
-      modifiedResult = candidateModifiedResult;
-      break;
+  const originalSpec = normalizedRequest.parentHash !== null && originalPath !== null
+    ? `${normalizedRequest.parentHash}:${originalPath}`
+    : null;
+  const modifiedSpec = modifiedPath !== null
+    ? `${normalizedRequest.commitHash}:${modifiedPath}`
+    : null;
+
+  const readSize = async (objectSpec, label) => {
+    if (!objectSpec) {
+      return 0;
     }
+    const exists = await runGitCommand(repoRoot, ['cat-file', '-e', objectSpec]);
+    if (!exists.success) {
+      throw new Error(`Expected ${label} object is missing for ${objectSpec}`);
+    }
+    const sizeResult = await runGitCommandOrThrow(repoRoot, ['cat-file', '-s', objectSpec], `Failed to read ${label} object size`);
+    return parseNonNegativeInt(String(sizeResult.stdout || '').trim(), `${label} object size`);
+  };
+
+  const [originalBytes, modifiedBytes] = await Promise.all([
+    readSize(originalSpec, 'original'),
+    readSize(modifiedSpec, 'modified'),
+  ]);
+  const totalBytes = originalBytes + modifiedBytes;
+  if (totalBytes > MAX_COMMIT_FILE_PREVIEW_BYTES) {
+    return {
+      status: 'too-large',
+      totalBytes,
+      maxBytes: MAX_COMMIT_FILE_PREVIEW_BYTES,
+    };
   }
 
-  if (!originalResult || !modifiedResult) {
-    const resolvedPath = await resolveGitCommitFilePath(repoRoot, hash, candidates);
-    [originalResult, modifiedResult] = await Promise.all([
-      runGitCommand(repoRoot, ['show', `${hash}^:${resolvedPath}`]),
-      runGitCommand(repoRoot, ['show', `${hash}:${resolvedPath}`]),
-    ]);
-  }
+  const readContent = async (objectSpec, label) => {
+    if (!objectSpec) {
+      return '';
+    }
+    const result = await runGitCommandOrThrow(repoRoot, ['cat-file', '-p', objectSpec], `Failed to read ${label} object content`);
+    return result.stdout;
+  };
 
-  const original = originalResult.success ? originalResult.stdout : '';
-  const modified = modifiedResult.success ? modifiedResult.stdout : '';
+  const [original, modified] = await Promise.all([
+    readContent(originalSpec, 'original'),
+    readContent(modifiedSpec, 'modified'),
+  ]);
 
-  if (!originalResult.success && !modifiedResult.success) {
-    throw new Error(`Failed to read file content at commit ${hash}: ${originalResult.stderr || modifiedResult.stderr}`);
-  }
-
-  return { original, modified, isBinary: false };
+  return { status: 'ready', original, modified };
 }

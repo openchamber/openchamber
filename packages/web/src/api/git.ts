@@ -8,6 +8,9 @@ import type {
 export const createWebGitAPI = (): GitAPI => ({
   checkIsGitRepository: gitApiHttp.checkIsGitRepository,
   getGitStatus: gitApiHttp.getGitStatus,
+  getGitHistoryRefs: gitApiHttp.getGitHistoryRefs,
+  getGitHistory: gitApiHttp.getGitHistory,
+  getGitHistoryMergeBase: gitApiHttp.getGitHistoryMergeBase,
   getGitDiff: gitApiHttp.getGitDiff,
   getGitFileDiff: gitApiHttp.getGitFileDiff,
   getGitRangeDiff: gitApiHttp.getGitRangeDiff,
@@ -49,11 +52,13 @@ export const createWebGitAPI = (): GitAPI => ({
   dropGitStash: gitApiHttp.dropGitStash,
   checkoutBranch: gitApiHttp.checkoutBranch,
   createBranch: gitApiHttp.createBranch,
+  createGitTag: gitApiHttp.createGitTag,
   renameBranch: gitApiHttp.renameBranch,
   getGitLog(directory: string, options?: GitLogOptions) {
     return gitApiHttp.getGitLog(directory, options);
   },
   getCommitFiles: gitApiHttp.getCommitFiles,
+  getCommitFileDiff: gitApiHttp.getCommitFileDiff,
   getCurrentGitIdentity: gitApiHttp.getCurrentGitIdentity,
   hasLocalIdentity: gitApiHttp.hasLocalIdentity,
   setGitIdentity: gitApiHttp.setGitIdentity,

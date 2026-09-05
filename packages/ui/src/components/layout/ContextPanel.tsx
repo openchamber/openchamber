@@ -8,6 +8,7 @@ import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { PullRequestView } from '@/components/views/PullRequestView';
 import { TerminalView } from '@/components/views/TerminalView';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
+import { useGitDiffTabsStore } from '@/stores/useGitDiffTabsStore';
 
 // Heavy views stay on-demand (same as MainLayout): importing DiffView/FilesView
 // or the walkthrough statically pulls the CodeMirror and @pierre/diffs stacks
@@ -39,6 +40,7 @@ import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync } from '@/lib/run
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getActiveRelayDescriptor } from '@/lib/relay/runtime-tunnel';
 import { Icon } from "@/components/icon/Icon";
+import { GitDiffTabsPane } from './GitDiffTabsPane';
 import {
   EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST,
   EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
@@ -59,6 +61,9 @@ const RESIZE_FOLLOW_INTERVAL_MS = 100;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
 const EMPTY_SESSION_TITLE_MAP = new Map<string, string>();
+// Stable fallback so the selector returns a referentially equal snapshot for
+// directories with no open diff tabs (an inline [] would re-render forever).
+const EMPTY_GIT_DIFF_TABS: readonly never[] = Object.freeze([]);
 
 
 
@@ -385,6 +390,113 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
   );
 };
 
+// Split-mode divider between the diff region and the git pane. Dragging it
+// resizes the GIT pane (the diff region keeps its own persisted width), so the
+// committed value is the same widthByMode['git'] the panel uses in git-only
+// mode — the git surface therefore keeps one width everywhere. During the drag
+// the git pane follows via the row's --oc-git-pane-width and the panel total
+// follows via --oc-context-panel-width on the panel root, with no re-renders.
+const GitDiffSeparator: React.FC<{
+  directoryKey: string;
+  gitPaneWidth: number;
+  diffRegionWidth: number;
+}> = ({ directoryKey, gitPaneWidth, diffRegionWidth }) => {
+  const { t } = useI18n();
+  const setContextPanelWidth = useUIStore((state) => state.setContextPanelWidth);
+  const [isResizing, setIsResizing] = React.useState(false);
+  const startXRef = React.useRef(0);
+  const startWidthRef = React.useRef(gitPaneWidth);
+  const liveWidthRef = React.useRef<number | null>(null);
+  const pointerIDRef = React.useRef<number | null>(null);
+  const maxGitWidthRef = React.useRef(900);
+  const separatorRef = React.useRef<HTMLDivElement | null>(null);
+
+  const clampGitWidth = React.useCallback((value: number) => {
+    return Math.min(maxGitWidthRef.current, Math.max(CONTEXT_PANEL_MIN_WIDTH, Math.round(value)));
+  }, []);
+
+  const applyLiveWidths = React.useCallback((nextGitWidth: number) => {
+    const separator = separatorRef.current;
+    if (!separator) {
+      return;
+    }
+    separator.parentElement?.style.setProperty('--oc-git-pane-width', `${nextGitWidth}px`);
+    const root = separator.closest('[data-context-panel="true"]');
+    if (root instanceof HTMLElement) {
+      root.style.setProperty('--oc-context-panel-width', `${nextGitWidth + diffRegionWidth}px`);
+    }
+  }, [diffRegionWidth]);
+
+  const handlePointerDown = (event: React.PointerEvent) => {
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // ignore
+    }
+    const root = separatorRef.current?.closest('[data-context-panel="true"]');
+    const available = getAvailablePanelWidth(root instanceof HTMLElement ? root : null);
+    // Measure once per drag: the git pane may grow until the split total
+    // (git + diff region) fills the available area.
+    maxGitWidthRef.current = Math.max(
+      CONTEXT_PANEL_MIN_WIDTH,
+      Math.min(900, (available ?? Number.MAX_SAFE_INTEGER) - diffRegionWidth),
+    );
+    pointerIDRef.current = event.pointerId;
+    setIsResizing(true);
+    startXRef.current = event.clientX;
+    startWidthRef.current = gitPaneWidth;
+    liveWidthRef.current = gitPaneWidth;
+    event.preventDefault();
+  };
+
+  const handlePointerMove = (event: React.PointerEvent) => {
+    if (!isResizing || pointerIDRef.current !== event.pointerId) {
+      return;
+    }
+    // The git pane is docked right of the handle: dragging left widens it.
+    const delta = startXRef.current - event.clientX;
+    const nextWidth = clampGitWidth(startWidthRef.current + delta);
+    if (liveWidthRef.current === nextWidth) {
+      return;
+    }
+    liveWidthRef.current = nextWidth;
+    applyLiveWidths(nextWidth);
+  };
+
+  const handlePointerEnd = (event: React.PointerEvent) => {
+    if (pointerIDRef.current !== event.pointerId) {
+      return;
+    }
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // ignore
+    }
+    const finalWidth = clampGitWidth(liveWidthRef.current ?? gitPaneWidth);
+    pointerIDRef.current = null;
+    liveWidthRef.current = null;
+    setIsResizing(false);
+    setContextPanelWidth(directoryKey, 'git', finalWidth);
+  };
+
+  return (
+    <div
+      ref={separatorRef}
+      className={cn(
+        'relative z-20 h-full w-[3px] shrink-0 cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
+        isResizing && 'bg-[var(--interactive-border)]'
+      )}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerEnd}
+      onPointerCancel={handlePointerEnd}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={t('gitView.preview.resizeAria')}
+    />
+  );
+};
+
 const getSessionIDFromDedupeKey = (dedupeKey: string | undefined): string | null => {
   if (!dedupeKey || !dedupeKey.startsWith('session:')) {
     return null;
@@ -476,18 +588,50 @@ export const ContextPanel: React.FC = () => {
   const faviconByOrigin = useBrowserFaviconStore((state) => state.byOrigin);
   const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
   const { themeMode, setThemeMode, lightThemeId, darkThemeId, currentTheme } = useThemeSystem();
+  const contextGitSplitDiffWidth = useUIStore((state) => state.contextGitSplitDiffWidth);
+  const setContextGitSplitDiffWidth = useUIStore((state) => state.setContextGitSplitDiffWidth);
 
   const tabs = React.useMemo(() => panelState?.tabs ?? [], [panelState?.tabs]);
   const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? tabs[tabs.length - 1] ?? null;
+  const diffTabs = React.useMemo(
+    () => tabs.filter((tab) => tab.mode === 'diff'),
+    [tabs],
+  );
+  const innerDiffTabs = useGitDiffTabsStore(
+    (state) => (directoryKey ? state.byDirectory[directoryKey]?.tabs ?? EMPTY_GIT_DIFF_TABS : EMPTY_GIT_DIFF_TABS),
+  );
   const isOpen = Boolean(panelState?.isOpen && activeTab);
   const isExpanded = Boolean(isOpen && panelState?.expanded);
   const [availablePanelAreaWidth, setAvailablePanelAreaWidth] = React.useState<number | null>(null);
+  const panelRef = React.useRef<HTMLElement | null>(null);
   const activeModeForWidth = activeTab?.mode ?? null;
   const manualWidth = activeModeForWidth ? panelState?.widthByMode?.[activeModeForWidth] : undefined;
   const widthFraction = activeModeForWidth ? getContextSurfaceWidthFraction(activeModeForWidth) : 0.5;
   const widthFallbackBase = availablePanelAreaWidth
     ?? (typeof window !== 'undefined' ? window.innerWidth : CONTEXT_PANEL_DEFAULT_WIDTH * 2);
   const width = clampWidth(manualWidth ?? Math.round(widthFraction * widthFallbackBase));
+
+  // The git pane keeps exactly the width the panel has in git-only mode, so
+  // opening or closing the split never resizes the git surface. Same math as
+  // the panel's own `width` for activeMode 'git' — kept in one place so the
+  // two cannot drift.
+  const gitPaneWidth = React.useMemo(() => {
+    const gitModeWidth = panelState?.widthByMode?.['git'];
+    return clampWidth(gitModeWidth ?? Math.round(getContextSurfaceWidthFraction('git') * widthFallbackBase));
+  }, [panelState?.widthByMode, widthFallbackBase]);
+
+  // In split mode, total panel width = gitPaneWidth + contextGitSplitDiffWidth
+  const splitTotalWidth = React.useMemo(() => {
+    if (activeTab?.mode !== 'git' || innerDiffTabs.length === 0) {
+      return width;
+    }
+    const total = gitPaneWidth + contextGitSplitDiffWidth;
+    const available = getAvailablePanelWidth(panelRef.current);
+    return available === null ? total : Math.min(total, available);
+  }, [activeTab?.mode, innerDiffTabs.length, gitPaneWidth, contextGitSplitDiffWidth, width]);
+
+  const panelWidthForLayout = activeTab?.mode === 'git' && innerDiffTabs.length > 0 ? splitTotalWidth : width;
+
   const chatSessionIDs = React.useMemo(() => {
     const ids: string[] = [];
     for (const tab of tabs) {
@@ -504,7 +648,6 @@ export const ContextPanel: React.FC = () => {
   const startWidthRef = React.useRef(width);
   const resizingWidthRef = React.useRef<number | null>(null);
   const activeResizePointerIDRef = React.useRef<number | null>(null);
-  const panelRef = React.useRef<HTMLElement | null>(null);
   const chatFrameRefs = React.useRef<Map<string, HTMLIFrameElement>>(new Map());
   const chatFrameSrcByTabIDRef = React.useRef<Map<string, EmbeddedSessionChatURLCacheEntry>>(new Map());
   const wasOpenRef = React.useRef(false);
@@ -567,31 +710,45 @@ export const ContextPanel: React.FC = () => {
   }, []);
 
   const clampWidthForDrag = React.useCallback((nextWidth: number) => {
+    const isSplitMode = activeTab?.mode === 'git' && innerDiffTabs.length > 0;
+    if (isSplitMode) {
+      // The split total (git pane + diff region) is bounded by the available
+      // area only — the 1400px single-surface cap does not apply here.
+      const minTotal = CONTEXT_PANEL_MIN_WIDTH + 360;
+      const available = resizeAvailableWidthRef.current;
+      const maxTotal = Math.max(minTotal, available ?? Number.MAX_SAFE_INTEGER);
+      return Math.min(maxTotal, Math.max(minTotal, Math.round(nextWidth)));
+    }
     const clamped = clampWidth(nextWidth);
     const available = resizeAvailableWidthRef.current;
     return available === null ? clamped : Math.min(clamped, Math.max(1, available));
-  }, []);
+  }, [activeTab?.mode, innerDiffTabs.length]);
 
   const handleResizeStart = React.useCallback((event: React.PointerEvent) => {
     if (!isOpen || isExpanded || !directoryKey) {
       return;
     }
 
+    const isSplitMode = activeTab?.mode === 'git' && innerDiffTabs.length > 0;
+    const startingWidth = isSplitMode ? splitTotalWidth : width;
+
     activeResizePointerIDRef.current = event.pointerId;
     setIsResizing(true);
     startXRef.current = event.clientX;
-    startWidthRef.current = width;
-    resizingWidthRef.current = width;
+    startWidthRef.current = startingWidth;
+    resizingWidthRef.current = startingWidth;
     // Measure once per drag; no layout reads happen during pointermove.
     resizeAvailableWidthRef.current = getAvailablePanelWidth(panelRef.current);
     document.documentElement.style.cursor = 'col-resize';
     event.preventDefault();
-  }, [directoryKey, isExpanded, isOpen, width]);
+  }, [directoryKey, isExpanded, isOpen, width, activeTab?.mode, innerDiffTabs.length, splitTotalWidth]);
 
   const finishResize = React.useCallback(() => {
     // Apply the final width once, letting the regular 200ms width transition
     // carry the panel to the release position.
-    const finalWidth = clampWidthForDrag(resizingWidthRef.current ?? width);
+    const isSplitMode = activeTab?.mode === 'git' && innerDiffTabs.length > 0;
+    const startingWidth = isSplitMode ? splitTotalWidth : width;
+    const finalWidth = clampWidthForDrag(resizingWidthRef.current ?? startingWidth);
     resizingWidthRef.current = null;
     resizeAvailableWidthRef.current = null;
     if (resizeFollowTimerRef.current !== null) {
@@ -600,11 +757,16 @@ export const ContextPanel: React.FC = () => {
     }
     document.documentElement.style.cursor = '';
     if (directoryKey && activeModeForWidth) {
-      setContextPanelWidth(directoryKey, activeModeForWidth, finalWidth);
+      if (isSplitMode) {
+        // In split mode, write the diff region width, not the total width
+        setContextGitSplitDiffWidth(finalWidth - gitPaneWidth);
+      } else {
+        setContextPanelWidth(directoryKey, activeModeForWidth, finalWidth);
+      }
     }
     setIsResizing(false);
     activeResizePointerIDRef.current = null;
-  }, [activeModeForWidth, clampWidthForDrag, directoryKey, setContextPanelWidth, width]);
+  }, [activeTab?.mode, innerDiffTabs.length, clampWidthForDrag, directoryKey, setContextPanelWidth, splitTotalWidth, width, gitPaneWidth, setContextGitSplitDiffWidth, activeModeForWidth]);
 
   // Window-level drag listeners: tracking the pointer via the 3px handle and
   // pointer capture is unreliable (capture can fail over iframes and a missed
@@ -763,6 +925,59 @@ export const ContextPanel: React.FC = () => {
     }
   }, [tabs]);
 
+  // Legacy seed: a persisted 'diff' panel tab from before the inner tab store
+  // existed still carries its target on the descriptor. Seed the inner store
+  // from it once per directory so the tab keeps showing its diff.
+  const legacySeededDirectoriesRef = React.useRef<Set<string>>(new Set());
+  React.useEffect(() => {
+    if (!directoryKey || innerDiffTabs.length > 0 || legacySeededDirectoriesRef.current.has(directoryKey)) {
+      return;
+    }
+    const diffTab = diffTabs[0];
+    if (!diffTab || (!diffTab.commitDiffTarget && !diffTab.targetPath)) {
+      return;
+    }
+    legacySeededDirectoriesRef.current.add(directoryKey);
+
+    if (diffTab.commitDiffTarget) {
+      useGitDiffTabsStore.getState().openTab(directoryKey, {
+        kind: 'commit',
+        target: diffTab.commitDiffTarget,
+      });
+    } else if (diffTab.targetPath) {
+      useGitDiffTabsStore.getState().openTab(directoryKey, {
+        kind: 'working',
+        path: diffTab.targetPath,
+        scope: diffTab.diffScope ?? (diffTab.stagedDiff ? 'staged' : 'working'),
+      });
+    }
+  }, [directoryKey, innerDiffTabs.length, diffTabs]);
+
+  // Empty-tabs cleanup: when the LAST inner diff tab is closed, retire the
+  // singleton 'diff' panel tab too. Guarded on the non-empty -> empty
+  // transition so a persisted legacy tab is not closed on mount before the
+  // seed effect above has a chance to read it. Keyed by directory so a switch
+  // to a different directory never misreads the previous directory's count.
+  const prevInnerDiffTabCountRef = React.useRef<{ directory: string; count: number } | null>(null);
+  React.useEffect(() => {
+    if (!directoryKey) {
+      prevInnerDiffTabCountRef.current = null;
+      return;
+    }
+    const previous = prevInnerDiffTabCountRef.current;
+    const previousCount = previous?.directory === directoryKey ? previous.count : 0;
+    prevInnerDiffTabCountRef.current = { directory: directoryKey, count: innerDiffTabs.length };
+    if (innerDiffTabs.length > 0 || previousCount === 0) {
+      return;
+    }
+    if (diffTabs.length > 0) {
+      closeContextPanelTab(directoryKey, diffTabs[0].id);
+    }
+  }, [directoryKey, innerDiffTabs.length, diffTabs, closeContextPanelTab]);
+
+  // Scope switching for the targetless diff fallback (the rail-opened diff
+  // surface with no file). Inner-store working tabs own their scope changes
+  // inside GitDiffTabsPane.
   const handleDiffScopeChange = React.useCallback((nextScope: PendingDiffScope) => {
     if (!directoryKey || activeTab?.mode !== 'diff') {
       return;
@@ -945,7 +1160,29 @@ export const ContextPanel: React.FC = () => {
   const activeNonChatContent = activeTab?.mode === 'context'
         ? <ContextPanelContent />
         : activeTab?.mode === 'git'
-            ? <React.Suspense fallback={null}><GitView isActive={isOpen} /></React.Suspense>
+            ? innerDiffTabs.length > 0 && directoryKey
+              ? (
+                  <div
+                    className="flex h-full min-h-0"
+                    style={{ ['--oc-git-pane-width' as string]: `${gitPaneWidth}px` }}
+                  >
+                    <div className="h-full min-w-0 flex-1 overflow-hidden">
+                      <GitDiffTabsPane directory={directoryKey} />
+                    </div>
+                    <GitDiffSeparator
+                      directoryKey={directoryKey}
+                      gitPaneWidth={gitPaneWidth}
+                      diffRegionWidth={Math.max(360, splitTotalWidth - gitPaneWidth)}
+                    />
+                    <div
+                      className="h-full shrink-0 overflow-hidden border-l border-border"
+                      style={{ width: 'var(--oc-git-pane-width)' }}
+                    >
+                      <React.Suspense fallback={null}><GitView isActive={isOpen} /></React.Suspense>
+                    </div>
+                  </div>
+                )
+              : <React.Suspense fallback={null}><GitView isActive={isOpen} /></React.Suspense>
             : activeTab?.mode === 'pr'
                 ? <PullRequestView />
             : activeTab?.mode === 'linear'
@@ -963,10 +1200,6 @@ export const ContextPanel: React.FC = () => {
 
   const browserTabs = React.useMemo(
     () => tabs.filter((tab) => tab.mode === 'browser'),
-    [tabs],
-  );
-  const diffTabs = React.useMemo(
-    () => tabs.filter((tab) => tab.mode === 'diff'),
     [tabs],
   );
   const terminalTab = React.useMemo(
@@ -1131,7 +1364,7 @@ export const ContextPanel: React.FC = () => {
   // jumps) so the 200ms width transition matches the sidebars.
   const panelStyle: React.CSSProperties = !isOpen
     ? {
-        ['--oc-context-panel-width' as string]: `${width}px`,
+        ['--oc-context-panel-width' as string]: `${panelWidthForLayout}px`,
         width: 0,
         maxWidth: '100%',
         overflowX: 'clip',
@@ -1148,7 +1381,7 @@ export const ContextPanel: React.FC = () => {
           width: 'min(var(--oc-context-panel-width), 100%)',
           maxWidth: '100%',
           overflowX: 'clip',
-          ['--oc-context-panel-width' as string]: `${width}px`,
+          ['--oc-context-panel-width' as string]: `${panelWidthForLayout}px`,
         };
 
   return (
@@ -1164,7 +1397,7 @@ export const ContextPanel: React.FC = () => {
         // animates and the panel grows leftwards from its docked position.
         isExpanded
           ? 'absolute inset-y-0 right-0 z-20 min-w-0'
-          : 'relative h-full flex-shrink-0',
+          : 'relative z-20 h-full flex-shrink-0',
         !isOpen && 'pointer-events-none',
         'will-change-[width] motion-reduce:transition-none',
         'transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]'
@@ -1261,28 +1494,28 @@ export const ContextPanel: React.FC = () => {
             <BrowserPane initialUrl={tab.targetPath ?? ''} directory={directoryKey} tabID={tab.id} />
           </div>
         ))}
-        {diffTabs.map((tab) => (
-          <div
-            key={tab.id}
-            className={cn(
-              'absolute inset-0',
-              activeTab?.id !== tab.id && 'hidden'
+        {activeTab?.mode === 'diff' && directoryKey ? (
+          <div className="absolute inset-0">
+            {innerDiffTabs.length > 0 ? (
+              <GitDiffTabsPane directory={directoryKey} />
+            ) : (
+              // A targetless diff tab (opened from the rail with no file) keeps
+              // its pre-split behavior: the full working-tree stacked diff.
+              <React.Suspense fallback={null}>
+                <DiffView
+                  hideStackedFileSidebar
+                  stackedDefaultCollapsedAll
+                  pinSelectedFileHeaderToTopOnNavigate
+                  showOpenInEditorAction
+                  diffScope={activeTab.diffScope ?? (activeTab.stagedDiff ? 'staged' : 'working')}
+                  onDiffScopeChange={handleDiffScopeChange}
+                  targetFilePath={activeTab.targetPath}
+                  flushContent
+                />
+              </React.Suspense>
             )}
-          >
-            <React.Suspense fallback={null}>
-              <DiffView
-                hideStackedFileSidebar
-                stackedDefaultCollapsedAll
-                pinSelectedFileHeaderToTopOnNavigate
-                showOpenInEditorAction
-                diffScope={tab.diffScope ?? (tab.stagedDiff ? 'staged' : 'working')}
-                onDiffScopeChange={handleDiffScopeChange}
-                targetFilePath={tab.targetPath}
-                flushContent
-              />
-            </React.Suspense>
           </div>
-        ))}
+        ) : null}
         {terminalTab ? (
           <div className={cn('absolute inset-0', activeTab?.mode === 'terminal' ? 'block' : 'hidden')}>
             <TerminalView visible={isOpen && activeTab?.mode === 'terminal'} directory={terminalTab.targetDirectory} />

@@ -1,5 +1,42 @@
-export function registerGitRoutes(app) {
+import { createGitChangeWatcher } from './watcher.js';
+
+let sharedGitChangeWatcher = null;
+let sharedGitChangeBroadcaster = null;
+const isFunction = (value) => Object.prototype.toString.call(value) === '[object Function]';
+
+const createGitChangedBroadcaster = (broadcastGlobalUiEvent) => (directory) => {
+  if (!isFunction(broadcastGlobalUiEvent)) {
+    return;
+  }
+  broadcastGlobalUiEvent({
+    type: 'openchamber:git-changed',
+    properties: { directory },
+  });
+};
+
+const getGitChangeWatcher = (broadcastGlobalUiEvent) => {
+  if (sharedGitChangeWatcher && sharedGitChangeBroadcaster === broadcastGlobalUiEvent) {
+    return sharedGitChangeWatcher;
+  }
+
+  sharedGitChangeWatcher?.dispose();
+  sharedGitChangeBroadcaster = broadcastGlobalUiEvent;
+  sharedGitChangeWatcher = createGitChangeWatcher({
+    broadcast: createGitChangedBroadcaster(broadcastGlobalUiEvent),
+  });
+  return sharedGitChangeWatcher;
+};
+
+export function registerGitRoutes(app, { broadcastGlobalUiEvent } = {}) {
+  const gitChangeWatcher = getGitChangeWatcher(broadcastGlobalUiEvent);
   let gitLibraries = null;
+  const ROOT_QUERY_MARKER = '__ROOT__';
+  const COMMIT_ISH_PATTERN = /^[0-9a-f]{7,64}$/i;
+  const FULL_GIT_OBJECT_ID_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
+  const readSingleQueryString = (value) => {
+    const raw = Array.isArray(value) ? value[0] : value;
+    return Object.prototype.toString.call(raw) === '[object String]' ? String(raw) : null;
+  };
   const getGitLibraries = async () => {
     if (!gitLibraries) {
       gitLibraries = await import('./index.js');
@@ -8,12 +45,67 @@ export function registerGitRoutes(app) {
   };
 
   const resolveDirectoryQuery = (value) => {
-    const raw = Array.isArray(value) ? value[0] : value;
-    if (typeof raw !== 'string') {
+    const raw = readSingleQueryString(value);
+    if (raw === null) {
       return null;
     }
     const trimmed = raw.trim();
     return trimmed || null;
+  };
+
+  const resolveStringArrayQuery = (value) => {
+    const values = Array.isArray(value) ? value : value == null ? [] : [value];
+    return values
+      .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+      .filter(Boolean);
+  };
+
+  const resolveCommitHashQuery = (value, fieldName) => {
+    const raw = readSingleQueryString(value);
+    if (raw === null || !FULL_GIT_OBJECT_ID_PATTERN.test(raw.trim())) {
+      throw new Error(`${fieldName} must be a full commit SHA`);
+    }
+    return raw.trim();
+  };
+
+  const resolveNullableCommitPathQuery = (value, fieldName) => {
+    const raw = readSingleQueryString(value);
+    if (raw === ROOT_QUERY_MARKER) {
+      return null;
+    }
+    if (raw === null || raw.length === 0) {
+      throw new Error(`${fieldName} parameter is required`);
+    }
+    return raw;
+  };
+
+  const parseGitHistoryLimit = (value) => {
+    if (value == null || value === '') return undefined;
+    const parsed = Number.parseInt(String(Array.isArray(value) ? value[0] : value), 10);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
+      throw new Error('limit must be between 1 and 100');
+    }
+    return parsed;
+  };
+
+  const parseGitHistoryCursor = (value) => {
+    if (value == null || value === '') return undefined;
+    const raw = Array.isArray(value) ? value[0] : value;
+    if (typeof raw !== 'string') {
+      throw new Error('cursor is malformed');
+    }
+    if (!/^[A-Za-z0-9_-]+$/.test(raw)) {
+      throw new Error('cursor is malformed');
+    }
+    return raw;
+  };
+
+  const parseGitHistoryAll = (value) => {
+    if (value == null || value === '') {
+      return false;
+    }
+    const raw = Array.isArray(value) ? value[0] : value;
+    return raw === 'true';
   };
 
   const extractGitErrorText = (error) => {
@@ -27,6 +119,7 @@ export function registerGitRoutes(app) {
       .join('\n');
   };
 
+  const NON_REPOSITORY_ERROR = 'Directory does not appear to be a git repository';
   const isNonRepoGitError = (error) => /not a git repository/i.test(extractGitErrorText(error));
 
   const nonRepoStatusPayload = () => ({
@@ -236,6 +329,11 @@ export function registerGitRoutes(app) {
       const mode = req.query.mode === 'light' ? 'light' : undefined;
       const status = await getStatus(directory, { mode });
       res.json(status);
+      try {
+        gitChangeWatcher.ensureWatch(directory);
+      } catch (watchError) {
+        console.warn('Failed to watch git directory for status refresh hints:', watchError);
+      }
     } catch (error) {
       // Non-repo / GitError must not abort callers that enumerate projects or
       // sessions (e.g. sidebar discovery). Log a warning and continue.
@@ -290,6 +388,77 @@ export function registerGitRoutes(app) {
     } catch (error) {
       console.error('Failed to get git commit summaries:', error);
       res.status(400).json({ error: error.message || 'Failed to get git commit summaries' });
+    }
+  });
+
+  app.get('/api/git/history/refs', async (req, res) => {
+    const { getGitHistoryRefs } = await getGitLibraries();
+    try {
+      const directory = resolveDirectoryQuery(req.query.directory);
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      res.json(await getGitHistoryRefs(directory));
+    } catch (error) {
+      if (isNonRepoGitError(error)) {
+        return res.status(400).json({ error: NON_REPOSITORY_ERROR });
+      }
+      console.error('Failed to get git history refs:', error);
+      res.status(error?.statusCode || 500).json({ error: error.message || 'Failed to get git history refs' });
+    }
+  });
+
+  app.get('/api/git/history', async (req, res) => {
+    const { getGitHistory } = await getGitLibraries();
+    try {
+      const directory = resolveDirectoryQuery(req.query.directory);
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const refs = resolveStringArrayQuery(req.query.refs);
+      const all = parseGitHistoryAll(req.query.all);
+      if (all && refs.length > 0) {
+        return res.status(400).json({ error: 'all cannot be combined with explicit refs' });
+      }
+      if (!all && refs.length === 0) {
+        return res.status(400).json({ error: 'at least one ref is required' });
+      }
+      if (!all && refs.some((ref) => ref.startsWith('-') || ref.includes('\0'))) {
+        return res.status(400).json({ error: 'refs must not contain option-like values' });
+      }
+      const cursor = parseGitHistoryCursor(req.query.cursor);
+      const limit = parseGitHistoryLimit(req.query.limit);
+      res.json(await getGitHistory(directory, all ? { all: true, cursor, limit } : { refs, cursor, limit }));
+    } catch (error) {
+      console.error('Failed to get git history:', error);
+      const responseBody = {
+        error: error.message || 'Failed to get git history',
+      };
+      if (error?.code) {
+        responseBody.code = error.code;
+      }
+      res.status(error?.statusCode || 400).json(responseBody);
+    }
+  });
+
+  app.get('/api/git/history/merge-base', async (req, res) => {
+    const { getGitHistoryMergeBase } = await getGitLibraries();
+    try {
+      const directory = resolveDirectoryQuery(req.query.directory);
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const refs = resolveStringArrayQuery(req.query.refs);
+      if (refs.length === 0) {
+        return res.status(400).json({ error: 'at least one ref is required' });
+      }
+      if (refs.some((ref) => ref.startsWith('-') || ref.includes('\0'))) {
+        return res.status(400).json({ error: 'refs must not contain option-like values' });
+      }
+      res.json(await getGitHistoryMergeBase(directory, { refs }));
+    } catch (error) {
+      console.error('Failed to get git history merge base:', error);
+      res.status(error?.statusCode || 400).json({ error: error.message || 'Failed to get git history merge base' });
     }
   });
 
@@ -892,12 +1061,13 @@ export function registerGitRoutes(app) {
   app.post('/api/git/branches', async (req, res) => {
     const { createBranch } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const { name, startPoint } = req.body;
+      const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+      const startPoint = typeof req.body?.startPoint === 'string' ? req.body.startPoint : undefined;
       if (!name) {
         return res.status(400).json({ error: 'name is required' });
       }
@@ -907,6 +1077,38 @@ export function registerGitRoutes(app) {
     } catch (error) {
       console.error('Failed to create branch:', error);
       res.status(500).json({ error: error.message || 'Failed to create branch' });
+    }
+  });
+
+  app.post('/api/git/tags', async (req, res) => {
+    const { createTag } = await getGitLibraries();
+    try {
+      const directory = resolveDirectoryQuery(req.query.directory);
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+
+      const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+      if (!name) {
+        return res.status(400).json({ error: 'name is required' });
+      }
+      if (name.startsWith('-') || name.includes('\0')) {
+        return res.status(400).json({ error: 'name must not contain option-like values' });
+      }
+
+      const commitHashRaw = typeof req.body?.commitHash === 'string' ? req.body.commitHash.trim() : '';
+      if (!commitHashRaw) {
+        return res.status(400).json({ error: 'commitHash is required' });
+      }
+      if (!FULL_GIT_OBJECT_ID_PATTERN.test(commitHashRaw)) {
+        return res.status(400).json({ error: 'commitHash must be a full commit SHA' });
+      }
+
+      const result = await createTag(directory, name, commitHashRaw);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to create tag:', error);
+      res.status(500).json({ error: error.message || 'Failed to create tag' });
     }
   });
 
@@ -1005,7 +1207,7 @@ export function registerGitRoutes(app) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
       const { hash } = req.body;
-      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+      if (!req.body.hash || typeof req.body.hash !== 'string' || !COMMIT_ISH_PATTERN.test(req.body.hash)) {
         return res.status(400).json({ error: 'Invalid commit hash' });
       }
       const result = await checkoutCommit(directory, hash);
@@ -1024,7 +1226,7 @@ export function registerGitRoutes(app) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
       const { hash } = req.body;
-      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+      if (!req.body.hash || typeof req.body.hash !== 'string' || !COMMIT_ISH_PATTERN.test(req.body.hash)) {
         return res.status(400).json({ error: 'Invalid commit hash' });
       }
       const result = await cherryPick(directory, hash);
@@ -1043,7 +1245,7 @@ export function registerGitRoutes(app) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
       const { hash } = req.body;
-      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+      if (!req.body.hash || typeof req.body.hash !== 'string' || !COMMIT_ISH_PATTERN.test(req.body.hash)) {
         return res.status(400).json({ error: 'Invalid commit hash' });
       }
       const result = await revertCommit(directory, hash);
@@ -1062,7 +1264,7 @@ export function registerGitRoutes(app) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
       const { hash, mode, force } = req.body;
-      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+      if (!req.body.hash || typeof req.body.hash !== 'string' || !COMMIT_ISH_PATTERN.test(req.body.hash)) {
         return res.status(400).json({ error: 'Invalid commit hash' });
       }
       if (!['soft', 'mixed', 'hard'].includes(mode)) {
@@ -1284,43 +1486,62 @@ export function registerGitRoutes(app) {
   app.get('/api/git/commit-files', async (req, res) => {
     const { getCommitFiles } = await getGitLibraries();
     try {
-      const { directory, hash } = req.query;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
-      if (!hash) {
-        return res.status(400).json({ error: 'hash parameter is required' });
-      }
 
-      const result = await getCommitFiles(directory, hash);
+      const result = await getCommitFiles(directory, {
+        commitHash: resolveCommitHashQuery(req.query.commitHash, 'commitHash'),
+        parentHash: req.query.parentHash === ROOT_QUERY_MARKER
+          ? null
+          : resolveCommitHashQuery(req.query.parentHash, 'parentHash'),
+      });
       res.json(result);
     } catch (error) {
+      if (/must be a full commit SHA|parameter is required/.test(String(error?.message || ''))) {
+        return res.status(400).json({ error: error.message });
+      }
       console.error('Failed to get commit files:', error);
       res.status(500).json({ error: error.message || 'Failed to get commit files' });
     }
   });
 
   app.get('/api/git/commit-file-diff', async (req, res) => {
-    const { getCommitFileDiff } = await getGitLibraries();
+      const { getCommitFileDiff } = await getGitLibraries();
     try {
-      const { directory, hash, path: filePath } = req.query;
-      if (!directory || typeof directory !== 'string') {
+      const directory = resolveDirectoryQuery(req.query.directory);
+      if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
-      if (!hash || typeof hash !== 'string') {
-        return res.status(400).json({ error: 'hash parameter is required' });
+      const originalPathQuery = readSingleQueryString(req.query.originalPath);
+      const modifiedPathQuery = readSingleQueryString(req.query.modifiedPath);
+      if (originalPathQuery === null) {
+        return res.status(400).json({ error: 'originalPath and modifiedPath parameters are required' });
       }
-      if (!/^[0-9a-fA-F]{7,40}$/.test(hash)) {
-        return res.status(400).json({ error: 'hash must be a valid commit SHA' });
-      }
-      if (!filePath || typeof filePath !== 'string') {
-        return res.status(400).json({ error: 'path parameter is required' });
+      if (modifiedPathQuery === null) {
+        return res.status(400).json({ error: 'originalPath and modifiedPath parameters are required' });
       }
 
-      const isBinary = req.query.binary === 'true';
-      const result = await getCommitFileDiff(directory, hash, filePath, isBinary);
+      const request = {
+        commitHash: resolveCommitHashQuery(req.query.commitHash, 'commitHash'),
+        parentHash: req.query.parentHash === ROOT_QUERY_MARKER
+          ? null
+          : resolveCommitHashQuery(req.query.parentHash, 'parentHash'),
+        originalPath: resolveNullableCommitPathQuery(req.query.originalPath, 'originalPath'),
+        modifiedPath: resolveNullableCommitPathQuery(req.query.modifiedPath, 'modifiedPath'),
+      };
+
+      if (request.originalPath === null && request.modifiedPath === null) {
+        return res.status(400).json({ error: 'originalPath or modifiedPath parameter is required' });
+      }
+
+      const result = await getCommitFileDiff(directory, request);
       res.json(result);
     } catch (error) {
+      if (/must be a full commit SHA|parameter is required/.test(String(error?.message || ''))) {
+        return res.status(400).json({ error: error.message });
+      }
       console.error('Failed to get commit file diff:', error);
       res.status(500).json({ error: error.message || 'Failed to get commit file diff' });
     }

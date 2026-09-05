@@ -711,6 +711,12 @@ export const createSettingsHelpers = (dependencies) => {
         result.toolJsonViewMode = mode;
       }
     }
+    if (typeof candidate.gitReviewLayout === 'string') {
+      const layout = candidate.gitReviewLayout.trim();
+      if (layout === 'separate' || layout === 'combined') {
+        result.gitReviewLayout = layout;
+      }
+    }
     if (typeof candidate.directoryShowHidden === 'boolean') {
       result.directoryShowHidden = candidate.directoryShowHidden;
     }

@@ -406,9 +406,7 @@ div[data-chat-input-footer="true"] {
 /* Safari/WebKit fixes for buttons and SVG icons */
 /* Remixicon puts fill="currentColor" on root SVG which WebKit renders as background */
 button svg.remixicon,
-[role="button"] svg.remixicon,
-button svg,
-[role="button"] svg {
+[role="button"] svg.remixicon {
   background: none !important;
   background-color: transparent !important;
   /* Override inline fill attribute on SVG root */
@@ -425,10 +423,10 @@ button svg:not(.animate-spin),
 }
 
 /* Fix SVG elements inside buttons - remove any rect/circle backgrounds */
-button svg rect,
-button svg circle,
-[role="button"] svg rect,
-[role="button"] svg circle {
+button svg.remixicon rect,
+button svg.remixicon circle,
+[role="button"] svg.remixicon rect,
+[role="button"] svg.remixicon circle {
   fill: none !important;
 }
 
@@ -436,9 +434,7 @@ button svg circle,
 button svg.remixicon path,
 button svg.remixicon circle[fill],
 [role="button"] svg.remixicon path,
-[role="button"] svg.remixicon circle[fill],
-button svg path,
-[role="button"] svg path {
+[role="button"] svg.remixicon circle[fill] {
   fill: currentColor !important;
 }
 

@@ -1,22 +1,22 @@
-import { describe, expect, it, vi } from 'vitest';
-
-// Every export is auto-stubbed from the real module. The previous hand-written
-// list of ~70 names silently fell behind the source: `getGitRangeDiff` was added
-// upstream, the list was not, and the whole file failed on an unrelated change.
-vi.mock('@openchamber/ui/lib/gitApiHttp', async (importOriginal) => {
-  const actual = await importOriginal<Record<string, unknown>>();
-  return Object.fromEntries(Object.keys(actual).map((name) => [name, vi.fn()]));
-});
+import { describe, expect, it } from 'vitest';
+import { createWebGitAPI } from './git';
 
 describe('createWebGitAPI', () => {
-  it('exposes bulk stage and unstage methods', async () => {
-    const { createWebGitAPI } = await import('./git');
+  it('exposes the shared git HTTP surface', () => {
     const api = createWebGitAPI();
 
-    expect(typeof api.stageGitFiles).toBe('function');
-    expect(typeof api.unstageGitFiles).toBe('function');
-    expect(typeof api.stageGitHunk).toBe('function');
-    expect(typeof api.unstageGitHunk).toBe('function');
-    expect(typeof api.revertGitHunk).toBe('function');
+    expect(api).toEqual(expect.objectContaining({
+      createGitTag: expect.any(Function),
+      stageGitFiles: expect.any(Function),
+      unstageGitFiles: expect.any(Function),
+      stageGitHunk: expect.any(Function),
+      unstageGitHunk: expect.any(Function),
+      revertGitHunk: expect.any(Function),
+      getGitHistoryRefs: expect.any(Function),
+      getGitHistory: expect.any(Function),
+      getGitHistoryMergeBase: expect.any(Function),
+      getCommitFiles: expect.any(Function),
+      getCommitFileDiff: expect.any(Function),
+    }));
   });
 });

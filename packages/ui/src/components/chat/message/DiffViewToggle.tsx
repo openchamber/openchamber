@@ -25,6 +25,7 @@ export const DiffViewToggle: React.FC<DiffViewToggleProps> = ({ mode, onModeChan
         <Button
             size="sm"
             variant="ghost"
+            data-diff-view-toggle="true"
             className={cn('h-5 w-5 p-0 opacity-60 hover:opacity-100', className)}
             onClick={handleClick}
             title={mode === 'side-by-side' ? 'Switch to unified view' : 'Switch to side-by-side view'}

@@ -14,6 +14,7 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 
 - `bridge-git-runtime.ts`
   - Standard Git message handlers.
+  - Git history bridge payloads accept either validated explicit refs or the canonical `{ all: true }` selector; the bridge stays thin and the service still owns ref validation plus `--all` construction.
 
 - `bridge-git-special-runtime.ts`
   - Specialized Git flows (`pr-description`, `conflict-details`) and generation helpers.
@@ -24,6 +25,9 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 - `gitService.ts`
   - Owns VS Code Git and worktree operations.
   - Fetches the current tracked source branch once before worktree creation. Fetch failure falls back to the local branch and reports it to the shared UI.
+  - Legacy Git history parsing uses control-character field and statistics delimiters so multiline commit bodies survive in shared `GitLogEntry` results.
+  - Commit metadata parity uses explicit `parentHash` comparisons plus a single NUL-delimited `git diff-tree --raw --numstat -z` parser so the extension host returns the same normalized changed-file objects as other runtimes for adds, deletes, renames, type changes, symlinks, gitlinks, and binary files.
+  - Commit previews accept nullable original/modified paths, resolve each side through tree metadata, and return either `{ status: 'ready', original, modified }` or `{ status: 'too-large', totalBytes, maxBytes }` before reading blobs larger than the preview cap.
   - Fast worktree creation reports bootstrap phases explicitly: `directory-created`, then `git-ready` after Git population/upstream work, and `setup-ready` after setup commands. Existing worktrees without tracked bootstrap state fall back to `ready`/`setup-ready`; shared webview consumers also accept legacy responses without `phase`.
   - Worktree removal waits for an active create/bootstrap task for the same directory so background Git and setup work cannot race deletion or restore stale bootstrap state.
   - Worktree population enables Git `core.longpaths` (local repo config plus `-c core.longpaths=true` on `git reset --hard`) so deeply nested checkouts under the managed data-dir worktree root do not fail on Windows MAX_PATH with "Filename too long".

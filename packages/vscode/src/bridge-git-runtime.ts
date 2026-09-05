@@ -7,6 +7,8 @@ type BridgeMessageInput = {
   payload?: unknown;
 };
 
+type BridgePayloadRecord = Record<string, unknown>;
+
 const requireDirectory = (id: string, type: string, directory?: string): BridgeResponse | null => {
   if (!directory) {
     return { id, type, success: false, error: 'Directory is required' };
@@ -14,12 +16,62 @@ const requireDirectory = (id: string, type: string, directory?: string): BridgeR
   return null;
 };
 
+const FULL_GIT_OBJECT_ID_PATTERN = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/;
+
 const isValidCommitHash = (hash: string | undefined): hash is string => (
-  typeof hash === 'string' && /^[0-9a-fA-F]{7,40}$/.test(hash)
+  typeof hash === 'string' && /^[0-9a-fA-F]{7,64}$/.test(hash)
 );
+
+const isFullGitObjectId = (hash: string | undefined): hash is string => (
+  typeof hash === 'string' && FULL_GIT_OBJECT_ID_PATTERN.test(hash)
+);
+
+const isOptionLikeGitName = (value: string | undefined): value is string => (
+  typeof value === 'string' && (value.startsWith('-') || value.includes('\0'))
+);
+
+const asRecord = (payload: unknown): BridgePayloadRecord => (
+  payload && typeof payload === 'object' ? payload as BridgePayloadRecord : {}
+);
+
+const readString = (payload: BridgePayloadRecord, key: string): string | undefined => (
+  typeof payload[key] === 'string' ? payload[key] as string : undefined
+);
+
+const readStringArray = (payload: BridgePayloadRecord, key: string): string[] | null => {
+  const value = payload[key];
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+    return null;
+  }
+  return value;
+};
+
+const readOptionalStringArray = (payload: BridgePayloadRecord, key: string): string[] | null | undefined => {
+  if (!(key in payload) || payload[key] == null) {
+    return undefined;
+  }
+  return readStringArray(payload, key);
+};
+
+const readOptionalBoolean = (payload: BridgePayloadRecord, key: string): boolean | null | undefined => {
+  if (!(key in payload) || payload[key] == null) {
+    return undefined;
+  }
+  const value = payload[key];
+  return typeof value === 'boolean' ? value : null;
+};
+
+const readOptionalNumber = (payload: BridgePayloadRecord, key: string): number | null | undefined => {
+  const value = payload[key];
+  if (value == null) {
+    return undefined;
+  }
+  return typeof value === 'number' ? value : null;
+};
 
 export async function handleStandardGitBridgeMessage(message: BridgeMessageInput): Promise<BridgeResponse | null> {
   const { id, type, payload } = message;
+  const payloadRecord = asRecord(payload);
 
   switch (type) {
     case 'api:git/check': {
@@ -44,6 +96,58 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (dirError) return dirError;
       const status = await gitService.getGitStatus(directory!, mode === 'light' ? { mode } : undefined);
       return { id, type, success: true, data: status };
+    }
+
+    case 'api:git/history/refs': {
+      const directory = readString(payloadRecord, 'directory');
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      const refs = await gitService.getGitHistoryRefs(directory!);
+      return { id, type, success: true, data: refs };
+    }
+
+    case 'api:git/history': {
+      const directory = readString(payloadRecord, 'directory');
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+
+      const refs = readOptionalStringArray(payloadRecord, 'refs');
+      if (refs === null) {
+        return { id, type, success: false, error: 'refs must be an array of strings' };
+      }
+      const all = readOptionalBoolean(payloadRecord, 'all');
+      if (all === null) {
+        return { id, type, success: false, error: 'all must be a boolean' };
+      }
+      if (all === true && refs && refs.length > 0) {
+        return { id, type, success: false, error: 'all cannot be combined with explicit refs' };
+      }
+      if (all !== true && !refs) {
+        return { id, type, success: false, error: 'refs must be an array of strings' };
+      }
+
+      const cursor = readString(payloadRecord, 'cursor');
+      const limit = readOptionalNumber(payloadRecord, 'limit');
+      if (limit === null) {
+        return { id, type, success: false, error: 'limit must be a number' };
+      }
+
+      const history = await gitService.getGitHistory(directory!, all === true ? { all: true, cursor, limit } : { refs, cursor, limit });
+      return { id, type, success: true, data: history };
+    }
+
+    case 'api:git/history/merge-base': {
+      const directory = readString(payloadRecord, 'directory');
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+
+      const refs = readStringArray(payloadRecord, 'refs');
+      if (!refs) {
+        return { id, type, success: false, error: 'refs must be an array of strings' };
+      }
+
+      const mergeBase = await gitService.getGitHistoryMergeBase(directory!, { refs });
+      return { id, type, success: true, data: mergeBase };
     }
 
     case 'api:git/branches': {
@@ -91,6 +195,34 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
         return { id, type, success: false, error: 'branches must be an array of branch names' };
       }
       return { id, type, success: true, data: await gitService.getGitUnpushedBranchCounts(directory!, branches) };
+    }
+
+    case 'api:git/tags': {
+      const directory = readString(payloadRecord, 'directory');
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+
+      const method = readString(payloadRecord, 'method');
+      const normalizedMethod = typeof method === 'string' ? method.toUpperCase() : 'GET';
+      if (normalizedMethod !== 'POST') {
+        return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };
+      }
+
+      const name = readString(payloadRecord, 'name')?.trim();
+      if (!name) {
+        return { id, type, success: false, error: 'Tag name is required' };
+      }
+      if (isOptionLikeGitName(name)) {
+        return { id, type, success: false, error: 'Tag name must not contain option-like values' };
+      }
+
+      const commitHash = readString(payloadRecord, 'commitHash')?.trim();
+      if (!commitHash || !isFullGitObjectId(commitHash)) {
+        return { id, type, success: false, error: 'commitHash must be a full commit SHA' };
+      }
+
+      const result = await gitService.createTag(directory!, name, commitHash);
+      return { id, type, success: true, data: result };
     }
 
     case 'api:git/remote-branches': {
@@ -515,28 +647,65 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
     }
 
     case 'api:git/commit-files': {
-      const { directory, hash } = (payload || {}) as { directory?: string; hash?: string };
+      const directory = readString(payloadRecord, 'directory');
+      const hash = readString(payloadRecord, 'hash');
+      const parentHashValue = payloadRecord.parentHash;
+      const parentHash = parentHashValue === null ? null : readString(payloadRecord, 'parentHash');
       if (!directory || !hash) {
         return { id, type, success: false, error: 'Directory and hash are required' };
       }
-      const result = await gitService.getCommitFiles(directory, hash);
+      if (!isFullGitObjectId(hash)) {
+        return { id, type, success: false, error: 'hash must be a full commit SHA' };
+      }
+      if (parentHashValue !== undefined && parentHashValue !== null && parentHash === undefined) {
+        return { id, type, success: false, error: 'parentHash must be a string or null' };
+      }
+      if (parentHash !== undefined && parentHash !== null && !isFullGitObjectId(parentHash)) {
+        return { id, type, success: false, error: 'parentHash must be a full commit SHA or null' };
+      }
+      const result = await gitService.getCommitFiles(directory, {
+        commitHash: hash,
+        parentHash: parentHash ?? null,
+      });
       return { id, type, success: true, data: result };
     }
 
     case 'api:git/commit-file-diff': {
-      const { directory, hash, path: filePath, binary } = (payload || {}) as {
-        directory?: string;
-        hash?: string;
-        path?: string;
-        binary?: boolean;
-      };
-      if (!directory || !hash || !filePath) {
-        return { id, type, success: false, error: 'Directory, hash, and path are required' };
+      const directory = readString(payloadRecord, 'directory');
+      const hash = readString(payloadRecord, 'hash');
+      const parentHashValue = payloadRecord.parentHash;
+      const parentHash = parentHashValue === null ? null : readString(payloadRecord, 'parentHash');
+      const originalPathValue = payloadRecord.originalPath;
+      const originalPath = originalPathValue === null ? null : readString(payloadRecord, 'originalPath');
+      const modifiedPathValue = payloadRecord.modifiedPath;
+      const modifiedPath = modifiedPathValue === null ? null : readString(payloadRecord, 'modifiedPath');
+      if (!directory || !hash) {
+        return { id, type, success: false, error: 'Directory and hash are required' };
       }
-      if (!/^[0-9a-fA-F]{7,40}$/.test(hash)) {
-        return { id, type, success: false, error: 'hash must be a valid commit SHA' };
+      if (!isFullGitObjectId(hash)) {
+        return { id, type, success: false, error: 'hash must be a full commit SHA' };
       }
-      const result = await gitService.getCommitFileDiff(directory, hash, filePath, Boolean(binary));
+      if (parentHashValue !== undefined && parentHashValue !== null && parentHash === undefined) {
+        return { id, type, success: false, error: 'parentHash must be a string or null' };
+      }
+      if (parentHash !== undefined && parentHash !== null && !isFullGitObjectId(parentHash)) {
+        return { id, type, success: false, error: 'parentHash must be a full commit SHA or null' };
+      }
+      if (originalPathValue !== undefined && originalPathValue !== null && originalPath === undefined) {
+        return { id, type, success: false, error: 'originalPath must be a string or null' };
+      }
+      if (modifiedPathValue !== undefined && modifiedPathValue !== null && modifiedPath === undefined) {
+        return { id, type, success: false, error: 'modifiedPath must be a string or null' };
+      }
+      if (!originalPath && !modifiedPath) {
+        return { id, type, success: false, error: 'originalPath or modifiedPath is required' };
+      }
+      const result = await gitService.getCommitFileDiff(directory, {
+        commitHash: hash,
+        parentHash: parentHash ?? null,
+        originalPath: originalPath ?? null,
+        modifiedPath: modifiedPath ?? null,
+      });
       return { id, type, success: true, data: result };
     }
 

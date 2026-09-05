@@ -13,7 +13,6 @@ import { notifyGitStatusInvalidated } from './gitStatusInvalidation';
 export type {
   GitRemote,
   MergeConflictDetails,
-  CommitFileDiffResponse,
 } from './api/types';
 
 const getRuntimeGit = () => {
@@ -88,6 +87,30 @@ export async function getGitStatus(directory: string, options?: { mode?: 'light'
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getGitStatus(directory, options);
   return gitHttp.getGitStatus(directory, options);
+}
+
+export async function getGitHistoryRefs(directory: string): Promise<import('./api/types').GitHistoryRefsResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime?.getGitHistoryRefs) return runtime.getGitHistoryRefs(directory);
+  return gitHttp.getGitHistoryRefs(directory);
+}
+
+export async function getGitHistory(
+  directory: string,
+  options: import('./api/types').GitHistoryOptions,
+): Promise<import('./api/types').GitHistoryPage> {
+  const runtime = getRuntimeGit();
+  if (runtime?.getGitHistory) return runtime.getGitHistory(directory, options);
+  return gitHttp.getGitHistory(directory, options);
+}
+
+export async function getGitHistoryMergeBase(
+  directory: string,
+  options: { refs: string[] },
+): Promise<import('./api/types').GitHistoryMergeBaseResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime?.getGitHistoryMergeBase) return runtime.getGitHistoryMergeBase(directory, options);
+  return gitHttp.getGitHistoryMergeBase(directory, options);
 }
 
 export async function resolveGitPrimaryRoot(directory: string): Promise<string> {
@@ -482,6 +505,7 @@ export async function generatePullRequestDescription(
     .filter((entry) => typeof entry?.hash === 'string' && entry.hash.length > 0)
     .map((entry) => ({
       hash: entry.hash,
+      parentHash: entry.parents?.[0] ?? null,
       subject: typeof entry.message === 'string' ? entry.message.trim() : '',
       body: typeof entry.body === 'string' ? entry.body.trim().slice(0, COMMIT_BODY_CHAR_LIMIT) : '',
     }));
@@ -493,7 +517,10 @@ export async function generatePullRequestDescription(
   const filesSet = new Set<string>();
   await Promise.all(commits.map(async (commit) => {
     try {
-      const response = await getCommitFiles(directory, commit.hash);
+      const response = await getCommitFiles(directory, {
+        commitHash: commit.hash,
+        parentHash: commit.parentHash,
+      });
       const files = Array.isArray(response?.files) ? response.files : [];
       for (const file of files) {
         if (typeof file?.path === 'string' && file.path.trim().length > 0) {
@@ -956,6 +983,16 @@ export async function createBranch(
   return gitHttp.createBranch(directory, name, startPoint);
 }
 
+export async function createGitTag(
+  directory: string,
+  name: string,
+  commitHash: string
+): Promise<{ success: boolean; tag: string }> {
+  const runtime = getRuntimeGit();
+  if (runtime?.createGitTag) return runtime.createGitTag(directory, name, commitHash);
+  return gitHttp.createGitTag(directory, name, commitHash);
+}
+
 export async function renameBranch(
   directory: string,
   oldName: string,
@@ -977,22 +1014,20 @@ export async function getGitLog(
 
 export async function getCommitFiles(
   directory: string,
-  hash: string
+  request: import('./api/types').GitCommitChangesRequest
 ): Promise<import('./api/types').GitCommitFilesResponse> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtime.getCommitFiles(directory, hash);
-  return gitHttp.getCommitFiles(directory, hash);
+  if (runtime) return runtime.getCommitFiles(directory, request);
+  return gitHttp.getCommitFiles(directory, request);
 }
 
 export async function getCommitFileDiff(
   directory: string,
-  hash: string,
-  filePath: string,
-  isBinary: boolean
-): Promise<import('./api/types').CommitFileDiffResponse> {
+  request: import('./api/types').GitCommitFilePreviewRequest
+): Promise<import('./api/types').GitCommitFilePreviewResponse> {
   const runtime = getRuntimeGit();
-  if (runtime?.getCommitFileDiff) return runtime.getCommitFileDiff(directory, hash, filePath, isBinary);
-  return gitHttp.getCommitFileDiff(directory, hash, filePath, isBinary);
+  if (runtime?.getCommitFileDiff) return runtime.getCommitFileDiff(directory, request);
+  return gitHttp.getCommitFileDiff(directory, request);
 }
 
 export async function getGitIdentities(): Promise<import('./api/types').GitIdentityProfile[]> {

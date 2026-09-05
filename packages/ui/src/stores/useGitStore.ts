@@ -4,14 +4,19 @@ import { devtools } from 'zustand/middleware';
 import type {
   GitStatus,
   GitBranch,
+  GitHistoryOptions,
   GitLogResponse,
   GitIdentitySummary,
+  GitHistoryItem,
+  GitHistoryPage,
+  GitHistoryRefsResponse,
 } from '@/lib/api/types';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { GitDirectoriesUnsupportedError, listGitDirectories } from '@/lib/gitApiHttp';
 import { subscribeGitStatusInvalidations } from '@/lib/gitStatusInvalidation';
 import { getWorktreeBootstrapState } from '@/lib/worktrees/worktreeBootstrap';
+import { isStaleGitHistoryCursorError } from '@/lib/gitHistoryError';
 
 const LOG_STALE_THRESHOLD = 10000;
 const REPO_CHECK_STALE_THRESHOLD = 60_000;
@@ -23,6 +28,9 @@ const DIFF_PREFETCH_FOCUS_MAX_FILES = 40;
 const DIFF_PREFETCH_CONCURRENCY = 2;
 const DIFF_PREFETCH_TIMEOUT_MS = 15000;
 const DIFF_PREFETCH_LARGE_FILE_THRESHOLD = 500; // skip prefetch for files with >500 changed lines
+const GIT_HISTORY_INITIAL_PAGE_SIZE = 50;
+const GIT_HISTORY_MAX_PAGE_SIZE = 100;
+const NON_REPOSITORY_ERROR = 'Directory does not appear to be a git repository';
 
 // Diff cache limits to prevent memory bloat with many modified files
 const DIFF_CACHE_MAX_ENTRIES = 30;
@@ -35,6 +43,33 @@ type GitStatusRequestOptions = { mode?: 'light'; fresh?: boolean };
 // states are mutually exclusive: a repository list (possibly empty), a failed
 // scan (`null`), or a runtime without the discovery route (`'unsupported'`).
 export type NestedRepoDiscovery = string[] | null | 'unsupported';
+export type GitGraphFilterMode = 'auto' | 'all' | 'manual';
+
+export interface GitHistoryGraphQuery {
+  mode: GitGraphFilterMode;
+  refIds?: string[];
+}
+
+interface GitHistoryGraphQueryState {
+  queryKey: string;
+  mode: GitGraphFilterMode;
+  refIds: string[];
+  items: GitHistoryItem[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  refsSnapshot: string | null;
+  isLoading: boolean;
+  isLoadingMore: boolean;
+  error: string | null;
+  outdated: boolean;
+}
+
+interface DirectoryGitHistoryState {
+  refs: GitHistoryRefsResponse | null;
+  refsError: string | null;
+  isLoadingRefs: boolean;
+  queries: Map<string, GitHistoryGraphQueryState>;
+}
 
 interface DirectoryGitState {
   isGitRepo: boolean | null;
@@ -43,6 +78,7 @@ interface DirectoryGitState {
   log: GitLogResponse | null;
   identity: GitIdentitySummary | null;
   diffCache: Map<string, { original: string; modified: string; fetchedAt: number; isBinary?: boolean }>;
+  history: DirectoryGitHistoryState;
   indexRevision: number;
   lastRepoCheckAt: number;
   lastStatusFetch: number;
@@ -71,6 +107,15 @@ interface GitStore {
   fetchLog: (directory: string, git: GitAPI, maxCount?: number) => Promise<void>;
   fetchIdentity: (directory: string, git: GitAPI) => Promise<void>;
   fetchAll: (directory: string, git: GitAPI, options?: { force?: boolean; silentIfCached?: boolean }) => Promise<void>;
+  ensureHistoryRefs: (directory: string, git: GitAPI, options?: { force?: boolean }) => Promise<GitHistoryRefsResponse | null>;
+  fetchHistoryPage: (
+    directory: string,
+    git: GitAPI,
+    query: GitHistoryGraphQuery,
+    options?: { append?: boolean; limit?: number }
+  ) => Promise<void>;
+  invalidateHistory: (directory: string) => void;
+  getHistoryQueryState: (directory: string, query: GitHistoryGraphQuery) => GitHistoryGraphQueryState | null;
 
   ensureStatus: (directory: string, git: GitAPI) => Promise<void>;
   ensureAll: (directory: string, git: GitAPI) => Promise<void>;
@@ -122,6 +167,8 @@ interface GitAPI {
   getGitLog: (directory: string, options?: { maxCount?: number }) => Promise<GitLogResponse>;
   getCurrentGitIdentity: (directory: string) => Promise<GitIdentitySummary | null>;
   getGitFileDiff: (directory: string, options: { path: string }) => Promise<GitFileDiffResponse>;
+  getGitHistoryRefs?: (directory: string) => Promise<GitHistoryRefsResponse>;
+  getGitHistory?: (directory: string, options: GitHistoryOptions) => Promise<GitHistoryPage>;
 }
 
 const inFlightDiffFetchesByDirectory = new Map<string, Set<string>>();
@@ -129,6 +176,7 @@ const diffFetchGenerationByDirectory = new Map<string, number>();
 const inFlightStatusFetches = new Map<string, { promise: Promise<boolean>; statusMutationRevision: number }>();
 const inFlightEnsureAllByDirectory = new Map<string, Promise<void>>();
 const inFlightNestedRepoDiscovery = new Map<string, Promise<void>>();
+const inFlightHistoryRefsByDirectory = new Map<string, Promise<GitHistoryRefsResponse | null>>();
 const requestGenerationByChannel = new Map<string, number>();
 const statusMutationRevisionByDirectory = new Map<string, number>();
 let gitRuntimeGeneration = 0;
@@ -143,6 +191,75 @@ const getStatusFetchKey = (runtimeKey: string, directory: string, mode: GitStatu
 const channelKey = (runtimeKey: string, directory: string, channel: string) =>
   JSON.stringify([runtimeKey, directory, channel]);
 
+const normalizeHistoryRefIds = (value: readonly string[] | undefined): string[] => {
+  if (!value || value.length === 0) {
+    return [];
+  }
+
+  return Array.from(new Set(value.map((ref) => ref.trim()).filter(Boolean))).sort();
+};
+
+const getHistoryQueryKey = (query: GitHistoryGraphQuery): string => JSON.stringify({
+  mode: query.mode,
+  refIds: normalizeHistoryRefIds(query.refIds),
+});
+
+const createEmptyHistoryState = (): DirectoryGitHistoryState => ({
+  refs: null,
+  refsError: null,
+  isLoadingRefs: false,
+  queries: new Map(),
+});
+
+const createHistoryQueryState = (query: GitHistoryGraphQuery): GitHistoryGraphQueryState => ({
+  queryKey: getHistoryQueryKey(query),
+  mode: query.mode,
+  refIds: normalizeHistoryRefIds(query.refIds),
+  items: [],
+  nextCursor: null,
+  hasMore: false,
+  refsSnapshot: null,
+  isLoading: false,
+  isLoadingMore: false,
+  error: null,
+  outdated: false,
+});
+
+const resolveHistoryQueryRefs = (
+  refsResponse: GitHistoryRefsResponse,
+  query: GitHistoryGraphQuery,
+): string[] => {
+  if (query.mode === 'all') {
+    return [];
+  }
+
+  if (query.mode === 'manual') {
+    return normalizeHistoryRefIds(query.refIds).filter((refId) => refsResponse.refs.some((ref) => ref.id === refId));
+  }
+
+  return normalizeHistoryRefIds([
+    refsResponse.current?.id,
+    refsResponse.upstream?.id,
+    refsResponse.base?.id,
+  ].filter((value): value is string => Boolean(value)));
+};
+
+const buildHistoryRequestOptions = (
+  refsResponse: GitHistoryRefsResponse,
+  query: GitHistoryGraphQuery,
+): GitHistoryOptions => {
+  if (query.mode === 'all') {
+    return { all: true };
+  }
+
+  return { refs: resolveHistoryQueryRefs(refsResponse, query) };
+};
+
+const formatHistoryRefsError = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : 'Failed to load refs';
+  return /not a git repository/i.test(message) ? NON_REPOSITORY_ERROR : message;
+};
+
 type GitRequestToken = {
   runtimeKey: string;
   runtimeGeneration: number;
@@ -156,15 +273,16 @@ const startRequest = (directory: string, channel: string, includeStatusMutation 
   const key = channelKey(runtimeKey, directory, channel);
   const requestGeneration = (requestGenerationByChannel.get(key) ?? 0) + 1;
   requestGenerationByChannel.set(key, requestGeneration);
-  return {
+  const token: GitRequestToken = {
     runtimeKey,
     runtimeGeneration: gitRuntimeGeneration,
     channelKey: key,
     requestGeneration,
-    ...(includeStatusMutation
-      ? { statusMutationRevision: statusMutationRevisionByDirectory.get(runtimeDirectoryKey(runtimeKey, directory)) ?? 0 }
-      : {}),
   };
+  if (includeStatusMutation) {
+    token.statusMutationRevision = statusMutationRevisionByDirectory.get(runtimeDirectoryKey(runtimeKey, directory)) ?? 0;
+  }
+  return token;
 };
 
 const isRequestCurrent = (token: GitRequestToken, directory: string): boolean => (
@@ -220,6 +338,7 @@ const createEmptyDirectoryState = (): DirectoryGitState => ({
   log: null,
   identity: null,
   diffCache: new Map(),
+  history: createEmptyHistoryState(),
   indexRevision: 0,
   lastRepoCheckAt: 0,
   lastStatusFetch: 0,
@@ -657,6 +776,7 @@ export const useGitStore = create<GitStore>()(
         inFlightStatusFetches.clear();
         inFlightEnsureAllByDirectory.clear();
         inFlightNestedRepoDiscovery.clear();
+        inFlightHistoryRefsByDirectory.clear();
         inFlightDiffFetchesByDirectory.clear();
         diffFetchGenerationByDirectory.clear();
         set({
@@ -691,6 +811,240 @@ export const useGitStore = create<GitStore>()(
 
       getDirectoryState: (directory) => {
         return get().directories.get(directory) ?? null;
+      },
+
+      getHistoryQueryState: (directory, query) => {
+        const history = get().directories.get(directory)?.history;
+        return history?.queries.get(getHistoryQueryKey(query)) ?? null;
+      },
+
+      ensureHistoryRefs: async (directory, git, options = {}) => {
+        const getGitHistoryRefs = git.getGitHistoryRefs;
+        if (!getGitHistoryRefs) {
+          return null;
+        }
+
+        const cached = get().directories.get(directory)?.history.refs;
+        if (cached && !options.force) {
+          return cached;
+        }
+
+        const inFlightKey = runtimeDirectoryKey(getRuntimeKey(), directory);
+        const existing = inFlightHistoryRefsByDirectory.get(inFlightKey);
+        if (existing) {
+          return existing;
+        }
+
+        const token = startRequest(directory, 'history-refs');
+        const promise = (async () => {
+          const directories = new Map(get().directories);
+          const current = directories.get(directory) ?? createEmptyDirectoryState();
+          directories.set(directory, {
+            ...current,
+            history: {
+              ...current.history,
+              isLoadingRefs: true,
+              refsError: null,
+            },
+          });
+          set({ directories });
+
+          try {
+            const refs = await getGitHistoryRefs(directory);
+            if (!isRequestCurrent(token, directory)) {
+              return null;
+            }
+
+            const nextDirectories = new Map(get().directories);
+            const latest = nextDirectories.get(directory) ?? createEmptyDirectoryState();
+            nextDirectories.set(directory, {
+              ...latest,
+              history: {
+                ...latest.history,
+                refs,
+                refsError: null,
+                isLoadingRefs: false,
+              },
+            });
+            set({ directories: nextDirectories });
+            return refs;
+          } catch (error) {
+            if (!isRequestCurrent(token, directory)) {
+              return null;
+            }
+
+            const nextDirectories = new Map(get().directories);
+            const latest = nextDirectories.get(directory) ?? createEmptyDirectoryState();
+            nextDirectories.set(directory, {
+              ...latest,
+              history: {
+                ...latest.history,
+                refsError: formatHistoryRefsError(error),
+                isLoadingRefs: false,
+              },
+            });
+            set({ directories: nextDirectories });
+            return null;
+          }
+        })();
+
+        inFlightHistoryRefsByDirectory.set(inFlightKey, promise);
+        try {
+          return await promise;
+        } finally {
+          if (inFlightHistoryRefsByDirectory.get(inFlightKey) === promise) {
+            inFlightHistoryRefsByDirectory.delete(inFlightKey);
+          }
+        }
+      },
+
+      fetchHistoryPage: async (directory, git, query, options = {}) => {
+        const getGitHistory = git.getGitHistory;
+        if (!getGitHistory || !git.getGitHistoryRefs) {
+          return;
+        }
+
+        const refs = await get().ensureHistoryRefs(directory, git);
+        if (!refs) {
+          return;
+        }
+
+        const queryKey = getHistoryQueryKey(query);
+        const historyRequestOptions = buildHistoryRequestOptions(refs, query);
+        const refIds = historyRequestOptions.refs ?? [];
+        const effectiveQuery = { ...query, refIds };
+        const append = options.append === true;
+        const limit = Math.max(1, Math.min(GIT_HISTORY_MAX_PAGE_SIZE, Math.trunc(options.limit ?? GIT_HISTORY_INITIAL_PAGE_SIZE)));
+
+        const currentDirectoryState = get().directories.get(directory) ?? createEmptyDirectoryState();
+        const previousQueryState = currentDirectoryState.history.queries.get(queryKey) ?? createHistoryQueryState(effectiveQuery);
+        const shouldRestart = previousQueryState.refsSnapshot !== null && previousQueryState.refsSnapshot !== refs.snapshot;
+        const nextCursor = append && !shouldRestart ? previousQueryState.nextCursor : null;
+
+        const token = startRequest(directory, `history:${queryKey}`, true);
+        const seedQueryState: GitHistoryGraphQueryState = {
+          ...previousQueryState,
+          mode: effectiveQuery.mode,
+          refIds,
+          isLoading: !append || shouldRestart,
+          isLoadingMore: append && !shouldRestart,
+          error: null,
+        };
+        const loadingDirectories = new Map(get().directories);
+        const loadingDirectoryState = loadingDirectories.get(directory) ?? createEmptyDirectoryState();
+        const loadingQueries = new Map(loadingDirectoryState.history.queries);
+        loadingQueries.set(queryKey, seedQueryState);
+        loadingDirectories.set(directory, {
+          ...loadingDirectoryState,
+          history: {
+            ...loadingDirectoryState.history,
+            queries: loadingQueries,
+          },
+        });
+        set({ directories: loadingDirectories });
+
+        const commitPage = async (appendPage: boolean, cursor: string | null) => {
+          const page = await getGitHistory(directory, {
+            ...historyRequestOptions,
+            cursor: cursor ?? undefined,
+            limit,
+          });
+          if (!isRequestCurrent(token, directory)) {
+            return;
+          }
+
+          const committedDirectories = new Map(get().directories);
+          const committedDirectoryState = committedDirectories.get(directory) ?? createEmptyDirectoryState();
+          const committedQueries = new Map(committedDirectoryState.history.queries);
+          const currentQueryState = committedQueries.get(queryKey) ?? createHistoryQueryState(effectiveQuery);
+          const items = appendPage ? currentQueryState.items.concat(page.items) : page.items;
+          committedQueries.set(queryKey, {
+            ...currentQueryState,
+            mode: effectiveQuery.mode,
+            refIds,
+            items,
+            nextCursor: page.nextCursor,
+            hasMore: page.hasMore,
+            refsSnapshot: page.refsSnapshot,
+            isLoading: false,
+            isLoadingMore: false,
+            error: null,
+            outdated: false,
+          });
+          committedDirectories.set(directory, {
+            ...committedDirectoryState,
+            history: {
+              ...committedDirectoryState.history,
+              queries: committedQueries,
+            },
+          });
+          set({ directories: committedDirectories });
+        };
+
+        try {
+          await commitPage(append && !shouldRestart && nextCursor !== null, nextCursor);
+        } catch (error) {
+          let historyError = error instanceof Error ? error : new Error('Failed to load graph history');
+          if (append && nextCursor && isStaleGitHistoryCursorError(historyError)) {
+            try {
+              await commitPage(false, null);
+              return;
+            } catch (retryError) {
+              historyError = retryError instanceof Error ? retryError : new Error('Failed to load graph history');
+            }
+          }
+          if (!isRequestCurrent(token, directory)) {
+            return;
+          }
+          const errorDirectories = new Map(get().directories);
+          const errorDirectoryState = errorDirectories.get(directory) ?? createEmptyDirectoryState();
+          const errorQueries = new Map(errorDirectoryState.history.queries);
+          const currentQueryState = errorQueries.get(queryKey) ?? createHistoryQueryState(effectiveQuery);
+          errorQueries.set(queryKey, {
+            ...currentQueryState,
+            mode: effectiveQuery.mode,
+            refIds,
+            isLoading: false,
+            isLoadingMore: false,
+            error: historyError.message,
+            outdated: currentQueryState.items.length > 0,
+          });
+          errorDirectories.set(directory, {
+            ...errorDirectoryState,
+            history: {
+              ...errorDirectoryState.history,
+              queries: errorQueries,
+            },
+          });
+          set({ directories: errorDirectories });
+        }
+      },
+
+      invalidateHistory: (directory) => {
+        const directories = new Map(get().directories);
+        const current = directories.get(directory);
+        if (!current || current.history.queries.size === 0) {
+          return;
+        }
+
+        bumpStatusMutationRevision(get().runtimeKey, directory);
+
+        const queries = new Map<string, GitHistoryGraphQueryState>();
+        for (const [queryKey, queryState] of current.history.queries) {
+          queries.set(queryKey, {
+            ...queryState,
+            outdated: queryState.items.length > 0,
+          });
+        }
+
+        directories.set(directory, {
+          ...current,
+          history: {
+            ...current.history,
+            queries,
+          },
+        });
+        set({ directories });
       },
 
       fetchStatus: async (directory, git, options = {}) => {
@@ -1551,5 +1905,47 @@ export const useGitLoadingBranches = (directory: string | null) => {
   return useGitStore((state) => {
     if (!directory) return false;
     return state.directories.get(directory)?.isLoadingBranches ?? false;
+  });
+};
+
+const EMPTY_GIT_HISTORY_REFS_STATE = {
+  refs: null,
+  refsError: null,
+  isLoadingRefs: false,
+};
+
+export const useGitHistoryRefsState = (directory: string | null) => {
+  const refs = useGitStore((state) => {
+    if (!directory) {
+      return null;
+    }
+    return state.directories.get(directory)?.history.refs ?? null;
+  });
+  const refsError = useGitStore((state) => {
+    if (!directory) {
+      return null;
+    }
+    return state.directories.get(directory)?.history.refsError ?? null;
+  });
+  const isLoadingRefs = useGitStore((state) => {
+    if (!directory) {
+      return false;
+    }
+    return state.directories.get(directory)?.history.isLoadingRefs ?? false;
+  });
+
+  return React.useMemo(() => {
+    if (!directory) {
+      return EMPTY_GIT_HISTORY_REFS_STATE;
+    }
+    return { refs, refsError, isLoadingRefs };
+  }, [directory, isLoadingRefs, refs, refsError]);
+};
+
+export const useGitHistoryQueryState = (directory: string | null, query: GitHistoryGraphQuery) => {
+  const queryKey = getHistoryQueryKey(query);
+  return useGitStore((state) => {
+    if (!directory) return null;
+    return state.directories.get(directory)?.history.queries.get(queryKey) ?? null;
   });
 };

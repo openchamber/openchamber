@@ -135,6 +135,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       emitSessionCreatedEvent,
       permissionAutoAcceptRuntime,
       messageQueueRuntime,
+      broadcastGlobalUiEvent,
     } = routeDependencies;
 
     registerSettingsUtilityRoutes(app, {
@@ -306,7 +307,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerSessionGoalRoutes(app);
     registerGitHubRoutes(app);
     registerLinearRoutes(app);
-    registerGitRoutes(app);
+    registerGitRoutes(app, { broadcastGlobalUiEvent });
     registerDevServerRoutes(app, { scanner: devServerScanner, getOwnPorts });
     registerMagicPromptRoutes(app, {
       fsPromises,

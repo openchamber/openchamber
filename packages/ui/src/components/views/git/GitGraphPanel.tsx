@@ -1,0 +1,521 @@
+import React from 'react';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { useI18n } from '@/lib/i18n';
+import type { GitCommitChangedFile, GitCommitHoverDetailsCache, GitHistoryRef } from '@/lib/api/types';
+import type { RuntimeAPIs } from '@/lib/api/types';
+import { HistoryCommitRow } from './HistoryCommitRow';
+import { GitGraphSegment } from './GitGraphSegment';
+import { GitCommitHoverPopover } from './GitCommitHoverPopover';
+import { buildGitHistoryViewModels } from './gitGraph';
+import {
+  useGitHistoryQueryState,
+  useGitHistoryRefsState,
+  useGitStore,
+} from '@/stores/useGitStore';
+import {
+  DEFAULT_GIT_REPOSITORY_PANE_STATE,
+  gitRepositoryPanePreferenceKey,
+  useUIStore,
+} from '@/stores/useUIStore';
+import {
+  groupGraphRefs,
+  isGitGraphFilterDisabled,
+  resolveGitGraphPanelRenderState,
+  resolveMergeBaseComparisonRefIds,
+  resolveGraphQuery,
+  shouldAutoRefreshGitGraphQuery,
+  shouldRevalidateGitGraphOnActivation,
+} from './gitGraphPanelModel';
+import type { GitCommitDetailsController } from './gitCommitDetailsController';
+
+interface GitGraphPanelProps {
+  directory: string;
+  git: RuntimeAPIs['git'];
+  isActive: boolean;
+  commitDetailsController: GitCommitDetailsController;
+  onCopyHash: (hash: string) => void;
+  hoverRemoteName?: string | null;
+  hoverRemoteUrl?: string | null;
+  hoverDetailsCache?: GitCommitHoverDetailsCache | null;
+  onConflict?: (result: { conflict: boolean; conflictFiles?: string[]; operation: 'cherry-pick' | 'revert' | 'merge' | 'rebase' }) => void;
+  onActionSuccess?: () => void;
+}
+
+const EMPTY_FILES: GitCommitChangedFile[] = [];
+
+export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
+  directory,
+  git,
+  isActive,
+  commitDetailsController,
+  onCopyHash,
+  hoverRemoteName = null,
+  hoverRemoteUrl = null,
+  hoverDetailsCache = null,
+  onConflict,
+  onActionSuccess,
+}) => {
+  const { t } = useI18n();
+  const preferenceKey = gitRepositoryPanePreferenceKey(directory);
+  const paneState = useUIStore((state) => state.gitRepositoryPaneStates[preferenceKey] ?? DEFAULT_GIT_REPOSITORY_PANE_STATE);
+  const setPaneState = useUIStore((state) => state.setGitRepositoryPaneState);
+  const ensureHistoryRefs = useGitStore((state) => state.ensureHistoryRefs);
+  const fetchHistoryPage = useGitStore((state) => state.fetchHistoryPage);
+  const [mergeBase, setMergeBase] = React.useState<string | null>(null);
+  const [mergeBaseError, setMergeBaseError] = React.useState<string | null>(null);
+  const scrollContainerRef = React.useRef<HTMLDivElement | null>(null);
+  const sentinelRef = React.useRef<HTMLDivElement | null>(null);
+  const appendRequestPendingRef = React.useRef(false);
+  const { refs, refsError, isLoadingRefs } = useGitHistoryRefsState(directory);
+  const query = React.useMemo(() => resolveGraphQuery(paneState), [paneState]);
+  const queryState = useGitHistoryQueryState(directory, query);
+  const currentRef = refs?.current ?? null;
+  const upstreamRef = refs?.upstream ?? null;
+  const baseRef = refs?.base ?? null;
+  const currentRefId = currentRef?.id ?? null;
+  const upstreamRefId = upstreamRef?.id ?? null;
+  const baseRefId = baseRef?.id ?? null;
+  const groupedRefs = React.useMemo(() => groupGraphRefs(refs?.refs ?? []), [refs]);
+  const comparisonRefIds = React.useMemo(() => resolveMergeBaseComparisonRefIds({
+    current: currentRefId ? { id: currentRefId } : null,
+    upstream: upstreamRefId ? { id: upstreamRefId } : null,
+    base: baseRefId ? { id: baseRefId } : null,
+  }), [
+    baseRefId,
+    currentRefId,
+    upstreamRefId,
+  ]);
+  const comparisonRequestKey = JSON.stringify([
+    currentRefId,
+    currentRef?.revision ?? null,
+    upstreamRefId,
+    upstreamRef?.revision ?? null,
+    baseRefId,
+    baseRef?.revision ?? null,
+  ]);
+  const queryItems = React.useMemo(() => queryState?.items ?? [], [queryState?.items]);
+  const areFilterControlsDisabled = React.useMemo(
+    () => isGitGraphFilterDisabled({ isLoadingRefs, refsError }),
+    [isLoadingRefs, refsError],
+  );
+  const renderState = React.useMemo(() => resolveGitGraphPanelRenderState({
+    itemCount: queryItems.length,
+    queryError: queryState?.error ?? null,
+    refsError,
+    mergeBaseError,
+  }), [mergeBaseError, queryItems.length, queryState?.error, refsError]);
+  const viewModels = React.useMemo(() => {
+    if (queryItems.length === 0 || !refs) {
+      return [];
+    }
+
+    return buildGitHistoryViewModels(queryItems, {
+      current: refs.current,
+      upstream: refs.upstream,
+      base: refs.base,
+    }, {
+      showIncoming: true,
+      showOutgoing: true,
+      mergeBase,
+    });
+  }, [mergeBase, queryItems, refs]);
+  const hoverCoordinator = React.useMemo(() => GitCommitHoverPopover.createCoordinator(), []);
+  const [, forceExpandedRefresh] = React.useReducer((count: number) => count + 1, 0);
+  const lastRevalidatedKeyRef = React.useRef<string | null>(null);
+  const previousQueryStateRef = React.useRef<{ directory: string; isActive: boolean; outdated: boolean | null } | null>(null);
+
+  const [comparisonOverrides, setComparisonOverrides] = React.useState<ReadonlyMap<string, { parentHash: string; label: string }>>(new Map());
+  const [comparePickerCommitHash, setComparePickerCommitHash] = React.useState<string | null>(null);
+
+  const applyComparisonOverride = React.useCallback((commitHash: string, parentHash: string, label: string) => {
+    setComparisonOverrides((previous) => {
+      const next = new Map(previous);
+      next.set(commitHash, { parentHash, label });
+      return next;
+    });
+    setComparePickerCommitHash(null);
+    const comparison = { directory, commitHash, parentHash };
+    if (!commitDetailsController.isExpanded(comparison)) {
+      commitDetailsController.toggleExpanded(comparison);
+    }
+  }, [commitDetailsController, directory]);
+
+  const clearComparisonOverride = React.useCallback((commitHash: string) => {
+    setComparisonOverrides((previous) => {
+      if (!previous.has(commitHash)) {
+        return previous;
+      }
+      const next = new Map(previous);
+      next.delete(commitHash);
+      return next;
+    });
+  }, []);
+
+  React.useEffect(() => commitDetailsController.subscribeExpanded(() => {
+    forceExpandedRefresh();
+  }), [commitDetailsController]);
+
+  const refresh = React.useCallback(async () => {
+    try {
+      const refs = await ensureHistoryRefs(directory, git, { force: true });
+      if (!refs) {
+        return;
+      }
+      await fetchHistoryPage(directory, git, query);
+    } catch { /* errors surfaced through store state */ }
+  }, [directory, ensureHistoryRefs, fetchHistoryPage, git, query]);
+
+  React.useEffect(() => {
+    if (!isActive) {
+      lastRevalidatedKeyRef.current = null;
+      return;
+    }
+    if (!shouldRevalidateGitGraphOnActivation({
+      isActive,
+      directory,
+      hasCachedRefs: refs !== null && refs !== undefined,
+      lastRevalidatedKey: lastRevalidatedKeyRef.current,
+    })) {
+      return;
+    }
+    lastRevalidatedKeyRef.current = directory;
+    void refresh();
+  }, [directory, isActive, refresh, refs]);
+
+  React.useEffect(() => {
+    const previousQueryState = previousQueryStateRef.current;
+    const queryIsOutdated = queryState?.outdated === true;
+    const becameOutdatedWhileActive = Boolean(
+      queryIsOutdated
+      && previousQueryState?.directory === directory
+      && previousQueryState.isActive
+      && previousQueryState.outdated === false
+    );
+    previousQueryStateRef.current = {
+      directory,
+      isActive,
+      outdated: queryState?.outdated ?? null,
+    };
+
+    if (!directory || !isActive) {
+      return;
+    }
+    if (queryIsOutdated && !becameOutdatedWhileActive) {
+      return;
+    }
+    if (shouldAutoRefreshGitGraphQuery({ isLoadingRefs, refsError, queryState })) {
+      lastRevalidatedKeyRef.current = directory;
+      void refresh();
+    }
+  }, [directory, isActive, isLoadingRefs, queryState, refs, refsError, refresh]);
+
+  React.useEffect(() => {
+    if (!isActive || !git.getGitHistoryMergeBase || comparisonRefIds.length < 2) {
+      setMergeBase(null);
+      setMergeBaseError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setMergeBase(null);
+    setMergeBaseError(null);
+
+    void git.getGitHistoryMergeBase(directory, { refs: comparisonRefIds }).then((result) => {
+      if (!cancelled) {
+        setMergeBase(result.mergeBase);
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setMergeBase(null);
+        setMergeBaseError('failed');
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [comparisonRefIds, comparisonRequestKey, directory, git, isActive]);
+
+  const latestStateRef = React.useRef({
+    directory,
+    git,
+    query,
+    queryState,
+    isActive,
+  });
+  latestStateRef.current = {
+    directory,
+    git,
+    query,
+    queryState,
+    isActive,
+  };
+
+  const hasMore = queryState?.hasMore ?? false;
+  const isQueryLoading = queryState?.isLoading ?? false;
+  const isQueryLoadingMore = queryState?.isLoadingMore ?? false;
+  const isQueryOutdated = queryState?.outdated ?? false;
+  const hasQueryError = queryState?.error !== null && queryState?.error !== undefined;
+
+  React.useEffect(() => {
+    if (!isActive || !hasMore || isQueryOutdated || isQueryLoading || isQueryLoadingMore || hasQueryError) {
+      return;
+    }
+
+    const IntersectionObserverConstructor = globalThis.IntersectionObserver;
+    const scrollContainer = scrollContainerRef.current;
+    const sentinel = sentinelRef.current;
+
+    if (!scrollContainer || !sentinel || !IntersectionObserverConstructor) {
+      return;
+    }
+
+    const observer = new IntersectionObserverConstructor((entries) => {
+      const entry = entries[0];
+      const state = latestStateRef.current;
+      if (
+        !entry?.isIntersecting
+        || appendRequestPendingRef.current
+        || !state.isActive
+        || !state.queryState?.hasMore
+        || state.queryState.outdated
+        || state.queryState.isLoading
+        || state.queryState.isLoadingMore
+        || state.queryState.error
+      ) {
+        return;
+      }
+
+      appendRequestPendingRef.current = true;
+      void fetchHistoryPage(state.directory, state.git, state.query, { append: true, limit: 20 }).finally(() => {
+        appendRequestPendingRef.current = false;
+      });
+    }, {
+      root: scrollContainer,
+    });
+
+    observer.observe(sentinel);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [fetchHistoryPage, hasMore, hasQueryError, isActive, isQueryLoading, isQueryLoadingMore, isQueryOutdated]);
+
+  React.useEffect(() => {
+    if (!refs || paneState.graphFilterMode !== 'manual') {
+      return;
+    }
+
+    const valid = paneState.graphManualRefIds.filter((refId) => refs.refs.some((ref) => ref.id === refId));
+    if (valid.length === paneState.graphManualRefIds.length) {
+      return;
+    }
+
+    setPaneState(directory, valid.length > 0
+      ? { graphManualRefIds: valid }
+      : { graphFilterMode: 'auto', graphManualRefIds: [] });
+  }, [directory, paneState.graphFilterMode, paneState.graphManualRefIds, refs, setPaneState]);
+
+  const toggleManualRef = React.useCallback((refId: string) => {
+    setPaneState(directory, (current) => {
+      const next = current.graphManualRefIds.includes(refId)
+        ? current.graphManualRefIds.filter((id) => id !== refId)
+        : current.graphManualRefIds.concat(refId).sort();
+      return next.length > 0
+        ? { graphFilterMode: 'manual', graphManualRefIds: next }
+        : { graphFilterMode: 'auto', graphManualRefIds: [] };
+    });
+  }, [directory, setPaneState]);
+
+  const renderRefGroup = (title: string, refsForGroup: readonly GitHistoryRef[]) => {
+    if (refsForGroup.length === 0) {
+      return null;
+    }
+
+    return (
+      <div className="flex flex-col gap-1">
+        <div className="typography-micro font-medium text-muted-foreground">{title}</div>
+        <div className="flex flex-wrap gap-1">
+          {refsForGroup.map((ref) => {
+            const selected = paneState.graphManualRefIds.includes(ref.id);
+            return (
+              <Button
+                key={ref.id}
+                type="button"
+                variant="chip"
+                size="xs"
+                aria-pressed={selected}
+                disabled={areFilterControlsDisabled}
+                onClick={() => toggleManualRef(ref.id)}
+              >
+                {ref.name}
+              </Button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <section id="git-graph-panel" className="flex h-full min-h-0 flex-col">
+      {paneState.graphFilterMode === 'manual' ? (
+        <div className="flex flex-col gap-2 border-b border-border/50 px-2.5 py-1.5">
+          <div className="typography-micro text-muted-foreground">{t('gitView.graph.manualSelection')}</div>
+          {renderRefGroup(t('gitView.graph.localBranches'), groupedRefs.branches)}
+          {renderRefGroup(t('gitView.branch.remoteBranches'), groupedRefs.remoteBranches)}
+          {renderRefGroup(t('gitView.graph.tags'), groupedRefs.tags)}
+        </div>
+      ) : null}
+
+      {renderState.showInlineMergeBaseError ? (
+        <div
+          id="git-graph-merge-base-error"
+          role="alert"
+          className="border-b border-[var(--status-warning-border)] bg-[var(--status-warning-background)] px-2.5 py-1.5"
+        >
+          <p className="typography-micro text-[var(--status-warning-foreground)]">{t('gitView.graph.mergeBaseLookupFailed')}</p>
+        </div>
+      ) : null}
+
+      {refsError && refs ? (
+        <div id="git-graph-retained-refs-error" role="alert" className="flex items-center justify-between gap-2 border-b border-border/50 px-2.5 py-1.5">
+          <p className="typography-micro text-muted-foreground">{refsError}</p>
+          <Button type="button" size="xs" onClick={() => void refresh()} disabled={isLoadingRefs || queryState?.isLoading || queryState?.isLoadingMore}>
+            {t('contextPanel.preview.actions.retry')}
+          </Button>
+        </div>
+      ) : null}
+
+      {refsError && !refs ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center">
+          <p className="typography-meta text-muted-foreground">{refsError}</p>
+          <Button type="button" size="sm" onClick={() => void refresh()}>{t('contextPanel.preview.actions.retry')}</Button>
+        </div>
+      ) : renderState.showRows ? (
+        <div id="git-graph-scroll-container" data-ui="git-graph-scroll-container" ref={scrollContainerRef} className="min-h-0 flex-1 overflow-auto">
+          <ul>
+            {viewModels.map((viewModel) => {
+              if (viewModel.kind === 'incoming-changes' || viewModel.kind === 'outgoing-changes') {
+                return (
+                  <li key={viewModel.historyItem.id} data-history-commit-row={viewModel.historyItem.id}>
+                    <div className="flex h-[22px] items-center gap-1.5 px-2">
+                      <div className="h-[22px] shrink-0">
+                        <GitGraphSegment viewModel={viewModel} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="typography-ui-label font-medium text-foreground line-clamp-1">
+                          {viewModel.kind === 'incoming-changes'
+                            ? t('gitView.graph.incomingChanges')
+                            : t('gitView.graph.outgoingChanges')}
+                        </p>
+                      </div>
+                    </div>
+                  </li>
+                );
+              }
+
+              const commitHash = viewModel.historyItem.id;
+              const override = comparisonOverrides.get(commitHash);
+              const comparison = {
+                directory,
+                commitHash,
+                parentHash: override?.parentHash ?? viewModel.historyItem.parentIds[0] ?? null,
+              };
+              const upstreamRevision = upstreamRef?.revision ?? null;
+              const canCompareWithMergeBase = Boolean(mergeBase);
+
+              return (
+                <HistoryCommitRow
+                  key={commitHash}
+                  entry={viewModel.historyItem}
+                  mode="graph"
+                  viewModel={viewModel}
+                  isExpanded={commitDetailsController.isExpanded(comparison)}
+                  onToggle={() => commitDetailsController.toggleExpanded(comparison)}
+                  files={EMPTY_FILES}
+                  isLoadingFiles={false}
+                  onCopyHash={onCopyHash}
+                  directory={directory}
+                  hoverCoordinator={hoverCoordinator}
+                  hoverRemoteName={hoverRemoteName}
+                  hoverRemoteUrl={hoverRemoteUrl}
+                  hoverDetailsCache={hoverDetailsCache}
+                  compactGraph={true}
+                  onConflict={onConflict}
+                  onActionSuccess={onActionSuccess}
+                  commitComparison={comparison}
+                  commitDetailsController={commitDetailsController}
+                  onCompareWithRemote={upstreamRevision
+                    ? () => applyComparisonOverride(commitHash, upstreamRevision, upstreamRef?.name ?? upstreamRevision)
+                    : undefined}
+                  canCompareWithRemote={Boolean(upstreamRevision)}
+                  onCompareWithMergeBase={canCompareWithMergeBase && mergeBase
+                    ? () => applyComparisonOverride(commitHash, mergeBase, t('gitView.graph.mergeBaseLabel'))
+                    : undefined}
+                  canCompareWithMergeBase={canCompareWithMergeBase}
+                  onCompareWithRef={() => setComparePickerCommitHash(commitHash)}
+                  activeComparisonLabel={override?.label ?? null}
+                  onClearComparison={override ? () => clearComparisonOverride(commitHash) : undefined}
+                />
+              );
+            })}
+          </ul>
+          {queryState?.hasMore ? (
+            <div id="git-graph-end-sentinel" data-ui="git-graph-end-sentinel" ref={sentinelRef} aria-hidden="true" className="h-px w-full" />
+          ) : null}
+        </div>
+      ) : (
+        <div className="flex flex-1 items-center justify-center px-4 py-6 text-center typography-meta text-muted-foreground">
+          {renderState.emptyMessage ?? t('gitView.history.noCommits')}
+        </div>
+      )}
+
+      <Dialog
+        open={comparePickerCommitHash !== null}
+        onOpenChange={(open) => { if (!open) setComparePickerCommitHash(null); }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('gitView.history.actions.compareWithRef')}</DialogTitle>
+          </DialogHeader>
+          <div className="flex max-h-72 flex-col gap-2 overflow-auto">
+            {([
+              { title: t('gitView.graph.localBranches'), refsForGroup: groupedRefs.branches },
+              { title: t('gitView.branch.remoteBranches'), refsForGroup: groupedRefs.remoteBranches },
+              { title: t('gitView.graph.tags'), refsForGroup: groupedRefs.tags },
+            ] as const).map(({ title, refsForGroup }) => {
+              const selectable = refsForGroup.filter((ref) => Boolean(ref.revision));
+              if (selectable.length === 0) {
+                return null;
+              }
+              return (
+                <div key={title} className="flex flex-col gap-1">
+                  <div className="typography-micro font-medium text-muted-foreground">{title}</div>
+                  <div className="flex flex-wrap gap-1">
+                    {selectable.map((ref) => (
+                      <Button
+                        key={ref.id}
+                        type="button"
+                        variant="chip"
+                        size="xs"
+                        onClick={() => {
+                          if (comparePickerCommitHash && ref.revision) {
+                            applyComparisonOverride(comparePickerCommitHash, ref.revision, ref.name);
+                          }
+                        }}
+                      >
+                        {ref.name}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </section>
+  );
+};

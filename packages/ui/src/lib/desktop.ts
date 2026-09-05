@@ -209,6 +209,7 @@ export type DesktopSettings = {
   diffLayoutPreference?: 'dynamic' | 'inline' | 'side-by-side';
   gitChangesViewMode?: 'flat' | 'tree';
   toolJsonViewMode?: 'summary' | 'formatted' | 'raw';
+  gitReviewLayout?: 'separate' | 'combined';
   directoryShowHidden?: boolean;
   filesViewShowGitignored?: boolean;
 

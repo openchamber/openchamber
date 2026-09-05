@@ -633,6 +633,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     diffLayoutPreference: defaults.diffLayoutPreference,
     gitChangesViewMode: defaults.gitChangesViewMode,
     toolJsonViewMode: defaults.toolJsonViewMode,
+    gitReviewLayout: defaults.gitReviewLayout,
     directoryShowHidden: true,
     filesViewShowGitignored: false,
     dictationEnabled: true,
@@ -1083,6 +1084,11 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     && (settings.toolJsonViewMode === 'summary' || settings.toolJsonViewMode === 'formatted' || settings.toolJsonViewMode === 'raw')) {
     if (settings.toolJsonViewMode !== store.toolJsonViewMode) {
       store.setToolJsonViewMode(settings.toolJsonViewMode);
+    }
+  }
+  if (settings.gitReviewLayout === 'separate' || settings.gitReviewLayout === 'combined') {
+    if (settings.gitReviewLayout !== store.gitReviewLayout) {
+      store.setGitReviewLayout(settings.gitReviewLayout);
     }
   }
   if (typeof settings.directoryShowHidden === 'boolean') {
@@ -1677,6 +1683,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     && (candidate.toolJsonViewMode === 'summary' || candidate.toolJsonViewMode === 'formatted' || candidate.toolJsonViewMode === 'raw')
   ) {
     result.toolJsonViewMode = candidate.toolJsonViewMode;
+  }
+  if (candidate.gitReviewLayout === 'separate' || candidate.gitReviewLayout === 'combined') {
+    result.gitReviewLayout = candidate.gitReviewLayout;
   }
   if (typeof candidate.directoryShowHidden === 'boolean') {
     result.directoryShowHidden = candidate.directoryShowHidden;

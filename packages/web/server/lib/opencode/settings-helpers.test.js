@@ -710,4 +710,40 @@ describe('settings helpers', () => {
       expect(sanitized.sessionRetentionAction).toBe('delete');
     });
   });
+
+  describe('git review layout persistence', () => {
+    it('round-trips gitReviewLayout separate and combined through the sanitizer', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+
+      expect(helpers.sanitizeSettingsUpdate({ gitReviewLayout: 'separate' })).toEqual({
+        gitReviewLayout: 'separate',
+      });
+      expect(helpers.sanitizeSettingsUpdate({ gitReviewLayout: 'combined' })).toEqual({
+        gitReviewLayout: 'combined',
+      });
+    });
+
+    it('rejects invalid gitReviewLayout values', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+
+      expect(helpers.sanitizeSettingsUpdate({ gitReviewLayout: 'split' })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ gitReviewLayout: true })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ gitReviewLayout: '' })).toEqual({});
+    });
+
+    it('survives a full settings payload containing gitReviewLayout (regression)', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+      const payload = {
+        diffLayoutPreference: 'side-by-side',
+        gitChangesViewMode: 'tree',
+        gitReviewLayout: 'combined',
+      };
+
+      const sanitized = helpers.sanitizeSettingsUpdate(payload);
+
+      expect(sanitized.diffLayoutPreference).toBe('side-by-side');
+      expect(sanitized.gitChangesViewMode).toBe('tree');
+      expect(sanitized.gitReviewLayout).toBe('combined');
+    });
+  });
 });
