@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { getVSCodeBootstrapConfig, isVSCodeBootstrapPresent } from './vscodeBootstrap';
+import {
+  getVSCodeBootstrapConfig,
+  getVSCodeBootstrapWorkspaceFolder,
+  isVSCodeBootstrapPresent,
+} from './vscodeBootstrap';
 
 interface TestWindow {
-  __VSCODE_CONFIG__?: { workspaceFolder: string; workspaceFolders: { name: string; path: string }[] };
+  __VSCODE_CONFIG__?: { workspaceFolder?: string; workspaceFolders?: { name: string; path: string }[] };
 }
 
 /**
@@ -36,6 +40,24 @@ describe('VS Code bootstrap config', () => {
       workspaceFolders: [{ name: 'project-one', path: '/workspace/project-one' }],
     });
     expect(isVSCodeBootstrapPresent()).toBe(true);
+  });
+
+  test('returns a trimmed workspace folder', () => {
+    setTestWindow({
+      __VSCODE_CONFIG__: {
+        workspaceFolder: '  /workspace/project-one  ',
+      },
+    });
+
+    expect(getVSCodeBootstrapWorkspaceFolder()).toBe('/workspace/project-one');
+  });
+
+  test('returns null for a missing or blank workspace folder', () => {
+    setTestWindow({ __VSCODE_CONFIG__: {} });
+    expect(getVSCodeBootstrapWorkspaceFolder()).toBeNull();
+
+    setTestWindow({ __VSCODE_CONFIG__: { workspaceFolder: '   ' } });
+    expect(getVSCodeBootstrapWorkspaceFolder()).toBeNull();
   });
 
   test('treats missing window/bootstrap as not VS Code', () => {

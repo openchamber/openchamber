@@ -111,6 +111,16 @@ export class SessionEditorPanelProvider {
   }
 
   public createOrShowNewSession(): void {
+    // Without an open workspace folder there is no directory to start the
+    // session against; opening a draft would fall back to the last session's
+    // directory in shared UI state (the bug this fixes). Mirror the sidebar
+    // flow's guard and tell the user instead.
+    const firstFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!firstFolder) {
+      vscode.window.showInformationMessage('OpenChamber: No folder is open. Open a folder to start a new session.');
+      return;
+    }
+
     // Generate unique panel ID for new session drafts
     const panelId = `new_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     this._createPanel(panelId, t('New Session'), null);
