@@ -496,6 +496,30 @@ describe('updateDesktopSettings', () => {
     expect(localStorage.getItem('selectedThemeId')).toBe('existing-theme');
   });
 
+  test('round-trips showExpandedTodoTools through save responses as a partial patch', async () => {
+    getWindow();
+    expect(useUIStore.getState().showExpandedTodoTools).toBe(false);
+    useUIStore.getState().setTerminalShell('fish');
+    registerSettingsSave(async () => ({ showExpandedTodoTools: true }));
+
+    await updateDesktopSettings({ showExpandedTodoTools: true });
+
+    expect(useUIStore.getState().showExpandedTodoTools).toBe(true);
+    expect(useUIStore.getState().terminalShell).toBe('fish');
+  });
+
+  test('ignores a non-boolean showExpandedTodoTools in a settings save response', async () => {
+    getWindow();
+    useUIStore.getState().setShowExpandedTodoTools(true);
+    const invalidSettings: SettingsPayload = {};
+    Object.defineProperty(invalidSettings, 'showExpandedTodoTools', { value: 'yes', enumerable: true });
+    registerSettingsSave(async () => invalidSettings);
+
+    await updateDesktopSettings({ showExpandedTodoTools: true });
+
+    expect(useUIStore.getState().showExpandedTodoTools).toBe(true);
+  });
+
   test('ignores an invalid JSON view mode in a settings save response', async () => {
     getWindow();
     useUIStore.getState().setToolJsonViewMode('formatted');
