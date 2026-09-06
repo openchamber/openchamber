@@ -1884,6 +1884,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             onChange={handleShowExpandedTodoToolsChange}
                                             label={t('settings.openchamber.visual.field.todoList')}
                                             ariaLabel={t('settings.openchamber.visual.field.showExpandedTodoToolsAria')}
+                                            settingsItem="chat.expanded-tools-todo"
                                         />
                                     </SettingsSection>
                                 )}
