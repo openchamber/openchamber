@@ -128,6 +128,15 @@ describe("applyDirectoryEvent", () => {
       properties: { part: serverText },
     } as Event)).toBe(true)
     expect(draft.part.msg_1).toEqual([serverText, optimisticFile])
+
+    // The file echo follows the text echo; it must claim the optimistic file
+    // even though the first slot now holds a server part.
+    const serverFile = { id: "prt_server_file", messageID: "msg_1", sessionID: "ses_1", type: "file", filename: "a.png" } as Part
+    expect(applyDirectoryEvent(draft, {
+      type: "message.part.updated",
+      properties: { part: serverFile },
+    } as Event)).toBe(true)
+    expect(draft.part.msg_1).toEqual([serverText, serverFile])
   })
 
   test("returns typed materialization when delta arrives before parts", () => {

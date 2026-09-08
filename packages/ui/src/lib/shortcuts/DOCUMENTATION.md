@@ -47,6 +47,11 @@ Shared `DropdownMenu` and `Select` can opt into this boundary with `disableGloba
 
 Terminal capture, Escape abort priming, and the shifted reverse-agent chord are input-boundary exceptions. They preserve their target-specific semantics and invoke the registered application handler rather than duplicating command behavior.
 
+`[data-btw-composer="true"]` owns Escape instead of main-session abort priming.
+While active, main and Mini Chat model/effort shortcuts yield; main agent,
+expansion and dictation shortcuts also yield. Footer unmounting alone cannot
+disable these global registrations or protect the parent composer's selection.
+
 Local key handling remains appropriate for text editing, IME composition, menu and list navigation, dialog confirmation, terminal input, and other interactions that do not represent configurable application commands. The settings recorder treats Enter and Escape as recordable keys; only its explicit Confirm and Cancel buttons apply or discard a recording.
 
 # Adding shortcuts

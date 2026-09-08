@@ -20,9 +20,8 @@ import {
 /**
  * Which sections the work-status panel may show.
  *
- * Everything is on by default and the choice is stored as the *hidden* set, so
- * a section added in a later release appears for everyone rather than staying
- * invisible to whoever had saved settings before it existed.
+ * Choices are stored as the hidden set. Telemetry is opt-in; Show all is an
+ * explicit choice to enable it along with the other sections.
  */
 export const WorkStatusSectionsDialog: React.FC<{
   open: boolean;

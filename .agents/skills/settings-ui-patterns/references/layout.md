@@ -29,7 +29,7 @@ All primitives and class constants below live in
 | L2 | `SettingsSection` title (`SETTINGS_SECTION_TITLE_CLASS`) | Section |
 | L3 | `SettingsControlGroup` title (`SETTINGS_GROUP_TITLE_CLASS`) | Sub-cluster inside a section |
 | L4 | `SETTINGS_FIELD_LABEL_CLASS` | Field / control labels |
-| Helper | `SETTINGS_HELPER_CLASS`, `SETTINGS_DESCRIPTION_CLASS` | Rare visible helper text (most goes behind `info`) |
+| Helper | `SETTINGS_HELPER_CLASS`, `SETTINGS_DESCRIPTION_CLASS` | Rare visible helper text (most goes behind `info`; see the skill's Description Policy) |
 
 ## Navigation Placement
 
@@ -63,5 +63,6 @@ pattern when touching nav.
 - Sections own vertical rhythm: divider + `py-8` come from `SettingsSection`.
 - Fields inside a column: `SETTINGS_FIELDS_STACK_CLASS` (`space-y-4`).
 - Checkbox/radio lists: `SETTINGS_OPTION_STACK_CLASS` (`space-y-1.5`).
+- Groups requiring a title and visible description: separate them from preceding controls with `space-y-6` on the parent. Keep simple checkbox/radio lists compact. The title sits closer to its own description and controls than to the preceding group; use `SettingsControlGroup`'s internal spacing.
 - Two-column areas: `SettingsTwoColumn` (`@3xl:grid-cols-2`); use `SettingsStackedField` inside cells (a `SettingsFieldRow` overflows half-width columns).
 - No elevated backgrounds, rounded rows, or hover fills without explicit UX value.

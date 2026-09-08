@@ -8,14 +8,15 @@ import { useI18n } from '@/lib/i18n';
 interface MobileModelButtonProps {
     onOpenModel: () => void;
     className?: string;
+    model?: { providerId: string; modelId: string } | null;
 }
 
-export const MobileModelButton: React.FC<MobileModelButtonProps> = ({ onOpenModel, className }) => {
+export const MobileModelButton: React.FC<MobileModelButtonProps> = ({ onOpenModel, className, model }) => {
     const { t } = useI18n();
-    const currentModelId = useConfigStore((state) => state.currentModelId);
-    const currentProviderId = useConfigStore((state) => state.currentProviderId);
-    const getCurrentProvider = useConfigStore((state) => state.getCurrentProvider);
-    const currentProvider = getCurrentProvider();
+    const currentModelId = useConfigStore((state) => model === undefined ? state.currentModelId : model?.modelId);
+    const currentProviderId = useConfigStore((state) => model === undefined ? state.currentProviderId : model?.providerId);
+    const providers = useConfigStore((state) => state.providers);
+    const currentProvider = providers.find((provider) => provider.id === currentProviderId);
     const modelLabel = getModelDisplayName(currentProvider, currentModelId, t('chat.modelControls.selectModel'));
 
     return (

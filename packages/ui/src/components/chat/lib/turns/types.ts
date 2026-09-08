@@ -115,6 +115,7 @@ export interface TurnGroupingContext {
     activityOwnerMessageId?: string;
     isFirstAssistantInTurn: boolean;
     isLastAssistantInTurn: boolean;
+    hasEarlierAssistantText?: boolean;
     isLatestTurn: boolean;
     summaryBody?: string;
     activityParts?: TurnActivityRecord[];

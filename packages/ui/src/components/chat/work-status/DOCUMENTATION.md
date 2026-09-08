@@ -17,7 +17,8 @@ conditionally; passing "am I first?" down would mean each one tracking what the
 sections above it decided to render.
 
 Sections render nothing when they have no rows, so the panel collapses upward
-instead of reserving empty space.
+instead of reserving empty space. Turn stats keeps its header for a
+selected session even without metrics, so a saved collapsed state can reopen.
 
 ## What it is not
 
@@ -103,10 +104,48 @@ which requests only providers enabled for this panel.
 | Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
 | Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not |
 | Linked threads | `lib/linkedIssues.ts` over session metadata | written by the flows that attach an issue or PR |
+| Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed only while expanded and authoritatively idle |
 | Goal | `useSessionGoal` | respects the Settings toggle |
 | MCP | `useMcpStore` | connect/disconnect reuses the dropdown's actions |
 | Pinned messages | `getContextObligatoryMessages` + `state.part` | see below |
 | Todos | live `state.todo[sessionId]`, persisted fallback | live channel wins |
+
+### Turn stats
+
+The section follows Usage and reuses the panel's existing rows. Only its header
+has an icon; metric rows use labels and values without leading icons. It
+reads already-loaded records without fetching history. The newest turn needs a
+preceding user message and completed assistant steps. A truncated or unfinished
+turn has no whole-turn result; later materialization can supply it.
+
+Two rates answer different questions. Response speed uses the final assistant
+message's output tokens divided by the union of its nonempty text intervals.
+It excludes initial waiting, reasoning tokens and reasoning time, and earlier
+tool steps. It requires complete, valid text timing and a final message without
+tools, errors, synthetic text or ignored text. This measures text delivery from
+stored timestamps, not provider-side decode speed. The header shows only this
+rate; unavailable response timing never falls back to whole-turn speed.
+
+Whole-turn speed uses output plus reasoning tokens from every step, divided by
+elapsed assistant time minus the union of completed and failed tool intervals.
+Waiting for each model response remains included. Invalid or missing inputs
+omit the dependent metric rather than becoming zero; reported zeros remain
+valid. TTFT averages the earliest text/reasoning start delay from every step,
+only when all steps have a valid sample.
+
+Metric labels stay short. Every row is a single hover and keyboard-focus target
+for a shared tooltip, with a 750ms hover delay and a portal outside the panel's
+scroller. Tooltips explain the measurement in every locale. The token row uses
+compact input/output arrows; its tooltip gives full counts and explains that
+input excludes cached tokens and output includes reasoning across all steps.
+
+Records subscriptions and aggregation stop while collapsed, busy, retrying, or
+awaiting status authority. Explicit idle events or a successful directory status
+snapshot allow computation. One component-owned committed result keeps the
+headline and rows stable during the next active turn. Its identity includes
+runtime, normalized directory and session. Scope changes discard it; fresh empty
+or reverted records clear it. There is no global message-ID cache. Corrections
+to existing message/part identities invalidate the current result.
 
 ### Context usage has its own computation, on purpose
 
@@ -179,13 +218,21 @@ including edits the user made by hand and excluding session edits that are
 already committed. If a session-authored count is ever needed, it has to come
 from aggregating message summaries, not from `Session.summary`.
 
+One exception: while the directory is a worktree whose creation has not
+finished (`useWorktreeBootstrapPending`), the working tree transiently holds
+bootstrap files that the initial git reset is about to remove. Those are not
+changes on the branch, so the panel neither fetches status nor renders the
+changed-files row until the bootstrap settles, then forces one status fetch so
+the row reflects the reset tree rather than a mid-creation snapshot.
+
 ## Section order
 
 Ordering is by durability, not category:
 
 1. **Session** (goal, context, cost), **Project** (attention, branch,
-   changes, PR, checks) and **Usage** — true for as long as the session is
-   open. Usage sits here rather than lower down because a spent quota stops the
+   changes, PR, checks), **Usage**, and **Turn stats** (session telemetry:
+   throughput, duration, TTFT, cache hit rate) — true for as long as the session
+   is open. Usage sits here rather than lower down because a spent quota stops the
    work outright;
 2. **Subagents**, **Tasks** — what is happening right now;
 3. **MCP**, **Pinned messages**, **Context sources** — supporting material.
@@ -194,10 +241,13 @@ Ordering is by durability, not category:
 
 A persisted preference (`workStatusPanelEnabled`) drives a header toggle, and a
 dialog behind the equalizer icon switches individual sections off. Hidden
-sections are stored rather than visible ones, so a section added later appears
-for everyone instead of staying invisible to whoever had saved settings before
-it existed. Both travel the full settings pipeline, including the server
-whitelist without which the keys never reach `settings.json`.
+sections are stored rather than visible ones. Every section, including Turn
+stats, is enabled by default. UI-store v21 migration and server-list hydration
+remove the old automatic telemetry hiding unless `workStatusHiddenSectionsExplicit`
+records a user-chosen list. Explicit hiding and other hidden sections survive.
+The marker and list travel together through autosave, sanitization, and server
+settings; an empty list enables everything. Complete settings
+snapshots own this preference; unrelated partial save echoes leave it unchanged.
 
 `workStatusPanelVisible` is separate and transient: the switch can be on while
 layout still refuses the panel. The header and the git rail read it to drop the
@@ -346,6 +396,28 @@ the matching header dropdown:
   section loads them itself, keyed on the directory, since skills are
   discovered relative to the active project. It does not wrap the call in
   `runBackgroundNetworkTask`: the store already gates its own fetch.
+
+Usage waits for the instance to say it is initialised. Quota providers report
+themselves as configured only once the instance can read their credentials,
+which on a remote instance is not true when the UI mounts — a fetch fired at
+mount gets "nothing configured" for every provider, and since each one then has
+a result, nothing asks again until the three-minute refresh. That is why Usage
+could stay missing from the panel until Settings -> Usage forced a fresh fetch.
+`useQuotaStore.ensureLoadedForRuntime` owns both the readiness rule and the
+once-per-instance bookkeeping, so every caller can ask on each connection
+change.
+
+### These readouts belong to the connected instance
+
+Quotas, MCP status, skills, agent memory and the Linear/GitHub logins are all
+served by whichever OpenChamber instance is connected, and each was cached
+globally or by directory alone — which two instances can share. A switch left
+the previous instance's answers on screen, and its Linear login usable against
+a runtime that has no Linear. `apps/runtimeEndpointReset.ts` now drops all of
+them, each store guarding its own in-flight requests with a generation so a
+response for the previous instance cannot land in the new one. The MCP and
+skills effects take `isConnected` as a dependency — not a gate — because
+`directory` alone does not change when both instances hold the same path.
 
 The panel now performs these itself, silently and through the
 background-network gate, so it cannot compete with chat bootstrap traffic for

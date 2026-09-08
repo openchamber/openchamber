@@ -370,7 +370,6 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
   private generateMarkdownColors(markdown: Record<string, string>, theme: Theme): string[] {
     const vars: string[] = [];
     const primary = theme.colors.primary.base;
-    const chatBackground = theme.colors.chat?.background || theme.colors.surface.background;
 
     vars.push(`  --markdown-heading1: ${markdown.heading1 || primary};`);
     vars.push(`  --markdown-heading2: ${markdown.heading2 || this.opacity(primary, 0.9)};`);
@@ -378,8 +377,6 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     vars.push(`  --markdown-heading4: ${markdown.heading4 || theme.colors.surface.foreground};`);
     vars.push(`  --markdown-link: ${markdown.link || primary};`);
     vars.push(`  --markdown-link-hover: ${markdown.linkHover || theme.colors.primary.hover || this.darken(primary, 10)};`);
-    vars.push(`  --markdown-inline-code: ${markdown.inlineCode || theme.colors.syntax.base.string};`);
-    vars.push(`  --markdown-inline-code-bg: ${markdown.inlineCodeBackground || chatBackground};`);
     vars.push(`  --markdown-blockquote: ${markdown.blockquote || theme.colors.surface.mutedForeground};`);
     vars.push(`  --markdown-blockquote-border: ${markdown.blockquoteBorder || theme.colors.interactive.border};`);
     vars.push(`  --markdown-list-marker: ${markdown.listMarker || this.opacity(primary, 0.6)};`);
@@ -394,7 +391,6 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
   private generateDefaultMarkdownColors(theme: Theme): string[] {
     const vars: string[] = [];
     const primary = theme.colors.primary.base;
-    const chatBackground = theme.colors.chat?.background || theme.colors.surface.background;
 
     vars.push(`  --markdown-heading1: ${primary};`);
     vars.push(`  --markdown-heading2: ${this.opacity(primary, 0.9)};`);
@@ -402,8 +398,6 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     vars.push(`  --markdown-heading4: ${theme.colors.surface.foreground};`);
     vars.push(`  --markdown-link: ${primary};`);
     vars.push(`  --markdown-link-hover: ${theme.colors.primary.hover || this.darken(primary, 10)};`);
-    vars.push(`  --markdown-inline-code: ${theme.colors.syntax.base.string};`);
-    vars.push(`  --markdown-inline-code-bg: ${chatBackground};`);
     vars.push(`  --markdown-blockquote: ${theme.colors.surface.mutedForeground};`);
     vars.push(`  --markdown-blockquote-border: ${theme.colors.interactive.border};`);
     vars.push(`  --markdown-list-marker: ${this.opacity(primary, 0.6)};`);

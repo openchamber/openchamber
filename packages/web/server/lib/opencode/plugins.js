@@ -1,8 +1,8 @@
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import {
   AGENT_SCOPE,
+  OPENCODE_CONFIG_DIR,
   readConfigFile,
   readConfigLayer,
   writeConfig,
@@ -71,7 +71,7 @@ function getActiveOpencodeConfigDir() {
   if (customConfigPath) {
     return path.dirname(path.resolve(customConfigPath));
   }
-  return path.join(os.homedir(), '.config', 'opencode');
+  return OPENCODE_CONFIG_DIR;
 }
 
 function getActiveUserConfigPaths() {

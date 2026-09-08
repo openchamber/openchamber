@@ -38,6 +38,9 @@ cells or when the control is wide; same `info` / `settingsItem` props.
 
 ## Boolean
 
+For a self-explanatory enable/disable setting, use only a checkbox and label;
+no separate group title or description is needed.
+
 ```tsx
 <SettingsCheckboxRow
   checked={value}
@@ -54,10 +57,21 @@ for text that must stay visible (warnings, dynamic status).
 
 ## Mutually Exclusive Options
 
+Use radios for mutually exclusive modes, not independent checkboxes. Keep
+self-explanatory choices compact; a title or description is not mandatory.
+
+When the skill's Description Policy calls for a visible explanation, wrap
+the controls in `SettingsControlGroup`: title, description, then options.
+Explain the choice once at group level. Use checkbox rows for independent
+choices and radio options for mutually exclusive choices. Group spacing is
+defined in `layout.md`.
+
 ```tsx
-<SettingsRadioGroup aria-label={t('...group')}>
-  <SettingsRadioOption selected={…} onSelect={…} label={t('...')} ariaLabel={t('...')} />
-</SettingsRadioGroup>
+<SettingsControlGroup title={t('...group')} description={t('...description')}>
+  <SettingsRadioGroup aria-label={t('...group')}>
+    <SettingsRadioOption selected={…} onSelect={…} label={t('...')} ariaLabel={t('...')} />
+  </SettingsRadioGroup>
+</SettingsControlGroup>
 ```
 
 Skip per-option descriptions when labels are self-explanatory. For short

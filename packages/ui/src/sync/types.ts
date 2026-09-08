@@ -56,6 +56,8 @@ export type State = {
   sessionEventRevision?: Record<string, number>
   sessionDeletedRevision?: Record<string, number>
   session_status: Record<string, SessionStatus>
+  /** A successful status snapshot makes omitted sessions authoritatively idle. */
+  sessionStatusReady?: boolean
   session_diff: Record<string, FileDiff[]>
   todo: Record<string, Todo[]>
   permission: Record<string, PermissionRequest[]>

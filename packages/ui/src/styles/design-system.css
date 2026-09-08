@@ -24,13 +24,16 @@
     --oc-glass-saturation: 1.24;
 
     /* Semantic typography defaults (must match SEMANTIC_TYPOGRAPHY) */
-    --text-markdown: 0.9375rem;
-    --text-code: 0.8125rem;
-    --text-ui-header: 0.9375rem;
-    --text-ui-label: 0.8750rem;
-    --text-meta: 0.875rem;
-    --text-micro: 0.875rem;
-    --text-settings-page-title: 1.125rem;
+    --text-markdown: 0.875rem;
+    --text-code: 0.75rem;
+    --text-ui-header: 0.875rem;
+    --text-ui-label: 0.8125rem;
+    --text-meta: 0.8125rem;
+    --text-micro: 0.8125rem;
+    --text-settings-page-title: 1.0625rem;
+
+    /* Text selection colour shared by native ::selection and the comment overlay */
+    --oc-text-selection: color-mix(in srgb, var(--primary) 30%, transparent);
 
     /* Default Light Theme */
     --background: oklch(0.97 0.02 85); /* Warm sand background */
@@ -154,25 +157,24 @@
     font-family: var(--font-mono, ui-monospace, SFMono-Regular, 'Liberation Mono', Menlo, monospace) !important;
   }
 
-  /* Restore default list styling inside markdown content - override Tailwind preflight */
+  /* Restore list styling inside markdown content - override Tailwind preflight.
+     Native markers with a compact gutter; nesting cycles the marker shape so
+     depth stays readable without extra indentation. */
   .markdown-content ul,
   .markdown-content ol {
-    padding-left: 2em !important;
+    padding-left: 1.25rem !important;
   }
 
   .markdown-content ul {
-    list-style-type: none !important;
+    list-style-type: disc !important;
   }
 
-  .markdown-content ul > li {
-    position: relative;
+  .markdown-content ul ul {
+    list-style-type: circle !important;
   }
 
-  .markdown-content ul > li::before {
-    content: "–";
-    position: absolute;
-    left: -1.25em;
-    color: inherit;
+  .markdown-content ul ul ul {
+    list-style-type: square !important;
   }
 
   .markdown-content ol {
@@ -180,8 +182,38 @@
     list-style-position: outside !important;
   }
 
+  .markdown-content ol ol {
+    list-style-type: lower-alpha !important;
+  }
+
+  .markdown-content ol ol ol {
+    list-style-type: lower-roman !important;
+  }
+
   .markdown-content li {
     display: list-item !important;
+  }
+
+  .markdown-content li::marker {
+    color: currentColor;
+  }
+
+  .markdown-content ol > li::marker {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .markdown-content li + li {
+    margin-top: 0.25rem;
+  }
+
+  /* GitHub-style task lists: the checkbox replaces the list marker. */
+  .markdown-content li:has(> input[type="checkbox"]:first-child) {
+    list-style-type: none !important;
+  }
+
+  .markdown-content li > input[type="checkbox"]:first-child {
+    margin: 0 0.35em 0.15em -1.25rem;
+    vertical-align: middle;
   }
 
   /* Remove focus rings globally (except inputs/textareas/dropdowns/selects/explicit accent rings) */
@@ -425,13 +457,11 @@
   --markdown-link: var(--markdown-link);
   --markdown-link-hover: var(--markdown-link-hover);
   --markdown-list-marker: var(--markdown-list-marker);
-  --markdown-inline-code: var(--markdown-inline-code);
-  --markdown-inline-code-bg: var(--markdown-inline-code-bg);
   --markdown-blockquote: var(--markdown-blockquote);
   --markdown-blockquote-border: var(--markdown-blockquote-border);
 
   /* Markdown spacing defaults */
-  --markdown-paragraph-spacing: 0.75rem;
+  --markdown-paragraph-spacing: 0.65rem;
   --markdown-heading-primary-top: 0.75rem;
   --markdown-heading-primary-bottom: 0.35rem;
   --markdown-heading-secondary-top: 0.6rem;

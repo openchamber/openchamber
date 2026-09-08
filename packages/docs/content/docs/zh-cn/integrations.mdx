@@ -1,54 +1,53 @@
 ---
 title: 集成
-description: 将你的 Claude 或 Cursor 订阅用作提供商。
+description: 将 GitHub 和 Linear 连接到 OpenChamber。
 ---
 
 # 集成
 
-集成是一个小型插件，它使用你已有的订阅为 OpenChamber 添加一个提供商。你可以在 **Settings → Integrations** 中管理它们。
+在 **设置 → 集成** 中登录 OpenChamber 所配合使用的服务。登录信息保存在 OpenChamber 服务器上，因此网页端、桌面端和已配对的手机共用同一份登录。
 
-> **实验性功能。**我们力求遵守提供商的政策，但帐户限制和暂停仍由各提供商决定。请自行承担使用集成的风险。
+## GitHub
 
-可用的集成：
+展开 **GitHub** 卡片并选择 **Connect GitHub**，用一个简短的设备码登录。连接后，OpenChamber 可以从 issue 和拉取请求开始会话、将它们附加到消息，以及创建或更新 PR。GitHub 能做的一切见 [GitHub Issue 与 PR](/zh-cn/github/)。
 
-- **Claude Code** — 你的 Claude Pro 或 Max 套餐，无需 API 密钥
-- **Cursor** — 你的 Cursor 套餐的模型额度
+## Linear
 
-## 安装集成
+### 连接工作区
 
-1. 打开 **Settings → Integrations**。
-2. 找到所需的集成并选择 **Install**。
-3. 在提示时重启 OpenCode — 重启后提供商就会出现。
-4. 选择 **Set up** 并登录。之后模型会出现在聊天室的模型选择器中。
+1. 展开 **Linear** 卡片并选择 **Connect**。
+2. 在打开的浏览器标签页中批准访问。在此之前，卡片显示 **Waiting for Linear**。
 
-集成按用户安装，因此在所有项目中都可用。你可以随时在同一张卡片上更新或移除它们。
+用 **Add workspace** 连接另一个 Linear 组织。同一时间只有一个当前工作区：用 **Switch to** 切换，**Disconnect** 只移除当前工作区。项目映射会保留。
 
-## Claude Code
+### 浏览 issue
 
-Claude Code 使用你的 Claude Pro 或 Max 套餐 — 无需 API 密钥，也无需单独的 Claude 应用。
+连接工作区后，右侧上下文栏会出现 **Linear** 面板。它列出当前工作区的 issue，你可以：
 
-1. 安装集成（见上文）。
-2. 选择 **Set up** 并登录。如果你还没有 Claude Code CLI，安装向导会先提供安装，然后再登录。
+- 按状态（**Backlog**、**To Do**、**In Progress**、**In Review**、**Done**、**Canceled**、**Duplicate**）、负责人（**Anyone** 或 **Assigned to me**）、团队和优先级筛选
+- 按标题、标识符或 Linear URL 搜索
+- 打开 issue 查看描述、评论、标签和优先级
+- 修改其 **Status** 或选择 **Close issue**
+- 切换当前 **Workspace**
 
-Claude Code 是这里唯一要求安装并登录其提供商 CLI 的集成。Cursor 不需要其 CLI。
+### 从 issue 开始会话
 
-**你的 Claude 账户如何受到保护：** 此集成使用 Anthropic 官方的 Claude Agent SDK 和你已安装的 Claude Code CLI。它不会劫持 OAuth，不会提取或重放浏览器令牌，不会冒充不受支持的客户端，也不会绕过 Anthropic 的身份验证。它始终运行在 Anthropic 支持的访问路径上，因此不会带来与令牌劫持或未授权身份验证变通手段相关的封号风险。
+- 在 Linear 面板中打开 issue 并选择 **Start session**。滚动 issue 时按钮始终停留在底部。
+- 在聊天中选择 **New Session From Linear Issue** 从列表中挑选；需要新分支时选择 **Create in worktree**。
+- 在 **New Worktree** 对话框中选择 **Start from Linear Issue**。
 
-## Cursor
+会话会在映射到该 issue 所属团队的项目中打开，issue 作为第一条提示。在 Linear 卡片中映射团队：**Default project** 适用于所有团队，**Team projects** 可按团队覆盖。未映射的团队会先要求你完成映射。第一条消息由 **Issue Review** 魔法提示生成，可在 **设置 → Magic Prompts → Linear** 中编辑。
 
-Cursor 让你的 Cursor 套餐中包含的模型可以在 OpenChamber 中使用。
+### 将 issue 关联到消息
 
-1. 安装集成（见上文）。
-2. 选择 **Set up**，打开链接并在浏览器中授权访问。无需 API 密钥。登录后模型列表会自动加载。
+在聊天输入框中选择 **Link Linear Issue**。该 issue 会作为上下文随你的下一条消息一起发送，会话的工作状态面板会保留指向它的链接。
 
-## 更新或移除
+### 会话评论
 
-- **Update** 安装插件的最新发布版本。
-- **Remove** 从你的 OpenCode 配置中删除该插件。OpenCode 重新加载后，该提供商将不再加载。
-
-如果卡片提示条目需要手动管理，请选择 **Manage plugins** 并在那里清理重复项。
+在 Linear 卡片中开启 **Session comments**，从 issue 开始的会话会在开始、完成或失败时在该 issue 下发布评论，每条评论都带有打开会话的链接。只有当此 OpenChamber 服务器拥有公网地址时才会发布评论，这样 issue 中的每个人都能打开链接；在本地或私有地址下不会发布任何内容。
 
 ## 相关内容
 
-- [提供商、模型与智能体](/zh-cn/providers/) — 连接其他提供商并选择模型
-- [用量与配额](/zh-cn/usage/) — 跟踪你的使用量
+- [GitHub Issue 与 PR](/zh-cn/github/) — GitHub 在 OpenChamber 中能做的一切
+- [工作树会话](/zh-cn/worktrees/) — issue 会话可以从哪里开始
+- [Magic Prompts](/zh-cn/magic-prompts/) — 编辑 Linear 会话的起始提示

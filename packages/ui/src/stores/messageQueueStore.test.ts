@@ -1,11 +1,17 @@
-import { beforeEach, describe, expect, test } from "bun:test"
-import {
+import { beforeEach, describe, expect, mock, test } from "bun:test"
+
+// The local queue is the VS Code behavior; every other runtime hands the
+// queue to the server (see messageQueueStore.server.test.ts).
+const desktop = await import("@/lib/desktop")
+mock.module("@/lib/desktop", () => ({ ...desktop, isVSCodeRuntime: () => true }))
+
+const {
   createMessageQueueTarget,
   getMessageQueueKey,
   migrateMessageQueueState,
   parseMessageQueueKey,
   useMessageQueueStore,
-} from "./messageQueueStore"
+} = await import("./messageQueueStore")
 
 beforeEach(() => {
   useMessageQueueStore.setState({ queuedMessages: {}, quarantinedLegacyMessages: {}, sendingIds: {} })
@@ -36,6 +42,37 @@ describe("message queue runtime ownership", () => {
 
     expect(migrated.queuedMessages).toEqual({})
     expect(migrated.quarantinedLegacyMessages?.["session-1"]?.[0]?.content).toBe("legacy")
+  })
+
+  test("keeps what was captured at queue time on the local message", () => {
+    const target = createMessageQueueTarget("session-1", "/repo", "runtime-a")!
+    const context = [{ kind: "synthetic" as const, text: "conflict payload" }]
+    useMessageQueueStore.getState().addToQueue(target, {
+      content: "@Builder do it",
+      text: "do it",
+      agentMention: "Builder",
+      context,
+    })
+    useMessageQueueStore.getState().addToQueue(target, { content: "plain" })
+
+    const [captured, plain] = useMessageQueueStore.getState().getQueueForTarget(target)
+    expect(captured?.content).toBe("@Builder do it")
+    expect(captured?.text).toBe("do it")
+    expect(captured?.agentMention).toBe("Builder")
+    expect(captured?.context).toEqual(context)
+    expect(plain?.text).toBe("plain")
+    expect(plain?.agentMention).toBe(undefined)
+    expect(plain?.context).toBe(undefined)
+  })
+
+  test("messages persisted before delivery text existed deliver their content", () => {
+    const migrated = migrateMessageQueueState({
+      queuedMessages: {
+        "runtime-a\n/repo\nsession-1": [{ id: "queued-1", content: "@Builder old", createdAt: 1 }],
+      },
+    }, 2)
+
+    expect(migrated.queuedMessages?.["runtime-a\n/repo\nsession-1"]?.[0]?.text).toBe("@Builder old")
   })
 
   test("bounds each queue to the newest 20 messages", () => {

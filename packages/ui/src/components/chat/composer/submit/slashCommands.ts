@@ -136,6 +136,20 @@ export interface ParsedSlashCommand {
     argument: string;
 }
 
+export type LocalSlashCommandPlan = {
+    command: ParsedSlashCommand;
+    kind: 'action' | 'prompt';
+    attachedContext: 'none' | 'retain' | 'send';
+};
+
+const LOCAL_ACTION_COMMANDS = new Set([
+    'undo',
+    'redo',
+    'timeline',
+    'handoff-review',
+    'compact',
+]);
+
 /**
  * Read the leading slash command out of a message, if there is one. Only the
  * first word counts as the command; the rest is its argument.
@@ -152,6 +166,42 @@ export function parseSlashCommand(text: string): ParsedSlashCommand | null {
         name,
         argument: withoutSlash.slice(name.length).trim(),
     };
+}
+
+/**
+ * Plan commands owned by the composer before attached context is consumed.
+ * Action commands leave that context in the composer; prompt commands send it.
+ * Unknown commands return null so the OpenCode command router remains authoritative.
+ */
+export function planLocalSlashCommand(
+    text: string,
+    inputMode: 'normal' | 'shell' | undefined,
+    hasAttachedContext: boolean,
+    hasSession: boolean,
+): LocalSlashCommandPlan | null {
+    if (inputMode !== 'normal') return null;
+    const command = parseSlashCommand(text);
+    if (!command) return null;
+
+    if (LOCAL_ACTION_COMMANDS.has(command.name)) {
+        if (!hasSession) return null;
+
+        return {
+            command,
+            kind: 'action',
+            attachedContext: hasAttachedContext ? 'retain' : 'none',
+        };
+    }
+
+    if (command.name === 'btw' || findMagicPromptCommand(command.name)) {
+        return {
+            command,
+            kind: 'prompt',
+            attachedContext: hasAttachedContext ? 'send' : 'none',
+        };
+    }
+
+    return null;
 }
 
 /** The prompt-pair command for `name`, or null when it is not one. */
@@ -173,7 +223,7 @@ export function canRunCommand(
 export function buildCommandVariables(
     command: MagicPromptCommand,
     argument: string,
-): { visible: Record<string, string>; instructions: Record<string, string> } {
+) {
     const built = command.buildVariables?.(argument) ?? {};
     return {
         visible: built.visible ?? {},

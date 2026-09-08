@@ -2,7 +2,7 @@ import type React from 'react';
 
 import { isIMECompositionEvent } from '@/lib/ime';
 
-function getDropdownNavigationKey(event: Pick<KeyboardEvent, 'key' | 'code' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>): 'ArrowDown' | 'ArrowUp' | null {
+export function getDropdownNavigationKey(event: Pick<KeyboardEvent, 'key' | 'code' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>): 'ArrowDown' | 'ArrowUp' | null {
   if (!event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return null;
   // `code` covers non-Latin layouts, where `key` is the layout's own letter.
   if (event.key.toLowerCase() === 'n' || event.code === 'KeyN') return 'ArrowDown';

@@ -61,6 +61,11 @@ describe('bridge local fs proxy', () => {
     expect(response?.status).toBe(404);
   });
 
+  it('does not forward directory availability probes to OpenCode', async () => {
+    const response = await tryHandleLocalFsProxy('GET', '/api/fs/directory-stat?path=%2Fmissing-dir');
+    expect(response?.status).toBe(501);
+  });
+
   it('reads from the active directory when it is the second workspace root', async () => {
     existingFiles.add('/workspace-two/image.png');
     const response = await tryHandleLocalFsProxy(

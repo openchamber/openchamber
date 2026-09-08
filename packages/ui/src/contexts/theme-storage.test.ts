@@ -7,6 +7,7 @@ import {
   getThemePreferencesStorageKey,
   readThemePreferencesForRuntime,
   resolveThemePreferencesForRuntime,
+  resolveThemePreferencesFromSettingsSync,
   resolveThemePreferencesFromStorageEvent,
   writeThemePreferencesForRuntime,
 } from './theme-storage';
@@ -286,5 +287,42 @@ describe('theme storage event resolution', () => {
 
     localStorage.setItem(getThemePreferencesStorageKey('runtime-a'), 'not-json');
     expect(resolveThemePreferencesFromStorageEvent(getThemePreferencesStorageKey('runtime-a'), 'runtime-a', current)).toBeNull();
+  });
+});
+
+describe('settings sync resolution', () => {
+  const current = { themeMode: 'system' as const, lightThemeId: 'light-theme', darkThemeId: 'dark-theme' };
+  const serverTheme = { useSystemTheme: false as const, themeVariant: 'dark' as const, lightThemeId: 'server-light', darkThemeId: 'server-dark' };
+
+  test('a non-bootstrap sync (settings save echo) never changes preferences', () => {
+    expect(resolveThemePreferencesFromSettingsSync({ adoptTheme: false, settings: serverTheme }, current)).toBeNull();
+    expect(resolveThemePreferencesFromSettingsSync(null, current)).toBeNull();
+  });
+
+  test('a bootstrap sync adopts the server theme', () => {
+    expect(resolveThemePreferencesFromSettingsSync({ adoptTheme: true, settings: serverTheme }, current)).toEqual({
+      themeMode: 'dark',
+      lightThemeId: 'server-light',
+      darkThemeId: 'server-dark',
+    });
+  });
+
+  test('theme fields omitted by the server keep the current preferences (not-set is not reset-to-defaults)', () => {
+    expect(resolveThemePreferencesFromSettingsSync({ adoptTheme: true, settings: {} }, current)).toBeNull();
+    expect(
+      resolveThemePreferencesFromSettingsSync({ adoptTheme: true, settings: { useSystemTheme: true } }, current),
+    ).toBeNull();
+    expect(
+      resolveThemePreferencesFromSettingsSync({ adoptTheme: true, settings: { lightThemeId: 'server-light' } }, current),
+    ).toEqual({ themeMode: 'system', lightThemeId: 'server-light', darkThemeId: 'dark-theme' });
+  });
+
+  test('a bootstrap sync carrying the current preferences resolves to no change', () => {
+    expect(
+      resolveThemePreferencesFromSettingsSync(
+        { adoptTheme: true, settings: { useSystemTheme: true, lightThemeId: 'light-theme', darkThemeId: 'dark-theme' } },
+        current,
+      ),
+    ).toBeNull();
   });
 });

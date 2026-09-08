@@ -20,6 +20,7 @@ import { useI18n } from '@/lib/i18n';
 import type { ProjectSortOrder } from '@/stores/useSessionDisplayStore';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { Icon } from '@/components/icon/Icon';
+import { DirectoryActionIndicator } from '../sessions/DirectoryActionIndicator';
 
 type SessionProjectScrollerState = Pick<SessionGroupSectionProps,
   | 'editingId'
@@ -313,6 +314,7 @@ function SessionProjectScrollerComponent(props: Props): React.ReactNode {
                   disabled={model.singleProjectMode || view.projectSortOrder !== 'manual'}
                   projectLabel={projectLabel}
                   projectDescription={projectDescription}
+                  projectDirectory={project.normalizedPath}
                   projectIcon={project.icon}
                   projectColor={project.color}
                   projectIconImage={project.iconImage}
@@ -409,14 +411,17 @@ function SessionProjectScrollerComponent(props: Props): React.ReactNode {
           aria-hidden="true"
         >
           {leadingProject && leadingProjectLabel ? (
-            <ProjectHeaderIdentity
-               id={leadingProject.id}
-              projectLabel={leadingProjectLabel}
-              projectIcon={leadingProject.icon}
-              projectColor={leadingProject.color}
-              projectIconImage={leadingProject.iconImage}
-              projectIconBackground={leadingProject.iconBackground}
-            />
+            <>
+              <ProjectHeaderIdentity
+                id={leadingProject.id}
+                projectLabel={leadingProjectLabel}
+                projectIcon={leadingProject.icon}
+                projectColor={leadingProject.color}
+                projectIconImage={leadingProject.iconImage}
+                projectIconBackground={leadingProject.iconBackground}
+              />
+              <DirectoryActionIndicator directory={leadingProject.normalizedPath} className="ml-auto" />
+            </>
           ) : (
             <>
               <Icon name="history" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/80" />

@@ -35,7 +35,7 @@ describe('issue #2644: Escape in terminal must not close the context panel', () 
     expect(handler).toContain('event.stopPropagation()');
     expect(handler).toContain('handleClose()');
 
-    // Guard must return before preventDefault/stopPropagation so ghostty-web's
+    // Guard must return before preventDefault/stopPropagation so the terminal input's
     // bubble-phase keydown listener can forward Escape to the PTY.
     const guardIndex = handler.indexOf('isTerminalEventTarget(event.target)');
     const preventIndex = handler.indexOf('event.preventDefault()');

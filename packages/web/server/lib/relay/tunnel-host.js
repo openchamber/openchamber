@@ -33,7 +33,9 @@ const ALLOWED_WS_PATHS = new Set([
   '/api/event/ws',
   '/api/terminal/ws',
   '/api/dictation/ws',
+  '/api/dev-tunnel',
 ]);
+export const isAllowedRelayWebSocketPath = (pathname) => ALLOWED_WS_PATHS.has(pathname);
 
 // Hop-by-hop headers stripped from tunneled requests; `host` is set by fetch
 // to the loopback origin. content-length is dropped too because the body is
@@ -425,7 +427,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       void sendAbort(streamId, error?.message ?? 'malformed ws open');
       return;
     }
-    if (!ALLOWED_WS_PATHS.has(open.path)) {
+    if (!isAllowedRelayWebSocketPath(open.path)) {
       void sendAbort(streamId, 'Path is not allowed through the relay');
       return;
     }

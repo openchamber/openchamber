@@ -38,7 +38,7 @@ Examples:
 - `useFeatureFlagsStore.ts`
 - `useUpdateStore.ts`
 
-These stores coordinate visible app state, navigation, selected context-panel tabs, dialogs, and lightweight feature flags. `useUIStore.activeSurface` selects the primary mobile view and the few desktop views that are promoted out of the context panel. It is not a desktop tab selection. Linear panel list filters (status, assignee, team, priority) live here too: the Linear rail surface remounts on switch, so those filters restore from this store rather than component state. `resetLinearIssueListFilters` restores those four defaults together; search stays local to the rail. `linearIssueFocus` is a one-shot identifier so work-status can open a specific issue in that panel; it is not persisted.
+These stores coordinate visible app state, navigation, selected context-panel tabs, dialogs, and lightweight feature flags. `useUIStore.activeSurface` selects the primary mobile view and the few desktop views that are promoted out of the context panel. It is not a desktop tab selection. Linear panel list filters (status, assignee, team, priority) live here too: the Linear rail surface remounts on switch, so those filters restore from this store rather than component state. `resetLinearIssueListFilters` restores those four defaults together; search stays local to the rail. The team filter is the one that is not a plain preference: a Linear team belongs to one workspace, and each OpenChamber instance has its own Linear login, so it is persisted per instance in `linearIssueListTeamIdByRuntime` and the flat `linearIssueListTeamId` is derived from it by `applyLinearIssueListFiltersForRuntime` — on an instance switch and when the rail mounts, since rehydration can run before the runtime endpoint is known. Carried across, a team id filters the new instance's list down to nothing. `linearIssueFocus` is a one-shot identifier so work-status can open a specific issue in that panel; it is not persisted.
 
 Context-panel session chats mount only the active chat iframe. After installing
 its message listener, the iframe requests its authoritative visibility from the
@@ -64,7 +64,11 @@ These stores coordinate persistent project/session metadata across multiple view
 
 `useProjectContextStore.ts` caches server-owned project notes, todos, and plan links, keyed by the path-derived project id. It replaced a pair of `window` CustomEvents that made every mounted notes panel re-read the whole project config. Writes are optimistic and roll back on failure; they are serialized per project, because the server's own store does a read-modify-write and two concurrent saves would otherwise race it. A load that resolves while a write is in flight keeps the local value for that field group only, so a slow snapshot cannot undo newer typing while still delivering the plan list it fetched. A failed load sets `error` and preserves the cached snapshot — an unreachable server must never render as "this project has no notes". Note and plan creation are deliberately not optimistic, since ids and timestamps are assigned by the server. Notes, todos, and plans are written through separate routes and tracked by separate in-flight flags, so a todo toggle cannot clobber a note edit in the same window. Pinned notes and plans are assembled into a synthetic context part by `lib/projectContextPinning.ts` at send time; that module tracks per-session what it already sent so an unchanged pinned set is not re-sent every turn.
 
-`messageQueueStore.ts` keeps a queued message until its own send resolves, so between dispatch and resolution the entry is still visible to every reader. Dispatchers must therefore mark the send (`markSending`/`clearSending`) and read `getSendableQueue()` — or filter `sendingIds` themselves — instead of dispatching straight from `queuedMessages`; otherwise a composer submit merges a message the auto-send hook is already delivering and it is sent twice (the window is seconds over a relay). `clearQueue()` retains in-flight entries for the same reason. `sendingIds` is deliberately not persisted: a restart has no in-flight sends, and a stale flag would strand a queued message. Desktop queues use the configured host id as runtime identity, not the current API URL, because an SSH reconnect allocates a new local forwarding port while the remote host remains the same.
+`messageQueueStore.ts` has two owners, decided by `isServerOwnedMessageQueue()`. On web, desktop, and mobile the OpenChamber server owns the queue (`packages/web/server/lib/message-queue/`): it delivers queued messages when the session goes idle whether or not any UI is open, and the store is a projection of it — `hydrate()` loads the server snapshot for the active runtime, `openchamber:message-queue.updated` broadcasts keep it current, and every mutation is optimistic locally then settled on the server's copy of that session (a failed round-trip re-reads the server instead of guessing). A per-key server revision rejects stale snapshots. An empty session that arrives without a directory (servers before 1.22.2 dropped it once the queue emptied) clears every projection of that session id in the runtime, because a session id is unique across directories. Projection items carry attachment metadata only and no captured context; `popToInput()`/`takeForSend()` remove the message on the server and get the full payload back, which is why both are async.
+
+A queued message is captured whole, so whoever delivers it sends exactly what the composer would have: `text` (the content with its agent mention stripped and `@file` mentions already resolved into `attachments`), `agentMention`, and `context` — every chip the composer had attached (inline comments, terminal selections, browser annotations, PR comments/checks, quotes, linked issue/PR/Linear references, pending synthetic parts) plus the skill instruction derived from the text. `QueuedContextPart` distinguishes attached items (restored to the chips when the message is edited) from derived instructions (re-derived on send, never restored) and from synthetic parts other surfaces handed the composer (restored as pending). Context is captured by `buildComposerContext` and delivered by `queuedContextToParts` (`components/chat/composer/submit/buildOutgoingMessage.ts`), the same functions the composer uses for its own send. Nothing is re-resolved at delivery: the server has no agent list, no confirmed mentions, and no draft store. Messages a previous build left in this browser are uploaded once on the first hydration of a runtime and then dropped from persistence for that runtime (`partialize` skips server-owned runtime keys). VS Code has no server and keeps the local queue with the foreground auto-send hook (`useQueuedMessageAutoSend`, enabled only there); `useMessageQueueHoldSync` tells the server to hold a session's queue while a UI-driven auto-review run is going.
+
+In the local (VS Code) mode the store keeps a queued message until its own send resolves, so between dispatch and resolution the entry is still visible to every reader. Dispatchers must therefore mark the send (`markSending`/`clearSending`) and read `getSendableQueue()` — or filter `sendingIds` themselves — instead of dispatching straight from `queuedMessages`; otherwise a composer submit merges a message the auto-send hook is already delivering and it is sent twice (the window is seconds over a relay). `clearQueue()` retains in-flight entries for the same reason. `sendingIds` is deliberately not persisted: a restart has no in-flight sends, and a stale flag would strand a queued message; in the server-owned mode it mirrors the server's in-flight item. Desktop queues use the configured host id as runtime identity, not the current API URL, because an SSH reconnect allocates a new local forwarding port while the remote host remains the same.
 
 `useGlobalSessionsStore.ts` owns cold/global active and archived session coverage. Its entity map and active root, parent/child, and directory indexes are maintained in the same transaction as the compatibility arrays and `sessionsByDirectory`. Full authoritative snapshots may rebuild those indexes once; direct create, update, move, archive, and delete mutations update only affected hierarchy and directory buckets. Metadata-only updates preserve the structure reference. It is complementary to directory child stores: it is not the source of live busy/retry status or session messages.
 
@@ -84,17 +88,21 @@ Permission auto-accept policy is authoritative in the active Web server or VS Co
 
 Shared safe storage treats durable failures per key. A quota or access failure creates an ephemeral override or tombstone for that key without disabling reads and writes for unrelated keys; later writes retry the durable backend. Deferred adapters retain failed operations for a later flush, and malformed Zustand JSON is removed and treated as missing so hydration can recover.
 
-Project and UI settings use successful settings synchronization as authority. Omitted fields in a complete snapshot reset to canonical client defaults, including an omitted project list becoming empty; transport or settings-load failure dispatches no synchronization event and preserves current state. Settings save responses are partial patches and must not clear unrelated in-memory preferences or local mirrors. Debounced settings writes flush best-effort on page hide, document hidden, app freeze, and unload — canceling the pending timer so the write happens exactly once — because a write lost inside the debounce window lets the stale server snapshot override the change on next startup; a hard process kill can still lose the in-flight request. The unload flush uses `keepalive: true` on the HTTP write, because a plain fetch started from `pagehide`/`beforeunload` is cancelled with the document; `navigator.sendBeacon` is not used, as it cannot carry the runtime bearer header. On Capacitor neither `pagehide` nor `beforeunload` fires when the OS suspends the app, so the flush also runs on `App.appStateChange` going inactive.
+Settings fields are declared once in the settings registry (`packages/ui/src/lib/settings/DOCUMENTATION.md`); the sync described here iterates that registry rather than naming keys. Project and UI settings use successful settings synchronization as authority for the fields the snapshot supplies. A field the server omits is "unset", not "reset": the window keeps whatever value it already holds and nothing is written back — a bootstrap never seeds the server from local state. The one exception is the project list, whose omission still means an empty list (`useProjectsStore`). Theme fields follow the same keep-what-you-hold rule and additionally adopt only on bootstrap-grade syncs; settings save echoes never adopt a theme. A write reaches the server only because a person changed something in this window: the theme context writes only from its user-facing setters (never on mount or on adoption), and the store-subscribing auto-savers (`appearanceAutoSave`, `modelPrefsAutoSave`) treat changes made while `isApplyingServerSettings()` is true as a new baseline rather than a change to send. `updateDesktopSettings` additionally drops any key whose value equals the last value the server was seen holding for this runtime, so an echo or a toggle back to the server's value inside the debounce window produces no request. Device-scoped registry fields (window controls, mobile keyboard mode, input bar offset) never leave the install: they are dropped from writes, persisted only locally, and adopted from a pre-split server document once per runtime as a seed. Per-surface profile fields arrive already resolved for this client's surface kind (`lib/settings/surface.ts`); the stores never see another kind's value. VS Code settings broadcasts may still adopt shared workspace pointers without replacing each webview's editor-derived theme. Transport or settings-load failure dispatches no synchronization event and preserves current state. Settings save responses are partial patches and must not clear unrelated in-memory preferences or local mirrors. Debounced settings writes flush best-effort on page hide, document hidden, app freeze, and unload — canceling the pending timer so the write happens exactly once — because a write lost inside the debounce window lets the stale server snapshot override the change on next startup; a hard process kill can still lose the in-flight request. The unload flush uses `keepalive: true` on the HTTP write, because a plain fetch started from `pagehide`/`beforeunload` is cancelled with the document; `navigator.sendBeacon` is not used, as it cannot carry the runtime bearer header. On Capacitor neither `pagehide` nor `beforeunload` fires when the OS suspends the app, so the flush also runs on `App.appStateChange` going inactive.
 
 Project ordering defaults to manual. Session display persistence v3 migrates the previously shipped `recent` project order to `manual` while preserving every other explicit sort mode.
 
-Session display persistence keeps a hydrated local cache for the independent all-projects/single-project mode, session grouping, project sort, and Recent preference; successful server settings snapshots are authoritative and the UI seeds missing server fields once from that cache for upgrades. The last confirmed or manually selected project and sticky-header preference stay local to the device. Draft target changes do not write the picker selection; materialized session navigation updates it from the resolved project directory.
+Session display persistence keeps a hydrated local cache for the independent all-projects/single-project mode, session grouping, project sort, and Recent preference; successful server settings snapshots are authoritative for the fields they carry, and a field the server omits leaves the local cache untouched (it is not seeded back to the server). The last confirmed or manually selected project and sticky-header preference stay local to the device. Draft target changes do not write the picker selection; materialized session navigation updates it from the resolved project directory.
 
 Session folders persist in runtime-specific v2 browser keys without silently evicting older runtime namespaces. Runtime switch, page hide, app freeze, and unload synchronously flush the pending browser snapshot before lifecycle suspension or namespace replacement. A runtime switch then cancels stale old-runtime disk work and starts generation-owned disk hydration. Missing or malformed server files are not authoritative empty snapshots; disk data may replace browser state only when it carries a real revision and no newer local folder mutation occurred. Server writes are serialized and reject non-newer revisions so delayed or duplicate requests cannot overwrite the current state. File-search cache and in-flight keys include runtime plus directory and are cleared on endpoint reset.
 
 Persisted session todos use a bounded composite key of runtime, normalized directory, and session ID. Ambiguous legacy todo entries are discarded rather than claimed by whichever runtime starts first. Authoritative deletion uses an explicit runtime identity, and session-folder deletion scans every scope in the active runtime so archived assignments cannot survive after their session is gone.
 
 Chat composer drafts, confirmed mentions, inline-comment drafts, and pinned sessions use the same runtime/directory/session ownership rule. Chat drafts use a bounded shared envelope and notify mounted composers when authoritative deletion clears their identity, preventing unmount autosave from resurrecting deleted text. Inline drafts enforce per-session, global-session, and serialized-byte bounds. Pins retain every valid composite key across runtimes without silent age/count eviction and are never pruned from the first startup list. Confirmed local deletion and routed deletion events clear immediately; after an authoritative baseline exists, a later complete omission also cleans persisted state. Ambiguous session-only legacy drafts and pins are not claimed.
+
+Input history keeps both runtime-wide and runtime/directory/session buckets in one bounded browser-storage envelope. The per-bucket cap is configurable from 1 through 100 and defaults to 40. Recall defaults to the current session's bucket merged with the visible transcript's user prompts; the runtime-wide bucket is opt-in through the Chat setting. Lowering the limit trims older entries from every bucket at once and cannot restore what it discards. Every scope change, limit change, append, and session cleanup rereads the latest durable envelope before applying its mutation, so a stale tab preserves history written by another tab. A failed write retains bounded before/after snapshots. The next mutation applies that local delta to the latest durable data, preserving pending appends and session deletions together with unrelated changes from other tabs. A successful durable write clears the pending delta.
+
+Server-owned queue acceptance records the original prompt and restorable attachments against its captured runtime/directory/session identity. Rejection records nothing. Automatic delivery and manual take do not record the accepted item again. VS Code retains recording at dispatch, using the full messages actually taken for sending.
 
 Composer draft edits remain immediate in memory and use a trailing durable-write debounce. Pending text and confirmed mentions flush synchronously when the document becomes hidden, freezes, receives `pagehide`, switches identity, or unmounts; authoritative deletion cancels pending work before any lifecycle flush can run. The shared chat-draft envelope reuses its parsed snapshot until the storage value changes. Inline-comment draft byte accounting indexes serialized buckets and recalculates only the changed session bucket during normal edits; deferred storage still performs the final full-envelope serialization and lifecycle flush.
 
@@ -111,6 +119,10 @@ run monitor, and made Zustand persist rewrite the session-storage snapshot per c
 
 Invariants to preserve when editing:
 
+- Directory keys come from `normalizeTerminalDirectory` (`lib/pathNormalization.ts`) and
+  nothing else. Server `cwd` strings, sidebar project paths and the panel's own directory
+  all pass through it, so a folder has exactly one entry on every platform. Read `sessions`
+  through `getDirectoryState`, never by indexing the map with a path normalized elsewhere.
 - Output actions (`appendToBuffer`, `replaceBuffer`) must leave `sessions` referentially
   unchanged; only `buffers` and `nextChunkId` may change.
 - Buffer entries are owned by their tab. `closeTab`, `removeDirectory`, `clearAll`, and
@@ -120,6 +132,25 @@ Invariants to preserve when editing:
   projection while both are referentially unchanged, and the storage adapter skips a write
   for an unchanged projection, so streaming output performs no persistence work.
 - Consumers that react to output must subscribe to `buffers`, not `sessions`.
+- Action tab IDs remain stable while each command execution receives a fresh terminal ID.
+  Starting or adopting a different execution resets its buffer sequence and preview together;
+  reconnecting to the same execution and observing its exit preserve scrollback.
+- Reconciliation selects one record per action before updating tabs. A running execution wins
+  over retained exited records independently of listing order. An in-progress stop remains
+  stopping until the same execution exits or explicit termination failure restores running.
+- `terminalSessionObserver` shares one five-second refresh loop per terminal adapter across
+  the visible sidebar, headers and panels. The existing empty-cwd listing returns all server
+  sessions in one request; directory subscribers receive only their own records. A sidebar
+  subscriber reconciles the complete list, including omitted known action directories.
+  Focus and online recovery refresh immediately. Hidden/offline clients pause, failed reads
+  preserve state, and the last consumer stops the loop. Replaced runtimes cannot publish old
+  responses. Mutation revisions are captured for every subscribed scope before the request.
+- Passive action adoption may restore output but has no launch-time authority to open browser
+  tabs. Preview navigation belongs to the initiating host directory even for a parent action.
+- Server session listings capture the directory's per-action mutation revisions when the
+  request starts. Coalesced callers share that first snapshot. A response cannot replace or
+  remove an action execution mutated after its request began, while a fresh successful empty
+  response still clears an omitted run.
 
 ## Git / PR Stores
 
@@ -154,7 +185,8 @@ Important properties:
 - status, branches, log, identity, repository probes, and prefetch diffs commit through runtime and per-channel generations
 - status mutations advance a revision so older refreshes cannot undo optimistic or confirmed index changes
 - a successful status-affecting git mutation also advances that revision: the HTTP adapter's cache invalidation notifies the store through `lib/gitStatusInvalidation.ts` (the VS Code bridge adapter has no client-side status cache, so it emits nothing today)
-- `fetchAll({ force: true })` forces the status fetch as well as the log refresh
+- `fetchStatus({ force: true })` and `fetchAll({ force: true })` cross both the store and runtime transport caches; a forced reconciliation must reach the active runtime rather than reuse an unexpired browser status snapshot
+- status requests do not start while a managed worktree bootstrap is pending, and a response admitted before bootstrap began is discarded if it completes after the directory enters `pending`; the `--no-checkout` population window is not user working-tree state
 - branch persistence is versioned, bounded, runtime-scoped, and claims the ambiguous legacy cache once
 - diff data has per-directory and aggregate count/UTF-8-byte limits; oversized single entries are rejected
 
@@ -218,11 +250,29 @@ Each of them therefore keeps two things:
   tracks the **active** project only.
 
 Thinking variants keep the effective value in `currentVariant` so existing send
-paths capture a stable configuration. The transient `currentVariantSelection`
-distinguishes automatic initialization from a picker or shortcut choosing an
-explicit override or `Default`; returning to `Default` restores its inherited
-effective value. Only explicit overrides are stored in the per-session
-selection store.
+paths capture a stable configuration. `currentVariantSelection` says where that
+value came from: a string is an effort chosen in the picker or by the shortcut,
+`null` is an explicit `Default`, and `undefined` is automatic initialization,
+which lets the inherited default apply.
+
+`Default` sends no effort at all. It cannot resolve back to the inherited
+default: the settings default would take effect again, and the next assistant
+reply echoes that effort back as an explicit choice, so the picker jumps off
+`Default` one message after the user chose it. For the same reason the
+per-session selection store records an explicit `Default` (as `null`) instead of
+clearing the entry — a cleared entry is indistinguishable from never having
+chosen, and the settings default wins again on the next agent or session switch.
+
+Only a place where the user chose may write `null`. Restore paths — message
+history, a preserved manual override — pass their own "found nothing" through
+as `undefined`, because a session whose history carries no effort is not a
+session where `Default` was picked. A restore that manufactures `null` latches
+the session onto `Default`: `null` outranks the agent and settings defaults by
+design, so the concrete effort it displaced can never come back.
+
+Every write of `currentVariant` writes `currentVariantSelection` with it. They
+are one selection; updating only the effective value leaves the picker showing
+one effort while sends carry another.
 
 Every loader and mutation takes an explicit directory; omitting it means the
 active project, which is what non-Settings callers pass. A load for another
@@ -315,9 +365,11 @@ Do not raise limits casually.
 Expected model:
 
 - `GitView` / `DiffView` ensure current-directory Git state when visible
+- the Git view gates its status-derived content and actions while a managed worktree bootstrap is pending, then keeps the gate closed until one forced fresh status read succeeds; refresh failure exposes retry without revealing the cached bootstrap snapshot
 - explicit Git actions refresh status/branches/log as needed
 - every status-affecting git mutation invalidates the HTTP adapter's status cache on its success path (failed mutations invalidate nothing), so the follow-up refresh is authoritative instead of the pre-mutation cache entry
-- a mounted file-mutating tool issues a one-shot Git refresh hint when it transitions from active to successfully finalized; remounting historical completed tools does not replay the hint
+- the sync event handler issues one Git refresh hint when a live file-mutating tool first reaches `completed`; this does not depend on `ToolPart` mounting, and duplicate terminal events do not replay the hint
+- every Git refresh hint invalidates the store request generation and the HTTP status cache before visible consumers request status, so they share one post-mutation read instead of accepting a cached or pre-mutation response
 - a successful dirty save from the in-app file editor issues a path-scoped Git refresh hint; clean autosave checks remain no-ops
 - refresh hints with authoritative file paths invalidate only those cached and currently rendered diffs before status refresh; pathless tools request status reconciliation without broadly remounting DiffView
 - targeted diff remounts preserve the user's current file-section anchor and intra-file offset before paint instead of resetting the stacked view to the top

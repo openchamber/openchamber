@@ -9,6 +9,7 @@ import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
+import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
 import { VSCodeLayout } from '@/components/layout/VSCodeLayout';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useGlobalSessionsPolling } from '@/hooks/useGlobalSessionsPolling';
@@ -114,6 +115,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
                 <SyncAppEffects embeddedBackgroundWorkEnabled={true} />
                 <AgentManagerView />
                 <AppLinkConfirmDialog />
+                <SharedTrustConfirmDialog />
                 <OpenCodeUpdateToast />
                 <Toaster position="top-center" />
               </div>
@@ -134,6 +136,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
                 <SyncAppEffects embeddedBackgroundWorkEnabled={true} />
                 <VSCodeLayout />
                 <AppLinkConfirmDialog />
+                <SharedTrustConfirmDialog />
                 <OpenCodeUpdateToast />
                 <Toaster position="top-center" />
                 <ConfigUpdateOverlay />

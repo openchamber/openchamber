@@ -14,7 +14,8 @@ import { checkIsGitRepository, previewGitWorktree } from '@/lib/gitApi';
 import { generateBranchName } from '@/lib/git/branchNameGenerator';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
-import { getWorktreeSetupCommands, getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
+import { getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
+import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
 import {
   removeProjectWorktree,
   type ProjectRef,
@@ -70,7 +71,7 @@ export const createQuickWorktree = async (
   options: { preferredName?: string; startRef?: string } = {},
 ) => {
   const preferredName = options.preferredName ?? generateBranchName();
-  const setupCommands = await getWorktreeSetupCommands(project);
+  const setupCommands = await resolveWorktreeSetupCommands(project);
   return createWorktreeWithDefaults(project, {
     preferredName,
     mode: 'new',
@@ -362,7 +363,7 @@ export async function createWorktreeSessionForNewBranch(
       return null;
     }
 
-    const setupCommands = await getWorktreeSetupCommands(projectRef);
+    const setupCommands = await resolveWorktreeSetupCommands(projectRef);
     const rootBranch = await getRootBranch(projectRef.path);
     try {
       const metadata = await createWorktreeWithDefaults(projectRef, {

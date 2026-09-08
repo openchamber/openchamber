@@ -20,6 +20,7 @@ import {
   useGitLoadingLog,
 } from '@/stores/useGitStore';
 import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
+import { useWorktreeBootstrapPending } from '@/hooks/useWorktreeBootstrapPending';
 import { NestedRepoResolutionStates } from './git/NestedRepoResolutionStates';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
@@ -58,6 +59,7 @@ import { GitEmptyState } from './git/GitEmptyState';
 import { HistorySection } from './git/HistorySection';
 import { ConflictDialog } from './git/ConflictDialog';
 import { StashDialog } from './git/StashDialog';
+import { DirtyBranchSwitchDialog } from './git/DirtyBranchSwitchDialog';
 import { InProgressOperationBanner } from './git/InProgressOperationBanner';
 import { BranchIntegrationSection, type OperationLogEntry } from './git/BranchIntegrationSection';
 import { deriveBaseBranch } from './git/baseBranch';
@@ -202,8 +204,14 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
   const currentDirectory = useEffectiveDirectory();
-  const [worktreeBootstrapStatus, setWorktreeBootstrapStatus] = React.useState<'pending' | 'ready' | 'failed' | null>(null);
-  const [isWaitingForGitRefreshAfterBootstrap, setIsWaitingForGitRefreshAfterBootstrap] = React.useState(false);
+  const [worktreeBootstrapSnapshot, setWorktreeBootstrapSnapshot] = React.useState<{
+    directory: string;
+    status: 'pending' | 'ready' | 'failed' | null;
+  } | null>(null);
+  const [postBootstrapRefresh, setPostBootstrapRefresh] = React.useState<{
+    directory: string;
+    status: 'refreshing' | 'failed';
+  } | null>(null);
   const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
   const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
   const setDraftBootstrapPendingDirectory = useSessionUIStore((s) => s.setDraftBootstrapPendingDirectory);
@@ -284,7 +292,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   const isLogLoading = useGitLoadingLog(gitDirectory ?? null);
   const {
     setActiveDirectory,
-    fetchAll,
     ensureAll,
     fetchStatus,
     fetchBranches,
@@ -300,7 +307,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     selectNestedRepo,
   } = useGitStore(useShallow((state) => ({
     setActiveDirectory: state.setActiveDirectory,
-    fetchAll: state.fetchAll,
     ensureAll: state.ensureAll,
     fetchStatus: state.fetchStatus,
     fetchBranches: state.fetchBranches,
@@ -328,7 +334,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   });
   const navigateToDiff = useUIStore((state) => state.navigateToDiff);
 
-  const previousBootstrapStatusRef = React.useRef<'pending' | 'ready' | 'failed' | null>(null);
   const gitReconcileTimeoutRef = React.useRef<number | null>(null);
   const gitMutationFlushTimeoutRef = React.useRef<number | null>(null);
   const flushQueuedGitMutationsRef = React.useRef<(() => void) | null>(null);
@@ -437,10 +442,12 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   React.useEffect(() => {
     if (!isActive) return;
     if (!currentDirectory) {
-      setWorktreeBootstrapStatus(null);
-      setIsWaitingForGitRefreshAfterBootstrap(false);
+      setWorktreeBootstrapSnapshot(null);
       return;
     }
+
+    const bootstrapDirectory = normalizePath(currentDirectory) ?? currentDirectory;
+    setWorktreeBootstrapSnapshot({ directory: bootstrapDirectory, status: null });
 
     let cancelled = false;
     let timeoutId: number | null = null;
@@ -451,7 +458,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
         if (cancelled) {
           return;
         }
-        setWorktreeBootstrapStatus(next.status);
+        setWorktreeBootstrapSnapshot({ directory: bootstrapDirectory, status: next.status });
         if (next.status === 'pending') {
           timeoutId = window.setTimeout(() => {
             void poll();
@@ -459,7 +466,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
         }
       } catch {
         if (!cancelled) {
-          setWorktreeBootstrapStatus(null);
+          setWorktreeBootstrapSnapshot({ directory: bootstrapDirectory, status: null });
         }
       }
     };
@@ -474,37 +481,84 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     };
   }, [isActive, currentDirectory]);
 
-  React.useEffect(() => {
-    const previous = previousBootstrapStatusRef.current;
-    previousBootstrapStatusRef.current = worktreeBootstrapStatus;
-
-    if (!currentDirectory || !git) {
-      return;
-    }
-
-    if (previous === 'pending' && worktreeBootstrapStatus === 'ready') {
-      setIsWaitingForGitRefreshAfterBootstrap(true);
-      void fetchAll(currentDirectory, git).finally(() => {
-        window.setTimeout(() => {
-          setIsWaitingForGitRefreshAfterBootstrap(false);
-        }, 1200);
-      });
-    }
-
-    if (worktreeBootstrapStatus === 'failed') {
-      setDraftBootstrapPendingDirectory(null);
-      setIsWaitingForGitRefreshAfterBootstrap(false);
-    }
-  }, [currentDirectory, fetchAll, git, setDraftBootstrapPendingDirectory, worktreeBootstrapStatus]);
-
   const normalizedDraftBootstrapPendingDirectory = normalizePath(newSessionDraft?.bootstrapPendingDirectory ?? null);
   const isDraftBootstrapPendingForCurrentDirectory = Boolean(
     currentDirectory && normalizedDraftBootstrapPendingDirectory && normalizedDraftBootstrapPendingDirectory === normalizePath(currentDirectory)
   );
+  const sharedWorktreeBootstrapPending = useWorktreeBootstrapPending(currentDirectory ?? null);
+  const normalizedCurrentBootstrapDirectory = normalizePath(currentDirectory);
+  const observedWorktreeBootstrapStatus = worktreeBootstrapSnapshot?.directory === normalizedCurrentBootstrapDirectory
+    ? worktreeBootstrapSnapshot.status
+    : null;
   const isPendingWorktreeSetup = Boolean(
-    currentDirectory && (worktreeBootstrapStatus === 'pending' || isDraftBootstrapPendingForCurrentDirectory)
+    currentDirectory
+      && (
+        sharedWorktreeBootstrapPending
+        || observedWorktreeBootstrapStatus === 'pending'
+        || (isDraftBootstrapPendingForCurrentDirectory && newSessionDraft?.pendingWorktreeRequestId)
+      )
   );
-  const shouldHideNotGitState = isPendingWorktreeSetup || isWaitingForGitRefreshAfterBootstrap;
+  const isPostBootstrapRefreshForCurrentDirectory = Boolean(
+    normalizedCurrentBootstrapDirectory
+      && postBootstrapRefresh?.directory === normalizedCurrentBootstrapDirectory
+  );
+
+  React.useEffect(() => {
+    if (!normalizedCurrentBootstrapDirectory) return;
+
+    if (observedWorktreeBootstrapStatus === 'failed') {
+      setDraftBootstrapPendingDirectory(null);
+      setPostBootstrapRefresh((current) => (
+        current?.directory === normalizedCurrentBootstrapDirectory ? null : current
+      ));
+      return;
+    }
+
+    if (isPendingWorktreeSetup) {
+      setPostBootstrapRefresh((current) => (
+        current?.directory === normalizedCurrentBootstrapDirectory && current.status === 'refreshing'
+          ? current
+          : { directory: normalizedCurrentBootstrapDirectory, status: 'refreshing' }
+      ));
+      return;
+    }
+
+    if (
+      postBootstrapRefresh?.directory !== normalizedCurrentBootstrapDirectory
+      || postBootstrapRefresh.status !== 'refreshing'
+      || !gitDirectory
+      || !git
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    void fetchStatus(gitDirectory, git, {
+      force: true,
+      silent: true,
+      throwOnError: true,
+    }).then(() => {
+      if (cancelled) return;
+      setPostBootstrapRefresh((current) => (
+        current?.directory === normalizedCurrentBootstrapDirectory ? null : current
+      ));
+    }).catch(() => {
+      if (cancelled) return;
+      setPostBootstrapRefresh((current) => (
+        current?.directory === normalizedCurrentBootstrapDirectory
+          ? { ...current, status: 'failed' }
+          : current
+      ));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchStatus, git, gitDirectory, isPendingWorktreeSetup, normalizedCurrentBootstrapDirectory, observedWorktreeBootstrapStatus, postBootstrapRefresh, setDraftBootstrapPendingDirectory]);
+
+  const shouldHideGitState = isPendingWorktreeSetup || isPostBootstrapRefreshForCurrentDirectory;
+  const postBootstrapRefreshFailed = isPostBootstrapRefreshForCurrentDirectory
+    && postBootstrapRefresh?.status === 'failed';
 
   const initialSnapshot = React.useMemo(() => {
     if (!gitDirectory) return null;
@@ -706,6 +760,8 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     }
   }, [conflictStorageKey, gitDirectory]);
   const [stashDialogOpen, setStashDialogOpen] = React.useState(false);
+  // Branch a dirty-tree switch is waiting on; null when no switch is blocked.
+  const [pendingDirtySwitchBranch, setPendingDirtySwitchBranch] = React.useState<string | null>(null);
   const [stashDialogOperation, setStashDialogOperation] = React.useState<'merge' | 'rebase'>('merge');
   const [stashDialogBranch, setStashDialogBranch] = React.useState('');
 
@@ -1371,6 +1427,21 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
       return;
     }
 
+    // A checkout over uncommitted changes can carry them onto the target
+    // branch, conflict, or silently rewrite what the user was editing. The
+    // switch is blocked until the working tree is resolved: commit, or
+    // explicitly revert (DirtyBranchSwitchDialog).
+    if ((status?.files?.length ?? 0) > 0) {
+      setPendingDirtySwitchBranch(normalized);
+      return;
+    }
+
+    await performCheckout(normalized);
+  };
+
+  const performCheckout = async (branch: string) => {
+    if (!gitDirectory) return;
+    const normalized = branch;
     try {
       // Picking a remote-tracking branch checks out the local branch that
       // tracks it, so report the branch the repository actually landed on.
@@ -2318,6 +2389,42 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     );
   }
 
+  if (shouldHideGitState) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center px-4 text-center">
+        {!postBootstrapRefreshFailed ? (
+          <Icon name="loader-4" className="mb-3 size-6 animate-spin text-muted-foreground" />
+        ) : null}
+        <p className="typography-ui-label font-semibold text-foreground">
+          {postBootstrapRefreshFailed
+            ? t('gitView.toast.refreshRepositoryFailed')
+            : t('gitView.empty.worktreeSetupInProgress')}
+        </p>
+        {!postBootstrapRefreshFailed ? (
+          <p className="typography-meta mt-1 text-muted-foreground">
+            {t('gitView.empty.worktreeSetupDescription')}
+          </p>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-3"
+            onClick={() => {
+              if (!normalizedCurrentBootstrapDirectory) return;
+              setPostBootstrapRefresh({
+                directory: normalizedCurrentBootstrapDirectory,
+                status: 'refreshing',
+              });
+            }}
+          >
+            {t('gitView.empty.retryDiscovery')}
+          </Button>
+        )}
+      </div>
+    );
+  }
+
   if (isGitRepo === null || (isGitRepo === true && !status)) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -2330,20 +2437,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   }
 
   if (isGitRepo === false) {
-    if (shouldHideNotGitState) {
-      return (
-        <div className="flex h-full flex-col items-center justify-center px-4 text-center">
-          <Icon name="loader-4" className="mb-3 size-6 animate-spin text-muted-foreground" />
-          <p className="typography-ui-label font-semibold text-foreground">
-            {t('gitView.empty.worktreeSetupInProgress')}
-          </p>
-          <p className="typography-meta mt-1 text-muted-foreground">
-            {t('gitView.empty.worktreeSetupDescription')}
-          </p>
-        </div>
-      );
-    }
-
     // Nested repository discovery states (discovering, failed, unsupported,
     // none found, or settling on the auto-selected repository).
     return (
@@ -2369,7 +2462,8 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
 
   return (
     <div className={cn('flex h-full flex-col overflow-hidden')}>
-          <GitHeader
+           <GitHeader
+        directory={gitDirectory ?? ''}
         status={status}
         localBranches={localBranches}
         remoteBranches={remoteBranches}
@@ -2669,6 +2763,83 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
           onClearState={clearConflictState}
         />
       )}
+
+      <DirtyBranchSwitchDialog
+        open={pendingDirtySwitchBranch !== null}
+        onOpenChange={(open) => { if (!open) setPendingDirtySwitchBranch(null); }}
+        targetBranch={pendingDirtySwitchBranch ?? ''}
+        changedFileCount={status?.files?.length ?? 0}
+        onCommitAndSwitch={async (message, pushAfter) => {
+          const branch = pendingDirtySwitchBranch;
+          if (!branch || !gitDirectory) return;
+          const sourceBranch = status?.current ?? null;
+          await git.createGitCommit(gitDirectory, message, { addAll: true });
+          bumpIndexRevision(gitDirectory);
+          let pushedRemoteName: string | null = null;
+          if (pushAfter) {
+            const trackingRemoteName = status?.tracking?.split('/')[0];
+            const remote = effectiveRemotes.find((entry) => entry.name === trackingRemoteName) ?? effectiveRemotes[0];
+            try {
+              if (!remote) throw new Error(t('mobile.changes.noRemote'));
+              await git.gitPush(gitDirectory, status?.tracking
+                ? { remote: remote.name }
+                : { remote: remote.name, branch: sourceBranch ?? undefined, options: ['--set-upstream'] });
+              pushedRemoteName = remote.name;
+            } catch (error) {
+              // The commit stands, so nothing is lost — but the switch is
+              // cancelled: the user must see the failed push on the branch it
+              // belongs to instead of discovering it later from elsewhere.
+              console.error('Push after commit failed:', error);
+              toast.error(t('gitView.dirtySwitch.pushFailed'));
+              await refreshStatusAndBranches();
+              await refreshLog();
+              setPendingDirtySwitchBranch(null);
+              return;
+            }
+          }
+          // Without a push the commit stays local on the branch being left;
+          // after the switch nothing on screen would say so, so the toast must.
+          toast.success(pushedRemoteName
+            ? t('gitView.toast.pushedToUpstream', { name: pushedRemoteName })
+            : sourceBranch
+              ? t('gitView.dirtySwitch.committedNotPushed', { branch: sourceBranch })
+              : t('gitView.toast.commitCreated'));
+          await refreshStatusAndBranches();
+          await refreshLog();
+          setPendingDirtySwitchBranch(null);
+          await performCheckout(branch);
+        }}
+        onGenerateMessage={async () => {
+          if (!gitDirectory) return '';
+          const paths = (status?.files ?? []).map((file) => file.path).sort();
+          const { message } = await generateSessionCommitMessage(gitDirectory, paths);
+          const subject = message.subject?.trim() ?? '';
+          // Same gitmoji decoration as the commit panel's Generate button.
+          if (subject && settingsGitmojiEnabled && gitmojiEmojis.length > 0) {
+            const match = matchGitmojiFromSubject(subject, gitmojiEmojis);
+            if (match && !subject.startsWith(match.code) && !subject.startsWith(match.emoji)) {
+              return `${match.code} ${subject}`;
+            }
+          }
+          return subject;
+        }}
+        onRevertAndSwitch={async () => {
+          const branch = pendingDirtySwitchBranch;
+          if (!branch || !gitDirectory) return;
+          const paths = (status?.files ?? []).map((file) => file.path);
+          await handleRevertPaths(paths, true, 'all');
+          // The revert reports its own partial failures; the checkout happens
+          // only once the tree is verifiably clean, so a half-reverted tree is
+          // never switched over.
+          const fresh = await git.getGitStatus(gitDirectory);
+          if (!fresh.isClean && (fresh.files?.length ?? 0) > 0) {
+            toast.error(t('gitView.dirtySwitch.revertIncomplete'));
+            return;
+          }
+          setPendingDirtySwitchBranch(null);
+          await performCheckout(branch);
+        }}
+      />
 
       <StashDialog
         open={stashDialogOpen}

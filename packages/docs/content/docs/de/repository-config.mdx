@@ -1,0 +1,100 @@
+---
+title: Repository-Konfiguration
+description: Projektaktionen, Worktree-Setup-Befehle, Starter und Pläne im Repository ablegen, damit alle sie bekommen, die es pullen.
+---
+
+# Repository-Konfiguration
+
+Projektaktionen, Worktree-Setup-Befehle und Entwurfs-Starter liegen standardmäßig in deinen eigenen OpenChamber-Einstellungen. Niemand sonst sieht sie. Wenn jemand im Team, der das Repository klont, dieselbe Dev-Server-Aktion und dasselbe `bun install` in jedem neuen Worktree bekommen soll, verschiebe diese Einträge ins Repository.
+
+OpenChamber legt sie in `.openchamber/project.json` im Wurzelverzeichnis des Repositorys ab. Die Datei entsteht erst, wenn du den ersten Eintrag dorthin verschiebst, und verschwindet wieder, wenn du den letzten herausnimmst. Committe sie wie jede andere Datei.
+
+## Was wohin gehört
+
+| Bleibt in deinen Einstellungen | Kann ins Repository |
+|---|---|
+| Notizen und Todos | Projektaktionen |
+| Geplante Aufgaben | Worktree-Setup-Befehle |
+| Welche Repository-Aktion du für dich ausgeblendet hast | Entwurfs-Starter (angeheftete Befehle und Skills) |
+| Deine Vertrauensantwort für Repository-Befehle | Pläne |
+
+Notizen, Todos und geplante Aufgaben gehören dir. Sie landen nie im Repository.
+
+## Einen Eintrag verschieben
+
+Öffne **Settings → Projects** und wähle das Projekt. Jede Aktion und jeder Setup-Befehl hat einen Button **Move to repository**, und jeder Eintrag aus dem Repository hat **Move to my settings**. Starter auf dem Bildschirm für neue Sitzungen zeigen dasselbe Paar beim Überfahren. Pläne haben es in jeder Zeile des Tabs „Pläne“.
+
+Verschieben heißt verschieben. Der Eintrag verlässt den einen Ort und landet am anderen, nichts wird verdoppelt.
+
+Einträge aus dem Repository tragen das Abzeichen **In repo**. Repository-Aktionen lassen sich mit **Hide for me** aus deinem Menü ausblenden. Das ändert nur dein Menü, nicht die Datei.
+
+## Die Datei
+
+```json
+{
+  "version": 1,
+  "setupWorktree": [
+    "bun install"
+  ],
+  "setupWorktreeWait": true,
+  "projectActions": [
+    {
+      "id": "dev",
+      "name": "Dev server",
+      "command": "bun run dev",
+      "icon": "rocket",
+      "autoOpenUrl": true,
+      "platforms": ["macos", "linux"]
+    },
+    {
+      "id": "test",
+      "name": "Tests",
+      "command": "bun test"
+    }
+  ],
+  "draftStarters": [
+    { "type": "skill", "name": "triage-prs" }
+  ],
+  "plansDir": "docs/plans"
+}
+```
+
+Nur `version` ist Pflicht. Alle anderen Schlüssel sind optional, und OpenChamber schreibt nur die, die etwas enthalten.
+
+`setupWorktree` ist die Liste der Shell-Befehle, die OpenChamber direkt nach dem Anlegen eines neuen Worktrees darin ausführt, der Reihe nach. Verwende `$ROOT_PROJECT_PATH` für den Pfad des Haupt-Checkouts. Mit `setupWorktreeWait: true` wartet OpenChamber auf diese Befehle, bevor es eine Sitzung im Worktree startet.
+
+`projectActions` ist die Liste der Aktionen im Kopfzeilenmenü. `id`, `name` und `command` sind Pflicht. `icon` ist optional und fällt auf ein Play-Symbol zurück; OpenChamber kennt die Namen `play`, `build`, `lint`, `terminal`, `tools`, `bug`, `flask`, `rocket`, `code`, `server`, `branch`, `search`, `settings`, `brain`, `stack`, `robot`, `command` und `file`. `autoOpenUrl: true` öffnet die Adresse, die der Befehl ausgibt, siehe [Vorschau und Entwicklungsserver](/preview/). `platforms` beschränkt die Aktion auf `macos`, `linux` oder `windows`. `runIn: "parent"` führt die Aktion im Haupt-Checkout statt im aktuellen Worktree aus.
+
+`draftStarters` heftet Befehle und Skills an den Bildschirm für neue Sitzungen. Jeder Eintrag hat die Form `{ "type": "command" | "skill", "name": "..." }`, und der Befehl oder Skill selbst muss in der OpenCode-Konfiguration des Repositorys existieren.
+
+`plansDir` ist der Ort der Repository-Pläne. Lass ihn weg, um `.openchamber/plans` zu verwenden. Siehe unten.
+
+Du kannst diese Datei von Hand schreiben. Ein Schlüssel mit falscher Form macht die ganze Datei ungültig, und die Seite Projects sagt dir warum, statt ihn stillschweigend zu ignorieren.
+
+## Wie sich Repository- und eigene Einträge verbinden
+
+Zuerst laufen die Setup-Befehle aus dem Repository, dann deine eigenen. Hake **Use only my setup commands** im Abschnitt Worktree an, um die Befehle des Repositorys ganz zu überspringen.
+
+Aktionen werden nach `id` zusammengeführt. Eine Aktion in deinen Einstellungen mit derselben id wie eine Repository-Aktion ersetzt diese. Starter werden nach Name zusammengeführt.
+
+Das Warte-Flag kommt aus deinen Einstellungen, wenn du es gesetzt hast, sonst aus dem Repository.
+
+## Vertrauen
+
+Setup-Befehle und Aktionen aus dem Repository laufen auf deinem Rechner, und ein `git pull` kann sie ändern. Deshalb zeigt OpenChamber beim ersten Mal, wenn einer davon ausgeführt werden soll, die genauen Befehle und fragt. **Trust and run** merkt sich deine Antwort auf dieser Instanz. **Not this time** führt nur deine eigenen Befehle aus.
+
+Die Antwort ist an die Befehle selbst gebunden. Wenn ein Pull einen Repository-Befehl ändert, kommt die Frage für den neuen Text zurück. Mit **reset trust** im Abschnitt Worktree der Projekteinstellungen vergisst OpenChamber die Antwort.
+
+Einen eigenen Befehl ins Repository zu verschieben gilt als Vertrauen, denn du hast ihn gerade gesehen.
+
+## Pläne im Repository
+
+Pläne aus dem Tab „Pläne“ können ebenfalls im Repository liegen, als Markdown-Dateien. Der Standardordner ist `.openchamber/plans`. Setze **Plans folder** in den Projekteinstellungen, um einen anderen Ordner im Repository zu verwenden, etwa `docs/plans`, wenn das Team seine Pläne schon dort hat. Ein eigener Ordner ersetzt den Standard vollständig: OpenChamber liest und schreibt nur diesen Ordner, verschiebe vorhandene Dateien beim Wechsel also selbst.
+
+Jede `.md`-Datei in diesem Ordner erscheint im Tab „Pläne“, auch Dateien aus anderen Werkzeugen. Beim Bearbeiten in OpenChamber wird die Datei so gespeichert, wie du sie getippt hast. Ein Plan, den du ins Repository verschiebst, behält seine Identität, sodass Sitzungen, die ihn angehängt hatten, ihn weiterhin finden.
+
+## Verwandt
+
+- [Projektaktionen](/project-actions/)
+- [Worktrees](/worktrees/)
+- [Projektnotizen, Todos und Pläne](/notes-todos-plans/)

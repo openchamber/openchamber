@@ -7,7 +7,7 @@ import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { getWorktreeStatus } from '@/lib/worktrees/worktreeStatus';
-import { removeProjectWorktree, type ProjectRef } from '@/lib/worktrees/worktreeManager';
+import { getWorktreeDisplayName, removeProjectWorktree, type ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -91,9 +91,24 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
     };
   }, [open, worktree?.path, worktree?.status?.isDirty]);
 
-  const removeWorktreeInBackground = React.useCallback((target: WorktreeMetadata) => {
+  const removeWorktreeInBackground = React.useCallback((target: WorktreeMetadata, sessionIds: string[]) => {
+    const name = getWorktreeDisplayName(target);
+    const toastId = toast.loading(t('sessions.sidebar.sessionDialogs.worktree.removingTitle', { name }));
     void (async () => {
       try {
+        if (sessionIds.length > 0) {
+          const { failedIds } = await archiveSessions(sessionIds);
+          if (failedIds.length > 0) {
+            toast.error(
+              failedIds.length === 1
+                ? t('sessions.sidebar.bulkActions.failedArchiveSingle', { count: failedIds.length })
+                : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }),
+              { id: toastId, description: t('sessions.sidebar.dialogs.deleteResult.tryAgain') },
+            );
+            return;
+          }
+        }
+
         await removeProjectWorktree(project, target, {
           deleteRemoteBranch: hasBranch && deleteRemoteBranch,
           deleteLocalBranch: hasBranch && deleteLocalBranch,
@@ -104,7 +119,8 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
           useDirectoryStore.getState().setDirectory(normalizePath(project.path), { showOverlay: false });
         }
 
-        toast.success(t('sessions.sidebar.sessionDialogs.worktree.removedTitle'), {
+        toast.success(t('sessions.sidebar.sessionDialogs.worktree.removedTitle', { name }), {
+          id: toastId,
           description:
             hasBranch && deleteRemoteBranch
               ? t('sessions.sidebar.sessionDialogs.worktree.removedWithRemote')
@@ -112,49 +128,19 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
         });
         onDeleted?.();
       } catch (error) {
-        toast.error(t('sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle'), {
+        toast.error(t('sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle', { name }), {
+          id: toastId,
           description: error instanceof Error ? error.message : t('sessions.sidebar.dialogs.deleteResult.tryAgain'),
         });
       }
     })();
-  }, [currentDirectory, deleteLocalBranch, deleteRemoteBranch, hasBranch, onDeleted, project, t, worktreePath]);
+  }, [archiveSessions, currentDirectory, deleteLocalBranch, deleteRemoteBranch, hasBranch, onDeleted, project, t, worktreePath]);
 
-  const handleConfirm = async () => {
+  const handleConfirm = () => {
     if (!worktree || isProcessing) return;
     setIsProcessing(true);
-    try {
-      if (linkedSessions.length > 0) {
-        const { archivedIds, failedIds } = await archiveSessions(linkedSessions.map((session) => session.id));
-        if (failedIds.length > 0) {
-          if (archivedIds.length > 0) {
-            toast.success(
-              archivedIds.length === 1
-                ? t('sessions.sidebar.bulkActions.archivedSingle', { count: archivedIds.length })
-                : t('sessions.sidebar.bulkActions.archivedPlural', { count: archivedIds.length }),
-            );
-          }
-          toast.error(
-            failedIds.length === 1
-              ? t('sessions.sidebar.bulkActions.failedArchiveSingle', { count: failedIds.length })
-              : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }),
-            { description: t('sessions.sidebar.dialogs.deleteResult.tryAgain') },
-          );
-          setIsProcessing(false);
-          return;
-        }
-      }
-      removeWorktreeInBackground(worktree);
-      onClose();
-    } catch (error) {
-      toast.error(t('sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle'), {
-        description: error instanceof Error ? error.message : t('sessions.sidebar.dialogs.deleteResult.tryAgain'),
-      });
-      setIsProcessing(false);
-    } finally {
-      if (!open) {
-        setIsProcessing(false);
-      }
-    }
+    removeWorktreeInBackground(worktree, linkedSessions.map((session) => session.id));
+    onClose();
   };
 
   if (!worktree) return null;

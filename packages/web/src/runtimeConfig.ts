@@ -1,12 +1,16 @@
 import { getRuntimeExtraHeadersSync, refreshLocalRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, setRuntimeBearerToken, setRuntimeExtraHeaders } from '@openchamber/ui/lib/runtime-auth';
 import { installRuntimeFetchBridge } from '@openchamber/ui/lib/runtime-fetch';
 import { initializeRuntimeEndpoint, switchRuntimeEndpoint } from '@openchamber/ui/lib/runtime-switch';
+import { warmDesktopHostStatuses } from '@openchamber/ui/lib/desktopHostStatus';
 import { restoreDesktopRelayRuntime } from '@openchamber/ui/lib/desktopRelayRestore';
 import { getInjectedBootOutcome } from '@openchamber/ui/lib/desktopBoot';
 import { configureRuntimeUrlResolver } from '@openchamber/ui/lib/runtime-url';
 import type { EmbeddedSessionRuntimeBootstrap } from '@openchamber/ui/components/layout/contextPanelEmbeddedChat';
 import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
 import { createWebAPIs } from './api';
+
+// The switcher's statuses are warmed after boot settles, not during it.
+const HOST_STATUS_WARMUP_DELAY_MS = 3_000;
 
 const sameOrigin = (left: string, right: string): boolean => {
   if (!left || !right) return false;
@@ -93,5 +97,12 @@ export const createConfiguredWebAPIs = (bootstrap?: EmbeddedSessionRuntimeBootst
         // subscribes to runtime-change events, so bind the SDK explicitly.
         opencodeClient.reconnectToRuntimeBaseUrl();
       });
+  // Learn every instance's reachability in the background, so the switcher opens
+  // on real values instead of probing for the first time under the user's
+  // cursor. After the endpoint is settled and past the app's own bootstrap:
+  // this is unprompted work and the machine's network is busiest at launch.
+  void desktopRelayRestoreReady.then(() => {
+    window.setTimeout(() => { void warmDesktopHostStatuses().catch(() => {}); }, HOST_STATUS_WARMUP_DELAY_MS);
+  });
   return createWebAPIs({ urls });
 };

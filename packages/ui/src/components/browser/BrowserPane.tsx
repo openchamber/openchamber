@@ -1,3 +1,4 @@
+import { isIMECompositionEvent } from '@/lib/ime';
 import React from 'react';
 
 import { toast } from '@/components/ui';
@@ -272,7 +273,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
   React.useEffect(() => {
     if (!isAnnotating) return;
     const handler = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      if (isIMECompositionEvent(event) || event.key !== 'Escape') return;
       event.preventDefault();
       event.stopImmediatePropagation();
       setIsAnnotating(false);

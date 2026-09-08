@@ -40,14 +40,14 @@ bun install
 bun run electron:dev
 ```
 
-`bun run electron:dev` starts the web dev server with HMR, then launches Electron against `packages/electron/main.mjs`.
+`bun run electron:dev` starts the web dev server with HMR, then launches Electron against `packages/electron/main.mjs`. On Windows, the HMR launcher resolves npm's `bun.cmd` shim to the underlying `bun.exe` before spawning Bun child processes.
 
 The Electron workspace package trusts Electron's install script so `bun install` downloads the platform runtime in fresh checkouts and worktrees.
 
 Electron's postinstall (`node install.js`) is run by `bun install` with the system Node. Older Electron releases bundled `extract-zip@2.0.1`, which under Node 24 silently unpacked only the first entry of the Electron zip, leaving `dist/` without the binary and `path.txt` missing. Electron 43+ ships its own fixed extractor (`@electron-internal/extract-zip`), but to keep interrupted or wrong-architecture installs from blocking desktop work:
 
 - The root `postinstall` runs `ensure-electron.mjs --best-effort`, which detects an incomplete Electron install (missing binary, stale `dist/version`/`path.txt`, or a binary of the wrong architecture) and repairs it by re-running the postinstall under Bun (which extracts correctly), falling back to Node.
-- `electron-dev.mjs` runs the same check (fail-fast, not best-effort) before launching, so `bun run electron:dev` self-heals even when an install was interrupted.
+- `electron-dev.mjs` runs the same check (fail-fast, not best-effort) before launching, so `bun run electron:dev` self-heals even when an install was interrupted. On Windows, the repair resolves npm's `bun.cmd` shim to the underlying `bun.exe` before spawning it from Node.
 - The check can be run on demand with `bun run --cwd packages/electron ensure:electron`; set `ELECTRON_SKIP_BINARY_DOWNLOAD=1` to skip repair (e.g. CI without a network).
 - Unit tests in `scripts/ensure-electron.test.mjs` (run via `bun run --cwd packages/electron test:architecture`) cover healthy/missing/stale installs, wrong-architecture binaries, repair fallback, and `--best-effort`.
 
@@ -96,7 +96,7 @@ Running a packaged Linux AppImage requires FUSE (`libfuse.so.2`, typically `libf
 
 Desktop clears AppImage `ARGV0` from `process.env` before probing the login shell and starting the in-process server. Leaving it set makes zsh rewrite argv[0] for integrated-terminal and managed-OpenCode child commands to the AppImage path.
 
-Linux updates are supported only when the packaged app is running from a writable AppImage. Update checks, downloads, and installation report an actionable error when `APPIMAGE` is missing, invalid, or read-only; a missing release feed (`latest-linux.yml` 404 before the first Linux publish) is treated as “no update available”. macOS and Windows updater behavior is unchanged. Release builds keep `latest-linux.yml` (x64) and `latest-linux-arm64.yml` separate and validate each manifest against its AppImage before upload. Linux AppImages download full updates (no `.blockmap` differential channel yet).
+Linux updates are supported only when the packaged app is running from a writable AppImage. Update checks, downloads, and installation report an actionable error when `APPIMAGE` is missing, invalid, or read-only; a missing release feed (`latest-linux.yml` 404 before the first Linux publish) is treated as “no update available”. Authenticated Web clients connected to the embedded Desktop Host use this same `electron-updater` check, download, and restart flow rather than a package-manager command. macOS and Windows updater behavior is unchanged. Release builds keep `latest-linux.yml` (x64) and `latest-linux-arm64.yml` separate and validate each manifest against its AppImage before upload. Linux AppImages download full updates (no `.blockmap` differential channel yet).
 
 `desktop_restart` does not answer the renderer before the install is decided. On the apply-update path it calls `quitAndInstall()` and keeps the IPC call open until the app quits or `autoUpdater` emits `error`, which the platform installers do asynchronously (a rejected code signature, or a Squirrel session disabled by an earlier failure). A failed install rejects the IPC call so the update dialog can show it, and the quit/install flags are rolled back because the app is staying up. A still-running app after the grace period resolves the call.
 
@@ -155,6 +155,7 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
 - SSH host import, connections, logs, and port forwarding.
 - SSH uses OpenSSH ControlMaster on macOS/Linux. Windows uses independent hidden OpenSSH processes for setup commands and each long-lived forward because Win32 OpenSSH does not support ControlMaster reliably.
 - Tunnel lifecycle integration through the web server runtime.
+- Remote dev-server previews use a direct WebSocket tunnel when the instance has an HTTP address. Relay-only instances keep the encrypted relay transport in the renderer and bridge its raw bytes to the browser panel through a local Electron listener.
 - Auto-update checks, downloads, and restart/apply flow.
 - The browser panel's own session (`persist:openchamber-browser`): its storage is
   cleared only through the scoped clear-data command, and camera, microphone,

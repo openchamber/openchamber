@@ -14,12 +14,11 @@ import {
   SETTINGS_OPTION_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
-import { updateDesktopSettings } from '@/lib/persistence';
+import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useI18n } from '@/lib/i18n';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -79,75 +78,23 @@ export const DefaultsSettings: React.FC = () => {
   React.useEffect(() => {
     const loadSettings = async () => {
       try {
-        let data: {
-          defaultModel?: string;
-          defaultVariant?: string;
-          defaultAgent?: string;
-          smallModelUseDefault?: boolean;
-          smallModelOverride?: string;
-          walkthroughModelOverride?: string;
-        } | null = null;
-
-        if (!data) {
-          const runtimeSettings = getRegisteredRuntimeAPIs()?.settings;
-          if (runtimeSettings) {
-            try {
-              const result = await runtimeSettings.load();
-              const settings = result?.settings;
-              if (settings) {
-                const raw = settings as Record<string, unknown>;
-                data = {
-                  defaultModel: typeof settings.defaultModel === 'string' ? settings.defaultModel : undefined,
-                  defaultVariant:
-                    typeof raw.defaultVariant === 'string'
-                      ? (raw.defaultVariant as string)
-                      : undefined,
-                  defaultAgent: typeof settings.defaultAgent === 'string' ? settings.defaultAgent : undefined,
-                  smallModelUseDefault: typeof raw.smallModelUseDefault === 'boolean' ? raw.smallModelUseDefault : undefined,
-                  smallModelOverride: typeof raw.smallModelOverride === 'string' ? raw.smallModelOverride : undefined,
-                  walkthroughModelOverride:
-                    typeof raw.walkthroughModelOverride === 'string' ? raw.walkthroughModelOverride : undefined,
-                };
-              }
-            } catch {
-              // fall through
-            }
-          }
-        }
-
-        if (!data) {
-          const response = await runtimeFetch('/api/config/settings', {
-            method: 'GET',
-            headers: { Accept: 'application/json' },
-          });
-          if (response.ok) {
-            data = await response.json();
-          }
-        }
-
+        const data = await loadDesktopSettings();
         if (data) {
-          const model =
-            typeof data.defaultModel === 'string' && data.defaultModel.trim().length > 0
-              ? data.defaultModel.trim()
-              : undefined;
-          const variant =
-            typeof data.defaultVariant === 'string' && data.defaultVariant.trim().length > 0
-              ? data.defaultVariant.trim()
-              : undefined;
-          const agent =
-            typeof data.defaultAgent === 'string' && data.defaultAgent.trim().length > 0
-              ? data.defaultAgent.trim()
-              : undefined;
+          const model = data.defaultModel?.trim() || undefined;
+          const variant = data.defaultVariant?.trim() || undefined;
+          const agent = data.defaultAgent?.trim() || undefined;
 
           if (model !== undefined) setDefaultModel(model);
           if (variant !== undefined) setDefaultVariant(variant);
           if (agent !== undefined) setDefaultAgent(agent);
-          if (typeof data.smallModelUseDefault === 'boolean') setSmallModelUseDefault(data.smallModelUseDefault);
-          if (typeof data.smallModelOverride === 'string' && data.smallModelOverride.trim()) {
-            setSmallModelOverride(data.smallModelOverride.trim());
+          if (data.smallModelUseDefault !== undefined) setSmallModelUseDefault(data.smallModelUseDefault);
+          const smallOverride = data.smallModelOverride?.trim();
+          if (smallOverride) {
+            setSmallModelOverride(smallOverride);
           }
-          if (typeof data.walkthroughModelOverride === 'string' && data.walkthroughModelOverride.trim()) {
-            setWalkthroughModelOverride(data.walkthroughModelOverride.trim());
+          const walkthroughOverride = data.walkthroughModelOverride?.trim();
+          if (walkthroughOverride) {
+            setWalkthroughModelOverride(walkthroughOverride);
           }
         }
       } catch (error) {
@@ -181,14 +128,6 @@ export const DefaultsSettings: React.FC = () => {
 
       try {
         await updateDesktopSettings({ defaultModel: newValue ?? '', defaultVariant: '' });
-        const response = await runtimeFetch('/api/config/settings', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ defaultModel: newValue }),
-        });
-        if (!response.ok) {
-          console.warn('Failed to save default model to server:', response.status, response.statusText);
-        }
       } catch (error) {
         console.warn('Failed to save default model:', error);
       }

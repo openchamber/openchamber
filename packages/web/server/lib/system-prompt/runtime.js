@@ -1,5 +1,5 @@
-import { parse as parseJsonc } from 'jsonc-parser';
 import { pathToFileURL } from 'node:url';
+import { appendManagedPlugin } from '../opencode/managed-plugin-config.js';
 
 const PROVIDER_PROMPT_BOUNDARY = 'You are powered by the model named';
 const MINIMAL_IDENTITY = 'You are OpenCode, a coding agent.';
@@ -33,25 +33,6 @@ export const OpenChamberSystemPromptPlugin = async () => ({
 })
 `;
 
-const mergePluginConfig = (rawConfig, pluginUrl) => {
-  const errors = [];
-  const parsed = typeof rawConfig === 'string' && rawConfig.trim()
-    ? parseJsonc(rawConfig, errors, { allowTrailingComma: true })
-    : {};
-  if (errors.length > 0 || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('OPENCODE_CONFIG_CONTENT must contain a valid JSON object before OpenChamber can inject its system prompt optimizer');
-  }
-  if (parsed.plugin !== undefined && !Array.isArray(parsed.plugin)) {
-    throw new Error('OPENCODE_CONFIG_CONTENT plugin must be an array before OpenChamber can inject its system prompt optimizer');
-  }
-  const configured = Array.isArray(parsed.plugin) ? parsed.plugin : [];
-  parsed.plugin = [
-    ...configured.filter((value) => value !== pluginUrl && (!Array.isArray(value) || value[0] !== pluginUrl)),
-    pluginUrl,
-  ];
-  return JSON.stringify(parsed);
-};
-
 export const createSystemPromptRuntime = ({ fsPromises, path, dataDir }) => {
   const pluginDirectory = path.join(dataDir, 'system-prompt');
   const pluginPath = path.join(pluginDirectory, 'openchamber-system-prompt-plugin.js');
@@ -60,7 +41,7 @@ export const createSystemPromptRuntime = ({ fsPromises, path, dataDir }) => {
     await fsPromises.mkdir(pluginDirectory, { recursive: true });
     await fsPromises.writeFile(pluginPath, createPluginSource(), { mode: 0o600 });
     return {
-      OPENCODE_CONFIG_CONTENT: mergePluginConfig(rawConfig, pathToFileURL(pluginPath).href),
+      OPENCODE_CONFIG_CONTENT: appendManagedPlugin(rawConfig, pathToFileURL(pluginPath).href, 'system prompt optimizer'),
     };
   };
 

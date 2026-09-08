@@ -6,23 +6,13 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { GitHubIntegration } from './GitHubIntegration';
 import { LinearSettings } from './LinearSettings';
-import { ThirdPartyIntegrationsSection } from './ThirdPartyIntegrationsSection';
 
-interface IntegrationsPageProps {
-  onOpenProviderSetup: (providerId: string) => Promise<boolean>;
-  onOpenPluginManager: () => void;
-}
-
-export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({
-  onOpenProviderSetup,
-  onOpenPluginManager,
-}) => {
+export const IntegrationsPage: React.FC = () => {
   const { t } = useI18n();
   // GitHub sign-in is an OpenChamber server feature; the VS Code extension
   // uses the editor's own GitHub session instead.
   const hasGitHub = !isVSCodeRuntime();
   const hasLinear = Boolean(getRegisteredRuntimeAPIs()?.linear);
-  const hasBuiltIn = hasGitHub || hasLinear;
 
   return (
     <SettingsPageLayout
@@ -30,23 +20,16 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({
       description={t('settings.page.integrations.description')}
       showSaveStatus
     >
-      {hasBuiltIn ? (
-        <SettingsSection
-          title={t('settings.integrations.firstParty.title')}
-          info={t('settings.integrations.firstParty.info')}
-          divider={false}
-          settingsItem="integrations.first-party"
-          contentClassName="space-y-3"
-        >
-          {hasGitHub ? <GitHubIntegration /> : null}
-          {hasLinear ? <LinearSettings /> : null}
-        </SettingsSection>
-      ) : null}
-      <ThirdPartyIntegrationsSection
-        divider={hasBuiltIn}
-        onOpenProviderSetup={onOpenProviderSetup}
-        onOpenPluginManager={onOpenPluginManager}
-      />
+      <SettingsSection
+        title={t('settings.integrations.firstParty.title')}
+        info={t('settings.integrations.firstParty.info')}
+        divider={false}
+        settingsItem="integrations.first-party"
+        contentClassName="space-y-3"
+      >
+        {hasGitHub ? <GitHubIntegration /> : null}
+        {hasLinear ? <LinearSettings /> : null}
+      </SettingsSection>
     </SettingsPageLayout>
   );
 };

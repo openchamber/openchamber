@@ -36,6 +36,25 @@ describe("content cache owner", () => {
     owner.dispose()
   })
 
+  test("bypasses metadata cache for an authoritative read", async () => {
+    let content = "old"
+    let reads = 0
+    const owner = createContentCachedFiles({
+      readFile: async (path: string) => {
+        reads += 1
+        return { path, content }
+      },
+      statFile: async () => ({ isFile: true, isDirectory: false, size: 3, mtimeMs: 1 }),
+    } as unknown as FilesAPI)
+
+    await owner.files.readFile!("file.ts")
+    content = "new"
+    expect((await owner.files.readFile!("file.ts")).content).toBe("old")
+    expect((await owner.files.readFile!("file.ts", { fresh: true })).content).toBe("new")
+    expect(reads).toBe(2)
+    owner.dispose()
+  })
+
   test("retries a read that overlaps a write", async () => {
     const firstRead = deferred<{ path: string; content: string }>()
     let content = "old"

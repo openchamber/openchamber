@@ -2,6 +2,7 @@ import React from 'react';
 import { useI18n } from '@/lib/i18n';
 import { Switch } from '@/components/ui/switch';
 import { useMcpStore } from '@/stores/useMcpStore';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { McpIcon } from '@/components/icons/McpIcon';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { toast } from 'sonner';
@@ -28,6 +29,7 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ directory }) => {
   const ensureMcpFresh = useMcpStore((state) => state.ensureFresh);
   const connect = useMcpStore((state) => state.connect);
   const disconnect = useMcpStore((state) => state.disconnect);
+  const isConnected = useConfigStore((state) => state.isConnected);
   const [busyServer, setBusyServer] = React.useState<string | null>(null);
 
   // The panel must not depend on the header dropdown having been mounted or
@@ -35,9 +37,12 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ directory }) => {
   // compete with chat bootstrap traffic for sockets. The section remounts on
   // every session switch, so it only asks for a status that is missing or
   // older than a minute; connect/disconnect/auth refresh on their own.
+  // `isConnected` is a dependency, not a gate: MCP status is cached by
+  // directory alone and dropped on an instance switch, and two instances can
+  // hold the same project path — so the switch itself has to trigger the ask.
   React.useEffect(() => {
     void runBackgroundNetworkTask(() => ensureMcpFresh({ directory, silent: true, maxAgeMs: MCP_STATUS_MAX_AGE_MS }));
-  }, [directory, ensureMcpFresh]);
+  }, [directory, ensureMcpFresh, isConnected]);
 
   const mcpServers = React.useMemo(
     () => Object.entries(mcpStatus ?? {}).sort(([left], [right]) => left.localeCompare(right)),

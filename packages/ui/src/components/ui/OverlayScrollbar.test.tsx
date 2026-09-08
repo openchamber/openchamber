@@ -4,6 +4,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 import { OverlayScrollbar } from './OverlayScrollbar';
+import { useUIStore } from '@/stores/useUIStore';
 
 class TestResizeObserver implements ResizeObserver {
   static instances: TestResizeObserver[] = [];
@@ -65,6 +66,7 @@ describe('OverlayScrollbar', () => {
   };
 
   beforeEach(() => {
+    useUIStore.getState().setAlwaysShowScrollbars(false);
     windowInstance = new Window();
     pendingFrames = new Map();
     nextFrameId = 1;
@@ -140,7 +142,115 @@ describe('OverlayScrollbar', () => {
 
   afterEach(async () => {
     await act(async () => root.unmount());
+    useUIStore.getState().setAlwaysShowScrollbars(false);
     windowInstance.close();
+  });
+
+  test('starts hidden and hides again after scrolling by default', async () => {
+    await renderScrollbar({ hideDelayMs: 10 });
+    const scrollbar = host.querySelector<HTMLElement>('.overlay-scrollbar');
+    expect(scrollbar?.dataset.visible).toBe('false');
+    scroller.dispatchEvent(new window.Event('scroll'));
+    expect(scrollbar?.dataset.visible).toBe('true');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(scrollbar?.dataset.visible).toBe('false');
+  });
+
+  test('shows overflowing thumbs immediately and keeps them visible without user input', async () => {
+    useUIStore.getState().setAlwaysShowScrollbars(true);
+    await renderScrollbar({ hideDelayMs: 10, suppressVisibility: true, userIntentOnly: true });
+    const scrollbar = host.querySelector<HTMLElement>('.overlay-scrollbar');
+    expect(scrollbar?.dataset.visible).toBe('true');
+    expect(host.querySelector<HTMLElement>('[data-overlay-scrollbar-thumb="vertical"]')?.hidden).toBe(false);
+    expect(host.querySelector<HTMLElement>('[data-overlay-scrollbar-thumb="horizontal"]')?.hidden).toBe(true);
+
+    verticalLayoutReads = 0;
+    scrollbarCommits = 0;
+    scrollTop = 200;
+    for (let i = 0; i < 100; i += 1) scroller.dispatchEvent(new window.Event('scroll'));
+    expect(pendingFrames.size).toBe(1);
+    await flushFrames();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(scrollbar?.dataset.visible).toBe('true');
+    expect(host.querySelector<HTMLElement>('[data-overlay-scrollbar-thumb="vertical"]')?.style.transform).toBe('translate3d(0, 34px, 0)');
+    expect(verticalLayoutReads).toBe(0);
+    expect(scrollbarCommits).toBe(0);
+  });
+
+  test('updates mounted scrollbars and cancels an existing hide timer when the preference changes', async () => {
+    await renderScrollbar({ hideDelayMs: 10 });
+    const scrollbar = host.querySelector<HTMLElement>('.overlay-scrollbar');
+    scroller.dispatchEvent(new window.Event('scroll'));
+    await act(async () => useUIStore.getState().setAlwaysShowScrollbars(true));
+    await flushFrames();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(scrollbar?.dataset.visible).toBe('true');
+    expect(TestResizeObserver.instances).toHaveLength(1);
+    expect(TestResizeObserver.instances[0]?.disconnectCount).toBe(1);
+
+    await act(async () => useUIStore.getState().setAlwaysShowScrollbars(false));
+    expect(scrollbar?.dataset.visible).toBe('false');
+    scroller.dispatchEvent(new window.Event('scroll'));
+    expect(scrollbar?.dataset.visible).toBe('true');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(scrollbar?.dataset.visible).toBe('false');
+  });
+
+  test('keeps non-overflowing axes hidden and responds to content resizing in always-visible mode', async () => {
+    useUIStore.getState().setAlwaysShowScrollbars(true);
+    let contentHeight = 100;
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, get: () => contentHeight });
+    Object.defineProperty(scroller, 'scrollWidth', { configurable: true, get: () => 300 });
+    await renderScrollbar({ disableHorizontal: false });
+    const vertical = host.querySelector<HTMLElement>('[data-overlay-scrollbar-thumb="vertical"]');
+    const horizontal = host.querySelector<HTMLElement>('[data-overlay-scrollbar-thumb="horizontal"]');
+    expect(vertical?.hidden).toBe(true);
+    expect(horizontal?.hidden).toBe(false);
+
+    contentHeight = 500;
+    TestResizeObserver.instances[0]?.trigger();
+    await flushFrames();
+    expect(vertical?.hidden).toBe(false);
+    contentHeight = 100;
+    TestResizeObserver.instances[0]?.trigger();
+    await flushFrames();
+    expect(vertical?.hidden).toBe(true);
+  });
+
+  test('drops stale thumbs and pending work when the scrolling element disappears or is replaced', async () => {
+    useUIStore.getState().setAlwaysShowScrollbars(true);
+    await renderScrollbar();
+    const scrollbar = host.querySelector<HTMLElement>('.overlay-scrollbar');
+    const vertical = host.querySelector<HTMLElement>('[data-overlay-scrollbar-thumb="vertical"]');
+    scroller.dispatchEvent(new window.Event('scroll'));
+    expect(pendingFrames.size).toBe(1);
+
+    containerRef.current = null;
+    await renderScrollbar();
+    expect(pendingFrames.size).toBe(0);
+    expect(scrollbar?.dataset.visible).toBe('false');
+    expect(vertical?.hidden).toBe(true);
+    scroller.dispatchEvent(new window.Event('scroll'));
+    expect(pendingFrames.size).toBe(0);
+
+    const replacement = document.createElement('div');
+    Object.defineProperties(replacement, {
+      clientHeight: { value: 100 },
+      scrollHeight: { value: 100 },
+    });
+    containerRef.current = replacement;
+    await renderScrollbar();
+    expect(scrollbar?.dataset.visible).toBe('true');
+    expect(vertical?.hidden).toBe(true);
+
+    containerRef.current = scroller;
+    await renderScrollbar();
+    expect(vertical?.hidden).toBe(false);
+    expect(scrollbar?.dataset.visible).toBe('true');
+    replacement.dispatchEvent(new window.Event('scroll'));
+    expect(pendingFrames.size).toBe(0);
+    scroller.dispatchEvent(new window.Event('scroll'));
+    expect(pendingFrames.size).toBe(1);
   });
 
   test('moves the thumb without rereading layout during steady scrolling', async () => {
@@ -213,6 +323,7 @@ describe('OverlayScrollbar', () => {
   });
 
   test('uses the rendered thumb travel when dragging', async () => {
+    useUIStore.getState().setAlwaysShowScrollbars(true);
     await renderScrollbar();
     const thumb = host.querySelector<HTMLElement>('[data-overlay-scrollbar-thumb="vertical"]');
     if (!thumb) throw new Error('OverlayScrollbar did not render its vertical thumb');
@@ -280,6 +391,159 @@ describe('OverlayScrollbar', () => {
     scroller.dispatchEvent(new window.WheelEvent('wheel'));
     scroller.dispatchEvent(new window.Event('scroll'));
     expect(scrollbar.dataset.visible).toBe('true');
+  });
+
+  test('re-measures on hover so a horizontally overflowing container shows its horizontal thumb', async () => {
+    await renderScrollbar({ disableHorizontal: false });
+    const scrollbar = host.querySelector<HTMLElement>('.overlay-scrollbar');
+    if (!scrollbar) throw new Error('OverlayScrollbar did not render its container');
+    const horizontalThumb = host.querySelector<HTMLElement>('[data-overlay-scrollbar-thumb="horizontal"]');
+    if (!horizontalThumb) throw new Error('OverlayScrollbar did not render its horizontal thumb');
+
+    // Horizontal overflow appears after mount without a resize, so the mount
+    // measure saw no overflow and the thumb is hidden. The hover re-measure is
+    // the only path that can reveal it now (no ResizeObserver is triggered here).
+    expect(horizontalThumb.hidden).toBe(true);
+    Object.defineProperty(scroller, 'scrollWidth', { configurable: true, get: () => 300 });
+
+    scroller.dispatchEvent(new window.PointerEvent('pointerenter', { bubbles: false, pointerType: 'mouse' }));
+    await flushFrames();
+
+    expect(scrollbar.dataset.visible).toBe('true');
+    expect(horizontalThumb.hidden).toBe(false);
+    expect(horizontalThumb.style.width).not.toBe('');
+  });
+
+  test('keeps the horizontal thumb hidden on hover when there is no horizontal overflow', async () => {
+    await renderScrollbar({ disableHorizontal: false });
+    const horizontalThumb = host.querySelector<HTMLElement>('[data-overlay-scrollbar-thumb="horizontal"]');
+    if (!horizontalThumb) throw new Error('OverlayScrollbar did not render its horizontal thumb');
+
+    expect(horizontalThumb.hidden).toBe(true);
+    scroller.dispatchEvent(new window.PointerEvent('pointerenter', { bubbles: false, pointerType: 'mouse' }));
+    await flushFrames();
+
+    expect(horizontalThumb.hidden).toBe(true);
+  });
+
+  test('does not reveal the thumb on touch taps (pointerType guard)', async () => {
+    await renderScrollbar();
+    const scrollbar = host.querySelector<HTMLElement>('.overlay-scrollbar');
+    if (!scrollbar) throw new Error('OverlayScrollbar did not render its container');
+
+    scroller.dispatchEvent(new window.PointerEvent('pointerenter', { bubbles: false, pointerType: 'touch' }));
+    await flushFrames();
+
+    expect(scrollbar.dataset.visible).toBe('false');
+  });
+
+  test('keeps the thumb visible while the pointer crosses from container onto the thumb', async () => {
+    await renderScrollbar({ hideDelayMs: 10 });
+    const scrollbar = host.querySelector<HTMLElement>('.overlay-scrollbar');
+    if (!scrollbar) throw new Error('OverlayScrollbar did not render its container');
+    const thumb = host.querySelector<HTMLElement>('[data-overlay-scrollbar-thumb="vertical"]');
+    if (!thumb) throw new Error('OverlayScrollbar did not render its vertical thumb');
+
+    // Enter the container: thumb reveals.
+    scroller.dispatchEvent(new window.PointerEvent('pointerenter', { bubbles: false, pointerType: 'mouse' }));
+    expect(scrollbar.dataset.visible).toBe('true');
+
+    // Leave the container (pointer moves toward the sibling thumb): this arms
+    // the hide timer. The thumb's pointerover fires after the container's
+    // pointerleave, so the fire-time re-check must keep the thumb visible.
+    scroller.dispatchEvent(new window.PointerEvent('pointerleave', { bubbles: false, pointerType: 'mouse' }));
+    thumb.dispatchEvent(new window.PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }));
+    await flushFrames();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(scrollbar.dataset.visible).toBe('true');
+    thumb.dispatchEvent(new window.PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse' }));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(scrollbar.dataset.visible).toBe('false');
+  });
+
+  test('refreshes the vertical thumb on hover after hidden programmatic scrolling', async () => {
+    await renderScrollbar({ userIntentOnly: true });
+    scrollTop = 200;
+    scroller.dispatchEvent(new window.Event('scroll'));
+    await flushFrames();
+    const thumb = host.querySelector<HTMLElement>('[data-overlay-scrollbar-thumb="vertical"]');
+    expect(thumb?.style.transform).toBe('translate3d(0, 8px, 0)');
+    horizontalLayoutReads = 0;
+
+    scroller.dispatchEvent(new window.PointerEvent('pointerenter', { pointerType: 'mouse' }));
+    await flushFrames();
+    expect(host.querySelector<HTMLElement>('.overlay-scrollbar')?.dataset.visible).toBe('true');
+    expect(thumb?.style.transform).toBe('translate3d(0, 34px, 0)');
+    expect(horizontalLayoutReads).toBe(0);
+  });
+
+  test('keeps a hovered user-intent scrollbar visible and positioned during programmatic scrolling', async () => {
+    await renderScrollbar({ userIntentOnly: true });
+    scroller.dispatchEvent(new window.PointerEvent('pointerenter', { pointerType: 'mouse' }));
+    await flushFrames();
+    verticalLayoutReads = 0;
+    horizontalLayoutReads = 0;
+    scrollbarCommits = 0;
+
+    scrollTop = 200;
+    for (let i = 0; i < 100; i += 1) scroller.dispatchEvent(new window.Event('scroll'));
+    await flushFrames();
+    expect(host.querySelector<HTMLElement>('.overlay-scrollbar')?.dataset.visible).toBe('true');
+    expect(host.querySelector<HTMLElement>('[data-overlay-scrollbar-thumb="vertical"]')?.style.transform).toBe('translate3d(0, 34px, 0)');
+    expect(verticalLayoutReads).toBe(0);
+    expect(horizontalLayoutReads).toBe(0);
+    expect(scrollbarCommits).toBe(0);
+  });
+
+  test('restores hover visibility and position when programmatic suppression ends', async () => {
+    await renderScrollbar({ userIntentOnly: true, suppressVisibility: true });
+    scroller.dispatchEvent(new window.PointerEvent('pointerenter', { pointerType: 'mouse' }));
+    scrollTop = 200;
+    scroller.dispatchEvent(new window.Event('scroll'));
+    expect(host.querySelector<HTMLElement>('.overlay-scrollbar')?.dataset.visible).toBe('false');
+
+    await renderScrollbar({ userIntentOnly: true, suppressVisibility: false });
+    expect(host.querySelector<HTMLElement>('.overlay-scrollbar')?.dataset.visible).toBe('true');
+    expect(host.querySelector<HTMLElement>('[data-overlay-scrollbar-thumb="vertical"]')?.style.transform).toBe('translate3d(0, 34px, 0)');
+    expect(TestResizeObserver.instances).toHaveLength(1);
+
+    await renderScrollbar({ userIntentOnly: true, suppressVisibility: true });
+    expect(host.querySelector<HTMLElement>('.overlay-scrollbar')?.dataset.visible).toBe('false');
+  });
+
+  test('turning off always-visible retains hover until the mouse leaves', async () => {
+    useUIStore.getState().setAlwaysShowScrollbars(true);
+    await renderScrollbar({ hideDelayMs: 10 });
+    scroller.dispatchEvent(new window.PointerEvent('pointerenter', { pointerType: 'mouse' }));
+    await act(async () => useUIStore.getState().setAlwaysShowScrollbars(false));
+    await flushFrames();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(host.querySelector<HTMLElement>('.overlay-scrollbar')?.dataset.visible).toBe('true');
+
+    scroller.dispatchEvent(new window.PointerEvent('pointerleave', { pointerType: 'mouse' }));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(host.querySelector<HTMLElement>('.overlay-scrollbar')?.dataset.visible).toBe('false');
+  });
+
+  test('hides the thumb after the pointer leaves the container', async () => {
+    await renderScrollbar({ hideDelayMs: 0 });
+    const scrollbar = host.querySelector<HTMLElement>('.overlay-scrollbar');
+    if (!scrollbar) throw new Error('OverlayScrollbar did not render its container');
+
+    scroller.dispatchEvent(new window.PointerEvent('pointerenter', { bubbles: false, pointerType: 'mouse' }));
+    expect(scrollbar.dataset.visible).toBe('true');
+
+    scroller.dispatchEvent(new window.PointerEvent('pointerleave', { bubbles: false, pointerType: 'mouse' }));
+    await flushFrames();
+
+    // The hide path is a setTimeout (hideDelayMs: 0 still schedules a 0ms
+    // timer). happy-dom runs real timers, so we must let the macrotask fire
+    // before asserting; rAF frames alone are not enough.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await flushFrames();
+
+    expect(scrollbar.dataset.visible).toBe('false');
   });
 
 });

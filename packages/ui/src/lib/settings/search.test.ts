@@ -17,28 +17,17 @@ const runtimeCtx = {
 };
 
 describe('settings search', () => {
-  test('finds the Claude Code third-party integration', () => {
-    const results = buildSettingsSearchResults({
-      query: 'claude',
-      runtimeCtx,
-      t,
-      getPageTitle: (page) => page,
-    });
-
-    expect(results.some((result) => result.id === 'integrations.third-party.opencode-claude')).toBe(true);
+  test('finds the scrollbar preference on every surface', () => {
+    for (const context of [runtimeCtx, { ...runtimeCtx, isDesktop: true }, { ...runtimeCtx, isVSCode: true }, { ...runtimeCtx, isMobile: true }]) {
+      const results = buildSettingsSearchResults({
+        query: 'scrollbar',
+        runtimeCtx: context,
+        t,
+        getPageTitle: (page) => page,
+      });
+      expect(results.find((result) => result.id === 'appearance.scrollbars')?.page).toBe('appearance');
+    }
   });
-
-  test('finds third-party integrations by OpenChamber npm package names', () => {
-    const results = buildSettingsSearchResults({
-      query: '@openchamber/opencode-cursor',
-      runtimeCtx,
-      t,
-      getPageTitle: (page) => page,
-    });
-
-    expect(results.some((result) => result.id === 'integrations.third-party.opencode-cursor-oauth')).toBe(true);
-  });
-
   test('finds Linear connect on the integrations page', () => {
     const results = buildSettingsSearchResults({
       query: 'linear',
@@ -50,6 +39,28 @@ describe('settings search', () => {
     expect(results.some((result) => result.id === 'integrations.linear')).toBe(true);
     expect(results.some((result) => result.id === 'integrations.linear.add-workspace')).toBe(true);
     expect(results.some((result) => result.id === 'integrations.linear.mapping')).toBe(true);
+  });
+
+  test('finds the chat input history scope setting', () => {
+    const results = buildSettingsSearchResults({
+      query: 'input history scope',
+      runtimeCtx,
+      t,
+      getPageTitle: (page) => page,
+    });
+
+    expect(results.some((result) => result.id === 'chat.input-history-scope')).toBe(true);
+  });
+
+  test('finds the chat input history limit setting by recall keywords', () => {
+    const results = buildSettingsSearchResults({
+      query: 'remember prompts',
+      runtimeCtx,
+      t,
+      getPageTitle: (page) => page,
+    });
+
+    expect(results.some((result) => result.id === 'chat.input-history-limit')).toBe(true);
   });
 
   test('hides Linear connect in VS Code', () => {

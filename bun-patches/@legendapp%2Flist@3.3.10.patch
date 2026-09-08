@@ -1,0 +1,68 @@
+diff --git a/react-native.web.js b/react-native.web.js
+index 5b171ebd6fa7ac86b0148fe17f897a0ca821d55e..954235cd2b970e0dbb6b78f650633e4f07242558 100644
+--- a/react-native.web.js
++++ b/react-native.web.js
+@@ -6560,8 +6560,11 @@ function ScrollAdjust() {
+               window.getComputedStyle(contentNode)[axis.paddingEndProp]
+             );
+             const temporaryPaddingEnd = `${(currentPaddingEnd || 0) + pad}px`;
+-            temporaryPaddingRef.current = { baseline: baselinePaddingEnd, value: temporaryPaddingEnd };
+             contentNode.style[axis.paddingEndProp] = temporaryPaddingEnd;
++            // CSSOM rounds fractional pixels (2123.1875px becomes 2123.19px).
++            // Track the serialized value so ownership checks and cleanup
++            // match what the browser actually stored, not the input string.
++            temporaryPaddingRef.current = { baseline: baselinePaddingEnd, value: contentNode.style[axis.paddingEndProp] };
+             void contentNode.offsetHeight;
+             scrollBy();
+             if (resetPaddingRafRef.current !== void 0) {
+diff --git a/react-native.web.mjs b/react-native.web.mjs
+index cf549ca32946a9e35a883290c11423330bf8728b..d6508ee3b88e2f79c5ee9b994f6f93b6654e708c 100644
+--- a/react-native.web.mjs
++++ b/react-native.web.mjs
+@@ -6539,8 +6539,11 @@ function ScrollAdjust() {
+               window.getComputedStyle(contentNode)[axis.paddingEndProp]
+             );
+             const temporaryPaddingEnd = `${(currentPaddingEnd || 0) + pad}px`;
+-            temporaryPaddingRef.current = { baseline: baselinePaddingEnd, value: temporaryPaddingEnd };
+             contentNode.style[axis.paddingEndProp] = temporaryPaddingEnd;
++            // CSSOM rounds fractional pixels (2123.1875px becomes 2123.19px).
++            // Track the serialized value so ownership checks and cleanup
++            // match what the browser actually stored, not the input string.
++            temporaryPaddingRef.current = { baseline: baselinePaddingEnd, value: contentNode.style[axis.paddingEndProp] };
+             void contentNode.offsetHeight;
+             scrollBy();
+             if (resetPaddingRafRef.current !== void 0) {
+diff --git a/react.js b/react.js
+index 5b171ebd6fa7ac86b0148fe17f897a0ca821d55e..954235cd2b970e0dbb6b78f650633e4f07242558 100644
+--- a/react.js
++++ b/react.js
+@@ -6560,8 +6560,11 @@ function ScrollAdjust() {
+               window.getComputedStyle(contentNode)[axis.paddingEndProp]
+             );
+             const temporaryPaddingEnd = `${(currentPaddingEnd || 0) + pad}px`;
+-            temporaryPaddingRef.current = { baseline: baselinePaddingEnd, value: temporaryPaddingEnd };
+             contentNode.style[axis.paddingEndProp] = temporaryPaddingEnd;
++            // CSSOM rounds fractional pixels (2123.1875px becomes 2123.19px).
++            // Track the serialized value so ownership checks and cleanup
++            // match what the browser actually stored, not the input string.
++            temporaryPaddingRef.current = { baseline: baselinePaddingEnd, value: contentNode.style[axis.paddingEndProp] };
+             void contentNode.offsetHeight;
+             scrollBy();
+             if (resetPaddingRafRef.current !== void 0) {
+diff --git a/react.mjs b/react.mjs
+index cf549ca32946a9e35a883290c11423330bf8728b..d6508ee3b88e2f79c5ee9b994f6f93b6654e708c 100644
+--- a/react.mjs
++++ b/react.mjs
+@@ -6539,8 +6539,11 @@ function ScrollAdjust() {
+               window.getComputedStyle(contentNode)[axis.paddingEndProp]
+             );
+             const temporaryPaddingEnd = `${(currentPaddingEnd || 0) + pad}px`;
+-            temporaryPaddingRef.current = { baseline: baselinePaddingEnd, value: temporaryPaddingEnd };
+             contentNode.style[axis.paddingEndProp] = temporaryPaddingEnd;
++            // CSSOM rounds fractional pixels (2123.1875px becomes 2123.19px).
++            // Track the serialized value so ownership checks and cleanup
++            // match what the browser actually stored, not the input string.
++            temporaryPaddingRef.current = { baseline: baselinePaddingEnd, value: contentNode.style[axis.paddingEndProp] };
+             void contentNode.offsetHeight;
+             scrollBy();
+             if (resetPaddingRafRef.current !== void 0) {

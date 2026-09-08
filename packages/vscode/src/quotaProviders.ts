@@ -1,9 +1,12 @@
+import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
 import { deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
 import { getProviderAuth, updateProviderAuth } from './opencodeAuth';
+import { fetchExeDevUsage } from './exeDevQuota';
+import { fetchOllamaUsage } from './ollamaQuota';
 
 type AuthEntry = Record<string, unknown> | string;
 type AuthFile = Record<string, AuthEntry>;
@@ -190,7 +193,6 @@ export type ProviderResult = {
   planLabel?: string | null;
 };
 
-const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
 const OPENCODE_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'opencode');
 const AUTH_FILE = path.join(OPENCODE_DATA_DIR, 'auth.json');
 
@@ -774,6 +776,7 @@ export const listConfiguredQuotaProviders = () => {
   if (openCodeGoAuth && (typeof openCodeGoAuth.key === 'string' || typeof openCodeGoAuth.token === 'string')) configured.add('opencode-go');
   if (readCredential('ollama-cloud')) configured.add('ollama-cloud');
   if (readCredential('cursor')) configured.add('cursor');
+  if (readCredential('exe-dev')) configured.add('exe-dev');
 
   const anthropicAuth = normalizeAuthEntry(getAuthEntry(auth, ['anthropic', 'claude']));
   if (anthropicAuth && ((anthropicAuth as Record<string, unknown>).access || (anthropicAuth as Record<string, unknown>).token)) {
@@ -849,6 +852,10 @@ export const listConfiguredQuotaProviders = () => {
   const deepseekAuth = normalizeAuthEntry(getAuthEntry(auth, ['deepseek']));
   if (deepseekAuth && ((deepseekAuth as Record<string, unknown>).key || (deepseekAuth as Record<string, unknown>).token)) {
     configured.add('deepseek');
+  }
+
+  if (getHyperApiKey(auth)) {
+    configured.add('hyper');
   }
 
   let xaiAuth: XaiAuthEntry | null = null;
@@ -1860,44 +1867,14 @@ const fetchMiniMaxCnCodingPlanQuota = () => fetchMiniMaxQuota({
   usageFieldsAreRemaining: true,
 });
 
-const parseOllamaSettingsHtml = (html: string) => {
-  const windows: Record<string, UsageWindow> = {};
-  const sessionMatch = html.match(/Session\s+usage[^0-9]*([0-9.]+)%/i);
-  if (sessionMatch) {
-    windows.session = toUsageWindow({
-      usedPercent: toNumber(sessionMatch[1]),
-      windowSeconds: null,
-      resetAt: null,
-    });
-  }
-
-  const weeklyMatch = html.match(/Weekly\s+usage[^0-9]*([0-9.]+)%/i);
-  if (weeklyMatch) {
-    windows.weekly = toUsageWindow({
-      usedPercent: toNumber(weeklyMatch[1]),
-      windowSeconds: null,
-      resetAt: null,
-    });
-  }
-
-  const premiumMatch = html.match(/Premium[^0-9]*([0-9]+)\s*\/\s*([0-9]+)/i);
-  if (premiumMatch) {
-    const used = toNumber(premiumMatch[1]);
-    const total = toNumber(premiumMatch[2]);
-    const usedPercent = total && used !== null ? Math.min(100, (used / total) * 100) : null;
-    windows.premium = toUsageWindow({
-      usedPercent,
-      windowSeconds: null,
-      resetAt: null,
-      valueLabel: `${used ?? 0} / ${total ?? 0}`,
-    });
-  }
-
-  return windows;
-};
-
-const fetchOllamaCloudQuota = async (): Promise<ProviderResult> => {
-  const cookie = readCredential('ollama-cloud')?.cookie;
+export const fetchOllamaCloudQuota = async ({
+  readCookie = () => readCredential('ollama-cloud')?.cookie,
+  fetchImpl = fetch,
+}: {
+  readCookie?: () => string | undefined;
+  fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
+} = {}): Promise<ProviderResult> => {
+  const cookie = readCookie();
 
   if (!cookie) {
     return buildResult({
@@ -1910,30 +1887,17 @@ const fetchOllamaCloudQuota = async (): Promise<ProviderResult> => {
   }
 
   try {
-    const response = await fetch('https://ollama.com/settings', {
-      method: 'GET',
-      headers: {
-        Cookie: cookie,
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-      },
-    });
-
-    if (!response.ok) {
-      return buildResult({
-        providerId: 'ollama-cloud',
-        providerName: 'Ollama Cloud',
-        ok: false,
-        configured: true,
-        error: `API error: ${response.status}`,
-      });
-    }
+    const parsed = await fetchOllamaUsage(cookie, fetchImpl);
+    const windows = Object.fromEntries(Object.entries(parsed).map(([key, value]) => [
+      key, toUsageWindow({ ...value, windowSeconds: null, resetAt: null }),
+    ]));
 
     return buildResult({
       providerId: 'ollama-cloud',
       providerName: 'Ollama Cloud',
       ok: true,
       configured: true,
-      usage: { windows: parseOllamaSettingsHtml(await response.text()) },
+      usage: { windows },
     });
   } catch (error) {
     return buildResult({
@@ -1943,6 +1907,16 @@ const fetchOllamaCloudQuota = async (): Promise<ProviderResult> => {
       configured: true,
       error: error instanceof Error ? error.message : 'Request failed',
     });
+  }
+};
+
+const fetchExeDevQuota = async (): Promise<ProviderResult> => {
+  const usageToken = readCredential('exe-dev')?.usageToken;
+  if (!usageToken) return buildResult({ providerId: 'exe-dev', providerName: 'exe.dev', ok: false, configured: false, error: 'Not configured' });
+  try {
+    return buildResult({ providerId: 'exe-dev', providerName: 'exe.dev', ok: true, configured: true, usage: { windows: await fetchExeDevUsage(usageToken) } });
+  } catch (error) {
+    return buildResult({ providerId: 'exe-dev', providerName: 'exe.dev', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
   }
 };
 
@@ -1959,6 +1933,28 @@ const fetchCursorQuota = async (): Promise<ProviderResult> => {
   } catch (error) { return buildResult({ providerId: 'cursor', providerName: 'Cursor', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' }); }
 };
 
+const openRouterResetAt = (period: string | null, nowMs: number): number | null => {
+  const now = new Date(nowMs);
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+  const day = now.getUTCDate();
+
+  if (period === 'daily') return Date.UTC(year, month, day + 1);
+  if (period === 'weekly') {
+    const daysUntilMonday = ((8 - now.getUTCDay()) % 7) || 7;
+    return Date.UTC(year, month, day + daysUntilMonday);
+  }
+  if (period === 'monthly') return Date.UTC(year, month + 1, 1);
+  return null;
+};
+
+const PERIOD_SECONDS = { daily: 86400, weekly: 604800, monthly: 30 * 86400 };
+type OpenRouterPeriod = keyof typeof PERIOD_SECONDS;
+
+const isOpenRouterPeriod = (value: unknown): value is OpenRouterPeriod => (
+  typeof value === 'string' && Object.prototype.hasOwnProperty.call(PERIOD_SECONDS, value)
+);
+
 const fetchOpenRouterQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['openrouter'])) as Record<string, unknown> | null;
@@ -1974,13 +1970,16 @@ const fetchOpenRouterQuota = async (): Promise<ProviderResult> => {
     });
   }
 
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
   try {
-    const response = await fetch('https://openrouter.ai/api/v1/credits', {
+    const response = await fetch('https://openrouter.ai/api/v1/key', {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
+        'Accept-Encoding': 'identity',
       },
+      signal: timeoutSignal,
     });
 
     if (!response.ok) {
@@ -1989,20 +1988,86 @@ const fetchOpenRouterQuota = async (): Promise<ProviderResult> => {
         providerName: 'OpenRouter',
         ok: false,
         configured: true,
-        error: `API error: ${response.status}`,
+        error: response.status === 401 || response.status === 403
+          ? 'Session expired — please re-authenticate with OpenRouter'
+          : `API error: ${response.status}`,
       });
     }
 
-    const payload = await response.json() as Record<string, unknown>;
-    const credits = payload.data as Record<string, unknown> | undefined;
-    const totalCredits = toNumber(credits?.total_credits);
-    const totalUsage = toNumber(credits?.total_usage);
-    const remaining = totalCredits !== null && totalUsage !== null
-      ? Math.max(0, totalCredits - totalUsage)
-      : null;
-    let valueLabel: string | null = null;
-    if (remaining !== null && totalUsage !== null) {
-      valueLabel = `$${formatMoney(remaining)} left · $${formatMoney(totalUsage)} spent`;
+    const payload = await response.json() as unknown;
+    const dataContainer = asObject(payload);
+    const data = asObject(dataContainer?.data);
+    if (data === null) {
+      return buildResult({
+        providerId: 'openrouter',
+        providerName: 'OpenRouter',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+      });
+    }
+
+    if (data.is_management_key === true) {
+      return buildResult({
+        providerId: 'openrouter',
+        providerName: 'OpenRouter',
+        ok: false,
+        configured: true,
+        error: 'Management key configured — quota needs an inference API key',
+      });
+    }
+
+    const limit = toNumber(data.limit);
+    const limitRemaining = toNumber(data.limit_remaining);
+    if (limit !== null && limitRemaining === null) {
+      return buildResult({
+        providerId: 'openrouter',
+        providerName: 'OpenRouter',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+      });
+    }
+
+    const usageMonthly = toNumber(data.usage_monthly);
+    if (limit === null && usageMonthly === null) {
+      return buildResult({
+        providerId: 'openrouter',
+        providerName: 'OpenRouter',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+      });
+    }
+
+    const nowMs = Date.now();
+    let windowKey: string;
+    let windowSeconds: number | null;
+    let resetAt: number | null;
+    let usedPercent: number | null;
+    let valueLabel: string;
+
+    if (limit === null) {
+      windowKey = 'monthly';
+      windowSeconds = PERIOD_SECONDS.monthly;
+      resetAt = openRouterResetAt('monthly', nowMs);
+      usedPercent = null;
+      valueLabel = `$${formatMoney(usageMonthly)} spent`;
+    } else {
+      const used = Math.max(0, limit - (limitRemaining ?? 0));
+      const percent = limit > 0 ? (used / limit) * 100 : null;
+      usedPercent = percent === null ? null : Math.min(100, percent);
+      valueLabel = `$${formatMoney(used)} / $${formatMoney(limit)}`;
+
+      if (isOpenRouterPeriod(data.limit_reset)) {
+        windowKey = data.limit_reset;
+        windowSeconds = PERIOD_SECONDS[data.limit_reset];
+        resetAt = openRouterResetAt(data.limit_reset, nowMs);
+      } else {
+        windowKey = 'credits';
+        windowSeconds = null;
+        resetAt = null;
+      }
     }
 
     return buildResult({
@@ -2012,22 +2077,28 @@ const fetchOpenRouterQuota = async (): Promise<ProviderResult> => {
       configured: true,
       usage: {
         windows: {
-          credits: toUsageWindow({
-            usedPercent: null,
-            windowSeconds: null,
-            resetAt: null,
+          [windowKey]: toUsageWindow({
+            usedPercent,
+            windowSeconds,
+            resetAt,
             valueLabel,
           }),
         },
       },
     });
   } catch (error) {
+    const isTimeout = error instanceof DOMException && (error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted));
+    const isParseError = error instanceof SyntaxError;
     return buildResult({
       providerId: 'openrouter',
       providerName: 'OpenRouter',
       ok: false,
       configured: true,
-      error: error instanceof Error ? error.message : 'Request failed',
+      error: isTimeout
+        ? 'Request timed out'
+        : isParseError
+          ? 'Invalid response from provider'
+          : error instanceof Error ? error.message : 'Request failed',
     });
   }
 };
@@ -2496,7 +2567,6 @@ const fetchNeuralwattQuota = async (): Promise<ProviderResult> => {
     const subscription = payload?.subscription ?? null;
     const inOverage = Boolean(subscription?.in_overage);
     const allowance = payload?.key?.allowance ?? null;
-    const keyName = payload?.key?.name ?? null;
     const creditsRemaining = toNumber(payload?.balance?.credits_remaining_usd);
 
     const windows: Record<string, UsageWindow> = {};
@@ -2542,19 +2612,17 @@ const fetchNeuralwattQuota = async (): Promise<ProviderResult> => {
         : (spent !== null && effectiveLimit !== null && effectiveLimit > 0
             ? Math.max(0, Math.min(100, (spent / effectiveLimit) * 100))
             : null);
-      // Window title is the localized period label (daily/weekly/monthly); key
-      // name is attached via valueLabel for identification (wafer precedent).
+      // Window title is the localized period label (daily/weekly/monthly); the
+      // usage value stays a percent so the UI's display-mode toggle applies.
       const periodKey = (period === 'daily' || period === 'weekly' || period === 'monthly' || period === 'month')
         ? (period === 'month' ? 'monthly' : period)
         : 'billing_cycle';
-      const labelName = typeof keyName === 'string' && keyName.trim() ? keyName.trim() : null;
       const resetAt = toTimestamp(allowance.reset_at);
       const windowSeconds = period ? neuralwattWindowSeconds(period) : null;
       windows[periodKey] = toUsageWindow({
         usedPercent,
         windowSeconds,
         resetAt,
-        ...(labelName ? { valueLabel: labelName } : {}),
       });
     } else if (creditsRemaining !== null) {
       windows.credits_balance = toUsageWindow({
@@ -2774,6 +2842,113 @@ const fetchDeepseekQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+const HYPER_QUOTA_URL = 'https://hyper.charm.land/v1/credits';
+const HYPER_CREDIT_TO_USD = 0.05;
+
+const getHyperApiKey = (auth: AuthFile) => {
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['hyper']));
+  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
+};
+
+type HyperQuotaDependencies = {
+  readAuth?: () => AuthFile;
+  fetchImpl?: (url: string, options: RequestInit) => Promise<Response>;
+};
+
+export const fetchHyperQuota = async ({ readAuth = readAuthFile, fetchImpl = fetch }: HyperQuotaDependencies = {}): Promise<ProviderResult> => {
+  const apiKey = getHyperApiKey(readAuth());
+
+  if (!apiKey) {
+    return buildResult({
+      providerId: 'hyper',
+      providerName: 'Charm Hyper',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
+  try {
+    const response = await fetchImpl(HYPER_QUOTA_URL, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Accept-Encoding': 'identity',
+      },
+      signal: timeoutSignal,
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'hyper',
+        providerName: 'Charm Hyper',
+        ok: false,
+        configured: true,
+        error: response.status === 401 || response.status === 403
+          ? 'Session expired — please re-authenticate with Charm Hyper'
+          : `API error: ${response.status}`,
+      });
+    }
+
+    const payload = asObject(await response.json());
+    const rawBalance = payload?.balance;
+    const balance = toNumber(asNonEmptyString(rawBalance)
+      ?? (Number.isFinite(rawBalance) ? rawBalance : null));
+
+    if (balance === null) {
+      return buildResult({
+        providerId: 'hyper',
+        providerName: 'Charm Hyper',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+      });
+    }
+
+    const creditsLabel = Number.isInteger(balance) ? String(balance) : formatMoney(balance);
+    const windows = {
+      credits_balance: toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel: `$${formatMoney(balance * HYPER_CREDIT_TO_USD)}`,
+      }),
+      credits: toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel: creditsLabel,
+      }),
+    };
+
+    return buildResult({
+      providerId: 'hyper',
+      providerName: 'Charm Hyper',
+      ok: true,
+      configured: true,
+      usage: { windows },
+    });
+  } catch (error) {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
+    const isParseError = error instanceof SyntaxError;
+    return buildResult({
+      providerId: 'hyper',
+      providerName: 'Charm Hyper',
+      ok: false,
+      configured: true,
+      error: isTimeout
+        ? 'Request timed out'
+        : isParseError
+          ? 'Invalid response from provider'
+          : (error instanceof Error ? error.message : 'Request failed'),
+    });
+  }
+};
+
 const fetchXaiQuota = async (): Promise<ProviderResult> => {
   try {
     const entry = resolveXaiAuth();
@@ -2868,6 +3043,8 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
       return fetchMiniMaxCnCodingPlanQuota();
     case 'ollama-cloud':
       return fetchOllamaCloudQuota();
+    case 'exe-dev':
+      return fetchExeDevQuota();
     case 'openrouter':
       return fetchOpenRouterQuota();
     case 'zai-coding-plan':
@@ -2893,6 +3070,8 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
       return fetchCrofQuota();
     case 'deepseek':
       return fetchDeepseekQuota();
+    case 'hyper':
+      return fetchHyperQuota();
     case 'neuralwatt':
       return fetchNeuralwattQuota();
     case 'xai':

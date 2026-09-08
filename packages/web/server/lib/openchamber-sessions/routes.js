@@ -253,6 +253,40 @@ const latestCompletedAssistantMessageID = async ({ client, sessionID, directory 
   return asNonEmptyString(latest?.id);
 };
 
+/**
+ * Upper bound on one archive batch.
+ *
+ * The batch is applied one session at a time against OpenCode, so an unbounded
+ * list would hold a request open for as long as the list is large. Callers with
+ * more sessions than this send several batches and keep their own partial
+ * results.
+ */
+const MAX_ARCHIVE_BATCH = 500;
+
+const parseArchiveRequest = (payload) => {
+  const rawIds = payload?.ids;
+  if (!Array.isArray(rawIds) || rawIds.length === 0) {
+    return { ok: false, error: 'ids must be a non-empty array of session ids' };
+  }
+  if (rawIds.length > MAX_ARCHIVE_BATCH) {
+    return { ok: false, error: `ids must contain at most ${MAX_ARCHIVE_BATCH} session ids` };
+  }
+
+  const ids = [];
+  for (const value of rawIds) {
+    const id = asNonEmptyString(value);
+    if (!id) return { ok: false, error: 'ids must contain non-empty session ids' };
+    ids.push(id);
+  }
+
+  const archivedAt = payload?.archivedAt;
+  if (archivedAt !== undefined && (!Number.isSafeInteger(archivedAt) || archivedAt <= 0)) {
+    return { ok: false, error: 'archivedAt must be a positive integer timestamp' };
+  }
+
+  return { ok: true, ids, archivedAt: archivedAt ?? Date.now() };
+};
+
 const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated, sanitizeProjects, validateDirectoryPath }) => {
   const projectID = asNonEmptyString(payload?.projectId) || asNonEmptyString(payload?.projectID);
   if (projectID) {
@@ -579,6 +613,64 @@ export const createOpenChamberSessionService = (dependencies) => {
     return { model, agent, variant, promptDispatched: true, dispatchedAsCommand: Boolean(resolvedCommand) };
   };
 
+  /**
+   * Archive a batch of sessions in one request.
+   *
+   * The UI archives every session linked to a worktree before removing it.
+   * Doing that from the browser costs one request per session plus a store
+   * reconciliation between each of them, which is what made deleting a
+   * worktree with many sessions take tens of seconds. Here the batch stays on
+   * the server, next to OpenCode, and the client reconciles once.
+   *
+   * Sessions are updated one at a time on purpose: they are archived against a
+   * single OpenCode instance, and a fan-out of concurrent writes would trade a
+   * UI stall for server event-loop starvation. One failed session never stops
+   * the batch — it is reported in `failedIds` while the rest still archive, so
+   * callers keep the partial-failure behaviour they already show.
+   */
+  const archive = async (payload = {}) => {
+    const parsed = parseArchiveRequest(payload);
+    if (!parsed.ok) {
+      throw new OpenChamberControlError(parsed.error, 400);
+    }
+
+    const resolvedDirectory = await resolveRequestedDirectory({
+      payload,
+      readSettingsFromDiskMigrated,
+      sanitizeProjects,
+      validateDirectoryPath,
+    });
+    if (!resolvedDirectory.ok) {
+      throw new OpenChamberControlError(resolvedDirectory.error, resolvedDirectory.status || 400);
+    }
+
+    if (typeof waitForOpenCodeReady === 'function') await waitForOpenCodeReady(10_000, 250);
+
+    const directory = resolvedDirectory.directory;
+    const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
+    const client = createOpencodeClient({ baseUrl, headers: getOpenCodeAuthHeaders() });
+
+    const archived = [];
+    const failedIds = [];
+    for (const sessionID of parsed.ids) {
+      try {
+        const response = await client.session.update({
+          sessionID,
+          directory,
+          time: { archived: parsed.archivedAt },
+        });
+        const session = response?.data;
+        if (session?.id) archived.push(session);
+        else failedIds.push(sessionID);
+      } catch (error) {
+        console.warn('[OpenChamberSessions] failed to archive session', sessionID, error);
+        failedIds.push(sessionID);
+      }
+    }
+
+    return { directory, archived, failedIds };
+  };
+
   const create = async (payload = {}) => {
     const title = asNonEmptyString(payload.title);
     const prompt = asNonEmptyString(payload.prompt);
@@ -813,6 +905,7 @@ export const createOpenChamberSessionService = (dependencies) => {
 
   return {
     create,
+    archive,
     send: (sessionID, payload) => runExisting('send', sessionID, payload),
     fork: (sessionID, payload) => runExisting('fork', sessionID, payload),
   };
@@ -840,6 +933,15 @@ export const registerOpenChamberSessionRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('[OpenChamberSessions] failed to create session:', error);
       return sendServiceError(res, error, 'Failed to create session');
+    }
+  });
+
+  app.post('/api/openchamber/sessions/archive', express.json({ limit: '1mb' }), async (req, res) => {
+    try {
+      return res.json(await service.archive(req.body && typeof req.body === 'object' ? req.body : {}));
+    } catch (error) {
+      console.error('[OpenChamberSessions] failed to archive sessions:', error);
+      return sendServiceError(res, error, 'Failed to archive sessions');
     }
   });
 

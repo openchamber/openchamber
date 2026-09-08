@@ -29,6 +29,7 @@ import {
   unstageGitFiles,
 } from './gitApiHttp';
 import type { GitStatus } from './api/types';
+import { sessionEvents } from './sessionEvents';
 
 type FetchCall = {
   input: RequestInfo | URL;
@@ -141,6 +142,28 @@ describe('gitApiHttp index mutations', () => {
 });
 
 describe('gitApiHttp status cache', () => {
+  test('a Git refresh hint invalidates the cached status before listeners fetch', async () => {
+    installWindowMock();
+    let statusRequestCount = 0;
+    globalThis.fetch = async () => {
+      statusRequestCount += 1;
+      return jsonResponse(statusPayload({ behind: statusRequestCount }));
+    };
+
+    try {
+      const directory = '/repo-cache-tool-mutation';
+      const first = await getGitStatus(directory);
+      sessionEvents.requestGitRefresh({ directory });
+      const afterMutation = await getGitStatus(directory);
+
+      expect(first.behind).toBe(1);
+      expect(afterMutation.behind).toBe(2);
+      expect(statusRequestCount).toBe(2);
+    } finally {
+      restoreMocks();
+    }
+  });
+
   test('invalidates cached status after fetch', async () => {
     installWindowMock();
     const calls: FetchCall[] = [];
@@ -184,6 +207,58 @@ describe('gitApiHttp status cache', () => {
         '/api/git/fetch?directory=%2Frepo-cache-fetch',
         '/api/git/status?directory=%2Frepo-cache-fetch',
       ]);
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('fresh status bypasses an unexpired cached snapshot', async () => {
+    installWindowMock();
+    let statusRequestCount = 0;
+    globalThis.fetch = (async () => {
+      statusRequestCount += 1;
+      return jsonResponse(statusPayload({ behind: statusRequestCount }));
+    }) as typeof fetch;
+
+    try {
+      const directory = '/repo-cache-fresh';
+      const first = await getGitStatus(directory);
+      const cached = await getGitStatus(directory);
+      const fresh = await getGitStatus(directory, { fresh: true });
+
+      expect(first.behind).toBe(1);
+      expect(cached.behind).toBe(1);
+      expect(fresh.behind).toBe(2);
+      expect(statusRequestCount).toBe(2);
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('fresh status cannot be replaced in cache by an older in-flight response', async () => {
+    installWindowMock();
+    const statusResolvers: Array<(response: Response) => void> = [];
+    // SAFETY: the mock accepts the same arguments as fetch and always returns
+    // a pending Response promise controlled by this test.
+    globalThis.fetch = (async () => new Promise<Response>((resolve) => {
+      statusResolvers.push(resolve);
+    })) as typeof fetch;
+
+    try {
+      const directory = '/repo-cache-fresh-race';
+      const older = getGitStatus(directory);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const fresh = getGitStatus(directory, { fresh: true });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(statusResolvers).toHaveLength(2);
+      statusResolvers[1](jsonResponse(statusPayload({ current: 'fresh' })));
+      statusResolvers[0](jsonResponse(statusPayload({ current: 'stale' })));
+
+      expect((await fresh).current).toBe('fresh');
+      expect((await older).current).toBe('stale');
+      expect((await getGitStatus(directory)).current).toBe('fresh');
+      expect(statusResolvers).toHaveLength(2);
     } finally {
       restoreMocks();
     }

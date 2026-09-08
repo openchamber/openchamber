@@ -14,6 +14,8 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
     - `POST /api/fs/mkdir`
     - `GET /api/fs/read`
     - `GET /api/fs/raw`
+    - `GET /api/fs/stat`
+    - `GET /api/fs/directory-stat`
     - `GET /api/fs/serve/:path(*)`
     - `POST /api/fs/write`
     - `POST /api/fs/upload`
@@ -40,7 +42,10 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
 
 ## Notes for contributors
 - Keep filesystem policy (workspace root checks, error mapping, exec timeout behavior) inside this module, not in the composition root.
+- Workspace checks accept, besides the active workspace and its worktrees, the **managed roots**: the OpenChamber config root and the managed chats root (`managedChatsRoot` dependency; `OPENCHAMBER_CHATS_DIR` upstream, default `<config root>/chats`). Chat worktrees may legitimately live outside every project workspace.
+- `GET /api/fs/home` answers `{ home, chatsRoot }`. `chatsRoot` is the server-resolved managed chats root; clients must use it instead of joining `home` + the well-known segment (a relocated root does not contain that segment).
 - Filesystem `EPERM`/`EACCES` failures use the stable `reason: "os-permission"` response marker. Policy denials such as workspace-boundary or missing-grant failures must not use that marker because a native folder picker cannot remediate them.
+- `GET /api/fs/directory-stat?path=...` uses one `stat` without listing contents or resolving project topology. It follows the same authenticated directory-discovery path policy as `/api/fs/list`, including targets outside the active workspace. A directory returns `{ isDirectory: true }`; `ENOENT` returns `not-found`, and a file or `ENOTDIR` returns `not-directory`. Permission and other failures remain distinct from a missing path. VS Code explicitly returns 501, so the shared client treats its probe as unknown.
 - Read-only routes authorize the requested path against the workspace before resolving symlinks. A symlink reached through the workspace may therefore target a file outside it, while a directly requested outside path still requires an exact-path grant. Write routes keep canonical-target boundary checks.
 - If adding new `/api/fs/*` endpoints, add them in `routes.js` and extend this document.
 - `GET /api/fs/list` may resolve symlinks with `realpath` to read directory contents, but the response `path` and each entry `path` must stay in the caller's requested path space (`path.join(requestedPath, name)`). Returning real paths breaks file-tree expansion for directories reached through workspace symlinks.

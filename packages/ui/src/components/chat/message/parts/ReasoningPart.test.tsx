@@ -1,13 +1,54 @@
 import React, { act } from 'react';
 import { describe, expect, test } from 'bun:test';
+import { plugin } from 'bun';
+import { pathToFileURL } from 'node:url';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
-import type { Part } from '@opencode-ai/sdk/v2';
+import { createOpencodeClient, type Part } from '@opencode-ai/sdk/v2';
+import { SyncProvider } from '@/sync/sync-context';
+
+import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
+import type { RuntimeAPIs } from '@/lib/api/types';
 
 import { I18nProvider } from '@/lib/i18n';
 import ReasoningPart, { ReasoningTimelineBlock } from './ReasoningPart';
 import type { StreamPhase } from '../types';
+
+// Bun does not implement Vite's asset-query imports. Preserve the real asset
+// URL while keeping the renderer and worker client modules unchanged.
+plugin({
+  name: 'reasoning-worker-url',
+  setup(build) {
+    build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, ({ path }) => ({
+      contents: `export default ${JSON.stringify(pathToFileURL(path.split('?')[0]).href)};`,
+      loader: 'js',
+    }));
+  },
+});
+
+const unavailable = (): never => { throw new Error('Reasoning scrolling must not call runtime APIs'); };
+const runtimeApis: RuntimeAPIs = {
+  runtime: { platform: 'web', isDesktop: false, isVSCode: false },
+  get terminal() { return unavailable(); },
+  get git() { return unavailable(); },
+  get files() { return unavailable(); },
+  get settings() { return unavailable(); },
+  get permissions() { return unavailable(); },
+  get notifications() { return unavailable(); },
+  get tools() { return unavailable(); },
+};
+const sdk = createOpencodeClient({
+  baseUrl: 'http://localhost',
+  fetch: async () => new Response('[]', { headers: { 'Content-Type': 'application/json' } }),
+});
+const TestProviders = ({ children }: { children: React.ReactNode }) => (
+  <RuntimeAPIContext.Provider value={runtimeApis}>
+    <SyncProvider sdk={sdk} directory="">
+      <I18nProvider>{children}</I18nProvider>
+    </SyncProvider>
+  </RuntimeAPIContext.Provider>
+);
 
 type ReasoningPartFixture = Extract<Part, { type: 'reasoning' }>;
 
@@ -22,9 +63,18 @@ const DOM_GLOBAL_NAMES = [
   'window',
   'document',
   'navigator',
+  'localStorage',
+  'customElements',
   'Node',
+  'NodeList',
   'Element',
   'HTMLElement',
+  'SVGElement',
+  'requestAnimationFrame',
+  'cancelAnimationFrame',
+  'getComputedStyle',
+  'ResizeObserver',
+  'MutationObserver',
   'IS_REACT_ACT_ENVIRONMENT',
 ] as const;
 
@@ -33,13 +83,40 @@ const installDomStub = () => {
   const previous = DOM_GLOBAL_NAMES.map(
     (name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const,
   );
+  const observers: ResizeObserverStub[] = [];
+  class ResizeObserverStub implements ResizeObserver {
+    readonly targets = new Set<Element>();
+    disconnectCount = 0;
+
+    constructor(private readonly callback: ResizeObserverCallback) {
+      observers.push(this);
+    }
+    observe(target: Element) { this.targets.add(target); }
+    unobserve(target: Element) { this.targets.delete(target); }
+    disconnect() {
+      this.disconnectCount += 1;
+      this.targets.clear();
+    }
+    notify() {
+      if (this.targets.size > 0) this.callback([], this);
+    }
+  }
   const values = {
     window: happyWindow,
     document: happyWindow.document,
     navigator: happyWindow.navigator,
+    localStorage: happyWindow.localStorage,
+    customElements: happyWindow.customElements,
     Node: happyWindow.Node,
+    NodeList: happyWindow.NodeList,
     Element: happyWindow.Element,
     HTMLElement: happyWindow.HTMLElement,
+    SVGElement: happyWindow.SVGElement,
+    requestAnimationFrame: happyWindow.requestAnimationFrame.bind(happyWindow),
+    cancelAnimationFrame: happyWindow.cancelAnimationFrame.bind(happyWindow),
+    getComputedStyle: happyWindow.getComputedStyle.bind(happyWindow),
+    ResizeObserver: ResizeObserverStub,
+    MutationObserver: happyWindow.MutationObserver,
     IS_REACT_ACT_ENVIRONMENT: true,
   };
   for (const name of DOM_GLOBAL_NAMES) {
@@ -53,6 +130,7 @@ const installDomStub = () => {
 
   return {
     container,
+    observers,
     restore: () => {
       for (const [name, descriptor] of previous) {
         if (descriptor) Object.defineProperty(globalThis, name, descriptor);
@@ -78,14 +156,14 @@ const LONG_JUSTIFICATION =
 describe('ReasoningTimelineBlock', () => {
   test('renders reasoning traces behind an accessible collapsed disclosure by default', () => {
     const markup = renderToStaticMarkup(
-      <I18nProvider>
+      <TestProviders>
         <ReasoningTimelineBlock
           text={LONG_REASONING}
           variant="thinking"
           blockId="reasoning-test"
           showDuration={false}
         />
-      </I18nProvider>,
+      </TestProviders>,
     );
 
     // Accessible toggle row is rendered
@@ -103,7 +181,7 @@ describe('ReasoningTimelineBlock', () => {
 
   test('renders "Justification" label for justification variant when pre-expanded and not streaming', () => {
     const markup = renderToStaticMarkup(
-      <I18nProvider>
+      <TestProviders>
         <ReasoningTimelineBlock
           text={LONG_JUSTIFICATION}
           variant="justification"
@@ -111,7 +189,7 @@ describe('ReasoningTimelineBlock', () => {
           showDuration={false}
           defaultExpanded={true}
         />
-      </I18nProvider>,
+      </TestProviders>,
     );
 
     // Label shown in expanded header should be "Justification" not "Thinking"
@@ -121,7 +199,7 @@ describe('ReasoningTimelineBlock', () => {
 
   test('renders "Thinking" label for thinking variant when pre-expanded and not streaming', () => {
     const markup = renderToStaticMarkup(
-      <I18nProvider>
+      <TestProviders>
         <ReasoningTimelineBlock
           text={LONG_REASONING}
           variant="thinking"
@@ -129,7 +207,7 @@ describe('ReasoningTimelineBlock', () => {
           showDuration={false}
           defaultExpanded={true}
         />
-      </I18nProvider>,
+      </TestProviders>,
     );
 
     // Label shown in expanded header should be "Thinking"
@@ -138,14 +216,14 @@ describe('ReasoningTimelineBlock', () => {
 
   test('header summary is a truncated excerpt from the beginning', () => {
     const markup = renderToStaticMarkup(
-      <I18nProvider>
+      <TestProviders>
         <ReasoningTimelineBlock
           text={LONG_REASONING}
           variant="thinking"
           blockId="reasoning-test"
           showDuration={false}
         />
-      </I18nProvider>,
+      </TestProviders>,
     );
 
     // Deep body content beyond 120 chars should be cut from the summary span
@@ -156,14 +234,14 @@ describe('ReasoningTimelineBlock', () => {
 
   test('omits trailing empty HTML comments from the header summary', () => {
     const markup = renderToStaticMarkup(
-      <I18nProvider>
+      <TestProviders>
         <ReasoningTimelineBlock
           text={'Planning accessible icon labels with translations <!-- -->'}
           variant="thinking"
           blockId="reasoning-comment-test"
           showDuration={false}
         />
-      </I18nProvider>,
+      </TestProviders>,
     );
 
     expect(markup).toContain('Planning accessible icon labels with translations');
@@ -198,9 +276,9 @@ describe('ReasoningPart streaming gating (issue #2020)', () => {
   // reachable and the issue reproduces.
   const renderPart = (part: ReasoningPartFixture, streamPhase?: StreamPhase): string =>
     renderToStaticMarkup(
-      <I18nProvider>
+      <TestProviders>
         <ReasoningPart part={part} messageId="msg_2020" streamPhase={streamPhase} />
-      </I18nProvider>,
+      </TestProviders>,
     );
 
   test('reasoning without time.end and without a live stream phase renders complete, not streaming', () => {
@@ -239,6 +317,16 @@ describe('ReasoningPart streaming gating (issue #2020)', () => {
     expect(markup).toContain('aria-expanded="true"');
   });
 
+  test('streaming reasoning stays inside the capped nested scroll box', () => {
+    // The box is capped while streaming too, so a long thought scrolls inside
+    // its own box instead of growing the timeline; it is marked as a nested
+    // scroller so an upward wheel over it scrolls the box before the chat.
+    const markup = renderPart(makeReasoningPart({ start: 1_000 }), 'streaming');
+
+    expect(markup).toContain('max-h-80');
+    expect(markup).toContain('data-scrollable="true"');
+  });
+
   test('a live part with no committed text yet shows the busy header and no empty summary', () => {
     // The streaming early-return keeps the block mounted before the block-level
     // reveal commits a first line. The header must read as busy and must not
@@ -266,7 +354,7 @@ describe('ReasoningPart streaming gating (issue #2020)', () => {
 
     const renderTree = () =>
       React.createElement(
-        I18nProvider,
+        TestProviders,
         null,
         React.createElement(ReasoningPart, { part, messageId: 'msg_2020', streamPhase: undefined }),
       );
@@ -292,6 +380,69 @@ describe('ReasoningPart streaming gating (issue #2020)', () => {
       await act(async () => {
         root.unmount();
       });
+      dom.restore();
+    }
+  });
+});
+
+describe('ReasoningTimelineBlock live follow', () => {
+  test('scrollbar scrolling releases live follow and returning to the bottom resumes it', async () => {
+    const dom = installDomStub();
+    const root = createRoot(dom.container);
+    const renderBlock = (isStreaming: boolean) => (
+      <TestProviders>
+        <ReasoningTimelineBlock
+          text="Working through the task step by step."
+          variant="thinking"
+          blockId="reasoning-follow"
+          defaultExpanded
+          isStreaming={isStreaming}
+          showDuration={false}
+        />
+      </TestProviders>
+    );
+
+    try {
+      await act(async () => { root.render(renderBlock(true)); });
+      const scroller = dom.container.querySelector<HTMLElement>('[data-scrollable="true"]');
+      if (!scroller) throw new Error('Expected the mounted reasoning scroll box');
+      const body = scroller.firstElementChild;
+      const followObserver = dom.observers.find((observer) => observer.targets.size === 1 && body && observer.targets.has(body));
+      if (!followObserver) throw new Error('Expected an observer of the reasoning body');
+
+      let contentHeight = 800;
+      Object.defineProperties(scroller, {
+        clientHeight: { configurable: true, value: 320 },
+        scrollHeight: { configurable: true, get: () => contentHeight },
+      });
+      await act(async () => { followObserver.notify(); });
+      expect(scroller.scrollTop).toBe(480);
+
+      // A scrollbar drag emits scroll, without a wheel or touch event.
+      await act(async () => {
+        scroller.scrollTop = 120;
+        scroller.dispatchEvent(new window.Event('scroll'));
+      });
+      contentHeight = 1000;
+      await act(async () => { followObserver.notify(); });
+      expect(scroller.scrollTop).toBe(120);
+
+      await act(async () => {
+        scroller.scrollTop = 680;
+        scroller.dispatchEvent(new window.Event('scroll'));
+      });
+      contentHeight = 1200;
+      await act(async () => { followObserver.notify(); });
+      expect(scroller.scrollTop).toBe(880);
+
+      await act(async () => { root.render(renderBlock(false)); });
+      expect(followObserver.disconnectCount).toBe(1);
+      expect(followObserver.targets.size).toBe(0);
+      contentHeight = 1400;
+      await act(async () => { followObserver.notify(); });
+      expect(scroller.scrollTop).toBe(880);
+    } finally {
+      await act(async () => { root.unmount(); });
       dom.restore();
     }
   });

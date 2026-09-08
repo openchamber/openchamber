@@ -22,10 +22,12 @@ import type {
   GitHubChecksSummary,
 } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { useDeviceInfo } from '@/lib/device';
 
 type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;
 
 interface GitHeaderProps {
+  directory: string;
   status: GitStatus | null;
   localBranches: string[];
   remoteBranches: string[];
@@ -240,6 +242,7 @@ const UpstreamStatusPill: React.FC<UpstreamStatusPillProps> = ({
 };
 
 export const GitHeader: React.FC<GitHeaderProps> = ({
+  directory,
   status,
   localBranches,
   remoteBranches,
@@ -272,6 +275,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   repositoryRoot,
 }) => {
   const { t } = useI18n();
+  const { isMobile } = useDeviceInfo();
   if (!status) {
     return null;
   }
@@ -425,20 +429,23 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
     <header className="@container/git-header px-3 py-2 bg-transparent">
       <div className="flex items-center justify-between gap-2 min-w-0">
         <div className="flex min-w-0 flex-1 items-center gap-1">
-          {isWorktreeMode ? (
+          {isWorktreeMode && !isMobile ? (
             <WorktreeBranchDisplay
               currentBranch={status.current}
               onRename={onRenameBranch}
             />
           ) : (
             <BranchSelector
+              directory={directory}
               currentBranch={status.current}
               localBranches={localBranches}
               remoteBranches={remoteBranches}
               branchInfo={branchInfo}
+              currentBranchAhead={status.ahead}
               onCheckout={onCheckoutBranch}
               onCreate={onCreateBranch}
               remotes={remotes}
+              switchBlockedNotice={(status.files?.length ?? 0) > 0 ? t('gitView.branch.switchBlockedNotice') : null}
             />
           )}
           {repositoryOptionsForPicker.length > 0 && onSelectRepository ? (

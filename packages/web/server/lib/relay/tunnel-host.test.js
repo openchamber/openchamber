@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import http from 'node:http';
 
-import { createTunnelHost } from './tunnel-host.js';
+import { createTunnelHost, isAllowedRelayWebSocketPath } from './tunnel-host.js';
 import { decodeTunnelFrame, encodeTunnelFrame, encodeJsonPayload, TunnelFrameType } from './tunnel-codec.js';
 
 const startLoopback = () =>
@@ -143,5 +143,13 @@ describe('tunnel-host HTTP body forwarding', () => {
     expect(received).toBe(true);
     expect(loopback.requests[0].method).toBe('GET');
     await loopback.stop();
+  });
+});
+
+describe('relay host WebSocket allowlist', () => {
+  test('allows only the exact dev-server tunnel path', () => {
+    expect(isAllowedRelayWebSocketPath('/api/dev-tunnel')).toBe(true);
+    expect(isAllowedRelayWebSocketPath('/api/dev-tunnel/')).toBe(false);
+    expect(isAllowedRelayWebSocketPath('/api/database/ws')).toBe(false);
   });
 });

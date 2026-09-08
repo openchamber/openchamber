@@ -322,9 +322,21 @@ function DropdownMenuSubTrigger({
 function DropdownMenuSubContent({
   className,
   children,
+  onKeyDown,
   ...props
 }: React.ComponentProps<typeof BaseMenu.Popup>) {
   const portalContext = React.useContext(DropdownPortalContext);
+  const handleKeyDown: NonNullable<React.ComponentProps<typeof BaseMenu.Popup>['onKeyDown']> = (event) => {
+    onKeyDown?.(event);
+    handleDropdownNavigationKey(event, (navigationKey) => {
+      event.currentTarget.dispatchEvent(new KeyboardEvent('keydown', {
+        key: navigationKey,
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+  };
+
   return (
     <BaseMenu.Portal container={portalContext?.portalContainer || undefined}>
       <BaseMenu.Positioner className="z-50">
@@ -338,6 +350,7 @@ function DropdownMenuSubContent({
             className
           )}
           {...props}
+          onKeyDown={handleKeyDown}
         >
           {children}
         </BaseMenu.Popup>

@@ -3,7 +3,7 @@ import { isDesktopShell, requestFileAccess, startDesktopWindowDrag } from '@/lib
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
-import { updateDesktopSettings } from '@/lib/persistence';
+import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { restartDesktopApp } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
@@ -99,11 +99,9 @@ export function LocalSetupScreen({
     let cancelled = false;
     void (async () => {
       try {
-        const response = await runtimeFetch('/api/config/settings', { method: 'GET', headers: { Accept: 'application/json' } });
-        if (!response.ok) return;
-        const data = (await response.json().catch(() => null)) as null | { opencodeBinary?: unknown };
+        const data = await loadDesktopSettings();
         if (!data || cancelled) return;
-        const value = typeof data.opencodeBinary === 'string' ? data.opencodeBinary.trim() : '';
+        const value = data.opencodeBinary ?? '';
         if (value) {
           setOpencodeBinary(value);
         }

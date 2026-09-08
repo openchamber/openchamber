@@ -3,8 +3,11 @@ import type { Part } from '@opencode-ai/sdk/v2';
 import { LegendList, type LegendListRef } from '@legendapp/list/react';
 
 import ChatMessage from './ChatMessage';
+import { filterVisibleParts, isEmptyTextPart } from './message/partUtils';
 import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual, areRenderRelevantMessagesEqual } from './message/renderCompare';
 import TurnItem from './components/TurnItem';
+import { LiveTurnActivity } from './components/LiveTurnActivity';
+import { getTurnsWithLaterAssistant, hasLiveActivity } from './lib/turns/liveActivity';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
 import { useTurnRecords } from './hooks/useTurnRecords';
 import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
@@ -20,7 +23,7 @@ import type { StreamPhase } from './message/types';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionPartsForMessages } from '@/sync/sync-context';
 import type { ReviewTransferDirection } from '@/lib/reviewFlow';
-import { resolveChatListAnchoredEndSpace, resolveTimelineIsAtEnd } from './lib/scroll/timelineScrollAnchoring';
+import { resolveTimelineIsAtEnd } from './lib/scroll/timelineScrollAnchoring';
 import {
     USER_SHELL_MARKER,
     isUserShellMarkerMessage,
@@ -43,8 +46,6 @@ const EMPTY_UNGROUPED_MESSAGE_IDS = new Set<string>();
 //   • `maintainVisibleContentPosition` preserves the read position when older
 //     history is prepended, replacing the manual anchor-hold and the mobile
 //     quiet-window prepend deferral.
-//   • `anchoredEndSpace` reserves the tail space that parks a just-sent
-//     message near the top of the viewport.
 const TIMELINE_ESTIMATED_ENTRY_SIZE = 320;
 
 // Anchor hold for an explicit viewport restore (session re-entry): row
@@ -54,9 +55,6 @@ const TIMELINE_ESTIMATED_ENTRY_SIZE = 320;
 const ANCHOR_HOLD_STABLE_FRAMES = 30;
 const ANCHOR_HOLD_MAX_FRAMES = 180;
 
-// Reserved tail space that parks an anchored row near the top of the viewport.
-// `onReady` fires once the list has measured the anchor, `onSizeChanged` when
-// the reserved size is recomputed.
 // Presentation-only props forwarded to the scroll container the list renders.
 // Deliberately narrow: the list owns scroll and layout callbacks on that
 // element, so only styling, focus and click-through are caller-controlled.
@@ -67,13 +65,6 @@ type TimelineScrollContainerProps = {
     onClick?: React.MouseEventHandler<HTMLDivElement>;
     'data-scrollbar'?: string;
     'data-scroll-shadow'?: string;
-};
-
-type TimelineAnchoredEndSpace = {
-    anchorIndex: number;
-    anchorOffset?: number;
-    onReady?: (info: { anchorIndex: number | undefined; anchorKey: string | undefined; size: number }) => void;
-    onSizeChanged?: (size: number) => void;
 };
 
 const useStableEvent = <TArgs extends unknown[], TResult>(handler: (...args: TArgs) => TResult) => {
@@ -324,13 +315,9 @@ interface MessageListProps {
     // True while a real gesture owns the scroll; releases the list's own
     // end pinning so the state machine, not the library heuristic, decides.
     endPinningReleased?: boolean;
-    // The anchored row is identified by message id; the index it maps to is a
-    // property of the row model, which only this component knows.
-    anchorMessageId?: string | null;
-    onAnchorReady?: (messageId: string, anchorIndex: number) => void;
-    onAnchorSizeChanged?: (messageId: string) => void;
     composerOverlayHeight?: number;
     onIsAtEndChange?: (isAtEnd: boolean) => void;
+    onListMetricsChange?: (metrics: { readonly footerSize: number }) => void;
     onTimelineDataChange?: () => void;
     // Content that used to sit as siblings of the list inside the scroll
     // container. The list owns that container now, so they render as its
@@ -358,9 +345,10 @@ type RenderEntry =
         previousMessage?: ChatMessageEntry;
         nextMessage?: ChatMessageEntry;
     }
-    | { kind: 'turn'; key: string; turn: TurnRecord; isLastTurn: boolean; nextEntryFirstMessage?: ChatMessageEntry };
+    | { kind: 'turn'; key: string; turn: TurnRecord; isLastTurn: boolean; hasLaterAssistant?: boolean; nextEntryFirstMessage?: ChatMessageEntry };
 
-type TurnUiState = { isExpanded: boolean };
+type TurnUiState = { isExpanded: boolean; isLiveExpanded?: boolean };
+type ToggleTurnGroup = (turnId: string, mode?: 'sorted' | 'live') => void;
 
 
 
@@ -427,12 +415,13 @@ MessageRow.displayName = 'MessageRow';
 
 interface TurnBlockProps {
     turn: TurnRecord;
+    hasLaterAssistant?: boolean;
     isLastTurn: boolean;
     nextEntryFirstMessage?: ChatMessageEntry;
     sessionIsWorking: boolean;
     defaultActivityExpanded: boolean;
     turnUiStates: Map<string, TurnUiState>;
-    onToggleTurnGroup: (turnId: string) => void;
+    onToggleTurnGroup: ToggleTurnGroup;
     chatRenderMode: 'sorted' | 'live';
     scrollToBottom?: () => void;
     stickyUserHeader?: boolean;
@@ -445,6 +434,7 @@ interface TurnBlockProps {
 
 const TurnBlock = React.memo(({
     turn,
+    hasLaterAssistant = false,
     isLastTurn,
     nextEntryFirstMessage,
     sessionIsWorking,
@@ -462,6 +452,7 @@ const TurnBlock = React.memo(({
 }: TurnBlockProps) => {
 
     const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
+    const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
     const userMessageHidden = React.useMemo(
         () => isHiddenUserMessage(turn.userMessage, { planModeEnabled }),
         [planModeEnabled, turn.userMessage]
@@ -469,6 +460,9 @@ const TurnBlock = React.memo(({
     const turnUiState = turnUiStates.get(turn.turnId) ?? { isExpanded: defaultActivityExpanded };
     const handleToggleTurnGroup = React.useCallback(() => {
         onToggleTurnGroup(turn.turnId);
+    }, [onToggleTurnGroup, turn.turnId]);
+    const handleToggleLiveActivity = React.useCallback(() => {
+        onToggleTurnGroup(turn.turnId, 'live');
     }, [onToggleTurnGroup, turn.turnId]);
 
     const messageOrder = React.useMemo(() => {
@@ -653,6 +647,9 @@ const TurnBlock = React.memo(({
                     activityOwnerMessageId,
                     isFirstAssistantInTurn: isFirstAssistant,
                     isLastAssistantInTurn: isLastAssistant,
+                    hasEarlierAssistantText: chatRenderMode === 'live' && isLastAssistant && visibleAssistantMessages.some((assistant, index) => (
+                        index < assistantIndex && filterVisibleParts(assistant.parts).some((part) => part.type === 'text' && !isEmptyTextPart(part))
+                    )),
                     isLatestTurn: isLastTurn,
                     isWorking: isLastTurn && sessionIsWorking && (
                         chatRenderMode === 'sorted'
@@ -736,6 +733,15 @@ const TurnBlock = React.memo(({
             turn={renderableTurn}
             stickyUserHeader={stickyUserHeader && !userMessageHidden}
             renderMessage={renderMessage}
+            assistantContent={chatRenderMode === 'live' && !defaultActivityExpanded && hasLiveActivity(turn, showReasoningTraces) ? (
+                <LiveTurnActivity
+                    turn={renderableTurn}
+                    hasLaterAssistant={hasLaterAssistant}
+                    expanded={turnUiState.isLiveExpanded === true}
+                    onToggle={handleToggleLiveActivity}
+                    renderMessage={renderMessage}
+                />
+            ) : undefined}
         />
     );
 });
@@ -789,7 +795,7 @@ interface MessageListEntryProps {
     sessionIsWorking: boolean;
     defaultActivityExpanded: boolean;
     turnUiStates: Map<string, TurnUiState>;
-    onToggleTurnGroup: (turnId: string) => void;
+    onToggleTurnGroup: ToggleTurnGroup;
     chatRenderMode: 'sorted' | 'live';
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
@@ -845,6 +851,7 @@ const MessageListEntry = React.memo(({
     return (
         <TurnBlock
             turn={entry.turn}
+            hasLaterAssistant={entry.hasLaterAssistant}
             isLastTurn={entry.isLastTurn}
             nextEntryFirstMessage={entry.nextEntryFirstMessage}
             sessionIsWorking={sessionIsWorking}
@@ -873,7 +880,7 @@ type TimelineRowContextValue = {
     stickyUserHeader: boolean;
     defaultActivityExpanded: boolean;
     turnUiStates: Map<string, TurnUiState>;
-    onToggleTurnGroup: (turnId: string) => void;
+    onToggleTurnGroup: ToggleTurnGroup;
     chatRenderMode: 'sorted' | 'live';
     showTurnChangedFiles: boolean;
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
@@ -951,14 +958,9 @@ type TimelineListProps = {
     streamingTailKey: string | null;
     registerList: (list: LegendListRef | null) => void;
     endPinningReleased: boolean;
-    anchoredEndSpace?: {
-        anchorIndex: number;
-        anchorOffset?: number;
-        onReady?: (info: { anchorIndex: number | undefined; anchorKey: string | undefined; size: number }) => void;
-        onSizeChanged?: (size: number) => void;
-    };
     composerOverlayHeight: number;
     onIsAtEndChange: (isAtEnd: boolean) => void;
+    onListMetricsChange: (metrics: { readonly footerSize: number }) => void;
     onTimelineDataChange: () => void;
     listHeader?: React.ReactNode;
     listFooter?: React.ReactNode;
@@ -970,9 +972,9 @@ const TimelineList = React.memo(({
     entries,
     registerList,
     endPinningReleased,
-    anchoredEndSpace,
     composerOverlayHeight,
     onIsAtEndChange,
+    onListMetricsChange,
     onTimelineDataChange,
     listHeader,
     listFooter,
@@ -1064,33 +1066,31 @@ const TimelineList = React.memo(({
                 // animations); recycling a container into a different row would
                 // carry that state across.
                 recycleItems={false}
-                {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
                 contentInsetEndAdjustment={composerOverlayHeight}
-                // While a turn is anchored, the reserved end space — not the
-                // live edge — defines where the viewport rests.
-                // Also released while the width resizes: re-pinning against
-                // rows that are still re-measuring shakes the pinned
-                // viewport; once the resize settles the owning hook
-                // re-asserts the end for a streaming session and releases
-                // the pin for an idle one.
-                maintainScrollAtEnd={anchoredEndSpace || !streamingAutoFollowEnabled || isWidthResizing || endPinningReleased
+                // Live only while the session streams: outside a stream the
+                // owning hook keeps a pinned reader on the end with same-frame
+                // writes, and the list's own correction runs a frame later
+                // against a content length that can still be stale (a
+                // re-wrap, a late measurement) — that is the visible bounce
+                // an idle reader saw on every panel toggle. Also off while the
+                // width resizes, where the hook holds the measured end itself.
+                maintainScrollAtEnd={!streamingAutoFollowEnabled || !rowContext.sessionIsWorking || isWidthResizing || endPinningReleased
                     ? false
-                    // Animated only while the session actively streams: there
-                    // the block-step growth turns each correction into a glide
-                    // and reveal + scroll read as one motion. Outside of a live
-                    // stream — opening a historical session, late measurements —
-                    // corrections must be instant: an animated catch-up scrolls
-                    // visibly through the whole conversation on open, and an
-                    // in-flight glide can supersede explicit navigation.
+                    // Animated: the block-step growth turns each correction
+                    // into a glide and reveal + scroll read as one motion.
                     : {
-                        animated: rowContext.sessionIsWorking,
+                        animated: true,
                         on: { dataChange: true, itemLayout: true, layout: true, footerLayout: true },
                     }}
                 // Prepending older history must not move what the user is
                 // reading. Size restoration applies only during a width
-                // resize — see the observer above.
-                maintainVisibleContentPosition={{ data: true, size: isWidthResizing }}
+                // resize (see the observer above) and only for a reader who
+                // left the end: a pinned reader is held on the end by the
+                // owning hook, and compensating the rows above them would pull
+                // the viewport away from it.
+                maintainVisibleContentPosition={{ data: true, size: isWidthResizing && endPinningReleased }}
                 onScroll={handleScroll}
+                onMetricsChange={onListMetricsChange}
                 ListHeaderComponent={header}
                 ListFooterComponent={footer}
                 {...scrollContainerProps}
@@ -1109,7 +1109,7 @@ const StreamingTailContent: React.FC<{
     sessionIsWorking: boolean;
     defaultActivityExpanded: boolean;
     turnUiStates: Map<string, TurnUiState>;
-    onToggleTurnGroup: (turnId: string) => void;
+    onToggleTurnGroup: ToggleTurnGroup;
     chatRenderMode: 'sorted' | 'live';
     showTurnChangedFiles: boolean;
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
@@ -1183,11 +1183,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     directory,
     registerList,
     endPinningReleased = false,
-    anchorMessageId = null,
-    onAnchorReady,
-    onAnchorSizeChanged,
     composerOverlayHeight = 0,
     onIsAtEndChange,
+    onListMetricsChange,
     onTimelineDataChange,
     listHeader,
     listFooter,
@@ -1215,13 +1213,15 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
     React.useEffect(() => {
         setTurnUiStates(new Map());
-    }, [activityRenderMode]);
+    }, [activityRenderMode, sessionKey]);
 
-    const toggleTurnGroup = React.useCallback((turnId: string) => {
+    const toggleTurnGroup = React.useCallback((turnId: string, mode: 'sorted' | 'live' = 'sorted') => {
         setTurnUiStates((previous) => {
             const next = new Map(previous);
             const current = next.get(turnId) ?? { isExpanded: defaultActivityExpanded };
-            next.set(turnId, { isExpanded: !current.isExpanded });
+            next.set(turnId, mode === 'live'
+                ? { ...current, isLiveExpanded: !current.isLiveExpanded }
+                : { ...current, isExpanded: !current.isExpanded });
             return next;
         });
     }, [defaultActivityExpanded]);
@@ -1314,6 +1314,15 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         planModeEnabled,
     });
     const hasUngroupedStaticEntries = projection.ungroupedMessageIds.size > 0;
+    const tailHasAssistant = Boolean(streamingTurn?.assistantMessages.length);
+    const turnsWithLaterAssistant = React.useMemo(() => {
+        if (chatRenderMode !== 'live' || defaultActivityExpanded) return new Set<string>();
+        const retired = getTurnsWithLaterAssistant(staticTurns);
+        if (tailHasAssistant) {
+            for (const turn of staticTurns) retired.add(turn.turnId);
+        }
+        return retired;
+    }, [chatRenderMode, defaultActivityExpanded, staticTurns, tailHasAssistant]);
     const staticEntryMessages = hasUngroupedStaticEntries ? displayMessages : EMPTY_STATIC_ENTRY_MESSAGES;
     const staticEntryUngroupedIds = hasUngroupedStaticEntries ? projection.ungroupedMessageIds : EMPTY_UNGROUPED_MESSAGE_IDS;
     const staticRenderEntries = React.useMemo<RenderEntry[]>(() => streamPerfMeasure('ui.message_list.render_entries_ms', () => {
@@ -1322,6 +1331,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             key: `turn:${turn.turnId}`,
             turn,
             isLastTurn: turn.turnId === projection.lastTurnId,
+            hasLaterAssistant: turnsWithLaterAssistant.has(turn.turnId),
         }));
 
         if (staticEntryUngroupedIds.size === 0) {
@@ -1355,7 +1365,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         });
 
         return orderedEntries;
-    }), [projection.lastTurnId, staticEntryMessages, staticEntryUngroupedIds, staticTurns]);
+    }), [projection.lastTurnId, staticEntryMessages, staticEntryUngroupedIds, staticTurns, turnsWithLaterAssistant]);
 
     const trailingStreamingEntry = React.useMemo<RenderEntry | undefined>(() => {
         if (streamingTurn) {
@@ -1433,6 +1443,10 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
     const stableTimelineDataChange = useStableEvent(() => {
         onTimelineDataChange?.();
+    });
+
+    const stableListMetricsChange = useStableEvent((metrics: { readonly footerSize: number }) => {
+        onListMetricsChange?.(metrics);
     });
 
     const currentUserOrder = React.useMemo(() => {
@@ -1793,27 +1807,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         };
     }, [findMessageElement, historyEntries.length, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, settleNavigationTarget, turnIndexMap, ref]);
 
-    const anchoredEndSpace = React.useMemo<TimelineAnchoredEndSpace | undefined>(() => {
-        const resolved = resolveChatListAnchoredEndSpace(
-            allEntries,
-            anchorMessageId,
-            (entry) => (entry.kind === 'turn' ? entry.turn.userMessage.info.id : entry.message.info.id),
-        );
-        if (!resolved || !anchorMessageId) {
-            return undefined;
-        }
-        return {
-            ...resolved,
-            onReady: (info) => {
-                if (info.anchorIndex === undefined) return;
-                onAnchorReady?.(anchorMessageId, info.anchorIndex);
-            },
-            onSizeChanged: () => {
-                onAnchorSizeChanged?.(anchorMessageId);
-            },
-        };
-    }, [allEntries, anchorMessageId, onAnchorReady, onAnchorSizeChanged]);
-
     const rowContext = React.useMemo(() => ({
         scrollToBottom: stableScrollToBottom,
         stickyUserHeader,
@@ -1859,9 +1852,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 entries={allEntries}
                 streamingTailKey={trailingStreamingEntry?.key ?? null}
                 registerList={handleRegisterList}
-                anchoredEndSpace={anchoredEndSpace}
                 composerOverlayHeight={composerOverlayHeight}
                 onIsAtEndChange={stableIsAtEndChange}
+                onListMetricsChange={stableListMetricsChange}
                 onTimelineDataChange={stableTimelineDataChange}
                 listHeader={listHeader}
                 listFooter={listFooter}

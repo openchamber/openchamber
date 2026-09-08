@@ -9,9 +9,10 @@ The managed Chats root (`~/.config/openchamber/chats`) is also one context owner
 
 | Path | Owner | Contents |
 |---|---|---|
-| `<projectsDir>/<projectId>.json` | shared UI (`packages/ui/src/lib/openchamberConfig.ts`), plus server-owned `version` / `scheduledTasks` | worktree setup, draft starters, project actions |
+| `<projectsDir>/<projectId>.json` | `packages/web/server/lib/projects` (`project-setup.js` for the client-owned keys behind `/api/projects/:projectId/config`; `project-config.js` for `version` / `scheduledTasks`), one write lock for both | worktree setup, draft starters, project actions, scheduled tasks |
 | `<projectsDir>/<projectId>/context.json` | **this module, exclusively** | notes, todos, plan manifest |
 | `<projectsDir>/<projectId>/plans/*.md` | **this module, exclusively** | plan bodies |
+| `<repo>/<plansDir>/*.md` | this module (read, edit, delete, move) when the team config names a `plansDir`; the folder is the team's, any tool may write there | shared plan bodies |
 
 The split is the point. Both files were previously one, written by the client
 with a whole-file read-modify-write. Adding a server writer to that file would
@@ -58,6 +59,27 @@ denormalized into the manifest so listing plans costs one read rather than one
 read per plan; `readPlan` returns the title parsed from the file, which wins if
 the two ever disagree.
 
+## Shared plans
+
+Every `.md` file in the repository plans folder is a plan too: `.openchamber/plans`
+by default, or the `plansDir` the team config (`<repo>/.openchamber/project.json`,
+see `packages/web/server/lib/projects`) names instead of it (the custom folder
+replaces the default outright; moving files between the two is the user's job). `readContext` appends them after the personal ones,
+each marked `source: "shared"` (personal ones get `source: "personal"`), and
+reports the folder as `sharedPlansDir`. A shared plan is addressed as
+`shared:<file>` when no manifest entry claims it; its title is parsed from the
+file on every list, and `readPlan` / `updatePlan` / `deletePlan` work on the
+file directly (an update writes the raw document verbatim, so a plan another
+tool wrote keeps its shape). `setPlanPinned` is `404` for such a plan.
+
+A plan the user moves there keeps its id: `sharePlan` moves the markdown into
+the folder and keeps the manifest entry with `shared: true` (the flag says
+which folder holds the file), so a session that attached the plan still finds
+it, and the file is listed under that id instead of `shared:<file>`.
+`unsharePlan` moves it back and clears the flag; a plan that only ever lived
+in the team's folder gets a manifest entry (and an id) on the way in. A name
+collision gets a numeric suffix. Sharing is refused only when the checkout cannot be located.
+
 ## Routes
 
 | Method | Route | Notes |
@@ -72,6 +94,8 @@ the two ever disagree.
 | POST | `/api/project-context/:projectId/plans` | `201`; takes `{title, body}`, never a path |
 | PUT | `/api/project-context/:projectId/plans/:planId` | takes the whole `{raw}` document; `404` when the link or its markdown is gone |
 | DELETE | `/api/project-context/:projectId/plans/:planId` | `404` when unknown |
+| POST | `/api/project-context/:projectId/plans/:planId/share` | moves the plan into the shared folder; `400` without one, `404` when unknown |
+| POST | `/api/project-context/:projectId/plans/:planId/unshare` | moves a `shared:` plan back; `404` when unknown |
 
 **Body parsing is attached per route.** This server has no global JSON parser:
 `core-routes` parses only an allowlist of `/api` path prefixes so the generic

@@ -6,6 +6,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { MiniChatLayout } from '@/components/mini-chat/MiniChatLayout';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
+import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useRootScrollLock } from '@/hooks/useRootScrollLock';
@@ -329,6 +330,7 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
             <div className="h-full text-foreground bg-background">
               <ElectronMiniChatContent config={config} />
               <AppLinkConfirmDialog />
+              <SharedTrustConfirmDialog />
               <Toaster />
             </div>
           </TooltipProvider>

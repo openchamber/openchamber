@@ -483,6 +483,29 @@ describe('callSmallModel — custom provider config', () => {
   });
 
   describe('catalog-based base URL (no config override)', () => {
+    it('identifies OpenCode Go requests with the owning conversation', async () => {
+      readConfig.mockReturnValue({});
+      fetchMock.mockResolvedValue(ok('ok'));
+
+      await callSmallModel({
+        auth: { 'opencode-go': { type: 'api', key: 'go-key' } },
+        catalog: {
+          'opencode-go': {
+            id: 'opencode-go',
+            api: 'https://opencode.ai/zen/go/v1',
+            models: { utility: { id: 'utility' } },
+          },
+        },
+        workingDirectory: '/proj',
+        sessionID: 'ses_conversation',
+        providerID: 'opencode-go',
+        modelID: 'utility',
+        prompt: 'hi',
+      });
+
+      expect(lastCall(fetchMock).init.headers['x-opencode-session']).toBe('ses_conversation');
+    });
+
     it('uses the catalog api field when no config baseURL is set', async () => {
       readConfig.mockReturnValue({});
       fetchMock.mockResolvedValue(ok('ok'));

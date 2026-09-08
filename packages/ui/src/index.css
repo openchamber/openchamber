@@ -75,11 +75,15 @@ button,
   line-height: round(1.625em, 1px);
 }
 
-:root.light .message-content-text::selection,
-:root.light .message-content-text ::selection,
-:root.light .oc-file-preview::selection,
-:root.light .oc-file-preview ::selection {
-  background: color-mix(in srgb, var(--interactive-border-focus) 18%, transparent);
+/* Text selection in chat and file previews: the theme accent at 30%, the same
+   in every theme. The themes' own selection token is tuned for selected rows
+   and in several light themes is nearly the page background; a translucent
+   accent stays visible over every background and never hides the text. */
+.message-content-text::selection,
+.message-content-text ::selection,
+.oc-file-preview::selection,
+.oc-file-preview ::selection {
+  background: var(--oc-text-selection);
   color: var(--surface-foreground);
 }
 
@@ -89,14 +93,12 @@ button,
 
 /* Quoted chat fragment kept visibly highlighted while its comment input is
    open (the native selection collapses once the input takes focus). The
-   rectangles come from the selection's own client rects, so shape and shade
-   both match the native selection that was just showing. */
+   rectangles come from the selection's own client rects and paint in the
+   selection colour, so shape and shade both match the native selection that
+   was just showing; the colour is translucent because these rectangles sit
+   above the text. */
 .oc-chat-comment-rect {
-  background-color: var(--interactive-selection);
-}
-
-:root.light .oc-chat-comment-rect {
-  background-color: color-mix(in srgb, var(--interactive-border-focus) 18%, transparent);
+  background-color: var(--oc-text-selection);
 }
 
 .pierre-diff-wrapper {
@@ -653,6 +655,13 @@ html:not(.dark) .chat-scroll {
 }
 
 /* Overlay scrollbar styling (custom thumb) */
+/* Reserve the thumb's 6px width, 4px right inset and a 4px content gap.
+   Follow overflow, not hover visibility, so showing the thumb never shifts text.
+   Direct-child matching prevents nested scrollers from reserving space twice. */
+.overlay-scrollbar-wrapper:has(> .overlay-scrollbar > .overlay-scrollbar__thumb--vertical:not([hidden])) {
+  padding-right: 6px;
+}
+
 .overlay-scrollbar {
   position: absolute;
   inset: 0;
@@ -995,11 +1004,13 @@ html:not(.dark) .chat-scroll {
   }
 }
 
-/* Text font */
+/* Text font. The line height is snapped to whole pixels: a fractional
+   value lets glyph baselines land on half pixels and text lines blur or
+   render unevenly as they scroll. */
 .markdown-content {
   font-family: var(--font-sans);
   font-size: var(--text-markdown);
-  line-height: inherit;
+  line-height: round(1.625em, 1px);
 }
 
 .markdown-content p,
@@ -1010,20 +1021,31 @@ html:not(.dark) .chat-scroll {
   line-height: inherit;
 }
 
-/* Restore paragraph block spacing inside markdown content. The
-   --markdown-paragraph-spacing token existed but was never wired, so Tailwind
-   preflight's zeroed <p> margins left adjacent paragraphs collapsed into one
-   visual line. */
-.markdown-content p {
-  margin: 0 0 var(--markdown-paragraph-spacing) 0;
+/* Block rhythm: every block carries the same margin on both sides, so the
+   gap between any two neighbours is one paragraph spacing (margins collapse)
+   and the first/last block of a message adds nothing. Tailwind preflight
+   zeroes these margins, which left adjacent paragraphs reading as one. */
+.markdown-content p,
+.markdown-content ul,
+.markdown-content ol,
+.markdown-content blockquote,
+.markdown-content hr,
+.markdown-content table {
+  margin: var(--markdown-paragraph-spacing) 0;
 }
 
 /* The markdown renderer wraps each block in a display:contents [data-md-block]
-   element, so the message-level [&_.markdown-content>*:last-child]:mb-0
-   nullifiers target the wrapper (where margin is ignored), not the paragraph.
-   Drop the trailing margin on the last paragraph of the last block directly so
-   messages don't gain extra space at the bottom. */
-.markdown-content > [data-md-block]:last-child p:last-child {
+   element, so the message-level [&_.markdown-content>*:first-child]:mt-0 /
+   [&_.markdown-content>*:last-child]:mb-0 nullifiers target the wrapper
+   (where margin is ignored), not the block. Trim the outer blocks directly so
+   messages gain no extra space at the top or bottom. */
+.markdown-content > [data-md-block]:first-child > :first-child,
+.markdown-content > :first-child:not([data-md-block]) {
+  margin-top: 0;
+}
+
+.markdown-content > [data-md-block]:last-child > :last-child,
+.markdown-content > :last-child:not([data-md-block]) {
   margin-bottom: 0;
 }
 
@@ -1110,35 +1132,36 @@ html:not(.dark) .chat-scroll {
   font-size: inherit !important;
 }
 
-/* Streamdown headers: keep proportional but not oversized */
-.markdown-content h1 {
-  font-size: 1.125em;
+/* Headings: a clear step above the body without becoming display type, and
+   more air above than below so each heading binds to the text it introduces. */
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+  margin: 1.25rem 0 0.5rem;
+  color: color-mix(in srgb, var(--foreground) 95%, transparent);
   font-weight: 600;
-  margin-top: 1em;
-  margin-bottom: 0.5em;
+  line-height: 1.3;
+}
+
+.markdown-content h1 {
+  font-size: 1.25rem;
 }
 
 .markdown-content h2 {
-  font-size: 1.0625em;
-  font-weight: 600;
-  margin-top: 0.875em;
-  margin-bottom: 0.375em;
+  font-size: 1.125rem;
 }
 
 .markdown-content h3 {
-  font-size: 1em;
-  font-weight: 600;
-  margin-top: 0.75em;
-  margin-bottom: 0.25em;
+  font-size: 1rem;
 }
 
 .markdown-content h4,
 .markdown-content h5,
 .markdown-content h6 {
-  font-size: 1em;
-  font-weight: 600;
-  margin-top: 0.625em;
-  margin-bottom: 0.25em;
+  font-size: 0.875rem;
 }
 
 /* Code font */
@@ -1148,33 +1171,15 @@ html:not(.dark) .chat-scroll {
   font-size: var(--text-code);
 }
 
-/* Override Streamdown's hardcoded bg-muted for inline code - use theme colors instead */
+/* Inline code sits inside a sentence: a quiet muted chip in the text colour,
+   one step smaller than the prose so it never towers over it. */
 .markdown-content code[data-markdown="inline-code"] {
-  background-color: var(--markdown-inline-code-bg, var(--surface-subtle)) !important;
-  color: var(--markdown-inline-code, var(--foreground)) !important;
-  padding: 0.125rem 0.3125rem;
+  background-color: var(--surface-muted) !important;
+  color: inherit !important;
+  padding: 0.1rem 0.35rem;
   border-radius: 0.375rem;
   word-break: break-all;
   overflow-wrap: break-word;
-}
-
-/* Markdown headings - use theme colors */
-.markdown-content h1 {
-  color: var(--markdown-heading1, var(--primary));
-}
-
-.markdown-content h2 {
-  color: var(--markdown-heading2, var(--primary));
-}
-
-.markdown-content h3 {
-  color: var(--markdown-heading3, var(--primary));
-}
-
-.markdown-content h4,
-.markdown-content h5,
-.markdown-content h6 {
-  color: var(--markdown-heading4, var(--foreground));
 }
 
 /* Markdown links - use theme colors */
@@ -1212,8 +1217,9 @@ html:not(.dark) .chat-scroll {
 
 /* Markdown blockquote - use theme colors */
 .markdown-content blockquote {
+  border-left: 2px solid var(--markdown-blockquote-border, var(--border));
+  padding-left: 0.8rem;
   color: var(--markdown-blockquote, var(--muted-foreground));
-  border-left-color: var(--markdown-blockquote-border, var(--border));
 }
 
 /* Markdown horizontal rule - use theme colors */
@@ -1666,44 +1672,54 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   color: transparent !important;
 }
 
-/* Hide browser/system caret for Ghostty's own input surfaces.
-   Terminal cursor is rendered by the canvas renderer. */
-.terminal-viewport-container[contenteditable="true"][aria-label="Terminal input"],
-.terminal-viewport-container [contenteditable="true"][aria-label="Terminal input"] {
+/* libghostty-vt terminal surface. The canvas draws the grid and cursor; the
+   textarea only receives keyboard, IME and clipboard events and follows the
+   cursor so IME candidates appear where the user types. */
+.terminal-viewport-container .oc-terminal-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: text;
+}
+
+.terminal-viewport-container .oc-terminal-input {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  padding: 0;
+  border: 0;
+  resize: none;
+  pointer-events: none;
   caret-color: transparent !important;
   outline: none !important;
 }
 
-textarea[aria-label="Terminal input"],
-input[aria-label="Terminal input"] {
-  caret-color: transparent !important;
-  outline: none !important;
+.terminal-viewport-container .oc-terminal-scrollbar {
+  position: absolute;
+  top: 4px;
+  right: 1px;
+  bottom: 4px;
+  z-index: 1;
+  width: 8px;
+  cursor: default;
+  touch-action: none;
 }
 
-/* When touch terminal input uses the portaled overlay, keep Ghostty's
-   internal editable surfaces fully non-painting to avoid duplicate cursors. */
-.terminal-viewport-container[data-hidden-input-overlay-active="true"] textarea:not([data-terminal-hidden-input="true"]),
-.terminal-viewport-container[data-hidden-input-overlay-active="true"] input:not([data-terminal-hidden-input="true"]),
-.terminal-viewport-container[data-hidden-input-overlay-active="true"] [contenteditable="true"] {
-  caret-color: transparent !important;
-  color: transparent !important;
-  -webkit-text-fill-color: transparent !important;
-  background: transparent !important;
-  border: 0 !important;
-  outline: none !important;
-  box-shadow: none !important;
-  text-shadow: none !important;
+.terminal-viewport-container .oc-terminal-scrollbar-thumb {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  top: 0;
+  border-radius: 3px;
+  background: var(--oc-scrollbar-thumb);
+  transition: background-color 120ms ease-out;
 }
 
-.terminal-viewport-container[data-hidden-input-overlay-active="true"] textarea:not([data-terminal-hidden-input="true"]),
-.terminal-viewport-container[data-hidden-input-overlay-active="true"] input:not([data-terminal-hidden-input="true"]),
-.terminal-viewport-container[data-hidden-input-overlay-active="true"] [contenteditable="true"] {
-  opacity: 0 !important;
-  font-size: 0 !important;
-  line-height: 0 !important;
-  pointer-events: none !important;
-  user-select: none !important;
-  -webkit-user-select: none !important;
+.terminal-viewport-container .oc-terminal-scrollbar:hover .oc-terminal-scrollbar-thumb {
+  background: var(--oc-scrollbar-thumb-hover);
 }
 
 /* Mobile Terminal Optimizations */
@@ -1712,15 +1728,6 @@ input[aria-label="Terminal input"] {
     font-variant-ligatures: none;
     font-feature-settings: "liga" 0, "calt" 0;
   }
-}
-
-/* Font loading states */
-.fonts-loading .terminal-viewport-container {
-  font-family: monospace;
-}
-
-.fonts-loaded .terminal-viewport-container {
-  font-family: "JetBrainsMono Nerd Font", "FiraCode Nerd Font", "Fira Code", "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 @keyframes oc-busy-pulse {
@@ -1860,11 +1867,6 @@ input[aria-label="Terminal input"] {
     animation: none;
   }
 
-}
-
-/* Settings dialog: hide the overlay scrollbar; wheel/keyboard scroll still works. */
-[data-settings-view="true"] .overlay-scrollbar {
-  display: none;
 }
 
 /* Desktop app shell (Electron/native window): native apps use the arrow cursor

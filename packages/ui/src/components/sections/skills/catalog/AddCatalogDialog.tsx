@@ -1,6 +1,5 @@
 import React from 'react';
 import { toast } from '@/components/ui';
-import { runtimeFetch } from '@/lib/runtime-fetch';
 
 import {
   Dialog,
@@ -21,10 +20,9 @@ import {
 import { Icon } from "@/components/icon/Icon";
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeRuntime } from '@/lib/desktop';
-import { updateDesktopSettings } from '@/lib/persistence';
-import type { DesktopSettings, SkillCatalogConfig } from '@/lib/desktop';
+import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
+import type { SkillCatalogConfig } from '@/lib/desktop';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
 import { useI18n } from '@/lib/i18n';
@@ -54,29 +52,6 @@ const guessLabelFromSource = (value: string) => {
 
 type IdentityOption = { id: string; name: string };
 
-const loadSettings = async (): Promise<DesktopSettings | null> => {
-  try {
-    const runtimeSettings = getRegisteredRuntimeAPIs()?.settings;
-    if (runtimeSettings) {
-      const result = await runtimeSettings.load();
-      return (result?.settings || {}) as DesktopSettings;
-    }
-
-    const response = await runtimeFetch('/api/config/settings', {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    return (await response.json().catch(() => null)) as DesktopSettings | null;
-  } catch {
-    return null;
-  }
-};
-
 interface AddCatalogDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -96,7 +71,9 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
   const [source, setSource] = React.useState('');
   const [subpath, setSubpath] = React.useState('');
 
-  const [existingCatalogs, setExistingCatalogs] = React.useState<SkillCatalogConfig[]>([]);
+  // `null` until the current list is known: a failed load must never be
+  // treated as "no catalogs", or adding one would overwrite the others.
+  const [existingCatalogs, setExistingCatalogs] = React.useState<SkillCatalogConfig[] | null>(null);
 
   const [scanCount, setScanCount] = React.useState<number | null>(null);
   const [scanOk, setScanOk] = React.useState(false);
@@ -128,10 +105,10 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
     setGitIdentityId(null);
     void loadDefaultGitIdentityId();
 
+    setExistingCatalogs(null);
     void (async () => {
-      const settings = await loadSettings();
-      const catalogs = Array.isArray(settings?.skillCatalogs) ? settings?.skillCatalogs : [];
-      setExistingCatalogs(catalogs || []);
+      const settings = await loadDesktopSettings();
+      setExistingCatalogs(settings ? settings.skillCatalogs ?? [] : null);
     })();
   }, [open, loadDefaultGitIdentityId]);
 
@@ -139,7 +116,7 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
     const normalizedSource = source.trim();
     const normalizedSubpath = subpath.trim();
 
-    return existingCatalogs.some((c) => {
+    return (existingCatalogs ?? []).some((c) => {
       const s = (c.source || '').trim();
       const sp = (c.subpath || '').trim();
       return s === normalizedSource && sp === normalizedSubpath;
@@ -244,10 +221,17 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
       ...(gitIdentityId ? { gitIdentityId } : {}),
     };
 
+    if (existingCatalogs === null) {
+      toast.error(t('settings.skills.catalog.add.toast.saveFailed'));
+      return;
+    }
     const updated = [...existingCatalogs, next];
 
     try {
-      await updateDesktopSettings({ skillCatalogs: updated });
+      const saved = await updateDesktopSettings({ skillCatalogs: updated });
+      if (!saved.ok) {
+        throw new Error(t('settings.skills.catalog.add.toast.saveFailed'));
+      }
       setExistingCatalogs(updated);
       toast.success(t('settings.skills.catalog.add.toast.catalogAdded'));
       await loadCatalog({ refresh: true });
@@ -363,7 +347,7 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
           <Button
             size="sm"
             onClick={() => void handleAdd()}
-            disabled={!scanOk || isDuplicate || !label.trim() || !source.trim()}
+            disabled={!scanOk || isDuplicate || existingCatalogs === null || !label.trim() || !source.trim()}
           >
             {t('settings.skills.catalog.add.actions.addCatalog')}
           </Button>

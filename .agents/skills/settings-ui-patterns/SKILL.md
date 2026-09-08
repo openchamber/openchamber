@@ -23,7 +23,7 @@ divs — use the primitives, and extend them (in the shared file) when a new
 shape is genuinely missing.
 
 - Flat hierarchy through spacing and typography; no cards, boxed backgrounds, or row chrome.
-- Secondary helper text is hidden behind an info icon (`info` prop); the default view stays quiet.
+- Secondary helper text is hidden behind an info icon (`info` prop) by default; the default view stays quiet.
 - Controls have one standard size (`h-9` / select `size="settings"`) and capped widths — no full-bleed inputs.
 - Layouts respond to the settings pane width via container queries (`@xl:` / `@3xl:`), never viewport `sm:`/`lg:` breakpoints (the pane is much narrower than the viewport inside the dialog).
 - Checkbox/radio state comes before labels; selected states are subtle and never shift layout.
@@ -57,7 +57,8 @@ Do not introduce raw `<Tooltip>`-based info icons, direct Remixicon components, 
 
 ## Description Policy (info hints)
 
-- Explanatory prose (what a feature does, when it applies) goes behind the info icon via the `info` prop — never as always-visible `description`.
+- Explanatory prose goes behind the info icon via the `info` prop by default.
+- When labels alone cannot explain the differences, consequences, or conditions needed to choose a setting, use a title, a visible description, then checkbox or radio controls. Large-text paste modes and send shortcuts with expanded-composer exceptions need this explanation. Having multiple options or a group title alone does not require a description; see `references/controls.md` for composition.
 - Stays visible: security/data-loss warnings, destructive consequences, required syntax/placeholder lists the user reads while typing, dynamic status, empty states, validation errors, active-flow wizard instructions.
 - Mixed text: keep the warning sentence visible, move the explanation to `info`.
 
@@ -80,7 +81,7 @@ Dynamic entity rows normally are not indexed. Load `references/search.md` for ex
 ## Completion Criteria
 
 - Built from shared primitives; no ad-hoc page/section/row markup.
-- Explanatory text hidden behind `info`; warnings/syntax/status still visible.
+- Description placement follows the policy above; warnings/syntax/status remain visible.
 - Container-query (`@xl:`/`@3xl:`) responsiveness — no viewport breakpoints in pane content.
 - Controls use the standard size and width caps; no stretched full-width inputs.
 - Localized visible and accessibility text everywhere.

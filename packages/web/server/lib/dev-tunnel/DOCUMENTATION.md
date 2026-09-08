@@ -20,7 +20,13 @@ and what made it fragile per framework.
 - `client.js` is the local end: it binds a loopback listener on the user's
   machine and pipes each accepted connection through one WebSocket. It lives in
   this package because it needs a WebSocket client the package already depends
-  on; the desktop shell drives it over IPC.
+  on; the desktop shell drives it over IPC for directly reachable HTTP(S)
+  runtimes.
+- Relay-only runtimes use `packages/electron/relay-dev-tunnel.mjs` for the local
+  listener. Each accepted connection gets an Electron `MessagePort`; the trusted
+  renderer carries its bytes through the active E2EE relay. This keeps relay
+  credentials and encryption in their existing renderer owner instead of
+  duplicating them in Electron main.
 - Port discovery is not owned here. `runtime.js` is given the reachable set by
   the same dev-server discovery the user's own list is built from.
 - The browser panel decides when to tunnel; this module never chooses a target.
@@ -40,9 +46,12 @@ and what made it fragile per framework.
     usual origin allowlist applies unchanged. That check is a CSRF defence: a
     hostile page can make a browser open a WebSocket carrying ambient cookies,
     and the origin is what exposes it.
-  - With no `Origin` the request must carry client-token auth. A browser cannot
-    reach this path — the WebSocket API always sends an origin and never lets a
-    page set an `Authorization` header — so this case is the desktop shell.
+  - With no `Origin` the request must carry client-token auth or a short-lived
+    URL token. The bearer case is the desktop main process. The URL-token case
+    is the trusted renderer carrying the socket through the E2EE relay.
+  - Through the E2EE relay, the trusted renderer mints a short-lived URL token
+    and includes it in the virtual WebSocket URL. The relay host and URL-token
+    allowlists accept exactly `/api/dev-tunnel`, not subpaths.
 - Concurrency is capped per host, not per page, because one page load opens
   many sockets.
 - A connection that cannot be established fails the socket rather than holding

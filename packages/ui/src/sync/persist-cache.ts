@@ -177,7 +177,7 @@ function scheduleSessionCacheWrite(directory: string, sessions: Session[]): void
     if (pending.runtimeKey !== runtimeKey) pendingSessionWrites.delete(pendingKey)
   }
   pendingSessionWrites.set(key, { runtimeKey, key, legacyKey: legacyCacheKey(directory, "sessions"), sessions })
-  if (pendingSessionWriteTimer !== undefined) return
+  if (pendingSessionWriteTimer !== undefined) clearTimeout(pendingSessionWriteTimer)
   pendingSessionWriteTimer = setTimeout(flushPendingSessionWrites, SESSION_PERSIST_DEBOUNCE_MS)
 }
 

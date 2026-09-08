@@ -12,6 +12,13 @@ type LinearAuthStore = {
     runtimeLinear?: RuntimeAPIs['linear'],
     options?: { force?: boolean }
   ) => Promise<LinearAuthStatusWithError | null>;
+  /**
+   * Linear is authenticated on the OpenChamber instance, not in the browser, so
+   * this status belongs to whichever instance is connected. Switching instances
+   * must drop it — otherwise the previous instance's login stays on screen and
+   * its issue surfaces remain usable against a runtime that has no Linear at all.
+   */
+  resetForRuntimeSwitch: () => void;
 };
 
 const fetchStatus = async (
@@ -24,6 +31,9 @@ const fetchStatus = async (
 };
 
 let inFlightAuthRefresh: Promise<LinearAuthStatusWithError | null> | null = null;
+// Bumped by every reset so a response already in flight for the previous
+// instance cannot write itself into the new instance's status.
+let authGeneration = 0;
 
 export const useLinearAuthStore = create<LinearAuthStore>((set, get) => ({
   status: null,
@@ -41,13 +51,16 @@ export const useLinearAuthStore = create<LinearAuthStore>((set, get) => ({
 
     if (inFlightAuthRefresh) return inFlightAuthRefresh;
 
+    const generation = authGeneration;
     set({ isLoading: true });
     inFlightAuthRefresh = (async () => {
       try {
         const payload = await fetchStatus(runtimeLinear);
+        if (generation !== authGeneration) return null;
         set({ status: payload, isLoading: false, hasChecked: true });
         return payload;
       } catch (error) {
+        if (generation !== authGeneration) return null;
         const message = error instanceof Error ? error.message : String(error);
         // A failed request is not an authoritative disconnect. Keep the last
         // known status and leave `hasChecked` false so the next caller retries
@@ -63,5 +76,10 @@ export const useLinearAuthStore = create<LinearAuthStore>((set, get) => ({
     })().finally(() => { inFlightAuthRefresh = null; });
 
     return inFlightAuthRefresh;
+  },
+  resetForRuntimeSwitch: () => {
+    authGeneration += 1;
+    inFlightAuthRefresh = null;
+    set({ status: null, isLoading: false, hasChecked: false });
   },
 }));

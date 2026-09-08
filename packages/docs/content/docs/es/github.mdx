@@ -9,11 +9,11 @@ Conecta tu cuenta de GitHub y OpenChamber podrá traer issues y pull requests, i
 
 ## Conecta GitHub
 
-1. Abre **Settings → Git**.
-2. En GitHub, elige **Connect**. OpenChamber muestra un enlace y un código corto.
+1. Abre **Settings → Integrations** y despliega la tarjeta **GitHub**.
+2. Elige **Connect GitHub**. OpenChamber muestra un enlace y un código corto.
 3. Abre el enlace, introduce el código y aprueba.
 
-Cuando esté conectado, tu cuenta aparece en la sección de GitHub. Puedes conectar más de una cuenta y cambiar entre ellas, o desconectar en cualquier momento.
+Cuando esté conectado, tu cuenta aparece en la tarjeta. Puedes conectar más de una cuenta y cambiar entre ellas, o desconectar en cualquier momento. Si la CLI `gh` tiene sesión iniciada en la misma máquina, OpenChamber puede usarla como respaldo.
 
 ## Empieza a trabajar desde una issue o PR
 
@@ -27,6 +27,10 @@ Esto te deja directamente en una sesión con el contexto ya cargado.
 ## Abre y gestiona pull requests
 
 Desde la pestaña **PR** en la [vista de git](/es/git/), puedes crear un pull request, actualizarlo, marcar un borrador como listo o fusionarlo. OpenChamber puede generar el título y la descripción del PR a partir de tus cambios.
+
+## Vincula una issue o PR a un mensaje
+
+En el compositor del chat, elige **Link GitHub Issue** o **Link GitHub PR**. La issue, o el PR con su diff, acompaña tu siguiente mensaje como contexto, y el panel de estado de trabajo de la sesión conserva un enlace. El mismo selector puede iniciar una nueva sesión con la issue como primer prompt.
 
 ## Relacionado
 

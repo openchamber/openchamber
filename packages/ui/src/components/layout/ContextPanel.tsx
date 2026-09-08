@@ -680,8 +680,8 @@ export const ContextPanel: React.FC = () => {
     }
 
     // Terminal owns Escape so the PTY receives it (e.g. Vim Normal mode).
-    // ghostty-web listens in the bubble phase; stopping capture here would
-    // swallow the key before the terminal ever sees it (issue #2644).
+    // The terminal input listens in the bubble phase; stopping capture here
+    // would swallow the key before the terminal ever sees it (issue #2644).
     if (isTerminalEventTarget(event.target)) {
       return;
     }
@@ -969,8 +969,8 @@ export const ContextPanel: React.FC = () => {
     () => tabs.filter((tab) => tab.mode === 'diff'),
     [tabs],
   );
-  const hasTerminalTab = React.useMemo(
-    () => tabs.some((tab) => tab.mode === 'terminal'),
+  const terminalTab = React.useMemo(
+    () => tabs.find((tab) => tab.mode === 'terminal') ?? null,
     [tabs],
   );
   // Keep-alive: the walkthrough holds reading progress and scroll position that
@@ -1283,9 +1283,9 @@ export const ContextPanel: React.FC = () => {
             </React.Suspense>
           </div>
         ))}
-        {hasTerminalTab ? (
+        {terminalTab ? (
           <div className={cn('absolute inset-0', activeTab?.mode === 'terminal' ? 'block' : 'hidden')}>
-            <TerminalView visible={isOpen && activeTab?.mode === 'terminal'} />
+            <TerminalView visible={isOpen && activeTab?.mode === 'terminal'} directory={terminalTab.targetDirectory} />
           </div>
         ) : null}
         {hasWalkthroughTab ? (

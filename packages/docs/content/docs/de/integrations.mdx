@@ -1,54 +1,53 @@
 ---
 title: Integrationen
-description: Nutze dein Claude- oder Cursor-Abo als Provider.
+description: Verbinde GitHub und Linear mit OpenChamber.
 ---
 
 # Integrationen
 
-Eine Integration ist ein kleines Plugin, das OpenChamber einen Provider hinzufügt — auf Basis eines Abos, das du bereits hast. Verwalten kannst du sie unter **Settings → Integrations**.
+Unter **Einstellungen → Integrationen** meldest du dich bei den Diensten an, mit denen OpenChamber arbeitet. Die Anmeldung wird auf dem OpenChamber-Server gespeichert, sodass Web, Desktop und ein gekoppeltes Telefon sie teilen.
 
-> **Experimentelle Funktion.** Wir bemühen uns, die Richtlinien der Anbieter zu respektieren, aber Kontobeschränkungen und Sperrungen liegen bei jedem Anbieter. Nutze Integrationen auf eigenes Risiko.
+## GitHub
 
-Verfügbare Integrationen:
+Klappe die Karte **GitHub** auf und wähle **Connect GitHub**, um dich mit einem kurzen Gerätecode anzumelden. Danach kann OpenChamber Sessions aus Issues und Pull Requests starten, sie an Nachrichten hängen und PRs öffnen oder aktualisieren. Alles, was GitHub kann, steht unter [GitHub Issues & PRs](/de/github/).
 
-- **Claude Code** — dein Claude Pro- oder Max-Plan, ohne API-Keys
-- **Cursor** — die Modell-Limits deines Cursor-Plans
+## Linear
 
-## Integration installieren
+### Workspace verbinden
 
-1. Öffne **Settings → Integrations**.
-2. Suche die Integration und wähle **Install**.
-3. Starte OpenCode neu, wenn darum gebeten wird — der Provider erscheint nach dem Neustart.
-4. Wähle **Set up** und melde dich an. Die Modelle erscheinen danach in der Modellauswahl im Chat.
+1. Klappe die Karte **Linear** auf und wähle **Connect**.
+2. Bestätige den Zugriff im Browser-Tab, der sich öffnet. Bis dahin zeigt die Karte **Waiting for Linear**.
 
-Integrationen werden für deinen Benutzer installiert und funktionieren damit in jedem Projekt. Aktualisieren oder entfernen kannst du sie jederzeit über dieselbe Karte.
+Eine weitere Linear-Organisation verbindest du mit **Add workspace**. Es ist immer genau ein Workspace aktuell: Wechsle mit **Switch to**, und **Disconnect** entfernt nur den aktuellen. Deine Projektzuordnung bleibt erhalten.
 
-## Claude Code
+### Issues durchsuchen
 
-Claude Code nutzt deinen Claude Pro- oder Max-Plan — ohne API-Keys und ohne separate Claude-App.
+Sobald ein Workspace verbunden ist, erscheint das Panel **Linear** in der rechten Kontextleiste. Es listet die Issues des aktuellen Workspace und erlaubt dir:
 
-1. Installiere die Integration (siehe oben).
-2. Wähle **Set up** und melde dich an. Wenn du die Claude Code CLI noch nicht hast, bietet die Einrichtung an, sie zuerst zu installieren, und meldet dich danach an.
+- nach Status (**Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**), Zuständigem (**Anyone** oder **Assigned to me**), Team und Priorität zu filtern
+- nach Titel, Kennung oder Linear-URL zu suchen
+- ein Issue zu öffnen und Beschreibung, Kommentare, Labels und Priorität zu lesen
+- seinen **Status** zu ändern oder **Close issue** zu wählen
+- den aktuellen **Workspace** zu wechseln
 
-Claude Code ist die einzige Integration hier, die ihre Provider-CLI installiert und angemeldet benötigt. Cursor braucht seine CLI nicht.
+### Session aus einem Issue starten
 
-**Wie dein Claude-Konto geschützt bleibt:** Diese Integration nutzt das offizielle Claude Agent SDK von Anthropic und deine installierte Claude Code CLI. Sie kapert kein OAuth, extrahiert oder wiederholt keine Browser-Tokens, gibt sich nicht als nicht unterstützter Client aus und umgeht nicht Anthropics Authentifizierung. Sie bleibt auf dem von Anthropic unterstützten Zugriffsweg und trägt daher nicht das mit Token-Hijacking oder unautorisierten Authentifizierungsumgehungen verbundene Sperrrisiko.
+- Öffne im Linear-Panel ein Issue und wähle **Start session**. Der Button bleibt in der Fußzeile, während das Issue scrollt.
+- Wähle im Chat **New Session From Linear Issue**, um eines aus der Liste zu wählen, mit **Create in worktree**, wenn du einen frischen Branch möchtest.
+- Wähle im Dialog **New Worktree** die Option **Start from Linear Issue**.
 
-## Cursor
+Die Session öffnet sich im Projekt, das dem Team des Issues zugeordnet ist, mit dem Issue als erstem Prompt. Teams ordnest du in der Linear-Karte zu: **Default project** gilt für alle Teams, **Team projects** überschreibt es pro Team. Bei einem nicht zugeordneten Team wirst du zuerst um die Zuordnung gebeten. Die erste Nachricht entsteht aus dem Magic Prompt **Issue Review**, den du unter **Einstellungen → Magic Prompts → Linear** bearbeiten kannst.
 
-Cursor macht die Modelle deines Cursor-Plans in OpenChamber nutzbar.
+### Issue an eine Nachricht hängen
 
-1. Installiere die Integration (siehe oben).
-2. Wähle **Set up**, öffne den Link und genehmige den Zugriff im Browser. Kein API-Key nötig. Die Modellliste lädt nach der Anmeldung automatisch.
+Wähle im Chat-Composer **Link Linear Issue**. Das Issue geht als Kontext mit deiner nächsten Nachricht mit, und das Arbeitsstatus-Panel der Session behält einen Link darauf.
 
-## Aktualisieren oder entfernen
+### Session-Kommentare
 
-- **Update** installiert die neueste veröffentlichte Version des Plugins.
-- **Remove** löscht das Plugin aus deiner OpenCode-Konfiguration. Der Provider wird beim nächsten Neuladen von OpenCode nicht mehr geladen.
-
-Wenn eine Karte meldet, dass Einträge manuell verwaltet werden müssen, wähle **Manage plugins** und bereinige die Duplikate dort.
+Schalte **Session comments** in der Linear-Karte ein, und eine aus einem Issue gestartete Session schreibt beim Start, beim Abschluss oder bei einem Fehler einen Kommentar auf das Issue, jeweils mit einem Link, der die Session öffnet. Kommentare werden nur gepostet, wenn dieser OpenChamber-Server eine öffentliche Adresse hat, damit der Link für alle am Issue funktioniert; bei einer lokalen oder privaten Adresse wird nichts gepostet.
 
 ## Verwandtes
 
-- [Anbieter, Modelle und Agenten](/de/providers/) — weitere Provider verbinden und Modelle wählen
-- [Nutzung und Kontingente](/de/usage/) — verfolge, wie viel du genutzt hast
+- [GitHub Issues & PRs](/de/github/) — alles, was GitHub in OpenChamber kann
+- [Worktree-Sessions](/de/worktrees/) — wo Issue-Sessions starten können
+- [Magic Prompts](/de/magic-prompts/) — den Prompt bearbeiten, mit dem eine Linear-Session beginnt

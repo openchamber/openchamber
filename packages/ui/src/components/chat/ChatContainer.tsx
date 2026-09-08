@@ -171,10 +171,8 @@ type ChatViewportProps = {
     scrollRef: React.RefObject<HTMLDivElement | null>;
     messageListRef: React.RefObject<MessageListHandle | null>;
     registerList: (list: TimelineListHandle | null) => void;
-    anchorMessageId: string | null;
-    onAnchorReady: (messageId: string, anchorIndex: number) => void;
-    onAnchorSizeChanged: (messageId: string) => void;
     onIsAtEndChange: (isAtEnd: boolean) => void;
+    onListMetricsChange: (metrics: { readonly footerSize: number }) => void;
     onTimelineDataChange: () => void;
     renderedMessages: SessionMessageRecord[];
     isLoadingOlder: boolean;
@@ -215,10 +213,8 @@ const ChatViewport = React.memo(({
     scrollRef,
     messageListRef,
     registerList,
-    anchorMessageId,
-    onAnchorReady,
-    onAnchorSizeChanged,
     onIsAtEndChange,
+    onListMetricsChange,
     onTimelineDataChange,
     renderedMessages,
     isLoadingOlder,
@@ -499,14 +495,12 @@ const ChatViewport = React.memo(({
                     endPinningReleased={endPinningReleased}
                     directory={directory}
                     registerList={registerList}
-                    anchorMessageId={anchorMessageId}
-                    onAnchorReady={onAnchorReady}
-                    onAnchorSizeChanged={onAnchorSizeChanged}
                     // Zero end inset: the footer spacer already reserves the
                     // zone the floating status row covers; adding its height
                     // again produced a double-tall blank band at rest.
                     composerOverlayHeight={0}
                     onIsAtEndChange={onIsAtEndChange}
+                    onListMetricsChange={onListMetricsChange}
                     onTimelineDataChange={onTimelineDataChange}
                     listHeader={listHeader}
                     listFooter={listFooter}
@@ -543,6 +537,7 @@ const ChatViewport = React.memo(({
         && prev.activeStreamingPhase === next.activeStreamingPhase
         && prev.retryOverlay === next.retryOverlay
         && prev.scrollToBottom === next.scrollToBottom
+        && prev.onListMetricsChange === next.onListMetricsChange
         && prev.endPinningReleased === next.endPinningReleased
         && prev.revealWaited === next.revealWaited
         && prev.revealGate === next.revealGate
@@ -1106,24 +1101,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         statusOverlayObserverRef.current?.disconnect();
         statusOverlayObserverRef.current = null;
     }, []);
-    const lastUserMessageId = React.useMemo(() => {
-        for (let index = sessionMessages.length - 1; index >= 0; index -= 1) {
-            const message = sessionMessages[index];
-            if (message.info.role === 'user') {
-                return message.info.id;
-            }
-        }
-        return null;
-    }, [sessionMessages]);
-
     const {
         scrollRef,
         scrollNode,
         registerList,
-        anchorMessageId,
-        onAnchorReady,
-        onAnchorSizeChanged,
         onIsAtEndChange,
+        onListMetricsChange,
         onManualNavigation,
         onTimelineDataChange,
         goToBottom,
@@ -1138,7 +1121,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         currentSessionKey,
         sessionMessageCount,
         composerOverlayHeight,
-        lastUserMessageId,
         sessionIsWorking,
         revealGate,
         onActiveTurnChange: handleActiveTurnChange,
@@ -1549,10 +1531,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 directory={effectiveSessionDirectory}
                 scrollRef={scrollRef}
                 registerList={registerList}
-                anchorMessageId={anchorMessageId}
-                onAnchorReady={onAnchorReady}
-                onAnchorSizeChanged={onAnchorSizeChanged}
                 onIsAtEndChange={onIsAtEndChange}
+                onListMetricsChange={onListMetricsChange}
                 onTimelineDataChange={onTimelineDataChange}
                 messageListRef={messageListRef}
                 renderedMessages={timelineController.renderedMessages}

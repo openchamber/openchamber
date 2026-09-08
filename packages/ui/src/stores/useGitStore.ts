@@ -11,6 +11,7 @@ import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { GitDirectoriesUnsupportedError, listGitDirectories } from '@/lib/gitApiHttp';
 import { subscribeGitStatusInvalidations } from '@/lib/gitStatusInvalidation';
+import { getWorktreeBootstrapState } from '@/lib/worktrees/worktreeBootstrap';
 
 const LOG_STALE_THRESHOLD = 10000;
 const REPO_CHECK_STALE_THRESHOLD = 60_000;
@@ -28,6 +29,7 @@ const DIFF_CACHE_MAX_ENTRIES = 30;
 const DIFF_CACHE_MAX_TOTAL_SIZE_BYTES = 20 * 1024 * 1024; // 20MB
 const DIFF_CACHE_MAX_GLOBAL_ENTRIES = 200;
 type GitStatusFetchMode = 'full' | 'light';
+type GitStatusRequestOptions = { mode?: 'light'; fresh?: boolean };
 
 // Discovery outcome for a root that is not itself a git repository. The three
 // states are mutually exclusive: a repository list (possibly empty), a failed
@@ -64,7 +66,7 @@ interface GitStore {
   setActiveDirectory: (directory: string | null) => void;
   getDirectoryState: (directory: string) => DirectoryGitState | null;
 
-  fetchStatus: (directory: string, git: GitAPI, options?: { silent?: boolean; mode?: 'light'; force?: boolean }) => Promise<boolean>;
+  fetchStatus: (directory: string, git: GitAPI, options?: { silent?: boolean; mode?: 'light'; force?: boolean; throwOnError?: boolean }) => Promise<boolean>;
   fetchBranches: (directory: string, git: GitAPI) => Promise<void>;
   fetchLog: (directory: string, git: GitAPI, maxCount?: number) => Promise<void>;
   fetchIdentity: (directory: string, git: GitAPI) => Promise<void>;
@@ -115,7 +117,7 @@ interface GitFileDiffResponse {
 
 interface GitAPI {
   checkIsGitRepository: (directory: string) => Promise<boolean>;
-  getGitStatus: (directory: string, options?: { mode?: 'light' }) => Promise<GitStatus>;
+  getGitStatus: (directory: string, options?: GitStatusRequestOptions) => Promise<GitStatus>;
   getGitBranches: (directory: string) => Promise<GitBranch>;
   getGitLog: (directory: string, options?: { maxCount?: number }) => Promise<GitLogResponse>;
   getCurrentGitIdentity: (directory: string) => Promise<GitIdentitySummary | null>;
@@ -692,6 +694,9 @@ export const useGitStore = create<GitStore>()(
       },
 
       fetchStatus: async (directory, git, options = {}) => {
+        if (getWorktreeBootstrapState(directory)?.status === 'pending') {
+          return false;
+        }
         const statusFetchMode: GitStatusFetchMode = options.mode ?? 'full';
         const runtimeKey = getRuntimeKey();
         const statusFetchKey = getStatusFetchKey(runtimeKey, directory, statusFetchMode);
@@ -757,8 +762,17 @@ export const useGitStore = create<GitStore>()(
               return false;
             }
 
-            const newStatus = await git.getGitStatus(directory, options.mode ? { mode: options.mode } : undefined);
+            let statusOptions: GitStatusRequestOptions | undefined;
+            if (options.mode || options.force) {
+              statusOptions = {};
+              if (options.mode) statusOptions.mode = options.mode;
+              if (options.force) statusOptions.fresh = true;
+            }
+            const newStatus = await git.getGitStatus(directory, statusOptions);
             if (!isRequestCurrent(token, directory)) return false;
+            // A request admitted before worktree creation must not publish a
+            // transient --no-checkout/reset snapshot after bootstrap begins.
+            if (getWorktreeBootstrapState(directory)?.status === 'pending') return false;
 
             const latestState = get().directories.get(directory) ?? createEmptyDirectoryState();
             if (hasStatusChanged(latestState.status, newStatus)) {
@@ -830,6 +844,9 @@ export const useGitStore = create<GitStore>()(
             }
           } catch (error) {
             console.error('Failed to fetch git status:', error);
+            if (options.throwOnError) {
+              throw error;
+            }
           } finally {
             if (!silent && isRequestCurrent(token, directory)) {
               const newDirectories = new Map(get().directories);

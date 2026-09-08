@@ -67,6 +67,7 @@ mock.module("@/components/ui", () => ({
 import { INITIAL_STATE, type State } from "../types"
 import { ChildStoreManager, type DirectoryStore } from "../child-store"
 import { getRuntimeKey } from "@/lib/runtime-switch"
+import { sessionEvents } from "@/lib/sessionEvents"
 const {
   createEventRoutingIndex,
   handleEvent,
@@ -339,5 +340,41 @@ describe("resyncBlockingRequestsForDirectory", () => {
     expect(storeWrites).toBe(1)
     unsubscribe()
     childStores.disposeAll()
+  })
+
+  test("refreshes Git once when a live mutating tool completes between renders", () => {
+    const childStores = new ChildStoreManager()
+    childStores.ensureChild("/repo", { bootstrap: false })
+    const routingIndex = createEventRoutingIndex()
+    const refreshes: Array<{ directory: string; paths?: string[] }> = []
+    const unsubscribe = sessionEvents.onGitRefreshHint((hint) => refreshes.push(hint))
+    // SAFETY: this fixture supplies the SDK event discriminator and the tool
+    // part identity, tool name, and state fields consumed by the reducer.
+    const toolEvent = (tool: string, status: "pending" | "completed" | "error") => ({
+      type: "message.part.updated",
+      properties: {
+        part: {
+          id: "prt_tool",
+          messageID: "msg_assistant",
+          sessionID: "ses_a",
+          type: "tool",
+          tool,
+          state: { status, input: {}, metadata: {} },
+        },
+      },
+    }) as Event
+
+    try {
+      handleEvent("/repo", toolEvent("apply_patch", "pending"), childStores, routingIndex, getRuntimeKey())
+      handleEvent("/repo", toolEvent("apply_patch", "completed"), childStores, routingIndex, getRuntimeKey())
+      handleEvent("/repo", toolEvent("apply_patch", "completed"), childStores, routingIndex, getRuntimeKey())
+      handleEvent("/repo", toolEvent("read", "completed"), childStores, routingIndex, getRuntimeKey())
+      handleEvent("/repo", toolEvent("edit", "error"), childStores, routingIndex, getRuntimeKey())
+
+      expect(refreshes).toEqual([{ directory: "/repo" }])
+    } finally {
+      unsubscribe()
+      childStores.disposeAll()
+    }
   })
 })

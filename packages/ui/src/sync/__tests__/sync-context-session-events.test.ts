@@ -45,7 +45,15 @@ mock.module("@/lib/runtime-switch", () => ({
     return () => undefined
   },
 }))
-import { applySessionEventsToGlobalSessions, applySessionEventToGlobalSessions } from "../session-event-router"
+import {
+  applySessionEventsToGlobalSessions,
+  applySessionEventToGlobalSessions,
+} from "../session-event-router"
+import {
+  registerBulkArchiveEchoes,
+  releaseBulkArchiveEchoes,
+  shouldConsumeBulkArchiveEcho,
+} from "../bulk-archive-echo"
 
 const buildSession = (title: string, time: Session["time"]): Session => ({
   id: "ses_1",
@@ -145,5 +153,36 @@ describe("applySessionEventToGlobalSessions", () => {
 
     expect(mutationCalls).toBe(1)
     expect(upsertedSessions).toHaveLength(1_000)
+  })
+
+  test("consumes only the matching bulk archive echo", () => {
+    registerBulkArchiveEchoes(runtimeKey, [{ id: "ses_1", archivedAt: 20 }], 100)
+
+    expect(shouldConsumeBulkArchiveEcho(buildEvent(buildSession("Initial", {
+      created: 1,
+      updated: 20,
+      archived: 20,
+    })), runtimeKey, 101)).toBe(true)
+    expect(shouldConsumeBulkArchiveEcho(buildEvent(buildSession("Initial", {
+      created: 1,
+      updated: 21,
+      archived: 21,
+    })), runtimeKey, 101)).toBe(false)
+    expect(shouldConsumeBulkArchiveEcho(buildEvent(buildSession("Initial", {
+      created: 1,
+      updated: 20,
+      archived: 20,
+    })), "runtime-b", 101)).toBe(false)
+  })
+
+  test("does not consume an expired or released bulk archive echo", () => {
+    registerBulkArchiveEchoes(runtimeKey, [{ id: "ses_1", archivedAt: 20 }], 100)
+    const event = buildEvent(buildSession("Initial", { created: 1, updated: 20, archived: 20 }))
+
+    expect(shouldConsumeBulkArchiveEcho(event, runtimeKey, 30_101)).toBe(false)
+
+    registerBulkArchiveEchoes(runtimeKey, [{ id: "ses_1", archivedAt: 20 }], 100)
+    releaseBulkArchiveEchoes(runtimeKey, ["ses_1"])
+    expect(shouldConsumeBulkArchiveEcho(event, runtimeKey, 101)).toBe(false)
   })
 })

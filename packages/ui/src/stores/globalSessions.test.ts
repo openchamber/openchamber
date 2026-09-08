@@ -1,3 +1,5 @@
+import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
+import { opencodeClient } from '@/lib/opencode/client';
 import { describe, expect, test } from 'bun:test'
 import type { OpencodeClient, Session } from '@opencode-ai/sdk/v2'
 
@@ -335,3 +337,8 @@ describe('splitGlobalSessionsByArchived', () => {
     expect(archived.map((session) => session.id)).toEqual(['ses_archived'])
   })
 })
+
+const originalHomeInfo = opencodeClient.getFilesystemHomeInfo;
+opencodeClient.getFilesystemHomeInfo = async () => ({ home: '/home/user' });
+await ensureChatsRootDirectory();
+opencodeClient.getFilesystemHomeInfo = originalHomeInfo;

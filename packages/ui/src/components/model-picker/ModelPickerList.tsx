@@ -16,6 +16,7 @@ import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { handleDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { mergeModelMetadataWithLiveModel } from '@/lib/modelMetadata';
 import { getModelDisplayName as getSharedModelDisplayName } from '@/lib/modelDisplay';
@@ -585,9 +586,17 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     filteredFavorites.map((entry) => [`${entry.providerID}:${entry.modelID}`, entry] as const),
   ), [filteredFavorites]);
 
-  React.useEffect(() => {
-    selectionStore.set(0);
-  }, [searchQuery, selectionStore]);
+  const initialSelectionIndex = searchQuery.trim() || !selectedModel ? 0 : Math.max(0,
+    flatModelList.findIndex((entry) => entry.providerID === selectedModel.providerID && entry.modelID === selectedModel.modelID),
+  );
+
+  React.useLayoutEffect(() => {
+    selectionStore.set(initialSelectionIndex);
+    // Opening or scrolling the list must not let a stationary pointer replace the current model.
+    keyboardOwnsSelectionRef.current = true;
+    lastMousePositionRef.current = null;
+    scrollIntoView(scrollRef.current, itemRefs.current[initialSelectionIndex]);
+  }, [initialSelectionIndex, searchQuery, selectedModel?.providerID, selectedModel?.modelID, selectionStore]);
 
   const selectIndex = React.useCallback((index: number) => {
     selectionStore.set(index);
@@ -608,10 +617,13 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
 
   React.useEffect(() => {
     onActiveEntryChange?.(flatModelList[selectionStore.getSnapshot()]);
-  }, [flatModelList, onActiveEntryChange, selectionStore]);
+  }, [flatModelList, initialSelectionIndex, onActiveEntryChange, selectionStore]);
 
   const handleKeyDown = React.useCallback((event: React.KeyboardEvent) => {
     if (event.defaultPrevented) return;
+    if (handleDropdownNavigationKey(event, (navigationKey) => {
+      moveSelection(navigationKey === 'ArrowDown' ? 1 : -1);
+    })) return;
     event.stopPropagation();
     if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
       const selected = flatModelList[selectionStore.getSnapshot()];

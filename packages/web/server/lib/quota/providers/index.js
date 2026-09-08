@@ -13,7 +13,9 @@ import * as copilot from './copilot.js';
 import * as crof from './crof.js';
 import * as cursor from './cursor.js';
 import * as deepseek from './deepseek.js';
+import * as exeDev from './exe-dev.js';
 import * as google from './google/index.js';
+import * as hyper from './hyper.js';
 import * as kimi from './kimi.js';
 import * as nanogpt from './nanogpt.js';
 import * as openai from './openai.js';
@@ -59,11 +61,23 @@ const registry = {
     isConfigured: deepseek.isConfigured,
     fetchQuota: deepseek.fetchQuota
   },
+  'exe-dev': {
+    providerId: exeDev.providerId,
+    providerName: exeDev.providerName,
+    isConfigured: exeDev.isConfigured,
+    fetchQuota: exeDev.fetchQuota
+  },
   google: {
     providerId: google.providerId,
     providerName: google.providerName,
     isConfigured: google.isConfigured,
     fetchQuota: google.fetchGoogleQuota
+  },
+  hyper: {
+    providerId: hyper.providerId,
+    providerName: hyper.providerName,
+    isConfigured: hyper.isConfigured,
+    fetchQuota: hyper.fetchQuota
   },
   'zai-coding-plan': {
     providerId: zai.providerId,
@@ -213,6 +227,7 @@ export const fetchGoogleQuota = google.fetchGoogleQuota;
 export const fetchCodexQuota = codex.fetchQuota;
 export const fetchCursorQuota = cursor.fetchQuota;
 export const fetchDeepseekQuota = deepseek.fetchQuota;
+export const fetchHyperQuota = hyper.fetchQuota;
 export const fetchCopilotQuota = copilot.fetchQuota;
 export const fetchCopilotAddonQuota = copilot.fetchQuotaAddon;
 export const fetchKimiQuota = kimi.fetchQuota;

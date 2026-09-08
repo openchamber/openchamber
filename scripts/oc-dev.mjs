@@ -27,6 +27,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cancel, intro, isCancel, log, outro, select, text } from '@clack/prompts';
+import { RELEASE_PACKAGE_FILES } from './bump-version.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -173,16 +174,20 @@ function step(label, fn) {
   return result;
 }
 
+// The release notes source plus the files generated from it; all go into the release commit.
+// CHANGELOG.md is legacy (older installs read it for update notes); it is
+// refreshed only while it exists.
+const RELEASE_CHANGELOG_FILES = ['changelog', 'packages/vscode/CHANGELOG.md', ...(existsSync(path.join(repoRoot, 'CHANGELOG.md')) ? ['CHANGELOG.md'] : [])];
+
 function printReleaseNextSteps(version) {
   log.success(`Release v${version} prepared locally`);
-  log.info('Next steps:');
-  console.log(`  git add -A`);
+  log.info('Next steps (only the release files are staged, unrelated changes stay out):');
+  console.log(`  git add ${[...RELEASE_PACKAGE_FILES, ...RELEASE_CHANGELOG_FILES].join(' ')}`);
   console.log(`  git commit -m "release v${version}"`);
   console.log(`  git tag v${version}`);
-  console.log(`  git push origin main --tags`);
+  console.log(`  git push origin main v${version}`);
   console.log('');
-  console.log('This will trigger the GitHub Actions release workflow.');
-  console.log(`Make sure CHANGELOG.md contains a section like "## [${version}] - YYYY-MM-DD" before pushing.`);
+  console.log('Pushing the tag is what starts the GitHub Actions release; pushing main alone does not.');
 }
 
 function normalizeAction(action = '') {
@@ -389,6 +394,7 @@ async function deployRemoteWeb(options, config) {
   const dir = remote.dir;
   const port = String(remote.port);
   const apiOnly = remote.apiOnly ? 'true' : 'false';
+  const bindHost = remote.lan === false ? '127.0.0.1' : '0.0.0.0';
   const packageBase = path.basename(packageFile);
 
   if (!host || !dir || !port) throw new Error(`Remote deployment ${remote.id} must define host, dir, and port.`);
@@ -400,9 +406,9 @@ async function deployRemoteWeb(options, config) {
     run('scp', ['-q', packageFile, `${host}:~/${dir}/releases/${packageBase}`]);
   });
   step('Resetting remote install state', () => run('ssh', [host, `cd ~/${dir} && rm -f package.json package-lock.json pnpm-lock.yaml bun.lockb && rm -rf node_modules`]));
-  step('Preparing remote package manifest', () => run('ssh', [host, `cd ~/${dir} && ${REMOTE_RUNTIME_ENV}; npm init -y >/dev/null 2>&1`]));
-  step('Installing remote package', () => run('ssh', [host, `cd ~/${dir} && ${REMOTE_RUNTIME_ENV}; npm install ./releases/${packageBase}`]));
-  step(`Starting remote instance on ${host}:${port}`, () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; PASSWORD_VALUE=$(grep '^export OPENCHAMBER_UI_PASSWORD=' ~/.bashrc 2>/dev/null | sed -E 's/.*=["“]?([^"”]+)["”]?/\\1/' || true); if [ -n "$PASSWORD_VALUE" ]; then export OPENCHAMBER_UI_PASSWORD="$PASSWORD_VALUE"; fi; if [ ${quote(apiOnly)} = 'true' ]; then export OPENCHAMBER_API_ONLY=true; fi; OPENCHAMBER_HOST=0.0.0.0 node ./node_modules/@openchamber/web/bin/cli.js --port ${quote(port)} >/dev/null 2>&1; sleep 0.5; if command -v lsof >/dev/null 2>&1; then lsof -ti :${quote(port)} >/dev/null 2>&1 || exit 1; fi`]));
+  step('Preparing remote package manifest', () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; if command -v bun >/dev/null 2>&1; then bun init -y; else npm init -y; fi`]));
+  step('Installing remote package', () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; if command -v bun >/dev/null 2>&1; then bun add ./releases/${packageBase}; else npm install ./releases/${packageBase}; fi`]));
+  step(`Starting remote instance on ${host}:${port}`, () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; PASSWORD_VALUE=$(grep '^export OPENCHAMBER_UI_PASSWORD=' ~/.bashrc 2>/dev/null | sed -E 's/.*=["“]?([^"”]+)["”]?/\\1/' || true); if [ -n "$PASSWORD_VALUE" ]; then export OPENCHAMBER_UI_PASSWORD="$PASSWORD_VALUE"; fi; if [ ${quote(apiOnly)} = 'true' ]; then export OPENCHAMBER_API_ONLY=true; fi; if command -v bun >/dev/null 2>&1; then OPENCHAMBER_HOST=${quote(bindHost)} bun ./node_modules/@openchamber/web/bin/cli.js --port ${quote(port)} >/dev/null 2>&1; else OPENCHAMBER_HOST=${quote(bindHost)} node ./node_modules/@openchamber/web/bin/cli.js --port ${quote(port)} >/dev/null 2>&1; fi; sleep 0.5; if command -v lsof >/dev/null 2>&1; then lsof -ti :${quote(port)} >/dev/null 2>&1 || exit 1; fi`]));
   log.success(`Remote deployment ready: ${host}:${port}`);
 }
 
@@ -597,6 +603,9 @@ async function createRelease(options) {
     }
   }
   if (!/^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$/.test(version)) throw new Error('Invalid version format. Use semver, e.g. 1.4.7 or 1.4.7-beta.1');
+  // Turns changelog/unreleased.md into changelog/<version>.md dated today and
+  // regenerates the outputs; fails when nothing was written for the release.
+  step('Promoting the changelog', () => run('node', ['scripts/changelog/build.mjs', '--release', version]));
   step('Validating codebase', () => run('bun', ['run', 'release:prepare']));
   step(`Bumping version to ${version}`, () => run('node', ['scripts/bump-version.mjs', version]));
   printReleaseNextSteps(version);

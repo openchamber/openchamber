@@ -2,15 +2,16 @@
  * The collapsed mobile composer.
  *
  * With the keyboard down the composer is a pill: attachments, a one-line
- * preview of the draft, and a mic, with a round new-session button beside it.
+ * preview of the draft, and a mic, with a round contextual action beside it.
  * Tapping anywhere in it expands the real composer and raises the keyboard in
  * the same gesture — which is why the expand handler must run synchronously
  * from the tap rather than from an effect.
  *
- * The new-session button collapses away once a draft is already open, letting
- * the pill grow into its place.
+ * With content, the inner end slot sends while the session is idle. While it
+ * is running, abort keeps that slot and the outer new-session action sends.
  */
 
+import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { StopIcon } from '@/components/icons/StopIcon';
 import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
@@ -30,10 +31,14 @@ export interface MobilePillComposerProps {
     canAbort: boolean;
     footerIconButtonClass: string;
     iconSizeClass: string;
+    sendIconSizeClass: string;
     stopIconSizeClass: string;
     theme: Theme;
     onExpand: () => void;
     onApplySuggestion: (text: string) => void;
+    onPrimaryAction: () => void;
+    /** While a turn runs, the trailing action queues, as the expanded composer does. */
+    onQueueMessage: () => void;
     onNewSession: () => void;
     onPickLocalFiles: () => void;
     onOpenIssuePicker: () => void;
@@ -57,10 +62,13 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
         canAbort,
         footerIconButtonClass,
         iconSizeClass,
+        sendIconSizeClass,
         stopIconSizeClass,
         theme: currentTheme,
         onExpand,
         onApplySuggestion,
+        onPrimaryAction,
+        onQueueMessage,
         onNewSession,
         onPickLocalFiles,
         onOpenIssuePicker,
@@ -71,6 +79,8 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
         onStartDictation,
         onAbort,
     } = props;
+    const canPrimaryAction = hasContent && Boolean(currentSessionId || newSessionDraftOpen);
+    const showTrailingSendAction = canPrimaryAction && canAbort;
 
     return (
         <div className="flex flex-col">
@@ -158,26 +168,46 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                     >
                         <StopIcon className={cn(stopIconSizeClass)} />
                     </button>
+                ) : canPrimaryAction ? (
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="text-primary hover:text-primary"
+                        onClick={onPrimaryAction}
+                        title={t('chat.chatInput.actions.sendMessageAria')}
+                        aria-label={t('chat.chatInput.actions.sendMessageAria')}
+                    >
+                        <Icon name="send-plane-2" className={cn(sendIconSizeClass)} />
+                    </Button>
                 ) : null}
             </div>
-            {/* New-session button: fades/shrinks away when the draft is
-                already open, letting the pill expand into its place. */}
+            {/* While running, Abort owns the pill's end slot and the outer button
+                queues the draft, with the same rotated icon and label the expanded
+                composer uses for that state. An empty new-session draft needs
+                neither action. */}
             <div
                 className={cn(
                     'flex-shrink-0 transition-all duration-200 ease-out',
-                    newSessionDraftOpen ? 'w-0 opacity-0 overflow-hidden' : 'w-11 opacity-100',
+                    newSessionDraftOpen && !showTrailingSendAction ? 'w-0 opacity-0 overflow-hidden' : 'w-11 opacity-100',
                 )}
             >
                 <button
                     type="button"
-                    className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border border-border/80 text-foreground shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
+                    className={cn(
+                        'flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border border-border/80 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
+                        showTrailingSendAction ? 'text-primary hover:text-primary' : 'text-foreground',
+                    )}
                     style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
-                    onClick={onNewSession}
-                    disabled={newSessionDraftOpen}
-                    title={t('mobile.sessions.newChat')}
-                    aria-label={t('mobile.sessions.newChat')}
+                    onClick={showTrailingSendAction ? onQueueMessage : onNewSession}
+                    disabled={newSessionDraftOpen && !showTrailingSendAction}
+                    title={t(showTrailingSendAction ? 'chat.chatInput.actions.queueMessageAria' : 'mobile.sessions.newChat')}
+                    aria-label={t(showTrailingSendAction ? 'chat.chatInput.actions.queueMessageAria' : 'mobile.sessions.newChat')}
                 >
-                    <Icon name="add" className="h-5 w-5 text-current" />
+                    <Icon
+                        name={showTrailingSendAction ? 'send-plane-2' : 'add'}
+                        className={cn(showTrailingSendAction ? cn(sendIconSizeClass, '-rotate-90') : 'h-5 w-5', 'text-current')}
+                    />
                 </button>
             </div>
         </div>

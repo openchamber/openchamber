@@ -362,6 +362,15 @@ const SessionRenameForm: React.FC<{
   const { t } = useI18n();
   const [value, setValue] = React.useState(initialTitle);
 
+  // Opens with the whole title selected, so the first keystroke replaces it.
+  // Stable ref callback: an inline one would re-run on every render and
+  // re-select the text mid-edit.
+  const focusRenameInput = React.useCallback((node: HTMLInputElement | null) => {
+    if (!node) return;
+    node.focus();
+    node.select();
+  }, []);
+
   const commit = () => {
     const next = value.trim();
     if (!next || next === initialTitle.trim()) {
@@ -385,7 +394,7 @@ const SessionRenameForm: React.FC<{
       }}
     >
       <input
-        autoFocus
+        ref={focusRenameInput}
         value={value}
         onChange={(event) => setValue(event.target.value)}
         onKeyDown={(event) => {

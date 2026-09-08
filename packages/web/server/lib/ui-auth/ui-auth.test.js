@@ -221,6 +221,22 @@ describe('ui auth client credential seam', () => {
     };
     expect(await auth.ensureSessionToken(dictationWsReq, null)).toBe('client:device-1');
 
+    const devTunnelWsReq = {
+      method: 'GET',
+      path: '/api/dev-tunnel',
+      url: `/api/dev-tunnel?port=4322&oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { upgrade: 'websocket' },
+    };
+    expect(await auth.ensureSessionToken(devTunnelWsReq, null)).toBe('client:device-1');
+
+    const devTunnelSubpathWsReq = {
+      method: 'GET',
+      path: '/api/dev-tunnel/private',
+      url: `/api/dev-tunnel/private?port=4322&oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { upgrade: 'websocket' },
+    };
+    expect(await auth.ensureSessionToken(devTunnelSubpathWsReq, null)).toBe(null);
+
     const dictationHttpReq = {
       method: 'GET',
       path: '/api/dictation/ws',

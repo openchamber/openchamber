@@ -1,8 +1,9 @@
 import React from "react";
 import { cn } from "@/lib/utils";
+import { useUIStore } from "@/stores/useUIStore";
 
 type OverlayScrollbarProps = {
-  /** The authoritative scrolling element. Its identity must stay stable while mounted. */
+  /** The scrolling element. Container replacement is picked up on the next React commit. */
   containerRef: React.RefObject<HTMLElement | null>;
   /** Minimum thumb length in CSS pixels, capped to the available track. */
   minThumbSize?: number;
@@ -13,16 +14,16 @@ type OverlayScrollbarProps = {
   disableHorizontal?: boolean;
   /** Tracks direct-child replacement so newly mounted content remains size-observed. */
   observeMutations?: boolean;
-  /** Hides the scrollbar during programmatic motion, except while the user is dragging it. */
+  /** Hides programmatic motion unless dragging or the device preference keeps scrollbars visible. */
   suppressVisibility?: boolean;
-  /** Shows the scrollbar only after recent wheel, touch, keyboard, or thumb input. */
+  /** Requires recent user input in the default auto-hide mode. */
   userIntentOnly?: boolean;
 };
 
 type ScrollbarOptions = Required<Pick<
   OverlayScrollbarProps,
   "minThumbSize" | "hideDelayMs" | "disableHorizontal" | "observeMutations" | "suppressVisibility" | "userIntentOnly"
->>;
+>> & { alwaysVisible: boolean };
 
 // The inset is part of both rendering and drag math; changing it must preserve that shared track.
 const TRACK_INSET = 8;
@@ -66,6 +67,11 @@ function bindScrollbar(
   let hideDeadlineMs = 0;
   let lastUserIntentTimeMs = Number.NEGATIVE_INFINITY;
   let pointerOverThumb = false;
+  // The thumb is a sibling overlay of the container, so hover state is tracked
+  // for both: moving the pointer from the container onto the thumb fires the
+  // container's pointerleave before the thumb's pointerover, and the hide timer
+  // must not run in the gap between those two events.
+  let pointerOverContainer = false;
 
   // Drag state is the minimum snapshot needed to convert pointer travel back into a scroll offset.
   let drag: {
@@ -83,11 +89,11 @@ function bindScrollbar(
   };
 
   const scheduleHide = () => {
-    if (pointerOverThumb || drag || hideTimerId !== null) return;
+    if (options.alwaysVisible || pointerOverThumb || pointerOverContainer || drag || hideTimerId !== null) return;
 
     const hide = () => {
       hideTimerId = null;
-      if (pointerOverThumb || drag) return;
+      if (options.alwaysVisible || pointerOverThumb || pointerOverContainer || drag) return;
       const delay = hideDeadlineMs - performance.now();
       if (delay > 0) {
         hideTimerId = setTimeout(hide, delay);
@@ -160,9 +166,9 @@ function bindScrollbar(
 
   // Scroll visibility is separate from positioning so hidden programmatic scrolling does no DOM work.
   const onScroll = () => {
-    const shouldShow = drag
+    const shouldShow = options.alwaysVisible || drag
       || (!options.suppressVisibility
-        && (!options.userIntentOnly
+        && (pointerOverContainer || pointerOverThumb || !options.userIntentOnly
           || performance.now() - lastUserIntentTimeMs <= USER_INTENT_DURATION_MS));
 
     if (!shouldShow) {
@@ -246,7 +252,34 @@ function bindScrollbar(
     scheduleHide();
   };
 
+  // Hover makes the thumb reachable without wheel input. Touch/pen pointerenter
+  // also fires on contact, so only mouse pointers get this affordance.
+  const onContainerPointerEnter = (event: PointerEvent) => {
+    if (event.pointerType !== "mouse") return;
+    pointerOverContainer = true;
+    if (options.suppressVisibility && !options.alwaysVisible) return;
+    hideDeadlineMs = performance.now() + options.hideDelayMs;
+    if (hideTimerId !== null) {
+      clearTimeout(hideTimerId);
+      hideTimerId = null;
+    }
+    setVisible(true);
+    // Hidden programmatic scrolling may have skipped positioning. Refresh both
+    // position and overflow on reveal; disabled horizontal geometry stays unread.
+    scheduleUpdate(true);
+  };
+
+  const onContainerPointerLeave = (event: PointerEvent) => {
+    if (event.pointerType !== "mouse") return;
+    pointerOverContainer = false;
+    if (options.suppressVisibility) return;
+    hideDeadlineMs = performance.now() + options.hideDelayMs;
+    scheduleHide();
+  };
+
   container.addEventListener("scroll", onScroll, { passive: true });
+  container.addEventListener("pointerenter", onContainerPointerEnter);
+  container.addEventListener("pointerleave", onContainerPointerLeave);
   root.addEventListener("pointerdown", onPointerDown);
   root.addEventListener("pointermove", onPointerMove);
   root.addEventListener("pointerup", onPointerEnd);
@@ -298,12 +331,13 @@ function bindScrollbar(
 
   setMutationObservation(options.observeMutations);
   setUserIntentListeners(options.userIntentOnly);
-  root.dataset.visible = "false";
+  setVisible(options.alwaysVisible);
   scheduleUpdate(true);
 
   // Props update policy in place; only mounting and unmounting bind browser resources.
   return {
     update(nextOptions: ScrollbarOptions) {
+      const visibilityChanged = nextOptions.alwaysVisible !== options.alwaysVisible;
       const mustMeasure = nextOptions.disableHorizontal !== options.disableHorizontal
         || nextOptions.minThumbSize !== options.minThumbSize;
       if (nextOptions.observeMutations !== options.observeMutations) {
@@ -316,12 +350,31 @@ function bindScrollbar(
       options = nextOptions;
       if (mustMeasure) scheduleUpdate(true);
       if (options.disableHorizontal) horizontalThumb.hidden = true;
-      if (options.suppressVisibility && !drag) setVisible(false);
+      if (options.alwaysVisible) {
+        if (hideTimerId !== null) {
+          clearTimeout(hideTimerId);
+          hideTimerId = null;
+        }
+        if (visibilityChanged) scheduleUpdate();
+        setVisible(true);
+      } else if (options.suppressVisibility && !drag) {
+        setVisible(false);
+      } else if (pointerOverContainer || pointerOverThumb) {
+        scheduleUpdate();
+        setVisible(true);
+      } else if (visibilityChanged) {
+        setVisible(Boolean(drag));
+      }
     },
     disconnect() {
       if (frameId !== null) cancelAnimationFrame(frameId);
       if (hideTimerId !== null) clearTimeout(hideTimerId);
+      setVisible(false);
+      verticalThumb.hidden = true;
+      horizontalThumb.hidden = true;
       container.removeEventListener("scroll", onScroll);
+      container.removeEventListener("pointerenter", onContainerPointerEnter);
+      container.removeEventListener("pointerleave", onContainerPointerLeave);
       setUserIntentListeners(false);
       root.removeEventListener("pointerdown", onPointerDown);
       root.removeEventListener("pointermove", onPointerMove);
@@ -345,12 +398,14 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
   suppressVisibility = false,
   userIntentOnly = false,
 }) => {
+  const alwaysVisible = useUIStore((state) => state.alwaysShowScrollbars === true);
   const rootRef = React.useRef<HTMLDivElement>(null);
   const verticalThumbRef = React.useRef<HTMLDivElement>(null);
   const horizontalThumbRef = React.useRef<HTMLDivElement>(null);
   const bindingRef = React.useRef<ReturnType<typeof bindScrollbar> | null>(null);
   const boundContainerRef = React.useRef<HTMLElement | null>(null);
   const optionsRef = React.useRef<ScrollbarOptions>({
+    alwaysVisible,
     minThumbSize,
     hideDelayMs,
     disableHorizontal,
@@ -359,6 +414,7 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
     userIntentOnly,
   });
   optionsRef.current = {
+    alwaysVisible,
     minThumbSize,
     hideDelayMs,
     disableHorizontal,
@@ -397,6 +453,7 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
 
   React.useLayoutEffect(() => {
     bindingRef.current?.update({
+      alwaysVisible,
       minThumbSize,
       hideDelayMs,
       disableHorizontal,
@@ -404,7 +461,7 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
       suppressVisibility,
       userIntentOnly,
     });
-  }, [disableHorizontal, hideDelayMs, minThumbSize, observeMutations, suppressVisibility, userIntentOnly]);
+  }, [alwaysVisible, disableHorizontal, hideDelayMs, minThumbSize, observeMutations, suppressVisibility, userIntentOnly]);
 
   return (
     <div ref={rootRef} className={cn("overlay-scrollbar", className)} aria-hidden="true">

@@ -2,7 +2,7 @@
   "name": "openchamber",
   "displayName": "OpenChamber",
   "description": "%extension.description%",
-  "version": "1.22.0",
+  "version": "1.22.2",
   "publisher": "fedaykindev",
   "private": true,
   "repository": {
@@ -116,6 +116,22 @@
         "title": "%command.addToContext.title%"
       },
       {
+        "command": "openchamber.addLineComment",
+        "category": "OpenChamber",
+        "title": "%command.addLineComment.title%"
+      },
+      {
+        "command": "openchamber.submitLineComment",
+        "category": "OpenChamber",
+        "title": "%command.submitLineComment.title%"
+      },
+      {
+        "command": "openchamber.removeLineComment",
+        "category": "OpenChamber",
+        "title": "%command.removeLineComment.title%",
+        "icon": "$(close)"
+      },
+      {
         "command": "openchamber.explain",
         "category": "OpenChamber",
         "title": "%command.explain.title%"
@@ -150,6 +166,30 @@
       }
     ],
     "menus": {
+      "comments/commentThread/context": [
+        {
+          "command": "openchamber.submitLineComment",
+          "group": "inline",
+          "when": "commentController == openchamber.inlineComments"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "openchamber.removeLineComment",
+          "group": "navigation",
+          "when": "commentController == openchamber.inlineComments && commentThread == openchamberAttached"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "openchamber.submitLineComment",
+          "when": "false"
+        },
+        {
+          "command": "openchamber.removeLineComment",
+          "when": "false"
+        }
+      ],
       "editor/context": [
         {
           "submenu": "openchamber.submenu",
@@ -200,6 +240,9 @@
         },
         {
           "command": "openchamber.addToContext"
+        },
+        {
+          "command": "openchamber.addLineComment"
         }
       ]
     },
@@ -245,7 +288,7 @@
   },
   "dependencies": {
     "@openchamber/ui": "workspace:*",
-    "@opencode-ai/sdk": "1.18.25",
+    "@opencode-ai/sdk": "1.18.29",
     "adm-zip": "^0.6.0",
     "jsonc-parser": "^3.3.1",
     "react": "^19.1.1",

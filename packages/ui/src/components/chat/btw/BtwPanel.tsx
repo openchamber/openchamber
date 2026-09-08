@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Message, Part } from '@opencode-ai/sdk/v2';
 import { useI18n } from '@/lib/i18n';
+import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
@@ -40,11 +41,13 @@ const IDLE_SESSION_STATUS = { type: 'idle' as const };
  * and the app navigates to it), destroy (the fork is deleted; the main
  * conversation is never touched).
  */
-export const BtwPanel: React.FC<{ parentSessionId: string; panel: BtwPanelState }> = ({
+export const BtwPanel: React.FC<{ parentSessionId: string; panel: BtwPanelState; onExit: () => void }> = ({
     parentSessionId,
     panel,
+    onExit,
 }) => {
     const { t } = useI18n();
+    useEscapeToExit(onExit, !panel.collapsed && Boolean(panel.pending || panel.creating || panel.btwSessionId));
 
     if (panel.btwSessionId && panel.btwDirectory) {
         return (
@@ -54,7 +57,6 @@ export const BtwPanel: React.FC<{ parentSessionId: string; panel: BtwPanelState 
                     btwSessionId: panel.btwSessionId,
                     directory: panel.btwDirectory,
                 }}
-                title={panel.btwSession?.title?.trim() || t('chat.btw.titleFallback')}
                 boundaryMessageID={panel.boundaryMessageID}
                 collapsed={panel.collapsed}
             />
@@ -63,12 +65,33 @@ export const BtwPanel: React.FC<{ parentSessionId: string; panel: BtwPanelState 
 
     if (panel.creating) {
         return (
-            <BtwFrame title={t('chat.btw.titleFallback')}>
+            <BtwFrame>
                 <div className="flex items-center gap-2 px-4 py-4 text-sm text-muted-foreground">
                     <Icon name="loader-4" className="size-4 animate-spin" />
                     <span>{t('chat.btw.loading')}</span>
                 </div>
             </BtwFrame>
+        );
+    }
+
+    if (panel.pending) {
+        return (
+            <BtwFrame
+                draftHint={t('chat.btw.draftHint')}
+                collapsed={panel.collapsed}
+                actions={(
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={onExit}
+                        aria-label={t('chat.btw.cancelAria')}
+                        title={t('chat.btw.cancelAria')}
+                    >
+                        <Icon name="close" className="size-4" />
+                    </Button>
+                )}
+            />
         );
     }
 
@@ -161,21 +184,18 @@ const useBtwSessionData = (
     };
 };
 
-/** Esc collapses the sheet (never destroys) unless focus is in a text field. */
-const useEscapeToCollapse = (onCollapse: () => void): void => {
+/** Composer and popup handlers get first refusal; the owner decides cancel versus collapse. */
+const useEscapeToExit = (onExit: () => void, enabled: boolean): void => {
     React.useEffect(() => {
+        if (!enabled) return;
         const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key !== 'Escape') return;
-            // SAFETY: keydown targets are DOM elements (or null on window).
-            const target = event.target as HTMLElement | null;
-            if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-                return;
-            }
-            onCollapse();
+            if (event.key !== 'Escape' || event.defaultPrevented || isIMECompositionEvent(event)) return;
+            event.preventDefault();
+            onExit();
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [onCollapse]);
+    }, [enabled, onExit]);
 };
 
 /**
@@ -217,14 +237,14 @@ const useAutoScroll = (
 };
 
 const BtwFrame: React.FC<{
-    title: string;
     actions?: React.ReactNode;
     onTitleClick?: () => void;
     titleClickLabel?: string;
     collapsed?: boolean;
     headerSpinner?: boolean;
+    draftHint?: string;
     children?: React.ReactNode;
-}> = ({ title, actions, onTitleClick, titleClickLabel, collapsed, headerSpinner, children }) => (
+}> = ({ actions, onTitleClick, titleClickLabel, collapsed, headerSpinner, draftHint, children }) => (
     <div
         className="chat-input-column absolute bottom-full left-0 right-0 z-30 mb-3"
         role="dialog"
@@ -245,17 +265,12 @@ const BtwFrame: React.FC<{
                         ) : (
                             <Icon name="chat-ai-3" className="size-3.5 shrink-0" />
                         )}
-                        <span className="typography-ui-label min-w-0 truncate font-semibold">
-                            {title}
-                        </span>
                         <Icon name={collapsed ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" />
                     </button>
                 ) : (
                     <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
                         <Icon name="chat-ai-3" className="size-3.5 shrink-0" />
-                        <h2 className="typography-ui-label min-w-0 truncate font-semibold">
-                            {title}
-                        </h2>
+                        {draftHint ? <span className="typography-ui-label truncate">{draftHint}</span> : null}
                     </span>
                 )}
                 <div className="min-w-0 flex-1" />
@@ -273,23 +288,20 @@ const BtwFrame: React.FC<{
 
 const BtwSheet: React.FC<{
     sessionRef: BtwSessionRef;
-    title: string;
     boundaryMessageID: string | null;
     collapsed: boolean;
-}> = ({ sessionRef, title, boundaryMessageID, collapsed }) => {
+}> = ({ sessionRef, boundaryMessageID, collapsed }) => {
     const { t } = useI18n();
     const handleDestroy = useBtwDestroy(sessionRef);
     const setCollapsed = React.useCallback((next: boolean) => {
         useBtwStore.getState().setPanelState(sessionRef.parentSessionId, { collapsed: next });
     }, [sessionRef.parentSessionId]);
     const handleToggleCollapsed = React.useCallback(() => setCollapsed(!collapsed), [collapsed, setCollapsed]);
-    const handleCollapse = React.useCallback(() => setCollapsed(true), [setCollapsed]);
     const handlePromote = React.useCallback(() => {
         void promoteBtwSession(sessionRef).catch(() => {
             toast.error(t('chat.btw.toast.promoteFailed'));
         });
     }, [sessionRef, t]);
-    useEscapeToCollapse(handleCollapse);
 
     const toggleLabel = collapsed ? t('chat.btw.expandAria') : t('chat.btw.collapseAria');
     const headerButtonClass = 'size-7 rounded-lg text-muted-foreground transition-colors hover:text-foreground hover:!bg-transparent active:!bg-transparent';
@@ -324,7 +336,6 @@ const BtwSheet: React.FC<{
         return (
             <BtwCollapsedStrip
                 sessionRef={sessionRef}
-                title={title}
                 actions={actions}
                 onExpand={handleToggleCollapsed}
                 expandLabel={toggleLabel}
@@ -335,7 +346,6 @@ const BtwSheet: React.FC<{
     return (
         <BtwExpandedSheet
             sessionRef={sessionRef}
-            title={title}
             boundaryMessageID={boundaryMessageID}
             actions={actions}
             onTitleClick={handleToggleCollapsed}
@@ -351,16 +361,14 @@ const BtwSheet: React.FC<{
  */
 const BtwCollapsedStrip: React.FC<{
     sessionRef: BtwSessionRef;
-    title: string;
     actions: React.ReactNode;
     onExpand: () => void;
     expandLabel: string;
-}> = ({ sessionRef, title, actions, onExpand, expandLabel }) => {
+}> = ({ sessionRef, actions, onExpand, expandLabel }) => {
     const status = useSessionStatus(sessionRef.btwSessionId, sessionRef.directory) ?? IDLE_SESSION_STATUS;
     const isBusy = status.type === 'busy' || status.type === 'retry';
     return (
         <BtwFrame
-            title={title}
             actions={actions}
             onTitleClick={onExpand}
             titleClickLabel={expandLabel}
@@ -372,12 +380,11 @@ const BtwCollapsedStrip: React.FC<{
 
 const BtwExpandedSheet: React.FC<{
     sessionRef: BtwSessionRef;
-    title: string;
     boundaryMessageID: string | null;
     actions: React.ReactNode;
     onTitleClick: () => void;
     titleClickLabel: string;
-}> = ({ sessionRef, title, boundaryMessageID, actions, onTitleClick, titleClickLabel }) => {
+}> = ({ sessionRef, boundaryMessageID, actions, onTitleClick, titleClickLabel }) => {
     const data = useBtwSessionData(sessionRef.btwSessionId, sessionRef.directory, boundaryMessageID);
     const bodyRef = React.useRef<HTMLDivElement | null>(null);
     const contentRef = React.useRef<HTMLDivElement | null>(null);
@@ -395,7 +402,7 @@ const BtwExpandedSheet: React.FC<{
         : undefined;
 
     return (
-        <BtwFrame title={title} actions={actions} onTitleClick={onTitleClick} titleClickLabel={titleClickLabel} collapsed={false}>
+        <BtwFrame actions={actions} onTitleClick={onTitleClick} titleClickLabel={titleClickLabel} collapsed={false}>
             <ChatSurfaceProvider mode="peek">
                 <BtwMessages
                     data={data}

@@ -1,5 +1,5 @@
 import type { WorktreeMetadata } from '@/types/worktree';
-import type { DraftStarterRef } from '@/lib/draftStarters';
+import type { DesktopSettings } from '@/lib/settings/registry';
 
 type RuntimePlatform = 'web' | 'desktop' | 'vscode';
 
@@ -23,7 +23,13 @@ export interface TerminalSession {
   cols: number;
   rows: number;
   status: 'running' | 'exited' | 'error';
+  mode?: 'interactive' | 'command';
+  purpose?: TerminalSessionPurpose;
 }
+
+export type TerminalSessionPurpose =
+  | { type: 'terminal' }
+  | { type: 'project-action'; actionId: string; executionId: string };
 
 export type TerminalShell = 'auto' | 'bash' | 'zsh' | 'sh' | 'fish' | 'pwsh' | 'powershell' | 'cmd' | 'dash' | 'ksh' | 'nu';
 
@@ -38,6 +44,9 @@ export interface TerminalStreamEvent {
   sequence?: number;
   data?: string;
   replayData?: string;
+  /** PTY size the snapshot history was drawn for; only `snapshot` events carry it. */
+  cols?: number;
+  rows?: number;
   status?: 'running' | 'exited' | 'error';
   exitCode?: number;
   signal?: number | null;
@@ -46,13 +55,15 @@ export interface TerminalStreamEvent {
 
   runtime?: 'node' | 'bun';
   ptyBackend?: string;
+  mode?: 'interactive' | 'command';
+  purpose?: TerminalSessionPurpose;
 }
 
 export interface TerminalError extends Error {
   code?: string;
 }
 
-export interface CreateTerminalOptions {
+interface BaseCreateTerminalOptions {
   cwd: string;
   sessionId?: string;
   cols?: number;
@@ -62,7 +73,20 @@ export interface CreateTerminalOptions {
   terminalForeground?: string;
   shell?: TerminalShell;
   loginShell?: boolean;
+  purpose?: TerminalSessionPurpose;
 }
+
+interface InteractiveCreateTerminalOptions extends BaseCreateTerminalOptions {
+  mode?: 'interactive';
+}
+
+interface CommandCreateTerminalOptions extends BaseCreateTerminalOptions {
+  mode: 'command';
+  command: string;
+}
+
+export type CreateTerminalOptions = InteractiveCreateTerminalOptions | CommandCreateTerminalOptions;
+export type RestartTerminalOptions = InteractiveCreateTerminalOptions;
 
 export interface ResizeTerminalPayload {
   sessionId: string;
@@ -85,11 +109,13 @@ export interface TerminalServerSession {
   cwd: string;
   status: 'running' | 'exited';
   createdAt: number | null;
+  mode?: 'interactive' | 'command';
+  purpose?: TerminalSessionPurpose;
 }
 
 export interface TerminalAPI {
   listShells?(): Promise<TerminalShellOption[]>;
-  /** Server-side sessions for a working directory; absent on runtimes without a server terminal list. */
+  /** Server-side sessions for a working directory, or all directories when cwd is empty; absent on runtimes without a server terminal list. */
   listSessions?(cwd: string): Promise<TerminalServerSession[]>;
   /** Marks the sessions as active so the server's idle sweep does not reap terminals an open client still shows. */
   touchSessions?(sessionIds: string[]): Promise<void>;
@@ -99,7 +125,7 @@ export interface TerminalAPI {
   resize(payload: ResizeTerminalPayload): Promise<void>;
   updateAppearance?(sessionId: string, appearance: Pick<CreateTerminalOptions, 'themeMode' | 'terminalBackground' | 'terminalForeground'>): Promise<void>;
   close(sessionId: string): Promise<void>;
-  restartSession?(currentSessionId: string, options: CreateTerminalOptions): Promise<TerminalSession>;
+  restartSession?(currentSessionId: string, options: RestartTerminalOptions): Promise<TerminalSession>;
   forceKill?(options: ForceKillOptions): Promise<void>;
 }
 
@@ -145,6 +171,11 @@ export interface GitStatus {
   rebaseInProgress?: GitRebaseInProgress | null;
   /** Phase 1: reason for attention-required state */
   attentionReason?: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null;
+}
+
+export interface GitUnpushedBranchCounts {
+  /** Local commits not present in each branch's configured upstream. */
+  counts: Record<string, number>;
 }
 
 export interface GitDiffResponse {
@@ -378,6 +409,8 @@ export interface GitWorktreeInfo {
   name: string;
   branch: string;
   path: string;
+  /** git still registers the worktree, but its directory is gone (deleted outside git). */
+  prunable?: boolean;
 }
 
 export interface GitWorktreeValidationError {
@@ -433,6 +466,7 @@ export interface GitWorktreeCreateResult {
   path: string;
   directoryCreated?: true;
   bootstrapStatus?: GitWorktreeBootstrapStatus;
+  sourceFetchFailed?: true;
 }
 
 export interface RemoveGitWorktreePayload {
@@ -489,7 +523,7 @@ interface GitWorktreeAPI {
 
 export interface GitAPI {
   checkIsGitRepository(directory: string): Promise<boolean>;
-  getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<GitStatus>;
+  getGitStatus(directory: string, options?: { mode?: 'light'; fresh?: boolean }): Promise<GitStatus>;
   getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitDiffResponse>;
   getGitFileDiff(directory: string, options: GetGitFileDiffOptions): Promise<GitFileDiffResponse>;
   getGitRangeDiff?(directory: string, options: GetGitRangeDiffOptions): Promise<GitDiffResponse>;
@@ -505,6 +539,7 @@ export interface GitAPI {
   revertGitHunk?(directory: string, filePath: string, patch: string): Promise<void>;
   isLinkedWorktree(directory: string): Promise<boolean>;
   getGitBranches(directory: string): Promise<GitBranch>;
+  getGitUnpushedBranchCounts(directory: string, branches: string[]): Promise<GitUnpushedBranchCounts>;
   deleteGitBranch(directory: string, payload: GitDeleteBranchPayload): Promise<{ success: boolean }>;
   deleteRemoteBranch(directory: string, payload: GitDeleteRemoteBranchPayload): Promise<{ success: boolean }>;
   removeRemote(directory: string, payload: GitRemoveRemotePayload): Promise<{ success: boolean }>;
@@ -625,6 +660,7 @@ interface FileReadOptions {
   outsideFileGrant?: string;
   optional?: boolean;
   directory?: string;
+  fresh?: boolean;
 }
 
 export interface FilesAPI {
@@ -663,74 +699,11 @@ export interface ProjectEntry {
   sidebarCollapsed?: boolean;
 }
 
-export interface SettingsPayload {
-  themeId?: string;
-  useSystemTheme?: boolean;
-  themeVariant?: 'light' | 'dark';
-  lightThemeId?: string;
-  darkThemeId?: string;
-  lastDirectory?: string;
-  homeDirectory?: string;
-  opencodeBinary?: string;
-  projects?: ProjectEntry[];
-  activeProjectId?: string;
-  sidebarProjectDisplayMode?: 'all' | 'single';
-  sidebarSessionGroupingMode?: 'by-worktree' | 'flat';
-  sidebarProjectSortOrder?: 'manual' | 'a-z' | 'z-a' | 'date-added' | 'recent';
-  sidebarShowRecentSection?: boolean;
-  securityScopedBookmarks?: string[];
-  pinnedDirectories?: string[];
-  showReasoningTraces?: boolean;
-  collapsibleThinkingBlocks?: boolean;
-  showDeletionDialog?: boolean;
-  nativeNotificationsEnabled?: boolean;
-  notificationMode?: 'always' | 'hidden-only';
-  autoDeleteEnabled?: boolean;
-  autoSaveEnabled?: boolean;
-  autoDeleteAfterDays?: number;
-  sessionRetentionAction?: 'archive' | 'delete';
-  followUpBehavior?: 'steer' | 'queue';
-  queueModeEnabled?: boolean;
-  gitmojiEnabled?: boolean;
-  inputSpellcheckEnabled?: boolean;
-  showOpenCodeUpdateNotifications?: boolean;
-  openCodeUpdateToastDismissedVersion?: string;
-  showToolFileIcons?: boolean;
-  codeBlockLineWrap?: boolean;
-  showTurnChangedFiles?: boolean;
-  showExpandedBashTools?: boolean;
-  showExpandedEditTools?: boolean;
-  chatRenderMode?: 'sorted' | 'live';
-  messageStreamTransport?: 'auto' | 'ws' | 'sse';
-  activityRenderMode?: 'collapsed' | 'summary';
-  mermaidRenderingMode?: 'svg' | 'ascii';
-  showSplitAssistantMessageActions?: boolean;
-  fontSize?: number;
-  terminalFontSize?: number;
-  terminalShell?: TerminalShell;
-  terminalLoginShells?: TerminalShell[];
-  editorFontSize?: number;
-  uiFont?: string;
-  monoFont?: string;
-  padding?: number;
-  cornerRadius?: number;
-  inputBarOffset?: number;
-  shortcutOverrides?: Record<string, string>;
-  diffLayoutPreference?: 'dynamic' | 'inline' | 'side-by-side';
-  gitChangesViewMode?: 'flat' | 'tree';
-  directoryShowHidden?: boolean;
-  filesViewShowGitignored?: boolean;
-  openInAppId?: string;
-  gitProviderId?: string;
-  gitModelId?: string;
-  pwaAppName?: string;
-  mobileKeyboardMode?: 'native' | 'resize-content';
-  draftStarters?: DraftStarterRef[];
-  draftStartersVisible?: boolean;
-  draftStartersCraftGoalAdded?: boolean;
-
-  [key: string]: unknown;
-}
+/**
+ * The settings document on the wire. Defined once in the settings registry;
+ * this alias keeps the runtime `SettingsAPI` contract readable.
+ */
+export type SettingsPayload = DesktopSettings;
 
 export interface SettingsLoadResult {
   settings: SettingsPayload;

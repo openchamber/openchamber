@@ -20,6 +20,7 @@ import { useInputStore } from '@/sync/input-store';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
 import { Button } from '@/components/ui/button';
+import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 
 interface QueuedMessageChipProps {
@@ -102,7 +103,8 @@ const QueuedMessageChip = memo(({ message, target, onEdit, onSend }: QueuedMessa
 QueuedMessageChip.displayName = 'QueuedMessageChip';
 
 interface QueuedMessageChipsProps {
-    onEditMessage: (content: string, attachments?: QueuedMessage['attachments']) => void;
+    /** The message was taken from the queue in full; the composer restores it. */
+    onEditMessage: (message: QueuedMessage) => void;
     onSendMessage: (messageId: string) => void;
 }
 
@@ -149,16 +151,21 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
 
     const handleEdit = React.useCallback((message: QueuedMessage) => {
         if (!target) return;
-        
-        const popped = popToInput(target, message.id);
-        if (popped) {
+
+        // The full message (attachments included) comes back from the queue's
+        // owner; the chip itself only knows the summary.
+        void popToInput(target, message.id).then((popped) => {
+            if (!popped) return;
             if (popped.attachments && popped.attachments.length > 0) {
                 const currentAttachments = useInputStore.getState().attachedFiles;
                 useInputStore.getState().setAttachedFiles([...currentAttachments, ...popped.attachments]);
             }
-            onEditMessage(popped.content, popped.attachments);
-        }
-    }, [target, popToInput, onEditMessage]);
+            onEditMessage(popped);
+        }).catch((error) => {
+            console.warn('[queue] failed to take queued message for editing:', error);
+            toast.error(t('chat.queuedMessage.toast.takeFailed'));
+        });
+    }, [target, popToInput, onEditMessage, t]);
 
     const handleSend = React.useCallback((message: QueuedMessage) => {
         onSendMessage(message.id);

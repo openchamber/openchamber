@@ -1,5 +1,5 @@
-import type { Ghostty } from 'ghostty-web';
 import type { Theme } from '@/types/theme';
+import type { GhosttyColor, GhosttyTheme } from '@/lib/ghostty/core';
 
 export interface TerminalTheme {
   background: string;
@@ -62,53 +62,46 @@ export function convertThemeToXterm(theme: Theme): TerminalTheme {
   };
 }
 
-/**
- * Get terminal options for Ghostty Web terminal
- */
-export function getGhosttyTerminalOptions(
-  fontFamily: string,
-  fontSize: number,
-  theme: TerminalTheme,
-  ghostty: Ghostty,
-  disableStdin = false
-) {
-  const powerlineFallbacks =
-    '"JetBrainsMonoNL Nerd Font", "FiraCode Nerd Font", "Cascadia Code PL", "Fira Code", "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", "Courier New", monospace';
-  const augmentedFontFamily = `${fontFamily}, ${powerlineFallbacks}`;
+const ANSI_ORDER = [
+  'black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white',
+  'brightBlack', 'brightRed', 'brightGreen', 'brightYellow', 'brightBlue', 'brightMagenta', 'brightCyan', 'brightWhite',
+] as const;
 
+/** Parses #rgb, #rrggbb (alpha digits ignored) or rgb()/rgba() into channels. */
+const parseTerminalColor = (color: string): GhosttyColor | null => {
+  const value = color.trim();
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(value)?.[1];
+  if (hex) {
+    const expanded = hex.length <= 4
+      ? hex.slice(0, 3).split('').map((part) => part + part).join('')
+      : hex.slice(0, 6);
+    return {
+      r: Number.parseInt(expanded.slice(0, 2), 16),
+      g: Number.parseInt(expanded.slice(2, 4), 16),
+      b: Number.parseInt(expanded.slice(4, 6), 16),
+    };
+  }
+
+  const rgb = /^rgba?\(\s*(\d{1,3})\s*[, ]\s*(\d{1,3})\s*[, ]\s*(\d{1,3})(?:\s*[,/]\s*[\d.]+)?\s*\)$/i.exec(value);
+  if (!rgb) return null;
+  const [r, g, b] = rgb.slice(1, 4).map(Number);
+  if ([r, g, b].some((channel) => channel === undefined || channel < 0 || channel > 255)) return null;
+  return { r: r ?? 0, g: g ?? 0, b: b ?? 0 };
+};
+
+/**
+ * Theme colors as libghostty-vt takes them. Theme JSON values are hex, so a
+ * parse failure means a broken theme file: fall back to plain white on black
+ * for that entry rather than sending Ghostty garbage.
+ */
+export function toGhosttyTheme(theme: TerminalTheme): GhosttyTheme {
+  const background = parseTerminalColor(theme.background) ?? { r: 0, g: 0, b: 0 };
+  const foreground = parseTerminalColor(theme.foreground) ?? { r: 255, g: 255, b: 255 };
   return {
-    // TerminalViewport enables blinking only while its input owns focus.
-    cursorBlink: false,
-    cursorStyle: 'bar' as const,
-    fontSize,
-    fontFamily: augmentedFontFamily,
-    allowTransparency: false,
-    theme: {
-      background: theme.background,
-      foreground: theme.foreground,
-      cursor: theme.cursor,
-      cursorAccent: theme.cursorAccent,
-      selectionBackground: theme.selectionBackground,
-      selectionForeground: theme.selectionForeground,
-      black: theme.black,
-      red: theme.red,
-      green: theme.green,
-      yellow: theme.yellow,
-      blue: theme.blue,
-      magenta: theme.magenta,
-      cyan: theme.cyan,
-      white: theme.white,
-      brightBlack: theme.brightBlack,
-      brightRed: theme.brightRed,
-      brightGreen: theme.brightGreen,
-      brightYellow: theme.brightYellow,
-      brightBlue: theme.brightBlue,
-      brightMagenta: theme.brightMagenta,
-      brightCyan: theme.brightCyan,
-      brightWhite: theme.brightWhite,
-    },
-    scrollback: 10_000,
-    ghostty,
-    disableStdin,
+    background,
+    foreground,
+    cursor: parseTerminalColor(theme.cursor) ?? foreground,
+    palette: ANSI_ORDER.map((name) => parseTerminalColor(theme[name]) ?? foreground),
+    selectionBackground: theme.selectionBackground,
   };
 }

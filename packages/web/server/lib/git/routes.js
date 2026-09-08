@@ -873,6 +873,22 @@ export function registerGitRoutes(app) {
     }
   });
 
+  app.post('/api/git/branch-push-status', async (req, res) => {
+    const { getUnpushedBranchCounts } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      const branches = req.body?.branches;
+      if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+      if (!Array.isArray(branches) || branches.some((branch) => typeof branch !== 'string')) {
+        return res.status(400).json({ error: 'branches must be an array of branch names' });
+      }
+      res.json(await getUnpushedBranchCounts(directory, branches));
+    } catch (error) {
+      console.error('Failed to get branch push status:', error);
+      res.status(500).json({ error: error.message || 'Failed to get branch push status' });
+    }
+  });
+
   app.post('/api/git/branches', async (req, res) => {
     const { createBranch } = await getGitLibraries();
     try {

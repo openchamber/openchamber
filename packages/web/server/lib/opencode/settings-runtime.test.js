@@ -6,7 +6,7 @@ import path from 'path';
 import { createProjectIdFromPath } from '../projects/project-id.js';
 import { createSettingsRuntime } from './settings-runtime.js';
 
-const createRuntime = async () => {
+const createRuntime = async ({ mergePersistedSettings = (_current, changes) => changes } = {}) => {
   const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-runtime-'));
   const settingsFilePath = path.join(tempRoot, 'settings.json');
   const runtime = createSettingsRuntime({
@@ -16,7 +16,7 @@ const createRuntime = async () => {
     SETTINGS_FILE_PATH: settingsFilePath,
     sanitizeProjects: (projects) => Array.isArray(projects) ? projects : [],
     sanitizeSettingsUpdate: (settings) => settings,
-    mergePersistedSettings: (_current, changes) => changes,
+    mergePersistedSettings,
     normalizeSettingsPaths: (settings) => ({ settings, changed: false }),
     normalizeStringArray: (values) => Array.isArray(values) ? values.filter((value) => typeof value === 'string') : [],
     formatSettingsResponse: (settings) => settings,
@@ -39,8 +39,37 @@ const createRuntime = async () => {
 };
 
 describe('settings runtime', () => {
-  it('round-trips shared sidebar preferences through settings.json', async () => {
+  it('uses OpenChamber themes when a new install has no theme preferences', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      await expect(runtime.readSettingsFromDiskMigrated()).resolves.toMatchObject({
+        lightThemeId: 'openchamber-light',
+        darkThemeId: 'openchamber-dark',
+      });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('preserves existing theme preferences during theme migration', async () => {
     const { runtime, settingsFilePath, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({
+        lightThemeId: 'flexoki-light',
+        darkThemeId: 'flexoki-dark',
+      }), 'utf8');
+
+      await expect(runtime.readSettingsFromDiskMigrated()).resolves.toMatchObject({
+        lightThemeId: 'flexoki-light',
+        darkThemeId: 'flexoki-dark',
+      });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('round-trips shared sidebar preferences through preferences.json', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
     const preferences = {
       sidebarProjectDisplayMode: 'single',
       sidebarSessionGroupingMode: 'flat',
@@ -51,7 +80,10 @@ describe('settings runtime', () => {
       await runtime.persistSettings(preferences);
 
       await expect(runtime.readSettingsFromDisk()).resolves.toEqual(preferences);
-      await expect(fsPromises.readFile(settingsFilePath, 'utf8')).resolves.toBe(JSON.stringify(preferences, null, 2));
+      // Profile keys live in preferences.json; settings.json keeps a legacy copy for older builds.
+      expect(JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'))).toEqual(preferences);
+      const stored = JSON.parse(await fsPromises.readFile(path.join(tempRoot, 'preferences.json'), 'utf8'));
+      expect(Object.fromEntries(Object.entries(stored.fields).map(([key, entry]) => [key, entry.value]))).toEqual(preferences);
     } finally {
       await cleanup();
     }
@@ -216,6 +248,161 @@ describe('settings runtime', () => {
       expect(files.some((f) => f.startsWith('settings.json.tmp-'))).toBe(false);
     } finally {
       await fsPromises.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('settings runtime: preferences.json split', () => {
+  const readJson = async (filePath) => JSON.parse(await fsPromises.readFile(filePath, 'utf8'));
+
+  it('seeds preferences.json from the profile keys of an existing settings.json and leaves that file intact', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    try {
+      const legacy = { projects: [], fontSize: 110, themeId: 'openchamber-dark', desktopLanAccessEnabled: true };
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify(legacy));
+
+      const merged = await runtime.readSettingsFromDisk();
+      expect(merged).toMatchObject(legacy);
+
+      const preferences = await readJson(path.join(tempRoot, 'preferences.json'));
+      expect(preferences.version).toBe(1);
+      expect(Object.keys(preferences.fields).sort()).toEqual(['fontSize', 'themeId']);
+      expect(preferences.fields.fontSize.value).toBe(110);
+      expect(typeof preferences.fields.fontSize.updatedAt).toBe('number');
+      expect(await readJson(settingsFilePath)).toEqual(legacy);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('routes profile keys to preferences.json, keeps a legacy copy of them in settings.json, and drops device keys', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    try {
+      await runtime.persistSettings({ fontSize: 120, desktopLanAccessEnabled: true, mobileKeyboardMode: 'native' });
+
+      const settings = await readJson(settingsFilePath);
+      expect(settings.desktopLanAccessEnabled).toBe(true);
+      // Older builds read only settings.json: the profile's base values stay there as a copy.
+      expect(settings.fontSize).toBe(120);
+      expect(settings).not.toHaveProperty('mobileKeyboardMode');
+
+      const preferences = await readJson(path.join(tempRoot, 'preferences.json'));
+      expect(preferences.fields.fontSize.value).toBe(120);
+      expect(preferences.fields).not.toHaveProperty('mobileKeyboardMode');
+      expect(preferences.fields).not.toHaveProperty('desktopLanAccessEnabled');
+
+      expect(await runtime.readSettingsFromDisk()).toMatchObject({ fontSize: 120, desktopLanAccessEnabled: true });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('keeps the timestamp of an unchanged profile key and restamps a changed one', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    try {
+      const preferencesPath = path.join(tempRoot, 'preferences.json');
+      await runtime.persistSettings({ fontSize: 100, padding: 100 });
+      const first = await readJson(preferencesPath);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await runtime.persistSettings({ fontSize: 100, padding: 120 });
+      const second = await readJson(preferencesPath);
+
+      expect(second.fields.fontSize.updatedAt).toBe(first.fields.fontSize.updatedAt);
+      expect(second.fields.padding.updatedAt).toBeGreaterThan(first.fields.padding.updatedAt);
+      expect(second.fields.padding.value).toBe(120);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('treats an unreadable preferences.json as failure: no seed, no overwrite, profile writes refused, instance still served', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    try {
+      const preferencesPath = path.join(tempRoot, 'preferences.json');
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ desktopLanAccessEnabled: true }));
+      await fsPromises.writeFile(preferencesPath, '{ not json');
+
+      expect(await runtime.readSettingsFromDisk()).toEqual({ desktopLanAccessEnabled: true });
+
+      await runtime.persistSettings({ fontSize: 130, desktopKeepAwakeEnabled: true });
+
+      expect(await fsPromises.readFile(preferencesPath, 'utf8')).toBe('{ not json');
+      const settings = await readJson(settingsFilePath);
+      expect(settings.desktopKeepAwakeEnabled).toBe(true);
+      // The refused profile write must not land in the legacy copy either.
+      expect(settings).not.toHaveProperty('fontSize');
+    } finally {
+      await cleanup();
+    }
+  });
+});
+
+describe('settings runtime: per-surface profile keys', () => {
+  const readJson = async (filePath) => JSON.parse(await fsPromises.readFile(filePath, 'utf8'));
+  // These sequences persist several times; the default stub replaces the
+  // document with the changes, the real merge keeps the current document.
+  const createMergingRuntime = () => createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+
+  it('stores a per-surface key under the writing surface and leaves the base alone', async () => {
+    const { runtime, tempRoot, cleanup } = await createMergingRuntime();
+    try {
+      await runtime.persistSettings({ fontSize: 100 }); // base (no surface): migrations and legacy callers
+      await runtime.persistSettings({ fontSize: 130, showReasoningTraces: false }, { surface: 'mobile' });
+
+      const stored = await readJson(path.join(tempRoot, 'preferences.json'));
+      expect(stored.fields.fontSize.value).toBe(100);
+      expect(stored.fields.fontSize.surfaces.mobile.value).toBe(130);
+      // Not per-surface: written to the base regardless of the surface.
+      expect(stored.fields.showReasoningTraces.value).toBe(false);
+      expect(stored.fields.showReasoningTraces.surfaces).toBeUndefined();
+
+      expect((await runtime.readSettingsFromDisk({ surface: 'mobile' })).fontSize).toBe(130);
+      expect((await runtime.readSettingsFromDisk({ surface: 'desktop' })).fontSize).toBe(100);
+      expect((await runtime.readSettingsFromDisk()).fontSize).toBe(100);
+      expect((await runtime.readSettingsFromDiskMigrated({ surface: 'mobile' })).fontSize).toBe(130);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('a per-surface key set only from one surface has no base and stays absent elsewhere', async () => {
+    const { runtime, tempRoot, cleanup } = await createMergingRuntime();
+    try {
+      await runtime.persistSettings({ stickyUserHeader: false }, { surface: 'mobile' });
+      const stored = await readJson(path.join(tempRoot, 'preferences.json'));
+      expect(stored.fields.stickyUserHeader).not.toHaveProperty('value');
+      expect(stored.fields.stickyUserHeader.surfaces.mobile.value).toBe(false);
+      expect((await runtime.readSettingsFromDisk({ surface: 'desktop' })).stickyUserHeader).toBeUndefined();
+      expect((await runtime.readSettingsFromDisk({ surface: 'mobile' })).stickyUserHeader).toBe(false);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('a surface write of an unrelated key does not copy the resolved per-surface view into the file', async () => {
+    const { runtime, tempRoot, cleanup } = await createMergingRuntime();
+    try {
+      await runtime.persistSettings({ fontSize: 100 });
+      await runtime.persistSettings({ fontSize: 130 }, { surface: 'mobile' });
+      await runtime.persistSettings({ showReasoningTraces: true }, { surface: 'mobile' });
+      const stored = await readJson(path.join(tempRoot, 'preferences.json'));
+      expect(stored.fields.fontSize.value).toBe(100);
+      expect(stored.fields.fontSize.surfaces.mobile.value).toBe(130);
+      expect(stored.fields.fontSize.surfaces.desktop).toBeUndefined();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('ignores an unknown surface header value and writes the base', async () => {
+    const { runtime, tempRoot, cleanup } = await createMergingRuntime();
+    try {
+      await runtime.persistSettings({ fontSize: 90 }, { surface: 'toaster' });
+      const stored = await readJson(path.join(tempRoot, 'preferences.json'));
+      expect(stored.fields.fontSize.value).toBe(90);
+      expect(stored.fields.fontSize.surfaces).toBeUndefined();
+    } finally {
+      await cleanup();
     }
   });
 });

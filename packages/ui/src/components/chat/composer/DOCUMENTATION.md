@@ -23,7 +23,7 @@ existing mobile fixed-position rules unchanged.
 |---|---|
 | `language/` | What the text *means*: `@` references, `/` and `#` tokens, markdown, and which picker a caret asks for |
 | `editor/` | The CodeMirror view that renders the language and owns the caret |
-| `state/` | Composer state with a lifecycle: drafts, mobile shell, history, popup placement, draft targeting |
+| `state/` | Composer-local lifecycle state: ArrowUp/ArrowDown browsing, draft stash/restore, mobile shell, popup placement, draft targeting |
 | `submit/` | Turning what the user has into what gets sent |
 | `attachments/` | Files: paths, drop payloads |
 | `ui/` | Presentation |
@@ -159,20 +159,106 @@ and the send path reading the same grammar.
   linked issue/PR) becomes its own synthetic text part carrying structured
   metadata** built by `lib/messages/contextParts.ts`; the timeline reads that
   metadata back to render context blocks. PR instructions precede the PR diff.
-  Queueing a message leaves context drafts in their store on purpose — the send
-  that later delivers the queue consumes them.
+  The same module's `buildComposerContext` captures that context when a message
+  is **queued** instead of sent: the chips leave the composer with the message
+  (as `QueuedContextPart`s on the queue item), the server or the VS Code
+  auto-send delivers them through `queuedContextToParts`, and editing the
+  queued message puts them back. A queued message is placed as captured — its
+  mention, file mentions, and skill instruction were resolved when it was
+  queued, never at delivery — and its context follows it before the next
+  queued message.
+- Local slash commands are planned by `submit/slashCommands.ts` before any
+  attached context is consumed. Commands that act on session or UI state
+  (`/undo`, `/redo`, `/compact`, `/timeline`, `/handoff-review`) take only
+  their command text and leave comments, files, and linked context attached;
+   magic prompt commands send that
+  context with the prompt they produce. Session actions are planned only when
+  a session exists, so typing one into a new-session draft stays on the normal
+  send path. A local command is never queued as text: queueing runs it
+  instead. A failed prompt command restores everything it consumed: text,
+  confirmed mentions, files, comment drafts, and pending synthetic context.
 - `state/useComposerDraft.ts` — a draft belongs to a (runtime, directory,
   session) identity. Writes are debounced while typing but forced at every edge
   where the page may stop running, because a pending timer is not a saved
   draft. Two orderings are load-bearing: the debounced write is skipped once
   while a draft is being restored, and a deleted draft's empty signature is
   recorded before a queued write could resurrect it.
+  Fork replay text and files arrive in `input-store.pendingComposerRestore`,
+  addressed to the fork's runtime, directory, and session. The hook consumes
+  them after loading that identity's draft. Selection alone is not enough:
+  the deferred chat column can still show the source composer. Ordinary
+  pending text insertions keep their existing path in `ChatInput`.
 - `state/useDraftTarget.ts` — the draft can target a directory that does not
   exist yet (a worktree being created). It must survive not appearing in the
-  branch list, or the selector snaps back to the project root mid-creation.
+  branch list, or the selector snaps back to the project root mid-creation. It
+  also owns the advisory dirty state for the selected directory, clearing it as
+  soon as the target changes so a warning never names a previous branch.
 - `ui/DraftTargetSelectors.tsx` owns the controlled project/worktree picker
-  state and registers its application shortcuts locally. The selectors only
-  consume their shared prefix while the draft target UI is mounted.
+  state and registers its application shortcuts locally. The desktop project
+  picker is a searchable popup: it ranks the current projects with
+  `rankByQuery` over display label and path, keeps the query and the active
+  result as transient local state that resets on every close, and commits
+  through the existing project-change flow only on explicit activation.
+  Filtering changes the result area below the anchored input without moving
+  the search field. The worktree picker remains a Select; mobile keeps its
+  bottom sheets. The selectors only consume their shared prefix while the
+  draft target UI is mounted.
+  Keyboard selection returns focus to the current form's composer, including
+  when the selected value is unchanged.
+- `ChatInput.tsx` maps Ctrl+N/P to the active command, skill, snippet, or
+  mention picker after its IME guard.
+
+## Input recall ownership
+
+Prompt recall has two owners on purpose.
+
+- `packages/ui/src/stores/useInputHistoryStore.ts` owns the persisted source of
+  truth. It keeps the runtime-scoped global bucket and the runtime + directory
+  + session bucket, each capped by the configurable input-history limit. That
+  setting defaults to 40 entries. Recall reads the current session's bucket by
+  default; the Chat setting can widen it to every project on the runtime.
+- `state/useMessageHistory.ts` owns only keyboard traversal through whichever
+  bucket the composer was given. Moving away from a position stores the
+  composer's current text and attachments as an overlay for that position, so
+  the live draft and any edit made to a recalled prompt survive a round trip
+  through history. Overlays never rewrite stored history; sending resets them.
+- `ChatInput.tsx` applies the recalled text and attachments to the composer and
+  places the caret.
+
+In session scope the composer merges two sources, oldest first: the visible
+transcript's user prompts (`useUserMessageHistory` in `sync-context.tsx`), so
+sessions that predate the persisted store still recall, and the persisted
+session bucket, which adds attachments and keeps prompts a revert hid from the
+timeline. A prompt present in both collapses to the persisted entry. Global
+scope reads the persisted runtime bucket only.
+
+## BTW composer
+
+An empty `/btw` opens an unsent draft. `/btw <question>` opens BTW and sends
+that question immediately after its own draft and model selection are active.
+**By the way…** opens an unsent draft with Quote-formatted selection text.
+The first send creates the fork; Enter follows the user's preference. Pending text and references then
+move to the fork's draft identity. Normal and BTW drafts remain independent,
+including in memory when persistence is disabled.
+
+Both modes reuse `ComposerEditor` and `ModelControls`; BTW transitions put the
+caret at the end. BTW copies the main model/effort once, including explicit
+Default, and uses `plan` or the first selectable agent. Its controlled model
+path only writes BTW selections. Attachments, goals, expansion, shell, and
+agent selection and file/agent mention autocomplete are unavailable. Auto-accept is applied before the first send.
+On mobile, model and effort controls sit in the input's upper-left row; the
+footer only contains auto-accept and send/stop controls.
+
+Escape closes menus first. Otherwise it returns to normal: an unsent BTW is
+discarded with its text, references, selections and panel; a creating or real
+fork is only collapsed. Neither exit sends, aborts, or deletes a server session,
+nor consumes the main draft's files, queue, or linked context. Pending snippet
+expansion belongs to the unsent panel. Discarding that panel invalidates the
+send, and a runtime change prevents fork creation and stale UI recovery.
+
+The unsent panel shows "Ask your question" until fork creation starts.
+Existing panels hide titles. Promotion retains the existing internal title, without
+transcript fetching or Small Model generation.
 
 ## Mobile
 
@@ -191,12 +277,32 @@ hardware.
 
 The package has no DOM test environment, so coverage stops at the state and
 logic layers: the language, the submit assembly, path and drop handling, text
-splicing, large-paste detection, paste-offer invalidation, message history, and
-the CodeMirror language extension at the `EditorState` level.
+splicing, large-paste detection, paste-offer invalidation, input-history
+traversal, and the CodeMirror language extension at the `EditorState` level.
 
 Rendering, focus, keyboard behavior, IME and WKWebView are **not covered by
-tests** and are verified by hand. Do not report a change to them as validated
-on the strength of type-check and unit tests.
+tests** and are verified by hand. That includes ArrowUp and ArrowDown recall,
+caret placement after recall, restored drafts, and any edited-entry overlay.
+Do not report a change to them as validated on the strength of type-check and
+unit tests.
 
 Run tests per file (`bun test <path>`): `mock.module` is process-global, so
 suites that install module mocks are order-dependent.
+
+## Enter preference
+
+`keyboardPolicy.ts` owns the submission decision. The expanded desktop composer
+always inserts a newline with Enter, including Shift+Enter, and sends with
+Ctrl/Cmd+Enter; it ignores the Enter-to-send preference. Outside expanded mode,
+until the Chat setting is changed, desktop Enter sends, mobile requires
+Ctrl/Cmd+Enter, and Shift-modified Enter does not send. An explicit choice
+applies across the other shared composers; Ctrl/Cmd+Enter sends in either
+configured mode.
+
+CodeMirror's deferred mobile Enter loses modifier information. Untouched
+settings restore Shift to keep the original policy. Once configured, with mobile
+autocapitalization enabled, the editor cannot distinguish its Shift flag from
+an intentional Shift press and does not restore Shift. Consequently, deferred
+Shift+Enter can send when Enter-to-send is enabled and cannot serve as the send
+shortcut when it is disabled. Ctrl/Cmd+Enter remains the supported modified
+send shortcut on this path.

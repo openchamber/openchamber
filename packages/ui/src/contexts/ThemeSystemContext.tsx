@@ -34,6 +34,7 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-sw
 import {
   adoptThemePreferencesForRuntime,
   resolveThemePreferencesForRuntime,
+  resolveThemePreferencesFromSettingsSync,
   resolveThemePreferencesFromStorageEvent,
   writeThemePreferencesForRuntime,
 } from './theme-storage';
@@ -159,6 +160,12 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   const isVSCode = useMemo(() => isVSCodeRuntime(), []);
   const isDesktopShell = useMemo(() => detectDesktopShell(), []);
   const customThemesRequestRef = useRef(0);
+  // Set only by the handlers a person reaches through the UI. The persist
+  // effect below writes to the server only while this is raised, so a mount,
+  // a runtime switch, an OS light/dark flip, or a settings sync adopting
+  // another window's theme never produce a write (see the 2026-08-30 theme
+  // flip-flop: a fresh client used to PUT its default theme on load).
+  const themeWriteIntentRef = useRef(false);
   const receivesParentThemeSync = useMemo(() => {
     if (typeof window === 'undefined') {
       return false;
@@ -555,12 +562,10 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   }, [applyIncomingThemeSync]);
 
   useEffect(() => {
-    if (receivesParentThemeSync) {
+    if (receivesParentThemeSync || !themeWriteIntentRef.current) {
       return;
     }
-
-    const lightTheme = ensureThemeById(preferences.lightThemeId, 'light');
-    const darkTheme = ensureThemeById(preferences.darkThemeId, 'dark');
+    themeWriteIntentRef.current = false;
 
     void updateDesktopSettings({
       themeId: currentTheme.metadata.id,
@@ -568,68 +573,41 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       useSystemTheme: preferences.themeMode === 'system',
       lightThemeId: preferences.lightThemeId,
       darkThemeId: preferences.darkThemeId,
-      splashBgLight: lightTheme.colors.surface.background,
-      splashFgLight: lightTheme.colors.surface.foreground,
-      splashBgDark: darkTheme.colors.surface.background,
-      splashFgDark: darkTheme.colors.surface.foreground,
     });
-  }, [currentTheme.metadata.id, currentTheme.metadata.variant, ensureThemeById, preferences.themeMode, preferences.lightThemeId, preferences.darkThemeId, receivesParentThemeSync]);
+  }, [currentTheme.metadata.id, currentTheme.metadata.variant, preferences.themeMode, preferences.lightThemeId, preferences.darkThemeId, receivesParentThemeSync]);
 
   useEffect(() => {
     if (receivesParentThemeSync || !isDesktopShell) {
       return;
     }
 
+    // The shell paints the next startup splash from these; they are this
+    // install's cosmetics, so they go to main directly, not to the server.
+    const lightTheme = ensureThemeById(preferences.lightThemeId, 'light');
+    const darkTheme = ensureThemeById(preferences.darkThemeId, 'dark');
     void (async () => {
-      await setDesktopWindowTheme(preferences.themeMode, currentTheme.metadata.variant);
+      await setDesktopWindowTheme(preferences.themeMode, currentTheme.metadata.variant, {
+        bgLight: lightTheme.colors.surface.background,
+        fgLight: lightTheme.colors.surface.foreground,
+        bgDark: darkTheme.colors.surface.background,
+        fgDark: darkTheme.colors.surface.foreground,
+      });
     })();
-  }, [currentTheme.metadata.variant, isDesktopShell, preferences.themeMode, receivesParentThemeSync]);
+  }, [currentTheme.metadata.variant, ensureThemeById, isDesktopShell, preferences.themeMode, preferences.lightThemeId, preferences.darkThemeId, receivesParentThemeSync]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || receivesParentThemeSync) {
       return;
     }
     const handleSettingsSynced = (event: Event) => {
-      const detail = (event as CustomEvent<SettingsSyncedDetail>).detail?.settings;
+      const detail = (event as CustomEvent<SettingsSyncedDetail>).detail?.settings
+        ? (event as CustomEvent<SettingsSyncedDetail>).detail
+        : null;
       if (!detail) {
         return;
       }
 
-      setPreferences((prev) => {
-        let nextMode = prev.themeMode;
-        if (detail.useSystemTheme === true) {
-          nextMode = 'system';
-        } else if (detail.useSystemTheme === false) {
-          if (detail.themeVariant === 'dark' || detail.themeVariant === 'light') {
-            nextMode = detail.themeVariant;
-          }
-        }
-
-        let nextLight = prev.lightThemeId;
-        if (typeof detail.lightThemeId === 'string' && detail.lightThemeId.length > 0) {
-          nextLight = detail.lightThemeId.trim();
-        }
-
-        let nextDark = prev.darkThemeId;
-        if (typeof detail.darkThemeId === 'string' && detail.darkThemeId.length > 0) {
-          nextDark = detail.darkThemeId.trim();
-        }
-
-        const same =
-          nextMode === prev.themeMode &&
-          nextLight === prev.lightThemeId &&
-          nextDark === prev.darkThemeId;
-
-        if (same) {
-          return prev;
-        }
-
-        return {
-          themeMode: nextMode,
-          lightThemeId: nextLight,
-          darkThemeId: nextDark,
-        };
-      });
+      setPreferences((prev) => resolveThemePreferencesFromSettingsSync(detail, prev) ?? prev);
     };
 
     window.addEventListener('openchamber:settings-synced', handleSettingsSynced);
@@ -648,6 +626,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
           if (prev.darkThemeId === theme.metadata.id && prev.themeMode === 'dark') {
             return prev;
           }
+          themeWriteIntentRef.current = true;
           return {
             ...prev,
             darkThemeId: theme.metadata.id,
@@ -659,6 +638,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
           return prev;
         }
 
+        themeWriteIntentRef.current = true;
         return {
           ...prev,
           lightThemeId: theme.metadata.id,
@@ -674,18 +654,12 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       return;
     }
 
+    themeWriteIntentRef.current = true;
     setPreferences((prev) => ({
       ...prev,
       themeMode: mode,
     }));
-
-    if (!receivesParentThemeSync) {
-      void updateDesktopSettings({
-        themeVariant: mode === 'system' ? currentTheme.metadata.variant : mode,
-        useSystemTheme: mode === 'system',
-      });
-    }
-  }, [currentTheme.metadata.variant, preferences.themeMode, receivesParentThemeSync]);
+  }, [preferences.themeMode]);
 
   const setSystemPreferenceHandler = useCallback(
     (use: boolean) => {
@@ -694,6 +668,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
           if (prev.themeMode === 'system') {
             return prev;
           }
+          themeWriteIntentRef.current = true;
           return {
             ...prev,
             themeMode: 'system',
@@ -708,6 +683,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
         if (prev.themeMode === fallbackMode) {
           return prev;
         }
+        themeWriteIntentRef.current = true;
         return {
           ...prev,
           themeMode: fallbackMode,
@@ -731,6 +707,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
         if (prev.lightThemeId === theme.metadata.id) {
           return prev;
         }
+        themeWriteIntentRef.current = true;
         return {
           ...prev,
           lightThemeId: theme.metadata.id,
@@ -754,6 +731,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
         if (prev.darkThemeId === theme.metadata.id) {
           return prev;
         }
+        themeWriteIntentRef.current = true;
         return {
           ...prev,
           darkThemeId: theme.metadata.id,

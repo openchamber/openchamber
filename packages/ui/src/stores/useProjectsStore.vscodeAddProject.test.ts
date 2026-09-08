@@ -74,7 +74,8 @@ mock.module('@/lib/opencode/client', () => ({
   opencodeClient: opencodeClientStub,
 }));
 mock.module('@/lib/persistence', () => ({
-  updateDesktopSettings: async () => {},
+  updateDesktopSettings: async () => ({ ok: true }),
+  loadDesktopSettings: async () => null,
 }));
 
 const addWorkspaceFolderCalls: string[] = [];

@@ -40,6 +40,7 @@ export async function summarizeSelectionForNotes(text: string, sessionId?: strin
       body: JSON.stringify({
         prompt: trimmed,
         system: NOTES_SYSTEM_PROMPT,
+        sessionID: sessionId || undefined,
         restrictToPreferredProvider: true,
         ...(preferredProviderID ? { preferredProviderID } : {}),
         ...(preferredModelID ? { preferredModelID } : {}),

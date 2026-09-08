@@ -196,7 +196,7 @@ const isPathWithinRoot = (resolvedPath, rootPath, path, os) => {
   return true;
 };
 
-const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot }) => {
+const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDirectoryPath, managedRoots }) => {
   const normalized = normalizeDirectoryPath(targetPath);
   if (!normalized || typeof normalized !== 'string') {
     return { ok: false, error: 'Path is required' };
@@ -209,8 +209,12 @@ const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDi
     return { ok: true, base: resolvedBase, resolved };
   }
 
-  if (isPathWithinRoot(resolved, openchamberUserConfigRoot, path, os)) {
-    return { ok: true, base: path.resolve(openchamberUserConfigRoot), resolved };
+  // Managed roots (config root, relocated chats root) stay valid targets
+  // even outside the active workspace.
+  for (const root of managedRoots) {
+    if (isPathWithinRoot(resolved, root, path, os)) {
+      return { ok: true, base: path.resolve(root), resolved };
+    }
   }
 
   return { ok: false, error: 'Path is outside of active workspace' };
@@ -249,7 +253,7 @@ const resolveWorkspacePathFromWorktrees = async ({ targetPath, baseDirectory, pa
   return { ok: false, error: 'Path is outside of active workspace' };
 };
 
-const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProjectDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot }) => {
+const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProjectDirectory, path, os, normalizeDirectoryPath, managedRoots }) => {
   const resolvedProject = await resolveProjectDirectory(req);
   if (!resolvedProject.directory) {
     return { ok: false, error: resolvedProject.error || 'Active workspace is required' };
@@ -261,7 +265,7 @@ const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProject
     path,
     os,
     normalizeDirectoryPath,
-    openchamberUserConfigRoot,
+    managedRoots,
   });
   if (resolved.ok || resolved.error !== 'Path is outside of active workspace') {
     return resolved;
@@ -281,7 +285,7 @@ const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProject
       path,
       os,
       normalizeDirectoryPath,
-      openchamberUserConfigRoot,
+      managedRoots,
     });
     if (lexical.ok) {
       return lexical;
@@ -412,7 +416,7 @@ const escapeCloneSshKeyPath = (sshKeyPath) => {
   return `'${normalized.replace(/'/g, "'\\''")}'`;
 };
 
-const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProjectDirectory, path, os, fsPromises, normalizeDirectoryPath, openchamberUserConfigRoot }) => {
+const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProjectDirectory, path, os, fsPromises, normalizeDirectoryPath, managedRoots }) => {
   if (req.query?.allowOutsideWorkspace === 'true') {
     const normalized = normalizeDirectoryPath(targetPath);
     if (!normalized || typeof normalized !== 'string') {
@@ -434,7 +438,7 @@ const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProje
     path,
     os,
     normalizeDirectoryPath,
-    openchamberUserConfigRoot,
+    managedRoots,
   });
 };
 
@@ -520,7 +524,14 @@ export const registerFsRoutes = (app, dependencies) => {
     buildAugmentedPath,
     resolveGitBinaryForSpawn,
     openchamberUserConfigRoot,
+    managedChatsRoot,
   } = dependencies;
+  // Chat worktrees may live outside every project workspace; both managed
+  // roots stay valid filesystem targets.
+  const chatsRoot = typeof managedChatsRoot === 'string' && managedChatsRoot.trim()
+    ? path.resolve(managedChatsRoot.trim())
+    : path.join(openchamberUserConfigRoot, 'chats');
+  const managedRoots = [path.resolve(openchamberUserConfigRoot), chatsRoot];
   const realpathCache = createRealpathCache({
     realpath: fsPromises.realpath.bind(fsPromises),
   });
@@ -699,7 +710,7 @@ export const registerFsRoutes = (app, dependencies) => {
       if (!home || typeof home !== 'string' || home.length === 0) {
         return res.status(500).json({ error: 'Failed to resolve home directory' });
       }
-      return res.json({ home });
+      return res.json({ home, chatsRoot });
     } catch (error) {
       console.error('Failed to resolve home directory:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to resolve home directory' });
@@ -725,7 +736,7 @@ export const registerFsRoutes = (app, dependencies) => {
           path,
           os,
           normalizeDirectoryPath,
-          openchamberUserConfigRoot,
+          managedRoots,
         });
         if (!resolved.ok) {
           return res.status(400).json({ error: resolved.error });
@@ -853,6 +864,37 @@ export const registerFsRoutes = (app, dependencies) => {
     }
   });
 
+  app.get('/api/fs/directory-stat', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const paths = new URL(req.url, 'http://openchamber.local').searchParams.getAll('path');
+    const directoryPath = paths.length === 1 ? paths[0].trim() : '';
+    if (!directoryPath) {
+      return res.status(400).json({ error: 'Path is required' });
+    }
+
+    try {
+      // Directory discovery uses the same path policy as /api/fs/list, including
+      // paths outside the current workspace. stat follows symlinks without readdir.
+      const resolvedPath = path.resolve(normalizeDirectoryPath(directoryPath));
+      const stats = await fsPromises.stat(resolvedPath);
+      if (!stats.isDirectory()) {
+        return res.status(400).json({ error: 'Specified path is not a directory', reason: 'not-directory' });
+      }
+      return res.json({ isDirectory: true });
+    } catch (error) {
+      if (error.code === 'ENOENT' || error.code === 'ENOTDIR') {
+        return res.status(error.code === 'ENOENT' ? 404 : 400).json({
+          error: error.code === 'ENOENT' ? 'Directory not found' : 'Specified path is not a directory',
+          reason: error.code === 'ENOENT' ? 'not-found' : 'not-directory',
+        });
+      }
+      if (isOsPermissionError(error)) {
+        return sendOsPermissionDenied(res, 'Access to directory denied');
+      }
+      return res.status(500).json({ error: 'Failed to stat directory' });
+    }
+  });
+
   app.get('/api/fs/stat', async (req, res) => {
     const filePath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
     const optional = req.query.optional === 'true';
@@ -870,7 +912,7 @@ export const registerFsRoutes = (app, dependencies) => {
         os,
         fsPromises,
         normalizeDirectoryPath,
-        openchamberUserConfigRoot,
+        managedRoots,
       });
       if (!resolved.ok) {
         if (req.query?.allowOutsideWorkspace === 'true') {
@@ -920,7 +962,7 @@ export const registerFsRoutes = (app, dependencies) => {
         os,
         fsPromises,
         normalizeDirectoryPath,
-        openchamberUserConfigRoot,
+        managedRoots,
       });
       if (!resolved.ok) {
         if (req.query?.allowOutsideWorkspace === 'true') {
@@ -984,7 +1026,7 @@ export const registerFsRoutes = (app, dependencies) => {
         os,
         fsPromises,
         normalizeDirectoryPath,
-        openchamberUserConfigRoot,
+        managedRoots,
       });
       if (!resolved.ok) {
         if (req.query?.allowOutsideWorkspace === 'true') {
@@ -1065,7 +1107,7 @@ export const registerFsRoutes = (app, dependencies) => {
         path,
         os,
         normalizeDirectoryPath,
-        openchamberUserConfigRoot,
+        managedRoots,
       });
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
@@ -1117,7 +1159,7 @@ export const registerFsRoutes = (app, dependencies) => {
         path,
         os,
         normalizeDirectoryPath,
-        openchamberUserConfigRoot,
+        managedRoots,
       });
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
@@ -1187,7 +1229,7 @@ export const registerFsRoutes = (app, dependencies) => {
         path,
         os,
         normalizeDirectoryPath,
-        openchamberUserConfigRoot,
+        managedRoots,
       });
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
@@ -1294,7 +1336,7 @@ export const registerFsRoutes = (app, dependencies) => {
         path,
         os,
         normalizeDirectoryPath,
-        openchamberUserConfigRoot,
+        managedRoots,
       });
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
@@ -1332,7 +1374,7 @@ export const registerFsRoutes = (app, dependencies) => {
         path,
         os,
         normalizeDirectoryPath,
-        openchamberUserConfigRoot,
+        managedRoots,
       });
       if (!resolvedOld.ok) {
         return res.status(400).json({ error: resolvedOld.error });
@@ -1345,7 +1387,7 @@ export const registerFsRoutes = (app, dependencies) => {
         path,
         os,
         normalizeDirectoryPath,
-        openchamberUserConfigRoot,
+        managedRoots,
       });
       if (!resolvedNew.ok) {
         return res.status(400).json({ error: resolvedNew.error });
@@ -1451,7 +1493,7 @@ export const registerFsRoutes = (app, dependencies) => {
         path,
         os,
         normalizeDirectoryPath,
-        openchamberUserConfigRoot,
+        managedRoots,
       });
       if (!resolvedForWorkspace.ok) {
         console.warn(`Rejected /api/fs/exec outside workspace: ${resolvedForWorkspace.error}`);
@@ -1689,7 +1731,7 @@ export const registerFsRoutes = (app, dependencies) => {
         path,
         os,
         normalizeDirectoryPath,
-        openchamberUserConfigRoot,
+        managedRoots,
       });
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
