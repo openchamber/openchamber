@@ -81,6 +81,13 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ workStatusSectionOrder: 'bad' }).workStatusSectionOrder).toBeUndefined();
     expect(helpers.sanitizeSettingsUpdate({ workStatusSectionOrder: [] }).workStatusSectionOrder).toEqual([]);
   });
+  it('accepts the browser STT provider and maps legacy wasm to local', () => {
+    const helpers = createTestHelpers();
+    expect(helpers.sanitizeSettingsUpdate({ sttProvider: 'browser' }).sttProvider).toBe('browser');
+    expect(helpers.sanitizeSettingsUpdate({ sttProvider: 'local' }).sttProvider).toBe('local');
+    expect(helpers.sanitizeSettingsUpdate({ sttProvider: 'wasm' }).sttProvider).toBe('local');
+    expect(helpers.sanitizeSettingsUpdate({ sttProvider: 'server' }).sttProvider).toBe('openai-compatible');
+  });
   it('round-trips telemetry opt-in with the hidden list and preserves it across unrelated writes', () => {
     const helpers = createTestHelpers();
     const legacy = helpers.sanitizeSettingsUpdate({ workStatusHiddenSections: [] });

@@ -1189,6 +1189,7 @@ export const VoiceSettings: React.FC = () => {
                                 <ul className="space-y-1">
                                     <li><strong>{t('settings.voice.page.provider.local')}</strong> {t('settings.voice.page.tooltip.sttLocal')}</li>
                                     <li><strong>{t('settings.voice.page.provider.server')}</strong> {t('settings.voice.page.tooltip.sttServer')}</li>
+                                    <li><strong>{t('settings.voice.page.provider.browser')}</strong> {t('settings.voice.page.tooltip.sttBrowser')}</li>
                                 </ul>
                             )}
                         >
@@ -1200,6 +1201,7 @@ export const VoiceSettings: React.FC = () => {
                                 options={[
                                     { value: 'local', label: t('settings.voice.page.provider.local') },
                                     { value: 'openai-compatible', label: t('settings.voice.page.provider.server') },
+                                    { value: 'browser', label: t('settings.voice.page.provider.browser') },
                                 ]}
                             />
                         </SettingsControlGroup>
