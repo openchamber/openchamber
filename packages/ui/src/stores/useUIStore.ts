@@ -35,38 +35,6 @@ export type DesktopWindowControlsStyle = 'classic' | 'traffic-lights';
 export type FileEditorKeymap = 'default' | 'vim';
 export type LargeTextPasteBehavior = 'ask' | 'attach' | 'inline';
 
-const CONTEXT_PANEL_MODES: ReadonlySet<string> = new Set<ContextPanelMode>([
-  'diff',
-  'walkthrough',
-  'file',
-  'context',
-  'plan',
-  'chat',
-  'browser',
-  'git',
-  'pr',
-  'linear',
-  'notes',
-  'terminal',
-]);
-
-const LEGACY_CONTEXT_PANEL_MODES: ReadonlySet<string> = new Set<ContextPanelMode>([
-  'diff',
-  'file',
-  'context',
-  'plan',
-  'chat',
-  'terminal',
-]);
-
-const isContextPanelMode = (value: unknown): value is ContextPanelMode => (
-  typeof value === 'string' && CONTEXT_PANEL_MODES.has(value)
-);
-
-const isPersistedContextPanelWidthMode = (value: string): value is ContextPanelMode => (
-  CONTEXT_PANEL_MODES.has(value)
-);
-
 export const DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR: LargeTextPasteBehavior = 'ask';
 
 export const normalizeLargeTextPasteBehavior = (value: unknown): LargeTextPasteBehavior => {
@@ -297,6 +265,12 @@ const mergeContextPanelDirectoryStates = (
     CONTEXT_PANEL_MAX_TABS,
     preferred.activeTabId,
   );
+  const widthFractionByMode = { ...older.widthFractionByMode, ...newer.widthFractionByMode };
+  for (const mode of contextPanelModeSchema.options) {
+    if (newer.widthByMode[mode] !== undefined && newer.widthFractionByMode[mode] === undefined) {
+      delete widthFractionByMode[mode];
+    }
+  }
 
   return {
     isOpen: preferred.isOpen,
@@ -304,6 +278,7 @@ const mergeContextPanelDirectoryStates = (
     tabs,
     activeTabId: resolveActiveContextPanelTabID(tabs, preferred.activeTabId),
     widthByMode: { ...older.widthByMode, ...newer.widthByMode },
+    widthFractionByMode,
     touchedAt: Math.max(existing.touchedAt, incoming.touchedAt),
   };
 };
@@ -494,7 +469,10 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       touchedAt?: unknown;
     };
 
-    if (!isContextPanelMode(candidate.mode)) {
+    // Legacy 'preview' tabs are converted to 'browser' by the v14 migration;
+    // anything still carrying an unknown mode here is discarded rather than
+    // resurrected into a tab the panel cannot render.
+    if (candidate.mode !== 'diff' && candidate.mode !== 'walkthrough' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'browser' && candidate.mode !== 'git' && candidate.mode !== 'pr' && candidate.mode !== 'linear' && candidate.mode !== 'notes' && candidate.mode !== 'terminal') {
       continue;
     }
 
@@ -762,7 +740,7 @@ const sanitizeContextPanelByDirectory = (
     // no owner and cannot be migrated into an openable saved-plan tab — that
     // combination is dropped by sanitize above. A generic filesystem plan tab
     // (no plan id) revives fine from the descriptor alone.
-    if (tabs.length === 0 && isContextPanelMode(candidate.mode) && LEGACY_CONTEXT_PANEL_MODES.has(candidate.mode)) {
+    if (tabs.length === 0 && (candidate.mode === 'diff' || candidate.mode === 'file' || candidate.mode === 'context' || candidate.mode === 'plan' || candidate.mode === 'chat' || candidate.mode === 'terminal')) {
       tabs = [createContextPanelTab({
         mode: candidate.mode,
         targetPath: typeof candidate.targetPath === 'string' ? candidate.targetPath : null,

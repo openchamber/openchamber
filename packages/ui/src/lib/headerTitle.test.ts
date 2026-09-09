@@ -92,10 +92,12 @@ describe('deriveDesktopHeaderTitle', () => {
   });
 
   test('maps an external worktree to its owning project', () => {
-    const externalWorktree = {
+    const externalWorktree: WorktreeMetadata = {
       path: '/worktrees/app-feature',
       projectDirectory: '/workspace/app',
-    } as WorktreeMetadata;
+      branch: 'app-feature',
+      label: 'App feature',
+    };
 
     expect(deriveDesktopHeaderTitle({
       ...baseOptions,

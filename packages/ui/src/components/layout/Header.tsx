@@ -1058,7 +1058,7 @@ export const Header: React.FC = () => {
   }, [currentSessionId, handleOpenDraftMiniChat, isNewSessionDraftOpen, selectedSessionDirectory, sessionDirectory, worktreeDirectory]);
 
   const handleOpenContextPanel = React.useCallback(() => {
-    const directory = normalize(openDirectory || '');
+    const directory = normalizeContextPanelDirectoryKey(openDirectory || '');
     if (!directory) {
       return;
     }

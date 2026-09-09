@@ -632,40 +632,56 @@ describe('useUIStore context-panel persistence migration', () => {
     expect(useUIStore.persist.getOptions().version).toBe(22);
   });
 
-  test('rehydrates a version-18 snapshot through the canonical-key migration', async () => {
-    const originalStorage = useUIStore.persist.getOptions().storage;
-    useUIStore.persist.setOptions({
-      storage: {
-        getItem: () => ({
-          state: {
-            contextPanelByDirectory: {
-              'c:/repo': {
-                isOpen: true,
-                expanded: false,
-                tabs: [{ mode: 'diff', touchedAt: 20 }],
-                activeTabId: 'diff',
-                widthByMode: { diff: 640 },
-                touchedAt: 20,
+  for (const version of [18, 19, 20, 21]) {
+    test(`rehydrates a version-${version} snapshot through the canonical-key migration`, async () => {
+      const originalStorage = useUIStore.persist.getOptions().storage;
+      const originalState = useUIStore.getState();
+      let writtenVersion: number | undefined;
+      useUIStore.persist.setOptions({
+        storage: {
+          getItem: () => ({
+            state: {
+              workStatusHiddenSections: ['telemetry'],
+              workStatusHiddenSectionsExplicit: true,
+              shortcutOverrides: { open_settings: 'mod+comma' },
+              linearIssueListTeamIdByRuntime: { 'web:https://example.test': 'team-1' },
+              contextPanelByDirectory: {
+                'c:/repo': {
+                  isOpen: true,
+                  expanded: false,
+                  tabs: [{ mode: 'diff', touchedAt: 20 }],
+                  activeTabId: 'diff',
+                  widthByMode: { diff: 640 },
+                  widthFractionByMode: { diff: 0.64, walkthrough: 0.8 },
+                  touchedAt: 20,
+                },
               },
             },
-          },
-          version: 18,
-        }),
-        setItem: () => undefined,
-        removeItem: () => undefined,
-      },
+            version,
+          }),
+          setItem: (_name, value) => { writtenVersion = value.version; },
+          removeItem: () => undefined,
+        },
+      });
+
+      try {
+        await useUIStore.persist.rehydrate();
+
+        expect(Object.keys(useUIStore.getState().contextPanelByDirectory)).toEqual(['C:/repo']);
+        expect(useUIStore.getState().contextPanelByDirectory['C:/repo']?.isOpen).toBe(true);
+        expect(useUIStore.getState().contextPanelByDirectory['C:/repo']?.widthByMode).toEqual({ diff: 640 });
+        expect(useUIStore.getState().contextPanelByDirectory['C:/repo']?.widthFractionByMode).toEqual({ diff: 0.64, walkthrough: 0.8 });
+        expect(useUIStore.getState().workStatusHiddenSections).toEqual(['telemetry']);
+        expect(useUIStore.getState().workStatusHiddenSectionsExplicit).toBe(true);
+        expect(useUIStore.getState().shortcutOverrides).toEqual({ open_settings: 'mod+comma' });
+        expect(useUIStore.getState().linearIssueListTeamIdByRuntime).toEqual({ 'web:https://example.test': 'team-1' });
+        expect(writtenVersion).toBe(22);
+      } finally {
+        useUIStore.persist.setOptions({ storage: originalStorage });
+        useUIStore.setState(originalState, true);
+      }
     });
-
-    try {
-      await useUIStore.persist.rehydrate();
-
-      expect(Object.keys(useUIStore.getState().contextPanelByDirectory)).toEqual(['C:/repo']);
-      expect(useUIStore.getState().contextPanelByDirectory['C:/repo']?.isOpen).toBe(true);
-    } finally {
-      useUIStore.persist.setOptions({ storage: originalStorage });
-      useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [] });
-    }
-  });
+  }
 
   test('rehydrates a version-13 snapshot through the canonical-key migration', async () => {
     const originalStorage = useUIStore.persist.getOptions().storage;
@@ -674,9 +690,12 @@ describe('useUIStore context-panel persistence migration', () => {
         ' c:\\repo\\ ': {
           isOpen: true,
           expanded: false,
-          tabs: [{ mode: 'diff', touchedAt: 20 }],
+          tabs: [
+            { mode: 'diff', touchedAt: 20 },
+            { mode: 'preview', targetPath: 'https://example.test', touchedAt: 10 },
+          ],
           activeTabId: 'diff',
-          widthByMode: { diff: 640 },
+          widthByMode: { diff: 640, preview: 700 },
           touchedAt: 20,
         },
       },
@@ -701,6 +720,7 @@ describe('useUIStore context-panel persistence migration', () => {
           id: 'diff',
           mode: 'diff',
           targetPath: null,
+          targetDirectory: null,
           projectPlanId: null,
           projectPlanRef: null,
           dedupeKey: 'diff',
@@ -710,9 +730,24 @@ describe('useUIStore context-panel persistence migration', () => {
           stagedDiff: false,
           diffScope: 'working',
           touchedAt: 20,
+        }, {
+          id: 'browser:https://example.test',
+          mode: 'browser',
+          targetPath: 'https://example.test',
+          targetDirectory: null,
+          projectPlanId: null,
+          projectPlanRef: null,
+          dedupeKey: 'https://example.test',
+          label: null,
+          sessionTitleFallback: null,
+          readOnly: false,
+          stagedDiff: false,
+          diffScope: 'working',
+          touchedAt: 10,
         }],
         activeTabId: 'diff',
-        widthByMode: { diff: 640 },
+        widthByMode: { diff: 640, browser: 700 },
+        widthFractionByMode: {},
         touchedAt: 20,
       });
     } finally {
@@ -723,7 +758,7 @@ describe('useUIStore context-panel persistence migration', () => {
 
   test('merges historical keys that canonicalize to the same directory', async () => {
     const migrate = useUIStore.persist.getOptions().migrate;
-    expect(typeof migrate).toBe('function');
+    expect(migrate).toBeDefined();
 
     const migrated = await migrate?.({
       contextPanelByDirectory: {
@@ -732,7 +767,8 @@ describe('useUIStore context-panel persistence migration', () => {
           expanded: false,
           tabs: [{ mode: 'file', targetPath: 'C:/repo/a.ts', touchedAt: 10 }],
           activeTabId: 'file:C:/repo/a.ts',
-          widthByMode: { file: 600, diff: 500 },
+          widthByMode: { file: 600, diff: 500, walkthrough: 900 },
+          widthFractionByMode: { file: 0.6, diff: 0.5, walkthrough: 0.9 },
           touchedAt: 10,
         },
         'C:/repo///': {
@@ -743,44 +779,35 @@ describe('useUIStore context-panel persistence migration', () => {
             { mode: 'diff', touchedAt: 20 },
           ],
           activeTabId: 'diff',
-          widthByMode: { diff: 800 },
+          widthByMode: { diff: 800, walkthrough: 700 },
+          widthFractionByMode: { diff: 0.8 },
           touchedAt: 20,
         },
       },
-    }, 13) as { contextPanelByDirectory?: Record<string, {
-      isOpen: boolean;
-      expanded: boolean;
-      tabs: Array<{ id: string; mode: string; targetPath: string | null }>;
-      activeTabId: string | null;
-      widthByMode: Record<string, number>;
-      touchedAt: number;
-    }> } | undefined;
+    }, 21);
 
-    const byDirectory = migrated?.contextPanelByDirectory ?? {};
-    expect(Object.keys(byDirectory)).toEqual(['C:/repo']);
-    expect({
-      isOpen: byDirectory['C:/repo']?.isOpen,
-      expanded: byDirectory['C:/repo']?.expanded,
-      activeTabId: byDirectory['C:/repo']?.activeTabId,
-      widthByMode: byDirectory['C:/repo']?.widthByMode,
-      touchedAt: byDirectory['C:/repo']?.touchedAt,
-    }).toEqual({
-      isOpen: true,
-      expanded: true,
-      activeTabId: 'diff',
-      widthByMode: { file: 600, diff: 800 },
-      touchedAt: 20,
+    expect(migrated).toMatchObject({
+      contextPanelByDirectory: {
+        'C:/repo': {
+          isOpen: true,
+          expanded: true,
+          activeTabId: 'diff',
+          widthByMode: { file: 600, diff: 800, walkthrough: 700 },
+          widthFractionByMode: { file: 0.6, diff: 0.8 },
+          touchedAt: 20,
+          tabs: [
+            { mode: 'file', targetPath: 'C:/repo/a.ts' },
+            { mode: 'file', targetPath: 'C:/repo/b.ts' },
+            { mode: 'diff', targetPath: null },
+          ],
+        },
+      },
     });
-    expect(byDirectory['C:/repo']?.tabs.map((tab) => [tab.mode, tab.targetPath])).toEqual([
-      ['file', 'C:/repo/a.ts'],
-      ['file', 'C:/repo/b.ts'],
-      ['diff', null],
-    ]);
   });
 
   test('merges equal-timestamp key collisions independently of persisted key order', async () => {
     const migrate = useUIStore.persist.getOptions().migrate;
-    expect(typeof migrate).toBe('function');
+    expect(migrate).toBeDefined();
 
     const legacyState = {
       isOpen: false,
@@ -799,17 +826,10 @@ describe('useUIStore context-panel persistence migration', () => {
       touchedAt: 20,
     };
 
-    const migrateCollision = async (entries: Array<[string, object]>) => {
-      const migrated = await migrate?.({
+    const migrateCollision = async (entries: Array<[string, typeof legacyState]>) => {
+      return migrate?.({
         contextPanelByDirectory: Object.fromEntries(entries),
-      }, 13) as { contextPanelByDirectory?: Record<string, {
-        isOpen: boolean;
-        expanded: boolean;
-        tabs: Array<{ label: string | null }>;
-        widthByMode: Record<string, number>;
-      }> } | undefined;
-
-      return migrated?.contextPanelByDirectory?.['C:/repo'];
+      }, 21);
     };
 
     const legacyFirst = await migrateCollision([
@@ -822,16 +842,15 @@ describe('useUIStore context-panel persistence migration', () => {
     ]);
 
     expect(canonicalFirst).toEqual(legacyFirst);
-    expect({
-      isOpen: legacyFirst?.isOpen,
-      expanded: legacyFirst?.expanded,
-      tabLabels: legacyFirst?.tabs.map((tab) => tab.label),
-      widthByMode: legacyFirst?.widthByMode,
-    }).toEqual({
-      isOpen: true,
-      expanded: true,
-      tabLabels: ['Canonical'],
-      widthByMode: { diff: 800 },
+    expect(legacyFirst).toMatchObject({
+      contextPanelByDirectory: {
+        'C:/repo': {
+          isOpen: true,
+          expanded: true,
+          tabs: [{ label: 'Canonical' }],
+          widthByMode: { diff: 800 },
+        },
+      },
     });
   });
 });
