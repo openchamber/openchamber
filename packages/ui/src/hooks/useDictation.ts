@@ -228,6 +228,10 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
 
         try {
             await audio.start();
+            if (statusRef.current !== 'recording') {
+                await audio.stop();
+                return;
+            }
             startDurationTracking();
             // Open the stream eagerly so audio uploads while the user speaks
             // and only the tail is left to transcribe on stop.
@@ -297,6 +301,7 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
 
         try {
             await audio.stop();
+            if (statusRef.current !== 'recording') return null;
             setStatus('uploading');
             statusRef.current = 'uploading';
 
@@ -306,8 +311,10 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
             }
 
             const result = await senderRef.current!.finish(finalSeq);
+            if (statusRef.current !== 'uploading') return null;
             return handleSuccess(result.text);
         } catch (err) {
+            if (!['recording', 'uploading'].includes(statusRef.current)) return null;
             handleFailure(err);
             return null;
         } finally {

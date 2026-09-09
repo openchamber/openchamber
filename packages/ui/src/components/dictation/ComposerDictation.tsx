@@ -21,8 +21,7 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn } from '@/lib/utils';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useDictation } from '@/hooks/useDictation';
-import { useBrowserDictation } from '@/hooks/useBrowserDictation';
-import { browserVoiceService } from '@/lib/voice/browserVoiceService';
+import { useBrowserDictation, isBrowserDictationSupported } from '@/hooks/useBrowserDictation';
 import { DictationWaveform } from '@/components/dictation/DictationWaveform';
 import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -131,10 +130,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     // STT runs entirely in the client, so it needs the Web Speech API instead
     // of the capture stack.
     const [captureSupported] = React.useState(() => isDictationCaptureSupported());
-    const [browserRecognitionSupported] = React.useState(() => {
-        const details = browserVoiceService.getSupportDetails();
-        return details.recognition && details.secureContext;
-    });
+    const [browserRecognitionSupported] = React.useState(isBrowserDictationSupported);
     const browserStt = sttProvider === 'browser';
     const supported = !isVSCodeRuntime() && (browserStt ? browserRecognitionSupported : captureSupported);
 
@@ -146,8 +142,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         onInsertAndSendRef.current = onInsertAndSend;
     }, [onInsert, onInsertAndSend]);
 
-    const serverDictation = useDictation({
-        onTranscript: (text) => {
+    const onTranscript = React.useCallback((text: string) => {
             const action = pendingActionRef.current;
             pendingActionRef.current = null;
             if (action === 'send') {
@@ -155,20 +150,20 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
             } else {
                 onInsertRef.current(text);
             }
-        },
-    });
+    }, []);
+    const canStart = () => supported && dictationEnabled && !disabled;
+    const serverDictation = useDictation({ onTranscript, canStart });
     const browserDictation = useBrowserDictation({
-        onTranscript: (text) => {
-            const action = pendingActionRef.current;
-            pendingActionRef.current = null;
-            if (action === 'send') {
-                onInsertAndSendRef.current(text);
-            } else {
-                onInsertRef.current(text);
-            }
-        },
+        onTranscript, canStart,
     });
     const dictation = browserStt ? browserDictation : serverDictation;
+    const cancelServer = serverDictation.cancelDictation;
+    const cancelBrowser = browserDictation.cancelDictation;
+    React.useEffect(() => () => {
+        pendingActionRef.current = null;
+        void cancelServer();
+        void cancelBrowser();
+    }, [sttProvider, dictationEnabled, cancelServer, cancelBrowser]);
 
     const {
         status,
@@ -520,7 +515,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                                     >
                                         <Icon name="close" className={iconSizeClass} />
                                     </button>
-                                    <button
+                                    {!browserStt && <button
                                         type="button"
                                         {...keepKeyboardFocusProps}
                                         className={footerIconButtonClass}
@@ -529,7 +524,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                                         aria-label={t('chat.dictation.retry')}
                                     >
                                         <Icon name="refresh" className={iconSizeClass} />
-                                    </button>
+                                    </button>}
                                     {partialTranscript.trim() ? (
                                         <button
                                             type="button"

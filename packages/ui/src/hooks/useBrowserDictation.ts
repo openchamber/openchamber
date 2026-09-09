@@ -1,256 +1,148 @@
-/**
- * Browser (Web Speech API) dictation engine.
- *
- * Same contract as `useDictation`, but recognition runs entirely in the
- * browser: no mic capture graph, no server stream, and transcripts arrive as
- * Web Speech results instead of a server response. There is no uploading
- * phase — `partialTranscript` accumulates what the provider has recognized so
- * far and also serves as the salvage text if dictation fails.
- */
-
+/** Browser-owned recognition and local-only microphone metering. No server audio upload. */
 import { useCallback, useEffect, useRef, useState } from 'react';
-
-import { browserVoiceService } from '@/lib/voice/browserVoiceService';
+import { useI18n } from '@/lib/i18n';
+import { isElectronShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isCapacitorApp } from '@/lib/platform';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { BrowserRecognitionSession } from '@/lib/dictation/browser-recognition-session';
+import { useDictationAudioSource } from '@/lib/dictation/use-dictation-audio-source';
 import type { DictationStatus, UseDictationOptions, UseDictationResult } from '@/hooks/useDictation';
 
-const DURATION_TICK_MS = 1000;
-
-const getRecognitionLanguage = (): string => {
-    const configured = useConfigStore.getState().sttLanguage?.trim();
-    if (configured && configured.toLowerCase() !== 'auto') {
-        return configured;
-    }
-    return navigator.language || 'en-US';
-};
-
-/** Compose the full transcript from confirmed sentences plus any pending interim result. */
-const composeTranscript = (finals: string, interim: string): string => {
-    return [finals.trim(), interim.trim()].filter(Boolean).join(' ');
+export const isBrowserDictationSupported = (): boolean => {
+    if (!globalThis.window) return false;
+    // Embedded Chromium exposes the interface without a working speech service.
+    if (isElectronShell() || isVSCodeRuntime() || isCapacitorApp()) return false;
+    return window.isSecureContext && Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
 };
 
 export function useBrowserDictation(options: UseDictationOptions = {}): UseDictationResult {
-    const { onTranscript, onError, canStart } = options;
-
+    const { t } = useI18n();
+    const meter = useDictationAudioSource({});
     const [status, setStatus] = useState<DictationStatus>('idle');
     const [partialTranscript, setPartialTranscript] = useState('');
     const [duration, setDuration] = useState(0);
-    const [error, setError] = useState<string | null>(null);
     const [errorReason, setErrorReason] = useState<string | null>(null);
+    const sessionRef = useRef<BrowserRecognitionSession | null>(null);
+    const statusRef = useRef<DictationStatus>('idle');
+    const textRef = useRef('');
+    const optionsRef = useRef(options);
+    optionsRef.current = options;
 
-    const statusRef = useRef(status);
-    useEffect(() => {
-        statusRef.current = status;
-    }, [status]);
-
-    const finalsRef = useRef('');
-    const interimRef = useRef('');
-    const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-    const actionGateRef = useRef({ starting: false, confirming: false, cancelling: false });
-
-    const onTranscriptRef = useRef(onTranscript);
-    const onErrorRef = useRef(onError);
-    useEffect(() => {
-        onTranscriptRef.current = onTranscript;
-        onErrorRef.current = onError;
-    }, [onTranscript, onError]);
-
-    const stopDurationTracking = useCallback(() => {
-        if (durationIntervalRef.current) {
-            clearInterval(durationIntervalRef.current);
-            durationIntervalRef.current = null;
-        }
+    const transition = useCallback((next: DictationStatus) => {
+        statusRef.current = next;
+        setStatus(next);
     }, []);
-
-    const startDurationTracking = useCallback(() => {
-        if (durationIntervalRef.current) {
-            return;
-        }
-        durationIntervalRef.current = setInterval(() => {
-            setDuration((prev) => prev + 1);
-        }, DURATION_TICK_MS);
-    }, []);
-
-    const reportError = useCallback((message: string) => {
-        setError(message);
-        onErrorRef.current?.(new Error(message));
-    }, []);
-
-    const updateTranscript = useCallback((finals: string, interim: string) => {
-        finalsRef.current = finals;
-        interimRef.current = interim;
-        setPartialTranscript(composeTranscript(finals, interim));
-    }, []);
-
-    const clearRecognitionState = useCallback(() => {
-        finalsRef.current = '';
-        interimRef.current = '';
-        setPartialTranscript('');
-    }, []);
-
-    const handleSuccess = useCallback(
-        (text: string): string | null => {
-            setDuration(0);
-            setStatus('idle');
-            statusRef.current = 'idle';
-            const transcriptText = text.trim();
-            clearRecognitionState();
-            if (!transcriptText) {
-                return null;
-            }
-            onTranscriptRef.current?.(transcriptText);
-            return transcriptText;
-        },
-        [clearRecognitionState],
-    );
-
-    const startDictation = useCallback(async () => {
-        const gate = actionGateRef.current;
-        if (gate.starting || gate.confirming || gate.cancelling) {
-            return;
-        }
-        if (statusRef.current !== 'idle') {
-            return;
-        }
-        if (canStart && !canStart()) {
-            return;
-        }
-
-        gate.starting = true;
-        setError(null);
-        setErrorReason(null);
-        setPartialTranscript('');
-        setDuration(0);
-        setStatus('recording');
-        statusRef.current = 'recording';
-        clearRecognitionState();
-
-        try {
-            await browserVoiceService.startListening(getRecognitionLanguage(), (text, isFinal) => {
-                if (isFinal) {
-                    updateTranscript(composeTranscript(finalsRef.current, text), '');
-                } else {
-                    updateTranscript(finalsRef.current, text);
-                }
-            }, (message) => {
-                // Web Speech reports transient errors (no-speech, network
-                // blips) while continuing to listen, and fatal ones after
-                // stopping. Surface the message either way; the accumulated
-                // transcript stays available for confirm or salvage.
-                setError(message);
-            });
-            startDurationTracking();
-        } catch (err) {
-            browserVoiceService.stopListening();
-            stopDurationTracking();
-            setStatus('idle');
-            statusRef.current = 'idle';
-            reportError(err instanceof Error ? err.message : String(err));
-        } finally {
-            gate.starting = false;
-        }
-    }, [canStart, clearRecognitionState, reportError, startDurationTracking, stopDurationTracking, updateTranscript]);
 
     const cancelDictation = useCallback(async () => {
-        const gate = actionGateRef.current;
-        if (gate.cancelling) {
-            return;
-        }
-        if (statusRef.current !== 'recording') {
-            return;
-        }
-        gate.cancelling = true;
-        stopDurationTracking();
-        setDuration(0);
-        setError(null);
+        // Clear ownership before aborting so late results cannot enter a new draft.
+        const session = sessionRef.current;
+        sessionRef.current = null;
+        session?.cancel();
+        transition('idle');
+        textRef.current = '';
+        setPartialTranscript('');
         setErrorReason(null);
-        browserVoiceService.stopListening();
-        setStatus('idle');
-        statusRef.current = 'idle';
-        clearRecognitionState();
-        gate.cancelling = false;
-    }, [clearRecognitionState, stopDurationTracking]);
+        setDuration(0);
+        await meter.stop();
+    }, [meter, transition]);
+
+    const startDictation = useCallback(async () => {
+        if (statusRef.current !== 'idle' || optionsRef.current.canStart?.() === false) return;
+        if (!isBrowserDictationSupported()) {
+            setErrorReason('unsupported');
+            transition('failed');
+            return;
+        }
+        setErrorReason(null);
+        textRef.current = '';
+        setPartialTranscript('');
+        setDuration(0);
+        transition('recording');
+        const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition: SpeechRecognition;
+        try {
+            recognition = new Recognition();
+        } catch {
+            setErrorReason('start-failed');
+            transition('failed');
+            return;
+        }
+        const fail = (code: string) => {
+            if (sessionRef.current !== session) return;
+            sessionRef.current = null;
+            session.cancel();
+            setErrorReason(code);
+            transition('failed');
+            void meter.stop();
+        };
+        const session = new BrowserRecognitionSession(recognition, {
+            onText: (text) => {
+                if (sessionRef.current !== session) return;
+                textRef.current = text;
+                setPartialTranscript(text);
+            },
+            onError: fail,
+        });
+        sessionRef.current = session;
+        const language = useConfigStore.getState().sttLanguage.trim();
+        // Keep recognition.start in the user gesture, before awaiting mic permission.
+        session.start(language && language.toLowerCase() !== 'auto' ? language : navigator.language || 'en-US');
+        if (sessionRef.current !== session) return;
+        try {
+            await meter.start();
+        } catch {
+            fail('audio-capture');
+        }
+    }, [meter, transition]);
 
     const confirmDictation = useCallback(async (): Promise<string | null> => {
-        const gate = actionGateRef.current;
-        if (gate.confirming) {
-            return null;
-        }
-        if (statusRef.current !== 'recording') {
-            return null;
-        }
+        const session = sessionRef.current;
+        if (!session || statusRef.current !== 'recording') return null;
+        transition('uploading');
+        void meter.stop();
+        // stop() may produce one last result. Do not insert interim text early.
+        const text = await session.finish();
+        if (sessionRef.current !== session) return null;
+        void cancelDictation();
+        if (!text?.trim()) return null;
+        optionsRef.current.onTranscript?.(text.trim());
+        return text.trim();
+    }, [cancelDictation, meter, transition]);
 
-        gate.confirming = true;
-        stopDurationTracking();
-        browserVoiceService.stopListening();
-        try {
-            return handleSuccess(composeTranscript(finalsRef.current, interimRef.current));
-        } finally {
-            gate.confirming = false;
-        }
-    }, [handleSuccess, stopDurationTracking]);
-
-    // Web Speech results are final the moment they arrive — there is no
-    // buffered audio to replay, so failed dictations offer only the partial.
-    const retryFailedDictation = useCallback(async (): Promise<string | null> => {
-        return null;
-    }, []);
-
-    const acceptPartialTranscript = useCallback((): string | null => {
-        if (statusRef.current !== 'failed') {
-            return null;
-        }
-        const text = partialTranscript.trim();
-        setDuration(0);
-        setStatus('idle');
-        statusRef.current = 'idle';
-        setError(null);
-        setErrorReason(null);
-        browserVoiceService.stopListening();
-        clearRecognitionState();
-        if (!text) {
-            return null;
-        }
-        onTranscriptRef.current?.(text);
+    const acceptPartialTranscript = useCallback(() => {
+        if (statusRef.current !== 'failed') return null;
+        const text = textRef.current.trim();
+        void cancelDictation();
+        if (!text) return null;
+        optionsRef.current.onTranscript?.(text);
         return text;
-    }, [clearRecognitionState, partialTranscript]);
-
-    const discardFailedDictation = useCallback(() => {
-        setDuration(0);
-        setStatus('idle');
-        statusRef.current = 'idle';
-        setError(null);
-        setErrorReason(null);
-        browserVoiceService.stopListening();
-        clearRecognitionState();
-    }, [clearRecognitionState]);
+    }, [cancelDictation]);
 
     useEffect(() => {
-        return () => {
-            stopDurationTracking();
-            browserVoiceService.stopListening();
-        };
-    }, [stopDurationTracking]);
+        if (status !== 'recording') return;
+        const timer = setInterval(() => setDuration((previous) => previous + 1), 1000);
+        return () => clearInterval(timer);
+    }, [status]);
 
-    // Web Speech exposes no audio levels; the waveform renders its idle trace.
-    const subscribeLevel = useCallback((): (() => void) => {
-        return () => undefined;
-    }, []);
+    useEffect(() => () => {
+        const session = sessionRef.current;
+        sessionRef.current = null;
+        session?.cancel();
+        void meter.stop();
+    }, [meter]);
 
-    return {
-        status,
-        isRecording: status === 'recording',
-        isProcessing: false,
-        partialTranscript,
-        subscribeLevel,
-        duration,
-        error,
-        errorReason,
-        startDictation,
-        confirmDictation,
-        cancelDictation,
-        retryFailedDictation,
-        acceptPartialTranscript,
-        discardFailedDictation,
-    };
+    // No buffered audio exists to replay. The UI offers salvage or discard instead.
+    const retryFailedDictation = useCallback(async () => null, []);
+    const discardFailedDictation = useCallback(() => { void cancelDictation(); }, [cancelDictation]);
+    const error = errorReason === 'unsupported'
+        ? t('settings.voice.page.browserTest.unavailable')
+        : errorReason ? t('settings.voice.page.browserTest.error', { code: errorReason }) : null;
+    useEffect(() => {
+        if (error) optionsRef.current.onError?.(new Error(error));
+    }, [error]);
+
+    return { status, isRecording: status === 'recording', isProcessing: status === 'uploading',
+        partialTranscript, subscribeLevel: meter.subscribeLevel, duration, error, errorReason,
+        startDictation, confirmDictation, cancelDictation, retryFailedDictation,
+        acceptPartialTranscript, discardFailedDictation };
 }

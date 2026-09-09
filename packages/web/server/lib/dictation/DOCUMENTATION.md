@@ -33,6 +33,16 @@ response carries `X-Speech-Model` and `X-Speech-Language`.
 
 ## Ownership
 
+Browser STT is client-owned and does not use this server protocol. The
+`useBrowserDictation` hook owns a `BrowserRecognitionSession`, waits for the
+final result on confirmation, and aborts on cancel, provider change, or
+unmount. Its microphone capture is level-only, without PCM encoding or
+upload. Fatal recognition errors retain text for recovery and release the
+microphone. The Voice settings preview uses the same engine without sending
+results to chat. Recognition is available in supported secure web browsers,
+including hosted mobile browsers, but not Electron, VS Code, or Capacitor
+shells. Browser recognition may send audio to the browser vendor's service.
+
 - `runtime.js` — registers `GET /api/dictation/status`,
   `POST /api/dictation/models/:modelId/download`, and the
   `/api/dictation/ws` WebSocket endpoint (auth-gated the same way as the
