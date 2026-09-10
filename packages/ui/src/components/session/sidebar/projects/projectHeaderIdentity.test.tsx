@@ -36,6 +36,8 @@ describe('ProjectHeaderIdentity project label casing', () => {
 
     expect(markup).toContain('>MyProject</span>');
     expect(markup).not.toContain('lowercase');
+    expect(markup).toContain('typography-ui-label');
+    expect(markup).not.toContain('text-[14px]');
   });
 
   test('preserves a directory-derived project label exactly', () => {

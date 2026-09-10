@@ -638,11 +638,11 @@ export const useProjectsStore = create<ProjectsStore>()(
       const entry: ProjectEntry = {
         id,
         path: normalizedPath,
-        ...(label ? { label } : {}),
         color: pickAutoColor(get().projects),
         addedAt: now,
         lastOpenedAt: now,
       };
+      if (label) entry.label = label;
 
       const nextProjects = [...get().projects, entry];
       set({ projects: nextProjects });

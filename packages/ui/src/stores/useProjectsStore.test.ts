@@ -55,8 +55,8 @@ describe("useProjectsStore settings synchronization", () => {
 
   test("treats legacy generated labels as directory defaults", () => {
     useProjectsStore.getState().synchronizeFromSettings({
-      projects: [{ path: "/workspace/my-project_Name", label: "My Project Name" }],
-    } as DesktopSettings)
+      projects: [{ id: "legacy", path: "/workspace/my-project_Name", label: "My Project Name" }],
+    })
 
     expect(useProjectsStore.getState().projects[0]?.path).toBe("/workspace/my-project_Name")
     expect(useProjectsStore.getState().projects[0]?.label).toBe(undefined)
@@ -64,14 +64,14 @@ describe("useProjectsStore settings synchronization", () => {
 
   test("preserves a custom label that differs from the legacy generated label", () => {
     useProjectsStore.getState().synchronizeFromSettings({
-      projects: [{ path: "/workspace/my-project", label: "my Custom_Project" }],
-    } as DesktopSettings)
+      projects: [{ id: "custom", path: "/workspace/my-project", label: "my Custom_Project" }],
+    })
 
     expect(useProjectsStore.getState().projects[0]?.label).toBe("my Custom_Project")
   })
 
   test("removes a custom label when project metadata restores the directory default", () => {
-    const project = { id: "project-a", path: "/workspace/my-project", label: "Custom Name" } as ProjectEntry
+    const project: ProjectEntry = { id: "project-a", path: "/workspace/my-project", label: "Custom Name" }
     useProjectsStore.setState({ projects: [project], activeProjectId: project.id })
 
     useProjectsStore.getState().updateProjectMeta(project.id, { label: null })
