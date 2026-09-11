@@ -110,6 +110,15 @@
     width: min(100%, 64rem);
   }
 
+  .work-status-overlay-visible .chat-column,
+  .work-status-overlay-visible .chat-input-column,
+  .work-status-overlay-visible .chat-message-column {
+    width: min(100%, 64rem, calc(100% - 324px));
+    margin-left: auto;
+    margin-right: auto;
+    transform: translateX(calc(-324px / 2));
+  }
+
   @media (min-width: 1024px) {
     .chat-column {
       padding-inline: calc(clamp(1rem, 2.5vw, 1.5rem) * var(--padding-scale, 1));
@@ -228,4 +237,11 @@
 
 .wide-chat-layout .chat-message-column {
   width: min(100%, 64rem);
+}
+
+.work-status-overlay-visible .chat-message-column {
+  width: min(100%, 64rem, calc(100% - 324px));
+  margin-left: auto;
+  margin-right: auto;
+  transform: translateX(calc(-324px / 2));
 }
