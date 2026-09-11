@@ -1,6 +1,8 @@
 import React from 'react';
+import type { Session } from '@opencode-ai/sdk/v2';
 import { useI18n } from '@/lib/i18n';
-import { useAllLiveSessions, useAllSessionStatuses, useDirectorySync } from '@/sync/sync-context';
+import { useDirectoryStore } from '@/sync/sync-context';
+import { subscribeDirectoryPermission, subscribeDirectoryQuestion } from '@/sync/child-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -8,8 +10,7 @@ import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedC
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusValue } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
 import { formatCost } from './subagentCost';
-import { useSubagentCostRollup } from './useSubagentCostRollup';
-import type { State } from '@/sync/types';
+import { useDirectorySubagentCostRollup } from './useSubagentCostRollup';
 
 type Props = {
   sessionId: string | null;
@@ -17,6 +18,133 @@ type Props = {
 };
 
 const SECTION_ID = 'subagents';
+
+type DirectoryStore = ReturnType<typeof useDirectoryStore>;
+
+type SubagentChildrenSnapshot = {
+  children: Session[];
+  busyById: Record<string, boolean>;
+};
+
+const EMPTY_SUBAGENT_CHILDREN: SubagentChildrenSnapshot = { children: [], busyById: {} };
+
+const childCreatedAt = (session: Session): number => session.time?.created ?? 0;
+
+/**
+ * Equal when the same children are shown with the same labels and busy state.
+ * `time.updated` is deliberately absent: streaming bumps it without changing
+ * anything this section renders, so treating those bumps as different would
+ * re-render on every unrelated session publication.
+ */
+const areSubagentChildrenEqual = (
+  left: SubagentChildrenSnapshot,
+  right: SubagentChildrenSnapshot,
+): boolean => {
+  if (left === right) return true;
+  if (left.children.length !== right.children.length) return false;
+  for (let index = 0; index < left.children.length; index += 1) {
+    const leftChild = left.children[index];
+    const rightChild = right.children[index];
+    if (leftChild.id !== rightChild.id || leftChild.title !== rightChild.title) return false;
+    if (left.busyById[leftChild.id] !== right.busyById[rightChild.id]) return false;
+  }
+  return true;
+};
+
+/**
+ * Direct children of `sessionId` and their busy state, read from one directory
+ * store instead of the directory-wide session/status aggregates. The snapshot
+ * is cached and compared on child identity, label and busy state, so unrelated
+ * session or status publications resolve to the same reference and React bails
+ * out before re-rendering the section.
+ */
+function useSubagentChildren(store: DirectoryStore, sessionId: string | null): SubagentChildrenSnapshot {
+  const cacheRef = React.useRef<SubagentChildrenSnapshot | null>(null);
+
+  const getSnapshot = React.useCallback((): SubagentChildrenSnapshot => {
+    if (!sessionId) return EMPTY_SUBAGENT_CHILDREN;
+    const state = store.getState();
+    const children = state.session
+      .filter((candidate) => candidate.parentID === sessionId)
+      .sort((left, right) => {
+        // `time.created` is stable, unlike `time.updated`, so the newest
+        // subagent stays on top without a volatile ordering input.
+        const byCreated = childCreatedAt(right) - childCreatedAt(left);
+        if (byCreated !== 0) return byCreated;
+        return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+      });
+    const busyById: Record<string, boolean> = {};
+    for (const child of children) {
+      busyById[child.id] = state.session_status?.[child.id]?.type === 'busy';
+    }
+    const next: SubagentChildrenSnapshot = { children, busyById };
+    const cached = cacheRef.current;
+    if (cached && areSubagentChildrenEqual(cached, next)) return cached;
+    cacheRef.current = next;
+    return next;
+  }, [store, sessionId]);
+
+  const subscribe = React.useCallback((notify: () => void) => {
+    if (!sessionId) return () => undefined;
+    return store.subscribe((state, previous) => {
+      if (state.session !== previous.session || state.session_status !== previous.session_status) {
+        notify();
+      }
+    });
+  }, [store, sessionId]);
+
+  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+type SubagentBlockers = Record<string, 'permission' | 'question'>;
+
+const areBlockersEqual = (left: SubagentBlockers, right: SubagentBlockers): boolean => {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  for (const key of leftKeys) {
+    if (left[key] !== right[key]) return false;
+  }
+  return true;
+};
+
+/**
+ * Pending permission/question presence per direct child, keyed by child ID.
+ * Uses the per-session sidecar channels, so a blocker raised anywhere else in
+ * the directory never notifies this section.
+ */
+function useSubagentBlockers(store: DirectoryStore, childIds: readonly string[]): SubagentBlockers {
+  const cacheRef = React.useRef<{ ids: readonly string[]; blockers: SubagentBlockers } | null>(null);
+
+  const getSnapshot = React.useCallback(() => {
+    const state = store.getState();
+    const blockers: SubagentBlockers = {};
+    for (const id of childIds) {
+      if ((state.permission[id]?.length ?? 0) > 0) blockers[id] = 'permission';
+      else if ((state.question[id]?.length ?? 0) > 0) blockers[id] = 'question';
+    }
+    const cached = cacheRef.current;
+    if (cached && cached.ids === childIds && areBlockersEqual(cached.blockers, blockers)) {
+      cacheRef.current = { ids: childIds, blockers: cached.blockers };
+      return cached.blockers;
+    }
+    cacheRef.current = { ids: childIds, blockers };
+    return blockers;
+  }, [store, childIds]);
+
+  const subscribe = React.useCallback((notify: () => void) => {
+    if (childIds.length === 0) return () => undefined;
+    const unsubscribers = childIds.flatMap((id) => [
+      subscribeDirectoryPermission(store, id, notify),
+      subscribeDirectoryQuestion(store, id, notify),
+    ]);
+    return () => {
+      for (const unsubscribe of unsubscribers) unsubscribe();
+    };
+  }, [store, childIds]);
+
+  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
 
 /**
  * Running subagents and, more importantly, their blockers: a permission request
@@ -27,22 +155,15 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
   const { t } = useI18n();
   const isMobile = useUIStore((state) => state.isMobile);
 
-  const liveSessions = useAllLiveSessions();
-  const statuses = useAllSessionStatuses();
-  const children = React.useMemo(
-    () => (sessionId ? liveSessions.filter((candidate) => candidate.parentID === sessionId) : []),
-    [liveSessions, sessionId],
-  );
+  const store = useDirectoryStore(directory ?? undefined);
+  const { children, busyById } = useSubagentChildren(store, sessionId);
+  const childIds = React.useMemo(() => children.map((child) => child.id), [children]);
+  const blockers = useSubagentBlockers(store, childIds);
 
   // Each child's own subtree total (its cost plus every descendant of its
   // own), so nested subagent-of-subagent cost rolls up under the immediate
   // child row shown here rather than disappearing.
-  const { perChildCost } = useSubagentCostRollup(sessionId);
-
-  // One subscription covers every child: per-session hooks would multiply
-  // store subscriptions by the number of subagents.
-  const permissions = useDirectorySync(React.useCallback((state: State) => state.permission, []));
-  const questions = useDirectorySync(React.useCallback((state: State) => state.question, []));
+  const { perChildCost } = useDirectorySubagentCostRollup(sessionId, directory);
 
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
@@ -79,7 +200,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
 
   if (children.length === 0) return null;
 
-  const busyChildren = children.filter((child) => statuses[child.id]?.type === 'busy').length;
+  const busyChildren = children.filter((child) => busyById[child.id]).length;
 
   return (
     <WorkStatusCollapsibleSection
@@ -91,9 +212,8 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
     >
       <div className="max-h-56 overflow-y-auto">
         {children.map((child) => {
-          const blocked = (permissions[child.id]?.length ?? 0) > 0;
-          const asked = (questions[child.id]?.length ?? 0) > 0;
-          const busy = statuses[child.id]?.type === 'busy';
+          const blocker = blockers[child.id];
+          const busy = busyById[child.id] === true;
           const label = child.title?.trim() || t('chat.workStatus.subagent.untitled');
           const childCost = perChildCost.get(child.id) ?? 0;
           return (
@@ -104,9 +224,9 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
               label={label}
               value={(
                 <>
-                  {blocked ? (
+                  {blocker === 'permission' ? (
                     <WorkStatusValue tone="warning">{t('chat.workStatus.subagent.needsPermission')}</WorkStatusValue>
-                  ) : asked ? (
+                  ) : blocker === 'question' ? (
                     <WorkStatusValue tone="warning">{t('chat.workStatus.subagent.askedQuestion')}</WorkStatusValue>
                   ) : busy ? (
                     <WorkStatusValue tone="info">{t('chat.workStatus.subagent.working')}</WorkStatusValue>

@@ -96,12 +96,12 @@ which requests only providers enabled for this panel.
 
 | Block | Source | Notes |
 |---|---|---|
-| Context + cost | `contextUsage.ts` over `useSessionMessages`; cost via `useSubagentCostRollup` (own cost + every descendant subagent, recursively) | see below — the store getters cannot serve this |
+| Context + cost | `contextUsage.ts` over `useSessionMessages`; cost via `useDirectorySubagentCostRollup` (own cost + every descendant subagent, recursively) | see below — the store getters cannot serve this |
 | Branch, ahead/behind, attention | `useGitStore` directory state | warmed via `runBackgroundNetworkTask(ensureStatus)` and refreshed from Git mutation hints |
 | Changed files | `useGitStore` status `files` + `diffStats` | working tree, not session-authored edits |
 | PR + checks | `useFreshestPrVisualSummaryForBranch` | **read-only**; follows the freshest remote-keyed entry for the branch |
-| Subagents | child sessions from `useAllLiveSessions` (`parentID`) + `useAllSessionStatuses`; per-row cost from `useSubagentCostRollup`'s `perChildCost` (each child's own subtree total, so nested subagent-of-subagent cost rolls up under its immediate parent row) | |
-| Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
+| Subagents | direct children from one `useDirectoryStore`'s `session` (`parentID`) and their `session_status`; per-row cost from `useDirectorySubagentCostRollup`'s `perChildCost` (each child's own subtree total, so nested subagent-of-subagent cost rolls up under its immediate parent row) | scoped to the panel's directory; another directory's session or status publication never reaches this section |
+| Subagent blockers | per-child `permission` / `question` sidecar subscriptions (`subscribeDirectoryPermission` / `subscribeDirectoryQuestion`) | one subscription pair per visible child, so a blocker raised anywhere else never notifies |
 | Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not |
 | Linked threads | `lib/linkedIssues.ts` over session metadata | written by the flows that attach an issue or PR |
 | Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed only while expanded and authoritatively idle |
@@ -281,6 +281,10 @@ just collapsed it.
 Its expanded list is capped at eight rows and scrolls independently, so a
 session with many subagents does not crowd every section below it out of the
 panel.
+
+Rows are ordered by session creation time, newest first, with the session id as
+a tiebreak. The order is deliberately stable under streaming — `time.updated`
+is not an input — so a working child does not jump the list.
 
 ## Tasks
 

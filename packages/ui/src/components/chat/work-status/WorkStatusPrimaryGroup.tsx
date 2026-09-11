@@ -17,7 +17,7 @@ import { sessionEvents } from '@/lib/sessionEvents';
 import { normalizePath } from '@/lib/pathNormalization';
 import { computeContextUsage } from './contextUsage';
 import { formatCost } from './subagentCost';
-import { useSubagentCostRollup } from './useSubagentCostRollup';
+import { useDirectorySubagentCostRollup } from './useSubagentCostRollup';
 import {
   WorkStatusCallout,
   WorkStatusMeter,
@@ -245,9 +245,9 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
       : 'var(--status-success)';
 
   // Rollup total: own cost plus every descendant subagent's cost, recursively
-  // (see useSubagentCostRollup). Shown here instead of session.cost alone, so
-  // spend that ran in a spawned subagent doesn't hide from the reader.
-  const { totalCost, ownCost, subagentCost, subagentCount } = useSubagentCostRollup(sessionId);
+  // (see useDirectorySubagentCostRollup). Shown here instead of session.cost
+  // alone, so spend that ran in a spawned subagent doesn't hide from the reader.
+  const { totalCost, ownCost, subagentCost, subagentCount } = useDirectorySubagentCostRollup(sessionId, directory);
   const cost = totalCost !== null && totalCost > 0 ? totalCost : null;
   // The total answers "what has this cost"; the split answers "why is it more
   // than the session I am looking at". Only worth a line once subagents exist —
