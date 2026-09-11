@@ -8,6 +8,8 @@ import {
   restartTerminalSession,
   forceKillTerminal,
   listTerminalShells,
+  listTerminalSessions,
+  touchTerminalSessions,
 } from '@openchamber/ui/lib/terminalApi';
 import type {
   TerminalAPI,
@@ -21,6 +23,14 @@ import type {
 export const createWebTerminalAPI = (): TerminalAPI => ({
   async listShells() {
     return listTerminalShells();
+  },
+
+  async listSessions(cwd: string) {
+    return listTerminalSessions(cwd);
+  },
+
+  async touchSessions(sessionIds: string[]) {
+    await touchTerminalSessions(sessionIds);
   },
 
   async createSession(options: CreateTerminalOptions): Promise<TerminalSession> {

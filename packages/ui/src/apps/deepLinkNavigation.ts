@@ -3,7 +3,7 @@ import React from 'react';
 import { isCapacitorApp } from '@/lib/platform';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
-import { buildDeepLink, parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarget } from './deepLinks';
+import { parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarget } from './deepLinks';
 
 /**
  * Navigation layer for {@link DeepLinkIntent}s — the only place that knows how to *apply* a
@@ -93,13 +93,13 @@ const flush = (): void => {
 };
 
 /** Apply an intent now if possible, otherwise stash it until the app is ready / a handler appears. */
-export const applyDeepLinkIntent = (intent: DeepLinkIntent): void => {
+const applyDeepLinkIntent = (intent: DeepLinkIntent): void => {
   pending = intent;
   flush();
 };
 
 /** Convenience: parse a raw `openchamber://…` URL and apply it. No-op for unrecognised URLs. */
-export const applyDeepLinkUrl = (raw: string | null | undefined): void => {
+const applyDeepLinkUrl = (raw: string | null | undefined): void => {
   const intent = parseDeepLink(raw);
   if (intent) {
     applyDeepLinkIntent(intent);
@@ -192,7 +192,3 @@ export const useDeepLinkSource = (options: { ready: boolean }): void => {
     };
   }, []);
 };
-
-// Re-export so producers (notifications, future widgets) have one import for the whole vocabulary.
-export { buildDeepLink, parseDeepLink };
-export type { DeepLinkIntent, SessionsFilter, ViewTarget };

@@ -1,14 +1,20 @@
 /**
- * Custom / Other OpenAI-compatible provider form helpers.
+ * Custom provider form helpers.
  * Mirrors OpenCode web UI validation and request construction so a provider
  * can be defined from Settings without code changes.
  */
 
-export const CUSTOM_PROVIDER_NPM = '@ai-sdk/openai-compatible';
+export const CUSTOM_PROVIDER_PROTOCOLS = {
+  'openai-chat': '@ai-sdk/openai-compatible',
+  'openai-responses': '@ai-sdk/openai',
+  'anthropic-messages': '@ai-sdk/anthropic',
+} as const;
+export type CustomProviderProtocol = keyof typeof CUSTOM_PROVIDER_PROTOCOLS;
+export type CustomProviderNpm = (typeof CUSTOM_PROVIDER_PROTOCOLS)[CustomProviderProtocol];
 export const CUSTOM_PROVIDER_ID = '__custom_provider__';
-export const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
-export const BASE_URL_PATTERN = /^https?:\/\//;
-export const ENV_KEY_PATTERN = /^\{env:([^}]+)\}$/;
+const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
+const BASE_URL_PATTERN = /^https?:\/\//;
+const ENV_KEY_PATTERN = /^\{env:([^}]+)\}$/;
 
 export type CustomProviderTranslator = (
   key: string,
@@ -30,6 +36,7 @@ export type HeaderRow = {
 export type CustomProviderFormState = {
   providerID: string;
   name: string;
+  protocol: CustomProviderProtocol;
   baseURL: string;
   apiKey: string;
   models: ModelRow[];
@@ -54,7 +61,7 @@ export type HeaderFieldErrors = {
 };
 
 export type CustomProviderConfig = {
-  npm: typeof CUSTOM_PROVIDER_NPM;
+  npm: CustomProviderNpm;
   name: string;
   env?: string[];
   options: {
@@ -120,13 +127,25 @@ export const createHeaderRow = (): HeaderRow => ({
 export const createEmptyCustomProviderForm = (): CustomProviderFormState => ({
   providerID: '',
   name: '',
+  protocol: 'openai-chat',
   baseURL: '',
   apiKey: '',
   models: [createModelRow()],
   headers: [createHeaderRow()],
 });
 
-export function parseEnvApiKey(apiKey: string): { env?: string; key?: string } {
+function protocolFromNpm(npm: string | undefined): CustomProviderProtocol {
+  switch (npm) {
+    case '@ai-sdk/openai':
+      return 'openai-responses';
+    case '@ai-sdk/anthropic':
+      return 'anthropic-messages';
+    default:
+      return 'openai-chat';
+  }
+}
+
+function parseEnvApiKey(apiKey: string): { env?: string; key?: string } {
   const trimmed = apiKey.trim();
   if (!trimmed) {
     return {};
@@ -159,7 +178,7 @@ export function isCustomOpenAICompatibleProvider(provider: ProviderLikeForCustom
     const api = 'api' in model && model.api && typeof model.api === 'object'
       ? model.api as { npm?: unknown }
       : null;
-    return typeof api?.npm === 'string' && api.npm === CUSTOM_PROVIDER_NPM;
+    return typeof api?.npm === 'string' && new Set<string>(Object.values(CUSTOM_PROVIDER_PROTOCOLS)).has(api.npm);
   });
 }
 
@@ -238,9 +257,14 @@ export function providerToCustomFormState(provider: ProviderLikeForCustomForm): 
     ? provider.env.find((entry) => typeof entry === 'string' && entry.trim().length > 0)?.trim()
     : undefined;
 
+  const modelWithApi = modelEntries.find(
+    (model): model is { id?: string; name?: string; api?: { npm?: string } } => 'api' in model,
+  );
+
   return {
     providerID: provider.id,
     name: typeof provider.name === 'string' && provider.name.trim() ? provider.name : provider.id,
+    protocol: protocolFromNpm(modelWithApi?.api?.npm),
     baseURL,
     apiKey: envName ? `{env:${envName}}` : '',
     models,
@@ -360,7 +384,7 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
       name,
       apiKey: key,
       config: {
-        npm: CUSTOM_PROVIDER_NPM,
+        npm: CUSTOM_PROVIDER_PROTOCOLS[input.form.protocol],
         name,
         ...(env ? { env: [env] } : {}),
         options: {

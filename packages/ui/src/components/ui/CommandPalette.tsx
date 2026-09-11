@@ -18,6 +18,7 @@ import {
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { isBtwSession } from '@/lib/sessionBtwMetadata';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import {
   EMPTY_SESSION_ORDER_RANKS,
@@ -36,18 +37,20 @@ import { toast } from '@/components/ui';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
-import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
+import { formatShortcutForDisplay, getEffectiveShortcutCombo, shortcutRegistry } from '@/lib/shortcuts';
+import { showOpenCodeStatus } from '@/lib/openCodeStatus';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { SETTINGS_PAGE_METADATA, type SettingsRuntimeContext } from '@/lib/settings/metadata';
 
 const EMPTY_PINNED_SESSION_IDS = new Set<string>();
-import { getSettingsNavIcon } from '@/components/views/SettingsView';
+import { getSettingsNavIcon } from '@/lib/settings/metadata';
 import { Icon } from "@/components/icon/Icon";
 import { McpIcon } from '@/components/icons/McpIcon';
 import { scoreByFuzzyQuery } from '@/lib/search/fuzzySearch';
 import { truncatePathMiddle } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { sessionEvents } from '@/lib/sessionEvents';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { buildCommandPaletteFileSearchKey, scoreCommandPaletteFiles } from './commandPaletteFilesState';
 
@@ -57,6 +60,9 @@ type CommandEntry = {
   icon: React.ReactNode;
   shortcutId?: string;
   searchText: string;
+  /** Search-only command: reachable by typing, hidden from the initial list
+      so the first screen stays scroll-free. */
+  secondary?: boolean;
   onSelect: () => void;
 };
 
@@ -80,7 +86,6 @@ export const CommandPalette: React.FC = () => {
 
   const isCommandPaletteOpen = useUIStore((s) => s.isCommandPaletteOpen);
   const setCommandPaletteOpen = useUIStore((s) => s.setCommandPaletteOpen);
-  const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((s) => s.setSettingsPage);
   const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
@@ -89,9 +94,14 @@ export const CommandPalette: React.FC = () => {
   const openContextSurface = useUIStore((s) => s.openContextSurface);
   const openContextFile = useUIStore((s) => s.openContextFile);
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
+  const openMultiRunLauncher = useUIStore((s) => s.openMultiRunLauncher);
+  const setArchivePageOpen = useUIStore((s) => s.setArchivePageOpen);
+  const setProjectContextTab = useUIStore((s) => s.setProjectContextTab);
 
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
   const setCurrentSession = useSessionUIStore((s) => s.setCurrentSession);
+  const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+  const togglePinnedSession = useSessionPinnedStore((s) => s.toggle);
 
   const activeSessions = useGlobalSessionsStore(React.useCallback(
     (state) => isCommandPaletteOpen ? state.activeSessions : EMPTY_SESSIONS,
@@ -169,7 +179,6 @@ export const CommandPalette: React.FC = () => {
         shortcutId: 'new_chat',
         searchText: t('commandPalette.item.newSession'),
         onSelect: run(() => {
-          setActiveMainTab('chat');
           setSessionSwitcherOpen(false);
           openNewSessionDraft();
         }),
@@ -232,6 +241,27 @@ export const CommandPalette: React.FC = () => {
         }),
       },
       {
+        id: 'cycle-theme',
+        secondary: true,
+        title: t('commandPalette.item.cycleTheme'),
+        icon: <Icon name="palette" className="mr-2 h-4 w-4" />,
+        shortcutId: 'cycle_theme',
+        searchText: t('commandPalette.item.cycleTheme'),
+        onSelect: run(() => {
+          shortcutRegistry.invoke('cycle_theme');
+        }),
+      },
+      {
+        id: 'open-status',
+        secondary: true,
+        title: t('commandPalette.item.showOpenCodeStatus'),
+        icon: <Icon name="pulse" className="mr-2 h-4 w-4" />,
+        searchText: t('commandPalette.item.showOpenCodeStatus'),
+        onSelect: run(() => {
+          void showOpenCodeStatus();
+        }),
+      },
+      {
         id: 'open-settings',
         title: t('commandPalette.item.openSettings'),
         icon: <Icon name="settings-3" className="mr-2 h-4 w-4" />,
@@ -240,6 +270,97 @@ export const CommandPalette: React.FC = () => {
         onSelect: run(() => setSettingsDialogOpen(true)),
       },
     ];
+    list.push(
+      {
+        id: 'pin-session',
+        secondary: true,
+        title: t('commandPalette.item.pinSession'),
+        icon: <Icon name="pushpin" className="mr-2 h-4 w-4" />,
+        searchText: t('commandPalette.item.pinSession'),
+        onSelect: run(() => {
+          if (currentSessionId && currentDirectory) {
+            togglePinnedSession({ directory: currentDirectory, sessionId: currentSessionId });
+          }
+        }),
+      },
+      {
+        id: 'copy-session-id',
+        secondary: true,
+        title: t('commandPalette.item.copySessionId'),
+        icon: <Icon name="file-copy" className="mr-2 h-4 w-4" />,
+        searchText: t('commandPalette.item.copySessionId'),
+        onSelect: run(() => {
+          if (!currentSessionId) return;
+          void copyTextToClipboard(currentSessionId)
+            .then((result) => {
+              if (result.ok) {
+                toast.success(t('sessions.sidebar.session.copyId.success'));
+                return;
+              }
+              toast.error(t('sessions.sidebar.session.copyId.error'));
+            })
+            .catch(() => toast.error(t('sessions.sidebar.session.copyId.error')));
+        }),
+      },
+      {
+        id: 'open-multi-run',
+        secondary: true,
+        title: t('commandPalette.item.openMultiRun'),
+        icon: <Icon name="checkbox-multiple" className="mr-2 h-4 w-4" />,
+        searchText: t('commandPalette.item.openMultiRun'),
+        onSelect: run(() => {
+          setSessionSwitcherOpen(false);
+          openMultiRunLauncher();
+        }),
+      },
+      {
+        id: 'open-archive',
+        secondary: true,
+        title: t('commandPalette.item.openArchive'),
+        icon: <Icon name="archive" className="mr-2 h-4 w-4" />,
+        searchText: t('commandPalette.item.openArchive'),
+        onSelect: run(() => {
+          setSessionSwitcherOpen(false);
+          setArchivePageOpen(true);
+        }),
+      },
+      {
+        id: 'open-notes',
+        secondary: true,
+        title: t('commandPalette.item.openNotes'),
+        icon: <Icon name="sticky-note" className="mr-2 h-4 w-4" />,
+        searchText: t('commandPalette.item.openNotes'),
+        onSelect: run(() => {
+          if (currentDirectory) {
+            setProjectContextTab('notes');
+            openContextSurface(currentDirectory, 'notes');
+          }
+        }),
+      },
+      {
+        id: 'open-todos',
+        secondary: true,
+        title: t('commandPalette.item.openTodos'),
+        icon: <Icon name="checkbox-circle" className="mr-2 h-4 w-4" />,
+        searchText: t('commandPalette.item.openTodos'),
+        onSelect: run(() => {
+          if (currentDirectory) {
+            setProjectContextTab('todos');
+            openContextSurface(currentDirectory, 'notes');
+          }
+        }),
+      },
+    );
+    list.push({
+      id: 'toggle-memory-debug',
+      secondary: true,
+      title: t('commandPalette.item.toggleMemoryDebug'),
+      icon: <Icon name="bug" className="mr-2 h-4 w-4" />,
+      searchText: t('commandPalette.item.toggleMemoryDebug'),
+      onSelect: run(() => {
+        window.dispatchEvent(new CustomEvent('openchamber:memory-debug-toggle'));
+      }),
+    });
     if (canUseElectronDesktopIPC()) {
       list.splice(1, 0, {
         id: 'new-mini-chat',
@@ -262,8 +383,7 @@ export const CommandPalette: React.FC = () => {
     t,
     run,
     isMobile,
-    setActiveMainTab,
-    setSessionSwitcherOpen,
+        setSessionSwitcherOpen,
     openNewSessionDraft,
     toggleSidebar,
     openContextSurface,
@@ -272,6 +392,11 @@ export const CommandPalette: React.FC = () => {
     setSettingsDialogOpen,
     activeProject?.id,
     activeProject?.path,
+    currentSessionId,
+    togglePinnedSession,
+    openMultiRunLauncher,
+    setArchivePageOpen,
+    setProjectContextTab,
   ]);
 
   // ---------------------------------------------------------------------------
@@ -308,7 +433,9 @@ export const CommandPalette: React.FC = () => {
   // Sessions
   // ---------------------------------------------------------------------------
   const orderedActiveSessions = React.useMemo(() => {
-    return orderSessionsByLifecycleScopes(activeSessions, pinnedSessionIds, sessionOrderRanks);
+    // btw forks stay hidden until promoted to a full session
+    const visibleSessions = activeSessions.filter((session) => !isBtwSession(session));
+    return orderSessionsByLifecycleScopes(visibleSessions, pinnedSessionIds, sessionOrderRanks);
   }, [activeSessions, pinnedSessionIds, sessionOrderRanks]);
 
   const allBranches = useGitAllBranches();
@@ -349,7 +476,7 @@ export const CommandPalette: React.FC = () => {
       return;
     }
     let cancelled = false;
-    void searchFiles(currentRoot, trimmedQuery, 10, { type: 'file' })
+    void searchFiles(currentRoot, trimmedQuery, 40, { type: 'file' })
       .then((results) => {
         if (cancelled) return;
         setFileResults(
@@ -378,7 +505,9 @@ export const CommandPalette: React.FC = () => {
   const hasQuery = liveTrimmed.length > 0;
 
   const scoredCommands = React.useMemo(() => {
-    if (!hasQuery) return commands.map((item) => ({ item, score: 0 }));
+    if (!hasQuery) {
+      return commands.filter((item) => !item.secondary).map((item) => ({ item, score: 0 }));
+    }
     return scoreByFuzzyQuery(commands, liveTrimmed, (c) => c.searchText, {
       limit: 7,
       noFuzzy: true,

@@ -9,6 +9,7 @@ import {
   finishConfigUpdate,
   updateConfigUpdateMessage,
 } from "@/lib/configUpdate";
+import { noteDeferredRestartFromPayload } from "@/lib/opencode/deferredRestart";
 import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { useConfigStore } from "@/stores/useConfigStore";
 import { invalidateCommandsLoadCache, useCommandsStore } from "@/stores/useCommandsStore";
@@ -37,6 +38,19 @@ const getCurrentDirectory = (): string | null => {
   }
 
   return null;
+};
+
+/**
+ * Directory a call operates on. Settings can browse another project without
+ * moving the app, so every entry point takes one; omitting it means the project
+ * the app is currently on.
+ */
+const resolveDirectory = (directory?: string | null): string | null => {
+  if (directory !== undefined) {
+    const trimmed = directory?.trim();
+    return trimmed ? trimmed : null;
+  }
+  return getConfigDirectory();
 };
 
 export const getConfigDirectory = (): string | null => {
@@ -120,10 +134,13 @@ export interface AgentConfig {
  * `requiresManualRestart` is true when the change was persisted to disk but the
  * connected (external) OpenCode server could not be reloaded by OpenChamber, so
  * the user must restart that server before the change takes effect.
+ * `restartDeferred` is true when the change is saved and waiting for an explicit
+ * Apply & Restart OpenCode action.
  */
 export interface AgentMutationResult {
   ok: boolean;
   requiresManualRestart?: boolean;
+  restartDeferred?: boolean;
 }
 
 // Extended Agent type for API properties not in SDK types
@@ -179,6 +196,63 @@ const SLOW_HEALTH_POLL_MAX_MS = 2000;
 
 const hasValue = <T>(value: T | null | undefined): value is T => value !== null && value !== undefined;
 
+const parseModelRef = (model: string | null | undefined): Agent['model'] | undefined => {
+  if (!model || typeof model !== 'string') return undefined;
+  const trimmed = model.trim();
+  if (!trimmed) return undefined;
+  const slash = trimmed.indexOf('/');
+  if (slash <= 0 || slash >= trimmed.length - 1) {
+    return { providerID: trimmed, modelID: trimmed };
+  }
+  return {
+    providerID: trimmed.slice(0, slash),
+    modelID: trimmed.slice(slash + 1),
+  };
+};
+
+const buildOptimisticAgent = (
+  name: string,
+  config: Partial<AgentConfig>,
+  previous?: Agent,
+): AgentWithExtras => {
+  const previousExtras = previous as AgentWithExtras | undefined;
+  const model = 'model' in config
+    ? parseModelRef(config.model)
+    : previous?.model;
+  return {
+    ...(previous || { name }),
+    name,
+    description: config.description !== undefined ? (config.description || undefined) : previous?.description,
+    mode: config.mode ?? previous?.mode ?? 'subagent',
+    model,
+    variant: 'variant' in config ? (config.variant ?? undefined) : previous?.variant,
+    temperature: 'temperature' in config ? (config.temperature ?? undefined) : previous?.temperature,
+    topP: 'top_p' in config ? (config.top_p ?? undefined) : previous?.topP,
+    prompt: config.prompt !== undefined ? (config.prompt || undefined) : previous?.prompt,
+    permission: config.permission !== undefined ? (config.permission || undefined) : previous?.permission,
+    scope: config.scope ?? previousExtras?.scope,
+    group: previousExtras?.group,
+  } as unknown as AgentWithExtras;
+};
+
+const upsertOptimisticAgentLocal = (
+  set: (partial: { agents: Agent[] }) => void,
+  get: () => { agents: Agent[] },
+  name: string,
+  config: Partial<AgentConfig>,
+) => {
+  const agents = get().agents;
+  const existing = agents.find((agent) => agent.name === name);
+  const nextAgent = buildOptimisticAgent(name, config, existing);
+  if (existing) {
+    set({
+      agents: agents.map((agent) => (agent.name === name ? nextAgent : agent)),
+    });
+  } else {
+    set({ agents: [...agents, nextAgent] });
+  }
+};
+
 export interface AgentDraft {
   name: string;
   scope: AgentScope;
@@ -196,19 +270,22 @@ export interface AgentDraft {
 interface AgentsStore {
 
   selectedAgentName: string | null;
+  /** Agents of the project the app is on. Chat and pickers read this one. */
   agents: Agent[];
+  /** Every directory loaded so far, including the ambient one. */
+  agentsByDirectory: Record<string, Agent[]>;
   isLoading: boolean;
   agentDraft: AgentDraft | null;
 
   setSelectedAgent: (name: string | null) => void;
   setAgentDraft: (draft: AgentDraft | null) => void;
-  loadAgents: () => Promise<boolean>;
-  createAgent: (config: AgentConfig) => Promise<AgentMutationResult>;
-  updateAgent: (name: string, config: Partial<AgentConfig>) => Promise<AgentMutationResult>;
-  deleteAgent: (name: string, scope?: AgentScope) => Promise<AgentMutationResult>;
-  getAgentByName: (name: string) => Agent | undefined;
+  loadAgents: (directory?: string | null) => Promise<boolean>;
+  createAgent: (config: AgentConfig, directory?: string | null) => Promise<AgentMutationResult>;
+  updateAgent: (name: string, config: Partial<AgentConfig>, directory?: string | null) => Promise<AgentMutationResult>;
+  deleteAgent: (name: string, scope?: AgentScope, directory?: string | null) => Promise<AgentMutationResult>;
+  getAgentByName: (name: string, directory?: string | null) => Agent | undefined;
   // Returns only visible agents (excludes hidden internal agents)
-  getVisibleAgents: () => Agent[];
+  getVisibleAgents: (directory?: string | null) => Agent[];
 }
 
 declare global {
@@ -217,6 +294,20 @@ declare global {
   }
 }
 
+const EMPTY_AGENTS: Agent[] = [];
+
+/**
+ * Agents of one project. Returns a stored array so components can select it
+ * directly; an omitted directory means the project the app is on.
+ */
+export const selectAgentsForDirectory = (
+  state: Pick<AgentsStore, 'agentsByDirectory'>,
+  directory?: string | null,
+): Agent[] => {
+  const cacheKey = getAgentsCacheKey(resolveDirectory(directory));
+  return state.agentsByDirectory[cacheKey] ?? EMPTY_AGENTS;
+};
+
 export const useAgentsStore = create<AgentsStore>()(
   devtools(
     persist(
@@ -224,6 +315,7 @@ export const useAgentsStore = create<AgentsStore>()(
 
         selectedAgentName: null,
         agents: [],
+        agentsByDirectory: {},
         isLoading: false,
         agentDraft: null,
 
@@ -235,12 +327,13 @@ export const useAgentsStore = create<AgentsStore>()(
           set({ agentDraft: draft });
         },
 
-        loadAgents: async () => {
-          const configDirectory = getConfigDirectory();
+        loadAgents: async (requestedDirectory?: string | null) => {
+          const configDirectory = resolveDirectory(requestedDirectory);
           const cacheKey = getAgentsCacheKey(configDirectory);
+          const isAmbient = cacheKey === getAgentsCacheKey(getConfigDirectory());
           const now = Date.now();
           const loadedAt = agentsLastLoadedAt.get(cacheKey) ?? 0;
-          const hasCachedAgents = get().agents.length > 0;
+          const hasCachedAgents = (get().agentsByDirectory[cacheKey] ?? (isAmbient ? get().agents : [])).length > 0;
 
           if (hasCachedAgents && now - loadedAt < AGENTS_LOAD_CACHE_TTL_MS) {
             return true;
@@ -253,7 +346,9 @@ export const useAgentsStore = create<AgentsStore>()(
 
           const request = (async () => {
             set({ isLoading: true });
-            const previousAgents = get().agents;
+            // Failure must never look like an empty project. The mirror is the
+            // fallback so a directory loaded before this map existed still counts.
+            const previousAgents = get().agentsByDirectory[cacheKey] ?? (isAmbient ? get().agents : []);
             const previousSignature = buildAgentsSignature(previousAgents);
 
             for (let attempt = 0; attempt < 3; attempt++) {
@@ -311,7 +406,14 @@ export const useAgentsStore = create<AgentsStore>()(
 
                 const nextSignature = buildAgentsSignature(agentsWithScope);
                 if (previousSignature !== nextSignature) {
-                  set({ agents: agentsWithScope, isLoading: false });
+                  set((state) => {
+                    const next: Partial<AgentsStore> = {
+                      agentsByDirectory: { ...state.agentsByDirectory, [cacheKey]: agentsWithScope },
+                      isLoading: false,
+                    };
+                    if (isAmbient) next.agents = agentsWithScope;
+                    return next;
+                  });
                 } else {
                   set({ isLoading: false });
                 }
@@ -334,9 +436,7 @@ export const useAgentsStore = create<AgentsStore>()(
           }
         },
 
-        createAgent: async (config: AgentConfig) => {
-          startConfigUpdate("Creating agent configuration…");
-          let requiresReload = false;
+        createAgent: async (config: AgentConfig, requestedDirectory?: string | null) => {
           try {
             console.log('[AgentsStore] Creating agent:', config.name);
 
@@ -356,7 +456,7 @@ export const useAgentsStore = create<AgentsStore>()(
 
             console.log('[AgentsStore] Agent config to save:', agentConfig);
 
-            const configDirectory = getConfigDirectory();
+            const configDirectory = resolveDirectory(requestedDirectory);
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
 
             const response = await runtimeFetch(`/api/config/agents/${encodeURIComponent(config.name)}${queryParams}`, {
@@ -376,16 +476,20 @@ export const useAgentsStore = create<AgentsStore>()(
 
             invalidateAgentsLoadCache(configDirectory);
 
-            // External OpenCode server: persisted to disk but not reloaded.
-            // Skip the reload so the form keeps the just-saved values instead of
-            // reverting to the server's stale, startup-cached config.
             if (payload?.requiresManualRestart) {
+              upsertOptimisticAgentLocal(set, get, config.name, config);
               return { ok: true, requiresManualRestart: true };
             }
 
+            if (noteDeferredRestartFromPayload(payload, 'agents', { id: config.name })) {
+              upsertOptimisticAgentLocal(set, get, config.name, config);
+              emitConfigChange("agents", { source: CONFIG_EVENT_SOURCE });
+              return { ok: true, restartDeferred: true };
+            }
+
+            startConfigUpdate("Creating agent configuration…");
             const needsReload = payload?.requiresReload ?? true;
             if (needsReload) {
-              requiresReload = true;
               await refreshAfterOpenCodeRestart({
                 message: payload?.message,
                 delayMs: payload?.reloadDelayMs,
@@ -395,24 +499,20 @@ export const useAgentsStore = create<AgentsStore>()(
               return { ok: true };
             }
 
-            const loaded = await get().loadAgents();
+            const loaded = await get().loadAgents(configDirectory);
             if (loaded) {
               emitConfigChange("agents", { source: CONFIG_EVENT_SOURCE });
             }
+            finishConfigUpdate();
             return { ok: loaded };
           } catch (error) {
             console.error('Failed to create agent:', error);
+            finishConfigUpdate();
             return { ok: false };
-          } finally {
-            if (!requiresReload) {
-              finishConfigUpdate();
-            }
           }
         },
 
-        updateAgent: async (name: string, config: Partial<AgentConfig>) => {
-          startConfigUpdate("Updating agent configuration…");
-          let requiresReload = false;
+        updateAgent: async (name: string, config: Partial<AgentConfig>, requestedDirectory?: string | null) => {
           try {
             const agentConfig: Record<string, unknown> = {};
 
@@ -426,8 +526,7 @@ export const useAgentsStore = create<AgentsStore>()(
             if (config.permission !== undefined) agentConfig.permission = config.permission;
             if (config.disable !== undefined) agentConfig.disable = config.disable;
 
-            // Use active project root for project-level agent support.
-            const configDirectory = getConfigDirectory();
+            const configDirectory = resolveDirectory(requestedDirectory);
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
 
             const response = await runtimeFetch(`/api/config/agents/${encodeURIComponent(name)}${queryParams}`, {
@@ -447,16 +546,20 @@ export const useAgentsStore = create<AgentsStore>()(
 
             invalidateAgentsLoadCache(configDirectory);
 
-            // External OpenCode server: persisted to disk but not reloaded.
-            // Skip the reload so the form keeps the just-saved values instead of
-            // reverting to the server's stale, startup-cached config.
             if (payload?.requiresManualRestart) {
+              upsertOptimisticAgentLocal(set, get, name, config);
               return { ok: true, requiresManualRestart: true };
             }
 
+            if (noteDeferredRestartFromPayload(payload, 'agents', { id: name })) {
+              upsertOptimisticAgentLocal(set, get, name, config);
+              emitConfigChange("agents", { source: CONFIG_EVENT_SOURCE });
+              return { ok: true, restartDeferred: true };
+            }
+
+            startConfigUpdate("Updating agent configuration…");
             const needsReload = payload?.requiresReload ?? true;
             if (needsReload) {
-              requiresReload = true;
               await refreshAfterOpenCodeRestart({
                 message: payload?.message,
                 delayMs: payload?.reloadDelayMs,
@@ -466,27 +569,22 @@ export const useAgentsStore = create<AgentsStore>()(
               return { ok: true };
             }
 
-            const loaded = await get().loadAgents();
+            const loaded = await get().loadAgents(configDirectory);
             if (loaded) {
               emitConfigChange("agents", { source: CONFIG_EVENT_SOURCE });
             }
+            finishConfigUpdate();
             return { ok: loaded };
           } catch (error) {
             console.error('Failed to update agent:', error);
+            finishConfigUpdate();
             throw error;
-          } finally {
-            if (!requiresReload) {
-              finishConfigUpdate();
-            }
           }
         },
 
-        deleteAgent: async (name: string, scope?: AgentScope) => {
-          startConfigUpdate("Deleting agent configuration…");
-          let requiresReload = false;
+        deleteAgent: async (name: string, scope?: AgentScope, requestedDirectory?: string | null) => {
           try {
-            // Use active project root for project-level agent support.
-            const configDirectory = getConfigDirectory();
+            const configDirectory = resolveDirectory(requestedDirectory);
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
 
             const response = await runtimeFetch(`/api/config/agents/${encodeURIComponent(name)}${queryParams}`, {
@@ -510,14 +608,24 @@ export const useAgentsStore = create<AgentsStore>()(
               set({ selectedAgentName: null });
             }
 
-            // External OpenCode server: persisted to disk but not reloaded.
+            const removeLocal = () => {
+              set({ agents: get().agents.filter((agent) => agent.name !== name) });
+            };
+
             if (payload?.requiresManualRestart) {
+              removeLocal();
               return { ok: true, requiresManualRestart: true };
             }
 
+            if (noteDeferredRestartFromPayload(payload, 'agents', { id: name })) {
+              removeLocal();
+              emitConfigChange("agents", { source: CONFIG_EVENT_SOURCE });
+              return { ok: true, restartDeferred: true };
+            }
+
+            startConfigUpdate("Deleting agent configuration…");
             const needsReload = payload?.requiresReload ?? true;
             if (needsReload) {
-              requiresReload = true;
               await refreshAfterOpenCodeRestart({
                 message: payload?.message,
                 delayMs: payload?.reloadDelayMs,
@@ -527,31 +635,27 @@ export const useAgentsStore = create<AgentsStore>()(
               return { ok: true };
             }
 
-            const loaded = await get().loadAgents();
+            const loaded = await get().loadAgents(configDirectory);
             if (loaded) {
               emitConfigChange("agents", { source: CONFIG_EVENT_SOURCE });
             }
 
+            finishConfigUpdate();
             return { ok: loaded };
           } catch (error) {
             console.error('Failed to delete agent:', error);
+            finishConfigUpdate();
             throw error;
-          } finally {
-            if (!requiresReload) {
-              finishConfigUpdate();
-            }
           }
         },
 
 
-        getAgentByName: (name: string) => {
-          const { agents } = get();
-          return agents.find((a) => a.name === name);
+        getAgentByName: (name: string, requestedDirectory?: string | null) => {
+          return selectAgentsForDirectory(get(), requestedDirectory).find((agent) => agent.name === name);
         },
 
-        getVisibleAgents: () => {
-          const { agents } = get();
-          return filterVisibleAgents(agents);
+        getVisibleAgents: (requestedDirectory?: string | null) => {
+          return filterVisibleAgents(selectAgentsForDirectory(get(), requestedDirectory));
         },
       }),
       {
@@ -749,6 +853,15 @@ export async function reloadOpenCodeConfiguration(options?: {
       throw new Error(message);
     }
 
+    if (payload?.requiresManualRestart) {
+      finishConfigUpdate();
+      const error = new Error(
+        payload?.message || 'Restart your connected OpenCode server to apply the changes.',
+      );
+      (error as Error & { requiresManualRestart?: boolean }).requiresManualRestart = true;
+      throw error;
+    }
+
     const refreshOptions = {
       ...options,
       scopes: options?.scopes ?? ["all"],
@@ -766,6 +879,9 @@ export async function reloadOpenCodeConfiguration(options?: {
     }
   } catch (error) {
     console.error('[reloadOpenCodeConfiguration] Failed:', error);
+    if ((error as Error & { requiresManualRestart?: boolean })?.requiresManualRestart) {
+      throw error;
+    }
     updateConfigUpdateMessage('Failed to reload configuration. Please try again.');
     await sleep(2000);
     finishConfigUpdate();

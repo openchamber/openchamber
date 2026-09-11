@@ -217,6 +217,8 @@ const extensionOf = (name: string): string => {
   return index === -1 ? "" : name.slice(index + 1).toLowerCase()
 }
 
+export const isDocumentAttachmentFilename = (name: string): boolean => DOCUMENT_EXTENSIONS.has(extensionOf(name))
+
 const declaredMimeOf = (file: File): string => file.type.split(";", 1)[0]?.trim().toLowerCase() ?? ""
 
 const inspectTextContent = async (file: File): Promise<"text/plain" | undefined> => {
@@ -392,7 +394,7 @@ export const prepareAttachmentFiles = (
   file: File,
   reservedFilenames: Iterable<string> = [],
 ): PreparedAttachmentFile[] | Promise<PreparedAttachmentFile[] | undefined> | undefined => {
-  if (!DOCUMENT_EXTENSIONS.has(extensionOf(file.name))) {
+  if (!isDocumentAttachmentFilename(file.name)) {
     const prepared = prepareAttachmentFile(file)
     if (prepared instanceof Promise) return prepared.then((output) => output ? [output] : undefined)
     return prepared ? [prepared] : undefined

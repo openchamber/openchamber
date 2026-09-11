@@ -1,4 +1,5 @@
 import React from 'react';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   Dialog,
   DialogContent,
@@ -217,7 +218,7 @@ export function GitHubPrPickerDialog({
   const connected = githubAuthChecked ? result?.connected !== false : true;
 
   const openGitHubSettings = React.useCallback(() => {
-    setSettingsPage('github');
+    setSettingsPage('integrations');
     setSettingsDialogOpen(true);
   }, [setSettingsDialogOpen, setSettingsPage]);
 
@@ -318,7 +319,7 @@ export function GitHubPrPickerDialog({
         </button>
       </div>
 
-      <div className={cn(isMobile ? 'min-h-0' : 'flex-1 overflow-y-auto')}>
+      <ScrollableOverlay outerClassName={cn(isMobile ? 'min-h-0' : 'flex-1')} disableHorizontal>
           {!projectDirectory ? (
             <div className="text-center text-muted-foreground py-8">{t('session.githubPrPicker.empty.noActiveProject')}</div>
           ) : null}
@@ -439,7 +440,7 @@ export function GitHubPrPickerDialog({
               </button>
             </div>
           ) : null}
-      </div>
+      </ScrollableOverlay>
     </>
   );
 

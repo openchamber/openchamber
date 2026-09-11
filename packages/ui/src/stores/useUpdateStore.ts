@@ -11,6 +11,8 @@ import {
   isVSCodeRuntime,
   isWebRuntime,
 } from '@/lib/desktop';
+import { formatMessage, useI18nStore } from '@/lib/i18n/store';
+import { getUpdateInstallErrorMessage } from '@/lib/updateInstallError';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getClientPlatform, isCapacitorApp } from '@/lib/platform';
 
@@ -314,15 +316,18 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
       return;
     }
 
+    set({ error: null });
+
     try {
       const ok = await restartToApplyUpdate();
       if (!ok) {
-        throw new Error('Desktop restart only works on Local instance');
+        // No desktop bridge at all — the update was never installable here.
+        throw new Error(formatMessage(useI18nStore.getState().dictionary, 'updateDialog.error.restartUnavailable'));
       }
     } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : 'Failed to restart',
-      });
+      // Keep the real installer failure; the dialog shows it and the button
+      // stays clickable for another attempt.
+      set({ error: getUpdateInstallErrorMessage(error instanceof Error ? error : new Error(String(error))) });
     }
   },
 

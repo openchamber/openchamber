@@ -212,3 +212,35 @@ export const parsePairingConnectionPayload = (value: string): PairingConnectionP
     return null;
   }
 };
+
+// URL-string-only sibling of parsePairingConnectionPayload. Old Android WebViews
+// (e.g. WebView 114) mis-parse non-special schemes: `new URL('openchamber://connect?...')`
+// yields hostname "" and pathname "//connect", so the URL-based parser above rejects a
+// perfectly valid pairing link. This parser never touches the URL/URLSearchParams APIs —
+// it matches the head with a regex and reads `v`/`p` straight off the query string.
+// Used by the Android QR-scan path after the standard parse fails; keeps every existing
+// validation (version, payload length, base64url, candidate normalization).
+export const parsePairingConnectionPayloadString = (value: string): PairingConnectionPayload | null => {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > MAX_PAIRING_PAYLOAD_LENGTH) return null;
+  const question = trimmed.indexOf('?');
+  if (question === -1 || !/^openchamber:\/\/connect\/?$/i.test(trimmed.slice(0, question))) return null;
+  let version: string | null = null;
+  let encoded: string | null = null;
+  for (const part of trimmed.slice(question + 1).split('&')) {
+    const eq = part.indexOf('=');
+    if (eq === -1) continue;
+    const key = part.slice(0, eq);
+    const value_ = part.slice(eq + 1);
+    if (key === 'v') version = value_;
+    else if (key === 'p') encoded = value_;
+  }
+  if (version !== '2' || !encoded || encoded.length > MAX_PAIRING_PAYLOAD_LENGTH) return null;
+  const decoded = base64UrlDecode(encoded);
+  if (!decoded || decoded.length > MAX_PAIRING_PAYLOAD_LENGTH) return null;
+  try {
+    return normalizePairingPayload(JSON.parse(decoded) as unknown);
+  } catch {
+    return null;
+  }
+};

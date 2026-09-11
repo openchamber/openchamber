@@ -10,7 +10,9 @@ import {
   SettingsChipGroup,
   SettingsInset,
   SETTINGS_ICON_BUTTON_CLASS,
+  SETTINGS_NUMBER_INPUT_CLASS,
 } from '@/components/sections/shared/SettingsSection';
+import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionAutoCleanup } from '@/hooks/useSessionAutoCleanup';
 import { useI18n, type I18nKey } from '@/lib/i18n';
@@ -27,16 +29,21 @@ export const SessionRetentionSettings: React.FC = () => {
   const { t } = useI18n();
   const autoDeleteEnabled = useUIStore((state) => state.autoDeleteEnabled);
   const autoDeleteAfterDays = useUIStore((state) => state.autoDeleteAfterDays);
-  const sessionRetentionAction = useUIStore((state) => state.sessionRetentionAction);
+  const onlyArchived = useUIStore((state) => state.sessionRetentionOnlyArchived);
   const setAutoDeleteEnabled = useUIStore((state) => state.setAutoDeleteEnabled);
   const setAutoDeleteAfterDays = useUIStore((state) => state.setAutoDeleteAfterDays);
   const setSessionRetentionAction = useUIStore((state) => state.setSessionRetentionAction);
+  const setOnlyArchived = useUIStore((state) => state.setSessionRetentionOnlyArchived);
 
-  const { candidates, isRunning, runCleanup, action } = useSessionAutoCleanup({ autoRun: false });
+  const { candidates, isRunning, runCleanup, action, status } = useSessionAutoCleanup({ autoRun: false });
   const pendingCount = candidates.length;
 
   const handleRunCleanup = React.useCallback(async () => {
-    const result = await runCleanup({ force: true });
+    const result = await runCleanup({ force: true }).catch(() => {
+      toast.error(t('sessions.sidebar.group.empty.loadFailed'));
+      return null;
+    });
+    if (!result || (result.skippedReason && result.skippedReason !== 'no-candidates')) return;
 
     if (result.completedIds.length === 0 && result.failedIds.length === 0) {
       toast.message(
@@ -65,7 +72,9 @@ export const SessionRetentionSettings: React.FC = () => {
   return (
     <SettingsSection
       title={t('settings.openchamber.sessionRetention.title')}
-      info={t('settings.openchamber.sessionRetention.tooltip')}
+      info={t(onlyArchived
+        ? 'settings.openchamber.sessionRetention.archivedTooltip'
+        : 'settings.openchamber.sessionRetention.tooltip')}
     >
       <SettingsCheckboxRow
         settingsItem="sessions.auto-cleanup"
@@ -76,6 +85,15 @@ export const SessionRetentionSettings: React.FC = () => {
       />
 
       <SettingsInset className="space-y-0">
+        <SettingsCheckboxRow
+          settingsItem="sessions.retention-only-archived"
+          checked={onlyArchived}
+          onChange={setOnlyArchived}
+          disabled={isRunning}
+          label={t('settings.openchamber.sessionRetention.field.onlyArchived')}
+          ariaLabel={t('settings.openchamber.sessionRetention.field.onlyArchived')}
+          info={t('settings.openchamber.sessionRetention.field.onlyArchivedDescription')}
+        />
         <SettingsFieldRow
           settingsItem="sessions.retention-period"
           label={t('settings.openchamber.sessionRetention.field.retentionPeriod')}
@@ -87,7 +105,7 @@ export const SessionRetentionSettings: React.FC = () => {
             max={MAX_DAYS}
             step={1}
             aria-label={t('settings.openchamber.sessionRetention.field.retentionPeriodAria')}
-            className="w-20 tabular-nums"
+            className={cn(SETTINGS_NUMBER_INPUT_CLASS, 'tabular-nums')}
           />
           <span className="typography-ui-label text-muted-foreground">{t('settings.openchamber.sessionRetention.field.days')}</span>
           <Button
@@ -109,11 +127,12 @@ export const SessionRetentionSettings: React.FC = () => {
           label={t('settings.openchamber.sessionRetention.field.whenSessionsExpire')}
         >
           <SettingsChipGroup
-            value={sessionRetentionAction}
+            value={action}
             onChange={setSessionRetentionAction}
             options={RETENTION_ACTION_OPTIONS.map((option) => ({
               value: option.value,
               label: t(option.labelKey),
+              disabled: onlyArchived && option.value === 'archive',
             }))}
           />
         </SettingsFieldRow>
@@ -135,7 +154,11 @@ export const SessionRetentionSettings: React.FC = () => {
           </Button>
         </SettingsFieldRow>
         <p className="typography-meta text-muted-foreground">
-          {action === 'archive'
+          {status === 'error'
+            ? t('sessions.sidebar.group.empty.loadFailed')
+            : status !== 'ready'
+            ? t('sessions.sidebar.group.empty.loadingSessions')
+            : action === 'archive'
             ? t('settings.openchamber.sessionRetention.manualCleanup.eligibleArchiveNow', { count: pendingCount })
             : t('settings.openchamber.sessionRetention.manualCleanup.eligibleDeleteNow', { count: pendingCount })}
         </p>

@@ -10,7 +10,7 @@ type DesktopBridgeGlobal = {
 };
 
 type DesktopSshRemoteMode = 'managed' | 'external';
-type DesktopSshInstallMethod = 'npm' | 'bun' | 'download_release' | 'upload_bundle';
+type DesktopSshInstallMethod = 'auto' | 'npm' | 'bun';
 type DesktopSshSecretStore = 'never' | 'settings';
 
 type DesktopSshStoredSecret = {
@@ -44,6 +44,8 @@ export type DesktopSshInstance = {
     mode: DesktopSshRemoteMode;
     keepRunning: boolean;
     preferredPort?: number;
+    /** Interface the managed remote server listens on. '0.0.0.0' also exposes it to the remote machine's network. */
+    bindHost: '127.0.0.1' | '0.0.0.0';
     installMethod: DesktopSshInstallMethod;
     uploadBundleOverSsh: boolean;
   };
@@ -197,12 +199,11 @@ const parseInstance = (value: unknown): DesktopSshInstance | null => {
   const mode: DesktopSshRemoteMode = rawMode === 'external' ? 'external' : 'managed';
 
   const rawInstallMethod = readString(remoteRaw, 'installMethod') || readString(remoteRaw, 'install_method');
+  // Legacy 'download_release'/'upload_bundle' never had their own remote path:
+  // they fell through to the same bun-then-npm attempt as 'auto'. Read them as
+  // 'auto' so the stored value matches what actually happens.
   const installMethod: DesktopSshInstallMethod =
-    rawInstallMethod === 'npm' ||
-    rawInstallMethod === 'download_release' ||
-    rawInstallMethod === 'upload_bundle'
-      ? rawInstallMethod
-      : 'bun';
+    rawInstallMethod === 'npm' || rawInstallMethod === 'bun' ? rawInstallMethod : 'auto';
 
   const bindHostRaw =
     readString(localRaw, 'bindHost') ||
@@ -222,6 +223,8 @@ const parseInstance = (value: unknown): DesktopSshInstance | null => {
     .filter((item): item is DesktopSshPortForward => Boolean(item));
 
   const preferredPort = readNumber(remoteRaw, 'preferredPort') ?? readNumber(remoteRaw, 'preferred_port');
+  const rawRemoteBindHost = readString(remoteRaw, 'bindHost') || readString(remoteRaw, 'bind_host');
+  const remoteBindHost: '127.0.0.1' | '0.0.0.0' = rawRemoteBindHost === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1';
   const preferredLocalPort =
     readNumber(localRaw, 'preferredLocalPort') ?? readNumber(localRaw, 'preferred_local_port');
   const sshPassword = parseStoredSecret(authRaw.sshPassword || authRaw.ssh_password);
@@ -239,6 +242,7 @@ const parseInstance = (value: unknown): DesktopSshInstance | null => {
     remoteOpenchamber: {
       mode,
       keepRunning: readBoolean(remoteRaw, 'keepRunning') ?? readBoolean(remoteRaw, 'keep_running') ?? true,
+      bindHost: remoteBindHost,
       ...(preferredPort ? { preferredPort } : {}),
       installMethod,
       uploadBundleOverSsh:
@@ -327,7 +331,8 @@ export const createDesktopSshInstance = (id: string, sshCommand: string): Deskto
     remoteOpenchamber: {
       mode: 'managed',
       keepRunning: true,
-      installMethod: 'bun',
+      bindHost: '127.0.0.1',
+      installMethod: 'auto',
       uploadBundleOverSsh: false,
     },
     localForward: {

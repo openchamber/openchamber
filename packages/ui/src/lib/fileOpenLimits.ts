@@ -1,4 +1,4 @@
-export const MAX_OPEN_FILE_LINES = 5_000;
+export const MAX_OPEN_FILE_LINES = 20_000;
 
 export const countLinesWithLimit = (content: string, limit: number): number => {
   if (!content) {

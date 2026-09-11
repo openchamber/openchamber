@@ -1,7 +1,31 @@
+import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
+import { opencodeClient } from '@/lib/opencode/client';
 import { describe, expect, test } from 'bun:test'
-import type { OpencodeClient } from '@opencode-ai/sdk/v2'
+import type { OpencodeClient, Session } from '@opencode-ai/sdk/v2'
 
-import { listGlobalSessionPages } from './globalSessions'
+import { filterManagedChatsForRuntime, listGlobalSessionPages, splitGlobalSessionsByArchived } from './globalSessions'
+
+describe('managed Chats runtime visibility', () => {
+  const session = (id: string, directory: string): Session => ({
+    id,
+    slug: id,
+    projectID: 'project',
+    directory,
+    title: id,
+    version: '1',
+    time: { created: 1, updated: 1 },
+  })
+  const chat = session('chat', '/home/user/.config/openchamber/chats/2026-08-21/session-a')
+  const project = session('project', '/workspace/project')
+
+  test('VS Code rejects managed Chats before they enter global state', () => {
+    expect(filterManagedChatsForRuntime([chat, project], true)).toEqual([project])
+  })
+
+  test('other runtimes retain managed Chats', () => {
+    expect(filterManagedChatsForRuntime([chat, project], false)).toEqual([chat, project])
+  })
+})
 
 describe('listGlobalSessionPages', () => {
   test('sanitizes session list records before returning them', async () => {
@@ -136,6 +160,27 @@ describe('listGlobalSessionPages', () => {
     const sessions = await listGlobalSessionPages(apiClient, { archived: false, pageSize: 500 })
 
     expect(sessions.map((session) => session.id)).toEqual(['ses_active_1', 'ses_active_2'])
+  })
+
+  test('returns the inclusive response unfiltered when narrowing is disabled', async () => {
+    const apiClient = {
+      experimental: {
+        session: {
+          list: async () => ({
+            data: [
+              { id: 'ses_active', time: { created: 1, updated: 20 } },
+              { id: 'ses_archived', time: { created: 1, updated: 10, archived: 15 } },
+              { id: 'ses_restored', time: { created: 1, updated: 5, archived: 0 } },
+            ],
+            response: { headers: new Headers() },
+          }),
+        },
+      },
+    } as unknown as OpencodeClient
+
+    const sessions = await listGlobalSessionPages(apiClient, { archived: true, narrowToArchived: false, pageSize: 500 })
+
+    expect(sessions.map((session) => session.id)).toEqual(['ses_active', 'ses_archived', 'ses_restored'])
   })
 
   test('keeps paginating archived pages that are full of non-archived records', async () => {
@@ -279,3 +324,21 @@ describe('listGlobalSessionPages', () => {
     expect(sessions.map((session) => session.id)).toEqual(['ses_1'])
   })
 })
+
+describe('splitGlobalSessionsByArchived', () => {
+  test('classifies restored (falsy archived) records as active', () => {
+    const { active, archived } = splitGlobalSessionsByArchived([
+      { id: 'ses_active', time: { created: 1, updated: 20 } },
+      { id: 'ses_archived', time: { created: 1, updated: 10, archived: 15 } },
+      { id: 'ses_restored', time: { created: 1, updated: 5, archived: 0 } },
+    ] as unknown as Parameters<typeof splitGlobalSessionsByArchived>[0])
+
+    expect(active.map((session) => session.id)).toEqual(['ses_active', 'ses_restored'])
+    expect(archived.map((session) => session.id)).toEqual(['ses_archived'])
+  })
+})
+
+const originalHomeInfo = opencodeClient.getFilesystemHomeInfo;
+opencodeClient.getFilesystemHomeInfo = async () => ({ home: '/home/user' });
+await ensureChatsRootDirectory();
+opencodeClient.getFilesystemHomeInfo = originalHomeInfo;

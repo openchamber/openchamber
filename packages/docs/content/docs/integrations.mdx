@@ -1,0 +1,53 @@
+---
+title: Integrations
+description: Connect GitHub and Linear to OpenChamber.
+---
+
+# Integrations
+
+**Settings → Integrations** is where you sign in to the services OpenChamber works with. The sign-in is stored on the OpenChamber server, so web, desktop, and a paired phone share it.
+
+## GitHub
+
+Expand the **GitHub** card and choose **Connect GitHub** to sign in with a short device code. Once connected, OpenChamber can start sessions from issues and pull requests, attach them to messages, and open or update PRs. Everything GitHub can do is on [GitHub Issues & PRs](/github/).
+
+## Linear
+
+### Connect a workspace
+
+1. Expand the **Linear** card and choose **Connect**.
+2. Approve access in the browser tab that opens. The card shows **Waiting for Linear** until you do.
+
+Connect another Linear organization with **Add workspace**. One workspace is current at a time: switch with **Switch to**, and **Disconnect** removes only the current one. Your project mapping stays.
+
+### Browse issues
+
+Once a workspace is connected, the **Linear** panel appears in the right-hand context rail. It lists the current workspace's issues and lets you:
+
+- filter by status (**Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**), assignee (**Anyone** or **Assigned to me**), team, and priority
+- search by title, identifier, or a Linear URL
+- open an issue to read its description, comments, labels, and priority
+- change its **Status** or **Close issue**
+- switch the current **Workspace**
+
+### Start a session from an issue
+
+- In the Linear panel, open an issue and choose **Start session**. The button stays in the footer while the issue scrolls.
+- In the chat, choose **New Session From Linear Issue** to pick one from the list, with **Create in worktree** if you want a fresh branch.
+- In the **New Worktree** dialog, choose **Start from Linear Issue**.
+
+The session opens in the project mapped to the issue's team, with the issue as the first prompt. Map teams in the Linear card: **Default project** covers every team, and **Team projects** override it per team. An unmapped team asks you to map it first. The first message is built from the **Issue Review** magic prompt, which you can edit at **Settings → Magic Prompts → Linear**.
+
+### Link an issue to a message
+
+In the chat composer, choose **Link Linear Issue**. The issue rides along with your next message as context, and the session's work status panel keeps a link back to it.
+
+### Session comments
+
+Turn on **Session comments** in the Linear card and a session started from an issue posts a comment on that issue when it starts, finishes, or fails, each with a link that opens the session. Comments are only posted when this OpenChamber server has a public address, so the link works for everyone on the issue; on a local or private address nothing is posted.
+
+## Related
+
+- [GitHub Issues & PRs](/github/) — everything GitHub can do in OpenChamber
+- [Worktree Sessions](/worktrees/) — where issue sessions can start
+- [Magic Prompts](/magic-prompts/) — edit the prompt a Linear session starts with

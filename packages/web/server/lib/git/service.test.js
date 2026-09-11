@@ -2,16 +2,28 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import simpleGit from 'simple-git';
+import { loadSourceSections, parseSource, sourceKey } from '../walkthrough/sources.js';
+import { registerGitRoutes } from './routes.js';
 
 import {
+  checkoutBranch,
   checkoutCommit,
   cherryPick,
   createWorktree,
   getWorktreeBootstrapStatus,
+  getBranches,
+  getUnpushedBranchCounts,
+  getRangeDiff,
+  getBranchBase,
+  getCommitDiff,
+  getCommitFiles,
+  getLog,
   getStatus,
+  getWorktrees,
   isGitRepository,
+  observeWorktreeTopology,
   populateWorktreeWithLockRecovery,
   removeWorktree,
   resolvePrimaryWorktreeRoot,
@@ -21,10 +33,15 @@ import {
   revertCommit,
   setLocalIdentity,
   stageFiles,
+  subscribeWorktreeTopologyChanges,
   unstageFiles,
   applyHunk,
   getDiff,
+  getUntrackedDiffs,
   getFileDiff,
+  validateWorktreeCreate,
+  parseBranchCreationSource,
+  getRangeFiles,
 } from './service.js';
 
 // ---------------------------------------------------------------------------
@@ -46,6 +63,36 @@ const runGit = (cwd, args) =>
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+
+const readBranchConfig = (cwd, branch, key) => {
+  try {
+    return runGit(cwd, ['config', '--get', `branch.${branch}.${key}`]).trim();
+  } catch {
+    return '';
+  }
+};
+
+/**
+ * A repository on `next` whose only remote publishes `defaultBranch` and has it
+ * recorded as that remote's HEAD — the shape of every repository whose default
+ * branch is not one of the conventional names.
+ */
+const createRepositoryWithRemote = ({ remoteName = 'origin', defaultBranch = 'react' } = {}) => {
+  const remote = createTempDir();
+  const repository = createTempDir();
+  runGit(remote, ['init', '--bare', `--initial-branch=${defaultBranch}`]);
+  runGit(repository, ['init', '-b', 'next']);
+  runGit(repository, ['config', 'user.email', 'test@example.com']);
+  runGit(repository, ['config', 'user.name', 'Test']);
+  fs.writeFileSync(path.join(repository, 'README.md'), '# Test\n');
+  runGit(repository, ['add', 'README.md']);
+  runGit(repository, ['commit', '-m', 'init']);
+  runGit(repository, ['remote', 'add', remoteName, remote]);
+  runGit(repository, ['push', remoteName, `HEAD:${defaultBranch}`]);
+  runGit(repository, ['fetch', remoteName]);
+  runGit(repository, ['remote', 'set-head', remoteName, '--auto']);
+  return { remote, repository };
+};
 
 const canRunGit = () => {
   try {
@@ -145,28 +192,49 @@ describe.runIf(canRunGit())('setLocalIdentity', () => {
       "ssh -i '/tmp/test key' -o IdentitiesOnly=yes"
     );
   });
+
+  it('configures the stored credential helper for token auth with the targeted simple-git opt-in', async () => {
+    const { tmpDir } = await createTempRepo();
+
+    await setLocalIdentity(tmpDir, {
+      userName: 'Token User',
+      userEmail: 'token@example.com',
+      authType: 'token',
+      host: 'github.com',
+    });
+
+    expect(runGit(tmpDir, ['config', '--local', '--get', 'credential.helper']).trim()).toBe('store');
+  });
+
+  it('clears the stored credential helper when switching to SSH auth', async () => {
+    const { tmpDir } = await createTempRepo();
+
+    await setLocalIdentity(tmpDir, {
+      userName: 'Token User',
+      userEmail: 'token@example.com',
+      authType: 'token',
+      host: 'github.com',
+    });
+    await setLocalIdentity(tmpDir, {
+      userName: 'SSH User',
+      userEmail: 'ssh@example.com',
+      authType: 'ssh',
+      sshKey: '/tmp/test key',
+    });
+
+    expect(runGit(tmpDir, ['config', '--local', '--get', 'core.sshCommand']).trim()).toBe(
+      "ssh -i '/tmp/test key' -o IdentitiesOnly=yes"
+    );
+    expect(() => runGit(tmpDir, ['config', '--local', '--get', 'credential.helper'])).toThrow();
+  });
 });
 
 // ---------------------------------------------------------------------------
 // applyHunk (per-hunk stage / unstage / discard)
 // ---------------------------------------------------------------------------
 
-/** Minimal unified-diff splitter: returns standalone per-hunk patches. */
-const splitHunks = (patch) => {
-  const lines = patch.split(/\r?\n/);
-  const headerEnd = lines.findIndex((line) => /^@@\s/.test(line));
-  if (headerEnd === -1) return [];
-  const header = lines.slice(0, headerEnd);
-  const hunks = [];
-  for (let i = headerEnd; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (/^@@\s/.test(line)) hunks.push([...header, line]);
-    else if (hunks.length > 0) hunks[hunks.length - 1].push(line);
-  }
-  return hunks.map((hunk) => hunk.join('\n'))
-    .filter((hunk) => hunk.trim().length > 0)
-    .map((hunk) => (hunk.endsWith('\n') ? hunk : `${hunk}\n`));
-};
+// Exercise the actual client splitter against the server apply boundary.
+import { splitPatchIntoHunks as splitHunks } from '../../../../ui/src/lib/diff/patchFileDiff.ts';
 
 const writeFile = (repo, name, contents) =>
   fs.promises.writeFile(path.join(repo, name), contents, 'utf8');
@@ -182,6 +250,77 @@ const readWorking = (repo) => fs.promises.readFile(path.join(repo, 'file.txt'), 
 const readStaged = async (git) => (await git.raw(['show', ':file.txt'])).replace(/\r\n/g, '\n');
 
 describe('applyHunk', () => {
+  it('stages successive hunks and never discards a stale staged or committed patch', async () => {
+    if (!canRunGit()) return;
+    const { tmpDir, git } = await createTempRepo();
+    const original = Array.from({ length: 60 }, (_, index) => `line${index}`);
+    const changed = [...original];
+    changed[1] = 'FIRST'; changed[25] = 'SECOND'; changed[50] = 'THIRD';
+    await writeFile(tmpDir, 'file.txt', original.join('\n') + '\n');
+    await git.add('file.txt'); await git.commit('Initial');
+    await writeFile(tmpDir, 'file.txt', changed.join('\n') + '\n');
+    const historical = splitHunks(await getDiff(tmpDir, { path: 'file.txt' }));
+    expect(historical).toHaveLength(3);
+    await applyHunk(tmpDir, 'file.txt', { patch: historical[0], action: 'stage' });
+    const remaining = splitHunks(await getDiff(tmpDir, { path: 'file.txt' }));
+    expect(remaining).toHaveLength(2);
+    await applyHunk(tmpDir, 'file.txt', { patch: remaining[0], action: 'stage' });
+    const stalePath = path.join(tmpDir, 'stale.patch');
+    await fs.promises.writeFile(stalePath, historical[0]);
+    // Git's reverse applicability check accepts it, but it is no longer an
+    // unstaged hunk. The server must reject it before touching the working file.
+    await git.raw(['apply', '--reverse', '--check', stalePath]);
+    await expect(applyHunk(tmpDir, 'file.txt', { patch: historical[0], action: 'discard' })).rejects.toThrow('refresh and try again');
+    expect(await readWorking(tmpDir)).toBe(changed.join('\n') + '\n');
+    const last = splitHunks(await getDiff(tmpDir, { path: 'file.txt' }));
+    expect(last).toHaveLength(1);
+    await applyHunk(tmpDir, 'file.txt', { patch: last[0], action: 'discard' });
+    changed[50] = original[50];
+    expect(await readWorking(tmpDir)).toBe(changed.join('\n') + '\n');
+    expect(await readStaged(git)).toBe(changed.join('\n') + '\n');
+    const staged = splitHunks(await getDiff(tmpDir, { path: 'file.txt', staged: true }));
+    await applyHunk(tmpDir, 'file.txt', { patch: staged[0], action: 'unstage' });
+    expect(await readWorking(tmpDir)).toBe(changed.join('\n') + '\n');
+    await git.add('file.txt'); await git.commit('Committed changes');
+    await expect(applyHunk(tmpDir, 'file.txt', { patch: historical[0], action: 'discard' })).rejects.toThrow('refresh and try again');
+  });
+
+  it.each(['crlf', 'mixed'])('preserves %s file bytes through stage, unstage and discard', async (endings) => {
+    if (!canRunGit()) return;
+    const { tmpDir, git } = await createTempRepo();
+    await git.addConfig('core.autocrlf', 'false');
+    const serialize = (first, last) => Array.from({ length: 30 }, (_, index) => {
+      const text = index === 0 ? first : index === 29 ? last : `line${index}`;
+      return text + (endings === 'crlf' || index % 2 === 0 ? '\r\n' : '\n');
+    }).join('');
+    const original = serialize('first', 'last');
+    const edited = serialize('FIRST', 'LAST');
+    await writeFile(tmpDir, 'file.txt', original);
+    await git.add('file.txt'); await git.commit('Initial');
+    await writeFile(tmpDir, 'file.txt', edited);
+    const hunks = splitHunks(await getDiff(tmpDir, { path: 'file.txt' }));
+    await applyHunk(tmpDir, 'file.txt', { patch: hunks[0], action: 'stage' });
+    expect(await git.raw(['show', ':file.txt'])).toBe(serialize('FIRST', 'last'));
+    const staged = splitHunks(await getDiff(tmpDir, { path: 'file.txt', staged: true }));
+    await applyHunk(tmpDir, 'file.txt', { patch: staged[0], action: 'unstage' });
+    expect(await git.raw(['show', ':file.txt'])).toBe(original);
+    const working = splitHunks(await getDiff(tmpDir, { path: 'file.txt' }));
+    await applyHunk(tmpDir, 'file.txt', { patch: working[0], action: 'discard' });
+    expect(await fs.promises.readFile(path.join(tmpDir, 'file.txt'), 'utf8')).toBe(serialize('first', 'LAST'));
+  });
+
+  it('rejects extra files hidden before the requested patch', async () => {
+    if (!canRunGit()) return;
+    const { tmpDir, git } = await createTempRepo();
+    for (const name of ['file.txt', 'other.txt']) await writeFile(tmpDir, name, ORIGINAL_FILE);
+    await git.add('.'); await git.commit('Initial');
+    for (const name of ['file.txt', 'other.txt']) await writeFile(tmpDir, name, EDITED_FILE);
+    const other = splitHunks(await getDiff(tmpDir, { path: 'other.txt' }))[0];
+    const requested = splitHunks(await getDiff(tmpDir, { path: 'file.txt' }))[0];
+    await expect(applyHunk(tmpDir, 'file.txt', { patch: requested + other, action: 'stage' })).rejects.toThrow('refresh and try again');
+    expect(await git.raw(['diff', '--cached'])).toBe('');
+  });
+
   it('rejects an invalid action or a patch without a hunk header', async () => {
     const { tmpDir } = await createTempRepo();
     await expect(applyHunk(tmpDir, 'file.txt', { patch: '@@ -1 +1 @@\n a\n', action: 'bogus' })).rejects.toThrow(
@@ -264,10 +403,9 @@ describe('applyHunk', () => {
     );
   });
 
-  it('accepts hunk patches for files with spaces in their path', async () => {
+  it.each(['file name.txt', 'зміни.txt'])('accepts hunk patches for %s', async (filePath) => {
     if (!canRunGit()) return;
     const { tmpDir, git } = await createTempRepo();
-    const filePath = 'file name.txt';
     await writeFile(tmpDir, filePath, ORIGINAL_FILE);
     await git.add(filePath);
     await git.commit('Initial');
@@ -281,6 +419,71 @@ describe('applyHunk', () => {
 
     const staged = (await git.raw(['show', `:${filePath}`])).replace(/\r\n/g, '\n');
     expect(staged).toBe(makeFile('TOP', 'line20'));
+  });
+});
+
+describe.runIf(canRunGit())('untracked diffs', () => {
+  it.each(['false', 'warn'])('returns only the patch with core.safecrlf=%s', async (safecrlf) => {
+    const { tmpDir, git } = await createTempRepo();
+    await git.addConfig('core.autocrlf', 'true');
+    await git.addConfig('core.safecrlf', safecrlf);
+    fs.writeFileSync(path.join(tmpDir, 'new file.txt'), 'first\nsecond\n');
+
+    // Confirm this fixture produces a real diff exit, including stderr in the warning case.
+    let expectedPatch;
+    try {
+      runGit(tmpDir, ['diff', '--no-color', '--full-index', '--no-index', '--', '/dev/null', 'new file.txt']);
+      throw new Error('Expected git diff to exit with differences');
+    } catch (error) {
+      expect(error.status).toBe(1);
+      expectedPatch = error.stdout;
+      if (safecrlf === 'warn') {
+        expect(error.stderr).toContain('LF will be replaced by CRLF');
+      }
+    }
+
+    const diff = await getDiff(tmpDir, { path: 'new file.txt' });
+    expect(diff).toBe(expectedPatch);
+    expect(diff).toContain('+first\n+second\n');
+    expect(diff).not.toContain('warning:');
+    expect(await getUntrackedDiffs(tmpDir, ['new file.txt'])).toEqual([diff]);
+  });
+
+  it('accepts an empty untracked file without a process error', async () => {
+    const { tmpDir } = await createTempRepo();
+    fs.writeFileSync(path.join(tmpDir, 'empty.txt'), '');
+    const diff = await getDiff(tmpDir, { path: 'empty.txt' });
+    expect(diff).toContain('new file mode 100644');
+    expect(diff).not.toContain('@@');
+    expect(await getUntrackedDiffs(tmpDir, ['empty.txt'])).toEqual([diff]);
+  });
+
+  it('rejects fatal conversion errors while preserving other batch entries', async () => {
+    const { tmpDir } = await createTempRepo();
+    runGit(tmpDir, ['config', 'diff.broken.textconv', 'false']);
+    fs.writeFileSync(path.join(tmpDir, '.gitattributes'), 'bad.txt diff=broken\n');
+    fs.writeFileSync(path.join(tmpDir, 'first.safe'), 'first\n');
+    fs.writeFileSync(path.join(tmpDir, 'bad.txt'), 'bad\n');
+    fs.writeFileSync(path.join(tmpDir, 'last.safe'), 'last\n');
+
+    await expect(getDiff(tmpDir, { path: 'bad.txt' })).rejects.toThrow('unable to read files to diff');
+    const diffs = await getUntrackedDiffs(tmpDir, ['first.safe', 'bad.txt', 'last.safe'], { concurrency: 1 });
+    expect(diffs).toHaveLength(3);
+    expect(diffs[0]).toContain('+first\n');
+    expect(diffs[1]).toBe('');
+    expect(diffs[2]).toContain('+last\n');
+  });
+
+  it('rejects truncated patches when the process output exceeds the buffer limit', async () => {
+    const { tmpDir } = await createTempRepo();
+    fs.writeFileSync(path.join(tmpDir, 'large.txt'), 'x'.repeat(21 * 1024 * 1024) + '\n');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await expect(getDiff(tmpDir, { path: 'large.txt' })).rejects.toThrow('maxBuffer');
+      expect(await getUntrackedDiffs(tmpDir, ['large.txt'])).toEqual(['']);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
 
@@ -437,6 +640,141 @@ describe('worktree root resolution', () => {
 });
 
 // ---------------------------------------------------------------------------
+// getWorktrees
+// ---------------------------------------------------------------------------
+
+describe('getWorktrees', () => {
+  if (!canRunGit()) {
+    it.skip('git binary not available', () => {});
+    return;
+  }
+
+  const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+  afterEach(() => {
+    warnSpy.mockClear();
+  });
+
+  afterAll(() => {
+    warnSpy.mockRestore();
+  });
+
+  it('returns an empty list for a non-git directory without warning', async () => {
+    const nonGit = createTempDir();
+
+    const result = await getWorktrees(nonGit);
+
+    expect(result).toEqual([]);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns the worktrees for a real git repository', async () => {
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'init']);
+
+    const result = await getWorktrees(repo);
+
+    expect(Array.isArray(result)).toBe(true);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+  it('notifies subscribers only when another git process changes the worktree set', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'init']);
+    const worktreePath = path.join(createTempDir(), 'feature');
+
+    const events = [];
+    const unsubscribe = subscribeWorktreeTopologyChanges((event) => events.push(event));
+    try {
+      await observeWorktreeTopology(repo);
+      await observeWorktreeTopology(repo);
+      expect(events).toHaveLength(0);
+
+      runGit(repo, ['worktree', 'add', worktreePath, '-b', 'feature']);
+      await observeWorktreeTopology(worktreePath);
+      expect(events).toHaveLength(1);
+      expect(events[0].directories).toEqual(expect.arrayContaining([repo, worktreePath]));
+
+      await observeWorktreeTopology(repo);
+      expect(events).toHaveLength(1);
+
+      runGit(repo, ['worktree', 'remove', worktreePath]);
+      await observeWorktreeTopology(repo);
+      expect(events).toHaveLength(2);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('publishes worktrees this server creates and removes', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = createTempDir();
+    const events = [];
+    const unsubscribe = subscribeWorktreeTopologyChanges((event) => events.push(event));
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      runGit(repo, ['commit', '--allow-empty', '-m', 'init']);
+      await observeWorktreeTopology(repo);
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        worktreeName: 'published',
+        branchName: 'openchamber/published',
+      });
+      expect(events).toHaveLength(1);
+      expect(events[0].directories).toContain(repo);
+
+      // The publish refreshed the baseline, so the next observation is quiet.
+      await observeWorktreeTopology(repo);
+      expect(events).toHaveLength(1);
+
+      await removeWorktree(repo, { directory: created.path });
+      expect(events).toHaveLength(2);
+    } finally {
+      unsubscribe();
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+
+  it('flags a worktree whose directory was deleted outside git as prunable', async () => {
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'init']);
+    const worktreePath = path.join(createTempDir(), 'feature');
+    runGit(repo, ['worktree', 'add', worktreePath, '-b', 'feature']);
+
+    const before = await getWorktrees(repo);
+    expect(before.find((entry) => entry.branch === 'feature')).toMatchObject({ prunable: false });
+
+    fs.rmSync(worktreePath, { recursive: true, force: true });
+
+    const after = await getWorktrees(repo);
+    expect(after.find((entry) => entry.branch === 'feature')).toMatchObject({ path: expect.any(String), prunable: true });
+    expect(after.find((entry) => entry.branch === 'main')).toMatchObject({ prunable: false });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // createWorktree
 // ---------------------------------------------------------------------------
 
@@ -504,6 +842,154 @@ describe('createWorktree', () => {
         phase: 'setup-ready',
         error: null,
       });
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+
+  const installPostCheckoutHook = (repo, script, executable = true) => {
+    const hookPath = path.join(repo, '.git', 'hooks', 'post-checkout');
+    fs.writeFileSync(hookPath, script);
+    if (executable) {
+      fs.chmodSync(hookPath, 0o755);
+    }
+    return hookPath;
+  };
+
+  it('runs the post-checkout hook after populating a created worktree', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+      const head = runGit(repo, ['rev-parse', 'HEAD']).trim();
+
+      const hookLog = path.join(dataHome, 'post-checkout.log');
+      installPostCheckoutHook(
+        repo,
+        `#!/bin/sh\nprintf '%s|%s|%s|%s' "$1" "$2" "$3" "$(pwd -P)" > ${JSON.stringify(hookLog)}\n`,
+      );
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        worktreeName: 'hook-test',
+        branchName: 'openchamber/hook-test',
+        returnAfterDirectoryCreated: true,
+      });
+
+      await expect.poll(() => {
+        try {
+          return fs.readFileSync(hookLog, 'utf8');
+        } catch {
+          return '';
+        }
+      }, { timeout: 5_000 }).not.toBe('');
+
+      const [previousHead, newHead, flag, cwd] = fs.readFileSync(hookLog, 'utf8').split('|');
+      expect(previousHead).toBe('0000000000000000000000000000000000000000');
+      expect(newHead).toBe(head);
+      expect(flag).toBe('1');
+      expect(cwd).toBe(fs.realpathSync(created.path));
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+
+  it('skips a non-executable post-checkout hook', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const hookLog = path.join(dataHome, 'post-checkout-skipped.log');
+      installPostCheckoutHook(
+        repo,
+        `#!/bin/sh\nprintf 'ran' > ${JSON.stringify(hookLog)}\n`,
+        false,
+      );
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        worktreeName: 'hook-skip-test',
+        branchName: 'openchamber/hook-skip-test',
+        returnAfterDirectoryCreated: true,
+      });
+
+      await expect.poll(
+        async () => (await getWorktreeBootstrapStatus(created.path)).status,
+        { timeout: 5_000 },
+      ).toBe('ready');
+      expect(fs.existsSync(hookLog)).toBe(false);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+
+  it('does not fail worktree bootstrap when the post-checkout hook fails', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const hookLog = path.join(dataHome, 'post-checkout-failed.log');
+      installPostCheckoutHook(
+        repo,
+        `#!/bin/sh\nprintf 'ran' > ${JSON.stringify(hookLog)}\nexit 1\n`,
+      );
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        worktreeName: 'hook-fail-test',
+        branchName: 'openchamber/hook-fail-test',
+        returnAfterDirectoryCreated: true,
+      });
+
+      await expect.poll(
+        async () => (await getWorktreeBootstrapStatus(created.path)).status,
+        { timeout: 5_000 },
+      ).toBe('ready');
+      expect(fs.readFileSync(hookLog, 'utf8')).toBe('ran');
     } finally {
       if (previousXdgDataHome === undefined) {
         delete process.env.XDG_DATA_HOME;
@@ -632,6 +1118,263 @@ describe('createWorktree', () => {
       }
     }
   });
+
+  it('does not auto-track the remote start ref when creating a new branch from it', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const { repository } = createRepositoryWithRemote({ defaultBranch: 'main' });
+
+      const created = await createWorktree(repository, {
+        mode: 'new',
+        branchName: 'openchamber/feature',
+        worktreeName: 'feature-wt',
+        startRef: 'remotes/origin/main',
+        setUpstream: true,
+        upstreamRemote: 'origin',
+        upstreamBranch: 'openchamber/feature',
+      });
+
+      expect(created.branch).toBe('openchamber/feature');
+
+      await expect.poll(
+        () => getWorktreeBootstrapStatus(created.path).then((status) => status.status === 'ready' || status.status === 'failed'),
+        { timeout: 5_000 }
+      ).toBe(true);
+
+      expect(readBranchConfig(created.path, 'openchamber/feature', 'remote')).toBe('');
+      expect(readBranchConfig(created.path, 'openchamber/feature', 'merge')).toBe('');
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  }, 30_000);
+
+  it('falls back to the remote start ref for upstream tracking when no explicit keys are given', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const { repository } = createRepositoryWithRemote({ defaultBranch: 'main' });
+
+      const created = await createWorktree(repository, {
+        mode: 'new',
+        branchName: 'openchamber/fallback-wt',
+        worktreeName: 'fallback-wt',
+        startRef: 'remotes/origin/main',
+        setUpstream: true,
+      });
+
+      await expect.poll(
+        () => readBranchConfig(created.path, 'openchamber/fallback-wt', 'merge'),
+        { timeout: 5_000 }
+      ).toBe('refs/heads/main');
+      expect(readBranchConfig(created.path, 'openchamber/fallback-wt', 'remote')).toBe('origin');
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  }, 30_000);
+
+  it('falls back to the tracked local branch when the source fetch fails', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const { repository } = createRepositoryWithRemote({ defaultBranch: 'main' });
+      runGit(repository, ['branch', '--set-upstream-to=origin/main', 'next']);
+      runGit(repository, ['remote', 'set-url', 'origin', '/nonexistent/openchamber-unreachable.git']);
+
+      const created = await createWorktree(repository, {
+        mode: 'new',
+        branchName: 'openchamber/stale-ref-wt',
+        worktreeName: 'stale-ref-wt',
+        startRef: 'remotes/origin/main',
+      });
+
+      expect(created.branch).toBe('openchamber/stale-ref-wt');
+      expect(created.sourceFetchFailed).toBe(true);
+      const expectedHead = runGit(repository, ['rev-parse', 'next']).trim();
+      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(expectedHead);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  }, 30_000);
+
+  it('rejects creation from a remote start ref that was never fetched and cannot be fetched', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const { repository } = createRepositoryWithRemote({ defaultBranch: 'main' });
+      runGit(repository, ['update-ref', '-d', 'refs/remotes/origin/main']);
+      runGit(repository, ['remote', 'set-url', 'origin', '/nonexistent/openchamber-unreachable.git']);
+
+      await expect(createWorktree(repository, {
+        mode: 'new',
+        branchName: 'openchamber/never-fetched-wt',
+        worktreeName: 'never-fetched-wt',
+        startRef: 'remotes/origin/main',
+      })).rejects.toThrow(/does not appear to be a git repository|Could not read from remote repository/i);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  }, 30_000);
+});
+
+// ---------------------------------------------------------------------------
+// createWorktree from a forked GitHub PR head (issue #2422)
+// ---------------------------------------------------------------------------
+
+describe('createWorktree from a forked GitHub PR', () => {
+  const withDataHome = async (test) => {
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+    try {
+      await test(dataHome);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  };
+
+  const publishForkHead = (repository, forkBare, branchName) => {
+    fs.writeFileSync(path.join(repository, 'FORK.md'), `# ${branchName}\n`);
+    runGit(repository, ['add', 'FORK.md']);
+    runGit(repository, ['commit', '-m', `fork ${branchName}`]);
+    const sha = runGit(repository, ['rev-parse', 'HEAD']).trim();
+    runGit(repository, ['push', forkBare, `HEAD:refs/heads/${branchName}`]);
+    return sha;
+  };
+
+  const getBranchTrackingRemote = (directory, branch) => {
+    try {
+      return runGit(directory, ['config', '--get', `branch.${branch}.remote`]).trim();
+    } catch {
+      return '';
+    }
+  };
+
+  const forkWorktreeInput = ({ fork, worktreeName }) => ({
+    mode: 'existing',
+    branchName: 'feature/login',
+    worktreeName,
+    existingBranch: 'remotes/pr-alice/feature/login',
+    setUpstream: true,
+    upstreamRemote: 'pr-alice',
+    upstreamBranch: 'feature/login',
+    ensureRemoteName: 'pr-alice',
+    ensureRemoteUrl: fork,
+  });
+
+  it('creates a worktree from a reachable fork head remote', async () => {
+    if (!canRunGit()) return;
+
+    await withDataHome(async () => {
+      const { repository } = createRepositoryWithRemote();
+      const fork = createTempDir();
+      runGit(fork, ['init', '--bare']);
+      const sha = publishForkHead(repository, fork, 'feature/login');
+
+      const created = await createWorktree(repository, forkWorktreeInput({
+        fork,
+        worktreeName: 'pr-42',
+      }));
+
+      expect(created.branch).toBe('feature/login');
+      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(sha);
+      await expect.poll(() => fs.existsSync(path.join(created.path, 'FORK.md')), { timeout: 5_000 }).toBe(true);
+      expect(runGit(repository, ['remote', 'get-url', 'pr-alice']).trim()).toBe(fork);
+      await expect.poll(
+        () => getBranchTrackingRemote(created.path, 'feature/login') === 'pr-alice',
+        { timeout: 5_000 }
+      ).toBe(true);
+    });
+  }, 30_000);
+
+  it('rejects an unreachable fork with an actionable error and no worktree', async () => {
+    if (!canRunGit()) return;
+
+    await withDataHome(async () => {
+      const { repository } = createRepositoryWithRemote();
+      const missingFork = path.join(createTempDir(), 'missing-fork.git');
+      const before = runGit(repository, ['worktree', 'list', '--porcelain']);
+
+      await expect(createWorktree(repository, forkWorktreeInput({
+        fork: missingFork,
+        worktreeName: 'pr-42-unreachable',
+      }))).rejects.toThrow(/Unable to (reach|fetch)/i);
+
+      expect(runGit(repository, ['worktree', 'list', '--porcelain'])).toBe(before);
+
+      const validation = await validateWorktreeCreate(repository, forkWorktreeInput({
+        fork: missingFork,
+        worktreeName: 'pr-42-unreachable',
+      }));
+      expect(validation.ok).toBe(false);
+      expect(validation.errors.some((error) => /Unable to (reach|fetch)/i.test(error.message))).toBe(true);
+    });
+  }, 30_000);
+
+  it('does not write upstream tracking when the upstream ref cannot be fetched', async () => {
+    if (!canRunGit()) return;
+
+    await withDataHome(async () => {
+      const { repository } = createRepositoryWithRemote();
+      runGit(repository, ['branch', 'feature/tracking']);
+      const emptyRemote = createTempDir();
+      runGit(emptyRemote, ['init', '--bare']);
+      runGit(repository, ['remote', 'add', 'broken-upstream', emptyRemote]);
+
+      const created = await createWorktree(repository, {
+        mode: 'existing',
+        branchName: 'feature/tracking-wt',
+        worktreeName: 'feature-tracking-wt',
+        existingBranch: 'feature/tracking',
+        setUpstream: true,
+        upstreamRemote: 'broken-upstream',
+        upstreamBranch: 'does-not-exist',
+      });
+
+      await expect.poll(
+        () => getWorktreeBootstrapStatus(created.path).then((status) => status.status === 'ready' || status.status === 'failed'),
+        { timeout: 5_000 }
+      ).toBe(true);
+
+      expect(getBranchTrackingRemote(created.path, 'feature/tracking-wt')).toBe('');
+    });
+  }, 30_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -700,6 +1443,92 @@ describe('checkoutCommit', () => {
   it('throws an error for an invalid/nonexistent hash', async () => {
     const { tmpDir } = await createTempRepo();
     await expect(checkoutCommit(tmpDir, 'invalidhash123')).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkoutBranch
+// ---------------------------------------------------------------------------
+
+describe('checkoutBranch', () => {
+  it('checks out a local branch by name', async () => {
+    const { repository } = createRepositoryWithRemote();
+    runGit(repository, ['branch', 'feature']);
+
+    const result = await checkoutBranch(repository, 'feature');
+
+    expect(result).toEqual({ success: true, branch: 'feature' });
+    expect(runGit(repository, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('feature');
+  });
+
+  it('creates a tracking local branch instead of detaching HEAD on a remote branch', async () => {
+    const { repository } = createRepositoryWithRemote({ defaultBranch: 'react' });
+
+    const result = await checkoutBranch(repository, 'origin/react');
+
+    expect(result).toEqual({ success: true, branch: 'react' });
+    expect(runGit(repository, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('react');
+    expect(runGit(repository, ['rev-parse', '--abbrev-ref', 'react@{upstream}']).trim()).toBe('origin/react');
+  });
+
+  it('checks out the existing local branch when a remote branch is picked', async () => {
+    const { repository } = createRepositoryWithRemote({ defaultBranch: 'react' });
+    runGit(repository, ['branch', 'react', 'origin/react']);
+
+    const result = await checkoutBranch(repository, 'origin/react');
+
+    expect(result).toEqual({ success: true, branch: 'react' });
+    expect(runGit(repository, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('react');
+  });
+
+  it('accepts the remotes/ prefixed form of a remote branch', async () => {
+    const { repository } = createRepositoryWithRemote({ defaultBranch: 'react' });
+
+    const result = await checkoutBranch(repository, 'remotes/origin/react');
+
+    expect(result).toEqual({ success: true, branch: 'react' });
+    expect(runGit(repository, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('react');
+  });
+
+  it('prefers a local branch whose name looks like a remote ref', async () => {
+    const { repository } = createRepositoryWithRemote({ defaultBranch: 'react' });
+    runGit(repository, ['branch', 'origin/react']);
+
+    const result = await checkoutBranch(repository, 'origin/react');
+
+    expect(result).toEqual({ success: true, branch: 'origin/react' });
+    expect(runGit(repository, ['symbolic-ref', 'HEAD']).trim()).toBe('refs/heads/origin/react');
+  });
+
+  it('rejects an unknown branch', async () => {
+    const { repository } = createRepositoryWithRemote();
+    await expect(checkoutBranch(repository, 'does-not-exist')).rejects.toThrow();
+  });
+
+  it('fetches a remote-only branch that was never fetched locally (#2735)', async () => {
+    const { repository, remote } = createRepositoryWithRemote({ defaultBranch: 'react' });
+    // A collaborator pushes straight to the remote; this repository never
+    // fetches, so `remotes/origin/collab` is listed (#2098) with no local ref.
+    const collaborator = createTempDir();
+    runGit(collaborator, ['clone', remote, '.']);
+    runGit(collaborator, ['config', 'user.email', 'test@example.com']);
+    runGit(collaborator, ['config', 'user.name', 'Test']);
+    runGit(collaborator, ['checkout', '-b', 'collab']);
+    runGit(collaborator, ['push', 'origin', 'collab']);
+
+    const result = await checkoutBranch(repository, 'remotes/origin/collab');
+
+    expect(result).toEqual({ success: true, branch: 'collab' });
+    expect(runGit(repository, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('collab');
+    expect(runGit(repository, ['rev-parse', '--abbrev-ref', 'collab@{upstream}']).trim()).toBe('origin/collab');
+  });
+
+  it('reports a clear failure when the remote branch no longer exists', async () => {
+    const { repository } = createRepositoryWithRemote({ defaultBranch: 'react' });
+
+    await expect(checkoutBranch(repository, 'remotes/origin/never-pushed')).rejects.toThrow(
+      /Failed to fetch never-pushed from origin/
+    );
   });
 });
 
@@ -986,5 +1815,449 @@ describe('hash validation', () => {
     await expect(
       resetToCommit('/tmp', '1234567890abcdef1234567890abcdef12345678', 'soft')
     ).rejects.not.toThrow('Invalid commit hash');
+  });
+});
+
+describe.runIf(canRunGit())('getBranches', () => {
+  it('returns a remote default branch whose name is not a conventional fallback', async () => {
+    const { repository } = createRepositoryWithRemote({ remoteName: 'origin', defaultBranch: 'react' });
+
+    await expect(getBranches(repository)).resolves.toMatchObject({
+      defaultBranches: { origin: 'react' },
+    });
+  });
+
+  it('asks the remote when no local remote/HEAD exists', async () => {
+    const { repository } = createRepositoryWithRemote({ remoteName: 'origin', defaultBranch: 'react' });
+    // A hand-added remote can end up without this ref; the branch it points at
+    // is still knowable, and guessing instead is the bug this data replaces.
+    runGit(repository, ['remote', 'set-head', 'origin', '--delete']);
+
+    await expect(getBranches(repository)).resolves.toMatchObject({
+      defaultBranches: { origin: 'react' },
+    });
+  });
+
+  it('keeps the branches of a remote that cannot be reached', async () => {
+    const { repository, remote } = createRepositoryWithRemote({ remoteName: 'origin', defaultBranch: 'react' });
+    fs.rmSync(remote, { recursive: true, force: true });
+
+    const branches = await getBranches(repository);
+
+    // "We could not ask" is not "the branch is gone": callers read this list to
+    // decide whether a base branch exists at all.
+    expect(branches.all).toContain('remotes/origin/react');
+  });
+
+  it('includes remote branches with no local tracking ref and prunes refs deleted on the remote (#2098)', async () => {
+    const remote = createTempDir();
+    runGit(remote, ['init', '--bare', '--initial-branch=main']);
+
+    const repository = createTempDir();
+    runGit(repository, ['init', '-b', 'main']);
+    runGit(repository, ['config', 'user.email', 'test@example.com']);
+    runGit(repository, ['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(repository, 'README.md'), '# Test\n');
+    runGit(repository, ['add', 'README.md']);
+    runGit(repository, ['commit', '-m', 'init']);
+    runGit(repository, ['remote', 'add', 'origin', remote]);
+    runGit(repository, ['push', '-u', 'origin', 'main']);
+    runGit(repository, ['checkout', '-b', 'feature-known']);
+    runGit(repository, ['push', '-u', 'origin', 'feature-known']);
+    // This tracking ref will go stale: the collaborator deletes the branch on
+    // the remote below, and the list must prune it.
+    runGit(repository, ['checkout', '-b', 'feature-stale']);
+    runGit(repository, ['push', '-u', 'origin', 'feature-stale']);
+    runGit(repository, ['checkout', 'main']);
+    runGit(repository, ['branch', '-D', 'feature-stale']);
+
+    // A collaborator pushes a branch straight to the remote and deletes
+    // another; this repository never fetches, so it has no local
+    // remote-tracking ref for feature-remote-only.
+    const collaborator = createTempDir();
+    runGit(collaborator, ['clone', remote, '.']);
+    runGit(collaborator, ['config', 'user.email', 'test@example.com']);
+    runGit(collaborator, ['config', 'user.name', 'Test']);
+    runGit(collaborator, ['checkout', '-b', 'feature-remote-only']);
+    runGit(collaborator, ['push', 'origin', 'feature-remote-only']);
+    runGit(collaborator, ['push', 'origin', ':feature-stale']);
+
+    const branches = await getBranches(repository);
+
+    expect(branches.all).toContain('remotes/origin/feature-remote-only');
+    expect(branches.all).toContain('remotes/origin/feature-known');
+    expect(branches.all).toContain('feature-known');
+    expect(branches.all).not.toContain('remotes/origin/feature-stale');
+  });
+});
+
+describe.runIf(canRunGit())('getUnpushedBranchCounts', () => {
+  it('counts only commits ahead of a locally known upstream', async () => {
+    const { repository } = createRepositoryWithRemote();
+    runGit(repository, ['branch', '--set-upstream-to=origin/react', 'next']);
+    fs.writeFileSync(path.join(repository, 'ahead.txt'), 'ahead\n');
+    runGit(repository, ['add', 'ahead.txt']);
+    runGit(repository, ['commit', '-m', 'ahead']);
+    runGit(repository, ['checkout', '-b', 'no-upstream']);
+
+    await expect(getUnpushedBranchCounts(repository, ['next', 'no-upstream', 'remotes/origin/react'])).resolves.toEqual({
+      counts: { next: 1 },
+    });
+  });
+});
+
+describe.runIf(canRunGit())('commit comparisons', () => {
+  it('shows only the selected commit and gives walkthrough the identical patch', async () => {
+    const { repository } = createRepositoryWithRemote();
+    fs.writeFileSync(path.join(repository, 'README.md'), 'selected version\n');
+    runGit(repository, ['add', '.']);
+    runGit(repository, ['commit', '-m', 'selected']);
+    const hash = runGit(repository, ['rev-parse', 'HEAD']).trim();
+    fs.writeFileSync(path.join(repository, 'README.md'), 'later version\n');
+    runGit(repository, ['add', '.']);
+    runGit(repository, ['commit', '-m', 'later']);
+    fs.writeFileSync(path.join(repository, 'README.md'), 'uncommitted version\n');
+    const patch = await getCommitDiff(repository, { hash, path: 'README.md' });
+    expect(patch).toContain('+selected version');
+    expect(patch).not.toContain('later version');
+    expect(patch).not.toContain('uncommitted version');
+    expect((await getCommitFiles(repository, hash)).files).toEqual([
+      { path: 'README.md', insertions: 1, deletions: 1, isBinary: false, changeType: 'M' },
+    ]);
+    const source = parseSource({ kind: 'commit', hash });
+    expect(sourceKey(source)).toBe(`commit:${hash}`);
+    expect((await loadSourceSections(repository, source)).sections).toEqual([{ scope: 'commit', patch }]);
+    const routes = new Map();
+    registerGitRoutes({
+      get: (url, handler) => routes.set(url, handler), post() {}, put() {}, delete() {},
+    });
+    let response;
+    await routes.get('/api/git/commit-diff')(
+      { query: { directory: repository, hash, path: 'README.md' } },
+      { json: (body) => { response = body; }, status: (code) => { throw new Error(`Unexpected status ${code}`); } },
+    );
+    expect(response).toEqual({ diff: patch });
+  });
+
+  it('handles root and empty commits and rejects invalid hashes', async () => {
+    const { repository } = createRepositoryWithRemote();
+    const root = runGit(repository, ['rev-parse', 'HEAD']).trim();
+    expect(await getCommitDiff(repository, { hash: root })).toContain('+# Test');
+    expect((await getCommitFiles(repository, root)).files[0].changeType).toBe('A');
+    runGit(repository, ['commit', '--allow-empty', '-m', 'empty']);
+    const empty = runGit(repository, ['rev-parse', 'HEAD']).trim();
+    expect(await getCommitDiff(repository, { hash: empty })).toBe('');
+    expect(await getCommitFiles(repository, empty)).toEqual({ files: [] });
+    expect(() => parseSource({ kind: 'commit', hash: 'HEAD' })).toThrow();
+    expect(() => parseSource({ kind: 'commit', hash: [root] })).toThrow();
+    await expect(getCommitDiff(repository, { hash: 'HEAD' })).rejects.toThrow();
+    await expect(getCommitFiles(repository, '0'.repeat(40))).rejects.toThrow();
+  });
+
+  it('keeps rename paths and original contents together, including whitespace in names', async () => {
+    const { repository } = createRepositoryWithRemote();
+    const destination = ' new\nname.md';
+    runGit(repository, ['mv', 'README.md', destination]);
+    runGit(repository, ['commit', '-m', 'rename']);
+    const hash = runGit(repository, ['rev-parse', 'HEAD']).trim();
+    const { files } = await getCommitFiles(repository, hash);
+    expect(files).toEqual([{ path: destination, previousPath: 'README.md', changeType: 'R', insertions: 0, deletions: 0, isBinary: false }]);
+    const patch = await getCommitDiff(repository, { hash, path: destination, previousPath: files[0].previousPath });
+    expect(patch).toContain('rename from README.md');
+    expect(patch).toContain('similarity index 100%');
+  });
+
+  it('compares a merge commit against its first parent', async () => {
+    const { repository } = createRepositoryWithRemote();
+    runGit(repository, ['checkout', '-b', 'side']);
+    fs.writeFileSync(path.join(repository, 'side.txt'), 'side\n');
+    runGit(repository, ['add', '.']);
+    runGit(repository, ['commit', '-m', 'side']);
+    runGit(repository, ['checkout', 'next']);
+    fs.writeFileSync(path.join(repository, 'main.txt'), 'main\n');
+    runGit(repository, ['add', '.']);
+    runGit(repository, ['commit', '-m', 'main']);
+    runGit(repository, ['merge', '--no-ff', 'side', '-m', 'merge']);
+    const hash = runGit(repository, ['rev-parse', 'HEAD']).trim();
+    expect((await getCommitFiles(repository, hash)).files.map((file) => file.path)).toEqual(['side.txt']);
+    const patch = await getCommitDiff(repository, { hash });
+    expect(patch).toContain('+side');
+    expect(patch).not.toContain('main.txt');
+  });
+
+  it('limits current-branch history to 50 commits without including another branch', async () => {
+    const { repository } = createRepositoryWithRemote();
+    runGit(repository, ['checkout', '-b', 'other']);
+    runGit(repository, ['commit', '--allow-empty', '-m', 'other branch only']);
+    runGit(repository, ['checkout', 'next']);
+    for (let index = 0; index < 51; index += 1) runGit(repository, ['commit', '--allow-empty', '-m', `current ${index}`]);
+    const history = await getLog(repository, { maxCount: 50, to: 'refs/heads/next' });
+    expect(history.all).toHaveLength(50);
+    expect(history.all[0].message).toBe('current 50');
+    expect(history.all.some((commit) => commit.message === 'other branch only')).toBe(false);
+  });
+});
+
+describe.runIf(canRunGit())('getRangeDiff', () => {
+  it('loads a committed deletion that no longer exists in HEAD or the working tree', async () => {
+    const { repository } = createRepositoryWithRemote();
+    runGit(repository, ['rm', 'README.md']);
+    runGit(repository, ['commit', '-m', 'delete file']);
+    const diff = await getRangeDiff(repository, { base: 'origin/react', head: 'next', path: 'README.md', includeWorkingTree: true });
+    expect(diff).toContain('deleted file mode');
+    expect(diff).toContain('-# Test');
+  });
+
+  it('carries the working-tree option through the actual HTTP route handlers', async () => {
+    const { repository } = createRepositoryWithRemote();
+    fs.writeFileSync(path.join(repository, 'local.txt'), 'current local work\n');
+    const routes = new Map();
+    registerGitRoutes({
+      get: (url, handler) => routes.set(url, handler),
+      post() {},
+      put() {},
+      delete() {},
+    });
+    const query = { directory: repository, base: 'origin/react', head: 'next', includeWorkingTree: 'true' };
+    for (const endpoint of ['range-diff', 'range-files']) {
+      let status = 200;
+      let body;
+      const response = {
+        status(value) { status = value; return this; },
+        json(value) { body = value; },
+      };
+      await routes.get(`/api/git/${endpoint}`)({ query }, response);
+      expect(status).toBe(200);
+      if (endpoint === 'range-diff') expect(body.diff).toContain('+current local work');
+      else expect(body.files).toEqual([{ path: 'local.txt', status: 'A' }]);
+    }
+  });
+
+  it('asks for a new base after restacking and compares against the selected parent', async () => {
+    const { repository } = createRepositoryWithRemote();
+    runGit(repository, ['checkout', '-b', 'child', 'origin/react']);
+    fs.writeFileSync(path.join(repository, 'child.txt'), 'child\n');
+    runGit(repository, ['add', '.']);
+    runGit(repository, ['commit', '-m', 'child']);
+    expect(await getBranchBase(repository, 'child')).toEqual({ base: 'origin/react' });
+    runGit(repository, ['checkout', '-b', 'parent', 'origin/react']);
+    fs.writeFileSync(path.join(repository, 'parent.txt'), 'parent\n');
+    runGit(repository, ['add', '.']);
+    runGit(repository, ['commit', '-m', 'parent']);
+    runGit(repository, ['checkout', 'child']);
+    runGit(repository, ['rebase', 'parent']);
+    expect(await getBranchBase(repository, 'child')).toEqual({ base: null });
+    fs.writeFileSync(path.join(repository, 'child.txt'), 'current child\n');
+    const options = { base: 'refs/heads/parent', head: 'child', includeWorkingTree: true };
+    expect(await getRangeFiles(repository, options)).toEqual([{ path: 'child.txt', status: 'A' }]);
+    const diff = await getRangeDiff(repository, options);
+    expect(diff).toContain('+current child');
+    expect(diff).not.toContain('parent.txt');
+  });
+
+  it('combines committed, staged, unstaged and untracked work without changing the real index', async () => {
+    const { repository } = createRepositoryWithRemote();
+    fs.writeFileSync(path.join(repository, 'README.md'), '# Committed\n');
+    runGit(repository, ['add', 'README.md']);
+    runGit(repository, ['commit', '-m', 'branch change']);
+    fs.writeFileSync(path.join(repository, 'README.md'), '# Staged\n');
+    fs.writeFileSync(path.join(repository, 'staged.txt'), 'staged only\n');
+    runGit(repository, ['add', '.']);
+    fs.writeFileSync(path.join(repository, 'README.md'), '# Current\n');
+    fs.writeFileSync(path.join(repository, 'untracked.txt'), 'new local file\n');
+    fs.writeFileSync(path.join(repository, ' leading space.txt'), 'space path\n');
+    const indexBefore = fs.readFileSync(path.join(repository, '.git/index'));
+    const options = { base: 'origin/react', head: 'next', includeWorkingTree: true };
+
+    const diff = await getRangeDiff(repository, options);
+    expect(diff).toContain('-# Test');
+    expect(diff).toContain('+# Current');
+    expect(diff).not.toContain('+# Staged');
+    expect(diff).not.toContain('+# Committed');
+    expect(diff).toContain('+new local file');
+    expect(diff).toContain('+staged only');
+    expect(await getRangeFiles(repository, options)).toEqual(expect.arrayContaining([
+      { path: 'README.md', status: 'M' },
+      { path: 'staged.txt', status: 'A' },
+      { path: 'untracked.txt', status: 'A' },
+      { path: ' leading space.txt', status: 'A' },
+    ]));
+    const { sections } = await loadSourceSections(repository, { kind: 'branch', baseRef: options.base, headRef: options.head });
+    expect(sections).toEqual([{ scope: 'branch', patch: diff }]);
+    expect(fs.readFileSync(path.join(repository, '.git/index'))).toEqual(indexBefore);
+
+    const committed = await getRangeDiff(repository, { base: options.base, head: options.head });
+    expect(committed).toContain('+# Committed');
+    expect(committed).not.toContain('+new local file');
+    fs.writeFileSync(path.join(repository, 'README.md'), '# Latest\n');
+    expect(await getRangeDiff(repository, { ...options, path: 'README.md' })).toContain('+# Latest');
+  });
+
+  it('reports the final file after a staged deletion is recreated, and omits undone branch changes', async () => {
+    const { repository } = createRepositoryWithRemote();
+    runGit(repository, ['rm', 'README.md']);
+    fs.writeFileSync(path.join(repository, 'README.md'), '# Recreated\n');
+    const options = { base: 'origin/react', head: 'next', includeWorkingTree: true };
+    expect(await getRangeFiles(repository, options)).toEqual([{ path: 'README.md', status: 'M' }]);
+    const diff = await getRangeDiff(repository, options);
+    expect(diff).toContain('-# Test');
+    expect(diff).toContain('+# Recreated');
+    expect(diff.match(/diff --git/g)).toHaveLength(1);
+    fs.writeFileSync(path.join(repository, 'README.md'), '# Test\n');
+    expect(await getRangeFiles(repository, options)).toEqual([]);
+    expect(await getRangeDiff(repository, options)).toBe('');
+  });
+
+  it('keeps local and remote bases distinct and rejects a different checked-out branch', async () => {
+    const { repository } = createRepositoryWithRemote();
+    runGit(repository, ['branch', 'react']);
+    fs.writeFileSync(path.join(repository, 'parent.txt'), 'parent work\n');
+    runGit(repository, ['add', '.']);
+    runGit(repository, ['commit', '-m', 'parent work']);
+    runGit(repository, ['branch', '-f', 'react', 'HEAD']);
+    fs.writeFileSync(path.join(repository, 'child.txt'), 'child work\n');
+    const options = { head: 'next', includeWorkingTree: true };
+    const local = await getRangeDiff(repository, { ...options, base: 'react' });
+    const remote = await getRangeDiff(repository, { ...options, base: 'origin/react' });
+    expect(local).not.toContain('parent.txt');
+    expect(remote).toContain('parent.txt');
+    expect(local).toContain('child.txt');
+    expect(await getRangeFiles(repository, { ...options, base: 'react' })).toEqual([{ path: 'child.txt', status: 'A' }]);
+    runGit(repository, ['checkout', 'react']);
+    await expect(getRangeDiff(repository, { ...options, base: 'origin/react' })).rejects.toThrow(/checked-out branch/);
+  });
+
+  it('includes untracked symlinks as links without reading their targets', async () => {
+    const { repository } = createRepositoryWithRemote();
+    const outside = path.join(createTempDir(), 'outside.txt');
+    fs.writeFileSync(outside, 'must not be in a diff\n');
+    fs.symlinkSync(outside, path.join(repository, 'link.txt'));
+    const diff = await getRangeDiff(repository, { base: 'origin/react', head: 'next', includeWorkingTree: true });
+    expect(diff).toContain('new file mode 120000');
+    expect(diff).toContain(outside);
+    expect(diff).not.toContain('must not be in a diff');
+  });
+
+  it('uses an explicitly selected base on a remote other than origin', async () => {
+    const { repository } = createRepositoryWithRemote({ remoteName: 'upstream', defaultBranch: 'react' });
+    // The selected remote ref must work without a local branch of that name.
+    fs.writeFileSync(path.join(repository, 'feature.txt'), 'work\n');
+    runGit(repository, ['add', 'feature.txt']);
+    runGit(repository, ['commit', '-m', 'feature']);
+
+    const diff = await getRangeDiff(repository, { base: 'upstream/react', head: 'next' });
+
+    expect(diff).toContain('feature.txt');
+    await expect(getRangeDiff(repository, { base: 'react', head: 'next' })).rejects.toThrow(/is not available locally/);
+  });
+
+  it('names an unfetched remote-only ref instead of failing with git\'s ambiguous argument (#2735)', async () => {
+    const { repository } = createRepositoryWithRemote({ defaultBranch: 'react' });
+
+    await expect(
+      getRangeDiff(repository, { base: 'remotes/origin/never-fetched', head: 'next' })
+    ).rejects.toThrow(/is not available locally/);
+  });
+});
+
+describe('parseBranchCreationSource', () => {
+  it('does not reuse the creation base after a rebase', () => {
+    expect(parseBranchCreationSource('rebase (finish): refs/heads/feature onto abc123\nbranch: Created from main')).toBeNull();
+  });
+  it('returns the source ref from the oldest creation entry', () => {
+    // Reflog lists newest entries first; creation is the last line.
+    const reflog = [
+      'commit: abc123',
+      'branch: Created from origin/main',
+    ].join('\n');
+    expect(parseBranchCreationSource(reflog)).toBe('origin/main');
+  });
+
+  it('returns null when the branch was created from a detached HEAD pointer', () => {
+    const reflog = 'branch: Created from HEAD@{0}';
+    expect(parseBranchCreationSource(reflog)).toBeNull();
+  });
+
+  it('returns null when the branch was created from the current HEAD without a named source', () => {
+    // `git switch -c <branch>` / `git checkout -b <branch>` from the current
+    // branch record `branch: Created from HEAD` in the reflog (git 2.x). The
+    // source branch name is not recorded, so no base can be derived from it.
+    const reflog = 'branch: Created from HEAD';
+    expect(parseBranchCreationSource(reflog)).toBeNull();
+  });
+
+  it('returns null when the branch was created from a raw commit', () => {
+    const reflog = 'branch: Created from 9a3b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b';
+    expect(parseBranchCreationSource(reflog)).toBeNull();
+  });
+
+  it('returns null when there is no creation entry', () => {
+    const reflog = ['commit: abc123', 'reset: moving to HEAD'].join('\n');
+    expect(parseBranchCreationSource(reflog)).toBeNull();
+  });
+
+  it('returns null for empty input', () => {
+    expect(parseBranchCreationSource('')).toBeNull();
+    expect(parseBranchCreationSource(undefined)).toBeNull();
+  });
+});
+
+describe.runIf(canRunGit())('getRangeFiles', () => {
+  it('returns added and modified paths with their status letters', async () => {
+    const { repository } = createRepositoryWithRemote();
+    fs.writeFileSync(path.join(repository, 'added.txt'), 'new\n');
+    fs.writeFileSync(path.join(repository, 'README.md'), '# Test\nchanged\n');
+    runGit(repository, ['add', 'added.txt', 'README.md']);
+    runGit(repository, ['commit', '-m', 'changes']);
+
+    const files = await getRangeFiles(repository, { base: 'origin/react', head: 'next' });
+
+    expect(files).toEqual(expect.arrayContaining([
+      { path: 'added.txt', status: 'A' },
+      { path: 'README.md', status: 'M' },
+    ]));
+  });
+
+  it('reports the destination path for renamed files, including spaces', async () => {
+    const { repository } = createRepositoryWithRemote();
+    // The original file must exist in the base: rename detection pairs a
+    // deletion against an addition relative to base, not within the branch.
+    fs.writeFileSync(path.join(repository, 'old name with spaces.md'), '# Test\n');
+    runGit(repository, ['add', 'old name with spaces.md']);
+    runGit(repository, ['commit', '-m', 'add file to rename']);
+    runGit(repository, ['push', 'origin', 'HEAD:react']);
+    // Spaces in filenames exercise the -z token split: a newline split would
+    // mangle these paths long before status letters matter.
+    fs.renameSync(path.join(repository, 'old name with spaces.md'), path.join(repository, 'new name with spaces.md'));
+    runGit(repository, ['add', '-A']);
+    runGit(repository, ['commit', '-m', 'rename']);
+
+    const files = await getRangeFiles(repository, { base: 'origin/react', head: 'next' });
+
+    const renameEntry = files.find((file) => file.status === 'R');
+    expect(renameEntry).toBeDefined();
+    expect(renameEntry.path).toBe('new name with spaces.md');
+    expect(files.some((file) => file.path === 'old name with spaces.md')).toBe(false);
+  });
+
+  it('reports the destination path for copied files', async () => {
+    const { repository } = createRepositoryWithRemote();
+    // The source must exist in the base. Copy detection needs the repository's
+    // own `diff.renames=copies` setting on top of the service's -C flag; the
+    // parser must survive whatever C entries git emits.
+    runGit(repository, ['config', 'diff.renames', 'copies']);
+    fs.writeFileSync(path.join(repository, 'copied source.md'), '# Copy me\n');
+    runGit(repository, ['add', 'copied source.md']);
+    runGit(repository, ['commit', '-m', 'add source']);
+    runGit(repository, ['push', 'origin', 'HEAD:react']);
+    fs.copyFileSync(path.join(repository, 'copied source.md'), path.join(repository, 'copied destination.md'));
+    runGit(repository, ['add', '-A']);
+    runGit(repository, ['commit', '-m', 'copy']);
+
+    const files = await getRangeFiles(repository, { base: 'origin/react', head: 'next' });
+
+    const copyEntry = files.find((file) => file.status === 'C');
+    expect(copyEntry).toBeDefined();
+    expect(copyEntry.path).toBe('copied destination.md');
   });
 });

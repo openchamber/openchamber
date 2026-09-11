@@ -5,11 +5,12 @@ import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
-import { parseAgentMentions } from '@/lib/messages/agentMentions';
+import { queuedContextToParts } from '@/components/chat/composer/submit/buildOutgoingMessage';
 import { getDirectoryState } from '@/sync/sync-refs';
 import { useDirectorySync } from '@/sync/sync-context';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { createInputHistorySubmission } from '@/stores/useInputHistoryStore';
 
 type SessionStatusType = 'idle' | 'busy' | 'retry';
 
@@ -82,14 +83,15 @@ export const buildQueuedAutoSendPayload = (queue: QueuedMessage[]) => {
     return null;
   }
 
-  const agents = useConfigStore.getState().getVisibleAgents();
-  const { sanitizedText, mention } = parseAgentMentions(queued.content, agents);
-
+  // A queued message is delivered as captured: mention already stripped,
+  // file mentions resolved, and the context it was queued with following it.
   return {
     queuedMessageId: queued.id,
-    primaryText: sanitizedText,
+    historySubmissions: [createInputHistorySubmission(queued.content, queued.attachments ?? [])],
+    primaryText: queued.text,
     primaryAttachments: queued.attachments ?? [],
-    agentMentionName: mention?.name,
+    agentMentionName: queued.agentMention,
+    additionalParts: queuedContextToParts(queued.context ?? []),
     sendConfig: queued.sendConfig,
   };
 };
@@ -103,8 +105,7 @@ type ResolvedQueuedSendConfig = {
 };
 
 export const sendQueuedAutoSendPayload = (
-  sessionId: string,
-  directory: string,
+  target: MessageQueueTarget,
   payload: QueuedAutoSendPayload,
   resolved: ResolvedQueuedSendConfig,
 ) => {
@@ -115,10 +116,10 @@ export const sendQueuedAutoSendPayload = (
     resolved.agent,
     payload.primaryAttachments,
     payload.agentMentionName,
-    undefined,
+    payload.additionalParts.length > 0 ? payload.additionalParts : undefined,
     resolved.variant,
     'normal',
-    { sessionId, directory },
+    { target, historySubmissions: payload.historySubmissions },
   );
 };
 
@@ -149,11 +150,18 @@ const resolveSessionSendConfig = (sessionId: string) => {
     ?? config.currentModelId
     ?? selection.lastUsedProvider?.modelID;
 
-  const variant =
+  // A recorded `null` is an explicit "Default": it stops the lookup and sends
+  // no effort, instead of falling through to the persisted copy.
+  const savedVariant =
     selectedAgent && providerID && modelID
-      ? (selection.getAgentModelVariantForSession(sessionId, selectedAgent, providerID, modelID)
-        ?? context.getAgentModelVariantForSession(sessionId, selectedAgent, providerID, modelID))
+      ? (() => {
+        const live = selection.getAgentModelVariantForSession(sessionId, selectedAgent, providerID, modelID);
+        return live !== undefined
+          ? live
+          : context.getAgentModelVariantForSession(sessionId, selectedAgent, providerID, modelID);
+      })()
       : undefined;
+  const variant = savedVariant ?? undefined;
 
   return {
     providerID,
@@ -173,11 +181,50 @@ export const shouldDispatchQueuedAutoSend = (
     && currentStatusType === 'idle';
 };
 
+/**
+ * Resolve the live status the queue gate should honor for a session.
+ *
+ * The server's `/session/status` map only lists busy/retry sessions — idle
+ * sessions are absent — so a missing entry means "idle per the snapshot", not
+ * "no information". A missed busy event therefore leaves no entry while a turn
+ * is still streaming. The trailing in-flight assistant message is the live
+ * evidence of that running turn: treat it as busy so the queue never dispatches
+ * into it (mirrors `useSessionActivity`'s fallback). The entry becomes idle the
+ * moment the message completes or an idle status event lands. This reads the
+ * directory child store directly so both the effect-loop gate and the
+ * dispatch-time re-check agree.
+ */
+export const resolveQueuedSessionStatusType = (
+  sessionId: string,
+  directory: string,
+): SessionStatusType => {
+  const state = getDirectoryState(directory);
+  const statusType = state?.session_status?.[sessionId]?.type;
+  if (statusType === 'busy' || statusType === 'retry') {
+    return statusType;
+  }
+  const sessionMessages = state?.message?.[sessionId];
+  const lastMessage = sessionMessages && sessionMessages.length > 0
+    ? sessionMessages[sessionMessages.length - 1]
+    : undefined;
+  if (
+    lastMessage?.role === 'assistant'
+    && typeof (lastMessage as { time?: { completed?: number } }).time?.completed !== 'number'
+  ) {
+    return 'busy';
+  }
+  return 'idle';
+};
+
 export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?: boolean }) {
   const enabled = typeof enabledOrOptions === 'boolean' ? enabledOrOptions : (enabledOrOptions?.enabled ?? true);
   const queuedMessages = useMessageQueueStore((state) => state.queuedMessages);
   const autoReviewRuns = useAutoReviewStore((state) => state.runsByOriginalSessionID);
   const sessionStatusRecord = useDirectorySync((state) => state.session_status);
+  // Message completion clears the in-flight fallback in
+  // resolveQueuedSessionStatusType; subscribe so the queue drains the moment
+  // the trailing assistant message completes even if status events were missed.
+  const sessionMessages = useDirectorySync((state) => state.message);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
 
   const inFlightSessionsRef = React.useRef<Set<string>>(new Set());
@@ -216,7 +263,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         return;
       }
 
-      const currentStatus = getDirectoryState(target.directory)?.session_status?.[sessionId]?.type ?? 'idle';
+      const currentStatus = resolveQueuedSessionStatusType(sessionId, target.directory);
       if (currentStatus !== 'idle') {
         return;
       }
@@ -256,7 +303,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
       useMessageQueueStore.getState().markSending(target, payload.queuedMessageId);
 
       try {
-        await sendQueuedAutoSendPayload(sessionId, target.directory, payload, {
+        await sendQueuedAutoSendPayload(target, payload, {
           providerID: resolved.providerID,
           modelID: resolved.modelID,
           agent: resolved.agent,
@@ -294,7 +341,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
       const target = parseMessageQueueKey(key);
       if (!target || target.runtimeKey !== getRuntimeKey() || target.directory !== currentDirectory) return;
       const { sessionId } = target;
-      const currentStatusType = (statusRecord[sessionId]?.type ?? 'idle') as SessionStatusType;
+      const currentStatusType = resolveQueuedSessionStatusType(sessionId, target.directory);
       const previousStatusType = previousStatusRef.current.get(sessionId);
       const wasAutoReviewBlocked = autoReviewBlockedSessionsRef.current.has(sessionId);
       const isAutoReviewRunning = useAutoReviewStore.getState().isRunningForSession(sessionId);
@@ -315,5 +362,5 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
     });
 
     previousStatusRef.current = nextStatusMap;
-  }, [enabled, queuedMessages, sessionStatusRecord, autoReviewRuns, currentDirectory, retryTick, retryScheduler]);
+  }, [enabled, queuedMessages, sessionStatusRecord, sessionMessages, autoReviewRuns, currentDirectory, retryTick, retryScheduler]);
 }

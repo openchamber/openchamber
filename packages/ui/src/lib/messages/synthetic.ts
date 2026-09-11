@@ -1,5 +1,7 @@
 import type { Part } from "@opencode-ai/sdk/v2";
 
+import { readContextPart } from "./contextParts";
+
 const GITHUB_ISSUE_CONTEXT_PREFIX = 'GitHub issue context (JSON)';
 const GITHUB_PR_CONTEXT_PREFIX = 'GitHub pull request context (JSON)';
 
@@ -37,6 +39,13 @@ export const filterSyntheticParts = (parts: Part[] | undefined): Part[] => {
     const shouldKeepSyntheticPart = (part: Part): boolean => {
         if (!isSyntheticPart(part) || part.type !== 'text') {
             return false;
+        }
+
+        // User-attached context (inline comments, terminal selections, and
+        // such) is synthetic transport-wise but is user content that renders
+        // as its own context block.
+        if (readContextPart(part)) {
+            return true;
         }
 
         const text = (part as { text?: unknown }).text;

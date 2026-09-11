@@ -1,0 +1,53 @@
+---
+title: 統合機能
+description: GitHub と Linear を OpenChamber に接続する。
+---
+
+# 統合機能
+
+**設定 → 統合機能** では、OpenChamber が連携するサービスにサインインします。サインイン情報は OpenChamber サーバーに保存されるため、Web、デスクトップ、ペアリングした端末で共有されます。
+
+## GitHub
+
+**GitHub** カードを展開し、**Connect GitHub** を選んで短いデバイスコードでサインインします。接続後は、Issue やプルリクエストからセッションを開始し、メッセージに添付し、PR を作成・更新できます。GitHub でできることは [GitHub Issues と PR](/ja/github/) にまとめています。
+
+## Linear
+
+### ワークスペースを接続する
+
+1. **Linear** カードを展開し、**Connect** を選びます。
+2. 開いたブラウザータブでアクセスを承認します。承認するまでカードには **Waiting for Linear** と表示されます。
+
+別の Linear 組織は **Add workspace** で接続します。現在のワークスペースは常に 1 つで、**Switch to** で切り替え、**Disconnect** は現在のものだけを外します。プロジェクトの対応付けは残ります。
+
+### Issue を閲覧する
+
+ワークスペースを接続すると、右側のコンテキストレールに **Linear** パネルが現れます。現在のワークスペースの Issue を一覧し、次の操作ができます。
+
+- ステータス（**Backlog**、**To Do**、**In Progress**、**In Review**、**Done**、**Canceled**、**Duplicate**）、担当者（**Anyone** または **Assigned to me**）、チーム、優先度で絞り込む
+- タイトル、識別子、Linear の URL で検索する
+- Issue を開いて説明、コメント、ラベル、優先度を読む
+- **Status** を変更する、または **Close issue** を選ぶ
+- 現在の **Workspace** を切り替える
+
+### Issue からセッションを開始する
+
+- Linear パネルで Issue を開き、**Start session** を選びます。ボタンは Issue をスクロールしてもフッターに残ります。
+- チャットで **New Session From Linear Issue** を選ぶと一覧から選べます。新しいブランチが欲しければ **Create in worktree** を使います。
+- **New Worktree** ダイアログで **Start from Linear Issue** を選びます。
+
+セッションは Issue のチームに対応付けられたプロジェクトで開き、Issue が最初のプロンプトになります。チームの対応付けは Linear カードで行います。**Default project** が全チームに適用され、**Team projects** でチームごとに上書きできます。対応付けのないチームでは、先に対応付けを求められます。最初のメッセージは Magic Prompt の **Issue Review** から作られ、**設定 → Magic Prompts → Linear** で編集できます。
+
+### Issue をメッセージに添付する
+
+チャットのコンポーザーで **Link Linear Issue** を選びます。Issue は次のメッセージにコンテキストとして添付され、セッションの作業ステータスパネルにリンクが残ります。
+
+### セッションコメント
+
+Linear カードで **Session comments** をオンにすると、Issue から開始したセッションが開始時、完了時、失敗時にその Issue へコメントを投稿します。各コメントにはセッションを開くリンクが付きます。コメントは、この OpenChamber サーバーが公開アドレスを持つ場合にのみ投稿されます（Issue の関係者全員がリンクを開けるようにするため）。ローカルやプライベートなアドレスでは何も投稿されません。
+
+## 関連情報
+
+- [GitHub Issues と PR](/ja/github/) — OpenChamber で GitHub にできること
+- [ワークツリーセッション](/ja/worktrees/) — Issue からのセッションを開始できる場所
+- [Magic Prompts](/ja/magic-prompts/) — Linear セッションの最初のプロンプトを編集する

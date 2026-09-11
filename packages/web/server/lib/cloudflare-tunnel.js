@@ -64,7 +64,7 @@ Install instructions for your platform:
   Windows:  winget install --id Cloudflare.cloudflared
   Linux:    Download from https://github.com/cloudflare/cloudflared/releases
 
-Or visit: https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflared/downloads/
+Or visit: https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/
 `);
 }
 

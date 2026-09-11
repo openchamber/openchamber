@@ -1,0 +1,30 @@
+---
+title: Git Kimlikleri
+description: Her repo için doğru ad ve e-posta ile commit edin.
+---
+
+# Git Kimlikleri
+
+Bir git kimliği, commit'lerinizin hangi ad ve e-posta ile imzalandığıdır. Kişisel ve iş repoları arasında çalışıyorsanız, tek bir global ayara güvenmek yerine kimlikleri kaydedip her repo için doğru olanı uygulayabilirsiniz. Bunları **Settings → Git** bölümünden yönetin.
+
+## Bir kimlik ekleyin
+
+1. **Settings → Git** bölümünü açın ve **New** seçin.
+2. Commit edeceğiniz **name** ve **email** bilgilerini girin.
+3. Uzak depo ile nasıl doğrulanacağını seçin:
+   - **SSH** — bir SSH anahtarına yönlendirin
+   - **token** — bir host için kayıtlı bir kimlik bilgisi kullanın
+4. İsterseniz kolay seçmek için bir renk ve simge verin.
+
+Sisteminizin global kimliği de salt okunur olarak gösterilir.
+
+## Bir kimliği bir repo'ya uygulayın
+
+Bir kimliği uygulamak, onu o repo'nun **local** git config'ine yazar. Yalnızca o repo'yu etkiler, global ayarınızı etkilemez. SSH kimlikleri ayrıca kullanılacak SSH komutunu anahtarınızı kullanacak şekilde ayarlar. token kimlikleri de host için kimlik bilgisi depolamasını kurar.
+
+OpenChamber'ın mevcut git kimlik bilgilerinizden keşfettiği kimlikleri içe aktarabilir ve token kimlikleri olarak kaydedebilirsiniz.
+
+## İlgili
+
+- [Git & GitHub Workflows](/git/) — ayarladığınız kimlikle commit edin
+- [GitHub Issues & PRs](/github/) — PR'ler için bir GitHub hesabı bağlayın

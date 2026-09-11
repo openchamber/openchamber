@@ -15,7 +15,6 @@ import {
   createFragmentAssembler,
   decodeJsonPayload,
   decodeTunnelFrame,
-  encodeFragmentedMessage,
   encodeJsonPayload,
   encodeTunnelFrame,
 } from './tunnel-codec.js';
@@ -33,7 +32,9 @@ const ALLOWED_WS_PATHS = new Set([
   '/api/event/ws',
   '/api/terminal/ws',
   '/api/dictation/ws',
+  '/api/dev-tunnel',
 ]);
+export const isAllowedRelayWebSocketPath = (pathname) => ALLOWED_WS_PATHS.has(pathname);
 
 // Hop-by-hop headers stripped from tunneled requests; `host` is set by fetch
 // to the loopback origin. content-length is dropped too because the body is
@@ -62,6 +63,22 @@ const STRIPPED_RESPONSE_HEADERS = new Set([
 const BACKPRESSURE_LIMIT_BYTES = 4 * 1024 * 1024;
 const BACKPRESSURE_POLL_MS = 20;
 
+// Bodies smaller than this are fully buffered before the loopback request is
+// sent, so a tunneled body that lost frames (relay reconnect, dropped HttpBody
+// frames) can never reach the loopback server as an empty/truncated chunked
+// body — the server rejects those with a bare 400, surfacing as the mobile
+// app's "Failed to send message (400)". Larger bodies stream live as before.
+const BODY_BUFFER_MAX_BYTES = 512 * 1024;
+// While the body is still being buffered, abort the stream if it never
+// completes, so a stalled tunnel converts into an ambiguous transport failure
+// (which the client already retries) instead of a hung loopback request.
+const BODY_DELIVERY_TIMEOUT_MS = 15_000;
+const MAX_PENDING_WS_BYTES = 16 * 1024 * 1024;
+const MAX_PENDING_WS_MESSAGES = 1024;
+// Node ws supports read backpressure. Bun's ws shim does not implement pause;
+// there the bounded queue fails the affected substream explicitly on overflow.
+const CAN_PAUSE_WS_READS = !process.versions.bun;
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const isHttpRequestPayload = (parsed) =>
@@ -85,13 +102,18 @@ const isWsClosePayload = (parsed) => Boolean(parsed && typeof parsed === 'object
  *   getLocalPort: () => number,
  *   sendFrame: (plaintextFrame: Uint8Array) => void | Promise<void>,
  *   getBufferedAmount: () => number,
+ *   bodyDeliveryTimeoutMs?: number,
+ *   responseChunkBytes?: number,
+ *   cancelPendingFrames?: (streamId: number) => void,
  * }} deps
  */
-export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBufferedAmount }) => {
-  /** @type {Map<number, { kind: 'http', abort: AbortController, body: ReadableStreamDefaultController | null } | { kind: 'ws', socket: WebSocket, opened: boolean }>} */
+export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBufferedAmount, bodyDeliveryTimeoutMs = BODY_DELIVERY_TIMEOUT_MS, responseChunkBytes = MAX_TUNNEL_PAYLOAD_BYTES, cancelPendingFrames = () => {} }) => {
+  /** @type {Map<number, { kind: 'http', abort: AbortController, body: { enqueue(payload: Uint8Array): void, close(): void, error(error: Error): void } | null, noBody: boolean } | { kind: 'ws', socket: WebSocket, opened: boolean }>} */
   const streams = new Map();
   const assembler = createFragmentAssembler();
   let closed = false;
+  let pendingWsBytes = 0;
+  let pendingWsMessages = 0;
 
   const send = async (frame) => {
     if (closed) return;
@@ -114,6 +136,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     const stream = streams.get(streamId);
     if (!stream) return;
     dropStream(streamId);
+    cancelPendingFrames(streamId);
     if (stream.kind === 'http') {
       try {
         stream.body?.error(new Error(String(reason ?? 'aborted')));
@@ -168,39 +191,14 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     await send(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, new Uint8Array(0)));
   };
 
-  const runHttpStream = async (streamId, request) => {
-    const method = request.method.toUpperCase();
-    if (!isAllowedHttpPath(request.path)) {
-      dropStream(streamId);
-      await syntheticResponse(streamId, 403, 'Path is not allowed through the relay');
-      return;
-    }
-
-    const stream = streams.get(streamId);
-    if (!stream || stream.kind !== 'http') return;
-
-    const hasBody = method !== 'GET' && method !== 'HEAD';
-    let requestBody;
-    if (hasBody) {
-      requestBody = new ReadableStream({
-        start(controller) {
-          stream.body = controller;
-        },
-      });
-    } else {
-      stream.body = null;
-      stream.noBody = true;
-    }
-
-    const loopbackOrigin = `http://127.0.0.1:${getLocalPort()}`;
-    const url = `${loopbackOrigin}${request.path}${request.query ? `?${request.query}` : ''}`;
+  const forwardRequest = async (streamId, stream, url, method, request, body, loopbackOrigin) => {
     let response;
     try {
       response = await fetch(url, {
         method,
         headers: buildRequestHeaders(request.headers, loopbackOrigin),
-        body: requestBody,
-        duplex: hasBody ? 'half' : undefined,
+        body,
+        duplex: body ? 'half' : undefined,
         signal: stream.abort.signal,
       });
     } catch (error) {
@@ -216,17 +214,27 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       if (STRIPPED_RESPONSE_HEADERS.has(name)) continue;
       responseHeaders[name] = value;
     }
-    await sendJson(TunnelFrameType.HttpResponse, streamId, { status: response.status, headers: responseHeaders });
+    if (closed || stream.abort.signal.aborted) {
+      await response.body?.cancel();
+      return;
+    }
 
     try {
+      await sendJson(TunnelFrameType.HttpResponse, streamId, { status: response.status, headers: responseHeaders });
       if (response.body) {
         for await (const chunk of response.body) {
           if (closed || stream.abort.signal.aborted) return;
           const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
-          for (const piece of chunkPayload(bytes, MAX_TUNNEL_PAYLOAD_BYTES)) {
+          const pieces = chunkPayload(bytes, responseChunkBytes);
+          // Offer at most one plaintext-frame budget at a time. The scheduler
+          // can batch small slices and interleave streams without buffering the
+          // entire source or encrypting hundreds of tiny messages separately.
+          const groupSize = Math.max(1, Math.floor(MAX_TUNNEL_PAYLOAD_BYTES / responseChunkBytes));
+          for (let offset = 0; offset < pieces.length; offset += groupSize) {
             await waitForBackpressure(stream.abort.signal);
             if (closed || stream.abort.signal.aborted) return;
-            await send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece));
+            await Promise.all(pieces.slice(offset, offset + groupSize).map(piece =>
+              send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece))));
           }
         }
       }
@@ -240,6 +248,143 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
         await sendAbort(streamId, error?.message ?? 'loopback response failed');
       }
     }
+  };
+
+  const runHttpStream = async (streamId, request) => {
+    const method = request.method.toUpperCase();
+    if (!isAllowedHttpPath(request.path)) {
+      dropStream(streamId);
+      await syntheticResponse(streamId, 403, 'Path is not allowed through the relay');
+      return;
+    }
+
+    const stream = streams.get(streamId);
+    if (!stream || stream.kind !== 'http') return;
+
+    const hasBody = method !== 'GET' && method !== 'HEAD';
+    const loopbackOrigin = `http://127.0.0.1:${getLocalPort()}`;
+    const url = `${loopbackOrigin}${request.path}${request.query ? `?${request.query}` : ''}`;
+
+    if (!hasBody) {
+      stream.noBody = true;
+      await forwardRequest(streamId, stream, url, method, request, null, loopbackOrigin);
+      return;
+    }
+
+    // Body-carrying request. Buffer the tunneled body frames and forward the
+    // COMPLETE body only once StreamEnd arrives. Forwarding a body that lost
+    // frames through the tunnel (relay reconnect, dropped HttpBody frames)
+    // reaches the loopback server as an empty/truncated chunked body, which it
+    // rejects with a bare 400 (empty response body) — the "Failed to send
+    // message (400)" seen from the mobile APK. Bodies above BODY_BUFFER_MAX_BYTES
+    // stream live so large uploads are not fully buffered.
+    const buffered = [];
+    let bufferedBytes = 0;
+    let bodyFrameCount = 0;
+    let liveStream = null;
+    let liveController = null;
+    let completed = false;
+    let bodyFailure = null;
+    let resolveBodyEnd;
+    const bodyEnded = new Promise((resolve) => { resolveBodyEnd = resolve; });
+
+    const finishBody = (error) => {
+      if (completed) return;
+      completed = true;
+      bodyFailure = error ?? null;
+      if (liveController) {
+        try {
+          if (error) liveController.error(error);
+          else liveController.close();
+        } catch {
+          // stream already errored/closed
+        }
+      }
+      resolveBodyEnd();
+    };
+
+    let deliveryDeadline = null;
+    const switchToLive = () => {
+      liveStream = new ReadableStream({
+        start(controller) {
+          liveController = controller;
+          stream.body = controller;
+        },
+      });
+      for (const chunk of buffered) {
+        try { liveController.enqueue(chunk); } catch { break; }
+      }
+      buffered.length = 0;
+      // The loopback request is now streaming live; runHttpStream has nothing
+      // left to do — clear the deadline and let the async body forwarding own
+      // this stream from here (abort/StreamEnd close the controller).
+      if (deliveryDeadline) clearTimeout(deliveryDeadline);
+      resolveBodyEnd();
+      void forwardRequest(streamId, stream, url, method, request, liveStream, loopbackOrigin);
+    };
+
+    stream.body = {
+      enqueue(payload) {
+        if (completed) return;
+        bodyFrameCount += 1;
+        if (liveController) {
+          try { liveController.enqueue(payload); } catch {
+            // stream already errored/closed
+          }
+          return;
+        }
+        buffered.push(payload);
+        bufferedBytes += payload.length;
+        if (bufferedBytes > BODY_BUFFER_MAX_BYTES) {
+          switchToLive();
+        }
+      },
+      close() {
+        finishBody(null);
+      },
+      error(error) {
+        finishBody(error);
+      },
+    };
+
+    deliveryDeadline = setTimeout(() => {
+      if (streams.get(streamId) === stream && !completed && !liveStream) {
+        dropStream(streamId);
+        void sendAbort(streamId, 'tunnel request body was not delivered in time');
+        // Settle the buffered-body wait below so the stream's buffered chunks
+        // and this call frame are released (the post-wait guard sees the
+        // dropped stream and returns without a second abort).
+        finishBody(new Error('tunnel request body was not delivered in time'));
+      }
+    }, bodyDeliveryTimeoutMs);
+    deliveryDeadline.unref?.();
+
+    await bodyEnded;
+    if (deliveryDeadline) clearTimeout(deliveryDeadline);
+    if (streams.get(streamId) !== stream) return; // aborted or dropped meanwhile
+    if (bodyFailure) {
+      dropStream(streamId);
+      await sendAbort(streamId, bodyFailure.message ?? 'tunnel request body failed');
+      return;
+    }
+    if (liveStream) return; // already forwarded via the streaming path
+
+    // The client signaled it had a body but no HttpBody frame arrived before
+    // StreamEnd — the body frames were lost through the tunnel. Forwarding an
+    // empty body would make the loopback server reject the request with a bare
+    // 400. Abort instead so the client treats it as an ambiguous transport
+    // failure (dispatched, outcome unknown) and can safely retry.
+    if (request.hasBody === true && bodyFrameCount === 0) {
+      dropStream(streamId);
+      await sendAbort(streamId, 'tunnel request body frames were lost');
+      return;
+    }
+
+    // Buffered path: forward the complete body as a single buffer so Bun
+    // frames it with content-length — never as a chunked body that could be
+    // truncated. Reset the buffered handler so late frames cannot enqueue.
+    stream.body = null;
+    await forwardRequest(streamId, stream, url, method, request, Buffer.concat(buffered), loopbackOrigin);
   };
 
   const handleHttpRequest = (streamId, payload) => {
@@ -263,9 +408,9 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
   const handleHttpBody = (streamId, payload) => {
     const stream = streams.get(streamId);
     if (!stream || stream.kind !== 'http' || stream.noBody) return;
-    // The body controller attaches synchronously in runHttpStream before any
-    // await, so by the time body frames arrive it is set for body-carrying
-    // methods; drop stray body bytes otherwise.
+    // runHttpStream installs a body sink (buffering handler, or the live stream
+    // controller once the buffer cap is crossed) before any HttpBody frame can
+    // arrive; drop stray bytes for request bodies already completed/aborted.
     try {
       stream.body?.enqueue(payload);
     } catch {
@@ -301,7 +446,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       void sendAbort(streamId, error?.message ?? 'malformed ws open');
       return;
     }
-    if (!ALLOWED_WS_PATHS.has(open.path)) {
+    if (!isAllowedRelayWebSocketPath(open.path)) {
       void sendAbort(streamId, 'Path is not allowed through the relay');
       return;
     }
@@ -322,6 +467,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     try {
       socket = new WebSocket(url, open.protocols, {
         headers: dialHeaders,
+        maxPayload: MAX_PENDING_WS_BYTES,
       });
     } catch (error) {
       void sendAbort(streamId, error?.message ?? 'ws dial failed');
@@ -329,6 +475,8 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     }
     const stream = { kind: 'ws', socket, opened: false };
     streams.set(streamId, stream);
+    let outputChain = Promise.resolve();
+    let socketPendingMessages = 0;
 
     socket.on('open', () => {
       if (streams.get(streamId) !== stream) return;
@@ -339,23 +487,47 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       if (streams.get(streamId) !== stream || closed) return;
       const bytes = Buffer.isBuffer(data) ? new Uint8Array(data) : new Uint8Array(Buffer.concat(data));
       const frameType = isBinary ? TunnelFrameType.WsBinary : TunnelFrameType.WsText;
-      void (async () => {
-        for (const frame of encodeFragmentedMessage(frameType, streamId, bytes)) {
+      if (pendingWsBytes + bytes.length > MAX_PENDING_WS_BYTES || pendingWsMessages >= MAX_PENDING_WS_MESSAGES) {
+        abortLocalStream(streamId, 'upstream WebSocket exceeded downstream queue limit');
+        void sendAbort(streamId, 'upstream WebSocket exceeded downstream queue limit');
+        return;
+      }
+      pendingWsBytes += bytes.length;
+      pendingWsMessages += 1;
+      socketPendingMessages += 1;
+      if (CAN_PAUSE_WS_READS) socket.pause();
+      outputChain = outputChain.then(async () => {
+        // Serialize entire messages, including their fragments. A later close
+        // must also wait here or it can overtake the final output.
+        const chunks = chunkPayload(bytes, responseChunkBytes);
+        const groupSize = Math.max(1, Math.floor(MAX_TUNNEL_PAYLOAD_BYTES / responseChunkBytes));
+        for (let offset = 0; offset < chunks.length; offset += groupSize) {
           await waitForBackpressure(null);
           if (streams.get(streamId) !== stream || closed) return;
-          await send(frame);
+          await Promise.all(chunks.slice(offset, offset + groupSize).map((chunk, index) =>
+            send(encodeTunnelFrame(frameType, streamId, chunk, offset + index < chunks.length - 1))));
         }
-      })();
+      }).catch(() => {
+        abortLocalStream(streamId, 'upstream WebSocket forwarding failed');
+        void sendAbort(streamId, 'upstream WebSocket forwarding failed');
+      }).finally(() => {
+        pendingWsBytes -= bytes.length;
+        pendingWsMessages -= 1;
+        socketPendingMessages -= 1;
+        if (CAN_PAUSE_WS_READS && socketPendingMessages === 0 && streams.get(streamId) === stream && socket.readyState === WebSocket.OPEN) socket.resume();
+      });
     });
     socket.on('close', (code, reasonBuffer) => {
-      if (streams.get(streamId) !== stream) return;
-      dropStream(streamId);
-      const reason = reasonBuffer ? reasonBuffer.toString('utf8') : '';
-      if (stream.opened) {
-        void sendJson(TunnelFrameType.WsClose, streamId, { code: code || 1000, reason });
-      } else {
-        void sendAbort(streamId, reason || `upstream ws closed (${code || 'no code'})`);
-      }
+      void outputChain.then(async () => {
+        if (streams.get(streamId) !== stream) return;
+        dropStream(streamId);
+        const reason = reasonBuffer ? reasonBuffer.toString('utf8') : '';
+        if (stream.opened) {
+          await sendJson(TunnelFrameType.WsClose, streamId, { code: code || 1000, reason });
+        } else {
+          await sendAbort(streamId, reason || `upstream ws closed (${code || 'no code'})`);
+        }
+      });
     });
     socket.on('error', (error) => {
       if (streams.get(streamId) !== stream) return;
@@ -386,6 +558,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     const stream = streams.get(streamId);
     if (!stream || stream.kind !== 'ws') return;
     dropStream(streamId);
+    cancelPendingFrames(streamId);
     let close = { code: 1000, reason: '' };
     try {
       close = decodeJsonPayload(payload, isWsClosePayload);
@@ -394,6 +567,8 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     }
     const code = Number.isInteger(close.code) && close.code >= 1000 && close.code <= 4999 ? close.code : 1000;
     try {
+      // A paused receiver still needs to read the peer's close handshake.
+      if (CAN_PAUSE_WS_READS) stream.socket.resume();
       stream.socket.close(code, typeof close.reason === 'string' ? close.reason : '');
     } catch {
       stream.socket.terminate();

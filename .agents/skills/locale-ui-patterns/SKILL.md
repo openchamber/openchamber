@@ -9,8 +9,6 @@ description: Use when creating or modifying OpenChamber UI text, labels, buttons
 
 User-facing UI text must go through `@/lib/i18n`; do not hardcode English strings in components.
 
-Use this skill for any React UI change that adds or edits visible text, accessible labels, placeholders, tooltips, toasts, dialogs, settings labels, navigation labels, or empty/error states.
-
 ## Translate everything immediately (no English placeholders)
 
 Every key you add to a non-English dictionary MUST contain a real translation in that language — never the English source string as a stand-in. There is NO "leave it in English for now" convention in this project; if an agent told you there was, it was wrong. Copying the English value into `es.ts`/`fr.ts`/`ko.ts`/`pl.ts`/`pt-BR.ts`/`uk.ts`/`zh-CN.ts`/`zh-TW.ts` is a defect, not a deferral. The app ships every locale at once, so an untranslated key is a visible bug for those users.
@@ -104,20 +102,11 @@ date
   : t('dialog.delete.description', { count })
 ```
 
-## What Counts As UI Text
+## Translation Boundary
 
-- Button and menu labels
-- Settings labels and descriptions
-- Placeholder text
-- Tooltip content
-- Dialog titles/descriptions/actions
-- Toast title/description/action labels
-- Empty/error/loading states
-- `aria-label`, `title`, image `alt` text when user-facing
+Translate visible text, placeholders, tooltips, dialogs, toasts, empty/error/loading states, and user-facing `aria-label`, `title`, and `alt` text.
 
-## Exceptions
-
-Do not translate:
+Keep these literal:
 
 - Product names: `OpenChamber`, `OpenCode`, `GitHub`
 - Protocol/tool acronyms: `MCP`, `SSE`, `WebSocket`, `API`
@@ -125,10 +114,11 @@ Do not translate:
 - File paths, command names, environment variables
 - User/generated content
 
-## Review Checklist
+## Completion Criteria
 
 - No new hardcoded user-facing English in changed UI files.
-- Every new key exists in all dictionaries.
+- Every new key exists in all dictionaries with a real translation.
+- All translated values are resolved inside a reactive render/hook boundary.
 - No locale state added to broad/shared stores.
 - No full app remount for locale changes.
 - Locale switch preserves current UI state.

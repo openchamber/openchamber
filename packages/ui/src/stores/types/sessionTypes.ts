@@ -21,6 +21,9 @@ export interface AttachedFile {
     serverPath?: string;
     vscodePath?: string;
     vscodeSource?: 'file' | 'selection';
+    /** Shared ID linking entries extracted from the same document (PPTX, DOCX, etc.).
+     *  Removing any entry with this ID cascades to all entries in the group. */
+    sourceDocumentId?: string;
 }
 
 export type EditPermissionMode = 'allow' | 'ask' | 'deny' | 'full';

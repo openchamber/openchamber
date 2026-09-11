@@ -28,12 +28,20 @@ Browser-owned URLs cannot attach the normal `Authorization` header. Use short-li
 - Add browser-readable GET or realtime paths to the narrow allowlist in `packages/web/server/lib/ui-auth/ui-auth.js`.
 - Add allowlist tests; never allow arbitrary `/api/*` URL-token access.
 
-## Preview Iframes And Rewritten Resources
+## Showing Somebody Else's Page
 
-- Use preview proxy helpers so preview and URL tokens propagate to rewritten resources and redirects.
-- Strip legacy client-token query parameters before forwarding upstream.
-- Do not use `postMessage('*')`; target the known preview origin.
-- Preserve CSP where possible. If injecting a bridge, prefer a per-response nonce and remove only directives that block framing or the bridge.
+OpenChamber does not rewrite third-party HTML to display it. Rewriting a page to
+serve it under our origin and a path prefix breaks every absolute URL on it, and
+recovering from that means encoding knowledge of each framework's dev-server
+internals — which ages badly and fails silently.
+
+- The in-app browser renders a real Chromium `<webview>` (`packages/ui/src/components/browser/`).
+- A dev server on a remote OpenChamber host is reached by binding a local port
+  and tunnelling raw bytes (`packages/web/server/lib/dev-tunnel/`), so the page
+  keeps its own origin at the root of its own host.
+- Runtimes without a Chromium host fall back to a plain iframe that can display
+  a page but cannot inspect one. State that limit; do not emulate around it.
+- Do not use `postMessage('*')`; target a known origin.
 - Re-resolve browser URLs after runtime switches; do not retain URLs minted for an old runtime.
 
 ## Security Tests
@@ -43,4 +51,4 @@ Prefer focused coverage in:
 - `packages/ui/src/lib/runtime-url.test.ts`
 - `packages/ui/src/lib/runtime-auth.test.ts`
 - `packages/web/server/lib/ui-auth/ui-auth.test.js`
-- `packages/web/server/lib/preview/proxy-runtime.test.js`
+- `packages/web/server/lib/dev-tunnel/tunnel.test.js`

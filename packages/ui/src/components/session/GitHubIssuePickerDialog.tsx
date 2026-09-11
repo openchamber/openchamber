@@ -1,4 +1,5 @@
 import React from 'react';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   Dialog,
   DialogContent,
@@ -18,6 +19,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
+import { buildLinkedIssue } from '@/lib/linkedIssues';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
@@ -229,7 +231,7 @@ export function GitHubIssuePickerDialog({
   const repoUrl = result?.repo?.url ?? null;
 
   const openGitHubSettings = React.useCallback(() => {
-    setSettingsPage('github');
+    setSettingsPage('integrations');
     setSettingsDialogOpen(true);
   }, [setSettingsDialogOpen, setSettingsPage]);
 
@@ -395,7 +397,7 @@ export function GitHubIssuePickerDialog({
 
       const sessionTitle = `#${issue.number} ${issue.title}`.trim();
 
-      const { sessionId } = await (async () => {
+      const { sessionId, sessionDirectory } = await (async () => {
         if (createInWorktree) {
           const preferred = `issue-${issue.number}-${generateBranchSlug()}`;
           const created = await createWorktreeSessionForNewBranch(
@@ -449,6 +451,23 @@ export function GitHubIssuePickerDialog({
       const instructionsText = await renderMagicPrompt('github.issue.review.instructions');
       const contextText = buildIssueContextText({ repo: issueRes.repo, issue, comments });
 
+      // Record the thread this session was created for, so it stays visible as
+      // a context source once the opening message has scrolled away. A
+      // snapshot, never re-fetched; a failed write must not fail the flow.
+      void sessionActions.setLinkedIssue(
+        sessionId,
+        sessionDirectory,
+        buildLinkedIssue({
+          url: issue.url,
+          number: issue.number,
+          title: issue.title,
+          kind: 'issue',
+          author: issue.author,
+          linkedAt: Date.now(),
+        }),
+        true,
+      ).catch(() => undefined);
+
       void useSessionUIStore.getState().sendMessage(
         visiblePromptText,
         providerID,
@@ -496,7 +515,7 @@ export function GitHubIssuePickerDialog({
         />
       </div>
 
-      <div className={cn(isMobile ? 'min-h-0 mt-2' : 'flex-1 overflow-y-auto mt-2')}>
+      <ScrollableOverlay outerClassName={cn(isMobile ? 'min-h-0 mt-2' : 'flex-1 mt-2')} disableHorizontal>
           {!projectDirectory ? (
             <div className="text-center text-muted-foreground py-8">{t('session.githubIssuePicker.empty.noActiveProject')}</div>
           ) : null}
@@ -618,7 +637,7 @@ export function GitHubIssuePickerDialog({
               </button>
             </div>
           ) : null}
-      </div>
+      </ScrollableOverlay>
 
       {mode !== 'select' && (
         <div className="mt-4 p-3 bg-muted/30 rounded-lg">

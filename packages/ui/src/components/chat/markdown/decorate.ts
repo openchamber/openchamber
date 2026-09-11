@@ -43,27 +43,56 @@ export type DecorateContext = {
   onPreviewLoopback?: (url: string) => void;
 };
 
-// Reference the app's icon sprite (injected into <body> by the shared Icon
-// component) so DOM-built controls use the same themed icons as the rest of
-// the app. Sprite symbols are registered under `#oc-<name>`.
-const spriteIcon = (name: IconName): string =>
-  `<svg class="remixicon size-3.5" viewBox="0 0 24 24" aria-hidden="true"><use href="#oc-${name}"></use></svg>`;
-
 const ICONS = {
-  copy: spriteIcon('file-copy'),
-  check: spriteIcon('check'),
-  download: spriteIcon('download'),
-  zoomIn: spriteIcon('add'),
-  zoomOut: spriteIcon('subtract'),
-  fit: spriteIcon('refresh'),
-  textWrap: spriteIcon('text-wrap'),
-} as const;
+  copy: 'file-copy',
+  check: 'check',
+  download: 'download',
+  zoomIn: 'add',
+  zoomOut: 'subtract',
+  fit: 'refresh',
+  textWrap: 'text-wrap',
+  image: 'file-image',
+  disclosure: 'arrow-right-s',
+} as const satisfies Record<string, IconName>;
 
 const ICON_BTN_CLASS =
   'p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--interactive-focus-ring)]';
 
-const setIconHtml = (el: Element, html: string): void => {
-  el.innerHTML = html;
+const setIcon = (el: Element, icon: keyof typeof ICONS): void => {
+  const iconName = ICONS[icon];
+  const svg = el.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'remixicon size-3.5');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  const use = el.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', `#oc-${iconName}`);
+  svg.appendChild(use);
+  el.replaceChildren(svg);
+};
+
+const decorateImageLabels = (root: HTMLElement): void => {
+  for (const label of Array.from(root.querySelectorAll<HTMLElement>('[data-openchamber-markdown-image-label="true"]'))) {
+    if (label.querySelector('[data-openchamber-markdown-image-label-icon]')) continue;
+    const icon = document.createElement('span');
+    icon.className = 'inline-flex shrink-0';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.setAttribute('data-openchamber-markdown-image-label-icon', 'true');
+    setIcon(icon, 'image');
+    label.prepend(icon);
+  }
+};
+
+const decorateDisclosures = (root: HTMLElement): void => {
+  for (const summary of root.querySelectorAll<HTMLElement>('details[data-md-details] > summary')) {
+    if (summary.querySelector('[data-md-disclosure-icon]')) continue;
+    const label = document.createElement('span');
+    label.append(...Array.from(summary.childNodes));
+    const icon = document.createElement('span');
+    icon.setAttribute('data-md-disclosure-icon', '');
+    icon.setAttribute('aria-hidden', 'true');
+    setIcon(icon, 'disclosure');
+    summary.append(icon, label);
+  }
 };
 
 const makeIconButton = (icon: keyof typeof ICONS, title: string, slot: string): HTMLButtonElement => {
@@ -73,7 +102,7 @@ const makeIconButton = (icon: keyof typeof ICONS, title: string, slot: string): 
   button.setAttribute('data-md-action', slot);
   button.setAttribute('title', title);
   button.setAttribute('aria-label', title);
-  setIconHtml(button, ICONS[icon]);
+  setIcon(button, icon);
   return button;
 };
 
@@ -118,6 +147,9 @@ const layoutCodeLines = (pre: HTMLPreElement): void => {
   const code = pre.querySelector<HTMLElement>(':scope > code');
   if (!code || code.hasAttribute('data-md-code-lines')) return;
 
+  // The real gutter takes over the reserved footprint.
+  pre.removeAttribute('data-md-gutter-reserved');
+
   const text = code.textContent ?? '';
   const hasTrailingNewline = text.endsWith('\n');
   const lines = hasTrailingNewline ? text.slice(0, -1).split('\n') : text.split('\n');
@@ -138,9 +170,8 @@ const layoutCodeLines = (pre: HTMLPreElement): void => {
     row.setAttribute('data-md-code-line', '');
 
     const number = document.createElement('span');
-    number.setAttribute('data-md-code-line-number', '');
+    number.setAttribute('data-md-code-line-number', String(index + 1));
     number.setAttribute('aria-hidden', 'true');
-    number.textContent = String(index + 1);
 
     const content = document.createElement('span');
     content.setAttribute('data-md-code-line-content', '');
@@ -150,7 +181,6 @@ const layoutCodeLines = (pre: HTMLPreElement): void => {
     } else {
       content.textContent = sourceLine;
     }
-
     row.append(number, content);
     fragment.appendChild(row);
     if (index < sourceLines.length - 1 || hasTrailingNewline) {
@@ -183,11 +213,11 @@ export const applyMarkdownCodeBlockWrapState = (root: HTMLElement, enabled: bool
 };
 
 const flashCopied = (button: HTMLButtonElement, copiedTitle: string, restore: keyof typeof ICONS, restoreTitle: string): void => {
-  setIconHtml(button, ICONS.check);
+  setIcon(button, 'check');
   button.setAttribute('title', copiedTitle);
   button.setAttribute('aria-label', copiedTitle);
   window.setTimeout(() => {
-    setIconHtml(button, ICONS[restore]);
+    setIcon(button, restore);
     button.setAttribute('title', restoreTitle);
     button.setAttribute('aria-label', restoreTitle);
   }, 2000);
@@ -250,7 +280,15 @@ const decorateCodeBlocks = (root: HTMLElement, ctx: DecorateContext): void => {
     pre.style.margin = '0';
     pre.style.background = 'transparent';
     pre.classList.add('min-w-0', 'w-full', 'flex-1');
-    if (!ctx.deferCodeLineNumberSync) layoutCodeLines(pre);
+    if (!ctx.deferCodeLineNumberSync) {
+      layoutCodeLines(pre);
+    } else {
+      // Streaming defers the per-line gutter markup, but the gutter's
+      // horizontal footprint is reserved immediately — otherwise the
+      // end-of-stream decorate pass shifts every code line right by the
+      // gutter column and the finished message visibly jumps.
+      pre.setAttribute('data-md-gutter-reserved', '');
+    }
     body.appendChild(pre);
     wrapper.appendChild(header);
     wrapper.appendChild(body);
@@ -309,6 +347,10 @@ const buildTableMenu = (action: string, items: Array<{ key: string; label: strin
   return menu;
 };
 
+const TABLE_COLUMN_MIN_WIDTH = 120;
+const TABLE_COLUMN_MAX_WIDTH = 320;
+const TABLE_LAYOUT_ATTR = 'data-md-table-layout';
+
 const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
   const tables = root.querySelectorAll<HTMLTableElement>('table');
   for (const table of Array.from(tables)) {
@@ -316,7 +358,7 @@ const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
     if (existing) continue;
 
     const wrapper = document.createElement('div');
-    wrapper.className = 'group my-4 flex flex-col space-y-2';
+    wrapper.className = 'group my-4 flex w-fit max-w-full flex-col space-y-2';
     wrapper.setAttribute('data-markdown', 'table-wrapper');
 
     const toolbar = document.createElement('div');
@@ -349,7 +391,8 @@ const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
     if (!parent) continue;
     parent.replaceChild(wrapper, table);
     table.setAttribute('data-markdown', 'table');
-    table.classList.add('w-full', 'border-collapse', 'text-sm');
+    table.setAttribute(TABLE_LAYOUT_ATTR, 'pending');
+    table.classList.add('w-max', 'border-collapse', 'text-sm');
 
     for (const tr of Array.from(table.querySelectorAll('tr'))) {
       tr.classList.add('border-b', 'border-border/60');
@@ -358,15 +401,110 @@ const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
     lastBodyRow?.classList.remove('border-b');
     lastBodyRow?.classList.add('border-0');
     for (const th of Array.from(table.querySelectorAll('th'))) {
-      th.classList.add('border-r', 'border-border/60', 'px-4', 'py-2.5', 'text-left', 'align-middle', 'font-semibold', 'text-foreground', 'last:border-r-0');
+      th.classList.add('min-w-[120px]', 'max-w-[320px]', 'whitespace-normal', '[overflow-wrap:anywhere]', 'border-r', 'border-border/60', 'px-4', 'py-2.5', 'text-left', 'align-middle', 'font-semibold', 'text-foreground', 'last:border-r-0');
     }
     for (const td of Array.from(table.querySelectorAll('td'))) {
-      td.classList.add('border-r', 'border-border/60', 'px-4', 'py-2.5', 'align-middle', 'text-foreground/90', 'last:border-r-0');
+      td.classList.add('min-w-[120px]', 'max-w-[320px]', 'whitespace-normal', '[overflow-wrap:anywhere]', 'border-r', 'border-border/60', 'px-4', 'py-2.5', 'align-middle', 'text-foreground/90', 'last:border-r-0');
     }
 
     scroll.appendChild(table);
     wrapper.appendChild(toolbar);
     wrapper.appendChild(scroll);
+  }
+};
+
+export const stabilizeMarkdownTableWidths = (root: HTMLElement): void => {
+  const tables = Array.from(root.querySelectorAll<HTMLTableElement>(
+    `table[data-markdown="table"]:not([${TABLE_LAYOUT_ATTR}="fixed"])`,
+  ));
+  if (tables.length === 0 || !root.isConnected) return;
+
+  const measurementRoot = root.ownerDocument.createElement('div');
+  measurementRoot.setAttribute('aria-hidden', 'true');
+  measurementRoot.setAttribute('data-md-table-measure', '');
+  measurementRoot.style.position = 'fixed';
+  measurementRoot.style.left = '-100000px';
+  measurementRoot.style.top = '0';
+  measurementRoot.style.visibility = 'hidden';
+  measurementRoot.style.pointerEvents = 'none';
+  measurementRoot.style.width = 'max-content';
+
+  const probes = tables.map((table) => {
+    const getRowCells = (row: HTMLTableRowElement): HTMLTableCellElement[] => (
+      Array.from(row.children).filter((child): child is HTMLTableCellElement => (
+        child.tagName === 'TH' || child.tagName === 'TD'
+      ))
+    );
+    const bodyRows = Array.from(table.querySelectorAll<HTMLTableRowElement>('tbody tr'));
+    const sourceRows = bodyRows.some((row) => getRowCells(row).length > 0)
+      ? bodyRows
+      : Array.from(table.querySelectorAll<HTMLTableRowElement>('thead tr'));
+    const columnCount = Math.max(
+      0,
+      ...Array.from(table.querySelectorAll<HTMLTableRowElement>('tr')).map((row) => getRowCells(row).length),
+    );
+    const columnProbes: HTMLTableElement[] = [];
+
+    for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
+      const probeTable = root.ownerDocument.createElement('table');
+      probeTable.className = table.className;
+      probeTable.style.tableLayout = 'auto';
+      probeTable.style.width = 'max-content';
+      const probeBody = root.ownerDocument.createElement('tbody');
+
+      for (const row of sourceRows) {
+        const sourceCell = getRowCells(row)[columnIndex];
+        if (!sourceCell) continue;
+        const probeRow = root.ownerDocument.createElement('tr');
+        const probeCell = sourceCell.cloneNode(true);
+        if (!(probeCell instanceof HTMLElement)) continue;
+        probeCell.style.width = 'auto';
+        probeCell.style.minWidth = '0';
+        probeCell.style.maxWidth = 'none';
+        probeCell.style.whiteSpace = 'nowrap';
+        probeCell.style.overflowWrap = 'normal';
+        probeRow.appendChild(probeCell);
+        probeBody.appendChild(probeRow);
+      }
+
+      probeTable.appendChild(probeBody);
+      measurementRoot.appendChild(probeTable);
+      columnProbes.push(probeTable);
+    }
+
+    return { table, columnProbes };
+  });
+
+  root.appendChild(measurementRoot);
+  const plans = probes.map(({ table, columnProbes }) => ({
+    table,
+    widths: columnProbes.map((probe) => Math.min(
+      TABLE_COLUMN_MAX_WIDTH,
+      Math.max(TABLE_COLUMN_MIN_WIDTH, Math.ceil(probe.getBoundingClientRect().width)),
+    )),
+  }));
+  measurementRoot.remove();
+
+  for (const { table, widths } of plans) {
+    const existingColumns = Array.from(table.children).find((child) => (
+      child.matches('colgroup[data-md-table-columns]')
+    ));
+    existingColumns?.remove();
+
+    const colgroup = root.ownerDocument.createElement('colgroup');
+    colgroup.setAttribute('data-md-table-columns', '');
+    for (const width of widths) {
+      const column = root.ownerDocument.createElement('col');
+      column.style.width = `${width}px`;
+      colgroup.appendChild(column);
+    }
+    const firstSection = Array.from(table.children).find((child) => (
+      child.tagName === 'THEAD' || child.tagName === 'TBODY' || child.tagName === 'TFOOT'
+    )) ?? null;
+    table.insertBefore(colgroup, firstSection);
+    table.style.tableLayout = 'fixed';
+    table.style.width = `${widths.reduce((total, width) => total + width, 0)}px`;
+    table.setAttribute(TABLE_LAYOUT_ATTR, 'fixed');
   }
 };
 
@@ -479,7 +617,7 @@ const decorateLinks = (root: HTMLElement, ctx: DecorateContext): void => {
       preview.setAttribute('data-md-url', href);
       preview.setAttribute('title', ctx.labels.previewTitle);
       preview.setAttribute('aria-label', ctx.labels.previewLabel);
-      setIconHtml(preview, ICONS.download);
+      setIcon(preview, 'download');
       anchor.parentNode?.insertBefore(preview, anchor.nextSibling);
     }
   }
@@ -487,6 +625,8 @@ const decorateLinks = (root: HTMLElement, ctx: DecorateContext): void => {
 
 /** Run all idempotent DOM decoration passes over freshly-rendered markdown. */
 export const decorateMarkdown = (root: HTMLElement, ctx: DecorateContext): void => {
+  decorateDisclosures(root);
+  decorateImageLabels(root);
   decorateInlineCode(root);
   decorateMermaid(root, ctx);
   decorateCodeBlocks(root, ctx);
@@ -516,6 +656,67 @@ const closeAllMenus = (container: HTMLElement): void => {
   }
 };
 
+const getContainingMarkdownCode = (node: Node): HTMLElement | null => {
+  const element = node.nodeType === 1 ? node as Element : node.parentElement;
+  return element?.closest<HTMLElement>('pre code[data-md-code-lines]') ?? null;
+};
+
+const getMarkdownCodeSelectionText = (range: Range): string | null => {
+  const code = getContainingMarkdownCode(range.startContainer);
+  if (!code || code !== getContainingMarkdownCode(range.endContainer)) return null;
+  // Line numbers are CSS-generated, so the DOM range is already the exact
+  // source selection, including boundaries between rows and empty lines.
+  return range.toString();
+};
+
+type MarkdownCopyState = {
+  registrations: number;
+  handler: (event: ClipboardEvent) => void;
+  menuHandler: (event: Event) => void;
+};
+
+const markdownCopyStates = new WeakMap<Document, MarkdownCopyState>();
+
+const registerMarkdownCodeCopy = (doc: Document): (() => void) => {
+  let state = markdownCopyStates.get(doc);
+  if (!state) {
+    const getSelectedText = (): string | null => {
+      const selection = doc.getSelection();
+      if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null;
+      return getMarkdownCodeSelectionText(selection.getRangeAt(0));
+    };
+    const handler = (event: ClipboardEvent) => {
+      if (!event.clipboardData) return;
+      const text = getSelectedText();
+      if (text === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.clipboardData.setData('text/plain', text);
+    };
+    const menuHandler = (event: Event) => {
+      const text = getSelectedText();
+      if (text === null) return;
+      event.preventDefault();
+      void copyTextToClipboard(text);
+    };
+    state = { registrations: 0, handler, menuHandler };
+    markdownCopyStates.set(doc, state);
+    doc.addEventListener('copy', handler, true);
+    doc.defaultView?.addEventListener('openchamber:copy', menuHandler);
+  }
+  state.registrations += 1;
+
+  return () => {
+    const current = markdownCopyStates.get(doc);
+    if (!current) return;
+    current.registrations -= 1;
+    if (current.registrations > 0) return;
+    doc.removeEventListener('copy', current.handler, true);
+    doc.defaultView?.removeEventListener('openchamber:copy', current.menuHandler);
+    markdownCopyStates.delete(doc);
+  };
+};
+
 /**
  * Attach a single delegated click listener for all in-markdown actions: code
  * copy, table copy/download menus, mermaid copy/download, loopback preview.
@@ -525,6 +726,7 @@ export const attachMarkdownInteractions = (
   container: HTMLElement,
   ctx: DecorateContext,
 ): (() => void) => {
+  const unregisterCodeCopy = registerMarkdownCodeCopy(container.ownerDocument);
   const handleClick = (event: MouseEvent) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
@@ -540,7 +742,12 @@ export const attachMarkdownInteractions = (
     if (action === 'copy-code') {
       const code = actionEl.closest('[data-component="markdown-code"]')?.querySelector('code');
       const text = code ? getMarkdownCodeText(code) : '';
-      if (text) void copyTextToClipboard(text).then(() => flashCopied(actionEl as HTMLButtonElement, ctx.labels.copied, 'copy', ctx.labels.copy));
+      if (text) {
+        actionEl.setAttribute('data-md-copy-pending', '');
+        void copyTextToClipboard(text)
+          .then(() => flashCopied(actionEl as HTMLButtonElement, ctx.labels.copied, 'copy', ctx.labels.copy))
+          .finally(() => actionEl.removeAttribute('data-md-copy-pending'));
+      }
       return;
     }
 
@@ -626,5 +833,8 @@ export const attachMarkdownInteractions = (
   };
 
   container.addEventListener('click', handleClick);
-  return () => container.removeEventListener('click', handleClick);
+  return () => {
+    unregisterCodeCopy();
+    container.removeEventListener('click', handleClick);
+  };
 };

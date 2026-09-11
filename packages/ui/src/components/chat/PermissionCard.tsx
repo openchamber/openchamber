@@ -10,6 +10,10 @@ import { Icon } from "@/components/icon/Icon";
 import { DiffPreview, WritePreview } from './DiffPreview';
 import { useI18n } from '@/lib/i18n';
 import { getVisiblePermissionPatterns } from './permissionCardPatterns';
+import { formatShortcutForDisplay } from '@/lib/shortcuts';
+
+// Newest pending card owns the keyboard; older cards wait their turn.
+const activePermissionCardIds: string[] = [];
 
 const PERMISSION_BASH_CUSTOM_STYLE: React.CSSProperties = {
   margin: 0,
@@ -66,6 +70,14 @@ const getToolIcon = (toolName: string) => {
     return <Icon name="global" className={iconClass} />;
   }
 
+  if (tool === 'linear' || tool.startsWith('linear_')) {
+    return <Icon name="linear" className={iconClass} />;
+  }
+
+  if (tool === 'cloudflare' || tool.startsWith('cloudflare_') || tool === 'claudflare' || tool.startsWith('claudflare_')) {
+    return <Icon name="cloudflare" className={iconClass} />;
+  }
+
   return <Icon name="tools" className={iconClass} />;
 };
 
@@ -117,6 +129,33 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
       setIsResponding(false);
     }
   };
+
+  const handleResponseRef = React.useRef(handleResponse);
+  handleResponseRef.current = handleResponse;
+
+  React.useEffect(() => {
+    if (hasResponded) return;
+    activePermissionCardIds.push(permission.id);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (activePermissionCardIds.at(-1) !== permission.id) return;
+      if (!event.altKey || event.metaKey || event.ctrlKey) return;
+      const response = event.key === 'Enter'
+        ? (event.shiftKey ? 'always' as const : 'once' as const)
+        : event.key === 'Backspace' && !event.shiftKey
+          ? 'reject' as const
+          : null;
+      if (!response) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void handleResponseRef.current(response);
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+      const index = activePermissionCardIds.lastIndexOf(permission.id);
+      if (index !== -1) activePermissionCardIds.splice(index, 1);
+    };
+  }, [hasResponded, permission.id]);
 
   if (hasResponded) {
     return null;
@@ -372,6 +411,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
             >
               <Icon name="check" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
               Allow Once
+              <kbd className="ml-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+enter')}</kbd>
             </button>
 
             {permission.always.length > 0 ? (
@@ -428,6 +468,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
               >
                 <Icon name="time" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
                 Always Allow
+                <kbd className="ml-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+shift+enter')}</kbd>
               </button>
             )}
 
@@ -451,6 +492,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
             >
               <Icon name="close" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
               Deny
+              <kbd className="ml-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+backspace')}</kbd>
             </button>
 
             {isResponding && (

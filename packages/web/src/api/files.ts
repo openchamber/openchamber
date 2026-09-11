@@ -4,6 +4,11 @@ import type {
   FileSearchResult,
   FilesAPI,
 } from '@openchamber/ui/lib/api/types';
+import {
+  FilesystemError,
+  parseFilesystemErrorReason,
+  type FilesystemErrorReason,
+} from '@openchamber/ui/lib/api/files-errors';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 
 const normalizePath = (path: string): string => path.replace(/\\/g, '/');
@@ -27,13 +32,24 @@ type WebDirectoryListResponse = {
   entries?: WebDirectoryEntry[];
 };
 
+type WebFileUploadResponse = {
+  success?: boolean;
+  path?: string;
+  error?: string;
+  reason?: FilesystemErrorReason;
+};
+
 const toDirectoryListResult = (fallbackDirectory: string, payload: WebDirectoryListResponse): DirectoryListResult => {
+  if (!payload || !Array.isArray(payload.entries)) {
+    throw new FilesystemError('Directory listing returned an invalid response', {
+      reason: 'invalid-response',
+    });
+  }
   const directory = normalizePath(payload?.directory || payload?.path || fallbackDirectory);
-  const entries = Array.isArray(payload?.entries) ? payload.entries : [];
 
   return {
     directory,
-    entries: entries
+    entries: payload.entries
       .filter((entry): entry is Required<Pick<WebDirectoryEntry, 'name' | 'path'>> & { isDirectory?: boolean } =>
         Boolean(entry && typeof entry.name === 'string' && typeof entry.path === 'string')
       )
@@ -67,8 +83,17 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error((error as { error?: string }).error || 'Failed to list directory');
+      const error = await response.json().catch(() => ({ error: response.statusText })) as {
+        error?: string;
+        reason?: unknown;
+      };
+      throw new FilesystemError(
+        error.error || 'Failed to list directory',
+        {
+          reason: parseFilesystemErrorReason(error.reason),
+          status: response.status,
+        },
+      );
     }
 
     const result = (await response.json()) as WebDirectoryListResponse;
@@ -172,7 +197,7 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     }
     const response = await runtimeFetch('/api/fs/read', {
       query: params,
-      cache: options?.optional ? 'no-store' : 'default',
+      cache: options?.optional || options?.fresh ? 'no-store' : 'default',
       headers: directoryHeaders(getDirectory, options?.directory),
     });
 
@@ -202,6 +227,36 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     return {
       success: Boolean((result as { success?: boolean }).success),
       path: typeof (result as { path?: string }).path === 'string' ? normalizePath((result as { path: string }).path) : target,
+    };
+  },
+
+  async uploadFile(path: string, file: Blob, options): Promise<{ success: boolean; path: string }> {
+    const target = normalizePath(path);
+    const response = await runtimeFetch('/api/fs/upload', {
+      method: 'POST',
+      query: {
+        path: target,
+        overwrite: options?.overwrite ? 'true' : undefined,
+      },
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        ...directoryHeaders(getDirectory, options?.directory),
+      },
+      body: file,
+    });
+
+    if (!response.ok) {
+      const error: WebFileUploadResponse = await response.json().catch(() => ({ error: response.statusText }));
+      throw new FilesystemError(error.error || 'Failed to upload file', {
+        reason: parseFilesystemErrorReason(error.reason),
+        status: response.status,
+      });
+    }
+
+    const result: WebFileUploadResponse = await response.json().catch(() => ({}));
+    return {
+      success: Boolean(result.success),
+      path: result.path ? normalizePath(result.path) : target,
     };
   },
 
@@ -268,10 +323,20 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     }
 
     const blob = await response.blob();
+    const filename = target.split('/').pop() || 'file';
+    const capacitor = (window as typeof window & {
+      Capacitor?: { isNativePlatform?: () => boolean };
+    }).Capacitor;
+    const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
+    if (capacitor?.isNativePlatform?.() === true && navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file] });
+      return;
+    }
+
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = target.split('/').pop() || 'file';
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

@@ -1,15 +1,28 @@
 import { describe, expect, test } from 'bun:test';
-import { EditorState } from '@codemirror/state';
+import { EditorState, type Extension } from '@codemirror/state';
 
 import {
     COMPOSER_EDITOR_THEME_SPEC,
+    IOS_SELECTION_THEME_SPEC,
     NATIVE_SELECTION_THEME_SPEC,
     composerEditorTheme,
+    composerIOSSelectionExtension,
     composerNativeSelectionExtension,
+    composerSelectionExtension,
+    isCodeMirrorIOSNavigator,
 } from '../theme';
 
 const selectors = Object.keys(COMPOSER_EDITOR_THEME_SPEC);
 const declarations = JSON.stringify(COMPOSER_EDITOR_THEME_SPEC);
+
+function installationError(extension: Extension): string | null {
+    try {
+        EditorState.create({ extensions: [extension] });
+        return null;
+    } catch (error) {
+        return String(error);
+    }
+}
 
 describe('composerEditorTheme', () => {
     /**
@@ -20,13 +33,7 @@ describe('composerEditorTheme', () => {
      * surfaces only in the running app, where it takes the composer down.
      */
     test('its selectors compile and the theme can be installed', () => {
-        let failure: unknown = null;
-        try {
-            EditorState.create({ extensions: [composerEditorTheme] });
-        } catch (error) {
-            failure = error;
-        }
-        expect(failure).toBeNull();
+        expect(installationError(composerEditorTheme)).toBeNull();
     });
 
     /**
@@ -44,6 +51,14 @@ describe('composerEditorTheme', () => {
         const cursorRule = selectors.find((selector) => selector.includes('.cm-cursor'));
         const rule = (COMPOSER_EDITOR_THEME_SPEC as Record<string, Record<string, string>>)[cursorRule!];
         expect(rule.borderLeftColor.startsWith('var(--')).toBe(true);
+    });
+
+    test('the drawn caret is wide enough to remain prominent', () => {
+        const cursorRule = selectors.find((selector) => selector.includes('.cm-cursor'));
+        const rule = (COMPOSER_EDITOR_THEME_SPEC as Record<string, Record<string, string>>)[cursorRule!];
+        expect(rule.borderLeftWidth).toBe('2px');
+        expect(rule.transform).toBe('scaleY(1.15)');
+        expect(rule.transformOrigin).toBe('center');
     });
 
     /**
@@ -93,6 +108,10 @@ describe('composerEditorTheme', () => {
             expect(rule.background.includes('transparent')).toBe(true);
         }
     });
+
+    test('the common theme does not re-show the native selection', () => {
+        expect(selectors.some((selector) => selector.includes('::selection'))).toBe(false);
+    });
 });
 
 describe('composerNativeSelectionTheme', () => {
@@ -100,21 +119,16 @@ describe('composerNativeSelectionTheme', () => {
     const nativeDeclarations = JSON.stringify(NATIVE_SELECTION_THEME_SPEC);
 
     /**
-     * Every device layers this over `drawSelection()`: the native selection
-     * paints over token backgrounds (the painted layer is hidden behind them)
-     * and iOS attaches its selection handles to it. `drawSelection()` must
-     * NOT be removed for that: without it CodeMirror starts enforcing cursor
-     * association on the native selection while typing in wrapped text, and
-     * iOS answers those programmatic selection moves with severe input lag.
+     * Every device except iOS layers this over `drawSelection()`: the native
+     * selection paints over token backgrounds (the painted layer is hidden
+     * behind them) and the platform attaches its selection handles to it.
+     * `drawSelection()` must NOT be removed for that: without it CodeMirror
+     * starts enforcing cursor association on the native selection while typing
+     * in wrapped text, and iOS answers those programmatic selection moves with
+     * severe input lag.
      */
     test('it compiles and can be installed', () => {
-        let failure: unknown = null;
-        try {
-            EditorState.create({ extensions: [composerNativeSelectionExtension] });
-        } catch (error) {
-            failure = error;
-        }
-        expect(failure).toBeNull();
+        expect(installationError(composerNativeSelectionExtension)).toBeNull();
     });
 
     /**
@@ -142,9 +156,9 @@ describe('composerNativeSelectionTheme', () => {
     });
 
     /**
-     * iOS colours its selection drag handles from the caret colour. With
-     * `drawSelection()`'s `caret-color: transparent !important` in effect the
-     * handles are drawn — invisibly. The native caret must come back with
+     * A platform showing native handles colours them from the caret colour.
+     * With `drawSelection()`'s `caret-color: transparent !important` in effect
+     * the handles are drawn — invisibly. The native caret must come back with
      * enough weight to win, and the drawn cursor layer must go so there are
      * not two carets.
      *
@@ -185,5 +199,108 @@ describe('composerNativeSelectionTheme', () => {
         const tokens = [...nativeDeclarations.matchAll(/var\((--[A-Za-z-]+)/g)].map((m) => m[1]);
         expect(tokens.length > 0).toBe(true);
         expect(tokens.filter((token) => /[A-Z]/.test(token))).toEqual([]);
+    });
+});
+
+describe('composerIOSSelectionExtension', () => {
+    const layerRule = IOS_SELECTION_THEME_SPEC['& .cm-scroller > .cm-selectionLayer'];
+    const scrollerRule = IOS_SELECTION_THEME_SPEC['& .cm-scroller'];
+    const selectionBackgroundRule = IOS_SELECTION_THEME_SPEC['& .cm-selectionBackground'];
+
+    test('it compiles and can be installed', () => {
+        expect(installationError(composerIOSSelectionExtension)).toBeNull();
+    });
+
+    /**
+     * CodeMirror renders its selection layer at `z-index: -1`, behind the
+     * text. Inline code and code fences have opaque backgrounds and otherwise
+     * cover both the selection and the iOS handles. The base value is inline,
+     * so raising it without `!important` silently does nothing.
+     */
+    test('CodeMirror selection and handles are raised above token backgrounds', () => {
+        expect(layerRule.zIndex).toBe('100 !important');
+    });
+
+    /**
+     * The layer now sits over the content and would intercept taps and drags
+     * by default. It only paints; CodeMirror/WebKit still own the gestures.
+     */
+    test('the layer does not intercept touch', () => {
+        expect(layerRule.pointerEvents).toBe('none');
+    });
+
+    /**
+     * A higher z-index cannot escape overflow clipping. CodeMirror's dots
+     * extend 8px past the range, so the scroller needs that much internal room;
+     * the matching negative margin keeps the text and composer height fixed.
+     */
+    test('the scroller reserves unclipped room for both handles', () => {
+        expect(scrollerRule.paddingBlock).toBe('8px');
+        expect(scrollerRule.marginBlock).toBe('-8px');
+    });
+
+    test('the CodeMirror fill does not stack over the iOS system highlight', () => {
+        expect(selectionBackgroundRule.background).toBe('transparent !important');
+    });
+
+    /**
+     * A second custom layer was visually indistinguishable from duplicate
+     * native selection UI. iOS must only reposition the one layer that
+     * CodeMirror already uses for both selection rectangles and handles.
+     */
+    test('it does not add a second selection implementation', () => {
+        expect(Object.keys(IOS_SELECTION_THEME_SPEC)).toEqual([
+            '& .cm-scroller',
+            '& .cm-scroller > .cm-selectionLayer',
+            '& .cm-selectionBackground',
+        ]);
+    });
+});
+
+describe('composerSelectionExtension', () => {
+    /**
+     * The split is the point: iOS is the only platform that pays for a visible
+     * native selection during composition, and CodeMirror 6.43.9 draws its
+     * handles. Collapsing the two branches into one would
+     * either restore the latency on iOS or leave every other platform without
+     * discoverable range selection.
+     */
+    test('the CodeMirror iOS path uses its handles; other platforms keep native selection', () => {
+        expect(composerSelectionExtension(true)).toBe(composerIOSSelectionExtension);
+        expect(composerSelectionExtension(false)).toBe(composerNativeSelectionExtension);
+    });
+
+    /**
+     * The composer may remove the native fallback only when CodeMirror's own
+     * browser predicate enables its replacement handles. This deliberately
+     * includes CodeMirror's vendor and touch thresholds rather than using a
+     * broader application-level iOS heuristic.
+     */
+    test('the platform predicate matches CodeMirror 6.43.9', () => {
+        expect(isCodeMirrorIOSNavigator(
+            'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6) Mobile/15E148 Safari/604.1',
+            'Apple Computer, Inc.',
+            5,
+        )).toBe(true);
+        expect(isCodeMirrorIOSNavigator(
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15)',
+            'Apple Computer, Inc.',
+            5,
+        )).toBe(true);
+        expect(isCodeMirrorIOSNavigator(
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15)',
+            'Google Inc.',
+            5,
+        )).toBe(false);
+        expect(isCodeMirrorIOSNavigator(
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15)',
+            'Apple Computer, Inc.',
+            0,
+        )).toBe(false);
+        expect(isCodeMirrorIOSNavigator(
+            'Mozilla/5.0 (Windows NT 10.0; Trident/7.0; rv:11.0)',
+            'Apple Computer, Inc.',
+            5,
+        )).toBe(false);
     });
 });

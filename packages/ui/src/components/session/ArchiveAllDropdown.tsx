@@ -17,7 +17,7 @@ const ArchiveAllDropdown: React.FC<ArchiveAllDropdownProps> = ({ onArchiveAll })
   const { t } = useI18n();
   return (
     <DropdownMenu>
-      <Tooltip>
+      <Tooltip delayDuration={500}>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <button

@@ -27,6 +27,7 @@ const LANGUAGE_NAMES = {
   ko: 'Korean',
   pl: 'Polish',
   ja: 'Japanese',
+  tr: 'Turkish',
 };
 
 /**

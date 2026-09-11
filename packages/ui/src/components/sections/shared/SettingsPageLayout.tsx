@@ -64,18 +64,24 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
         )}
       >
         {hasHeader && (
-          <div className="mb-2 flex items-start justify-between gap-4 pb-6">
-            <div className="min-w-0 space-y-1">
+          // Wraps rather than squeezes. The action cluster never shrinks, so on
+          // a narrow pane it used to starve the title until the name was a
+          // single letter and an ellipsis; giving the title block a basis lets
+          // the actions drop to their own line instead.
+          <div className="mb-2 flex flex-wrap items-start justify-between gap-x-4 gap-y-3 pb-6">
+            <div className="min-w-0 flex-1 basis-64 space-y-1">
               {title != null ? (
                 isPlainTitle ? (
                   hasTitleChrome ? (
                     <div className="flex min-w-0 items-center gap-2">
                       {titleLeading}
-                      <h1 className={cn(SETTINGS_PAGE_TITLE_CLASS, 'min-w-0 truncate')}>{title}</h1>
-                      {titleAccessory}
+                      <h1 data-settings-page-heading tabIndex={-1} className={cn(SETTINGS_PAGE_TITLE_CLASS, 'min-w-0 truncate')}>{title}</h1>
+                      {/* A status badge carries a fixed word; compressing it
+                          wraps the text inside its own pill. */}
+                      <span className="shrink-0">{titleAccessory}</span>
                     </div>
                   ) : (
-                    <h1 className={SETTINGS_PAGE_TITLE_CLASS}>{title}</h1>
+                    <h1 data-settings-page-heading tabIndex={-1} className={SETTINGS_PAGE_TITLE_CLASS}>{title}</h1>
                   )
                 ) : (
                   title
@@ -89,7 +95,7 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
                 )
               ) : null}
             </div>
-            <div className="flex shrink-0 items-center gap-3">
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-3">
               {headerEnd}
               {showSaveStatus && <SettingsSaveStatus />}
             </div>

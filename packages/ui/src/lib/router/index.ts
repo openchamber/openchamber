@@ -6,15 +6,15 @@
  *
  * URL Schema:
  * - `?session=<id>` - Navigate to specific session
- * - `?tab=<chat|git|diff|terminal|files>` - Active main tab
+ * - `?tab=<chat|git|diff|terminal|files>` - Legacy URL name for the active workspace surface
  * - `?settings=<section>` - Open settings to specific section
  * - `?file=<path>` - Diff view with file selected
  *
  * Examples:
  * - `/?session=abc123` - Open session abc123
- * - `/?tab=git` - Open git tab
+ * - `/?tab=git` - Open the Git surface
  * - `/?settings=providers` - Open settings to providers section
- * - `/?tab=diff&file=src/main.ts` - Open diff view with file
+ * - `/?tab=diff&file=src/main.ts` - Open the Diff surface with a file
  */
 
 export type { RouteState } from './types';

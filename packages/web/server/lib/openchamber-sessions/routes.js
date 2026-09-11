@@ -1,6 +1,6 @@
 import express from 'express';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
-import { createWorktree } from '../git/index.js';
+import { createWorktree, getWorktreeBootstrapStatus } from '../git/index.js';
 import { expandSnippets } from '../opencode/snippets.js';
 import { expandCommandGoalObjective, parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
@@ -83,7 +83,10 @@ const resolveVariant = (providers, providerID, modelID, variant) => {
 const parseConfigModel = (value) => splitModel(value);
 
 const buildDirectoryHeaders = (directory) => ({
-  ...(directory ? { 'x-opencode-directory': directory } : {}),
+  // OpenCode rejects non-ASCII header values; the official SDK sends this
+  // header percent-encoded, so match that wire format (non-ASCII checkout
+  // paths such as "Masaüstü" otherwise fail every dispatched prompt).
+  ...(directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : {}),
 });
 
 const fetchJson = async (url, authHeaders, fallback, directory) => {
@@ -250,6 +253,40 @@ const latestCompletedAssistantMessageID = async ({ client, sessionID, directory 
   return asNonEmptyString(latest?.id);
 };
 
+/**
+ * Upper bound on one archive batch.
+ *
+ * The batch is applied one session at a time against OpenCode, so an unbounded
+ * list would hold a request open for as long as the list is large. Callers with
+ * more sessions than this send several batches and keep their own partial
+ * results.
+ */
+const MAX_ARCHIVE_BATCH = 500;
+
+const parseArchiveRequest = (payload) => {
+  const rawIds = payload?.ids;
+  if (!Array.isArray(rawIds) || rawIds.length === 0) {
+    return { ok: false, error: 'ids must be a non-empty array of session ids' };
+  }
+  if (rawIds.length > MAX_ARCHIVE_BATCH) {
+    return { ok: false, error: `ids must contain at most ${MAX_ARCHIVE_BATCH} session ids` };
+  }
+
+  const ids = [];
+  for (const value of rawIds) {
+    const id = asNonEmptyString(value);
+    if (!id) return { ok: false, error: 'ids must contain non-empty session ids' };
+    ids.push(id);
+  }
+
+  const archivedAt = payload?.archivedAt;
+  if (archivedAt !== undefined && (!Number.isSafeInteger(archivedAt) || archivedAt <= 0)) {
+    return { ok: false, error: 'archivedAt must be a positive integer timestamp' };
+  }
+
+  return { ok: true, ids, archivedAt: archivedAt ?? Date.now() };
+};
+
 const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated, sanitizeProjects, validateDirectoryPath }) => {
   const projectID = asNonEmptyString(payload?.projectId) || asNonEmptyString(payload?.projectID);
   if (projectID) {
@@ -270,6 +307,66 @@ const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated
   return validated.ok
     ? { ok: true, directory: validated.directory }
     : { ok: false, status: 400, error: validated.error || 'Invalid directory' };
+};
+
+const PROMPT_LANDED_TIMEOUT_MS = 5_000;
+const PROMPT_LANDED_POLL_MS = 150;
+
+// createWorktree returns while the worktree is still being populated in the
+// background (git reset --hard after a --no-checkout add). Dispatching a
+// prompt into a half-populated directory makes opencode's run die with
+// UnknownError (agent and config files are not there yet), so wait until the
+// bootstrap reaches git-ready (population done) or fails before creating the
+// session and dispatching.
+const WORKTREE_BOOTSTRAP_TIMEOUT_MS = 60_000;
+const WORKTREE_BOOTSTRAP_POLL_MS = 150;
+
+const waitForWorktreeBootstrapReady = async ({ directory }) => {
+  const deadline = Date.now() + WORKTREE_BOOTSTRAP_TIMEOUT_MS;
+  for (;;) {
+    const status = await getWorktreeBootstrapStatus(directory);
+    if (status?.status === 'failed') {
+      throw new OpenChamberControlError(`Worktree bootstrap failed: ${status.error || 'unknown error'}`, 500);
+    }
+    const phase = status?.phase;
+    if (status?.status === 'ready' || phase === 'git-ready' || phase === 'setup-ready') return;
+    if (Date.now() >= deadline) {
+      throw new OpenChamberControlError('Timed out waiting for the worktree bootstrap', 500);
+    }
+    await new Promise((resolve) => setTimeout(resolve, WORKTREE_BOOTSTRAP_POLL_MS));
+  }
+};
+
+const latestUserMessageID = async ({ client, sessionID, directory }) => {
+  let response;
+  try {
+    response = await client.session.messages({ sessionID, directory, limit: 100 });
+  } catch {
+    return { ok: false, messageID: null };
+  }
+  const messages = Array.isArray(response?.data) ? response.data : [];
+  let latest = null;
+  for (const message of messages) {
+    const info = message?.info;
+    if (info?.role !== 'user') continue;
+    if (!latest || (info.time?.created || 0) >= (latest.time?.created || 0)) latest = info;
+  }
+  return { ok: true, messageID: asNonEmptyString(latest?.id) };
+};
+
+// `prompt_async` answers 204 as soon as OpenCode forks the run, and every later
+// failure is reported only on the session event stream. Confirm the prompt was
+// actually recorded so `promptDispatched` never claims a dispatch that vanished.
+const waitForPromptLanded = async ({ client, sessionID, directory, baselineUserMessageID }) => {
+  const deadline = Date.now() + PROMPT_LANDED_TIMEOUT_MS;
+  for (;;) {
+    const latest = await latestUserMessageID({ client, sessionID, directory });
+    // A failed lookup is not authoritative evidence that the prompt was lost.
+    if (!latest.ok) return true;
+    if (latest.messageID && latest.messageID !== baselineUserMessageID) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, PROMPT_LANDED_POLL_MS));
+  }
 };
 
 const resolveWorktreeInput = (payload) => {
@@ -297,6 +394,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     waitForOpenCodeReady,
     emitSessionCreatedEvent,
     createSessionGoal: createSessionGoalOverride,
+    sessionKnowledgeRuntime = null,
   } = dependencies;
 
   // Last user message of an existing session, as a selection to reuse. Returns
@@ -320,6 +418,48 @@ export const createOpenChamberSessionService = (dependencies) => {
     } catch {
     }
     return null;
+  };
+
+  // Explicit model/agent/variant are never checked by `prompt_async`: an unknown
+  // agent makes the forked run fail silently, leaving a session with no message.
+  // Reject them before any session, worktree, or goal side effect happens.
+  const validateRequestedSelection = async ({ directory, requestedModel, requestedAgent, requestedVariant }) => {
+    if (!requestedModel && !requestedAgent && !requestedVariant) return;
+    const authHeaders = getOpenCodeAuthHeaders();
+    const { providers, agents } = await fetchSelectionInputs({
+      buildOpenCodeUrl,
+      authHeaders,
+      directory,
+      readSettingsFromDiskMigrated,
+    });
+
+    // An empty list means the lookup failed or returned nothing authoritative;
+    // it must not turn a valid selection into a rejection.
+    if (requestedAgent && agents.length > 0) {
+      const agent = agents.find((entry) => entry?.name === requestedAgent) || null;
+      if (!agent) {
+        throw new OpenChamberControlError(`Unknown agent '${requestedAgent}' for ${directory}`, 400);
+      }
+      if (!isPrimaryAgentMode(agent.mode)) {
+        throw new OpenChamberControlError(`Agent '${requestedAgent}' is a subagent and cannot receive a prompt directly`, 400);
+      }
+    }
+
+    if (requestedModel && providers.length > 0) {
+      if (!hasProviderModel(providers, requestedModel.providerID, requestedModel.modelID)) {
+        throw new OpenChamberControlError(
+          `Unknown model '${requestedModel.providerID}/${requestedModel.modelID}' for ${directory}`,
+          400,
+        );
+      }
+      if (requestedVariant
+        && !resolveVariant(providers, requestedModel.providerID, requestedModel.modelID, requestedVariant)) {
+        throw new OpenChamberControlError(
+          `Unknown variant '${requestedVariant}' for model '${requestedModel.providerID}/${requestedModel.modelID}'`,
+          400,
+        );
+      }
+    }
   };
 
   const dispatchPrompt = async ({
@@ -417,6 +557,14 @@ export const createOpenChamberSessionService = (dependencies) => {
         throw markGoalPartial(error);
       }
     } else {
+      const baseline = await latestUserMessageID({ client, sessionID, directory });
+      // A session the agent dispatched has no UI to attach the project's
+      // standing context, so it is asked for here. Never fails the dispatch:
+      // a session that runs without its background beats one that never runs.
+      const knowledge = sessionKnowledgeRuntime
+        ? await sessionKnowledgeRuntime.resolvePendingForSession(sessionID, directory)
+          .catch(() => ({ text: '', signature: '' }))
+        : { text: '', signature: '' };
       try {
         await runPromptAsync({
           baseUrl,
@@ -428,6 +576,7 @@ export const createOpenChamberSessionService = (dependencies) => {
             ...(agent ? { agent } : {}),
             ...(variant ? { variant } : {}),
             parts: [
+              ...(knowledge.text ? [{ type: 'text', text: knowledge.text, synthetic: true }] : []),
               { type: 'text', text: expandedPrompt },
               ...(goalInput.enabled
                 ? [{ type: 'text', text: buildGoalIntroText(goalInput.tokenBudget), synthetic: true }]
@@ -438,9 +587,88 @@ export const createOpenChamberSessionService = (dependencies) => {
       } catch (error) {
         throw markGoalPartial(error);
       }
+      if (knowledge.text && sessionKnowledgeRuntime) {
+        // After the prompt is accepted, so a rejected dispatch carries it again.
+        await sessionKnowledgeRuntime.recordDelivered(sessionID, directory, knowledge.signature)
+          .catch(() => undefined);
+      }
+      const landed = await waitForPromptLanded({
+        client,
+        sessionID,
+        directory,
+        baselineUserMessageID: baseline.messageID,
+      });
+      if (!landed) {
+        return {
+          model,
+          agent,
+          variant,
+          promptDispatched: false,
+          dispatchedAsCommand: false,
+          promptError: 'OpenCode accepted the prompt but it never appeared in the session',
+        };
+      }
     }
 
     return { model, agent, variant, promptDispatched: true, dispatchedAsCommand: Boolean(resolvedCommand) };
+  };
+
+  /**
+   * Archive a batch of sessions in one request.
+   *
+   * The UI archives every session linked to a worktree before removing it.
+   * Doing that from the browser costs one request per session plus a store
+   * reconciliation between each of them, which is what made deleting a
+   * worktree with many sessions take tens of seconds. Here the batch stays on
+   * the server, next to OpenCode, and the client reconciles once.
+   *
+   * Sessions are updated one at a time on purpose: they are archived against a
+   * single OpenCode instance, and a fan-out of concurrent writes would trade a
+   * UI stall for server event-loop starvation. One failed session never stops
+   * the batch — it is reported in `failedIds` while the rest still archive, so
+   * callers keep the partial-failure behaviour they already show.
+   */
+  const archive = async (payload = {}) => {
+    const parsed = parseArchiveRequest(payload);
+    if (!parsed.ok) {
+      throw new OpenChamberControlError(parsed.error, 400);
+    }
+
+    const resolvedDirectory = await resolveRequestedDirectory({
+      payload,
+      readSettingsFromDiskMigrated,
+      sanitizeProjects,
+      validateDirectoryPath,
+    });
+    if (!resolvedDirectory.ok) {
+      throw new OpenChamberControlError(resolvedDirectory.error, resolvedDirectory.status || 400);
+    }
+
+    if (typeof waitForOpenCodeReady === 'function') await waitForOpenCodeReady(10_000, 250);
+
+    const directory = resolvedDirectory.directory;
+    const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
+    const client = createOpencodeClient({ baseUrl, headers: getOpenCodeAuthHeaders() });
+
+    const archived = [];
+    const failedIds = [];
+    for (const sessionID of parsed.ids) {
+      try {
+        const response = await client.session.update({
+          sessionID,
+          directory,
+          time: { archived: parsed.archivedAt },
+        });
+        const session = response?.data;
+        if (session?.id) archived.push(session);
+        else failedIds.push(sessionID);
+      } catch (error) {
+        console.warn('[OpenChamberSessions] failed to archive session', sessionID, error);
+        failedIds.push(sessionID);
+      }
+    }
+
+    return { directory, archived, failedIds };
   };
 
   const create = async (payload = {}) => {
@@ -470,12 +698,23 @@ export const createOpenChamberSessionService = (dependencies) => {
     if (payload?.worktree && !worktreeInput) {
       throw new OpenChamberControlError('worktree.name is required when worktree is provided', 400);
     }
+
+    if (typeof waitForOpenCodeReady === 'function') await waitForOpenCodeReady(10_000, 250);
+
+    if (prompt) {
+      await validateRequestedSelection({
+        directory: resolvedDirectory.directory,
+        requestedModel: model,
+        requestedAgent: agent,
+        requestedVariant: variant,
+      });
+    }
+
     if (worktreeInput) {
       worktree = await createWorktree(resolvedDirectory.directory, worktreeInput);
       sessionDirectory = worktree.path;
+      await waitForWorktreeBootstrapReady({ directory: sessionDirectory });
     }
-
-    if (typeof waitForOpenCodeReady === 'function') await waitForOpenCodeReady(10_000, 250);
 
     const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
     const authHeaders = getOpenCodeAuthHeaders();
@@ -514,6 +753,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       ...(prompt && dispatch.agent ? { agent: dispatch.agent } : {}),
       ...(prompt && dispatch.variant ? { variant: dispatch.variant } : {}),
       promptDispatched: dispatch.promptDispatched,
+      ...(dispatch.promptError ? { promptError: dispatch.promptError } : {}),
       dispatchedAsCommand: dispatch.dispatchedAsCommand,
       ...(goalInput.enabled ? { goalEnabled: true } : {}),
       ...(goalInput.tokenBudget ? { goalTokenBudget: goalInput.tokenBudget } : {}),
@@ -566,6 +806,13 @@ export const createOpenChamberSessionService = (dependencies) => {
       directory = resolvedDirectory.directory;
       if (typeof waitForOpenCodeReady === 'function') await waitForOpenCodeReady(10_000, 250);
 
+      await validateRequestedSelection({
+        directory,
+        requestedModel,
+        requestedAgent: asNonEmptyString(payload.agent),
+        requestedVariant: asNonEmptyString(payload.variant),
+      });
+
       const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
       const authHeaders = getOpenCodeAuthHeaders();
       const client = createOpencodeClient({ baseUrl, headers: authHeaders });
@@ -608,7 +855,8 @@ export const createOpenChamberSessionService = (dependencies) => {
         model: dispatch.model,
         ...(dispatch.agent ? { agent: dispatch.agent } : {}),
         ...(dispatch.variant ? { variant: dispatch.variant } : {}),
-        promptDispatched: true,
+        promptDispatched: dispatch.promptDispatched,
+        ...(dispatch.promptError ? { promptError: dispatch.promptError } : {}),
         dispatchedAsCommand: dispatch.dispatchedAsCommand,
         ...(goalInput.enabled ? { goalEnabled: true } : {}),
         ...(goalInput.tokenBudget ? { goalTokenBudget: goalInput.tokenBudget } : {}),
@@ -624,7 +872,7 @@ export const createOpenChamberSessionService = (dependencies) => {
             model: dispatch.model,
             ...(dispatch.agent ? { agent: dispatch.agent } : {}),
             ...(dispatch.variant ? { variant: dispatch.variant } : {}),
-            promptDispatched: true,
+            promptDispatched: dispatch.promptDispatched,
             dispatchedAsCommand: dispatch.dispatchedAsCommand,
             ...(goalInput.enabled ? { goalEnabled: true } : {}),
             ...(goalInput.tokenBudget ? { goalTokenBudget: goalInput.tokenBudget } : {}),
@@ -657,6 +905,7 @@ export const createOpenChamberSessionService = (dependencies) => {
 
   return {
     create,
+    archive,
     send: (sessionID, payload) => runExisting('send', sessionID, payload),
     fork: (sessionID, payload) => runExisting('fork', sessionID, payload),
   };
@@ -684,6 +933,15 @@ export const registerOpenChamberSessionRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('[OpenChamberSessions] failed to create session:', error);
       return sendServiceError(res, error, 'Failed to create session');
+    }
+  });
+
+  app.post('/api/openchamber/sessions/archive', express.json({ limit: '1mb' }), async (req, res) => {
+    try {
+      return res.json(await service.archive(req.body && typeof req.body === 'object' ? req.body : {}));
+    } catch (error) {
+      console.error('[OpenChamberSessions] failed to archive sessions:', error);
+      return sendServiceError(res, error, 'Failed to archive sessions');
     }
   });
 

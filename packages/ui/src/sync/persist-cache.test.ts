@@ -1,7 +1,9 @@
+import { opencodeClient } from '@/lib/opencode/client';
+import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { Session } from "@opencode-ai/sdk/v2/client"
 import { switchRuntimeEndpoint } from "@/lib/runtime-switch"
-import { persistSessions, readDirCache } from "./persist-cache"
+import { persistManagedChatSessions, persistSessions, readDirCache, readManagedChatSessions } from "./persist-cache"
 import { getSyncPerformanceDiagnostics, setSyncPerformanceDiagnosticsEnabled } from "./performance-diagnostics"
 
 class TestStorage implements Storage {
@@ -69,10 +71,14 @@ const session = (
   time: { created: updated - 1, updated },
 } as Session)
 
-beforeEach(() => {
+beforeEach(async () => {
   storage = new TestStorage()
   Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage })
   switchRuntimeEndpoint({ apiBaseUrl: "https://runtime-default.test", runtimeKey: "runtime-default" })
+  const originalHomeInfo = opencodeClient.getFilesystemHomeInfo
+  opencodeClient.getFilesystemHomeInfo = async () => ({ home: '/home/user' })
+  await ensureChatsRootDirectory()
+  opencodeClient.getFilesystemHomeInfo = originalHomeInfo
 })
 
 afterEach(() => {
@@ -81,6 +87,27 @@ afterEach(() => {
 })
 
 describe("persisted directory sessions", () => {
+  test("keeps one runtime-scoped startup snapshot for managed chats", async () => {
+    const chat = session(1, 2, "Chat", "/home/user/.config/openchamber/chats/2026-08-21/session-a")
+    persistManagedChatSessions([session(2, 3), chat])
+    await waitForPersistence()
+
+    expect(readManagedChatSessions().map((item) => item.id)).toEqual([chat.id])
+
+    switchRuntimeEndpoint({ apiBaseUrl: "https://runtime-other.test", runtimeKey: "runtime-other" })
+    expect(readManagedChatSessions()).toEqual([])
+  })
+
+  test("coalesces a continuing burst into one trailing session write", async () => {
+    persistSessions(directory, [session(1, 1)])
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    persistSessions(directory, [session(1, 2)])
+    await waitForPersistence()
+
+    expect(storage.writes).toBe(1)
+    expect(readDirCache(directory).sessions?.[0]?.time.updated).toBe(2)
+  })
+
   test("keeps the 50 most recently updated sessions across restart reads", async () => {
     const sessions = Array.from({ length: 60 }, (_, updated) => session(59 - updated, updated))
 

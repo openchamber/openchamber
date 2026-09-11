@@ -1,0 +1,85 @@
+---
+title: Değişiklik İncelemesi
+description: Bir diff'i alfabetik sıraya göre değil, anlamlı olduğu sırayla okuyun.
+---
+
+# Değişiklik İncelemesi
+
+Diff dosya yoluna göre sıralanır, ama değişikliğin anlamlı olduğu sıra neredeyse hiç öyle değildir. Walkthrough bunu yeniden sıralar. İlgili düzenlemeler **duraklar** halinde gruplanır. Her durak, kodun artık neyi farklı yaptığını açıklar ve duraklar da her biri bir öncekine dayanacak şekilde dizilir.
+
+Açıklar ve sıralar. Kodunuzu yargılamaz, karar vermez. Bunun için [Review](/git/) vardır.
+
+Bunu sağ kenar şeridindeki **Walkthrough** simgesinden ya da Changes ve Pull Request panellerindeki **AI walkthrough** düğmesinden açın. İkisi de yalnızca paneli açar. **Generate walkthrough** düğmesine basana kadar hiçbir şey üretilmez.
+
+## Bir durak nasıl işaretlenir
+
+Her durak neyle ilgili olduğunu söyler, bunu bir iki cümleyle açıklar ve sonra anlattığı kodu doğrudan gösterir. Bazı durakların başlığının yanında küçük bir etiket olur:
+
+| Etiket | Anlamı |
+| --- | --- |
+| **Key change** | Bu durak değişikliğin geri kalanını sürükler ya da riskin çoğunu taşır. Yakından okuyun ve önce bunu okuyun. |
+| **Context** | Geri kalan kısmın anlaşılması için eklenmiş destekleyici bir değişiklik. Hızla göz atılabilir. |
+| *(etiket yok)* | Okuma sırasındaki sıradan bir adım. |
+
+Etiket, **dikkatinizi nereye vereceğinizi** söyler. Kodun kalitesiyle ilgili değildir. Bir durak, içinde bir şey yanlış bulunduğu için işaretlenmez. Walkthrough hiçbir bulgu, şiddet seviyesi ya da karar vermez. Kodu yargılatmak istiyorsanız, bu [Git & GitHub](/git/) içindeki **Review** işlemidir.
+
+Problem bildiren tek işaretler **Outdated** ve **Not covered**dır. İkisi de kodunuzdan değil, walkthrough'un kendisinin eski kalmasından söz eder. Aşağıya bakın.
+
+## Neleri inceleyebilir
+
+| Kapsam | Neleri kapsar |
+| --- | --- |
+| All uncommitted | Henüz commit edilmemiş her şey. Stage edilmiş, stage edilmemiş ve yeni dosyalar. |
+| Staged | Şu anda commit'e girecek olanlar. |
+| Unstaged | Working tree ve yeni dosyalar. |
+| This branch | Bu branch'in base'inde olmayan tüm commit'leri. |
+| Pull request | GitHub'daki haliyle değişiklik. |
+
+**This branch**, "push edilmemiş commit'ler" demek değildir. Branch'in base'ine eklediği her şeydir, push edilmiş olsun olmasın. Bu yüzden commit ettikten ama push etmeden önce, bu görünüm ile pull request bilerek farklı olur. Biri yaptığınızı, diğeri inceleyenlerin şu anda gördüğünü gösterir.
+
+Her kapsam ayrı saklanır. Aralarında geçiş yapmak hiçbir şeyi kaybettirmez.
+
+## Model seçimi
+
+Walkthrough'lar varsayılan olarak küçük modelinizi kullanır. Başka bir model seçmek için **Settings → Sessions → Changes Walkthrough Model** bölümüne gidin ya da tek bir inceleme için panel başlığındaki seçiciyi kullanın. Değişiklik yeterince riskliyse daha güçlü bir model kullanmak işe yarar.
+
+Seçici yalnızca yapılandırılmış çıktı verebilen modelleri gösterir. Walkthrough bunun olmadan kurulamaz. Model diff için fazla küçükse, üretim sessizce kısaltılmak yerine açıklamayla reddedilir. Diff'in yarısına bakarak yazılmış bir walkthrough kendinden emin görünür ama yanlıştır.
+
+Paneli yeniden açtığınızda, gördüğünüz çıktıyı üreten model görünür. Bu yüzden **Regenerate**, siz değiştirmedikçe aynı modelle tekrar eder.
+
+## Dil seçimi
+
+Walkthrough'lar varsayılan olarak arayüz dilinizde yazılır. Panel başlığındaki dil seçici buradan başlar. OpenChamber'ın çevrildiği başka bir dili tek bir inceleme için seçebilirsiniz. Rehberli açıklama, rahat okuduğunuz bir dildeyse faydalıdır.
+
+Yalnızca düz metin çevrilir. Tanımlayıcılar, dosya yolları ve API adları kodda göründükleri gibi kalır. Böylece bir durak neyi adlandırıyorsa onu yine arayıp bulabilirsiniz.
+
+Seçtiğiniz dilde henüz bir şey üretilmemişse, panel elindeki walkthrough'u göstermeyi sürdürür ve bunu söyler. Yeni dilde bir tane almak için **Generate walkthrough** düğmesine basın.
+
+## Maliyet ve önbellek
+
+Kendi kendine hiçbir şey üretilmez. Üretim yalnızca siz istediğinizde başlar. Yeniden üretim de elle yapılır.
+
+Sonuçlar, diff'in tam içeriğine göre önbelleğe alınır. Working tree'yi eski bir duruma döndürün, eski walkthrough model çağrısı olmadan geri gelir. Dil ve model de bu anahtarın parçasıdır. Her birleşim ayrı tutulur. Bir diff'in iki dilde walkthrough'u varsa, aralarında geçiş anlık olur ve maliyeti yoktur.
+
+Üretim tarayıcı sekmenizde değil, OpenChamber sunucusunda çalışır. Sayfayı yenileyin ya da paneli kapatın, işlem sürer. Geri döndüğünüzde sonuç hazırdır. Onu durduran tek şey **Cancel** düğmesidir.
+
+## Eskime durumunu dürüstçe gösterme
+
+Her durak, anlattığı kodun tam içeriğine bağlıdır. Bu yüzden panel, kod o zamandan beri değiştiyse size bunu söyleyebilir:
+
+- **Outdated steps** — bir durakta anlatılan kod değişmiş ya da silinmiştir. Walkthrough yine gösterilir, ama işaretlenir. Böylece yeniden üretip üretmemeye siz karar verirsiniz.
+- **Not covered** — mevcut diff'te olup da hiçbir durak tarafından anlatılmayan değişiklikler. Buna, üretimden sonra yapılan düzenlemeler, walkthrough'un sıradan saydığı değişiklikler ve model girdisinden bilerek çıkarılan lockfile'lar ile diğer üretilmiş dosyalar dahildir. Hiçbir şey sessizce kaybolmasın diye bunların hepsi akışın sonunda listelenir.
+
+Yeniden üretmek, yamalamak yerine yeniden yazmak demektir. Önceki walkthrough bağlam olarak modele verilir, böylece doğru parçalar korunur ve her şey güncel koda yeniden bağlanır.
+
+## Notlar
+
+- Walkthrough'daki herhangi bir satıra diff görünümündekiyle aynı şekilde yorum yapın. Yorumlar chat composer'a eklenir.
+- Desktop ve tablet genişliklerinde kullanılabilir. VS Code eklentisinde ya da mobil uygulamada sunulmaz.
+- Pull request incelemesi için bağlı bir GitHub hesabı gerekir. Bkz. [GitHub Issues & PRs](/github/).
+
+## İlgili
+
+- [Git & GitHub](/git/) — bunu okuyan Changes paneli ve kodu yargılayan Review işlemi
+- [GitHub Issues & PRs](/github/) — pull request'leri incelemek için GitHub'ı bağlayın
+- [Providers, Models & Agents](/providers/) — küçük modelin geldiği yer

@@ -11,6 +11,20 @@ It explains and orders. It does not judge your code or hand out verdicts — tha
 
 Open it from the **Walkthrough** icon in the right rail, or from the **AI walkthrough** button in the Changes and Pull Request panels. Both just open the panel; nothing is generated until you press **Generate walkthrough**.
 
+## How a stop is marked
+
+Each stop names what it is about, explains it in a sentence or two, and then shows exactly the code it describes. Some stops carry a small tag next to the title:
+
+| Tag | What it means |
+| --- | --- |
+| **Key change** | This stop drives the rest of the change, or carries most of its risk. Read it closely and read it first. |
+| **Context** | A supporting change, included so the rest makes sense. Safe to skim. |
+| *(no tag)* | An ordinary step in the reading order. |
+
+The tag is about **where to spend your attention**, not about the quality of the code. A stop is never marked because something was found wrong in it — the walkthrough reports no findings, no severities, and no verdicts. If you want code judged, that is the **Review** action in [Git & GitHub](/git/).
+
+The only marks that do report a problem are **Outdated** and **Not covered**, and both are about the walkthrough itself going out of date rather than about your code — see below.
+
 ## What it can review
 
 | Scope | What it covers |

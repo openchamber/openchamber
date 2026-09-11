@@ -1,0 +1,39 @@
+---
+title: Komutlar ve Snippets
+description: Sohbet için yeniden kullanılabilir slash komutları ve metin parçaları oluşturun.
+---
+
+# Komutlar ve Snippets
+
+Komutlar ve snippets aynı şeyi yeniden yazmaktan kurtarır. Komutlar, `/` ile çalıştırdığınız tam istemlerdir; snippets ise bir mesaja `#` ile eklediğiniz metin parçalarıdır.
+
+## Komutlar
+
+Komut, `/review` gibi eğik çizgiyle çalıştırdığınız kayıtlı bir istemdir. Bunları **Settings → Commands** altında yönetirsiniz.
+
+1. **Settings → Commands** bölümünü açın ve bir komut oluşturun.
+2. Ona bir ad, açıklama ve göndermesi gereken istem metnini verin.
+3. İsterseniz belirli bir agent'a ya da modele sabitleyin.
+4. Kişisel ya da proje kapsamını seçin.
+
+Sohbette, komutları açmak için mesajın **ilk** karakteri olarak `/` yazın ve ardından birini seçin. Metniniz şu yer tutucuları kullanabilir:
+
+- `$ARGUMENTS` — komuttan sonra yazdığınız her şey
+- `@filename` — bir dosyanın içeriğini ekler
+- `` !`command` `` — bir shell komutunun çıktısını ekler
+
+Yerleşik `init` ve `review` komutları sıfırlanabilir, ama silinemez.
+
+## Snippets
+
+Snippet, `#signoff` gibi bir etiketle satır içinde çağırdığınız yeniden kullanılabilir metindir. Bunları **Settings → Snippets** altında yönetirsiniz.
+
+1. **Settings → Snippets** bölümünü açın ve bir snippet oluşturun.
+2. Ona bir ad ve temsil ettiği metni verin. Birden fazla tetikleyici istiyorsanız takma adlar ekleyin.
+3. Kişisel ya da proje kapsamını seçin.
+
+Sohbette `#` yazın ve bir snippet seçin. OpenChamber gönderimden önce tam metni yerine yerleştirir.
+
+## İlgili
+
+- [Skills](/skills/) — daha büyük yönerge kümelerini gerektiğinde yükler

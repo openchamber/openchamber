@@ -5,7 +5,17 @@ import { readAuthFile } from '../opencode/auth.js';
 import { readConfigLayers } from '../opencode/shared.js';
 import { getModelCatalog } from './catalog.js';
 import { resolveSmallModel, parseModelRef, isUsableAuthEntry, getAuthEntryForProvider } from './resolve.js';
-import { callSmallModel } from './call.js';
+import { DEDICATED_WIRE_FORMAT_PROVIDERS, callSmallModel, resolveProviderLogin } from './call.js';
+import { readMergedSettingsSync } from '../opencode/settings-files.js';
+import { getRuntimeProviderSnapshot } from './runtime-providers.js';
+
+// Never a small model, whatever the transport looks like. A plugin can publish
+// an OpenAI-compatible endpoint for Claude Code, but it is a façade over the
+// Claude Agent SDK, which spawns the Claude Code CLI per request and spends
+// the user's Claude subscription rate limit. Paying that for a session title
+// or a summary is the wrong trade, so the refusal is unconditional rather than
+// conditional on an endpoint existing.
+const CLAUDE_CODE_PROVIDER = 'claude-code';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -17,16 +27,10 @@ const OPENCHAMBER_SETTINGS_FILE = path.join(
 // OpenChamber's own settings: when the user unchecks "use default small model"
 // their explicit override outranks every other resolution step.
 const readSmallModelSettingsOverride = () => {
-  try {
-    const raw = fs.readFileSync(OPENCHAMBER_SETTINGS_FILE, 'utf8');
-    const settings = JSON.parse(raw);
-    if (!settings || typeof settings !== 'object') return null;
-    if (settings.smallModelUseDefault !== false) return null;
-    const override = typeof settings.smallModelOverride === 'string' ? settings.smallModelOverride.trim() : '';
-    return override || null;
-  } catch {
-    return null;
-  }
+  const settings = readMergedSettingsSync({ fs, path, settingsFilePath: OPENCHAMBER_SETTINGS_FILE });
+  if (settings.smallModelUseDefault !== false) return null;
+  const override = typeof settings.smallModelOverride === 'string' ? settings.smallModelOverride.trim() : '';
+  return override || null;
 };
 
 // Rough safety clamp so a huge input never blows the model's context window.
@@ -93,7 +97,7 @@ const readConfiguredSmallModel = (workingDirectory) => {
  * Generates text with the user's small model, resolved and authenticated
  * entirely server-side from the OpenCode config and auth store.
  */
-export async function generateSmallModelText({ prompt, system, maxOutputTokens, model, directory, preferredProviderID, preferredModelID, restrictToPreferredProvider = false, responseSchema, timeoutMs, signal, onOverflow = 'truncate' }) {
+export async function generateSmallModelText({ prompt, system, maxOutputTokens, model, directory, sessionID, preferredProviderID, preferredModelID, restrictToPreferredProvider = false, responseSchema, timeoutMs, signal, onOverflow = 'truncate' }) {
   if (typeof prompt !== 'string' || !prompt.trim()) {
     throw Object.assign(new Error('prompt is required'), { statusCode: 400 });
   }
@@ -117,6 +121,13 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
     throw Object.assign(
       new Error('No small model available — no authenticated provider has a suitable model'),
       { statusCode: 404 },
+    );
+  }
+
+  if (resolved.providerID === CLAUDE_CODE_PROVIDER) {
+    throw Object.assign(
+      new Error('Claude Code cannot be used for background small-model actions. Choose another Small Model in Settings → Sessions.'),
+      { statusCode: 422, code: 'small-model-provider-unsupported' },
     );
   }
 
@@ -153,6 +164,7 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
     auth,
     catalog,
     workingDirectory: directory,
+    sessionID,
     providerID: resolved.providerID,
     modelID: resolved.modelID,
     prompt: clamped.prompt,
@@ -173,11 +185,12 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
 }
 
 /**
- * Provider ids with a usable OpenCode login — the set the small model can
- * actually call. Used by the settings override picker to hide providers that
- * would only ever fail (e.g. opencode free models without a token).
+ * Provider ids the small model can actually call — an auth.json login, or a
+ * credential and endpoint the running OpenCode resolved for a plugin. Used by
+ * the Small Model and Changes Walkthrough pickers to hide providers that would
+ * only ever fail (e.g. opencode free models without a token).
  */
-export function listAuthenticatedProviders() {
+export async function listAuthenticatedProviders() {
   try {
     const auth = readAuthFile();
     const ids = new Set(
@@ -188,10 +201,44 @@ export function listAuthenticatedProviders() {
     if (isUsableAuthEntry(getAuthEntryForProvider(auth, 'github-copilot'))) {
       ids.add('github-copilot');
     }
+    // Kept separate so a runtime lookup that goes wrong costs the providers it
+    // would have added, never the logins already established from disk.
+    try {
+      for (const providerID of await listRuntimeCallableProviders()) ids.add(providerID);
+    } catch {
+      // The auth.json set below stands on its own.
+    }
+    ids.delete(CLAUDE_CODE_PROVIDER);
     return Array.from(ids);
   } catch {
     return [];
   }
+}
+
+/**
+ * Providers that only the running OpenCode knows about — plugin-registered
+ * ones, and any whose endpoint is resolved at startup.
+ *
+ * The test is the same one applied to an auth.json login: a credential we may
+ * use and somewhere to send it. Whether the endpoint answers the protocol we
+ * speak is not knowable from any field OpenCode reports, and guessing it wrong
+ * removes a working model from the picker with nothing to explain it.
+ */
+async function listRuntimeCallableProviders() {
+  const snapshot = await getRuntimeProviderSnapshot();
+  if (!snapshot) return [];
+  const ids = [];
+  for (const id of snapshot.connected) {
+    const provider = snapshot.providers.get(id);
+    // No credential we may use — including the zen sentinel, whose free models
+    // belong to OpenCode's own server.
+    if (!provider?.apiKey || !provider.baseURL) continue;
+    // Reached through a dedicated wire format and already covered by the
+    // auth.json scan above.
+    if (DEDICATED_WIRE_FORMAT_PROVIDERS.has(id)) continue;
+    ids.push(id);
+  }
+  return ids;
 }
 
 /**
@@ -252,8 +299,17 @@ export async function describeSmallModel({ directory, preferredProviderID, prefe
     outputReserveTokens: reserveTokens,
   });
 
+  // Settings/config/request overrides can name a provider with no usable login.
+  // Report that here so readiness can refuse before the user pays for a 401.
+  const hasLogin = Boolean(await resolveProviderLogin({
+    auth,
+    workingDirectory: directory,
+    providerID: resolved.providerID,
+  }));
+
   return {
     ...resolved,
+    hasLogin,
     inputCharBudget: maxChars,
     contextTokens,
     contextKnown,

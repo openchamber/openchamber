@@ -9,6 +9,11 @@ import {
 const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
 const BASE_URL_PATTERN = /^https?:\/\//;
 const OPENAI_COMPATIBLE_NPM = '@ai-sdk/openai-compatible';
+const CUSTOM_PROVIDER_NPM_PACKAGES = new Set([
+  OPENAI_COMPATIBLE_NPM,
+  '@ai-sdk/openai',
+  '@ai-sdk/anthropic',
+]);
 
 function getProviderSources(providerId, workingDirectory) {
   const layers = readConfigLayers(workingDirectory);
@@ -42,7 +47,7 @@ function getProviderSources(providerId, workingDirectory) {
 }
 
 /**
- * Validate a custom OpenAI-compatible provider config payload before persistence.
+ * Validate a custom provider config payload before persistence.
  * Returns { ok: true, value } or { ok: false, error }.
  *
  * Credentials: either config.env contains a variable name, or hasStoredAuth is true
@@ -63,8 +68,8 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
   }
 
   const npm = typeof config.npm === 'string' ? config.npm.trim() : OPENAI_COMPATIBLE_NPM;
-  if (npm !== OPENAI_COMPATIBLE_NPM) {
-    return { ok: false, error: `Custom providers must use npm package ${OPENAI_COMPATIBLE_NPM}` };
+  if (!CUSTOM_PROVIDER_NPM_PACKAGES.has(npm)) {
+    return { ok: false, error: 'Custom providers must use @ai-sdk/openai-compatible, @ai-sdk/openai, or @ai-sdk/anthropic' };
   }
 
   const optionsBlock = isPlainObject(config.options) ? config.options : null;
@@ -102,7 +107,7 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
   }
 
   const normalized = {
-    npm: OPENAI_COMPATIBLE_NPM,
+    npm,
     name,
     options: {
       baseURL,
@@ -147,6 +152,37 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
   return { ok: true, value: { providerId, config: normalized } };
 }
 
+function mergeCustomProviderConfig(existingValue, normalizedConfig) {
+  const existing = isPlainObject(existingValue) ? existingValue : {};
+  const existingOptions = isPlainObject(existing.options) ? existing.options : {};
+  const normalizedOptions = isPlainObject(normalizedConfig.options) ? normalizedConfig.options : {};
+  const mergedOptions = { ...existingOptions, ...normalizedOptions };
+  if (!Object.prototype.hasOwnProperty.call(normalizedOptions, 'headers')) {
+    delete mergedOptions.headers;
+  }
+
+  const existingModels = isPlainObject(existing.models) ? existing.models : {};
+  const normalizedModels = isPlainObject(normalizedConfig.models) ? normalizedConfig.models : {};
+  const mergedModels = Object.fromEntries(
+    Object.entries(normalizedModels).map(([modelId, normalizedModel]) => {
+      const existingModel = isPlainObject(existingModels[modelId]) ? existingModels[modelId] : {};
+      const nextModel = isPlainObject(normalizedModel) ? normalizedModel : {};
+      return [modelId, { ...existingModel, ...nextModel }];
+    }),
+  );
+
+  const merged = {
+    ...existing,
+    ...normalizedConfig,
+    options: mergedOptions,
+    models: mergedModels,
+  };
+  if (!Object.prototype.hasOwnProperty.call(normalizedConfig, 'env')) {
+    delete merged.env;
+  }
+  return merged;
+}
+
 /**
  * Persist (create or update) a custom provider block in OpenCode user/project/custom config.
  * Does not write secrets — API keys remain in auth.json via the OpenCode auth API.
@@ -178,8 +214,19 @@ function upsertProviderConfig(providerId, config, workingDirectory, scope = 'use
 
   const targetConfig = getConfigForPath(layers, targetPath);
   const providerConfig = isPlainObject(targetConfig.provider) ? { ...targetConfig.provider } : {};
-  providerConfig[validated.value.providerId] = validated.value.config;
+  const providersAlias = isPlainObject(targetConfig.providers) ? { ...targetConfig.providers } : {};
+  const existingProvider = providerConfig[validated.value.providerId] ?? providersAlias[validated.value.providerId];
+  const mergedConfig = mergeCustomProviderConfig(existingProvider, validated.value.config);
+  providerConfig[validated.value.providerId] = mergedConfig;
   targetConfig.provider = providerConfig;
+  if (Object.prototype.hasOwnProperty.call(providersAlias, validated.value.providerId)) {
+    delete providersAlias[validated.value.providerId];
+    if (Object.keys(providersAlias).length === 0) {
+      delete targetConfig.providers;
+    } else {
+      targetConfig.providers = providersAlias;
+    }
+  }
 
   if (Array.isArray(targetConfig.disabled_providers)) {
     targetConfig.disabled_providers = targetConfig.disabled_providers.filter(
@@ -193,7 +240,7 @@ function upsertProviderConfig(providerId, config, workingDirectory, scope = 'use
   return {
     providerId: validated.value.providerId,
     path: writePath,
-    config: validated.value.config,
+    config: mergedConfig,
   };
 }
 

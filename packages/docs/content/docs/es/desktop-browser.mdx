@@ -1,22 +1,53 @@
 ---
-title: Navegador de escritorio
-description: Navega cualquier página dentro de la app de escritorio, con inspección y captura de consola.
+title: Panel del navegador
+description: Navega cualquier página dentro de la aplicación, anótala y deja que el agente la maneje.
 ---
 
-# Navegador de escritorio
+# Panel del navegador
 
-La app de escritorio tiene un navegador integrado para que abras cualquier página justo al lado de tu chat, señales elementos para preguntar sobre ellos y captures la consola de la página. Ábrelo desde el botón del globo en el encabezado de la app.
+El panel del navegador abre cualquier página justo al lado del chat. Ábrelo con el botón del globo de la cabecera.
 
-> El navegador de escritorio es una función **solo de escritorio**. En la web, el panel de [vista previa](/es/preview/) ofrece las mismas herramientas de inspección y consola para tu servidor de desarrollo local.
+En la aplicación de escritorio es un navegador de verdad: tus sesiones se mantienen, la recarga en caliente funciona y las herramientas de desarrollo están a un clic. En una pestaña del navegador el panel puede mostrar una página, pero no mirar dentro de ella: las herramientas de anotación de abajo son solo de escritorio.
 
-## Inspecciona y anota
+Las páginas que abras aquí no pueden usar tu cámara, tu micrófono ni tu ubicación: esas peticiones se rechazan.
 
-Activa **inspect** y haz clic en cualquier elemento de la página. OpenChamber captura una nota sobre él —qué es, sus estilos, dónde se sitúa y una captura de pantalla— y la adjunta a tu mensaje del chat. Es la forma más rápida de decirle al agente "este elemento, justo aquí".
+## La barra de herramientas
 
-## Captura de consola
+La barra de direcciones recuerda las páginas que has abierto en este proyecto y las ofrece mientras escribes, buscando en parte de la dirección o del título de la página. Las flechas recorren la lista, Enter abre la entrada resaltada y el botón de una fila la quita.
 
-El navegador recopila la salida de la consola de la página —errores, advertencias y registros— para que puedas filtrarla y leerla sin abrir las herramientas de desarrollo.
+Al lado está **Recargar**, junto con una **recarga forzada** que ignora la caché cuando un cambio se niega a aparecer, y los controles de zoom, que escalan solo la página.
+
+**Borrar cookies** y **Borrar datos en caché** afectan únicamente a este panel. Tu sesión de OpenChamber y cualquier otra ventana quedan intactas.
+
+## Anotar una página
+
+Pulsa **Anotar** y aparecerá una barra sobre la página con tres herramientas:
+
+- **Elemento** — haz clic en un elemento. Hacer clic en otro mueve la selección; volver a hacer clic en el mismo la quita.
+- **Región** — arrastra un recuadro alrededor de una zona cuando te refieras a más de un elemento.
+- **Dibujar** — traza a mano alzada sobre la página.
+
+Escribe lo que quieres en el cuadro que aparece junto a tu marca y pulsa **Adjuntar**, o simplemente Enter. Tu mensaje recibe una tarjeta con todo lo que has marcado, tu nota y una captura de la página visible con tus marcas dibujadas encima — así puedes decir "este botón, un poco más redondeado" en vez de describir dónde está.
+
+La página en sí nunca se modifica: anotar solo marca lo que ya está ahí. `Esc` cancela y cierra la barra.
+
+## Dejar que el agente maneje
+
+El agente puede usar el panel del navegador por su cuenta — abrir una página, leer lo que hay en ella, hacer clic, escribir, desplazarse y alternar entre diseño móvil, de tableta y de escritorio — para comprobar su propio trabajo en lugar de pedírtelo a ti. Lo verás ocurrir en el panel.
+
+El agente no puede ejecutar código arbitrario en la página. El navegador conserva tus sesiones reales, así que se limita a las acciones anteriores.
+
+También puede guardar una imagen de lo que está viendo en `.openchamber/screenshots/` de tu proyecto y mostrártela en su respuesta. Eso es lo que hace posible un antes y después, y el archivo se queda ahí para adjuntarlo a un pull request.
+
+Las acciones del navegador son la **herramienta OpenChamber Web**, que se activa y desactiva por separado en **Ajustes → General → Herramientas de OpenChamber**.
+
+Esto necesita la aplicación de escritorio: una página mostrada en una pestaña del navegador no se puede controlar.
+
+## Herramientas de desarrollo
+
+Pulsa el botón de terminal de la barra para abrir las herramientas de desarrollo propias de Chromium — consola, red, elementos, todo lo habitual.
 
 ## Relacionado
 
-- [Vista previa y servidores de desarrollo](/es/preview/) — las mismas herramientas para tu servidor de desarrollo local
+- [Vista previa y servidores de desarrollo](/preview/) — abrir tu aplicación en marcha, también en una máquina remota
+- [Herramienta de control para agentes](/es/agent-control-tool/) — sesiones, worktrees y tareas programadas desde el chat

@@ -1,0 +1,34 @@
+---
+title: Çoklu Çalıştırma
+description: Aynı promptu birkaç model veya oturumda aynı anda çalıştırın.
+---
+
+# Çoklu Çalıştırma
+
+Çoklu çalıştırma, tek bir formdan birkaç oturum başlatır. Aynı işi farklı modellerle denemek ve sonuçları karşılaştırmak için kullanışlıdır. Oturum kenar çubuğunun üstündeki düğmeden açılır.
+
+## Çoklu çalıştırma başlatın
+
+1. Çoklu çalıştırma başlatıcısını açın.
+2. Projeyi seçin ve çalıştırma grubuna bir ad verin.
+3. Promptu yazın ve hangi modellerle çalıştıracağınızı seçin. Grup başına en fazla beş model seçebilirsiniz.
+4. **isolate runs** seçeneğini kullanıp kullanmayacağınıza karar verin.
+5. Başlatın.
+
+Her model kendi oturumunu alır ve hepsi promptunuzla başlar.
+
+## İzole çalıştırmalar
+
+Her çalıştırmaya kendi [worktree](/worktrees/) ve branch'ini vermek için **isolate runs** seçeneğini açın. Böylece aynı dosyalara dokunmazlar. Bunun için bir git deposu gerekir. Depo olmayan klasörlerde bu seçenek otomatik olarak kapanır. Çalıştırmaların başlayacağı branch'i seçin.
+
+İzolasyon kapalıyken her çalıştırma proje klasöründe düz bir oturum olur.
+
+## Sonuçları karşılaştırma
+
+Her çalıştırma, açıp okuyabileceğiniz, saklayabileceğiniz ya da silebileceğiniz normal bir oturumdur. Yaklaşımları karşılaştırmak için başlattıysanız, yan yana inceleyin ve en iyi olanı devam ettirin.
+
+Tek bir çalıştırma başlayamazsa diğerleri yine de açılır. Sadece istediğinizden daha az oturum görürsünüz.
+
+## İlgili
+
+- [Worktree Sessions](/worktrees/) — izolasyonun perde arkasında nasıl çalıştığı

@@ -10,9 +10,11 @@ import {
 } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import {
+  CUSTOM_PROVIDER_PROTOCOLS,
   createEmptyCustomProviderForm,
   createHeaderRow,
   createModelRow,
@@ -159,6 +161,31 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
             aria-label={t('settings.providers.page.custom.field.providerID.label')}
           />
           {err.providerID ? <p className="mt-1 typography-meta text-[var(--status-error)]">{err.providerID}</p> : null}
+        </SettingsStackedField>
+
+        <SettingsStackedField
+          label={t('settings.providers.page.custom.field.protocol.label')}
+          info={t('settings.providers.page.custom.field.protocol.info')}
+        >
+          <Select
+            value={form.protocol}
+            onValueChange={(protocol) => {
+              if (!(protocol in CUSTOM_PROVIDER_PROTOCOLS)) {
+                return;
+              }
+              setForm((prev) => ({ ...prev, protocol }));
+            }}
+            disabled={busy}
+          >
+            <SelectTrigger aria-label={t('settings.providers.page.custom.field.protocol.label')} className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="openai-chat">{t('settings.providers.page.custom.field.protocol.openaiChat')}</SelectItem>
+              <SelectItem value="openai-responses">{t('settings.providers.page.custom.field.protocol.openaiResponses')}</SelectItem>
+              <SelectItem value="anthropic-messages">{t('settings.providers.page.custom.field.protocol.anthropicMessages')}</SelectItem>
+            </SelectContent>
+          </Select>
         </SettingsStackedField>
 
         <SettingsStackedField

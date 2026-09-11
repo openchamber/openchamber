@@ -1,32 +1,35 @@
 ---
-title: Vorschau & Entwicklungsserver
-description: Öffne einen laufenden Entwicklungsserver direkt in OpenChamber.
+title: Vorschau & Dev-Server
+description: Öffne einen laufenden Dev-Server direkt in OpenChamber.
 ---
 
-# Vorschau & Entwicklungsserver
+# Vorschau & Dev-Server
 
-Wenn du einen Entwicklungsserver startest, kann OpenChamber ihn direkt in der App öffnen statt in einem separaten Browser-Tab — so kannst du deine Seite neben dem Chat sehen, ihre Konsole aufzeichnen und Elemente anstupsen, um Fragen dazu zu stellen.
+Wenn du einen Dev-Server startest, kann OpenChamber ihn direkt in der App öffnen statt in einem separaten Browser-Tab — so siehst du deine Seite neben dem Chat und kannst auf Elemente zeigen, um danach zu fragen.
 
-## Eine Vorschau öffnen
+## Einen Dev-Server öffnen
 
-OpenChamber überwacht die Terminalausgabe auf eine lokale Adresse (die `Local:`-Zeile, die Werkzeuge wie Vite, Next.js oder Astro ausgeben). Sobald es eine findet:
+Öffne das Browser-Panel über die Globus-Schaltfläche in der Kopfzeile. Läuft bereits ein Dev-Server, steht er dort in der Liste und ein Klick öffnet ihn — OpenChamber findet ihn daran, was auf deinem Rechner tatsächlich lauscht, also unabhängig davon, wie du ihn gestartet hast.
 
-- erscheint im Terminal eine Schaltfläche **Open preview**
-- öffnet eine [Projektaktion](/project-actions/) mit aktiviertem Auto-Open die Vorschau für dich
-- kann auch ein lokaler Link in einer Chatnachricht sie öffnen
+Ein Dev-Server öffnet sich außerdem automatisch, wenn:
 
-Die Seite lädt im Seitenbereich. Nur lokale Adressen (auf deinem eigenen Rechner) können als Vorschau geöffnet werden.
+- du im Terminal bei einer lokalen Adresse auf **Vorschau öffnen** drückst
+- eine [Projektaktion](/project-actions/) mit aktiviertem Auto-Öffnen einen startet
+- du einem lokalen Link in einer Chat-Nachricht folgst
 
-## Konsole und Inspektion
+Du kannst die Adresse jederzeit selbst eintippen. Ein bloßes `localhost:5173` wird als `http://` verstanden, das Schema musst du also nicht mitschreiben.
 
-Im Vorschau-Bereich kannst du:
+## Mit einem entfernten OpenChamber arbeiten
 
-- die **Konsole** der Seite beobachten — Fehler, Warnungen und Protokolle, so gefiltert, wie du möchtest
-- **inspect** einschalten, auf ein beliebiges Element klicken und eine Notiz dazu senden — Selektor, Stile, Position und ein Screenshot — direkt in den Chat
+Läuft OpenChamber auf einem anderen Rechner, liegt sein Dev-Server ebenfalls auf *jenem* Rechner — `localhost` auf deinem Laptop führt ganz woandershin. Die Desktop-App erledigt das für dich: Sie öffnet einen lokalen Port, der die Verbindung zum entfernten Dev-Server durchreicht. Die Seite lädt ganz normal, mit funktionierendem Hot Reload und Entwicklerwerkzeugen. Du tippst weiterhin die Adresse, die du erwartest; die Technik dahinter bleibt dir aus dem Weg.
 
-Das ist der schnellste Weg, dem Agenten "diese Schaltfläche hier" zu sagen, ohne sie beschreiben zu müssen.
+Dafür brauchst du die Desktop-App. In einem Browser-Tab lassen sich nur Dev-Server auf deinem eigenen Rechner öffnen.
+
+## Die Seite annotieren
+
+Wie du auf Elemente zeigst, auf der Seite zeichnest und alles in den Chat schickst, steht unter [Browser-Panel](/desktop-browser/).
 
 ## Verwandt
 
-- [Projektaktionen](/project-actions/) — einen Server automatisch öffnen, wenn du ihn startest
-- [Desktop-Browser](/desktop-browser/) — dieselben Werkzeuge für jede Seite, auf dem Desktop
+- [Projektaktionen](/project-actions/) — einen Server beim Start automatisch öffnen
+- [Browser-Panel](/desktop-browser/) — Seiten annotieren und den Agenten steuern lassen

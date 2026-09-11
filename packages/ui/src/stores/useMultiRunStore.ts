@@ -138,10 +138,6 @@ export const useMultiRunStore = create<MultiRunStore>()(
             set({ error: `Group ${gi + 1}: select at least 1 model` });
             return null;
           }
-          if (groups[gi].models.length > 5) {
-            set({ error: `Group ${gi + 1}: maximum 5 models allowed` });
-            return null;
-          }
         }
 
         set({ isLoading: true, error: null });

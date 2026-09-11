@@ -1,22 +1,53 @@
 ---
-title: Navigateur desktop
-description: Parcourez n’importe quelle page dans l’application desktop, avec inspection et capture de console.
+title: Panneau navigateur
+description: Parcourez n'importe quelle page dans l'application, annotez-la et laissez l'agent la piloter.
 ---
 
-# Navigateur desktop
+# Panneau navigateur
 
-L’application desktop possède un navigateur intégré pour ouvrir n’importe quelle page juste à côté de votre chat, pointer des éléments pour poser des questions à leur sujet et capturer la console de la page. Ouvrez-le avec le bouton globe dans l’en-tête de l’application.
+Le panneau navigateur ouvre n'importe quelle page juste à côté de votre discussion. Ouvrez-le depuis le bouton globe de l'en-tête.
 
-> Le navigateur desktop est une fonctionnalité **desktop uniquement**. Sur le web, le panneau [aperçu](/preview/) offre les mêmes outils d’inspection et de console pour votre serveur de dev local.
+Dans l'application de bureau, c'est un vrai navigateur : vos connexions persistent, le rechargement à chaud fonctionne et les outils de développement sont à un clic. Dans un onglet de navigateur, le panneau affiche bien une page mais ne peut pas regarder à l'intérieur — les outils d'annotation ci-dessous sont réservés au bureau.
 
-## Inspecter et annoter
+Les pages ouvertes ici ne peuvent pas utiliser votre caméra, votre micro ni votre position : ces demandes sont refusées.
 
-Activez **inspect** et cliquez sur n’importe quel élément de la page. OpenChamber capture une note à son sujet — ce que c’est, ses styles, sa position et une capture d’écran — puis l’attache à votre message de chat. C’est le moyen le plus rapide de dire à l’agent « cet élément, juste ici ».
+## La barre d'outils
 
-## Capture de console
+La barre d'adresse retient les pages que vous avez ouvertes dans ce projet et les propose pendant la saisie, en cherchant dans une partie de l'adresse ou du titre de la page. Les flèches parcourent la liste, Entrée ouvre l'entrée surlignée, et le bouton d'une ligne la retire.
 
-Le navigateur collecte la sortie console de la page — erreurs, avertissements et logs — pour que vous puissiez la filtrer et la lire sans ouvrir les outils développeur.
+À côté se trouve **Recharger**, ainsi qu'un **rechargement forcé** qui ignore le cache quand un changement refuse d'apparaître, et des commandes de zoom qui agrandissent la page seule.
 
-## Pages liées
+**Effacer les cookies** et **Effacer les données en cache** ne concernent que ce panneau. Votre session OpenChamber et les autres fenêtres n'y touchent pas.
 
-- [Aperçu et serveurs de dev](/preview/) — les mêmes outils pour votre serveur de dev local
+## Annoter une page
+
+Appuyez sur **Annoter** : une barre apparaît au-dessus de la page avec trois outils.
+
+- **Élément** — cliquez sur un élément. Cliquer sur un autre déplace la sélection ; recliquer sur le même la retire.
+- **Zone** — tracez un cadre autour d'une portion lorsque votre remarque porte sur plusieurs éléments.
+- **Dessin** — croquez à main levée par-dessus la page.
+
+Écrivez votre demande dans le champ qui apparaît à côté de votre marque, puis appuyez sur **Joindre** — ou simplement sur Entrée. Votre message reçoit une carte avec tout ce que vous avez marqué, votre note et une capture de la page visible avec vos marques dessinées dessus — vous pouvez donc dire « ce bouton, un peu plus arrondi » au lieu de décrire où il se trouve.
+
+La page elle-même n'est jamais modifiée : annoter ne fait que marquer ce qui s'y trouve. `Échap` annule et ferme la barre.
+
+## Laisser l'agent piloter
+
+L'agent peut se servir lui-même du panneau navigateur — ouvrir une page, lire ce qu'elle contient, cliquer, saisir du texte, faire défiler et basculer entre les mises en page mobile, tablette et bureau — afin de vérifier son propre travail plutôt que de vous le demander. Vous le voyez faire dans le panneau.
+
+L'agent ne peut pas exécuter de code arbitraire dans la page. Le navigateur conserve vos vraies connexions ; il s'en tient donc aux actions ci-dessus.
+
+Il peut aussi enregistrer une image de ce qu'il regarde dans `.openchamber/screenshots/` de votre projet et vous la montrer dans sa réponse. C'est ce qui rend un avant-après possible, et le fichier reste ensuite disponible pour l'attacher à une pull request.
+
+Les actions du navigateur constituent l'**outil OpenChamber Web**, qui s'active et se désactive séparément dans **Réglages → Général → Outils OpenChamber**.
+
+Cela nécessite l'application de bureau : une page affichée dans un onglet de navigateur ne peut pas être pilotée.
+
+## Outils de développement
+
+Appuyez sur le bouton terminal de la barre pour ouvrir les outils de développement de Chromium pour la page — console, réseau, éléments, tout ce à quoi vous vous attendez.
+
+## Voir aussi
+
+- [Aperçu et serveurs de développement](/preview/) — ouvrir votre application en cours, y compris sur une machine distante
+- [Outil de contrôle pour les agents](/fr/agent-control-tool/) — sessions, worktrees et tâches planifiées depuis la discussion

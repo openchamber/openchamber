@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 
-import { bundledLanguages, createHighlighter, type BundledLanguage, type ThemedToken } from 'shiki';
+import { bundledLanguages, createHighlighter, type BundledLanguage, type LanguageRegistration, type ThemedToken } from 'shiki';
+import { sanitizeTemplateCallGrammar } from '../../../lib/shiki/sanitizeTemplateCallGrammar';
 import { MARKDOWN_SHIKI_THEME, MARKDOWN_SHIKI_THEME_DEFINITION } from './markdownShikiThemeDefinition';
 import type { MarkdownWorkerRequest, MarkdownWorkerResponse } from './markdown-worker-protocol';
 
@@ -60,11 +61,32 @@ self.onmessage = (event: MessageEvent<MarkdownWorkerRequest>) => {
 
 type Instance = Awaited<ReturnType<typeof createHighlighter>>;
 
+type BundledLanguageModule = { default: LanguageRegistration[] };
+
+/**
+ * Load a language, neutralizing the catastrophic JS/TS `template-call` rule
+ * before it reaches the Oniguruma scanner (see sanitizeTemplateCallGrammar).
+ *
+ * Every bundled language is resolved and sanitized rather than a fixed id
+ * list: Shiki keys the JS/TS grammars under aliases too (`js`, `ts`, `cjs`,
+ * `mjs`, `mts`, `cts`), and embedding grammars (`vue`, `svelte`, `mdx`,
+ * `astro`, `html`) ship them as extra entries in their own module. Sanitizing
+ * every entry is free for the rest — `hasCatastrophicTemplateCall` returns the
+ * grammar untouched when the rule is absent.
+ */
+const loadLanguageSafe = async (instance: Instance, lang: BundledLanguage): Promise<void> => {
+  // SAFETY: every Shiki bundled-language module default-exports its grammar
+  // array; `lang` is narrowed to a bundled id by the caller.
+  const mod = (await bundledLanguages[lang]()) as BundledLanguageModule;
+  const grammars = mod.default.map((grammar) => sanitizeTemplateCallGrammar(grammar));
+  await instance.loadLanguage(...grammars);
+};
+
 const resolveLanguage = async (instance: Instance, requested: string): Promise<string> => {
   let lang = requested in bundledLanguages ? requested : 'text';
   if (lang !== 'text' && !instance.getLoadedLanguages().includes(lang)) {
     try {
-      await instance.loadLanguage(bundledLanguages[lang as BundledLanguage]);
+      await loadLanguageSafe(instance, lang as BundledLanguage);
     } catch {
       lang = 'text';
     }

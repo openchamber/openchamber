@@ -1,0 +1,41 @@
+---
+title: Masaüstü Tünelleri
+description: Masaüstü uygulamasından Cloudflare veya Ngrok tünelleri oluşturun.
+---
+
+# Masaüstü Tünelleri
+
+Masaüstü uygulaması, **Settings → OpenChamber → Tunnel** bölümünden herkese açık bir tünel oluşturabilir. Bu yol için OpenChamber'ı CLI'dan başlatmanız gerekmez.
+
+## Sağlayıcı kurun
+
+OpenChamber sağlayıcının CLI aracını makinenizde başlatır. Önce kullanmak istediğiniz sağlayıcıyı kurun:
+
+```bash
+brew install cloudflared
+brew install ngrok
+```
+
+Cloudflare `cloudflared` kullanır. Ngrok için bir ngrok hesabı ve ngrok panelinden alınmış bir authtoken gerekir:
+
+```bash
+ngrok config add-authtoken <your-ngrok-token>
+```
+
+## Uygulamadan başlatma
+
+1. **Settings → OpenChamber → Tunnel** bölümünü açın.
+2. **Cloudflare** ya da **Ngrok** seçin.
+3. Hızlı bir tünel başlatın.
+4. Oluşturulan QR kodunu telefonunuzdan tarayın.
+
+Ngrok şu anda hızlı tünelleri destekler. Cloudflare ise hızlı tünelleri ve yönetilen Cloudflare modlarını destekler.
+
+## Erişim koruması
+
+Sağlayıcı URL'si herkese açık olsa bile, OpenChamber erişimi kendi connect token'ı ile korur. Oluşturulan bağlantı bir kerelik token içerir, bir TTL'ye sahiptir ve eski kullanılmamış bağlantılar yeni bir bağlantı oluşturduğunuzda ya da tüneli durdurup yeniden başlattığınızda iptal edilir.
+
+## İlgili
+
+- [Tunnels](/tunnels/) — CLI tünel kullanımı ve yönetilen Cloudflare modları
+- [PWA & Mobile](/mobile/) — OpenChamber'a telefonunuzdan erişin

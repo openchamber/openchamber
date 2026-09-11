@@ -41,7 +41,7 @@ const languageContextField = StateField.define<ComposerLanguageContext>({
     },
 });
 
-export const EMPTY_CONTEXT: ComposerLanguageContext = {
+const EMPTY_CONTEXT: ComposerLanguageContext = {
     inputMode: 'normal',
     knownAgentNames: new Set(),
     confirmedMentions: new Set(),
@@ -89,9 +89,4 @@ export function composerLanguage(initial: ComposerLanguageContext = EMPTY_CONTEX
         languageContextField.init(() => initial),
         decorationField,
     ];
-}
-
-/** The context currently in effect, for callers that need to read it back. */
-export function readLanguageContext(view: EditorView): ComposerLanguageContext {
-    return view.state.field(languageContextField);
 }

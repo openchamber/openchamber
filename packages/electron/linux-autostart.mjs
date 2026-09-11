@@ -5,7 +5,7 @@ import path from 'node:path';
 
 const AUTOSTART_FILE_NAME = 'openchamber.desktop';
 
-export const resolveLinuxAutostartDirectory = ({
+const resolveLinuxAutostartDirectory = ({
   env = process.env,
   homeDir = os.homedir(),
 } = {}) => {

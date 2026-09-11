@@ -11,6 +11,7 @@ import { dict as ptBrDict } from './messages/pt-BR';
 import { dict as ukDict } from './messages/uk';
 import { dict as zhCnDict } from './messages/zh-CN';
 import { dict as zhTwDict } from './messages/zh-TW';
+import { dict as trDict } from './messages/tr';
 
 const localeDictionaries = {
   en: enDict,
@@ -24,6 +25,7 @@ const localeDictionaries = {
   pl: plDict,
   'zh-CN': zhCnDict,
   'zh-TW': zhTwDict,
+  tr: trDict,
 } as const;
 
 describe('i18n dictionaries', () => {
@@ -40,6 +42,29 @@ describe('i18n dictionaries', () => {
       expect(dictionary['common.language.german']).toBeTruthy();
       expect(dictionary['common.language.french']).toBeTruthy();
       expect(dictionary['common.language.japanese']).toBeTruthy();
+    }
+  });
+
+  test('telemetry translations retain the numeric token placeholders', () => {
+    for (const dictionary of Object.values(localeDictionaries)) {
+      expect(dictionary['chat.workStatus.telemetry.tokens.inOut']).toContain('{input}');
+      expect(dictionary['chat.workStatus.telemetry.tokens.inOut']).toContain('{output}');
+      for (const parameter of ['input', 'output', 'reasoning']) {
+        expect(dictionary['chat.workStatus.telemetry.tokensDescription']).toContain(`{${parameter}}`);
+      }
+    }
+  });
+
+  test('all telemetry rows have translated explanations and compact labels', () => {
+    const metrics = ['responseSpeed', 'speed', 'llmDuration', 'toolDuration', 'ttft', 'steps', 'tokens', 'cacheHit', 'cost'] as const;
+    for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
+      for (const metric of metrics) {
+        const label = dictionary[`chat.workStatus.telemetry.${metric}`];
+        const description = dictionary[`chat.workStatus.telemetry.${metric}Description`];
+        expect(label.length <= 16).toBe(true);
+        expect(description.length > 30).toBe(true);
+        if (locale !== 'en') expect(description === enDict[`chat.workStatus.telemetry.${metric}Description`]).toBe(false);
+      }
     }
   });
 });

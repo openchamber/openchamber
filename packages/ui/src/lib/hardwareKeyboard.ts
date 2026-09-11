@@ -139,9 +139,9 @@ export const resetHardwareKeyboardDetection = (): void => {
   setHardwareKeyboardAttached(false);
 };
 
-export const isHardwareKeyboardAttached = (): boolean => hardwareKeyboardAttached;
+const isHardwareKeyboardAttached = (): boolean => hardwareKeyboardAttached;
 
-export const subscribeHardwareKeyboard = (listener: () => void): (() => void) => {
+const subscribeHardwareKeyboard = (listener: () => void): (() => void) => {
   subscribers.add(listener);
   return () => {
     subscribers.delete(listener);

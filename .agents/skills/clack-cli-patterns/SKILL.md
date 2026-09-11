@@ -17,36 +17,19 @@ Use this skill for terminal CLI work only (for example `packages/web/bin/*`).
 
 Do not use this skill for web UI or VS Code webview styling work.
 
-## Mandatory Rules
+## Mode Contract
 
-1. **Validation first**
-   - Safety and correctness checks must run in all modes.
-   - Prompts may help collect input, but cannot be the only guard.
+Run safety and correctness validation before presentation in every mode. Prompts collect missing input; they never enforce policy alone.
 
-2. **Mode parity is required**
-   - Behavior must be equivalent in:
-     - Interactive TTY
-     - Non-interactive shells
-     - `--quiet`
-     - `--json`
-     - Fully pre-specified flags
-   - Invalid operations must fail deterministically with non-zero exit code.
+| Mode | Prompt | Output | Failure |
+|---|---|---|---|
+| Interactive TTY | Allowed when input is missing | Framed human output | Concise human error, non-zero exit |
+| Fully specified flags | None required | Human output | Same policy and exit semantics |
+| Non-TTY/piped | Never | Deterministic script-safe output | Non-zero without hanging |
+| `--quiet` | Never | Essential result only | Concise error, non-zero exit |
+| `--json` | Never | JSON only, including warnings/errors | JSON failure payload, non-zero exit |
 
-3. **Prompt guard contract**
-   - Only prompt when all are true:
-     - stdout is TTY
-     - not `--quiet`
-     - not `--json`
-     - not automated/non-interactive context
-
-4. **Output contract**
-   - `--json`: machine-readable output only.
-   - `--quiet`: suppress non-essential output only.
-   - Neither mode weakens policy enforcement.
-
-5. **Cancellation contract**
-   - Handle prompt cancellation with `isCancel` + `cancel(...)`.
-   - Handle SIGINT cleanly and use consistent exit semantics.
+Handle prompt cancellation with `isCancel` + `cancel(...)` and SIGINT with consistent exit semantics.
 
 ## Clack Primitive Standard
 
@@ -140,9 +123,9 @@ Quiet output should still be complete enough for scripts and quick human scannin
 - Prefer this style over boxed notes for routine follow-up actions.
 - Reserve `note`/boxed callouts for rare, high-context guidance where a long paragraph is truly necessary.
 
-## Parity Verification Matrix
+## Completion Criteria
 
-For each command/subcommand, manually verify:
+Every command/subcommand must have a tested answer for:
 
 1. default interactive TTY output
 2. `--quiet` output (minimal but informative)
@@ -154,13 +137,7 @@ For each command/subcommand, manually verify:
 
 Load `references/snippets.md` when implementing prompt guards, non-interactive fallback, spinner lifecycle, or JSON/human output branching.
 
-## Implementation Checklist
-
-1. Add or update core validators first.
-2. Ensure validators execute in all modes.
-3. Add interactive Clack UX only as enhancement.
-4. Verify parity between interactive and non-interactive flows.
-5. Ensure script-safe deterministic failure behavior.
+Implementation is complete when validators run before every mode branch, interactive Clack UX is only an enhancement, and all five cases above produce deterministic output and exit behavior.
 
 ## References
 

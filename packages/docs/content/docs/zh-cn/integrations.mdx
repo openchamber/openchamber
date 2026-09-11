@@ -1,0 +1,53 @@
+---
+title: 集成
+description: 将 GitHub 和 Linear 连接到 OpenChamber。
+---
+
+# 集成
+
+在 **设置 → 集成** 中登录 OpenChamber 所配合使用的服务。登录信息保存在 OpenChamber 服务器上，因此网页端、桌面端和已配对的手机共用同一份登录。
+
+## GitHub
+
+展开 **GitHub** 卡片并选择 **Connect GitHub**，用一个简短的设备码登录。连接后，OpenChamber 可以从 issue 和拉取请求开始会话、将它们附加到消息，以及创建或更新 PR。GitHub 能做的一切见 [GitHub Issue 与 PR](/zh-cn/github/)。
+
+## Linear
+
+### 连接工作区
+
+1. 展开 **Linear** 卡片并选择 **Connect**。
+2. 在打开的浏览器标签页中批准访问。在此之前，卡片显示 **Waiting for Linear**。
+
+用 **Add workspace** 连接另一个 Linear 组织。同一时间只有一个当前工作区：用 **Switch to** 切换，**Disconnect** 只移除当前工作区。项目映射会保留。
+
+### 浏览 issue
+
+连接工作区后，右侧上下文栏会出现 **Linear** 面板。它列出当前工作区的 issue，你可以：
+
+- 按状态（**Backlog**、**To Do**、**In Progress**、**In Review**、**Done**、**Canceled**、**Duplicate**）、负责人（**Anyone** 或 **Assigned to me**）、团队和优先级筛选
+- 按标题、标识符或 Linear URL 搜索
+- 打开 issue 查看描述、评论、标签和优先级
+- 修改其 **Status** 或选择 **Close issue**
+- 切换当前 **Workspace**
+
+### 从 issue 开始会话
+
+- 在 Linear 面板中打开 issue 并选择 **Start session**。滚动 issue 时按钮始终停留在底部。
+- 在聊天中选择 **New Session From Linear Issue** 从列表中挑选；需要新分支时选择 **Create in worktree**。
+- 在 **New Worktree** 对话框中选择 **Start from Linear Issue**。
+
+会话会在映射到该 issue 所属团队的项目中打开，issue 作为第一条提示。在 Linear 卡片中映射团队：**Default project** 适用于所有团队，**Team projects** 可按团队覆盖。未映射的团队会先要求你完成映射。第一条消息由 **Issue Review** 魔法提示生成，可在 **设置 → Magic Prompts → Linear** 中编辑。
+
+### 将 issue 关联到消息
+
+在聊天输入框中选择 **Link Linear Issue**。该 issue 会作为上下文随你的下一条消息一起发送，会话的工作状态面板会保留指向它的链接。
+
+### 会话评论
+
+在 Linear 卡片中开启 **Session comments**，从 issue 开始的会话会在开始、完成或失败时在该 issue 下发布评论，每条评论都带有打开会话的链接。只有当此 OpenChamber 服务器拥有公网地址时才会发布评论，这样 issue 中的每个人都能打开链接；在本地或私有地址下不会发布任何内容。
+
+## 相关内容
+
+- [GitHub Issue 与 PR](/zh-cn/github/) — GitHub 在 OpenChamber 中能做的一切
+- [工作树会话](/zh-cn/worktrees/) — issue 会话可以从哪里开始
+- [Magic Prompts](/zh-cn/magic-prompts/) — 编辑 Linear 会话的起始提示

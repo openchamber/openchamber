@@ -47,6 +47,7 @@ export const UsagePage: React.FC = () => {
   const isLoading = useQuotaStore((state) => state.isLoading);
   const lastUpdated = useQuotaStore((state) => state.lastUpdated);
   const error = useQuotaStore((state) => state.error);
+  const refreshErrors = useQuotaStore((state) => state.refreshErrors);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
   const setDropdownProviderIds = useQuotaStore((state) => state.setDropdownProviderIds);
   const selectedModels = useQuotaStore((state) => state.selectedModels);
@@ -76,8 +77,16 @@ export const UsagePage: React.FC = () => {
   const providerMeta = QUOTA_PROVIDERS.find((provider) => provider.id === selectedProviderId);
   const providerName = providerMeta?.name ?? selectedProviderId ?? t('settings.usage.sidebar.title');
   const usage = selectedResult?.usage;
+  const refreshError = selectedProviderId ? refreshErrors[selectedProviderId] : undefined;
+  const selectedProviderError = refreshError
+    ? usage
+      ? t('header.services.usageRefreshFailedStale', { error: refreshError })
+      : refreshError
+    : selectedResult?.configured && !selectedResult.ok
+      ? selectedResult.error
+      : null;
   const showInDropdown = selectedProviderId ? dropdownProviderIds.includes(selectedProviderId) : false;
-  const hasCredentialsForm = selectedProviderId === 'opencode-go' || selectedProviderId === 'ollama-cloud' || selectedProviderId === 'cursor';
+  const hasCredentialsForm = selectedProviderId === 'exe-dev' || selectedProviderId === 'ollama-cloud' || selectedProviderId === 'cursor';
   const handleDropdownToggle = React.useCallback((enabled: boolean) => {
     if (!selectedProviderId) {
       return;
@@ -159,19 +168,24 @@ export const UsagePage: React.FC = () => {
       description={
         isLoading ? (
           <span className="animate-pulse typography-settings-description text-muted-foreground">{t('settings.usage.page.header.refreshing')}</span>
+        ) : selectedResult?.planLabel ? (
+          t('settings.usage.page.header.lastUpdatedWithPlan', {
+            plan: selectedResult.planLabel,
+            time: formatTime(lastUpdated, timeFormatPreference),
+          })
         ) : (
           t('settings.usage.page.header.lastUpdated', { time: formatTime(lastUpdated, timeFormatPreference) })
         )
       }
       showSaveStatus
     >
-      <SettingsSection divider={false} settingsItem="usage.header-menu">
+      <SettingsSection divider={false} settingsItem="usage.work-status-panel">
         <SettingsCheckboxRow
           checked={showInDropdown}
           onChange={handleDropdownToggle}
-          label={t('settings.usage.page.options.showInHeader')}
-          ariaLabel={t('settings.usage.page.options.showInHeaderAria')}
-          info={t('settings.usage.page.options.showInHeaderTooltip')}
+          label={t('settings.usage.page.options.showInWorkStatus')}
+          ariaLabel={t('settings.usage.page.options.showInWorkStatusAria')}
+          info={t('settings.usage.page.options.showInWorkStatusTooltip')}
         />
       </SettingsSection>
 
@@ -179,10 +193,10 @@ export const UsagePage: React.FC = () => {
         <p className="typography-ui-label text-foreground pb-8">{t('settings.usage.page.state.noData')}</p>
       )}
 
-      {error && (
+      {(error || selectedProviderError) && (
         <div className="mb-8 rounded-lg border border-[var(--status-error-border)] bg-[var(--status-error-background)] px-4 py-3">
           <p className="typography-ui-label font-medium text-[var(--status-error)]">{t('settings.usage.page.state.refreshFailedTitle')}</p>
-          <p className="typography-meta text-[var(--status-error)]/80 mt-1">{error}</p>
+          <p className="typography-meta text-[var(--status-error)]/80 mt-1">{selectedProviderError ?? error}</p>
         </div>
       )}
 
@@ -196,7 +210,7 @@ export const UsagePage: React.FC = () => {
         </div>
       )}
 
-      {(selectedProviderId === 'opencode-go' || selectedProviderId === 'ollama-cloud' || selectedProviderId === 'cursor') && (
+      {(selectedProviderId === 'exe-dev' || selectedProviderId === 'ollama-cloud' || selectedProviderId === 'cursor') && (
         <QuotaCredentials providerId={selectedProviderId} providerName={providerName} />
       )}
 

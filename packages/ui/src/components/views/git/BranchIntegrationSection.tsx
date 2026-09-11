@@ -26,6 +26,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
+import { rankByQuery } from '@/lib/search/fuzzySearch';
 import { useI18n } from '@/lib/i18n';
 
 type OperationType = 'merge' | 'rebase';
@@ -94,22 +95,19 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
 
   // Filter branches based on search
   const filteredLocal = React.useMemo(() => {
-    const term = branchSearch.toLowerCase();
     const remoteBranchNames = new Set(
       remoteBranches
         .map((branch) => branch.slice(branch.indexOf('/') + 1))
         .filter(Boolean)
     );
-    const filtered = localBranches.filter((branch) => branch !== currentBranch && !remoteBranchNames.has(branch));
-    if (!term) return filtered;
-    return filtered.filter((b) => b.toLowerCase().includes(term));
+    const candidates = localBranches.filter((branch) => branch !== currentBranch && !remoteBranchNames.has(branch));
+    return rankByQuery(candidates, branchSearch, (branch) => [branch]);
   }, [branchSearch, localBranches, currentBranch, remoteBranches]);
 
-  const filteredRemote = React.useMemo(() => {
-    const term = branchSearch.toLowerCase();
-    if (!term) return remoteBranches;
-    return remoteBranches.filter((b) => b.toLowerCase().includes(term));
-  }, [branchSearch, remoteBranches]);
+  const filteredRemote = React.useMemo(
+    () => rankByQuery(remoteBranches, branchSearch, (branch) => [branch]),
+    [branchSearch, remoteBranches]
+  );
 
   const resolveDefaultBranch = React.useCallback(() => {
     if (!defaultTargetBranch) return null;
@@ -321,7 +319,8 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
             sideOffset={6}
             className="w-[var(--anchor-width)] p-0 max-h-[min(var(--available-height),24rem)] flex flex-col overflow-hidden"
           >
-            <Command className="h-full min-h-0">
+            {/* rankByQuery owns filtering/ordering; cmdk must not re-filter. */}
+            <Command className="h-full min-h-0" shouldFilter={false}>
               <CommandInput
                 ref={searchInputRef}
                 placeholder={t('gitView.branch.searchPlaceholder')}

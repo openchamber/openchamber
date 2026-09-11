@@ -1,0 +1,35 @@
+---
+title: Önizleme ve Geliştirme Sunucuları
+description: Çalışan bir geliştirme sunucusunu OpenChamber içinde açın.
+---
+
+# Önizleme ve Geliştirme Sunucuları
+
+Bir geliştirme sunucusu başlattığınızda, OpenChamber onu ayrı bir tarayıcı sekmesi yerine doğrudan uygulama içinde açabilir. Böylece sitenizi sohbetin yanında görür, öğelere işaret edip onlar hakkında soru sorabilirsiniz.
+
+## Bir geliştirme sunucusu açın
+
+Tarayıcı panelini uygulama başlığındaki küre düğmesinden açın. Bir geliştirme sunucusu zaten çalışıyorsa listede görünür ve tek tıklamayla açılır. OpenChamber bunu makinenizde gerçekten hangi adreslerin dinlediğine bakarak bulur, bu yüzden nasıl başlattığınız önemli değildir.
+
+Geliştirme sunucusu şu durumlarda da otomatik açılır:
+
+- terminalde yerel bir adreste **Open preview** düğmesine bastığınızda
+- otomatik açma açık olan bir [project action](/project-actions/) bunu başlattığında
+- bir sohbet mesajındaki yerel bağlantıyı takip ettiğinizde
+
+Adresi her zaman kendiniz de yazabilirsiniz. Sadece `localhost:5173` yazarsanız `http://` olarak kabul edilir. Bu yüzden şemayı yazmanız gerekmez.
+
+## Uzak bir OpenChamber ile çalışma
+
+OpenChamber başka bir makinede çalışıyorsa, geliştirme sunucusu o makinededir. Dizüstü bilgisayarınızdaki `localhost` bambaşka bir yeri anlatır. Masaüstü uygulaması bunu sizin için halleder. Uzak geliştirme sunucusuna bağlantıyı taşıyan yerel bir port açar. Böylece sayfa normal şekilde yüklenir, hot reload ve geliştirici araçları çalışır. Siz beklediğiniz adresi yazmaya devam edersiniz, ayrıntılar araya girmez.
+
+Bu, masaüstü uygulamasını gerektirir. Web tarayıcı sekmesinde yalnızca kendi makinenizdeki geliştirme sunucuları açılabilir.
+
+## Sayfayı işaretleyin
+
+Öğelere işaret etmek, sayfanın üzerine çizmek ve bunların hepsini sohbete göndermek için [Browser Panel](/desktop-browser/) sayfasına bakın.
+
+## İlgili
+
+- [Project Actions](/project-actions/) — başlattığınızda bir sunucuyu otomatik açın
+- [Browser Panel](/desktop-browser/) — sayfaları işaretleyin ve aracıya kontrol ettirin

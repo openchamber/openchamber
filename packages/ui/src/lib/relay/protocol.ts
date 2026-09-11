@@ -47,6 +47,7 @@ export const TunnelFrameType = {
   WsClose: 10,
   Ping: 11,
   Pong: 12,
+  DeliveryAck: 13,
 } as const;
 
 export type TunnelFrameTypeValue = (typeof TunnelFrameType)[keyof typeof TunnelFrameType];
@@ -61,6 +62,11 @@ export interface TunnelHttpRequestPayload {
   path: string;
   query: string;
   headers: Record<string, string>;
+  /** True when the client had a request body to send. The host uses this to
+   * distinguish a genuine bodyless request from one whose body frames were lost
+   * through the tunnel (which it must abort as an ambiguous transport failure
+   * instead of forwarding an empty body the loopback server rejects with 400). */
+  hasBody?: boolean;
 }
 
 export interface TunnelHttpResponsePayload {
@@ -78,10 +84,6 @@ export interface TunnelWsOpenPayload {
   protocols?: string[];
 }
 
-export interface TunnelWsOpenedPayload {
-  protocol?: string;
-}
-
 export interface TunnelWsClosePayload {
   code: number;
   reason: string;
@@ -96,6 +98,8 @@ export interface E2eeHelloMessage {
   // Capability advertisement: the client can pack multiple tunnel frames into
   // one encrypted WS message. Missing/false = legacy (one frame per message).
   batch?: boolean;
+  /** Client supports cumulative downstream delivery acknowledgements. */
+  flowControl?: boolean;
 }
 
 export interface E2eeReadyMessage {
@@ -104,14 +108,9 @@ export interface E2eeReadyMessage {
   // Host echoes `batch: true` only when it also supports batching AND the client
   // advertised it. Batching is enabled for the session only if both agree.
   batch?: boolean;
+  /** Enabled only when both peers support downstream flow control. */
+  flowControl?: boolean;
 }
-
-// Layer 1 control messages (relay <-> host control socket).
-export type RelayControlMessage =
-  | { type: 'sync'; connectionIds: string[] }
-  | { type: 'connected'; connectionId: string }
-  | { type: 'disconnected'; connectionId: string }
-  | { type: 'limit'; reason: string };
 
 // Relay-assigned WebSocket close codes.
 export const RelayCloseCode = {
@@ -125,4 +124,3 @@ export const RelayCloseCode = {
   RekeyMismatch: 1008,
   ChannelFailure: 1011,
 } as const;
-

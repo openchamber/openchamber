@@ -1,5 +1,7 @@
 import { parsePatchFiles } from '@pierre/diffs';
 
+import { isToolDiffPreviewOversized } from './toolDiffPreview';
+
 export type DiffPatchEntry = {
     id: string;
     title: string;
@@ -200,29 +202,6 @@ export const getPrimaryToolPath = (
     return null;
 };
 
-export const getMutatedToolPaths = (
-    toolName: string,
-    input: Record<string, unknown> | undefined,
-    metadata: Record<string, unknown> | undefined,
-): string[] => {
-    if (toolName === 'apply_patch') {
-        const files = Array.isArray(metadata?.files) ? metadata.files : [];
-        const paths = new Set<string>();
-        for (const file of files) {
-            if (!isRecord(file)) continue;
-            const filePath = getApplyPatchFilePath(file);
-            if (filePath) paths.add(filePath);
-            if (file.type === 'move' && typeof file.filePath === 'string') {
-                paths.add(file.filePath);
-            }
-        }
-        return [...paths];
-    }
-
-    const primaryPath = getPrimaryToolPath(toolName, input, metadata);
-    return primaryPath ? [primaryPath] : [];
-};
-
 const supportsDiffMetadata = (toolName: string): boolean => (
     toolName === 'edit' || toolName === 'multiedit' || toolName === 'apply_patch'
 );
@@ -259,6 +238,15 @@ export const getPrimaryDiffFromMetadata = (
     }
 
     return getPatchText(metadata.patch) ?? getPatchText(metadata.diff);
+};
+
+/** Top-level patch a tool card falls back to when metadata carries no per-file entries. */
+export const getToolFallbackDiff = (metadata: Record<string, unknown> | undefined): string | undefined => {
+    const fileDiff = isRecord(metadata?.filediff) ? metadata.filediff : undefined;
+    return getPatchText(metadata?.patch)
+        ?? getPatchText(metadata?.diff)
+        ?? getPatchText(fileDiff?.patch)
+        ?? getPatchText(fileDiff?.diff);
 };
 
 export const extractFirstChangedLineFromDiff = (diffText: string): number | undefined => {
@@ -328,6 +316,33 @@ export const getFirstChangedLineFromMetadata = (
     const firstFile = getMetadataFileForPath(metadata);
     const firstPatch = getPatchText(firstFile?.patch) ?? getPatchText(firstFile?.diff);
     return firstPatch ? extractFirstChangedLineFromDiff(firstPatch) : undefined;
+};
+
+/**
+ * Quick-open target for a tool card: the primary mutated file plus the diff
+ * entry the expanded card renders for it. Both the collapsed header icon and
+ * the expanded "open file" button resolve their line from the same entry
+ * patch, so they always land on the same line.
+ */
+export const resolveToolQuickOpenTarget = (
+    toolName: string,
+    input: Record<string, unknown> | undefined,
+    metadata: Record<string, unknown> | undefined,
+): { filePath: string; line?: number; patch?: string } | null => {
+    const filePath = getPrimaryToolPath(toolName, input, metadata);
+    if (!filePath) {
+        return null;
+    }
+
+    const entries = getDiffPatchEntries(metadata, getToolFallbackDiff(metadata), (path) => path);
+    const matchedEntry = entries.find((entry) => entry.filePath === filePath)
+        ?? (entries.length === 1 ? entries[0] : undefined);
+    const patch = matchedEntry?.patch;
+    return {
+        filePath,
+        line: patch ? extractFirstChangedLineFromDiff(patch) : undefined,
+        patch,
+    };
 };
 
 const normalizeParsedPath = (path: string | undefined): string => {
@@ -418,6 +433,15 @@ const getPatchEntriesFromText = (
     idPrefix: string,
     resolveTitle: (path: string) => string,
 ): DiffPatchEntry[] => {
+    if (isToolDiffPreviewOversized(patch)) {
+        return [{
+            id: `${idPrefix}-0`,
+            title: resolveTitle(fallbackTitle),
+            patch,
+            renderMode: 'text',
+        }];
+    }
+
     const normalized = normalizeLooseUnifiedPatch(patch);
     if (!normalized) {
         return [];

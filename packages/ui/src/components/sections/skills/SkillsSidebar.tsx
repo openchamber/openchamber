@@ -18,7 +18,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
-import { useSkillsStore, type DiscoveredSkill } from '@/stores/useSkillsStore';
+import { selectSkillsForDirectory, useSkillsStore, type DiscoveredSkill } from '@/stores/useSkillsStore';
+import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -49,7 +50,6 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
 
   const {
     selectedSkillName,
-    skills,
     setSelectedSkill,
     setSkillDraft,
     deleteSkill,
@@ -57,7 +57,6 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     getSkillDetail,
   } = useSkillsStore(useShallow((s) => ({
     selectedSkillName: s.selectedSkillName,
-    skills: s.skills,
     setSelectedSkill: s.setSelectedSkill,
     setSkillDraft: s.setSkillDraft,
     deleteSkill: s.deleteSkill,
@@ -65,7 +64,15 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     getSkillDetail: s.getSkillDetail,
   })));
 
-  // Skills are loaded by the Settings shell when this page is active.
+  // Settings browses whichever project its own selector points at; the app
+  // stays where it is.
+  const settingsDirectory = useSettingsDirectory();
+  const skills = useSkillsStore((state) => selectSkillsForDirectory(state, settingsDirectory));
+  const loadSkills = useSkillsStore((state) => state.loadSkills);
+
+  React.useEffect(() => {
+    void loadSkills(settingsDirectory);
+  }, [loadSkills, settingsDirectory]);
 
   const bgClass = 'bg-background';
 
@@ -101,7 +108,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     }
 
     setIsDeletePending(true);
-    const success = await deleteSkill(deleteDialogSkill.name);
+    const success = await deleteSkill(deleteDialogSkill.name, settingsDirectory);
     if (success) {
       toast.success(t('settings.skills.sidebar.toast.skillDeleted', { name: deleteDialogSkill.name }));
       setDeleteDialogSkill(null);
@@ -124,7 +131,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     }
 
     // Get full skill detail to copy
-    const detail = await getSkillDetail(skill.name);
+    const detail = await getSkillDetail(skill.name, settingsDirectory);
     if (!detail) {
       toast.error(t('settings.skills.sidebar.toast.duplicateLoadFailed'));
       return;
@@ -173,7 +180,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     }
 
     // Rename in place on disk so SKILL.md body and supporting files are preserved.
-    const success = await renameSkill(renameDialogSkill.name, sanitizedName);
+    const success = await renameSkill(renameDialogSkill.name, sanitizedName, settingsDirectory);
     if (success) {
       toast.success(t('settings.skills.sidebar.toast.skillRenamed', { name: sanitizedName }));
       setSelectedSkill(sanitizedName);
@@ -439,12 +446,6 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
 }) => {
   const { t } = useI18n();
   const isMobile = isMobileDeviceViaCSS();
-  const sourceLabel = skill.source === 'claude'
-    ? t('settings.skills.sidebar.badge.claude')
-    : skill.source === 'agents'
-      ? t('settings.skills.sidebar.badge.agents')
-      : t('settings.skills.sidebar.badge.opencode');
-  const badgeClassName = 'typography-micro text-muted-foreground bg-[var(--surface-muted)] px-1 rounded flex-shrink-0 leading-none pb-px border border-[var(--interactive-border)]/50';
   const isBuiltIn = isBuiltInSkill(skill);
   const canRename = isRenamableSkill(skill);
   const [isContextMenuOpen, setIsContextMenuOpen] = React.useState(false);
@@ -479,10 +480,6 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
             <span className="typography-ui-label font-normal truncate text-foreground">
               {skill.name}
             </span>
-            <span className={badgeClassName}>
-              {skill.scope}
-            </span>
-            <span className={badgeClassName}>{sourceLabel}</span>
           </div>
         </button>
 

@@ -179,6 +179,80 @@ describe('session runtime', () => {
     expect(runtime.getActiveSessionCount()).toBe(0);
   });
 
+  it('interrupts busy sessions after restart and broadcasts terminal events once', () => {
+    const events = [];
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent: (event) => events.push(event),
+    });
+    runtimes.push(runtime);
+    const status = (sessionID, type) => runtime.processOpenCodeSsePayload({
+      type: 'session.status',
+      properties: { sessionID, status: { type } },
+    });
+
+    status('session-busy-1', 'busy');
+    status('session-busy-2', 'retry');
+    status('session-busy-3', 'busy');
+    status('session-idle', 'idle');
+    expect(runtime.getActiveSessionCount()).toBe(3);
+    events.length = 0;
+
+    expect(runtime.interruptBusySessionsAfterRestart()).toEqual({
+      sessionIds: ['session-busy-1', 'session-busy-2', 'session-busy-3'],
+    });
+
+    expect(runtime.getActiveSessionCount()).toBe(0);
+    expect(runtime.getSessionActivitySnapshot()).toEqual({
+      'session-busy-1': { type: 'idle' },
+      'session-busy-2': { type: 'idle' },
+      'session-busy-3': { type: 'idle' },
+      'session-idle': { type: 'idle' },
+    });
+    expect(runtime.getSessionStateSnapshot()).toEqual({
+      'session-busy-1': expect.objectContaining({
+        status: 'idle',
+        metadata: expect.objectContaining({
+          message: 'Interrupted by OpenCode restart',
+          reason: 'opencode-restart',
+        }),
+      }),
+      'session-busy-2': expect.objectContaining({ status: 'idle' }),
+      'session-busy-3': expect.objectContaining({ status: 'idle' }),
+      'session-idle': expect.objectContaining({ status: 'idle' }),
+    });
+
+    const terminalEvents = events.filter((event) => (
+      event.type === 'openchamber:session-status' || event.type === 'session.error'
+    ));
+    expect(terminalEvents).toHaveLength(6);
+    for (const sessionId of ['session-busy-1', 'session-busy-2', 'session-busy-3']) {
+      expect(terminalEvents).toContainEqual({
+        type: 'openchamber:session-status',
+        properties: expect.objectContaining({
+          sessionID: sessionId,
+          status: 'idle',
+        }),
+      });
+      expect(terminalEvents).toContainEqual({
+        type: 'session.error',
+        properties: {
+          sessionID: sessionId,
+          error: {
+            name: 'MessageAbortedError',
+            message: 'The running turn was interrupted when OpenCode restarted.',
+          },
+        },
+      });
+    }
+    expect(terminalEvents.some((event) => event.properties.sessionID === 'session-idle')).toBe(false);
+
+    events.length = 0;
+    expect(runtime.interruptBusySessionsAfterRestart()).toEqual({ sessionIds: [] });
+    expect(events).toEqual([]);
+  });
+
   it('restores activity when busy interrupts cooldown without timer underflow', () => {
     vi.useFakeTimers();
     const runtime = createSessionRuntime({

@@ -52,14 +52,55 @@ written against staged code never silently re-anchors onto an unstaged edit.
 | Kind | Sections | Notes |
 |---|---|---|
 | `working-tree` (`all` \| `staged` \| `working`) | `staged`, `working` | Untracked files are fetched individually because `git diff` omits them |
-| `branch` | `branch` | `getRangeDiff` uses three-dot `base...head`, so work merged in from the base branch is excluded |
-| `pr` | `pr:<number>` | GitHub returns the merge-base diff, matching the branch semantics |
+| `branch` | `branch` | `getRangeDiff` with `includeWorkingTree: true` compares the selected merge base with current files, including committed and local work in one net diff |
+| `commit` | `commit` | `getCommitDiff` compares the full selected commit hash with its first parent; root commits compare with an empty tree |
+| `pr` | `pr:<number>` | GitHub's committed pull-request diff, without local working-tree changes |
 
-The panel offers the current branch's pull request on its own: it registers with
-the shared GitHub PR status store (`useGitHubPrStatusStore`) rather than waiting
-for the pull request panel to have been visited. That store already dedupes
-concurrent requests by signature and throttles by TTL, so several panels asking
-the same question produce one call to GitHub.
+Changes and walkthrough resolve the current branch's base through
+`packages/ui/src/hooks/useBranchComparisonBase.ts`. An explicit choice in Changes
+outranks reflog detection. Both toolbars use
+`packages/ui/src/components/views/git/BranchComparisonSelector.tsx` to select or
+change the base directly. Walkthrough allows selecting Branch before a base is
+known and waits for a valid choice before loading or generating. Opening
+walkthrough from Changes carries the selected base and head; later selections
+in either toolbar update both comparisons.
+
+Commit mode uses the shared `CommitComparisonSelector` in both toolbars. It
+lists the latest 50 commits reachable from the checked-out branch, with subject,
+author, date, and short hash. Opening the picker refreshes that list; selecting a
+commit changes the comparison, not the checkout. Changes hands the selected full
+hash to walkthrough. The server accepts full object IDs for commit sources and
+keys their cache entries and generation jobs as `commit:<hash>`, so reviews of
+different commits cannot overwrite each other. Existing source keys keep their
+format. Commit reads have no working-tree freshness dependency, and selecting a
+commit never starts model generation.
+
+The Git module owns exact-ref and working-tree comparison semantics. Local and
+remote bases remain distinct, and a checkout during a branch review requires
+the source to be resolved for the new branch rather than including another
+branch's local files.
+
+Successful status refreshes invalidate the visible branch comparison even when
+file names and insertion/deletion counts stay the same. Walkthrough refreshes
+its current hunk index while visible; regeneration remains user-initiated. The
+content-addressed cache continues to reuse an old review only when its hunks
+match, and otherwise reports stale anchors and uncovered current hunks.
+
+PR mode uses the same searchable, paginated selector as Changes. Its list loads
+only while PR mode is visible. Selection ownership and handoff rules are in
+`packages/ui/src/stores/DOCUMENTATION.md`.
+
+PR sources may include `sourceRepo: { owner, repo }`. This qualifies both the
+GitHub request and the cache/job key as `pr:<owner>/<repo>:<number>`. Existing
+number-only sources retain `pr:<number>` and resolve the directory's repository.
+The PR panel forwards its resolved repository when opening walkthrough.
+
+`GET /api/walkthrough/pr-diff` accepts `directory` and a JSON `source` restricted
+to PRs. It returns GitHub's complete published diff as text, with no model
+readiness checks or generation. Successful empty patches return 200; auth,
+GitHub and malformed-response failures remain errors. Walkthrough generation
+keeps its existing empty-diff refusal. UI comparison behavior is documented in
+`packages/ui/src/components/views/DOCUMENTATION.md`.
 
 ## No truncation
 
@@ -117,6 +158,14 @@ offering them would move the same refusal one click later — and, like the smal
 model picker, only shows providers with a usable login. The in-panel picker on a
 blocked walkthrough writes this setting too, so recovering from a refusal never
 silently changes the model behind commit messages.
+
+A settings or `opencode.json` `small_model` override can still name a provider
+with no usable login (neither `auth.json` nor `provider.<id>.options.apiKey`).
+`describeSmallModel` reports that as `hasLogin: false`, readiness refuses with
+`reason: 'no-provider-login'` and omits the unusable model so the panel cannot
+present it as selected, and generation maps the same code to HTTP 401. The UI
+disables Generate and keeps the picker on authenticated providers only — it does
+not surface a raw auth error or a special login blocker for this case.
 
 ## Output language
 
@@ -368,6 +417,21 @@ endpoint nothing calls is a maintenance surface that rots untested.
 
 Registered lazily from `feature-routes-runtime.js`. `/api/walkthrough` is in the
 JSON body-parser allowlist in `core-routes.js`.
+
+## A server that does not have these routes
+
+An `/api/*` path no OpenChamber route claims reaches the OpenCode proxy, and
+OpenCode answers any path it does not know with its embedded web UI — HTML, with
+status **200**. So a client newer than the server it is connected to is not told
+"no such route"; it is handed a web page. Parsing that as JSON is where
+`Unexpected token '<', "<!doctype "...` came from, a message that names neither
+the cause nor the remedy.
+
+The client therefore checks the content type before parsing. A non-JSON answer
+on 2xx or 404 becomes `server-unsupported`, which the panel renders as "this
+server is older than the app, update it". A non-JSON **5xx** keeps its own
+failure: a server that answered badly is not a server missing the feature, and
+telling someone to upgrade would send them after the wrong thing.
 
 ## Runtime availability
 

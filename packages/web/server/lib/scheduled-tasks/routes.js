@@ -81,6 +81,35 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     }
   });
 
+  app.patch('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', async (req, res) => {
+    const projectID = parseProjectID(req);
+    const taskID = parseTaskID(req);
+    if (!projectID) return res.status(400).json({ error: 'projectId is required' });
+    if (!taskID) return res.status(400).json({ error: 'taskId is required' });
+    try {
+      const task = await scheduledTaskService.setLoopEnabled(projectID, taskID, req.body?.enabled);
+      return res.json({ task });
+    } catch (error) {
+      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      console.error('[ScheduledTasks] failed to update loop file:', error);
+      return res.status(500).json({ error: 'Failed to update loop file' });
+    }
+  });
+
+  app.delete('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', async (req, res) => {
+    const projectID = parseProjectID(req);
+    const taskID = parseTaskID(req);
+    if (!projectID) return res.status(400).json({ error: 'projectId is required' });
+    if (!taskID) return res.status(400).json({ error: 'taskId is required' });
+    try {
+      return res.json({ tasks: await scheduledTaskService.removeLoopFile(projectID, taskID) });
+    } catch (error) {
+      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      console.error('[ScheduledTasks] failed to delete loop file:', error);
+      return res.status(500).json({ error: 'Failed to delete loop file' });
+    }
+  });
+
   app.post('/api/projects/:projectId/scheduled-tasks/:taskId/run', async (req, res) => {
     const projectID = parseProjectID(req);
     const taskID = parseTaskID(req);
@@ -115,6 +144,12 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
+
+    // Whether a client can drive a browser view is a property of that client,
+    // not of this server: a desktop shell and a browser tab can be connected to
+    // the same server at once. Recording it on the connection keeps the answer
+    // current without any enable/disable setting to go stale.
+    res.openchamberBrowserCapable = req.query?.browser === '1';
 
     const clients = getOpenChamberEventClients();
     clients.add(res);

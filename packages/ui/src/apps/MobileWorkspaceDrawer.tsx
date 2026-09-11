@@ -9,6 +9,7 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import { TerminalView } from '@/components/views/TerminalView';
 import { useI18n } from '@/lib/i18n';
+import type { ProjectRef } from '@/lib/projectContextApi';
 import { cn } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
@@ -16,6 +17,7 @@ import { useMcpStore } from '@/stores/useMcpStore';
 
 import { MobileChangesSurface } from './MobileChangesSurface';
 import { MobileFilesSurface } from './MobileFilesSurface';
+import { useEdgeSwipe } from './useEdgeSwipe';
 
 const DRAWER_ROOT_ID = 'mobile-surface-root';
 const ENTER_DELAY_MS = 16;
@@ -95,8 +97,9 @@ const McpWorkspacePane: React.FC<{ onOpenMcpSettings: () => void }> = ({ onOpenM
        beside the chat (tablet, landscape). The caller owns the width and the
        open/close animation there; this component only fills it.
 
-    Closes via the header X, Escape (unless the terminal tab owns the keys), or
-    the Android back button (handled by MobileShell). */
+    Closes via the header X, a left-edge swipe back toward the right (the
+    mirror of the gesture that opened it), Escape (unless the terminal tab owns
+    the keys), or the Android back button (handled by MobileShell). */
 export const MobileWorkspaceDrawer: React.FC<{
   open: boolean;
   onClose: () => void;
@@ -105,13 +108,14 @@ export const MobileWorkspaceDrawer: React.FC<{
   /** When set, the Changes tab opens directly into the per-file diff. */
   pendingChangesDiff: { path: string; staged: boolean } | null;
   /** Notes tab: opens a plan fullscreen (layered above the drawer). */
-  onOpenPlan: (plan: { path: string; title: string }) => void;
+  onOpenPlan: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
   /** MCP tab: jump to the MCP settings page pre-seeded with a new server draft. */
   onOpenMcpSettings: () => void;
   variant?: 'drawer' | 'panel';
 }> = ({ open, onClose, tab, onTabChange, pendingChangesDiff, onOpenPlan, onOpenMcpSettings, variant = 'drawer' }) => {
   const { t } = useI18n();
   const rootRef = React.useRef<HTMLElement | null>(null);
+  const drawerRef = React.useRef<HTMLElement>(null);
   const [entered, setEntered] = React.useState(false);
   // Kept visible through the exit slide; flipped to hidden once it finishes.
   const [visible, setVisible] = React.useState(open);
@@ -123,6 +127,15 @@ export const MobileWorkspaceDrawer: React.FC<{
   React.useEffect(() => {
     tabRef.current = tab;
   }, [tab]);
+
+  // Swipe from the drawer's left edge back toward the right = close, the
+  // reverse of the right-edge swipe that opened it from the chat. Only the
+  // full-cover drawer has an edge to grab; the tablet panel is closed from the
+  // header instead.
+  useEdgeSwipe(drawerRef, {
+    enabled: variant === 'drawer' && open,
+    onLeftEdgeSwipe: () => onCloseRef.current(),
+  });
 
   // Tabs the user has actually opened — their panes stay mounted afterwards.
   const [visitedTabs, setVisitedTabs] = React.useState<ReadonlySet<MobileWorkspaceTab>>(() => new Set());
@@ -223,14 +236,14 @@ export const MobileWorkspaceDrawer: React.FC<{
         {visitedTabs.has('changes') ? (
           <div
             // A newly requested per-file diff remounts the pane so
-            // initialDiffPath applies; plain reopens keep the state.
+            // initialDiff applies; plain reopens keep the state.
             key={pendingChangesDiff ? `changes:${pendingChangesDiff.path}:${pendingChangesDiff.staged}` : 'changes'}
             className={cn('h-full', tab !== 'changes' && 'hidden')}
           >
             <ErrorBoundary>
               <MobileChangesSurface
-                initialDiffPath={pendingChangesDiff?.path ?? null}
-                initialDiffStaged={pendingChangesDiff?.staged === true}
+                visible={open && tab === 'changes'}
+                initialDiff={pendingChangesDiff}
               />
             </ErrorBoundary>
           </div>
@@ -277,11 +290,12 @@ export const MobileWorkspaceDrawer: React.FC<{
 
   return createPortal(
     <section
+      ref={drawerRef}
       role="dialog"
       aria-modal="true"
       aria-label={t('mobile.header.openWorkspaceAria')}
       aria-hidden={!open}
-      className="oc-keyboard-inset-surface fixed inset-0 z-50 flex flex-col bg-background text-foreground"
+      className="oc-keyboard-inset-surface oc-bottom-safe-surface fixed inset-0 z-50 flex flex-col bg-background text-foreground"
       style={{
         paddingTop: 'var(--oc-safe-area-top, 0px)',
         // Settled state drops the transform entirely so the drawer isn't kept

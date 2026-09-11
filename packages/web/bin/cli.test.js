@@ -11,6 +11,7 @@ import { isModuleCliExecution, normalizeCliEntryPath } from './cli-entry.js';
 import { requestJson } from './lib/cli-http.js';
 import { requestControlAction } from './lib/cli-control.js';
 import { inspectTunnelAttachability } from './lib/cli-lifecycle.js';
+import { startupCommand } from './lib/commands-startup.js';
 import { formatGoal } from './lib/commands-schedule.js';
 import {
   buildSessionCreatePayload,
@@ -34,13 +35,17 @@ import {
   discoverRunningInstances,
   discoverUnconfirmedRegistryInstanceOnPort,
   ensureTunnelProfilesMigrated,
+  EXIT_CODE,
+  generateUiPassword,
   getInstanceFilePath,
   getPidFilePath,
   isOpenchamberCmdline,
   isOpenchamberProcessRunning,
   parseArgs,
   resolveServeHost,
+  resolveServeUiPassword,
 } from './cli.js';
+import { buildWindowsStartupTaskCommand } from './lib/cli-startup.js';
 
 async function withTempOpenChamberDataDir(fn) {
   const previous = process.env.OPENCHAMBER_DATA_DIR;
@@ -689,6 +694,43 @@ describe('network-exposed auth validation', () => {
         delete process.env.OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN;
       }
     }
+  });
+});
+
+describe('serve UI password resolution', () => {
+  it('keeps a configured password untouched', () => {
+    expect(resolveServeUiPassword({ uiPassword: 'secret', explicitUiPassword: true }))
+      .toEqual({ password: 'secret', generated: false });
+  });
+
+  it('generates a password for an explicit --ui-password flag without a value', () => {
+    const resolved = resolveServeUiPassword({ uiPassword: '', explicitUiPassword: true });
+    expect(resolved.generated).toBe(true);
+    expect(typeof resolved.password).toBe('string');
+    expect(resolved.password.length).toBe(16);
+  });
+
+  it('does not generate a password when the flag is absent', () => {
+    expect(resolveServeUiPassword({ uiPassword: undefined, explicitUiPassword: false }))
+      .toEqual({ password: undefined, generated: false });
+  });
+
+  it('generates passwords from an ambiguity-free charset', () => {
+    const resolved = resolveServeUiPassword({ uiPassword: '', explicitUiPassword: true });
+    expect(resolved.password).toMatch(/^[A-HJ-NP-Za-km-z2-9]{16}$/);
+    expect(resolved.password).not.toMatch(/[0O1Il]/);
+  });
+
+  it('generates distinct passwords on repeated calls', () => {
+    const a = generateUiPassword();
+    const b = generateUiPassword();
+    expect(a).not.toBe(b);
+  });
+
+  it('parses --ui-password without a value as explicit but empty', () => {
+    const parsed = parseArgs(['serve', '--ui-password']);
+    expect(parsed.options.explicitUiPassword).toBe(true);
+    expect(parsed.options.uiPassword).toBe('');
   });
 });
 
@@ -1380,5 +1422,129 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
         await server.close();
       }
     });
+  });
+});
+
+describe('Windows startup task command builder', () => {
+  it('default-path length stays under 200 chars', () => {
+    const cmd = buildWindowsStartupTaskCommand(
+      'C:\\Users\\test\\.config\\openchamber\\bin\\OpenChamber.ps1'
+    );
+    expect(cmd).toMatch(/^powershell\.exe -NoProfile -ExecutionPolicy Bypass -File /);
+    expect(cmd.length).toBeLessThan(200);
+  });
+
+  it('worst-case long path stays under 261-char Task Scheduler ceiling', () => {
+    // Build a wrapper path >= 180 chars (simulates long OPENCHAMBER_DATA_DIR)
+    // Overhead = 57 chars (prefix + closing quote), so max wrapper for <261 total is 203
+    const longPath =
+      'C:\\Users\\' +
+      'a'.repeat(139) +
+      '\\.config\\openchamber\\bin\\OpenChamber.ps1';
+    expect(longPath.length).toBeGreaterThanOrEqual(180);
+
+    const cmd = buildWindowsStartupTaskCommand(longPath);
+    expect(cmd.length).toBeLessThan(261);
+  });
+
+  it('does NOT inline SetEnvironmentVariable (externalization invariant)', () => {
+    const cmd = buildWindowsStartupTaskCommand('C:\\wrapper.ps1');
+    expect(cmd).not.toContain('SetEnvironmentVariable');
+  });
+
+  it('uses -File form, not -Command', () => {
+    const cmd = buildWindowsStartupTaskCommand('C:\\wrapper.ps1');
+    expect(cmd).toContain('-File ');
+    expect(cmd).not.toContain('-Command ');
+  });
+});
+
+describe('startup command lingering output', () => {
+  const linuxStatus = (lingerEnabled, lingerUser = 'alice') => ({
+    supported: true,
+    platform: 'linux',
+    enabled: true,
+    active: true,
+    activeState: 'active',
+    servicePath: '/home/alice/.config/systemd/user/openchamber.service',
+    lingerEnabled,
+    lingerUser,
+  });
+
+  const dependenciesFor = (status) => ({
+    getStartupStatus: () => status,
+    enableStartupService: () => status,
+    disableStartupService: () => status,
+  });
+
+  const runCommand = (status, options, action) => startupCommand(options, action, dependenciesFor(status));
+
+  it.each([
+    ['enable', true, 'ok', undefined],
+    ['enable', false, 'warning', 'LINGER_DISABLED'],
+    ['enable', null, 'warning', 'LINGER_UNKNOWN'],
+    ['status', true, 'ok', undefined],
+    ['status', false, 'warning', 'LINGER_DISABLED'],
+    ['status', null, 'warning', 'LINGER_UNKNOWN'],
+  ])('reports %s with Linux linger=%s as JSON-only output', async (action, lingerEnabled, expectedStatus, warningCode) => {
+    const output = await captureStdout(() => runCommand(linuxStatus(lingerEnabled), { json: true }, action));
+    const payload = JSON.parse(output);
+
+    expect(payload.status).toBe(expectedStatus);
+    expect(payload.action).toBe(action);
+    expect(payload.lingerEnabled).toBe(lingerEnabled);
+    expect(payload.messages?.[0]?.code).toBe(warningCode);
+  });
+
+  it.each([
+    ['enable', true, 'yes'],
+    ['enable', false, 'no'],
+    ['enable', null, 'unknown'],
+    ['status', true, 'yes'],
+    ['status', false, 'no'],
+    ['status', null, 'unknown'],
+  ])('reports %s with Linux linger=%s in one quiet result line', async (action, lingerEnabled, label) => {
+    const output = await captureStdout(() => runCommand(linuxStatus(lingerEnabled), { quiet: true }, action));
+
+    expect(output.split('\n')).toHaveLength(2);
+    expect(output).toContain(` linger:${label}\n`);
+    expect(output).not.toContain('loginctl');
+  });
+
+  it.each([true, false])('warns with an actionable command in human TTY=%s output', async (isTTY) => {
+    const descriptor = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
+    Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: isTTY });
+    try {
+      const output = await captureStdout(() => runCommand(linuxStatus(false), {}, 'enable'));
+
+      expect(output).toContain('[LINGER_DISABLED]');
+      expect(output).toContain('sudo loginctl enable-linger alice');
+    } finally {
+      if (descriptor) Object.defineProperty(process.stdout, 'isTTY', descriptor);
+      else delete process.stdout.isTTY;
+    }
+  });
+
+  it('reports unknown state without inventing a user when detection is unavailable', async () => {
+    const output = await captureStdout(() => runCommand(linuxStatus(null, null), {}, 'status'));
+
+    expect(output).toContain('[LINGER_UNKNOWN]');
+    expect(output).toContain('loginctl show-user "$USER" -p Linger');
+  });
+
+  it('reports disabled-service linger state without warning or remediation', async () => {
+    const output = await captureStdout(() => runCommand({ ...linuxStatus(false), enabled: false }, {}, 'status'));
+
+    expect(output).toContain('user lingering is disabled');
+    expect(output).not.toContain('[LINGER_DISABLED]');
+    expect(output).not.toContain('loginctl enable-linger');
+  });
+
+  it('does not emit linger guidance for unsupported systems', async () => {
+    await expect(runCommand(
+      { supported: false, platform: 'freebsd', enabled: false, servicePath: null },
+      { json: true },
+      'status'
+    )).rejects.toMatchObject({ exitCode: EXIT_CODE.USAGE_ERROR });
   });
 });

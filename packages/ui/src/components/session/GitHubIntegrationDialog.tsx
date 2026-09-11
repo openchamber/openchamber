@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   Dialog,
   DialogContent,
@@ -29,14 +30,14 @@ import { useI18n } from '@/lib/i18n';
 
 type GitHubTab = 'issues' | 'prs';
 
+export type GitHubWorktreeSelection =
+  | { type: 'issue'; item: GitHubIssue; includeDiff?: boolean }
+  | { type: 'pr'; item: GitHubPullRequestSummary; includeDiff?: boolean };
+
 interface GitHubIntegrationDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSelect: (result: {
-    type: 'issue' | 'pr';
-    item: GitHubIssue | GitHubPullRequestSummary;
-    includeDiff?: boolean;
-  } | null) => void;
+  onSelect: (result: GitHubWorktreeSelection | null) => void;
 }
 
 interface ValidationResult {
@@ -284,7 +285,7 @@ export function GitHubIntegrationDialog({
   const isGitHubConnected = githubAuthChecked && githubAuthStatus?.connected === true;
 
   const openGitHubSettings = () => {
-    setSettingsPage('github');
+    setSettingsPage('integrations');
     setSettingsDialogOpen(true);
   };
 
@@ -362,7 +363,7 @@ export function GitHubIntegrationDialog({
 
           {/* List Content */}
           <div className="mt-2 h-[300px] overflow-hidden">
-            <div className="h-full overflow-y-auto">
+            <ScrollableOverlay outerClassName="h-full" disableHorizontal>
               {/* Loading */}
               {loading && (
                 <div className="flex items-center justify-center h-full">
@@ -505,7 +506,7 @@ export function GitHubIntegrationDialog({
                   )}
                 </div>
               )}
-            </div>
+            </ScrollableOverlay>
           </div>
         </>
       )}

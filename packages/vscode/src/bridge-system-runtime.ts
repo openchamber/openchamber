@@ -6,10 +6,12 @@ import { randomUUID } from 'crypto';
 import { removeProviderConfig, getProviderSources, upsertProviderConfig } from './opencodeConfig';
 import { getProviderAuth, removeProviderAuth } from './opencodeAuth';
 import { fetchQuotaForProvider, listConfiguredQuotaProviders } from './quotaProviders';
-import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
 import { credentialStatus, deleteCredential, importCursorCredential, normalizeCredential, readCredential, validateCredential, writeCredential, type ManagedProvider } from './quotaCredentials';
 import { getSessionActivitySnapshot } from './sessionActivityWatcher';
 import { getOpenCodeUpgradeStatus, upgradeManagedOpenCode } from './opencode-upgrade-runtime';
+import { buildDeferredRestartResponse } from './config-mutation-response';
+import { normalizeWindowsDriveLetter, pathsEqualWithNormalizedDriveLetter } from './pathUtils';
+import { resolveWorkspaceFolders } from './workspaceResolver';
 import type { BridgeContext, BridgeResponse } from './bridge';
 
 type BridgeMessageInput = {
@@ -356,13 +358,12 @@ export async function handleSystemBridgeMessage(
     case 'editor:openFile': {
       const { path: filePath, line, column } = payload as { path: string; line?: number; column?: number };
       try {
-        const doc = await vscode.workspace.openTextDocument(filePath);
         const options: vscode.TextDocumentShowOptions = {};
         if (typeof line === 'number') {
           const pos = new vscode.Position(Math.max(0, line - 1), column || 0);
           options.selection = new vscode.Range(pos, pos);
         }
-        await vscode.window.showTextDocument(doc, options);
+        await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath), options);
         return { id, type, success: true };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -443,21 +444,19 @@ export async function handleSystemBridgeMessage(
           return { id, type, success: false, error: 'Invalid scope' };
         }
 
-        if (removed) {
-          await ctx?.manager?.restart();
-        }
         return {
           id,
           type,
           success: true,
           data: {
-            success: true,
             removed,
-            requiresReload: removed,
-            message: removed
-              ? `Provider ${providerId} disconnected successfully. Reloading interface…`
-              : `Provider ${providerId} was not configured.`,
-            reloadDelayMs: removed ? deps.clientReloadDelayMs : undefined,
+            ...(removed
+              ? buildDeferredRestartResponse(`Provider ${providerId} disconnected successfully. Restart OpenCode to apply.`)
+              : {
+                success: true,
+                requiresReload: false,
+                message: `Provider ${providerId} was not configured.`,
+              }),
           },
         };
       } catch (error) {
@@ -556,7 +555,7 @@ export async function handleSystemBridgeMessage(
     case 'api:quota:credentials': {
       const { providerId, method, credential: input } = (payload || {}) as { providerId?: ManagedProvider; method?: string; credential?: unknown };
       try {
-        if (!providerId || !['opencode-go', 'ollama-cloud', 'cursor'].includes(providerId)) return { id, type, success: false, error: 'Unsupported credential provider' };
+        if (!providerId || !['exe-dev', 'ollama-cloud', 'cursor'].includes(providerId)) return { id, type, success: false, error: 'Unsupported credential provider' };
         if (method === 'GET') return { id, type, success: true, data: credentialStatus(providerId) };
         if (method === 'DELETE') { deleteCredential(providerId); return { id, type, success: true, data: { configured: false } }; }
         if (method === 'IMPORT') {
@@ -568,15 +567,13 @@ export async function handleSystemBridgeMessage(
         if (method === 'PUT') {
           const credential = normalizeCredential(providerId, input);
           if (!credential) return { id, type, success: false, error: 'Invalid credential' };
-          if (providerId === 'opencode-go') await fetchOpenCodeGoUsage(credential as { workspaceId: string; authCookie: string });
-          else await validateCredential(providerId, credential);
+          await validateCredential(providerId, credential);
           return { id, type, success: true, data: writeCredential(providerId, credential) };
         }
         if (method === 'VALIDATE') {
           const credential = readCredential(providerId);
           if (!credential) return { id, type, success: false, error: 'Not configured' };
-          if (providerId === 'opencode-go') await fetchOpenCodeGoUsage(credential as { workspaceId: string; authCookie: string });
-          else await validateCredential(providerId, credential);
+          await validateCredential(providerId, credential);
           return { id, type, success: true, data: { valid: true } };
         }
         return { id, type, success: false, error: 'Unsupported method' };
@@ -593,6 +590,41 @@ export async function handleSystemBridgeMessage(
       try {
         const result = await fetchQuotaForProvider(providerId);
         return { id, type, success: true, data: result };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:workspace:addFolder': {
+      try {
+        // SAFETY: bridge payloads are untrusted JSON from the webview; the
+        // cast only reads the optional path field, and non-string values fail
+        // the emptiness check below (or throw inside the try, which the catch
+        // converts into a clean failure response).
+        const { path: targetPath } = (payload || {}) as { path?: string };
+        if (!targetPath || targetPath.trim().length === 0) {
+          return { id, type, success: false, error: 'Directory path is required' };
+        }
+        const folders = vscode.workspace.workspaceFolders ?? [];
+        const uri = vscode.Uri.file(normalizeWindowsDriveLetter(targetPath.trim()));
+        // `Uri.fsPath` lowercases the Windows drive letter again, so both sides
+        // have to go through the shared comparison (see pathUtils).
+        const alreadyAdded = folders.some(
+          (folder) => pathsEqualWithNormalizedDriveLetter(folder.uri.fsPath, uri.fsPath),
+        );
+        if (!alreadyAdded) {
+          const updated = await vscode.workspace.updateWorkspaceFolders(folders.length, null, { uri });
+          if (!updated) {
+            return { id, type, success: false, error: 'Failed to add workspace folder' };
+          }
+        }
+        return {
+          id,
+          type,
+          success: true,
+          data: { workspaceFolders: resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []) },
+        };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { id, type, success: false, error: errorMessage };

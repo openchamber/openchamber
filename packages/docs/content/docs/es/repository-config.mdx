@@ -1,0 +1,100 @@
+---
+title: Configuración en el repositorio
+description: Guarda acciones del proyecto, comandos de configuración de worktree, arranques y planes en el repositorio para que los tenga todo el que lo clone.
+---
+
+# Configuración en el repositorio
+
+Las acciones del proyecto, los comandos de configuración de worktree y los arranques de borrador viven por defecto en tus propios ajustes de OpenChamber. Nadie más los ve. Si quieres que quien clone el repositorio tenga la misma acción de servidor de desarrollo y el mismo `bun install` en cada worktree nuevo, mueve esos elementos al repositorio.
+
+OpenChamber los guarda en `.openchamber/project.json` en la raíz del repositorio. El archivo aparece solo cuando mueves allí el primer elemento y desaparece cuando sacas el último. Haz commit como con cualquier otro archivo.
+
+## Qué va a cada sitio
+
+| Se queda en tus ajustes | Puede ir al repositorio |
+|---|---|
+| Notas y tareas | Acciones del proyecto |
+| Tareas programadas | Comandos de configuración de worktree |
+| Qué acción del repositorio has ocultado para ti | Arranques de borrador (comandos y skills fijados) |
+| Tu respuesta de confianza para los comandos del repositorio | Planes |
+
+Las notas, las tareas y las tareas programadas son tuyas. Nunca acaban en el repositorio.
+
+## Mover un elemento
+
+Abre **Settings → Projects** y elige el proyecto. Cada acción y cada comando de configuración tiene un botón **Move to repository**, y cada elemento que viene del repositorio tiene **Move to my settings**. Los arranques de la pantalla de nueva sesión muestran el mismo par al pasar el cursor. Los planes lo tienen en cada fila de la pestaña Planes.
+
+Mover es exactamente eso. El elemento sale de un sitio y llega al otro, no se duplica nada.
+
+Los elementos del repositorio muestran la insignia **In repo**. Las acciones del repositorio también se pueden ocultar de tu menú con **Hide for me**. Eso solo cambia tu menú, no el archivo.
+
+## El archivo
+
+```json
+{
+  "version": 1,
+  "setupWorktree": [
+    "bun install"
+  ],
+  "setupWorktreeWait": true,
+  "projectActions": [
+    {
+      "id": "dev",
+      "name": "Dev server",
+      "command": "bun run dev",
+      "icon": "rocket",
+      "autoOpenUrl": true,
+      "platforms": ["macos", "linux"]
+    },
+    {
+      "id": "test",
+      "name": "Tests",
+      "command": "bun test"
+    }
+  ],
+  "draftStarters": [
+    { "type": "skill", "name": "triage-prs" }
+  ],
+  "plansDir": "docs/plans"
+}
+```
+
+Solo `version` es obligatorio. El resto de claves son opcionales, y OpenChamber escribe solo las que contienen algo.
+
+`setupWorktree` es la lista de comandos de shell que OpenChamber ejecuta dentro de un worktree nuevo justo después de crearlo, en orden. Usa `$ROOT_PROJECT_PATH` para la ruta del checkout principal. `setupWorktreeWait: true` hace que OpenChamber espere a estos comandos antes de iniciar una sesión en el worktree.
+
+`projectActions` es la lista de acciones del menú de la cabecera. `id`, `name` y `command` son obligatorios. `icon` es opcional y por defecto es un icono de play; los nombres que OpenChamber conoce son `play`, `build`, `lint`, `terminal`, `tools`, `bug`, `flask`, `rocket`, `code`, `server`, `branch`, `search`, `settings`, `brain`, `stack`, `robot`, `command` y `file`. `autoOpenUrl: true` abre la dirección que imprime el comando, consulta [Vista previa y servidores de desarrollo](/preview/). `platforms` limita la acción a `macos`, `linux` o `windows`. `runIn: "parent"` ejecuta la acción en el checkout principal en lugar del worktree actual.
+
+`draftStarters` fija comandos y skills en la pantalla de nueva sesión. Cada entrada es `{ "type": "command" | "skill", "name": "..." }`, y el comando o skill tiene que existir en la configuración de OpenCode del repositorio.
+
+`plansDir` es donde viven los planes del repositorio. Omítelo para usar `.openchamber/plans`. Más abajo se explica.
+
+Puedes escribir este archivo a mano. Una clave con forma incorrecta invalida el archivo entero, y la página Projects te dice por qué en lugar de ignorarla en silencio.
+
+## Cómo se combinan los elementos del repositorio y los tuyos
+
+Primero se ejecutan los comandos de configuración del repositorio, después los tuyos. Marca **Use only my setup commands** en la sección Worktree para omitir por completo los del repositorio.
+
+Las acciones se combinan por `id`. Una acción de tus ajustes con el mismo id que una del repositorio la reemplaza. Los arranques se combinan por nombre.
+
+La marca de espera sale de tus ajustes cuando la has fijado, y si no, del repositorio.
+
+## Confianza
+
+Los comandos de configuración y las acciones del repositorio se ejecutan en tu máquina, y un `git pull` puede cambiarlos. Por eso, la primera vez que uno de ellos está a punto de ejecutarse, OpenChamber muestra los comandos exactos y pregunta. **Trust and run** recuerda tu respuesta en esta instancia. **Not this time** ejecuta solo tus propios comandos.
+
+La respuesta va ligada a los comandos en sí. Cuando un pull cambia un comando del repositorio, la pregunta vuelve para el texto nuevo. Puedes olvidar la respuesta con **reset trust** en la sección Worktree de los ajustes del proyecto.
+
+Mover un comando tuyo al repositorio cuenta como confiar en él, porque acabas de verlo.
+
+## Planes en el repositorio
+
+Los planes de la pestaña Planes también pueden vivir en el repositorio como archivos Markdown. La carpeta por defecto es `.openchamber/plans`. Define **Plans folder** en los ajustes del proyecto para usar otra carpeta dentro del repositorio, por ejemplo `docs/plans` si tu equipo ya guarda ahí los planes. Una carpeta propia reemplaza por completo la predeterminada: OpenChamber lee y escribe solo en esa carpeta, así que mueve tú mismo los archivos existentes cuando la cambies.
+
+Cada archivo `.md` de esa carpeta aparece en la pestaña Planes, incluidos los escritos por otras herramientas. Editar uno en OpenChamber guarda el archivo tal como lo escribiste. Un plan que mueves al repositorio conserva su identidad, así que las sesiones que lo tenían adjunto lo siguen encontrando.
+
+## Relacionado
+
+- [Acciones del proyecto](/project-actions/)
+- [Worktrees](/worktrees/)
+- [Notas, tareas y planes del proyecto](/notes-todos-plans/)

@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useCallback, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   areFilesEqual,
   areOptionsEqual,
@@ -29,6 +30,20 @@ import { getDefaultTheme } from '@/lib/theme/themes';
 
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
+import type { PatchHunkAnchor } from '@/lib/diff/patchFileDiff';
+
+export interface DiffHunkActions {
+  anchors: readonly PatchHunkAnchor[];
+  render: (index: number) => React.ReactNode;
+}
+
+type DiffAnnotation = PierreAnnotationData | { type: 'hunk-action'; index: number };
+const EMPTY_HUNK_ANCHORS: readonly PatchHunkAnchor[] = [];
+
+const HUNK_ACTION_OVERLAY_CSS = `
+  [data-gutter-buffer="annotation"] { min-height: 0; }
+  [data-code] { min-height: 2.5rem; align-content: start; }
+`;
 
 
 // Threshold (bytes) above which syntax highlighting is degraded for performance
@@ -44,6 +59,7 @@ interface PierreDiffViewerProps {
   wrapLines?: boolean;
   layout?: 'fill' | 'inline';
   enableComments?: boolean;
+  hunkActions?: DiffHunkActions;
 }
 
 /**
@@ -52,7 +68,7 @@ interface PierreDiffViewerProps {
  * and enables touch-friendly line interactions. Re-exported so plain
  * <PierreFile> consumers (e.g. `MobileFilesSurface`) can inject the same.
  */
-export const PIERRE_RUNTIME_BASE_CSS = `
+const PIERRE_RUNTIME_BASE_CSS = `
   :host {
     font-family: var(--font-mono);
     font-size: var(--text-code);
@@ -81,6 +97,27 @@ export const PIERRE_RUNTIME_BASE_CSS = `
 // as they break resize behavior.
 const WEBKIT_SCROLL_FIX_CSS = `
   ${PIERRE_RUNTIME_BASE_CSS}
+
+  /* While a multi-line content drag is being mapped to a line selection the
+     row highlight is the feedback; the native blue text selection on top of
+     it reads as double-selection, so it is painted transparent for the drag's
+     duration only (single-line selections keep the normal look for copying). */
+  :host([data-oc-comment-drag]) {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* Gutter "+" comment utility: theme primary, and smaller than Pierre's
+     1lh default, which reads oversized next to our 13px line numbers. */
+  [data-utility-button] {
+    width: 16px;
+    height: 16px;
+    align-self: center;
+    margin-right: calc(-16px + 1ch);
+    border-radius: 5px;
+    background-color: var(--primary-base);
+    color: var(--primary-foreground);
+  }
 
   :host {
     --diffs-bg-separator-override: var(--surface-elevated);
@@ -423,7 +460,7 @@ function acquireSharedVirtualizer(container: HTMLElement): SharedVirtualizer | n
 }
 
 const wakeVirtualizer = (
-  instance: PierreFileDiff<PierreAnnotationData>,
+  instance: PierreFileDiff<DiffAnnotation>,
   sharedVirtualizer: SharedVirtualizer | null,
   forceUpdate: () => void,
 ): (() => void) => {
@@ -470,6 +507,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   wrapLines,
   layout = 'fill',
   enableComments = true,
+  hunkActions,
 }) => {
   const themeContext = useOptionalThemeSystem();
 
@@ -478,6 +516,12 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   const darkTheme = themeContext?.availableThemes.find(t => t.metadata.id === themeContext.darkThemeId) ?? getDefaultTheme(true);
 
   const { isMobile } = useDeviceInfo();
+  const hunkAnchors = hunkActions?.anchors ?? EMPTY_HUNK_ANCHORS;
+  const [hunkTargets, setHunkTargets] = React.useState<{
+    fileDiff: FileDiffMetadata | undefined;
+    anchors: readonly PatchHunkAnchor[];
+    targets: ReadonlyMap<number, HTMLElement>;
+  }>(() => ({ fileDiff: undefined, anchors: EMPTY_HUNK_ANCHORS, targets: new Map() }));
 
   const diffCommentController = useInlineCommentController<SelectedLineRange>({
     source: 'diff',
@@ -566,9 +610,15 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
     cancel();
   }, [cancel]);
 
-  const renderAnnotation = useCallback((annotation: DiffLineAnnotation<PierreAnnotationData>) => {
+  const renderAnnotation = useCallback((annotation: DiffLineAnnotation<DiffAnnotation>) => {
     const div = document.createElement('div');
     div.style.position = 'relative';
+
+    if (annotation.metadata.type === 'hunk-action') {
+      div.dataset.hunkActionTarget = String(annotation.metadata.index);
+      div.style.height = '0px';
+      return div;
+    }
 
     const id = toPierreAnnotationId(annotation.metadata);
 
@@ -577,6 +627,52 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
     div.dataset.annotationLine = String(annotation.lineNumber);
     return div;
   }, []);
+
+  const captureHunkTargets = useCallback<NonNullable<FileDiffOptions<DiffAnnotation>['onPostRender']>>((node, instance, phase) => {
+    const targets = new Map<number, HTMLElement>();
+    if (phase !== 'unmount') {
+      const capsuleHeight = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) * 2;
+      const columns = new Map<HTMLElement, DOMRect>();
+      const placements: Array<{ target: HTMLElement; offset: number }> = [];
+      // Only mounted virtual rows have slots. Avoid creating React controls
+      // for off-screen hunks or measuring every line on a scroll event.
+      for (const slot of node.shadowRoot?.querySelectorAll('slot') ?? []) {
+        for (const wrapper of slot.assignedElements()) {
+          const target = wrapper.querySelector<HTMLElement>('[data-hunk-action-target]');
+          const index = Number(target?.dataset.hunkActionTarget);
+          if (!target || !Number.isInteger(index) || index < 0) continue;
+          targets.set(index, target);
+          const column = slot.closest<HTMLElement>('[data-code]');
+          if (!column) continue;
+          let bounds = columns.get(column);
+          if (!bounds) {
+            bounds = column.getBoundingClientRect();
+            columns.set(column, bounds);
+          }
+          const markerTop = target.getBoundingClientRect().top;
+          // Float over the following context. At EOF, lift the capsule inside
+          // the code column so its vertical clipping cannot hide the buttons.
+          const top = Math.max(bounds.top + 4, Math.min(markerTop + 4, bounds.bottom - capsuleHeight - 4));
+          placements.push({ target, offset: top - markerTop });
+        }
+      }
+      // Finish all geometry reads before writing offsets to avoid layout
+      // recalculation between neighboring hunks.
+      for (const { target, offset } of placements) {
+        const value = `${offset}px`;
+        if (target.style.getPropertyValue('--oc-hunk-action-offset') !== value) {
+          target.style.setProperty('--oc-hunk-action-offset', value);
+        }
+      }
+    }
+    const renderedDiff = instance.fileDiff;
+    setHunkTargets((previous) => {
+      if (previous.fileDiff === renderedDiff && previous.anchors === hunkAnchors
+          && previous.targets.size === targets.size
+          && [...targets].every(([index, target]) => previous.targets.get(index) === target)) return previous;
+      return { fileDiff: renderedDiff, anchors: hunkAnchors, targets };
+    });
+  }, [hunkAnchors]);
 
   const handleSaveComment = useCallback((textToSave: string, rangeOverride?: SelectedLineRange) => {
     saveComment(textToSave, rangeOverride ?? selection ?? undefined);
@@ -597,6 +693,187 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
       isApplyingSelectionRef.current = false;
     }
   }, [setSelection]);
+
+  // Multi-line text selection over diff CONTENT highlights the same line
+  // range Pierre paints for number-column selection — without opening the
+  // comment editor. The "+" utility then targets the highlighted range.
+  const contentSelectionRef = useRef<SelectedLineRange | null>(null);
+  const contentSelectionClearTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!enableComments) return;
+    const root = diffRootRef.current;
+    if (!root) return;
+
+    const getShadowRoot = (): ShadowRoot | null => {
+      const host = root.querySelector('diffs-container');
+      return host instanceof HTMLElement ? host.shadowRoot : null;
+    };
+
+    const setDragAttribute = (active: boolean) => {
+      const host = root.querySelector('diffs-container');
+      if (!(host instanceof HTMLElement)) return;
+      if (active) host.setAttribute('data-oc-comment-drag', '');
+      else host.removeAttribute('data-oc-comment-drag');
+    };
+
+    const lineFromPoint = (clientX: number, clientY: number): { line: number; side: AnnotationSide; numberColumn: boolean } | null => {
+      const shadowRoot = getShadowRoot();
+      const element = shadowRoot?.elementFromPoint(clientX, clientY) ?? document.elementFromPoint(clientX, clientY);
+      if (!(element instanceof Element)) return null;
+      const numberColumn = Boolean(element.closest('[data-column-number]'));
+      const row = element.closest('[data-line]');
+      if (!(row instanceof HTMLElement)) return null;
+      const line = Number.parseInt(row.getAttribute('data-line') ?? '', 10);
+      if (!Number.isFinite(line) || line <= 0) return null;
+      const side: AnnotationSide = row.getAttribute('data-line-type') === 'change-deletion'
+        || row.closest('[data-code][data-deletions]') != null
+        ? 'deletions'
+        : 'additions';
+      return { line, side, numberColumn };
+    };
+
+    let anchor: { line: number; side: AnnotationSide } | null = null;
+    let engaged = false;
+    let pointerId: number | null = null;
+
+    const highlight = (range: SelectedLineRange) => {
+      contentSelectionRef.current = range;
+      const instance = diffInstanceRef.current;
+      if (!instance) return;
+      try {
+        isApplyingSelectionRef.current = true;
+        instance.setSelectedLines(range);
+      } catch {
+        // ignore
+      } finally {
+        isApplyingSelectionRef.current = false;
+      }
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.button !== 0 || event.pointerType !== 'mouse') return;
+      const hit = lineFromPoint(event.clientX, event.clientY);
+      // Number-column drags belong to Pierre's own selection handling.
+      if (!hit || hit.numberColumn) {
+        anchor = null;
+        return;
+      }
+      anchor = { line: hit.line, side: hit.side };
+      engaged = false;
+      pointerId = event.pointerId;
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (anchor == null || event.pointerId !== pointerId) return;
+      const hit = lineFromPoint(event.clientX, event.clientY);
+      if (!hit) return;
+      if (!engaged) {
+        if (hit.line === anchor.line) return;
+        // The drag crossed into another line: from here it is a line
+        // selection, not a text selection. Drop the native selection and
+        // block new one from forming for the rest of the drag.
+        engaged = true;
+        setDragAttribute(true);
+        window.getSelection()?.removeAllRanges();
+        const shadowRoot = getShadowRoot();
+        if (shadowRoot && 'getSelection' in shadowRoot) {
+          // SAFETY: getSelection on ShadowRoot is a Chromium extension absent
+          // from lib.dom; the `in` check gates the call.
+          (shadowRoot as ShadowRoot & { getSelection: () => Selection | null }).getSelection()?.removeAllRanges();
+        }
+      }
+      highlight({
+        start: Math.min(anchor.line, hit.line),
+        end: Math.max(anchor.line, hit.line),
+        side: anchor.side,
+      });
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      if (anchor == null || event.pointerId !== pointerId) return;
+      const wasEngaged = engaged;
+      anchor = null;
+      engaged = false;
+      pointerId = null;
+      setDragAttribute(false);
+      if (!wasEngaged) return;
+      const range = contentSelectionRef.current;
+      contentSelectionRef.current = null;
+      if (!range) return;
+      // A half-written comment survives an accidental selection elsewhere.
+      if (selectionRef.current && commentTextRef.current.trim() && !editingDraftIdRef.current) return;
+      applySelection(range);
+      if (!editingDraftIdRef.current) {
+        setCommentText('');
+      }
+    };
+
+    root.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('pointermove', handlePointerMove, { passive: true });
+    document.addEventListener('pointerup', handlePointerUp);
+    return () => {
+      root.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('pointermove', handlePointerMove);
+      document.removeEventListener('pointerup', handlePointerUp);
+      setDragAttribute(false);
+    };
+  }, [applySelection, enableComments, setCommentText]);
+
+  // The gutter "+" utility: pressing it (or dragging from it) yields a line
+  // range; select it so the comment editor opens under the lines.
+  const handleGutterUtilityClick = useCallback((range: SelectedLineRange) => {
+    if (!enableComments) return;
+    // A content-drag highlight is the intended target when the pressed line
+    // falls inside it.
+    const highlighted = contentSelectionRef.current;
+    const withinHighlight = highlighted
+      && range.start >= highlighted.start
+      && range.end <= highlighted.end
+      && (range.side == null || range.side === highlighted.side);
+    if (contentSelectionClearTimerRef.current !== null) {
+      window.clearTimeout(contentSelectionClearTimerRef.current);
+      contentSelectionClearTimerRef.current = null;
+    }
+    contentSelectionRef.current = null;
+    applySelection(withinHighlight && highlighted ? highlighted : range);
+    if (!editingDraftIdRef.current) {
+      setCommentText('');
+    }
+  }, [applySelection, enableComments, setCommentText]);
+
+  // Clicking anywhere on a diff line (not only its number cell) toggles a
+  // single-line comment selection, matching the "+" utility's target.
+  const handleLineClick = useCallback((props: { lineNumber: number; annotationSide: AnnotationSide; numberColumn: boolean }) => {
+    if (!enableComments || props.numberColumn) return;
+    // Ignore when the user selected text on the way to this click (copying
+    // code must not pop the comment editor).
+    if (window.getSelection()?.toString().trim()) return;
+    const side: SelectedLineRange['side'] = props.annotationSide;
+    const range: SelectedLineRange = { start: props.lineNumber, end: props.lineNumber, side };
+    const current = selectionRef.current;
+    if (current && current.start === range.start && current.end === range.end && current.side === range.side) {
+      if (!commentTextRef.current.trim()) {
+        setSelection(null);
+        const instance = diffInstanceRef.current;
+        try {
+          isApplyingSelectionRef.current = true;
+          instance?.setSelectedLines(null);
+        } finally {
+          isApplyingSelectionRef.current = false;
+        }
+      }
+      return;
+    }
+    if (current && commentTextRef.current.trim() && !editingDraftIdRef.current) {
+      // A half-written comment survives an accidental click elsewhere.
+      return;
+    }
+    applySelection(range);
+    if (!editingDraftIdRef.current) {
+      setCommentText('');
+    }
+  }, [applySelection, enableComments, setCommentText, setSelection]);
 
   const resolveClickedSide = useCallback((numberCell: HTMLElement): AnnotationSide => {
     const lineType =
@@ -649,11 +926,11 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
 
   const diffRootRef = useRef<HTMLDivElement | null>(null);
   const diffContainerRef = useRef<HTMLDivElement | null>(null);
-  const diffInstanceRef = useRef<PierreFileDiff<PierreAnnotationData> | null>(null);
+  const diffInstanceRef = useRef<PierreFileDiff<DiffAnnotation> | null>(null);
   const sharedVirtualizerRef = useRef<SharedVirtualizer | null>(null);
   const instanceVirtualizerRef = useRef<Virtualizer | null>(null);
   const instanceWorkerPoolRef = useRef<unknown>(null);
-  const instanceVirtualHunkSeparatorsRef = useRef<FileDiffOptions<PierreAnnotationData>['hunkSeparators'] | undefined>(undefined);
+  const instanceVirtualHunkSeparatorsRef = useRef<FileDiffOptions<DiffAnnotation>['hunkSeparators'] | undefined>(undefined);
   const instanceFileDiffRef = useRef<FileDiffMetadata | undefined>(undefined);
   const instanceOldFileRef = useRef<FileContents | undefined>(undefined);
   const instanceNewFileRef = useRef<FileContents | undefined>(undefined);
@@ -738,44 +1015,47 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   }, [darkResolvedTheme, diffThemeKey, isDark, lightResolvedTheme]);
 
 
-  const options = useMemo(() => ({
+  const options = useMemo<FileDiffOptions<DiffAnnotation>>(() => ({
     theme: {
       dark: darkTheme.metadata.id,
       light: lightTheme.metadata.id,
     },
-    themeType: isDark ? ('dark' as const) : ('light' as const),
-    diffStyle: renderSideBySide ? ('split' as const) : ('unified' as const),
-    diffIndicators: 'none' as const,
-    hunkSeparators: 'line-info-basic' as const,
+    themeType: isDark ? 'dark' : 'light',
+    diffStyle: renderSideBySide ? 'split' : 'unified',
+    diffIndicators: 'none',
+    hunkSeparators: 'line-info-basic',
     // Perf: disable intra-line diff (word-level) globally.
-    lineDiffType: 'none' as const,
+    lineDiffType: 'none',
     // Perf: degrade tokenization/highlighting for large files (>500KB)
     maxLineDiffLength: isLargeContent ? 0 : 1000,
     maxLineLengthForHighlighting: isLargeContent ? 1 : 1000,
     tokenizeMaxLineLength: isLargeContent ? 1 : 1000,
     collapsedContextThreshold: 0,
     expansionLineCount: 20,
-    overflow: wrapLines ? ('wrap' as const) : ('scroll' as const),
+    overflow: wrapLines ? 'wrap' : 'scroll',
     disableFileHeader: true,
     enableLineSelection: enableComments,
-    enableHoverUtility: false,
+    enableGutterUtility: enableComments,
+    onGutterUtilityClick: enableComments ? handleGutterUtilityClick : undefined,
+    onLineClick: enableComments ? handleLineClick : undefined,
     onLineSelected: enableComments ? handleSelectionChange : undefined,
-    unsafeCSS: WEBKIT_SCROLL_FIX_CSS,
-    renderAnnotation: enableComments ? renderAnnotation : undefined,
-  }), [darkTheme.metadata.id, enableComments, isDark, isLargeContent, lightTheme.metadata.id, renderSideBySide, wrapLines, handleSelectionChange, renderAnnotation]);
+    unsafeCSS: hunkAnchors.length > 0 ? `${WEBKIT_SCROLL_FIX_CSS}\n${HUNK_ACTION_OVERLAY_CSS}` : WEBKIT_SCROLL_FIX_CSS,
+    renderAnnotation: enableComments || hunkAnchors.length > 0 ? renderAnnotation : undefined,
+    onPostRender: hunkAnchors.length > 0 ? captureHunkTargets : undefined,
+  }), [captureHunkTargets, hunkAnchors.length, darkTheme.metadata.id, enableComments, isDark, isLargeContent, lightTheme.metadata.id, renderSideBySide, wrapLines, handleSelectionChange, handleGutterUtilityClick, handleLineClick, renderAnnotation]);
 
 
-  const lineAnnotations = useMemo(() => {
-    if (!enableComments) {
-      return [];
-    }
-
-    return buildPierreLineAnnotations({
+  const lineAnnotations = useMemo<DiffLineAnnotation<DiffAnnotation>[]>(() => {
+    const annotations: DiffLineAnnotation<DiffAnnotation>[] = enableComments ? buildPierreLineAnnotations({
       drafts: fileDrafts,
       editingDraftId,
       selection,
-    });
-  }, [editingDraftId, enableComments, fileDrafts, selection]);
+    }) : [];
+    for (const anchor of hunkAnchors) {
+      annotations.push({ side: anchor.side, lineNumber: anchor.lineNumber, metadata: { type: 'hunk-action', index: anchor.index } });
+    }
+    return annotations;
+  }, [editingDraftId, enableComments, fileDrafts, hunkAnchors, selection]);
 
   const lineAnnotationsRef = useRef(lineAnnotations);
 
@@ -864,17 +1144,17 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
       : false;
     if (!instance) {
       instance = sharedVirtualizer
-        ? new VirtualizedFileDiff<PierreAnnotationData>(
-            options as FileDiffOptions<PierreAnnotationData>,
+        ? new VirtualizedFileDiff<DiffAnnotation>(
+            options,
             sharedVirtualizer.virtualizer,
             VIRTUAL_METRICS,
             workerPool,
           )
-        : new PierreFileDiff(options as FileDiffOptions<PierreAnnotationData>, workerPool);
+        : new PierreFileDiff(options, workerPool);
       diffInstanceRef.current = instance;
       lastAppliedSelectionRef.current = null;
     } else {
-      instance.setOptions(options as FileDiffOptions<PierreAnnotationData>);
+      instance.setOptions(options);
     }
 
     instanceVirtualizerRef.current = virtualizer;
@@ -1087,6 +1367,12 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
     />
   ) : null;
 
+  // A new action snapshot must never land in annotation nodes belonging to
+  // the previously rendered diff, even for one frame before Pierre updates.
+  const hunkActionPortals = hunkActions && fileDiff && hunkTargets.fileDiff === fileDiff && hunkTargets.anchors === hunkAnchors
+    ? [...hunkTargets.targets].map(([index, target]) => createPortal(hunkActions.render(index), target, `hunk-${index}`))
+    : null;
+
   if (layout === 'fill') {
     return (
       <div className={cn("flex flex-col relative", "size-full")} data-diff-virtual-root>
@@ -1102,6 +1388,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
             </div>
           </ScrollableOverlay>
           {commentOverlays}
+          {hunkActionPortals}
         </div>
       </div>
     );
@@ -1114,6 +1401,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
       <div ref={diffContainerRef} className="w-full" />
     </div>
     {commentOverlays}
+    {hunkActionPortals}
   </div>
   );
 };

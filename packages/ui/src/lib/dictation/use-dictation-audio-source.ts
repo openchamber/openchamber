@@ -4,20 +4,27 @@
  * Captures mono audio via getUserMedia, taps it with a ScriptProcessorNode
  * (universally supported, including iOS WKWebView), resamples Float32 to
  * 16 kHz PCM16LE, and emits ~1-second base64 chunks plus a normalized RMS
- * volume for the level meter.
+ * level for the waveform.
+ *
+ * The level is delivered by subscription rather than React state: it updates
+ * on every audio callback (~12 Hz), and routing that through state re-rendered
+ * the whole dictation overlay at the same rate.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 export interface DictationAudioSourceConfig {
     onPcmSegment: (base64Pcm: string) => void;
     onError?: (error: Error) => void;
 }
 
+export type DictationLevelListener = (level: number) => void;
+
 export interface DictationAudioSource {
     start: () => Promise<void>;
     stop: () => Promise<void>;
-    volume: number;
+    /** Subscribe to the normalized (0..1) mic level. Returns an unsubscribe. */
+    subscribeLevel: (listener: DictationLevelListener) => () => void;
 }
 
 const OUTPUT_RATE = 16000;
@@ -125,7 +132,18 @@ export const isDictationCaptureSupported = (): boolean => {
 };
 
 export function useDictationAudioSource(config: DictationAudioSourceConfig): DictationAudioSource {
-    const [volume, setVolume] = useState(0);
+    const levelListenersRef = useRef(new Set<DictationLevelListener>());
+    const emitLevel = useCallback((level: number) => {
+        for (const listener of levelListenersRef.current) {
+            listener(level);
+        }
+    }, []);
+    const subscribeLevel = useCallback((listener: DictationLevelListener) => {
+        levelListenersRef.current.add(listener);
+        return () => {
+            levelListenersRef.current.delete(listener);
+        };
+    }, []);
 
     const onPcmSegmentRef = useRef(config.onPcmSegment);
     const onErrorRef = useRef(config.onError);
@@ -196,7 +214,7 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
                     sumSquares += input[i] * input[i];
                 }
                 const rms = Math.sqrt(sumSquares / Math.max(1, input.length));
-                setVolume(Math.min(1, Math.max(0, rms * 2)));
+                emitLevel(Math.min(1, Math.max(0, rms * 2)));
 
                 const next = resampleToPcm16(input, context.sampleRate, OUTPUT_RATE);
                 graph.pending = concatInt16(graph.pending, next);
@@ -227,12 +245,12 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
             graphRef.current = emptyGraph();
             throw error instanceof Error ? error : new Error(String(error));
         }
-    }, []);
+    }, [emitLevel]);
 
     const stop = useCallback(async () => {
         const graph = graphRef.current;
         graph.started = false;
-        setVolume(0);
+        emitLevel(0);
 
         if (graph.processor) {
             try {
@@ -272,7 +290,7 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
         if (graphRef.current === graph) {
             graphRef.current = emptyGraph();
         }
-    }, []);
+    }, [emitLevel]);
 
     useEffect(() => {
         return () => {
@@ -294,8 +312,8 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
                 }
             },
             stop,
-            volume,
+            subscribeLevel,
         }),
-        [start, stop, volume],
+        [start, stop, subscribeLevel],
     );
 }

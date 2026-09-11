@@ -262,14 +262,15 @@ export const createClientPairingRuntime = ({
       if (!constantTimeEqual(session.secretHash, hashSecret(normalizedSecret), crypto)) throw redeemError();
 
       // The operator's typed pairing label is THIS server's name for the device
-      // (shown in the device list). It wins over the device's self-reported
-      // label; fall back to that only when no pairing label was set.
-      const label = normalizeOptionalString(session.label)
-        || normalizeOptionalString(clientLabel)
-        || normalizeOptionalString(deviceName)
-        || 'Remote client';
+      // (shown in the device list) and wins outright. The device's self-reported
+      // label is only a fallback: on a re-pair with the same dedupeKey,
+      // createClient keeps the replaced record's label over it, so a rescan
+      // without a typed name does not reset the device to the app default.
       const result = await remoteClientAuthRuntime.createClient({
-        label,
+        label: normalizeOptionalString(session.label),
+        fallbackLabel: normalizeOptionalString(clientLabel)
+          || normalizeOptionalString(deviceName)
+          || 'Remote client',
         clientKind: normalizedKind,
         dedupeKey: normalizeOptionalString(dedupeKey) || `pairing:${session.id}`,
         authMethod: 'pairing',

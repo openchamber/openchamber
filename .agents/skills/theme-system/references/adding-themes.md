@@ -43,6 +43,15 @@ export const presetThemes: Theme[] = [
 bun run type-check && bun run lint && bun run build
 ```
 
+## Authoring Tools
+
+Both do the mechanical work of steps 1–2 and are run by hand:
+
+- `node scripts/convert-vscode-theme.cjs <vscode-theme.json>` converts a VS Code
+  theme into this format and registers it in `presets.ts`.
+- `node scripts/harmonize-theme.mjs <theme.json> [--write]` aligns accent roles
+  to one chroma/lightness target in OKLCH so borrowed colors read as one family.
+
 ## Key Files
 
 - Theme types: `packages/ui/src/types/theme.ts`

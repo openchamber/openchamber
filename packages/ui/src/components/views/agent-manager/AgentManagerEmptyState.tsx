@@ -13,7 +13,7 @@ import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo }
 import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
 import { Icon } from "@/components/icon/Icon";
 import { isIMECompositionEvent } from '@/lib/ime';
-import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
+import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { ProjectRef } from '@/lib/openchamberConfig';
@@ -22,8 +22,6 @@ import { useI18n } from '@/lib/i18n';
 
 /** Max file size in bytes (10MB) */
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
-/** Max number of concurrent runs */
-const MAX_MODELS = 5;
 
 /** Attached file for agent manager */
 interface AttachedFile {
@@ -115,7 +113,8 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
     
     (async () => {
       try {
-        const commands = await getWorktreeSetupCommands(projectRef);
+        // This screen prepares a run: the shared commands ask for trust here, before they are shown as the defaults.
+        const commands = await resolveWorktreeSetupCommands(projectRef);
         if (!cancelled) {
           setSetupCommands(commands);
         }
@@ -132,11 +131,8 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
   }, [projectRef]);
 
   const handleAddModel = React.useCallback((model: ModelSelectionWithId) => {
-    if (selectedModels.length >= MAX_MODELS) {
-      return;
-    }
     setSelectedModels((prev) => [...prev, model]);
-  }, [selectedModels.length]);
+  }, []);
 
   const handleRemoveModel = React.useCallback((index: number) => {
     setSelectedModels((prev) => prev.filter((_, i) => i !== index));
@@ -529,7 +525,6 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
             onUpdate={handleUpdateModel}
             minModels={1}
             addButtonLabel={t('agentManager.empty.models.addModel')}
-            maxModels={5}
           />
         </div>
 

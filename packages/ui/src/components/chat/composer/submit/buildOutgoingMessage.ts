@@ -14,12 +14,17 @@
  */
 
 import type { AttachedFile } from '@/stores/types/sessionTypes';
+import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
+import type { QueuedContextPart } from '@/stores/messageQueueStore';
+import { contextPayloadFromDraft, createContextPart, type ContextPartMetadata } from '@/lib/messages/contextParts';
 
 export interface OutgoingPart {
     text: string;
     attachments?: AttachedFile[];
     /** Synthetic parts are context for the model, not shown as user content. */
     synthetic?: boolean;
+    /** Structured context (see contextParts.ts), persisted with the part. */
+    metadata?: ContextPartMetadata;
 }
 
 export interface OutgoingMessage {
@@ -32,23 +37,35 @@ export interface OutgoingMessage {
     isEmpty: boolean;
 }
 
+/**
+ * A queued message is already resolved: its agent mention was stripped, its
+ * file mentions became attachments, and the context the composer had attached
+ * travels with it. Assembly only places it.
+ */
 export interface QueuedInput {
-    content: string;
+    text: string;
+    agentMention?: string;
     attachments?: AttachedFile[];
+    context?: readonly QueuedContextPart[];
 }
 
-export interface OutgoingMessageInput {
+/** What the composer has attached besides text and files. */
+export interface ComposerContextInput {
+    /** Context drafts (code comments, terminal selections, annotations, PR context). */
+    inlineComments: readonly InlineCommentDraft[];
+    /** Synthetic context produced elsewhere (conflict resolution, and such). */
+    syntheticTexts: readonly string[];
+    linkedIssue: { number: number; title: string; url: string; contextText: string } | null;
+    linkedPr: { number: number; title: string; url: string; instructions: string; context: string } | null;
+    linkedLinearIssue: { identifier: string; title: string; url: string; contextText: string } | null;
+}
+
+export interface OutgoingMessageInput extends ComposerContextInput {
     /** Messages queued while a turn was running, oldest first. */
     queued: readonly QueuedInput[];
     /** The composer's own text, or null when this send skips it. */
     composerText: string | null;
     composerAttachments: readonly AttachedFile[];
-    /** Inline review comments, appended to the user's last authored text. */
-    inlineComments: readonly unknown[];
-    /** Synthetic context produced elsewhere (conflict resolution, and such). */
-    syntheticTexts: readonly string[];
-    linkedIssueContext: string | null;
-    linkedPr: { instructions: string; context: string } | null;
 }
 
 /**
@@ -64,8 +81,6 @@ export interface OutgoingMessageDeps {
     sanitizeAttachments: (files: readonly AttachedFile[] | undefined) => AttachedFile[];
     /** Skills named inline with `/name`. */
     collectSkillNames: (text: string) => string[];
-    /** Append inline review comments to a message body. */
-    appendComments: (text: string, comments: readonly unknown[]) => string;
     /** Instruction telling the model which skills the user named. */
     buildSkillInstruction: (names: string[]) => string | null;
 }
@@ -101,20 +116,19 @@ export function buildOutgoingMessage(
     };
 
     // Queued messages come first, in the order they were queued: the oldest
-    // becomes the primary message so the turn reads chronologically.
+    // becomes the primary message so the turn reads chronologically. Each one
+    // is followed by the context it was queued with.
     input.queued.forEach((queued, index) => {
-        const resolved = resolve(queued.content);
-        const attachments = [
-            ...deps.sanitizeAttachments(queued.attachments),
-            ...resolved.attachments,
-        ];
+        noteAgent(queued.agentMention);
+        const attachments = deps.sanitizeAttachments(queued.attachments);
 
         if (index === 0) {
-            primaryText = resolved.text;
+            primaryText = queued.text;
             primaryAttachments = attachments;
-            return;
+        } else {
+            additionalParts.push({ text: queued.text, attachments });
         }
-        additionalParts.push({ text: resolved.text, attachments });
+        additionalParts.push(...queuedContextToParts(queued.context ?? []));
     });
 
     // The composer's own text follows, becoming primary only when nothing was
@@ -134,39 +148,10 @@ export function buildOutgoingMessage(
         }
     }
 
-    // Inline comments attach to the last thing the user authored, so they read
-    // as a continuation of it rather than as a separate turn.
-    if (input.inlineComments.length > 0) {
-        const lastAuthored = input.queued.length > 0 && additionalParts.length > 0
-            ? additionalParts[additionalParts.length - 1]
-            : null;
-        if (lastAuthored) {
-            lastAuthored.text = deps.appendComments(lastAuthored.text, input.inlineComments);
-        } else {
-            primaryText = deps.appendComments(primaryText, input.inlineComments);
-        }
-    }
-
-    // Everything below is context for the model, never user-visible content.
-    for (const text of input.syntheticTexts) {
-        additionalParts.push({ text, synthetic: true });
-    }
-
-    if (input.linkedIssueContext) {
-        additionalParts.push({ text: input.linkedIssueContext, synthetic: true });
-    }
-
-    if (input.linkedPr) {
-        // Instructions before context: the model is told how to read the diff
-        // before it is given the diff.
-        additionalParts.push({ text: input.linkedPr.instructions, synthetic: true });
-        additionalParts.push({ text: input.linkedPr.context, synthetic: true });
-    }
-
-    const skillInstruction = deps.buildSkillInstruction(skillNames);
-    if (skillInstruction) {
-        additionalParts.push({ text: skillInstruction, synthetic: true });
-    }
+    // Everything the composer had attached follows its text.
+    additionalParts.push(...queuedContextToParts(
+        buildComposerContext(input, deps.buildSkillInstruction(skillNames)),
+    ));
 
     return {
         primaryText,
@@ -175,4 +160,69 @@ export function buildOutgoingMessage(
         agentMentionName,
         isEmpty: !primaryText && primaryAttachments.length === 0 && additionalParts.length === 0,
     };
+}
+
+/**
+ * Everything the composer has attached besides text and files, in send
+ * order. Each attached context item becomes its own synthetic part carrying
+ * structured metadata, so the timeline can render it as a context block after
+ * the server echoes the message back. Used both when sending and when queueing:
+ * a queued message takes this context with it, so whoever delivers it later
+ * sends exactly what the composer would have.
+ */
+export function buildComposerContext(
+    input: ComposerContextInput,
+    skillInstruction: string | null,
+): QueuedContextPart[] {
+    const context: QueuedContextPart[] = [];
+    const attach = (part: { text: string; metadata: ContextPartMetadata }, instructions?: string) => {
+        const entry: QueuedContextPart = { kind: 'context', text: part.text, metadata: part.metadata };
+        if (instructions) entry.instructions = instructions;
+        context.push(entry);
+    };
+
+    for (const draft of input.inlineComments) {
+        attach(createContextPart(contextPayloadFromDraft(draft)));
+    }
+
+    for (const text of input.syntheticTexts) {
+        context.push({ kind: 'synthetic', text });
+    }
+
+    if (input.linkedIssue) {
+        const { number, title, url, contextText } = input.linkedIssue;
+        attach(createContextPart({ kind: 'github-issue', number, title, url }, contextText));
+    }
+
+    if (input.linkedPr) {
+        // Instructions before context: the model is told how to read the diff
+        // before it is given the diff.
+        const { number, title, url, instructions, context: prContext } = input.linkedPr;
+        attach(createContextPart({ kind: 'github-pr', number, title, url }, prContext), instructions);
+    }
+
+    if (input.linkedLinearIssue) {
+        const { identifier, title, url, contextText } = input.linkedLinearIssue;
+        attach(createContextPart({ kind: 'linear-issue', identifier, title, url }, contextText));
+    }
+
+    if (skillInstruction) {
+        context.push({ kind: 'instruction', text: skillInstruction });
+    }
+
+    return context;
+}
+
+/** The synthetic parts a captured context is delivered as, in order. */
+export function queuedContextToParts(context: readonly QueuedContextPart[]): OutgoingPart[] {
+    const parts: OutgoingPart[] = [];
+    for (const part of context) {
+        if (part.kind !== 'context') {
+            parts.push({ text: part.text, synthetic: true });
+            continue;
+        }
+        if (part.instructions) parts.push({ text: part.instructions, synthetic: true });
+        parts.push({ text: part.text, synthetic: true, metadata: part.metadata });
+    }
+    return parts;
 }

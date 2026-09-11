@@ -11,12 +11,12 @@ import {
   SETTINGS_OPTION_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { isDesktopShell, requestFileAccess } from '@/lib/desktop';
-import { updateDesktopSettings } from '@/lib/persistence';
-import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
+import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
+import { recordDeferredOpenCodeRestart } from '@/lib/opencode/deferredRestart';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
 import { isWindowsArm64 } from '@/lib/platform';
+import { toast } from '@/components/ui';
 
 export const OpenCodeCliSettings: React.FC = () => {
   const { t } = useI18n();
@@ -25,26 +25,16 @@ export const OpenCodeCliSettings: React.FC = () => {
   const [isSaving, setIsSaving] = React.useState(false);
   const showOpenCodeUpdateNotifications = useUIStore((state) => state.showOpenCodeUpdateNotifications);
   const setShowOpenCodeUpdateNotifications = useUIStore((state) => state.setShowOpenCodeUpdateNotifications);
-  const agentControlToolEnabled = useUIStore((state) => state.agentControlToolEnabled);
-  const setAgentControlToolEnabled = useUIStore((state) => state.setAgentControlToolEnabled);
 
   React.useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const response = await runtimeFetch('/api/config/settings', {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-        });
-        if (!response.ok) {
-          return;
-        }
-        const data = (await response.json().catch(() => null)) as null | { opencodeBinary?: unknown };
+        const data = await loadDesktopSettings();
         if (cancelled || !data) {
           return;
         }
-        const next = typeof data.opencodeBinary === 'string' ? data.opencodeBinary.trim() : '';
-        setValue(next);
+        setValue(data.opencodeBinary ?? '');
       } catch {
         // ignore
       } finally {
@@ -89,11 +79,8 @@ export const OpenCodeCliSettings: React.FC = () => {
         ? trimmed.slice(1, -1).trim()
         : trimmed;
       await updateDesktopSettings({ opencodeBinary: unquoted });
-      await reloadOpenCodeConfiguration({
-        message: t('settings.openchamber.opencodeCli.actions.restartingOpenCode'),
-        mode: 'projects',
-        scopes: ['all'],
-      });
+      recordDeferredOpenCodeRestart('cli', { id: 'opencode-binary' });
+      toast.success(t('settings.view.pendingRestart.saved'));
     } finally {
       setIsSaving(false);
     }
@@ -103,11 +90,6 @@ export const OpenCodeCliSettings: React.FC = () => {
     setShowOpenCodeUpdateNotifications(enabled);
     void updateDesktopSettings({ showOpenCodeUpdateNotifications: enabled });
   }, [setShowOpenCodeUpdateNotifications]);
-
-  const handleAgentControlToolChange = React.useCallback((enabled: boolean) => {
-    setAgentControlToolEnabled(enabled);
-    void updateDesktopSettings({ agentControlToolEnabled: enabled });
-  }, [setAgentControlToolEnabled]);
 
   return (
     <SettingsSection title={t('settings.openchamber.opencodeCli.title')}>
@@ -162,15 +144,6 @@ export const OpenCodeCliSettings: React.FC = () => {
             />
           )}
 
-          <SettingsCheckboxRow
-            settingsItem="sessions.agent-control-tool"
-            checked={agentControlToolEnabled}
-            onChange={handleAgentControlToolChange}
-            label={t('settings.openchamber.opencodeCli.field.agentControlTool')}
-            ariaLabel={t('settings.openchamber.opencodeCli.field.agentControlToolAria')}
-            info={t('settings.openchamber.opencodeCli.field.agentControlToolInfo')}
-          />
-
           <div className="flex justify-start py-1.5">
             <Button
               type="button"
@@ -179,7 +152,7 @@ export const OpenCodeCliSettings: React.FC = () => {
               disabled={isLoading || isSaving}
               className="shrink-0 !font-normal"
             >
-              {isSaving ? t('settings.common.actions.saving') : t('settings.openchamber.opencodeCli.actions.saveAndReload')}
+              {isSaving ? t('settings.common.actions.saving') : t('settings.common.actions.saveChanges')}
             </Button>
           </div>
         </SettingsInset>

@@ -1,0 +1,97 @@
+---
+title: OpenCode Sunucusu
+description: OpenChamber'ı yerel veya uzak bir OpenCode sunucusuna bağlayın.
+---
+
+# OpenCode Sunucusu
+
+OpenChamber, bir OpenCode sunucusunun üzerinde çalışır. Varsayılan olarak sizin için bir sunucu başlatır; bu nedenle bir şey yapmanız gerekmez. Bu sayfaya yalnızca OpenChamber'ı zaten çalıştırdığınız bir sunucuya yönlendirmek veya onun başlattığı sunucuyu yönetmek istiyorsanız ihtiyacınız olur.
+
+## OpenChamber sunucuyu nasıl bulur
+
+OpenChamber başladığında sunucuyu şu sırayla arar:
+
+1. daha önce başlattığı sunucuyu yeniden kullanır
+2. belirtmişseniz harici bir sunucuya bağlanır, aşağıya bakın
+3. varsayılan bağlantı noktasındaki (`4096`) bir sunucuyu otomatik algılar
+4. bunların hiçbiri yoksa kendi sunucusunu başlatır ve yönetir
+
+Hiçbir ayar yoksa 4. adım otomatik olarak gerçekleşir ve kullanıma hazır olursunuz.
+
+## Zaten çalıştırdığınız bir sunucuya bağlanın
+
+OpenChamber'ı başlatmadan önce şunları ayarlayın:
+
+```bash
+OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
+```
+
+- `OPENCODE_HOST`, bağlantı noktası da dahil olmak üzere OpenCode sunucunuzun tam adresidir, örneğin `http://localhost:4096`. Sonunda bir yol olmamalıdır.
+- `OPENCODE_SKIP_START=true`, OpenChamber'a kendi sunucusunu başlatmamasını söyler.
+
+Yalnızca bağlantı noktasını değiştirmek istiyorsanız `OPENCODE_PORT` öğesini `OPENCODE_HOST` yerine ayarlayın.
+
+`OPENCODE_HOST` bağlantı noktasını içermiyorsa veya bir yol içeriyorsa OpenChamber bunu yok sayar ve kendi sunucusunu başlatmaya döner. Beklediğiniz bağlantı kurulmadıysa başlangıç günlüklerindeki `[config]` uyarısına bakın.
+
+## Sunucuyu CLI ile yönetin
+
+```bash
+openchamber status
+openchamber logs
+openchamber restart
+openchamber stop
+```
+
+Tek başına `openchamber`, sunucuyu arka planda başlatır. Sunucunun terminale bağlı kalması için `--foreground` ekleyin.
+
+## OpenChamber'ı oturum açınca başlatın
+
+Yerel bir kullanıcı hizmeti kurmak için `startup enable` kullanın. OpenChamber macOS'ta `launchd`, Linux'ta `systemd --user`, Windows'ta Task Scheduler kullanır.
+
+```bash
+openchamber startup enable
+openchamber startup status
+openchamber startup disable
+```
+
+Arayüzü korumak için hizmeti etkinleştirirken parolayı ayarlayın:
+
+```bash
+OPENCHAMBER_UI_PASSWORD='secret' openchamber startup enable
+```
+
+Oturum açınca başlayan ve masaüstü veya mobil istemciler için kullanılacak başsız bir sunucu için `--api-only` ile erişilebilir bir host ekleyin:
+
+```bash
+openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password secret
+```
+
+`startup enable`, hizmetin aynı kabuktan `openchamber` başlatmaya daha çok benzemesi için geçerli ortamınızı hizmete kaydeder. Böylece sağlayıcı token'ları, `PATH`, SSH agent ayarları ve diğer CLI kimlik doğrulama veya yapılandırma değişkenleri kullanılabilir kalır. Daha az ortam değişkeni olan bir hizmet istiyorsanız `--no-env-snapshot` kullanın.
+
+Başlangıç hizmeti `--port`, `--host`, `--ui-password` ve `--api-only` değerlerini hatırlar. CLI ile yeniden başlatma ve güncelleme sonrası yeniden başlatma, kaydedilmiş bu ayarları yeniden kullanır.
+
+Başka bir OpenChamber uygulaması için bağlantı bağlantısı oluşturmak üzere şunu kullanın:
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+`openchamber connect-url --help` komutunu çalıştırarak `--name`, `--lan`, `--server`, `--api-only`, `--ui-password` ve `--qr` dahil tüm bağlantı seçeneklerini görün.
+
+Çalışan bu hizmetin tünellerini yine de bağımsız olarak yönetebilirsiniz:
+
+```bash
+openchamber tunnel start --port 3000
+openchamber tunnel stop --port 3000
+```
+
+Tüneli durdurmak hizmeti veya uygulamayı yeniden başlatmaz.
+
+## "OpenCode yeniden başlatılıyor"
+
+Sunucu başlarken veya yeniden başlarken OpenChamber "OpenCode yeniden başlatılıyor" durumunu gösterir ve hazır olana kadar istekleri duraklatır. Bu, uygulama açıldıktan veya yeniden başlatıldıktan hemen sonra normaldir. Durum hiç kaybolmazsa [OpenCode bağlantısı](/troubleshooting/opencode-connection/) sayfasına bakın.
+
+## İlgili sayfalar
+
+- [Sağlayıcılar, modeller ve agentlar](/providers/), sunucunun konuşacağı hizmetleri ayarlayın
+- [OpenCode bağlantısı](/troubleshooting/opencode-connection/), bağlanmıyorsa

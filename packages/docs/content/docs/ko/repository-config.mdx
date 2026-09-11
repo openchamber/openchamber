@@ -1,0 +1,100 @@
+---
+title: 저장소 설정
+description: 프로젝트 작업, 워크트리 설정 명령, 스타터, 플랜을 저장소에 두어 저장소를 받는 모든 사람이 같은 것을 사용하게 합니다.
+---
+
+# 저장소 설정
+
+프로젝트 작업, 워크트리 설정 명령, 초안 스타터는 기본적으로 자신의 OpenChamber 설정에 저장됩니다. 다른 사람에게는 보이지 않습니다. 저장소를 클론한 팀원도 같은 개발 서버 작업과 새 워크트리마다 같은 `bun install`을 쓰게 하고 싶다면, 해당 항목을 저장소로 옮기세요.
+
+OpenChamber는 이를 저장소 루트의 `.openchamber/project.json`에 저장합니다. 이 파일은 첫 항목을 옮길 때 처음 만들어지고, 마지막 항목을 빼면 사라집니다. 다른 파일과 똑같이 커밋하면 됩니다.
+
+## 무엇이 어디에 있는가
+
+| 내 설정에 남는 것 | 저장소로 옮길 수 있는 것 |
+|---|---|
+| 노트와 할 일 | 프로젝트 작업 |
+| 예약 작업 | 워크트리 설정 명령 |
+| 저장소 작업 중 나만 숨긴 것 | 초안 스타터(고정한 명령과 스킬) |
+| 저장소 명령에 대한 신뢰 응답 | 플랜 |
+
+노트, 할 일, 예약 작업은 내 것입니다. 저장소에 들어가지 않습니다.
+
+## 항목 옮기기
+
+**Settings → Projects**를 열고 프로젝트를 고릅니다. 각 작업과 각 설정 명령에는 **Move to repository** 버튼이 있고, 저장소에서 온 각 항목에는 **Move to my settings**가 있습니다. 새 세션 화면의 스타터는 마우스를 올리면 같은 두 버튼을 보여 줍니다. 플랜은 플랜 탭의 각 행에 있습니다.
+
+옮기기는 말 그대로 옮기기입니다. 항목이 한쪽에서 사라지고 다른 쪽에 나타나며, 복제되지 않습니다.
+
+저장소에서 온 항목에는 **In repo** 배지가 붙습니다. 저장소 작업은 **Hide for me**로 내 메뉴에서 숨길 수 있습니다. 이는 내 메뉴만 바꾸며 파일은 바꾸지 않습니다.
+
+## 파일
+
+```json
+{
+  "version": 1,
+  "setupWorktree": [
+    "bun install"
+  ],
+  "setupWorktreeWait": true,
+  "projectActions": [
+    {
+      "id": "dev",
+      "name": "Dev server",
+      "command": "bun run dev",
+      "icon": "rocket",
+      "autoOpenUrl": true,
+      "platforms": ["macos", "linux"]
+    },
+    {
+      "id": "test",
+      "name": "Tests",
+      "command": "bun test"
+    }
+  ],
+  "draftStarters": [
+    { "type": "skill", "name": "triage-prs" }
+  ],
+  "plansDir": "docs/plans"
+}
+```
+
+필수 키는 `version`뿐입니다. 나머지 키는 모두 선택이며, OpenChamber는 내용이 있는 키만 기록합니다.
+
+`setupWorktree`는 새 워크트리를 만든 직후 그 안에서 OpenChamber가 순서대로 실행하는 셸 명령 목록입니다. 메인 체크아웃 경로에는 `$ROOT_PROJECT_PATH`를 사용하세요. `setupWorktreeWait: true`로 두면 OpenChamber는 이 명령들이 끝난 뒤에 워크트리에서 세션을 시작합니다.
+
+`projectActions`는 헤더 메뉴의 작업 목록입니다. `id`, `name`, `command`는 필수입니다. `icon`은 선택이며 없으면 play 아이콘이 쓰입니다. OpenChamber가 아는 이름은 `play`, `build`, `lint`, `terminal`, `tools`, `bug`, `flask`, `rocket`, `code`, `server`, `branch`, `search`, `settings`, `brain`, `stack`, `robot`, `command`, `file`입니다. `autoOpenUrl: true`는 명령이 출력한 주소를 엽니다([미리보기 및 개발 서버](/preview/) 참고). `platforms`는 작업을 `macos`, `linux`, `windows`로 제한합니다. `runIn: "parent"`는 현재 워크트리 대신 메인 체크아웃에서 작업을 실행합니다.
+
+`draftStarters`는 명령과 스킬을 새 세션 화면에 고정합니다. 각 항목은 `{ "type": "command" | "skill", "name": "..." }` 형태이며, 해당 명령이나 스킬은 저장소의 OpenCode 설정에 있어야 합니다.
+
+`plansDir`는 저장소 플랜이 있는 곳입니다. 생략하면 `.openchamber/plans`를 사용합니다. 아래를 참고하세요.
+
+이 파일은 직접 써도 됩니다. 형태가 잘못된 키가 있으면 파일 전체가 무효가 되고, Projects 페이지는 조용히 무시하는 대신 이유를 알려 줍니다.
+
+## 저장소 항목과 내 항목이 합쳐지는 방식
+
+설정 명령은 저장소의 것이 먼저, 내 것이 그다음에 실행됩니다. Worktree 섹션의 **Use only my setup commands**에 체크하면 저장소 명령을 완전히 건너뜁니다.
+
+작업은 `id`로 병합됩니다. 저장소 작업과 같은 id가 내 설정에 있으면 내 것이 대신합니다. 스타터는 이름으로 병합됩니다.
+
+대기 플래그는 내가 설정했으면 내 값, 아니면 저장소 값이 쓰입니다.
+
+## 신뢰
+
+저장소의 설정 명령과 작업은 내 컴퓨터에서 실행되며, `git pull`로 내용이 바뀔 수 있습니다. 그래서 그중 하나가 처음 실행되려 할 때 OpenChamber는 정확한 명령을 보여 주고 묻습니다. **Trust and run**은 이 인스턴스에서 응답을 기억합니다. **Not this time**은 내 명령만 실행합니다.
+
+응답은 명령 자체에 묶여 있습니다. pull로 저장소 명령이 바뀌면 새 내용에 대해 다시 묻습니다. 프로젝트 설정의 Worktree 섹션에 있는 **reset trust**로 응답을 잊게 할 수 있습니다.
+
+내 명령을 저장소로 옮기는 것은 그 명령을 신뢰한 것으로 간주됩니다. 방금 직접 봤기 때문입니다.
+
+## 저장소의 플랜
+
+플랜 탭의 플랜도 Markdown 파일로 저장소에 둘 수 있습니다. 기본 폴더는 `.openchamber/plans`입니다. 팀이 이미 `docs/plans` 같은 곳에 플랜을 두고 있다면 프로젝트 설정의 **Plans folder**에서 저장소 안의 다른 폴더를 지정하세요. 사용자 지정 폴더는 기본값을 완전히 대체합니다. OpenChamber는 그 폴더만 읽고 쓰므로, 변경할 때 기존 파일은 직접 옮기세요.
+
+그 폴더의 모든 `.md` 파일이 플랜 탭에 표시되며, 다른 도구로 쓴 파일도 포함됩니다. OpenChamber에서 편집하면 입력한 그대로 파일이 저장됩니다. 저장소로 옮긴 플랜은 정체성을 유지하므로, 그 플랜을 첨부했던 세션에서도 계속 찾을 수 있습니다.
+
+## 관련 항목
+
+- [프로젝트 작업](/project-actions/)
+- [워크트리](/worktrees/)
+- [프로젝트 노트, 할 일, 플랜](/notes-todos-plans/)

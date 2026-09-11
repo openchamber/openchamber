@@ -5,7 +5,9 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
 import { toast } from '@/components/ui';
-import { useSkillsStore, type SkillConfig, type SkillScope, type SupportingFile, type PendingFile } from '@/stores/useSkillsStore';
+import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
+import { selectSkillsForDirectory, useSkillsStore, type SkillConfig, type SkillScope, type SupportingFile, type PendingFile } from '@/stores/useSkillsStore';
+import { usePendingOpenCodeRestartStore } from '@/stores/usePendingOpenCodeRestartStore';
 import { useShallow } from 'zustand/react/shallow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
@@ -118,7 +120,6 @@ const SkillsInstalledPage: React.FC = () => {
     getSkillDetail,
     createSkill,
     updateSkill,
-    skills,
     skillDraft,
     setSkillDraft,
     setSelectedSkill,
@@ -128,13 +129,16 @@ const SkillsInstalledPage: React.FC = () => {
     getSkillDetail: s.getSkillDetail,
     createSkill: s.createSkill,
     updateSkill: s.updateSkill,
-    skills: s.skills,
     skillDraft: s.skillDraft,
     setSkillDraft: s.setSkillDraft,
     setSelectedSkill: s.setSelectedSkill,
   })));
 
-  const selectedSkill = selectedSkillName ? getSkillByName(selectedSkillName) : null;
+  // Settings browses whichever project its own selector points at; the app
+  // stays where it is.
+  const settingsDirectory = useSettingsDirectory();
+  const skills = useSkillsStore((state) => selectSkillsForDirectory(state, settingsDirectory));
+  const selectedSkill = selectedSkillName ? getSkillByName(selectedSkillName, settingsDirectory) : null;
   const isNewSkill = Boolean(skillDraft && skillDraft.name === selectedSkillName && !selectedSkill);
   const hasStaleSelection = Boolean(selectedSkillName && !selectedSkill && !skillDraft);
   const isReadOnlySkill = selectedSkill?.path === '<built-in>';
@@ -231,7 +235,7 @@ const SkillsInstalledPage: React.FC = () => {
       } else if (selectedSkillName && selectedSkill) {
         setIsLoading(true);
         try {
-          const detail = await getSkillDetail(selectedSkillName);
+          const detail = await getSkillDetail(selectedSkillName, settingsDirectory);
           if (detail) {
             const md = detail.sources.md;
             const nextDescription = md.description || '';
@@ -252,7 +256,7 @@ const SkillsInstalledPage: React.FC = () => {
     };
 
     loadSkillDetails();
-  }, [selectedSkill, isNewSkill, selectedSkillName, skills, skillDraft, getSkillDetail]);
+  }, [selectedSkill, isNewSkill, selectedSkillName, settingsDirectory, skills, skillDraft, getSkillDetail]);
 
   const editorFontSize = useUIStore((state) => state.editorFontSize);
 
@@ -337,14 +341,14 @@ const SkillsInstalledPage: React.FC = () => {
 
       let success: boolean;
       if (isNewSkill) {
-        success = await createSkill(config);
+        success = await createSkill(config, settingsDirectory);
         if (success) {
           setSkillDraft(null);
           setPendingFiles([]);
           setSelectedSkill(skillName);
         }
       } else {
-        success = await updateSkill(skillName, config);
+        success = await updateSkill(skillName, config, settingsDirectory);
         if (success) {
           setOriginalDescription(description.trim());
           setOriginalInstructions(instructions.trim());
@@ -352,7 +356,16 @@ const SkillsInstalledPage: React.FC = () => {
       }
 
       if (success) {
-        toast.success(isNewSkill ? t('settings.skills.page.toast.skillCreated') : t('settings.skills.page.toast.skillUpdated'));
+        const deferred = usePendingOpenCodeRestartStore.getState().changes.some(
+          (change) => change.scope === 'skills' && change.id.startsWith(`skills:${skillName}:`),
+        );
+        toast.success(
+          deferred
+            ? t('settings.view.pendingRestart.saved')
+            : isNewSkill
+              ? t('settings.skills.page.toast.skillCreated')
+              : t('settings.skills.page.toast.skillUpdated'),
+        );
       } else {
         toast.error(isNewSkill ? t('settings.skills.page.toast.createSkillFailed') : t('settings.skills.page.toast.updateSkillFailed'));
       }
@@ -392,7 +405,7 @@ const SkillsInstalledPage: React.FC = () => {
     
     try {
       const { readSupportingFile } = useSkillsStore.getState();
-      const content = await readSupportingFile(selectedSkillName, filePath);
+      const content = await readSupportingFile(selectedSkillName, filePath, settingsDirectory);
       setNewFileContent(content || '');
       setOriginalFileContent(content || '');
     } catch {
@@ -438,13 +451,13 @@ const SkillsInstalledPage: React.FC = () => {
     }
 
     const { writeSupportingFile } = useSkillsStore.getState();
-    const success = await writeSupportingFile(selectedSkillName, filePath, newFileContent);
+    const success = await writeSupportingFile(selectedSkillName, filePath, newFileContent, settingsDirectory);
     
     if (success) {
       toast.success(isEditing ? t('settings.skills.page.toast.fileUpdated', { path: filePath }) : t('settings.skills.page.toast.fileCreated', { path: filePath }));
       setIsFileDialogOpen(false);
       setEditingFilePath(null);
-      const detail = await getSkillDetail(selectedSkillName);
+      const detail = await getSkillDetail(selectedSkillName, settingsDirectory);
       if (detail) {
         setSupportingFiles(detail.sources.md.supportingFiles || []);
       }
@@ -474,11 +487,11 @@ const SkillsInstalledPage: React.FC = () => {
 
     setIsDeletingFile(true);
     const { deleteSupportingFile } = useSkillsStore.getState();
-    const success = await deleteSupportingFile(selectedSkillName, deleteFilePath);
+    const success = await deleteSupportingFile(selectedSkillName, deleteFilePath, settingsDirectory);
 
     if (success) {
       toast.success(t('settings.skills.page.toast.fileDeleted', { path: deleteFilePath }));
-      const detail = await getSkillDetail(selectedSkillName);
+      const detail = await getSkillDetail(selectedSkillName, settingsDirectory);
       if (detail) {
         setSupportingFiles(detail.sources.md.supportingFiles || []);
       }

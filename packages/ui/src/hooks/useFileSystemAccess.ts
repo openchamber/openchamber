@@ -1,11 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
-import { isDesktopShell, requestDirectoryAccess, startAccessingDirectory, stopAccessingDirectory } from '@/lib/desktop';
+import {
+  canRequestNativeDirectoryAccess,
+  isDesktopShell,
+  requestDirectoryAccess,
+  startAccessingDirectory,
+  stopAccessingDirectory,
+} from '@/lib/desktop';
 
 export const useFileSystemAccess = () => {
   const [isDesktop, setIsDesktop] = useState(false);
+  const [canRequestAccess, setCanRequestAccess] = useState(false);
 
   useEffect(() => {
     setIsDesktop(isDesktopShell());
+    setCanRequestAccess(canRequestNativeDirectoryAccess());
   }, []);
 
   const requestAccess = useCallback(async (directoryPath: string): Promise<{ success: boolean; path?: string; projectId?: string; error?: string }> => {
@@ -34,6 +42,7 @@ export const useFileSystemAccess = () => {
 
   return {
     isDesktop,
+    canRequestAccess,
     requestAccess,
     startAccessing,
     stopAccessing

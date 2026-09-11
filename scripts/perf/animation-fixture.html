@@ -91,6 +91,10 @@
     overflow: visible;
     display: block;
   }
+
+  .v-activity-static, .v-activity-collapse { display: block; }
+  .v-activity-static .cell, .v-activity-collapse .cell { width: 680px; height: auto; overflow: hidden; }
+  .activity-row { height: 18px; display: flex; gap: 12px; }
 </style>
 </head>
 <body>
@@ -108,14 +112,37 @@
   grid.className = 'grid v-' + variant;
   const usesWrapper = variant.endsWith('-wrapper');
   const usesButton = variant === 'ctx-button' || variant === 'ctx-sibling-translatez';
+  const usesActivity = variant === 'activity-static' || variant === 'activity-collapse';
   for (let index = 0; index < count; index += 1) {
     const cell = document.createElement('div');
     cell.className = 'cell';
     const spinner = SPINNER.replace('<svg', '<svg class="spin"');
-    if (usesWrapper) cell.innerHTML = '<span class="wrap">' + SPINNER + '</span>';
+    if (usesActivity) {
+      cell.innerHTML = Array.from({ length: 80 }, (_, row) =>
+        '<div class="activity-row"><span>Read file</span><code>src/module-' + row + '.ts</code><span>Completed</span></div>'
+      ).join('');
+    }
+    else if (usesWrapper) cell.innerHTML = '<span class="wrap">' + SPINNER + '</span>';
     else if (usesButton) cell.innerHTML = '<button>' + spinner + '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" fill="#456"/></svg></button>';
     else cell.innerHTML = SPINNER;
     grid.appendChild(cell);
+  }
+
+  // Two content regions per turn at most: prior messages and non-text parts
+  // of the final message. Exercise the same 180ms height transition, with no
+  // continuous animation between disclosure changes. The static variant has
+  // identical content for the baseline.
+  if (variant === 'activity-collapse') {
+    let expanded = true;
+    setInterval(() => {
+      for (const cell of grid.children) {
+        const height = cell.scrollHeight;
+        cell.animate({ height: expanded ? [height + 'px', '0px'] : ['0px', height + 'px'] }, {
+          duration: 180, easing: 'cubic-bezier(0.16, 1, 0.3, 1)', fill: 'forwards',
+        });
+      }
+      expanded = !expanded;
+    }, 2000);
   }
 
   if (filler > 0) {

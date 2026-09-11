@@ -144,6 +144,20 @@ export const assignImageAttachmentFilenames = (
     });
 };
 
+/** Next unused `pasted-context-N.txt` name for a large text paste attachment. */
+export const nextPastedContextFilename = (existingFilenames: string[]): string => {
+    const used = new Set(existingFilenames.map(normalizeFilenameKey));
+
+    for (let index = 1; index < Number.MAX_SAFE_INTEGER; index += 1) {
+        const candidate = `pasted-context-${index}.txt`;
+        if (!used.has(normalizeFilenameKey(candidate))) {
+            return candidate;
+        }
+    }
+
+    return `pasted-context-${Date.now()}.txt`;
+};
+
 export const buildAttachmentCitationText = (filenames: string[]): string => (
     filenames.map((filename) => `[${filename}]`).join(' ')
 );

@@ -2,12 +2,27 @@
 
 ## Purpose
 
-This module exposes OpenChamber orchestration to agents as one typed OpenCode
-custom tool named `openchamber`. It is injected only when OpenChamber launches
-and owns the OpenCode process, and only while the persisted
-`agentControlToolEnabled` setting is not `false` (default on; toggled in
-Settings → General → OpenCode CLI and applied on the next managed OpenCode
-restart).
+This module exposes OpenChamber to agents as typed OpenCode custom tools. There
+are two, because controlling sessions and driving a page are separate intents
+the user can want independently:
+
+- `openchamber` — projects, sessions, worktrees, and scheduled tasks. Enabled
+  while the persisted `agentControlToolEnabled` setting is not `false`.
+- `openchamber_web` — looking at and interacting with the page in OpenChamber's
+  browser panel. Enabled while `agentWebToolEnabled` is not `false`.
+
+Both default to on, are toggled in Settings → General → OpenCode CLI, and apply
+on the next managed OpenCode restart. Each tool carries only its own actions and
+only the parameters those actions use, so turning one off removes its inputs
+from the schema rather than leaving them visible. The plugin is injected only
+when OpenChamber launches and owns the OpenCode process, and not at all when
+both settings are `false`.
+
+- The plugin accepts the action's inputs either inside `parameters` or beside
+  `action`, because models produce both shapes; an explicit `parameters` object
+  wins on a conflict. Rejecting the flattened shape turned a call that plainly
+  carried a `url` into "url is required", which reads as a broken tool rather
+  than a malformed call.
 
 ## Runtime flow
 
@@ -88,3 +103,17 @@ error state.
 - VS Code: not injected; the extension owns a separate OpenCode lifecycle.
 - Hosted and Capacitor mobile clients use the server's managed OpenCode tool
   when connected to such a server; no tool runs in the client runtime.
+
+## The calling tool is part of the request
+
+Each generated tool sends its own name with every callback. Models routinely
+drop the namespace their tool's name appears to supply — `openchamber_memory`
+asked for `memory.read` gets called as `read` — and resolving the bare name
+inside the calling tool's action set makes that unambiguous even where it is not
+globally (`delete` belongs to both schedule and memory).
+
+Resolution never reaches outside the tool that asked: `open` from the memory
+tool fails rather than driving the browser. An unresolvable action answers with
+the actions that tool actually has, because an error that only says
+"unsupported" leaves the model to guess a second wrong name — which is exactly
+what happened before this existed.

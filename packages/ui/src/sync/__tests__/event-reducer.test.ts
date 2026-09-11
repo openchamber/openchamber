@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { Session } from "@opencode-ai/sdk/v2"
-import type { Event, Part, PermissionRequest, QuestionRequest, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { Event, Message, Part, PermissionRequest, QuestionRequest, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { applyDirectoryEvent } from "../event-reducer"
 import { INITIAL_STATE, type State } from "../types"
 
@@ -65,6 +65,80 @@ function buildSession(title: string, time: Session["time"]): Session {
 }
 
 describe("applyDirectoryEvent", () => {
+  test("inserts post-rollover message events by creation time rather than ID", () => {
+    const legacy = {
+      id: "msg_ffffffffffffLegacy",
+      sessionID: "ses_1",
+      role: "user",
+      time: { created: 100 },
+    } as Message
+    const current = {
+      id: "msg_000000000000Current",
+      sessionID: "ses_1",
+      role: "assistant",
+      time: { created: 200 },
+    } as Message
+    const draft = state({ message: { ses_1: [legacy] } })
+
+    expect(applyDirectoryEvent(draft, {
+      type: "message.updated",
+      properties: { info: current },
+    } as Event)).toBe(true)
+    expect(draft.message.ses_1).toEqual([legacy, current])
+  })
+
+  test("preserves part event order across the part ID rollover", () => {
+    const legacyPart = {
+      id: "prt_ffffffffffffLegacy",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "text",
+      text: "legacy",
+    } as Part
+    const currentPart = {
+      id: "prt_000000000000Current",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "text",
+      text: "current",
+    } as Part
+    const draft = state({
+      message: { ses_1: [{ id: "msg_1", sessionID: "ses_1", role: "assistant", time: { created: 1 } } as Message] },
+      part: { msg_1: [legacyPart] },
+    })
+
+    expect(applyDirectoryEvent(draft, {
+      type: "message.part.updated",
+      properties: { part: currentPart },
+    } as Event)).toBe(true)
+    expect(draft.part.msg_1).toEqual([legacyPart, currentPart])
+  })
+
+  test("replaces an optimistic user part in place instead of appending it", () => {
+    const optimisticText = { id: "prt_optimistic_text", messageID: "msg_1", type: "text", text: "hi" } as Part
+    const optimisticFile = { id: "prt_optimistic_file", messageID: "msg_1", type: "file", filename: "a.png" } as Part
+    const serverText = { id: "prt_server_text", messageID: "msg_1", sessionID: "ses_1", type: "text", text: "hi" } as Part
+    const draft = state({
+      message: { ses_1: [{ id: "msg_1", sessionID: "ses_1", role: "user", time: { created: 1 } } as Message] },
+      part: { msg_1: [optimisticText, optimisticFile] },
+    })
+
+    expect(applyDirectoryEvent(draft, {
+      type: "message.part.updated",
+      properties: { part: serverText },
+    } as Event)).toBe(true)
+    expect(draft.part.msg_1).toEqual([serverText, optimisticFile])
+
+    // The file echo follows the text echo; it must claim the optimistic file
+    // even though the first slot now holds a server part.
+    const serverFile = { id: "prt_server_file", messageID: "msg_1", sessionID: "ses_1", type: "file", filename: "a.png" } as Part
+    expect(applyDirectoryEvent(draft, {
+      type: "message.part.updated",
+      properties: { part: serverFile },
+    } as Event)).toBe(true)
+    expect(draft.part.msg_1).toEqual([serverText, serverFile])
+  })
+
   test("returns typed materialization when delta arrives before parts", () => {
     const result = applyDirectoryEvent(state(), deltaEvent())
 
@@ -279,5 +353,100 @@ describe("applyDirectoryEvent", () => {
 
     expect(draft.question.ses_1).not.toBe(afterReply)
     expect(draft.question.ses_1).toEqual([])
+  })
+})
+
+describe("question reducer invariants (main contract)", () => {
+  const questionRequest = (id: string, sessionID = "ses_1"): QuestionRequest => ({
+    id,
+    sessionID,
+    questions: [],
+  })
+
+  const askedEvent = (id: string, sessionID = "ses_1"): Event => ({
+    id: `evt_${id}`,
+    type: "question.asked",
+    properties: questionRequest(id, sessionID),
+  })
+
+  const repliedEvent = (requestID: string, sessionID = "ses_1"): Event => ({
+    id: `evt_${requestID}`,
+    type: "question.replied",
+    properties: { sessionID, requestID, answers: [] },
+  })
+
+  const rejectedEvent = (requestID: string, sessionID = "ses_1"): Event => ({
+    id: `evt_${requestID}`,
+    type: "question.rejected",
+    properties: { sessionID, requestID },
+  })
+
+  test("question.asked is an idempotent upsert-by-id — replaying does not duplicate", () => {
+    const draft = state({ question: { ses_1: [questionRequest("ques_1")] } })
+
+    expect(applyDirectoryEvent(draft, askedEvent("ques_1"))).toBe(true)
+    expect(applyDirectoryEvent(draft, askedEvent("ques_1"))).toBe(true)
+
+    expect(draft.question.ses_1).toHaveLength(1)
+    expect(draft.question.ses_1[0]?.id).toBe("ques_1")
+  })
+
+  test("question.asked replaces the stored record in place (not first-wins)", () => {
+    const draft = state({ question: { ses_1: [questionRequest("ques_1")] } })
+    const replacement: QuestionRequest = {
+      id: "ques_1",
+      sessionID: "ses_1",
+      questions: [
+        { question: "updated?", header: "Build", options: [{ label: "Yes", description: "Go" }] },
+      ],
+    }
+
+    expect(applyDirectoryEvent(draft, {
+      id: "evt_ques_1",
+      type: "question.asked",
+      properties: replacement,
+    })).toBe(true)
+
+    expect(draft.question.ses_1).toHaveLength(1)
+    expect(draft.question.ses_1[0]).toEqual(replacement)
+  })
+
+  test("question.replied and question.rejected remove exactly the matching request; unknown removal is a no-op returning false", () => {
+    const draft = state({
+      question: { ses_1: [questionRequest("ques_1"), questionRequest("ques_2")] },
+    })
+
+    expect(applyDirectoryEvent(draft, repliedEvent("ques_1"))).toBe(true)
+    expect(draft.question.ses_1.map((q) => q.id)).toEqual(["ques_2"])
+
+    expect(applyDirectoryEvent(draft, rejectedEvent("ques_2"))).toBe(true)
+    expect(draft.question.ses_1).toEqual([])
+
+    // Removal for an unknown request is a safe no-op.
+    expect(applyDirectoryEvent(draft, repliedEvent("ques_missing"))).toBe(false)
+    expect(applyDirectoryEvent(draft, rejectedEvent("ques_missing"))).toBe(false)
+    expect(draft.question.ses_1).toEqual([])
+  })
+
+  test("a duplicate terminal event after removal is a safe no-op", () => {
+    const draft = state({ question: { ses_1: [questionRequest("ques_1")] } })
+
+    expect(applyDirectoryEvent(draft, repliedEvent("ques_1"))).toBe(true)
+    expect(draft.question.ses_1).toEqual([])
+
+    // Replayed terminal event: no error, no duplicate, no state change.
+    expect(applyDirectoryEvent(draft, repliedEvent("ques_1"))).toBe(false)
+    expect(draft.question.ses_1).toEqual([])
+  })
+
+  test("a late question.asked after a terminal event re-registers the request (no tombstone)", () => {
+    const draft = state({ question: { ses_1: [questionRequest("ques_1")] } })
+
+    expect(applyDirectoryEvent(draft, repliedEvent("ques_1"))).toBe(true)
+    expect(draft.question.ses_1).toEqual([])
+
+    // Ordered-stream replay: a late asked re-inserts; there is no tombstone.
+    expect(applyDirectoryEvent(draft, askedEvent("ques_1"))).toBe(true)
+    expect(draft.question.ses_1.map((q) => q.id)).toEqual(["ques_1"])
   })
 })

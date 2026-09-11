@@ -1,7 +1,7 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
-import { getMarkdownSyntaxVars } from '@/components/chat/markdown/markdownTheme';
+import { getMarkdownSyntaxVars } from '@/components/chat/markdown/markdownSyntaxVars';
 import { highlightCodeInWorker } from '@/components/chat/markdown/markdown-worker';
 
 // Shared static code highlighter backed by the markdown Shiki Web Worker.

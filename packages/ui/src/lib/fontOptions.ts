@@ -1,13 +1,22 @@
-export type UiFontOption = 'inter' | 'geist-sans' | 'atkinson-hyperlegible' | 'source-sans-3' | 'roboto' | 'noto-sans' | 'dm-sans' | 'manrope' | 'system';
+export type UiFontOption = 'inter' | 'fixel' | 'geist-sans' | 'atkinson-hyperlegible' | 'source-sans-3' | 'roboto' | 'noto-sans' | 'dm-sans' | 'manrope' | 'system';
 
 export type MonoFontOption = 'jetbrains-mono' | 'fira-code' | 'geist-mono' | 'commit-mono' | 'source-code-pro' | 'cascadia-code' | 'roboto-mono' | 'iosevka' | 'system-mono';
 
-export interface FontFaceSource {
+interface FontFaceSourceBase {
     family: string;
-    packageName: string;
-    filePrefix: string;
     weights: number[];
 }
+
+interface FontsourceFaceSource extends FontFaceSourceBase {
+    packageName: string;
+    filePrefix: string;
+}
+
+interface DirectFontFaceSource extends FontFaceSourceBase {
+    urls: Record<number, string>;
+}
+
+export type FontFaceSource = FontsourceFaceSource | DirectFontFaceSource;
 
 export interface FontOptionDefinition<T extends string> {
     id: T;
@@ -25,6 +34,21 @@ export const UI_FONT_OPTIONS: FontOptionDefinition<UiFontOption>[] = [
         description: 'Modern UI sans with excellent readability at small sizes.',
         stack: '"Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
         source: { family: 'Inter', packageName: '@fontsource/inter', filePrefix: 'inter', weights: [400, 500, 600] }
+    },
+    {
+        id: 'fixel',
+        label: 'Fixel Text',
+        description: 'Humanist geometric sans-serif with full Ukrainian support.',
+        stack: '"Fixel Text", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        source: {
+            family: 'Fixel Text',
+            weights: [400, 500, 600],
+            urls: {
+                400: 'https://cdn.jsdelivr.net/gh/MacPaw/Fixel@f6ee910e98add47e830db87f1a754130506c11a2/fonts/webfonts/FixelText-Regular.woff2',
+                500: 'https://cdn.jsdelivr.net/gh/MacPaw/Fixel@f6ee910e98add47e830db87f1a754130506c11a2/fonts/webfonts/FixelText-Medium.woff2',
+                600: 'https://cdn.jsdelivr.net/gh/MacPaw/Fixel@f6ee910e98add47e830db87f1a754130506c11a2/fonts/webfonts/FixelText-SemiBold.woff2'
+            }
+        }
     },
     {
         id: 'geist-sans',

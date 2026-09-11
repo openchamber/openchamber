@@ -4,6 +4,7 @@ import {
   ATTACHMENT_ACCEPT,
   getAttachmentInputModality,
   getUnsupportedAttachmentInputs,
+  isDocumentAttachmentFilename,
   prepareAttachmentFile,
 } from "./attachment-files"
 
@@ -45,6 +46,11 @@ describe("attachment file preparation", () => {
       expect(ACCEPTED_ATTACHMENT_EXTENSIONS.includes(extension)).toBe(true)
       expect(ATTACHMENT_ACCEPT.includes(`.${extension}`)).toBe(true)
     }
+  })
+
+  test("identifies Office and OpenDocument filenames for shared mention preparation", () => {
+    expect(isDocumentAttachmentFilename("reports/BUDGET.XLSX")).toBe(true)
+    expect(isDocumentAttachmentFilename("notes.txt")).toBe(false)
   })
 
   test("renders notebooks as readable markdown without binary outputs", async () => {

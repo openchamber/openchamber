@@ -1,15 +1,17 @@
 import React from "react";
 
+import { useScrollShadow, type ScrollShadowOrientation, type ScrollShadowVisibility } from "./useScrollShadow";
+
 export type ScrollShadowProps = React.HTMLAttributes<HTMLElement> & {
   as?: React.ElementType;
-  orientation?: "vertical" | "horizontal";
+  orientation?: ScrollShadowOrientation;
   offset?: number;
   size?: number;
   isEnabled?: boolean;
   hideTopShadow?: boolean;
   hideBottomShadow?: boolean;
   observeMutations?: boolean;
-  onVisibilityChange?: (state: "both" | "none" | "top" | "bottom" | "left" | "right") => void;
+  onVisibilityChange?: (state: ScrollShadowVisibility) => void;
 };
 
 function mergeRefs<T>(...refs: Array<React.Ref<T>>): React.RefCallback<T> {
@@ -44,7 +46,6 @@ export const ScrollShadow = React.forwardRef<HTMLElement, ScrollShadowProps>(
     ref,
   ) => {
     const internalRef = React.useRef<HTMLElement>(null);
-    const visibleRef = React.useRef<"both" | "none" | "top" | "bottom" | "left" | "right">("none");
 
     const dataScrollShadow = (rest as Record<string, unknown>)["data-scroll-shadow"];
     delete (rest as Record<string, unknown>)["data-scroll-shadow"];
@@ -57,104 +58,15 @@ export const ScrollShadow = React.forwardRef<HTMLElement, ScrollShadowProps>(
       return next;
     }, [size, style]);
 
-    const setAttributes = React.useCallback(
-      (el: HTMLElement, hasBefore: boolean, hasAfter: boolean, prefix: "top" | "left", suffix: "bottom" | "right") => {
-        const bothKey = `${prefix}${suffix.charAt(0).toUpperCase()}${suffix.slice(1)}Scroll` as const;
-
-        if (hasBefore && hasAfter) {
-          (el.dataset as Record<string, string>)[bothKey] = "true";
-          el.removeAttribute(`data-${prefix}-scroll`);
-          el.removeAttribute(`data-${suffix}-scroll`);
-        } else {
-          el.dataset[`${prefix}Scroll`] = String(hasBefore);
-          el.dataset[`${suffix}Scroll`] = String(hasAfter);
-          el.removeAttribute(`data-${prefix}-${suffix}-scroll`);
-        }
-      },
-      [],
-    );
-
-    const clearAttributes = React.useCallback((el: HTMLElement) => {
-      ["top", "bottom", "top-bottom", "left", "right", "left-right"].forEach((attr) => {
-        el.removeAttribute(`data-${attr}-scroll`);
-      });
-    }, []);
-
-    const checkOverflow = React.useCallback(() => {
-      const el = internalRef.current;
-      if (!el) return;
-
-      if (!isEnabled) {
-        clearAttributes(el);
-        return;
-      }
-
-      // Subpixel tolerance: on hi-DPI (Retina) and with fractional scrollTop,
-      // scrollTop+clientHeight can fall ~0.5px short of scrollHeight at the very end,
-      // which would otherwise keep the bottom fade visible after fully scrolling.
-      const SUBPIXEL_TOLERANCE = 1;
-      const hasBefore =
-        orientation === "vertical"
-          ? el.scrollTop > offset + SUBPIXEL_TOLERANCE
-          : el.scrollLeft > offset + SUBPIXEL_TOLERANCE;
-      let hasAfter =
-        orientation === "vertical"
-          ? el.scrollHeight - (el.scrollTop + el.clientHeight) > offset + SUBPIXEL_TOLERANCE
-          : el.scrollWidth - (el.scrollLeft + el.clientWidth) > offset + SUBPIXEL_TOLERANCE;
-
-      const effectiveHasBefore = hideTopShadow && orientation === "vertical" ? false : hasBefore;
-
-      if (hideBottomShadow && orientation === "vertical") {
-        hasAfter = false;
-      }
-
-      setAttributes(el, effectiveHasBefore, hasAfter, orientation === "vertical" ? "top" : "left", orientation === "vertical" ? "bottom" : "right");
-
-      const next = effectiveHasBefore && hasAfter ? "both" : effectiveHasBefore ? (orientation === "vertical" ? "top" : "left") : hasAfter ? (orientation === "vertical" ? "bottom" : "right") : "none";
-      if (next !== visibleRef.current) {
-        visibleRef.current = next;
-        onVisibilityChange?.(next);
-      }
-    }, [clearAttributes, hideTopShadow, hideBottomShadow, isEnabled, offset, onVisibilityChange, orientation, setAttributes]);
-
-    React.useEffect(() => {
-      const el = internalRef.current;
-      if (!el) return;
-
-      // Throttle with RAF to avoid excessive calls during rapid DOM changes
-      let rafId: number | null = null;
-      const throttledCheck = () => {
-        if (rafId !== null) return;
-        rafId = requestAnimationFrame(() => {
-          rafId = null;
-          checkOverflow();
-        });
-      };
-
-      const handleScroll = () => checkOverflow(); // Scroll should be immediate
-      const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(throttledCheck) : null;
-      const mutationObserver =
-        observeMutations && typeof MutationObserver !== "undefined" ? new MutationObserver(throttledCheck) : null;
-
-      checkOverflow();
-
-      el.addEventListener("scroll", handleScroll, { passive: true });
-      resizeObserver?.observe(el);
-      // checkOverflow mutates our data-scroll attributes; observing attributes
-      // would make the component trigger its own observer indefinitely.
-      mutationObserver?.observe(el, {
-        childList: true,
-        subtree: true,
-        characterData: true,
-      });
-
-      return () => {
-        if (rafId !== null) cancelAnimationFrame(rafId);
-        el.removeEventListener("scroll", handleScroll);
-        resizeObserver?.disconnect();
-        mutationObserver?.disconnect();
-      };
-    }, [checkOverflow, observeMutations]);
+    useScrollShadow(internalRef, {
+      orientation,
+      offset,
+      isEnabled,
+      hideTopShadow,
+      hideBottomShadow,
+      observeMutations,
+      onVisibilityChange,
+    });
 
     return (
       <Component

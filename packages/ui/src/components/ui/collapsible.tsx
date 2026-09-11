@@ -39,7 +39,12 @@ const CollapsibleContent = ({
   ...props
 }: React.ComponentProps<typeof BaseCollapsible.Panel>) => (
   <BaseCollapsible.Panel
-    className={cn("overflow-hidden data-[closed]:animate-collapsible-up data-[open]:animate-collapsible-down", className)}
+    className={cn(
+      "transition-opacity duration-100 ease-out",
+      "data-[starting-style]:opacity-0 data-[ending-style]:opacity-0",
+      "motion-reduce:transition-none",
+      className,
+    )}
     {...props}
   />
 );

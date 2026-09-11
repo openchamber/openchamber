@@ -11,7 +11,7 @@ export const buildCommandPaletteFileSearchKey = (
   return JSON.stringify([currentRoot, trimmedQuery]);
 };
 
-export const scoreCommandPaletteFiles = <T extends { name: string }>(
+export const scoreCommandPaletteFiles = <T extends { name: string; relativePath: string }>(
   fileResults: T[],
   trimmedQuery: string,
   fileSearchKey: string,
@@ -21,7 +21,9 @@ export const scoreCommandPaletteFiles = <T extends { name: string }>(
     return [];
   }
 
-  return scoreByFuzzyQuery(fileResults, trimmedQuery, (file) => file.name, {
+  // Score against the full relative path: queries like "solo-is-a" must match
+  // solo-is-a-team-size/index.md even though the basename is just index.md.
+  return scoreByFuzzyQuery(fileResults, trimmedQuery, (file) => file.relativePath || file.name, {
     limit: 10,
     threshold: 0.4,
   });

@@ -1,0 +1,53 @@
+---
+title: Integrações
+description: Conecte o GitHub e o Linear ao OpenChamber.
+---
+
+# Integrações
+
+Em **Configurações → Integrações** você entra nos serviços com os quais o OpenChamber trabalha. O login fica salvo no servidor do OpenChamber, então web, desktop e um telefone pareado o compartilham.
+
+## GitHub
+
+Expanda o cartão **GitHub** e escolha **Connect GitHub** para entrar com um código curto de dispositivo. Conectado, o OpenChamber pode iniciar sessões a partir de issues e pull requests, anexá-los a mensagens e abrir ou atualizar PRs. Tudo o que o GitHub pode fazer está em [Issues e PRs do GitHub](/pt-br/github/).
+
+## Linear
+
+### Conecte um workspace
+
+1. Expanda o cartão **Linear** e escolha **Connect**.
+2. Aprove o acesso na aba do navegador que se abre. Até lá, o cartão mostra **Waiting for Linear**.
+
+Conecte outra organização do Linear com **Add workspace**. Só um workspace é o atual por vez: troque com **Switch to**, e **Disconnect** remove apenas o atual. O mapeamento de projetos é mantido.
+
+### Navegue pelas issues
+
+Com um workspace conectado, o painel **Linear** aparece na barra de contexto à direita. Ele lista as issues do workspace atual e permite:
+
+- filtrar por status (**Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**), responsável (**Anyone** ou **Assigned to me**), time e prioridade
+- buscar por título, identificador ou URL do Linear
+- abrir uma issue para ler descrição, comentários, labels e prioridade
+- mudar o **Status** ou escolher **Close issue**
+- trocar o **Workspace** atual
+
+### Inicie uma sessão a partir de uma issue
+
+- No painel do Linear, abra uma issue e escolha **Start session**. O botão fica no rodapé enquanto a issue rola.
+- No chat, escolha **New Session From Linear Issue** para escolher uma da lista, com **Create in worktree** se quiser um branch novo.
+- Na caixa de diálogo **New Worktree**, escolha **Start from Linear Issue**.
+
+A sessão abre no projeto mapeado para o time da issue, com a issue como primeiro prompt. Mapeie os times no cartão do Linear: **Default project** cobre todos os times e **Team projects** o sobrescreve por time. Um time sem mapeamento pede que você o mapeie primeiro. A primeira mensagem é montada a partir do magic prompt **Issue Review**, editável em **Configurações → Magic Prompts → Linear**.
+
+### Vincule uma issue a uma mensagem
+
+No compositor do chat, escolha **Link Linear Issue**. A issue acompanha sua próxima mensagem como contexto, e o painel de status de trabalho da sessão mantém um link para ela.
+
+### Comentários de sessão
+
+Ative **Session comments** no cartão do Linear e uma sessão iniciada a partir de uma issue publica um comentário nela ao começar, terminar ou falhar, cada um com um link que abre a sessão. Os comentários só são publicados quando este servidor do OpenChamber tem um endereço público, para que o link funcione para todos na issue; em um endereço local ou privado nada é publicado.
+
+## Relacionado
+
+- [Issues e PRs do GitHub](/pt-br/github/) — tudo o que o GitHub pode fazer no OpenChamber
+- [Sessões em worktree](/pt-br/worktrees/) — onde as sessões a partir de issues podem começar
+- [Magic Prompts](/pt-br/magic-prompts/) — edite o prompt com que uma sessão do Linear começa

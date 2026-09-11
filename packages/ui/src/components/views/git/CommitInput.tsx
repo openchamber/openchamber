@@ -6,6 +6,7 @@ import { useI18n } from '@/lib/i18n';
 interface CommitInputProps {
   value: string;
   onChange: (value: string) => void;
+  onSubmit?: () => void;
   placeholder?: string;
   disabled?: boolean;
   hasTouchInput?: boolean;
@@ -18,6 +19,7 @@ const MAX_HEIGHT = 200;
 export const CommitInput: React.FC<CommitInputProps> = ({
   value,
   onChange,
+  onSubmit,
   placeholder,
   disabled = false,
   hasTouchInput = false,
@@ -58,6 +60,12 @@ export const CommitInput: React.FC<CommitInputProps> = ({
       ref={textareaRef}
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+          e.preventDefault();
+          onSubmit?.();
+        }
+      }}
       placeholder={placeholder ?? t('gitView.commit.messagePlaceholder')}
       rows={1}
       disabled={disabled}

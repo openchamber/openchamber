@@ -21,6 +21,64 @@ Einige Prompts haben einen sichtbaren Teil (die Nachricht, die du sehen würdest
 
 Anders entschieden? Jeder Prompt hat **Auf Standard zurücksetzen**, und es gibt **Alle zurücksetzen**, wenn du überall neu anfangen möchtest.
 
+## Wo jeder Prompt verwendet wird
+
+Für jeden Prompt steht unten, wo er läuft und was ihn auslöst. Prüfe den Auslöser vor der Bearbeitung, dann weißt du, welchen Ablauf du änderst.
+
+### Git
+
+| Prompt | Wo er läuft | Wann er ausgelöst wird |
+| --- | --- | --- |
+| Commit-Erstellung | Die Generieren-Schaltfläche im Commit-Feld der Git-Ansicht und im mobilen Changes-Bildschirm | Du erzeugst eine Commit-Nachricht. Ausgewählte Dateien und die letzten Commit-Betreffs des Branchs werden eingesetzt, sodass die Nachricht zum Stil deines Repos passt. |
+| PR-Erstellung | Das Pull-Request-Anlegen-Formular im PR-Tab der Git-Ansicht | Du erzeugst Titel und Beschreibung eines PRs. Eingebaut werden Base- und Head-Branch, die Commits und geänderten Dateien dazwischen, dein zusätzlicher Kontext und die PR-Vorlage des Repos, falls vorhanden. |
+| Merge/Rebase-Konfliktlösung | Der Konflikt-Dialog der Git-Ansicht, wenn ein Merge oder Rebase auf Konflikten stoppt | Du wählst "Resolve in current session" oder "Resolve in new session". Der Agent liest die konfliktbehafteten Dateien, schlägt eine Lösungsstrategie pro Datei vor und wartet auf deine Bestätigung, bevor er etwas ändert, staged oder fortfährt. |
+| Cherry-pick-Konfliktlösung | Der Bereich "Re-integrate commits" einer Worktree-Sitzung | Beim Übertragen der Sitzungs-Commits auf den Zielbranch entsteht ein Konflikt und du übergibst ihn dem Agenten. Der Agent löst im temporären Worktree, staged die Dateien und setzt den Cherry-pick fort. |
+
+### GitHub
+
+| Prompt | Wo er läuft | Wann er ausgelöst wird |
+| --- | --- | --- |
+| PR-Review | Der "Link GitHub PR"-Picker im Anhänge-Menü des Composers und der neue Worktree-Dialog | Zwei Auslöser. Hängst du einen PR als Kontext an, werden die Anweisungen erzeugt und mit deiner nächsten Nachricht mitgesendet. Startest du eine Worktree-Sitzung aus einem PR, bildet der Prompt die erste Nachricht dieser Sitzung, mit dem vollständigen PR-Kontext. |
+| Issue-Review | Der neue Worktree-Dialog, wenn der Worktree aus einem Issue startet | Die erste Nachricht der neuen Sitzung reviewed das Issue, mit Titel, Text und Kommentaren als Kontext. |
+| Fehlgeschlagene PR-Checks / PR-Kommentare / einzelner PR-Kommentar | — | Wird heute von keinem Ablauf gesendet. Die PR-Ansicht löste sie früher über Ein-Klick-Review-Aktionen aus; fehlgeschlagene Checks und Kommentare werden jetzt als Chat-Kontext-Entwürfe angeheftet. Sie bleiben editierbar, damit bestehende Overrides weiter funktionieren. |
+
+### Planung
+
+| Prompt | Wo er läuft | Wann er ausgelöst wird |
+| --- | --- | --- |
+| Todo-Planung | Das Todos-Panel in der Projekt-Seitenleiste | Du schickst ein Todo an eine Sitzung oder eine neue Worktree-Sitzung. Der Todo-Text wird zur sichtbaren Nachricht; die Anweisungen machen daraus einen fragegesteuerten Planungsdialog statt sofort loszulegen. |
+| Plan verbessern | Die Aktion "Improve" für einen gespeicherten Plan in der Plans-Ansicht | Du schickst einen gespeicherten Plan in den Verbesserungsfluss. Der Agent liest zuerst die Plandatei, schlägt dann Änderungen auf Basis des aktuellen Repo-Zustands vor und bietet an, dieselbe Datei zu bearbeiten. |
+| Plan umsetzen | Die Aktion "Implement" für einen gespeicherten Plan | Du schickst einen gespeicherten Plan in den Umsetzungsfluss. Der Agent liest die Plandatei und setzt sie komplett um, ohne den Rahmen zu sprengen; nötige Plananpassungen schreibt er in dieselbe Datei zurück. |
+
+### Sitzung
+
+Die meisten davon treiben Slash-Befehle an, die du im Composer eingibst. Die meisten erscheinen auch als Starter-Chips im Entwurf einer neuen Sitzung.
+
+| Prompt | Wo er läuft | Wann er ausgelöst wird |
+| --- | --- | --- |
+| Codebase-Tour | `/explore` | Du möchtest einen Überblick über die Codebase. |
+| Sitzungszusammenfassung | `/summary`, optional `/summary <Thema>` | Du fasst die bisherige Konversation zusammen — nützlich zur Übergabe an eine neue Sitzung. Benötigt eine bestehende Sitzung. |
+| Workspace-Review | `/workspace-review` | Du lässt den Agenten den aktuellen Workspace-Diff auf Absicht, Korrektheit und Sicherheit prüfen. |
+| Feature-Planung | `/plan-feature` | Du machst aus einer groben Feature-Idee über einen geführten Frage-Antwort-Dialog einen Umsetzungsplan. |
+| Goal formulieren | `/craft-goal`, optional `/craft-goal <Idee>` | Du machst aus einer Idee ein überprüfbares Goal-Ziel für den Goal-Dialog. |
+| Catch-up | `/catch-up` | Du kehrst zu einem Projekt zurück und fragst, wo es steht und wie es weitergeht. |
+| Debugging | `/debug` | Du untersuchst einen Bug: Der Agent bildet Hypothesen, bestätigt die Ursache aus dem Code und schlägt erst dann eine Lösung vor. |
+| Optionen abwägen | `/weigh` | Du weißt, was du bauen willst, aber nicht wie. Der Agent vergleicht zwei oder drei Ansätze und empfiehlt einen. |
+| Fusion | Die Aktion "Run fusion" auf einer Multi-run-Gruppe | Du vereinigst die Ausgaben mehrerer Läufe zu einer Antwort. Die Lauf-Ausgaben werden hinter die Anweisungen angehängt. |
+
+### Prompts ohne Settings-Seite
+
+Einige Prompts laufen automatisch und haben keine editierbare Seite in den Einstellungen:
+
+| Prompt | Wann er ausgelöst wird |
+| --- | --- |
+| Geplante Aufgabe | `/schedule-task`, optional mit einer ersten Idee. Führt durch den Dialog, der eine geplante Aufgabe definiert. |
+| Review-Übergabe | `/handoff-review` oder die Review-Schaltfläche in der Diff-Ansicht mit aktivierter Übergabe. Erzeugt die Übergabe in der Arbeitssitzung. |
+| Startnachricht der Review-Sitzung | Die erste Nachricht der erzeugten Review-Sitzung — mit Übergabe, wenn eine erzeugt wurde, sonst ohne. |
+| Review-Feedback / Umsetzungsantwort | Bringen Nachrichten zwischen den beiden Sitzungen hin und her: Review-Feedback geht zurück an die umsetzende Sitzung, die Antwort des Umsetzers zurück an die Review-Sitzung. |
+
 ## Weiterführend
 
 - [Git- & GitHub-Workflows](/git/) — viele dieser Prompts treiben die Git-Abläufe an
+- [Notizen, Todos & Pläne](/notes-todos-plans/) — die Todos und Pläne hinter den Planungs-Prompts
+- [Multi-run](/multi-run/) — Laufgruppen und Fusion

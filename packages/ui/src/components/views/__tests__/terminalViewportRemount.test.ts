@@ -32,35 +32,39 @@ const viewportKeyDeclaration = terminalViewSource
     .find((line) => line.includes('const terminalViewportKey =')) ?? '';
 
 describe('terminal viewport remount guard', () => {
-    test('viewport identity excludes the PTY session id', () => {
-        expect(viewportKeyDeclaration).toContain('effectiveDirectory');
+    test('viewport identity uses the authoritative terminal directory and excludes the PTY session id', () => {
+        expect(viewportKeyDeclaration).toContain('terminalDirectory');
         expect(viewportKeyDeclaration).toContain('activeTabId');
         expect(viewportKeyDeclaration).not.toContain('terminalSessionId');
     });
 
-    test('replay discontinuities reset the terminal in place instead of remounting it', () => {
-        const start = terminalViewportSource.indexOf('const recreateRenderer = React.useCallback(');
-        expect(start).toBeGreaterThan(-1);
-        const body = terminalViewportSource.slice(start, terminalViewportSource.indexOf('}, []);', start));
-        expect(body).toContain('terminal.reset()');
-        // The generation bump stays only as the fallback when no terminal exists yet.
-        expect(body.indexOf('if (!terminal)')).toBeLessThan(body.indexOf('terminal.reset()'));
+    test('replay discontinuities reset the surface in place instead of remounting it', () => {
+        expect(terminalViewportSource).toContain('surface.resetAndWrite(');
+        expect(terminalViewportSource).not.toContain('setRendererGeneration');
+    });
+
+    test('every open tab keeps its viewport mounted and only the active one is visible', () => {
+        expect(terminalViewSource).toContain('mountedTabIds.map((tabId) =>');
+        expect(terminalViewSource).toContain("!isActive && 'hidden'");
+        expect(terminalViewSource).toContain('isVisible={isTerminalVisible && isActive}');
     });
 
     test('scrollback is read from the buffer slice, not from the tab', () => {
-        expect(terminalViewSource).toContain('getBuffer(');
+        expect(terminalViewSource).toContain('s.getBuffer(directory, tabId).chunks');
         expect(terminalViewSource).not.toContain('activeTab?.bufferChunks');
     });
 
-    test('starts the PTY before Ghostty reports its first viewport size', () => {
+    test('spawns a visible tab at the fitted grid and a hidden one at the estimate', () => {
         expect(terminalViewSource).toContain('const FALLBACK_TERMINAL_SIZE = { cols: 80, rows: 24 } as const;');
-        expect(terminalViewSource).toContain('const initialSize = lastViewportSizeRef.current ?? FALLBACK_TERMINAL_SIZE;');
+        expect(terminalViewSource).toContain('const initialSize = fittedSize ?? lastViewportSizeRef.current ?? FALLBACK_TERMINAL_SIZE;');
+        // A visible tab waits for the fitted grid so zsh never prints its first prompt for a wider PTY.
+        expect(terminalViewSource).toContain('if (isTerminalVisibleRef.current && !fittedSize) return;');
         expect(terminalViewSource).not.toContain('if (!size && isTerminalVisibleRef.current)');
         expect(terminalViewSource).toContain('cols: initialSize.cols');
         expect(terminalViewSource).toContain('rows: initialSize.rows');
         expect(terminalViewSource).toContain('void terminal.resize({ sessionId: session.sessionId, ...viewportSize })');
         expect(terminalViewSource).toContain('if (!isTerminalVisible) {');
-        expect(terminalViewSource).not.toContain('isTerminalVisibleRef');
+        expect(terminalViewSource).not.toContain('if (!size && isTerminalVisibleRef.current)');
     });
 
     test('deduplicates create attempts while the viewport layout settles', () => {
@@ -69,19 +73,19 @@ describe('terminal viewport remount guard', () => {
     });
 
     test('lets the session-ID effect own stream startup after creating a tab', () => {
-        const createStart = terminalViewSource.indexOf('if (!terminalId) {');
-        const createEnd = terminalViewSource.indexOf('if (!terminalId || cancelled) return;', createStart);
+        const createStart = terminalViewSource.indexOf('const createTerminalSession = React.useCallback(');
+        const createEnd = terminalViewSource.indexOf('React.useEffect(() => {', createStart);
         expect(createStart).toBeGreaterThan(-1);
         expect(createEnd).toBeGreaterThan(createStart);
         const createBlock = terminalViewSource.slice(createStart, createEnd);
 
         expect(createBlock).toContain('setTabSessionId(directory, tabId, session.sessionId);');
-        expect(createBlock).toContain('Let that next');
+        expect(createBlock).toContain('Let that');
         expect(createBlock).not.toContain('startStream(');
     });
 
     test('clears a current tab from connecting when a strict-mode create rejects', () => {
-        const createStart = terminalViewSource.indexOf('if (!terminalId) {');
+        const createStart = terminalViewSource.indexOf('const createTerminalSession = React.useCallback(');
         const catchStart = terminalViewSource.indexOf('} catch (error) {', createStart);
         const catchEnd = terminalViewSource.indexOf('} finally {', catchStart);
         expect(catchStart).toBeGreaterThan(createStart);
@@ -97,7 +101,14 @@ describe('terminal viewport remount guard', () => {
     test('derives the initial PTY size before Ghostty mounts', () => {
         expect(terminalViewportSource).toContain('const getProvisionalTerminalSize');
         expect(terminalViewportSource).toContain('React.useLayoutEffect(() => {');
-        expect(terminalViewportSource).toContain('resizeRef.current(size.cols, size.rows)');
-        expect(terminalViewportSource).toContain('...(provisionalSizeRef.current ?? {})');
+        expect(terminalViewportSource).toContain('(provisionalSizeCallbackRef.current ?? resizeRef.current)(size.cols, size.rows)');
+    });
+
+    test('waits for the selected mono face with a bound before the surface measures the grid', () => {
+        expect(terminalViewportSource).toContain('const TERMINAL_FONT_WAIT_MS = 2000;');
+        expect(terminalViewportSource).toContain('await waitForMonoFont(initialMonoFont);');
+        // A surface lives for the whole mount; fonts and theme are applied in place.
+        expect(terminalViewportSource).toContain('surfaceRef.current?.setFont(');
+        expect(terminalViewportSource).toContain('surfaceRef.current?.setTheme(');
     });
 });

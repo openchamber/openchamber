@@ -1,3 +1,21 @@
+const SYSTEMD_SERVICE_UNIT_PATTERN = /^[A-Za-z0-9:_.@-]+\.service$/;
+
+function resolveSystemdServiceUnit(environment) {
+  if (!environment.INVOCATION_ID) {
+    return null;
+  }
+
+  const configuredUnit = typeof environment.OPENCHAMBER_SYSTEMD_UNIT === 'string'
+    ? environment.OPENCHAMBER_SYSTEMD_UNIT.trim()
+    : '';
+  const unit = configuredUnit || 'openchamber.service';
+  return SYSTEMD_SERVICE_UNIT_PATTERN.test(unit) ? unit : null;
+}
+
+function quotePosixShell(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
 export const registerOpenChamberRoutes = (app, dependencies) => {
   const {
     fs,
@@ -11,11 +29,13 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     readSettingsFromDiskMigrated,
     fetchFreeZenModels,
     getCachedZenModels,
+    desktopUpdater,
   } = dependencies;
+
+  let desktopRestartError = null;
 
   app.get('/api/openchamber/update-check', async (req, res) => {
     try {
-      const { checkForUpdates } = await import('../package-manager.js');
       const parseString = (value) => (typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined);
       const parseReportUsage = (value) => {
         if (typeof value !== 'string') return true;
@@ -31,8 +51,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         return 'desktop';
       };
       const userAgent = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : '';
-
-      const updateInfo = await checkForUpdates({
+      const updateRequest = {
         appType: parseString(req.query.appType),
         deviceClass: parseString(req.query.deviceClass) || inferDeviceClass(userAgent),
         platform: parseString(req.query.platform),
@@ -41,7 +60,31 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         currentVersion: parseString(req.query.currentVersion),
         installId: parseString(req.query.installId),
         reportUsage: parseReportUsage(parseString(req.query.reportUsage)),
-      });
+      };
+      let updateInfo;
+      if (process.env.OPENCHAMBER_RUNTIME === 'desktop' && updateRequest.appType === 'web') {
+        if (desktopRestartError && req.query.updateStatus === 'true') {
+          return res.status(503).json({
+            code: 'DESKTOP_UPDATE_RESTART_FAILED',
+            error: desktopRestartError,
+          });
+        }
+        if (typeof desktopUpdater?.check !== 'function') {
+          return res.status(503).json({
+            available: false,
+            code: 'DESKTOP_UPDATER_UNAVAILABLE',
+            error: 'The desktop updater is not available.',
+          });
+        }
+        updateInfo = {
+          ...await desktopUpdater.check(),
+          packageManager: 'electron',
+          updateOwner: 'electron-updater',
+        };
+      } else {
+        const { checkForUpdates } = await import('../package-manager.js');
+        updateInfo = await checkForUpdates(updateRequest);
+      }
       res.json(updateInfo);
     } catch (error) {
       console.error('Failed to check for updates:', error);
@@ -54,7 +97,42 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
 
   app.post('/api/openchamber/update-install', async (_req, res) => {
     try {
-      const { spawn: spawnChild } = await import('child_process');
+      if (process.env.OPENCHAMBER_RUNTIME === 'desktop') {
+        if (typeof desktopUpdater?.install !== 'function' || typeof desktopUpdater?.restart !== 'function') {
+          return res.status(503).json({
+            code: 'DESKTOP_UPDATER_UNAVAILABLE',
+            error: 'The desktop updater is not available.',
+          });
+        }
+
+        desktopRestartError = null;
+        const updateInfo = await desktopUpdater.install();
+        if (!updateInfo?.available) {
+          return res.status(400).json({ error: 'No update available' });
+        }
+
+        res.json({
+          success: true,
+          message: 'Desktop update downloaded, host will restart shortly',
+          version: updateInfo.version,
+          packageManager: 'electron',
+          updateOwner: 'electron-updater',
+          autoRestart: true,
+          restartManager: 'electron-updater',
+        });
+
+        setImmediate(() => {
+          Promise.resolve()
+            .then(() => desktopUpdater.restart())
+            .catch((error) => {
+              desktopRestartError = error instanceof Error ? error.message : 'Failed to restart after desktop update';
+              console.error('Failed to restart after desktop update:', error);
+            });
+        });
+        return;
+      }
+
+      const { spawn: spawnChild, spawnSync } = await import('child_process');
       const {
         checkForUpdates,
         getUpdateCommand,
@@ -110,6 +188,55 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       }
       const launchMode = storedOptions.launchMode === 'foreground' ? 'foreground' : 'daemon';
       const isForegroundService = launchMode === 'foreground';
+      const systemdServiceUnit = isForegroundService ? resolveSystemdServiceUnit(process.env) : null;
+
+      if (isForegroundService) {
+        if (!systemdServiceUnit) {
+          return res.status(409).json({
+            error: 'Foreground servers must be updated by their service manager. Set OPENCHAMBER_SYSTEMD_UNIT when running under systemd, or run openchamber update and restart the service.',
+          });
+        }
+
+        const updateJobName = `openchamber-update-${Date.now()}`;
+        const updateLogPath = `journalctl --user-unit ${updateJobName}.service`;
+        const updateScript = [
+          'set -eu',
+          updateCmd,
+          `systemctl --user restart ${quotePosixShell(systemdServiceUnit)}`,
+        ].join('\n');
+        const systemdRun = spawnSync('systemd-run', [
+          '--user',
+          `--unit=${updateJobName}`,
+          '--collect',
+          '--service-type=exec',
+          `--setenv=PATH=${process.env.PATH || ''}`,
+          '/bin/sh',
+          '-c',
+          updateScript,
+        ], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+          timeout: 5000,
+        });
+
+        if (systemdRun.status !== 0) {
+          const detail = (systemdRun.stderr || systemdRun.stdout || '').trim();
+          return res.status(409).json({
+            error: detail || `Could not queue update job for ${systemdServiceUnit}`,
+          });
+        }
+
+        return res.json({
+          success: true,
+          message: 'Update queued; OpenChamber will restart after installation completes',
+          version: updateInfo.version,
+          packageManager: pm,
+          autoRestart: true,
+          restartManager: 'systemd',
+          jobId: updateJobName,
+          logPath: updateLogPath,
+        });
+      }
 
       const isWindows = process.platform === 'win32';
       const quotePosix = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;

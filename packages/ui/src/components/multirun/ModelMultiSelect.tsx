@@ -152,7 +152,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
     // Find the nearest dialog or overflow ancestor to constrain within
     let container: HTMLElement | null = triggerRef.current.parentElement;
     while (container) {
-      if (container.getAttribute('role') === 'dialog' || container.hasAttribute('data-scroll-shadow')) {
+      if (container.matches('[role="dialog"], [data-scroll-shadow-scroller]')) {
         break;
       }
       const style = getComputedStyle(container);

@@ -1,25 +1,21 @@
 import type { DesktopSettings } from '@/lib/desktop';
-import { createProjectIdFromPath } from '@/lib/projectId';
 import { useUIStore } from '@/stores/useUIStore';
-import { isMonoFontOption, isUiFontOption } from '@/lib/fontOptions';
-import {
-  DEFAULT_FOLLOW_UP_BEHAVIOR,
-  isFollowUpBehavior,
-  normalizeFollowUpBehavior,
-  useMessageQueueStore,
-  type FollowUpBehavior,
-} from '@/stores/messageQueueStore';
-import { setDirectoryShowHidden } from '@/lib/directoryShowHidden';
-import { setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { loadAppearancePreferences, applyAppearancePreferences } from '@/lib/appearancePersistence';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
-import { sanitizeStarterRefs } from '@/lib/draftStarters';
-import { normalizeMobileKeyboardMode, setStoredMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import { setStoredMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { isTerminalShell } from '@/lib/terminalShell';
+import { isCapacitorApp } from '@/lib/platform';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
-import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID } from '@/lib/theme/themes';
-import { DEFAULT_OPEN_IN_APP_ID } from '@/lib/openInApps';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import {
+  applySettingsToStores,
+  isDeviceSettingsKey,
+  isWritableSettingsKey,
+  MIRRORED_KEYS,
+  parseSettingsDocument,
+  SETTINGS_KEYS,
+} from '@/lib/settings/registry';
+import { SETTINGS_SURFACE_QUERY, getSettingsSurface } from '@/lib/settings/surface';
 
 export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void => {
   if (typeof window === 'undefined') {
@@ -37,6 +33,33 @@ export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void
 };
 
 const SETTINGS_MIRROR_INDEX_KEY = 'openchamber.settingsMirror.v2.index';
+// Set once a runtime's device fields have been read from the server document
+// (installs that predate the settings split still carry them there). After
+// that the local store is the only owner and the server copy is ignored.
+const DEVICE_SEED_KEY_PREFIX = 'openchamber.deviceSeeded.v1:';
+const getDeviceSeedStorageKey = (runtimeKey: string): string => `${DEVICE_SEED_KEY_PREFIX}${encodeURIComponent(runtimeKey)}`;
+
+/**
+ * The part of a server document this window may apply: everything but device
+ * fields, plus the device fields exactly once per runtime as a migration seed.
+ */
+const withoutStaleDeviceFields = (settings: DesktopSettings, runtimeKey: string): DesktopSettings => {
+  const seedKey = getDeviceSeedStorageKey(runtimeKey);
+  let seedDevice = false;
+  try {
+    seedDevice = localStorage.getItem(seedKey) === null;
+    if (seedDevice) localStorage.setItem(seedKey, String(Date.now()));
+  } catch {
+    seedDevice = false;
+  }
+  if (seedDevice) return settings;
+  const next: DesktopSettings = {};
+  for (const key of SETTINGS_KEYS) {
+    if (settings[key] === undefined || isDeviceSettingsKey(key)) continue;
+    Object.assign(next, { [key]: settings[key] });
+  }
+  return next;
+};
 const SETTINGS_MIRROR_KEY_PREFIX = 'openchamber.settingsMirror.v2:';
 const MAX_SETTINGS_MIRROR_RUNTIMES = 5;
 
@@ -52,31 +75,13 @@ const setOrRemoveLocalStorage = (key: string, value: string | null): void => {
 };
 
 const persistRuntimeSettingsMirror = (settings: DesktopSettings, runtimeKey: string): void => {
-  const mirror = {
-    themeId: settings.themeId,
-    themeVariant: settings.themeVariant,
-    lightThemeId: settings.lightThemeId,
-    darkThemeId: settings.darkThemeId,
-    useSystemTheme: settings.useSystemTheme,
-    lastDirectory: settings.lastDirectory,
-    homeDirectory: settings.homeDirectory,
-    projects: settings.projects,
-    activeProjectId: settings.activeProjectId,
-    pinnedDirectories: settings.pinnedDirectories,
-    gitmojiEnabled: settings.gitmojiEnabled,
-    directoryShowHidden: settings.directoryShowHidden,
-    filesViewShowGitignored: settings.filesViewShowGitignored,
-    openInAppId: settings.openInAppId,
-    pwaAppName: settings.pwaAppName,
-    mobileKeyboardMode: settings.mobileKeyboardMode,
-    openCodeUpdateToastDismissedVersion: settings.openCodeUpdateToastDismissedVersion,
-    dictationEnabled: settings.dictationEnabled,
-    sttProvider: settings.sttProvider,
-    sttServerUrl: settings.sttServerUrl,
-    sttModel: settings.sttModel,
-    sttLocalModel: settings.sttLocalModel,
-    sttLanguage: settings.sttLanguage,
-  };
+  // Every user-owned field the server holds for this runtime, so a later
+  // phase can serve the profile from the mirror; secrets and computed flags
+  // never land in browser storage.
+  const mirror: DesktopSettings = {};
+  for (const key of MIRRORED_KEYS) {
+    if (settings[key] !== undefined) Object.assign(mirror, { [key]: settings[key] });
+  }
   localStorage.setItem(getRuntimeSettingsMirrorStorageKey(runtimeKey), JSON.stringify(mirror));
 
   let previous: string[] = [];
@@ -99,11 +104,6 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   }
 
   persistRuntimeSettingsMirror(settings, getRuntimeKey());
-  setOrRemoveLocalStorage('selectedThemeId', settings.themeId || null);
-  setOrRemoveLocalStorage('selectedThemeVariant', settings.themeVariant || null);
-  setOrRemoveLocalStorage('lightThemeId', settings.lightThemeId || null);
-  setOrRemoveLocalStorage('darkThemeId', settings.darkThemeId || null);
-  setOrRemoveLocalStorage('useSystemTheme', typeof settings.useSystemTheme === 'boolean' ? String(settings.useSystemTheme) : null);
   setOrRemoveLocalStorage('lastDirectory', settings.lastDirectory || null);
   if (settings.homeDirectory) {
     localStorage.setItem('homeDirectory', settings.homeDirectory);
@@ -129,7 +129,7 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
 
   if (Array.isArray(settings.projects) && settings.projects.length > 0) {
     const collapsed = settings.projects
-      .filter((project) => (project as unknown as { sidebarCollapsed?: boolean }).sidebarCollapsed === true)
+      .filter((project) => project.sidebarCollapsed === true)
       .map((project) => project.id)
       .filter((id): id is string => typeof id === 'string' && id.length > 0);
     if (collapsed.length > 0) {
@@ -193,11 +193,30 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   setOrRemoveLocalStorage('sttLanguage', typeof settings.sttLanguage === 'string' ? settings.sttLanguage : null);
 };
 
-const dispatchSettingsSynced = (settings: DesktopSettings): void => {
+export interface SettingsSyncedDetail {
+  settings: DesktopSettings;
+  /** Whether listeners may adopt authoritative state that this window owns a
+      live copy of (workspace pointers, theme). True only for a bootstrap-grade
+      sync: the settings document is shared by every window of this server, so
+      a mid-session reconciliation adopting them would hijack this window's
+      choices with another window's. Every settings save echoes the full
+      document back as a sync event with bootstrap=false — the echo itself is
+      not filtered; listeners gate their adoption on this flag and keep their
+      live state for the fields they own. */
+  bootstrap: boolean;
+  /** Whether this sync may replace this window's theme preferences. VS Code
+      settings broadcasts remain bootstrap-grade for shared workspace pointers,
+      but must not copy one webview's theme into another webview. */
+  adoptTheme: boolean;
+}
+
+const dispatchSettingsSynced = (settings: DesktopSettings, bootstrap: boolean, adoptTheme = bootstrap): void => {
   if (typeof window === 'undefined') {
     return;
   }
-  window.dispatchEvent(new CustomEvent<DesktopSettings>('openchamber:settings-synced', { detail: settings }));
+  window.dispatchEvent(new CustomEvent<SettingsSyncedDetail>('openchamber:settings-synced', {
+    detail: { settings, bootstrap, adoptTheme },
+  }));
 };
 
 type SettingsSaveState = 'idle' | 'saving' | 'error';
@@ -250,263 +269,8 @@ type PersistApi = {
   onFinishHydration?: (callback: () => void) => (() => void) | undefined;
 };
 
-const sanitizeSkillCatalogs = (value: unknown): DesktopSettings['skillCatalogs'] | undefined => {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-
-  const result: NonNullable<DesktopSettings['skillCatalogs']> = [];
-  const seen = new Set<string>();
-
-  for (const entry of value) {
-    if (!entry || typeof entry !== 'object') continue;
-    const candidate = entry as Record<string, unknown>;
-
-    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
-    const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
-    const source = typeof candidate.source === 'string' ? candidate.source.trim() : '';
-    const subpath = typeof candidate.subpath === 'string' ? candidate.subpath.trim() : '';
-    const gitIdentityId = typeof candidate.gitIdentityId === 'string' ? candidate.gitIdentityId.trim() : '';
-
-    if (!id || !label || !source) continue;
-    if (seen.has(id)) continue;
-    seen.add(id);
-
-    result.push({
-      id,
-      label,
-      source,
-      ...(subpath ? { subpath } : {}),
-      ...(gitIdentityId ? { gitIdentityId } : {}),
-    });
-  }
-
-  return result;
-};
-
-const sanitizeShortcutOverrides = (value: unknown): Record<string, string> | undefined => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const result: Record<string, string> = {};
-  for (const [key, combo] of Object.entries(value)) {
-    const normalizedKey = typeof key === 'string' ? key.trim() : '';
-    const normalizedCombo = typeof combo === 'string' ? combo.trim() : '';
-    if (!normalizedKey || !normalizedCombo) continue;
-    result[normalizedKey] = normalizedCombo;
-  }
-  return result;
-};
-
-const areStringRecordsEqual = (left: Record<string, string>, right: Record<string, string>): boolean => {
-  const leftEntries = Object.entries(left);
-  const rightEntries = Object.entries(right);
-  if (leftEntries.length !== rightEntries.length) return false;
-  return leftEntries.every(([key, value]) => right[key] === value);
-};
-
-const areModelRefsEqual = (
-  left: Array<{ providerID: string; modelID: string }>,
-  right: Array<{ providerID: string; modelID: string }>,
-): boolean => (
-  left.length === right.length &&
-  left.every((item, idx) => item.providerID === right[idx]?.providerID && item.modelID === right[idx]?.modelID)
-);
-
-const areStringArraysEqual = (left: string[], right: string[]): boolean => (
-  left.length === right.length && left.every((value, idx) => value === right[idx])
-);
-
-const sanitizeStringArray = (value: unknown): string[] | undefined => {
-  if (!Array.isArray(value)) return undefined;
-  return Array.from(new Set(value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)));
-};
-
-const sanitizeRecentEfforts = (value: unknown): Record<string, string[]> | undefined => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const result: Record<string, string[]> = {};
-  for (const [key, variants] of Object.entries(value)) {
-    if (!key || !Array.isArray(variants)) continue;
-    const sanitized = sanitizeStringArray(variants);
-    if (sanitized && sanitized.length > 0) {
-      result[key] = sanitized.slice(0, 5);
-    }
-  }
-  return Object.keys(result).length > 0 ? result : undefined;
-};
-
-const areRecentEffortsEqual = (left: Record<string, string[]>, right: Record<string, string[]>): boolean => {
-  const leftKeys = Object.keys(left);
-  if (leftKeys.length !== Object.keys(right).length) return false;
-  return leftKeys.every((key) => Array.isArray(right[key]) && areStringArraysEqual(left[key], right[key]));
-};
-
-const HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
-
-const normalizeIconBackground = (value: unknown): string | null => {
-  if (typeof value !== 'string') {
-    return null;
-  }
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-  return HEX_COLOR_PATTERN.test(trimmed) ? trimmed.toLowerCase() : null;
-};
-
-const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefined => {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-
-  const result: NonNullable<DesktopSettings['projects']> = [];
-  const seenIds = new Set<string>();
-  const seenPaths = new Set<string>();
-
-  for (const entry of value) {
-    if (!entry || typeof entry !== 'object') continue;
-    const candidate = entry as Record<string, unknown>;
-
-    const rawPath = typeof candidate.path === 'string' ? candidate.path.trim() : '';
-    if (!rawPath) continue;
-
-    const normalizedPath = rawPath === '/' ? rawPath : rawPath.replace(/\\/g, '/').replace(/\/+$/, '');
-    if (!normalizedPath) continue;
-
-    const id = createProjectIdFromPath(normalizedPath);
-    if (!id) continue;
-
-    if (seenIds.has(id) || seenPaths.has(normalizedPath)) continue;
-    seenIds.add(id);
-    seenPaths.add(normalizedPath);
-
-    const project: NonNullable<DesktopSettings['projects']>[number] = {
-      id,
-      path: normalizedPath,
-    };
-
-    if (typeof candidate.label === 'string' && candidate.label.trim().length > 0) {
-      project.label = candidate.label.trim();
-    }
-    if (typeof candidate.icon === 'string' && candidate.icon.trim().length > 0) {
-      project.icon = candidate.icon.trim();
-    }
-    if (candidate.iconImage === null) {
-      (project as unknown as Record<string, unknown>).iconImage = null;
-    } else if (candidate.iconImage && typeof candidate.iconImage === 'object') {
-      const iconImage = candidate.iconImage as Record<string, unknown>;
-      const mime = typeof iconImage.mime === 'string' ? iconImage.mime.trim() : '';
-      const updatedAt = typeof iconImage.updatedAt === 'number' && Number.isFinite(iconImage.updatedAt)
-        ? Math.max(0, Math.round(iconImage.updatedAt))
-        : 0;
-      const source = iconImage.source === 'custom' || iconImage.source === 'auto'
-        ? iconImage.source
-        : null;
-      if (mime && updatedAt > 0 && source) {
-        (project as unknown as Record<string, unknown>).iconImage = { mime, updatedAt, source };
-      }
-    }
-    if (typeof candidate.color === 'string' && candidate.color.trim().length > 0) {
-      project.color = candidate.color.trim();
-    }
-    if (candidate.iconBackground === null) {
-      (project as unknown as Record<string, unknown>).iconBackground = null;
-    } else {
-      const iconBackground = normalizeIconBackground(candidate.iconBackground);
-      if (iconBackground) {
-        (project as unknown as Record<string, unknown>).iconBackground = iconBackground;
-      }
-    }
-    if (typeof candidate.addedAt === 'number' && Number.isFinite(candidate.addedAt) && candidate.addedAt >= 0) {
-      project.addedAt = candidate.addedAt;
-    }
-    if (
-      typeof candidate.lastOpenedAt === 'number' &&
-      Number.isFinite(candidate.lastOpenedAt) &&
-      candidate.lastOpenedAt >= 0
-    ) {
-      project.lastOpenedAt = candidate.lastOpenedAt;
-    }
-    if (typeof candidate.sidebarCollapsed === 'boolean') {
-      (project as unknown as Record<string, unknown>).sidebarCollapsed = candidate.sidebarCollapsed;
-    }
-    result.push(project);
-  }
-
-  return result.length > 0 ? result : undefined;
-};
-
-const sanitizeManagedRemoteTunnelPresets = (value: unknown): DesktopSettings['managedRemoteTunnelPresets'] | undefined => {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-
-  const result: NonNullable<DesktopSettings['managedRemoteTunnelPresets']> = [];
-  const seenIds = new Set<string>();
-  const seenHostnames = new Set<string>();
-
-  for (const entry of value) {
-    if (!entry || typeof entry !== 'object') continue;
-    const candidate = entry as Record<string, unknown>;
-
-    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
-    const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
-    const hostname = typeof candidate.hostname === 'string' ? candidate.hostname.trim().toLowerCase() : '';
-
-    if (!id || !name || !hostname) continue;
-    if (seenIds.has(id) || seenHostnames.has(hostname)) continue;
-    seenIds.add(id);
-    seenHostnames.add(hostname);
-
-    result.push({ id, name, hostname });
-  }
-
-  return result;
-};
-
-const sanitizeManagedRemoteTunnelPresetTokens = (value: unknown): DesktopSettings['managedRemoteTunnelPresetTokens'] | undefined => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  const result: Record<string, string> = {};
-  for (const [key, tokenValue] of Object.entries(candidate)) {
-    const id = key.trim();
-    const token = typeof tokenValue === 'string' ? tokenValue.trim() : '';
-    if (!id || !token) continue;
-    result[id] = token;
-  }
-
-  return Object.keys(result).length > 0 ? result : undefined;
-};
-
-const sanitizeModelRefs = (value: unknown, limit: number): Array<{ providerID: string; modelID: string }> | undefined => {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-
-  const result: Array<{ providerID: string; modelID: string }> = [];
-  const seen = new Set<string>();
-
-  for (const entry of value) {
-    if (!entry || typeof entry !== 'object') continue;
-    const candidate = entry as Record<string, unknown>;
-    const providerID = typeof candidate.providerID === 'string' ? candidate.providerID.trim() : '';
-    const modelID = typeof candidate.modelID === 'string' ? candidate.modelID.trim() : '';
-    if (!providerID || !modelID) continue;
-    const key = `${providerID}/${modelID}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push({ providerID, modelID });
-    if (result.length >= limit) break;
-  }
-
-  return result;
-};
-
 const getPersistApi = (): PersistApi | undefined => {
-  const candidate = (useUIStore as unknown as { persist?: PersistApi }).persist;
+  const candidate = useUIStore.persist;
   if (candidate && typeof candidate === 'object') {
     return candidate;
   }
@@ -515,1100 +279,109 @@ const getPersistApi = (): PersistApi | undefined => {
 
 const getRuntimeSettingsAPI = () => getRegisteredRuntimeAPIs()?.settings ?? null;
 
-const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopSettings => {
-  const defaults = useUIStore.getInitialState();
+const settingsEndpointForSurface = (): string => `/api/config/settings?${SETTINGS_SURFACE_QUERY}=${getSettingsSurface()}`;
 
-  return {
-    useSystemTheme: true,
-    lightThemeId: DEFAULT_LIGHT_THEME_ID,
-    darkThemeId: DEFAULT_DARK_THEME_ID,
-    openInAppId: DEFAULT_OPEN_IN_APP_ID,
-    showReasoningTraces: defaults.showReasoningTraces,
-    sessionRecapEnabled: defaults.sessionRecapEnabled,
-    sessionSuggestionEnabled: defaults.sessionSuggestionEnabled,
-    sessionGoalEnabled: defaults.sessionGoalEnabled,
-    sessionGoalDefaultBudgetEnabled: defaults.sessionGoalDefaultBudgetEnabled,
-    sessionGoalDefaultBudget: defaults.sessionGoalDefaultBudget,
-    collapsibleThinkingBlocks: defaults.collapsibleThinkingBlocks,
-    autoDeleteEnabled: defaults.autoDeleteEnabled,
-    autoSaveEnabled: defaults.autoSaveEnabled,
-    autoDeleteAfterDays: defaults.autoDeleteAfterDays,
-    sessionRetentionAction: defaults.sessionRetentionAction,
-    followUpBehavior: DEFAULT_FOLLOW_UP_BEHAVIOR,
-    showDeletionDialog: defaults.showDeletionDialog,
-    nativeNotificationsEnabled: defaults.nativeNotificationsEnabled,
-    notificationMode: defaults.notificationMode,
-    notifyOnSubtasks: defaults.notifyOnSubtasks,
-    notifyOnCompletion: defaults.notifyOnCompletion,
-    notifyOnError: defaults.notifyOnError,
-    notifyOnQuestion: defaults.notifyOnQuestion,
-    notificationTemplates: defaults.notificationTemplates,
-    summarizeLastMessage: defaults.summarizeLastMessage,
-    summaryThreshold: defaults.summaryThreshold,
-    summaryLength: defaults.summaryLength,
-    maxLastMessageLength: defaults.maxLastMessageLength,
-    inputSpellcheckEnabled: defaults.inputSpellcheckEnabled,
-    showOpenCodeUpdateNotifications: defaults.showOpenCodeUpdateNotifications,
-    agentControlToolEnabled: defaults.agentControlToolEnabled,
-    showToolFileIcons: defaults.showToolFileIcons,
-    codeBlockLineWrap: defaults.codeBlockLineWrap,
-    showTurnChangedFiles: defaults.showTurnChangedFiles,
-    showExpandedBashTools: defaults.showExpandedBashTools,
-    showExpandedEditTools: defaults.showExpandedEditTools,
-    timeFormatPreference: defaults.timeFormatPreference,
-    weekStartPreference: defaults.weekStartPreference,
-    desktopWindowControlsPosition: defaults.desktopWindowControlsPosition,
-    desktopWindowControlsStyle: defaults.desktopWindowControlsStyle,
-    chatRenderMode: defaults.chatRenderMode,
-    activityRenderMode: defaults.activityRenderMode,
-    mermaidRenderingMode: defaults.mermaidRenderingMode,
-    userMessageRenderingMode: defaults.userMessageRenderingMode,
-    collapsibleUserMessages: defaults.collapsibleUserMessages,
-    messageStreamTransport: 'auto',
-    stickyUserHeader: defaults.stickyUserHeader,
-    promptNavigatorEnabled: defaults.promptNavigatorEnabled,
-    expandedEditorToolbar: defaults.expandedEditorToolbar,
-    wideChatLayoutEnabled: defaults.wideChatLayoutEnabled,
-    showSplitAssistantMessageActions: defaults.showSplitAssistantMessageActions,
-    draftStartersVisible: defaults.draftStartersVisible,
-    reportUsage: defaults.reportUsage,
-    fontSize: defaults.fontSize,
-    terminalFontSize: defaults.terminalFontSize,
-    terminalShell: defaults.terminalShell,
-    terminalLoginShells: defaults.terminalLoginShells,
-    editorFontSize: defaults.editorFontSize,
-    uiFont: defaults.uiFont,
-    monoFont: defaults.monoFont,
-    padding: defaults.padding,
-    cornerRadius: defaults.cornerRadius,
-    inputBarOffset: defaults.inputBarOffset,
-    shortcutOverrides: defaults.shortcutOverrides,
-    mobileKeyboardMode: 'resize-content',
-    favoriteModels: defaults.favoriteModels,
-    hiddenModels: defaults.hiddenModels,
-    collapsedModelProviders: defaults.collapsedModelProviders,
-    recentModels: defaults.recentModels,
-    recentAgents: defaults.recentAgents,
-    recentEfforts: defaults.recentEfforts,
-    diffLayoutPreference: defaults.diffLayoutPreference,
-    gitChangesViewMode: defaults.gitChangesViewMode,
-    directoryShowHidden: true,
-    filesViewShowGitignored: false,
-    dictationEnabled: true,
-    sttProvider: 'local',
-    sttServerUrl: 'http://localhost:8001/v1',
-    sttModel: 'deepdml/faster-whisper-large-v3-turbo-ct2',
-    sttLocalModel: 'parakeet-tdt-0.6b-v2-int8',
-    sttLanguage: '',
-    ...settings,
-  };
+/** Copy a parsed snapshot into the live stores. Omitted keys stay as they are. */
+const applyDesktopUiPreferences = (settings: DesktopSettings): void => {
+  applySettingsToStores(settings);
 };
 
-const applyDesktopUiPreferences = (settings: DesktopSettings) => {
-  const store = useUIStore.getState();
-  const configStore = typeof window !== 'undefined'
-    ? window.__zustand_config_store__?.getState?.() ?? null
-    : null;
-  const configStoreApi = typeof window !== 'undefined'
-    ? window.__zustand_config_store__ ?? null
-    : null;
-  const queueStore = useMessageQueueStore.getState();
-
-  if (typeof settings.showReasoningTraces === 'boolean' && settings.showReasoningTraces !== store.showReasoningTraces) {
-    store.setShowReasoningTraces(settings.showReasoningTraces);
-  }
-  if (typeof settings.sessionRecapEnabled === 'boolean' && settings.sessionRecapEnabled !== store.sessionRecapEnabled) {
-    store.setSessionRecapEnabled(settings.sessionRecapEnabled);
-  }
-  if (typeof settings.sessionSuggestionEnabled === 'boolean' && settings.sessionSuggestionEnabled !== store.sessionSuggestionEnabled) {
-    store.setSessionSuggestionEnabled(settings.sessionSuggestionEnabled);
-  }
-  if (typeof settings.sessionGoalEnabled === 'boolean' && settings.sessionGoalEnabled !== store.sessionGoalEnabled) {
-    store.setSessionGoalEnabled(settings.sessionGoalEnabled);
-  }
-  if (typeof settings.sessionGoalDefaultBudgetEnabled === 'boolean' && settings.sessionGoalDefaultBudgetEnabled !== store.sessionGoalDefaultBudgetEnabled) {
-    store.setSessionGoalDefaultBudgetEnabled(settings.sessionGoalDefaultBudgetEnabled);
-  }
-  if (typeof settings.sessionGoalDefaultBudget === 'number' && Number.isFinite(settings.sessionGoalDefaultBudget) && settings.sessionGoalDefaultBudget !== store.sessionGoalDefaultBudget) {
-    store.setSessionGoalDefaultBudget(settings.sessionGoalDefaultBudget);
-  }
-  if (typeof settings.collapsibleThinkingBlocks === 'boolean' && settings.collapsibleThinkingBlocks !== store.collapsibleThinkingBlocks) {
-    store.setCollapsibleThinkingBlocks(settings.collapsibleThinkingBlocks);
-  }
-  if (typeof settings.autoDeleteEnabled === 'boolean' && settings.autoDeleteEnabled !== store.autoDeleteEnabled) {
-    store.setAutoDeleteEnabled(settings.autoDeleteEnabled);
-  }
-  if (typeof settings.autoSaveEnabled === 'boolean' && settings.autoSaveEnabled !== store.autoSaveEnabled) {
-    store.setAutoSaveEnabled(settings.autoSaveEnabled);
-  }
-  if (typeof settings.autoDeleteAfterDays === 'number' && Number.isFinite(settings.autoDeleteAfterDays)) {
-    const normalized = Math.max(1, Math.min(365, settings.autoDeleteAfterDays));
-    if (normalized !== store.autoDeleteAfterDays) {
-      store.setAutoDeleteAfterDays(normalized);
-    }
-  }
-  if (settings.sessionRetentionAction === 'archive' || settings.sessionRetentionAction === 'delete') {
-    if (settings.sessionRetentionAction !== store.sessionRetentionAction) {
-      store.setSessionRetentionAction(settings.sessionRetentionAction);
-    }
-  }
-
-  let nextFollowUpBehavior: FollowUpBehavior | null = null;
-  if (isFollowUpBehavior(settings.followUpBehavior)) {
-    nextFollowUpBehavior = settings.followUpBehavior;
-  } else if (typeof settings.queueModeEnabled === 'boolean') {
-    nextFollowUpBehavior = normalizeFollowUpBehavior(undefined, settings.queueModeEnabled);
-  }
-  if (nextFollowUpBehavior && nextFollowUpBehavior !== queueStore.followUpBehavior) {
-    queueStore.setFollowUpBehavior(nextFollowUpBehavior);
-  }
-
-  if (typeof settings.showDeletionDialog === 'boolean' && settings.showDeletionDialog !== store.showDeletionDialog) {
-    store.setShowDeletionDialog(settings.showDeletionDialog);
-  }
-  if (typeof settings.nativeNotificationsEnabled === 'boolean' && settings.nativeNotificationsEnabled !== store.nativeNotificationsEnabled) {
-    store.setNativeNotificationsEnabled(settings.nativeNotificationsEnabled);
-  }
-  if (typeof settings.notificationMode === 'string' && (settings.notificationMode === 'always' || settings.notificationMode === 'hidden-only')) {
-    if (settings.notificationMode !== store.notificationMode) {
-      store.setNotificationMode(settings.notificationMode);
-    }
-  }
-  if (typeof settings.notifyOnSubtasks === 'boolean' && settings.notifyOnSubtasks !== store.notifyOnSubtasks) {
-    store.setNotifyOnSubtasks(settings.notifyOnSubtasks);
-  }
-  if (typeof settings.notifyOnCompletion === 'boolean' && settings.notifyOnCompletion !== store.notifyOnCompletion) {
-    store.setNotifyOnCompletion(settings.notifyOnCompletion);
-  }
-  if (typeof settings.notifyOnError === 'boolean' && settings.notifyOnError !== store.notifyOnError) {
-    store.setNotifyOnError(settings.notifyOnError);
-  }
-  if (typeof settings.notifyOnQuestion === 'boolean' && settings.notifyOnQuestion !== store.notifyOnQuestion) {
-    store.setNotifyOnQuestion(settings.notifyOnQuestion);
-  }
-  if (settings.notificationTemplates && typeof settings.notificationTemplates === 'object') {
-    store.setNotificationTemplates(settings.notificationTemplates);
-  }
-  if (typeof settings.summarizeLastMessage === 'boolean' && settings.summarizeLastMessage !== store.summarizeLastMessage) {
-    store.setSummarizeLastMessage(settings.summarizeLastMessage);
-  }
-  if (typeof settings.summaryThreshold === 'number' && Number.isFinite(settings.summaryThreshold)) {
-    store.setSummaryThreshold(settings.summaryThreshold);
-  }
-  if (typeof settings.summaryLength === 'number' && Number.isFinite(settings.summaryLength)) {
-    store.setSummaryLength(settings.summaryLength);
-  }
-  if (typeof settings.maxLastMessageLength === 'number' && Number.isFinite(settings.maxLastMessageLength)) {
-    store.setMaxLastMessageLength(settings.maxLastMessageLength);
-  }
-  if (typeof settings.inputSpellcheckEnabled === 'boolean' && settings.inputSpellcheckEnabled !== store.inputSpellcheckEnabled) {
-    store.setInputSpellcheckEnabled(settings.inputSpellcheckEnabled);
-  }
-  if (
-    typeof settings.showOpenCodeUpdateNotifications === 'boolean'
-    && settings.showOpenCodeUpdateNotifications !== store.showOpenCodeUpdateNotifications
-  ) {
-    store.setShowOpenCodeUpdateNotifications(settings.showOpenCodeUpdateNotifications);
-  }
-  if (
-    typeof settings.agentControlToolEnabled === 'boolean'
-    && settings.agentControlToolEnabled !== store.agentControlToolEnabled
-  ) {
-    store.setAgentControlToolEnabled(settings.agentControlToolEnabled);
-  }
-  if (typeof settings.showToolFileIcons === 'boolean' && settings.showToolFileIcons !== store.showToolFileIcons) {
-    store.setShowToolFileIcons(settings.showToolFileIcons);
-  }
-  if (typeof settings.codeBlockLineWrap === 'boolean' && settings.codeBlockLineWrap !== store.codeBlockLineWrap) {
-    store.setCodeBlockLineWrap(settings.codeBlockLineWrap);
-  }
-  if (typeof settings.showTurnChangedFiles === 'boolean' && settings.showTurnChangedFiles !== store.showTurnChangedFiles) {
-    store.setShowTurnChangedFiles(settings.showTurnChangedFiles);
-  }
-  if (typeof settings.showExpandedBashTools === 'boolean' && settings.showExpandedBashTools !== store.showExpandedBashTools) {
-    store.setShowExpandedBashTools(settings.showExpandedBashTools);
-  }
-  if (typeof settings.showExpandedEditTools === 'boolean' && settings.showExpandedEditTools !== store.showExpandedEditTools) {
-    store.setShowExpandedEditTools(settings.showExpandedEditTools);
-  }
-  if (typeof settings.timeFormatPreference === 'string'
-    && (settings.timeFormatPreference === 'auto' || settings.timeFormatPreference === '12h' || settings.timeFormatPreference === '24h')) {
-    if (settings.timeFormatPreference !== store.timeFormatPreference) {
-      store.setTimeFormatPreference(settings.timeFormatPreference);
-    }
-  }
-  if (typeof settings.weekStartPreference === 'string'
-    && (settings.weekStartPreference === 'auto' || settings.weekStartPreference === 'sunday' || settings.weekStartPreference === 'monday')) {
-    if (settings.weekStartPreference !== store.weekStartPreference) {
-      store.setWeekStartPreference(settings.weekStartPreference);
-    }
-  }
-  if (typeof settings.desktopWindowControlsPosition === 'string') {
-    const nextPosition = settings.desktopWindowControlsPosition === 'left'
-      ? 'left'
-      : (settings.desktopWindowControlsPosition === 'right' || settings.desktopWindowControlsPosition === 'auto')
-        ? 'right'
-        : null;
-    if (nextPosition && nextPosition !== store.desktopWindowControlsPosition) {
-      store.setDesktopWindowControlsPosition(nextPosition);
-    }
-  }
-  if (typeof settings.desktopWindowControlsStyle === 'string') {
-    const nextStyle = settings.desktopWindowControlsStyle === 'traffic-lights'
-      ? 'traffic-lights'
-      : settings.desktopWindowControlsStyle === 'classic'
-        ? 'classic'
-        : null;
-    if (nextStyle && nextStyle !== store.desktopWindowControlsStyle) {
-      store.setDesktopWindowControlsStyle(nextStyle);
-    }
-  }
-  if (typeof settings.chatRenderMode === 'string'
-    && (settings.chatRenderMode === 'sorted' || settings.chatRenderMode === 'live')) {
-    if (settings.chatRenderMode !== store.chatRenderMode) {
-      store.setChatRenderMode(settings.chatRenderMode);
-    }
-  }
-  if (typeof settings.activityRenderMode === 'string'
-    && (settings.activityRenderMode === 'collapsed' || settings.activityRenderMode === 'summary')) {
-    if (settings.activityRenderMode !== store.activityRenderMode) {
-      store.setActivityRenderMode(settings.activityRenderMode);
-    }
-  }
-  if (typeof settings.mermaidRenderingMode === 'string'
-    && (settings.mermaidRenderingMode === 'svg' || settings.mermaidRenderingMode === 'ascii')) {
-    if (settings.mermaidRenderingMode !== store.mermaidRenderingMode) {
-      store.setMermaidRenderingMode(settings.mermaidRenderingMode);
-    }
-  }
-  if (typeof settings.userMessageRenderingMode === 'string'
-    && (settings.userMessageRenderingMode === 'markdown' || settings.userMessageRenderingMode === 'plain')) {
-    if (settings.userMessageRenderingMode !== store.userMessageRenderingMode) {
-      store.setUserMessageRenderingMode(settings.userMessageRenderingMode);
-    }
-  }
-  if (typeof settings.collapsibleUserMessages === 'boolean' && settings.collapsibleUserMessages !== store.collapsibleUserMessages) {
-    store.setCollapsibleUserMessages(settings.collapsibleUserMessages);
-  }
-  if (typeof settings.messageStreamTransport === 'string'
-    && (settings.messageStreamTransport === 'auto' || settings.messageStreamTransport === 'ws' || settings.messageStreamTransport === 'sse')) {
-    if (configStore && settings.messageStreamTransport !== configStore.settingsMessageStreamTransport) {
-      configStore.setSettingsMessageStreamTransport(settings.messageStreamTransport);
-    }
-  }
-  if (typeof settings.stickyUserHeader === 'boolean' && settings.stickyUserHeader !== store.stickyUserHeader) {
-    store.setStickyUserHeader(settings.stickyUserHeader);
-  }
-  if (typeof settings.promptNavigatorEnabled === 'boolean' && settings.promptNavigatorEnabled !== store.promptNavigatorEnabled) {
-    store.setPromptNavigatorEnabled(settings.promptNavigatorEnabled);
-  }
-  if (typeof settings.expandedEditorToolbar === 'boolean' && settings.expandedEditorToolbar !== store.expandedEditorToolbar) {
-    store.setExpandedEditorToolbar(settings.expandedEditorToolbar);
-  }
-  if (typeof settings.wideChatLayoutEnabled === 'boolean' && settings.wideChatLayoutEnabled !== store.wideChatLayoutEnabled) {
-    store.setWideChatLayoutEnabled(settings.wideChatLayoutEnabled);
-  }
-  if (
-    typeof settings.showSplitAssistantMessageActions === 'boolean'
-    && settings.showSplitAssistantMessageActions !== store.showSplitAssistantMessageActions
-  ) {
-    store.setShowSplitAssistantMessageActions(settings.showSplitAssistantMessageActions);
-  }
-  if (typeof settings.reportUsage === 'boolean' && settings.reportUsage !== store.reportUsage) {
-    store.setReportUsage(settings.reportUsage);
-  }
-  if (typeof settings.fontSize === 'number' && Number.isFinite(settings.fontSize) && settings.fontSize !== store.fontSize) {
-    store.setFontSize(settings.fontSize);
-  }
-  if (Array.isArray(settings.draftStarters)) {
-    let nextStarters = sanitizeStarterRefs(settings.draftStarters);
-    if (settings.draftStartersCraftGoalAdded !== true && !nextStarters.some((starter) => starter.type === 'command' && starter.name === 'craft-goal')) {
-      const planIndex = nextStarters.findIndex((starter) => starter.type === 'command' && starter.name === 'plan-feature');
-      const insertAt = planIndex >= 0 ? planIndex + 1 : nextStarters.length;
-      nextStarters = [
-        ...nextStarters.slice(0, insertAt),
-        { type: 'command', name: 'craft-goal' },
-        ...nextStarters.slice(insertAt),
-      ];
-    }
-    if (settings.draftStartersScheduleTaskAdded !== true && !nextStarters.some((starter) => starter.type === 'command' && starter.name === 'schedule-task')) {
-      const goalIndex = nextStarters.findIndex((starter) => starter.type === 'command' && starter.name === 'craft-goal');
-      const insertAt = goalIndex >= 0 ? goalIndex + 1 : nextStarters.length;
-      nextStarters = [
-        ...nextStarters.slice(0, insertAt),
-        { type: 'command', name: 'schedule-task' },
-        ...nextStarters.slice(insertAt),
-      ];
-    }
-    if (JSON.stringify(store.globalDraftStarters) !== JSON.stringify(nextStarters)) {
-      store.setGlobalDraftStarters(nextStarters);
-    }
-    if (settings.draftStartersCraftGoalAdded !== true || settings.draftStartersScheduleTaskAdded !== true) {
-      settings.draftStarters = nextStarters;
-      settings.draftStartersCraftGoalAdded = true;
-      settings.draftStartersScheduleTaskAdded = true;
-    }
-  } else {
-    // The built-in default already contains Craft a Goal and Schedule a Task;
-    // only persist the markers so removing them later remains a durable user
-    // choice.
-    if (settings.draftStartersCraftGoalAdded !== true) {
-      settings.draftStartersCraftGoalAdded = true;
-    }
-    if (settings.draftStartersScheduleTaskAdded !== true) {
-      settings.draftStartersScheduleTaskAdded = true;
-    }
-  }
-  if (typeof settings.draftStartersVisible === 'boolean' && settings.draftStartersVisible !== store.draftStartersVisible) {
-    store.setDraftStartersVisible(settings.draftStartersVisible);
-  }
-  if (typeof settings.terminalFontSize === 'number' && Number.isFinite(settings.terminalFontSize) && settings.terminalFontSize !== store.terminalFontSize) {
-    store.setTerminalFontSize(settings.terminalFontSize);
-  }
-  if (isTerminalShell(settings.terminalShell) && settings.terminalShell !== store.terminalShell) {
-    store.setTerminalShell(settings.terminalShell);
-  }
-  if (
-    Array.isArray(settings.terminalLoginShells)
-    && (
-      settings.terminalLoginShells.length !== store.terminalLoginShells.length
-      || settings.terminalLoginShells.some((shell, index) => shell !== store.terminalLoginShells[index])
-    )
-  ) {
-    store.setTerminalLoginShells(settings.terminalLoginShells);
-  }
-  if (typeof settings.editorFontSize === 'number' && Number.isFinite(settings.editorFontSize) && settings.editorFontSize !== store.editorFontSize) {
-    store.setEditorFontSize(settings.editorFontSize);
-  }
-  if (isUiFontOption(settings.uiFont) && settings.uiFont !== store.uiFont) {
-    store.setUiFont(settings.uiFont);
-  }
-  if (isMonoFontOption(settings.monoFont) && settings.monoFont !== store.monoFont) {
-    store.setMonoFont(settings.monoFont);
-  }
-  if (typeof settings.padding === 'number' && Number.isFinite(settings.padding) && settings.padding !== store.padding) {
-    store.setPadding(settings.padding);
-  }
-  if (typeof settings.cornerRadius === 'number' && Number.isFinite(settings.cornerRadius) && settings.cornerRadius !== store.cornerRadius) {
-    store.setCornerRadius(settings.cornerRadius);
-  }
-  if (typeof settings.inputBarOffset === 'number' && Number.isFinite(settings.inputBarOffset) && settings.inputBarOffset !== store.inputBarOffset) {
-    store.setInputBarOffset(settings.inputBarOffset);
-  }
-  if (settings.shortcutOverrides && !areStringRecordsEqual(settings.shortcutOverrides, store.shortcutOverrides)) {
-    useUIStore.setState({ shortcutOverrides: settings.shortcutOverrides });
-  }
-  if (typeof settings.mobileKeyboardMode === 'string') {
-    const mode = normalizeMobileKeyboardMode(settings.mobileKeyboardMode, store.mobileKeyboardMode);
-    if (mode !== store.mobileKeyboardMode) {
-      store.setMobileKeyboardMode(mode);
-    }
-  }
-  if (configStoreApi && configStore) {
-    const nextConfigState: Partial<typeof configStore> = {};
-    if (typeof settings.dictationEnabled === 'boolean' && settings.dictationEnabled !== configStore.dictationEnabled) {
-      nextConfigState.dictationEnabled = settings.dictationEnabled;
-    }
-    if ((settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible') && settings.sttProvider !== configStore.sttProvider) {
-      nextConfigState.sttProvider = settings.sttProvider;
-    }
-    if (typeof settings.sttServerUrl === 'string' && settings.sttServerUrl !== configStore.sttServerUrl) {
-      nextConfigState.sttServerUrl = settings.sttServerUrl;
-    }
-    if (typeof settings.sttModel === 'string' && settings.sttModel !== configStore.sttModel) {
-      nextConfigState.sttModel = settings.sttModel;
-    }
-    if (typeof settings.sttLocalModel === 'string' && settings.sttLocalModel !== configStore.sttLocalModel) {
-      nextConfigState.sttLocalModel = settings.sttLocalModel;
-    }
-    if (typeof settings.sttLanguage === 'string' && settings.sttLanguage !== configStore.sttLanguage) {
-      nextConfigState.sttLanguage = settings.sttLanguage;
-    }
-    if (Object.keys(nextConfigState).length > 0) {
-      configStoreApi.setState(nextConfigState);
-    }
-  }
-
-  if (Array.isArray(settings.favoriteModels)) {
-    const current = store.favoriteModels;
-    const next = settings.favoriteModels;
-    if (!areModelRefsEqual(current, next)) {
-      useUIStore.setState({ favoriteModels: next });
-    }
-  }
-
-  if (Array.isArray(settings.hiddenModels)) {
-    const current = store.hiddenModels;
-    const next = settings.hiddenModels;
-    if (!areModelRefsEqual(current, next)) {
-      useUIStore.setState({ hiddenModels: next });
-    }
-  }
-
-  if (Array.isArray(settings.collapsedModelProviders)) {
-    const current = store.collapsedModelProviders;
-    const next = settings.collapsedModelProviders;
-    if (!areStringArraysEqual(current, next)) {
-      useUIStore.setState({ collapsedModelProviders: next });
-    }
-  }
-
-  if (Array.isArray(settings.recentModels)) {
-    const current = store.recentModels;
-    const next = settings.recentModels;
-    if (!areModelRefsEqual(current, next)) {
-      useUIStore.setState({ recentModels: next });
-    }
-  }
-
-  if (Array.isArray(settings.recentAgents)) {
-    const current = store.recentAgents;
-    const next = settings.recentAgents;
-    if (!areStringArraysEqual(current, next)) {
-      useUIStore.setState({ recentAgents: next });
-    }
-  }
-
-  if (settings.recentEfforts && typeof settings.recentEfforts === 'object') {
-    const current = store.recentEfforts;
-    const next = settings.recentEfforts;
-    if (!areRecentEffortsEqual(current, next)) {
-      useUIStore.setState({ recentEfforts: next });
-    }
-  }
-  if (typeof settings.diffLayoutPreference === 'string'
-    && (settings.diffLayoutPreference === 'dynamic' || settings.diffLayoutPreference === 'inline' || settings.diffLayoutPreference === 'side-by-side')) {
-    if (settings.diffLayoutPreference !== store.diffLayoutPreference) {
-      store.setDiffLayoutPreference(settings.diffLayoutPreference);
-    }
-  }
-  if (typeof settings.gitChangesViewMode === 'string'
-    && (settings.gitChangesViewMode === 'flat' || settings.gitChangesViewMode === 'tree')) {
-    if (settings.gitChangesViewMode !== store.gitChangesViewMode) {
-      store.setGitChangesViewMode(settings.gitChangesViewMode);
-    }
-  }
-  if (typeof settings.directoryShowHidden === 'boolean') {
-    setDirectoryShowHidden(settings.directoryShowHidden, { persist: false });
-  }
-  if (typeof settings.filesViewShowGitignored === 'boolean') {
-    setFilesViewShowGitignored(settings.filesViewShowGitignored, { persist: false });
-  }
-};
-
-const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
-  if (!payload || typeof payload !== 'object') {
-    return null;
-  }
-
-  const candidate = payload as Record<string, unknown>;
-  const result: DesktopSettings = {};
-
-  if (typeof candidate.themeId === 'string' && candidate.themeId.length > 0) {
-    result.themeId = candidate.themeId;
-  }
-  if (candidate.useSystemTheme === true || candidate.useSystemTheme === false) {
-    result.useSystemTheme = candidate.useSystemTheme;
-  }
-  if (typeof candidate.themeVariant === 'string' && (candidate.themeVariant === 'light' || candidate.themeVariant === 'dark')) {
-    result.themeVariant = candidate.themeVariant;
-  }
-  if (typeof candidate.lightThemeId === 'string' && candidate.lightThemeId.length > 0) {
-    result.lightThemeId = candidate.lightThemeId;
-  }
-  if (typeof candidate.darkThemeId === 'string' && candidate.darkThemeId.length > 0) {
-    result.darkThemeId = candidate.darkThemeId;
-  }
-  if (typeof candidate.lastDirectory === 'string' && candidate.lastDirectory.length > 0) {
-    result.lastDirectory = candidate.lastDirectory;
-  }
-  if (typeof candidate.homeDirectory === 'string' && candidate.homeDirectory.length > 0) {
-    result.homeDirectory = candidate.homeDirectory;
-  }
-
-  if (typeof candidate.opencodeBinary === 'string') {
-    const trimmed = candidate.opencodeBinary.trim();
-    result.opencodeBinary = trimmed.length > 0 ? trimmed : undefined;
-  }
-  if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
-    result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
-  }
-  if (typeof candidate.desktopKeepAwakeEnabled === 'boolean') {
-    result.desktopKeepAwakeEnabled = candidate.desktopKeepAwakeEnabled;
-  }
-  if (typeof candidate.desktopMinimizeToTrayEnabled === 'boolean') {
-    result.desktopMinimizeToTrayEnabled = candidate.desktopMinimizeToTrayEnabled;
-  }
-  if (typeof candidate.desktopMacMenuBarEnabled === 'boolean') {
-    result.desktopMacMenuBarEnabled = candidate.desktopMacMenuBarEnabled;
-  }
-
-  const projects = sanitizeProjects(candidate.projects);
-  if (projects) {
-    result.projects = projects;
-  }
-  if (typeof candidate.activeProjectId === 'string' && candidate.activeProjectId.length > 0) {
-    result.activeProjectId = candidate.activeProjectId;
-  }
-
-  if (Array.isArray(candidate.securityScopedBookmarks)) {
-    result.securityScopedBookmarks = candidate.securityScopedBookmarks.filter(
-      (entry): entry is string => typeof entry === 'string' && entry.length > 0
-    );
-  }
-  if (Array.isArray(candidate.pinnedDirectories)) {
-    result.pinnedDirectories = Array.from(
-      new Set(
-        candidate.pinnedDirectories.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
-      )
-    );
-  }
-  if (Array.isArray(candidate.draftStarters)) {
-    result.draftStarters = sanitizeStarterRefs(candidate.draftStarters);
-  }
-  if (typeof candidate.draftStartersVisible === 'boolean') {
-    result.draftStartersVisible = candidate.draftStartersVisible;
-  }
-  if (typeof candidate.draftStartersCraftGoalAdded === 'boolean') {
-    result.draftStartersCraftGoalAdded = candidate.draftStartersCraftGoalAdded;
-  }
-  if (typeof candidate.draftStartersScheduleTaskAdded === 'boolean') {
-    result.draftStartersScheduleTaskAdded = candidate.draftStartersScheduleTaskAdded;
-  }
-  if (typeof candidate.showReasoningTraces === 'boolean') {
-    result.showReasoningTraces = candidate.showReasoningTraces;
-  }
-  if (typeof candidate.sessionRecapEnabled === 'boolean') {
-    result.sessionRecapEnabled = candidate.sessionRecapEnabled;
-  }
-  if (typeof candidate.sessionSuggestionEnabled === 'boolean') {
-    result.sessionSuggestionEnabled = candidate.sessionSuggestionEnabled;
-  }
-  if (typeof candidate.sessionGoalEnabled === 'boolean') {
-    result.sessionGoalEnabled = candidate.sessionGoalEnabled;
-  }
-  if (typeof candidate.sessionGoalDefaultBudgetEnabled === 'boolean') {
-    result.sessionGoalDefaultBudgetEnabled = candidate.sessionGoalDefaultBudgetEnabled;
-  }
-  if (typeof candidate.sessionGoalDefaultBudget === 'number' && Number.isFinite(candidate.sessionGoalDefaultBudget) && candidate.sessionGoalDefaultBudget > 0) {
-    result.sessionGoalDefaultBudget = Math.floor(candidate.sessionGoalDefaultBudget);
-  }
-  if (typeof candidate.collapsibleThinkingBlocks === 'boolean') {
-    result.collapsibleThinkingBlocks = candidate.collapsibleThinkingBlocks;
-  }
-  if (typeof candidate.autoDeleteEnabled === 'boolean') {
-    result.autoDeleteEnabled = candidate.autoDeleteEnabled;
-  }
-  if (typeof candidate.autoSaveEnabled === 'boolean') {
-    result.autoSaveEnabled = candidate.autoSaveEnabled;
-  }
-  if (typeof candidate.autoDeleteAfterDays === 'number' && Number.isFinite(candidate.autoDeleteAfterDays)) {
-    result.autoDeleteAfterDays = candidate.autoDeleteAfterDays;
-  }
-  if (candidate.sessionRetentionAction === 'archive' || candidate.sessionRetentionAction === 'delete') {
-    result.sessionRetentionAction = candidate.sessionRetentionAction;
-  }
-  if (typeof candidate.tunnelProvider === 'string') {
-    const provider = candidate.tunnelProvider.trim().toLowerCase();
-    if (provider.length > 0) {
-      result.tunnelProvider = provider;
-    }
-  }
-  if (typeof candidate.tunnelMode === 'string') {
-    const mode = candidate.tunnelMode.trim().toLowerCase();
-    if (mode === 'quick' || mode === 'managed-remote' || mode === 'managed-local') {
-      result.tunnelMode = mode;
-    }
-  }
-  if (candidate.tunnelBootstrapTtlMs === null) {
-    result.tunnelBootstrapTtlMs = null;
-  } else if (typeof candidate.tunnelBootstrapTtlMs === 'number' && Number.isFinite(candidate.tunnelBootstrapTtlMs)) {
-    result.tunnelBootstrapTtlMs = candidate.tunnelBootstrapTtlMs;
-  }
-  if (typeof candidate.tunnelSessionTtlMs === 'number' && Number.isFinite(candidate.tunnelSessionTtlMs)) {
-    result.tunnelSessionTtlMs = candidate.tunnelSessionTtlMs;
-  }
-  if (candidate.managedLocalTunnelConfigPath === null) {
-    result.managedLocalTunnelConfigPath = null;
-  } else if (typeof candidate.managedLocalTunnelConfigPath === 'string') {
-    const trimmed = candidate.managedLocalTunnelConfigPath.trim();
-    result.managedLocalTunnelConfigPath = trimmed.length > 0 ? trimmed : null;
-  }
-  if (typeof candidate.managedRemoteTunnelHostname === 'string') {
-    result.managedRemoteTunnelHostname = candidate.managedRemoteTunnelHostname.trim();
-  }
-  if (candidate.managedRemoteTunnelToken === null) {
-    result.managedRemoteTunnelToken = null;
-  } else if (typeof candidate.managedRemoteTunnelToken === 'string') {
-    result.managedRemoteTunnelToken = candidate.managedRemoteTunnelToken.trim();
-  }
-  const managedRemoteTunnelPresets = sanitizeManagedRemoteTunnelPresets(candidate.managedRemoteTunnelPresets);
-  if (managedRemoteTunnelPresets) {
-    result.managedRemoteTunnelPresets = managedRemoteTunnelPresets;
-  }
-  if (typeof candidate.managedRemoteTunnelSelectedPresetId === 'string') {
-    const trimmed = candidate.managedRemoteTunnelSelectedPresetId.trim();
-    result.managedRemoteTunnelSelectedPresetId = trimmed.length > 0 ? trimmed : undefined;
-  }
-  const managedRemoteTunnelPresetTokens = sanitizeManagedRemoteTunnelPresetTokens(candidate.managedRemoteTunnelPresetTokens);
-  if (managedRemoteTunnelPresetTokens) {
-    result.managedRemoteTunnelPresetTokens = managedRemoteTunnelPresetTokens;
-  }
-  if (typeof candidate.defaultModel === 'string' && candidate.defaultModel.length > 0) {
-    result.defaultModel = candidate.defaultModel;
-  }
-  if (typeof candidate.defaultVariant === 'string' && candidate.defaultVariant.length > 0) {
-    result.defaultVariant = candidate.defaultVariant;
-  }
-  if (typeof candidate.defaultAgent === 'string' && candidate.defaultAgent.length > 0) {
-    result.defaultAgent = candidate.defaultAgent;
-  }
-  if (typeof candidate.smallModelUseDefault === 'boolean') {
-    result.smallModelUseDefault = candidate.smallModelUseDefault;
-  }
-  if (typeof candidate.smallModelOverride === 'string' && candidate.smallModelOverride.length > 0) {
-    result.smallModelOverride = candidate.smallModelOverride;
-  }
-  if (typeof candidate.walkthroughModelOverride === 'string' && candidate.walkthroughModelOverride.length > 0) {
-    result.walkthroughModelOverride = candidate.walkthroughModelOverride;
-  }
-  if (typeof candidate.autoCreateWorktree === 'boolean') {
-    result.autoCreateWorktree = candidate.autoCreateWorktree;
-  }
-  if (typeof candidate.gitmojiEnabled === 'boolean') {
-    result.gitmojiEnabled = candidate.gitmojiEnabled;
-  }
-  if (isFollowUpBehavior(candidate.followUpBehavior)) {
-    result.followUpBehavior = candidate.followUpBehavior;
-  } else if (typeof candidate.queueModeEnabled === 'boolean') {
-    result.followUpBehavior = normalizeFollowUpBehavior(undefined, candidate.queueModeEnabled);
-  }
-  if (typeof candidate.showDeletionDialog === 'boolean') {
-    result.showDeletionDialog = candidate.showDeletionDialog;
-  }
-  if (typeof candidate.nativeNotificationsEnabled === 'boolean') {
-    result.nativeNotificationsEnabled = candidate.nativeNotificationsEnabled;
-  }
-  if (typeof candidate.notificationMode === 'string' && (candidate.notificationMode === 'always' || candidate.notificationMode === 'hidden-only')) {
-    result.notificationMode = candidate.notificationMode;
-  }
-  if (typeof candidate.notifyOnSubtasks === 'boolean') {
-    result.notifyOnSubtasks = candidate.notifyOnSubtasks;
-  }
-  if (typeof candidate.notifyOnCompletion === 'boolean') {
-    result.notifyOnCompletion = candidate.notifyOnCompletion;
-  }
-  if (typeof candidate.notifyOnError === 'boolean') {
-    result.notifyOnError = candidate.notifyOnError;
-  }
-  if (typeof candidate.notifyOnQuestion === 'boolean') {
-    result.notifyOnQuestion = candidate.notifyOnQuestion;
-  }
-  if (candidate.notificationTemplates && typeof candidate.notificationTemplates === 'object') {
-    const templates = candidate.notificationTemplates as Record<string, unknown>;
-    const validateTemplate = (key: string): { title: string; message: string } | undefined => {
-      const value = templates[key];
-      if (!value || typeof value !== 'object') return undefined;
-      const obj = value as Record<string, unknown>;
-      const title = typeof obj.title === 'string' ? obj.title : '';
-      const message = typeof obj.message === 'string' ? obj.message : '';
-      return { title, message };
-    };
-    const completion = validateTemplate('completion');
-    const error = validateTemplate('error');
-    const question = validateTemplate('question');
-    const subtask = validateTemplate('subtask');
-    if (completion || error || question || subtask) {
-      result.notificationTemplates = {
-        completion: completion ?? { title: 'Task Complete', message: 'Your task has finished.' },
-        error: error ?? { title: 'Error Occurred', message: 'An error occurred while processing your task.' },
-        question: question ?? { title: 'Input Needed', message: 'Please provide input to continue.' },
-        subtask: subtask ?? { title: 'Subtask Complete', message: 'A subtask has finished.' },
-      };
-    }
-  }
-  if (typeof candidate.summarizeLastMessage === 'boolean') {
-    result.summarizeLastMessage = candidate.summarizeLastMessage;
-  }
-  if (typeof candidate.summaryThreshold === 'number' && Number.isFinite(candidate.summaryThreshold)) {
-    result.summaryThreshold = Math.max(0, Math.round(candidate.summaryThreshold));
-  }
-  if (typeof candidate.summaryLength === 'number' && Number.isFinite(candidate.summaryLength)) {
-    result.summaryLength = Math.max(10, Math.round(candidate.summaryLength));
-  }
-  if (typeof candidate.maxLastMessageLength === 'number' && Number.isFinite(candidate.maxLastMessageLength)) {
-    result.maxLastMessageLength = Math.max(10, Math.round(candidate.maxLastMessageLength));
-  }
-  if (typeof candidate.usageAutoRefresh === 'boolean') {
-    result.usageAutoRefresh = candidate.usageAutoRefresh;
-  }
-  if (typeof candidate.usageRefreshIntervalMs === 'number' && Number.isFinite(candidate.usageRefreshIntervalMs)) {
-    result.usageRefreshIntervalMs = candidate.usageRefreshIntervalMs;
-  }
-  if (candidate.usageDisplayMode === 'usage' || candidate.usageDisplayMode === 'remaining') {
-    result.usageDisplayMode = candidate.usageDisplayMode;
-  }
-  if (typeof candidate.usageShowPredValues === 'boolean') {
-    result.usageShowPredValues = candidate.usageShowPredValues;
-  }
-  if (Array.isArray(candidate.usageDropdownProviders)) {
-    result.usageDropdownProviders = candidate.usageDropdownProviders.filter(
-      (entry): entry is string => typeof entry === 'string' && entry.length > 0
-    );
-  }
-
-  // Parse usageSelectedModels (Record<string, string[]>)
-  if (candidate.usageSelectedModels && typeof candidate.usageSelectedModels === 'object') {
-    const selectedModels: Record<string, string[]> = {};
-    for (const [providerId, models] of Object.entries(candidate.usageSelectedModels)) {
-      if (Array.isArray(models)) {
-        selectedModels[providerId] = models.filter((m): m is string => typeof m === 'string');
-      }
-    }
-    if (Object.keys(selectedModels).length > 0) {
-      result.usageSelectedModels = selectedModels;
-    }
-  }
-
-  // Parse usageCollapsedFamilies (Record<string, string[]>)
-  if (candidate.usageCollapsedFamilies && typeof candidate.usageCollapsedFamilies === 'object') {
-    const collapsedFamilies: Record<string, string[]> = {};
-    for (const [providerId, families] of Object.entries(candidate.usageCollapsedFamilies)) {
-      if (Array.isArray(families)) {
-        collapsedFamilies[providerId] = families.filter((f): f is string => typeof f === 'string');
-      }
-    }
-    if (Object.keys(collapsedFamilies).length > 0) {
-      result.usageCollapsedFamilies = collapsedFamilies;
-    }
-  }
-
-  // Parse usageExpandedFamilies (Record<string, string[]>) - inverted collapsed logic for header dropdown
-  if (candidate.usageExpandedFamilies && typeof candidate.usageExpandedFamilies === 'object') {
-    const expandedFamilies: Record<string, string[]> = {};
-    for (const [providerId, families] of Object.entries(candidate.usageExpandedFamilies)) {
-      if (Array.isArray(families)) {
-        expandedFamilies[providerId] = families.filter((f): f is string => typeof f === 'string');
-      }
-    }
-    if (Object.keys(expandedFamilies).length > 0) {
-      result.usageExpandedFamilies = expandedFamilies;
-    }
-  }
-
-  // Parse usageModelGroups - custom model groups configuration per provider
-  if (candidate.usageModelGroups && typeof candidate.usageModelGroups === 'object') {
-    const modelGroups: Record<string, {
-      customGroups?: Array<{id: string; label: string; models: string[]; order: number}>;
-      modelAssignments?: Record<string, string>;
-      renamedGroups?: Record<string, string>;
-    }> = {};
-    for (const [providerId, config] of Object.entries(candidate.usageModelGroups)) {
-      if (config && typeof config === 'object') {
-        const typedConfig = config as Record<string, unknown>;
-        const providerConfig: {
-          customGroups?: Array<{id: string; label: string; models: string[]; order: number}>;
-          modelAssignments?: Record<string, string>;
-          renamedGroups?: Record<string, string>;
-        } = {};
-
-        // Parse customGroups
-        if (Array.isArray(typedConfig.customGroups)) {
-          providerConfig.customGroups = typedConfig.customGroups
-            .filter((g): g is Record<string, unknown> => g && typeof g === 'object')
-            .map((g) => ({
-              id: String(g.id ?? ''),
-              label: String(g.label ?? ''),
-              models: Array.isArray(g.models)
-                ? g.models.filter((m): m is string => typeof m === 'string')
-                : [],
-              order: typeof g.order === 'number' ? g.order : 0,
-            }));
-        }
-
-        // Parse modelAssignments
-        if (typedConfig.modelAssignments && typeof typedConfig.modelAssignments === 'object') {
-          providerConfig.modelAssignments = Object.fromEntries(
-            Object.entries(typedConfig.modelAssignments as Record<string, unknown>)
-              .filter(([, v]) => typeof v === 'string')
-              .map(([k, v]) => [k, String(v)])
-          );
-        }
-
-        // Parse renamedGroups
-        if (typedConfig.renamedGroups && typeof typedConfig.renamedGroups === 'object') {
-          providerConfig.renamedGroups = Object.fromEntries(
-            Object.entries(typedConfig.renamedGroups as Record<string, unknown>)
-              .filter(([, v]) => typeof v === 'string')
-              .map(([k, v]) => [k, String(v)])
-          );
-        }
-
-        if (Object.keys(providerConfig).length > 0) {
-          modelGroups[providerId] = providerConfig;
-        }
-      }
-    }
-    if (Object.keys(modelGroups).length > 0) {
-      result.usageModelGroups = modelGroups;
-    }
-  }
-
-  if (typeof candidate.inputSpellcheckEnabled === 'boolean') {
-    result.inputSpellcheckEnabled = candidate.inputSpellcheckEnabled;
-  }
-  if (typeof candidate.showOpenCodeUpdateNotifications === 'boolean') {
-    result.showOpenCodeUpdateNotifications = candidate.showOpenCodeUpdateNotifications;
-  }
-  if (typeof candidate.agentControlToolEnabled === 'boolean') {
-    result.agentControlToolEnabled = candidate.agentControlToolEnabled;
-  }
-  if (typeof candidate.openCodeUpdateToastDismissedVersion === 'string') {
-    result.openCodeUpdateToastDismissedVersion = candidate.openCodeUpdateToastDismissedVersion.trim().slice(0, 128);
-  }
-  if (typeof candidate.showToolFileIcons === 'boolean') {
-    result.showToolFileIcons = candidate.showToolFileIcons;
-  }
-  if (typeof candidate.codeBlockLineWrap === 'boolean') {
-    result.codeBlockLineWrap = candidate.codeBlockLineWrap;
-  }
-  if (typeof candidate.showTurnChangedFiles === 'boolean') {
-    result.showTurnChangedFiles = candidate.showTurnChangedFiles;
-  }
-  if (typeof candidate.showExpandedBashTools === 'boolean') {
-    result.showExpandedBashTools = candidate.showExpandedBashTools;
-  }
-  if (typeof candidate.showExpandedEditTools === 'boolean') {
-    result.showExpandedEditTools = candidate.showExpandedEditTools;
-  }
-  if (typeof candidate.timeFormatPreference === 'string'
-    && (candidate.timeFormatPreference === 'auto' || candidate.timeFormatPreference === '12h' || candidate.timeFormatPreference === '24h')) {
-    result.timeFormatPreference = candidate.timeFormatPreference;
-  }
-  if (typeof candidate.weekStartPreference === 'string'
-    && (candidate.weekStartPreference === 'auto' || candidate.weekStartPreference === 'sunday' || candidate.weekStartPreference === 'monday')) {
-    result.weekStartPreference = candidate.weekStartPreference;
-  }
-  if (typeof candidate.desktopWindowControlsPosition === 'string') {
-    if (candidate.desktopWindowControlsPosition === 'left') {
-      result.desktopWindowControlsPosition = 'left';
-    } else if (
-      candidate.desktopWindowControlsPosition === 'right'
-      || candidate.desktopWindowControlsPosition === 'auto'
-    ) {
-      // Legacy "auto" never read OS chrome config; treat as right.
-      result.desktopWindowControlsPosition = 'right';
-    }
-  }
-  if (typeof candidate.desktopWindowControlsStyle === 'string') {
-    if (candidate.desktopWindowControlsStyle === 'classic' || candidate.desktopWindowControlsStyle === 'traffic-lights') {
-      result.desktopWindowControlsStyle = candidate.desktopWindowControlsStyle;
-    }
-  }
-  if (typeof candidate.chatRenderMode === 'string'
-    && (candidate.chatRenderMode === 'sorted' || candidate.chatRenderMode === 'live')) {
-    result.chatRenderMode = candidate.chatRenderMode;
-  }
-  if (typeof candidate.messageStreamTransport === 'string'
-    && (candidate.messageStreamTransport === 'auto' || candidate.messageStreamTransport === 'ws' || candidate.messageStreamTransport === 'sse')) {
-    result.messageStreamTransport = candidate.messageStreamTransport;
-  }
-  if (typeof candidate.activityRenderMode === 'string'
-    && (candidate.activityRenderMode === 'collapsed' || candidate.activityRenderMode === 'summary')) {
-    result.activityRenderMode = candidate.activityRenderMode;
-  }
-  if (typeof candidate.mermaidRenderingMode === 'string'
-    && (candidate.mermaidRenderingMode === 'svg' || candidate.mermaidRenderingMode === 'ascii')) {
-    result.mermaidRenderingMode = candidate.mermaidRenderingMode;
-  }
-  if (typeof candidate.userMessageRenderingMode === 'string'
-    && (candidate.userMessageRenderingMode === 'markdown' || candidate.userMessageRenderingMode === 'plain')) {
-    result.userMessageRenderingMode = candidate.userMessageRenderingMode;
-  }
-  if (typeof candidate.collapsibleUserMessages === 'boolean') {
-    result.collapsibleUserMessages = candidate.collapsibleUserMessages;
-  }
-  if (typeof candidate.stickyUserHeader === 'boolean') {
-    result.stickyUserHeader = candidate.stickyUserHeader;
-  }
-  if (typeof candidate.promptNavigatorEnabled === 'boolean') {
-    result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
-  }
-  if (typeof candidate.expandedEditorToolbar === 'boolean') {
-    result.expandedEditorToolbar = candidate.expandedEditorToolbar;
-  }
-  if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
-    result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
-  }
-  if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
-    result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;
-  }
-  if (typeof candidate.fontSize === 'number' && Number.isFinite(candidate.fontSize)) {
-    result.fontSize = candidate.fontSize;
-  }
-  if (typeof candidate.terminalFontSize === 'number' && Number.isFinite(candidate.terminalFontSize)) {
-    result.terminalFontSize = candidate.terminalFontSize;
-  }
-  if (isTerminalShell(candidate.terminalShell)) {
-    result.terminalShell = candidate.terminalShell;
-  }
-  if (Array.isArray(candidate.terminalLoginShells)) {
-    result.terminalLoginShells = [...new Set(candidate.terminalLoginShells.filter(isTerminalShell))];
-  }
-  if (typeof candidate.editorFontSize === 'number' && Number.isFinite(candidate.editorFontSize)) {
-    result.editorFontSize = candidate.editorFontSize;
-  }
-  if (isUiFontOption(candidate.uiFont)) {
-    result.uiFont = candidate.uiFont;
-  }
-  if (isMonoFontOption(candidate.monoFont)) {
-    result.monoFont = candidate.monoFont;
-  }
-  if (typeof candidate.padding === 'number' && Number.isFinite(candidate.padding)) {
-    result.padding = candidate.padding;
-  }
-  if (typeof candidate.cornerRadius === 'number' && Number.isFinite(candidate.cornerRadius)) {
-    result.cornerRadius = candidate.cornerRadius;
-  }
-  if (typeof candidate.inputBarOffset === 'number' && Number.isFinite(candidate.inputBarOffset)) {
-    result.inputBarOffset = candidate.inputBarOffset;
-  }
-  const shortcutOverrides = sanitizeShortcutOverrides(candidate.shortcutOverrides);
-  if (shortcutOverrides) {
-    result.shortcutOverrides = shortcutOverrides;
-  }
-  if (typeof candidate.mobileKeyboardMode === 'string') {
-    if (candidate.mobileKeyboardMode === 'native' || candidate.mobileKeyboardMode === 'resize-content') {
-      result.mobileKeyboardMode = candidate.mobileKeyboardMode;
-    }
-  }
-
-  const favoriteModels = sanitizeModelRefs(candidate.favoriteModels, 64);
-  if (favoriteModels) {
-    result.favoriteModels = favoriteModels;
-  }
-
-  const hiddenModels = sanitizeModelRefs(candidate.hiddenModels, 1024);
-  if (hiddenModels) {
-    result.hiddenModels = hiddenModels;
-  }
-
-  const collapsedModelProviders = sanitizeStringArray(candidate.collapsedModelProviders);
-  if (collapsedModelProviders) {
-    result.collapsedModelProviders = collapsedModelProviders;
-  }
-
-  const recentModels = sanitizeModelRefs(candidate.recentModels, 16);
-  if (recentModels) {
-    result.recentModels = recentModels;
-  }
-
-  const recentAgents = sanitizeStringArray(candidate.recentAgents);
-  if (recentAgents) {
-    result.recentAgents = recentAgents;
-  }
-
-  const recentEfforts = sanitizeRecentEfforts(candidate.recentEfforts);
-  if (recentEfforts) {
-    result.recentEfforts = recentEfforts;
-  }
-  if (
-    typeof candidate.diffLayoutPreference === 'string'
-    && (candidate.diffLayoutPreference === 'dynamic'
-      || candidate.diffLayoutPreference === 'inline'
-      || candidate.diffLayoutPreference === 'side-by-side')
-  ) {
-    result.diffLayoutPreference = candidate.diffLayoutPreference;
-  }
-  if (
-    typeof candidate.gitChangesViewMode === 'string'
-    && (candidate.gitChangesViewMode === 'flat' || candidate.gitChangesViewMode === 'tree')
-  ) {
-    result.gitChangesViewMode = candidate.gitChangesViewMode;
-  }
-  if (typeof candidate.directoryShowHidden === 'boolean') {
-    result.directoryShowHidden = candidate.directoryShowHidden;
-  }
-  if (typeof candidate.filesViewShowGitignored === 'boolean') {
-    result.filesViewShowGitignored = candidate.filesViewShowGitignored;
-  }
-  if (typeof candidate.openInAppId === 'string' && candidate.openInAppId.length > 0) {
-    result.openInAppId = candidate.openInAppId;
-  }
-  if (typeof candidate.pwaAppName === 'string') {
-    const normalized = candidate.pwaAppName.trim().replace(/\s+/g, ' ').slice(0, 64);
-    result.pwaAppName = normalized.length > 0 ? normalized : '';
-  }
-
-  const skillCatalogs = sanitizeSkillCatalogs(candidate.skillCatalogs);
-  if (skillCatalogs) {
-    result.skillCatalogs = skillCatalogs;
-  }
-
-  if (typeof candidate.reportUsage === 'boolean') {
-    result.reportUsage = candidate.reportUsage;
-  }
-
-  if (typeof candidate.globalBehaviorPrompt === 'string') {
-    result.globalBehaviorPrompt = candidate.globalBehaviorPrompt;
-  }
-  if (typeof candidate.responseStyleEnabled === 'boolean') {
-    result.responseStyleEnabled = candidate.responseStyleEnabled;
-  }
-  if (
-    typeof candidate.responseStylePreset === 'string'
-    && (candidate.responseStylePreset === 'concise'
-      || candidate.responseStylePreset === 'detailed'
-      || candidate.responseStylePreset === 'mentor'
-      || candidate.responseStylePreset === 'pushback'
-      || candidate.responseStylePreset === 'noFiller'
-      || candidate.responseStylePreset === 'matchEnergy'
-      || candidate.responseStylePreset === 'warmPeer'
-      || candidate.responseStylePreset === 'custom')
-  ) {
-    result.responseStylePreset = candidate.responseStylePreset;
-  }
-  if (typeof candidate.responseStyleCustomInstructions === 'string') {
-    result.responseStyleCustomInstructions = candidate.responseStyleCustomInstructions;
-  }
-  if (typeof candidate.dictationEnabled === 'boolean') {
-    result.dictationEnabled = candidate.dictationEnabled;
-  }
-  if (candidate.sttProvider === 'local' || candidate.sttProvider === 'openai-compatible') {
-    result.sttProvider = candidate.sttProvider;
-  } else if (candidate.sttProvider === 'server') {
-    // Legacy provider migration: 'server' was the OpenAI-compatible endpoint.
-    result.sttProvider = 'openai-compatible';
-  } else if (candidate.sttProvider === 'browser' || candidate.sttProvider === 'wasm') {
-    result.sttProvider = 'local';
-  }
-  if (typeof candidate.sttServerUrl === 'string') {
-    result.sttServerUrl = candidate.sttServerUrl.trim();
-  }
-  if (typeof candidate.sttModel === 'string') {
-    result.sttModel = candidate.sttModel.trim();
-  }
-  if (typeof candidate.sttLocalModel === 'string') {
-    result.sttLocalModel = candidate.sttLocalModel.trim();
-  }
-  if (typeof candidate.sttLanguage === 'string') {
-    result.sttLanguage = candidate.sttLanguage.trim();
-  }
-
-  return result;
-};
+/** Parse an untrusted settings document at the boundary; `null` when it is not an object at all. */
+const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => parseSettingsDocument(payload);
 
 type SettingsRuntimeContext = { runtimeKey: string; generation: number };
+/** Whether a settings write reached its store. A no-op (nothing to send) counts as ok. */
+export type SettingsWriteResult = { ok: boolean };
+type SettingsMutation = { revision: number; changes: Partial<DesktopSettings> };
+type SettingsOperation = { revision: number };
+
+class SettingsMutationTracker {
+  private revision = 0;
+  private mutations: SettingsMutation[] = [];
+  private operations = new Set<SettingsOperation>();
+
+  record(changes: Partial<DesktopSettings>): number {
+    this.revision += 1;
+    if (this.operations.size > 0) {
+      const latest = this.mutations.at(-1);
+      // A new segment is only needed when an operation started after the last one.
+      const crossedOperationBoundary = latest
+        ? [...this.operations].some((operation) => operation.revision >= latest.revision)
+        : true;
+      if (latest && !crossedOperationBoundary) {
+        latest.revision = this.revision;
+        latest.changes = { ...latest.changes, ...changes };
+      } else {
+        this.mutations.push({ revision: this.revision, changes });
+      }
+    }
+    return this.revision;
+  }
+
+  begin(revision = this.revision): SettingsOperation {
+    const operation = { revision };
+    this.operations.add(operation);
+    return operation;
+  }
+
+  reconcile(settings: DesktopSettings, operation: SettingsOperation): DesktopSettings {
+    let reconciled = settings;
+    for (const mutation of this.mutations) {
+      if (mutation.revision <= operation.revision) continue;
+      reconciled = { ...reconciled, ...mutation.changes };
+    }
+    return reconciled;
+  }
+
+  finish(operation: SettingsOperation): void {
+    if (!this.operations.delete(operation)) return;
+    if (this.operations.size === 0) {
+      this.mutations = [];
+      return;
+    }
+    const oldestRevision = Math.min(...[...this.operations].map(({ revision }) => revision));
+    this.mutations = this.mutations.filter((mutation) => mutation.revision > oldestRevision);
+  }
+
+  reset(): void {
+    this.mutations = [];
+    this.operations.clear();
+  }
+}
 
 // Short-lived cache + in-flight dedup for settings fetches to avoid repeated GET calls during startup
 let _settingsRuntimeGeneration = 0;
 let _settingsCache: { value: DesktopSettings | null; at: number; context: SettingsRuntimeContext } | null = null;
+// The last value the server was seen holding for each key, for the current
+// runtime. A write whose value equals it is redundant and is dropped before it
+// reaches the wire — this is what turns "the store changed because we adopted
+// the server's value" into zero PUTs instead of an echo (appearanceAutoSave and
+// the model-prefs auto-save both subscribe to the store, not to intent).
+let _serverKnownSettings: Partial<DesktopSettings> = {};
+// True while server values are being copied into the stores. Store
+// subscribers that mirror changes back to the server (appearanceAutoSave,
+// modelPrefsAutoSave) read this to tell "a person changed it" from "we just
+// adopted it" — the second must never become a write.
+let _applyingServerSettings = false;
+
+export const isApplyingServerSettings = (): boolean => _applyingServerSettings;
+
+const applyServerSettings = (settings: DesktopSettings): void => {
+  _applyingServerSettings = true;
+  try {
+    applyDesktopUiPreferences(settings);
+  } finally {
+    _applyingServerSettings = false;
+  }
+};
 let _settingsInflight: { promise: Promise<DesktopSettings | null>; context: SettingsRuntimeContext } | null = null;
 let _pendingSettingsChanges: Partial<DesktopSettings> | null = null;
 let _pendingSettingsContext: SettingsRuntimeContext | null = null;
 let _settingsFlushTimer: ReturnType<typeof setTimeout> | null = null;
-let _settingsFlushWaiters: Array<() => void> = [];
+let _settingsFlushWaiters: Array<(result: SettingsWriteResult) => void> = [];
 let _settingsLifecycleInitialized = false;
+let _pendingSettingsRevision = 0;
+const _settingsMutationTracker = new SettingsMutationTracker();
 const SETTINGS_CACHE_TTL = 2_000; // 2 seconds — covers the startup burst
 const SETTINGS_DEBOUNCE_MS = 200;
 
@@ -1617,6 +390,39 @@ const captureSettingsRuntimeContext = (): SettingsRuntimeContext => ({
   generation: _settingsRuntimeGeneration,
 });
 
+type SettingsKey = keyof DesktopSettings;
+type SettingsValue = DesktopSettings[SettingsKey];
+
+// SAFETY: a Partial<DesktopSettings> here always comes from the typed stores or
+// from `sanitizeWebSettings`, both of which only ever set DesktopSettings keys.
+const settingsKeysOf = (changes: Partial<DesktopSettings>): SettingsKey[] => Object.keys(changes) as SettingsKey[];
+
+const isSameSettingValue = (left: SettingsValue | undefined, right: SettingsValue | undefined): boolean => {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  return JSON.stringify(left) === JSON.stringify(right);
+};
+
+const rememberServerSettings = (settings: Partial<DesktopSettings>): void => {
+  _serverKnownSettings = { ..._serverKnownSettings, ...settings };
+};
+
+const forgetServerSettings = (keys: SettingsKey[]): void => {
+  const next: Partial<DesktopSettings> = { ..._serverKnownSettings };
+  for (const key of keys) delete next[key];
+  _serverKnownSettings = next;
+};
+
+/** Keys of `changes` whose value differs from what the server is known to hold. */
+const withoutRedundantSettings = (changes: Partial<DesktopSettings>): Partial<DesktopSettings> => {
+  const next: Partial<DesktopSettings> = {};
+  for (const key of settingsKeysOf(changes)) {
+    if (isSameSettingValue(changes[key], _serverKnownSettings[key])) continue;
+    Object.assign(next, { [key]: changes[key] });
+  }
+  return next;
+};
+
 const isSameSettingsRuntimeContext = (left: SettingsRuntimeContext, right: SettingsRuntimeContext): boolean => (
   left.runtimeKey === right.runtimeKey && left.generation === right.generation
 );
@@ -1624,6 +430,26 @@ const isSameSettingsRuntimeContext = (left: SettingsRuntimeContext, right: Setti
 const isSettingsRuntimeContextCurrent = (context: SettingsRuntimeContext): boolean => (
   context.generation === _settingsRuntimeGeneration && context.runtimeKey === getRuntimeKey()
 );
+
+// Best-effort flush of the pending debounced settings write at a lifecycle
+// boundary. Clearing the timer before flushing means the write happens exactly
+// once — the flush consumes the pending changes, so a timer that already fired
+// cannot double-write. A hard process kill (crash, task-manager kill) can
+// still lose the in-flight request; this narrows the loss window to the
+// request itself instead of the whole debounce interval (#2197).
+const flushPendingSettingsBeforeSuspend = (): void => {
+  if (!_pendingSettingsChanges) return;
+  if (_settingsFlushTimer) {
+    clearTimeout(_settingsFlushTimer);
+    _settingsFlushTimer = null;
+  }
+  // `keepalive` is what makes this flush actually land: a plain fetch started
+  // from pagehide/beforeunload is cancelled with the document. Settings payloads
+  // are a few KB, far under the 64 KB keepalive budget. `navigator.sendBeacon`
+  // is not an option here — it cannot carry the runtime bearer header, so the
+  // write would be rejected as unauthenticated.
+  void _flushSettingsUpdate({ keepalive: true });
+};
 
 const ensureSettingsRuntimeLifecycle = (): void => {
   if (_settingsLifecycleInitialized || typeof window === 'undefined') return;
@@ -1637,9 +463,39 @@ const ensureSettingsRuntimeLifecycle = (): void => {
   subscribeRuntimeEndpointChanged((detail) => {
     if (detail.runtimeKey === detail.previousRuntimeKey) return;
     _settingsRuntimeGeneration += 1;
+    _settingsMutationTracker.reset();
+    _pendingSettingsRevision = 0;
     _settingsCache = null;
     _settingsInflight = null;
+    _serverKnownSettings = {};
   });
+
+  // Mirror the deferred safe-storage lifecycle: without these listeners, a
+  // settings change made within SETTINGS_DEBOUNCE_MS of closing the window is
+  // silently dropped, and the stale server snapshot wins on next startup.
+  try {
+    window.addEventListener('pagehide', flushPendingSettingsBeforeSuspend, { capture: true });
+    window.addEventListener('beforeunload', flushPendingSettingsBeforeSuspend, { capture: true });
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') flushPendingSettingsBeforeSuspend();
+      });
+      document.addEventListener('freeze', flushPendingSettingsBeforeSuspend);
+    }
+    // Capacitor: iOS/Android suspend the app without firing pagehide or
+    // beforeunload, and `visibilitychange` alone is not dependable in a
+    // WKWebView. `App.appStateChange` is the authoritative foreground signal on
+    // native (same source `usePushVisibilityBeacon` trusts), so flush there too.
+    if (isCapacitorApp()) {
+      void import('@capacitor/app')
+        .then(({ App }) => App.addListener('appStateChange', ({ isActive }) => {
+          if (!isActive) flushPendingSettingsBeforeSuspend();
+        }))
+        .catch(() => undefined);
+    }
+  } catch {
+    // Restricted environments can reject listeners; the debounce timer still flushes.
+  }
 };
 
 const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Promise<DesktopSettings | null> => {
@@ -1662,6 +518,7 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
           if (!isSettingsRuntimeContextCurrent(context)) return null;
           const settings = sanitizeWebSettings(result.settings);
           _settingsCache = { value: settings, at: Date.now(), context };
+          if (settings) rememberServerSettings(settings);
           return settings;
         } catch (error) {
           if (!isSettingsRuntimeContextCurrent(context)) return null;
@@ -1671,7 +528,10 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
 
       if (!isSettingsRuntimeContextCurrent(context)) return null;
       try {
-        const response = await runtimeFetch('/api/config/settings', {
+        // The surface kind travels as a query parameter, not a header: a header
+        // would turn the request into a CORS preflight, which older instances
+        // (and the packaged desktop's cross-origin shell) refuse.
+        const response = await runtimeFetch(settingsEndpointForSurface(), {
           method: 'GET',
           headers: { Accept: 'application/json' },
         });
@@ -1683,6 +543,7 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
         if (!isSettingsRuntimeContextCurrent(context)) return null;
         const settings = sanitizeWebSettings(data);
         _settingsCache = { value: settings, at: Date.now(), context };
+        if (settings) rememberServerSettings(settings);
         return settings;
       } catch (error) {
         if (!isSettingsRuntimeContextCurrent(context)) return null;
@@ -1699,24 +560,29 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
   return inflight.promise;
 };
 
-/** Invalidate cached settings (call after a successful PUT) */
+/** Forget everything cached about the server document: the GET cache and the
+ * last-known per-key values used to drop redundant writes. */
 export const invalidateSettingsCache = (): void => {
   _settingsCache = null;
+  _serverKnownSettings = {};
 };
 
-export const syncDesktopSettings = async (): Promise<void> => {
+export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adoptTheme?: boolean }): Promise<void> => {
+  const bootstrap = options?.bootstrap !== false;
+  const adoptTheme = options?.adoptTheme ?? bootstrap;
   if (typeof window === 'undefined') {
     return;
   }
   ensureSettingsRuntimeLifecycle();
   const context = captureSettingsRuntimeContext();
+  const operation = _settingsMutationTracker.begin();
 
-  const persistApi = getPersistApi();
+  const persistApis = [getPersistApi(), useSessionDisplayStore.persist];
 
   // Wait for Zustand persist hydration before applying server settings.
   // Otherwise `set()`-calls race with hydration: we set X, then hydration
   // reads localStorage and overwrites back to the persisted value.
-  const waitForHydration = (): Promise<void> => {
+  const waitForPersistHydration = (persistApi: PersistApi | undefined): Promise<void> => {
     if (!persistApi?.hasHydrated || persistApi.hasHydrated()) {
       return Promise.resolve();
     }
@@ -1739,56 +605,48 @@ export const syncDesktopSettings = async (): Promise<void> => {
       if (persistApi.hasHydrated?.()) finish();
     });
   };
+  const waitForHydration = (): Promise<void> => Promise.all(
+    persistApis.map(waitForPersistHydration),
+  ).then(() => undefined);
 
   // Each step is wrapped in try/catch so a failure in one side-effect (e.g.
   // a TypeError from writing to a contextBridge-protected global) doesn't
   // prevent server settings from reaching the Zustand store.
-  const applySettings = async (settings: DesktopSettings) => {
+  // Local changes sitting in the debounce buffer are not yet tracked as
+  // mutations (record() only stores while a request is in flight), so a GET
+  // racing the debounce window would briefly revert them. Reapply the
+  // pending buffer over every reconciled result.
+  const overlayPendingChanges = (settings: DesktopSettings): DesktopSettings => {
+    if (!_pendingSettingsChanges || !_pendingSettingsContext) return settings;
+    if (!isSettingsRuntimeContextCurrent(_pendingSettingsContext)) return settings;
+    return { ...settings, ..._pendingSettingsChanges };
+  };
+
+  const applySettings = async (loadedSettings: DesktopSettings) => {
     if (!isSettingsRuntimeContextCurrent(context)) return;
-    const shouldPersistCraftGoalMigration = settings.draftStartersCraftGoalAdded !== true
-      || settings.draftStartersScheduleTaskAdded !== true;
-    // `autoSaveEnabled` is new to the settings backend. Until the server has a
-    // value, materialize would invent the client default (true) and overwrite a
-    // deliberate legacy "off" preference migrated from
-    // `openchamber:files:auto-save-enabled`. Prefer the hydrated store value and
-    // seed the backend once so later omitted→default authority is correct.
-    const shouldSeedAutoSaveEnabled = typeof settings.autoSaveEnabled !== 'boolean';
-    const authoritativeSettings = materializeAuthoritativeUiSettings(settings);
+    let settings = overlayPendingChanges(_settingsMutationTracker.reconcile(loadedSettings, operation));
+    await waitForHydration();
+    if (!isSettingsRuntimeContextCurrent(context)) return;
+    settings = withoutStaleDeviceFields(
+      overlayPendingChanges(_settingsMutationTracker.reconcile(loadedSettings, operation)),
+      context.runtimeKey,
+    );
+    // Keys the server omits are "unset", not "reset": this window keeps
+    // whatever it already holds for them and nothing is written back. A
+    // bootstrap therefore never seeds the server from local state — a write
+    // only ever carries a change a person made in this window.
     try {
       persistToLocalStorage(settings);
     } catch (error) {
       console.warn('persistToLocalStorage failed:', error);
     }
-    await waitForHydration();
-    if (!isSettingsRuntimeContextCurrent(context)) return;
-    if (shouldSeedAutoSaveEnabled) {
-      authoritativeSettings.autoSaveEnabled = useUIStore.getState().autoSaveEnabled;
-    }
-    if (settings.draftStarters === undefined) {
-      useUIStore.setState({ globalDraftStarters: null });
-    }
     try {
-      applyDesktopUiPreferences(authoritativeSettings);
+      applyServerSettings(settings);
     } catch (error) {
       console.warn('applyDesktopUiPreferences failed:', error);
     }
-    const migrationPatch: Partial<DesktopSettings> = {};
-    if (shouldPersistCraftGoalMigration) {
-      if (authoritativeSettings.draftStarters) {
-        migrationPatch.draftStarters = authoritativeSettings.draftStarters;
-      }
-      migrationPatch.draftStartersCraftGoalAdded = true;
-      migrationPatch.draftStartersScheduleTaskAdded = true;
-    }
-    if (shouldSeedAutoSaveEnabled) {
-      migrationPatch.autoSaveEnabled = authoritativeSettings.autoSaveEnabled;
-    }
-    if (Object.keys(migrationPatch).length > 0) {
-      await updateDesktopSettings(migrationPatch);
-      if (!isSettingsRuntimeContextCurrent(context)) return;
-    }
 
-    dispatchSettingsSynced(authoritativeSettings);
+    dispatchSettingsSynced(settings, bootstrap, adoptTheme);
   };
 
   try {
@@ -1798,86 +656,129 @@ export const syncDesktopSettings = async (): Promise<void> => {
     }
   } catch (error) {
     console.warn('Failed to synchronise settings:', error);
+  } finally {
+    _settingsMutationTracker.finish(operation);
   }
 };
 
 // Coalesce rapid updateDesktopSettings calls into a single PUT
-async function _flushSettingsUpdate(): Promise<void> {
+// `keepalive` is set only on the lifecycle-suspend path, where the document may
+// be torn down mid-request; the ordinary debounced write uses a plain fetch.
+async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean } = {}): Promise<void> {
+  let ok = false;
   const changes = _pendingSettingsChanges;
   const context = _pendingSettingsContext;
+  const revision = _pendingSettingsRevision;
   const waiters = _settingsFlushWaiters;
   _pendingSettingsChanges = null;
   _pendingSettingsContext = null;
+  _pendingSettingsRevision = 0;
   _settingsFlushTimer = null;
   _settingsFlushWaiters = [];
   try {
     if (!changes || !context || Object.keys(changes).length === 0 || !isSettingsRuntimeContextCurrent(context)) {
       // Nothing will be written — clear any pending "Saving…" indicator.
+      ok = true;
       dispatchSettingsSaveState('saved');
       return;
     }
+    const operation = _settingsMutationTracker.begin(revision);
+    // Assume the merge lands so a same-value write arriving mid-flight is not
+    // sent twice; a failed request forgets these keys so a retry goes through.
+    rememberServerSettings(changes);
+    const forgetSentSettings = () => forgetServerSettings(settingsKeysOf(changes));
 
-    const runtimeSettings = getRuntimeSettingsAPI();
-    if (runtimeSettings) {
+    try {
+      const runtimeSettings = getRuntimeSettingsAPI();
+      if (runtimeSettings) {
+        try {
+          // The runtime API hands back whatever the bridge or server returned;
+          // it is parsed here like any other boundary payload.
+          const updated = sanitizeWebSettings(await runtimeSettings.save(changes));
+          if (!isSettingsRuntimeContextCurrent(context)) return;
+          if (updated) {
+            rememberServerSettings(updated);
+            const reconciled = _settingsMutationTracker.reconcile(updated, operation);
+            applyServerSettings(reconciled);
+            dispatchSettingsSynced(reconciled, false);
+            _settingsCache = null;
+          }
+          if (!updated) forgetSentSettings();
+          ok = Boolean(updated);
+          dispatchSettingsSaveState(updated ? 'saved' : 'error');
+          return;
+        } catch (error) {
+          if (!isSettingsRuntimeContextCurrent(context)) return;
+          console.warn('Failed to update settings via runtime settings API:', error);
+        }
+      }
+
+      if (!isSettingsRuntimeContextCurrent(context)) return;
       try {
-        const updated = await runtimeSettings.save(changes);
+        const response = await runtimeFetch(settingsEndpointForSurface(), {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify(changes),
+          keepalive,
+        });
+
+        if (!isSettingsRuntimeContextCurrent(context)) return;
+        if (!response.ok) {
+          console.warn('Failed to update shared settings via API:', response.status, response.statusText);
+          forgetSentSettings();
+          dispatchSettingsSaveState('error');
+          return;
+        }
+
+        const updated = sanitizeWebSettings(await response.json().catch(() => null));
         if (!isSettingsRuntimeContextCurrent(context)) return;
         if (updated) {
-          applyDesktopUiPreferences(updated);
-          dispatchSettingsSynced(updated);
+          rememberServerSettings(updated);
+          const reconciled = _settingsMutationTracker.reconcile(updated, operation);
+          applyServerSettings(reconciled);
+          dispatchSettingsSynced(reconciled, false);
+          ok = true;
+          dispatchSettingsSaveState('saved');
+          // Invalidate GET cache so next read sees the fresh data
           _settingsCache = null;
+        } else {
+          forgetSentSettings();
+          dispatchSettingsSaveState('error');
         }
-        dispatchSettingsSaveState(updated ? 'saved' : 'error');
-        return;
       } catch (error) {
-        if (!isSettingsRuntimeContextCurrent(context)) return;
-        console.warn('Failed to update settings via runtime settings API:', error);
+        if (isSettingsRuntimeContextCurrent(context)) {
+          console.warn('Failed to update shared settings via API:', error);
+          forgetSentSettings();
+          dispatchSettingsSaveState('error');
+        }
       }
-    }
-
-    if (!isSettingsRuntimeContextCurrent(context)) return;
-    try {
-      const response = await runtimeFetch('/api/config/settings', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify(changes),
-      });
-
-      if (!isSettingsRuntimeContextCurrent(context)) return;
-      if (!response.ok) {
-        console.warn('Failed to update shared settings via API:', response.status, response.statusText);
-        dispatchSettingsSaveState('error');
-        return;
-      }
-
-      const updated = (await response.json().catch(() => null)) as DesktopSettings | null;
-      if (!isSettingsRuntimeContextCurrent(context)) return;
-      if (updated) {
-        applyDesktopUiPreferences(updated);
-        dispatchSettingsSynced(updated);
-        dispatchSettingsSaveState('saved');
-        // Invalidate GET cache so next read sees the fresh data
-        _settingsCache = null;
-      } else {
-        dispatchSettingsSaveState('error');
-      }
-    } catch (error) {
-      if (isSettingsRuntimeContextCurrent(context)) {
-        console.warn('Failed to update shared settings via API:', error);
-        dispatchSettingsSaveState('error');
-      }
+    } finally {
+      _settingsMutationTracker.finish(operation);
     }
   } finally {
-    waiters.forEach((resolve) => resolve());
+    waiters.forEach((resolve) => resolve({ ok }));
   }
 }
 
-export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): Promise<void> => {
+/**
+ * Load the shared settings document for the current runtime (cached briefly
+ * during startup bursts). Pages that need a field the stores do not carry read
+ * it from here instead of fetching the endpoint themselves. `null` is a load
+ * failure, never an empty document.
+ */
+export const loadDesktopSettings = (): Promise<DesktopSettings | null> => fetchWebSettings();
+
+/**
+ * Queue a change a person made in this window for the debounced write. Keys
+ * whose value the server already holds are dropped; computed server flags are
+ * never sent. Resolves once the write (or the decision not to write) settled.
+ */
+export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): Promise<SettingsWriteResult> => {
   if (typeof window === 'undefined') {
-    return;
+    return { ok: false };
   }
   ensureSettingsRuntimeLifecycle();
   const context = captureSettingsRuntimeContext();
@@ -1887,14 +788,36 @@ export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): 
     void _flushSettingsUpdate();
   }
 
-  _pendingSettingsChanges = { ...(_pendingSettingsChanges ?? {}), ...changes };
+  // Merge first, then drop keys that now equal the server: a toggle back to
+  // the server's value inside the debounce window cancels the pending write
+  // for that key instead of leaving the earlier value queued.
+  const writable: Partial<DesktopSettings> = {};
+  for (const key of settingsKeysOf(changes)) {
+    if (isWritableSettingsKey(key)) Object.assign(writable, { [key]: changes[key] });
+  }
+  const pending = withoutRedundantSettings({ ...(_pendingSettingsChanges ?? {}), ...writable });
+  if (Object.keys(pending).length === 0) {
+    _pendingSettingsChanges = null;
+    _pendingSettingsContext = null;
+    if (_settingsFlushTimer) {
+      clearTimeout(_settingsFlushTimer);
+      _settingsFlushTimer = null;
+    }
+    const waiters = _settingsFlushWaiters;
+    _settingsFlushWaiters = [];
+    waiters.forEach((resolve) => resolve({ ok: true }));
+    dispatchSettingsSaveState('saved');
+    return { ok: true };
+  }
+  _pendingSettingsChanges = pending;
   _pendingSettingsContext = context;
+  _pendingSettingsRevision = _settingsMutationTracker.record(withoutRedundantSettings(writable));
   dispatchSettingsSaveState('saving');
 
   if (_settingsFlushTimer) {
     clearTimeout(_settingsFlushTimer);
   }
-  const flushed = new Promise<void>((resolve) => {
+  const flushed = new Promise<SettingsWriteResult>((resolve) => {
     _settingsFlushWaiters.push(resolve);
   });
   _settingsFlushTimer = setTimeout(() => void _flushSettingsUpdate(), SETTINGS_DEBOUNCE_MS);

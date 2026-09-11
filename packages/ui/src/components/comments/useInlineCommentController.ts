@@ -11,6 +11,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useI18n } from '@/lib/i18n';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { focusChatInput } from '@/components/chat/composer/editor/dom';
 
 type LineRangeBase = {
   start: number;
@@ -136,6 +137,7 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
     const normalizedStoreRange = normalizeStoreRange(toStoreRange(normalizedRange));
     const code = getCodeForRange(normalizedRange);
 
+    const isNewComment = !editingDraftId;
     if (editingDraftId) {
       updateDraft(target, editingDraftId, {
         fileLabel,
@@ -160,6 +162,9 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
     }
 
     reset();
+    if (isNewComment) {
+      requestAnimationFrame(focusChatInput);
+    }
   }, [addDraft, editingDraftId, fileLabel, getCodeForRange, language, reset, selection, source, t, target, toStoreRange, updateDraft]);
 
   return {

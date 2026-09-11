@@ -1,22 +1,53 @@
 ---
-title: Przeglądarka na komputerze
-description: Przeglądaj dowolną stronę wewnątrz aplikacji na komputerze, z inspekcją i przechwytywaniem konsoli.
+title: Panel przeglądarki
+description: Przeglądaj dowolną stronę w aplikacji, dodawaj do niej adnotacje i pozwól agentowi nią sterować.
 ---
 
-# Przeglądarka na komputerze
+# Panel przeglądarki
 
-Aplikacja na komputerze ma wbudowaną przeglądarkę, dzięki czemu możesz otworzyć dowolną stronę tuż obok czatu, wskazywać elementy, aby o nie zapytać, oraz przechwytywać konsolę strony. Otwórz ją z przycisku globusa w nagłówku aplikacji.
+Panel przeglądarki otwiera dowolną stronę tuż obok czatu. Otwórz go przyciskiem globusa w nagłówku aplikacji.
 
-> Przeglądarka na komputerze to funkcja **tylko na komputerze**. W wersji webowej panel [podglądu](/pl/preview/) oferuje te same narzędzia inspekcji i konsoli dla Twojego lokalnego serwera deweloperskiego.
+W aplikacji desktopowej to prawdziwa przeglądarka: twoje logowania są zachowywane, przeładowanie na gorąco działa, a narzędzia deweloperskie są o jedno kliknięcie. W karcie przeglądarki panel wyświetli stronę, ale nie zajrzy do jej wnętrza — poniższe narzędzia adnotacji są dostępne tylko na desktopie.
 
-## Inspekcja i adnotacje
+Strony otwarte tutaj nie mogą użyć twojej kamery, mikrofonu ani lokalizacji: takie prośby są odrzucane.
 
-Włącz **inspect** i kliknij dowolny element na stronie. OpenChamber przechwytuje o nim notatkę — czym jest, jakie ma style, gdzie się znajduje, oraz zrzut ekranu — i dołącza ją do Twojej wiadomości czatu. To najszybszy sposób, by powiedzieć agentowi „ten element, dokładnie tutaj”.
+## Pasek narzędzi
 
-## Przechwytywanie konsoli
+Pasek adresu pamięta strony otwierane w tym projekcie i podpowiada je podczas pisania, dopasowując fragment adresu albo tytułu strony. Strzałki przechodzą po liście, Enter otwiera podświetloną pozycję, a przycisk w wierszu usuwa ją z listy.
 
-Przeglądarka zbiera wynik konsoli strony — błędy, ostrzeżenia i logi — dzięki czemu możesz go filtrować i czytać bez otwierania narzędzi deweloperskich.
+Obok jest **odświeżenie**, a także **twarde odświeżenie**, które pomija pamięć podręczną, gdy zmiana uparcie się nie pokazuje, oraz sterowanie powiększeniem działające tylko na stronę.
+
+**Wyczyść ciasteczka** i **Wyczyść dane w pamięci podręcznej** dotyczą wyłącznie tego panelu. Twoja sesja OpenChamber i pozostałe okna zostają nietknięte.
+
+## Dodawanie adnotacji
+
+Naciśnij **Adnotuj** — nad stroną pojawi się pasek z trzema narzędziami:
+
+- **Element** — kliknij element. Kliknięcie innego przenosi zaznaczenie, ponowne kliknięcie tego samego je zdejmuje.
+- **Obszar** — obrysuj fragment ramką, gdy chodzi o więcej niż jeden element.
+- **Rysuj** — szkicuj odręcznie po stronie.
+
+Napisz, czego oczekujesz, w polu obok swojego oznaczenia i naciśnij **Dołącz** — albo po prostu Enter. Do wiadomości trafi karta ze wszystkim, co zaznaczyłeś, z twoją notatką i ze zrzutem widocznej strony z naniesionymi oznaczeniami — możesz więc powiedzieć „ten przycisk, trochę bardziej zaokrąglony" zamiast opisywać, gdzie jest.
+
+Sama strona nie jest zmieniana — adnotacja tylko oznacza to, co już tam jest. `Esc` anuluje i zamyka pasek.
+
+## Sterowanie przez agenta
+
+Agent może sam korzystać z panelu przeglądarki — otworzyć stronę, odczytać jej zawartość, klikać, wpisywać tekst, przewijać i przełączać układ mobilny, tabletowy i desktopowy — żeby sprawdzić własną pracę zamiast prosić o to ciebie. Zobaczysz to w panelu.
+
+Agent nie może uruchamiać dowolnego kodu na stronie. Przeglądarka zachowuje twoje prawdziwe logowania, więc ogranicza się do powyższych działań.
+
+Może też zapisać obraz tego, co widzi, w `.openchamber/screenshots/` w twoim projekcie i pokazać go w odpowiedzi. To właśnie umożliwia porównanie przed i po, a plik zostaje, by dołączyć go do pull requesta.
+
+Działania w przeglądarce to **narzędzie OpenChamber Web**, które włącza się i wyłącza osobno w **Ustawienia → Ogólne → Narzędzia OpenChamber**.
+
+Wymaga to aplikacji desktopowej: stroną pokazaną w karcie przeglądarki nie da się sterować.
+
+## Narzędzia deweloperskie
+
+Naciśnij przycisk terminala na pasku, aby otworzyć własne narzędzia deweloperskie Chromium dla strony — konsolę, sieć, elementy, wszystko czego oczekujesz.
 
 ## Powiązane
 
-- [Podgląd i serwery deweloperskie](/pl/preview/) — te same narzędzia dla Twojego lokalnego serwera deweloperskiego
+- [Podgląd i serwery deweloperskie](/preview/) — otwieranie działającej aplikacji, także na zdalnym komputerze
+- [Narzędzie sterowania dla agentów](/pl/agent-control-tool/) — sesje, worktree i zaplanowane zadania prosto z czatu

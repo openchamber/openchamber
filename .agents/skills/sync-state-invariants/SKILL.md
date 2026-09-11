@@ -5,9 +5,9 @@ description: Use when changing session synchronization, bootstrap or reconnect s
 
 # Sync State Invariants
 
-## Read First
+## Required Context
 
-Read `packages/ui/src/sync/DOCUMENTATION.md` and the nearest owning module documentation before editing.
+Read `packages/ui/src/sync/DOCUMENTATION.md` and the nearest owning module documentation before editing. Context gathering is complete when every changed state has an identified owner, authority, scope, and lifecycle.
 
 ## Sources Of Truth
 
@@ -21,6 +21,10 @@ Classify every input before deriving state:
 | Optimistic shadow state | Temporary UI continuity until authoritative reconciliation |
 
 Prefer deterministic authoritative records over heuristics. Derive live behavior from live channels, not historical anomalies.
+
+Give each state and its invariants one owner. Callers request domain transitions from that owner; they do not inspect one field, mutate another collection, and repair status externally. Split ownership only when the states have genuinely independent lifecycles.
+
+Represent mutually exclusive lifecycle states with discriminated unions or equally precise contracts. Avoid boolean/nullable field combinations that permit impossible states. Reject invalid transitions at the owning boundary so downstream reducers and effects receive trusted state.
 
 ## Failure Is Not Empty
 
@@ -53,6 +57,7 @@ Inferring destructive cleanup from disappearance between snapshots requires an e
 
 ## Event Reducers
 
+- Make the valid transition path explicit and flat. Return early for irrelevant entities and semantic no-ops; assert or reject transitions that violate an established invariant.
 - Clone only fields the event mutates; preserve every unrelated reference.
 - Return no change for semantically identical events.
 - Gate scans behind cheap event/entity checks.
@@ -76,6 +81,7 @@ For streaming-frequency work, also load `performance-engineering`.
 
 ## Optimistic Updates
 
+- Keep optimistic promotion, reconciliation, and rollback behavior behind the store/module that owns both visible and shadow state; do not expose collections for callers to mutate independently.
 - Insert optimistic data into the visible store and a separate shadow tracker.
 - Use client-generated IDs accepted and echoed by the server to reconcile in place.
 - Remove optimistic data from both visible and shadow state on failure.
@@ -133,7 +139,7 @@ When state exists in memory and one or more persistent stores, define an explici
 
 ## Verification
 
-Cover the relevant lifecycle, not only static state:
+Cover every applicable lifecycle branch, not only static state. Verification is complete when failure cannot masquerade as empty success, stale or partial data cannot cause destructive replacement, and each transition remains with its owner:
 
 - fresh bootstrap and successful empty result;
 - fetch failure preserving prior state;
@@ -147,17 +153,3 @@ Cover the relevant lifecycle, not only static state:
 - identity-preserving moves/category changes and runtime/scope changes resetting cleanup baselines;
 - create, update, move, archive, and delete mutations surviving responses started before those mutations;
 - missing versus empty persistence, malformed payloads, out-of-order writes, hydration races, and lifecycle durability behavior.
-
-## Red Flags
-
-- Fetch helper catches and returns `[]`.
-- Historical message/session data drives a live spinner.
-- One failed entity blocks or clears all entities.
-- Light polling overwrites fields it did not fetch.
-- Queue reads current model/agent at send time.
-- New session lookup assumes SSE already indexed it.
-- Optimistic data has no shadow entry or rollback.
-- Snapshot-difference cleanup treats its first startup snapshot as a disappearance event.
-- Eviction runs on the acquisition path, or a cache limit is raised in response to a request loop.
-- Missing or malformed persistence becomes authoritative empty state.
-- Debounced writes are canceled on owner/lifecycle change without completing against the captured owner or an explicit durability/data-loss contract.

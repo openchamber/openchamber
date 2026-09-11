@@ -1,8 +1,23 @@
 import { DateTime, IANAZone } from 'luxon';
 import parser from 'cron-parser';
 
+import { projectConfigFileStemOf, projectPathFromId } from './project-id.js';
+import {
+  DEFAULT_PLANS_DIR,
+  EMPTY_SHARED_PROJECT_CONFIG,
+  SHARED_CONFIG_RELATIVE_PATH,
+  applySharedProjectSetupPatch,
+  isSharedProjectConfigEmpty,
+  mergeProjectSetup,
+  parseSharedProjectConfig,
+  projectSetupPatchToStored,
+  projectSetupViewOf,
+  serializeSharedProjectConfig,
+  sharedTrustHashOf,
+} from './project-setup.js';
+
 const PROJECT_CONFIG_VERSION = 1;
-const MAX_TASK_NAME_LENGTH = 80;
+export const MAX_TASK_NAME_LENGTH = 80;
 const MAX_TASK_PROMPT_LENGTH = 20_000;
 const MAX_CRON_LENGTH = 200;
 const MAX_LAST_ERROR_LENGTH = 2_000;
@@ -254,6 +269,12 @@ const normalizeState = (value, fallback) => {
   const nextRunAt = typeof source.nextRunAt === 'number' && Number.isFinite(source.nextRunAt)
     ? Math.max(0, Math.round(source.nextRunAt))
     : undefined;
+  // Absolute ms of the schedule occurrence last claimed for dispatch. Used so
+  // two OpenChamber server instances sharing this config cannot both start a
+  // run for the same daily/weekly/cron/once slot (see issue #2710).
+  const lastScheduledFor = typeof source.lastScheduledFor === 'number' && Number.isFinite(source.lastScheduledFor)
+    ? Math.max(0, Math.round(source.lastScheduledFor))
+    : undefined;
   const lastSessionId = asNonEmptyString(source.lastSessionId);
   const lastErrorRaw = asNonEmptyString(source.lastError);
   const lastError = lastErrorRaw ? clampLength(lastErrorRaw, MAX_LAST_ERROR_LENGTH) : undefined;
@@ -269,6 +290,7 @@ const normalizeState = (value, fallback) => {
     ...(typeof lastRunAt === 'number' ? { lastRunAt } : {}),
     ...(typeof lastDurationMs === 'number' ? { lastDurationMs } : {}),
     ...(typeof nextRunAt === 'number' ? { nextRunAt } : {}),
+    ...(typeof lastScheduledFor === 'number' ? { lastScheduledFor } : {}),
     ...(lastSessionId ? { lastSessionId } : {}),
     ...(lastError ? { lastError } : {}),
   };
@@ -313,6 +335,11 @@ const normalizeTaskForStorage = (value, options) => {
   const schedule = normalizeSchedule(value.schedule, existingTask?.schedule);
   const execution = normalizeExecution(value.execution);
 
+  // Loop provenance: absolute path of the `.agents/loops/*.md` file driving
+  // this task, when any. Preserved on every write so the scheduler can detect
+  // removed loop files across restarts. Unknown to the UI model.
+  const loopFile = asNonEmptyString(value.loopFile) ?? asNonEmptyString(existingTask?.loopFile);
+
   const nowMs = Math.max(0, Math.round(now));
   const baseState = normalizeState(value.state, existingTask?.state);
   const state = {
@@ -328,6 +355,7 @@ const normalizeTaskForStorage = (value, options) => {
     schedule,
     execution,
     state,
+    ...(loopFile ? { loopFile } : {}),
   };
 };
 
@@ -354,6 +382,9 @@ export const createProjectConfigRuntime = (deps) => {
     });
 
   const writeLocks = new Map();
+  const PROJECT_FILE_LOCK_WAIT_MS = 10_000;
+  const PROJECT_FILE_LOCK_STALE_MS = 60_000;
+  const PROJECT_FILE_LOCK_RETRY_MS = 20;
 
   const sanitizeProjectID = (projectID) => {
     const value = asNonEmptyString(projectID);
@@ -368,28 +399,157 @@ export const createProjectConfigRuntime = (deps) => {
 
   const resolveProjectConfigPath = (projectID) => {
     const safeProjectID = sanitizeProjectID(projectID);
+    return path.join(projectsDirPath, `${projectConfigFileStemOf(safeProjectID)}.json`);
+  };
+
+  // Where a build before the bounded file name stored an id too long for one
+  // (on a filesystem that still accepted it), or null when the id's own name
+  // is the current one. Read as a fallback, moved on the next write.
+  const resolveLegacyProjectConfigPath = (projectID) => {
+    const safeProjectID = sanitizeProjectID(projectID);
+    if (projectConfigFileStemOf(safeProjectID) === safeProjectID) return null;
     return path.join(projectsDirPath, `${safeProjectID}.json`);
   };
 
-  const readRawProjectConfigFromDisk = async (projectID) => {
-    const filePath = resolveProjectConfigPath(projectID);
+  const isProcessAlive = (pid) => {
+    if (!Number.isInteger(pid) || pid <= 0) {
+      return false;
+    }
     try {
-      const raw = await fsPromises.readFile(filePath, 'utf8');
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      process.kill(pid, 0);
+      return true;
     } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') {
-        return {};
-      }
-      throw error;
+      // EPERM: process exists but belongs to another user — treat as alive.
+      return error?.code === 'EPERM';
     }
   };
 
+  /**
+   * Cross-process exclusive lock for a project config file.
+   * In-process chaining alone cannot serialize Electron (port 57123) and CLI
+   * serve (port 3000) writers that share the same on-disk projects dir.
+   */
+  const acquireProjectFileLock = async (projectID) => {
+    const configPath = resolveProjectConfigPath(projectID);
+    const lockPath = `${configPath}.lock`;
+    const startedAt = Date.now();
+
+    await fsPromises.mkdir(path.dirname(configPath), { recursive: true });
+
+    while (Date.now() - startedAt < PROJECT_FILE_LOCK_WAIT_MS) {
+      let handle;
+      try {
+        handle = await fsPromises.open(lockPath, 'wx');
+        const lockPayload = {
+          pid: process.pid,
+          at: Date.now(),
+        };
+        await handle.writeFile(JSON.stringify(lockPayload));
+        return {
+          release: async () => {
+            try {
+              await handle.close();
+            } catch {
+            }
+            // Only unlink if we still own the lock. A stale-recovery steal can
+            // replace the file; unlinking blindly would drop the new owner's lock.
+            try {
+              const raw = await fsPromises.readFile(lockPath, 'utf8');
+              const parsed = JSON.parse(raw);
+              if (Number(parsed?.pid) !== process.pid) {
+                return;
+              }
+              await fsPromises.unlink(lockPath);
+            } catch {
+            }
+          },
+        };
+      } catch (error) {
+        if (handle) {
+          try {
+            await handle.close();
+          } catch {
+          }
+        }
+        if (error?.code !== 'EEXIST') {
+          throw error;
+        }
+
+        try {
+          const raw = await fsPromises.readFile(lockPath, 'utf8');
+          const parsed = JSON.parse(raw);
+          const lockPid = Number(parsed?.pid);
+          const lockAt = Number(parsed?.at);
+          const staleByPid = Number.isInteger(lockPid) && lockPid > 0 && !isProcessAlive(lockPid);
+          const staleByAge = Number.isFinite(lockAt) && (Date.now() - lockAt) > PROJECT_FILE_LOCK_STALE_MS;
+          if (staleByPid || staleByAge || !Number.isInteger(lockPid)) {
+            await fsPromises.unlink(lockPath).catch(() => {});
+            continue;
+          }
+        } catch {
+          // Crash between open(wx) and writeFile (or a partial write) leaves an
+          // unparseable lock. Fall back to mtime age so recovery is not wedged.
+          try {
+            const stat = await fsPromises.stat(lockPath);
+            const mtimeMs = Number(stat?.mtimeMs);
+            if (Number.isFinite(mtimeMs) && (Date.now() - mtimeMs) > PROJECT_FILE_LOCK_STALE_MS) {
+              await fsPromises.unlink(lockPath).catch(() => {});
+              continue;
+            }
+          } catch {
+          }
+        }
+
+        await new Promise((resolve) => {
+          setTimeout(resolve, PROJECT_FILE_LOCK_RETRY_MS);
+        });
+      }
+    }
+
+    throw new Error(`timeout acquiring project config lock for ${projectID}`);
+  };
+
+  // The parsed document, or null when there is no file (one of
+  // `missingCodes`). Malformed JSON still throws; it is a broken file, not
+  // an empty one.
+  const readJsonDocumentIfPresent = async (filePath, missingCodes) => {
+    let raw;
+    try {
+      raw = await fsPromises.readFile(filePath, 'utf8');
+    } catch (error) {
+      const code = error && typeof error === 'object' ? error.code : null;
+      if (missingCodes.includes(code)) return null;
+      throw error;
+    }
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  };
+
+  // The legacy name of a long id may exceed what the filesystem can hold;
+  // ENAMETOOLONG there means "no such file". On the bounded path it would
+  // mean the projects dir itself is unusable, so it stays an error.
+  const readRawProjectConfigFromDisk = async (projectID) => {
+    const current = await readJsonDocumentIfPresent(resolveProjectConfigPath(projectID), ['ENOENT']);
+    if (current) return current;
+    const legacyPath = resolveLegacyProjectConfigPath(projectID);
+    const legacy = legacyPath ? await readJsonDocumentIfPresent(legacyPath, ['ENOENT', 'ENAMETOOLONG']) : null;
+    return legacy ?? {};
+  };
+
+  // Normalized tasks for reading, plus the raw on-disk record of each one for
+  // writing back. Normalization only keeps the fields THIS build knows, so a
+  // write that re-serialized normalized tasks would strip every field added
+  // by a newer build (or a newer UI) the moment an older server touched the
+  // file — a goal or auto-accept setting silently lost after a task ran.
+  // Writers therefore persist untouched tasks from `rawTasksByID` verbatim and
+  // only serialize a normalized task where the task itself was deliberately
+  // replaced.
   const readProjectConfigFromDisk = async (projectID) => {
     const parsed = await readRawProjectConfigFromDisk(projectID);
     const tasksRaw = Array.isArray(parsed.scheduledTasks) ? parsed.scheduledTasks : [];
     const now = Date.now();
     const scheduledTasks = [];
+    const rawTasksByID = new Map();
     for (const task of tasksRaw) {
       try {
         const normalized = normalizeTaskForStorage(task, {
@@ -400,30 +560,62 @@ export const createProjectConfigRuntime = (deps) => {
           refreshUpdatedAt: false,
         });
         scheduledTasks.push(normalized);
+        rawTasksByID.set(normalized.id, task);
       } catch {
       }
     }
     return {
       version: PROJECT_CONFIG_VERSION,
       scheduledTasks,
+      rawTasksByID,
     };
   };
 
-  const writeProjectConfigToDisk = async (projectID, config) => {
+  // The list to write: tasks this write replaced go out normalized; every
+  // other task goes out exactly as stored, fields unknown to this build
+  // included. A state-only update counts as untouched — only its `state` is
+  // swapped onto the stored record. Callers keep working with (and returning)
+  // the normalized tasks; only the bytes on disk differ.
+  const toStoredTasks = (config, tasks, { replacedIDs = new Set(), stateUpdatedID = null } = {}) => (
+    tasks.map((task) => {
+      if (replacedIDs.has(task.id)) return task;
+      const stored = config.rawTasksByID.get(task.id);
+      if (!stored) return task;
+      return task.id === stateUpdatedID ? { ...stored, state: task.state } : stored;
+    })
+  );
+
+  // Atomic whole-document write; callers hand in the merged document so the
+  // keys they do not own survive untouched.
+  const writeRawProjectConfigToDisk = async (projectID, document) => {
     const filePath = resolveProjectConfigPath(projectID);
     const parentDirectory = path.dirname(filePath);
     const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
+    await fsPromises.mkdir(parentDirectory, { recursive: true });
+    try {
+      await fsPromises.writeFile(temporaryPath, JSON.stringify(document, null, 2), 'utf8');
+      await fsPromises.rename(temporaryPath, filePath);
+    } catch (error) {
+      await fsPromises.rm(temporaryPath, { force: true }).catch(() => {});
+      throw error;
+    }
+    // Every write goes through a read of the whole document, so the legacy
+    // file's content is now in the current one; drop it so a later read (or an
+    // older build) cannot see two copies drifting apart.
+    const legacyPath = resolveLegacyProjectConfigPath(projectID);
+    if (legacyPath) {
+      await fsPromises.rm(legacyPath, { force: true }).catch(() => {});
+    }
+  };
+
+  const writeProjectConfigToDisk = async (projectID, config) => {
     const existing = await readRawProjectConfigFromDisk(projectID);
-    const merged = {
+    await writeRawProjectConfigToDisk(projectID, {
       ...existing,
       version: PROJECT_CONFIG_VERSION,
       scheduledTasks: Array.isArray(config?.scheduledTasks) ? config.scheduledTasks : [],
-    };
-
-    await fsPromises.mkdir(parentDirectory, { recursive: true });
-    await fsPromises.writeFile(temporaryPath, JSON.stringify(merged, null, 2), 'utf8');
-    await fsPromises.rename(temporaryPath, filePath);
+    });
   };
 
   const withProjectWriteLock = async (projectID, mutate) => {
@@ -437,8 +629,16 @@ export const createProjectConfigRuntime = (deps) => {
     writeLocks.set(key, chained);
 
     await previous;
+    // Acquire sits outside the mutate try — if it throws (10s lock timeout),
+    // we must still release the in-process chain or every later write for this
+    // project hangs forever on await previous.
     try {
-      return await mutate();
+      const fileLock = await acquireProjectFileLock(projectID);
+      try {
+        return await mutate();
+      } finally {
+        await fileLock.release();
+      }
     } finally {
       release();
       const current = writeLocks.get(key);
@@ -480,7 +680,7 @@ export const createProjectConfigRuntime = (deps) => {
 
       const nextConfig = {
         version: PROJECT_CONFIG_VERSION,
-        scheduledTasks: nextTasks,
+        scheduledTasks: toStoredTasks(current, nextTasks, { replacedIDs: new Set([normalizedTask.id]) }),
       };
       await writeProjectConfigToDisk(projectID, nextConfig);
 
@@ -506,7 +706,7 @@ export const createProjectConfigRuntime = (deps) => {
       if (deleted) {
         await writeProjectConfigToDisk(projectID, {
           version: PROJECT_CONFIG_VERSION,
-          scheduledTasks: nextTasks,
+          scheduledTasks: toStoredTasks(current, nextTasks),
         });
       }
 
@@ -527,7 +727,7 @@ export const createProjectConfigRuntime = (deps) => {
       const current = await readProjectConfigFromDisk(projectID);
       const taskIndex = current.scheduledTasks.findIndex((task) => task.id === normalizedTaskID);
       if (taskIndex === -1) {
-        return { task: null, tasks: current.scheduledTasks };
+        return { task: null, tasks: current.scheduledTasks, updated: false };
       }
 
       const currentTask = current.scheduledTasks[taskIndex];
@@ -549,21 +749,331 @@ export const createProjectConfigRuntime = (deps) => {
 
       await writeProjectConfigToDisk(projectID, {
         version: PROJECT_CONFIG_VERSION,
-        scheduledTasks: nextTasks,
+        scheduledTasks: toStoredTasks(current, nextTasks, { stateUpdatedID: nextTask.id }),
       });
 
       return {
         task: nextTask,
         tasks: nextTasks,
+        updated: true,
       };
     });
   };
 
+  /**
+   * Conditionally patch task runtime state under the project write lock.
+   * `predicate(currentTask)` is evaluated after the latest on-disk read; when
+   * it returns false the write is skipped and `{ updated: false }` is returned.
+   * Used by the scheduled-tasks runtime to claim a single schedule occurrence
+   * across concurrent OpenChamber server instances.
+   */
+  const updateScheduledTaskStateIf = async (projectID, taskID, predicate, statePatch) => {
+    return withProjectWriteLock(projectID, async () => {
+      const normalizedTaskID = asNonEmptyString(taskID);
+      if (!normalizedTaskID) {
+        throw new Error('taskId is required');
+      }
+      if (typeof predicate !== 'function') {
+        throw new Error('predicate is required');
+      }
+
+      const current = await readProjectConfigFromDisk(projectID);
+      const taskIndex = current.scheduledTasks.findIndex((task) => task.id === normalizedTaskID);
+      if (taskIndex === -1) {
+        return { task: null, tasks: current.scheduledTasks, updated: false };
+      }
+
+      const currentTask = current.scheduledTasks[taskIndex];
+      if (!predicate(currentTask)) {
+        return {
+          task: currentTask,
+          tasks: current.scheduledTasks,
+          updated: false,
+        };
+      }
+
+      const patchObject = statePatch && typeof statePatch === 'object' ? statePatch : {};
+      const nextTask = {
+        ...currentTask,
+        state: normalizeState(
+          {
+            ...currentTask.state,
+            ...patchObject,
+            updatedAt: Date.now(),
+          },
+          currentTask.state,
+        ),
+      };
+
+      const nextTasks = current.scheduledTasks.slice();
+      nextTasks[taskIndex] = nextTask;
+
+      await writeProjectConfigToDisk(projectID, {
+        version: PROJECT_CONFIG_VERSION,
+        scheduledTasks: toStoredTasks(current, nextTasks, { stateUpdatedID: nextTask.id }),
+      });
+
+      return {
+        task: nextTask,
+        tasks: nextTasks,
+        updated: true,
+      };
+    });
+  };
+
+  /**
+   * Reconcile discovered `.agents/loops` definitions with the persisted JSON
+   * task list.
+   *
+   * Rules (documented in scheduled-tasks/DOCUMENTATION.md):
+   * - For loop-owned tasks (carrying the `loopFile` marker) identity is the
+   *   LOOP FILE PATH: a loop takes its task over regardless of the task's
+   *   current name, so renaming the loop (`name` field or a UI edit) renames
+   *   the task in place instead of leaving a stale duplicate behind.
+   * - A loop whose name matches a JSON task (no `loopFile`) takes that task
+   *   over: its schedule/execution/enabled are overwritten from the file while
+   *   its id and runtime state are preserved (markdown wins on conflict).
+   *   Execution fields the file format does not define (goalEnabled,
+   *   goalTokenBudget, permissionAutoAccept, variant) are preserved.
+   * - A task whose loopFile no longer matches any discovered loop file is
+   *   unscheduled (removed). JSON-configured tasks (no loopFile) are never
+   *   removed.
+   * - A task whose loop file still exists but is currently unparseable is
+   *   KEPT with its last good definition: only a genuinely removed file
+   *   unschedules a task, so transiently malformed files (mid-edit, bad
+   *   merge) never delete tasks or their runtime state.
+   * - Loops with no matching task are created under a deterministic
+   *   `loop:<scope>:<name>` id, so runtime state survives restarts.
+   * - Malformed definitions are skipped with a warning and never block valid
+   *   loops; the scheduler passes them as `definition: null` entries, and
+   *   normalization failures here are isolated per loop.
+   */
+  const reconcileLoopTasks = async (projectID, loops) => {
+    return withProjectWriteLock(projectID, async () => {
+      const now = Date.now();
+      const current = await readProjectConfigFromDisk(projectID);
+      const tasks = current.scheduledTasks;
+
+      const activeLoopFilePaths = new Set();
+      const pendingLoops = new Map();
+      const loopsByPath = new Map();
+      for (const loop of loops) {
+        if (!loop || typeof loop.filePath !== 'string' || !loop.filePath) {
+          continue;
+        }
+        activeLoopFilePaths.add(loop.filePath);
+        if (loop.definition && typeof loop.definition === 'object') {
+          pendingLoops.set(loop.definition.name, loop);
+          loopsByPath.set(loop.filePath, loop);
+        }
+      }
+
+      const consumedLoopPaths = new Set();
+      const nextTasks = [];
+      const replacedIDs = new Set();
+      for (const task of tasks) {
+        if (task.loopFile && !activeLoopFilePaths.has(task.loopFile)) {
+          // The driving loop file was removed (or renamed) — unschedule.
+          continue;
+        }
+
+        // Loop-owned tasks adopt by file path (covers renames of the `name`
+        // field); JSON tasks adopt by name.
+        const loop = task.loopFile
+          ? loopsByPath.get(task.loopFile) || null
+          : pendingLoops.get(task.name) || null;
+        if (loop) {
+          try {
+            const adopted = normalizeTaskForStorage(
+              {
+                ...task,
+                ...loop.definition,
+                // File-defined execution fields win; UI-only fields the file
+                // format does not define are preserved from the task.
+                execution: { ...task.execution, ...loop.definition.execution },
+                loopFile: loop.filePath,
+              },
+              {
+                now,
+                createId: taskIDFactory,
+                existingTask: task,
+                allowCreate: false,
+                refreshUpdatedAt: false,
+              },
+            );
+            nextTasks.push(adopted);
+            replacedIDs.add(adopted.id);
+            pendingLoops.delete(loop.definition.name);
+            if (task.loopFile) {
+              consumedLoopPaths.add(task.loopFile);
+              loopsByPath.delete(task.loopFile);
+            }
+          } catch (error) {
+            console.warn(`[scheduled-tasks] skipped loop ${loop.filePath} for task "${task.name}":`, error?.message ?? error);
+            nextTasks.push(task);
+          }
+          continue;
+        }
+
+        if (task.loopFile && consumedLoopPaths.has(task.loopFile)) {
+          // Orphan duplicate: another task already adopted this loop file
+          // (left over from a rename) — unschedule it.
+          continue;
+        }
+
+        nextTasks.push(task);
+      }
+
+      for (const loop of pendingLoops.values()) {
+        try {
+          const id = `loop:${loop.scope}:${loop.definition.name}`;
+          const created = normalizeTaskForStorage(
+            { id, ...loop.definition, loopFile: loop.filePath },
+            {
+              now,
+              createId: taskIDFactory,
+              existingTask: null,
+              allowCreate: true,
+              refreshUpdatedAt: false,
+            },
+          );
+          nextTasks.push(created);
+          replacedIDs.add(created.id);
+        } catch (error) {
+          console.warn(`[scheduled-tasks] skipped loop ${loop.filePath}:`, error?.message ?? error);
+        }
+      }
+
+      await writeProjectConfigToDisk(projectID, {
+        version: PROJECT_CONFIG_VERSION,
+        scheduledTasks: toStoredTasks(current, nextTasks, { replacedIDs }),
+      });
+
+      return nextTasks;
+    });
+  };
+
+  // The client-owned part of the file (worktree setup, project actions, draft
+  // starters); see `project-setup.js`. Reads are lock-free like task lists;
+  // an update merges the sanitized patch over the raw document under the same
+  // cross-process lock the task writers use, so neither side clobbers the other.
+  // The shared file lives in the project's checkout. The checkout path comes
+  // from the id itself (`path_<base64url>`), with the personal file's
+  // `projectPath` as the fallback for ids of another form. A missing file is
+  // the normal case; an unreadable or unparsable one is reported as invalid,
+  // never as "no shared setup".
+  const projectPathOf = (projectID, personalRaw) => (
+    projectPathFromId(projectID) || (typeof personalRaw.projectPath === 'string' ? personalRaw.projectPath.trim() : '')
+  );
+  const sharedConfigPathOf = (projectPath) => path.join(projectPath, ...SHARED_CONFIG_RELATIVE_PATH.split('/'));
+
+  const readSharedProjectConfig = async (projectID, personalRaw) => {
+    const projectPath = projectPathOf(projectID, personalRaw);
+    if (!projectPath) return { status: 'missing' };
+    let raw;
+    try {
+      raw = await fsPromises.readFile(sharedConfigPathOf(projectPath), 'utf8');
+    } catch (error) {
+      if (error && typeof error === 'object' && error.code === 'ENOENT') return { status: 'missing' };
+      return { status: 'invalid', reason: error instanceof Error ? error.message : String(error) };
+    }
+    return parseSharedProjectConfig(raw);
+  };
+
+  const mergedProjectSetupOf = async (projectID, personalRaw) => (
+    mergeProjectSetup(projectSetupViewOf(personalRaw), await readSharedProjectConfig(projectID, personalRaw))
+  );
+
+  const readProjectSetup = async (projectID) => mergedProjectSetupOf(projectID, await readRawProjectConfigFromDisk(projectID));
+
+  const updateProjectSetup = async (projectID, patch) => {
+    const stored = projectSetupPatchToStored(patch);
+    return withProjectWriteLock(projectID, async () => {
+      const existing = await readRawProjectConfigFromDisk(projectID);
+      const merged = { ...existing, ...stored };
+      for (const [key, value] of Object.entries(stored)) {
+        if (value === undefined) delete merged[key];
+      }
+      await writeRawProjectConfigToDisk(projectID, merged);
+      return mergedProjectSetupOf(projectID, merged);
+    });
+  };
+
+  /**
+   * Change the team's shared file in the checkout: the patch replaces the
+   * keys it names over the current file (a broken file counts as empty, so
+   * a write repairs it). A result with nothing in it removes the file (and
+   * the `.openchamber` folder when that leaves it empty), so unsharing the
+   * last item leaves no trace. The writer has seen the commands it just
+   * shared, so the personal trust record is set to the new hash on this
+   * instance; teammates still get the prompt.
+   */
+  const updateSharedProjectSetup = async (projectID, patch) => (
+    withProjectWriteLock(projectID, async () => {
+      const personalRaw = await readRawProjectConfigFromDisk(projectID);
+      const projectPath = projectPathOf(projectID, personalRaw);
+      if (!projectPath) throw new Error('project checkout not found');
+      try {
+        if (!(await fsPromises.stat(projectPath)).isDirectory()) throw new Error('project checkout not found');
+      } catch {
+        throw new Error('project checkout not found');
+      }
+      const currentRead = await readSharedProjectConfig(projectID, personalRaw);
+      const current = currentRead.status === 'ok' ? currentRead.config : EMPTY_SHARED_PROJECT_CONFIG;
+      const next = applySharedProjectSetupPatch(current, patch);
+
+      const filePath = sharedConfigPathOf(projectPath);
+      if (isSharedProjectConfigEmpty(next)) {
+        await fsPromises.rm(filePath, { force: true });
+        await fsPromises.rmdir(path.dirname(filePath)).catch(() => {});
+      } else {
+        await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
+        const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+        try {
+          await fsPromises.writeFile(temporaryPath, serializeSharedProjectConfig(next), 'utf8');
+          await fsPromises.rename(temporaryPath, filePath);
+        } catch (error) {
+          await fsPromises.rm(temporaryPath, { force: true }).catch(() => {});
+          throw error;
+        }
+      }
+
+      const hash = sharedTrustHashOf(next);
+      const personalNext = { ...personalRaw };
+      if (hash) personalNext.sharedTrust = { hash, trustedAt: Date.now() };
+      else delete personalNext.sharedTrust;
+      await writeRawProjectConfigToDisk(projectID, personalNext);
+      return mergedProjectSetupOf(projectID, personalNext);
+    })
+  );
+
+  /**
+   * The absolute repository plans folder of a project: `plansDir` from the
+   * shared file when set, else the default `.openchamber/plans`. Setting
+   * `plansDir` replaces the default outright (nothing is read from it any
+   * more); moving files between the two is the user's job. Null only when the
+   * checkout cannot be located.
+   */
+  const resolveSharedPlansDir = async (projectID) => {
+    const personalRaw = await readRawProjectConfigFromDisk(projectID);
+    const projectPath = projectPathOf(projectID, personalRaw);
+    if (!projectPath) return null;
+    const shared = await readSharedProjectConfig(projectID, personalRaw);
+    const relative = shared.status === 'ok' && shared.config.plansDir ? shared.config.plansDir : DEFAULT_PLANS_DIR;
+    return path.join(projectPath, ...relative.split('/'));
+  };
+
   return {
+    readProjectSetup,
+    updateProjectSetup,
+    updateSharedProjectSetup,
+    resolveSharedPlansDir,
     listScheduledTasks,
     upsertScheduledTask,
     deleteScheduledTask,
     updateScheduledTaskState,
+    updateScheduledTaskStateIf,
+    reconcileLoopTasks,
     resolveProjectConfigPath,
   };
 };

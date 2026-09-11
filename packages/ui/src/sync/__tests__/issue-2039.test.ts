@@ -4,6 +4,13 @@ import { togglePermissionAutoAccept } from "../../components/chat/permissionAuto
 const storage = new Map<string, string>()
 const createSessionCalls: Array<{ title?: string; directory: string | null; parentID: string | null; metadata?: unknown }> = []
 const permissionAutoAcceptCalls: Array<[string, boolean]> = []
+const savedVariantCalls: Array<string | undefined> = []
+let configVariantOverride: string | null | undefined
+let projects: Array<{ id: string; path: string; label: string }> = []
+const createdWorktreeProjects: Array<{ id: string; path: string }> = []
+// Sync's session→directory index. `createSession` writes it, and directory
+// resolution reads it as the authoritative source, so the mock has to keep one.
+const sessionDirectoryRegistry = new Map<string, string>()
 let createdSessionDirectory: string | undefined
 
 const getMockCalls = (fn: unknown): unknown[][] => ((fn as { mock?: { calls: unknown[][] } }).mock?.calls ?? [])
@@ -63,6 +70,7 @@ const deferredStorage: Storage = {
 
 mock.module("@/stores/utils/safeStorage", () => ({
   getDeferredSafeStorage: () => deferredStorage,
+  getSafeSessionStorage: () => deferredStorage,
   createDeferredSafeJSONStorage: () => ({
     getItem: async () => null,
     setItem: async () => undefined,
@@ -73,6 +81,9 @@ mock.module("@/stores/utils/safeStorage", () => ({
 mock.module("@/lib/opencode/client", () => ({
   opencodeClient: {
     getDirectory: () => null,
+    getFilesystemHome: mock(async () => "/home/test"),
+    getFilesystemHomeInfo: async () => ({ home: "/home/test" }),
+    createDirectory: mock(async (path: string) => ({ success: true, path })),
     setDirectory: mock(() => undefined),
   },
 }))
@@ -91,6 +102,9 @@ mock.module("@/stores/useConfigStore", () => ({
   useConfigStore: {
     getState: () => ({
       currentAgentName: "agent-default",
+      currentProviderId: "provider",
+      currentModelId: "model",
+      currentVariantSelection: { override: configVariantOverride, inherited: "high" },
       agents: [],
       activateDirectory: mock(async () => undefined),
       applyDefaultModelAgentSelection: mock(() => undefined),
@@ -101,7 +115,7 @@ mock.module("@/stores/useConfigStore", () => ({
 mock.module("@/stores/useProjectsStore", () => ({
   useProjectsStore: {
     getState: () => ({
-      projects: [],
+      projects,
       activeProjectId: null,
       getActiveProject: () => null,
     }),
@@ -117,11 +131,18 @@ mock.module("@/stores/useDirectoryStore", () => ({
   },
 }))
 
+mock.module("@/stores/useSessionGoalArmStore", () => ({
+  useSessionGoalArmStore: {
+    getState: () => ({ setArmed: () => undefined }),
+  },
+}))
+
 mock.module("@/stores/useGlobalSessionsStore", () => ({
   useGlobalSessionsStore: {
     getState: () => ({
       activeSessions: [],
       archivedSessions: [],
+      entityById: new Map(),
     }),
   },
   resolveGlobalSessionDirectory: () => null,
@@ -165,7 +186,9 @@ mock.module("../selection-store", () => ({
       saveSessionModelSelection: () => undefined,
       saveSessionAgentSelection: () => undefined,
       saveAgentModelForSession: () => undefined,
-      saveAgentModelVariantForSession: () => undefined,
+      saveAgentModelVariantForSession: (_sessionId: string, _agent: string, _provider: string, _model: string, variant: string | undefined) => {
+        savedVariantCalls.push(variant)
+      },
       getSessionAgentSelection: () => null,
       getSessionModelSelection: () => null,
       getAgentModelForSession: () => null,
@@ -174,7 +197,11 @@ mock.module("../selection-store", () => ({
   },
 }))
 
+// Spread the real module so the stub stays a patch: anything else importing
+// runtime-switch in this process still gets its remaining exports.
+const runtimeSwitchModule = await import("@/lib/runtime-switch")
 mock.module("@/lib/runtime-switch", () => ({
+  ...runtimeSwitchModule,
   getRuntimeApiBaseUrl: () => "",
   getRuntimeKey: () => "test-runtime",
   initializeRuntimeEndpoint: () => undefined,
@@ -239,18 +266,41 @@ mock.module("../sync-refs", () => ({
   getSyncMessages: () => [],
   getSyncParts: () => [],
   getAllSyncSessions: () => [],
-  getSyncSessionDirectory: () => null,
+  getSyncSessionDirectory: (sessionId: string) => sessionDirectoryRegistry.get(sessionId) ?? null,
+  registerSessionDirectory: (sessionId: string, directory: string) => {
+    sessionDirectoryRegistry.set(sessionId, directory)
+  },
 }))
 
 mock.module("../session-actions", () => ({
-  createSession: mock(async (title: string | undefined, directory: string | null, parentID: string | null, metadata?: unknown) => {
+  // Mirrors the real action's authoritative steps: the created session becomes
+  // current under the directory the server confirmed, and that directory enters
+  // the routing index. Everything these tests assert about routing depends on
+  // those two, so a mock without them tests nothing.
+  createSession: mock(async (
+    title: string | undefined,
+    directory: string | null,
+    parentID: string | null,
+    metadata?: unknown,
+    selectionTransition?: "submitted-draft",
+  ) => {
     createSessionCalls.push({ title, directory, parentID, metadata })
-    return { id: "ses_issue_2039", directory: createdSessionDirectory ?? directory }
+    const session = { id: "ses_issue_2039", directory: createdSessionDirectory ?? directory }
+    const sessionDirectory = session.directory ?? null
+    if (sessionDirectory) {
+      sessionDirectoryRegistry.set(session.id, sessionDirectory)
+    }
+    const { useSessionUIStore: store } = await import("../session-ui-store")
+    store.getState().setCurrentSession(session.id, sessionDirectory, selectionTransition)
+    store.getState().markSessionAsOpenChamberCreated(session.id)
+    return session
   }),
   deleteSession: mock(async () => true),
   deleteSessions: mock(async () => ({ deletedIds: [], failedIds: [] })),
   archiveSession: mock(async () => true),
   archiveSessions: mock(async () => ({ archivedIds: [], failedIds: [] })),
+  unarchiveSession: mock(async () => true),
+  unarchiveSessions: mock(async () => ({ restoredIds: [], failedIds: [] })),
   updateSessionTitle: mock(async () => undefined),
   shareSession: mock(async () => undefined),
   unshareSession: mock(async () => undefined),
@@ -263,6 +313,36 @@ mock.module("../session-actions", () => ({
   getSessionLastAssistantModel: () => null,
   patchSessionMetadata: mock(async () => undefined),
   abortCurrentOperation: mock(async () => undefined),
+}))
+
+mock.module("@/lib/git/branchNameGenerator", () => ({
+  generateBranchName: () => "generated-branch",
+}))
+
+mock.module("@/lib/openchamberConfig", () => ({
+  getWorktreeSetupCommands: async () => [],
+  getWorktreeSetupWaitEnabled: async () => false,
+}))
+mock.module("@/lib/sharedTrustConfirmation", () => ({
+  resolveWorktreeSetupCommands: async () => [],
+}))
+
+mock.module("@/lib/worktrees/worktreeBootstrap", () => ({
+  waitForWorktreeBootstrap: async () => undefined,
+}))
+
+mock.module("@/lib/worktrees/worktreeCreate", () => ({
+  createWorktreeWithDefaults: async (project: { id: string; path: string }) => {
+    createdWorktreeProjects.push(project)
+    return {
+      source: "sdk",
+      name: "generated-branch",
+      path: "/worktrees/generated-branch",
+      projectDirectory: project.path,
+      branch: "generated-branch",
+      label: "generated-branch",
+    }
+  },
 }))
 
 const { materializeOpenDraftSession, useSessionUIStore } = await import("../session-ui-store")
@@ -318,16 +398,21 @@ describe("issue 2039 draft auto-accept", () => {
   beforeEach(() => {
     storage.clear()
     createSessionCalls.length = 0
+    sessionDirectoryRegistry.clear()
     permissionAutoAcceptCalls.length = 0
+    savedVariantCalls.length = 0
+    configVariantOverride = undefined
     createdSessionDirectory = undefined
 
     useSessionUIStore.setState({
       currentSessionId: null,
       currentSessionDirectory: null,
       newSessionDraft: {
+        draftId: 0,
         open: false,
         directoryOverride: null,
         parentID: null,
+        target: "chat",
       },
     })
   })
@@ -353,6 +438,29 @@ describe("issue 2039 draft auto-accept", () => {
     expect(useSessionUIStore.getState().currentSessionId).toBe("ses_issue_2039")
   })
 
+  test("stores only an explicit draft variant as the session override", async () => {
+    useSessionUIStore.getState().openNewSessionDraft()
+    await materializeOpenDraftSession({
+      providerID: "provider",
+      modelID: "model",
+      agent: "agent-default",
+      variant: "high",
+    })
+
+    expect(savedVariantCalls).toEqual([undefined])
+
+    configVariantOverride = "high"
+    useSessionUIStore.getState().openNewSessionDraft()
+    await materializeOpenDraftSession({
+      providerID: "provider",
+      modelID: "model",
+      agent: "agent-default",
+      variant: "high",
+    })
+
+    expect(savedVariantCalls).toEqual([undefined, "high"])
+  })
+
   test("does not apply draft auto-accept after the draft is closed", async () => {
     useSessionUIStore.getState().openNewSessionDraft()
     useSessionUIStore.getState().setDraftPermissionAutoAcceptEnabled(true)
@@ -369,6 +477,27 @@ describe("issue 2039 draft auto-accept", () => {
     expect(result).toBeNull()
     expect(createSessionCalls).toHaveLength(0)
     expect(permissionAutoAcceptCalls).toHaveLength(0)
+  })
+
+  test("transfers draft project context pins only to the session it creates", async () => {
+    useSessionUIStore.getState().openNewSessionDraft({
+      projectContextPins: { notes: ["note-a"], plans: [] },
+    })
+    useSessionUIStore.getState().setDraftProjectContextPin("plan", "plan-a", true)
+
+    await materializeOpenDraftSession({ providerID: "provider", modelID: "model" })
+
+    expect(createSessionCalls[0]?.metadata).toEqual({
+      openchamber: {
+        project_context_pins: { notes: ["note-a"], plans: ["plan-a"] },
+      },
+    })
+    expect(useSessionUIStore.getState().newSessionDraft.projectContextPins).toBe(undefined)
+
+    useSessionUIStore.getState().openNewSessionDraft()
+    await materializeOpenDraftSession({ providerID: "provider", modelID: "model" })
+
+    expect(createSessionCalls[1]?.metadata).toBe(undefined)
   })
 
   test("uses the server-authoritative directory after worktree session creation", async () => {
@@ -410,5 +539,96 @@ describe("issue 2039 draft auto-accept", () => {
     })
 
     expect(useSessionUIStore.getState().getDirectoryForSession(sessionId)).toBe("/canonical/worktree")
+  })
+})
+
+describe("assistant answer worktree routing", () => {
+  test("reports session creation failure instead of completing silently", async () => {
+    const state = useSessionUIStore.getState()
+    const createFromAssistantMessage = state.createSessionFromAssistantMessage
+    const originalCreateSession = state.createSession
+
+    useSessionUIStore.setState({
+      createSession: async () => null,
+    })
+
+    try {
+      await expect(createFromAssistantMessage({
+        sessionId: "source-session",
+        directory: "/repo",
+        text: "Implement the plan",
+      }, {
+        providerID: "provider",
+        modelID: "model",
+        variant: "",
+        agent: "build",
+        instructions: "Follow the answer",
+      })).rejects.toThrow("Failed to create session")
+    } finally {
+      useSessionUIStore.setState({ createSession: originalCreateSession })
+    }
+  })
+
+  test("creates a sibling worktree from the captured source worktree directory", async () => {
+    projects = [
+      { id: "project", path: "/repo", label: "Repo" },
+      { id: "source-worktree", path: "/worktrees/source", label: "Source worktree" },
+    ]
+    createdWorktreeProjects.length = 0
+    const sourceWorktree = {
+      path: "/worktrees/source",
+      projectDirectory: "/repo",
+      branch: "source",
+      label: "source",
+    }
+    const state = useSessionUIStore.getState()
+    const createFromAssistantMessage = state.createSessionFromAssistantMessage
+    const originalCreateSession = state.createSession
+    const originalSendMessage = state.sendMessage
+    const originalWorktreeMetadata = state.worktreeMetadata
+    let createdDirectory: string | null | undefined
+
+    useSessionUIStore.setState({
+      availableWorktreesByProject: new Map([["/repo", [sourceWorktree]]]),
+      worktreeMetadata: new Map([["source-session", sourceWorktree]]),
+      createSession: async (_title, directory) => {
+        createdDirectory = directory
+        return {
+          id: "created-session",
+          slug: "created-session",
+          projectID: "project",
+          directory: directory ?? "",
+          title: "Created session",
+          version: "1",
+          time: { created: 1, updated: 1 },
+        }
+      },
+      sendMessage: async () => undefined,
+    })
+
+    try {
+      await createFromAssistantMessage({
+        sessionId: "source-session",
+        directory: "/worktrees/source",
+        text: "Implement the plan",
+      }, {
+        providerID: "provider",
+        modelID: "model",
+        variant: "",
+        agent: "build",
+        instructions: "Follow the answer",
+        createWorktree: true,
+      })
+    } finally {
+      useSessionUIStore.setState({
+        createSession: originalCreateSession,
+        sendMessage: originalSendMessage,
+        worktreeMetadata: originalWorktreeMetadata,
+      })
+      projects = []
+    }
+
+    expect(createdWorktreeProjects).toEqual([{ id: "project", path: "/repo" }])
+    expect(createdDirectory).toBe("/worktrees/generated-branch")
   })
 })

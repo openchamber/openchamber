@@ -593,7 +593,7 @@ OPTIONS:
   --lan                   Bind to 0.0.0.0 for LAN access
   --server <url>          Public/server URL for connect-url links
   --relay                 connect-url: also include the end-to-end-encrypted relay transport
-  --ui-password           Protect browser UI with single password
+  --ui-password [password] Protect browser UI with a password (generates one when omitted)
   --api-only              Start API routes only, without serving browser UI assets
   --foreground            Run server in foreground (use with systemd/process managers)
   --no-daemon             Alias for --foreground
@@ -752,7 +752,7 @@ COMMON OPTIONS:
   -p, --port              Target OpenChamber instance port
   --host                  Bind address when auto-starting an instance
   --lan                   Bind to 0.0.0.0 when auto-starting an instance
-  --ui-password           Protect browser UI when auto-starting an instance
+  --ui-password [password] Protect browser UI when auto-starting an instance (generates one when omitted)
   --api-only              Start API routes only when auto-starting an instance
   --json                  Output machine-readable JSON
   --all                   Apply to all running instances (doctor default, stop)

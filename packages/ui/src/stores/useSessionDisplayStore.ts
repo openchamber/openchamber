@@ -6,8 +6,13 @@ type ProjectSortOrder = 'manual' | 'a-z' | 'z-a' | 'date-added' | 'recent';
 // 'by-worktree' keeps per-worktree sub-headers inside each project zone
 // (parallel-work overview); 'flat' merges everything into one recency list.
 type SessionGroupingMode = 'by-worktree' | 'flat';
+type ProjectDisplayMode = 'all' | 'single';
 
 type SessionDisplayStore = {
+  projectDisplayMode: ProjectDisplayMode;
+  singleProjectId: string | null;
+  setProjectDisplayMode: (mode: ProjectDisplayMode) => void;
+  setSingleProjectId: (projectId: string) => void;
   sessionGroupingMode: SessionGroupingMode;
   setSessionGroupingMode: (mode: SessionGroupingMode) => void;
   /** Project/recent zone headers stick to the top while their zone scrolls. */
@@ -50,6 +55,10 @@ export const migrateSessionDisplayState = (
 export const useSessionDisplayStore = create<SessionDisplayStore>()(
   persist(
     (set) => ({
+      projectDisplayMode: 'all',
+      singleProjectId: null,
+      setProjectDisplayMode: (mode) => set({ projectDisplayMode: mode }),
+      setSingleProjectId: (projectId) => set({ singleProjectId: projectId }),
       sessionGroupingMode: 'by-worktree',
       setSessionGroupingMode: (mode) => set({ sessionGroupingMode: mode }),
       stickyZoneHeaders: true,
@@ -68,13 +77,14 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
     }),
     {
       name: 'session-display-mode',
-      version: 4,
+      version: 5,
       // v1→v2 adds projectSortOrder using the canonical manual ordering.
       // v2→v3 replaces the previously shipped recent default with manual.
       // v3→v4 removes displayMode (single sidebar row layout).
+      // v4→v5 adds the independent all-projects/single-project view mode.
       migrate: migrateSessionDisplayState,
     },
   ),
 );
 
-export type { ProjectSortOrder, SessionGroupingMode };
+export type { ProjectDisplayMode, ProjectSortOrder };

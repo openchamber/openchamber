@@ -65,10 +65,8 @@ afterAll(() => {
 
 const sessionState = (sessionId: string): AppRouteState => ({
   sessionId,
-  tab: 'chat',
   isSettingsOpen: false,
   settingsPath: '',
-  diffFile: null,
 });
 
 describe('updateBrowserURL embedded-session-chat guard', () => {

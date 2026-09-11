@@ -6,14 +6,24 @@ type ConfigResponse = { data: Record<string, unknown> };
 
 const configResolvers: Array<(response: ConfigResponse) => void> = [];
 let configCalls = 0;
+let runtimeKey = 'test-runtime';
 const promptAsyncCalls: unknown[][] = [];
 const promptAsyncResults: Array<unknown> = [];
+const pathGetResults: Array<unknown> = [];
 
 const promptAsyncMock = mock(async (...args: unknown[]) => {
   promptAsyncCalls.push(args);
   const next = promptAsyncResults.shift();
   if (next instanceof Error) throw next;
   return next ?? { response: new Response(null, { status: 200 }) };
+});
+
+let pathGetCalls = 0;
+const pathGetMock = mock(async () => {
+  pathGetCalls += 1;
+  const next = pathGetResults.shift();
+  if (next instanceof Error) throw next;
+  return next ?? { data: { directory: '/workspace/project' } };
 });
 
 mock.module('@opencode-ai/sdk/v2', () => ({
@@ -28,6 +38,9 @@ mock.module('@opencode-ai/sdk/v2', () => ({
     },
     session: {
       promptAsync: promptAsyncMock,
+    },
+    path: {
+      get: pathGetMock,
     },
   })),
 }));
@@ -44,13 +57,28 @@ mock.module('@/lib/runtime-url', () => ({
 
 mock.module('@/lib/runtime-switch', () => ({
   getRuntimeApiBaseUrl: mock(() => ''),
-  getRuntimeKey: mock(() => 'test-runtime'),
+  getRuntimeKey: mock(() => runtimeKey),
 }));
 
+type DirectoryProbeQuery = { path?: string };
+const runtimeFetchCalls: Array<{ path: string; query: DirectoryProbeQuery | undefined }> = [];
+const runtimeFetchResults: Array<Response | Error> = [];
+const fsHomeResponses: Array<Response | Error> = [];
+
 mock.module('@/lib/runtime-fetch', () => ({
-  runtimeFetch: mock(async () => new Response(JSON.stringify([]), {
-    headers: { 'Content-Type': 'application/json' },
-  })),
+  runtimeFetch: mock(async (input: string | URL | Request, init?: { query?: DirectoryProbeQuery }) => {
+    if (typeof input === 'string' && input.includes('/fs/home')) {
+      const next = fsHomeResponses.shift();
+      if (next instanceof Error) throw next;
+      if (next) return next;
+    }
+    if (typeof input === 'string') runtimeFetchCalls.push({ path: input, query: init?.query });
+    const next = runtimeFetchResults.shift();
+    if (next instanceof Error) throw next;
+    return next ?? new Response(JSON.stringify([]), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }),
 }));
 
 mock.module('@/lib/startupTrace', () => ({
@@ -60,8 +88,94 @@ mock.module('@/lib/startupTrace', () => ({
 const { opencodeClient } = await import(`./client?cache-test=${Date.now()}`);
 
 beforeEach(() => {
+  runtimeKey = 'test-runtime';
   promptAsyncCalls.length = 0;
   promptAsyncResults.length = 0;
+  pathGetResults.length = 0;
+  pathGetCalls = 0;
+  runtimeFetchCalls.length = 0;
+  runtimeFetchResults.length = 0;
+  fsHomeResponses.length = 0;
+});
+
+describe('opencodeClient directory availability', () => {
+  type ProbeBody = { error: string; reason?: string } | { isDirectory: boolean } | { isFile: boolean; size: number };
+  const json = (status: number, body: ProbeBody): Response => new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  test('stats the directory through the OpenChamber filesystem route, never through OpenCode path resolution', async () => {
+    runtimeFetchResults.push(json(200, { isDirectory: true }));
+    expect(await opencodeClient.getDirectoryAvailability('/private/deleted-worktree')).toBe('available');
+    expect(runtimeFetchCalls).toEqual([{ path: '/api/fs/directory-stat', query: { path: '/private/deleted-worktree' } }]);
+    expect(pathGetCalls).toBe(0);
+  });
+
+  test('distinguishes a missing directory from an unavailable probe', async () => {
+    runtimeFetchResults.push(json(404, { error: 'Directory not found', reason: 'not-found' }));
+    expect(await opencodeClient.getDirectoryAvailability('/private/deleted-worktree')).toBe('missing');
+
+    runtimeFetchResults.push(json(400, { error: 'Specified path is not a directory', reason: 'not-directory' }));
+    expect(await opencodeClient.getDirectoryAvailability('/private/deleted-worktree')).toBe('missing');
+
+    runtimeFetchResults.push(json(200, { isFile: true, size: 12 }));
+    expect(await opencodeClient.getDirectoryAvailability('/private/deleted-worktree')).toBe('unknown');
+
+    runtimeFetchResults.push(json(404, { error: 'Not Found' }));
+    expect(await opencodeClient.getDirectoryAvailability('/private/deleted-worktree')).toBe('unknown');
+
+    runtimeFetchResults.push(json(500, { error: 'Failed to stat path' }));
+    expect(await opencodeClient.getDirectoryAvailability('/private/deleted-worktree')).toBe('unknown');
+
+    runtimeFetchResults.push(json(403, { error: 'Access to directory denied', reason: 'os-permission' }));
+    expect(await opencodeClient.getDirectoryAvailability('/private/deleted-worktree')).toBe('unknown');
+
+    runtimeFetchResults.push(json(501, { error: 'Unsupported' }));
+    expect(await opencodeClient.getDirectoryAvailability('/private/deleted-worktree')).toBe('unknown');
+
+    runtimeFetchResults.push(new Error('offline'));
+    expect(await opencodeClient.getDirectoryAvailability('/private/deleted-worktree')).toBe('unknown');
+  });
+});
+
+describe('opencodeClient getFilesystemHomeInfo', () => {
+  type HomePayload = { home?: string; chatsRoot?: string | number };
+  const fsHomeResponse = (body: HomePayload) => new Response(JSON.stringify(body), {
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  test('returns the server-provided chats root', async () => {
+    fsHomeResponses.push(fsHomeResponse({ home: '/Users/tester', chatsRoot: '/srv/openchamber-chats' }));
+    expect(await opencodeClient.getFilesystemHomeInfo()).toEqual({ home: '/Users/tester', chatsRoot: '/srv/openchamber-chats' });
+  });
+
+  test('returns the home for an older server that answers without chatsRoot', async () => {
+    fsHomeResponses.push(fsHomeResponse({ home: '/Users/tester' }));
+    expect(await opencodeClient.getFilesystemHomeInfo()).toEqual({ home: '/Users/tester' });
+  });
+
+  test('throws on a failed fetch', async () => {
+    fsHomeResponses.push(new Error('transient network failure'));
+    await expect(opencodeClient.getFilesystemHomeInfo()).rejects.toThrow('transient network failure');
+  });
+
+  test('throws on a non-ok response', async () => {
+    fsHomeResponses.push(new Response('unavailable', { status: 503 }));
+    await expect(opencodeClient.getFilesystemHomeInfo()).rejects.toThrow('503');
+  });
+
+  test('rejects missing home and relative roots rather than caching a fallback', async () => {
+    fsHomeResponses.push(fsHomeResponse({}));
+    await expect(opencodeClient.getFilesystemHomeInfo()).rejects.toThrow();
+    fsHomeResponses.push(fsHomeResponse({ home: '/home/user', chatsRoot: 'relative' }));
+    await expect(opencodeClient.getFilesystemHomeInfo()).rejects.toThrow();
+  });
+
+  test('throws on a malformed payload', async () => {
+    fsHomeResponses.push(fsHomeResponse({ chatsRoot: 42 }));
+    await expect(opencodeClient.getFilesystemHomeInfo()).rejects.toThrow();
+  });
 });
 
 describe('opencodeClient getConfig cache', () => {
@@ -159,5 +273,35 @@ describe('opencodeClient prompt retry behavior', () => {
 
     expect(promptAsyncCalls.length).toBe(1);
     expect(error instanceof Error ? error.message : String(error)).toContain('Failed to send message (503)');
+  });
+
+  test('does not dispatch after the runtime changes while preparing attachments', async () => {
+    runtimeKey = 'runtime-a';
+    const pending = opencodeClient.sendMessage({
+      id: 'ses_runtime_race',
+      providerID: 'runtime-race-provider',
+      modelID: 'model-a',
+      text: 'hello',
+      runtimeKey: 'runtime-a',
+      files: [{
+        type: 'file',
+        mime: 'text/markdown',
+        filename: 'notes.md',
+        url: 'data:text/markdown,hello',
+      }],
+    });
+
+    runtimeKey = 'runtime-b';
+
+    let error: unknown = null;
+    try {
+      await pending;
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error instanceof Error ? error.message : String(error)).toContain('runtime changed');
+    expect(promptAsyncCalls).toHaveLength(0);
   });
 });

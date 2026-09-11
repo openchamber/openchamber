@@ -2,7 +2,7 @@ import React from 'react';
 import type { Part } from '@opencode-ai/sdk/v2';
 
 import { Icon } from '@/components/icon/Icon';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey, type I18nParams } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
 import { getMessagePreview } from '../lib/messagePreview';
@@ -58,12 +58,13 @@ const PANEL_HIDE_DELAY_MS = 160;
 const buildPromptEntries = (
     turnIds: string[],
     previewsByTurnId: Map<string, Part[]>,
+    t: (key: I18nKey, params?: I18nParams) => string,
 ): PromptEntry[] => {
     return turnIds.map((turnId) => {
         const parts = previewsByTurnId.get(turnId) ?? [];
         return {
             turnId,
-            preview: getMessagePreview(parts, PREVIEW_MAX_CHARS),
+            preview: getMessagePreview(parts, PREVIEW_MAX_CHARS, t),
         };
     });
 };
@@ -128,8 +129,8 @@ export function PromptNavigatorRail({
     }, []);
 
     const prompts = React.useMemo(
-        () => buildPromptEntries(turnIds, previewsByTurnId),
-        [previewsByTurnId, turnIds],
+        () => buildPromptEntries(turnIds, previewsByTurnId, t),
+        [previewsByTurnId, t, turnIds],
     );
 
     const visibleCount = Math.min(prompts.length, MAX_VISIBLE_TICKS);

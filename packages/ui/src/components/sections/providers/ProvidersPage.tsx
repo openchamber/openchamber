@@ -1,10 +1,12 @@
+import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsSection, SETTINGS_CUSTOM_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
+import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,15 +20,27 @@ import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
+import type { ConfigChangeScope } from '@/lib/configSync';
+import { recordDeferredOpenCodeRestart } from '@/lib/opencode/deferredRestart';
 import { cn } from '@/lib/utils';
-import { copyTextToClipboard } from '@/lib/clipboard';
-import { openExternalUrl } from '@/lib/url';
 import type { ModelMetadata } from '@/types';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { opencodeClient } from '@/lib/opencode/client';
-import { shouldLoadAvailableProviders } from './providerAvailability';
+import { requiresProviderAuth, shouldLoadAvailableProviders } from './providerAvailability';
+import {
+  getOAuthAuthMethods,
+  parseAuthPayload,
+  providerHasCredentials,
+  requiresOpenCodeRestartAfterOAuth,
+  shouldAutoOpenAuthPanel,
+  shouldShowApiKeyAuth,
+  shouldShowModelsSection,
+  type AuthMethod,
+  type OAuthAuthMethodEntry,
+} from './providerAuth';
 import { CustomProviderForm } from './CustomProviderForm';
+import { ProviderOAuthMethods, type ProviderOAuthMethod } from './ProviderOAuthMethods';
 import {
   buildAuthSetRequest,
   buildProviderUpsertRequest,
@@ -38,6 +52,14 @@ import {
   type CustomProviderPersistPlan,
   type ProviderConfigScope,
 } from './custom-provider-form';
+
+/**
+ * Providers whose credentials come from several env vars (Bedrock, Azure,
+ * Vertex) never get a single resolved `Provider.key` from OpenCode, so the
+ * declared env list is the only signal that they are configured at all.
+ */
+const providerDeclaresEnv = (provider: { env?: string[] } | undefined): boolean =>
+  Array.isArray(provider?.env) && provider.env.some((name) => name.trim().length > 0);
 
 const formatCompactNumber = (value: number) => new Intl.NumberFormat(getCurrentIntlLocale(), {
   notation: 'compact',
@@ -59,16 +81,6 @@ const formatTokens = (value?: number | null) => {
 
 const ADD_PROVIDER_ID = '__add_provider__';
 
-interface AuthMethod {
-  type?: string;
-  name?: string;
-  label?: string;
-  description?: string;
-  help?: string;
-  method?: number;
-  [key: string]: unknown;
-}
-
 interface ProviderOption {
   id: string;
   name?: string;
@@ -89,27 +101,15 @@ interface ProviderSources {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
-const normalizeAuthType = (method: AuthMethod) => {
-  const raw = typeof method.type === 'string' ? method.type : '';
-  const label = `${method.name ?? ''} ${method.label ?? ''}`.toLowerCase();
-  const merged = `${raw} ${label}`.toLowerCase();
-  if (merged.includes('oauth')) return 'oauth';
-  if (merged.includes('api')) return 'api';
-  return raw.toLowerCase();
-};
-
-const parseAuthPayload = (payload: unknown): Record<string, AuthMethod[]> => {
-  if (!isRecord(payload)) {
-    return {};
-  }
-  const result: Record<string, AuthMethod[]> = {};
-  for (const [providerId, value] of Object.entries(payload)) {
-    if (Array.isArray(value)) {
-      result[providerId] = value.filter((entry) => isRecord(entry)) as AuthMethod[];
-    }
-  }
-  return result;
-};
+const toOAuthMethods = (
+  entries: OAuthAuthMethodEntry[],
+  fallbackLabel: (index: number) => string,
+): ProviderOAuthMethod[] =>
+  entries.map(({ method, methodIndex }) => ({
+    index: methodIndex,
+    label: method.label || method.name || fallbackLabel(methodIndex),
+    prompts: method.prompts,
+  }));
 
 const normalizeProviderEntry = (entry: unknown): ProviderOption | null => {
   if (typeof entry === 'string') {
@@ -159,7 +159,10 @@ const parseProvidersPayload = (payload: unknown): ProviderOption[] => {
 
 export const ProvidersPage: React.FC = () => {
   const { t } = useI18n();
-  const providers = useConfigStore((state) => state.providers);
+  // Settings browses whichever project its own selector points at; the app
+  // stays where it is.
+  const settingsDirectory = useSettingsDirectory();
+  const providers = useConfigStore((state) => selectProvidersForDirectory(state, settingsDirectory));
   const selectedProviderId = useConfigStore((state) => state.selectedProviderId);
   const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
   const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
@@ -173,9 +176,6 @@ export const ProvidersPage: React.FC = () => {
   const [apiKeyInputs, setApiKeyInputs] = React.useState<Record<string, string>>({});
   const [authBusyKey, setAuthBusyKey] = React.useState<string | null>(null);
   const [modelQuery, setModelQuery] = React.useState('');
-  const [pendingOAuth, setPendingOAuth] = React.useState<{ providerId: string; methodIndex: number } | null>(null);
-  const [oauthCodes, setOauthCodes] = React.useState<Record<string, string>>({});
-  const [oauthDetails, setOauthDetails] = React.useState<Record<string, { url?: string; instructions?: string; userCode?: string }>>({});
   const [availableProviders, setAvailableProviders] = React.useState<ProviderOption[]>([]);
   const [availableLoading, setAvailableLoading] = React.useState(false);
   const [availableError, setAvailableError] = React.useState<string | null>(null);
@@ -183,7 +183,11 @@ export const ProvidersPage: React.FC = () => {
   const [providerSearchQuery, setProviderSearchQuery] = React.useState('');
   const [providerDropdownOpen, setProviderDropdownOpen] = React.useState(false);
   const [providerSources, setProviderSources] = React.useState<Record<string, ProviderSources>>({});
+  // Bumped after auth writes so the source snapshot is refetched even when the
+  // selected provider id is unchanged (OAuth/API key success path).
+  const [providerSourcesRevision, setProviderSourcesRevision] = React.useState(0);
   const [showAuthPanel, setShowAuthPanel] = React.useState(false);
+  const [authPanelDismissedForId, setAuthPanelDismissedForId] = React.useState<string | null>(null);
   const [editingCustomProviderId, setEditingCustomProviderId] = React.useState<string | null>(null);
   const [editingCustomFormInitial, setEditingCustomFormInitial] = React.useState<CustomProviderFormState | null>(null);
   const [editingCustomScope, setEditingCustomScope] = React.useState<ProviderConfigScope | null>(null);
@@ -205,7 +209,11 @@ export const ProvidersPage: React.FC = () => {
   }, [providers, selectedProviderId, setSelectedProvider]);
 
   React.useEffect(() => {
-    if (!isAddMode) {
+    // Auth methods drive which credential UI to show (API key vs OAuth). Keep
+    // them loaded for the active provider view so OAuth-only plugins never fall
+    // back to an API key form merely because methods were never fetched, and so
+    // an already-listed provider can still offer re-authentication.
+    if (!selectedProviderId) {
       return;
     }
 
@@ -236,7 +244,7 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [isAddMode, t]);
+  }, [selectedProviderId, t]);
 
   React.useEffect(() => {
     if (!shouldLoadAvailableProviders(isAddMode)) {
@@ -307,6 +315,7 @@ export const ProvidersPage: React.FC = () => {
   React.useEffect(() => {
     if (selectedProviderId === ADD_PROVIDER_ID) {
       setShowAuthPanel(true);
+      setAuthPanelDismissedForId(null);
       setEditingCustomProviderId(null);
       setEditingCustomFormInitial(null);
       setEditingCustomScope(null);
@@ -315,6 +324,7 @@ export const ProvidersPage: React.FC = () => {
     }
 
     setShowAuthPanel(false);
+    setAuthPanelDismissedForId(null);
     if (editingCustomProviderId && editingCustomProviderId !== selectedProviderId) {
       setEditingCustomProviderId(null);
       setEditingCustomFormInitial(null);
@@ -322,6 +332,38 @@ export const ProvidersPage: React.FC = () => {
       setCustomAuthFailureHint(null);
     }
   }, [selectedProviderId, editingCustomProviderId]);
+
+  // Unauthenticated providers (OAuth-only plugins before login) should open the
+  // auth panel instead of a false "Connected" summary. Respect an explicit Hide.
+  React.useEffect(() => {
+    if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID) {
+      return;
+    }
+    const sources = providerSources[selectedProviderId];
+    if (!sources) {
+      return;
+    }
+    const provider = providers.find((entry) => entry.id === selectedProviderId);
+    const hasCreds = providerHasCredentials({
+      key: provider?.key,
+      authSourceExists: sources.auth.exists,
+      optionsApiKey: (provider as { options?: { apiKey?: string | null } } | undefined)?.options?.apiKey ?? null,
+      envDeclared: providerDeclaresEnv(provider),
+    });
+    const isEditableCustomProvider = Boolean(
+      provider && isConfigDefinedCustomProvider(provider, sources)
+    );
+    if (
+      shouldAutoOpenAuthPanel({
+        sourcesLoaded: true,
+        hasCredentials: hasCreds,
+        userDismissed: authPanelDismissedForId === selectedProviderId,
+        isEditableCustomProvider,
+      })
+    ) {
+      setShowAuthPanel(true);
+    }
+  }, [selectedProviderId, providerSources, providers, authPanelDismissedForId]);
 
   React.useEffect(() => {
     if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID) {
@@ -334,7 +376,8 @@ export const ProvidersPage: React.FC = () => {
       try {
         // OpenChamber-only metadata endpoint: the SDK exposes provider data but
         // not local auth/source-file provenance used by this settings UI.
-        const response = await runtimeFetch(`/api/provider/${encodeURIComponent(selectedProviderId)}/source`, {
+        const query = settingsDirectory ? `?directory=${encodeURIComponent(settingsDirectory)}` : '';
+        const response = await runtimeFetch(`/api/provider/${encodeURIComponent(selectedProviderId)}/source${query}`, {
           method: 'GET',
           headers: { Accept: 'application/json' },
         });
@@ -363,8 +406,60 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedProviderId, t]);
+  }, [selectedProviderId, providerSourcesRevision, settingsDirectory, t]);
 
+  const refreshProviderSources = React.useCallback(() => {
+    setProviderSourcesRevision((revision) => revision + 1);
+  }, []);
+
+  const markAuthWriteSucceeded = React.useCallback((providerId: string) => {
+    // Optimistically mark auth present so a providers refresh that has not yet
+    // stamped provider.key cannot reopen the panel / hide models with a stale
+    // "Credentials missing" summary before the source refetch lands.
+    setProviderSources((prev) => {
+      const existing = prev[providerId];
+      return {
+        ...prev,
+        [providerId]: {
+          auth: { exists: true, path: existing?.auth.path ?? null },
+          user: existing?.user ?? { exists: false, path: null },
+          project: existing?.project ?? { exists: false, path: null },
+          ...(existing?.custom ? { custom: existing.custom } : {}),
+        },
+      };
+    });
+    setAuthPanelDismissedForId(null);
+    setShowAuthPanel(false);
+    setSelectedProvider(providerId);
+    refreshProviderSources();
+  }, [refreshProviderSources, setSelectedProvider]);
+
+  // The mutation above already persisted to disk. If OpenCode is externally
+  // managed (e.g. the user is running a separate `opencode serve` they have to
+  // restart themselves), reloadOpenCodeConfiguration throws with
+  // `requiresManualRestart`. Surface the restart guidance instead of a
+  // misleading "mutation failed" toast and ensure the deferred-restart
+  // payload is recorded so the Settings page can show pending-restart
+  // guidance consistently across providers, API keys, custom providers,
+  // and disconnects.
+  const applyConfigReloadOrRecordDeferred = React.useCallback(
+    async (scope: ConfigChangeScope, idForDeferred?: string) => {
+      try {
+        await reloadOpenCodeConfiguration({ scopes: [scope], mode: 'active' });
+        return 'reloaded';
+      } catch (error) {
+        const requiresManual = (error as Error & { requiresManualRestart?: boolean })?.requiresManualRestart === true;
+        if (requiresManual) {
+          if (idForDeferred) {
+            recordDeferredOpenCodeRestart(scope, { id: idForDeferred });
+          }
+          return 'manual-restart';
+        }
+        throw error;
+      }
+    },
+    [],
+  );
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
   const selectedSources = selectedProviderId ? providerSources[selectedProviderId] : undefined;
 
@@ -389,8 +484,12 @@ export const ProvidersPage: React.FC = () => {
 
       toast.success(t('settings.providers.page.toast.apiKeySaved'));
       setApiKeyInputs((prev) => ({ ...prev, [providerId]: '' }));
-      await reloadOpenCodeConfiguration({ scopes: ["providers"], mode: "active" });
-      setSelectedProvider(providerId);
+      // Mutation succeeded: the auth key is on disk. The reload can fail with
+      // requiresManualRestart when OpenCode is externally managed; the helper
+      // records the deferred-restart payload instead of throwing a misleading
+      // "mutation failed" toast.
+      await applyConfigReloadOrRecordDeferred('providers', providerId);
+      markAuthWriteSucceeded(providerId);
     } catch (error) {
       console.error('Failed to save API key:', error);
       toast.error(t('settings.providers.page.toast.apiKeySaveFailed'));
@@ -424,7 +523,7 @@ export const ProvidersPage: React.FC = () => {
           ? (editingCustomScope ?? resolveProviderConfigScope(providerSources[editingCustomProviderId]))
           : 'user',
       });
-      const response = await runtimeFetch('/api/provider', {
+      const response = await runtimeFetch(`/api/provider${settingsDirectory ? `?directory=${encodeURIComponent(settingsDirectory)}` : ''}`, {
         method: 'PUT',
         headers: {
           Accept: 'application/json',
@@ -447,8 +546,11 @@ export const ProvidersPage: React.FC = () => {
       setEditingCustomScope(null);
       setCustomAuthFailureHint(null);
       setLastCustomPersistId(null);
-      await reloadOpenCodeConfiguration({ scopes: ['providers'], mode: 'active' });
-      setSelectedProvider(plan.providerID);
+      // Mutation succeeded; route through the helper so an externally managed
+      // OpenCode does not produce a misleading "save failed" toast for a write
+      // that already persisted.
+      await applyConfigReloadOrRecordDeferred('providers', plan.providerID);
+      markAuthWriteSucceeded(plan.providerID);
     } catch (error) {
       console.error('Failed to save custom provider:', error);
       toast.error(
@@ -461,117 +563,17 @@ export const ProvidersPage: React.FC = () => {
     }
   };
 
-  const handleOAuthStart = async (providerId: string, methodIndex: number) => {
-    const busyKey = `oauth:${providerId}:${methodIndex}`;
-    setAuthBusyKey(busyKey);
+  const oauthMethodFallbackLabel = (index: number) =>
+    t('settings.providers.page.auth.oauthMethodFallback', { index: String(index + 1) });
 
-    try {
-      const result = await opencodeClient.getSdkClient().provider.oauth.authorize({
-        providerID: providerId,
-        method: methodIndex,
-      });
-      if (result.error) {
-        throw new Error(t('settings.providers.page.toast.oauthStartFailed'));
-      }
-
-      const payloadRecord: Record<string, unknown> = isRecord(result.data) ? result.data : {};
-      const nestedData = payloadRecord.data;
-      const dataRecord: Record<string, unknown> = isRecord(nestedData) ? nestedData : payloadRecord;
-      const urlCandidate =
-        (typeof dataRecord.url === 'string' && dataRecord.url) ||
-        (typeof dataRecord.verification_uri_complete === 'string' && dataRecord.verification_uri_complete) ||
-        (typeof dataRecord.verification_uri === 'string' && dataRecord.verification_uri) ||
-        undefined;
-      const instructions =
-        (typeof dataRecord.instructions === 'string' && dataRecord.instructions) ||
-        (typeof dataRecord.message === 'string' && dataRecord.message) ||
-        undefined;
-      const userCode =
-        (typeof dataRecord.user_code === 'string' && dataRecord.user_code) ||
-        (typeof dataRecord.code === 'string' && dataRecord.code) ||
-        (typeof dataRecord.userCode === 'string' && dataRecord.userCode) ||
-        undefined;
-
-      if (!urlCandidate && !instructions && !userCode) {
-        throw new Error(t('settings.providers.page.toast.oauthDetailsMissing'));
-      }
-
-      const detailsKey = `${providerId}:${methodIndex}`;
-      setOauthDetails((prev) => ({
-        ...prev,
-        [detailsKey]: {
-          url: urlCandidate,
-          instructions,
-          userCode,
-        },
-      }));
-
-      if (urlCandidate) {
-        void openExternalUrl(urlCandidate);
-      }
-      setPendingOAuth({ providerId, methodIndex });
-      toast.message(t('settings.providers.page.toast.completeOAuthInBrowser'));
-    } catch (error) {
-      console.error('Failed to start OAuth flow:', error);
-      toast.error(t('settings.providers.page.toast.oauthStartFailed'));
-    } finally {
-      setAuthBusyKey(null);
+  const handleOAuthConnected = (providerId: string) => {
+    setShowAuthPanel(false);
+    if (requiresOpenCodeRestartAfterOAuth(providerId)) {
+      recordDeferredOpenCodeRestart('providers', { id: providerId });
     }
-  };
-
-  const handleOAuthComplete = async (providerId: string, methodIndex: number) => {
-    const codeKey = `${providerId}:${methodIndex}`;
-    const code = oauthCodes[codeKey]?.trim();
-
-    const busyKey = `oauth-complete:${providerId}:${methodIndex}`;
-    setAuthBusyKey(busyKey);
-
-    try {
-      const requestBody: { method: number; code?: string } = { method: methodIndex };
-      if (code) {
-        requestBody.code = code;
-      }
-
-      const result = await opencodeClient.getSdkClient().provider.oauth.callback({
-        providerID: providerId,
-        method: requestBody.method,
-        code: requestBody.code,
-      });
-      if (result.error) {
-        throw new Error(t('settings.providers.page.toast.oauthCompleteFailed'));
-      }
-
-      toast.success(t('settings.providers.page.toast.oauthCompleted'));
-      setOauthCodes((prev) => ({ ...prev, [codeKey]: '' }));
-      setPendingOAuth(null);
-      await reloadOpenCodeConfiguration({ scopes: ["providers"], mode: "active" });
-      setSelectedProvider(providerId);
-    } catch (error) {
-      console.error('Failed to complete OAuth flow:', error);
-      toast.error(t('settings.providers.page.toast.oauthCompleteFailed'));
-    } finally {
-      setAuthBusyKey(null);
-    }
-  };
-
-  const handleCopyOAuthLink = async (url: string) => {
-    const result = await copyTextToClipboard(url);
-    if (result.ok) {
-      toast.success(t('settings.providers.page.toast.oauthLinkCopied'));
-      return;
-    }
-    console.error('Failed to copy OAuth link:', result.error);
-    toast.error(t('settings.providers.page.toast.oauthLinkCopyFailed'));
-  };
-
-  const handleCopyOAuthCode = async (code: string) => {
-    const result = await copyTextToClipboard(code);
-    if (result.ok) {
-      toast.success(t('settings.providers.page.toast.deviceCodeCopied'));
-      return;
-    }
-    console.error('Failed to copy device code:', result.error);
-    toast.error(t('settings.providers.page.toast.deviceCodeCopyFailed'));
+    // Optimistic mark + sources refetch so the page does not stick on a stale
+    // "Credentials missing" summary while the providers refresh lands.
+    markAuthWriteSucceeded(providerId);
   };
 
   const handleDisconnectProvider = async (providerId: string) => {
@@ -579,10 +581,13 @@ export const ProvidersPage: React.FC = () => {
     setAuthBusyKey(busyKey);
 
     try {
-      const response = await runtimeFetch(`/api/provider/${encodeURIComponent(providerId)}/auth?scope=all`, {
-        method: 'DELETE',
-        headers: { Accept: 'application/json' },
-      });
+      const response = await runtimeFetch(
+        `/api/provider/${encodeURIComponent(providerId)}/auth?scope=all${settingsDirectory ? `&directory=${encodeURIComponent(settingsDirectory)}` : ''}`,
+        {
+          method: 'DELETE',
+          headers: { Accept: 'application/json' },
+        },
+      );
 
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
@@ -590,7 +595,12 @@ export const ProvidersPage: React.FC = () => {
       }
 
       toast.success(t('settings.providers.page.toast.providerDisconnected'));
-      await reloadOpenCodeConfiguration({ scopes: ["providers"], mode: "active" });
+      // Use the helper so an externally managed OpenCode that requires a manual
+      // restart records the deferred-restart guidance instead of toasting a
+      // misleading "disconnect failed" for a write that already persisted.
+      await applyConfigReloadOrRecordDeferred('providers', providerId);
+      setAuthPanelDismissedForId(null);
+      refreshProviderSources();
     } catch (error) {
       console.error('Failed to disconnect provider:', error);
       toast.error(t('settings.providers.page.toast.providerDisconnectFailed'));
@@ -688,15 +698,9 @@ export const ProvidersPage: React.FC = () => {
                         </div>
                         <ScrollableOverlay outerClassName="max-h-[240px]" className="p-1">
                           {(() => {
-                            const query = providerSearchQuery.toLowerCase();
                             const customLabel = t('settings.providers.page.custom.optionLabel');
-                            const customMatches = !query
-                              || customLabel.toLowerCase().includes(query)
-                              || 'other'.includes(query)
-                              || 'custom'.includes(query);
-                            const filtered = unconnectedProviders.filter(p => {
-                              return (p.name || p.id).toLowerCase().includes(query) || p.id.toLowerCase().includes(query);
-                            });
+                            const customMatches = matchesRankQuery([customLabel, 'other', 'custom'], providerSearchQuery);
+                            const filtered = rankByQuery(unconnectedProviders, providerSearchQuery, (p) => [p.name || p.id, p.id]);
                             if (filtered.length === 0 && !customMatches) {
                               return <p className="py-4 text-center typography-meta text-muted-foreground">{t('settings.providers.page.connect.noProvidersFound')}</p>;
                             }
@@ -778,125 +782,57 @@ export const ProvidersPage: React.FC = () => {
                 <p className="typography-meta text-muted-foreground">{t('settings.providers.page.auth.loadingMethods')}</p>
               ) : (
                 <>
-                  <div className="py-1.5">
-                    <label className="typography-ui-label text-foreground flex items-center gap-1.5">
-                      {t('settings.providers.page.auth.apiKeyLabel')}
-                      <SettingsInfoHint>{t('settings.providers.page.auth.apiKeyTooltip')}</SettingsInfoHint>
-                    </label>
-                    <div className="flex flex-col @xl:flex-row @xl:items-center gap-2 mt-1.5">
-                      <Input
-                        type="password"
-                        value={apiKeyInputs[candidateProviderId] ?? ''}
-                        onChange={(event) =>
-                          setApiKeyInputs((prev) => ({
-                            ...prev,
-                            [candidateProviderId]: event.target.value,
-                          }))
-                        }
-                        placeholder={t('settings.providers.page.auth.apiKeyPlaceholder')}
-                        className="flex-1 font-mono text-xs"
-                      />
-                      <Button
-                        size="xs"
-                        className="!font-normal shrink-0"
-                        onClick={() => handleSaveApiKey(candidateProviderId)}
-                        disabled={authBusyKey === `api:${candidateProviderId}`}
-                      >
-                        {authBusyKey === `api:${candidateProviderId}` ? t('settings.providers.page.actions.saving') : t('settings.providers.page.actions.saveKey')}
-                      </Button>
-                    </div>
-                  </div>
-
                   {(() => {
                     const candidateAuthMethods = authMethodsByProvider[candidateProviderId] ?? [];
-                    const candidateOAuthMethods = candidateAuthMethods.filter(
-                      (method) => normalizeAuthType(method) === 'oauth'
+                    const candidateOAuthMethods = toOAuthMethods(
+                      getOAuthAuthMethods(candidateAuthMethods),
+                      oauthMethodFallbackLabel,
                     );
-
-                    if (candidateOAuthMethods.length === 0) {
-                      return null;
-                    }
+                    const showApiKey = shouldShowApiKeyAuth(candidateAuthMethods);
 
                     return (
-                      <div className="space-y-4 border-t border-[var(--surface-subtle)] pt-2">
-                        {candidateOAuthMethods.map((method, index) => {
-                          const methodLabel = method.label || method.name || t('settings.providers.page.auth.oauthMethodFallback', { index: String(index + 1) });
-                          const codeKey = `${candidateProviderId}:${index}`;
-                          const isPending =
-                            pendingOAuth?.providerId === candidateProviderId && pendingOAuth?.methodIndex === index;
-
-                          return (
-                            <div key={`${candidateProviderId}-${methodLabel}`} className="space-y-3">
-                              <div className="flex items-center justify-between gap-2">
-                                <div>
-                                  <div className="typography-ui-label text-foreground">{methodLabel}</div>
-                                  {(method.description || method.help) && (
-                                    <div className="typography-meta text-muted-foreground">
-                                      {String(method.description || method.help)}
-                                    </div>
-                                  )}
-                                </div>
-                                <Button
-                                  variant="outline"
-                                  size="xs"
-                                  className="!font-normal"
-                                  onClick={() => handleOAuthStart(candidateProviderId, index)}
-                                  disabled={authBusyKey === `oauth:${candidateProviderId}:${index}`}
-                                >
-                                  {t('settings.providers.page.actions.connect')}
-                                </Button>
-                              </div>
-
-                              {oauthDetails[codeKey]?.instructions && (
-                                <p className="typography-meta text-[var(--primary-base)] bg-[var(--primary-base)]/10 px-2 py-1.5 rounded">
-                                  {oauthDetails[codeKey]?.instructions}
-                                </p>
-                              )}
-
-                              {oauthDetails[codeKey]?.userCode && (
-                                <div className="flex items-center gap-2 mt-2">
-                                  <Input value={oauthDetails[codeKey]?.userCode} readOnly className="font-mono text-center tracking-widest" />
-                                  <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthCode(oauthDetails[codeKey]?.userCode ?? '')}>{t('settings.providers.page.actions.copyCode')}</Button>
-                                </div>
-                              )}
-
-                              {oauthDetails[codeKey]?.url && (
-                                <div className="flex items-center gap-2 mt-2">
-                                  <Input value={oauthDetails[codeKey]?.url} readOnly className="text-xs text-muted-foreground" />
-                                  <div className="flex gap-1 shrink-0">
-                                    <Button variant="outline" size="xs" className="!font-normal" onClick={() => openExternalUrl(oauthDetails[codeKey]?.url ?? '')}>{t('settings.providers.page.actions.open')}</Button>
-                                    <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthLink(oauthDetails[codeKey]?.url ?? '')}>{t('settings.providers.page.actions.copy')}</Button>
-                                  </div>
-                                </div>
-                              )}
-
-                              {isPending && (
-                                <div className="flex items-center gap-2 mt-2">
-                                  <Input
-                                    value={oauthCodes[codeKey] ?? ''}
-                                    onChange={(event) =>
-                                      setOauthCodes((prev) => ({
-                                        ...prev,
-                                        [codeKey]: event.target.value,
-                                      }))
-                                    }
-                                    placeholder={t('settings.providers.page.auth.pasteAuthorizationCodePlaceholder')}
-                                    className="font-mono text-xs"
-                                  />
-                                  <Button
-                                    size="xs"
-                                    className="!font-normal"
-                                    onClick={() => handleOAuthComplete(candidateProviderId, index)}
-                                    disabled={authBusyKey === `oauth-complete:${candidateProviderId}:${index}`}
-                                  >
-                                    {authBusyKey === `oauth-complete:${candidateProviderId}:${index}` ? t('settings.providers.page.actions.saving') : t('settings.providers.page.actions.complete')}
-                                  </Button>
-                                </div>
-                              )}
+                      <>
+                        {showApiKey ? (
+                          <div className="py-1.5">
+                            <label className="typography-ui-label text-foreground flex items-center gap-1.5">
+                              {t('settings.providers.page.auth.apiKeyLabel')}
+                              <SettingsInfoHint>{t('settings.providers.page.auth.apiKeyTooltip')}</SettingsInfoHint>
+                            </label>
+                            <div className="flex flex-col @xl:flex-row @xl:items-center gap-2 mt-1.5">
+                              <Input
+                                type="password"
+                                value={apiKeyInputs[candidateProviderId] ?? ''}
+                                onChange={(event) =>
+                                  setApiKeyInputs((prev) => ({
+                                    ...prev,
+                                    [candidateProviderId]: event.target.value,
+                                  }))
+                                }
+                                placeholder={t('settings.providers.page.auth.apiKeyPlaceholder')}
+                                className="flex-1 font-mono text-xs"
+                              />
+                              <Button
+                                size="xs"
+                                className="!font-normal shrink-0"
+                                onClick={() => handleSaveApiKey(candidateProviderId)}
+                                disabled={authBusyKey === `api:${candidateProviderId}`}
+                              >
+                                {authBusyKey === `api:${candidateProviderId}` ? t('settings.providers.page.actions.saving') : t('settings.providers.page.actions.saveKey')}
+                              </Button>
                             </div>
-                          );
-                        })}
-                      </div>
+                          </div>
+                        ) : null}
+
+                        {candidateOAuthMethods.length > 0 ? (
+                          <ProviderOAuthMethods
+                            key={candidateProviderId}
+                            providerId={candidateProviderId}
+                            methods={candidateOAuthMethods}
+                            onConnected={() => handleOAuthConnected(candidateProviderId)}
+                            className={cn(showApiKey && 'border-t border-[var(--surface-subtle)] pt-2')}
+                          />
+                        ) : null}
+                      </>
                     );
                   })()}
                 </>
@@ -921,25 +857,35 @@ export const ProvidersPage: React.FC = () => {
 
   const providerModels = Array.isArray(selectedProvider.models) ? selectedProvider.models : [];
   const providerAuthMethods = authMethodsByProvider[selectedProvider.id] ?? [];
-  const oauthAuthMethods = providerAuthMethods.filter((method) => normalizeAuthType(method) === 'oauth');
+  const oauthAuthMethods = toOAuthMethods(
+    getOAuthAuthMethods(providerAuthMethods),
+    oauthMethodFallbackLabel,
+  );
+  const showApiKeyAuth = shouldShowApiKeyAuth(providerAuthMethods);
   const sourcesLoaded = Boolean(selectedSources);
   const isEditableCustomProvider = sourcesLoaded
     && isConfigDefinedCustomProvider(selectedProvider, selectedSources);
-  const providerEnv = Array.isArray(selectedProvider.env)
-    ? selectedProvider.env.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-    : [];
-  const hasStoredAuth = Boolean(selectedSources?.auth.exists);
-  const hasEnvCredentials = providerEnv.length > 0;
-  const hasCredentials = hasStoredAuth || hasEnvCredentials;
-  const authStatusIncomplete = isEditableCustomProvider && !hasCredentials;
-
-  const filteredModels = providerModels.filter((model) => {
-    const name = typeof model?.name === 'string' ? model.name : '';
-    const id = typeof model?.id === 'string' ? model.id : '';
-    const query = modelQuery.trim().toLowerCase();
-    if (!query) return true;
-    return name.toLowerCase().includes(query) || id.toLowerCase().includes(query);
+  const hasCredentials = providerHasCredentials({
+    key: selectedProvider.key,
+    authSourceExists: selectedSources?.auth.exists,
+    optionsApiKey: (selectedProvider as { options?: { apiKey?: string | null } }).options?.apiKey ?? null,
+    envDeclared: providerDeclaresEnv(selectedProvider),
   });
+  const authStatusIncomplete = requiresProviderAuth(sourcesLoaded, hasCredentials, isEditableCustomProvider);
+  const showModelsSection = shouldShowModelsSection({
+    modelCount: providerModels.length,
+    sourcesLoaded,
+    hasCredentials,
+    isEditableCustomProvider,
+  });
+  const incompleteAuthHint = !showApiKeyAuth && oauthAuthMethods.length > 0
+    ? t('settings.providers.page.auth.useReconnectHint')
+    : t('settings.providers.page.auth.incompleteHint');
+
+  const filteredModels = rankByQuery(providerModels, modelQuery, (model) => [
+    typeof model?.name === 'string' ? model.name : '',
+    typeof model?.id === 'string' ? model.id : '',
+  ]);
 
   if (isCustomEditMode && isEditableCustomProvider && editingCustomFormInitial) {
     return (
@@ -1001,7 +947,11 @@ export const ProvidersPage: React.FC = () => {
               variant="outline"
               size="xs"
               className="!font-normal"
-              onClick={() => setShowAuthPanel((prev) => !prev)}
+              onClick={() => {
+                const nextOpen = !showAuthPanel;
+                setShowAuthPanel(nextOpen);
+                setAuthPanelDismissedForId(nextOpen ? null : selectedProvider.id);
+              }}
             >
               {showAuthPanel ? t('settings.providers.page.actions.hide') : t('settings.providers.page.actions.reconnect')}
             </Button>
@@ -1014,7 +964,7 @@ export const ProvidersPage: React.FC = () => {
                 <div className="flex items-center gap-1.5 py-1.5">
                   <Icon name="alert" className="w-4 h-4 text-[var(--status-warning)] shrink-0" />
                   <span className="typography-ui-label text-foreground">{t('settings.providers.page.auth.incomplete')}</span>
-                  <SettingsInfoHint>{t('settings.providers.page.auth.incompleteHint')}</SettingsInfoHint>
+                  <SettingsInfoHint>{incompleteAuthHint}</SettingsInfoHint>
                 </div>
               ) : (
                 <div className="flex items-center gap-1.5 py-1.5">
@@ -1027,115 +977,45 @@ export const ProvidersPage: React.FC = () => {
               <div className="py-1.5 typography-meta text-muted-foreground">{t('settings.providers.page.auth.loadingMethods')}</div>
             ) : (
               <div className="space-y-4">
-                <div className="py-1.5">
-                  <label className="typography-ui-label text-foreground flex items-center gap-1.5">
-                    {t('settings.providers.page.auth.apiKeyLabel')}
-                    <SettingsInfoHint>{t('settings.providers.page.auth.apiKeyTooltip')}</SettingsInfoHint>
-                  </label>
-                  <div className="flex flex-col @xl:flex-row @xl:items-center gap-2 mt-1.5">
-                    <Input
-                      type="password"
-                      value={apiKeyInputs[selectedProvider.id] ?? ''}
-                      onChange={(event) =>
-                        setApiKeyInputs((prev) => ({
-                          ...prev,
-                          [selectedProvider.id]: event.target.value,
-                        }))
-                      }
-                      placeholder={t('settings.providers.page.auth.apiKeyPlaceholder')}
-                      className="flex-1 font-mono text-xs"
-                    />
-                    <Button
-                      size="xs"
-                      className="!font-normal shrink-0"
-                      onClick={() => handleSaveApiKey(selectedProvider.id)}
-                      disabled={authBusyKey === `api:${selectedProvider.id}`}
-                    >
-                      {authBusyKey === `api:${selectedProvider.id}` ? t('settings.providers.page.actions.saving') : t('settings.providers.page.actions.saveKey')}
-                    </Button>
+                {showApiKeyAuth ? (
+                  <div className="py-1.5">
+                    <label className="typography-ui-label text-foreground flex items-center gap-1.5">
+                      {t('settings.providers.page.auth.apiKeyLabel')}
+                      <SettingsInfoHint>{t('settings.providers.page.auth.apiKeyTooltip')}</SettingsInfoHint>
+                    </label>
+                    <div className="flex flex-col @xl:flex-row @xl:items-center gap-2 mt-1.5">
+                      <Input
+                        type="password"
+                        value={apiKeyInputs[selectedProvider.id] ?? ''}
+                        onChange={(event) =>
+                          setApiKeyInputs((prev) => ({
+                            ...prev,
+                            [selectedProvider.id]: event.target.value,
+                          }))
+                        }
+                        placeholder={t('settings.providers.page.auth.apiKeyPlaceholder')}
+                        className="flex-1 font-mono text-xs"
+                      />
+                      <Button
+                        size="xs"
+                        className="!font-normal shrink-0"
+                        onClick={() => handleSaveApiKey(selectedProvider.id)}
+                        disabled={authBusyKey === `api:${selectedProvider.id}`}
+                      >
+                        {authBusyKey === `api:${selectedProvider.id}` ? t('settings.providers.page.actions.saving') : t('settings.providers.page.actions.saveKey')}
+                      </Button>
+                    </div>
                   </div>
-                </div>
+                ) : null}
 
                 {oauthAuthMethods.length > 0 && (
-                  <div className="space-y-4 border-t border-[var(--surface-subtle)] pt-2">
-                    {oauthAuthMethods.map((method, index) => {
-                      const methodLabel = method.label || method.name || t('settings.providers.page.auth.oauthMethodFallback', { index: String(index + 1) });
-                      const codeKey = `${selectedProvider.id}:${index}`;
-                      const isPending =
-                        pendingOAuth?.providerId === selectedProvider.id && pendingOAuth?.methodIndex === index;
-
-                      return (
-                        <div key={`${selectedProvider.id}-${methodLabel}`} className="space-y-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <div>
-                              <div className="typography-ui-label text-foreground">{methodLabel}</div>
-                              {(method.description || method.help) && (
-                                <div className="typography-meta text-muted-foreground">
-                                  {String(method.description || method.help)}
-                                </div>
-                              )}
-                            </div>
-                            <Button
-                              variant="outline"
-                              size="xs"
-                              className="!font-normal"
-                              onClick={() => handleOAuthStart(selectedProvider.id, index)}
-                              disabled={authBusyKey === `oauth:${selectedProvider.id}:${index}`}
-                            >
-                              {t('settings.providers.page.actions.connect')}
-                            </Button>
-                          </div>
-
-                          {oauthDetails[codeKey]?.instructions && (
-                            <p className="typography-meta text-[var(--primary-base)] bg-[var(--primary-base)]/10 px-2 py-1.5 rounded">
-                              {oauthDetails[codeKey]?.instructions}
-                            </p>
-                          )}
-
-                          {oauthDetails[codeKey]?.userCode && (
-                            <div className="flex items-center gap-2 mt-2">
-                              <Input value={oauthDetails[codeKey]?.userCode} readOnly className="font-mono text-center tracking-widest" />
-                              <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthCode(oauthDetails[codeKey]?.userCode ?? '')}>{t('settings.providers.page.actions.copyCode')}</Button>
-                            </div>
-                          )}
-
-                          {oauthDetails[codeKey]?.url && (
-                            <div className="flex items-center gap-2 mt-2">
-                              <Input value={oauthDetails[codeKey]?.url} readOnly className="text-xs text-muted-foreground" />
-                              <div className="flex gap-1 shrink-0">
-                                <Button variant="outline" size="xs" className="!font-normal" onClick={() => openExternalUrl(oauthDetails[codeKey]?.url ?? '')}>{t('settings.providers.page.actions.open')}</Button>
-                                <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthLink(oauthDetails[codeKey]?.url ?? '')}>{t('settings.providers.page.actions.copy')}</Button>
-                              </div>
-                            </div>
-                          )}
-
-                          {isPending && (
-                            <div className="flex items-center gap-2 mt-2">
-                              <Input
-                                value={oauthCodes[codeKey] ?? ''}
-                                onChange={(event) =>
-                                  setOauthCodes((prev) => ({
-                                    ...prev,
-                                    [codeKey]: event.target.value,
-                                  }))
-                                }
-                                placeholder={t('settings.providers.page.auth.pasteAuthorizationCodePlaceholder')}
-                                className="font-mono text-xs"
-                              />
-                              <Button
-                                size="xs"
-                                className="!font-normal"
-                                onClick={() => handleOAuthComplete(selectedProvider.id, index)}
-                                disabled={authBusyKey === `oauth-complete:${selectedProvider.id}:${index}`}
-                              >
-                                {authBusyKey === `oauth-complete:${selectedProvider.id}:${index}` ? t('settings.providers.page.actions.saving') : t('settings.providers.page.actions.complete')}
-                              </Button>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <ProviderOAuthMethods
+                    key={selectedProvider.id}
+                    providerId={selectedProvider.id}
+                    methods={oauthAuthMethods}
+                    onConnected={() => handleOAuthConnected(selectedProvider.id)}
+                    className={cn(showApiKeyAuth && 'border-t border-[var(--surface-subtle)] pt-2')}
+                  />
                 )}
               </div>
             )}
@@ -1175,14 +1055,13 @@ export const ProvidersPage: React.FC = () => {
             </div>
       </SettingsSection>
 
+      {showModelsSection ? (
       <SettingsSection
         title={t('settings.providers.page.models.title')}
         titleAccessory={
-          providerModels.length > 0 ? (
-            <span className="typography-micro text-muted-foreground font-normal">
-              ({providerModels.length})
-            </span>
-          ) : null
+          <span className="typography-micro text-muted-foreground font-normal">
+            ({providerModels.length})
+          </span>
         }
         headerAction={(
           <div className="flex items-center gap-1">
@@ -1291,6 +1170,7 @@ export const ProvidersPage: React.FC = () => {
               </div>
             )}
       </SettingsSection>
+      ) : null}
     </SettingsPageLayout>
   );
 };

@@ -84,6 +84,19 @@ describe('useSessionFoldersStore folder assignments', () => {
     expect(storageSetCount).toBe(0);
   });
 
+  test('bulk cross-scope move clears the former folder membership before assigning the target', () => {
+    const store = useSessionFoldersStore.getState();
+    const source = store.createFolder('/workspace/project', 'Source');
+    const target = store.createFolder('/workspace/project-worktree', 'Target');
+    store.addSessionsToFolder('/workspace/project', source.id, ['ses_1', 'ses_2']);
+
+    store.removeSessionsFromFolders('/workspace/project', ['ses_1', 'ses_2']);
+    store.addSessionsToFolder('/workspace/project-worktree', target.id, ['ses_1', 'ses_2']);
+
+    expect(useSessionFoldersStore.getState().getFoldersForScope('/workspace/project')[0]?.sessionIds).toEqual([]);
+    expect(useSessionFoldersStore.getState().getFoldersForScope('/workspace/project-worktree')[0]?.sessionIds).toEqual(['ses_1', 'ses_2']);
+  });
+
   test('restores independent folder snapshots across runtime switches', async () => {
     useSessionFoldersStore.getState().createFolder('/workspace/project', 'Runtime A');
     await waitForPersist();

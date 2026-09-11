@@ -1,32 +1,35 @@
 ---
-title: Aperçu et serveurs de dev
-description: Ouvrez un serveur de dev en cours d’exécution dans OpenChamber.
+title: Aperçu et serveurs de développement
+description: Ouvrez un serveur de développement en cours d'exécution dans OpenChamber.
 ---
 
-# Aperçu et serveurs de dev
+# Aperçu et serveurs de développement
 
-Quand vous démarrez un serveur de dev, OpenChamber peut l’ouvrir directement dans l’application au lieu d’un onglet de navigateur séparé — vous voyez ainsi votre site à côté du chat, vous capturez sa console et vous pouvez pointer des éléments pour poser des questions à leur sujet.
+Quand vous lancez un serveur de développement, OpenChamber peut l'ouvrir directement dans l'application plutôt que dans un onglet séparé — vous voyez ainsi votre site à côté de la discussion et pouvez désigner des éléments pour poser des questions à leur sujet.
 
-## Ouvrir un aperçu
+## Ouvrir un serveur de développement
 
-OpenChamber surveille la sortie du terminal pour détecter une adresse locale (la ligne `Local:` affichée par des outils comme Vite, Next.js ou Astro). Quand il en trouve une :
+Ouvrez le panneau navigateur depuis le bouton globe de l'en-tête. Si un serveur tourne déjà, il apparaît dans la liste et un clic suffit à l'ouvrir : OpenChamber le repère à partir de ce qui écoute réellement sur votre machine, quelle que soit la façon dont vous l'avez lancé.
 
-- dans le terminal, un bouton **Ouvrir l’aperçu** apparaît
-- une [action de projet](/project-actions/) avec l’ouverture automatique activée l’ouvre pour vous
-- un lien local dans un message de chat peut aussi l’ouvrir
+Un serveur s'ouvre également tout seul quand :
 
-Le site se charge dans le panneau latéral. Seules les adresses locales (sur votre propre machine) peuvent être prévisualisées.
+- vous appuyez sur **Ouvrir l'aperçu** sur une adresse locale dans le terminal
+- une [action de projet](/project-actions/) avec ouverture automatique en démarre un
+- vous suivez un lien local dans un message de la discussion
 
-## Console et inspection
+Vous pouvez toujours saisir l'adresse vous-même. Un simple `localhost:5173` est compris comme `http://`, inutile donc d'écrire le schéma.
 
-Dans le panneau d’aperçu, vous pouvez :
+## Travailler avec un OpenChamber distant
 
-- regarder la **console** de la page — erreurs, avertissements et logs, filtrés comme vous le voulez
-- activer **inspect**, cliquer sur n’importe quel élément et envoyer une note à son sujet — sélecteur, styles, position et capture d’écran — directement dans le chat
+Quand OpenChamber tourne sur une autre machine, son serveur de développement s'y trouve aussi — `localhost` sur votre portable désigne tout autre chose. L'application de bureau s'en charge : elle ouvre un port local qui achemine la connexion jusqu'au serveur distant, si bien que la page se charge normalement, avec rechargement à chaud et outils de développement fonctionnels. Vous continuez à saisir l'adresse attendue ; la tuyauterie reste hors de votre chemin.
 
-C’est le moyen le plus rapide de dire à l’agent « ce bouton, ici » sans devoir le décrire.
+Cela nécessite l'application de bureau. Dans un onglet de navigateur, seuls les serveurs de votre propre machine peuvent être ouverts.
 
-## Pages liées
+## Annoter la page
 
-- [Actions de projet](/project-actions/) — ouvrir automatiquement un serveur quand vous le démarrez
-- [Navigateur desktop](/desktop-browser/) — les mêmes outils pour n’importe quelle page, sur desktop
+Voyez [Panneau navigateur](/desktop-browser/) pour désigner des éléments, dessiner sur la page et envoyer le tout dans la discussion.
+
+## Voir aussi
+
+- [Actions de projet](/project-actions/) — ouvrir automatiquement un serveur à son démarrage
+- [Panneau navigateur](/desktop-browser/) — annoter les pages et laisser l'agent les piloter

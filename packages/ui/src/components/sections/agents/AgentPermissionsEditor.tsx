@@ -6,10 +6,10 @@ import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { opencodeClient } from '@/lib/opencode/client';
 import {
   useAgentsStore,
-  getConfigDirectory,
   type AgentWithExtras,
 } from '@/stores/useAgentsStore';
 import {
@@ -105,6 +105,9 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({ 
   const [reloadToken, setReloadToken] = React.useState(0);
 
   const agentName = agent.name;
+  // Settings browses whichever project its own selector points at; the app
+  // stays where it is.
+  const settingsDirectory = useSettingsDirectory();
 
   // --- Load the SOURCE permission map (the agent's own config file). ---
   React.useEffect(() => {
@@ -113,7 +116,7 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({ 
     setLoadFailed(false);
     void (async () => {
       try {
-        const directory = getConfigDirectory();
+        const directory = settingsDirectory;
         const query = directory ? `?directory=${encodeURIComponent(directory)}` : '';
         const response = await runtimeFetch(`/api/config/agents/${encodeURIComponent(agentName)}/config${query}`, {
           headers: {
@@ -136,14 +139,14 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({ 
     return () => {
       cancelled = true;
     };
-  }, [agentName, reloadToken]);
+  }, [agentName, reloadToken, settingsDirectory]);
 
   // --- Known tool ids for the key list (display only). ---
   React.useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const ids = await opencodeClient.listToolIds({ directory: getConfigDirectory() });
+        const ids = await opencodeClient.listToolIds({ directory: settingsDirectory });
         if (!cancelled && Array.isArray(ids)) {
           setToolIds(ids.filter((id) => typeof id === 'string' && !FOLDED_TOOL_IDS.has(id)));
         }
@@ -154,7 +157,7 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({ 
     return () => {
       cancelled = true;
     };
-  }, [agentName]);
+  }, [agentName, settingsDirectory]);
 
   // --- Effective rules from the resolved view (read-only hints). ---
   const effectiveRules = React.useMemo<EffectiveRule[]>(() => {

@@ -108,12 +108,33 @@ describe('createConfiguredWebAPIs', () => {
 
     expect(initializeRuntimeEndpoint).toHaveBeenCalledWith({
       apiBaseUrl: bootstrap.apiBaseUrl,
-      runtimeKey: null,
+      runtimeKey: 'host:host-1',
     });
     expect(setRuntimeBearerToken).toHaveBeenCalledWith(bootstrap.clientToken);
     expect(setRuntimeExtraHeaders).toHaveBeenCalledWith(bootstrap.runtimeHeaders);
     expect(restoreDesktopRelayRuntime).toHaveBeenCalledWith(bootstrap.relayHostId);
     expect(opencodeClient.reconnectToRuntimeBaseUrl).toHaveBeenCalled();
+  });
+
+  test('uses the configured desktop host id across changing SSH tunnel URLs', () => {
+    const current = makeWindow();
+    current.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__ = {
+      target: 'remote',
+      status: 'ok',
+      hostId: 'ssh-castle',
+      url: 'http://127.0.0.1:62545',
+      localAvailable: true,
+    };
+    current.__OPENCHAMBER_API_BASE_URL__ = 'http://127.0.0.1:62545';
+    current.__OPENCHAMBER_LOCAL_ORIGIN__ = 'http://127.0.0.1:3901';
+    installWindow(current);
+
+    createConfiguredWebAPIs();
+
+    expect(initializeRuntimeEndpoint).toHaveBeenCalledWith({
+      apiBaseUrl: 'http://127.0.0.1:62545',
+      runtimeKey: 'host:ssh-castle',
+    });
   });
 
   test('activates an embedded relay without relying on Electron preload IPC', () => {

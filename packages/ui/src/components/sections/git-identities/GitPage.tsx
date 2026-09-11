@@ -19,7 +19,6 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import { useGitIdentitiesStore, type GitIdentityProfile, type DiscoveredGitCredential } from '@/stores/useGitIdentitiesStore';
 import { useShallow } from 'zustand/react/shallow';
 import { GitSettings } from '@/components/sections/openchamber/GitSettings';
-import { GitHubSettings } from '@/components/sections/openchamber/GitHubSettings';
 import { GitIdentityEditorDialog } from './GitIdentityEditorDialog';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
@@ -121,10 +120,9 @@ export const GitPage: React.FC = () => {
         title={t('settings.page.git.title')}
         showSaveStatus
       >
-        <GitHubSettings />
-
         <SettingsSection
           title={t('settings.gitIdentities.page.section.title')}
+          divider={false}
           headerAction={(
             <Button size="sm" variant="outline" onClick={() => openEditor('new')}>
               <Icon name="add" className="w-3.5 h-3.5 mr-1" /> {t('settings.common.badge.new')}

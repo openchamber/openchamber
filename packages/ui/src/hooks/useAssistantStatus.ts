@@ -1,4 +1,5 @@
 import React from 'react';
+import { useChatColumnSession } from '@/components/chat/chatColumnSession';
 import type { Message, Part, ReasoningPart, TextPart, ToolPart } from '@opencode-ai/sdk/v2';
 
 import type { MessageStreamPhase } from '@/stores/types/sessionTypes';
@@ -301,8 +302,14 @@ export const getActiveAssistantContext = (messages: Message[]): ActiveAssistantC
 };
 
 export function useAssistantStatus(): AssistantStatusSnapshot {
-    const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-    const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
+    // Inside the chat column, follow the session the timeline shows rather
+    // than the live selection, so the status chip changes together with the
+    // conversation instead of a commit ahead of it.
+    const chatColumnSession = useChatColumnSession();
+    const liveSessionId = useSessionUIStore((state) => state.currentSessionId);
+    const liveSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
+    const currentSessionId = chatColumnSession ? chatColumnSession.sessionId : liveSessionId;
+    const currentSessionDirectory = chatColumnSession ? chatColumnSession.directory : liveSessionDirectory;
 
     const rawSessionMessages = useSessionMessages(
         currentSessionId ?? '',

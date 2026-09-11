@@ -229,15 +229,18 @@ export function WorkingPlaceholder({
 
   return (
     <div
+      // Full muted-foreground, matching the scroll-to-bottom pill's status
+      // text: the row and the pill hand off to each other in the same spot
+      // and must read as one element changing chrome.
       className={
-        'flex h-full items-center text-muted-foreground pl-0.5'
+        'flex h-full items-center text-muted-foreground'
       }
       role="status"
       aria-live={displayedPermission ? 'assertive' : 'polite'}
       aria-label={label}
       data-waiting={displayedPermission ? 'true' : undefined}
     >
-      <span className="typography-ui-header">
+      <span className="text-sm">
         {hasProviderLogo && providerLogoSrc ? (
           <img
             src={providerLogoSrc}

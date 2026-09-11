@@ -13,7 +13,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
+import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
 import type { ProjectRef } from '@/lib/openchamberConfig';
 import type { CreateMultiRunParams, MultiRunGroup } from '@/types/multirun';
 import { ModelMultiSelect, generateInstanceId, type ModelSelectionWithId } from './ModelMultiSelect';
@@ -32,7 +32,6 @@ import { startDesktopWindowDrag } from '@/lib/desktopNative';
 import { useI18n } from '@/lib/i18n';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
-const MAX_MODELS_PER_GROUP = 5;
 
 interface MultiRunAttachedFile {
   id: string;
@@ -209,7 +208,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
   const desktopHeaderPaddingClass = React.useMemo(() => {
     if ((isDesktopApp && isMacPlatform) || isTabletStandalonePwa) {
       // Match main app header: reserve space for Mac/iPadOS traffic lights.
-      return 'pl-[5.5rem]';
+      return 'pl-[88px]';
     }
     return 'pl-3';
   }, [isDesktopApp, isMacPlatform, isTabletStandalonePwa]);
@@ -281,7 +280,8 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
     setIsLoadingSetupCommands(true);
     (async () => {
       try {
-        const commands = await getWorktreeSetupCommands(projectRef);
+        // The launcher prepares a run: the shared commands ask for trust here, before they are shown as the defaults.
+        const commands = await resolveWorktreeSetupCommands(projectRef);
         if (!cancelled) setSetupCommands(commands);
       } catch {
         // Ignore
@@ -727,7 +727,6 @@ const RunGroupCard: React.FC<RunGroupCardProps> = ({
   const snippetRef = React.useRef<SnippetAutocompleteHandle>(null);
 
   const handleAddModel = React.useCallback((model: ModelSelectionWithId) => {
-    if (group.models.length >= MAX_MODELS_PER_GROUP) return;
     onUpdate(group.id, { models: [...group.models, model] });
   }, [group.id, group.models, onUpdate]);
 
@@ -987,7 +986,7 @@ const RunGroupCard: React.FC<RunGroupCardProps> = ({
       <div className="flex flex-col gap-1.5">
         <FieldLabel
           required
-          info={<InfoTip>{t('multirun.launcher.models.info', { max: MAX_MODELS_PER_GROUP })}</InfoTip>}
+          info={<InfoTip>{t('multirun.launcher.models.info')}</InfoTip>}
         >
           {t('multirun.launcher.models.label')}
         </FieldLabel>
@@ -997,7 +996,6 @@ const RunGroupCard: React.FC<RunGroupCardProps> = ({
           onRemove={handleRemoveModel}
           onUpdate={handleUpdateModel}
           minModels={1}
-          maxModels={MAX_MODELS_PER_GROUP}
         />
       </div>
     </div>

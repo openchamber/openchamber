@@ -27,9 +27,8 @@ export const createNotificationTemplateRuntime = (deps) => {
 
   const formatProjectLabel = (label) => {
     if (!label || typeof label !== 'string') return '';
-    return label
-      .replace(/[-_]/g, ' ')
-      .replace(/\b\w/g, (char) => char.toUpperCase());
+    // Folder names are shown exactly as they are on disk — no title-casing.
+    return label.trim();
   };
 
   const resolveNotificationTemplate = (template, variables) => {

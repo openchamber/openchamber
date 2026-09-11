@@ -43,7 +43,11 @@ const variants = [
           {textContent.split("").map((char, index) => (
             <motion.span
               {...props}
-              key={char + String(index)}
+              // Index-only: keying by character remounted every span when
+              // the text mutated (a tool title resolving on completion) and
+              // replayed the whole fade. Same-index spans update in place;
+              // appended characters still mount with the reveal.
+              key={index}
               className={cn(
                 "inline-block whitespace-pre align-baseline"
               )}

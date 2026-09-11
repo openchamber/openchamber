@@ -7,7 +7,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 
 const HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
 
-export const normalizeProjectIconBackground = (value: string | null | undefined): string | null => {
+const normalizeProjectIconBackground = (value: string | null | undefined): string | null => {
   if (!value) {
     return null;
   }
@@ -24,11 +24,12 @@ export type ProjectIdentitySaveData = {
   color: string | null;
   iconBackground: string | null;
   defaultModel: string | null;
+  defaultVariant: string | null;
 };
 
 type EditableProject = Pick<
   ProjectEntry,
-  'id' | 'label' | 'icon' | 'color' | 'iconBackground' | 'defaultModel' | 'iconImage' | 'path'
+  'id' | 'label' | 'icon' | 'color' | 'iconBackground' | 'defaultModel' | 'defaultVariant' | 'iconImage' | 'path'
 >;
 
 export const useProjectIdentityForm = (project: EditableProject | null) => {
@@ -45,6 +46,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
   const [color, setColor] = React.useState<string | null>(null);
   const [iconBackground, setIconBackground] = React.useState<string | null>(null);
   const [defaultModel, setDefaultModel] = React.useState<string | undefined>(undefined);
+  const [defaultVariant, setDefaultVariant] = React.useState<string | undefined>(undefined);
   const [isUploadingIcon, setIsUploadingIcon] = React.useState(false);
   const [isRemovingCustomIcon, setIsRemovingCustomIcon] = React.useState(false);
   const [isDiscoveringIcon, setIsDiscoveringIcon] = React.useState(false);
@@ -73,6 +75,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
       setColor(null);
       setIconBackground(null);
       setDefaultModel(undefined);
+      setDefaultVariant(undefined);
       return;
     }
     setName(project.label ?? '');
@@ -80,6 +83,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     setColor(project.color ?? null);
     setIconBackground(project.iconBackground ?? null);
     setDefaultModel(project.defaultModel);
+    setDefaultVariant(project.defaultVariant);
     setPendingRemoveImageIcon(false);
     clearPendingUploadIcon();
     setPreviewImageFailed(false);
@@ -110,12 +114,20 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     || color !== (project?.color ?? null)
     || iconBackground !== (project?.iconBackground ?? null)
     || (defaultModel ?? undefined) !== (project?.defaultModel ?? undefined)
+    || (defaultVariant ?? undefined) !== (project?.defaultVariant ?? undefined)
     || pendingRemoveImageIcon
     || Boolean(pendingUploadIconFile)
   );
 
   const handleDefaultModelChange = React.useCallback((providerId: string, modelId: string) => {
     setDefaultModel(providerId && modelId ? `${providerId}/${modelId}` : undefined);
+    // Variants belong to a model. Carrying the old one over would pin a name
+    // the new model may not have.
+    setDefaultVariant(undefined);
+  }, []);
+
+  const handleDefaultVariantChange = React.useCallback((variant: string | undefined) => {
+    setDefaultVariant(variant);
   }, []);
 
   const handleUploadIcon = React.useCallback((file: File | null) => {
@@ -232,11 +244,13 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
       color,
       iconBackground: normalizeProjectIconBackground(willRemoveImageIcon ? null : iconBackground),
       defaultModel: defaultModel ?? null,
+      defaultVariant: defaultModel ? defaultVariant ?? null : null,
     };
   }, [
     clearPendingUploadIcon,
     color,
     defaultModel,
+    defaultVariant,
     icon,
     iconBackground,
     name,
@@ -262,8 +276,10 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     iconBackground,
     setIconBackground,
     defaultModel,
+    defaultVariant,
     parsedDefaultModel,
     handleDefaultModelChange,
+    handleDefaultVariantChange,
     isUploadingIcon,
     isRemovingCustomIcon,
     isDiscoveringIcon,

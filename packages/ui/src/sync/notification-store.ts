@@ -24,7 +24,8 @@ type TurnCompleteNotification = NotificationBase & {
 
 type ErrorNotification = NotificationBase & {
   type: "error"
-  error?: { message?: string; code?: string }
+  /** What OpenCode reported for the failed turn; both null when it gave no details. */
+  error?: { name: string | null; message: string | null }
 }
 
 export type Notification = TurnCompleteNotification | ErrorNotification
@@ -159,5 +160,17 @@ export function markSessionViewed(sessionId: string) {
 
 export function useSessionUnseenCount(sessionId: string): number {
   return useNotificationStore((s) => s.index.session.unseenCount[sessionId] ?? 0)
+}
+
+/** The newest error OpenCode reported for this session, viewed or not. */
+export function useLatestSessionError(sessionId: string): ErrorNotification | null {
+  return useNotificationStore((s) => {
+    if (!sessionId) return null
+    for (let index = s.list.length - 1; index >= 0; index -= 1) {
+      const notification = s.list[index]
+      if (notification.session === sessionId && notification.type === "error") return notification
+    }
+    return null
+  })
 }
 

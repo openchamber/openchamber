@@ -12,7 +12,7 @@ const accessErrorMessage = (label, targetPath, error) => {
   return `${label} could not be checked: ${error?.message || String(error)}`;
 };
 
-export const normalizeRequiredPath = (rawPath, label = 'Path') => {
+const normalizeRequiredPath = (rawPath, label = 'Path') => {
   const targetPath = typeof rawPath === 'string' ? rawPath.trim() : '';
   if (!targetPath) {
     throw new Error(`${label} is required`);

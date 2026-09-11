@@ -63,6 +63,8 @@ export function createDictationRuntime({
         model: typeof req.body?.model === 'string' ? req.body.model : undefined,
         speakerId: Number.isInteger(req.body?.speakerId) ? req.body.speakerId : undefined,
         speed: typeof req.body?.speed === 'number' ? req.body.speed : undefined,
+        language: req.body?.language === 'auto' ? 'auto' : undefined,
+        languageSample: typeof req.body?.languageSample === 'string' ? req.body.languageSample.slice(0, 4000) : undefined,
       });
       if (result.error) {
         res.status(503).json({
@@ -73,6 +75,8 @@ export function createDictationRuntime({
         return;
       }
       res.setHeader('Content-Type', result.format || 'audio/wav');
+      res.setHeader('X-Speech-Model', result.modelId);
+      if (result.language) res.setHeader('X-Speech-Language', result.language);
       res.send(result.audio);
     } catch (error) {
       res.status(500).json({ error: error?.message || 'Failed to synthesize speech' });

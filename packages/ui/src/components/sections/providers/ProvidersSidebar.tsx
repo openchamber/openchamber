@@ -2,7 +2,8 @@ import React from 'react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Button } from '@/components/ui/button';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
+import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { cn } from '@/lib/utils';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
@@ -40,16 +41,28 @@ interface ProvidersSidebarProps {
 
 export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect }) => {
   const { t } = useI18n();
-  const providers = useConfigStore((state) => state.providers);
+  // Settings browses whichever project its own selector points at; the app
+  // stays where it is.
+  const settingsDirectory = useSettingsDirectory();
+  const providers = useConfigStore((state) => selectProvidersForDirectory(state, settingsDirectory));
   const selectedProviderId = useConfigStore((state) => state.selectedProviderId);
   const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
   const activeProjectId = useProjectsStore((s) => s.activeProjectId);
   const [sourcesByProvider, setSourcesByProvider] = React.useState<Record<string, ProviderSources>>({});
   const directory = React.useMemo(() => {
+    if (settingsDirectory) return settingsDirectory;
     // tie refresh to active project changes (directory is stored in the client)
     void activeProjectId;
     return getCurrentDirectory();
-  }, [activeProjectId]);
+  }, [activeProjectId, settingsDirectory]);
+
+  // The app only loads providers for the project it is on; Settings has to ask
+  // for the one it is looking at.
+  const loadProviders = useConfigStore((state) => state.loadProviders);
+  React.useEffect(() => {
+    if (!settingsDirectory) return;
+    void loadProviders({ directory: settingsDirectory, source: 'settings:providers' });
+  }, [loadProviders, settingsDirectory]);
 
   React.useEffect(() => {
     if (providers.length === 0) {

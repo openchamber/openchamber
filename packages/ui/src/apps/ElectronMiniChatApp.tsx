@@ -5,8 +5,11 @@ import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { MiniChatLayout } from '@/components/mini-chat/MiniChatLayout';
+import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
+import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
+import { useRootScrollLock } from '@/hooks/useRootScrollLock';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -24,7 +27,10 @@ import {
   partitionWorktreesByRegisteredProject,
   worktreeMapsEqual,
 } from '@/lib/worktrees/worktreeManager';
+import { refreshWorktreeTopologyForChange } from '@/lib/worktrees/worktreeTopologyRefresh';
+import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import type { WorktreeMetadata } from '@/types/worktree';
+import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 
 const MINI_CHAT_PRESENCE_CHANNEL = 'openchamber:mini-chat-presence';
 
@@ -153,9 +159,9 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
       const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId.trim() : '';
       if (!sessionId) return;
       if (useSessionUIStore.getState().currentSessionId === sessionId) return;
-      const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
-        ? detail.directory.trim()
-        : (sessions.find((entry) => entry.id === sessionId) as { directory?: string | null } | undefined)?.directory ?? null;
+      const sessionDirectory = (sessions.find((entry) => entry.id === sessionId) as { directory?: string | null } | undefined)?.directory?.trim();
+      const directory = sessionDirectory
+        || (typeof detail?.directory === 'string' && detail.directory.trim().length > 0 ? detail.directory.trim() : null);
       void sync.ensureSessionRenderable(sessionId);
       setCurrentSession(sessionId, directory);
       sessionBootstrappedRef.current = true;
@@ -166,9 +172,11 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
 
   React.useEffect(() => {
     if (config.mode !== 'draft' || draftOpen || currentSessionId) return;
+    const hasProjectTarget = Boolean(config.projectId || config.directory);
     openNewSessionDraft({
-      selectedProjectId: config.projectId,
-      directoryOverride: config.directory,
+      target: hasProjectTarget ? 'project' : 'chat',
+      selectedProjectId: hasProjectTarget ? config.projectId : CHAT_DRAFT_PROJECT_ID,
+      directoryOverride: hasProjectTarget ? config.directory : null,
       preserveDirectoryOverride: Boolean(config.directory),
     });
   }, [config, currentSessionId, draftOpen, openNewSessionDraft]);
@@ -213,6 +221,22 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
 
     return () => {
       cancelled = true;
+    };
+  }, [projects]);
+
+  // The main window (or an agent, or a terminal) may add or remove a worktree
+  // while this window is open; the server's control event names the affected
+  // repository so only its projects are re-listed.
+  React.useEffect(() => {
+    if (projects.length === 0) return;
+    let cancelled = false;
+    const unsubscribe = subscribeOpenchamberEvents((event) => {
+      if (event.type !== 'worktree-changed') return;
+      void refreshWorktreeTopologyForChange(projects, event.directories, () => cancelled);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
     };
   }, [projects]);
 
@@ -278,10 +302,11 @@ const MiniChatPresencePublisher: React.FC = () => {
 const useSessionUnavailable = (config: MiniChatConfig): boolean => {
   const sessions = useSessions();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const draftOpen = useSessionUIStore((state) => state.newSessionDraft.open);
   const [timedOut, setTimedOut] = React.useState(false);
 
   React.useEffect(() => {
-    if (config.mode !== 'session' || !config.sessionId || currentSessionId === config.sessionId) {
+    if (draftOpen || config.mode !== 'session' || !config.sessionId || currentSessionId) {
       setTimedOut(false);
       return;
     }
@@ -291,7 +316,7 @@ const useSessionUnavailable = (config: MiniChatConfig): boolean => {
     }
     const timeout = window.setTimeout(() => setTimedOut(true), 5000);
     return () => window.clearTimeout(timeout);
-  }, [config.mode, config.sessionId, currentSessionId, sessions]);
+  }, [config.mode, config.sessionId, currentSessionId, draftOpen, sessions]);
 
   return timedOut;
 };
@@ -313,6 +338,7 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
   useMiniChatKeyboardShortcuts();
   usePushVisibilityBeacon({ enabled: true });
   useWindowTitle();
+  useRootScrollLock();
 
   return (
     <ErrorBoundary>
@@ -321,6 +347,8 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
           <TooltipProvider delayDuration={300} skipDelayDuration={150}>
             <div className="h-full text-foreground bg-background">
               <ElectronMiniChatContent config={config} />
+              <AppLinkConfirmDialog />
+              <SharedTrustConfirmDialog />
               <Toaster />
             </div>
           </TooltipProvider>

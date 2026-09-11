@@ -1,0 +1,100 @@
+---
+title: Repository config
+description: Keep project actions, worktree setup commands, starters, and plans in the repository so everyone who pulls it gets them.
+---
+
+# Repository config
+
+Project actions, worktree setup commands, and draft starters live in your own OpenChamber settings by default. Nobody else sees them. If you want a teammate who clones the repository to get the same dev server action and the same `bun install` on every new worktree, move those items into the repository.
+
+OpenChamber stores them in `.openchamber/project.json` at the repository root. The file appears only when you move the first item there, and it goes away again when you move the last one out. Commit it like any other file.
+
+## What goes where
+
+| Stays in your settings | Can move to the repository |
+|---|---|
+| Notes and todos | Project actions |
+| Scheduled tasks | Worktree setup commands |
+| Which repository action is hidden for you | Draft starters (pinned commands and skills) |
+| Your trust answer for repository commands | Plans |
+
+Notes, todos, and scheduled tasks are yours. They never end up in the repository.
+
+## Moving an item
+
+Open **Settings → Projects** and pick the project. Every action and setup command has a **Move to repository** button, and every item that came from the repository has **Move to my settings**. Starters on the new session screen show the same pair on hover. Plans have it on each row of the Plans tab.
+
+A move is just that. The item leaves one place and lands in the other, so nothing is duplicated.
+
+Items from the repository show an **In repo** badge. Repository actions can also be hidden from your menu with **Hide for me**. That only changes your menu, not the file.
+
+## The file
+
+```json
+{
+  "version": 1,
+  "setupWorktree": [
+    "bun install"
+  ],
+  "setupWorktreeWait": true,
+  "projectActions": [
+    {
+      "id": "dev",
+      "name": "Dev server",
+      "command": "bun run dev",
+      "icon": "rocket",
+      "autoOpenUrl": true,
+      "platforms": ["macos", "linux"]
+    },
+    {
+      "id": "test",
+      "name": "Tests",
+      "command": "bun test"
+    }
+  ],
+  "draftStarters": [
+    { "type": "skill", "name": "triage-prs" }
+  ],
+  "plansDir": "docs/plans"
+}
+```
+
+Only `version` is required. Every other key is optional, and OpenChamber writes only the keys that carry something.
+
+`setupWorktree` is the list of shell commands OpenChamber runs inside a new worktree right after creating it, in order. Use `$ROOT_PROJECT_PATH` for the main checkout's path. `setupWorktreeWait: true` makes OpenChamber wait for these commands before it starts a session in the worktree.
+
+`projectActions` is the list of actions in the header menu. `id`, `name`, and `command` are required. `icon` is optional and falls back to a play icon; the names OpenChamber knows are `play`, `build`, `lint`, `terminal`, `tools`, `bug`, `flask`, `rocket`, `code`, `server`, `branch`, `search`, `settings`, `brain`, `stack`, `robot`, `command`, and `file`. `autoOpenUrl: true` opens the address the command prints, see [Preview & Dev Servers](/preview/). `platforms` limits the action to `macos`, `linux`, or `windows`. `runIn: "parent"` runs the action in the main checkout instead of the current worktree.
+
+`draftStarters` pins commands and skills to the new session screen. Each entry is `{ "type": "command" | "skill", "name": "..." }`, and the command or skill itself has to exist in the repository's OpenCode config.
+
+`plansDir` is where repository plans live. Leave it out to use `.openchamber/plans`. See below.
+
+You can write this file by hand. A key with the wrong shape makes the whole file invalid, and the Projects page tells you why instead of silently ignoring it.
+
+## How repository and personal items combine
+
+Repository setup commands run first, then your own. Tick **Use only my setup commands** in the Worktree section to skip the repository's commands altogether.
+
+Actions are merged by `id`. An action in your settings with the same id as a repository action replaces it. Starters are merged by name.
+
+The wait flag comes from your settings when you have set it, otherwise from the repository.
+
+## Trust
+
+Setup commands and actions from the repository run on your machine, and a `git pull` can change them. So the first time one of them is about to run, OpenChamber shows the exact commands and asks. **Trust and run** remembers your answer on this instance. **Not this time** runs only your own commands.
+
+The answer is tied to the commands themselves. When a pull changes a repository command, the question comes back for the new text. You can forget the answer with **reset trust** in the Worktree section of the project's settings.
+
+Moving your own command into the repository counts as trusting it, since you have just seen it.
+
+## Plans in the repository
+
+Plans on the Plans tab can also live in the repository, as Markdown files. The folder is `.openchamber/plans` by default. Set **Plans folder** in the project's settings to use another folder inside the repository, for example `docs/plans` if your team already keeps plans there. A custom folder replaces the default completely: OpenChamber reads and writes only that folder, so move existing files yourself when you change it.
+
+Every `.md` file in that folder shows on the Plans tab, including files written by other tools. Editing one in OpenChamber saves the file as you typed it. A plan you move into the repository keeps its identity, so sessions that had it attached still find it.
+
+## Related
+
+- [Project Actions](/project-actions/)
+- [Worktrees](/worktrees/)
+- [Project Notes, Todos & Plans](/notes-todos-plans/)

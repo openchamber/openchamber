@@ -119,6 +119,32 @@ describe('session lifecycle ordering', () => {
     ]);
   });
 
+  test('orders roots, siblings, orphan parents, and cyclic parent scopes deterministically', () => {
+    const rootOlder = session('root-older', 10);
+    const rootNewer = session('root-newer', 20);
+    const childOlder = session('child-older', 5, 'root-older');
+    const childNewer = session('child-newer', 6, 'root-older');
+    const orphanOlder = session('orphan-older', 10, 'missing-parent');
+    const orphanNewer = session('orphan-newer', 20, 'missing-parent');
+    const cycleOlder = session('cycle-older', 10, 'cycle-newer');
+    const cycleNewer = session('cycle-newer', 20, 'cycle-older');
+
+    expect(orderSessionsByLifecycleScopes(
+      [cycleOlder, rootOlder, childOlder, orphanOlder, cycleNewer, rootNewer, childNewer, orphanNewer],
+      new Set(),
+      new Map(),
+    ).map((item) => item.id)).toEqual([
+      'orphan-newer',
+      'root-newer',
+      'orphan-older',
+      'root-older',
+      'child-newer',
+      'child-older',
+      'cycle-newer',
+      'cycle-older',
+    ]);
+  });
+
   test('does not promote a root when only its child has lifecycle activity', () => {
     const rootOlder = session('root-older', 10);
     const rootNewer = session('root-newer', 20);

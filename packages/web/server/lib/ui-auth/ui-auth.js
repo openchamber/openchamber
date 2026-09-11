@@ -310,6 +310,7 @@ const isUrlAuthWebSocketPath = (pathname) => {
     || pathname === '/api/openchamber/realtime-proxy/ws'
     || pathname === '/api/terminal/ws'
     || pathname === '/api/dictation/ws'
+    || pathname === '/api/dev-tunnel'
     || pathname.startsWith('/api/preview/proxy/');
 };
 
@@ -839,7 +840,7 @@ export const createUiAuth = ({
     let clientTokenResult = null;
     if (req.body?.issueClientToken === true && typeof clientAuthController?.createClient === 'function') {
       clientTokenResult = await clientAuthController.createClient({
-        label: req.body?.clientLabel,
+        fallbackLabel: req.body?.clientLabel,
         expiresAt: new Date(Date.now() + ttlMs).toISOString(),
         clientKind: req.body?.clientKind,
         dedupeKey: req.body?.dedupeKey,
@@ -907,7 +908,7 @@ export const createUiAuth = ({
       let clientTokenResult = null;
       if (req.body?.issueClientToken === true && typeof clientAuthController?.createClient === 'function') {
         clientTokenResult = await clientAuthController.createClient({
-          label: req.body?.clientLabel,
+          fallbackLabel: req.body?.clientLabel,
           expiresAt: new Date(Date.now() + ttlMs).toISOString(),
           clientKind: req.body?.clientKind,
           dedupeKey: req.body?.dedupeKey,
@@ -984,7 +985,9 @@ export const createUiAuth = ({
     handlePasskeyList,
     handlePasskeyRevoke,
     handleResetAuth,
-    ensureSessionToken: async (req, _res) => {
+    ensureSessionToken: (req, _res) => {
+      const urlAuth = authenticateUrlAuthToken(req);
+      if (urlAuth) return clientSessionToken(urlAuth);
       return resolveAuthenticatedSessionToken(req);
     },
     dispose,

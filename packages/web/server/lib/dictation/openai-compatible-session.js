@@ -3,8 +3,9 @@
  * endpoints (faster-whisper, whisper.cpp, OpenAI, ...).
  *
  * The Whisper HTTP API cannot stream, so audio is buffered per segment and
- * transcribed on commit(). Live partials therefore only advance at segment
- * boundaries (the DictationStreamManager auto-commits every ~15s of speech).
+ * transcribed on commit(). This matches how the local session behaves: the
+ * DictationStreamManager splits long dictations at pauses, and everything
+ * shorter is one request on stop.
  *
  * Implements the StreamingTranscriptionSession contract used by
  * DictationStreamManager.

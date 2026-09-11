@@ -14,13 +14,15 @@ import {
   SETTINGS_OPTION_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
-import { updateDesktopSettings } from '@/lib/persistence';
+import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { useSelectionStore } from '@/sync/selection-store';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useI18n } from '@/lib/i18n';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 
 const getDisplayModel = (
   storedModel: string | undefined
@@ -39,9 +41,24 @@ export const DefaultsSettings: React.FC = () => {
   const setModel = useConfigStore((state) => state.setModel);
   const setAgent = useConfigStore((state) => state.setAgent);
   const setCurrentVariant = useConfigStore((state) => state.setCurrentVariant);
+  const setCurrentVariantOverride = useConfigStore((state) => state.setCurrentVariantOverride);
   const setSettingsDefaultModel = useConfigStore((state) => state.setSettingsDefaultModel);
   const setSettingsDefaultVariant = useConfigStore((state) => state.setSettingsDefaultVariant);
   const setSettingsDefaultAgent = useConfigStore((state) => state.setSettingsDefaultAgent);
+  // A default describes new sessions. Applying it to the open chat is a
+  // convenience, not the point, so it stops where the chat carries a choice the
+  // user made for it — the same pair of signals ModelControls restores from
+  // (`shouldPreserveManualModelOverride`).
+  const selectionIsManual = useConfigStore((state) => state.selectionSource === 'manual');
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const getSessionModelSelection = useSelectionStore((state) => state.getSessionModelSelection);
+  const getSessionAgentSelection = useSelectionStore((state) => state.getSessionAgentSelection);
+  const chatHasOwnModel = Boolean(
+    selectionIsManual && currentSessionId && getSessionModelSelection(currentSessionId),
+  );
+  const chatHasOwnAgent = Boolean(
+    selectionIsManual && currentSessionId && getSessionAgentSelection(currentSessionId),
+  );
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
   const providers = useConfigStore((state) => state.providers);
@@ -52,7 +69,7 @@ export const DefaultsSettings: React.FC = () => {
   const [defaultAgent, setDefaultAgent] = React.useState<string | undefined>();
   const [smallModelUseDefault, setSmallModelUseDefault] = React.useState(true);
   const [smallModelOverride, setSmallModelOverride] = React.useState<string | undefined>();
-  const [smallModelProviders, setSmallModelProviders] = React.useState<string[] | undefined>();
+  const [smallModelProviders, setSmallModelProviders] = React.useState<string[]>([]);
   const [walkthroughModelOverride, setWalkthroughModelOverride] = React.useState<string | undefined>();
   const [isLoading, setIsLoading] = React.useState(true);
 
@@ -61,75 +78,23 @@ export const DefaultsSettings: React.FC = () => {
   React.useEffect(() => {
     const loadSettings = async () => {
       try {
-        let data: {
-          defaultModel?: string;
-          defaultVariant?: string;
-          defaultAgent?: string;
-          smallModelUseDefault?: boolean;
-          smallModelOverride?: string;
-          walkthroughModelOverride?: string;
-        } | null = null;
-
-        if (!data) {
-          const runtimeSettings = getRegisteredRuntimeAPIs()?.settings;
-          if (runtimeSettings) {
-            try {
-              const result = await runtimeSettings.load();
-              const settings = result?.settings;
-              if (settings) {
-                const raw = settings as Record<string, unknown>;
-                data = {
-                  defaultModel: typeof settings.defaultModel === 'string' ? settings.defaultModel : undefined,
-                  defaultVariant:
-                    typeof raw.defaultVariant === 'string'
-                      ? (raw.defaultVariant as string)
-                      : undefined,
-                  defaultAgent: typeof settings.defaultAgent === 'string' ? settings.defaultAgent : undefined,
-                  smallModelUseDefault: typeof raw.smallModelUseDefault === 'boolean' ? raw.smallModelUseDefault : undefined,
-                  smallModelOverride: typeof raw.smallModelOverride === 'string' ? raw.smallModelOverride : undefined,
-                  walkthroughModelOverride:
-                    typeof raw.walkthroughModelOverride === 'string' ? raw.walkthroughModelOverride : undefined,
-                };
-              }
-            } catch {
-              // fall through
-            }
-          }
-        }
-
-        if (!data) {
-          const response = await runtimeFetch('/api/config/settings', {
-            method: 'GET',
-            headers: { Accept: 'application/json' },
-          });
-          if (response.ok) {
-            data = await response.json();
-          }
-        }
-
+        const data = await loadDesktopSettings();
         if (data) {
-          const model =
-            typeof data.defaultModel === 'string' && data.defaultModel.trim().length > 0
-              ? data.defaultModel.trim()
-              : undefined;
-          const variant =
-            typeof data.defaultVariant === 'string' && data.defaultVariant.trim().length > 0
-              ? data.defaultVariant.trim()
-              : undefined;
-          const agent =
-            typeof data.defaultAgent === 'string' && data.defaultAgent.trim().length > 0
-              ? data.defaultAgent.trim()
-              : undefined;
+          const model = data.defaultModel?.trim() || undefined;
+          const variant = data.defaultVariant?.trim() || undefined;
+          const agent = data.defaultAgent?.trim() || undefined;
 
           if (model !== undefined) setDefaultModel(model);
           if (variant !== undefined) setDefaultVariant(variant);
           if (agent !== undefined) setDefaultAgent(agent);
-          if (typeof data.smallModelUseDefault === 'boolean') setSmallModelUseDefault(data.smallModelUseDefault);
-          if (typeof data.smallModelOverride === 'string' && data.smallModelOverride.trim()) {
-            setSmallModelOverride(data.smallModelOverride.trim());
+          if (data.smallModelUseDefault !== undefined) setSmallModelUseDefault(data.smallModelUseDefault);
+          const smallOverride = data.smallModelOverride?.trim();
+          if (smallOverride) {
+            setSmallModelOverride(smallOverride);
           }
-          if (typeof data.walkthroughModelOverride === 'string' && data.walkthroughModelOverride.trim()) {
-            setWalkthroughModelOverride(data.walkthroughModelOverride.trim());
+          const walkthroughOverride = data.walkthroughModelOverride?.trim();
+          if (walkthroughOverride) {
+            setWalkthroughModelOverride(walkthroughOverride);
           }
         }
       } catch (error) {
@@ -147,32 +112,27 @@ export const DefaultsSettings: React.FC = () => {
       setDefaultModel(newValue);
       setDefaultVariant(undefined);
       setSettingsDefaultVariant(undefined);
-      setCurrentVariant(undefined);
       setSettingsDefaultModel(newValue);
 
-      if (providerId && modelId) {
-        const provider = providers.find((p) => p.id === providerId);
-        if (provider) {
-          setProvider(providerId);
-          setModel(modelId);
+      if (!chatHasOwnModel) {
+        setCurrentVariant(undefined);
+
+        if (providerId && modelId) {
+          const provider = providers.find((p) => p.id === providerId);
+          if (provider) {
+            setProvider(providerId);
+            setModel(modelId);
+          }
         }
       }
 
       try {
         await updateDesktopSettings({ defaultModel: newValue ?? '', defaultVariant: '' });
-        const response = await runtimeFetch('/api/config/settings', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ defaultModel: newValue }),
-        });
-        if (!response.ok) {
-          console.warn('Failed to save default model to server:', response.status, response.statusText);
-        }
       } catch (error) {
         console.warn('Failed to save default model:', error);
       }
     },
-    [providers, setCurrentVariant, setModel, setProvider, setSettingsDefaultModel, setSettingsDefaultVariant]
+    [chatHasOwnModel, providers, setCurrentVariant, setModel, setProvider, setSettingsDefaultModel, setSettingsDefaultVariant]
   );
 
   const DEFAULT_VARIANT_VALUE = '__default__';
@@ -189,7 +149,9 @@ export const DefaultsSettings: React.FC = () => {
       const newValue = variant === DEFAULT_VARIANT_VALUE ? undefined : variant || undefined;
       setDefaultVariant(newValue);
       setSettingsDefaultVariant(newValue);
-      setCurrentVariant(newValue);
+      if (!chatHasOwnModel) {
+        setCurrentVariantOverride(newValue ?? null, newValue);
+      }
 
       try {
         await updateDesktopSettings({ defaultVariant: newValue ?? '' });
@@ -197,7 +159,7 @@ export const DefaultsSettings: React.FC = () => {
         console.warn('Failed to save default variant:', error);
       }
     },
-    [setCurrentVariant, setSettingsDefaultVariant]
+    [chatHasOwnModel, setCurrentVariantOverride, setSettingsDefaultVariant]
   );
 
   const handleAgentChange = React.useCallback(
@@ -206,7 +168,7 @@ export const DefaultsSettings: React.FC = () => {
       setDefaultAgent(newValue);
       setSettingsDefaultAgent(newValue);
 
-      if (agentName) {
+      if (agentName && !chatHasOwnAgent) {
         setAgent(agentName);
       }
 
@@ -216,7 +178,7 @@ export const DefaultsSettings: React.FC = () => {
         console.warn('Failed to save default agent:', error);
       }
     },
-    [setAgent, setSettingsDefaultAgent]
+    [chatHasOwnAgent, setAgent, setSettingsDefaultAgent]
   );
 
   const handleSmallModelUseDefaultChange = React.useCallback(
@@ -274,13 +236,12 @@ export const DefaultsSettings: React.FC = () => {
     () => getDisplayModel(walkthroughModelOverride),
     [walkthroughModelOverride]
   );
-
   React.useEffect(() => {
-    // Both pickers filter by the same authenticated-provider list, so either
-    // one being open is reason enough to fetch it.
-    // Both pickers filter by the same authenticated-provider list, and the
-    // walkthrough picker is always visible, so this is always worth fetching.
-    if (smallModelProviders !== undefined) return;
+    // Both pickers offer the same providers — the walkthrough runs through the
+    // small model — and the walkthrough picker is always visible, so this is
+    // always worth fetching. The server answers with the providers it has a
+    // credential and an endpoint for, including plugin-registered ones that
+    // exist only inside the running OpenCode.
     let cancelled = false;
     (async () => {
       try {
@@ -291,13 +252,13 @@ export const DefaultsSettings: React.FC = () => {
           setSmallModelProviders(payload.authenticatedProviders.filter((id): id is string => typeof id === 'string'));
         }
       } catch {
-        // leave undefined — picker falls back to showing all providers
+        // Fail closed: never offer providers whose credentials were not verified.
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [smallModelProviders]);
+  }, []);
 
   const availableVariants = React.useMemo(() => {
     if (!parsedModel.providerId || !parsedModel.modelId) return [];
@@ -316,12 +277,14 @@ export const DefaultsSettings: React.FC = () => {
     if (!supportsVariants && defaultVariant) {
       setDefaultVariant(undefined);
       setSettingsDefaultVariant(undefined);
-      setCurrentVariant(undefined);
+      if (!chatHasOwnModel) {
+        setCurrentVariant(undefined);
+      }
       updateDesktopSettings({ defaultVariant: '' }).catch(() => {
         // best effort
       });
     }
-  }, [defaultVariant, setCurrentVariant, setSettingsDefaultVariant, supportsVariants]);
+  }, [chatHasOwnModel, defaultVariant, setCurrentVariant, setSettingsDefaultVariant, supportsVariants]);
 
   if (isLoading) {
     return null;
@@ -391,6 +354,7 @@ export const DefaultsSettings: React.FC = () => {
               <AgentSelector
                 agentName={defaultAgent || ''}
                 onChange={handleAgentChange}
+                filter={(agent) => isPrimaryMode(agent.mode)}
                 className={SETTINGS_CUSTOM_TRIGGER_CLASS}
               />
             </SettingsFieldRow>

@@ -11,7 +11,8 @@ export type WalkthroughWorkingTreeScope = 'all' | 'staged' | 'working';
 export type WalkthroughSource =
   | { kind: 'working-tree'; scope: WalkthroughWorkingTreeScope }
   | { kind: 'branch'; baseRef: string; headRef: string }
-  | { kind: 'pr'; number: number };
+  | { kind: 'commit'; hash: string }
+  | { kind: 'pr'; number: number; sourceRepo?: { owner: string; repo: string } };
 
 export type WalkthroughChapterIcon = 'bug' | 'wrench' | 'path' | 'flask' | 'doc' | 'gear';
 export type WalkthroughStopImportance = 'critical' | 'normal' | 'context';
@@ -89,13 +90,22 @@ export interface WalkthroughResult {
  */
 export type WalkthroughStage = 'collecting' | 'asking' | 'retrying' | 'assembling';
 
+/** Reasons the server reports for refusing to generate. */
 export type WalkthroughBlockedReason =
   | 'no-model'
+  | 'no-provider-login'
   | 'empty-diff'
   | 'only-generated'
   | 'context-too-small'
   | 'structured-output-unsupported'
   | 'output-exhausted';
+
+/**
+ * Everything the panel can render as a blocking screen. `server-unsupported` is
+ * never sent by a server — it is what the client concludes when the answer is
+ * not JSON at all, which is how a server too old to have these routes replies.
+ */
+export type WalkthroughBlockedState = WalkthroughBlockedReason | 'server-unsupported';
 
 export interface WalkthroughReadiness {
   ready: boolean;
@@ -104,6 +114,8 @@ export interface WalkthroughReadiness {
     inputCharBudget?: number;
     contextTokens?: number;
     structuredOutput?: boolean | null;
+    /** False when the resolved provider has no usable OpenCode login. */
+    hasLogin?: boolean;
   };
   requiredChars?: number;
   availableChars?: number;
@@ -113,7 +125,7 @@ export interface WalkthroughReadiness {
 }
 
 export class WalkthroughError extends Error {
-  readonly code?: WalkthroughBlockedReason | 'invalid-walkthrough' | 'github-not-connected' | 'no-github-remote';
+  readonly code?: WalkthroughBlockedState | 'invalid-walkthrough' | 'github-not-connected' | 'no-github-remote';
   readonly model?: WalkthroughModel;
   readonly requiredChars?: number;
   readonly availableChars?: number;

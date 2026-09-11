@@ -1,0 +1,100 @@
+---
+title: 仓库配置
+description: 把项目操作、工作树设置命令、启动项和计划放进仓库，让拉取仓库的每个人都能获得。
+---
+
+# 仓库配置
+
+项目操作、工作树设置命令和草稿启动项默认保存在你自己的 OpenChamber 设置里。别人看不到它们。如果你希望克隆仓库的队友也拥有同样的开发服务器操作，以及每个新工作树里同样的 `bun install`，就把这些项目移到仓库中。
+
+OpenChamber 把它们存放在仓库根目录的 `.openchamber/project.json` 里。只有当你把第一个项目移进去时这个文件才会出现，移出最后一个项目时它会消失。像提交其他文件一样提交它即可。
+
+## 什么放在哪里
+
+| 留在你的设置里 | 可以移到仓库 |
+|---|---|
+| 笔记和待办 | 项目操作 |
+| 定时任务 | 工作树设置命令 |
+| 你为自己隐藏了哪些仓库操作 | 草稿启动项（固定的命令和技能） |
+| 你对仓库命令的信任回答 | 计划 |
+
+笔记、待办和定时任务是你的。它们永远不会进入仓库。
+
+## 移动项目
+
+打开 **Settings → Projects** 并选择项目。每个操作和每条设置命令都有 **Move to repository** 按钮，每个来自仓库的项目都有 **Move to my settings**。新会话界面上的启动项在悬停时显示同样的一对按钮。计划则在“计划”标签的每一行里。
+
+移动就是移动。项目离开一处，落到另一处，不会产生副本。
+
+来自仓库的项目带有 **In repo** 徽章。仓库操作还可以用 **Hide for me** 从你的菜单中隐藏。这只改变你的菜单，不改变文件。
+
+## 文件
+
+```json
+{
+  "version": 1,
+  "setupWorktree": [
+    "bun install"
+  ],
+  "setupWorktreeWait": true,
+  "projectActions": [
+    {
+      "id": "dev",
+      "name": "Dev server",
+      "command": "bun run dev",
+      "icon": "rocket",
+      "autoOpenUrl": true,
+      "platforms": ["macos", "linux"]
+    },
+    {
+      "id": "test",
+      "name": "Tests",
+      "command": "bun test"
+    }
+  ],
+  "draftStarters": [
+    { "type": "skill", "name": "triage-prs" }
+  ],
+  "plansDir": "docs/plans"
+}
+```
+
+只有 `version` 是必填的。其余键都是可选的，OpenChamber 只写入有内容的键。
+
+`setupWorktree` 是 OpenChamber 在创建新工作树后立即在其中按顺序运行的 shell 命令列表。主检出路径用 `$ROOT_PROJECT_PATH` 表示。`setupWorktreeWait: true` 会让 OpenChamber 等这些命令完成后再在工作树中启动会话。
+
+`projectActions` 是头部菜单中的操作列表。`id`、`name` 和 `command` 是必填的。`icon` 可选，缺省时使用 play 图标；OpenChamber 认识的名称有 `play`、`build`、`lint`、`terminal`、`tools`、`bug`、`flask`、`rocket`、`code`、`server`、`branch`、`search`、`settings`、`brain`、`stack`、`robot`、`command` 和 `file`。`autoOpenUrl: true` 会打开命令输出的地址，见[预览与开发服务器](/preview/)。`platforms` 把操作限制在 `macos`、`linux` 或 `windows`。`runIn: "parent"` 在主检出而不是当前工作树中运行操作。
+
+`draftStarters` 把命令和技能固定到新会话界面。每一项形如 `{ "type": "command" | "skill", "name": "..." }`，命令或技能本身必须存在于仓库的 OpenCode 配置中。
+
+`plansDir` 是仓库计划所在的位置。省略则使用 `.openchamber/plans`。见下文。
+
+这个文件可以手写。某个键的形状不对会使整个文件无效，Projects 页面会告诉你原因，而不是悄悄忽略它。
+
+## 仓库项目与你自己的项目如何合并
+
+先运行仓库的设置命令，再运行你自己的。在 Worktree 区域勾选 **Use only my setup commands** 可以完全跳过仓库的命令。
+
+操作按 `id` 合并。你设置中与仓库操作 id 相同的操作会取代它。启动项按名称合并。
+
+等待标志在你设置了时取你的值，否则取仓库的值。
+
+## 信任
+
+仓库中的设置命令和操作会在你的机器上运行，而一次 `git pull` 就可能改变它们。因此，当其中某一条第一次即将运行时，OpenChamber 会显示完整的命令并询问你。**Trust and run** 会在此实例上记住你的回答。**Not this time** 只运行你自己的命令。
+
+回答与命令本身绑定。当 pull 改变了仓库中的命令，会针对新内容再次询问。你可以在项目设置的 Worktree 区域用 **reset trust** 忘记回答。
+
+把你自己的命令移到仓库视为信任它，因为你刚刚看过它。
+
+## 仓库中的计划
+
+“计划”标签中的计划也可以作为 Markdown 文件放在仓库里。默认文件夹是 `.openchamber/plans`。如果团队已经把计划放在例如 `docs/plans` 中，可在项目设置里的 **Plans folder** 指定仓库内的另一个文件夹。自定义文件夹会完全替代默认值：OpenChamber 只读写该文件夹，所以更改时请自行移动现有文件。
+
+该文件夹中的每个 `.md` 文件都会显示在“计划”标签中，包括其他工具写的文件。在 OpenChamber 中编辑会按你输入的内容原样保存文件。移到仓库的计划保持其身份，之前附加了它的会话仍能找到它。
+
+## 相关内容
+
+- [项目操作](/project-actions/)
+- [工作树](/worktrees/)
+- [项目笔记、待办与计划](/notes-todos-plans/)

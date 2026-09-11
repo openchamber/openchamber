@@ -44,7 +44,12 @@ export const createProjectDirectoryRuntime = (dependencies) => {
         return { ok: false, error: 'Specified path is not a directory' };
       }
       const realPath = await realpathCache.resolve(resolved);
-      return { ok: true, directory: realPath };
+      // `requestedDirectory` is the pre-realpath candidate the caller asked
+      // for. Callers that address files in the user-visible path space (the
+      // file tree, the read-family FS routes) need it when the project root
+      // is itself a symlink and the canonical `directory` no longer contains
+      // the paths the client sends.
+      return { ok: true, directory: realPath, requestedDirectory: resolved };
     } catch (error) {
       const err = error;
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
@@ -71,11 +76,11 @@ export const createProjectDirectoryRuntime = (dependencies) => {
       for (const candidate of requested) {
         const validated = await validateDirectoryPath(candidate);
         if (validated.ok) {
-          return { directory: validated.directory, error: null };
+          return { directory: validated.directory, requestedDirectory: validated.requestedDirectory, error: null };
         }
         lastError = validated.error;
       }
-      return { directory: null, error: lastError };
+      return { directory: null, requestedDirectory: null, error: lastError };
     }
 
     const readSettings = typeof getReadSettingsFromDiskMigrated === 'function'
@@ -93,27 +98,27 @@ export const createProjectDirectoryRuntime = (dependencies) => {
     if (typeof settings.lastDirectory === 'string' && settings.lastDirectory.trim()) {
       const validated = await validateDirectoryPath(settings.lastDirectory);
       if (validated.ok) {
-        return { directory: validated.directory, error: null };
+        return { directory: validated.directory, requestedDirectory: validated.requestedDirectory, error: null };
       }
     }
 
     const projects = sanitizeProjects(settings.projects) || [];
     if (projects.length === 0) {
-      return { directory: null, error: 'Directory parameter or active project is required' };
+      return { directory: null, requestedDirectory: null, error: 'Directory parameter or active project is required' };
     }
 
     const activeId = typeof settings.activeProjectId === 'string' ? settings.activeProjectId : '';
     const active = projects.find((project) => project.id === activeId) || projects[0];
     if (!active || !active.path) {
-      return { directory: null, error: 'Directory parameter or active project is required' };
+      return { directory: null, requestedDirectory: null, error: 'Directory parameter or active project is required' };
     }
 
     const validated = await validateDirectoryPath(active.path);
     if (!validated.ok) {
-      return { directory: null, error: validated.error };
+      return { directory: null, requestedDirectory: null, error: validated.error };
     }
 
-    return { directory: validated.directory, error: null };
+    return { directory: validated.directory, requestedDirectory: validated.requestedDirectory, error: null };
   };
 
   const resolveOptionalProjectDirectory = async (req) => {
@@ -126,18 +131,18 @@ export const createProjectDirectoryRuntime = (dependencies) => {
     const requested = [headerDirectory, queryDirectory].filter(Boolean);
 
     if (requested.length === 0) {
-      return { directory: null, error: null };
+      return { directory: null, requestedDirectory: null, error: null };
     }
 
     let lastError = null;
     for (const candidate of requested) {
       const validated = await validateDirectoryPath(candidate);
       if (validated.ok) {
-        return { directory: validated.directory, error: null };
+        return { directory: validated.directory, requestedDirectory: validated.requestedDirectory, error: null };
       }
       lastError = validated.error;
     }
-    return { directory: null, error: lastError };
+    return { directory: null, requestedDirectory: null, error: lastError };
   };
 
   return {

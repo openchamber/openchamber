@@ -21,6 +21,64 @@ Some prompts have a visible part (the message you'd see) and an instructions par
 
 Changed your mind? Each prompt has **reset to default**, and there's a **reset all** if you want to start over everywhere.
 
+## Where each prompt is used
+
+Every prompt below lists where it runs and the trigger that fires it. Check the trigger before editing, so you know which flow you're changing.
+
+### Git
+
+| Prompt | Where it runs | When it fires |
+| --- | --- | --- |
+| Commit generation | The generate button in the git view's commit box, and the mobile Changes screen | You generate a commit message. The selected files and the branch's recent commit subjects are filled in, so the subject matches your repo's existing style. |
+| PR generation | The create-pull-request form in the git view's PR tab | You generate a PR title and body. Filled with the base and head branches, the commits and changed files between them, your additional context, and the repo's PR template when one exists. |
+| Merge/rebase conflict resolution | The conflicts dialog in the git view, when a merge or rebase stops on conflicts | You pick "Resolve in current session" or "Resolve in new session". The agent reads the conflicted files, proposes a per-file resolution strategy, and waits for your confirmation before editing, staging, or continuing the operation. |
+| Cherry-pick conflict resolution | The "Re-integrate commits" section for a worktree session | Moving the session's commits onto the target branch hits a conflict and you hand it to the agent. The agent resolves inside the temporary worktree, stages the resolved files, and continues the cherry-pick. |
+
+### GitHub
+
+| Prompt | Where it runs | When it fires |
+| --- | --- | --- |
+| PR review | The "Link GitHub PR" picker in the composer's attach menu, and the new worktree dialog | Two triggers. Attaching a PR as context renders the instructions, which go out with your next message. Starting a worktree session from a PR uses the prompt as that session's opening message, with the full PR context attached. |
+| Issue review | The new worktree dialog, when you start the worktree from an issue | The new session's opening message reviews the issue, with its body and comments attached as context. |
+| PR failed checks / PR comments / single PR comment | — | Not sent by any flow today. The PR view used to fire these from one-click review actions; failed checks and comments now pin as chat-context drafts instead. They stay editable so existing overrides keep working. |
+
+### Planning
+
+| Prompt | Where it runs | When it fires |
+| --- | --- | --- |
+| Todo planning | The Todos panel in the project sidebar | You send a todo to a session or a new worktree session. The todo text becomes the visible message; the instructions turn it into a question-first planning dialogue instead of jumping straight to implementation. |
+| Improve plan | The "Improve" action on a saved plan in the Plans view | You send a saved plan into an improve flow. The agent reads the plan file first, then proposes changes grounded in the current repo state and offers to edit the same file. |
+| Implement plan | The "Implement" action on a saved plan | You send a saved plan into an implement flow. The agent reads the plan file and implements it end to end without expanding scope, saving plan adjustments back to the file when the plan itself turns out to be wrong. |
+
+### Session
+
+Most of these power slash commands typed in the composer. Most also appear as starter chips on a new-session draft.
+
+| Prompt | Where it runs | When it fires |
+| --- | --- | --- |
+| Codebase tour | `/explore` | You ask for a high-level orientation of the codebase. |
+| Session summary | `/summary`, optionally `/summary <topic>` | You summarize the conversation so far, useful for handing off to a new session. Needs an existing session. |
+| Workspace review | `/workspace-review` | You ask the agent to review the current workspace diff for intent, correctness, and security. |
+| Feature planning | `/plan-feature` | You turn a rough feature idea into an implementation plan through a guided question-and-answer dialogue. |
+| Goal crafting | `/craft-goal`, optionally `/craft-goal <idea>` | You turn an idea into a verifiable Goal objective for the Goal dialog. |
+| Catch up | `/catch-up` | You return to a project and ask where things stand and what to pick up next. |
+| Debugging | `/debug` | You investigate a bug: the agent forms hypotheses, confirms the root cause from the code, and only then proposes a fix. |
+| Weigh options | `/weigh` | You know what you want to build but not how. The agent compares two or three approaches and recommends one. |
+| Fusion | The "Run fusion" action on a multi-run group | You combine the outputs of several runs into one answer. The run outputs are appended after the instructions. |
+
+### Prompts without a Settings entry
+
+A few prompts fire automatically and have no editable page in Settings:
+
+| Prompt | When it fires |
+| --- | --- |
+| Scheduled task | `/schedule-task`, optionally with an initial idea. Guides the dialogue that defines a scheduled task. |
+| Review handoff | `/handoff-review`, or the Review button in the diff view with handoff enabled. Generates the handoff in the working session. |
+| Review session starter | The opening message of the generated review session, with the handoff when one was produced and without it otherwise. |
+| Review feedback / implementation response | Shuttle messages between the two sessions: reviewer feedback goes back to the implementing session, and the implementer's response returns to the review session. |
+
 ## Related
 
 - [Git & GitHub Workflows](/git/) — many of these prompts power the git flows
+- [Notes, Todos & Plans](/notes-todos-plans/) — the todos and plans behind the Planning prompts
+- [Multi-run](/multi-run/) — run groups and fusion

@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { computeCacheHitRate, sumTokenBreakdown } from "./tokenUtils"
+import type { Message, Part } from "@opencode-ai/sdk/v2"
+import { computeCacheHitRate, contextTokensFromBreakdown, extractTokensFromMessage, sumTokenBreakdown } from "./tokenUtils"
+
+const assistantMessage = (tokens: unknown): { info: Message; parts: Part[] } => ({
+  info: { tokens } as unknown as Message,
+  parts: [],
+})
 
 describe("computeCacheHitRate", () => {
   test("returns zero and hasInput=false for null input", () => {
@@ -93,5 +99,69 @@ describe("sumTokenBreakdown (regression)", () => {
   test("handles null safely", () => {
     expect(sumTokenBreakdown(null)).toBe(0)
     expect(sumTokenBreakdown(undefined)).toBe(0)
+  })
+})
+
+describe("contextTokensFromBreakdown", () => {
+  test("prefers the server-reported total over the summed fields", () => {
+    const breakdown = { total: 500, input: 100, output: 50, reasoning: 20, cache: { read: 800, write: 20 } }
+    expect(contextTokensFromBreakdown(breakdown)).toBe(500)
+  })
+
+  test("real multi-step turn: summing overstates a 1M window 14x, the total matches it", () => {
+    // Captured from opencode 1.18.18 (/session/:id/message) after a turn with
+    // ~14 tool-call round-trips. Every round-trip re-reads the whole cached
+    // prompt, so cache.read accumulates to 3.29M while the window really held
+    // 232,872. Summing rendered the context meter at 330.6% of a 1M window.
+    const breakdown = { total: 232_872, input: 0, output: 14_523, reasoning: 0, cache: { read: 3_291_956, write: 0 } }
+    expect(contextTokensFromBreakdown(breakdown)).toBe(232_872)
+    expect(sumTokenBreakdown(breakdown)).toBe(3_306_479)
+  })
+
+  test("single-step turn: the total and the summed fields agree", () => {
+    // Captured from the same server: one round-trip, nothing accumulates.
+    const breakdown = { total: 117_714, input: 1_116, output: 87, reasoning: 543, cache: { read: 115_968, write: 0 } }
+    expect(contextTokensFromBreakdown(breakdown)).toBe(sumTokenBreakdown(breakdown))
+  })
+
+  test("falls back to summing when the server sends no total (older servers)", () => {
+    expect(contextTokensFromBreakdown({ input: 100, output: 50, reasoning: 20, cache: { read: 80, write: 20 } })).toBe(270)
+  })
+
+  test("falls back to summing when the total is zero or not a finite number", () => {
+    expect(contextTokensFromBreakdown({ total: 0, input: 40 })).toBe(40)
+    expect(contextTokensFromBreakdown({ total: Number.NaN, input: 40 })).toBe(40)
+  })
+
+  test("handles null and undefined", () => {
+    expect(contextTokensFromBreakdown(null)).toBe(0)
+    expect(contextTokensFromBreakdown(undefined)).toBe(0)
+  })
+})
+
+describe("extractTokensFromMessage", () => {
+  test("uses the reported total from the message info breakdown", () => {
+    const message = assistantMessage({ total: 232_872, input: 0, output: 14_523, reasoning: 0, cache: { read: 3_291_956, write: 0 } })
+    expect(extractTokensFromMessage(message)).toBe(232_872)
+  })
+
+  test("sums the info breakdown when no total is reported", () => {
+    expect(extractTokensFromMessage(assistantMessage({ input: 100, output: 50, reasoning: 20, cache: { read: 80, write: 20 } }))).toBe(270)
+  })
+
+  test("returns plain numeric tokens as-is", () => {
+    expect(extractTokensFromMessage(assistantMessage(1234))).toBe(1234)
+  })
+
+  test("prefers the reported total when tokens live on a part", () => {
+    const message: { info: Message; parts: Part[] } = {
+      info: {} as Message,
+      parts: [{ tokens: { total: 500, input: 2_000 } } as unknown as Part],
+    }
+    expect(extractTokensFromMessage(message)).toBe(500)
+  })
+
+  test("returns 0 when neither info nor parts carry tokens", () => {
+    expect(extractTokensFromMessage({ info: {} as Message, parts: [] })).toBe(0)
   })
 })

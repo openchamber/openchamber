@@ -4,6 +4,7 @@ import type { Event, Session } from "@opencode-ai/sdk/v2/client"
 let currentSessions: Session[] = []
 const upsertedSessions: Session[] = []
 const removedSessionIds: string[] = []
+let mutationCalls = 0
 let runtimeKey = "runtime-a"
 let runtimeWillChange: (() => void) | null = null
 
@@ -15,6 +16,7 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
     getState: () => ({
       activeSessions: currentSessions,
       archivedSessions: [] as Session[],
+      entityById: new Map(currentSessions.map((session) => [session.id, session])),
       upsertSession: (session: Session) => {
         upsertedSessions.push(session)
       },
@@ -23,6 +25,15 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
       },
       removeSessions: (ids: string[]) => {
         removedSessionIds.push(...ids)
+      },
+      applySessionMutations: (mutations: Array<
+        { type: "upsert"; session: Session } | { type: "remove"; sessionId: string }
+      >) => {
+        mutationCalls += 1
+        for (const mutation of mutations) {
+          if (mutation.type === "upsert") upsertedSessions.push(mutation.session)
+          else removedSessionIds.push(mutation.sessionId)
+        }
       },
     }),
   },
@@ -34,7 +45,15 @@ mock.module("@/lib/runtime-switch", () => ({
     return () => undefined
   },
 }))
-import { applySessionEventToGlobalSessions } from "../session-event-router"
+import {
+  applySessionEventsToGlobalSessions,
+  applySessionEventToGlobalSessions,
+} from "../session-event-router"
+import {
+  registerBulkArchiveEchoes,
+  releaseBulkArchiveEchoes,
+  shouldConsumeBulkArchiveEcho,
+} from "../bulk-archive-echo"
 
 const buildSession = (title: string, time: Session["time"]): Session => ({
   id: "ses_1",
@@ -66,6 +85,7 @@ describe("applySessionEventToGlobalSessions", () => {
     currentSessions = []
     upsertedSessions.length = 0
     removedSessionIds.length = 0
+    mutationCalls = 0
   })
 
   test("skips stale global session.updated echoes after a newer rename", () => {
@@ -115,5 +135,54 @@ describe("applySessionEventToGlobalSessions", () => {
     applySessionEventToGlobalSessions(buildLifecycleEvent("session.idle", "ses_1"))
 
     expect(upsertedSessions).toEqual([])
+  })
+
+  test("commits an ordered event batch once", () => {
+    const events = Array.from({ length: 1_000 }, (_, index) => ({
+      type: "session.created",
+      properties: {
+        info: {
+          id: `ses_${index}`,
+          title: `Session ${index}`,
+          time: { created: index, updated: index },
+        },
+      },
+    } as Event))
+
+    applySessionEventsToGlobalSessions(events)
+
+    expect(mutationCalls).toBe(1)
+    expect(upsertedSessions).toHaveLength(1_000)
+  })
+
+  test("consumes only the matching bulk archive echo", () => {
+    registerBulkArchiveEchoes(runtimeKey, [{ id: "ses_1", archivedAt: 20 }], 100)
+
+    expect(shouldConsumeBulkArchiveEcho(buildEvent(buildSession("Initial", {
+      created: 1,
+      updated: 20,
+      archived: 20,
+    })), runtimeKey, 101)).toBe(true)
+    expect(shouldConsumeBulkArchiveEcho(buildEvent(buildSession("Initial", {
+      created: 1,
+      updated: 21,
+      archived: 21,
+    })), runtimeKey, 101)).toBe(false)
+    expect(shouldConsumeBulkArchiveEcho(buildEvent(buildSession("Initial", {
+      created: 1,
+      updated: 20,
+      archived: 20,
+    })), "runtime-b", 101)).toBe(false)
+  })
+
+  test("does not consume an expired or released bulk archive echo", () => {
+    registerBulkArchiveEchoes(runtimeKey, [{ id: "ses_1", archivedAt: 20 }], 100)
+    const event = buildEvent(buildSession("Initial", { created: 1, updated: 20, archived: 20 }))
+
+    expect(shouldConsumeBulkArchiveEcho(event, runtimeKey, 30_101)).toBe(false)
+
+    registerBulkArchiveEchoes(runtimeKey, [{ id: "ses_1", archivedAt: 20 }], 100)
+    releaseBulkArchiveEchoes(runtimeKey, ["ses_1"])
+    expect(shouldConsumeBulkArchiveEcho(event, runtimeKey, 101)).toBe(false)
   })
 })

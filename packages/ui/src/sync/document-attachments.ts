@@ -8,7 +8,7 @@ const MAX_ARCHIVE_ENTRIES = 5_000
 const MAX_EMBEDDED_IMAGES = 50
 const MAX_EMBEDDED_IMAGE_BYTES = 20 * 1024 * 1024
 const MAX_EMBEDDED_IMAGES_BYTES = 40 * 1024 * 1024
-const MAX_EXTRACTED_TEXT_CHARS = 2_000_000
+const MAX_EXTRACTED_TEXT_CHARS = 500_000
 const MAX_ODF_SPACES_PER_ELEMENT = 100
 const TEXT_TRUNCATION_NOTICE = "\n\n[Document text truncated by OpenChamber]\n"
 
@@ -310,6 +310,17 @@ const columnName = (index: number): string => {
   return result
 }
 
+const columnIndex = (name: string): number => {
+  let result = 0
+  for (const character of name.toUpperCase()) result = result * 26 + character.charCodeAt(0) - 64
+  return result - 1
+}
+
+const tsvValue = (value: string): string => {
+  if (!/[\t\r\n"]/.test(value)) return value
+  return `"${value.replace(/"/g, '""')}"`
+}
+
 const cellValue = (cell: string, sharedStrings: string[]): string => {
   const type = attribute(cell.match(/^<c\b[^>]*>/i)?.[0] ?? "", "t")
   if (type === "inlineStr") {
@@ -319,6 +330,95 @@ const cellValue = (cell: string, sharedStrings: string[]): string => {
   if (type === "s") return sharedStrings[Number(value)] ?? ""
   if (type === "b") return value === "1" ? "TRUE" : "FALSE"
   return decodeXml(value)
+}
+
+type SpreadsheetCell = {
+  reference: string
+  column: number
+  row: number
+  value: string
+}
+
+type SpreadsheetRow = {
+  cells: SpreadsheetCell[]
+  firstColumn: number
+  lastColumn: number
+  row: number
+}
+
+const isDenseSpreadsheetRow = (row: SpreadsheetRow): boolean => {
+  const width = row.lastColumn - row.firstColumn + 1
+  return width <= Math.max(32, row.cells.length * 4)
+}
+
+const serializeDenseSpreadsheetRow = (row: SpreadsheetRow): string => {
+  const valuesByColumn = new Map(row.cells.map((cell) => [cell.column, cell.value]))
+  return Array.from(
+    { length: row.lastColumn - row.firstColumn + 1 },
+    (_, offset) => tsvValue(valuesByColumn.get(row.firstColumn + offset) ?? ""),
+  ).join("\t")
+}
+
+const spreadsheetRows = (worksheet: string, sharedStrings: string[]): SpreadsheetRow[] => {
+  const rows: SpreadsheetRow[] = []
+  for (const rowXml of tagBlocks(worksheet, "row")) {
+    const cells: SpreadsheetCell[] = []
+    for (const match of rowXml.matchAll(/<c\b[^>]*>[\s\S]*?<\/c>/gi)) {
+      const tag = match[0].match(/^<c\b[^>]*>/i)?.[0] ?? ""
+      const reference = attribute(tag, "r")
+      const coordinates = reference?.match(/^([a-z]+)([1-9]\d*)$/i)
+      const value = cellValue(match[0], sharedStrings)
+      if (!reference || !coordinates || !value) continue
+      cells.push({
+        reference,
+        column: columnIndex(coordinates[1]),
+        row: Number(coordinates[2]),
+        value,
+      })
+    }
+    cells.sort((left, right) => left.column - right.column)
+    const first = cells[0]
+    const last = cells.at(-1)
+    if (!first || !last) continue
+    rows.push({ cells, firstColumn: first.column, lastColumn: last.column, row: first.row })
+  }
+  return rows
+}
+
+const serializeSpreadsheetRows = (rows: SpreadsheetRow[]): string[] => {
+  const sections: string[] = []
+  let denseBlock: SpreadsheetRow[] = []
+
+  const flushDenseBlock = () => {
+    const first = denseBlock[0]
+    const last = denseBlock.at(-1)
+    if (!first || !last) return
+    sections.push([
+      `Range: ${columnName(first.firstColumn)}${first.row}:${columnName(first.lastColumn)}${last.row}`,
+      ...denseBlock.map(serializeDenseSpreadsheetRow),
+    ].join("\n"))
+    denseBlock = []
+  }
+
+  for (const row of rows) {
+    const previous = denseBlock.at(-1)
+    if (!isDenseSpreadsheetRow(row)) {
+      flushDenseBlock()
+      sections.push(`Cells: ${row.cells.map((cell) => `${cell.reference}\t${tsvValue(cell.value)}`).join(" | ")}`)
+      continue
+    }
+    if (
+      previous
+      && (row.row !== previous.row + 1
+        || row.firstColumn !== previous.firstColumn
+        || row.lastColumn !== previous.lastColumn)
+    ) {
+      flushDenseBlock()
+    }
+    denseBlock.push(row)
+  }
+  flushDenseBlock()
+  return sections
 }
 
 const drawingCitations = (
@@ -362,15 +462,7 @@ const extractXlsx = (archive: Unzipped, images: EmbeddedImages): string | undefi
     if (!worksheetPath) continue
     sections.push(`## Sheet: ${name}`)
 
-    const rows: string[] = []
-    for (const row of tagBlocks(xml(archive, worksheetPath), "row")) {
-      const cells = Array.from(row.matchAll(/<c\b[^>]*>[\s\S]*?<\/c>/gi), (match) => {
-        const tag = match[0].match(/^<c\b[^>]*>/i)?.[0] ?? ""
-        const reference = attribute(tag, "r") ?? "?"
-        return `${reference}: ${cellValue(match[0], sharedStrings)}`
-      }).filter((value) => !value.endsWith(": "))
-      if (cells.length > 0) rows.push(cells.join(" | "))
-    }
+    const rows = serializeSpreadsheetRows(spreadsheetRows(xml(archive, worksheetPath), sharedStrings))
     sections.push(...(rows.length > 0 ? rows : ["[Empty sheet]"]), ...drawingCitations(archive, worksheetPath, images))
   }
   return `${sections.join("\n\n")}\n`

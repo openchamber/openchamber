@@ -1,8 +1,7 @@
 /**
- * Provider Circuit-Breaker & Retry Tracker
+ * Provider Circuit-Breaker Tracker
  *
  * Tracks per-provider error state to enable:
- * - Transparent retry with exponential backoff for transient errors
  * - Circuit breaking (pause requests to a provider during error storms)
  *
  * Inspired by HiveMind (arXiv:2604.17111) OS-inspired scheduling primitives.
@@ -12,9 +11,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch'
 
 const DEFAULT_CIRCUIT_BREAK_THRESHOLD = 3
 const DEFAULT_CIRCUIT_COOLDOWN_MS = 30_000
-const DEFAULT_RETRY_BASE_DELAY_MS = 1000
 const DEFAULT_RETRY_MAX_DELAY_MS = 32_000
-const DEFAULT_RETRY_MAX_ATTEMPTS = 3
 const PROVIDER_EVICTION_TTL_MS = 60 * 60 * 1000
 const PROVIDER_EVICTION_INTERVAL_MS = 10 * 60 * 1000
 const PROVIDER_MAX_ENTRIES = 200
@@ -113,19 +110,7 @@ function isCircuitOpen(providerID: string): boolean {
   return true
 }
 
-export function shouldRetry(providerID: string, status: number, attempt: number): boolean {
-  if (!RETRYABLE_STATUS_CODES.has(status)) return false
-  if (attempt >= DEFAULT_RETRY_MAX_ATTEMPTS - 1) return false
-  if (isCircuitOpen(providerID)) return false
-  return true
-}
-
 export function assertProviderCircuitClosed(providerID: string): void {
   if (!providerID || !isCircuitOpen(providerID)) return
   throw new Error(`Provider ${providerID} is temporarily unavailable after repeated errors. Please retry shortly.`)
-}
-
-export function getRetryDelayMs(attempt: number): number {
-  const delay = DEFAULT_RETRY_BASE_DELAY_MS * 2 ** attempt
-  return Math.min(delay, DEFAULT_RETRY_MAX_DELAY_MS)
 }

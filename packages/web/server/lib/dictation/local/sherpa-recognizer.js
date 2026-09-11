@@ -1,7 +1,12 @@
 /**
  * Sherpa-onnx offline recognizer engine (NeMo transducer / Parakeet) plus a
- * realtime streaming transcription session that re-decodes the accumulated
- * segment audio on a throttle to produce live partial transcripts.
+ * segment transcription session that decodes each segment exactly once, when
+ * the segment is committed.
+ *
+ * Parakeet is an offline model: it is trained to see a whole utterance at
+ * once. Decoding the accumulated audio repeatedly to animate a live transcript
+ * costs O(n^2) work for a result the final decode throws away, so this session
+ * only decodes on commit.
  *
  * Runs inside the dictation worker process only — never load the native
  * addon in the main server process.
@@ -147,31 +152,26 @@ export class SherpaOfflineRecognizerEngine {
 }
 
 /**
- * Streaming transcription session backed by the offline recognizer.
- * Accumulates the current segment's PCM and re-decodes it at most every
- * `minDecodeIntervalMs` to emit non-final partial transcripts; `commit()`
- * finalizes the segment and starts a new one.
+ * Segment transcription session backed by the offline recognizer.
+ * Accumulates the current segment's PCM and decodes it once in `commit()`,
+ * which emits the segment's final transcript and starts a new segment.
  *
  * Implements the StreamingTranscriptionSession contract used by
- * DictationStreamManager.
+ * DictationStreamManager. It never emits non-final transcripts: the manager's
+ * live `partial` messages are the concatenation of already-committed segments.
  */
-export class SherpaRealtimeTranscriptionSession extends EventEmitter {
+export class SherpaSegmentTranscriptionSession extends EventEmitter {
   /**
-   * @param {{ engine: SherpaOfflineRecognizerEngine, minDecodeIntervalMs?: number }} params
+   * @param {{ engine: SherpaOfflineRecognizerEngine }} params
    */
-  constructor({ engine, minDecodeIntervalMs }) {
+  constructor({ engine }) {
     super();
     this.engine = engine;
     this.requiredSampleRate = engine.sampleRate;
-    this.minDecodeIntervalMs = minDecodeIntervalMs ?? 350;
     this.connected = false;
     this.currentSegmentId = null;
     this.previousSegmentId = null;
-    this.lastPartialText = '';
     this.pcm16 = Buffer.alloc(0);
-    this.lastDecodeAt = 0;
-    this.decoding = false;
-    this.pendingDecode = false;
   }
 
   async connect() {
@@ -184,39 +184,38 @@ export class SherpaRealtimeTranscriptionSession extends EventEmitter {
 
   appendPcm16(chunk) {
     if (!this.connected || !this.currentSegmentId) {
-      this.emit('error', new Error('Sherpa realtime session not connected'));
+      this.emit('error', new Error('Sherpa transcription session not connected'));
       return;
     }
     this.pcm16 = this.pcm16.length === 0 ? chunk : Buffer.concat([this.pcm16, chunk]);
-    this.maybeDecode(false).catch((err) => {
-      this.emit('error', err instanceof Error ? err : new Error(String(err)));
-    });
   }
 
   commit() {
     if (!this.connected || !this.currentSegmentId) {
-      this.emit('error', new Error('Sherpa realtime session not connected'));
+      this.emit('error', new Error('Sherpa transcription session not connected'));
       return;
     }
 
-    void (async () => {
-      try {
-        await this.maybeDecode(true);
-        const finalText = this.lastPartialText;
-        const segmentId = this.currentSegmentId;
-        const previousSegmentId = this.previousSegmentId;
+    const segmentId = this.currentSegmentId;
+    const previousSegmentId = this.previousSegmentId;
+    const pcm16 = this.pcm16;
 
-        this.emit('committed', { segmentId, previousSegmentId });
-        this.emit('transcript', { segmentId, transcript: finalText, isFinal: true });
+    // Start the next segment before decoding: decoding blocks the worker for
+    // seconds on long segments, and audio for the next one keeps arriving.
+    this.previousSegmentId = segmentId;
+    this.currentSegmentId = randomUUID();
+    this.pcm16 = Buffer.alloc(0);
 
-        this.previousSegmentId = segmentId;
-        this.currentSegmentId = randomUUID();
-        this.lastPartialText = '';
-        this.pcm16 = Buffer.alloc(0);
-      } catch (err) {
-        this.emit('error', err instanceof Error ? err : new Error(String(err)));
-      }
-    })();
+    this.emit('committed', { segmentId, previousSegmentId });
+
+    let transcript;
+    try {
+      transcript = this.engine.decodePcm16(pcm16);
+    } catch (err) {
+      this.emit('error', err instanceof Error ? err : new Error(String(err)));
+      return;
+    }
+    this.emit('transcript', { segmentId, transcript, isFinal: true });
   }
 
   clear() {
@@ -225,53 +224,11 @@ export class SherpaRealtimeTranscriptionSession extends EventEmitter {
     }
     this.pcm16 = Buffer.alloc(0);
     this.currentSegmentId = randomUUID();
-    this.lastPartialText = '';
   }
 
   close() {
     this.connected = false;
     this.currentSegmentId = null;
     this.pcm16 = Buffer.alloc(0);
-  }
-
-  async maybeDecode(force) {
-    if (!this.connected || !this.currentSegmentId) {
-      return;
-    }
-
-    const now = Date.now();
-    if (!force && now - this.lastDecodeAt < this.minDecodeIntervalMs) {
-      return;
-    }
-
-    if (this.decoding) {
-      this.pendingDecode = true;
-      return;
-    }
-
-    this.decoding = true;
-    try {
-      const decodeStartedAt = Date.now();
-      const text = this.engine.decodePcm16(this.pcm16);
-      this.lastDecodeAt = Date.now();
-      // Adaptive throttle: on slow hardware (or heavy models) re-decoding the
-      // growing segment every 350ms would monopolize the worker. Space partial
-      // decodes to ~1.5x the observed decode time.
-      this.minDecodeIntervalMs = Math.max(350, (this.lastDecodeAt - decodeStartedAt) * 1.5);
-      if (text !== this.lastPartialText) {
-        this.lastPartialText = text;
-        this.emit('transcript', {
-          segmentId: this.currentSegmentId,
-          transcript: text,
-          isFinal: false,
-        });
-      }
-    } finally {
-      this.decoding = false;
-      if (this.pendingDecode) {
-        this.pendingDecode = false;
-        await this.maybeDecode(true);
-      }
-    }
   }
 }

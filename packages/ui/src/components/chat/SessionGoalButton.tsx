@@ -4,6 +4,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useSessionGoal } from '@/hooks/useSessionGoal';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { SESSION_GOAL_OBJECTIVE_CHAR_LIMIT } from '@/lib/sessionGoalMetadata';
+import { sessionGoalStatusColor } from '@/lib/sessionGoalPresentation';
 import { SessionGoalDialog } from '@/components/chat/SessionGoalDialog';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
@@ -50,12 +51,13 @@ export const SessionGoalButton: React.FC<SessionGoalButtonProps> = React.memo(({
   const liveGoal = goal && goal.status !== 'complete' ? goal : null;
   const isEngaged = armed || Boolean(liveGoal);
 
-  const colorClass = (() => {
-    if (goal?.status === 'complete') return 'text-[var(--status-success)]';
-    if (goal?.status === 'blocked' || goal?.status === 'budgetLimited') return 'text-[var(--status-error)]';
-    if (armed || goal?.status === 'active' || goal?.status === 'paused') return 'text-[var(--status-info)]';
-    return '';
-  })();
+  // One mapping for every goal surface. This button used to carry its own,
+  // which painted `paused` the same info colour as `active` — so a paused goal
+  // was indistinguishable from a running one — and `blocked` as an error rather
+  // than a warning. `armed` is not a goal status, so it keeps its own case.
+  const iconColor = goal
+    ? sessionGoalStatusColor[goal.status]
+    : (armed ? 'var(--status-info)' : undefined);
 
   const label = goal
     ? t('chat.goal.button.manageAria')
@@ -74,7 +76,8 @@ export const SessionGoalButton: React.FC<SessionGoalButtonProps> = React.memo(({
   const button = (
     <button
       type="button"
-      className={cn(footerIconButtonClass, colorClass)}
+      className={footerIconButtonClass}
+      style={iconColor ? { color: iconColor } : undefined}
       onClick={handleClick}
       // Same guard as PermissionAutoAcceptButton, but only for the ARM
       // toggle: arming happens mid-typing (the next message IS the

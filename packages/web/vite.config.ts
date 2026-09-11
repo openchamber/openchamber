@@ -73,7 +73,7 @@ export default defineConfig({
       injectRegister: false,
       manifest: false,
       injectManifest: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,ttf,otf,eot}'],
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,ttf,otf,eot,wasm}'],
         // iOS Safari/PWA is much more reliable with a classic (non-module) SW bundle.
         rollupFormat: 'iife',
         // We already keep a custom manifest in index.html
@@ -112,6 +112,10 @@ export default defineConfig({
         changeOrigin: true,
       },
       '/health': {
+        target: `http://127.0.0.1:${process.env.OPENCHAMBER_PORT || 3001}`,
+        changeOrigin: true,
+      },
+      '/linear': {
         target: `http://127.0.0.1:${process.env.OPENCHAMBER_PORT || 3001}`,
         changeOrigin: true,
       },
@@ -156,6 +160,28 @@ export default defineConfig({
 
           const segments = match.split('/');
           const packageName = match.startsWith('@') ? `${segments[0]}/${segments[1]}` : segments[0];
+
+          // Shiki grammars/themes and CodeMirror legacy modes are dynamically
+          // imported one at a time by their registries. Forcing them into a
+          // single vendor chunk makes the first language request download every
+          // grammar (7.4 MB raw for @shikijs/langs). Let Rollup split them per
+          // dynamically imported module so only used languages are fetched —
+          // the worker build already behaves this way.
+          if (
+            packageName === '@shikijs/langs' ||
+            packageName === '@shikijs/themes' ||
+            packageName === '@codemirror/legacy-modes'
+          ) {
+            return undefined;
+          }
+
+          // Split @pierre/diffs by usage as well: the eager tool renderer needs
+          // only its pure patch parser, while the Shiki-importing render stack
+          // must stay loadable on demand. One merged vendor chunk would make
+          // the parser import download the whole stack eagerly.
+          if (packageName === '@pierre/diffs') {
+            return undefined;
+          }
 
           if (packageName === 'react' || packageName === 'react-dom') return 'vendor-react';
           if (packageName === 'zustand' || packageName === 'zustand/middleware') return 'vendor-zustand';

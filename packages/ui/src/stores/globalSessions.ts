@@ -3,6 +3,7 @@ import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { retry } from "@/sync/retry";
 import { stripSessionListDetails } from "@/sync/sanitize";
 import { startSessionLoadPerformanceEvent } from "@/sync/session-load-performance";
+import { isChatDirectoryPath } from '@/lib/chatDirectories';
 
 export type GlobalSessionRecord = Session & {
     project?: {
@@ -11,6 +12,12 @@ export type GlobalSessionRecord = Session & {
         worktree?: string;
     } | null;
 };
+
+export const filterManagedChatsForRuntime = (sessions: Session[], vscode: boolean): Session[] => (
+    vscode
+        ? sessions.filter((session) => !isChatDirectoryPath(session.directory))
+        : sessions
+);
 
 const toNumber = (value: string | null): number | null => {
     if (!value) {
@@ -84,11 +91,38 @@ const unwrapSessionList = (
  */
 const isArchivedSession = (session: GlobalSessionRecord): boolean => Boolean(session.time?.archived);
 
+/**
+ * Split an inclusive (`archived: true`) session page stream into active and
+ * archived buckets. Restored sessions carry `time.archived === 0` (see
+ * `UNARCHIVED_TIMESTAMP` in `sync/session-actions.ts`); the truthiness check
+ * classifies them as active even though the server's own
+ * `time_archived IS NULL` filter would still exclude them, which is why the
+ * global cache must split client-side instead of issuing an
+ * `archived: false` request for its active list.
+ */
+export const splitGlobalSessionsByArchived = <T extends GlobalSessionRecord>(
+    sessions: T[],
+): { active: T[]; archived: T[] } => {
+    const active: T[] = [];
+    const archived: T[] = [];
+    for (const session of sessions) {
+        if (isArchivedSession(session)) archived.push(session);
+        else active.push(session);
+    }
+    return { active, archived };
+};
+
 export async function listGlobalSessionPages(
     apiClient: OpencodeClient,
     options: {
         directory?: string;
         archived: boolean;
+        /**
+         * When `archived` is true, narrow results to records carrying a truthy
+         * `time.archived` (default true). Pass false to receive the inclusive
+         * server response unfiltered, e.g. to split active/archived locally.
+         */
+        narrowToArchived?: boolean;
         roots?: boolean;
         pageSize: number;
         onPage?: (sessions: GlobalSessionRecord[]) => void;
@@ -97,17 +131,17 @@ export async function listGlobalSessionPages(
     const all: GlobalSessionRecord[] = [];
     const seenIds = new Set<string>();
     let cursor: number | undefined;
+    const narrowToArchived = options.narrowToArchived !== false;
     let operation: string;
     if (!options.directory) {
-        operation = `global-sessions.${options.archived ? "archived" : "active"}`;
+        operation = `global-sessions.${options.archived ? (narrowToArchived ? "archived" : "all") : "active"}`;
     } else if (options.roots === true) {
         operation = "bootstrap.sessions.roots";
     } else if (options.archived) {
-        operation = "bootstrap.sessions.archived";
+        operation = narrowToArchived ? "bootstrap.sessions.archived" : "bootstrap.sessions.all";
     } else {
         operation = "bootstrap.sessions.all";
     }
-
     while (true) {
         let attempts = 0;
         const finishPerformanceEvent = startSessionLoadPerformanceEvent({
@@ -150,7 +184,7 @@ export async function listGlobalSessionPages(
             if (!session?.id || seenIds.has(session.id)) continue;
             seenIds.add(session.id);
             appended += 1;
-            if (options.archived && !isArchivedSession(session)) continue;
+            if (options.archived && narrowToArchived && !isArchivedSession(session)) continue;
             all.push(session);
             accepted.push(session);
         }

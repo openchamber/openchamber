@@ -14,13 +14,16 @@ import {
     verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type MessageQueueTarget, type QueuedMessage } from '@/stores/messageQueueStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { getMessageQueueKey, useMessageQueueStore, type MessageQueueTarget, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useInputStore } from '@/sync/input-store';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
 import { Button } from '@/components/ui/button';
+import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
+import { ComposerFloatingPanel } from './composer/ui/ComposerFloatingPanel';
+import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
+import { getQueuedMessagePreview } from '@/lib/messages/queuedMessagePreview';
 
 interface QueuedMessageChipProps {
     message: QueuedMessage;
@@ -34,16 +37,7 @@ const QueuedMessageChip = memo(({ message, target, onEdit, onSend }: QueuedMessa
     const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: message.id });
 
-    // Get first line of message, truncated
-    const firstLine = React.useMemo(() => {
-        const lines = message.content.split('\n');
-        const first = lines[0] || '';
-        const maxLength = 100;
-        if (first.length > maxLength) {
-            return first.substring(0, maxLength) + '...';
-        }
-        return first + (lines.length > 1 ? '...' : '');
-    }, [message.content]);
+    const firstLine = getQueuedMessagePreview(message);
 
     const attachmentCount = message.attachments?.length ?? 0;
 
@@ -102,25 +96,20 @@ const QueuedMessageChip = memo(({ message, target, onEdit, onSend }: QueuedMessa
 QueuedMessageChip.displayName = 'QueuedMessageChip';
 
 interface QueuedMessageChipsProps {
-    onEditMessage: (content: string, attachments?: QueuedMessage['attachments']) => void;
+    target: MessageQueueTarget | null;
+    hidden?: boolean;
+    /** The message was taken from the queue in full; the composer restores it. */
+    onEditMessage: (message: QueuedMessage) => void;
     onSendMessage: (messageId: string) => void;
 }
 
 const EMPTY_QUEUE: QueuedMessage[] = [];
 
-export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: QueuedMessageChipsProps) => {
+export const QueuedMessageChips = memo(({ target, hidden = false, onEditMessage, onSendMessage }: QueuedMessageChipsProps) => {
     const { t } = useI18n();
-    const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-    // Must use the same resolution the composer used to build the queue key —
-    // reading currentSessionDirectory raw can key the chips to a different
-    // directory than the one the messages were queued under.
-    const currentSessionDirectory = useSessionUIStore(
-        React.useCallback(
-            (state) => (currentSessionId ? state.getDirectoryForSession(currentSessionId) : null),
-            [currentSessionId],
-        ),
-    );
-    const target = currentSessionId ? createMessageQueueTarget(currentSessionId, currentSessionDirectory) : null;
+    const [collapsed, setCollapsed] = React.useState(true);
+    const bodyId = React.useId();
+    const bodyRef = React.useRef<HTMLDivElement | null>(null);
     const queueKey = target ? getMessageQueueKey(target) : null;
     const queuedMessages = useMessageQueueStore(
         React.useCallback(
@@ -133,6 +122,7 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
     );
     const popToInput = useMessageQueueStore((state) => state.popToInput);
     const reorderQueue = useMessageQueueStore((state) => state.reorderQueue);
+    const availableMaxHeight = useMobileAutocompleteMaxHeight(bodyRef, !hidden && !collapsed && queuedMessages.length > 0, 168 + 48);
 
     const sensors = useSensors(
         // Desktop: drag after a small move so other clicks still register.
@@ -149,34 +139,47 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
 
     const handleEdit = React.useCallback((message: QueuedMessage) => {
         if (!target) return;
-        
-        const popped = popToInput(target, message.id);
-        if (popped) {
+
+        // The full message (attachments included) comes back from the queue's
+        // owner; the chip itself only knows the summary.
+        void popToInput(target, message.id).then((popped) => {
+            if (!popped) return;
             if (popped.attachments && popped.attachments.length > 0) {
                 const currentAttachments = useInputStore.getState().attachedFiles;
                 useInputStore.getState().setAttachedFiles([...currentAttachments, ...popped.attachments]);
             }
-            onEditMessage(popped.content, popped.attachments);
-        }
-    }, [target, popToInput, onEditMessage]);
+            onEditMessage(popped);
+        }).catch((error) => {
+            console.warn('[queue] failed to take queued message for editing:', error);
+            toast.error(t('chat.queuedMessage.toast.takeFailed'));
+        });
+    }, [target, popToInput, onEditMessage, t]);
 
     const handleSend = React.useCallback((message: QueuedMessage) => {
         onSendMessage(message.id);
     }, [onSendMessage]);
 
-    if (queuedMessages.length === 0 || !target) {
+    if (hidden || queuedMessages.length === 0 || !target) {
         return null;
     }
 
     return (
-        <div className="pb-2 w-full px-1">
-            <div className="rounded-xl border border-border/60 bg-[var(--surface-elevated)] text-[var(--surface-elevated-foreground)] shadow-sm overflow-hidden">
-                <div className="flex w-full items-center gap-2 px-3 py-2 text-left">
-                    <span className="typography-ui-label font-medium text-foreground flex-shrink-0">
-                        {t('chat.queuedMessage.title')} {queuedMessages.length}
-                    </span>
-                    <Icon name="time" className="ml-auto h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                </div>
+        <ComposerFloatingPanel role="region" ariaLabel={t('chat.queuedMessage.title')} compact={collapsed} header={
+                <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setCollapsed((value) => !value)}
+                    aria-expanded={!collapsed}
+                    aria-controls={collapsed ? undefined : bodyId}
+                    className="min-w-0 flex-1 shrink justify-start px-0 normal-case text-muted-foreground hover:!bg-transparent hover:text-foreground has-[>svg]:px-0"
+                >
+                    <Icon name="time" className="size-3.5 shrink-0" aria-hidden="true" />
+                    <Icon name={collapsed ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" aria-hidden="true" />
+                    <span className="min-w-0 truncate">{t('chat.queuedMessage.title')} {queuedMessages.length}</span>
+                </Button>
+        }>
+            {!collapsed && (
                 <DndContext
                     sensors={sensors}
                     collisionDetection={closestCenter}
@@ -186,7 +189,12 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
                         items={queuedMessages.map((m) => m.id)}
                         strategy={verticalListSortingStrategy}
                     >
-                        <div className="px-3 pb-3 flex flex-col gap-1.5 max-h-[10.5rem] overflow-y-auto">
+                        <div
+                            ref={bodyRef}
+                            id={bodyId}
+                            className="px-3 pb-3 flex flex-col gap-1.5 max-h-[10.5rem] overflow-y-auto overscroll-contain"
+                            style={availableMaxHeight === undefined ? undefined : { maxHeight: Math.max(72, availableMaxHeight - 48) }}
+                        >
                             {queuedMessages.map((message) => (
                                 <QueuedMessageChip
                                     key={message.id}
@@ -199,8 +207,8 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
                         </div>
                     </SortableContext>
                 </DndContext>
-            </div>
-        </div>
+            )}
+        </ComposerFloatingPanel>
     );
 });
 

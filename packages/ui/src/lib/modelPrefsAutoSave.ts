@@ -1,5 +1,5 @@
 import { useUIStore } from '@/stores/useUIStore';
-import { updateDesktopSettings } from '@/lib/persistence';
+import { isApplyingServerSettings, updateDesktopSettings } from '@/lib/persistence';
 import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 
 type ModelRef = { providerID: string; modelID: string };
@@ -131,6 +131,12 @@ export const startModelPrefsAutoSave = () => {
       recentEfforts: prevState.recentEfforts,
     };
     if (modelPrefsEqual(next, prev)) {
+      return;
+    }
+    // Adopted from the server by the settings sync: that is the new baseline,
+    // not a change of this window's to send back.
+    if (isApplyingServerSettings()) {
+      lastSent = cloneModelPrefs(next);
       return;
     }
     schedule();

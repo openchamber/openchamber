@@ -1,3 +1,4 @@
+import { rankByQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -69,11 +70,10 @@ export const StashesDialog: React.FC<StashesDialogProps> = ({
     };
   }, [directory, open, stashes]);
 
-  const filtered = React.useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    if (!normalized) return stashes;
-    return stashes.filter((stash) => `${stash.ref} ${stash.message} ${stash.relativeTime}`.toLowerCase().includes(normalized));
-  }, [query, stashes]);
+  const filtered = React.useMemo(
+    () => rankByQuery(stashes, query, (stash) => [stash.message, stash.ref, stash.relativeTime]),
+    [query, stashes],
+  );
 
   const refreshAfterChange = React.useCallback(async (change?: { affectsIndex?: boolean }) => {
     await load();

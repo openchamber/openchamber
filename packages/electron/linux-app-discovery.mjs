@@ -8,7 +8,7 @@ const DEFAULT_XDG_DATA_DIRS = ['/usr/local/share', '/usr/share'];
 const TARGET_FIELD_CODES = new Set(['f', 'F', 'u', 'U']);
 const TERMINAL_APP_IDS = new Set(['terminal', 'iterm2', 'ghostty']);
 
-export const LINUX_CLI_BY_APP_ID = {
+const LINUX_CLI_BY_APP_ID = {
   vscode: 'code',
   cursor: 'cursor',
   vscodium: 'codium',
@@ -43,7 +43,7 @@ const normalizeComparable = (value) => String(value || '')
   .trim();
 const normalizeCompactComparable = (value) => normalizeComparable(value).replace(/\s+/g, '');
 
-export const stripDesktopExecFieldCodes = (execValue) => String(execValue || '')
+const stripDesktopExecFieldCodes = (execValue) => String(execValue || '')
   .replace(/%%/g, '\^@')
   .replace(/%[fFuUdDnNickvm]/g, '')
   .replace(/%./g, '')
@@ -142,12 +142,14 @@ export const readLinuxDesktopEntries = async (options = {}) => {
   return entries.sort((left, right) => left.name.localeCompare(right.name));
 };
 
-export const discoverLinuxDesktopApps = readLinuxDesktopEntries;
-
-export const desktopEntryMatchesApp = (entry, appName, appId = '') => {
+const desktopEntryMatchesApp = (entry, appName, appId = '') => {
   const needles = uniqueStrings([appName, appId]).flatMap((value) => [normalizeComparable(value), normalizeCompactComparable(value)]).filter(Boolean);
   const haystacks = [entry.name, entry.id, path.basename(entry.filePath || ''), entry.exec]
-    .flatMap((value) => [normalizeComparable(value), normalizeCompactComparable(value)]);
+    .flatMap((value) => [normalizeComparable(value), normalizeCompactComparable(value)])
+    // A value with no ASCII letters or digits (e.g. a CJK-only Name) normalizes to the empty
+    // string, and needle.includes('') is true for every app — drop it so such entries can
+    // only match through a field that still carries comparable text.
+    .filter(Boolean);
   return needles.some((needle) => haystacks.some((haystack) => haystack === needle || haystack.includes(needle) || needle.includes(haystack)));
 };
 
@@ -234,6 +236,11 @@ const commandExists = (program, env = process.env) => {
 
 const findEntry = (entries, appId, appName) => entries.find((entry) => desktopEntryMatchesApp(entry, appName, appId)) || null;
 
+const isTerminalEmulatorEntry = (entry) => {
+  const categories = Array.isArray(entry?.categories) ? entry.categories : [];
+  return categories.some((category) => normalizeComparable(category) === 'terminalemulator');
+};
+
 export const buildLinuxOpenSpecs = ({ targetPath, appId, appName, targetKind = 'path', entries = [], env = process.env }) => {
   if (appId === 'finder') {
     return [{ kind: 'default', targetKind, targetPath }];
@@ -241,7 +248,9 @@ export const buildLinuxOpenSpecs = ({ targetPath, appId, appName, targetKind = '
   const specs = [];
   if (TERMINAL_APP_IDS.has(appId)) {
     const directory = targetKind === 'file' ? path.dirname(targetPath) : targetPath;
-    const terminalEntry = findEntry(entries, appId, appName);
+    const terminalEntry = appId === 'terminal'
+      ? entries.find(isTerminalEmulatorEntry) || null
+      : findEntry(entries, appId, appName);
     if (terminalEntry) {
       const spec = buildCommandFromDesktopExec(terminalEntry, directory);
       if (spec) specs.push(spec);
@@ -324,7 +333,7 @@ const pathExistsSync = (candidate) => {
   }
 };
 
-export const linuxIconThemeDirs = ({ env = process.env, homeDir = os.homedir() } = {}) => {
+const linuxIconThemeDirs = ({ env = process.env, homeDir = os.homedir() } = {}) => {
   const dataHome = typeof env.XDG_DATA_HOME === 'string' && env.XDG_DATA_HOME.trim()
     ? env.XDG_DATA_HOME.trim()
     : path.join(homeDir || os.homedir(), '.local', 'share');
@@ -412,7 +421,7 @@ export const resolveLinuxIconFile = (iconName, options = {}) => {
   return null;
 };
 
-export const resolveDefaultLinuxFileManagerId = ({ env = process.env, execFileSyncImpl = execFileSync } = {}) => {
+const resolveDefaultLinuxFileManagerId = ({ env = process.env, execFileSyncImpl = execFileSync } = {}) => {
   try {
     const output = String(execFileSyncImpl('xdg-mime', ['query', 'default', 'inode/directory'], {
       encoding: 'utf8',
@@ -515,7 +524,7 @@ export const buildLinuxInstalledApps = async (apps, options = {}) => {
           ...FILE_MANAGER_ICON_FALLBACKS,
         ], { ...options, env });
       } else if (normalizeComparable(name) === 'terminal') {
-        const terminalEntry = findEntry(entries, 'terminal', name)
+        const terminalEntry = entries.find(isTerminalEmulatorEntry)
           || findEntry(entries, 'ghostty', 'Ghostty');
         iconDataUrl = resolveIconDataUrlForName([
           terminalEntry?.icon,

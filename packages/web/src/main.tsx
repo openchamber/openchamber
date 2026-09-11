@@ -2,7 +2,7 @@ import { createConfiguredWebAPIs, getDesktopRelayRestoreReady } from './runtimeC
 import { registerSW } from 'virtual:pwa-register';
 
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
-import { resolveHostedSurface, type HostedSurface } from '@openchamber/ui/lib/runtimeSurface';
+import { resolveHostedSurface, watchHostedSurfaceViewport, type HostedSurface } from '@openchamber/ui/lib/runtimeSurface';
 import {
   isEmbeddedSessionChat,
   requestEmbeddedSessionRuntimeBootstrap,
@@ -89,6 +89,10 @@ const start = async (): Promise<void> => {
     ? await requestEmbeddedSessionRuntimeBootstrap()
     : null;
   window.__OPENCHAMBER_RUNTIME_APIS__ = createConfiguredWebAPIs(embeddedBootstrap);
+
+  // Reload into the other app shell when the viewport crosses the phone
+  // threshold after boot (no-op in fixed shells and with ?surface= overrides).
+  watchHostedSurfaceViewport();
 
   if (hostedSurface === 'mobile') {
     const { renderMobileApp } = await import('@openchamber/ui/apps/renderMobileApp');

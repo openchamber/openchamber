@@ -113,12 +113,16 @@ export function groupModelsByFamilyWithGetter<T>(
  * For Google provider with gemini/ and antigravity/ prefixes:
  * - Gemini 3.x models
  * - All Claude models
+ * For the Claude provider: every model it reports a limit for.
  */
 export function getDefaultModels(
   providerId: QuotaProviderId,
   availableModels: string[]
 ): string[] {
   return availableModels.filter((model) => {
+    // Anthropic only reports a model here when that model has its own plan
+    // limit, so every one it names is worth showing by default.
+    if (providerId === 'claude') return true;
     const lower = model.toLowerCase();
     // Handle gemini/ and antigravity/ prefixes
     const modelName = lower.includes('/') ? lower.split('/')[1] : lower;
