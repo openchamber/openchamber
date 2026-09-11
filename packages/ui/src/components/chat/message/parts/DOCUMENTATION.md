@@ -175,6 +175,7 @@ tool patch is parsed while the turn streams.
 - Running bash output falls back to `state.metadata.output` until canonical `state.output` arrives. Its output viewport grows with the content up to `46vh`, then scrolls and follows new output until the user scrolls up; following resumes when the user returns to the bottom. Live output appends or replaces rewritten snapshots as plain text without worker highlighting; finalized output normalizes ANSI terminal controls with a bounded synthetic-cell budget, bypasses the throttle, and receives the normal one-time highlighted rendering.
 - Thinking/Justification duration is hidden in `sorted` mode (handled in `ReasoningPart.tsx` + `JustificationBlock.tsx`).
 - Reasoning streaming presentation derives from the live stream phase (`streaming`/`cooldown`), never from missing persisted timing: a cached part without `time.end` is not live, and a part whose `time.end` is set never streams (issue #2020).
+- Assistant text parts carry the same part-finalization gate (`assistantTextVisibility.ts`): live mode's block-commit reveal holds a still-growing part's trailing line, while a part sealed with `time.end` renders in full immediately — including while the turn stays blocked on a pending question or permission ask (#3277).
 
 ## "I want to change description for Perplexity" (example recipe)
 
