@@ -65,7 +65,9 @@ Thumbs.db
 
 # Local runtime state (docker/dev)
 data/
-workspaces/
+# Anchored to the repo root: the unanchored pattern would also ignore
+# packages/web/server/lib/platform/workspaces/ (platform source).
+/workspaces/
 *.pid
 .worktrees/
 
