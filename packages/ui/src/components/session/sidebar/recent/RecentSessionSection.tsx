@@ -9,10 +9,16 @@ import type { ActivityItem } from './SidebarActivitySections';
 import type { SessionTreeItemProps } from '../sessions/SessionTreeItem';
 import type { SessionNode } from '../types';
 import { formatProjectLabel, normalizePath } from '../utils';
+import {
+  buildWorktreeByPathIndex,
+  findPrefixWorktreeEntry,
+  resolveBranchLiveFirst,
+} from '../worktreeIndex';
 
 type Props = {
   projects: { id: string; label?: string; normalizedPath: string }[];
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>;
+  worktreeMetadata?: ReadonlyMap<string, WorktreeMetadata>;
   gitBranches: Map<string, string | null>;
   homeDirectory: string | null;
   hasSessionSearchQuery: boolean;
@@ -52,10 +58,17 @@ type Props = {
   | 'startSessionWorktreeMenuLoad'
 >;
 
+type RecentWorktreeResolution = {
+  owner: Props['projects'][number] | null;
+  worktree: WorktreeMetadata | null;
+  worktreePath: string | null;
+};
+
 export const RecentSessionSection: React.FC<Props> = (props) => {
   const {
     projects,
     availableWorktreesByProject,
+    worktreeMetadata,
     gitBranches,
     homeDirectory,
     hasSessionSearchQuery,
@@ -69,11 +82,14 @@ export const RecentSessionSection: React.FC<Props> = (props) => {
     showRecentSection,
   } = props;
   const { t } = useI18n();
-  const sessionLocationById = React.useMemo(() => {
-    const locations = new Map<string, RecentSessionLocation>();
-    for (const session of sessions) {
-      const directory = normalizePath(session.directory ?? null);
-      if (!directory) continue;
+  // Canonical worktree index shared with project grouping and the switcher
+  // (normalization, project-root exclusion, first-wins dedupe).
+  const worktreeByPath = React.useMemo(
+    () => buildWorktreeByPathIndex(availableWorktreesByProject, projects),
+    [availableWorktreesByProject, projects],
+  );
+  const findOwnerProject = React.useCallback(
+    (directory: string): Props['projects'][number] | null => {
       let owner: Props['projects'][number] | null = null;
       let ownerLength = -1;
       for (const project of projects) {
@@ -83,10 +99,57 @@ export const RecentSessionSection: React.FC<Props> = (props) => {
           ownerLength = projectPath.length;
         }
       }
+      return owner;
+    },
+    [projects],
+  );
+  // Resolution order mirrors project grouping parity: session-keyed metadata
+  // first (trusted only inside its own worktree), then longest-prefix worktree
+  // match for `<worktree>/sub`, then the existing project prefix walk.
+  // The project root itself never resolves to a worktree.
+  const resolveOwnerAndWorktree = React.useCallback(
+    (sessionId: string, directory: string): RecentWorktreeResolution => {
+      const sessionMeta = worktreeMetadata?.get(sessionId) ?? null;
+      if (sessionMeta) {
+        const metaPath = normalizePath(sessionMeta.path);
+        if (metaPath && (directory === metaPath || directory.startsWith(`${metaPath}/`))) {
+          const indexed = worktreeByPath.get(metaPath) ?? null;
+          if (indexed) {
+            if (directory !== normalizePath(indexed.project.normalizedPath)) {
+              return { owner: indexed.project, worktree: sessionMeta, worktreePath: metaPath };
+            }
+          } else {
+            const owner = findOwnerProject(metaPath) ?? findOwnerProject(directory);
+            if (owner && directory !== normalizePath(owner.normalizedPath)) {
+              return { owner, worktree: sessionMeta, worktreePath: metaPath };
+            }
+          }
+        }
+      }
+      const prefixHit = findPrefixWorktreeEntry(directory, worktreeByPath);
+      if (prefixHit) {
+        if (directory !== normalizePath(prefixHit.project.normalizedPath)) {
+          return {
+            owner: prefixHit.project,
+            worktree: prefixHit.meta,
+            worktreePath: normalizePath(prefixHit.meta.path) ?? directory,
+          };
+        }
+      }
+      return { owner: findOwnerProject(directory), worktree: null, worktreePath: null };
+    },
+    [findOwnerProject, worktreeByPath, worktreeMetadata],
+  );
+  const sessionLocationById = React.useMemo(() => {
+    const locations = new Map<string, RecentSessionLocation>();
+    for (const session of sessions) {
+      const directory = normalizePath(session.directory ?? null);
+      if (!directory) continue;
+      const { owner, worktree, worktreePath } = resolveOwnerAndWorktree(session.id, directory);
       if (!owner) continue;
-      const worktree = availableWorktreesByProject.get(owner.normalizedPath)?.find((entry) => normalizePath(entry.path) === directory);
       const projectLabel = formatProjectLabel(owner.label?.trim() || formatDirectoryName(owner.normalizedPath, homeDirectory) || owner.normalizedPath);
-      const branch = worktree?.branch?.trim() || gitBranches.get(directory)?.trim() || null;
+      // Live-first: live git status wins over discovered worktree metadata.
+      const branch = resolveBranchLiveFirst(directory, worktreePath, worktree?.branch, gitBranches);
       locations.set(session.id, {
         projectId: owner.id,
         groupDirectory: directory,
@@ -95,22 +158,33 @@ export const RecentSessionSection: React.FC<Props> = (props) => {
       });
     }
     return locations;
-  }, [availableWorktreesByProject, sessions, gitBranches, homeDirectory, projects]);
+  }, [sessions, gitBranches, homeDirectory, resolveOwnerAndWorktree]);
   const getSessionLocation = React.useCallback(
     (sessionId: string) => sessionLocationById.get(sessionId) ?? null,
     [sessionLocationById],
   );
   const getSessionNode = React.useCallback(
-    (session: Session): SessionNode => ({
-      session,
-      children: (childrenMap.get(session.id) ?? []).filter((child) => !child.time?.archived).map((child) => ({
-        session: child,
-        children: [],
-        worktree: null,
-      })),
-      worktree: null,
-    }),
-    [childrenMap],
+    (session: Session): SessionNode => {
+      // Attach the canonical worktree per session (root and children alike),
+      // mirroring the project grouping contract. The row derives its branch
+      // line fallback and PR lookup key from node.worktree; leaving it null
+      // is what reduced worktree rows to title+date.
+      const resolveWorktree = (target: Session): WorktreeMetadata | null => {
+        const targetDirectory = normalizePath(target.directory ?? null);
+        if (!targetDirectory) return null;
+        return resolveOwnerAndWorktree(target.id, targetDirectory).worktree;
+      };
+      return {
+        session,
+        children: (childrenMap.get(session.id) ?? []).filter((child) => !child.time?.archived).map((child) => ({
+          session: child,
+          children: [],
+          worktree: resolveWorktree(child),
+        })),
+        worktree: resolveWorktree(session),
+      };
+    },
+    [childrenMap, resolveOwnerAndWorktree],
   );
   const recentSections = React.useMemo(() => deriveRecentActivitySections({
     sessions: recentSessions,

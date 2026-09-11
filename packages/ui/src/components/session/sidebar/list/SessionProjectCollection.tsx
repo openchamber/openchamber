@@ -458,6 +458,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     !topology.isVSCode ? <RecentSessionSection
       projects={topology.projects}
       availableWorktreesByProject={topology.availableWorktreesByProject}
+      worktreeMetadata={topology.worktreeMetadata}
       gitBranches={topology.gitBranches}
       homeDirectory={view.homeDirectory}
       hasSessionSearchQuery={view.hasSessionSearchQuery}
@@ -519,6 +520,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     topology.gitBranches,
     topology.isVSCode,
     topology.projects,
+    topology.worktreeMetadata,
     collection.chatSessions,
     view.hasSessionSearchQuery,
     view.homeDirectory,

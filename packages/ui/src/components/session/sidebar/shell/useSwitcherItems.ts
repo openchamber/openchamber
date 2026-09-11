@@ -12,6 +12,8 @@ import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
+import { buildWorktreeByPathIndex } from '../worktreeIndex';
+import { normalizePath } from '../utils';
 
 export type SwitcherItem = {
   node: SessionNode;
@@ -30,13 +32,6 @@ type SwitcherItemsOptions = {
   currentSessionId?: string | null;
   /** How many parent sessions to return (default 7 — the desktop dropdown). */
   maxParents?: number;
-};
-
-const normalize = (value: string | null | undefined): string | null => {
-  if (!value) return null;
-  const replaced = value.replace(/\\/g, '/');
-  if (replaced === '/') return '/';
-  return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
 };
 
 const formatProjectLabel = (project: { label?: string | null; path: string } | null): string | null => {
@@ -118,45 +113,35 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
 
+  const normalizedProjects = React.useMemo(
+    () => projects
+      .map((project) => ({ ...project, normalizedPath: normalizePath(project.path) }))
+      .filter((project) => project.normalizedPath),
+    [projects],
+  );
+
   // Worktree sessions live OUTSIDE their project's path, so prefix matching
   // can't resolve their project — and their branch is known from worktree
   // discovery long before any git status is fetched for that directory.
-  const worktreeInfoByPath = React.useMemo(() => {
-    const map = new Map<string, { projectPath: string; branch: string | null }>();
-    for (const [projectPath, worktrees] of availableWorktreesByProject) {
-      const normalizedProjectPath = normalize(projectPath);
-      if (!normalizedProjectPath) continue;
-      for (const worktree of worktrees) {
-        const worktreePath = normalize(worktree.path);
-        if (!worktreePath) continue;
-        map.set(worktreePath, { projectPath: normalizedProjectPath, branch: worktree.branch?.trim() || null });
-      }
-    }
-    return map;
-  }, [availableWorktreesByProject]);
-
-  const normalizedProjects = React.useMemo(
-    () => projects
-      .map((project) => ({ ...project, normalizedPath: normalize(project.path) }))
-      .filter((project) => project.normalizedPath),
-    [projects],
+  // Shared exact index: normalized keys, project-root exclusion, first-wins.
+  // Already live-first below (`liveBranch ?? stored`), so no branch change.
+  const worktreeByPath = React.useMemo(
+    () => buildWorktreeByPathIndex(availableWorktreesByProject, normalizedProjects),
+    [availableWorktreesByProject, normalizedProjects],
   );
 
   const findProjectForDirectory = React.useCallback(
     (directory: string | null) => {
       if (!directory) return null;
       // Known worktree → its project, regardless of where the worktree lives.
-      const worktreeInfo = worktreeInfoByPath.get(normalize(directory) ?? directory);
-      if (worktreeInfo) {
-        const byPath = normalizedProjects.find((project) => project.normalizedPath === worktreeInfo.projectPath);
-        if (byPath) return byPath;
-      }
+      const worktreeHit = worktreeByPath.get(normalizePath(directory) ?? directory);
+      if (worktreeHit) return worktreeHit.project;
       const matches = normalizedProjects
         .filter((project) => isPathWithinProject(directory, project.normalizedPath))
         .sort((a, b) => (b.normalizedPath?.length ?? 0) - (a.normalizedPath?.length ?? 0));
       return matches[0] ?? null;
     },
-    [normalizedProjects, worktreeInfoByPath],
+    [normalizedProjects, worktreeByPath],
   );
 
   const items = React.useMemo<SwitcherItem[]>(() => {
@@ -205,9 +190,9 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
       const projectLabel = formatProjectLabel(matchedProject);
       // Live git branch when available; the discovered worktree branch fills
       // in for directories whose git status hasn't been fetched yet.
-      const worktreeInfo = directory ? worktreeInfoByPath.get(normalize(directory) ?? directory) : null;
+      const worktreeHit = directory ? worktreeByPath.get(normalizePath(directory) ?? directory) : null;
       const liveBranch = directory ? branchesByDirectory.get(directory) : undefined;
-      const branchLabel = liveBranch ?? worktreeInfo?.branch ?? null;
+      const branchLabel = liveBranch ?? worktreeHit?.meta.branch?.trim() ?? null;
       return {
         node: buildNode(session),
         projectId: matchedProject?.id ?? null,
@@ -218,7 +203,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
         },
       };
     });
-  }, [activeSessions, branchesByDirectory, currentSessionId, enabled, findProjectForDirectory, isVSCode, maxParents, pinnedSessionIds, scopeProjectId, sessionOrderRanks, worktreeInfoByPath]);
+  }, [activeSessions, branchesByDirectory, currentSessionId, enabled, findProjectForDirectory, isVSCode, maxParents, pinnedSessionIds, scopeProjectId, sessionOrderRanks, worktreeByPath]);
 
   return items;
 };
