@@ -21,13 +21,15 @@ const REMOTE_BUN_CANDIDATE = '"${BUN_INSTALL:-$HOME/.bun}/bin/bun"';
 const REMOTE_OPENCODE_CANDIDATES = [
   '"$HOME/.opencode/bin/opencode"',
   '"${BUN_INSTALL:-$HOME/.bun}/bin/opencode"',
+  '"${XDG_CACHE_HOME:-$HOME/.cache}/.bun/bin/opencode"',
   '"$HOME/.local/bin/opencode"',
   '"$HOME/.openchamber/npm-global/bin/opencode"',
 ];
-const REMOTE_PATH_PREFIX = '$HOME/.opencode/bin:${BUN_INSTALL:-$HOME/.bun}/bin:$HOME/.local/bin:$HOME/.openchamber/npm-global/bin';
+const REMOTE_PATH_PREFIX = '$HOME/.opencode/bin:${BUN_INSTALL:-$HOME/.bun}/bin:${XDG_CACHE_HOME:-$HOME/.cache}/.bun/bin:$HOME/.local/bin:$HOME/.openchamber/npm-global/bin';
 const REMOTE_BIN_CANDIDATES = [
   '"$HOME/.openchamber/npm-global/bin/openchamber"',
   '"${BUN_INSTALL:-$HOME/.bun}/bin/openchamber"',
+  '"${XDG_CACHE_HOME:-$HOME/.cache}/.bun/bin/openchamber"',
 ];
 const DEFAULT_CONTROL_PERSIST_SEC = 300;
 const DEFAULT_READY_TIMEOUT_SEC = 30;
@@ -1063,11 +1065,14 @@ export class ElectronSshManager {
   }
 
   async installOpenChamberManaged(parsed, controlPath, version, preferred) {
-    const bunPath = await this.resolveRemoteTool(parsed, controlPath, 'bun', [REMOTE_BUN_CANDIDATE]);
+    const bunPath = await this.resolveRemoteTool(parsed, controlPath, 'bun', [
+      REMOTE_BUN_CANDIDATE,
+      '"${XDG_CACHE_HOME:-$HOME/.cache}/.bun/bin/bun"',
+    ]);
     const npmPath = await this.resolveRemoteTool(parsed, controlPath, 'npm');
 
-    // bun's global install already targets ~/.bun; npm is pinned to a prefix in
-    // the user's home so it never touches the root-owned global directory.
+    // bun's global install targets `~/.bun` or `${XDG_CACHE_HOME:-~/.cache}/.bun` (bun 1.3.x XDG-aware);
+    // npm is pinned to a prefix in the user's home so it never touches the root-owned global directory.
     const bunCommand = bunPath ? `${shellQuote(bunPath)} add -g @openchamber/web@${version}` : null;
     const npmCommand = npmPath
       ? `mkdir -p "${REMOTE_USER_PREFIX}" && ${shellQuote(npmPath)} install -g --prefix "${REMOTE_USER_PREFIX}" @openchamber/web@${version}`
