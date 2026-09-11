@@ -1485,7 +1485,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         if (part.tool === 'task' && hasStringOutput) {
             return renderScrollableBlock(
                 <div className="w-full min-w-0">
-                    <SimpleMarkdownRenderer content={coerceToText(outputString)} variant="tool" onShowPopup={onShowPopup} />
+                    <SimpleMarkdownRenderer content={prepareTaskToolOutput(outputString)} variant="tool" onShowPopup={onShowPopup} />
                 </div>
             );
         }
