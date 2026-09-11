@@ -8,10 +8,12 @@ import {
   computeNodeStructureKey,
   canShowSessionWorktreeMenu,
   getSessionWorktreeMenuDisabled,
+  isSessionTreeRoot,
   nodeHasPinnedMembershipChange,
   selectFolderRootNodes,
   selectQuestionBadgeSessionScopes,
   selectRowBadgeVisibilityClass,
+  shouldHardDeleteSession,
 } from './sessionNodeItemUtils';
 import type { SessionNode } from '../types';
 
@@ -25,6 +27,34 @@ const rootWithChild = (childSession: Session): SessionNode => ({
   session: session('root', 'Root'),
   children: [{ session: childSession, children: [], worktree: null }],
   worktree: null,
+});
+
+describe('shouldHardDeleteSession', () => {
+  test('uses the session archive state instead of its render bucket', () => {
+    const active = session('active', 'Active');
+    const archived = { ...session('archived', 'Archived'), time: { created: 1, updated: 1, archived: 2 } };
+
+    expect(shouldHardDeleteSession(active)).toBe(false);
+    expect(shouldHardDeleteSession(archived)).toBe(true);
+    expect(shouldHardDeleteSession(active, true)).toBe(true);
+  });
+});
+
+describe('isSessionTreeRoot', () => {
+  test('keeps active children under archived parents but detaches independently archived children', () => {
+    const activeParent = session('active-parent', 'Active parent');
+    const archivedParent = { ...session('archived-parent', 'Archived parent'), time: { created: 1, updated: 1, archived: 2 } };
+    const activeChild = { ...session('active-child', 'Active child'), parentID: archivedParent.id };
+    const archivedChild = {
+      ...session('archived-child', 'Archived child'),
+      parentID: activeParent.id,
+      time: { created: 1, updated: 1, archived: 2 },
+    };
+    const sessionsById = new Map([activeParent, archivedParent, activeChild, archivedChild].map((value) => [value.id, value]));
+
+    expect(isSessionTreeRoot(activeChild, sessionsById)).toBe(false);
+    expect(isSessionTreeRoot(archivedChild, sessionsById)).toBe(true);
+  });
 });
 
 describe('computeNodeStructureKey', () => {

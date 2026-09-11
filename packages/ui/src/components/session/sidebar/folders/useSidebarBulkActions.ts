@@ -3,6 +3,7 @@ import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
+import type { SessionNode } from '../types';
 
 type Args = {
   isInlineEditing: boolean;
@@ -14,6 +15,8 @@ type Args = {
    * the scope is missing here it is treated as a plain directory scope.
    */
   getFolderScopesForProject: (projectId: string) => readonly { scopeKey: string; directory: string | null }[];
+  sessionTreeRoots: readonly SessionNode[];
+  isSessionArchived: (sessionId: string) => boolean;
   addSessionsToFolder: (scopeKey: string, folderId: string, sessionIds: string[]) => void;
   removeSessionsFromFolders: (scopeKey: string, sessionIds: string[]) => void;
   createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
@@ -37,6 +40,32 @@ export const resolveSelectionFolderScopes = (
     : [selectionScope];
 };
 
+export const resolveBulkDestructiveSessionIds = (
+  selectedIds: Iterable<string>,
+  getChildIds: (sessionId: string) => readonly string[],
+): string[] => {
+  const resolved = new Set<string>();
+  const visit = (sessionId: string): void => {
+    if (resolved.has(sessionId)) return;
+    resolved.add(sessionId);
+    for (const childId of getChildIds(sessionId)) visit(childId);
+  };
+  for (const sessionId of selectedIds) visit(sessionId);
+  return [...resolved];
+};
+
+export const indexSessionTreeChildren = (
+  roots: readonly SessionNode[],
+): Map<string, string[]> => {
+  const childrenById = new Map<string, string[]>();
+  const visit = (node: SessionNode): void => {
+    childrenById.set(node.session.id, node.children.map((child) => child.session.id));
+    node.children.forEach(visit);
+  };
+  roots.forEach(visit);
+  return childrenById;
+};
+
 /**
  * Bulk-action logic for the sidebar. The hot-path concern is that this
  * hook subscribes to `useSessionMultiSelectStore` — which can fire on
@@ -45,8 +74,8 @@ export const resolveSelectionFolderScopes = (
  * `selectionModeEnabled` flag to decide whether to render the
  * selection chrome.
  *
- * To keep that subscription narrow, the heavy work (folders lookup,
- * DOM-attribute scanning for the active/archived scope, etc.) is
+ * To keep that subscription narrow, the heavy work (folder and hierarchy
+ * lookups, etc.) is
  * deferred behind a `selectedIds.size > 0` check inside the hook
  * itself, so toggling selection mode on/off does not force the
  * downstream useMemo chain to re-evaluate when no rows are selected.
@@ -58,6 +87,8 @@ export const useSidebarBulkActions = (args: Args) => {
     showDeletionDialog,
     foldersMap,
     getFolderScopesForProject,
+    sessionTreeRoots,
+    isSessionArchived,
     addSessionsToFolder,
     removeSessionsFromFolders,
     createFolderAndStartRename,
@@ -80,23 +111,22 @@ export const useSidebarBulkActions = (args: Args) => {
     useSessionMultiSelectStore.getState().disable();
   }, []);
 
-  // All of the below short-circuit on `hasSelection` so the DOM-scanning
-  // and folder-lookup work only runs when there's something to act on.
-  const bulkScopeIsArchived = React.useMemo(() => {
-    if (!hasSelection) return false;
-    if (typeof document === 'undefined') return false;
-    let sawActive = false;
-    let sawArchived = false;
-    for (const id of selectedIds) {
-      const rows = document.querySelectorAll<HTMLElement>(`[data-session-row="${CSS.escape(id)}"]`);
-      for (const row of rows) {
-        if (row.getAttribute('data-session-archived') === '1') sawArchived = true;
-        else sawActive = true;
-      }
+  const descendantIndexRef = React.useRef<{
+    roots: readonly SessionNode[];
+    index: Map<string, string[]>;
+  } | null>(null);
+  const getTreeChildIds = React.useCallback((sessionId: string): readonly string[] => {
+    if (descendantIndexRef.current?.roots !== sessionTreeRoots) {
+      descendantIndexRef.current = {
+        roots: sessionTreeRoots,
+        index: indexSessionTreeChildren(sessionTreeRoots),
+      };
     }
-    return sawArchived && !sawActive;
-  }, [hasSelection, selectedIds]);
+    return descendantIndexRef.current.index.get(sessionId) ?? [];
+  }, [sessionTreeRoots]);
 
+  // All of the below short-circuit on `hasSelection` so hierarchy and folder
+  // lookup work only runs when there's something to act on.
   const derivedSelectionScope = React.useMemo(() => {
     if (selectionScopeKey) return selectionScopeKey;
     if (!hasSelection) return null;
@@ -108,6 +138,19 @@ export const useSidebarBulkActions = (args: Args) => {
     }
     return null;
   }, [hasSelection, selectedIds, selectionScopeKey]);
+
+  const bulkDestructiveSessionIds = React.useMemo(() => {
+    if (!hasSelection) return [];
+    return resolveBulkDestructiveSessionIds(selectedIds, getTreeChildIds);
+  }, [getTreeChildIds, hasSelection, selectedIds]);
+
+  const bulkScopeIsArchived = React.useMemo(() => {
+    if (!hasSelection) return false;
+    for (const sessionId of selectedIds) {
+      if (!isSessionArchived(sessionId)) return false;
+    }
+    return true;
+  }, [hasSelection, isSessionArchived, selectedIds]);
 
   // The selection scope is a project id; folders live per directory scope
   // (project root + each worktree). Resolve all of them, in project order.
@@ -173,7 +216,7 @@ export const useSidebarBulkActions = (args: Args) => {
   }, [removeSessionsFromFolders, selectedIds, selectionFolderScopes, hasSelection]);
 
   const executeBulkDelete = React.useCallback(async () => {
-    const ids = Array.from(selectedIds);
+    const ids = bulkDestructiveSessionIds;
     if (ids.length === 0) return;
     if (bulkScopeIsArchived) {
       const { deletedIds, failedIds } = await deleteSessions(ids);
@@ -201,17 +244,17 @@ export const useSidebarBulkActions = (args: Args) => {
       }
     }
     useSessionMultiSelectStore.getState().clear();
-  }, [archiveSessions, bulkScopeIsArchived, deleteSessions, selectedIds, t]);
+  }, [archiveSessions, bulkDestructiveSessionIds, bulkScopeIsArchived, deleteSessions, t]);
 
   const handleBulkDelete = React.useCallback(() => {
     if (!hasSelection) return;
-    const count = selectedIds.size;
+    const count = bulkDestructiveSessionIds.length;
     if (!showDeletionDialog) {
       void executeBulkDelete();
       return;
     }
     setBulkDeleteConfirm({ sessionCount: count, archivedBucket: bulkScopeIsArchived });
-  }, [bulkScopeIsArchived, executeBulkDelete, selectedIds, showDeletionDialog, setBulkDeleteConfirm, hasSelection]);
+  }, [bulkDestructiveSessionIds.length, bulkScopeIsArchived, executeBulkDelete, showDeletionDialog, setBulkDeleteConfirm, hasSelection]);
 
   const handleBulkRestore = React.useCallback(async () => {
     if (!hasSelection || !bulkScopeIsArchived) return;

@@ -78,6 +78,25 @@ describe('createSessionOwnershipIndex', () => {
     ]);
   });
 
+  test('inherits ownership from an archived parent when a live child has no directory', () => {
+    const parent = {
+      id: 'archived-parent',
+      directory: '/worktrees/app-feature',
+      time: { archived: 1 },
+    } as Session;
+    const child = { id: 'live-child', parentID: parent.id } as Session;
+    const ownership = createSessionOwnershipIndex(
+      [child],
+      [{ id: 'app', normalizedPath: '/projects/app' }],
+      new Map([['/projects/app', [{ path: '/worktrees/app-feature' }]]]),
+      false,
+      [parent],
+    );
+
+    expect(ownership.bySessionId.get(child.id)?.scopeDirectory).toBe('/worktrees/app-feature');
+    expect(ownership.sessionsByProject.get('app')?.map((session) => session.id)).toEqual([child.id]);
+  });
+
   test('requires exact workspace directories in VS Code', () => {
     const ownership = createSessionOwnershipIndex(
       [

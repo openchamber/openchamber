@@ -131,6 +131,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const foldersMap = useSessionFoldersStore((state) => state.foldersMap);
   const createFolder = useSessionFoldersStore((state) => state.createFolder);
   const addSessionToFolder = useSessionFoldersStore((state) => state.addSessionToFolder);
+  const removeSessionsFromFolders = useSessionFoldersStore((state) => state.removeSessionsFromFolders);
   const projectView = view.projectView;
   const { getOrderedGroups, setGroupOrderByProject, toggleGroup, toggleProject } = projectViewActions;
   const collection = useSessionProjectCollection({ knownDirectories: topology.knownDirectories, isVSCode: topology.isVSCode, isVisible: true });
@@ -243,6 +244,13 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     foldersMap,
     standaloneGroups,
   });
+  const sessionTreeRoots = React.useMemo(
+    () => [
+      ...projectSections.flatMap((section) => section.groups.flatMap((group) => group.sessions)),
+      ...(chatGroup?.sessions ?? []),
+    ],
+    [chatGroup, projectSections],
+  );
 
   const onSearchMatchCountChange = view.onSearchMatchCountChange;
   React.useEffect(() => {
@@ -299,6 +307,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     foldersMap,
     createFolder,
     addSessionToFolder,
+    removeSessionsFromFolders,
   });
   const { github } = useRuntimeAPIs();
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
@@ -639,7 +648,9 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     <SessionProjectScroller model={scrollerModel} view={scrollerView} actions={scrollerActionSet} />
     <SessionBulkActions
       getFolderScopesForProject={getFolderScopesForProject}
+      isSessionArchived={collection.isSessionArchived}
       isInlineEditing={editingId !== null}
+      sessionTreeRoots={sessionTreeRoots}
       startFolderRename={startFolderRename}
     />
   </>;

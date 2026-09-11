@@ -83,6 +83,17 @@ describe('projectSidebarActiveSessions', () => {
     }).map((entry) => entry.id)).toEqual(['known']);
   });
 
+  test('defers a directory-less VS Code child to lineage-aware ownership', () => {
+    const child: Session = { ...session('child', null), parentID: 'archived-parent' };
+
+    expect(projectSidebarActiveSessions({
+      globalActiveSessions: [child],
+      liveSessions: [],
+      knownDirectories: new Set(['/workspace/known']),
+      isVSCode: true,
+    }).map((entry) => entry.id)).toEqual(['child']);
+  });
+
   test('allows missing or unknown directories for web when no directories are known', () => {
     const sessions = [session('unknown', '/workspace/unknown'), session('empty', null)];
 

@@ -11,7 +11,7 @@ export type DeleteSessionConfirmState = {
   // executed list matches the count shown to the user even if childrenMap
   // changes while the dialog is open.
   descendantIds: string[];
-  archivedBucket: boolean;
+  hardDelete: boolean;
 } | null;
 
 export function SessionDeleteConfirmDialog(props: {
@@ -29,12 +29,12 @@ export function SessionDeleteConfirmDialog(props: {
     <Dialog open={Boolean(value)} onOpenChange={(open) => { if (!open) setValue(null); }}>
       <DialogContent showCloseButton={false} className="max-w-sm gap-5">
         <DialogHeader>
-          <DialogTitle>{value?.archivedBucket
+          <DialogTitle>{value?.hardDelete
             ? t('sessions.sidebar.dialogs.deleteSession.title')
             : t('sessions.sidebar.dialogs.archiveSession.title')}</DialogTitle>
           <DialogDescription>
             {value && value.descendantCount > 0
-              ? value.archivedBucket
+              ? value.hardDelete
                 ? value.descendantCount === 1
                   ? t('sessions.sidebar.dialogs.deleteSession.withOneSubtask', {
                     sessionTitle: value.session.title || untitledSession,
@@ -53,7 +53,7 @@ export function SessionDeleteConfirmDialog(props: {
                   sessionTitle: value.session.title || untitledSession,
                   count: value.descendantCount,
                 })
-              : value?.archivedBucket
+              : value?.hardDelete
                 ? t('sessions.sidebar.dialogs.deleteSession.single', {
                   sessionTitle: value?.session.title || untitledSession,
                 })
@@ -85,7 +85,7 @@ export function SessionDeleteConfirmDialog(props: {
               onClick={() => void onConfirm()}
               className="inline-flex h-8 items-center justify-center rounded-md bg-destructive px-3 typography-ui-label text-destructive-foreground hover:bg-destructive/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/50"
             >
-              {value?.archivedBucket ? t('sessions.sidebar.bulkActions.delete') : t('sessions.sidebar.bulkActions.archive')}
+              {value?.hardDelete ? t('sessions.sidebar.bulkActions.delete') : t('sessions.sidebar.bulkActions.archive')}
             </button>
           </div>
         </DialogFooter>

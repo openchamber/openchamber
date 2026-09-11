@@ -43,11 +43,42 @@ const setOwner = (owners: Map<string, DirectoryOwner>, directory: string, candid
 };
 
 const resolveSessionDirectory = (session: Session): string | null => {
+  // SAFETY: OpenCode session payloads can carry a project worktree fallback
+  // even when the generated SDK Session shape omits that nested field.
   const record = session as Session & {
     directory?: string | null;
     project?: { worktree?: string | null } | null;
   };
   return normalizePath(record.directory) ?? normalizePath(record.project?.worktree);
+};
+
+export const createSessionDirectoryResolver = (
+  sessionsById: ReadonlyMap<string, Session>,
+  worktreeMetadata: ReadonlyMap<string, { path?: string | null }> = new Map(),
+): ((session: Session) => string | null) => {
+  const resolvedBySessionId = new Map<string, string | null>();
+
+  return (session) => {
+    if (resolvedBySessionId.has(session.id)) return resolvedBySessionId.get(session.id) ?? null;
+
+    const lineage: string[] = [];
+    const visited = new Set<string>();
+    let current: Session | undefined = session;
+    let directory: string | null = null;
+    while (current && !visited.has(current.id)) {
+      if (resolvedBySessionId.has(current.id)) {
+        directory = resolvedBySessionId.get(current.id) ?? null;
+        break;
+      }
+      visited.add(current.id);
+      lineage.push(current.id);
+      directory = normalizePath(worktreeMetadata.get(current.id)?.path) ?? resolveSessionDirectory(current);
+      if (directory) break;
+      current = current.parentID ? sessionsById.get(current.parentID) : undefined;
+    }
+    for (const sessionId of lineage) resolvedBySessionId.set(sessionId, directory);
+    return directory;
+  };
 };
 
 const getParentDirectory = (directory: string): string | null => {
@@ -109,6 +140,8 @@ export const createSessionOwnershipIndex = (
   const sessionsByProject = new Map<string, Session[]>();
   const archivedSessionsByProject = new Map<string, Session[]>();
   const sessionsByScope = new Map<string, Set<string>>();
+  const sessionsById = new Map([...sessions, ...archivedSessions].map((session) => [session.id, session]));
+  const resolveDirectory = createSessionDirectoryResolver(sessionsById);
 
   const resolveOwner = (directory: string | null): DirectoryOwner | null => {
     if (!directory) return null;
@@ -147,7 +180,7 @@ export const createSessionOwnershipIndex = (
     scopeTarget?: Map<string, Set<string>>,
   ): void => {
     for (const session of input) {
-      const owner = resolveOwner(resolveSessionDirectory(session));
+      const owner = resolveOwner(resolveDirectory(session));
       if (!owner) continue;
       bySessionId.set(session.id, owner);
       const projectSessions = target.get(owner.projectId);
