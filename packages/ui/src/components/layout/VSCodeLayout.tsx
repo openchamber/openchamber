@@ -17,6 +17,7 @@ import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDro
 import { SessionsTabTitle } from '@/components/session/SessionsTabTitle';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { getVSCodeBootstrapWorkspaceFolder } from '@/lib/vscodeBootstrap';
 import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
@@ -98,6 +99,10 @@ export const VSCodeLayout: React.FC = () => {
       return configured.trim();
     }
     return null;
+  }, []);
+
+  const bootstrapWorkspaceFolder = React.useMemo<string | null>(() => {
+    return getVSCodeBootstrapWorkspaceFolder();
   }, []);
 
   const hasAppliedInitialSession = React.useRef(false);
@@ -449,7 +454,7 @@ export const VSCodeLayout: React.FC = () => {
     // No initialSessionId means open a new session draft
     if (!initialSessionId) {
       hasAppliedInitialSession.current = true;
-      openNewSessionDraft({ automatic: true });
+      openNewSessionDraft({ automatic: true, directoryOverride: bootstrapWorkspaceFolder });
       return;
     }
 
@@ -459,7 +464,7 @@ export const VSCodeLayout: React.FC = () => {
 
     hasAppliedInitialSession.current = true;
     void useSessionUIStore.getState().setCurrentSession(initialSessionId);
-  }, [connectionStatus, hasInitializedOnce, initialSessionExists, initialSessionId, openNewSessionDraft, viewMode]);
+  }, [bootstrapWorkspaceFolder, connectionStatus, hasInitializedOnce, initialSessionExists, initialSessionId, openNewSessionDraft, viewMode]);
 
   // Track container width for responsive settings layout
   React.useEffect(() => {
