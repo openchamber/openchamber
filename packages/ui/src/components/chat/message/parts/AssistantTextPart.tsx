@@ -35,9 +35,11 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
     const textContent = [rawText, contentText, valueText].reduce((best, candidate) => {
         return candidate.length > best.length ? candidate : best;
     }, '');
-    const isStreamingPhase = streamPhase === 'streaming';
-    const isCooldownPhase = streamPhase === 'cooldown';
-    const isStreaming = chatRenderMode === 'live' && (isStreamingPhase || isCooldownPhase);
+    const isFinalized = partWithText.time?.end !== undefined;
+    // An ended part receives no more text, so it never streams even while the
+    // message keeps running tool calls (issue #3484).
+    const isLiveStreamPhase = streamPhase === 'streaming' || streamPhase === 'cooldown';
+    const isStreaming = chatRenderMode === 'live' && isLiveStreamPhase && !isFinalized;
 
     streamPerfCount('ui.assistant_text_part.render');
     if (isStreaming) {
@@ -57,9 +59,6 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
     });
 
     streamPerfObserve('ui.assistant_text_part.display_len', displayTextContent.length);
-
-    const time = partWithText.time;
-    const isFinalized = Boolean(time && typeof time.end !== 'undefined');
 
     const isRenderableTextPart = part.type === 'text' || part.type === 'reasoning';
     if (!isRenderableTextPart) {
