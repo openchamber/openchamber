@@ -93,7 +93,8 @@
       "icon": "resources/icons/icon.icns",
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "extendInfo": {
-        "CFBundleIconName": "AppIcon"
+        "CFBundleIconName": "AppIcon",
+        "NSLocalNetworkUsageDescription": "OpenChamber needs access to devices and services on your local network."
       },
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
