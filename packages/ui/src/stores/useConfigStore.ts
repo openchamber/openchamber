@@ -1945,13 +1945,11 @@ export const useConfigStore = create<ConfigStore>()(
                         return {
                             currentVariant,
                             currentVariantSelection: { override, inherited },
-                            selectionSource: "manual",
                             directoryScoped: {
                                 ...state.directoryScoped,
                                 [directoryKey]: {
                                     ...baseSnapshot,
                                     currentVariant,
-                                    selectionSource: "manual",
                                 },
                             },
                         };
@@ -2509,9 +2507,8 @@ export const useConfigStore = create<ConfigStore>()(
                         settingsDefaultVariant,
                         currentProviderId,
                         currentModelId,
+                        currentAgentName,
                     } = get();
-                    // Captured before the first set below, which unconditionally
-                    // marks the selection as manual.
                     const hadManualSelection = get().selectionSource === "manual";
 
                     set((state) => {
@@ -2530,12 +2527,10 @@ export const useConfigStore = create<ConfigStore>()(
                         const nextSnapshot: DirectoryScopedConfig = {
                             ...baseSnapshot,
                             currentAgentName: agentName,
-                            selectionSource: "manual",
                         };
 
                         return {
                             currentAgentName: agentName,
-                            selectionSource: "manual",
                             directoryScoped: {
                                 ...state.directoryScoped,
                                 [directoryKey]: nextSnapshot,
@@ -2569,6 +2564,7 @@ export const useConfigStore = create<ConfigStore>()(
                             providerId: string,
                             modelId: string,
                             variantSelection: CurrentVariantSelection,
+                            source: "auto" | "manual" = "manual",
                         ) => {
                             set((state) => {
                                 const variant = resolveVariantFromSelection(variantSelection);
@@ -2578,7 +2574,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     && state.currentVariant === variant
                                     && state.currentVariantSelection.override === variantSelection.override
                                     && state.currentVariantSelection.inherited === variantSelection.inherited
-                                    && state.selectionSource === "manual"
+                                    && state.selectionSource === source
                                 ) {
                                     return state;
                                 }
@@ -2601,7 +2597,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     currentProviderId: providerId,
                                     currentModelId: modelId,
                                     currentVariant: variant,
-                                    selectionSource: "manual",
+                                    selectionSource: source,
                                 };
 
                                 return {
@@ -2609,7 +2605,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     currentModelId: modelId,
                                     currentVariant: variant,
                                     currentVariantSelection: variantSelection,
-                                    selectionSource: "manual",
+                                    selectionSource: source,
                                     directoryScoped: {
                                         ...state.directoryScoped,
                                         [directoryKey]: nextSnapshot,
@@ -2677,6 +2673,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     existingAgentModel.providerId,
                                     existingAgentModel.modelId,
                                     resolveVariantSelectionForModel(existingAgentModel.providerId, existingAgentModel.modelId, agent?.variant),
+                                    "manual",
                                 );
                                 return;
                             }
@@ -2690,17 +2687,33 @@ export const useConfigStore = create<ConfigStore>()(
                             const agentModel = agentProvider?.models.find((model) => model.id === modelID);
 
                             if (agentModel) {
-                                applyResolvedModelSelection(providerID, modelID, resolveVariantSelectionForModel(providerID, modelID, agent?.variant));
+                                applyResolvedModelSelection(
+                                    providerID,
+                                    modelID,
+                                    resolveVariantSelectionForModel(providerID, modelID, agent?.variant),
+                                    "auto",
+                                );
                                 return;
                             }
                         }
+
+                        const prevAgent = agents.find((candidate) => candidate.name === currentAgentName);
+                        const prevAgentHasPinnedModel = Boolean(
+                            prevAgent?.model?.providerID
+                            && prevAgent?.model?.modelID
+                            && prevAgent.model.providerID === currentProviderId
+                            && prevAgent.model.modelID === currentModelId
+                        );
+                        const targetHasPinnedModel = Boolean(agent?.model?.providerID && agent?.model?.modelID);
 
                         // The user has a live manual model selection and the target
                         // agent configures no model of its own. Switching modes or
                         // agents must not reset the selection to the settings default
                         // (issue #2531) — mode switches are not model changes.
                         if (
-                            hadManualSelection
+                            !targetHasPinnedModel
+                            && !prevAgentHasPinnedModel
+                            && hadManualSelection
                             && currentProviderId
                             && currentModelId
                             && hasProviderModel(providers, currentProviderId, currentModelId)
@@ -2722,7 +2735,12 @@ export const useConfigStore = create<ConfigStore>()(
                             if (parsed) {
                                 const settingsProvider = providers.find((p) => p.id === parsed.providerId);
                                 if (settingsProvider?.models.some((m) => m.id === parsed.modelId)) {
-                                    applyResolvedModelSelection(parsed.providerId, parsed.modelId, resolveVariantSelectionForModel(parsed.providerId, parsed.modelId, agent?.variant));
+                                    applyResolvedModelSelection(
+                                        parsed.providerId,
+                                        parsed.modelId,
+                                        resolveVariantSelectionForModel(parsed.providerId, parsed.modelId, agent?.variant),
+                                        "auto",
+                                    );
                                     return;
                                 }
                             }

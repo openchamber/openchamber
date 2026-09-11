@@ -37,7 +37,13 @@ const model = {
   variants: { low: {}, high: {} },
 };
 const provider = { id: PROVIDER_ID, name: PROVIDER_ID, models: [model] };
-const agent = { name: AGENT, mode: 'primary' as const };
+type Agent = {
+  name: string;
+  mode: 'primary';
+  model?: { providerID: string; modelID: string };
+  variant?: string;
+};
+const agent: Agent = { name: AGENT, mode: 'primary' };
 
 let latestUserChoice: UserModelChoice | null = null;
 let forcePreserveManualOverride: boolean | null = null;
@@ -49,7 +55,7 @@ const overrideWrites: Array<{ override: VariantChoice; inherited: string | undef
 
 type ConfigState = {
   providers: typeof provider[];
-  agents: typeof agent[];
+  agents: Agent[];
   modelsMetadata: Record<string, never>;
   currentProviderId: string;
   currentModelId: string;
@@ -66,8 +72,8 @@ type ConfigState = {
   setCurrentVariant: (variant: string | undefined) => void;
   setCurrentVariantOverride: (override: VariantChoice, inherited: string | undefined) => void;
   getCurrentProvider: () => typeof provider;
-  getCurrentAgent: () => typeof agent;
-  getVisibleAgents: () => typeof agent[];
+  getCurrentAgent: () => Agent;
+  getVisibleAgents: () => Agent[];
   getCurrentModelVariants: () => string[];
   getModelMetadata: () => undefined;
 };
@@ -150,7 +156,10 @@ const useSelectionStore = create<SelectionState>((set, get) => ({
   },
 }));
 
-const useSessionUIStore = create(() => ({
+const useSessionUIStore = create<{
+  currentSessionId: string | null;
+  getDirectoryForSession: () => string;
+}>(() => ({
   currentSessionId: SESSION_ID,
   getDirectoryForSession: () => '/workspace/project',
 }));
@@ -337,7 +346,9 @@ describe('ModelControls effort restore', () => {
     forcePreserveManualOverride = null;
     useUIStore.setState({ isMobile: false, isModelSelectorOpen: false });
     useSelectionStore.setState({ savedVariant: undefined });
+    useSessionUIStore.setState({ currentSessionId: SESSION_ID });
     useConfigStore.setState({
+      agents: [agent],
       currentProviderId: PROVIDER_ID,
       currentModelId: MODEL_ID,
       currentAgentName: AGENT,
@@ -346,6 +357,31 @@ describe('ModelControls effort restore', () => {
       settingsDefaultVariant: undefined,
       selectionSource: 'auto',
     });
+  });
+
+  test('a draft inherits a pinned agent variant over the settings default', async () => {
+    useSessionUIStore.setState({ currentSessionId: null });
+    useConfigStore.setState({
+      agents: [{
+        ...agent,
+        model: { providerID: PROVIDER_ID, modelID: MODEL_ID },
+        variant: 'high',
+      }],
+      currentVariant: 'high',
+      currentVariantSelection: { override: undefined, inherited: 'high' },
+      settingsDefaultVariant: 'low',
+    });
+
+    const { cleanup } = await renderModelControls();
+    try {
+      expect(useConfigStore.getState().currentVariant).toBe('high');
+      expect(useConfigStore.getState().currentVariantSelection).toEqual({
+        override: undefined,
+        inherited: 'high',
+      });
+    } finally {
+      await cleanup();
+    }
   });
 
   test('restores the concrete effort the session history carries', async () => {
@@ -373,6 +409,23 @@ describe('ModelControls effort restore', () => {
       expect(useSelectionStore.getState().savedVariant).toBe(undefined);
       expect(useConfigStore.getState().currentVariantSelection.override).toBe(undefined);
     } finally {
+      await cleanup();
+    }
+  });
+
+  test('does not reapply persisted session selections after a live agent change', async () => {
+    const selections = useSelectionStore.getState();
+    const getSessionModel = spyOn(selections, 'getSessionModelSelection');
+    const { cleanup } = await renderModelControls();
+    try {
+      const callsAfterHydration = getSessionModel.mock.calls.length;
+
+      await act(async () => useConfigStore.setState({ currentAgentName: 'plan' }));
+
+      expect(getSessionModel.mock.calls.length).toBe(callsAfterHydration);
+      expect(useConfigStore.getState().currentAgentName).toBe('plan');
+    } finally {
+      getSessionModel.mockRestore();
       await cleanup();
     }
   });
