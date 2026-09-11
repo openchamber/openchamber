@@ -61,6 +61,7 @@ interface ProjectsStore {
     icon?: string | null;
     color?: string | null;
     iconBackground?: string | null;
+    defaultAgent?: string | null;
     defaultModel?: string | null;
     defaultVariant?: string | null;
   }) => void;
@@ -140,6 +141,14 @@ const normalizeDefaultModel = (value: unknown): string | undefined => {
     return undefined;
   }
   return trimmed;
+};
+
+const normalizeOptionalProjectString = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
 };
 
 const normalizeIconBackground = (value: unknown): string | null => {
@@ -297,6 +306,10 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     }
     if (typeof candidate.color === 'string' && candidate.color.trim().length > 0) {
       project.color = candidate.color.trim();
+    }
+    const defaultAgent = normalizeOptionalProjectString(candidate.defaultAgent);
+    if (defaultAgent) {
+      project.defaultAgent = defaultAgent;
     }
     const defaultModel = normalizeDefaultModel(candidate.defaultModel);
     if (defaultModel) {
@@ -537,6 +550,7 @@ const vscodeWorkspaceProjectsEqual = (left: ProjectEntry[], right: ProjectEntry[
       && leftProject.icon === rightProject.icon
       && leftProject.color === rightProject.color
       && leftProject.iconBackground === rightProject.iconBackground
+      && leftProject.defaultAgent === rightProject.defaultAgent
       && leftProject.defaultModel === rightProject.defaultModel
       && leftProject.defaultVariant === rightProject.defaultVariant
       && leftProject.addedAt === rightProject.addedAt
@@ -820,6 +834,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       icon?: string | null;
       color?: string | null;
       iconBackground?: string | null;
+      defaultAgent?: string | null;
       defaultModel?: string | null;
       defaultVariant?: string | null;
     }) => {
@@ -838,6 +853,14 @@ export const useProjectsStore = create<ProjectsStore>()(
         if (meta.color !== undefined) updated.color = meta.color;
         if (meta.iconBackground !== undefined) {
           updated.iconBackground = normalizeIconBackground(meta.iconBackground);
+        }
+        if (meta.defaultAgent !== undefined) {
+          const normalized = normalizeOptionalProjectString(meta.defaultAgent);
+          if (normalized) {
+            updated.defaultAgent = normalized;
+          } else {
+            delete updated.defaultAgent;
+          }
         }
         if (meta.defaultModel !== undefined) {
           const normalized = normalizeDefaultModel(meta.defaultModel);

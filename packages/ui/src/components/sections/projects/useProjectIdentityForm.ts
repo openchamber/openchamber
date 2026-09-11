@@ -23,13 +23,14 @@ export type ProjectIdentitySaveData = {
   icon: string | null;
   color: string | null;
   iconBackground: string | null;
+  defaultAgent: string | null;
   defaultModel: string | null;
   defaultVariant: string | null;
 };
 
 type EditableProject = Pick<
   ProjectEntry,
-  'id' | 'label' | 'icon' | 'color' | 'iconBackground' | 'defaultModel' | 'defaultVariant' | 'iconImage' | 'path'
+  'id' | 'label' | 'icon' | 'color' | 'iconBackground' | 'defaultAgent' | 'defaultModel' | 'defaultVariant' | 'iconImage' | 'path'
 >;
 
 export const useProjectIdentityForm = (project: EditableProject | null) => {
@@ -45,6 +46,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
   const [icon, setIcon] = React.useState<string | null>(null);
   const [color, setColor] = React.useState<string | null>(null);
   const [iconBackground, setIconBackground] = React.useState<string | null>(null);
+  const [defaultAgent, setDefaultAgent] = React.useState<string | undefined>(undefined);
   const [defaultModel, setDefaultModel] = React.useState<string | undefined>(undefined);
   const [defaultVariant, setDefaultVariant] = React.useState<string | undefined>(undefined);
   const [isUploadingIcon, setIsUploadingIcon] = React.useState(false);
@@ -74,6 +76,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
       setIcon(null);
       setColor(null);
       setIconBackground(null);
+      setDefaultAgent(undefined);
       setDefaultModel(undefined);
       setDefaultVariant(undefined);
       return;
@@ -82,6 +85,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     setIcon(project.icon ?? null);
     setColor(project.color ?? null);
     setIconBackground(project.iconBackground ?? null);
+    setDefaultAgent(project.defaultAgent);
     setDefaultModel(project.defaultModel);
     setDefaultVariant(project.defaultVariant);
     setPendingRemoveImageIcon(false);
@@ -113,6 +117,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     || icon !== (project?.icon ?? null)
     || color !== (project?.color ?? null)
     || iconBackground !== (project?.iconBackground ?? null)
+    || (defaultAgent ?? undefined) !== (project?.defaultAgent ?? undefined)
     || (defaultModel ?? undefined) !== (project?.defaultModel ?? undefined)
     || (defaultVariant ?? undefined) !== (project?.defaultVariant ?? undefined)
     || pendingRemoveImageIcon
@@ -243,12 +248,14 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
       icon,
       color,
       iconBackground: normalizeProjectIconBackground(willRemoveImageIcon ? null : iconBackground),
+      defaultAgent: defaultAgent ?? null,
       defaultModel: defaultModel ?? null,
       defaultVariant: defaultModel ? defaultVariant ?? null : null,
     };
   }, [
     clearPendingUploadIcon,
     color,
+    defaultAgent,
     defaultModel,
     defaultVariant,
     icon,
@@ -275,6 +282,8 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     setColor,
     iconBackground,
     setIconBackground,
+    defaultAgent,
+    setDefaultAgent,
     defaultModel,
     defaultVariant,
     parsedDefaultModel,
