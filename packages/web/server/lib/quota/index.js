@@ -14,6 +14,7 @@ export {
   fetchCodexQuota,
   fetchCursorQuota,
   fetchDeepseekQuota,
+  fetchFireworksQuota,
   fetchHyperQuota,
   fetchCopilotQuota,
   fetchCopilotAddonQuota,
