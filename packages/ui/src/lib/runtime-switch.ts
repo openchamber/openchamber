@@ -56,6 +56,13 @@ const normalizeRuntimeUrlKey = (value: string): string => {
 // disconnect state (`MobileApp` switches to it when the connection drops).
 // Per-instance client state (e.g. the scoped theme entry) must not be read
 // from or written under them.
+//
+// A browser page served by the instance itself is NOT uninitialised: its
+// origin is the instance. The web server does not inject an API base URL for
+// same-origin pages (fetches resolve relative to the page), so without a
+// fallback the derived key is `url:default` and every transient-key consumer
+// — the once-per-instance quota load, the scoped theme entry, per-instance UI
+// state — silently skips work. See `getRuntimeKey`.
 export const MOBILE_DISCONNECTED_RUNTIME_KEY = 'mobile-disconnected';
 const UNINITIALIZED_RUNTIME_KEY = 'url:default';
 
@@ -91,7 +98,8 @@ export const getRuntimeApiBaseUrl = (): string => activeApiBaseUrl || readInject
 // trimming two injected globals and constructing three `URL` objects, which
 // made this one of the most expensive functions during streaming.
 //
-// The result depends only on `activeApiBaseUrl` and the two injected globals,
+// The result depends only on `activeApiBaseUrl`, the two injected globals
+// and the same-origin browser fallback,
 // and `switchRuntimeEndpoint` writes the injected API base URL at runtime, so
 // the cache is validated against the raw, untrimmed values. That comparison
 // allocates nothing and still recomputes the moment any input changes.
@@ -99,6 +107,7 @@ let cachedRuntimeKey = '';
 let cachedActiveApiBaseUrl: string | null = null;
 let cachedRawApiBaseUrl: string | undefined;
 let cachedRawLocalOrigin: string | undefined;
+let cachedRawBrowserOrigin: string | undefined;
 
 const readRawRuntimeGlobal = (key: '__OPENCHAMBER_API_BASE_URL__' | '__OPENCHAMBER_LOCAL_ORIGIN__'): string | undefined => {
   if (typeof window === 'undefined') return undefined;
@@ -109,26 +118,42 @@ const readRawRuntimeGlobal = (key: '__OPENCHAMBER_API_BASE_URL__' | '__OPENCHAMB
   return typeof value === 'string' ? value : undefined;
 };
 
+// Same-origin web pages fetch instance APIs with relative URLs, so no API
+// base URL is injected for them. The serving origin is nevertheless a real
+// instance identity: fall back to it so the derived key is `url:<origin>`
+// instead of the transient `url:default`. Restricted to http(s) pages — other
+// contexts (SSR, file://, custom protocols) have no origin that names an
+// instance and stay transient.
+const readBrowserOriginFallback = (): string => {
+  if (typeof window === 'undefined') return '';
+  const { location } = window;
+  if (!location) return '';
+  return location.protocol === 'http:' || location.protocol === 'https:' ? location.origin : '';
+};
+
 export const getRuntimeKey = (): string => {
   if (activeRuntimeKey) return activeRuntimeKey;
 
   const rawApiBaseUrl = readRawRuntimeGlobal('__OPENCHAMBER_API_BASE_URL__');
   const rawLocalOrigin = readRawRuntimeGlobal('__OPENCHAMBER_LOCAL_ORIGIN__');
+  const rawBrowserOrigin = readBrowserOriginFallback();
   if (
     cachedActiveApiBaseUrl === activeApiBaseUrl
     && cachedRawApiBaseUrl === rawApiBaseUrl
     && cachedRawLocalOrigin === rawLocalOrigin
+    && cachedRawBrowserOrigin === rawBrowserOrigin
   ) {
     return cachedRuntimeKey;
   }
 
-  const apiBaseUrl = getRuntimeApiBaseUrl();
+  const apiBaseUrl = getRuntimeApiBaseUrl() || rawBrowserOrigin;
   cachedRuntimeKey = sameOrigin(apiBaseUrl, readInjectedLocalOrigin())
     ? 'local'
     : normalizeRuntimeUrlKey(apiBaseUrl);
   cachedActiveApiBaseUrl = activeApiBaseUrl;
   cachedRawApiBaseUrl = rawApiBaseUrl;
   cachedRawLocalOrigin = rawLocalOrigin;
+  cachedRawBrowserOrigin = rawBrowserOrigin;
   return cachedRuntimeKey;
 };
 
@@ -202,4 +227,18 @@ export const subscribeRuntimeEndpointChanged = (callback: (detail: RuntimeEndpoi
   };
   window.addEventListener(RUNTIME_ENDPOINT_CHANGED_EVENT, listener);
   return () => window.removeEventListener(RUNTIME_ENDPOINT_CHANGED_EVENT, listener);
+};
+
+// Test-only: `switchRuntimeEndpoint` mutates module-level state that no other
+// endpoint switch can clear, and bun:test shares module state across test
+// files in a run. Tests that assert on the derived fallback path need the
+// module back at "never initialised" first.
+export const resetRuntimeEndpointForTesting = (): void => {
+  activeApiBaseUrl = '';
+  activeRuntimeKey = '';
+  cachedRuntimeKey = '';
+  cachedActiveApiBaseUrl = null;
+  cachedRawApiBaseUrl = undefined;
+  cachedRawLocalOrigin = undefined;
+  cachedRawBrowserOrigin = undefined;
 };
