@@ -133,6 +133,10 @@ omit the dependent metric rather than becoming zero; reported zeros remain
 valid. TTFT averages the earliest text/reasoning start delay from every step,
 only when all steps have a valid sample.
 
+Elapsed time is wall-clock time from the first user message in the turn through
+the final assistant completion. It includes model waits, tool execution,
+compaction, and other gaps; it is not used as a throughput denominator.
+
 Metric labels stay short. Every row is a single hover and keyboard-focus target
 for a shared tooltip, with a 750ms hover delay and a portal outside the panel's
 scroller. Tooltips explain the measurement in every locale. The token row uses

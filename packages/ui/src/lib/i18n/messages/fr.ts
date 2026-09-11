@@ -3298,6 +3298,8 @@ export const dict = {
   'chat.workStatus.telemetry.responseSpeed': 'Réponse',
   'chat.workStatus.telemetry.responseSpeedDescription': 'La vitesse à laquelle le texte final est arrivé. Sans attente initiale, raisonnement ni appels précédents aux outils. Une estimation basée sur les horodatages du texte, pas une mesure du fournisseur.',
   'chat.workStatus.telemetry.speed': 'Requête',
+  'chat.workStatus.telemetry.elapsed': 'Temps écoulé',
+  'chat.workStatus.telemetry.elapsedDescription': 'Temps réel entre le premier message de l’utilisateur et la réponse finale de l’assistant. Inclut l’attente du modèle, l’exécution des outils, la compaction et les autres intervalles.',
   'chat.workStatus.telemetry.llmDuration': 'Modèle',
   'chat.workStatus.telemetry.llmDurationDescription': 'Durée de toutes les étapes du modèle, attente des réponses comprise. Le temps des outils est soustrait. Ce ne sont pas uniquement les secondes de génération du texte.',
   'chat.workStatus.telemetry.toolDuration': 'Outils',

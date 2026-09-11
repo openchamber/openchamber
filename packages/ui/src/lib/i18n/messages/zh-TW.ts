@@ -3300,6 +3300,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.responseSpeed': '回答速度',
   'chat.workStatus.telemetry.responseSpeedDescription': '最終文字到達的速度。不含開始前的等待、推理和先前的工具呼叫。這是根據文字時間戳記估算的速度，不是供應商測得的生成速度。',
   'chat.workStatus.telemetry.speed': '整個請求',
+  'chat.workStatus.telemetry.elapsed': '經過時間',
+  'chat.workStatus.telemetry.elapsedDescription': '從第一則使用者訊息到助理最終回覆的實際耗時。包含等待模型、工具執行、壓縮與其他間隔。',
   'chat.workStatus.telemetry.llmDuration': '模型耗時',
   'chat.workStatus.telemetry.llmDurationDescription': '所有模型步驟的耗時，包括等待回答的時間。已扣除工具執行時間，並不只是生成文字的時間。',
   'chat.workStatus.telemetry.toolDuration': '工具耗時',

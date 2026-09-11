@@ -3300,6 +3300,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.responseSpeed': '응답',
   'chat.workStatus.telemetry.responseSpeedDescription': '최종 텍스트가 도착한 속도입니다. 시작 전 대기, 추론, 이전 도구 호출은 제외합니다. 텍스트 시간 기록으로 계산한 추정치이며 제공자 측 속도 측정값은 아닙니다.',
   'chat.workStatus.telemetry.speed': '전체 요청',
+  'chat.workStatus.telemetry.elapsed': '경과 시간',
+  'chat.workStatus.telemetry.elapsedDescription': '첫 사용자 메시지부터 최종 어시스턴트 응답까지의 실제 경과 시간입니다. 모델 대기, 도구 실행, 압축 및 기타 공백을 포함합니다.',
   'chat.workStatus.telemetry.llmDuration': '모델 시간',
   'chat.workStatus.telemetry.llmDurationDescription': '응답 대기를 포함한 모든 모델 단계의 시간입니다. 도구 실행 시간은 뺍니다. 텍스트 생성 시간만을 뜻하지는 않습니다.',
   'chat.workStatus.telemetry.toolDuration': '도구 시간',

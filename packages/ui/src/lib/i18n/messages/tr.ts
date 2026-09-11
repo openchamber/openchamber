@@ -3211,6 +3211,8 @@ export const dict = {
   'chat.workStatus.telemetry.responseSpeed': 'Yanıt',
   'chat.workStatus.telemetry.responseSpeedDescription': 'Son metnin ne hızla geldiği. İlk bekleme, akıl yürütme ve önceki araç çağrıları dahil değildir. Metin zamanlarından hesaplanan bir tahmindir, sağlayıcı tarafındaki hız ölçümü değildir.',
   'chat.workStatus.telemetry.speed': 'Tüm istek',
+  'chat.workStatus.telemetry.elapsed': 'Geçen süre',
+  'chat.workStatus.telemetry.elapsedDescription': 'İlk kullanıcı mesajından son asistan yanıtına kadar geçen gerçek süredir. Model bekleme, araç çalıştırma, sıkıştırma ve diğer aralıkları içerir.',
   'chat.workStatus.telemetry.llmDuration': 'Model süresi',
   'chat.workStatus.telemetry.llmDurationDescription': 'Yanıt bekleme dahil tüm model adımlarının süresi. Araç çalışma süresi çıkarılır. Yalnızca metin üretme süresi değildir.',
   'chat.workStatus.telemetry.toolDuration': 'Araç süresi',

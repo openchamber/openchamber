@@ -28,7 +28,9 @@ describe('turn telemetry', () => {
   test('formats durations, counts and approximate throughput', () => {
     expect(formatTelemetryDuration(0)).toBe('0.0s');
     expect(formatTelemetryDuration(1234)).toBe('1.2s');
-    expect(formatTelemetryDuration(84000)).toBe('1m24s');
+    expect(formatTelemetryDuration(84000)).toBe('1m 24s');
+    expect(formatTelemetryDuration(2796044)).toBe('46m 36s');
+    expect(formatTelemetryDuration(84600)).toBe('1m 25s');
     expect(formatTelemetryTokens(0)).toBe('0');
     expect(formatTelemetryTokens(500)).toBe('500');
     expect(formatTelemetryTokens(1234)).toBe('1.2K');
@@ -45,9 +47,23 @@ describe('turn telemetry', () => {
       tokens: { input: 1500, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
     }), parts: [text(21500)] });
     const stats = getLatestCompletedTurnStats(records);
-    expect(stats).toEqual({ stepsCount: 2, lastAssistantMessageId: 'a2', totalToolDurationMs: 3000,
+    expect(stats).toEqual({ stepsCount: 2, lastAssistantMessageId: 'a2', elapsedDurationMs: 24000, totalToolDurationMs: 3000,
       totalLlmDurationMs: 10000, outputTokens: 300, reasoningTokens: 300, totalGeneratedTokens: 600,
       inputTokens: 2500, cost: 0.015, tokensPerSecond: 60, responseTokensPerSecond: null, avgTtftMs: 1000, cacheHitPercent: 44 });
+  });
+
+  test('omits elapsed time when turn boundary timestamps are invalid', () => {
+    const invalidStartStats = getLatestCompletedTurnStats([
+      { info: { ...user, time: { created: Number.NaN } }, parts: [] },
+      { info: assistant(), parts: [] },
+    ]);
+    const invalidEndStats = getLatestCompletedTurnStats([
+      { info: { ...user, time: { created: 6000 } }, parts: [] },
+      { info: assistant(), parts: [] },
+    ]);
+
+    expect(invalidStartStats?.elapsedDurationMs).toBeNull();
+    expect(invalidEndStats?.elapsedDurationMs).toBeNull();
   });
 
   test('uses only the latest user-bounded turn', () => {

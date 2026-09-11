@@ -3301,6 +3301,8 @@ export const dict = {
   'chat.workStatus.telemetry.responseSpeedDescription': 'How fast the final text arrived. Excludes the initial wait, reasoning, and earlier tool calls. An estimate from text timestamps, not a provider speed measurement.',
   'chat.workStatus.telemetry.speed': 'Whole turn',
   'chat.workStatus.telemetry.speedDescription': 'Tokens generated across all steps, including reasoning, divided by time with tool execution removed. Waiting for the model still counts, so many short tool calls can lower this number.',
+  'chat.workStatus.telemetry.elapsed': 'Elapsed',
+  'chat.workStatus.telemetry.elapsedDescription': 'Wall-clock time from the first user message to the final assistant response. Includes model waiting, tool execution, compaction, and other gaps.',
   'chat.workStatus.telemetry.llmDuration': 'Model time',
   'chat.workStatus.telemetry.llmDurationDescription': 'Time spent on all model steps, including waiting for responses. Tool execution time is removed. This is not just time spent generating text.',
   'chat.workStatus.telemetry.toolDuration': 'Tool time',
