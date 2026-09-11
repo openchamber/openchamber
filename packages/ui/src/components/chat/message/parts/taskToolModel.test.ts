@@ -56,4 +56,46 @@ describe('taskToolModel', () => {
         expect(prepareTaskToolOutput('done\n<task_metadata>{"sessionID":"child-1"}</task_metadata>')).toBe('done');
         expect(prepareTaskToolOutput(undefined)).toBe('');
     });
+
+    test('unwraps the task result envelope and keeps the result Markdown intact', () => {
+        const output = [
+            '<task id="ses_abc123" state="completed">',
+            '<task_result>',
+            '## Verdict',
+            '- first item',
+            '- second item',
+            '</task_result>',
+            '</task>',
+        ].join('\n');
+
+        expect(prepareTaskToolOutput(output)).toBe('## Verdict\n- first item\n- second item');
+    });
+
+    test('unwraps a result block whose opening tag shares the content line', () => {
+        const output = '<task id="ses_abc123" state="completed"><task_result> ## Verdict\n- first item</task_result></task>';
+
+        expect(prepareTaskToolOutput(output)).toBe('## Verdict\n- first item');
+    });
+
+    test('does not strip outputs that are not wrapped in a task envelope', () => {
+        expect(prepareTaskToolOutput('## Verdict\n- first item')).toBe('## Verdict\n- first item');
+        expect(prepareTaskToolOutput('literal <task_result>text</task_result> in prose')).toBe('literal <task_result>text</task_result> in prose');
+        expect(prepareTaskToolOutput('<task id="ses_abc123" state="running">\n<task_result>\nstill running'))
+            .toBe('<task id="ses_abc123" state="running">\n<task_result>\nstill running');
+    });
+
+    test('unwraps only the display text while metadata parsing still reads the raw output', () => {
+        const output = [
+            '<task id="ses_abc123" state="completed">',
+            '<task_result>',
+            '## Verdict',
+            '</task_result>',
+            '</task>',
+            '<task_metadata>{"sessionID":"child-1"}</task_metadata>',
+        ].join('\n');
+
+        expect(prepareTaskToolOutput(output)).toBe('## Verdict');
+        expect(readTaskSessionIdFromOutput(output)).toBe('child-1');
+        expect(parseTaskMetadataBlock(output).sessionId).toBe('child-1');
+    });
 });

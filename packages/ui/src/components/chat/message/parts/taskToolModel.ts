@@ -133,11 +133,30 @@ export const stripTaskMetadataFromOutput = (output: string): string => {
     return output.replace(/\n*<task_metadata>[\s\S]*?<\/task_metadata>\s*$/i, '').trimEnd();
 };
 
+const TASK_ENVELOPE_OPEN_TAG_PATTERN = /^\s*<task(?:\s[^>]*)?>/i;
+const TASK_RESULT_BLOCK_PATTERN = /<task_result>\s*([\s\S]*?)\s*<\/task_result>/i;
+
+// OpenCode wraps a completed task result in an envelope:
+//   <task id="ses_…" state="completed">
+//   <task_result>…result Markdown…</task_result>
+//   </task>
+// `marked` treats the leading tag line as a raw HTML block, so the Markdown
+// inside the result block never reaches the parser. Only unwrap when the output
+// actually starts with the envelope tag; other outputs pass through untouched.
+// A missing result block (older or partial payloads) also falls back to the raw
+// output instead of guessing.
+const unwrapTaskResultEnvelope = (output: string): string => {
+    if (!TASK_ENVELOPE_OPEN_TAG_PATTERN.test(output)) return output;
+    const resultBlock = output.match(TASK_RESULT_BLOCK_PATTERN);
+    if (!resultBlock) return output;
+    return resultBlock[1];
+};
+
 // The task tool renders its output through the markdown parser instead of the
 // shared tool-output path, so it needs the same size guard as
 // `getToolOutputText` (issue #2265): an unbounded single string reaching the
 // parser can exhaust V8's Zone allocator and crash the renderer.
 export const prepareTaskToolOutput = (output: string | undefined): string => {
     if (!output) return '';
-    return capToolOutputText(stripTaskMetadataFromOutput(output));
+    return capToolOutputText(stripTaskMetadataFromOutput(unwrapTaskResultEnvelope(output)));
 };
