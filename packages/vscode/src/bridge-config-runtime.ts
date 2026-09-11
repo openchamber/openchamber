@@ -52,6 +52,7 @@ import {
   expandSnippets,
   type SnippetScope,
 } from './opencodeConfig';
+import { listMcpTools } from './mcp-tools';
 import {
   getSkillsCatalog,
   scanSkillsRepository as scanSkillsRepositoryFromGit,
@@ -436,6 +437,70 @@ export async function handleConfigBridgeMessage(
       }
 
       return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };
+    }
+
+    case 'api:config/mcp-tools': {
+      const { body, directory } = (payload || {}) as {
+        body?: Record<string, unknown>;
+        directory?: string;
+      };
+      const workingDirectory = resolveWorkingDirectory(ctx, directory);
+      const requestBody = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+      const requestedName = typeof requestBody.name === 'string' ? requestBody.name.trim() : '';
+      const saved = requestedName ? getMcpConfig(requestedName, workingDirectory) : null;
+
+      const hasDraftType = requestBody.type === 'local' || requestBody.type === 'remote';
+      const hasDraftCommand = Array.isArray(requestBody.command);
+      const hasDraftUrl = typeof requestBody.url === 'string';
+
+      let probeConfig: Record<string, unknown> | null = null;
+      if (hasDraftType || hasDraftCommand || hasDraftUrl) {
+        probeConfig = {
+          ...(saved || {}),
+          ...requestBody,
+          name: requestedName || saved?.name,
+          type: hasDraftType ? requestBody.type : (saved?.type || (hasDraftUrl ? 'remote' : 'local')),
+        };
+      } else if (saved) {
+        probeConfig = saved as Record<string, unknown>;
+      }
+
+      if (!probeConfig) {
+        return {
+          id,
+          type,
+          success: false,
+          error: requestedName
+            ? `MCP server "${requestedName}" not found`
+            : 'Provide a saved MCP server name or a draft MCP configuration',
+        };
+      }
+
+      if (probeConfig.enabled === false) {
+        return { id, type, success: false, error: 'MCP server is disabled' };
+      }
+
+      try {
+        const result = await listMcpTools(probeConfig, { cwd: workingDirectory });
+        return {
+          id,
+          type,
+          success: true,
+          data: {
+            name: requestedName || probeConfig.name || null,
+            tools: result.tools,
+            serverInfo: result.serverInfo ?? null,
+            truncated: result.truncated === true,
+          },
+        };
+      } catch (error) {
+        return {
+          id,
+          type,
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to list MCP tools',
+        };
+      }
     }
 
     case 'api:config/plugins': {
