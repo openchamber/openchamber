@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import * as google from './google/index.js';
-import { fetchQuotaForProvider, listConfiguredQuotaProviders } from './index.js';
+import {
+  fetchOpenCodeGoQuota,
+  fetchQuotaForProvider,
+  listConfiguredQuotaProviders
+} from './index.js';
 
 describe('quota provider registry', () => {
   it('exposes google provider configuration helpers through the provider module', () => {
@@ -22,5 +26,9 @@ describe('quota provider registry', () => {
     expect(first).toBe(second);
     await first;
     expect(fetchQuotaForProvider('unsupported-test-provider')).not.toBe(first);
+  });
+
+  it('exports the OpenCode Go quota helper', () => {
+    expect(typeof fetchOpenCodeGoQuota).toBe('function');
   });
 });
