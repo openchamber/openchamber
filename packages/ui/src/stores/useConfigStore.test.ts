@@ -1511,4 +1511,130 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentProviderId).toBe('manual');
     expect(state.selectionSource).toBe('manual');
   });
+
+  test('a manual model survives a provider refresh whose list omits its provider', async () => {
+    // The list reloads on reconnect, on config refresh and on directory
+    // activation, and a directory scope need not carry every provider. A pick
+    // the list cannot confirm used to fall through to the configured default,
+    // and the next send went out under that default as a deliberate choice.
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      currentProviderId: 'plugin-provider',
+      currentModelId: 'plugin-model',
+      selectedProviderId: 'plugin-provider',
+      selectionSource: 'manual',
+      settingsDefaultModel: 'live/live-model',
+      directoryScoped: {},
+    });
+
+    liveProviderId = 'live';
+    await useConfigStore.getState().loadProviders({ source: 'test:partial-provider-list' });
+
+    const state = useConfigStore.getState();
+    expect(state.providers.map((entry) => entry.id)).toEqual(['live']);
+    expect(state.currentProviderId).toBe('plugin-provider');
+    expect(state.currentModelId).toBe('plugin-model');
+    expect(state.directoryScoped[DIRECTORY]?.currentProviderId).toBe('plugin-provider');
+    expect(state.directoryScoped[DIRECTORY]?.currentModelId).toBe('plugin-model');
+  });
+
+  test('a manual model is re-resolved when its provider is present without it', async () => {
+    // The provider answered, so this is a real removal rather than a gap in the
+    // list, and re-resolving is the only way to reach a model that exists.
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      currentProviderId: 'live',
+      currentModelId: 'retired-model',
+      selectedProviderId: 'live',
+      selectionSource: 'manual',
+      directoryScoped: {},
+    });
+
+    liveProviderId = 'live';
+    await useConfigStore.getState().loadProviders({ source: 'test:removed-model' });
+
+    const state = useConfigStore.getState();
+    expect(state.currentProviderId).toBe('live');
+    expect(state.currentModelId).toBe('live-model');
+    expect(state.directoryScoped[DIRECTORY]?.currentModelId).toBe('live-model');
+  });
+
+  test('an empty provider list keeps the manual model while a removed agent re-resolves', async () => {
+    // An empty list confirms nothing about the model, so the pick stays; the
+    // agent list did answer, so a missing agent is a real removal.
+    liveAgents = [testAgent('build')];
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [],
+      agents: [],
+      currentProviderId: 'plugin-provider',
+      currentModelId: 'plugin-model',
+      currentAgentName: 'retired-agent',
+      selectedProviderId: 'plugin-provider',
+      selectionSource: 'manual',
+      directoryScoped: {
+        [DIRECTORY]: {
+          providers: [],
+          agents: [],
+          currentProviderId: 'plugin-provider',
+          currentModelId: 'plugin-model',
+          currentAgentName: 'retired-agent',
+          selectedProviderId: 'plugin-provider',
+          agentModelSelections: {},
+          defaultProviders: {},
+          selectionSource: 'manual',
+        },
+      },
+    });
+
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY, source: 'test:empty-provider-list' });
+
+    const state = useConfigStore.getState();
+    expect(state.selectionSource).toBe('manual');
+    expect(state.currentAgentName).toBe('build');
+    expect(state.directoryScoped[DIRECTORY]?.currentProviderId).toBe('plugin-provider');
+    expect(state.directoryScoped[DIRECTORY]?.currentModelId).toBe('plugin-model');
+  });
+
+  test('an automatic selection still re-resolves to the configured default', async () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      currentProviderId: 'plugin-provider',
+      currentModelId: 'plugin-model',
+      selectedProviderId: 'plugin-provider',
+      selectionSource: 'auto',
+      settingsDefaultModel: 'live/live-model',
+      directoryScoped: {},
+    });
+
+    liveProviderId = 'live';
+    await useConfigStore.getState().loadProviders({ source: 'test:auto-selection' });
+
+    const state = useConfigStore.getState();
+    expect(state.currentProviderId).toBe('live');
+    expect(state.currentModelId).toBe('live-model');
+  });
+
+  test('the selection source survives a persist and rehydrate cycle', async () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      currentProviderId: 'manual',
+      currentModelId: 'manual-model',
+      selectedProviderId: 'manual',
+      selectionSource: 'manual',
+      directoryScoped: {},
+    });
+
+    const persisted = JSON.parse(storage.get(STORAGE_KEY) ?? '{}');
+    expect(persisted.state.selectionSource).toBe('manual');
+
+    // Restored from the top-level field alone: with no directory snapshot to
+    // lift it from, a reload that forgets the source lets the next provider
+    // refresh re-resolve a pick the user made.
+    useConfigStore.setState({ selectionSource: 'auto' });
+    storage.set(STORAGE_KEY, JSON.stringify(persisted));
+    await useConfigStore.persist.rehydrate();
+
+    expect(useConfigStore.getState().selectionSource).toBe('manual');
+  });
 });

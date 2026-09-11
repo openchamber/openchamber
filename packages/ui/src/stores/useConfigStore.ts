@@ -201,6 +201,38 @@ const hasProviderModel = (
     return provider.models.some((model) => model.id === modelId);
 };
 
+const hasProvider = (providers: ProviderWithModelList[], providerId: string): boolean => (
+    providers.some((item) => item.id === providerId)
+);
+
+/**
+ * Whether this list is unable to say anything about a picked model.
+ *
+ * The provider list is not always complete: it reloads on reconnect
+ * re-bootstrap, on config refresh, and on directory activation, and a
+ * directory scope need not carry every provider. `hasProviderModel` answers
+ * false for a missing provider and for a removed model alike, so on its own it
+ * cannot tell an incomplete list from a model the user really lost.
+ *
+ * The two are distinguishable by the provider:
+ *
+ * - provider absent, or list empty — the list is incomplete, keep the pick
+ * - provider present without the model — a real removal, re-resolve
+ *
+ * Deliberate trade-off: a provider that is gone for good now keeps a stuck pick
+ * until the user selects another model, and sends fail visibly. That is
+ * preferred over silently swapping in the configured default, which the user
+ * cannot see and which then sends under a model they never chose. Nothing here
+ * bounds or expires that state on the user's behalf.
+ */
+const isUnconfirmableSelection = (
+    providers: ProviderWithModelList[],
+    providerId: string,
+    modelId: string,
+): boolean => (
+    !!providerId && !!modelId && !hasProvider(providers, providerId)
+);
+
 const resolveProviderModelSelection = ({
     providers,
     currentProviderId,
@@ -1008,10 +1040,15 @@ const resolveSelectionWithManualGuard = ({
     const manualAgentName = currentAgentName && agents.some((agent) => agent.name === currentAgentName)
         ? currentAgentName
         : undefined;
-    const manualModelValid = !!currentProviderId
+    const manualModelConfirmed = !!currentProviderId
         && !!currentModelId
         && hasProviderModel(providers, currentProviderId, currentModelId)
         && hasValidVariant(providers, currentProviderId, currentModelId, currentVariant);
+    // A list that does not carry the picked provider at all cannot disprove the
+    // pick, so an unconfirmable one survives; only a provider that is present
+    // and no longer offers the model re-resolves.
+    const manualModelValid = manualModelConfirmed
+        || isUnconfirmableSelection(providers, currentProviderId, currentModelId);
     const preserveManual = selectionSource === "manual" && (!!manualAgentName || manualModelValid);
 
     return {
@@ -1681,14 +1718,25 @@ export const useConfigStore = create<ConfigStore>()(
                                 const currentVariant = state.activeDirectoryKey === directoryKey
                                     ? state.currentVariant
                                     : baseSnapshot.currentVariant;
-                                const resolvedModel = resolveProviderModelSelection({
-                                    providers: processedProviders,
-                                    currentProviderId,
-                                    currentModelId,
-                                    currentVariant,
-                                    settingsDefaultModel: state.settingsDefaultModel,
-                                    settingsDefaultVariant: state.settingsDefaultVariant,
-                                });
+                                const selectionSource = state.activeDirectoryKey === directoryKey
+                                    ? state.selectionSource
+                                    : (baseSnapshot.selectionSource ?? "auto");
+                                // A refresh that omits the picked provider entirely is an
+                                // incomplete list, not a removal. Re-resolving on it replaced a
+                                // deliberate choice with the configured default, and the next
+                                // send went out under that default as if the user had picked it.
+                                const keepUnconfirmedManualModel = selectionSource === "manual"
+                                    && isUnconfirmableSelection(processedProviders, currentProviderId, currentModelId);
+                                const resolvedModel = keepUnconfirmedManualModel
+                                    ? { providerId: currentProviderId, modelId: currentModelId, variant: currentVariant }
+                                    : resolveProviderModelSelection({
+                                        providers: processedProviders,
+                                        currentProviderId,
+                                        currentModelId,
+                                        currentVariant,
+                                        settingsDefaultModel: state.settingsDefaultModel,
+                                        settingsDefaultVariant: state.settingsDefaultVariant,
+                                    });
                                 const currentSelectedProviderId = state.activeDirectoryKey === directoryKey
                                     ? state.selectedProviderId
                                     : baseSnapshot.selectedProviderId;
@@ -3524,6 +3572,9 @@ export const useConfigStore = create<ConfigStore>()(
                     selectedProviderId: sanitizePersistedSelectedProviderId(state.selectedProviderId),
                     agentModelSelections: state.agentModelSelections,
                     defaultProviders: state.defaultProviders,
+                    // Persisted with the pick it describes: a reload that restores a manual
+                    // model but calls it "auto" lets the next provider refresh re-resolve it.
+                    selectionSource: state.selectionSource,
                     settingsDefaultModel: state.settingsDefaultModel,
                     settingsDefaultVariant: state.settingsDefaultVariant,
                     settingsDefaultAgent: state.settingsDefaultAgent,

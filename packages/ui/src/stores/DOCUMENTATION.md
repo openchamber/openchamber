@@ -374,6 +374,20 @@ the chat, the session list and the file tree.
 Failure is still not empty: a failed load restores that directory's previous
 list rather than clearing it.
 
+An incomplete list is not a removal either. A provider refresh can succeed and
+still omit providers — it reloads on reconnect re-bootstrap, on config refresh
+and on directory activation, and a directory scope need not carry every
+provider — so a list without the picked provider in it cannot disprove the
+pick. While `selectionSource` is `manual`, `loadProviders` and
+`resolveSelectionWithManualGuard` keep such a pick rather than re-resolving it;
+only a provider that is present and no longer offers the model counts as a real
+removal. `selectionSource` is persisted alongside the pick, so a reload cannot
+downgrade it to `auto` and hand the next refresh a selection to re-resolve. The
+accepted cost is that a provider removed for good keeps a stuck pick until the
+user chooses another model, and sends then fail visibly — preferred over
+silently substituting the configured default, which the user cannot see and
+which sends under a model they never chose.
+
 ## Selector Rules
 
 Use leaf selectors.
