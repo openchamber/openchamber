@@ -5,6 +5,8 @@
  * (universally supported, including iOS WKWebView), resamples Float32 to
  * 16 kHz PCM16LE, and emits ~1-second base64 chunks plus a normalized RMS
  * level for the waveform.
+ * Without an onPcmSegment callback, only the level is measured; no PCM
+ * resampling, buffering, or base64 encoding runs.
  *
  * The level is delivered by subscription rather than React state: it updates
  * on every audio callback (~12 Hz), and routing that through state re-rendered
@@ -14,7 +16,8 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 export interface DictationAudioSourceConfig {
-    onPcmSegment: (base64Pcm: string) => void;
+    /** Omit for level metering only, without buffering or encoding audio. */
+    onPcmSegment?: (base64Pcm: string) => void;
     onError?: (error: Error) => void;
 }
 
@@ -153,6 +156,7 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
     }, [config.onPcmSegment, config.onError]);
 
     const graphRef = useRef<CaptureGraph>(emptyGraph());
+    const captureGenerationRef = useRef(0);
 
     const start = useCallback(async () => {
         if (graphRef.current.started) {
@@ -172,6 +176,7 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
             throw new Error('AudioContext unavailable');
         }
 
+        const generation = ++captureGenerationRef.current;
         const stream = await navigator.mediaDevices.getUserMedia({
             audio: {
                 channelCount: 1,
@@ -181,10 +186,28 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
             },
         });
 
-        const context = new AudioContextCtor();
+        // Permission can resolve after Cancel or unmount. Never retain that mic.
+        if (generation !== captureGenerationRef.current) {
+            stream.getTracks().forEach((track) => track.stop());
+            return;
+        }
+
+        let context: AudioContext;
+        try {
+            context = new AudioContextCtor();
+        } catch (error) {
+            stream.getTracks().forEach((track) => track.stop());
+            throw error instanceof Error ? error : new Error(String(error));
+        }
         try {
             if (context.state === 'suspended') {
                 await context.resume().catch(() => undefined);
+            }
+
+            if (generation !== captureGenerationRef.current) {
+                stream.getTracks().forEach((track) => track.stop());
+                await context.close();
+                return;
             }
 
             const source = context.createMediaStreamSource(stream);
@@ -216,13 +239,16 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
                 const rms = Math.sqrt(sumSquares / Math.max(1, input.length));
                 emitLevel(Math.min(1, Math.max(0, rms * 2)));
 
+                const onPcmSegment = onPcmSegmentRef.current;
+                if (!onPcmSegment) return;
+
                 const next = resampleToPcm16(input, context.sampleRate, OUTPUT_RATE);
                 graph.pending = concatInt16(graph.pending, next);
 
                 while (graph.pending.length >= CHUNK_SAMPLES) {
                     const chunk = graph.pending.slice(0, CHUNK_SAMPLES);
                     graph.pending = graph.pending.slice(CHUNK_SAMPLES);
-                    onPcmSegmentRef.current(int16ToBase64(chunk));
+                    onPcmSegment(int16ToBase64(chunk));
                 }
             };
 
@@ -242,12 +268,13 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
             } catch {
                 // no-op
             }
-            graphRef.current = emptyGraph();
+            if (graphRef.current.context === context) graphRef.current = emptyGraph();
             throw error instanceof Error ? error : new Error(String(error));
         }
     }, [emitLevel]);
 
     const stop = useCallback(async () => {
+        captureGenerationRef.current++;
         const graph = graphRef.current;
         graph.started = false;
         emitLevel(0);
@@ -274,7 +301,7 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
         const pending = graph.pending;
         graph.pending = new Int16Array(0);
         if (pending.length > 0) {
-            onPcmSegmentRef.current(int16ToBase64(pending));
+            onPcmSegmentRef.current?.(int16ToBase64(pending));
         }
 
         if (graph.context) {

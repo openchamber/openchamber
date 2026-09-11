@@ -375,11 +375,11 @@ export const parseFollowUpBehavior: SettingsParser<'steer' | 'queue'> = (value, 
   return legacy.data ? 'queue' : 'steer';
 };
 
-/** Legacy provider names: 'server' was the OpenAI-compatible endpoint; 'browser'/'wasm' the local one. */
+/** Legacy provider names: 'server' was the OpenAI-compatible endpoint; 'wasm' the local one. */
 export const parseSttProvider = fromSchema(
-  trimmed.pipe(z.enum(['local', 'openai-compatible', 'server', 'browser', 'wasm'])).transform((provider): 'local' | 'openai-compatible' => {
+  trimmed.pipe(z.enum(['local', 'openai-compatible', 'server', 'browser', 'wasm'])).transform((provider): 'local' | 'openai-compatible' | 'browser' => {
     if (provider === 'server') return 'openai-compatible';
-    if (provider === 'browser' || provider === 'wasm') return 'local';
+    if (provider === 'wasm') return 'local';
     return provider;
   }),
 );
