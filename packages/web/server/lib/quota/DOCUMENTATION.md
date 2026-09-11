@@ -55,6 +55,7 @@ All providers should return results via shared helpers to preserve API shape:
 - Required fields: `providerId`, `providerName`, `ok`, `configured`, `usage`, `fetchedAt`
 - Optional field: `error`
 - Unsupported provider requests should return `ok: false`, `configured: false`, `error: Unsupported provider`
+- Monitor APIs that report failures inside an HTTP 200 body (Zhipu and z.ai answer expired credentials with `{ code: 401, success: false, msg }`) must surface that as `ok: false` with the body's message; `resolveBusinessError` in `utils/transformers.js` performs the check for the web providers and the VS Code copy carries its own.
 
 Provider modules must export `providerId`, `providerName`, `aliases`, `isConfigured(auth?)`, and `fetchQuota()`.
 `fetchQuota()` should return a quota result with `usage.windows` keyed by window name (for example `5h`, `7d`, `daily`) and optional provider-specific `usage.models` data.

@@ -450,6 +450,17 @@ const buildResult = (data: {
   return result;
 };
 
+// Zhipu/z.ai monitor APIs report credential failures inside an HTTP 200 body
+// ({ code: 401, success: false, msg }); without this check they parse as empty success.
+const resolveBusinessError = (payload: unknown): string | null => {
+  const body = asObject(payload);
+  if (!body) return null;
+  const rejected = body.success === false
+    || (typeof body.code === 'number' && body.code !== 200);
+  if (!rejected) return null;
+  return asNonEmptyString(body.msg) ?? asNonEmptyString(body.message) ?? 'API request rejected';
+};
+
 const resolveXaiAuth = (): XaiAuthEntry | null => {
   const entry = getProviderAuth('xai');
   if (!entry || typeof entry !== 'object' || entry.type !== 'oauth') return null;
@@ -2173,6 +2184,16 @@ const fetchZaiQuota = async (): Promise<ProviderResult> => {
     }
 
     const payload = await response.json() as ZaiPayload;
+    const businessError = resolveBusinessError(payload);
+    if (businessError) {
+      return buildResult({
+        providerId: 'zai-coding-plan',
+        providerName: 'z.ai',
+        ok: false,
+        configured: true,
+        error: businessError,
+      });
+    }
     const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
     const windows: Record<string, UsageWindow> = {};
     // The API renamed TOKENS_LIMIT to CREDIT_LIMIT; field semantics stayed the same,
@@ -2254,6 +2275,16 @@ const fetchZhipuaiCodingPlanQuota = async (): Promise<ProviderResult> => {
     }
 
     const payload = await response.json() as ZhipuaiPayload;
+    const businessError = resolveBusinessError(payload);
+    if (businessError) {
+      return buildResult({
+        providerId: 'zhipuai-coding-plan',
+        providerName: 'Zhipu AI Coding Plan',
+        ok: false,
+        configured: true,
+        error: businessError,
+      });
+    }
     const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
 
     const tokensLimit = limits.find((limit): limit is ZhipuaiTokensLimit => limit?.type === 'TOKENS_LIMIT');

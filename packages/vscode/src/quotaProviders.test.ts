@@ -20,6 +20,7 @@ const AUTH = JSON.stringify({
   'opencode-go': { key: 'test-token' },
   openrouter: { key: 'test-token' },
   'zai-coding-plan': { key: 'test-token' },
+  'zhipuai-coding-plan': { key: 'test-token' },
   deepseek: { key: 'test-token' },
   hyper: { key: 'test-token' },
   'github-copilot': { access: 'test-token' },
@@ -668,6 +669,38 @@ describe('Z.ai quota provider (VS Code parity)', () => {
     assert.equal(windows.weekly!.windowSeconds, 7 * 24 * 60 * 60);
     assert.equal(windows.weekly!.resetAt, 1787844668997);
     assert.equal(windows.weekly!.valueLabel, '65 / 60k credits');
+  });
+
+  test('surfaces business-layer auth errors returned with HTTP 200', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      code: 401,
+      success: false,
+      msg: 'token expired or incorrect',
+    })));
+
+    const result = await fetchQuotaForProvider('zai-coding-plan');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'token expired or incorrect');
+    assert.equal(result.usage, null);
+  });
+});
+
+describe('Zhipu AI Coding Plan quota provider (VS Code parity)', () => {
+  test('surfaces business-layer auth errors returned with HTTP 200', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      code: 401,
+      success: false,
+      msg: 'token expired or incorrect',
+    })));
+
+    const result = await fetchQuotaForProvider('zhipuai-coding-plan');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'token expired or incorrect');
+    assert.equal(result.usage, null);
   });
 });
 
