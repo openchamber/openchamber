@@ -663,11 +663,11 @@ describe('Z.ai quota provider (VS Code parity)', () => {
     assert.equal(windows['5h']!.usedPercent, 1);
     assert.equal(windows['5h']!.windowSeconds, 5 * 60 * 60);
     assert.equal(windows['5h']!.resetAt, 1787257978907);
-    assert.equal(windows['5h']!.valueLabel, '65 / 12k credits');
+    assert.equal(windows['5h']!.valueLabel, '65 / 12k credits (1%)');
     assert.equal(windows.weekly!.usedPercent, 1);
     assert.equal(windows.weekly!.windowSeconds, 7 * 24 * 60 * 60);
     assert.equal(windows.weekly!.resetAt, 1787844668997);
-    assert.equal(windows.weekly!.valueLabel, '65 / 60k credits');
+    assert.equal(windows.weekly!.valueLabel, '65 / 60k credits (1%)');
   });
 });
 
