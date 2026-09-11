@@ -78,25 +78,33 @@ export const findLatestUserModelChoice = (
 }
 
 /**
- * When the user has a manual session model override, historical (or synthetic)
- * user-message metadata must not overwrite it. After a real send the selection
- * store is updated to match the message, so a conflict means the picker was
- * changed after the last prompt — keep the override.
+ * When the user has a manual session model override, initial history and late
+ * metadata updates to the same user message must not overwrite it. A different
+ * message ID is authoritative only while the previously reconciled message is
+ * still present; otherwise the candidate may be older history exposed by a
+ * failed-send rollback or message removal.
  */
 export const shouldPreserveManualModelOverride = ({
   selectionSource,
   savedSessionModel,
+  previousMessageId,
+  previousMessageStillPresent,
   candidate,
 }: {
   selectionSource: 'auto' | 'manual' | undefined
   savedSessionModel: { providerId: string; modelId: string } | null | undefined
-  candidate: Pick<UserModelChoice, 'providerID' | 'modelID'> | null | undefined
+  previousMessageId: string | null | undefined
+  previousMessageStillPresent: boolean
+  candidate: Pick<UserModelChoice, 'id' | 'providerID' | 'modelID'> | null | undefined
 }): boolean => {
   if (selectionSource !== 'manual' || !savedSessionModel?.providerId || !savedSessionModel.modelId) {
     return false
   }
   if (!candidate?.providerID || !candidate.modelID) {
     return true
+  }
+  if (previousMessageId && candidate.id !== previousMessageId) {
+    return !previousMessageStillPresent
   }
   return savedSessionModel.providerId !== candidate.providerID
     || savedSessionModel.modelId !== candidate.modelID
