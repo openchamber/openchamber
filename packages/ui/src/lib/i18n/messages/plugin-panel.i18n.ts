@@ -32,6 +32,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestCommandNothing': '{name} found nothing to attach.',
     'chat.chatInput.toast.guestCommandFailed': '/{command} failed: {reason}',
     'chat.chatInput.toast.guestCommandUnavailable': '{name} did not answer.',
+    'chat.chatInput.toast.guestUnavailableHere': 'This extension is not available here. Open it on OpenChamber web or desktop.',
   },
   de: {
     'contextRail.surface.plugin': 'Panel',
@@ -65,6 +66,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestCommandNothing': '{name} hat nichts zum Anhängen gefunden.',
     'chat.chatInput.toast.guestCommandFailed': '/{command} fehlgeschlagen: {reason}',
     'chat.chatInput.toast.guestCommandUnavailable': '{name} hat nicht geantwortet.',
+    'chat.chatInput.toast.guestUnavailableHere': 'Diese Erweiterung ist hier nicht verfügbar. Öffne sie in OpenChamber Web oder Desktop.',
   },
   fr: {
     'contextRail.surface.plugin': 'Panneau',
@@ -98,6 +100,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestCommandNothing': '{name} n’a rien trouvé à joindre.',
     'chat.chatInput.toast.guestCommandFailed': '/{command} a échoué : {reason}',
     'chat.chatInput.toast.guestCommandUnavailable': '{name} n’a pas répondu.',
+    'chat.chatInput.toast.guestUnavailableHere': 'Cette extension n’est pas disponible ici. Ouvrez-la dans OpenChamber web ou desktop.',
   },
   es: {
     'contextRail.surface.plugin': 'Panel',
@@ -131,6 +134,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestCommandNothing': '{name} no encontró nada que adjuntar.',
     'chat.chatInput.toast.guestCommandFailed': '/{command} falló: {reason}',
     'chat.chatInput.toast.guestCommandUnavailable': '{name} no respondió.',
+    'chat.chatInput.toast.guestUnavailableHere': 'Esta extensión no está disponible aquí. Ábrela en OpenChamber web o escritorio.',
   },
   ja: {
     'contextRail.surface.plugin': 'パネル',
@@ -164,6 +168,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestCommandNothing': '{name} には添付するものが見つかりませんでした。',
     'chat.chatInput.toast.guestCommandFailed': '/{command} が失敗しました: {reason}',
     'chat.chatInput.toast.guestCommandUnavailable': '{name} が応答しませんでした。',
+    'chat.chatInput.toast.guestUnavailableHere': 'この拡張機能はここでは利用できません。OpenChamber のウェブ版かデスクトップ版で開いてください。',
   },
   ko: {
     'contextRail.surface.plugin': '패널',
@@ -197,6 +202,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestCommandNothing': '{name}에서 첨부할 항목을 찾지 못했습니다.',
     'chat.chatInput.toast.guestCommandFailed': '/{command} 실패: {reason}',
     'chat.chatInput.toast.guestCommandUnavailable': '{name}이(가) 응답하지 않았습니다.',
+    'chat.chatInput.toast.guestUnavailableHere': '이 확장은 여기에서 사용할 수 없습니다. OpenChamber 웹 또는 데스크톱에서 여세요.',
   },
   pl: {
     'contextRail.surface.plugin': 'Panel',
@@ -230,6 +236,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestCommandNothing': '{name} nie znalazło nic do załączenia.',
     'chat.chatInput.toast.guestCommandFailed': '/{command} nie powiodło się: {reason}',
     'chat.chatInput.toast.guestCommandUnavailable': '{name} nie odpowiedziało.',
+    'chat.chatInput.toast.guestUnavailableHere': 'To rozszerzenie nie jest tu dostępne. Otwórz je w OpenChamber web lub na desktopie.',
   },
   'pt-BR': {
     'contextRail.surface.plugin': 'Painel',
@@ -263,6 +270,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestCommandNothing': '{name} não encontrou nada para anexar.',
     'chat.chatInput.toast.guestCommandFailed': '/{command} falhou: {reason}',
     'chat.chatInput.toast.guestCommandUnavailable': '{name} não respondeu.',
+    'chat.chatInput.toast.guestUnavailableHere': 'Esta extensão não está disponível aqui. Abra no OpenChamber web ou desktop.',
   },
   uk: {
     'contextRail.surface.plugin': 'Панель',
@@ -296,6 +304,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestCommandNothing': '{name} не знайшло, що прикріпити.',
     'chat.chatInput.toast.guestCommandFailed': '/{command} не спрацювала: {reason}',
     'chat.chatInput.toast.guestCommandUnavailable': '{name} не відповіло.',
+    'chat.chatInput.toast.guestUnavailableHere': 'Це розширення тут недоступне. Відкрийте його в OpenChamber web або на десктопі.',
   },
   'zh-CN': {
     'contextRail.surface.plugin': '面板',
@@ -329,6 +338,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestCommandNothing': '{name} 没有找到可附加的内容。',
     'chat.chatInput.toast.guestCommandFailed': '/{command} 失败：{reason}',
     'chat.chatInput.toast.guestCommandUnavailable': '{name} 没有响应。',
+    'chat.chatInput.toast.guestUnavailableHere': '此扩展在此处不可用。请在 OpenChamber 网页版或桌面版中打开。',
   },
   'zh-TW': {
     'contextRail.surface.plugin': '面板',
@@ -362,6 +372,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestCommandNothing': '{name} 沒有找到可附加的內容。',
     'chat.chatInput.toast.guestCommandFailed': '/{command} 失敗：{reason}',
     'chat.chatInput.toast.guestCommandUnavailable': '{name} 沒有回應。',
+    'chat.chatInput.toast.guestUnavailableHere': '此擴充功能在此處無法使用。請在 OpenChamber 網頁版或桌面版中開啟。',
   },
   tr: {
     'contextRail.surface.plugin': 'Panel',
@@ -395,5 +406,6 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestCommandNothing': '{name} eklenecek bir şey bulamadı.',
     'chat.chatInput.toast.guestCommandFailed': '/{command} başarısız oldu: {reason}',
     'chat.chatInput.toast.guestCommandUnavailable': '{name} yanıt vermedi.',
+    'chat.chatInput.toast.guestUnavailableHere': 'Bu eklenti burada kullanılamıyor. OpenChamber web veya masaüstünde açın.',
   },
 } as const;

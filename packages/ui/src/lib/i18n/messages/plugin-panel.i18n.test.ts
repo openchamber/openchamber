@@ -36,6 +36,7 @@ const requiredKeys = [
   'chat.chatInput.toast.guestCommandNothing',
   'chat.chatInput.toast.guestCommandFailed',
   'chat.chatInput.toast.guestCommandUnavailable',
+  'chat.chatInput.toast.guestUnavailableHere',
 ] as const;
 
 const sameInEveryLocale = new Set<string>([

@@ -83,6 +83,8 @@ import { useGuestAttachItems, useGuestCommands } from '@/hooks/useGuestSurfaces'
 import { useGuestDialogStore } from '@/lib/guests/dialog-store';
 import { useGuestItemStore } from '@/lib/guests/item-store';
 import { runGuestCommand } from '@/lib/guests/run-command';
+import { useGuestsStore } from '@/lib/guests/store';
+import { isGuestActive } from '@/lib/guests/capabilities';
 import { routeGuestSlashCommand } from './composer/submit/guestCommands';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -3219,9 +3221,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             issue.branches = { head: linkedGuestIssue.head, base: linkedGuestIssue.base };
         }
         if (linkedGuestIssue.data !== undefined) issue.data = linkedGuestIssue.data;
+        // A chip can outlive the place it was attached in: the session may be
+        // open on mobile or VS Code, where extensions never load, or the
+        // extension may be paused or removed here. Say so instead of opening
+        // an empty surface.
+        const installed = useGuestsStore.getState().guests.find((entry) => entry.id === issue.providerId);
+        if (!installed || !isGuestActive(installed)) {
+            toast.info(t('chat.chatInput.toast.guestUnavailableHere'));
+            return;
+        }
         const guest = guestAttachItems.find((entry) => entry.id === issue.providerId);
         // Only an extension that declared a dialog gets one; everything else
-        // (panel mode, no attach declared, paused) opens the rail with the item.
+        // (panel mode, no attach declared) opens the rail with the item.
         if (guest?.mode !== 'dialog') {
             useGuestItemStore.getState().setPendingItem(issue.providerId, issue);
             useUIStore.getState().openContextSurface(currentDirectory || '', pluginModeFromId(issue.providerId));
@@ -3229,7 +3240,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
         setAttachDialogItem(issue);
         setAttachDialogGuestId(issue.providerId);
-    }, [currentDirectory, guestAttachItems, linkedGuestIssue]);
+    }, [currentDirectory, guestAttachItems, linkedGuestIssue, t]);
     const handleGuestAttach = React.useCallback((issue: AttachIssueRequest) => {
         const contextText = issue.text
             ?? `Attached ${issue.providerId} ${issue.id}: ${issue.title}\n${issue.url}`;
