@@ -3,6 +3,7 @@ import React from 'react';
 import { useI18nStore, formatMessage, type I18nKey, type I18nParams } from './store';
 import { I18nContext, type I18nContextValue } from './react-context';
 import { LOCALE_LABEL_KEYS, LOCALES } from './runtime';
+import { invokeDesktop } from '../desktop';
 
 export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const locale = useI18nStore((state) => state.locale);
@@ -14,6 +15,12 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
     document.documentElement.lang = locale;
+  }, [locale]);
+
+  React.useEffect(() => {
+    invokeDesktop('desktop_set_locale', { locale }).catch((error) => {
+      console.warn('[i18n] failed to sync locale to desktop shell', error);
+    });
   }, [locale]);
 
   const value = React.useMemo<I18nContextValue>(() => {
