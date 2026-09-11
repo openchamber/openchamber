@@ -27,7 +27,7 @@ const STATUS_OVERLAY_RESERVED_HEIGHT = 40;
  * queue) land in this band, and a follow glide that trails the live edge
  * should still leave the last line clear of the glass.
  */
-const FLOATING_COMPOSER_GAP_PX = 64;
+const FLOATING_COMPOSER_GAP_PX = 80;
 /** Footer reserve before the floating composer slot has been measured. */
 const FLOATING_COMPOSER_DEFAULT_HEIGHT = 128;
 // A freshly opened timeline is shown once its content height has held still
@@ -388,7 +388,6 @@ const ChatViewport = React.memo(({
             )}
 
             <SessionErrorNotice sessionId={currentSessionId} directory={directory} />
-            <SessionRecapNote sessionId={currentSessionId} directory={directory} isMobile={isMobile} />
 
             {/* Tail spacer. With a floating composer it reserves the band the
                 composer covers, so the end of the transcript stays readable
@@ -1674,6 +1673,17 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                                 >
                                     <StatusRowContainer />
                                 </div>
+                                {/* The recap hint shares the anchor and its
+                                    fade, but stays out of the measured node:
+                                    it lives inside the fixed composer gap, so
+                                    its arrival must not move the end. */}
+                                {currentSessionId ? (
+                                    <SessionRecapNote
+                                        sessionId={currentSessionId}
+                                        directory={effectiveSessionDirectory}
+                                        isMobile={isMobile}
+                                    />
+                                ) : null}
                             </div>
                         </div>
                     </>

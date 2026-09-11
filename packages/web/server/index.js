@@ -113,7 +113,6 @@ import { createDevServerScanner } from './lib/dev-servers/routes.js';
 import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
 import { createSystemPromptRuntime } from './lib/system-prompt/runtime.js';
-import { createMcpReconnectRuntime } from './lib/mcp-reconnect/runtime.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
@@ -303,7 +302,6 @@ const readCustomThemesFromDisk = (...args) => themeRuntime.readCustomThemesFromD
 let notificationTemplateRuntime = null;
 let agentToolRuntime = null;
 let systemPromptRuntime = null;
-let mcpReconnectRuntime = null;
 
 const createTimeoutSignal = (...args) => notificationTemplateRuntime.createTimeoutSignal(...args);
 const formatProjectLabel = (...args) => notificationTemplateRuntime.formatProjectLabel(...args);
@@ -1257,14 +1255,11 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
       ? await (agentToolRuntime?.prepareManagedOpenCodeEnv({ includeControl, includeWeb, includeMemory }) || {})
       : {};
 
-    // Each managed plugin appends itself to the config the previous one produced.
-    let configContent = managedEnv.OPENCODE_CONFIG_CONTENT ?? process.env.OPENCODE_CONFIG_CONTENT;
     if (settings?.optimizeSystemPrompt === true) {
-      ({ OPENCODE_CONFIG_CONTENT: configContent } = await systemPromptRuntime.prepareManagedOpenCodeEnv(configContent));
+      const configContent = managedEnv.OPENCODE_CONFIG_CONTENT ?? process.env.OPENCODE_CONFIG_CONTENT;
+      Object.assign(managedEnv, await systemPromptRuntime.prepareManagedOpenCodeEnv(configContent));
     }
-    // Always on for managed OpenCode: it only retries servers OpenCode gave up on.
-    const mcpReconnectEnv = await mcpReconnectRuntime.prepareManagedOpenCodeEnv(configContent);
-    return { ...managedEnv, ...mcpReconnectEnv };
+    return managedEnv;
   },
 });
 
@@ -1534,11 +1529,6 @@ async function main(options = {}) {
     },
   });
   systemPromptRuntime = createSystemPromptRuntime({
-    fsPromises,
-    path,
-    dataDir: OPENCHAMBER_DATA_DIR,
-  });
-  mcpReconnectRuntime = createMcpReconnectRuntime({
     fsPromises,
     path,
     dataDir: OPENCHAMBER_DATA_DIR,

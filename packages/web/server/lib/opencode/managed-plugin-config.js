@@ -8,7 +8,7 @@ const isJsonObject = (value) => value !== null && value !== undefined && Object.
  *
  * Existing entries are preserved; an earlier entry for the same URL is dropped
  * so a restart never registers the same plugin twice. Every managed plugin
- * (agent tools, system prompt optimizer, MCP reconnect) goes through this one
+ * (agent tools, system prompt optimizer) goes through this one
  * merge so they compose in any order.
  *
  * @param {string | undefined} rawConfig the current `OPENCODE_CONFIG_CONTENT`, JSONC or unset
