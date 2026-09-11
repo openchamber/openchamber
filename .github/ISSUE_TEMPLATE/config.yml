@@ -1,1 +1,5 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Discord
+    url: https://discord.gg/ZYRSdnwwKA
+    about: Ask general questions or get community support.
