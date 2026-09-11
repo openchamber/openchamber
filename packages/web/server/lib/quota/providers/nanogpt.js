@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { readAuthFile } from '../../opencode/auth.js';
 import {
   getAuthEntry,
@@ -7,6 +8,31 @@ import {
   toNumber,
   toTimestamp
 } from '../utils/index.js';
+
+const nanoGptQuotaWindowSchema = z.object({
+  percentUsed: z.number().nullish(),
+  used: z.union([z.number(), z.string()]).nullish(),
+  limit: z.union([z.number(), z.string()]).nullish(),
+  limits: z.object({
+    daily: z.union([z.number(), z.string()]).nullish(),
+    monthly: z.union([z.number(), z.string()]).nullish(),
+  }).nullish(),
+  resetAt: z.union([z.number(), z.string()]).nullish(),
+  degraded: z.boolean().optional(),
+}).nullish();
+
+const nanoGptUsageSchema = z.object({
+  state: z.string().nullish(),
+  period: z.object({ currentPeriodEnd: z.union([z.number(), z.string()]).nullish() }).nullish(),
+  limits: z.object({
+    dailyInputTokens: z.number().nullish(),
+    weeklyInputTokens: z.number().nullish(),
+  }).nullish(),
+  dailyInputTokens: nanoGptQuotaWindowSchema,
+  weeklyInputTokens: nanoGptQuotaWindowSchema,
+  daily: nanoGptQuotaWindowSchema,
+  monthly: nanoGptQuotaWindowSchema,
+});
 
 const NANO_GPT_DAILY_WINDOW_SECONDS = 86400;
 
@@ -20,8 +46,8 @@ export const isConfigured = () => {
   return Boolean(entry?.key || entry?.token);
 };
 
-export const fetchQuota = async () => {
-  const auth = readAuthFile();
+export const fetchQuota = async ({ readAuth = readAuthFile, fetchImpl = fetch } = {}) => {
+  const auth = readAuth();
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   const apiKey = entry?.key ?? entry?.token;
 
@@ -36,7 +62,7 @@ export const fetchQuota = async () => {
   }
 
   try {
-    const response = await fetch('https://nano-gpt.com/api/subscription/v1/usage', {
+    const response = await fetchImpl('https://nano-gpt.com/api/subscription/v1/usage', {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -54,54 +80,55 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
+    const payload = nanoGptUsageSchema.parse(await response.json());
     const windows = {};
-    const period = payload?.period ?? null;
-    const daily = payload?.daily ?? null;
-    const monthly = payload?.monthly ?? null;
-    const state = payload?.state ?? 'active';
-
-    if (daily) {
-      let usedPercent = null;
-      const percentUsed = daily?.percentUsed;
-      if (typeof percentUsed === 'number') {
-        usedPercent = Math.max(0, Math.min(100, percentUsed * 100));
-      } else {
-        const used = toNumber(daily?.used);
-        const limit = toNumber(daily?.limit ?? daily?.limits?.daily);
-        if (used !== null && limit !== null && limit > 0) {
-          usedPercent = Math.max(0, Math.min(100, (used / limit) * 100));
-        }
-      }
-      const resetAt = toTimestamp(daily?.resetAt);
-      const valueLabel = state !== 'active' ? `(${state})` : null;
-      windows['daily'] = toUsageWindow({
-        usedPercent,
+    const state = payload.state ?? 'active';
+    // A null current daily quota means no daily cap; only absent fields use legacy data.
+    const daily = payload.dailyInputTokens !== undefined ? payload.dailyInputTokens : payload.daily;
+    const quotas = [
+      {
+        name: 'daily',
+        quota: daily,
+        limit: payload.dailyInputTokens !== undefined
+          ? payload.limits?.dailyInputTokens
+          : daily?.limit ?? daily?.limits?.daily,
         windowSeconds: NANO_GPT_DAILY_WINDOW_SECONDS,
-        resetAt,
-        valueLabel
-      });
-    }
+        resetAt: daily?.resetAt,
+      },
+      {
+        name: 'weekly',
+        quota: payload.weeklyInputTokens,
+        limit: payload.limits?.weeklyInputTokens,
+        windowSeconds: 7 * NANO_GPT_DAILY_WINDOW_SECONDS,
+        resetAt: payload.weeklyInputTokens?.resetAt,
+      },
+      {
+        name: 'monthly',
+        quota: payload.monthly,
+        limit: payload.monthly?.limit ?? payload.monthly?.limits?.monthly,
+        windowSeconds: null,
+        resetAt: payload.monthly?.resetAt ?? payload.period?.currentPeriodEnd,
+      },
+    ];
 
-    if (monthly) {
+    for (const { name, quota, limit: rawLimit, windowSeconds, resetAt } of quotas) {
+      if (!quota) continue;
+      const percentUsed = toNumber(quota.percentUsed);
+      const used = toNumber(quota.used);
+      const limit = toNumber(rawLimit);
       let usedPercent = null;
-      const percentUsed = monthly?.percentUsed;
-      if (typeof percentUsed === 'number') {
-        usedPercent = Math.max(0, Math.min(100, percentUsed * 100));
-      } else {
-        const used = toNumber(monthly?.used);
-        const limit = toNumber(monthly?.limit ?? monthly?.limits?.monthly);
-        if (used !== null && limit !== null && limit > 0) {
+      if (!quota.degraded) {
+        if (percentUsed !== null) {
+          usedPercent = Math.max(0, Math.min(100, percentUsed * 100));
+        } else if (used !== null && limit !== null && limit > 0) {
           usedPercent = Math.max(0, Math.min(100, (used / limit) * 100));
         }
       }
-      const resetAt = toTimestamp(monthly?.resetAt ?? period?.currentPeriodEnd);
-      const valueLabel = state !== 'active' ? `(${state})` : null;
-      windows['monthly'] = toUsageWindow({
+      windows[name] = toUsageWindow({
         usedPercent,
-        windowSeconds: null,
-        resetAt,
-        valueLabel
+        windowSeconds,
+        resetAt: toTimestamp(resetAt),
+        valueLabel: state !== 'active' ? `(${state})` : null,
       });
     }
 

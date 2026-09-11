@@ -22,6 +22,7 @@ const AUTH = JSON.stringify({
   'zai-coding-plan': { key: 'test-token' },
   deepseek: { key: 'test-token' },
   hyper: { key: 'test-token' },
+  'nano-gpt': { key: 'test-token' },
   'github-copilot': { access: 'test-token' },
   anthropic: { access: 'test-token', refresh: 'test-refresh' },
 });
@@ -1238,4 +1239,95 @@ describe('Charm Hyper quota provider (VS Code parity)', () => {
       assert.equal(result.usage, null);
     });
   }
+});
+
+describe('NanoGPT quota provider (VS Code parity)', () => {
+  const run = async (payload: Parameters<typeof Response.json>[0]) => {
+    stubFetchReturning(async () => Response.json(payload));
+    return fetchQuotaForProvider('nano-gpt');
+  };
+
+  test('reads daily and weekly token quotas with millisecond reset times', async () => {
+    const result = await run({
+      state: 'active', limits: { dailyInputTokens: 1000, weeklyInputTokens: 10000 },
+      dailyInputTokens: { used: 100, percentUsed: 0.1, resetAt: 1893542400000 },
+      weeklyInputTokens: { used: 2500, percentUsed: 0.25, resetAt: 1893974400000 },
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.usage?.windows.daily?.usedPercent, 10);
+    assert.equal(result.usage?.windows.daily?.resetAt, 1893542400000);
+    assert.equal(result.usage?.windows.weekly?.usedPercent, 25);
+    assert.equal(result.usage?.windows.weekly?.windowSeconds, 604800);
+    assert.equal(result.usage?.windows.weekly?.resetAt, 1893974400000);
+  });
+
+  test('reads a weekly-only subscription and computes usage from its top-level limit', async () => {
+    const result = await run({
+      limits: { dailyInputTokens: null, weeklyInputTokens: 10000 },
+      dailyInputTokens: null, weeklyInputTokens: { used: 2500 },
+    });
+    assert.equal(Object.keys(result.usage?.windows ?? {}).join(','), 'weekly');
+    assert.equal(result.usage?.windows.weekly?.usedPercent, 25);
+  });
+
+  test('prefers current daily quotas over legacy fields and uses the token limit', async () => {
+    const result = await run({
+      limits: { dailyInputTokens: 1000 },
+      dailyInputTokens: { used: 300 }, daily: { percentUsed: 0.9 },
+    });
+    assert.equal(result.usage?.windows.daily?.usedPercent, 30);
+  });
+
+  test('keeps unavailable quota reads unknown', async () => {
+    const result = await run({
+      limits: { dailyInputTokens: 1000, weeklyInputTokens: 10000 },
+      dailyInputTokens: { used: null, percentUsed: null, resetAt: null, degraded: true },
+      weeklyInputTokens: { used: null, percentUsed: null, resetAt: null, degraded: true },
+    });
+    assert.equal(result.usage?.windows.daily?.usedPercent, null);
+    assert.equal(result.usage?.windows.weekly?.usedPercent, null);
+    assert.equal(result.usage?.windows.weekly?.remainingPercent, null);
+  });
+
+  test('preserves zero and clamps exhausted quotas', async () => {
+    const result = await run({
+      dailyInputTokens: { percentUsed: 0 }, weeklyInputTokens: { percentUsed: 1.1 },
+    });
+    assert.equal(result.usage?.windows.daily?.usedPercent, 0);
+    assert.equal(result.usage?.windows.weekly?.usedPercent, 100);
+  });
+
+  test('preserves legacy daily and monthly response support', async () => {
+    const result = await run({
+      state: 'grace', period: { currentPeriodEnd: 1893974400000 },
+      daily: { percentUsed: 0.4 }, monthly: { used: 50, limit: 100 },
+    });
+    assert.equal(result.usage?.windows.daily?.usedPercent, 40);
+    assert.equal(result.usage?.windows.monthly?.usedPercent, 50);
+    assert.equal(result.usage?.windows.monthly?.resetAt, 1893974400000);
+    assert.equal(result.usage?.windows.daily?.valueLabel, '(grace)');
+  });
+
+  test('does not invent quotas when the account has none', async () => {
+    const result = await run({ active: false, dailyInputTokens: null, weeklyInputTokens: null });
+    assert.equal(result.ok, true);
+    assert.equal(Object.keys(result.usage?.windows ?? {}).length, 0);
+  });
+
+  test('reports HTTP failures rather than empty success', async () => {
+    stubFetchReturning(async () => new Response(null, { status: 401 }));
+    const result = await fetchQuotaForProvider('nano-gpt');
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'API error: 401');
+  });
+  test('does not revive a legacy daily cap when the current cap is null', async () => {
+    const result = await run({ dailyInputTokens: null, daily: { percentUsed: 0.9 } });
+    assert.equal(Object.keys(result.usage?.windows ?? {}).length, 0);
+  });
+
+  test('rejects malformed quota responses instead of reporting empty success', async () => {
+    const result = await run({ weeklyInputTokens: 'invalid' });
+    assert.equal(result.ok, false);
+  });
+
 });

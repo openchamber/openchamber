@@ -159,3 +159,13 @@ Keep `packages/web/server/lib/quota/providers/openrouter.js` and `packages/vscod
 - Avoid adding alias-based dispatch in `fetchQuotaForProvider`; dispatch currently expects exact provider IDs.
 - Keep Google behavior changes isolated and review `providers/google/*` together.
 - Z.ai Coding Plan exposes separate 5-hour and weekly token/credit limit entries plus a monthly `TIME_LIMIT` for MCP tools. The API renamed the limit type from `TOKENS_LIMIT` to `CREDIT_LIMIT` (same `unit`/`number` window semantics); `CREDIT_LIMIT` entries additionally carry `usage` (total), `currentValue` (consumed), and `remaining`, surfaced as a credit `valueLabel`, and the payload's `data.level` becomes `planLabel`. Web and VS Code must preserve these windows and stay in sync.
+
+## NanoGPT subscription quota semantics
+
+`GET https://nano-gpt.com/api/subscription/v1/usage` returns `dailyInputTokens`
+and `weeklyInputTokens`, with fractional `percentUsed`, millisecond `resetAt`,
+and total limits under `limits.dailyInputTokens` / `limits.weeklyInputTokens`.
+The daily cap is optional. A null quota is omitted; a degraded quota remains
+visible with unknown percentages. Legacy `daily` / `monthly` request windows
+remain supported when current fields are absent. Keep the web provider and
+`fetchNanoGptQuota` in `packages/vscode/src/quotaProviders.ts` in sync.
