@@ -2,13 +2,31 @@ import { deleteQuotaCredential, readQuotaCredential, writeQuotaCredential } from
 
 const clean = (value) => typeof value === 'string' && !/[\r\n]/.test(value) ? value.trim() : '';
 
+const pickOllamaSessionCookie = (header) => {
+  const parts = header.split(';').map((part) => part.trim()).filter(Boolean);
+  const pick = (name) => {
+    for (const part of parts) {
+      const index = part.indexOf('=');
+      if (index <= 0) continue;
+      if (part.slice(0, index).trim() !== name) continue;
+      const cookieValue = part.slice(index + 1).trim();
+      if (!cookieValue) continue;
+      return `${name}=${cookieValue}`;
+    }
+    return null;
+  };
+  return pick('wos-session') ?? pick('__Secure-session') ?? header.trim();
+};
+
 export const normalizers = {
   'exe-dev': (value) => {
     const usageToken = clean(value?.usageToken);
     return usageToken ? { usageToken } : null;
   },
   'ollama-cloud': (value) => {
-    const cookie = clean(value?.cookie);
+    const raw = clean(value?.cookie);
+    if (!raw) return null;
+    const cookie = pickOllamaSessionCookie(raw);
     return cookie ? { cookie } : null;
   },
   cursor: (value) => {

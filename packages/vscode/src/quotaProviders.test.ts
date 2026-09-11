@@ -1019,6 +1019,12 @@ describe('Ollama Cloud quota validation and refresh', () => {
   const credential = { cookie: 'test-ollama-cookie' };
   const readCookie = () => credential.cookie;
 
+  const ollamaResponse = (body: string | ReadableStream<Uint8Array>, init: { status?: number; url?: string; headers?: Record<string, string> } = {}): Response => {
+    const response = new Response(body, { status: init.status ?? 200, headers: init.headers });
+    Object.defineProperty(response, 'url', { value: init.url ?? 'https://ollama.com/settings' });
+    return response;
+  };
+
   for (const { html, expected } of [
     { html: '<h1>Monthly usage</h1><p>$25.00 of $100.00</p>', expected: { monthly: { usedPercent: 25, valueLabel: '$25.00 / $100.00' } } },
     { html: 'Monthly usage $1,250.00 of $2,500.00', expected: { monthly: { usedPercent: 50, valueLabel: '$1,250.00 / $2,500.00' } } },
@@ -1036,7 +1042,7 @@ describe('Ollama Cloud quota validation and refresh', () => {
         assert.equal(init.method, 'GET');
         assert.equal(new Headers(init.headers).get('Cookie'), credential.cookie);
         assert.ok(init.signal instanceof AbortSignal);
-        return new Response(html);
+        return ollamaResponse(html);
       };
       await validateCredential('ollama-cloud', credential, fetchImpl);
       const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
@@ -1057,7 +1063,7 @@ describe('Ollama Cloud quota validation and refresh', () => {
 
   for (const html of ['', '<h1>Monthly usage</h1>', 'Session usage', 'Session usage 1.2.3%', 'Weekly usage 1.2.3%', 'Add $5', 'Monthly usage $1.2.3 of $100', 'Balance remaining $1.2.3']) {
     test(`rejects unparseable HTML ${JSON.stringify(html)} in both consumers`, async () => {
-      const fetchImpl = async () => new Response(html);
+      const fetchImpl = async () => ollamaResponse(html);
       await assert.rejects(validateCredential('ollama-cloud', credential, fetchImpl), /usage data could not be parsed/);
       const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
       assert.equal(result.ok, false);
@@ -1067,14 +1073,25 @@ describe('Ollama Cloud quota validation and refresh', () => {
     });
   }
 
-  for (const status of [302, 307, 401, 403, 429, 500]) {
-    test(`rejects HTTP ${status} in both consumers`, async () => {
-      const fetchImpl = async () => new Response('Monthly usage $25 of $100', { status });
+  for (const status of [401, 403]) {
+    test(`rejects HTTP ${status} as authentication failure in both consumers`, async () => {
+      const fetchImpl = async () => ollamaResponse('Monthly usage $25 of $100', { status });
       await assert.rejects(validateCredential('ollama-cloud', credential, fetchImpl), /authentication failed/);
       const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
       assert.equal(result.ok, false);
       assert.equal(result.usage, null);
       assert.equal(result.error, 'Ollama Cloud authentication failed');
+    });
+  }
+
+  for (const status of [302, 307, 429, 500]) {
+    test(`rejects HTTP ${status} as an HTTP error in both consumers`, async () => {
+      const fetchImpl = async () => ollamaResponse('Monthly usage $25 of $100', { status });
+      await assert.rejects(validateCredential('ollama-cloud', credential, fetchImpl), new RegExp(`HTTP ${status}`));
+      const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+      assert.equal(result.ok, false);
+      assert.equal(result.usage, null);
+      assert.equal(result.error, `Ollama Cloud returned HTTP ${status}`);
     });
   }
 
@@ -1097,7 +1114,7 @@ describe('Ollama Cloud quota validation and refresh', () => {
 
   test('reports response body failures in both consumers', async () => {
     const failure = new Error('Response body interrupted');
-    const fetchImpl = async () => new Response(new ReadableStream<Uint8Array>({
+    const fetchImpl = async () => ollamaResponse(new ReadableStream<Uint8Array>({
       start(controller) {
         controller.error(failure);
       },
@@ -1110,6 +1127,95 @@ describe('Ollama Cloud quota validation and refresh', () => {
     assert.equal(result.usage, null);
     assert.equal(result.error, failure.message);
     assert.deepEqual(credential, { cookie: 'test-ollama-cookie' });
+  });
+
+  const queuedOllamaFetch = (responses: Response[], requests: Array<{ url: string; init?: RequestInit }>) => async (url: string, init?: RequestInit) => {
+    requests.push({ url, init });
+    const response = responses.shift();
+    if (!response) throw new Error('Ollama mock response queue was exhausted');
+    return response;
+  };
+
+  test('keeps the cookie on a same-origin redirect in both consumers', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const responses = [
+      ollamaResponse('', { status: 302, headers: { location: 'https://ollama.com/settings' } }),
+      ollamaResponse('<html>Session usage 50%</html>'),
+      ollamaResponse('', { status: 302, headers: { location: 'https://ollama.com/settings' } }),
+      ollamaResponse('<html>Session usage 50%</html>'),
+    ];
+    const fetchImpl = queuedOllamaFetch(responses, requests);
+
+    await validateCredential('ollama-cloud', credential, fetchImpl);
+    const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+    assert.equal(result.ok, true);
+    assert.equal(requests.length, 4);
+    for (const request of requests) {
+      assert.equal(request.init?.redirect, 'manual');
+      assert.equal(new Headers(request.init?.headers).get('Cookie'), credential.cookie);
+    }
+  });
+
+  test('strips the cookie before a cross-origin redirect in both consumers', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const responses = [
+      ollamaResponse('', { status: 302, headers: { location: 'https://evil.example/settings' } }),
+      ollamaResponse('<html>Session usage 50%</html>', { url: 'https://evil.example/settings' }),
+      ollamaResponse('', { status: 302, headers: { location: 'https://evil.example/settings' } }),
+      ollamaResponse('<html>Session usage 50%</html>', { url: 'https://evil.example/settings' }),
+    ];
+    const fetchImpl = queuedOllamaFetch(responses, requests);
+
+    await assert.rejects(validateCredential('ollama-cloud', credential, fetchImpl), /unexpected origin/);
+    const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Ollama Cloud redirected to an unexpected origin');
+    assert.equal(requests.length, 4);
+    assert.equal(requests[1].url, 'https://evil.example/settings');
+    assert.equal(new Headers(requests[1].init?.headers).get('Cookie'), null);
+    assert.equal(requests[3].url, 'https://evil.example/settings');
+    assert.equal(new Headers(requests[3].init?.headers).get('Cookie'), null);
+  });
+
+  test('rejects a signin final URL as authentication failure in both consumers', async () => {
+    const fetchImpl = async () => ollamaResponse('<html>Sign in</html>', { url: 'https://ollama.com/signin' });
+    await assert.rejects(validateCredential('ollama-cloud', credential, fetchImpl), /authentication failed/);
+    const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Ollama Cloud authentication failed');
+  });
+
+  test('rejects an unexpected final redirect path in both consumers', async () => {
+    const fetchImpl = async () => ollamaResponse('<html>Session usage 50%</html>', { url: 'https://ollama.com/dashboard' });
+    await assert.rejects(validateCredential('ollama-cloud', credential, fetchImpl), /unexpected final path/);
+    const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Ollama Cloud returned an unexpected final path');
+  });
+
+  test('rejects redirect loops beyond the maximum in both consumers', async () => {
+    const responses = Array.from({ length: 22 }, () => ollamaResponse('', { status: 302, headers: { location: 'https://ollama.com/settings' } }));
+    const fetchImpl = queuedOllamaFetch(responses, []);
+    await assert.rejects(validateCredential('ollama-cloud', credential, fetchImpl), /too many redirects/);
+    const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Ollama Cloud returned too many redirects');
+  });
+
+  test('rejects an invalid redirect URL in both consumers', async () => {
+    const fetchImpl = async () => ollamaResponse('', { status: 302, headers: { location: 'https://' } });
+    await assert.rejects(validateCredential('ollama-cloud', credential, fetchImpl), /invalid redirect URL/);
+    const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Ollama Cloud returned an invalid redirect URL');
+  });
+
+  test('rejects a redirect to a non-http protocol in both consumers', async () => {
+    const fetchImpl = async () => ollamaResponse('', { status: 302, headers: { location: 'file:///etc/passwd' } });
+    await assert.rejects(validateCredential('ollama-cloud', credential, fetchImpl), /invalid redirect URL/);
+    const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Ollama Cloud returned an invalid redirect URL');
   });
 });
 

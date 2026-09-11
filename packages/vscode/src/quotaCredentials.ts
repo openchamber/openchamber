@@ -15,10 +15,31 @@ const target = (provider: ManagedProvider) => {
 };
 const clean = (value: unknown) => typeof value === 'string' && !/[\r\n]/.test(value) ? value.trim() : '';
 
+const pickOllamaSessionCookie = (header: string): string => {
+  const parts = header.split(';').map((part) => part.trim()).filter(Boolean);
+  const pick = (name: string): string | null => {
+    for (const part of parts) {
+      const index = part.indexOf('=');
+      if (index <= 0) continue;
+      if (part.slice(0, index).trim() !== name) continue;
+      const cookieValue = part.slice(index + 1).trim();
+      if (!cookieValue) continue;
+      return `${name}=${cookieValue}`;
+    }
+    return null;
+  };
+  return pick('wos-session') ?? pick('__Secure-session') ?? header.trim();
+};
+
 export const normalizeCredential = (provider: ManagedProvider, value: unknown): ManagedCredential | null => {
   const data = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   if (provider === 'exe-dev') return clean(data.usageToken) ? { usageToken: clean(data.usageToken) } : null;
-  if (provider === 'ollama-cloud') return clean(data.cookie) ? { cookie: clean(data.cookie) } : null;
+  if (provider === 'ollama-cloud') {
+    const raw = clean(data.cookie);
+    if (!raw) return null;
+    const cookie = pickOllamaSessionCookie(raw);
+    return cookie ? { cookie } : null;
+  }
   const accessToken = clean(data.accessToken);
   const refreshToken = clean(data.refreshToken);
   return accessToken || refreshToken ? { accessToken, refreshToken } : null;
