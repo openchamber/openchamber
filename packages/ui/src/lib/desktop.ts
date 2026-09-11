@@ -620,9 +620,10 @@ export const restartToApplyUpdate = async (): Promise<boolean> => {
     return false;
   }
 
-  // Unlike a plain restart, an install failure (rejected signature, disabled
-  // updater session) must reach the update dialog instead of being reduced to
-  // a boolean the caller cannot explain.
+  // Update installation failures must reach the update store so it can show the real
+  // native error. Unlike a plain restart, a rejected signature or disabled updater
+  // session must reach the update dialog instead of being reduced to a boolean the
+  // caller cannot explain.
   await invokeDesktop('desktop_restart');
   return true;
 };

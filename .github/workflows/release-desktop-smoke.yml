@@ -24,7 +24,7 @@ on:
         default: true
         type: boolean
       build_linux:
-        description: Build Linux Electron AppImage artifacts
+        description: Build Linux Electron AppImage and deb artifacts
         required: false
         default: true
         type: boolean
@@ -288,12 +288,16 @@ jobs:
           - runner: ubuntu-24.04
             arch: x64
             host_arch: x86_64
-            artifact_arch: x86_64
+            appimage_artifact_arch: x86_64
+            # Debian names x64 packages amd64; AppImage names the same
+            # architecture x86_64, so keep target-specific artifact labels.
+            deb_artifact_arch: amd64
             manifest: latest-linux.yml
           - runner: ubuntu-24.04-arm
             arch: arm64
             host_arch: aarch64
-            artifact_arch: arm64
+            appimage_artifact_arch: arm64
+            deb_artifact_arch: arm64
             manifest: latest-linux-arm64.yml
     runs-on: ${{ matrix.runner }}
     steps:
@@ -344,7 +348,7 @@ jobs:
           bun run test:architecture
           bun run test:updater
 
-      - name: Build and package Linux AppImage
+      - name: Build and package Linux installers
         working-directory: packages/electron
         env:
           OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
@@ -363,19 +367,22 @@ jobs:
         working-directory: packages/electron
         env:
           VERSION: ${{ steps.versions.outputs.app }}
-          ARTIFACT_ARCH: ${{ matrix.artifact_arch }}
+          APPIMAGE_ARTIFACT_ARCH: ${{ matrix.appimage_artifact_arch }}
+          DEB_ARTIFACT_ARCH: ${{ matrix.deb_artifact_arch }}
           MANIFEST: ${{ matrix.manifest }}
         run: |
           set -euo pipefail
-          APPIMAGE="dist/OpenChamber-${VERSION}-linux-${ARTIFACT_ARCH}.AppImage"
-          node ./scripts/verify-update-manifest.mjs "dist/${MANIFEST}" "$APPIMAGE" "$VERSION"
+          APPIMAGE="dist/OpenChamber-${VERSION}-linux-${APPIMAGE_ARTIFACT_ARCH}.AppImage"
+          DEB="dist/OpenChamber-${VERSION}-linux-${DEB_ARTIFACT_ARCH}.deb"
+          node ./scripts/verify-update-manifest.mjs "dist/${MANIFEST}" "$APPIMAGE" "$DEB" "$VERSION"
 
       - name: Upload Linux installable artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: desktop-release-smoke-linux-${{ matrix.arch }}
           path: |
-            packages/electron/dist/OpenChamber-${{ steps.versions.outputs.app }}-linux-${{ matrix.artifact_arch }}.AppImage
+            packages/electron/dist/OpenChamber-${{ steps.versions.outputs.app }}-linux-${{ matrix.appimage_artifact_arch }}.AppImage
+            packages/electron/dist/OpenChamber-${{ steps.versions.outputs.app }}-linux-${{ matrix.deb_artifact_arch }}.deb
             packages/electron/dist/${{ matrix.manifest }}
           if-no-files-found: error
           retention-days: ${{ fromJSON(inputs.retention_days) }}
