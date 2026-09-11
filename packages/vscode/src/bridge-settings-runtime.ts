@@ -22,7 +22,20 @@ import {
 
 const SETTINGS_KEY = 'openchamber.settings';
 const OPENCHAMBER_SHARED_SETTINGS_PATH = path.join(os.homedir(), '.config', 'openchamber', 'settings.json');
-const OPENCHAMBER_PREFERENCES_PATH = preferencesFilePathFor(OPENCHAMBER_SHARED_SETTINGS_PATH);
+
+// Test seam: lets the settings tests redirect the module-level shared settings
+// path to a temp file without touching the real user file. The preferences
+// file is always derived from the effective shared path.
+let sharedSettingsPathOverride: string | null = null;
+const getSharedSettingsPath = (): string => sharedSettingsPathOverride ?? OPENCHAMBER_SHARED_SETTINGS_PATH;
+const getSharedPreferencesPath = (): string => preferencesFilePathFor(getSharedSettingsPath());
+
+// Not exported in the package surface; tests import the compiled module and
+// call this to point the shared settings file at a temp path. Exported solely
+// so `bun test` can reach it across the module boundary.
+export const __setSharedSettingsPathForTest = (filePath: string | null): void => {
+  sharedSettingsPathOverride = filePath;
+};
 const OPENCHAMBER_MAGIC_PROMPTS_PATH = path.join(os.homedir(), '.config', 'openchamber', 'magic-prompts.json');
 const MAGIC_PROMPTS_FILE_VERSION = 1;
 const MAGIC_PROMPT_ID_PATTERN = /^[a-z0-9._-]{1,160}$/;
@@ -185,7 +198,7 @@ export const fetchOpenCodeSkillsFromApi = async (
 // plan. preferences.json already fails closed below.
 const readSettingsJsonFromDisk = (): Record<string, unknown> => {
   try {
-    const raw = fs.readFileSync(OPENCHAMBER_SHARED_SETTINGS_PATH, 'utf8');
+    const raw = fs.readFileSync(getSharedSettingsPath(), 'utf8');
     // SAFETY: JSON.parse returns untyped data; the check below keeps only a plain object.
     const parsed = JSON.parse(raw) as unknown;
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -212,7 +225,7 @@ let preferencesUnavailableLogged = false;
 const readPreferencesFromDisk = (): PreferencesReadResult => {
   let result: PreferencesReadResult;
   try {
-    const parsed = parsePreferencesDocument(fs.readFileSync(OPENCHAMBER_PREFERENCES_PATH, 'utf8'));
+    const parsed = parsePreferencesDocument(fs.readFileSync(getSharedPreferencesPath(), 'utf8'));
     result = parsed.ok ? { status: 'ok', fields: parsed.fields } : { status: 'unreadable', reason: parsed.reason };
   } catch (error) {
     // SAFETY: fs errors carry a `code` string; anything else is reported by message.
@@ -226,7 +239,7 @@ const readPreferencesFromDisk = (): PreferencesReadResult => {
     preferencesUnavailable = true;
     if (!preferencesUnavailableLogged) {
       preferencesUnavailableLogged = true;
-      console.warn(`[OpenChamber] ${OPENCHAMBER_PREFERENCES_PATH} could not be read (${result.reason}); profile settings are unavailable until the file is fixed or removed.`);
+      console.warn(`[OpenChamber] ${getSharedPreferencesPath()} could not be read (${result.reason}); profile settings are unavailable until the file is fixed or removed.`);
     }
   } else {
     preferencesUnavailable = false;
@@ -274,7 +287,7 @@ const readSharedSettingsFromDisk = (): Record<string, unknown> => {
   if (preferences.status === 'missing') {
     const seeded = seedPreferencesFrom(stripDerived(settings), Date.now());
     try {
-      writeJsonAtomicSync(OPENCHAMBER_PREFERENCES_PATH, serializePreferencesDocument(seeded));
+      writeJsonAtomicSync(getSharedPreferencesPath(), serializePreferencesDocument(seeded));
     } catch (error) {
       console.warn('[OpenChamber] Failed to seed preferences.json:', error instanceof Error ? error.message : String(error));
     }
@@ -298,7 +311,7 @@ const writeSharedSettingsToDisk = async (
     console.warn('[OpenChamber] preferences.json is unreadable; profile settings were not saved.');
     // settings.json keeps whatever legacy profile copy it already holds.
     const onDisk = readSettingsJsonFromDisk();
-    await writeJsonAtomic(OPENCHAMBER_SHARED_SETTINGS_PATH, JSON.stringify({
+    await writeJsonAtomic(getSharedSettingsPath(), JSON.stringify({
       ...instancePartOf(document),
       ...profilePartOf(onDisk),
     }, null, 2));
@@ -311,9 +324,9 @@ const writeSharedSettingsToDisk = async (
     surface: VSCODE_SETTINGS_SURFACE,
     changedKeys,
   });
-  await writeJsonAtomic(OPENCHAMBER_PREFERENCES_PATH, serializePreferencesDocument(nextFields));
+  await writeJsonAtomic(getSharedPreferencesPath(), serializePreferencesDocument(nextFields));
   // The legacy copy of the profile's base values rides along for older builds.
-  await writeJsonAtomic(OPENCHAMBER_SHARED_SETTINGS_PATH, JSON.stringify(legacySettingsDocumentOf(document, nextFields), null, 2));
+  await writeJsonAtomic(getSharedSettingsPath(), JSON.stringify(legacySettingsDocumentOf(document, nextFields), null, 2));
 };
 
 // Fields derived from runtime context — never persisted, always recomputed.
@@ -403,6 +416,12 @@ export const readSettings = (ctx?: BridgeContext): Record<string, unknown> => {
   const persisted = withoutSecretSettings(readPersistedSettings(ctx));
   const persistedOpencodeBinary =
     typeof persisted.opencodeBinary === 'string' ? String(persisted.opencodeBinary).trim() : '';
+  // globalState/disk payloads are untyped: only the two known values survive;
+  // an old doc without the field, or a foreign value, reads as undefined.
+  const persistedOpencodeRuntime =
+    persisted.opencodeRuntime === 'stable' || persisted.opencodeRuntime === 'beta'
+      ? persisted.opencodeRuntime
+      : undefined;
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
   const themeVariant =
     vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Light ||
@@ -415,6 +434,8 @@ export const readSettings = (ctx?: BridgeContext): Record<string, unknown> => {
     themeVariant,
     lastDirectory: workspaceFolder,
     opencodeBinary: persistedOpencodeBinary || undefined,
+    // Always recomputed: an invalid persisted value must not leak through raw.
+    opencodeRuntime: persistedOpencodeRuntime,
   };
 };
 
@@ -464,6 +485,13 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
     restChanges.opencodeBinary = restChanges.opencodeBinary.trim();
   }
 
+  if ('opencodeRuntime' in restChanges) {
+    // Unknown/empty values must not land on disk; keep the existing value.
+    if (restChanges.opencodeRuntime !== 'stable' && restChanges.opencodeRuntime !== 'beta') {
+      delete restChanges.opencodeRuntime;
+    }
+  }
+
   // Persistable state = current persisted (no derived fields) + sanitized changes.
   const persistedCurrent = readPersistedSettings(ctx);
   const persistable: Record<string, unknown> = { ...persistedCurrent, ...restChanges };
@@ -485,6 +513,10 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
     opencodeBinary:
       typeof persistable.opencodeBinary === 'string' && persistable.opencodeBinary.length > 0
         ? persistable.opencodeBinary
+        : undefined,
+    opencodeRuntime:
+      persistable.opencodeRuntime === 'stable' || persistable.opencodeRuntime === 'beta'
+        ? persistable.opencodeRuntime
         : undefined,
   };
 };

@@ -218,6 +218,10 @@ export const SETTINGS_REGISTRY = {
   lastDirectory: field({ scope: 'instance', adopt: 'bootstrap-only', parse: parseNonEmptyString }),
   homeDirectory: field({ scope: 'instance', parse: parseNonEmptyString }),
   opencodeBinary: field({ scope: 'instance', parse: parseTrimmedString }),
+  // Which OpenCode runtime generation new sessions use. Applies after an
+  // OpenCode restart; the server injects the 'stable' default in its response
+  // so old documents read as stable without a special missing-field case.
+  opencodeRuntime: field({ scope: 'instance', parse: parseOneOf(['stable', 'beta']) }),
   projects: field<ProjectEntry[]>({ scope: 'instance', parse: parseProjects }),
   activeProjectId: field({ scope: 'instance', adopt: 'bootstrap-only', parse: parseNonEmptyString }),
   securityScopedBookmarks: field({ scope: 'instance', surfaces: ['desktop'], parse: parseStringList }),

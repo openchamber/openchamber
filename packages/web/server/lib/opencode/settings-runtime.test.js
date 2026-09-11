@@ -5,6 +5,7 @@ import os from 'os';
 import path from 'path';
 import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
 import { createSettingsRuntime } from './settings-runtime.js';
+import { createSettingsHelpers } from './settings-helpers.js';
 
 const createRuntime = async ({ mergePersistedSettings = (_current, changes) => changes } = {}) => {
   const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-runtime-'));
@@ -363,6 +364,99 @@ describe('settings runtime', () => {
     } finally {
       await cleanup();
     }
+  });
+
+  describe('opencodeRuntime persistence', () => {
+    const createRuntimeWithRealSanitizers = async () => {
+      const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-runtime-rt-'));
+      const settingsFilePath = path.join(tempRoot, 'settings.json');
+      const helpers = createSettingsHelpers({
+        normalizePathForPersistence: (value) => value,
+        normalizeDirectoryPath: (value) => value,
+        normalizeTunnelBootstrapTtlMs: (value) => value,
+        normalizeTunnelSessionTtlMs: (value) => value,
+        normalizeTunnelProvider: (value) => value,
+        normalizeTunnelMode: (value) => value,
+        normalizeOptionalPath: (value) => value,
+        normalizeManagedRemoteTunnelHostname: (value) => value,
+        normalizeManagedRemoteTunnelPresets: () => undefined,
+        normalizeManagedRemoteTunnelPresetTokens: () => undefined,
+        sanitizeTypographySizesPartial: () => undefined,
+        normalizeStringArray: (values) => (Array.isArray(values) ? values.filter((value) => value === String(value)) : []),
+        sanitizeModelRefs: () => undefined,
+        sanitizeSkillCatalogs: () => undefined,
+        sanitizeProjects: (projects) => Array.isArray(projects) ? projects : [],
+      });
+      const runtime = createSettingsRuntime({
+        fsPromises,
+        path,
+        crypto,
+        SETTINGS_FILE_PATH: settingsFilePath,
+        sanitizeProjects: (projects) => Array.isArray(projects) ? projects : [],
+        sanitizeSettingsUpdate: helpers.sanitizeSettingsUpdate,
+        mergePersistedSettings: helpers.mergePersistedSettings,
+        normalizeSettingsPaths: (settings) => ({ settings, changed: false }),
+        normalizeStringArray: (values) => (Array.isArray(values) ? values.filter((value) => value === String(value)) : []),
+        formatSettingsResponse: helpers.formatSettingsResponse,
+        resolveDirectoryCandidate: (value) => value,
+        normalizeManagedRemoteTunnelHostname: (value) => value,
+        normalizeManagedRemoteTunnelPresets: (value) => value,
+        normalizeManagedRemoteTunnelPresetTokens: (value) => value,
+        syncManagedRemoteTunnelConfigWithPresets: async () => {},
+        upsertManagedRemoteTunnelToken: async () => {},
+      });
+      return {
+        runtime,
+        helpers,
+        settingsFilePath,
+        cleanup: async () => {
+          await fsPromises.rm(tempRoot, { recursive: true, force: true });
+        },
+      };
+    };
+
+    it('reads an old settings.json without the field as stable in the response', async () => {
+      const { runtime, helpers, cleanup } = await createRuntimeWithRealSanitizers();
+      try {
+        // Old file: no opencodeRuntime key at all.
+        const settings = await runtime.readSettingsFromDiskMigrated();
+        const response = helpers.formatSettingsResponse(settings);
+        expect(response.opencodeRuntime).toBe('stable');
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it('persists a beta update and reads it back', async () => {
+      const { runtime, settingsFilePath, cleanup } = await createRuntimeWithRealSanitizers();
+      try {
+        const response = await runtime.persistSettings({ opencodeRuntime: 'beta' });
+        expect(response.opencodeRuntime).toBe('beta');
+
+        const onDisk = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+        expect(onDisk.opencodeRuntime).toBe('beta');
+
+        const reread = await runtime.readSettingsFromDiskMigrated();
+        expect(reread.opencodeRuntime).toBe('beta');
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it('collapses an invalid stored value to stable in the response', async () => {
+      const { runtime, helpers, settingsFilePath, cleanup } = await createRuntimeWithRealSanitizers();
+      try {
+        // Simulate an old/foreign writer leaving a garbage value on disk.
+        await fsPromises.writeFile(settingsFilePath, JSON.stringify({ opencodeRuntime: 'canary' }, null, 2), 'utf8');
+        const settings = await runtime.readSettingsFromDiskMigrated();
+        const response = helpers.formatSettingsResponse(settings);
+        expect(response.opencodeRuntime).toBe('stable');
+        // The raw value stays untouched on disk; only the shaped response defaults it.
+        expect(JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8')).opencodeRuntime).toBe('canary');
+      } finally {
+        await cleanup();
+      }
+    });
   });
 
   it('removes temp file when writeSettingsToDisk encounters a write error', async () => {

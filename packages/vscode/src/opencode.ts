@@ -94,8 +94,17 @@ function isValidOpenCodePassword(password: string): boolean {
   return typeof password === 'string' && password.trim().length > 0;
 }
 
+// Test seam: lets lifecycle tests redirect the shared settings file to a temp
+// path without touching the real user file. Same pattern as
+// bridge-settings-runtime's __setSharedSettingsPathForTest. Exported solely so
+// `bun test` can reach it across the module boundary.
+let sharedSettingsPathOverride: string | null = null;
+export const __setOpenChamberSettingsPathForTest = (filePath: string | null): void => {
+  sharedSettingsPathOverride = filePath;
+};
+
 function readOpenChamberSettings(): Record<string, unknown> {
-  const settingsPath = path.join(os.homedir(), '.config', 'openchamber', 'settings.json');
+  const settingsPath = sharedSettingsPathOverride ?? path.join(os.homedir(), '.config', 'openchamber', 'settings.json');
   try {
     const raw = fs.readFileSync(settingsPath, 'utf8');
     const parsed = JSON.parse(raw) as unknown;
@@ -106,6 +115,14 @@ function readOpenChamberSettings(): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+// Beta (opencode2) selection is an instance-level settings intent read from
+// the same shared settings file the manager already consults for
+// opencodeBinary. Anything but 'beta' reads as the stable default, so an old
+// doc without the field never enables the beta path.
+function isOpenCodeRuntimeBetaSelected(): boolean {
+  return readOpenChamberSettings().opencodeRuntime === 'beta';
 }
 
 function resolvePortFromUrl(url: string): number | null {
@@ -991,6 +1008,17 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
         cliPath = resolvedCli;
         appendToPath(path.dirname(resolvedCli));
         process.env.OPENCODE_BINARY = resolvedCli;
+      }
+
+      // Beta (opencode2) selection: the V2 compatibility infrastructure that
+      // would activate it is external (openchamber/openchamber#3007) and not
+      // present in this build. The selected runtime must never silently fall
+      // back to V1, so a Beta selection fails startup explicitly with a
+      // dependency message instead of starting the legacy runtime.
+      if (isOpenCodeRuntimeBetaSelected()) {
+        throw new Error(
+          'OpenCode Beta runtime is not available in this build yet. Switch the runtime back to Stable.',
+        );
       }
 
       const password = await ensureManagedOpenCodeServerPassword({

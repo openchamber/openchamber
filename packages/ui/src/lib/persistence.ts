@@ -290,8 +290,11 @@ const applyDesktopUiPreferences = (settings: DesktopSettings): void => {
 const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => parseSettingsDocument(payload);
 
 type SettingsRuntimeContext = { runtimeKey: string; generation: number };
-/** Whether a settings write reached its store. A no-op (nothing to send) counts as ok. */
-export type SettingsWriteResult = { ok: boolean };
+/** Whether a settings write settled (`ok`) and, when it did, whether the value
+ * actually reached the store (`written`). No-ops and writes cancelled as
+ * redundant settle `ok` with `written` false; error paths settle with `ok`
+ * false and `written` unset. */
+export type SettingsWriteResult = { ok: boolean; written?: boolean };
 type SettingsMutation = { revision: number; changes: Partial<DesktopSettings> };
 type SettingsOperation = { revision: number };
 
@@ -666,6 +669,7 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
 // be torn down mid-request; the ordinary debounced write uses a plain fetch.
 async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean } = {}): Promise<void> {
   let ok = false;
+  let written = false;
   const changes = _pendingSettingsChanges;
   const context = _pendingSettingsContext;
   const revision = _pendingSettingsRevision;
@@ -705,6 +709,7 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
           }
           if (!updated) forgetSentSettings();
           ok = Boolean(updated);
+          written = Boolean(updated);
           dispatchSettingsSaveState(updated ? 'saved' : 'error');
           return;
         } catch (error) {
@@ -741,6 +746,7 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
           applyServerSettings(reconciled);
           dispatchSettingsSynced(reconciled, false);
           ok = true;
+          written = true;
           dispatchSettingsSaveState('saved');
           // Invalidate GET cache so next read sees the fresh data
           _settingsCache = null;
@@ -759,7 +765,7 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
       _settingsMutationTracker.finish(operation);
     }
   } finally {
-    waiters.forEach((resolve) => resolve({ ok }));
+    waiters.forEach((resolve) => resolve({ ok, written }));
   }
 }
 
@@ -805,9 +811,9 @@ export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): 
     }
     const waiters = _settingsFlushWaiters;
     _settingsFlushWaiters = [];
-    waiters.forEach((resolve) => resolve({ ok: true }));
+    waiters.forEach((resolve) => resolve({ ok: true, written: false }));
     dispatchSettingsSaveState('saved');
-    return { ok: true };
+    return { ok: true, written: false };
   }
   _pendingSettingsChanges = pending;
   _pendingSettingsContext = context;

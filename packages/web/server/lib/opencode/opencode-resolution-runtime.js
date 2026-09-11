@@ -11,6 +11,7 @@ export const createOpenCodeResolutionRuntime = (dependencies) => {
 
   const getOpenCodeResolutionSnapshot = async (settings) => {
     const configured = typeof settings?.opencodeBinary === 'string' ? settings.opencodeBinary : null;
+    const opencodeRuntime = settings?.opencodeRuntime === 'beta' ? 'beta' : 'stable';
 
     const { resolvedOpencodeBinarySource: previousSource } = getResolvedState();
     const detectedNow = resolveOpencodeCliPath();
@@ -48,6 +49,13 @@ export const createOpenCodeResolutionRuntime = (dependencies) => {
 
     return {
       configured,
+      // Configured intent from settings. The active protocol is a runtime
+      // fact: Stable resolves and starts the legacy runtime; Beta has no V2
+      // runtime resolved in this build (the compatibility layer is external),
+      // so the resolved protocol is null rather than a claim that legacy is
+      // active.
+      opencodeRuntime,
+      resolvedProtocol: opencodeRuntime === 'beta' ? null : 'legacy',
       resolved,
       resolvedDir: resolved ? path.dirname(resolved) : null,
       source,

@@ -31,6 +31,9 @@
     "opencodeBinary": {
       "scope": "instance"
     },
+    "opencodeRuntime": {
+      "scope": "instance"
+    },
     "projects": {
       "scope": "instance"
     },

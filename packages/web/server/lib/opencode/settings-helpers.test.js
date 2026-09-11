@@ -229,6 +229,37 @@ describe('settings helpers', () => {
     });
   });
 
+  it('accepts opencodeRuntime as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ opencodeRuntime: 'stable' })).toEqual({
+      opencodeRuntime: 'stable',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ opencodeRuntime: 'beta' })).toEqual({
+      opencodeRuntime: 'beta',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ opencodeRuntime: ' beta ' })).toEqual({
+      opencodeRuntime: 'beta',
+    });
+  });
+
+  it('rejects invalid opencodeRuntime values', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ opencodeRuntime: 'v2' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ opencodeRuntime: '' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ opencodeRuntime: 2 })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ opencodeRuntime: true })).toEqual({});
+  });
+
+  it('includes opencodeRuntime in formatSettingsResponse with a stable default', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.formatSettingsResponse({})).toMatchObject({ opencodeRuntime: 'stable' });
+    expect(helpers.formatSettingsResponse({ opencodeRuntime: 'beta' })).toMatchObject({ opencodeRuntime: 'beta' });
+    expect(helpers.formatSettingsResponse({ opencodeRuntime: 'garbage' })).toMatchObject({ opencodeRuntime: 'stable' });
+  });
+
   it('rejects invalid messageStreamTransport values', () => {
     const helpers = createTestHelpers();
 
@@ -749,7 +780,7 @@ describe('settings registry gate', () => {
   const validValues = {
     themeId: 'openchamber-dark', useSystemTheme: true, themeVariant: 'dark', lightThemeId: 'openchamber-light', darkThemeId: 'openchamber-dark',
     splashBgLight: '#fff', splashFgLight: '#000', splashBgDark: '#000', splashFgDark: '#fff',
-    lastDirectory: '/home/testuser/project', homeDirectory: '/home/testuser', opencodeBinary: '/usr/local/bin/opencode',
+    lastDirectory: '/home/testuser/project', homeDirectory: '/home/testuser', opencodeBinary: '/usr/local/bin/opencode', opencodeRuntime: 'beta',
     projects: [{ id: 'p', path: '/home/testuser/project' }], activeProjectId: 'p',
     securityScopedBookmarks: ['bookmark'], pinnedDirectories: ['/home/testuser/project'],
     desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopMacMenuBarEnabled: true,

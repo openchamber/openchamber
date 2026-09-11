@@ -407,6 +407,7 @@ describe('updateDesktopSettings', () => {
         themeId: 'theme-a',
         directoryShowHidden: true,
         sttModel: 'model-a',
+        opencodeRuntime: 'beta',
         draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
       },
       source: 'web',
@@ -429,6 +430,7 @@ describe('updateDesktopSettings', () => {
       themeId: 'theme-a',
       directoryShowHidden: true,
       sttModel: 'model-a',
+      opencodeRuntime: 'beta',
       draftStartersCraftGoalAdded: true,
       draftStartersScheduleTaskAdded: true,
     });
@@ -1179,6 +1181,21 @@ describe('updateDesktopSettings', () => {
     await updateDesktopSettings({ showDeletionDialog: true });
 
     expect(saveCalls).toEqual([{ fontSize: 17 }]);
+  });
+
+  test('resolves a redundant update with written:false', async () => {
+    // Server already holds the value: the debounced write is cancelled as
+    // redundant, so the caller must be able to tell nothing was written.
+    registerSettingsApi(
+      // SAFETY: this mock echoes back exactly the partial changes it received;
+      // the test only asserts the resolved result, never fields beyond the
+      // changes actually sent.
+      async (changes) => changes as SettingsPayload,
+      async () => ({ settings: { themeVariant: 'dark' }, source: 'web' }),
+    );
+    await syncDesktopSettings();
+    const result = await updateDesktopSettings({ themeVariant: 'dark' });
+    expect(result).toEqual({ ok: true, written: false });
   });
 
   test('a failed save forgets its optimistic value so the retry is sent', async () => {

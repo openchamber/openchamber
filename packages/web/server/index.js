@@ -1192,6 +1192,13 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   buildManagedOpenCodePath,
   getManagedOpenCodeShellEnvSnapshot: getLoginShellEnvSnapshot,
   getActiveSessionCount,
+  // Beta (opencode2) selection is an instance-level settings intent; read it
+  // fresh like the binary resolution does so a settings change followed by a
+  // restart picks it up.
+  isOpenCodeRuntimeBetaSelected: async () => {
+    const settings = await readSettingsFromDiskMigrated().catch(() => null);
+    return settings?.opencodeRuntime === 'beta';
+  },
   // Most-recently-used directories first: OpenCode initializes each directory
   // lazily on first request (seconds on large session stores), so the
   // lifecycle warms these right after readiness — before the UI's first

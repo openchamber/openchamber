@@ -536,6 +536,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'sessions.opencode-runtime',
+    page: 'general',
+    titleKey: 'settings.openchamber.opencodeCli.runtime.label',
+    descriptionKey: 'settings.openchamber.opencodeCli.runtime.info',
+    keywords: ['opencode', 'cli', 'runtime', 'v1', 'v2', 'beta', 'stable', 'opencode2'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'sessions.opencode-update-notifications',
     page: 'general',
     titleKey: 'settings.openchamber.opencodeCli.field.showUpdateNotifications',

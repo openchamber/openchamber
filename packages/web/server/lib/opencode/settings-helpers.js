@@ -65,6 +65,7 @@ export const createSettingsHelpers = (dependencies) => {
   const SIDEBAR_PROJECT_DISPLAY_MODE_VALUES = new Set(['all', 'single']);
   const SIDEBAR_SESSION_GROUPING_MODE_VALUES = new Set(['by-worktree', 'flat']);
   const SIDEBAR_PROJECT_SORT_ORDER_VALUES = new Set(['manual', 'a-z', 'z-a', 'date-added', 'recent']);
+  const OPENCODE_RUNTIME_VALUES = new Set(['stable', 'beta']);
   const HIDDEN_MODELS_MAX = 1024;
   const RECENT_EFFORTS_MAX_KEYS = 128;
   const RECENT_EFFORTS_MAX_VARIANTS_PER_KEY = 5;
@@ -219,6 +220,13 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.opencodeBinary === 'string') {
       const normalized = normalizeDirectoryPath(candidate.opencodeBinary).trim();
       result.opencodeBinary = normalized;
+    }
+    // Which OpenCode runtime generation new sessions use. Anything outside the
+    // known values falls back to the default (injected by formatSettingsResponse).
+    // The trim accepts shell/VS Code paste noise; Set.has rejects everything else.
+    const opencodeRuntime = String(candidate.opencodeRuntime).trim();
+    if (OPENCODE_RUNTIME_VALUES.has(opencodeRuntime)) {
+      result.opencodeRuntime = opencodeRuntime;
     }
     if (typeof candidate.workStatusPanelEnabled === 'boolean') {
       result.workStatusPanelEnabled = candidate.workStatusPanelEnabled;
@@ -1008,6 +1016,9 @@ export const createSettingsHelpers = (dependencies) => {
       // Tells the client whether agent memory exists in this build at all, so
       // its settings row and panel tab can be absent rather than merely off.
       agentMemoryFeatureAvailable: isAgentMemoryFeatureAvailable(),
+      // Always present so clients can default old settings.json files to the
+      // stable runtime without a special missing-field case.
+      opencodeRuntime: sanitized.opencodeRuntime || 'stable',
       ...(pwaAppName ? { pwaAppName } : {}),
       pwaOrientation,
       mobileKeyboardMode,

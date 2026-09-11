@@ -110,6 +110,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     getWarmupDirectories = async () => [],
     onOpenCodeRestarted = null,
     now = Date.now,
+    // Beta (opencode2) selection is an instance-level settings intent; the
+    // selector PR wires the real reader. Default false keeps callers without
+    // selector wiring on the legacy path.
+    isOpenCodeRuntimeBetaSelected = async () => false,
   } = deps;
 
   const killProcessOnPortWin32 = (port) => {
@@ -701,6 +705,26 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       totalDurationMs: performance.now() - attemptStartedAt,
     });
     phaseStartedAt = performance.now();
+
+    // Beta (opencode2) selection: the V2 compatibility infrastructure that
+    // would activate it is external (openchamber/openchamber#3007) and not
+    // present in this build. The selected runtime must never silently fall
+    // back to V1, so a Beta selection fails the bootstrap attempt explicitly
+    // with a dependency message instead of starting the legacy runtime.
+    if (await isOpenCodeRuntimeBetaSelected()) {
+      const message = 'OpenCode Beta runtime is not available in this build yet. Switch the runtime back to Stable.';
+      state.lastOpenCodeError = message;
+      state.isOpenCodeReady = false;
+      syncToHmrState();
+      recordStartupPerformance('opencode.attempt.error', {
+        attempt,
+        totalDurationMs: performance.now() - attemptStartedAt,
+        outcome: 'error',
+      });
+      console.error(`Failed to start OpenCode: ${message}`);
+      throw new Error(message);
+    }
+
     const openCodePassword = await ensureLocalOpenCodeServerPassword({ rotateManaged: true });
     let envPath = process.env.PATH;
     if (typeof buildManagedOpenCodePath === 'function') {

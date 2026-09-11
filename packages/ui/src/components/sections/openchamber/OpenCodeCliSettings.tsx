@@ -7,6 +7,8 @@ import {
   SettingsFieldRow,
   SettingsCheckboxRow,
   SettingsInset,
+  SettingsRadioGroup,
+  SettingsRadioOption,
   SETTINGS_ICON_BUTTON_CLASS,
   SETTINGS_OPTION_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
@@ -18,9 +20,12 @@ import { useI18n } from '@/lib/i18n';
 import { isWindowsArm64 } from '@/lib/platform';
 import { toast } from '@/components/ui';
 
+type OpenCodeRuntimeValue = 'stable' | 'beta';
+
 export const OpenCodeCliSettings: React.FC = () => {
   const { t } = useI18n();
   const [value, setValue] = React.useState('');
+  const [runtime, setRuntime] = React.useState<OpenCodeRuntimeValue>('stable');
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const showOpenCodeUpdateNotifications = useUIStore((state) => state.showOpenCodeUpdateNotifications);
@@ -35,6 +40,9 @@ export const OpenCodeCliSettings: React.FC = () => {
           return;
         }
         setValue(data.opencodeBinary ?? '');
+        // The parsed settings document is the boundary; a missing or foreign
+        // opencodeRuntime reads as the stable default.
+        setRuntime(data.opencodeRuntime === 'beta' ? 'beta' : 'stable');
       } catch {
         // ignore
       } finally {
@@ -86,6 +94,25 @@ export const OpenCodeCliSettings: React.FC = () => {
     }
   }, [t, value]);
 
+  const handleRuntimeChange = React.useCallback((next: OpenCodeRuntimeValue) => {
+    if (next === runtime) {
+      return;
+    }
+    setRuntime(next);
+    // Persist immediately (like the sibling checkbox) so leaving the section
+    // never loses the selection. The deferred-restart marker is recorded only
+    // after the write settles and only when the value actually reached the
+    // server: a failed save or a quick revert inside the debounce window
+    // (which cancels the write as redundant) must not leave a restart badge
+    // with nothing pending. The shared settings save indicator reports
+    // failures for this fire-and-forget write.
+    void updateDesktopSettings({ opencodeRuntime: next }).then((result) => {
+      if (result.ok && result.written) {
+        recordDeferredOpenCodeRestart('cli', { id: 'opencode-runtime' });
+      }
+    });
+  }, [runtime]);
+
   const handleShowUpdateNotificationsChange = React.useCallback((enabled: boolean) => {
     setShowOpenCodeUpdateNotifications(enabled);
     void updateDesktopSettings({ showOpenCodeUpdateNotifications: enabled });
@@ -131,6 +158,31 @@ export const OpenCodeCliSettings: React.FC = () => {
           >
             <Icon name="folder" className="h-4 w-4" />
           </Button>
+        </SettingsFieldRow>
+
+        <SettingsFieldRow
+          settingsItem="sessions.opencode-runtime"
+          label={t('settings.openchamber.opencodeCli.runtime.label')}
+          info={t('settings.openchamber.opencodeCli.runtime.info')}
+          alignEnd={false}
+          controlClassName="@xl:w-[20rem]"
+        >
+          <SettingsRadioGroup aria-label={t('settings.openchamber.opencodeCli.runtime.labelAria')}>
+            <SettingsRadioOption
+              selected={runtime === 'stable'}
+              onSelect={() => handleRuntimeChange('stable')}
+              label={t('settings.openchamber.opencodeCli.runtime.optionStable')}
+              ariaLabel={t('settings.openchamber.opencodeCli.runtime.optionStable')}
+              disabled={isLoading || isSaving}
+            />
+            <SettingsRadioOption
+              selected={runtime === 'beta'}
+              onSelect={() => handleRuntimeChange('beta')}
+              label={t('settings.openchamber.opencodeCli.runtime.optionBeta')}
+              ariaLabel={t('settings.openchamber.opencodeCli.runtime.optionBeta')}
+              disabled={isLoading || isSaving}
+            />
+          </SettingsRadioGroup>
         </SettingsFieldRow>
 
         <SettingsInset className={SETTINGS_OPTION_STACK_CLASS}>

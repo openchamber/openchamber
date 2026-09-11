@@ -641,6 +641,48 @@ describe('OpenCode lifecycle', () => {
     expect(server.signalCode).toBe('SIGTERM');
   });
 
+  it('beta selection fails explicitly when V2 compatibility infrastructure is absent', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const runtime = createRuntime({
+      isOpenCodeRuntimeBetaSelected: async () => true,
+    });
+
+    const rejection = runtime.startOpenCode();
+    await expect(rejection).rejects.toThrow(/Beta/);
+    await expect(rejection).rejects.toThrow(/not available/);
+
+    expect(runtime.testState.lastOpenCodeError).toContain('Beta');
+    expect(runtime.testState.lastOpenCodeError).toContain('not available');
+    expect(runtime.testState.isOpenCodeReady).toBe(false);
+    // The gate must fail before any legacy process is spawned.
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('stable selection starts the legacy runtime unchanged', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+
+    const runtime = createRuntime({
+      isOpenCodeRuntimeBetaSelected: async () => false,
+    });
+    const server = await runtime.startOpenCode();
+    const [binary, args] = spawnMock.mock.calls[0];
+
+    expect(binary).toBe('opencode');
+    expect(args).toEqual(['serve', '--hostname', '127.0.0.1', '--port', '45678']);
+    expect(server.exitCode).toBeNull();
+    expect(server.signalCode).toBeNull();
+
+    await server.close();
+    expect(server.signalCode).toBe('SIGTERM');
+  });
+
   it('launches managed OpenCode on the configured bind hostname', async () => {
     delete process.env.OPENCODE_BINARY;
     const child = createMockChild();

@@ -8,9 +8,14 @@ mock.module('vscode', () => ({
     workspaceFolders: [],
     getConfiguration: () => ({ get: () => undefined }),
   },
+  window: {
+    activeColorTheme: { kind: 1 },
+  },
+  ColorThemeKind: { Light: 1, Dark: 2, HighContrast: 3, HighContrastLight: 4 },
 }));
 
 const { handleConfigBridgeMessage } = await import('./bridge-config-runtime.ts');
+const { readSettings, persistSettings, __setSharedSettingsPathForTest } = await import('./bridge-settings-runtime.ts');
 
 const tempRoots = [];
 const originalOpencodeConfig = process.env.OPENCODE_CONFIG;
@@ -308,5 +313,51 @@ describe('VS Code config bridge plugin parity', () => {
       type: 'local',
       command: ['node', 'server.js'],
     });
+  });
+});
+
+describe('VS Code settings runtime opencodeRuntime parity', () => {
+  let sharedSettingsPathOriginal = null;
+  const withTempSharedSettingsFile = (seed) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-settings-'));
+    tempRoots.push(dir);
+    const settingsPath = path.join(dir, 'settings.json');
+    if (seed) {
+      fs.writeFileSync(settingsPath, JSON.stringify(seed, null, 2), 'utf8');
+    }
+    // Point the module-level shared path at the temp file for this test run.
+    __setSharedSettingsPathForTest(settingsPath);
+    return settingsPath;
+  };
+
+  afterEach(() => {
+    __setSharedSettingsPathForTest(null);
+    sharedSettingsPathOriginal = null;
+  });
+
+  test('old persisted docs without the field read as stable; invalid values collapse to stable', () => {
+    withTempSharedSettingsFile({ opencodeRuntime: 'garbage' });
+    expect(readSettings().opencodeRuntime).toBeUndefined();
+
+    withTempSharedSettingsFile({ opencodeRuntime: 'beta' });
+    expect(readSettings().opencodeRuntime).toBe('beta');
+
+    withTempSharedSettingsFile({ opencodeRuntime: 'garbage' });
+    expect(readSettings().opencodeRuntime).toBeUndefined();
+  });
+
+  test('persists a beta update and keeps it sanitized on disk', async () => {
+    const settingsPath = withTempSharedSettingsFile({});
+    await persistSettings({ opencodeRuntime: 'beta' });
+
+    expect(readJson(settingsPath).opencodeRuntime).toBe('beta');
+    expect(readSettings().opencodeRuntime).toBe('beta');
+  });
+
+  test('rejects an invalid runtime update instead of writing it to disk', async () => {
+    const settingsPath = withTempSharedSettingsFile({ opencodeRuntime: 'beta' });
+    await persistSettings({ opencodeRuntime: 'canary' });
+
+    expect(readJson(settingsPath).opencodeRuntime).toBe('beta');
   });
 });

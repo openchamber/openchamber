@@ -67,4 +67,14 @@ describe('i18n dictionaries', () => {
       }
     }
   });
+
+  test('Beta runtime info copy states Beta is unavailable in this build', () => {
+    for (const dictionary of Object.values(localeDictionaries)) {
+      const info = dictionary['settings.openchamber.opencodeCli.runtime.info'];
+      const betaTerm = dictionary['settings.openchamber.opencodeCli.runtime.optionBeta'].replace(/\s*\(.*\)$/, '');
+      expect(info).toBeTruthy();
+      expect(info).not.toContain('opencode2');
+      expect(info.toLowerCase()).toContain(betaTerm.toLowerCase());
+    }
+  });
 });
