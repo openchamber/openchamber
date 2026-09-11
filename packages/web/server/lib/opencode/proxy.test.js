@@ -188,6 +188,7 @@ describe('createOpenCodeProxyAgent', () => {
 
     expect(agent).toBeInstanceOf(https.Agent);
     expect(agent.options.keepAlive).toBe(true);
+    expect(agent.options.timeout).toBe(4_000);
   });
 
   it('returns a plain http agent for http targets', () => {
@@ -197,6 +198,7 @@ describe('createOpenCodeProxyAgent', () => {
     expect(agent).toBeInstanceOf(http.Agent);
     expect(agent).not.toBeInstanceOf(https.Agent);
     expect(agent.options.keepAlive).toBe(true);
+    expect(agent.options.timeout).toBe(4_000);
   });
 
   it('falls back to an http agent for missing or unparseable targets', () => {
