@@ -302,7 +302,7 @@ export function DraftTargetSelectors(props: DraftTargetProps) {
                             variant="ghost"
                             size="sm"
                             aria-haspopup="dialog"
-                            className="h-7 min-w-0 w-fit max-w-[42vw] justify-start gap-1 px-1.5 normal-case sm:max-w-[18rem]"
+                            className="h-7 min-w-0 w-fit max-w-[42vw] justify-start gap-1 px-1.5 normal-case hover:bg-transparent data-[popup-open]:bg-transparent sm:max-w-[18rem]"
                             onPointerDownCapture={(event) => syncProjectPopupContainers(event.currentTarget)}
                             onFocusCapture={(event) => syncProjectPopupContainers(event.currentTarget)}
                         />
@@ -441,7 +441,7 @@ export function DraftTargetSelectors(props: DraftTargetProps) {
                             </TooltipContent>
                         ) : null}
                     </Tooltip>
-                    <SelectContent side="top" collisionAvoidance={{ side: 'none' }} constrainToMain className="w-max min-w-48" onKeyDown={handlePickerKeyDown} finalFocus={getFinalFocus}>
+                    <SelectContent side="bottom" align="start" sideOffset={4} collisionAvoidance={{ side: 'none' }} constrainToMain className="w-max min-w-48" onKeyDown={handlePickerKeyDown} finalFocus={getFinalFocus}>
                         {projectRootBranchOption ? (
                             <SelectGroup>
                                 <SelectLabel>{t('chat.chatInput.projectRoot')}</SelectLabel>

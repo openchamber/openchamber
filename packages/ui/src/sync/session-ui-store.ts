@@ -367,8 +367,6 @@ export type SessionUIState = {
   isSessionPlanAvailable: (sessionId: string) => boolean
 
   // Non-Git mode: dismissed signature hash per session, hides bar until new turn arrives
-  pendingChangesBarDismissed: Map<string, string>
-  dismissPendingChangesBar: (sessionId: string, signature: string | null) => void
 
   // Actions — UI state management
   setCurrentSession: (
@@ -1000,7 +998,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   isLoading: false,
   lastLoadedDirectory: null,
   sessionPlanAvailable: new Map(),
-  pendingChangesBarDismissed: new Map(),
 
   // ---------------------------------------------------------------------------
   // setCurrentSession
@@ -1164,8 +1161,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       availableWorktrees: flattenWorktreeMap(availableWorktreesByProject),
       availableWorktreesByProject,
       sessionAbortFlags: new Map(),
-      pendingChangesBarDismissed: new Map(),
-    })
+        })
     if (restoredSessionId) {
       setActiveSession(restoredDirectory ?? opencodeClient.getDirectory() ?? "", restoredSessionId)
     } else {
@@ -1612,16 +1608,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
   getWorktreeMetadata: (sessionId) => get().worktreeMetadata.get(sessionId),
 
-  dismissPendingChangesBar: (sessionId, signature) => {
-    const map = new Map(get().pendingChangesBarDismissed);
-    if (signature === null) {
-      map.delete(sessionId);
-    } else {
-      map.set(sessionId, signature);
-    }
-    set({ pendingChangesBarDismissed: map });
-  },
-
   // ---------------------------------------------------------------------------
   // sendMessage — calls SDK, reads domain data from sync
   // ---------------------------------------------------------------------------
@@ -1644,14 +1630,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const capturedRuntimeKey = capturedTarget?.runtimeKey ?? getRuntimeKey()
     if (capturedTarget && capturedTarget.runtimeKey !== getRuntimeKey()) {
       throw new Error("Message was not sent because the runtime changed.")
-    }
-
-    // Clear non-Git changed-files bar on new user message for current session
-    const sid = capturedTarget?.sessionId ?? options?.sessionId ?? get().currentSessionId;
-    if (sid) {
-      const map = new Map(get().pendingChangesBarDismissed);
-      map.delete(sid);
-      set({ pendingChangesBarDismissed: map });
     }
 
     const draft = options?.draftSnapshot ?? get().newSessionDraft

@@ -1,5 +1,5 @@
 import type { ToolPart } from '@opencode-ai/sdk/v2';
-import { getRelativeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
+import { getRelativeFilePath } from '@/lib/path-utils';
 
 export interface ChangedFile {
     path: string;
@@ -11,7 +11,7 @@ export interface ChangedFile {
     patch?: string;
 }
 
-export interface GitChangedFile {
+interface GitChangedFile {
     path: string;
     relativePath: string;
     insertions: number;
@@ -25,7 +25,7 @@ export type ChangedFileEntry = ChangedFile | GitChangedFile;
 
 export const FILE_EDIT_TOOLS = new Set(['edit', 'multiedit', 'write', 'apply_patch', 'create', 'file_write']);
 
-export const isGitFile = (file: ChangedFileEntry): file is GitChangedFile => 'insertions' in file;
+const isGitFile = (file: ChangedFileEntry): file is GitChangedFile => 'insertions' in file;
 
 const parseCount = (value: unknown): number | undefined => {
     if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.trunc(value));
@@ -147,33 +147,6 @@ export const extractChangedFiles = (parts: ToolPart[]): ChangedFile[] => {
     }
 
     return files;
-};
-
-export const extractGitChangedFiles = (
-    files: Array<{ path: string; index: string; working_dir: string }>,
-    diffStats: Record<string, { insertions: number; deletions: number }> | undefined,
-    directory: string,
-): GitChangedFile[] => {
-    const result: GitChangedFile[] = [];
-    for (const file of files) {
-        const indexStatus = file.index?.trim() ?? '';
-        const workingStatus = file.working_dir?.trim() ?? '';
-        const hasStagedChanges = Boolean(indexStatus && indexStatus !== '?');
-        const hasWorkingChanges = Boolean(workingStatus || indexStatus === '?');
-        const code = workingStatus || indexStatus;
-        if (!code || code === '!') continue;
-        const stats = diffStats?.[file.path];
-        result.push({
-            path: toAbsoluteFilePath(directory, file.path),
-            relativePath: file.path,
-            insertions: stats?.insertions ?? 0,
-            deletions: stats?.deletions ?? 0,
-            status: code,
-            hasStagedChanges,
-            hasWorkingChanges,
-        });
-    }
-    return result;
 };
 
 export const toRelativePath = (absolutePath: string, baseDirectory: string): string => {

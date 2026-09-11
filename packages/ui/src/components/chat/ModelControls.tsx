@@ -569,6 +569,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const sizeVariant: 'mobile' | 'vscode' | 'default' = isMobile ? 'mobile' : isVSCodeRuntime ? 'vscode' : 'default';
     const buttonHeight = sizeVariant === 'mobile' ? 'h-9' : sizeVariant === 'vscode' ? 'h-6' : 'h-8';
     const controlIconSize = sizeVariant === 'mobile' ? 'size-5' : sizeVariant === 'vscode' ? 'size-4' : 'size-4';
+    const providerLogoSize = sizeVariant === 'mobile' ? 'size-[21px]' : 'size-[17px]';
     const controlTextSize = isCompact ? 'typography-micro' : 'typography-meta';
     const inlineGapClass = sizeVariant === 'mobile' ? 'gap-x-1' : sizeVariant === 'vscode' ? 'gap-x-2' : 'gap-x-3';
 
@@ -2353,7 +2354,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             <DropdownMenuTrigger asChild>
                                 <div
                                     className={cn(
-                                        'model-controls__model-trigger flex items-center gap-1.5 cursor-pointer hover:bg-transparent hover:opacity-70 min-w-0',
+                                        'model-controls__model-trigger flex items-center gap-1.5 cursor-pointer select-none hover:bg-transparent hover:opacity-70 min-w-0',
                                         buttonHeight
                                     )}
                                 >
@@ -2370,9 +2371,11 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         </>
                                     ) : currentProviderId ? (
                                         <>
+                                            {/* Provider logos read smaller than the sprite icons
+                                                beside them at the same box size, so they get a step up. */}
                                             <ProviderLogo
                                                 providerId={currentProviderId}
-                                                className={cn(controlIconSize, 'flex-shrink-0')}
+                                                className={cn(providerLogoSize, 'flex-shrink-0')}
                                             />
                                             <Icon name="pencil-ai" className={cn(controlIconSize, 'text-primary/60 hidden')} />
                                         </>
@@ -2690,7 +2693,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         <DropdownMenuTrigger asChild>
                             <div
                                 className={cn(
-                                    'model-controls__variant-trigger flex items-center gap-1.5 transition-colors cursor-pointer hover:bg-transparent hover:opacity-70 min-w-0',
+                                    'model-controls__variant-trigger flex items-center gap-1.5 transition-colors cursor-pointer select-none hover:bg-transparent hover:opacity-70 min-w-0',
                                     buttonHeight,
                                 )}
                             >
@@ -2752,7 +2755,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             <TooltipTrigger asChild>
                                 <DropdownMenuTrigger asChild>
                                     <div className={cn(
-                                        'flex items-center gap-1.5 transition-colors cursor-pointer hover:bg-transparent hover:opacity-70 min-w-0',
+                                        'flex items-center gap-1.5 transition-colors cursor-pointer select-none hover:bg-transparent hover:opacity-70 min-w-0',
                                         buttonHeight
                                     )}>
                                         {!isReady ? (

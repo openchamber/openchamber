@@ -691,6 +691,9 @@ export const useChatTimelineScroll = ({
         mutations.observe(content, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] });
         const resizes = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(pin);
         resizes?.observe(content);
+        // The viewport itself shrinking (window height, a panel docked below)
+        // moves the end out of view just like content growth does.
+        resizes?.observe(scrollNode);
         return () => {
             mutations.disconnect();
             resizes?.disconnect();

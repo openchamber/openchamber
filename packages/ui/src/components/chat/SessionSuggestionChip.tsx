@@ -13,6 +13,11 @@ interface SessionSuggestionChipProps {
   /** The composer already has content — the suggestion must stay out of the way. */
   hidden: boolean;
   onApply: (text: string) => void;
+  /**
+   * `panel`: a floating card docked above the composer (desktop).
+   * `row`: the composer's own top row, inside the mobile pill and box.
+   */
+  variant?: 'panel' | 'row';
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -21,7 +26,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 // A suggested follow-up docked above the composer, like the BTW panel.
 // Tapping it fills the composer (no auto-send); the X patches the
 // suggestion out of the session metadata so it stays dismissed everywhere.
-export const SessionSuggestionChip: React.FC<SessionSuggestionChipProps> = React.memo(({ sessionId, directory, hidden, onApply }) => {
+export const SessionSuggestionChip: React.FC<SessionSuggestionChipProps> = React.memo(({ sessionId, directory, hidden, onApply, variant = 'panel' }) => {
   const { suggestion } = useSessionAssistState(sessionId ?? '', directory);
   const { t } = useI18n();
   const [dismissing, setDismissing] = React.useState(false);
@@ -49,8 +54,8 @@ export const SessionSuggestionChip: React.FC<SessionSuggestionChipProps> = React
     return null;
   }
 
-  return (
-    <ComposerFloatingPanel compact header={<>
+  const content = (
+    <>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -82,8 +87,18 @@ export const SessionSuggestionChip: React.FC<SessionSuggestionChipProps> = React
         >
           <Icon name="close" className="size-4" />
         </Button>
-    </>} />
+    </>
   );
+
+  if (variant === 'row') {
+    return (
+      <div className="flex h-10 items-center gap-1 border-b border-border/60 pl-3 pr-1.5">
+        {content}
+      </div>
+    );
+  }
+
+  return <ComposerFloatingPanel compact header={content} />;
 });
 
 SessionSuggestionChip.displayName = 'SessionSuggestionChip';

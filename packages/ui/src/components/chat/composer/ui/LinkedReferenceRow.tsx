@@ -1,5 +1,6 @@
 /**
- * The linked GitHub issue or pull request shown above the composer.
+ * A linked GitHub issue, pull request, or Linear issue, shown as a chip
+ * inside the composer next to the attached files.
  *
  * Linking one attaches its body — and for a PR its diff — as context on the
  * next send. The row exists so that context is visible and dismissible rather
@@ -41,56 +42,57 @@ export function LinkedReferenceRow(props: LinkedReferenceRowProps) {
     } = props;
 
     return (
-        <div className="pb-2 w-full px-1">
-            <div className="flex w-full items-center gap-1.5 text-sm h-5 px-1">
-                <button
-                    type="button"
-                    onClick={onReopenPicker}
-                    className="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:opacity-80 transition-opacity"
-                >
-                    {author?.avatarUrl ? (
-                        <img
-                            src={author.avatarUrl}
-                            alt={author.login}
-                            className="h-5 w-5 rounded-full flex-shrink-0"
-                        />
-                    ) : null}
-                    <span className="text-muted-foreground flex-shrink-0">
-                        {numberLabel}
-                        {author ? (
-                            <span className="ml-1">
-                                {t('chat.chatInput.linked.byAuthor', { author: author.login })}
-                            </span>
-                        ) : null}
-                    </span>
-                    <span className="text-foreground truncate">{title}</span>
-                    {branches ? (
-                        <span className="text-muted-foreground flex-shrink-0 typography-meta">
-                            {branches.head} → {branches.base}
+        <div
+            className="inline-flex h-7 max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-border/80 bg-background pl-2 pr-1 text-xs"
+            title={title}
+        >
+            <button
+                type="button"
+                onClick={onReopenPicker}
+                className="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:opacity-80 transition-opacity"
+            >
+                {author?.avatarUrl ? (
+                    <img
+                        src={author.avatarUrl}
+                        alt={author.login}
+                        className="h-4 w-4 rounded-full flex-shrink-0"
+                    />
+                ) : null}
+                <span className="text-muted-foreground flex-shrink-0">
+                    {numberLabel}
+                    {author ? (
+                        <span className="ml-1">
+                            {t('chat.chatInput.linked.byAuthor', { author: author.login })}
                         </span>
                     ) : null}
-                </button>
-                <span className="flex items-center gap-0.5 flex-shrink-0">
-                    <a
-                        href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
-                        aria-label={openInBrowserLabel}
-                    >
-                        <Icon name="external-link" className="h-4 w-4 text-muted-foreground" />
-                    </a>
-                    <button
-                        type="button"
-                        onClick={onRemove}
-                        className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
-                        aria-label={removeLabel}
-                        title={removeLabel}
-                    >
-                        <Icon name="close" className="h-4 w-4 text-muted-foreground" />
-                    </button>
                 </span>
-            </div>
+                <span className="text-foreground truncate max-w-[240px]">{title}</span>
+                {branches ? (
+                    <span className="text-muted-foreground flex-shrink-0">
+                        {branches.head} → {branches.base}
+                    </span>
+                ) : null}
+            </button>
+            <span className="flex items-center flex-shrink-0">
+                <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center h-5 w-5 hover:bg-[var(--interactive-hover)] rounded-md transition-colors"
+                    aria-label={openInBrowserLabel}
+                >
+                    <Icon name="external-link" className="h-3.5 w-3.5 text-muted-foreground" />
+                </a>
+                <button
+                    type="button"
+                    onClick={onRemove}
+                    className="flex items-center justify-center h-5 w-5 hover:bg-[var(--interactive-hover)] rounded-md transition-colors"
+                    aria-label={removeLabel}
+                    title={removeLabel}
+                >
+                    <Icon name="close" className="h-3.5 w-3.5 text-muted-foreground" />
+                </button>
+            </span>
         </div>
     );
 }

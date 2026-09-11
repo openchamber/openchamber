@@ -157,7 +157,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   React.useEffect(() => { if (!visible) setModeMenuOpen(false); }, [visible]);
 
   // Allow the host (MobileApp) to push us into a specific diff when the surface
-  // is reopened or when an external trigger (e.g. PendingChangesBar tap) requests
+  // is reopened or when an external trigger (e.g. a changed-file tap in chat) requests
   // a different file mid-session.
   React.useEffect(() => {
     if (!initialDiff?.path) return;

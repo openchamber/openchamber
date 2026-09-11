@@ -613,13 +613,8 @@
    .oc-draft-center note below) are moved with INLINE transform/transition set
    by useNativeMobileChrome — WebKit does not reliably start transitions when a
    transform changes via a CSS custom property, which parked the composer until
-   the keyboard finished. Only the sliding backdrop lives here. */
-:root.oc-capacitor-app.oc-kb-animating .oc-mobile-composer {
-  /* While sliding, the composer passes over chat content that hasn't moved (user
-     scrolled up) — give it an opaque backdrop so text doesn't show through the
-     form's transparent padding. */
-  background: var(--background);
-}
+   the keyboard finished. The composer floats over the transcript on a glass
+   box, so nothing else lives here. */
 
 /* Constant-viewport trick for the chat scroller: when the keyboard settles the
    shell shrinks by --oc-kb-layout, but the scroller keeps its full height by

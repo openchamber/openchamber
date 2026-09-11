@@ -356,11 +356,8 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
                     <button
                         key={group.key}
                         type="button"
-                        className="inline-flex max-w-full items-center gap-1.5 rounded-xl border px-2.5 py-1 text-left"
-                        style={{
-                            backgroundColor: colors?.surface?.elevated,
-                            borderColor: colors?.interactive?.border,
-                        }}
+                        className="oc-glass-popover inline-flex max-w-full items-center gap-1.5 rounded-xl border px-2.5 py-1 text-left"
+                        style={{ borderColor: colors?.interactive?.border }}
                         onMouseEnter={() => {
                             cancelClose();
                             setOpenGroupKey(group.key);

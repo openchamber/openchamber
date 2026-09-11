@@ -29,7 +29,7 @@ export const TurnChangedFilesDropdown: React.FC<TurnChangedFilesDropdownProps> =
     const isGitRepo = useIsGitRepo(currentDirectory);
 
     const changedFiles = React.useMemo<ChangedFile[]>(() => {
-        // Skip work entirely in git repos — the global PendingChangesBar handles those.
+        // Skip work entirely in git repos — git status owns changed files there.
         if (isGitRepo !== false) return [];
         if (!activityParts || activityParts.length === 0) return [];
         const toolParts: ToolPart[] = [];

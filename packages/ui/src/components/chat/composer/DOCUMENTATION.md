@@ -45,6 +45,20 @@ The shared frame measures its height and gap into the chat column's
 insets, and scroll position remain unchanged. Unmounting clears the offset;
 resizing or collapsing the frame updates it.
 
+## Floating composer
+
+In a normal session view the composer slot is an absolute layer over the
+bottom of the transcript (`ChatContainer`), and the input box is glass
+(`oc-glass-composer`). The draft screen and the expanded editor keep the slot
+in flow. A `ResizeObserver` on the slot writes its height into the chat
+column's `--chat-composer-inset`; the timeline's tail spacer reads that
+variable plus a fixed gap, so the last row always ends above the composer.
+The variable is written straight to the DOM, so composer growth never
+re-renders the timeline: the list's own footer observer extends the content
+and the scroll hook's pinned-end observer keeps a reader on the end. The
+mobile keyboard choreography is unchanged: the form inside the slot is still
+the keyboard mover and the column shrinks around it at settle.
+
 ## Layers
 
 | Directory | Owns |
@@ -60,7 +74,11 @@ resizing or collapsing the frame updates it.
 | `largeTextPasteOffer.ts` | Ask-toast offer id begin/resolve (supersede + double-apply guards) |
 
 `ChatInput.handlePaste` owns paste orchestration: URL-over-selection markdown
-links, clipboard images (attach + citation), and large plain-text pastes.
+links, clipboard files, and large plain-text pastes. Pasted and dropped files
+share `attachFilesWithCitation`: every file attaches and is cited in the draft
+as `[name]`; images get a generated unique name first, other files keep their
+own name and are cited only after they attached. A copied file's filename text
+is suppressed so only the citation lands in the draft.
 Large pastes (about 2,000 characters or 25 lines) follow the composer setting
 `largeTextPasteBehavior` (`ask` / `attach` / `inline`). Attaching creates an
 in-memory `text/plain` file named `pasted-context-N.txt`, inserts a bracket
