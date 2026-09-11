@@ -9,7 +9,7 @@ description: Buttons, fields, dropdowns, tabs, lists, and other building blocks 
 
 ## Call `applyHostReady` first
 
-The controls read their colours from CSS variables that `applyHostReady` writes onto the page. Call it inside `host.onReady` before the first mount, and the colours follow the app's theme when the user switches it.
+The controls read their colours from CSS variables that `applyHostReady` writes onto the page. It also sets the app's font and text colour on the page root, so plain HTML you add yourself looks right too. Call it inside `host.onReady` before the first mount, and the colours follow the app's theme when the user switches it.
 
 ```ts
 import { applyHostReady } from "@openchamber/sdk/ui";

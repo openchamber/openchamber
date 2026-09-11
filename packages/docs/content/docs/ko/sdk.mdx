@@ -38,7 +38,7 @@ bunx openchamber-guest-bundle panel/main.ts panel/main.js
 
 OpenChamber가 매니페스트를 읽고, 확장이 요구하는 항목을 나열한 대화상자를 보여줍니다([권한](#권한) 참고). 승인하면 레일에 아이콘이 나타납니다. 클릭하면 페이지가 로드됩니다.
 
-로컬 `.zip` 파일이나 git 저장소 또는 zip 파일의 https 링크도 추가할 수 있습니다. 이들은 OpenChamber 데이터 폴더로 복사되어 그 복사본에서 실행되므로, `node_modules`나 TypeScript 소스가 아니라 빌드된 파일을 배포하세요. 확장을 제거하면 복사본도 삭제됩니다. 폴더 설치는 여러분의 폴더에서 직접 실행되므로 수정, 재빌드, 새로고침이 가능합니다.
+로컬 `.zip` 파일이나 git 저장소 또는 zip 파일의 https 링크도 추가할 수 있습니다. 업데이트할 수 있는 것은 git 설치뿐입니다. `package.json`의 `version`을 올리고 푸시하면, 사용자가 다음에 설정 → 확장 을 열 때 OpenChamber가 업데이트를 제안합니다. URL의 `#tag`나 `#branch`로 무엇을 따라갈지 고정할 수 있습니다. 이들은 OpenChamber 데이터 폴더로 복사되어 그 복사본에서 실행되므로, `node_modules`나 TypeScript 소스가 아니라 빌드된 파일을 배포하세요. 확장을 제거하면 복사본도 삭제됩니다. 폴더 설치는 여러분의 폴더에서 직접 실행되므로 수정, 재빌드, 새로고침이 가능합니다.
 
 ## 매니페스트
 

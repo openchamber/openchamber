@@ -38,7 +38,7 @@ Una extensión completa y funcional, con los tres archivos, está en la página 
 
 OpenChamber lee el manifiesto y muestra un diálogo con lo que pide la extensión (consulta [Capacidades](#capacidades)). Apruébalo y tu icono aparecerá en la barra lateral. Haz clic en él y se cargará tu página.
 
-También puedes añadir un `.zip` local o un enlace https a un repositorio de git o a un archivo zip. Estos se copian a la carpeta de datos de OpenChamber y se ejecutan desde esa copia, así que distribuye los archivos compilados, no `node_modules` ni fuentes en TypeScript. Al quitar la extensión se elimina la copia. Una instalación desde carpeta se ejecuta directamente desde tu carpeta, así que puedes editar, recompilar y recargar.
+También puedes añadir un `.zip` local o un enlace https a un repositorio de git o a un archivo zip. Solo una instalación por git puede actualizarse: sube `version` en `package.json`, haz push y OpenChamber ofrecerá la actualización la próxima vez que el usuario abra Ajustes → Extensiones. Un `#tag` o `#branch` en la URL fija cuál sigue. Estos se copian a la carpeta de datos de OpenChamber y se ejecutan desde esa copia, así que distribuye los archivos compilados, no `node_modules` ni fuentes en TypeScript. Al quitar la extensión se elimina la copia. Una instalación desde carpeta se ejecuta directamente desde tu carpeta, así que puedes editar, recompilar y recargar.
 
 ## Manifiesto
 

@@ -236,6 +236,16 @@ export const toPublicGuest = (guest) => {
   if (typeof guest.version === 'string' && guest.version) {
     row.version = guest.version;
   }
+  // Git installs remember where they came from so the UI can offer updates.
+  // The URL is the one the user typed at install; it carries no credentials.
+  if (guest.source === 'git' && guest.gitOrigin && typeof guest.gitOrigin.url === 'string') {
+    row.origin = guest.gitOrigin.ref
+      ? { url: guest.gitOrigin.url, ref: guest.gitOrigin.ref }
+      : { url: guest.gitOrigin.url };
+  }
+  if (guest.update && typeof guest.update.version === 'string' && guest.update.version) {
+    row.update = { version: guest.update.version };
+  }
   const attach = resolveAttachMode(guest.attach);
   if (attach) {
     row.attach = attach;
@@ -328,8 +338,12 @@ const listInstalledGuestsUncached = async ({ persistPath } = {}) => {
         stored.serviceSocketOverrides?.[guest.id] ?? {},
       )
       : undefined;
+    const gitOrigin = source === 'git'
+      ? stored.gitOrigins[root] ?? stored.gitOrigins[storedPath]
+      : undefined;
     guests.push({
       ...withSource(guest, source, root),
+      gitOrigin,
       capabilityGrants: stored.capabilityGrants?.[guest.id] ?? [],
       enabled: !stored.disabledGuests?.[guest.id],
       socketBindings,

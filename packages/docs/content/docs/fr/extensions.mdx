@@ -18,7 +18,7 @@ Les extensions fonctionnent dans OpenChamber web et desktop. VS Code et l'app mo
    - un lien https vers un dépôt git ou un fichier zip
 3. Si l'extension demande des autorisations, une boîte de dialogue les liste. Choisis **Autoriser et activer**, ou **Supprimer** pour la retirer.
 
-Sur desktop, les boutons dossier et archive à côté du champ ouvrent un sélecteur natif au lieu de taper un chemin.
+Tu peux aussi déposer un `.zip` sur le champ ou le choisir avec le bouton archive à côté ; l'archive est envoyée au serveur OpenChamber, donc cela fonctionne aussi avec une instance distante. Sur desktop, le bouton dossier ouvre un sélecteur natif, et un dossier déposé s'installe depuis son chemin.
 
 L'icône de l'extension apparaît dans la barre. Si ce n'est pas le cas, consulte [Dépannage](/troubleshooting/).
 
@@ -28,13 +28,13 @@ Une installation depuis un dossier s'exécute directement depuis ce dossier, don
 
 Afficher un panneau et lire quel projet et quelle session sont ouverts ne demande aucune autorisation. Tout ce qui agit en ton nom en demande une, et tu vois toute la liste une seule fois, à l'installation :
 
-- **Envoyer des messages à tes sessions** : écrire et envoyer des prompts au modèle, ce qui consomme des jetons.
-- **Créer des sessions et des worktrees** : démarrer de nouvelles sessions dans le projet courant.
-- **Lire et écrire des fichiers dans le projet ouvert**.
-- **Lire et écrire des fichiers hors du projet** : seulement les emplacements exacts que l'extension liste dans la boîte de dialogue.
-- **Se connecter à des services externes** : appeler sa propre API avec un compte que tu connectes.
-- **Lire la conversation d’une session quand tu lances son action** : l'extension reçoit tous les messages de cette session, mais seulement quand tu choisis son action dans le menu de la session.
-- **Exécuter un service local** : lancer un programme séparé sur cet ordinateur avec les accès de ton compte utilisateur. N'autorise cela qu'aux extensions en qui tu as confiance ; les autorisations qu'elle déclare décrivent l'intention, elles ne la restreignent pas.
+- **Envoyer des messages dans tes sessions** : écrit et envoie des prompts au modèle, ce qui coûte des jetons et peut lancer des outils.
+- **Créer des sessions et des worktrees** : dans le projet courant.
+- **Lire et écrire les fichiers du projet** : n'importe quel fichier du projet ouvert.
+- **Lire et écrire des fichiers hors du projet** : seulement les emplacements listés dans la boîte de dialogue.
+- **Se connecter à un service externe** : avec le compte que tu connectes dans Paramètres → Intégrations.
+- **Lire la conversation d’une session** : seulement quand tu lances l'action de l'extension sur cette session.
+- **Exécuter un service local** : un programme séparé avec tous les accès de ton compte utilisateur. N'autorise cela que si tu fais confiance à l'auteur.
 
 Quand une version plus récente demande plus que ce que tu as autorisé, la carte affiche **Approbation requise** et un bouton **Vérifier les autorisations**. Tant que tu n'as pas autorisé la nouvelle liste, cette extension reste désactivée.
 
@@ -47,6 +47,12 @@ En plus de son panneau dans la barre latérale, une extension peut ajouter des e
 Une extension qui parle à un service reçoit une carte dans **Paramètres → Intégrations** sous **Comptes d’extensions**. Selon le service, la carte demande un jeton d'API, un nom d'utilisateur et un jeton, ou un client id pour une connexion. Choisis **Connecter** ; **Déconnecter** oublie le jeton enregistré. Les champs supplémentaires que l'extension déclare s'enregistrent tout seuls quand tu les quittes.
 
 Le jeton reste sur le serveur OpenChamber. La page de l'extension ne le voit jamais.
+
+## Mettre à jour
+
+Les extensions installées depuis une URL git peuvent se mettre à jour toutes seules. Ouvrir **Paramètres → Extensions** vérifie chacune d'elles au plus une fois par heure ; **Rechercher des mises à jour** vérifie tout de suite. Une carte avec une version plus récente affiche **Mise à jour disponible** et un bouton **Mettre à jour**. La mise à jour garde tes autorisations, tes comptes et tes réglages ; si la nouvelle version en demande plus, la boîte de dialogue d'approbation réapparaît. Les installations depuis un dossier ou un zip ne se mettent pas à jour : remplace-les à la main.
+
+Ajoute `#v1.2.0` ou `#stable` à l'URL git à l'installation pour suivre un tag ou une branche plutôt que la branche par défaut.
 
 ## Mettre en pause ou retirer
 

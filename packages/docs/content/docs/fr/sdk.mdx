@@ -38,7 +38,7 @@ Faites pointer `index.html` vers `main.js` avec un `<script src="main.js"></scri
 
 OpenChamber lit le manifeste et affiche une boîte de dialogue qui liste ce que l'extension demande (voir [Capacités](#capacités)). Approuvez, et votre icône apparaît dans la barre latérale. Cliquez dessus et votre page se charge.
 
-Vous pouvez aussi ajouter un `.zip` local ou un lien https vers un dépôt git ou un fichier zip. Ceux-ci sont copiés dans le dossier de données d'OpenChamber et exécutés depuis cette copie, donc livrez les fichiers construits, pas `node_modules` ni les sources TypeScript. Supprimer l'extension supprime la copie. Une installation depuis un dossier s'exécute directement depuis votre dossier, vous pouvez donc modifier, reconstruire et recharger.
+Vous pouvez aussi ajouter un `.zip` local ou un lien https vers un dépôt git ou un fichier zip. Seule une installation git peut se mettre à jour : montez `version` dans `package.json`, poussez, et OpenChamber propose la mise à jour la prochaine fois que l'utilisateur ouvre Paramètres → Extensions. Un `#tag` ou `#branch` dans l'URL fixe ce qu'elle suit. Ceux-ci sont copiés dans le dossier de données d'OpenChamber et exécutés depuis cette copie, donc livrez les fichiers construits, pas `node_modules` ni les sources TypeScript. Supprimer l'extension supprime la copie. Une installation depuis un dossier s'exécute directement depuis votre dossier, vous pouvez donc modifier, reconstruire et recharger.
 
 ## Manifeste
 

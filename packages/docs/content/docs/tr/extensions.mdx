@@ -18,7 +18,7 @@ Uzantılar OpenChamber web ve masaüstünde çalışır. VS Code ve mobil uygula
    - bir git deposuna ya da zip dosyasına giden https bağlantısı
 3. Uzantı izin istiyorsa bir iletişim kutusu bunları listeler. **İzin ver ve etkinleştir** seçeneğini seçin ya da geri çıkarmak için **Kaldır** deyin.
 
-Masaüstünde alanın yanındaki klasör ve arşiv düğmeleri yol yazmak yerine sistemin seçim penceresini açar.
+Alana bir `.zip` de bırakabilir ya da yanındaki arşiv düğmesiyle seçebilirsiniz; arşiv OpenChamber sunucusuna yüklenir, bu yüzden uzak bir örnekte de çalışır. Masaüstünde klasör düğmesi sistemin seçim penceresini açar ve bırakılan bir klasör kendi yolundan kurulur.
 
 Uzantının simgesi rayda görünür. Görünmüyorsa [Sorun giderme](/troubleshooting/) sayfasına bakın.
 
@@ -28,13 +28,13 @@ Klasörden kurulum doğrudan o klasörden çalışır, bu yüzden uzantı geliş
 
 Panel göstermek ve hangi proje ile oturumun açık olduğunu okumak izin gerektirmez. Sizin adınıza bir şey yapan her şey izin gerektirir ve tüm listeyi kurulumda bir kez görürsünüz:
 
-- **Oturumlarınıza mesaj gönderme**: modele istem yazıp gönderir, bu jeton harcar.
-- **Oturum ve çalışma ağacı oluşturma**: geçerli projede yeni oturumlar başlatır.
-- **Açık projedeki dosyaları okuma ve yazma**.
-- **Proje dışındaki dosyaları okuma ve yazma**: yalnızca uzantının iletişim kutusunda listelediği konumlar.
-- **Dış hizmetlere bağlanma**: bağladığınız bir hesapla kendi API'sini çağırır.
-- **Eylemini çalıştırdığında bir oturumun konuşmasını okur**: uzantı o oturumdaki her mesajı alır, ama yalnızca oturum menüsünden onun eylemini seçtiğinizde.
-- **Yerel servis çalıştırma**: kullanıcı hesabınızın erişimiyle bu bilgisayarda ayrı bir program başlatır. Buna yalnızca güvendiğiniz uzantılar için izin verin; bildirdiği izinler niyeti açıklar, onu kısıtlamaz.
+- **Oturumlarınıza mesaj gönderme**: modele istem yazıp gönderir, bu jeton harcar ve araç çalıştırabilir.
+- **Oturum ve çalışma ağacı oluşturma**: geçerli projede.
+- **Proje dosyalarını okuma ve yazma**: açık projedeki her dosya.
+- **Proje dışındaki dosyaları okuma ve yazma**: yalnızca iletişim kutusunda listelenen konumlar.
+- **Dış bir hizmete bağlanma**: Ayarlar → Entegrasyonlar altında bağladığınız hesapla.
+- **Bir oturumun konuşmasını okuma**: yalnızca o oturumda uzantının eylemini çalıştırdığınızda.
+- **Yerel servis çalıştırma**: kullanıcı hesabınızın tüm erişimine sahip ayrı bir program. Yalnızca yazara güveniyorsanız izin verin.
 
 Daha yeni bir sürüm izin verdiğinizden fazlasını istediğinde kart **Onay gerekli** ve bir **İzinleri incele** düğmesi gösterir. Yeni listeye izin verene kadar o uzantı kapalı kalır.
 
@@ -47,6 +47,12 @@ Raydaki panelinin yanı sıra bir uzantı, zaten kullandığınız menülere gir
 Bir hizmetle konuşan uzantı, **Ayarlar → Entegrasyonlar** altında **Uzantı hesapları** bölümünde bir kart alır. Hizmete göre kart bir API jetonu, kullanıcı adı ve jeton ya da oturum açma akışı için bir client id ister. **Bağlan** seçeneğini seçin; **Bağlantıyı kes** kayıtlı jetonu unutur. Uzantının bildirdiği ek alanlar siz alandan çıkınca kendiliğinden kaydedilir.
 
 Jeton OpenChamber sunucusunda kalır. Uzantının sayfası onu asla görmez.
+
+## Güncelleme
+
+Bir git URL'sinden kurulan uzantılar kendini güncelleyebilir. **Ayarlar → Uzantılar** sayfasını açmak her birini en fazla saatte bir denetler; **Güncellemeleri denetle** hemen denetler. Daha yeni sürümü olan bir kartta **Güncelleme var** yazısı ve bir **Güncelle** düğmesi görünür. Güncelleme izinlerinizi, hesaplarınızı ve ayarlarınızı korur; yeni sürüm daha fazlasını isterse onay iletişim kutusu yeniden açılır. Klasörden ve zip'ten kurulumlar güncellenmez: bunları elle değiştirin.
+
+Varsayılan dal yerine bir etiketi veya dalı izlemek için kurarken git URL'sine `#v1.2.0` ya da `#stable` ekleyin.
 
 ## Duraklatma veya kaldırma
 

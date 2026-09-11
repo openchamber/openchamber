@@ -38,7 +38,7 @@ bunx openchamber-guest-bundle panel/main.ts panel/main.js
 
 OpenChamber 会读取清单，并弹出一个对话框列出扩展所请求的内容（见[能力](#能力)）。批准后，你的图标会出现在侧栏。点击它，你的页面就会加载。
 
-你也可以添加本地 `.zip` 文件，或指向 git 仓库或 zip 文件的 https 链接。这些会被复制到 OpenChamber 的数据文件夹，并从该副本运行，因此请发布构建好的文件，而不是 `node_modules` 或 TypeScript 源码。移除扩展时会删除该副本。从文件夹安装则直接从你的文件夹运行，你可以编辑、重新构建、再重新加载。
+你也可以添加本地 `.zip` 文件，或指向 git 仓库或 zip 文件的 https 链接。只有 git 安装能够更新：提高 `package.json` 里的 `version` 并推送，用户下次打开 设置 → 扩展 时 OpenChamber 就会提供更新。URL 上的 `#tag` 或 `#branch` 固定它跟随的是哪一个。这些会被复制到 OpenChamber 的数据文件夹，并从该副本运行，因此请发布构建好的文件，而不是 `node_modules` 或 TypeScript 源码。移除扩展时会删除该副本。从文件夹安装则直接从你的文件夹运行，你可以编辑、重新构建、再重新加载。
 
 ## 清单
 

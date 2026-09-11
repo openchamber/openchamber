@@ -50,6 +50,10 @@ const guestCommandSchema = z.object({
   description: z.string().trim().min(1).optional(),
 });
 
+export const guestUpdateSchema = z.object({
+  version: z.string().trim().min(1).max(64),
+});
+
 const installedGuestSchema = z.object({
   id: z.string().regex(PANEL_ID),
   name: z.string().trim().min(1),
@@ -70,6 +74,11 @@ const installedGuestSchema = z.object({
   source: z.enum(['bundled', 'path', 'zip', 'git']).optional(),
   path: z.string().nullable().optional(),
   enabled: z.boolean().optional(),
+  origin: z.object({
+    url: z.string().trim().min(1),
+    ref: z.string().trim().min(1).optional(),
+  }).optional(),
+  update: guestUpdateSchema.optional(),
 });
 
 const catalogSchema = z.object({

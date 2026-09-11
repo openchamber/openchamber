@@ -18,6 +18,7 @@ const errorSchema = z.object({
     'bundled',
     'clone-failed',
     'extract-failed',
+    'too-large',
   ]),
   required: z.string().trim().min(1).max(64).optional(),
   id: z.string().trim().min(1).max(128).optional(),
@@ -35,6 +36,7 @@ export type InstallGuestErrorCode =
   | 'bundled'
   | 'clone-failed'
   | 'extract-failed'
+  | 'too-large'
   | 'failed';
 
 type InstallGuestResult =
@@ -96,6 +98,27 @@ export type InstallGuestOptions = {
   replace?: boolean;
 };
 
+const readInstallResponse = async (response: Response): Promise<InstallGuestResult> => {
+  if (!response.ok) {
+    const error = await readInstallError(response);
+    if (error.required && error.id) {
+      return { ok: false, code: error.code, required: error.required, id: error.id };
+    }
+    if (error.required) {
+      return { ok: false, code: error.code, required: error.required };
+    }
+    if (error.id) {
+      return { ok: false, code: error.code, id: error.id };
+    }
+    return { ok: false, code: error.code };
+  }
+  const guest = parseInstalledGuestJson(await response.text());
+  if (!guest) {
+    return { ok: false, code: 'failed' };
+  }
+  return { ok: true, guest, replaced: response.status === 200 };
+};
+
 export const installGuest = async (
   input: string,
   options: InstallGuestOptions = {},
@@ -113,24 +136,33 @@ export const installGuest = async (
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!response.ok) {
-      const error = await readInstallError(response);
-      if (error.required && error.id) {
-        return { ok: false, code: error.code, required: error.required, id: error.id };
-      }
-      if (error.required) {
-        return { ok: false, code: error.code, required: error.required };
-      }
-      if (error.id) {
-        return { ok: false, code: error.code, id: error.id };
-      }
-      return { ok: false, code: error.code };
-    }
-    const guest = parseInstalledGuestJson(await response.text());
-    if (!guest) {
-      return { ok: false, code: 'failed' };
-    }
-    return { ok: true, guest, replaced: response.status === 200 };
+    return await readInstallResponse(response);
+  } catch {
+    return { ok: false, code: 'failed' };
+  }
+};
+
+/**
+ * Send a `.zip` picked or dropped in the browser to the host. Same result
+ * shape as `installGuest`, so one flow handles both; the archive travels as a
+ * raw octet-stream body over `runtimeFetch`, which is what the files tree
+ * upload uses too, so relay and tunnel runtimes carry it unchanged.
+ */
+export const uploadGuestZip = async (
+  file: File,
+  options: InstallGuestOptions = {},
+): Promise<InstallGuestResult> => {
+  try {
+    const response = await runtimeFetch('/api/guests/upload', {
+      method: 'POST',
+      query: {
+        replace: options.replace ? 'true' : undefined,
+        name: file.name || undefined,
+      },
+      headers: { 'Content-Type': 'application/octet-stream', Accept: 'application/json' },
+      body: file,
+    });
+    return await readInstallResponse(response);
   } catch {
     return { ok: false, code: 'failed' };
   }

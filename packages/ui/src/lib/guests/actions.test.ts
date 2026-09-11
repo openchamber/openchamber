@@ -60,7 +60,7 @@ describe('buildGuestMessageItem', () => {
     const item = buildGuestMessageItem('create-task', session, record('m1', 'assistant', 'x'.repeat(GUEST_ITEM_MESSAGE_TEXT_MAX + 10)));
     expect(item).toMatchObject({ kind: 'message', action: 'create-task', sessionId: 'ses-1', sessionTitle: 'Hello', directory: '/repo', messageId: 'm1', role: 'assistant' });
     expect(item.text.length).toBe(GUEST_ITEM_MESSAGE_TEXT_MAX);
-    expect(buildGuestMessageItem('a', { ...session, sessionTitle: null, directory: null }, record('m1', 'user', 'hi'))).toMatchObject({ sessionTitle: 'ses-1', directory: '', text: 'hi' });
+    expect(buildGuestMessageItem('a', { ...session, sessionTitle: null, directory: null }, record('m1', 'user', 'hi'))).toMatchObject({ sessionTitle: 'ses-1', directory: null, text: 'hi' });
   });
 });
 

@@ -9,7 +9,7 @@ description: Przyciski, pola, listy rozwijane, zakładki, listy i inne gotowe el
 
 ## Najpierw wywołaj `applyHostReady`
 
-Kontrolki czytają kolory ze zmiennych CSS, które `applyHostReady` zapisuje na stronie. Wywołaj je w `host.onReady` przed pierwszym montowaniem, a kolory będą podążać za motywem aplikacji, gdy użytkownik go zmieni.
+Kontrolki czytają kolory ze zmiennych CSS, które `applyHostReady` zapisuje na stronie. Ustawia też czcionkę i kolor tekstu aplikacji na korzeniu strony, więc zwykły HTML, który dodasz samodzielnie, też wygląda poprawnie. Wywołaj je w `host.onReady` przed pierwszym montowaniem, a kolory będą podążać za motywem aplikacji, gdy użytkownik go zmieni.
 
 ```ts
 import { applyHostReady } from "@openchamber/sdk/ui";

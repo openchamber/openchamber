@@ -38,7 +38,7 @@ Uma extensão completa e funcional, com os três arquivos, está na página [Exe
 
 O OpenChamber lê o manifesto e mostra um diálogo com o que a extensão pede (veja [Capacidades](#capacidades)). Aprove, e seu ícone aparece na barra lateral. Clique nele e sua página carrega.
 
-Você também pode adicionar um `.zip` local ou um link https para um repositório git ou um arquivo zip. Esses são copiados para a pasta de dados do OpenChamber e rodam a partir dessa cópia, então distribua os arquivos compilados, não `node_modules` nem fontes em TypeScript. Remover a extensão apaga a cópia. Uma instalação a partir de pasta roda direto da sua pasta, então você pode editar, recompilar e recarregar.
+Você também pode adicionar um `.zip` local ou um link https para um repositório git ou um arquivo zip. Só uma instalação por git consegue se atualizar: suba `version` no `package.json`, faça push e o OpenChamber oferece a atualização na próxima vez que o usuário abrir Configurações → Extensões. Um `#tag` ou `#branch` na URL fixa qual ele segue. Esses são copiados para a pasta de dados do OpenChamber e rodam a partir dessa cópia, então distribua os arquivos compilados, não `node_modules` nem fontes em TypeScript. Remover a extensão apaga a cópia. Uma instalação a partir de pasta roda direto da sua pasta, então você pode editar, recompilar e recarregar.
 
 ## Manifesto
 

@@ -9,7 +9,7 @@ description: @openchamber/sdk/ui içindeki düğmeler, alanlar, açılır listel
 
 ## Önce `applyHostReady` çağırın
 
-Kontroller renklerini `applyHostReady` fonksiyonunun sayfaya yazdığı CSS değişkenlerinden okur. Bunu `host.onReady` içinde, ilk bağlamadan önce çağırın; kullanıcı temayı değiştirdiğinde renkler uygulamanın temasını izler.
+Kontroller renklerini `applyHostReady` fonksiyonunun sayfaya yazdığı CSS değişkenlerinden okur. Ayrıca uygulamanın yazı tipini ve metin rengini sayfa köküne uygular; böylece kendi eklediğiniz düz HTML de doğru görünür. Bunu `host.onReady` içinde, ilk bağlamadan önce çağırın; kullanıcı temayı değiştirdiğinde renkler uygulamanın temasını izler.
 
 ```ts
 import { applyHostReady } from "@openchamber/sdk/ui";

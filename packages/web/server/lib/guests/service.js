@@ -126,6 +126,7 @@ export const setGuestEnabled = async (guestId, persistPath, enabled) => {
   await writeExtensionStore(persistPath, {
     paths: store.paths,
     sources: store.sources,
+    gitOrigins: store.gitOrigins,
     capabilityGrants: store.capabilityGrants,
     disabledGuests,
     serviceSocketOverrides: store.serviceSocketOverrides,
@@ -159,6 +160,7 @@ export const setServiceSocketOverride = async (guestId, socketId, persistPath, s
   await writeExtensionStore(persistPath, {
     paths: store.paths,
     sources: store.sources,
+    gitOrigins: store.gitOrigins,
     capabilityGrants: store.capabilityGrants,
     disabledGuests: store.disabledGuests,
     serviceSocketOverrides,

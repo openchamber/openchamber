@@ -18,7 +18,7 @@ Extensions run on OpenChamber web and desktop. VS Code and the mobile app do not
    - an https link to a git repository or a zip file
 3. If the extension asks for any permissions, a dialog lists them. Choose **Allow and enable**, or **Remove** to take it back out.
 
-On desktop, the folder and archive buttons next to the field open a native picker instead of typing a path.
+You can also drop a `.zip` onto the field, or pick one with the archive button next to it; the archive is uploaded to the OpenChamber server, so this works for a remote instance too. On desktop the folder button opens a native picker, and a dropped folder installs from its path.
 
 The extension's icon appears on the rail. If it does not, see [Troubleshooting](/troubleshooting/).
 
@@ -28,13 +28,13 @@ A folder install runs straight from that folder, so someone developing an extens
 
 Showing a panel and reading which project and session are open needs no permission. Anything that acts on your behalf does, and you see the whole list once, when you install:
 
-- **Send messages to your sessions**: write and send prompts to the model, which spends tokens.
-- **Create sessions and worktrees**: start new sessions in the current project.
-- **Read and write files in the open project**.
-- **Read and write files outside the project**: only the exact locations the extension lists in the dialog.
-- **Connect to external services**: call its own API with an account you connect.
-- **Read a session's conversation when you run its action**: the extension receives every message in that session, but only when you pick its action from the session menu.
-- **Run a local service**: start a separate program on this computer with your user account's access. Allow this only for extensions you trust; the permissions it declares describe intent, they do not restrict it.
+- **Send messages in your sessions**: writes and sends prompts to the model, which costs tokens and can run tools.
+- **Create sessions and worktrees**: in the current project.
+- **Read and write project files**: any file in the open project.
+- **Read and write files outside the project**: only the locations listed in the dialog.
+- **Connect to an external service**: with the account you connect in Settings → Integrations.
+- **Read a session's conversation**: only when you run the extension's action on that session.
+- **Run a local service**: a separate program with your full user access. Allow it only if you trust the author.
 
 When a newer version asks for more than you allowed, the card shows **Needs approval** and a **Review permissions** button. Until you allow the new list, that extension stays off.
 
@@ -47,6 +47,12 @@ Besides its panel on the rail, an extension can add entries to menus you already
 An extension that talks to a service gets a card at **Settings → Integrations** under **Extension accounts**. Depending on the service, the card asks for an API token, a username and token, or a client id for a sign-in flow. Choose **Connect**; **Disconnect** forgets the stored token. Extra fields the extension declares save on their own as you leave them.
 
 The token stays on the OpenChamber server. The extension's page never sees it.
+
+## Update
+
+Extensions installed from a git URL can update themselves. Opening **Settings → Extensions** checks each of them at most once an hour; **Check for updates** checks right away. A card with a newer version shows **Update available** and an **Update** button. The update keeps your permissions, accounts, and settings; if the new version asks for more, the approval dialog appears again. Folder and zip installs do not update: replace them by hand.
+
+Add `#v1.2.0` or `#stable` to the git URL when you install to follow a tag or branch instead of the default branch.
 
 ## Pause or remove
 

@@ -18,7 +18,7 @@ Las extensiones funcionan en OpenChamber web y de escritorio. VS Code y la app m
    - un enlace https a un repositorio git o a un archivo zip
 3. Si la extensión pide permisos, un diálogo los enumera. Elige **Permitir y activar**, o **Eliminar** para quitarla.
 
-En el escritorio, los botones de carpeta y de archivo junto al campo abren un selector nativo en lugar de escribir una ruta.
+También puedes arrastrar un `.zip` sobre el campo o elegirlo con el botón de archivo que está al lado; el archivo se sube al servidor de OpenChamber, así que esto también funciona con una instancia remota. En el escritorio, el botón de carpeta abre un selector nativo, y una carpeta arrastrada se instala desde su ruta.
 
 El icono de la extensión aparece en la barra. Si no aparece, consulta [Solución de problemas](/troubleshooting/).
 
@@ -28,13 +28,13 @@ Una instalación desde carpeta se ejecuta directamente desde esa carpeta, así q
 
 Mostrar un panel y leer qué proyecto y sesión están abiertos no necesita permiso. Todo lo que actúa en tu nombre sí lo necesita, y ves la lista completa una sola vez, al instalar:
 
-- **Enviar mensajes a tus sesiones**: escribir y enviar prompts al modelo, lo que gasta tokens.
-- **Crear sesiones y worktrees**: iniciar sesiones nuevas en el proyecto actual.
-- **Leer y escribir archivos en el proyecto abierto**.
-- **Leer y escribir archivos fuera del proyecto**: solo las ubicaciones exactas que la extensión enumera en el diálogo.
-- **Conectarse a servicios externos**: llamar a su propia API con una cuenta que tú conectas.
-- **Leer la conversación de una sesión cuando ejecutas su acción**: la extensión recibe todos los mensajes de esa sesión, pero solo cuando eliges su acción en el menú de la sesión.
-- **Ejecutar un servicio local**: iniciar un programa aparte en este equipo con el acceso de tu cuenta de usuario. Permítelo solo a extensiones en las que confíes; los permisos que declara describen la intención, no lo restringen.
+- **Enviar mensajes en tus sesiones**: escribe y envía prompts al modelo, lo que gasta tokens y puede ejecutar herramientas.
+- **Crear sesiones y worktrees**: en el proyecto actual.
+- **Leer y escribir archivos del proyecto**: cualquier archivo del proyecto abierto.
+- **Leer y escribir archivos fuera del proyecto**: solo las ubicaciones enumeradas en el diálogo.
+- **Conectarse a un servicio externo**: con la cuenta que conectas en Configuración → Integraciones.
+- **Leer la conversación de una sesión**: solo cuando ejecutas la acción de la extensión en esa sesión.
+- **Ejecutar un servicio local**: un programa aparte con todo el acceso de tu usuario. Permítelo solo si confías en el autor.
 
 Cuando una versión más nueva pide más de lo que permitiste, la tarjeta muestra **Requiere aprobación** y un botón **Revisar permisos**. Hasta que permitas la nueva lista, esa extensión sigue apagada.
 
@@ -47,6 +47,12 @@ Además de su panel en la barra lateral, una extensión puede añadir entradas a
 Una extensión que habla con un servicio recibe una tarjeta en **Configuración → Integraciones** bajo **Cuentas de extensiones**. Según el servicio, la tarjeta pide un token de API, un usuario y token, o un client id para un flujo de inicio de sesión. Elige **Conectar**; **Desconectar** olvida el token guardado. Los campos extra que declara la extensión se guardan solos al salir de ellos.
 
 El token se queda en el servidor de OpenChamber. La página de la extensión nunca lo ve.
+
+## Actualizar
+
+Las extensiones instaladas desde una URL de git pueden actualizarse solas. Abrir **Configuración → Extensiones** comprueba cada una como máximo una vez por hora; **Buscar actualizaciones** comprueba al momento. Una tarjeta con una versión más nueva muestra **Actualización disponible** y un botón **Actualizar**. La actualización conserva tus permisos, cuentas y ajustes; si la nueva versión pide más, el diálogo de aprobación aparece otra vez. Las instalaciones por carpeta o zip no se actualizan: reemplázalas a mano.
+
+Añade `#v1.2.0` o `#stable` a la URL de git al instalar para seguir una etiqueta o rama en lugar de la rama por defecto.
 
 ## Pausar o quitar
 

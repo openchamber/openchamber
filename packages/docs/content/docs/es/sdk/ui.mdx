@@ -9,7 +9,7 @@ description: Botones, campos, desplegables, pestañas, listas y otros componente
 
 ## Llama primero a `applyHostReady`
 
-Los controles leen sus colores de variables CSS que `applyHostReady` escribe en la página. Llámalo dentro de `host.onReady` antes del primer montaje, y los colores seguirán el tema de la app cuando el usuario lo cambie.
+Los controles leen sus colores de variables CSS que `applyHostReady` escribe en la página. También aplica la fuente y el color de texto de la app en la raíz de la página, así que el HTML plano que añadas tú mismo también se ve bien. Llámalo dentro de `host.onReady` antes del primer montaje, y los colores seguirán el tema de la app cuando el usuario lo cambie.
 
 ```ts
 import { applyHostReady } from "@openchamber/sdk/ui";

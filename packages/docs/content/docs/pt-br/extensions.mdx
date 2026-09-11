@@ -18,7 +18,7 @@ As extensões funcionam no OpenChamber web e desktop. O VS Code e o app móvel a
    - um link https para um repositório git ou um arquivo zip
 3. Se a extensão pedir permissões, um diálogo lista todas. Escolha **Permitir e ativar**, ou **Remover** para tirá-la de volta.
 
-No desktop, os botões de pasta e de arquivo ao lado do campo abrem um seletor nativo em vez de digitar um caminho.
+Você também pode arrastar um `.zip` para o campo ou escolher um com o botão de arquivo ao lado; o arquivo é enviado ao servidor do OpenChamber, então isso funciona também com uma instância remota. No desktop, o botão de pasta abre um seletor nativo, e uma pasta arrastada é instalada a partir do seu caminho.
 
 O ícone da extensão aparece na barra. Se não aparecer, veja [Solução de problemas](/troubleshooting/).
 
@@ -28,13 +28,13 @@ Uma instalação por pasta roda direto daquela pasta, então quem desenvolve uma
 
 Mostrar um painel e ler qual projeto e sessão estão abertos não precisa de permissão. Tudo que age em seu nome precisa, e você vê a lista inteira uma vez, na instalação:
 
-- **Enviar mensagens para suas sessões**: escrever e enviar prompts ao modelo, o que gasta tokens.
-- **Criar sessões e worktrees**: iniciar novas sessões no projeto atual.
-- **Ler e gravar arquivos no projeto aberto**.
-- **Ler e gravar arquivos fora do projeto**: só os locais exatos que a extensão lista no diálogo.
-- **Conectar a serviços externos**: chamar a própria API com uma conta que você conecta.
-- **Ler a conversa de uma sessão quando você executa a ação dela**: a extensão recebe todas as mensagens dessa sessão, mas só quando você escolhe a ação dela no menu da sessão.
-- **Executar um serviço local**: iniciar um programa separado neste computador com o acesso da sua conta de usuário. Permita isso só para extensões em que você confia; as permissões declaradas descrevem a intenção, não o restringem.
+- **Enviar mensagens nas suas sessões**: escreve e envia prompts ao modelo, o que gasta tokens e pode executar ferramentas.
+- **Criar sessões e worktrees**: no projeto atual.
+- **Ler e gravar arquivos do projeto**: qualquer arquivo do projeto aberto.
+- **Ler e gravar arquivos fora do projeto**: só os locais listados no diálogo.
+- **Conectar a um serviço externo**: com a conta que você conecta em Configurações → Integrações.
+- **Ler a conversa de uma sessão**: só quando você executa a ação da extensão naquela sessão.
+- **Executar um serviço local**: um programa separado com todo o acesso do seu usuário. Permita só se confiar no autor.
 
 Quando uma versão mais nova pede mais do que você permitiu, o card mostra **Precisa de aprovação** e um botão **Revisar permissões**. Até você permitir a nova lista, essa extensão fica desligada.
 
@@ -47,6 +47,12 @@ Além do painel na barra lateral, uma extensão pode adicionar entradas a menus 
 Uma extensão que fala com um serviço ganha um card em **Configurações → Integrações** sob **Contas de extensões**. Dependendo do serviço, o card pede um token de API, um usuário e token, ou um client id para um fluxo de login. Escolha **Conectar**; **Desconectar** esquece o token guardado. Campos extras que a extensão declara são salvos sozinhos quando você sai deles.
 
 O token fica no servidor do OpenChamber. A página da extensão nunca o vê.
+
+## Atualizar
+
+Extensões instaladas a partir de uma URL git podem se atualizar sozinhas. Abrir **Configurações → Extensões** verifica cada uma no máximo uma vez por hora; **Verificar atualizações** verifica na hora. Um card com versão mais nova mostra **Atualização disponível** e um botão **Atualizar**. A atualização mantém suas permissões, contas e configurações; se a nova versão pedir mais, o diálogo de aprovação aparece de novo. Instalações por pasta ou zip não se atualizam: substitua-as à mão.
+
+Adicione `#v1.2.0` ou `#stable` à URL git ao instalar para seguir uma tag ou branch em vez do branch padrão.
 
 ## Pausar ou remover
 

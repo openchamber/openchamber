@@ -9,7 +9,7 @@ description: "@openchamber/sdk/ui のボタン、入力欄、ドロップダウ�
 
 ## まず `applyHostReady` を呼ぶ
 
-コントロールは、`applyHostReady` がページに書き込む CSS 変数から色を読みます。最初のマウントの前に `host.onReady` の中で呼んでください。そうすると、ユーザーがテーマを切り替えたときに色がアプリに追従します。
+コントロールは、`applyHostReady` がページに書き込む CSS 変数から色を読みます。アプリのフォントと文字色もページのルートに設定するので、自分で追加した素の HTML も正しく見えます。最初のマウントの前に `host.onReady` の中で呼んでください。そうすると、ユーザーがテーマを切り替えたときに色がアプリに追従します。
 
 ```ts
 import { applyHostReady } from "@openchamber/sdk/ui";

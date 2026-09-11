@@ -38,7 +38,7 @@ Binde `main.js` in `index.html` mit einem normalen `<script src="main.js"></scri
 
 OpenChamber liest das Manifest und zeigt einen Dialog mit allem, was die Erweiterung anfordert (siehe [Berechtigungen](#berechtigungen)). Bestätige ihn, und dein Icon erscheint in der Leiste. Klick darauf, und deine Seite lädt.
 
-Du kannst auch eine lokale `.zip`-Datei oder einen https-Link zu einem Git-Repository oder einer Zip-Datei hinzufügen. Die werden in den Datenordner von OpenChamber kopiert und aus dieser Kopie ausgeführt. Liefere also die gebauten Dateien aus, nicht `node_modules` oder TypeScript-Quellen. Beim Entfernen der Erweiterung wird die Kopie gelöscht. Eine Installation aus einem Ordner läuft direkt aus deinem Ordner, du kannst also bearbeiten, neu bauen und neu laden.
+Du kannst auch eine lokale `.zip`-Datei oder einen https-Link zu einem Git-Repository oder einer Zip-Datei hinzufügen. Nur eine Git-Installation kann sich aktualisieren: erhöhe `version` in `package.json` und pushe, dann bietet OpenChamber das Update an, wenn der Nutzer das nächste Mal Einstellungen → Erweiterungen öffnet. Ein `#tag` oder `#branch` in der URL legt fest, welchem es folgt. Die werden in den Datenordner von OpenChamber kopiert und aus dieser Kopie ausgeführt. Liefere also die gebauten Dateien aus, nicht `node_modules` oder TypeScript-Quellen. Beim Entfernen der Erweiterung wird die Kopie gelöscht. Eine Installation aus einem Ordner läuft direkt aus deinem Ordner, du kannst also bearbeiten, neu bauen und neu laden.
 
 ## Manifest
 

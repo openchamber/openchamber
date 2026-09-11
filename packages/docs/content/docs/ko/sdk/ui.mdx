@@ -9,7 +9,7 @@ description: "@openchamber/sdk/ui의 버튼, 입력란, 드롭다운, 탭, 목�
 
 ## 먼저 `applyHostReady`를 호출하세요
 
-컨트롤은 `applyHostReady`가 페이지에 기록하는 CSS 변수에서 색상을 읽습니다. 첫 마운트 전에 `host.onReady` 안에서 호출하면, 사용자가 테마를 바꿀 때 색상이 앱을 따라갑니다.
+컨트롤은 `applyHostReady`가 페이지에 기록하는 CSS 변수에서 색상을 읽습니다. 또한 앱의 글꼴과 글자 색상을 페이지 루트에 설정하므로, 직접 추가한 일반 HTML도 제대로 보입니다. 첫 마운트 전에 `host.onReady` 안에서 호출하면, 사용자가 테마를 바꿀 때 색상이 앱을 따라갑니다.
 
 ```ts
 import { applyHostReady } from "@openchamber/sdk/ui";

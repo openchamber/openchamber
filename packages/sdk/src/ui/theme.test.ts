@@ -49,6 +49,9 @@ describe('applyHostTheme', () => {
     expect(seen.get('--oc-elevated')).toBe('#1a1a1a');
     expect(seen.get('--font-sans')).toBe('SF Pro Text, sans-serif');
     expect(seen.get('--radius')).toBe('0.5625rem');
+    // Plain DOM outside the kit inherits the host font and text colour from the root.
+    expect(seen.get('font-family')).toBe('SF Pro Text, sans-serif');
+    expect(seen.get('color')).toBe('#eee');
   });
 
   test('applyHostReady stamps the host surface on the root', () => {

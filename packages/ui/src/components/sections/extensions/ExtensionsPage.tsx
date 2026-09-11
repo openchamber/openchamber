@@ -24,15 +24,16 @@ import { toast } from '@/components/ui';
 import { setGuestServiceSocketPath } from '@/lib/guests/service';
 import { guestNeedsApproval } from '@/lib/guests/capabilities';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
-import { approveGuestCapabilities, installGuest, setGuestEnabled, uninstallGuest, type InstallGuestErrorCode } from '@/lib/guests/install';
+import { approveGuestCapabilities, installGuest, setGuestEnabled, uninstallGuest, uploadGuestZip, type InstallGuestErrorCode } from '@/lib/guests/install';
 import { closeGuestTabsById } from '@/lib/guests/tabs';
 import { loadGuestCatalog } from '@/lib/guests/load-catalog';
+import { checkGuestUpdates, updateGuest, type UpdateGuestErrorCode } from '@/lib/guests/updates';
 import type { GuestSource, InstalledGuest } from '@/lib/guests/types';
 import { useGuestsStore } from '@/lib/guests/store';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { cn } from '@/lib/utils';
-import { canRequestNativeDirectoryAccess, requestDirectoryAccess, requestFileAccess } from '@/lib/desktop';
+import { canRequestNativeDirectoryAccess, pathForDroppedFile, requestDirectoryAccess, requestFileAccess } from '@/lib/desktop';
 import type { PublicSocketBinding } from '@openchamber/sdk';
 
 const errorToastKey = (code: InstallGuestErrorCode): I18nKey => {
@@ -46,7 +47,29 @@ const errorToastKey = (code: InstallGuestErrorCode): I18nKey => {
   if (code === 'host-too-old') return 'settings.extensions.toast.hostTooOld';
   if (code === 'clone-failed') return 'settings.extensions.toast.cloneFailed';
   if (code === 'extract-failed') return 'settings.extensions.toast.extractFailed';
+  if (code === 'too-large') return 'settings.extensions.toast.zipTooLarge';
   return 'settings.extensions.toast.failed';
+};
+
+/**
+ * What the user handed us to install: a typed path or URL (also what the
+ * desktop resolves from a picker or a drop), or a `.zip` File the browser
+ * holds that has to travel to the host.
+ */
+type InstallSource =
+  | { kind: 'input'; input: string }
+  | { kind: 'file'; file: File };
+
+const isZipFile = (file: File): boolean => file.name.toLowerCase().endsWith('.zip');
+
+const updateErrorToastKey = (code: UpdateGuestErrorCode): I18nKey => {
+  if (code === 'not-git') return 'settings.extensions.toast.notGit';
+  if (code === 'clone-failed') return 'settings.extensions.toast.cloneFailed';
+  if (code === 'invalid-manifest') return 'settings.extensions.toast.invalidManifest';
+  if (code === 'missing-build') return 'settings.extensions.toast.missingBuild';
+  if (code === 'swap-failed') return 'settings.extensions.toast.swapFailed';
+  if (code === 'not-found') return 'settings.extensions.toast.notFound';
+  return 'settings.extensions.toast.updateFailed';
 };
 
 const sourceKey = (source?: GuestSource): I18nKey => {
@@ -188,6 +211,7 @@ type ExtensionCardProps = {
   onReview: (guest: InstalledGuest) => void;
   onRemove: (id: string, name: string) => Promise<void>;
   onSetEnabled: (id: string, name: string, enabled: boolean) => Promise<void>;
+  onUpdate: (guest: InstalledGuest) => Promise<void>;
 };
 
 const ExtensionCard: React.FC<ExtensionCardProps> = ({
@@ -196,6 +220,7 @@ const ExtensionCard: React.FC<ExtensionCardProps> = ({
   onReview,
   onRemove,
   onSetEnabled,
+  onUpdate,
 }) => {
   const { t } = useI18n();
   const [open, setOpen] = React.useState(false);
@@ -203,16 +228,16 @@ const ExtensionCard: React.FC<ExtensionCardProps> = ({
   const needsApproval = guestNeedsApproval(guest);
   const permissions = servicePermissionList(guest);
   const canRemove = Boolean(guest.source && guest.source !== 'bundled');
+  // Only a git install can move forward; folder and zip cards never get this.
+  const update = guest.source === 'git' ? guest.update : undefined;
   const iconSrc = React.useMemo(
     () => guestPackageIconSrc(guest.id, guest.icon, getRuntimeUrlResolver().authenticatedAsset),
     [guest.id, guest.icon],
   );
-  const metaParts = [
-    t(sourceKey(guest.source)),
-    guest.version ? `v${guest.version}` : null,
-    guest.path || guest.id,
-  ].filter(Boolean);
-  const meta = metaParts.join(' · ');
+  // The path is one unbreakable word; it lives in the expanded body so the
+  // header line never clamps right after the version.
+  const meta = [t(sourceKey(guest.source)), guest.version ? `v${guest.version}` : null].filter(Boolean).join(' · ');
+  const location = guest.path || guest.id;
   const statusLabel = needsApproval
     ? t('settings.extensions.status.needsApproval')
     : enabled
@@ -239,10 +264,15 @@ const ExtensionCard: React.FC<ExtensionCardProps> = ({
           </div>
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold text-foreground">{guest.name}</div>
-            <p className="mt-0.5 line-clamp-1 text-xs leading-snug text-muted-foreground">
+            <p className="mt-0.5 truncate text-xs leading-snug text-muted-foreground">
               {meta}
             </p>
           </div>
+          {update ? (
+            <span className="max-w-40 shrink-0 truncate rounded-full bg-[var(--status-info)]/15 px-2 py-0.5 text-[10px] font-medium text-[var(--status-info)]">
+              {t('settings.extensions.update.badge', { version: update.version })}
+            </span>
+          ) : null}
           <span
             aria-live="polite"
             className={cn('max-w-36 shrink-0 truncate rounded-full px-2 py-0.5 text-[10px] font-medium', statusClassName)}
@@ -259,6 +289,9 @@ const ExtensionCard: React.FC<ExtensionCardProps> = ({
         </CollapsibleTrigger>
         <CollapsibleContent className="border-t border-[var(--interactive-border)] px-4 py-4">
           <div className="space-y-3">
+            <p className="typography-meta truncate font-mono text-muted-foreground" title={location}>
+              {location}
+            </p>
             {permissions ? (
               <p className="typography-meta truncate text-muted-foreground">
                 {t('settings.extensions.service.permissions', { list: permissions })}
@@ -281,6 +314,17 @@ const ExtensionCard: React.FC<ExtensionCardProps> = ({
               ))
               : null}
             <div className="flex flex-wrap items-center gap-2">
+              {update ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={busy}
+                  aria-label={t('settings.extensions.update.action.aria', { name: guest.name, version: update.version })}
+                  onClick={() => void onUpdate(guest)}
+                >
+                  {t('settings.extensions.update.action')}
+                </Button>
+              ) : null}
               {needsApproval ? (
                 <Button
                   type="button"
@@ -341,16 +385,78 @@ export const ExtensionsPage: React.FC = () => {
   const unsupported = status === 'unsupported';
   const [installValue, setInstallValue] = React.useState('');
   const [busy, setBusy] = React.useState(false);
-  const [reinstall, setReinstall] = React.useState<{ input: string; name: string } | null>(null);
+  const [checking, setChecking] = React.useState(false);
+  const checkedOnOpen = React.useRef(false);
+  const [reinstall, setReinstall] = React.useState<{ source: InstallSource; name: string } | null>(null);
   const [approval, setApproval] = React.useState<InstalledGuest | null>(null);
+  const [dropActive, setDropActive] = React.useState(false);
+  const dragDepth = React.useRef(0);
+  const zipInputRef = React.useRef<HTMLInputElement | null>(null);
+  // Desktop on its own machine can hand the server a path; every other
+  // runtime that shows this page (web, remote desktop instance) uploads.
+  const nativePaths = canRequestNativeDirectoryAccess();
 
   React.useEffect(() => {
     void loadGuestCatalog();
   }, []);
 
+  // One quiet check per page open, once the catalog is in. The server
+  // answers from its hour cache, so this is cheap on a revisit.
+  React.useEffect(() => {
+    if (status !== 'ready' || checkedOnOpen.current) return;
+    checkedOnOpen.current = true;
+    const runtimeKey = useGuestsStore.getState().runtimeKey;
+    void checkGuestUpdates(false).then((result) => {
+      if (result.ok) {
+        useGuestsStore.getState().applyUpdates(result.updates, runtimeKey);
+      }
+    });
+  }, [status]);
+
+  const checkForUpdates = async () => {
+    setChecking(true);
+    const runtimeKey = useGuestsStore.getState().runtimeKey;
+    const result = await checkGuestUpdates(true);
+    setChecking(false);
+    if (!result.ok) {
+      toast.error(t('settings.extensions.toast.checkFailed'));
+      return;
+    }
+    useGuestsStore.getState().applyUpdates(result.updates, runtimeKey);
+    if (Object.keys(result.updates).length === 0) {
+      toast.success(t('settings.extensions.toast.upToDate'));
+    }
+  };
+
+  const update = async (guest: InstalledGuest) => {
+    setBusy(true);
+    const result = await updateGuest(guest.id);
+    setBusy(false);
+    if (!result.ok) {
+      toast.error(
+        result.code === 'host-too-old' && result.required
+          ? t('settings.extensions.toast.hostTooOld', { version: result.required })
+          : t(updateErrorToastKey(result.code)),
+      );
+      return;
+    }
+    // Open panels still run the old bundle; the next open loads the new one.
+    closeGuestTabsById(guest.id);
+    toast.success(t('settings.extensions.toast.updated', {
+      name: result.guest.name,
+      version: result.guest.version ?? '',
+    }));
+    await loadGuestCatalog();
+    // A version that asks for more than the user approved goes through the
+    // same review dialog an install does.
+    if (guestNeedsApproval(result.guest)) {
+      setApproval(result.guest);
+    }
+  };
+
   const finishInstall = async (
     result: Awaited<ReturnType<typeof installGuest>>,
-    input: string,
+    source: InstallSource,
     options: { allowConflictDialog?: boolean } = {},
   ): Promise<boolean> => {
     if (!result.ok) {
@@ -362,8 +468,8 @@ export const ExtensionsPage: React.FC = () => {
           ? guests.find((guest) => guest.id === result.id)
           : undefined;
         setReinstall({
-          input,
-          name: existing?.name ?? result.id ?? input,
+          source,
+          name: existing?.name ?? result.id ?? (source.kind === 'file' ? source.file.name : source.input),
         });
         return false;
       }
@@ -392,52 +498,112 @@ export const ExtensionsPage: React.FC = () => {
     return true;
   };
 
+  const runInstall = async (source: InstallSource, options: { replace?: boolean } = {}) => {
+    if (source.kind === 'input') {
+      setInstallValue(source.input);
+    }
+    setBusy(true);
+    const result = source.kind === 'file'
+      ? await uploadGuestZip(source.file, options)
+      : await installGuest(source.input, options);
+    setBusy(false);
+    await finishInstall(result, source, { allowConflictDialog: !options.replace });
+  };
+
   const add = async () => {
     const trimmed = installValue.trim();
     if (!trimmed) {
       toast.error(t('settings.extensions.toast.invalidPath'));
       return;
     }
-    setBusy(true);
-    const result = await installGuest(trimmed);
-    setBusy(false);
-    await finishInstall(result, trimmed);
+    await runInstall({ kind: 'input', input: trimmed });
   };
 
   const browseFolder = async () => {
-    if (canRequestNativeDirectoryAccess()) {
-      const res = await requestDirectoryAccess('');
-      if (res.success && res.path) {
-        setInstallValue(res.path);
-        setBusy(true);
-        const result = await installGuest(res.path);
-        setBusy(false);
-        await finishInstall(result, res.path);
-      }
+    if (!nativePaths) return;
+    const res = await requestDirectoryAccess('');
+    if (res.success && res.path) {
+      await runInstall({ kind: 'input', input: res.path });
     }
   };
 
   const browseZip = async () => {
+    if (!nativePaths) {
+      zipInputRef.current?.click();
+      return;
+    }
     const fileRes = await requestFileAccess({
       filters: [{ name: 'ZIP Archive', extensions: ['zip'] }],
     });
     if (fileRes.success && fileRes.path) {
-      setInstallValue(fileRes.path);
-      setBusy(true);
-      const result = await installGuest(fileRes.path);
-      setBusy(false);
-      await finishInstall(result, fileRes.path);
+      await runInstall({ kind: 'input', input: fileRes.path });
     }
+  };
+
+  const onZipPicked = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    // Clear so picking the same file again (after a failed try) fires change.
+    event.target.value = '';
+    if (!file) return;
+    if (!isZipFile(file)) {
+      toast.error(t('settings.extensions.toast.invalidPath'));
+      return;
+    }
+    await runInstall({ kind: 'file', file });
+  };
+
+  const onDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (busy) return;
+    event.preventDefault();
+    dragDepth.current += 1;
+    setDropActive(true);
+  };
+
+  const onDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (busy) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  };
+
+  const onDragLeave = () => {
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDropActive(false);
+  };
+
+  const onDrop = async (event: React.DragEvent<HTMLDivElement>) => {
+    // Without this the shell (or the browser) navigates to the dropped file.
+    event.preventDefault();
+    dragDepth.current = 0;
+    setDropActive(false);
+    if (busy) return;
+    const item = event.dataTransfer.items[0];
+    const file = item?.getAsFile() ?? null;
+    const entry = item?.webkitGetAsEntry() ?? null;
+    const isDirectory = entry?.isDirectory === true;
+    const isZip = file !== null && !isDirectory && isZipFile(file);
+    // Fastest route: the desktop on its own machine names the path and the
+    // server reads it; nothing travels over the wire.
+    const path = file && nativePaths ? pathForDroppedFile(file) : null;
+    if (path && (isDirectory || isZip)) {
+      await runInstall({ kind: 'input', input: path });
+      return;
+    }
+    if (isDirectory) {
+      toast.error(t(nativePaths ? 'settings.extensions.toast.invalidPath' : 'settings.extensions.toast.folderNeedsZip'));
+      return;
+    }
+    if (!file || !isZip) {
+      toast.error(t('settings.extensions.toast.invalidPath'));
+      return;
+    }
+    await runInstall({ kind: 'file', file });
   };
 
   const confirmReinstall = async () => {
     if (!reinstall) {
       return;
     }
-    setBusy(true);
-    const result = await installGuest(reinstall.input, { replace: true });
-    setBusy(false);
-    await finishInstall(result, reinstall.input, { allowConflictDialog: false });
+    await runInstall(reinstall.source, { replace: true });
   };
 
   const remove = async (id: string, name: string) => {
@@ -500,6 +666,20 @@ export const ExtensionsPage: React.FC = () => {
         title={t('settings.extensions.section.installed')}
         divider={false}
         contentClassName="space-y-3"
+        headerAction={unsupported ? null : (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            data-settings-item="extensions.updates.check"
+            disabled={busy || checking || status !== 'ready'}
+            aria-label={t('settings.extensions.updates.check.aria')}
+            onClick={() => void checkForUpdates()}
+          >
+            <Icon name="refresh" className={cn('h-4 w-4', checking && 'animate-spin')} />
+            {t('settings.extensions.updates.check')}
+          </Button>
+        )}
       >
         {status === 'error' ? (
           <p className="typography-meta text-destructive">{t('settings.extensions.toast.loadFailed')}</p>
@@ -518,6 +698,7 @@ export const ExtensionsPage: React.FC = () => {
             onReview={setApproval}
             onRemove={remove}
             onSetEnabled={setEnabled}
+            onUpdate={update}
           />
         ))}
       </SettingsSection>
@@ -529,41 +710,67 @@ export const ExtensionsPage: React.FC = () => {
         >
           <SettingsStackedField
             label={t('settings.extensions.add.label')}
+            info={t(nativePaths ? 'settings.extensions.add.drop' : 'settings.extensions.add.drop.zipOnly')}
             settingsItem="extensions.add"
             controlClassName="w-full max-w-none"
           >
-            <div className="relative flex min-w-0 flex-1 items-center">
-              <Input
-                value={installValue}
-                onChange={(event) => setInstallValue(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    void add();
-                  }
-                }}
-                placeholder={t('settings.extensions.add.placeholder')}
-                aria-label={t('settings.extensions.add.label')}
-                className={cn(
-                  'h-8 min-w-0 flex-1 rounded-md pl-3',
-                  canRequestNativeDirectoryAccess() ? 'pr-14' : 'pr-3',
-                )}
-                disabled={busy}
-              />
-              {canRequestNativeDirectoryAccess() ? (
+            <div
+              className={cn(
+                'relative -m-1 flex min-w-0 flex-1 items-center gap-2 rounded-md border border-dashed border-transparent p-1 transition-colors',
+                dropActive && 'border-primary bg-primary/5',
+              )}
+              onDragEnter={onDragEnter}
+              onDragOver={onDragOver}
+              onDragLeave={onDragLeave}
+              onDrop={(event) => void onDrop(event)}
+            >
+              {dropActive ? (
+                <span className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-background/80 typography-ui-label text-primary">
+                  {t('settings.extensions.add.drop.active')}
+                </span>
+              ) : null}
+              <div className="relative flex min-w-0 flex-1 items-center">
+                <Input
+                  value={installValue}
+                  onChange={(event) => setInstallValue(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      void add();
+                    }
+                  }}
+                  placeholder={t('settings.extensions.add.placeholder')}
+                  aria-label={t('settings.extensions.add.label')}
+                  className={cn(
+                    'h-8 min-w-0 flex-1 rounded-md pl-3',
+                    nativePaths ? 'pr-14' : 'pr-8',
+                  )}
+                  disabled={busy}
+                />
+                <input
+                  ref={zipInputRef}
+                  type="file"
+                  accept=".zip,application/zip"
+                  className="sr-only"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                  onChange={(event) => void onZipPicked(event)}
+                />
                 <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                    title={t('settings.extensions.add.browseFolder')}
-                    aria-label={t('settings.extensions.add.browseFolder.aria')}
-                    disabled={busy}
-                    onClick={() => void browseFolder()}
-                  >
-                    <Icon name="folder" className="h-4 w-4" />
-                  </Button>
+                  {nativePaths ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                      title={t('settings.extensions.add.browseFolder')}
+                      aria-label={t('settings.extensions.add.browseFolder.aria')}
+                      disabled={busy}
+                      onClick={() => void browseFolder()}
+                    >
+                      <Icon name="folder" className="h-4 w-4" />
+                    </Button>
+                  ) : null}
                   <Button
                     type="button"
                     variant="ghost"
@@ -577,18 +784,18 @@ export const ExtensionsPage: React.FC = () => {
                     <Icon name="archive" className="h-4 w-4" />
                   </Button>
                 </div>
-              ) : null}
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                disabled={busy}
+                aria-label={t('settings.extensions.add.aria')}
+                onClick={() => void add()}
+              >
+                <Icon name="add" className="h-4 w-4" />
+                {t('settings.extensions.add.action')}
+              </Button>
             </div>
-            <Button
-              type="button"
-              size="sm"
-              disabled={busy}
-              aria-label={t('settings.extensions.add.aria')}
-              onClick={() => void add()}
-            >
-              <Icon name="add" className="h-4 w-4" />
-              {t('settings.extensions.add.action')}
-            </Button>
           </SettingsStackedField>
         </SettingsSection>
       )}

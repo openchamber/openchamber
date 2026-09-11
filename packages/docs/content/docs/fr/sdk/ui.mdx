@@ -9,7 +9,7 @@ description: Boutons, champs, listes déroulantes, onglets, listes et autres com
 
 ## Appelez `applyHostReady` en premier
 
-Les contrôles lisent leurs couleurs dans des variables CSS que `applyHostReady` écrit sur la page. Appelez-le dans `host.onReady` avant le premier montage, et les couleurs suivront le thème de l'application quand l'utilisateur en change.
+Les contrôles lisent leurs couleurs dans des variables CSS que `applyHostReady` écrit sur la page. Il applique aussi la police et la couleur de texte de l'application à la racine de la page, donc le HTML brut que vous ajoutez vous-même s'affiche correctement lui aussi. Appelez-le dans `host.onReady` avant le premier montage, et les couleurs suivront le thème de l'application quand l'utilisateur en change.
 
 ```ts
 import { applyHostReady } from "@openchamber/sdk/ui";

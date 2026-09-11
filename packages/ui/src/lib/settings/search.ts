@@ -1095,6 +1095,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['folder', 'path', 'zip', 'git', 'url', 'install', 'guest', 'panel'],
     isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
   },
+  {
+    id: 'extensions.updates.check',
+    page: 'extensions',
+    titleKey: 'settings.extensions.updates.check',
+    keywords: ['update', 'upgrade', 'version', 'git', 'extension', 'guest', 'refresh'],
+    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
+  },
 ] as const;
 
 interface BuildSettingsSearchResultsOptions {

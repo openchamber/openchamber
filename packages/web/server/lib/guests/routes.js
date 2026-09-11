@@ -21,7 +21,9 @@ import {
 } from './catalog.js';
 import { runGuestFileOperation } from './files.js';
 import { injectGuestAssetTokens, parseGuestUrlToken } from './html-tokens.js';
-import { installGuest, parseInstallRequest, uninstallGuest } from './install.js';
+import { installGuest, installGuestFromZipBuffer, parseInstallRequest, uninstallGuest } from './install.js';
+import { guestUploadMaxBytes, readGuestUploadBody } from './upload.js';
+import { checkAllGuestUpdates, updateGuest, withGuestUpdate } from './updates.js';
 import { extensionsPersistPath, readExtensionStore, setCapabilityGrants } from './persist.js';
 import { forgetGuestAuth, getGuestAuth, guestAuthPersistPath, patchGuestAuth } from './auth-store.js';
 import {
@@ -93,6 +95,10 @@ const enabledBodySchema = z.object({
   enabled: z.boolean(),
 });
 
+const updateCheckBodySchema = z.object({
+  force: z.boolean().optional(),
+});
+
 const queryValue = (req, key) => {
   const raw = req.query?.[key];
   const value = Array.isArray(raw) ? raw[0] : raw;
@@ -145,6 +151,21 @@ const renderOauthCallbackPage = ({ title, message }) => `<!doctype html>
 </body>
 </html>`;
 
+const sendInstallResult = (res, result) => {
+  if (!result.ok) {
+    const conflict = result.code === 'id-taken' || result.code === 'already-installed';
+    const body = { error: result.code };
+    if (result.code === 'host-too-old' && result.required) {
+      body.required = result.required;
+    }
+    if (conflict && result.id) {
+      body.id = result.id;
+    }
+    return res.status(conflict ? 409 : 400).json(body);
+  }
+  res.status(result.replaced ? 200 : 201).json({ guest: result.guest });
+};
+
 const declaredSettings = (guest) => {
   const fields = guest.integration?.settings ?? [];
   return new Map(fields.map((field) => [field.id, field]));
@@ -172,7 +193,7 @@ export const registerGuestRoutes = (app, {
     try {
       const guests = await listInstalledGuests({ persistPath });
       res.json({
-        guests: guests.map(toPublicGuest),
+        guests: guests.map((guest) => toPublicGuest(withGuestUpdate(guest, persistPath))),
       });
     } catch (error) {
       console.error('Failed to list guests:', error);
@@ -188,21 +209,78 @@ export const registerGuestRoutes = (app, {
         return res.status(400).json({ error: hasUrl ? 'invalid-url' : 'invalid-path' });
       }
       const result = await installGuest(request, persistPath, installOptions());
+      sendInstallResult(res, result);
+    } catch (error) {
+      console.error('Failed to install guest:', error);
+      res.status(500).json({ error: 'Failed to install guest' });
+    }
+  });
+
+  // Raw zip body from the browser (Settings → Extensions file picker or
+  // drop) for hosts the user cannot name a path on. Registered ahead of the
+  // `:id` routes because `upload` is a valid panel id shape. Same result
+  // and error codes as `POST /api/guests` with a local `.zip`.
+  app.post('/api/guests/upload', async (req, res) => {
+    try {
+      const body = await readGuestUploadBody(req, guestUploadMaxBytes());
+      if (!body.ok) {
+        return res.status(body.status).json({ error: body.error });
+      }
+      const replace = req.query?.replace === 'true';
+      const result = await installGuestFromZipBuffer(body.buffer, persistPath, { openchamberVersion, replace });
+      sendInstallResult(res, result);
+    } catch (error) {
+      console.error('Failed to install uploaded guest:', error);
+      res.status(500).json({ error: 'Failed to install guest' });
+    }
+  });
+
+  // Registered ahead of the `:id` routes so `updates` is never read as a guest id.
+  app.post('/api/guests/updates/check', json16, async (req, res) => {
+    try {
+      const parsed = updateCheckBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({ error: 'invalid-request' });
+      }
+      const updates = await checkAllGuestUpdates({
+        persistPath,
+        force: Boolean(parsed.data.force),
+        gitBinary: resolveGitBinaryForSpawn(),
+      });
+      res.json({ updates });
+    } catch (error) {
+      console.error('Failed to check guest updates:', error);
+      res.status(500).json({ error: 'Failed to check guest updates' });
+    }
+  });
+
+  app.post('/api/guests/:id/update', async (req, res) => {
+    try {
+      const guest = await loadGuest(req.params.id);
+      if (!guest) {
+        return res.status(404).json({ error: 'not-found' });
+      }
+      const result = await updateGuest({
+        guest,
+        origin: guest.gitOrigin,
+        persistPath,
+        ...installOptions(),
+      });
       if (!result.ok) {
-        const status = result.code === 'id-taken' || result.code === 'already-installed' ? 409 : 400;
         const body = { error: result.code };
         if (result.code === 'host-too-old' && result.required) {
           body.required = result.required;
         }
-        if ((result.code === 'id-taken' || result.code === 'already-installed') && result.id) {
-          body.id = result.id;
-        }
-        return res.status(status).json(body);
+        return res.status(400).json(body);
       }
-      res.status(result.replaced ? 200 : 201).json({ guest: result.guest });
+      const next = await loadGuest(guest.id);
+      if (!next) {
+        return res.status(404).json({ error: 'not-found' });
+      }
+      res.json({ guest: toPublicGuest(withGuestUpdate(next, persistPath)) });
     } catch (error) {
-      console.error('Failed to install guest:', error);
-      res.status(500).json({ error: 'Failed to install guest' });
+      console.error('Failed to update guest:', error);
+      res.status(500).json({ error: 'Failed to update guest' });
     }
   });
 

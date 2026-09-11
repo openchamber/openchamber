@@ -38,7 +38,7 @@ Point `index.html` at `main.js` with a normal `<script src="main.js"></script>`.
 
 OpenChamber reads the manifest and shows a dialog listing what the extension asks for (see [Capabilities](#capabilities)). Approve it, and your icon appears on the rail. Click it and your page loads.
 
-You can also add a local `.zip` or an https link to a git repository or a zip file. Those are copied into OpenChamber's data folder and run from that copy, so ship the built files, not `node_modules` or TypeScript sources. Removing the extension deletes the copy. A folder install runs from your folder directly, so you can edit, rebuild, and reload.
+You can also add a local `.zip` or an https link to a git repository or a zip file. A git install is the one that can update: raise `version` in `package.json` and push, and OpenChamber offers the update the next time the user opens Settings → Extensions. A `#tag` or `#branch` on the URL pins which one it follows. Those are copied into OpenChamber's data folder and run from that copy, so ship the built files, not `node_modules` or TypeScript sources. Removing the extension deletes the copy. A folder install runs from your folder directly, so you can edit, rebuild, and reload.
 
 ## Manifest
 

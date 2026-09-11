@@ -18,7 +18,7 @@ Rozszerzenia działają w OpenChamber w wersji web i desktop. VS Code i aplikacj
    - link https do repozytorium git lub pliku zip
 3. Jeśli rozszerzenie prosi o uprawnienia, okno dialogowe je wymienia. Wybierz **Zezwól i włącz** albo **Usuń**, żeby je wycofać.
 
-Na desktopie przyciski folderu i archiwum obok pola otwierają systemowe okno wyboru, więc nie trzeba wpisywać ścieżki.
+Możesz też upuścić `.zip` na pole albo wybrać go przyciskiem archiwum obok; archiwum jest wysyłane na serwer OpenChamber, więc działa to także dla zdalnej instancji. Na desktopie przycisk folderu otwiera systemowe okno wyboru, a upuszczony folder instaluje się z jego ścieżki.
 
 Ikona rozszerzenia pojawia się na pasku. Jeśli jej nie ma, zajrzyj do [Rozwiązywania problemów](/troubleshooting/).
 
@@ -28,13 +28,13 @@ Instalacja z folderu działa bezpośrednio z tego folderu, więc ktoś, kto twor
 
 Pokazywanie panelu i odczyt, który projekt i sesja są otwarte, nie wymaga uprawnień. Wszystko, co działa w Twoim imieniu, wymaga, a całą listę widzisz raz, przy instalacji:
 
-- **Wysyłanie wiadomości do Twoich sesji**: pisanie i wysyłanie promptów do modelu, co zużywa tokeny.
-- **Tworzenie sesji i worktree**: uruchamianie nowych sesji w bieżącym projekcie.
-- **Odczyt i zapis plików w otwartym projekcie**.
-- **Odczyt i zapis plików poza projektem**: tylko dokładnie te lokalizacje, które rozszerzenie wymienia w oknie dialogowym.
-- **Łączenie z usługami zewnętrznymi**: wywoływanie własnego API z kontem, które połączysz.
-- **Czytanie rozmowy sesji, gdy uruchamiasz jej akcję**: rozszerzenie dostaje wszystkie wiadomości tej sesji, ale tylko wtedy, gdy wybierzesz jego akcję z menu sesji.
-- **Uruchamianie lokalnej usługi**: uruchomienie osobnego programu na tym komputerze z uprawnieniami Twojego konta. Zezwalaj na to tylko rozszerzeniom, którym ufasz; zadeklarowane uprawnienia opisują zamiar, ale go nie ograniczają.
+- **Wysyłanie wiadomości w Twoich sesjach**: pisze i wysyła prompty do modelu, co kosztuje tokeny i może uruchamiać narzędzia.
+- **Tworzenie sesji i worktree**: w bieżącym projekcie.
+- **Odczyt i zapis plików projektu**: dowolny plik w otwartym projekcie.
+- **Odczyt i zapis plików poza projektem**: tylko lokalizacje wymienione w oknie dialogowym.
+- **Łączenie z usługą zewnętrzną**: z kontem, które połączysz w Ustawienia → Integracje.
+- **Czytanie rozmowy sesji**: tylko gdy uruchamiasz akcję rozszerzenia na tej sesji.
+- **Uruchamianie lokalnej usługi**: osobny program z pełnymi uprawnieniami Twojego konta. Zezwalaj tylko, jeśli ufasz autorowi.
 
 Gdy nowsza wersja prosi o więcej, niż pozwoliłeś, karta pokazuje **Wymaga zgody** i przycisk **Sprawdź uprawnienia**. Dopóki nie zezwolisz na nową listę, to rozszerzenie pozostaje wyłączone.
 
@@ -47,6 +47,12 @@ Poza panelem na pasku bocznym rozszerzenie może dodawać pozycje do menu, z kt�
 Rozszerzenie, które rozmawia z usługą, dostaje kartę w **Ustawienia → Integracje** w sekcji **Konta rozszerzeń**. Zależnie od usługi karta prosi o token API, nazwę użytkownika i token albo client id do logowania. Wybierz **Połącz**; **Rozłącz** zapomina zapisany token. Dodatkowe pola zadeklarowane przez rozszerzenie zapisują się same, gdy je opuszczasz.
 
 Token zostaje na serwerze OpenChamber. Strona rozszerzenia nigdy go nie widzi.
+
+## Aktualizuj
+
+Rozszerzenia zainstalowane z adresu URL git mogą aktualizować się same. Otwarcie **Ustawienia → Rozszerzenia** sprawdza każde z nich najwyżej raz na godzinę; **Sprawdź aktualizacje** sprawdza od razu. Karta z nowszą wersją pokazuje **Dostępna aktualizacja** i przycisk **Aktualizuj**. Aktualizacja zachowuje Twoje uprawnienia, konta i ustawienia; jeśli nowa wersja prosi o więcej, okno dialogowe zgody pojawia się ponownie. Instalacje z folderu i z zip nie aktualizują się: zastąp je ręcznie.
+
+Dodaj `#v1.2.0` albo `#stable` do adresu URL git przy instalacji, żeby śledzić tag lub gałąź zamiast gałęzi domyślnej.
 
 ## Wstrzymaj lub usuń
 

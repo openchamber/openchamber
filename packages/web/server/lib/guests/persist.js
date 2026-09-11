@@ -10,6 +10,10 @@ const GUEST_SOURCES = ['path', 'zip', 'git'];
 const storeSchema = z.object({
   paths: z.array(z.string().min(1).refine((entry) => !entry.includes('\0'))),
   sources: z.record(z.string(), z.enum(GUEST_SOURCES)).optional(),
+  // Where a git install came from, keyed by install path. Entries are checked
+  // one at a time on read so a malformed one drops out instead of hiding the
+  // whole catalog.
+  gitOrigins: z.record(z.string(), z.unknown()).optional(),
   // Grants are stored as plain strings and filtered on read: a capability
   // that this build no longer knows (renamed, removed) must not invalidate the
   // whole store and hide every installed extension.
@@ -20,6 +24,27 @@ const storeSchema = z.object({
     z.record(z.string(), z.string().min(1).refine((entry) => !entry.includes('\0'))),
   ).optional(),
 });
+
+const gitOriginSchema = z.object({
+  url: z.string().min(1).refine((entry) => !entry.includes('\0')),
+  ref: z.string().min(1).max(256).refine((entry) => !entry.includes('\0')).optional(),
+});
+
+/** @returns {Record<string, { url: string, ref?: string }>} */
+const knownGitOriginsOnly = (origins) => {
+  /** @type {Record<string, { url: string, ref?: string }>} */
+  const cleaned = {};
+  for (const [installPath, raw] of Object.entries(origins)) {
+    const parsed = gitOriginSchema.safeParse(raw);
+    if (!parsed.success) {
+      continue;
+    }
+    cleaned[installPath] = parsed.data.ref
+      ? { url: parsed.data.url, ref: parsed.data.ref }
+      : { url: parsed.data.url };
+  }
+  return cleaned;
+};
 
 const parseStore = (raw) => {
   try {
@@ -61,6 +86,7 @@ export const isCopiedGuestRoot = (root, persistPath) => {
 const emptyStore = () => ({
   paths: [],
   sources: {},
+  gitOrigins: {},
   capabilityGrants: {},
   disabledGuests: {},
   serviceSocketOverrides: {},
@@ -82,6 +108,7 @@ export const readExtensionStore = async (persistPath) => {
     return {
       paths: parsed.paths,
       sources: parsed.sources ?? {},
+      gitOrigins: knownGitOriginsOnly(parsed.gitOrigins ?? {}),
       capabilityGrants: knownGrantsOnly(parsed.capabilityGrants ?? {}),
       disabledGuests: parsed.disabledGuests ?? {},
       serviceSocketOverrides: parsed.serviceSocketOverrides ?? {},
@@ -99,16 +126,24 @@ export const writeExtensionStore = async (
   {
     paths,
     sources = {},
+    gitOrigins = {},
     capabilityGrants = {},
     disabledGuests = {},
     serviceSocketOverrides = {},
   },
 ) => {
   const cleaned = {};
+  /** @type {Record<string, { url: string, ref?: string }>} */
+  const origins = {};
   for (const entry of paths) {
     const source = sources[entry];
     if (source && source !== 'path') {
       cleaned[entry] = source;
+    }
+    // An origin only means something for a git copy that is still installed.
+    const origin = source === 'git' ? gitOrigins[entry] : undefined;
+    if (origin && typeof origin.url === 'string' && origin.url) {
+      origins[entry] = origin.ref ? { url: origin.url, ref: origin.ref } : { url: origin.url };
     }
   }
   const grants = {};
@@ -140,6 +175,9 @@ export const writeExtensionStore = async (
   const payload = { paths };
   if (Object.keys(cleaned).length > 0) {
     payload.sources = cleaned;
+  }
+  if (Object.keys(origins).length > 0) {
+    payload.gitOrigins = origins;
   }
   if (Object.keys(grants).length > 0) {
     payload.capabilityGrants = grants;
@@ -193,14 +231,19 @@ export const readExtensionPaths = async (persistPath) => {
 export const writeExtensionPaths = async (paths, persistPath) => {
   const current = await readExtensionStore(persistPath);
   const sources = {};
+  const gitOrigins = {};
   for (const entry of paths) {
     if (current.sources[entry]) {
       sources[entry] = current.sources[entry];
+    }
+    if (current.gitOrigins[entry]) {
+      gitOrigins[entry] = current.gitOrigins[entry];
     }
   }
   await writeExtensionStore(persistPath, {
     paths,
     sources,
+    gitOrigins,
     capabilityGrants: current.capabilityGrants,
     disabledGuests: current.disabledGuests,
     serviceSocketOverrides: current.serviceSocketOverrides,

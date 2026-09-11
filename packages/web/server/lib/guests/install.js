@@ -9,7 +9,7 @@ import {
   toPublicGuest,
 } from './catalog.js';
 import { stopGuestService } from './service.js';
-import { cloneGitRepository, isHttpsGitUrl, isHttpsZipUrl } from './clone.js';
+import { cloneGitRepository, isHttpsGitUrl, isHttpsZipUrl, parseGitInstallUrl } from './clone.js';
 import { extractZipBuffer, unwrapGuestRoot } from './extract-zip.js';
 import {
   guestCopiesDir,
@@ -31,7 +31,7 @@ export const parseInstallRequest = (body) => {
   return parsed.success ? parsed.data : null;
 };
 
-const persistGuest = async (guest, root, source, persistPath, { replace = false } = {}) => {
+const persistGuest = async (guest, root, source, persistPath, { replace = false, origin = null } = {}) => {
   const stored = await readExtensionStore(persistPath);
   const storedRoots = await Promise.all(stored.paths.map((entry) => resolveGuestPackageRoot(entry)));
   if (storedRoots.some((entry) => entry === root)) {
@@ -65,6 +65,7 @@ const persistGuest = async (guest, root, source, persistPath, { replace = false 
   await writeExtensionStore(persistPath, {
     paths: [...after.paths, root],
     sources: { ...after.sources, [root]: source },
+    gitOrigins: origin ? { ...after.gitOrigins, [root]: origin } : after.gitOrigins,
     capabilityGrants: after.capabilityGrants,
     disabledGuests: after.disabledGuests,
     serviceSocketOverrides: after.serviceSocketOverrides,
@@ -80,7 +81,7 @@ const removeDir = async (dir) => {
   await fs.rm(dir, { recursive: true, force: true });
 };
 
-const installCopiedGuest = async ({ source, prepare, persistPath, openchamberVersion, replace = false }) => {
+const installCopiedGuest = async ({ source, prepare, persistPath, openchamberVersion, replace = false, origin = null }) => {
   const copies = guestCopiesDir(persistPath);
   await fs.mkdir(copies, { recursive: true });
   const staging = path.join(copies, `.tmp-${process.pid}-${Date.now()}`);
@@ -119,7 +120,7 @@ const installCopiedGuest = async ({ source, prepare, persistPath, openchamberVer
       await removeDir(staging);
     }
     const root = await fs.realpath(dest);
-    const persisted = await persistGuest(inspected.guest, root, source, persistPath, { replace });
+    const persisted = await persistGuest(inspected.guest, root, source, persistPath, { replace, origin });
     if (!persisted.ok) {
       await removeDir(dest);
     }
@@ -162,7 +163,14 @@ const downloadZip = async (url) => {
   return buffer;
 };
 
-const installFromZipBuffer = async (buffer, persistPath, { openchamberVersion, replace = false } = {}) => (
+/**
+ * Install from zip bytes already in memory. Local `.zip` paths, https zip
+ * URLs, and browser uploads (`POST /api/guests/upload`) all land here, so the
+ * archive limits, unwrap, inspection, and store write are one path. The
+ * archive size cap is the caller's job: path and URL installs stop at
+ * `MAX_ZIP_BYTES`, the upload route at its own configured limit.
+ */
+export const installGuestFromZipBuffer = async (buffer, persistPath, { openchamberVersion, replace = false } = {}) => (
   installCopiedGuest({
     source: 'zip',
     persistPath,
@@ -186,7 +194,7 @@ export const installGuestFromPath = async (rawPath, persistPath, { openchamberVe
       if (!buffer) {
         return { ok: false, code: 'not-found' };
       }
-      return installFromZipBuffer(buffer, persistPath, { openchamberVersion, replace });
+      return installGuestFromZipBuffer(buffer, persistPath, { openchamberVersion, replace });
     }
   } catch {
     return { ok: false, code: 'not-found' };
@@ -210,25 +218,32 @@ export const installGuestFromUrl = async (rawUrl, persistPath, { openchamberVers
       if (!buffer) {
         return { ok: false, code: 'extract-failed' };
       }
-      return installFromZipBuffer(buffer, persistPath, { openchamberVersion, replace });
+      return installGuestFromZipBuffer(buffer, persistPath, { openchamberVersion, replace });
     } catch {
       return { ok: false, code: 'extract-failed' };
     }
   }
-  if (!isHttpsGitUrl(rawUrl)) {
+  const gitSource = parseGitInstallUrl(rawUrl);
+  if (!gitSource) {
     return { ok: false, code: 'invalid-url' };
   }
-  return installGuestFromGitSource(rawUrl, persistPath, { openchamberVersion, replace, gitBinary });
+  return installGuestFromGitSource(gitSource.url, persistPath, { openchamberVersion, replace, gitBinary, ref: gitSource.ref });
 };
 
-export const installGuestFromGitSource = async (source, persistPath, { openchamberVersion, replace = false, gitBinary } = {}) => (
+/**
+ * `source` is the clone URL without its `#ref` fragment; `ref` is the branch
+ * or tag to pin (omitted means the remote default branch). Both are stored
+ * as the guest's origin so Settings → Extensions can check for updates later.
+ */
+export const installGuestFromGitSource = async (source, persistPath, { openchamberVersion, replace = false, gitBinary, ref } = {}) => (
   installCopiedGuest({
     source: 'git',
     persistPath,
     openchamberVersion,
     replace,
+    origin: ref ? { url: source, ref } : { url: source },
     prepare: async (staging) => {
-      const cloned = await cloneGitRepository(source, staging, { gitBinary });
+      const cloned = await cloneGitRepository(source, staging, { gitBinary, ref });
       return cloned.ok ? { ok: true, root: staging } : cloned;
     },
   })
@@ -255,6 +270,7 @@ export const uninstallGuest = async (id, persistPath) => {
   const stored = await readExtensionStore(persistPath);
   const kept = [];
   const sources = {};
+  const gitOrigins = {};
   let removedRoot = null;
   for (const entry of stored.paths) {
     const root = await resolveGuestPackageRoot(entry);
@@ -266,6 +282,9 @@ export const uninstallGuest = async (id, persistPath) => {
     if (stored.sources[entry]) {
       sources[entry] = stored.sources[entry];
     }
+    if (stored.gitOrigins[entry]) {
+      gitOrigins[entry] = stored.gitOrigins[entry];
+    }
   }
   const capabilityGrants = { ...(stored.capabilityGrants ?? {}) };
   delete capabilityGrants[id];
@@ -276,6 +295,7 @@ export const uninstallGuest = async (id, persistPath) => {
   await writeExtensionStore(persistPath, {
     paths: kept,
     sources,
+    gitOrigins,
     capabilityGrants,
     disabledGuests,
     serviceSocketOverrides,

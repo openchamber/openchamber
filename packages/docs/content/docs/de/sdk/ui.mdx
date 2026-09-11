@@ -9,7 +9,7 @@ description: Buttons, Felder, Dropdowns, Tabs, Listen und andere Bausteine aus @
 
 ## Zuerst `applyHostReady` aufrufen
 
-Die Elemente lesen ihre Farben aus CSS-Variablen, die `applyHostReady` auf die Seite schreibt. Ruf es in `host.onReady` vor dem ersten Mount auf, dann folgen die Farben dem Theme der App, wenn der Nutzer es wechselt.
+Die Elemente lesen ihre Farben aus CSS-Variablen, die `applyHostReady` auf die Seite schreibt. Es setzt außerdem Schrift und Textfarbe der App auf der Seitenwurzel, sodass auch selbst hinzugefügtes einfaches HTML richtig aussieht. Ruf es in `host.onReady` vor dem ersten Mount auf, dann folgen die Farben dem Theme der App, wenn der Nutzer es wechselt.
 
 ```ts
 import { applyHostReady } from "@openchamber/sdk/ui";

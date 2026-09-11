@@ -3,6 +3,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
+import { useGuestBadgeStore } from './badge-store.ts';
 import { parseGuestCatalogJson } from './parse.ts';
 import { useGuestsStore } from './store.ts';
 
@@ -10,6 +11,7 @@ const alignCatalogRuntime = (runtimeKey: string): void => {
   const store = useGuestsStore.getState();
   if (store.runtimeKey !== runtimeKey) {
     store.resetForRuntimeSwitch(runtimeKey);
+    useGuestBadgeStore.getState().resetForRuntimeSwitch();
   }
 };
 

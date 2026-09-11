@@ -38,7 +38,7 @@ Wskaż `main.js` w `index.html` zwykłym `<script src="main.js"></script>`.
 
 OpenChamber odczytuje manifest i pokazuje okno z listą tego, o co rozszerzenie prosi (zobacz [Uprawnienia](#uprawnienia)). Zatwierdź, a Twoja ikona pojawi się na pasku bocznym. Kliknij ją i Twoja strona się załaduje.
 
-Możesz też dodać lokalny plik `.zip` albo link https do repozytorium git lub pliku zip. Te są kopiowane do folderu danych OpenChamber i uruchamiane z tej kopii, więc dostarczaj zbudowane pliki, a nie `node_modules` ani źródła TypeScript. Usunięcie rozszerzenia usuwa kopię. Instalacja z folderu działa bezpośrednio z Twojego folderu, więc możesz edytować, przebudowywać i przeładowywać.
+Możesz też dodać lokalny plik `.zip` albo link https do repozytorium git lub pliku zip. Tylko instalacja z git może się aktualizować: podnieś `version` w `package.json`, wypchnij zmiany, a OpenChamber zaproponuje aktualizację, gdy użytkownik następnym razem otworzy Ustawienia → Rozszerzenia. `#tag` albo `#branch` w adresie URL przypina, co jest śledzone. Te są kopiowane do folderu danych OpenChamber i uruchamiane z tej kopii, więc dostarczaj zbudowane pliki, a nie `node_modules` ani źródła TypeScript. Usunięcie rozszerzenia usuwa kopię. Instalacja z folderu działa bezpośrednio z Twojego folderu, więc możesz edytować, przebudowywać i przeładowywać.
 
 ## Manifest
 

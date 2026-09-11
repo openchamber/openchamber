@@ -48,25 +48,71 @@ export const isHttpsZipUrl = (value) => {
   }
 };
 
+// A branch or tag name git will take after `--branch`. No option-looking
+// names, no `..`, and nothing git refuses in a ref.
+const GIT_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$/;
+
+/** @param {string} value */
+export const isGitRef = (value) => (
+  GIT_REF_PATTERN.test(value)
+  && !value.includes('..')
+  && !value.endsWith('/')
+  && !value.endsWith('.lock')
+  && !value.includes('//')
+);
+
 /**
- * Clone `source` into `dest`. `source` is an https URL in production. Tests pass a local repo path.
- * `gitBinary` comes from the host's git resolver: on Windows and in the packaged desktop app a bare
- * `git` is often not on PATH.
+ * `https://host/org/panel.git#v1.2.0` → `{ url, ref }`. The fragment pins a
+ * branch or tag; without it the clone follows the remote default branch. A
+ * fragment that is not a usable ref, or a URL that is not public https, is
+ * `null` (the install route answers `invalid-url`).
+ * @param {string} value
  */
-export const cloneGitRepository = (source, dest, { gitBinary = 'git', timeoutMs = CLONE_TIMEOUT_MS } = {}) => (
+export const parseGitInstallUrl = (value) => {
+  const hashAt = value.indexOf('#');
+  const url = hashAt === -1 ? value : value.slice(0, hashAt);
+  const ref = hashAt === -1 ? '' : value.slice(hashAt + 1);
+  if (!isHttpsGitUrl(url)) {
+    return null;
+  }
+  if (hashAt !== -1 && !isGitRef(ref)) {
+    return null;
+  }
+  return ref ? { url, ref } : { url };
+};
+
+/**
+ * Run one git command without a terminal. Resolves `{ ok: true, stdout }` on
+ * exit 0 and `{ ok: false }` on a non-zero exit, a spawn error, or the
+ * timeout (the child is killed). Never rejects. `stdout` is captured only
+ * when `capture` is set so a clone's progress is not buffered.
+ */
+export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT_MS, capture = false } = {}) => (
   new Promise((resolve) => {
-    const child = spawn(
-      gitBinary,
-      ['clone', '--depth', '1', '--', source, dest],
-      {
-        env: {
-          ...process.env,
-          GIT_TERMINAL_PROMPT: '0',
-          GIT_ASKPASS: 'echo',
+    let child;
+    try {
+      child = spawn(
+        gitBinary,
+        args,
+        {
+          cwd,
+          env: {
+            ...process.env,
+            GIT_TERMINAL_PROMPT: '0',
+            GIT_ASKPASS: 'echo',
+          },
+          stdio: ['ignore', capture ? 'pipe' : 'ignore', 'pipe'],
         },
-        stdio: ['ignore', 'ignore', 'pipe'],
-      },
-    );
+      );
+    } catch {
+      resolve({ ok: false });
+      return;
+    }
+    /** @type {Buffer[]} */
+    const chunks = [];
+    if (capture && child.stdout) {
+      child.stdout.on('data', (chunk) => chunks.push(chunk));
+    }
     let settled = false;
     const finish = (result) => {
       if (settled) {
@@ -77,15 +123,34 @@ export const cloneGitRepository = (source, dest, { gitBinary = 'git', timeoutMs 
     };
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
-      finish({ ok: false, code: 'clone-failed' });
+      finish({ ok: false });
     }, timeoutMs);
     child.on('error', () => {
       clearTimeout(timer);
-      finish({ ok: false, code: 'clone-failed' });
+      finish({ ok: false });
     });
     child.on('close', (exit) => {
       clearTimeout(timer);
-      finish(exit === 0 ? { ok: true } : { ok: false, code: 'clone-failed' });
+      finish(exit === 0 ? { ok: true, stdout: Buffer.concat(chunks).toString('utf8') } : { ok: false });
     });
   })
 );
+
+/**
+ * Clone `source` into `dest`. `source` is an https URL in production. Tests pass a local repo path.
+ * `gitBinary` comes from the host's git resolver: on Windows and in the packaged desktop app a bare
+ * `git` is often not on PATH. `ref` pins a branch or tag (`--branch`); a shallow clone of a tag
+ * works the same way as of a branch.
+ */
+export const cloneGitRepository = async (source, dest, { gitBinary = 'git', timeoutMs = CLONE_TIMEOUT_MS, ref } = {}) => {
+  if (ref !== undefined && !isGitRef(ref)) {
+    return { ok: false, code: 'clone-failed' };
+  }
+  const args = ['clone', '--depth', '1'];
+  if (ref) {
+    args.push('--branch', ref);
+  }
+  args.push('--', source, dest);
+  const result = await runGit(args, { gitBinary, timeoutMs });
+  return result.ok ? { ok: true } : { ok: false, code: 'clone-failed' };
+};

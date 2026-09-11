@@ -9,7 +9,7 @@ description: 来自 @openchamber/sdk/ui 的按钮、输入框、下拉框、标�
 
 ## 先调用 `applyHostReady`
 
-控件从 `applyHostReady` 写入页面的 CSS 变量中读取颜色。在 `host.onReady` 内、第一次挂载之前调用它，这样用户切换主题时颜色会跟随应用的主题。
+控件从 `applyHostReady` 写入页面的 CSS 变量中读取颜色。它还会把应用的字体和文字颜色设置到页面根元素上，所以你自己添加的普通 HTML 看起来也正常。在 `host.onReady` 内、第一次挂载之前调用它，这样用户切换主题时颜色会跟随应用的主题。
 
 ```ts
 import { applyHostReady } from "@openchamber/sdk/ui";

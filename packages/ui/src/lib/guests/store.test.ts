@@ -63,4 +63,32 @@ describe('useGuestsStore', () => {
     expect(useGuestsStore.getState().status).toBe('ready');
     expect(useGuestsStore.getState().guests).toEqual([hello]);
   });
+
+  test('overlays update checks without touching untouched rows', () => {
+    resetStore();
+    const gitGuest: InstalledGuest = { ...hello, id: 'git-one', source: 'git', origin: { url: 'https://github.com/acme/one.git' } };
+    const other: InstalledGuest = { ...hello, id: 'git-two', source: 'git', origin: { url: 'https://github.com/acme/two.git' } };
+    useGuestsStore.getState().resetForRuntimeSwitch('instance-a');
+    useGuestsStore.getState().replaceCatalog([hello, gitGuest, other], 'instance-a');
+
+    useGuestsStore.getState().applyUpdates({ 'git-one': { version: '1.1.0' } }, 'instance-a');
+    const [first, second, third] = useGuestsStore.getState().guests;
+    expect(first).toBe(hello);
+    expect(second.update).toEqual({ version: '1.1.0' });
+    expect(third).toBe(other);
+
+    // Same answer again: no new array.
+    const before = useGuestsStore.getState().guests;
+    useGuestsStore.getState().applyUpdates({ 'git-one': { version: '1.1.0' } }, 'instance-a');
+    expect(useGuestsStore.getState().guests).toBe(before);
+
+    // The update went away (installed, or the remote moved back).
+    useGuestsStore.getState().applyUpdates({}, 'instance-a');
+    expect(useGuestsStore.getState().guests[1]).toEqual(gitGuest);
+    expect('update' in useGuestsStore.getState().guests[1]).toBe(false);
+
+    // A stale instance answer is ignored.
+    useGuestsStore.getState().applyUpdates({ 'git-one': { version: '9.0.0' } }, 'instance-b');
+    expect(useGuestsStore.getState().guests[1].update).toBeUndefined();
+  });
 });

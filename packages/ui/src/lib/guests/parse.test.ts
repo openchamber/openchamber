@@ -206,4 +206,34 @@ describe('parseInstalledGuestJson', () => {
       capabilities: { requested: [], granted: [] },
     }))).toBeNull();
   });
+
+  test('keeps a git origin and a pending update', () => {
+    const guest = parseInstalledGuestJson(JSON.stringify({
+      guest: {
+        id: 'hello',
+        name: 'Hello',
+        icon: 'window',
+        entry: 'panel/index.html',
+        version: '1.0.0',
+        source: 'git',
+        capabilities: { requested: [], granted: [] },
+        origin: { url: 'https://github.com/acme/hello.git', ref: 'v1' },
+        update: { version: '1.1.0' },
+      },
+    }));
+    expect(guest?.origin).toEqual({ url: 'https://github.com/acme/hello.git', ref: 'v1' });
+    expect(guest?.update).toEqual({ version: '1.1.0' });
+
+    const junkUpdate = parseInstalledGuestJson(JSON.stringify({
+      guest: {
+        id: 'hello',
+        name: 'Hello',
+        icon: 'window',
+        entry: 'panel/index.html',
+        capabilities: { requested: [], granted: [] },
+        update: { version: '' },
+      },
+    }));
+    expect(junkUpdate).toBeNull();
+  });
 });
