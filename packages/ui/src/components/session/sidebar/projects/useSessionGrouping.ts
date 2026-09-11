@@ -81,8 +81,9 @@ export const useSessionGrouping = (args: Args) => {
       projectIsRepo: boolean,
     ) => {
       const normalizedProjectRoot = normalizePath(projectRoot ?? null);
-      // `orderSessionsByLifecycleScopes` owns lifecycle ordering before project
-      // ownership buckets are built. Dedupe retains that root/sibling order.
+      // `getSessionsForProject` supplies ownership order, not lifecycle order.
+      // This keeps that input order; the render layer re-sorts every sibling
+      // list by lifecycle rank (see `SessionGroupSection.compareSessionNodes`).
       const sortedProjectSessions = dedupeSessionsById(projectSessions);
 
       const sessionMap = new Map(sortedProjectSessions.map((session) => [session.id, session]));

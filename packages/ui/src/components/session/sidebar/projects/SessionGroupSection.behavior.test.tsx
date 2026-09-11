@@ -4,9 +4,12 @@ import { createRoot } from 'react-dom/client';
 import { I18nProvider } from '@/lib/i18n';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionGroupSectionProps } from './SessionGroupSection';
+import type { SessionNode } from '../types';
 import { installHookTestDom } from '../test-utils/testDom';
 
 type FolderCallbacks = {
@@ -22,10 +25,11 @@ type RowPropsCapture = Pick<SessionGroupSectionProps,
   | 'deleteSessionConfirm'
   | 'copiedSessionId'
   | 'setCopiedSessionId'
->;
+> & { node?: SessionNode };
 
 let folderCallbacks: FolderCallbacks | null = null;
 let rowPropsCapture: RowPropsCapture | null = null;
+let renderedNodes: SessionNode[] = [];
 
 mock.module('../../SessionFolderItem', () => ({
   SessionFolderItem: (props: FolderCallbacks) => {
@@ -67,6 +71,7 @@ mock.module('../sessions/collapsedActivityState', () => ({
 mock.module('../sessions/SessionTreeItem', () => ({
   SessionTreeItem: (props: RowPropsCapture) => {
     rowPropsCapture = props;
+    if (props.node) renderedNodes.push(props.node);
     return null;
   },
 }));
@@ -99,6 +104,33 @@ const groupWithSession: SessionGroupSectionProps['group'] = {
   sessions: [{ session: { id: 'session-a' } as Session, children: [], worktree: null }],
 };
 
+const rootSession = (id: string, updated: number): Session => ({
+  id,
+  slug: id,
+  projectID: 'project',
+  title: id,
+  version: '1',
+  directory: '/workspace',
+  time: { created: updated, updated },
+});
+
+const childSession = (id: string, parentID: string, updated: number): Session => ({
+  id,
+  slug: id,
+  projectID: 'project',
+  title: id,
+  version: '1',
+  directory: '/workspace',
+  parentID,
+  time: { created: updated, updated },
+});
+
+const node = (session: Session, children: SessionNode[] = []): SessionNode => ({
+  session,
+  children,
+  worktree: null,
+});
+
 const createProps = (): SessionGroupSectionProps => ({
   group,
   groupKey: 'project:main',
@@ -119,6 +151,7 @@ const createProps = (): SessionGroupSectionProps => ({
   openNewSessionDraft: () => undefined,
   pinnedSessionIds: new Set(),
   sessionOrderIndex: new Map(),
+  sessionOrderRanks: new Map(),
   notifyOnSubtasks: false,
   expandedParents: new Set(),
   editingId: null,
@@ -205,6 +238,125 @@ describe('SessionGroupSection public behavior', () => {
     } finally {
       await act(async () => root.unmount());
       rowPropsCapture = null;
+      dom.restore();
+    }
+  });
+
+  test('orders nested children by live lifecycle rank instead of ownership order', async () => {
+    const dom = installHookTestDom();
+    const root = createRoot(dom.container);
+    const ranks = new Map([
+      ['child-b', 2],
+      ['child-a', 1],
+      ['grandchild-new', 4],
+      ['grandchild-old', 0.5],
+    ]);
+    const nestedGroup: SessionGroupSectionProps['group'] = {
+      ...group,
+      sessions: [
+        node(rootSession('session-parent', 1), [
+          node(childSession('child-a', 'session-parent', 100), [
+            node(childSession('grandchild-old', 'child-a', 50)),
+            node(childSession('grandchild-new', 'child-a', 60)),
+          ]),
+          node(childSession('child-b', 'session-parent', 200)),
+        ]),
+      ],
+    };
+
+    try {
+      renderedNodes = [];
+      await act(async () => root.render(
+        <I18nProvider>
+          <SessionGroupSection {...createProps()} group={nestedGroup} sessionOrderRanks={ranks} />
+        </I18nProvider>,
+      ));
+
+      const parentNode = renderedNodes.find((entry) => entry.session.id === 'session-parent');
+      expect(parentNode?.children.map((child) => child.session.id)).toEqual(['child-b', 'child-a']);
+      expect(parentNode?.children[1]?.children.map((child) => child.session.id))
+        .toEqual(['grandchild-new', 'grandchild-old']);
+    } finally {
+      await act(async () => root.unmount());
+      renderedNodes = [];
+      dom.restore();
+    }
+  });
+
+  test('orders nested children by live ranks when timestamps contradict them', async () => {
+    const dom = installHookTestDom();
+    const root = createRoot(dom.container);
+    // Both children are absent from `sessionOrderIndex`, so the fallback
+    // comparator runs. Ranks disagree with `time.updated`, so an empty
+    // ranks fallback would emit timestamp order (newer timestamp first)
+    // instead of the rank order asserted below.
+    const rankGroup: SessionGroupSectionProps['group'] = {
+      ...group,
+      sessions: [
+        node(rootSession('session-parent', 1), [
+          node(childSession('child-newer-timestamp', 'session-parent', 300)),
+          node(childSession('child-newer-rank', 'session-parent', 100)),
+        ]),
+      ],
+    };
+
+    try {
+      renderedNodes = [];
+      await act(async () => root.render(
+        <I18nProvider>
+          <SessionGroupSection
+            {...createProps()}
+            group={rankGroup}
+            sessionOrderRanks={new Map([
+              ['child-newer-timestamp', 1],
+              ['child-newer-rank', 2],
+            ])}
+          />
+        </I18nProvider>,
+      ));
+
+      const parentNode = renderedNodes.find((entry) => entry.session.id === 'session-parent');
+      expect(parentNode?.children.map((child) => child.session.id))
+        .toEqual(['child-newer-rank', 'child-newer-timestamp']);
+    } finally {
+      await act(async () => root.unmount());
+      renderedNodes = [];
+      dom.restore();
+    }
+  });
+
+  test('keeps pinned nested children ahead of a newer unpinned sibling', async () => {
+    const dom = installHookTestDom();
+    const root = createRoot(dom.container);
+    const pinnedKey = getPinnedSessionKey(getRuntimeKey(), '/workspace', 'child-pinned');
+    const pinnedGroup: SessionGroupSectionProps['group'] = {
+      ...group,
+      sessions: [
+        node(rootSession('session-parent', 1), [
+          node(childSession('child-new', 'session-parent', 300)),
+          node(childSession('child-pinned', 'session-parent', 10)),
+        ]),
+      ],
+    };
+
+    try {
+      renderedNodes = [];
+      await act(async () => root.render(
+        <I18nProvider>
+          <SessionGroupSection
+            {...createProps()}
+            group={pinnedGroup}
+            pinnedSessionIds={new Set(pinnedKey ? [pinnedKey] : [])}
+            sessionOrderRanks={new Map([['child-new', 2], ['child-pinned', 1]])}
+          />
+        </I18nProvider>,
+      ));
+
+      const parentNode = renderedNodes.find((entry) => entry.session.id === 'session-parent');
+      expect(parentNode?.children.map((child) => child.session.id)).toEqual(['child-pinned', 'child-new']);
+    } finally {
+      await act(async () => root.unmount());
+      renderedNodes = [];
       dom.restore();
     }
   });

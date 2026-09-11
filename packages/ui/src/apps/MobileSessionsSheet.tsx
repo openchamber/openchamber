@@ -44,7 +44,12 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { getProjectLabel, normalizePath } from './mobilePaths';
 import { CHAT_DRAFT_PROJECT_ID, isChatDirectoryPath } from '@/lib/chatDirectories';
 import { partitionSidebarSessions } from '@/components/session/sidebar/list/sessionCollection';
-import { sortProjectsByOrder } from '@/components/session/sidebar/list/projectSort';
+import {
+  deriveProjectActivityByProjectId,
+  orderProjectsByLiveActivity,
+  sortProjectsByOrder,
+  type ProjectActivitySignal,
+} from '@/components/session/sidebar/list/projectSort';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
@@ -70,6 +75,7 @@ import {
 } from '@/sync/session-ordering';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllLiveSessions, useGlobalSessionStatus } from '@/sync/sync-context';
+import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
@@ -100,6 +106,10 @@ type MobileSessionsSheetProps = {
 };
 
 const EMPTY_PINNED_SESSION_IDS = new Set<string>();
+// Stable empty references for the closed/drawer-gated subscriptions and for
+// sort modes that ignore live activity.
+const EMPTY_ACTIVE_SESSION_IDS: ReadonlySet<string> = new Set();
+const EMPTY_PROJECT_ACTIVITY: ReadonlyMap<string, ProjectActivitySignal> = new Map();
 
 // Same orders, same labels as the desktop sidebar's sort menu — the setting
 // itself is shared, so the two surfaces must offer the same choices.
@@ -937,6 +947,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     (state) => open || variant === 'sidebar' ? state.rankById : EMPTY_SESSION_ORDER_RANKS,
     [open, variant],
   ));
+  const activeSessionIds = useGlobalSessionStatusStore(React.useCallback(
+    (state) => open || variant === 'sidebar' ? state.activeSessionIds : EMPTY_ACTIVE_SESSION_IDS,
+    [open, variant],
+  ));
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
@@ -1062,31 +1076,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     };
   }, [git, open, projects, worktreeRefreshKey]);
 
-  const projectsMeta = React.useMemo<ProjectMeta[]>(
-    () =>
-      sortProjectsByOrder(
-        projects.map((project) => ({
-          id: project.id,
-          label: project.label?.trim() || getProjectLabel(project.path),
-          path: normalizePath(project.path),
-          icon: project.icon,
-          color: project.color,
-          iconImage: project.iconImage,
-          iconBackground: project.iconBackground,
-          isGitRepo: gitProjectPaths.has(normalizePath(project.path)),
-          worktrees: orderWorktrees(
-            worktreeOrderByProject[project.id],
-            worktreesByProject.get(normalizePath(project.path)) ?? [],
-          ),
-          addedAt: project.addedAt,
-          lastOpenedAt: project.lastOpenedAt,
-        })),
-        projectSortOrder,
-        manualProjectOrder,
-      ),
-    [gitProjectPaths, manualProjectOrder, projectSortOrder, projects, worktreeOrderByProject, worktreesByProject],
-  );
-
   /**
    * Global sessions cover all directories — even unbootstrapped ones — so the tree shows
    * accurate counts even when a worktree's live store hasn't been hydrated yet. Live
@@ -1116,6 +1105,55 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     () => partitionSidebarSessions(sessions, false),
     [sessions],
   );
+
+  // Project metadata before ordering: the live-activity pass needs the same
+  // project/worktree paths the tree below uses to match sessions to owners.
+  const projectsBase = React.useMemo<ProjectMeta[]>(
+    () =>
+      projects.map((project) => ({
+        id: project.id,
+        label: project.label?.trim() || getProjectLabel(project.path),
+        path: normalizePath(project.path),
+        icon: project.icon,
+        color: project.color,
+        iconImage: project.iconImage,
+        iconBackground: project.iconBackground,
+        isGitRepo: gitProjectPaths.has(normalizePath(project.path)),
+        worktrees: orderWorktrees(
+          worktreeOrderByProject[project.id],
+          worktreesByProject.get(normalizePath(project.path)) ?? [],
+        ),
+        addedAt: project.addedAt,
+        lastOpenedAt: project.lastOpenedAt,
+      })),
+    [gitProjectPaths, projects, worktreeOrderByProject, worktreesByProject],
+  );
+
+  // Desktop parity (#3444): `recent`/`date-added` promote projects that own a
+  // live session. Uses the same authoritative non-idle set and the same
+  // project↔session matching the tree builds below.
+  const projectActivityByProjectId = React.useMemo(() => {
+    if (projectSortOrder !== 'recent' && projectSortOrder !== 'date-added') {
+      return EMPTY_PROJECT_ACTIVITY;
+    }
+    return deriveProjectActivityByProjectId({
+      projectIds: projectsBase.map((project) => project.id),
+      sessions: projectSessions,
+      activeSessionIds,
+      sessionOrderRanks,
+      resolveProjectId: (session) => findExactProjectMatch(projectsBase, getSessionDirectory(session))?.id ?? null,
+    });
+  }, [activeSessionIds, projectSessions, projectSortOrder, projectsBase, sessionOrderRanks]);
+
+  const projectsMeta = React.useMemo<ProjectMeta[]>(
+    () => orderProjectsByLiveActivity(
+      sortProjectsByOrder(projectsBase, projectSortOrder, manualProjectOrder),
+      projectSortOrder,
+      projectActivityByProjectId,
+    ),
+    [manualProjectOrder, projectActivityByProjectId, projectSortOrder, projectsBase],
+  );
+
   const chatsBucket = React.useMemo<WorktreeBucket>(() => ({
     key: CHAT_DRAFT_PROJECT_ID,
     label: '',

@@ -14,6 +14,7 @@ import type { WorktreeMetadata } from '@/types/worktree';
 import { useRecentSessionCollection, useSessionProjectCollection } from './sessionCollection';
 import { buildSessionBootstrapDemands } from './sessionBootstrapDemands';
 import { useChildStoreManager } from '@/sync/sync-context';
+import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { createSessionOwnershipIndex } from '../sessions/sessionOwnership';
 import { useProjectSessionLists } from '../projects/useProjectSessionLists';
 import { useSessionSidebarSections } from '../projects/useSessionSidebarSections';
@@ -25,6 +26,7 @@ import { useSessionGrouping } from '../projects/useSessionGrouping';
 import { useStickyProjectHeaders } from '../projects/useStickyProjectHeaders';
 import { SessionBulkActions } from '../folders/SessionBulkActions';
 import { RecentSessionSection } from '../recent/RecentSessionSection';
+import { MAX_VISIBLE_RECENT_SESSIONS } from '../recent/SidebarActivitySections';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import type { useSessionProjectViewState } from '../projects/useSessionProjectViewState';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
@@ -226,6 +228,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     () => chatGroup ? [chatGroup] : EMPTY_STANDALONE_GROUPS,
     [chatGroup],
   );
+  const activeSessionIds = useGlobalSessionStatusStore((state) => state.activeSessionIds);
   const { projectSections, groupSearchDataByGroup, sectionsForRender, flatSectionsForRender, searchMatchCount } = useSessionSidebarSections({
     normalizedProjects: topology.projects,
     getSessionsForProject,
@@ -242,6 +245,9 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     buildGroupSearchText,
     foldersMap,
     standaloneGroups,
+    projectSortOrder: view.projectSortOrder,
+    activeSessionIds,
+    sessionOrderRanks: collection.sessionOrderRanks,
   });
 
   const onSearchMatchCountChange = view.onSearchMatchCountChange;
@@ -369,6 +375,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     notifyOnSubtasks,
     pinnedSessionIds: collection.pinnedSessionIds,
     sessionOrderIndex,
+    sessionOrderRanks: collection.sessionOrderRanks,
     expandedParents,
     editingId,
     editTitle,
@@ -398,6 +405,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     projectView.collapsedGroups,
     groupSearchDataByGroup,
     sessionOrderIndex,
+    collection.sessionOrderRanks,
     editTitle,
     editingId,
     expandedParents,
@@ -443,7 +451,9 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       groupKey="managed-chats"
       projectId={null}
       hideGroupLabel
-      sessionBatchSize={20}
+      // Managed chats keep the Recent list's 7-row default; "Show more" walks
+      // the batches from here. Single-project flat groups keep their own 20.
+      sessionBatchSize={MAX_VISIBLE_RECENT_SESSIONS}
       scrollContainerRef={undefined}
       openSidebarMenuKey={openSidebarMenuKey}
       setOpenSidebarMenuKey={setOpenSidebarMenuKey}

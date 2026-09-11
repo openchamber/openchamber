@@ -68,7 +68,7 @@ type Props = {
 
 type RenderExtras = SessionNodeRenderExtras;
 
-const MAX_VISIBLE_RECENT_SESSIONS = 7;
+export const MAX_VISIBLE_RECENT_SESSIONS = 7;
 
 const RELATIVE_TIME_TICK_INTERVAL_MS = 60_000;
 
