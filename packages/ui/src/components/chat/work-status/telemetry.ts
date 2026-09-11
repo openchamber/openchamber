@@ -10,12 +10,25 @@ type CompletedStepStats = {
   toolDurationMs: number | null;
   adjustedLlmDurationMs: number | null;
   ttftMs: number | null;
+  ttftSampleCount: number;
   inputTokens: number | null;
   outputTokens: number | null;
   reasoningTokens: number | null;
   cacheReadTokens: number | null;
   cacheWriteTokens: number | null;
   cost: number | null;
+};
+
+type AssistantInfo = Extract<Message, { role: 'assistant' }>;
+type TelemetryTokens = NonNullable<AssistantInfo['tokens']>;
+type OmpTurnTelemetry = {
+  turnUsage?: TelemetryTokens;
+  modelDurationMs?: number;
+  ttftMs?: number;
+  ttftSamples?: number;
+};
+type OmpTelemetryMetadata = {
+  omp?: OmpTurnTelemetry;
 };
 
 export type CompletedTurnStats = {
@@ -109,6 +122,16 @@ const nonnegative = (value: number | undefined): number | null =>
 const add = (left: number | null, right: number | null): number | null =>
   left === null || right === null ? null : nonnegative(left + right);
 
+const getOmpTurnTelemetry = (info: AssistantInfo): OmpTurnTelemetry | undefined => {
+  // SAFETY: The sidecar namespaces its optional aggregate usage under `info.metadata.omp`.
+  const metadata = (info as AssistantInfo & { metadata?: OmpTelemetryMetadata }).metadata;
+  return metadata?.omp;
+};
+
+const getTelemetryTokens = (info: AssistantInfo): TelemetryTokens | undefined => {
+  return getOmpTurnTelemetry(info)?.turnUsage ?? info.tokens;
+};
+
 /** Text delivery rate for the final reply, not throughput of the agent loop. */
 function calculateResponseTokenRate(record: SessionMessageRecord): number | null {
   const { info, parts } = record;
@@ -138,7 +161,8 @@ function calculateResponseTokenRate(record: SessionMessageRecord): number | null
  */
 function calculateCompletedStepStats(record: SessionMessageRecord): CompletedStepStats | null {
   const { info, parts } = record;
-  if (info.role !== 'assistant') return null;
+  if (info.role !== 'assistant' || info.summary === true) return null;
+  const ompTurnTelemetry = getOmpTurnTelemetry(info);
 
   const { created } = info.time;
   const completed = info.time.completed;
@@ -167,9 +191,11 @@ function calculateCompletedStepStats(record: SessionMessageRecord): CompletedSte
   }
 
   const toolDurationMs = validTools ? nonnegative(sumIntervalsDuration(mergeTimeIntervals(rawToolIntervals))) : null;
-  const adjustedLlmDurationMs = totalDurationMs !== null && toolDurationMs !== null
+  const calculatedLlmDurationMs = totalDurationMs !== null && toolDurationMs !== null
     ? nonnegative(totalDurationMs - toolDurationMs)
     : null;
+  const reportedModelDurationMs = nonnegative(ompTurnTelemetry?.modelDurationMs);
+  const adjustedLlmDurationMs = reportedModelDurationMs ?? calculatedLlmDurationMs;
 
   // Measure TTFT from first text or reasoning part start timestamp
   let ttftMs: number | null = null;
@@ -183,17 +209,29 @@ function calculateCompletedStepStats(record: SessionMessageRecord): CompletedSte
     }
   }
 
-  const inputTokens = nonnegative(info.tokens?.input);
-  const outputTokens = nonnegative(info.tokens?.output);
-  const reasoningTokens = nonnegative(info.tokens?.reasoning);
-  const cacheReadTokens = nonnegative(info.tokens?.cache?.read);
-  const cacheWriteTokens = nonnegative(info.tokens?.cache?.write);
+  const reportedTtftMs = nonnegative(ompTurnTelemetry?.ttftMs);
+  const reportedTtftSamples = nonnegative(ompTurnTelemetry?.ttftSamples);
+  const hasReportedTtft = reportedTtftMs !== null && reportedTtftSamples !== null && reportedTtftSamples > 0;
+  if (hasReportedTtft) {
+    ttftMs = reportedTtftMs;
+  }
+  const ttftSampleCount = hasReportedTtft
+    ? reportedTtftSamples
+    : (ttftMs === null ? 0 : 1);
+
+  const tokens = getTelemetryTokens(info);
+  const inputTokens = nonnegative(tokens?.input);
+  const outputTokens = nonnegative(tokens?.output);
+  const reasoningTokens = nonnegative(tokens?.reasoning);
+  const cacheReadTokens = nonnegative(tokens?.cache?.read);
+  const cacheWriteTokens = nonnegative(tokens?.cache?.write);
   const cost = nonnegative(info.cost);
 
   return {
     toolDurationMs,
     adjustedLlmDurationMs,
     ttftMs,
+    ttftSampleCount,
     inputTokens,
     outputTokens,
     reasoningTokens,
@@ -215,7 +253,7 @@ export function getLatestCompletedTurnStats(
   // Only the newest user-bounded turn qualifies. A partial newer turn must not
   // be published as complete or silently replaced with an older turn's stats.
   const lastCompletedAssistantIdx = records.length - 1;
-  if (records[lastCompletedAssistantIdx].info.role !== 'assistant') return null;
+  if (records[lastCompletedAssistantIdx].info.role !== 'assistant' || records[lastCompletedAssistantIdx].info.summary === true) return null;
   let turnStartIdx = -1;
   for (let i = records.length - 1; i >= 0; i -= 1) {
     const record = records[i];
@@ -230,7 +268,7 @@ export function getLatestCompletedTurnStats(
   const stepStatsList: CompletedStepStats[] = [];
   for (let i = turnStartIdx; i <= lastCompletedAssistantIdx; i += 1) {
     const record = records[i];
-    if (record.info.role === 'assistant') {
+    if (record.info.role === 'assistant' && record.info.summary !== true) {
       const stepStats = calculateCompletedStepStats(record);
       if (!stepStats) return null;
       stepStatsList.push(stepStats);
@@ -248,6 +286,7 @@ export function getLatestCompletedTurnStats(
   let totalCacheWriteTokens: number | null = 0;
   let totalCost: number | null = 0;
   let totalTtft: number | null = 0;
+  let totalTtftSamples = 0;
 
   for (const step of stepStatsList) {
     totalLlmDurationMs = add(totalLlmDurationMs, step.adjustedLlmDurationMs);
@@ -258,10 +297,15 @@ export function getLatestCompletedTurnStats(
     totalCacheReadTokens = add(totalCacheReadTokens, step.cacheReadTokens);
     totalCacheWriteTokens = add(totalCacheWriteTokens, step.cacheWriteTokens);
     totalCost = add(totalCost, step.cost);
-    totalTtft = add(totalTtft, step.ttftMs);
+    if (step.ttftMs === null) {
+      totalTtft = null;
+    } else {
+      totalTtft = add(totalTtft, step.ttftMs);
+      totalTtftSamples += step.ttftSampleCount;
+    }
   }
 
-  const avgTtftMs = totalTtft === null ? null : totalTtft / stepStatsList.length;
+  const avgTtftMs = totalTtft === null || totalTtftSamples === 0 ? null : totalTtft / totalTtftSamples;
 
   const totalGeneratedTokens = add(totalOutputTokens, totalReasoningTokens);
   const tokensPerSecond = totalGeneratedTokens !== null && totalLlmDurationMs !== null && totalLlmDurationMs > 0

@@ -10,6 +10,21 @@ const assistant = (overrides: Partial<AssistantMessage> = {}): AssistantMessage 
   tokens: { input: 100, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
   ...overrides,
 });
+const withOmpTurnUsage = (info: AssistantMessage, turnUsage: NonNullable<AssistantMessage['tokens']>): AssistantMessage => {
+  // SAFETY: The sidecar's runtime message metadata carries this namespaced telemetry extension.
+  (info as AssistantMessage & { metadata?: { omp?: { turnUsage?: NonNullable<AssistantMessage['tokens']> } } }).metadata = {
+    omp: { turnUsage },
+  };
+  return info;
+};
+const withOmpTiming = (
+  info: AssistantMessage,
+  telemetry: { modelDurationMs: number; ttftMs: number; ttftSamples: number },
+): AssistantMessage => {
+  // SAFETY: The sidecar's runtime message metadata carries this namespaced telemetry extension.
+  (info as AssistantMessage & { metadata?: { omp?: typeof telemetry } }).metadata = { omp: telemetry };
+  return info;
+};
 const tool = (start: number, end: number): Part => ({
   id: `tool-${start}`, sessionID: user.sessionID, messageID: 'a1', type: 'tool', tool: 'bash', callID: 'call',
   state: { status: 'completed', input: {}, output: '', title: 'test', metadata: {}, time: { start, end } },
@@ -48,6 +63,88 @@ describe('turn telemetry', () => {
     expect(stats).toEqual({ stepsCount: 2, lastAssistantMessageId: 'a2', totalToolDurationMs: 3000,
       totalLlmDurationMs: 10000, outputTokens: 300, reasoningTokens: 300, totalGeneratedTokens: 600,
       inputTokens: 2500, cost: 0.015, tokensPerSecond: 60, responseTokensPerSecond: null, avgTtftMs: 1000, cacheHitPercent: 44 });
+  });
+
+  test('excludes compaction summaries from turn stats without ending the turn', () => {
+    const records = turn(assistant({ id: 'first', time: { created: 1000, completed: 5000 } }));
+    records.push({
+      info: assistant({
+        id: 'compaction',
+        summary: true,
+        time: { created: 6000, completed: 6000 },
+        tokens: { input: 60_000, output: 25_000, reasoning: 0, cache: { read: 0, write: 0 } },
+      }),
+      parts: [text(6000)],
+    });
+    records.push({
+      info: assistant({ id: 'final', time: { created: 7000, completed: 9000 }, tokens: { input: 200, output: 50, reasoning: 10, cache: { read: 100, write: 0 } } }),
+      parts: [text(7500)],
+    });
+
+    const stats = getLatestCompletedTurnStats(records);
+    expect(stats?.lastAssistantMessageId).toBe('final');
+    expect(stats?.stepsCount).toBe(2);
+    expect(stats?.totalLlmDurationMs).toBe(6000);
+    expect(stats?.inputTokens).toBe(300);
+    expect(stats?.outputTokens).toBe(150);
+    expect(stats?.reasoningTokens).toBe(10);
+    expect(stats?.totalGeneratedTokens).toBe(160);
+
+    const trailingCompaction = [...records, {
+      info: assistant({ id: 'trailing-compaction', summary: true, time: { created: 10_000, completed: 10_000 } }),
+      parts: [text(10_000)],
+    }];
+    expect(getLatestCompletedTurnStats(trailingCompaction)).toBeNull();
+  });
+
+  test('uses sidecar turn usage totals while keeping final context tokens separate', () => {
+    const first = withOmpTurnUsage(assistant({ id: 'first' }), {
+      input: 1000,
+      output: 200,
+      reasoning: 300,
+      cache: { read: 2000, write: 0 },
+    });
+    const final = withOmpTurnUsage(assistant({ id: 'final', time: { created: 6000, completed: 8000 } }), {
+      input: 1500,
+      output: 100,
+      reasoning: 50,
+      cache: { read: 1000, write: 0 },
+    });
+
+    const stats = getLatestCompletedTurnStats([
+      { info: user, parts: [] },
+      { info: first, parts: [] },
+      { info: final, parts: [] },
+    ]);
+
+    expect(stats?.inputTokens).toBe(2500);
+    expect(stats?.outputTokens).toBe(300);
+    expect(stats?.reasoningTokens).toBe(350);
+    expect(stats?.totalGeneratedTokens).toBe(650);
+    expect(stats?.tokensPerSecond).toBe(650 / 6);
+    expect(stats?.cacheHitPercent).toBe(55);
+  });
+
+  test('uses sidecar model durations and TTFT samples for collated messages', () => {
+    const first = withOmpTiming(assistant({ id: 'first' }), {
+      modelDurationMs: 2500,
+      ttftMs: 1000,
+      ttftSamples: 2,
+    });
+    const final = withOmpTiming(assistant({ id: 'final', time: { created: 6000, completed: 8000 } }), {
+      modelDurationMs: 1500,
+      ttftMs: 500,
+      ttftSamples: 1,
+    });
+
+    const stats = getLatestCompletedTurnStats([
+      { info: user, parts: [] },
+      { info: first, parts: [] },
+      { info: final, parts: [] },
+    ]);
+
+    expect(stats?.totalLlmDurationMs).toBe(4000);
+    expect(stats?.avgTtftMs).toBe(500);
   });
 
   test('uses only the latest user-bounded turn', () => {
