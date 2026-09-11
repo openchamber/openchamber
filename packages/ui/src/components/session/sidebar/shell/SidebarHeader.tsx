@@ -78,7 +78,43 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const isSingleProjectMode = showProjectDisplayControls && projectDisplayMode === 'single';
 
   if (hideDirectoryControls) {
-    return null;
+    // VS Code: the sidebar is always a single workspace, so project/directory
+    // controls stay hidden, but session search is still useful. Show a compact,
+    // always-visible search input at the top of the sessions list.
+    return (
+      <div className="select-none flex-shrink-0 px-2.5 py-1.5">
+        <div className="relative">
+          <Icon name="search" className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            ref={sessionSearchInputRef}
+            value={sessionSearchQuery}
+            onChange={(event) => setSessionSearchQuery(event.target.value)}
+            placeholder={t('sessions.sidebar.header.search.placeholder')}
+            className="h-8 w-full rounded-md border border-border bg-transparent pl-8 pr-8 typography-ui-label text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.stopPropagation();
+                if (hasSessionSearchQuery) {
+                  setSessionSearchQuery('');
+                } else {
+                  setIsSessionSearchOpen(false);
+                }
+              }
+            }}
+          />
+          {sessionSearchQuery.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setSessionSearchQuery('')}
+              className="absolute right-1 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+              aria-label={t('sessions.sidebar.header.search.clear')}
+            >
+              <Icon name="close" className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+        </div>
+      </div>
+    );
   }
 
   return (
