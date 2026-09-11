@@ -1,7 +1,58 @@
 import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
+import {
+  parseCommandTokens,
+  optionNamesForCommand,
+  isKnownCommand,
+  TUNNEL_SUBCOMMAND_NAMES,
+  STARTUP_SUBCOMMAND_NAMES,
+} from './cli-commander.js';
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_TAIL_LINES = 200;
+
+// Removed flags report their own migration errors regardless of command and
+// are stripped before commander parsing so they are not also reported as
+// unknown options.
+const REMOVED_FLAG_MESSAGES = new Map([
+  ['try-cf-tunnel', () => '`--try-cf-tunnel` was removed. Use: openchamber tunnel start --provider cloudflare --mode quick'],
+  ['tunnel-qr', () => '`--tunnel-qr` was removed. Use: openchamber tunnel start ... --qr'],
+  ['tunnel-password-url', () => '`--tunnel-password-url` was removed. Use UI password auth directly after tunnel start.'],
+  ['tunnel-provider', (name) => `\`--${name}\` was removed from top-level serve flow. Use: openchamber tunnel start ...`],
+  ['tunnel-mode', (name) => `\`--${name}\` was removed from top-level serve flow. Use: openchamber tunnel start ...`],
+  ['tunnel-config', (name) => `\`--${name}\` was removed from top-level serve flow. Use: openchamber tunnel start ...`],
+  ['tunnel-token', (name) => `\`--${name}\` was removed from top-level serve flow. Use: openchamber tunnel start ...`],
+  ['tunnel-hostname', (name) => `\`--${name}\` was removed from top-level serve flow. Use: openchamber tunnel start ...`],
+  ['tunnel', (name) => `\`--${name}\` was removed from top-level serve flow. Use: openchamber tunnel start ...`],
+]);
+
+// Options whose missing values fail with a stable usage error. Commander specs
+// declare every value as optional so it never exits on a missing argument;
+// these flags are validated here with the historical messages.
+const REQUIRED_VALUE_FLAGS = new Map([
+  ['port', 'port'],
+  ['p', 'port'],
+  ['host', 'host'],
+  ['server', 'server'],
+  ['server-url', 'server'],
+]);
+
+function collectUnknownOptionErrors(command, unknownFlags) {
+  const allowed = optionNamesForCommand(command);
+  const knownCommand = isKnownCommand(command);
+  const errors = [];
+  for (const token of unknownFlags) {
+    const display = token.split('=')[0];
+    const name = display.replace(/^--?/, '');
+    if (allowed.has(name)) continue;
+    const suggestion = display.startsWith('--') && name.length >= 3
+      ? findClosestMatch(name, [...allowed].filter((candidate) => candidate.length >= 3))
+      : null;
+    const hint = suggestion ? ` Did you mean '--${suggestion}'?` : '';
+    const scope = knownCommand ? ` for command '${command}'` : '';
+    errors.push(`Unknown option '${display}'${scope}.${hint}`);
+  }
+  return errors;
+}
 
 function levenshteinDistance(a, b) {
   const m = a.length;
@@ -55,6 +106,76 @@ function splitOptionToken(arg) {
 
 function parseArgs(argv = process.argv.slice(2)) {
   const args = Array.isArray(argv) ? [...argv] : [];
+  const removedFlagErrors = [];
+  const positional = [];
+  const seenFlags = [];
+  const commanderTokens = [];
+  let helpRequested = false;
+  let versionRequested = false;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    const parsedToken = splitOptionToken(arg);
+    if (!parsedToken) {
+      positional.push(arg);
+      commanderTokens.push(arg);
+      continue;
+    }
+
+    const { name, inlineValue, long } = parsedToken;
+    if (REMOVED_FLAG_MESSAGES.has(name)) {
+      removedFlagErrors.push(REMOVED_FLAG_MESSAGES.get(name)(name));
+      continue;
+    }
+    seenFlags.push({ name, flag: long ? `--${name}` : `-${name}`, long });
+
+    if (name === 'help' || name === 'h') helpRequested = true;
+    if (name === 'version' || name === 'v') versionRequested = true;
+
+    if (REQUIRED_VALUE_FLAGS.has(name)) {
+      const canonical = REQUIRED_VALUE_FLAGS.get(name);
+      const next = args[i + 1];
+      const negativePort = canonical === 'port' && typeof inlineValue !== 'string' && typeof next === 'string' && /^-\d+$/.test(next);
+      const hasValue = (typeof inlineValue === 'string' && inlineValue.length > 0)
+        || (typeof next === 'string' && !next.startsWith('-'));
+      if (!hasValue && !negativePort) {
+        throw new TunnelCliError(`Missing value for --${canonical}.`, EXIT_CODE.USAGE_ERROR);
+      }
+      if (negativePort) {
+        commanderTokens.push(`--port=${next}`);
+        i += 1;
+        continue;
+      }
+    }
+
+    commanderTokens.push(arg);
+  }
+
+  const command = positional[0] || 'serve';
+  const commandExplicit = positional.length > 0;
+  const subcommand = command === 'tunnel' ? (positional[1] || 'help') : null;
+  const tunnelAction = command === 'tunnel' ? (positional[2] || null) : null;
+  const startupAction = command === 'startup' ? (positional[1] || 'status') : null;
+  const scheduleAction = command === 'schedule' ? (positional[1] || 'help') : null;
+  const sessionAction = command === 'session' ? (positional[1] || 'help') : null;
+  const controlAction = command === 'control' ? (positional[1] || 'help') : null;
+
+  // Tunnel validates options against the resolved subcommand's flag pool
+  // (for example `tunnel start`), not the union pool. Startup does the same
+  // (only 'enable' consumes its command-specific flags).
+  let optionCommandKey = command;
+  if (command === 'tunnel' && TUNNEL_SUBCOMMAND_NAMES.includes(subcommand)) {
+    optionCommandKey = `tunnel ${subcommand}`;
+  } else if (command === 'startup' && STARTUP_SUBCOMMAND_NAMES.includes(startupAction)) {
+    optionCommandKey = `startup ${startupAction}`;
+  }
+
+  const seen = (name) => seenFlags.some((entry) => entry.name === name);
+  const asValue = (value) => (typeof value === 'string' && value.length > 0 ? value : undefined);
+
+  const { opts, unknownFlags } = parseCommandTokens(optionCommandKey, commanderTokens);
+  removedFlagErrors.push(...collectUnknownOptionErrors(optionCommandKey, unknownFlags));
+
   const options = {
     port: DEFAULT_PORT,
     host: undefined,
@@ -116,429 +237,121 @@ function parseArgs(argv = process.argv.slice(2)) {
     withStatus: false,
   };
 
-  const removedFlagErrors = [];
-  const positional = [];
-  let helpRequested = false;
-  let versionRequested = false;
-
-  const consumeValue = (index, inlineValue) => {
-    if (typeof inlineValue === 'string' && inlineValue.length > 0) {
-      return { value: inlineValue, nextIndex: index };
+  if (seen('port') || seen('p')) {
+    options.explicitPort = true;
+    const raw = asValue(opts.port);
+    if (raw === undefined) {
+      throw new TunnelCliError('Missing value for --port.', EXIT_CODE.USAGE_ERROR);
     }
-    const candidate = args[index + 1];
-    if (typeof candidate === 'string' && !candidate.startsWith('-')) {
-      return { value: candidate, nextIndex: index + 1 };
+    if (!/^-?\d+$/.test(raw.trim())) {
+      throw new TunnelCliError(`Invalid port value: ${raw}`, EXIT_CODE.USAGE_ERROR);
     }
-    return { value: undefined, nextIndex: index };
-  };
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    const parsedToken = splitOptionToken(arg);
-    if (!parsedToken) {
-      positional.push(arg);
-      continue;
+    const parsed = parseInt(raw, 10);
+    if (parsed < 1 || parsed > 65535) {
+      throw new TunnelCliError(`Invalid port value: ${parsed}`, EXIT_CODE.USAGE_ERROR);
     }
+    options.port = parsed;
+  }
 
-    const { name, inlineValue, long } = parsedToken;
-    switch (name) {
-      case 'port':
-      case 'p': {
-        const { value: consumedValue, nextIndex: consumedIndex } = consumeValue(i, inlineValue);
-        let value = consumedValue;
-        let nextIndex = consumedIndex;
+  if (seen('host')) {
+    const value = typeof opts.host === 'string' ? opts.host.trim() : '';
+    if (value.length === 0) {
+      throw new TunnelCliError('Missing value for --host.', EXIT_CODE.USAGE_ERROR);
+    }
+    options.host = value;
+  }
 
-        // Support explicit negative numeric values like `-p -1` so we can report
-        // a clear range validation error instead of "Unknown option".
-        if (value === undefined && typeof inlineValue !== 'string') {
-          const candidate = args[i + 1];
-          if (typeof candidate === 'string' && /^-\d+$/.test(candidate)) {
-            value = candidate;
-            nextIndex = i + 1;
-          }
-        }
+  if (seen('ui-password')) {
+    options.explicitUiPassword = true;
+    options.uiPassword = typeof opts.uiPassword === 'string' ? opts.uiPassword : '';
+  }
 
-        i = nextIndex;
+  if (seen('server') || seen('server-url')) {
+    const raw = asValue(opts.serverUrl) ?? asValue(opts.server);
+    if (raw === undefined) {
+      throw new TunnelCliError('Missing value for --server.', EXIT_CODE.USAGE_ERROR);
+    }
+    options.server = raw.trim();
+  }
 
-        if (typeof value !== 'string' || value.trim().length === 0) {
-          throw new TunnelCliError('Missing value for --port.', EXIT_CODE.USAGE_ERROR);
-        }
+  options.provider = asValue(opts.provider);
+  options.mode = asValue(opts.mode);
+  options.profile = asValue(opts.profile);
+  options.name = asValue(opts.name);
+  options.title = asValue(opts.title);
+  options.worktree = asValue(opts.worktree);
+  options.branch = asValue(opts.branch);
+  options.startRef = asValue(opts.startRef) ?? asValue(opts.base);
+  if (seen('upstream')) options.setUpstream = true;
+  else if (seen('no-upstream')) options.setUpstream = false;
+  options.project = asValue(opts.project);
+  options.directory = asValue(opts.directory) ?? asValue(opts.dir);
+  options.task = asValue(opts.task);
+  options.session = asValue(opts.session);
+  options.message = asValue(opts.message);
+  options.prompt = asValue(opts.prompt);
+  options.model = asValue(opts.model);
+  options.daily = asValue(opts.daily);
+  options.weekly = asValue(opts.weekly);
+  options.once = asValue(opts.once);
+  options.time = asValue(opts.time);
+  options.cron = asValue(opts.cron);
+  options.timezone = asValue(opts.timezone);
+  options.agent = asValue(opts.agent);
+  options.variant = asValue(opts.variant);
+  options.disabled = seen('disabled');
+  options.goal = seen('goal');
+  options.goalTokenBudget = asValue(opts.goalTokenBudget);
+  options.configPath = seen('config')
+    ? (typeof opts.config === 'string' ? opts.config : null)
+    : undefined;
+  options.token = asValue(opts.token);
+  options.tokenFile = asValue(opts.tokenFile);
+  options.tokenStdin = seen('token-stdin');
+  options.hostname = asValue(opts.hostname);
+  options.connectTtl = asValue(opts.connectTtl);
+  options.sessionTtl = asValue(opts.sessionTtl);
+  options.json = seen('json');
+  options.all = seen('all');
+  options.last = seen('last');
+  options.lastAssistant = seen('last-assistant');
+  options.wait = seen('wait');
+  options.timeout = asValue(opts.timeout);
+  options.withStatus = seen('with-status');
+  options.role = asValue(opts.role);
+  options.follow = !seen('no-follow');
+  options.envSnapshot = !seen('no-env-snapshot');
+  options.lan = seen('lan');
+  options.foreground = seen('foreground') || seen('no-daemon') || seen('daemon') || seen('d');
+  options.apiOnly = seen('api-only');
+  options.relay = seen('relay');
+  if (seen('qr')) {
+    options.qr = true;
+    options.explicitQr = true;
+  } else if (seen('no-qr')) {
+    options.qr = false;
+    options.explicitQr = true;
+  }
+  options.force = seen('force');
+  options.showSecrets = seen('show-secrets');
+  options.dryRun = seen('dry-run');
+  options.plain = seen('plain');
+  options.quiet = seen('quiet') || seen('q');
 
-        if (!/^-?\d+$/.test(value.trim())) {
-          throw new TunnelCliError(`Invalid port value: ${value}`, EXIT_CODE.USAGE_ERROR);
-        }
-
-        const parsed = parseInt(value, 10);
-        if (parsed < 1 || parsed > 65535) {
-          throw new TunnelCliError(`Invalid port value: ${parsed}`, EXIT_CODE.USAGE_ERROR);
-        }
-
-        options.port = parsed;
-        options.explicitPort = true;
-        break;
-      }
-      case 'host': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        if (typeof value !== 'string' || value.trim().length === 0) {
-          throw new TunnelCliError('Missing value for --host.', EXIT_CODE.USAGE_ERROR);
-        }
-        options.host = value.trim();
-        break;
-      }
-      case 'lan':
-        options.lan = true;
-        break;
-      case 'ui-password': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.uiPassword = typeof value === 'string' ? value : '';
-        options.explicitUiPassword = true;
-        break;
-      }
-      case 'provider': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.provider = typeof value === 'string' ? value : options.provider;
-        break;
-      }
-      case 'mode': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.mode = typeof value === 'string' ? value : options.mode;
-        break;
-      }
-      case 'profile': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.profile = typeof value === 'string' ? value : options.profile;
-        break;
-      }
-      case 'name': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.name = typeof value === 'string' ? value : options.name;
-        break;
-      }
-      case 'title': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.title = typeof value === 'string' ? value : options.title;
-        break;
-      }
-      case 'worktree': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.worktree = typeof value === 'string' ? value : options.worktree;
-        break;
-      }
-      case 'branch': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.branch = typeof value === 'string' ? value : options.branch;
-        break;
-      }
-      case 'start-ref':
-      case 'base': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.startRef = typeof value === 'string' ? value : options.startRef;
-        break;
-      }
-      case 'upstream':
-        options.setUpstream = true;
-        break;
-      case 'no-upstream':
-        options.setUpstream = false;
-        break;
-      case 'project': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.project = typeof value === 'string' ? value : options.project;
-        break;
-      }
-      case 'dir':
-      case 'directory': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.directory = typeof value === 'string' ? value : options.directory;
-        break;
-      }
-      case 'task': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.task = typeof value === 'string' ? value : options.task;
-        break;
-      }
-      case 'session': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.session = typeof value === 'string' ? value : options.session;
-        break;
-      }
-      case 'message': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.message = typeof value === 'string' ? value : options.message;
-        break;
-      }
-      case 'prompt': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.prompt = typeof value === 'string' ? value : options.prompt;
-        break;
-      }
-      case 'model': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.model = typeof value === 'string' ? value : options.model;
-        break;
-      }
-      case 'daily': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.daily = typeof value === 'string' ? value : options.daily;
-        break;
-      }
-      case 'weekly': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.weekly = typeof value === 'string' ? value : options.weekly;
-        break;
-      }
-      case 'once': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.once = typeof value === 'string' ? value : options.once;
-        break;
-      }
-      case 'time': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.time = typeof value === 'string' ? value : options.time;
-        break;
-      }
-      case 'cron': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.cron = typeof value === 'string' ? value : options.cron;
-        break;
-      }
-      case 'timezone': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.timezone = typeof value === 'string' ? value : options.timezone;
-        break;
-      }
-      case 'agent': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.agent = typeof value === 'string' ? value : options.agent;
-        break;
-      }
-      case 'variant': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.variant = typeof value === 'string' ? value : options.variant;
-        break;
-      }
-      case 'disabled':
-        options.disabled = true;
-        break;
-      case 'goal':
-        options.goal = true;
-        break;
-      case 'goal-token-budget': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.goalTokenBudget = value;
-        break;
-      }
-      case 'config': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.configPath = typeof value === 'string' ? value : null;
-        break;
-      }
-      case 'token': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.token = typeof value === 'string' ? value : options.token;
-        break;
-      }
-      case 'token-file': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.tokenFile = typeof value === 'string' ? value : options.tokenFile;
-        break;
-      }
-      case 'token-stdin':
-        options.tokenStdin = true;
-        break;
-      case 'hostname': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.hostname = typeof value === 'string' ? value : options.hostname;
-        break;
-      }
-      case 'server':
-      case 'server-url': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        if (typeof value !== 'string' || value.trim().length === 0) {
-          throw new TunnelCliError('Missing value for --server.', EXIT_CODE.USAGE_ERROR);
-        }
-        options.server = value.trim();
-        break;
-      }
-      case 'connect-ttl': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.connectTtl = typeof value === 'string' ? value : options.connectTtl;
-        break;
-      }
-      case 'session-ttl': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.sessionTtl = typeof value === 'string' ? value : options.sessionTtl;
-        break;
-      }
-      case 'json':
-        options.json = true;
-        break;
-      case 'all':
-        options.all = true;
-        break;
-      case 'last':
-        options.last = true;
-        break;
-      case 'last-assistant':
-        options.lastAssistant = true;
-        break;
-      case 'wait':
-        options.wait = true;
-        break;
-      case 'timeout': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.timeout = typeof value === 'string' ? value : options.timeout;
-        break;
-      }
-      case 'with-status':
-        options.withStatus = true;
-        break;
-      case 'role': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        options.role = typeof value === 'string' ? value : options.role;
-        break;
-      }
-      case 'no-follow':
-        options.follow = false;
-        break;
-      case 'no-env-snapshot':
-        options.envSnapshot = false;
-        break;
-      case 'lines': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        const parsed = parseInt(value ?? '', 10);
-        if (Number.isFinite(parsed) && parsed > 0) {
-          options.lines = parsed;
-        }
-        break;
-      }
-      case 'limit': {
-        const { value, nextIndex } = consumeValue(i, inlineValue);
-        i = nextIndex;
-        const parsed = parseInt(value ?? '', 10);
-        if (!Number.isFinite(parsed) || parsed < 1) {
-          throw new TunnelCliError('Invalid limit value. Provide a positive integer.', EXIT_CODE.USAGE_ERROR);
-        }
-        options.limit = parsed;
-        break;
-      }
-      case 'relay':
-        options.relay = true;
-        break;
-      case 'qr':
-        options.qr = true;
-        options.explicitQr = true;
-        break;
-      case 'no-qr':
-        options.qr = false;
-        options.explicitQr = true;
-        break;
-      case 'force':
-        options.force = true;
-        break;
-      case 'show-secrets':
-        options.showSecrets = true;
-        break;
-      case 'dry-run':
-        options.dryRun = true;
-        break;
-      case 'plain':
-        options.plain = true;
-        break;
-      case 'quiet':
-      case 'q':
-        options.quiet = true;
-        break;
-      case 'help':
-      case 'h':
-        helpRequested = true;
-        break;
-      case 'version':
-      case 'v':
-        versionRequested = true;
-        break;
-      case 'foreground':
-      case 'no-daemon':
-        options.foreground = true;
-        break;
-      case 'api-only':
-        options.apiOnly = true;
-        break;
-      case 'daemon':
-      case 'd':
-        // Legacy no-op: daemon mode is already the default, but older clients
-        // may still pass this when starting a remote server.
-        break;
-      case 'try-cf-tunnel':
-        removedFlagErrors.push('`--try-cf-tunnel` was removed. Use: openchamber tunnel start --provider cloudflare --mode quick');
-        break;
-      case 'tunnel-qr':
-        removedFlagErrors.push('`--tunnel-qr` was removed. Use: openchamber tunnel start ... --qr');
-        break;
-      case 'tunnel-password-url':
-        removedFlagErrors.push('`--tunnel-password-url` was removed. Use UI password auth directly after tunnel start.');
-        break;
-      case 'tunnel-provider':
-      case 'tunnel-mode':
-      case 'tunnel-config':
-      case 'tunnel-token':
-      case 'tunnel-hostname':
-      case 'tunnel':
-        removedFlagErrors.push(`\`--${name}\` was removed from top-level serve flow. Use: openchamber tunnel start ...`);
-        break;
-      default:
-        if (!long && name.length === 1) {
-          removedFlagErrors.push(`Unknown option: -${name}`);
-        } else {
-          removedFlagErrors.push(`Unknown option: --${name}`);
-        }
-        break;
+  if (seen('lines')) {
+    const parsed = parseInt(asValue(opts.lines) ?? '', 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      options.lines = parsed;
     }
   }
 
-  const command = positional[0] || 'serve';
-  const subcommand = command === 'tunnel' ? (positional[1] || 'help') : null;
-  const tunnelAction = command === 'tunnel' ? (positional[2] || null) : null;
-  const startupAction = command === 'startup' ? (positional[1] || 'status') : null;
-  const scheduleAction = command === 'schedule' ? (positional[1] || 'help') : null;
-  const sessionAction = command === 'session' ? (positional[1] || 'help') : null;
-  const controlAction = command === 'control' ? (positional[1] || 'help') : null;
+  if (seen('limit')) {
+    const parsed = parseInt(asValue(opts.limit) ?? '', 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      throw new TunnelCliError('Invalid limit value. Provide a positive integer.', EXIT_CODE.USAGE_ERROR);
+    }
+    options.limit = parsed;
+  }
 
   if (options.lan && typeof options.host !== 'string') {
     options.host = '0.0.0.0';
@@ -550,6 +363,7 @@ function parseArgs(argv = process.argv.slice(2)) {
 
   return {
     command,
+    commandExplicit,
     subcommand,
     tunnelAction,
     startupAction,
@@ -589,7 +403,7 @@ COMMANDS:
 OPTIONS:
   -p, --port              Web server port (default: ${DEFAULT_PORT})
   --host                  Bind address (default: 127.0.0.1)
-  --hostname              Alias for --host outside tunnel commands
+  --hostname              Alias for --host (serve, connect-url)
   --lan                   Bind to 0.0.0.0 for LAN access
   --server <url>          Public/server URL for connect-url links
   --relay                 connect-url: also include the end-to-end-encrypted relay transport
@@ -624,12 +438,165 @@ EXAMPLES:
 `);
 }
 
+function showServeHelp() {
+  console.log(`
+ OpenChamber Serve
+
+USAGE:
+  openchamber serve [OPTIONS]
+
+OPTIONS:
+  -p, --port <port>        Web server port (default: ${DEFAULT_PORT})
+  --host <address>         Bind address (default: 127.0.0.1)
+  --hostname <address>     Alias for --host
+  --lan                    Bind to 0.0.0.0 for LAN access
+  --ui-password [password] Protect browser UI with a password (generates one when omitted)
+  --api-only               Start API routes only, without serving browser UI assets
+  --foreground             Run server in foreground (use with systemd/process managers)
+  --no-daemon              Alias for --foreground
+  -q, --quiet              Print minimal output
+  --json                   Output machine-readable JSON
+  -h, --help               Show this help
+
+ENVIRONMENT:
+  OPENCHAMBER_HOST             Bind address (e.g. 0.0.0.0 for all interfaces)
+  OPENCHAMBER_UI_PASSWORD      Alternative to --ui-password flag
+  OPENCHAMBER_API_ONLY         Set to true/1 to start API routes only
+  OPENCHAMBER_DATA_DIR         Override OpenChamber data directory
+
+EXAMPLES:
+  openchamber serve --port 8080
+  openchamber serve --lan --ui-password
+  openchamber serve --foreground
+`);
+}
+
+function showStopHelp() {
+  console.log(`
+ OpenChamber Stop
+
+USAGE:
+  openchamber stop [-p <port>] [OPTIONS]
+
+Stops discovered OpenChamber instances, or only the instance on --port.
+
+OPTIONS:
+  -p, --port <port>        Stop the instance on this port
+  --host <address>         Host used for shutdown requests
+  --json                   Output machine-readable JSON
+  -q, --quiet              Print minimal output
+  -h, --help               Show this help
+
+EXAMPLES:
+  openchamber stop
+  openchamber stop --port 3000
+`);
+}
+
+function showRestartHelp() {
+  console.log(`
+ OpenChamber Restart
+
+USAGE:
+  openchamber restart [-p <port>] [OPTIONS]
+
+Restarts discovered instances, or only the instance on --port, reusing the
+stored launch options (host, UI password, API-only mode).
+
+OPTIONS:
+  -p, --port <port>        Restart the instance on this port
+  --host <address>         Host used for shutdown requests
+  --ui-password <password> Override the stored UI password
+  --api-only               Restart in headless/API-only mode
+  --json                   Output machine-readable JSON
+  -q, --quiet              Print minimal output
+  -h, --help               Show this help
+
+EXAMPLES:
+  openchamber restart
+  openchamber restart --port 3000
+`);
+}
+
+function showStatusHelp() {
+  console.log(`
+ OpenChamber Status
+
+USAGE:
+  openchamber status [-p <port>] [OPTIONS]
+
+OPTIONS:
+  -p, --port <port>        Check the instance on this port
+  --json                   Output machine-readable JSON
+  -q, --quiet              Print minimal output
+  -h, --help               Show this help
+
+EXAMPLES:
+  openchamber status
+  openchamber status --port 3000 --json
+`);
+}
+
+function showLogsHelp() {
+  console.log(`
+ OpenChamber Logs
+
+USAGE:
+  openchamber logs [-p <port>] [OPTIONS]
+
+Tails recent log lines and follows output. Without --port, uses the most
+recent running instance; --all follows every discovered instance.
+
+OPTIONS:
+  -p, --port <port>        Follow logs for the instance on this port
+  --all                    Follow all discovered instances
+  --lines <count>          Initial lines to show (default: ${DEFAULT_TAIL_LINES})
+  --no-follow              Print recent lines and exit
+  -q, --quiet              Prefix lines with the port only
+  -h, --help               Show this help
+
+EXAMPLES:
+  openchamber logs
+  openchamber logs --port 3000 --lines 50
+  openchamber logs --all --no-follow
+`);
+}
+
+function showUpdateHelp() {
+  console.log(`
+ OpenChamber Update
+
+USAGE:
+  openchamber update [OPTIONS]
+
+Checks for and installs OpenChamber updates, then offers to restart.
+
+OPTIONS:
+  --json                   Output machine-readable JSON
+  -q, --quiet              Print minimal output
+  -h, --help               Show this help
+
+EXAMPLES:
+  openchamber update
+  openchamber update --json
+`);
+}
+
+// Control-plane commands listed by `openchamber control`. They run as
+// top-level commands; `control` itself only supports `help`. Keep in sync
+// with showControlHelp().
+const CONTROL_COMMAND_NAMES = ['status', 'session', 'models', 'projects', 'schedule', 'tunnel', 'logs'];
+
 function showControlHelp() {
   console.log(`
  OpenChamber Control Commands
 
+ Index of commands for agents and scripts. They run directly at the top
+ level, not under 'control'.
+
 USAGE:
-  openchamber <COMMAND> [OPTIONS]
+  openchamber control            Show this index
+  openchamber <COMMAND> [OPTIONS]  Run a control-plane command
 
 COMMANDS:
   status                         Show running OpenChamber runtimes
@@ -641,10 +608,10 @@ COMMANDS:
   logs                           Tail logs for CLI-managed runtimes
 
 DETAILED HELP:
-  openchamber session --help     Show session creation, status, and message options
+  openchamber session --help     Show session command options
   openchamber models --help      Show model defaults and favorites help
   openchamber projects --help    Show project list help
-  openchamber schedule --help    Show scheduled task actions and schedule options
+  openchamber schedule --help    Show scheduled task command options
   openchamber tunnel help        Show tunnel lifecycle/status commands
   openchamber status --help      Show runtime status options
 
@@ -663,31 +630,86 @@ EXAMPLES:
 `);
 }
 
-function showStartupHelp() {
-  console.log(`
- OpenChamber Startup Commands
+const STARTUP_OUTPUT_OPTIONS = `OUTPUT OPTIONS:
+  --json                  Output machine-readable JSON
+  -q, --quiet             Suppress non-essential output`;
+
+const STARTUP_ACTION_HELP = {
+  status: `OpenChamber Startup Status
 
 USAGE:
-  openchamber startup <SUBCOMMAND> [OPTIONS]
+  openchamber startup status [OPTIONS]
 
-SUBCOMMANDS:
-  status      Show startup integration status
-  enable      Install and start native user startup integration
-  disable     Stop and remove native user startup integration
+Shows whether the native user startup integration is installed and active.
+
+${STARTUP_OUTPUT_OPTIONS}
+
+EXAMPLES:
+  openchamber startup status
+  openchamber startup status --json`,
+
+  enable: `OpenChamber Startup Enable
+
+USAGE:
+  openchamber startup enable [OPTIONS]
+
+Installs and starts the native user startup integration. The service runs
+'openchamber serve --foreground' with the options below; a snapshot of the
+current environment is saved into the service unless --no-env-snapshot.
 
 OPTIONS:
-  -p, --port              Web server port used by startup service
-  --host                  Bind address used by startup service
-  --ui-password           Protect browser UI with single password
-  --api-only              Start API routes only, without serving browser UI assets
-  --no-env-snapshot       Do not save current environment for startup service
-  --json                  Output machine-readable JSON
-  -q, --quiet             Suppress non-essential output
+  -p, --port <port>        Web server port used by the startup service
+  --host <address>         Bind address used by the startup service
+  --ui-password [password] Protect browser UI with a password (generates one when omitted)
+  --api-only               Start API routes only, without serving browser UI assets
+  --no-env-snapshot        Do not save current environment for the startup service
+
+${STARTUP_OUTPUT_OPTIONS}
 
 EXAMPLES:
   openchamber startup enable
   openchamber startup enable --port 3000
-  openchamber startup enable --port 3000 --api-only --host 0.0.0.0
+  openchamber startup enable --port 3000 --api-only --host 0.0.0.0`,
+
+  disable: `OpenChamber Startup Disable
+
+USAGE:
+  openchamber startup disable [OPTIONS]
+
+Stops and removes the native user startup integration.
+
+${STARTUP_OUTPUT_OPTIONS}
+
+EXAMPLES:
+  openchamber startup disable`,
+};
+
+function showStartupHelp(action) {
+  const focused = typeof action === 'string' && Object.prototype.hasOwnProperty.call(STARTUP_ACTION_HELP, action)
+    ? STARTUP_ACTION_HELP[action]
+    : null;
+  if (focused) {
+    console.log(`\n${focused}\n`);
+    return;
+  }
+  console.log(`
+ OpenChamber Startup Commands
+
+USAGE:
+  openchamber startup <command> [OPTIONS]
+
+COMMANDS:
+  status      Show startup integration status
+  enable      Install and start native user startup integration
+  disable     Stop and remove native user startup integration
+
+FOCUSED HELP:
+  openchamber startup <command> --help   Show options for one command
+
+${STARTUP_OUTPUT_OPTIONS}
+
+EXAMPLES:
+  openchamber startup enable --port 3000
   openchamber startup status --json
 `);
 }
@@ -731,33 +753,94 @@ EXAMPLES:
 `);
 }
 
-function showTunnelHelp() {
-  console.log(`
- Tunnel Lifecycle Commands
+const TUNNEL_OUTPUT_OPTIONS = `TARGETING/OUTPUT OPTIONS:
+  -p, --port <port>       Target OpenChamber instance port
+  --host <address>        Host for shutdown/request calls
+  --ui-password <password> Authenticate to a password-protected runtime
+  --json                  Output machine-readable JSON
+  -q, --quiet             Suppress non-essential output
+  --plain                 Disable colors and decorations`;
+
+const TUNNEL_SUBCOMMAND_HELP = {
+  providers: `OpenChamber Tunnel Providers
 
 USAGE:
-  openchamber tunnel <SUBCOMMAND> [OPTIONS]
+  openchamber tunnel providers [OPTIONS]
 
-SUBCOMMANDS:
-  help        Show this tunnel help
-  providers   Show available tunnel providers and capabilities
-  ready       Check tunnel readiness for a provider
-  doctor      Run deep tunnel diagnostics
-  status      Show tunnel status
-  start       Start a tunnel
-  stop        Stop active tunnel (keep server running)
-  profile     Manage saved managed-remote profiles
+Lists available tunnel providers and their modes/capabilities.
 
-COMMON OPTIONS:
-  -p, --port              Target OpenChamber instance port
-  --host                  Bind address when auto-starting an instance
-  --lan                   Bind to 0.0.0.0 when auto-starting an instance
-  --ui-password [password] Protect browser UI when auto-starting an instance (generates one when omitted)
-  --api-only              Start API routes only when auto-starting an instance
-  --json                  Output machine-readable JSON
-  --all                   Apply to all running instances (doctor default, stop)
+${TUNNEL_OUTPUT_OPTIONS}
 
-START OPTIONS:
+EXAMPLES:
+  openchamber tunnel providers
+  openchamber tunnel providers --json`,
+
+  ready: `OpenChamber Tunnel Ready
+
+USAGE:
+  openchamber tunnel ready [--provider <id>] [OPTIONS]
+
+Checks tunnel readiness for a provider on the target instance.
+
+OPTIONS:
+  --provider <id>         Tunnel provider id (default: cloudflare)
+
+${TUNNEL_OUTPUT_OPTIONS}
+
+EXAMPLES:
+  openchamber tunnel ready --provider cloudflare`,
+
+  status: `OpenChamber Tunnel Status
+
+USAGE:
+  openchamber tunnel status [OPTIONS]
+
+Shows tunnel status for discovered instances.
+
+${TUNNEL_OUTPUT_OPTIONS}
+
+EXAMPLES:
+  openchamber tunnel status
+  openchamber tunnel status --port 3000`,
+
+  doctor: `OpenChamber Tunnel Doctor
+
+USAGE:
+  openchamber tunnel doctor [--provider <id>] [--all] [OPTIONS]
+  openchamber tunnel doctor --mode managed-remote --token-file <path> --hostname <host> [OPTIONS]
+  openchamber tunnel doctor --mode managed-local --config <path> [OPTIONS]
+
+Runs deep tunnel diagnostics. Without credentials, checks the quick tunnel
+path; managed mode flags let doctor validate a specific configuration.
+--all checks every discovered instance (doctor default).
+
+OPTIONS:
+  --provider <id>         Tunnel provider id (default: cloudflare)
+  --mode <id>             Tunnel mode (quick, managed-remote, managed-local)
+  --profile <name>        Check credentials from a saved profile
+  --token <token>         Managed-remote token (visible in process list)
+  --token-file <path>     Read token from file (recommended)
+  --token-stdin           Read token from stdin
+  --hostname <hostname>   Managed-remote hostname
+  --config <path>         Managed-local config path
+  --all                   Apply to all running instances
+
+${TUNNEL_OUTPUT_OPTIONS}
+
+EXAMPLES:
+  openchamber tunnel doctor --provider cloudflare
+  openchamber tunnel doctor --all`,
+
+  start: `OpenChamber Tunnel Start
+
+USAGE:
+  openchamber tunnel start [OPTIONS]
+
+Starts a tunnel on the target instance, auto-starting one when needed.
+Starting a different mode/provider replaces the current tunnel and revokes
+old connect links/sessions. Connect links are one-time.
+
+OPTIONS:
   --provider <id>         Tunnel provider id (default: cloudflare)
   --mode <id>             Tunnel mode (default: quick)
   --profile <name>        Start tunnel from saved profile name
@@ -771,24 +854,118 @@ START OPTIONS:
   --qr                    Print QR code for resulting tunnel URL
   --no-qr                 Disable QR output
   --dry-run               Validate inputs without applying changes
+  --lan                   Bind to 0.0.0.0 when auto-starting an instance
+  --api-only              Start API routes only when auto-starting an instance
 
-OUTPUT OPTIONS:
+${TUNNEL_OUTPUT_OPTIONS}
+
+EXAMPLES:
+  openchamber tunnel start --qr
+  openchamber tunnel start --profile prod-main
+  openchamber tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
+  openchamber tunnel start --dry-run --mode managed-local --config ~/.cloudflared/config.yml`,
+
+  stop: `OpenChamber Tunnel Stop
+
+USAGE:
+  openchamber tunnel stop [--all] [--force] [OPTIONS]
+
+Stops the active tunnel, keeping the server running.
+
+OPTIONS:
+  --all                   Apply to all running instances
+  --force                 Skip confirmation for multiple instances
+
+${TUNNEL_OUTPUT_OPTIONS}
+
+EXAMPLES:
+  openchamber tunnel stop --port 3000
+  openchamber tunnel stop --all`,
+
+  profile: `OpenChamber Tunnel Profile
+
+USAGE:
+  openchamber tunnel profile <command> [OPTIONS]
+
+COMMANDS:
+  list        List saved managed-remote profiles
+  show        Show one profile
+  add         Add a profile
+  remove      Remove a profile
+
+OPTIONS:
+  --name <name>           Profile name (list/show/add/remove)
+  --provider <id>         Tunnel provider id (default: cloudflare)
+  --mode <id>             Tunnel mode for add (managed-remote)
+  --hostname <hostname>   Managed-remote hostname for add
+  --token <token>         Managed-remote token (visible in process list)
+  --token-file <path>     Read token from file (recommended)
+  --token-stdin           Read token from stdin
+  --force                 Overwrite an existing profile on add
+  --dry-run               Validate add inputs without saving
   --show-secrets          Show full tokens in output (default: redacted)
-  --plain                 Disable colors and decorations
-  -q, --quiet             Suppress non-essential output
+
+${TUNNEL_OUTPUT_OPTIONS}
+
+EXAMPLES:
+  openchamber tunnel profile list --provider cloudflare
+  openchamber tunnel profile show --name prod-main
+  openchamber tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-file ~/.secrets/cf-token
+  openchamber tunnel profile remove --name prod-main`,
+
+  completion: `OpenChamber Tunnel Completion
+
+USAGE:
+  openchamber tunnel completion <shell>
+
+Generates a shell completion script for the openchamber CLI.
+
+EXAMPLES:
+  openchamber tunnel completion bash
+  openchamber tunnel completion zsh
+  openchamber tunnel completion fish`,
+};
+
+function showTunnelHelp(subcommand) {
+  const focused = typeof subcommand === 'string' && Object.prototype.hasOwnProperty.call(TUNNEL_SUBCOMMAND_HELP, subcommand)
+    ? TUNNEL_SUBCOMMAND_HELP[subcommand]
+    : null;
+  if (focused) {
+    console.log(`\n${focused}\n`);
+    return;
+  }
+  console.log(`
+ Tunnel Lifecycle Commands
+
+USAGE:
+  openchamber tunnel <command> [OPTIONS]
+
+COMMANDS:
+  help        Show this tunnel help
+  providers   Show available tunnel providers and capabilities
+  ready       Check tunnel readiness for a provider
+  doctor      Run deep tunnel diagnostics
+  status      Show tunnel status
+  start       Start a tunnel
+  stop        Stop active tunnel (keep server running)
+  profile     Manage saved managed-remote profiles
+
+FOCUSED HELP:
+  openchamber tunnel <command> --help   Show options for one command
+
+COMMON OPTIONS:
+  -p, --port              Target OpenChamber instance port
+  --host <address>        Host for shutdown/request calls
+  --ui-password <password> Authenticate to a password-protected runtime
   --json                  Output machine-readable JSON
+  -q, --quiet             Suppress non-essential output
+  --plain                 Disable colors and decorations
 
 BEHAVIOR NOTES:
   - One active tunnel per OpenChamber instance.
   - Starting a different mode/provider replaces the current tunnel and revokes old connect links/sessions.
   - Connect links are one-time; generating a new link revokes the previous unused link.
-
-PROFILE USAGE:
-  openchamber tunnel profile list [--provider <id>] [--json]
-  openchamber tunnel profile show --name <name> [--provider <id>] [--json]
-  openchamber tunnel profile add --provider <id> --mode managed-remote --name <name> --hostname <host> --token <token> [--force] [--json]
-  openchamber tunnel profile add --provider <id> --mode managed-remote --name <name> --hostname <host> --token-file <path> [--force] [--json]
-  openchamber tunnel profile remove --name <name> [--provider <id>] [--json]
+  - 'tunnel start' auto-starts an instance when needed (run 'openchamber tunnel start --help' for its options).
 
 SHELL COMPLETION:
   openchamber tunnel completion bash   Generate Bash completion script
@@ -977,7 +1154,14 @@ export {
   DEFAULT_PORT,
   parseArgs,
   showHelp,
+  showServeHelp,
+  showStopHelp,
+  showRestartHelp,
+  showStatusHelp,
+  showLogsHelp,
+  showUpdateHelp,
   showControlHelp,
+  CONTROL_COMMAND_NAMES,
   showStartupHelp,
   showConnectUrlHelp,
   showTunnelHelp,

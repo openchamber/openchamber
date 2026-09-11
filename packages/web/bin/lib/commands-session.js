@@ -156,9 +156,151 @@ const validateActionWaitOptions = (options, action) => {
   }
 };
 
-async function sessionCommand(options = {}, action = 'help') {
+const SESSION_OUTPUT_OPTIONS = `OUTPUT OPTIONS:
+  -p, --port <port>       OpenChamber server port
+  --json                  Output machine-readable JSON
+  -q, --quiet             Print compact output`;
+
+const SESSION_ACTION_HELP = {
+  list: `OpenChamber Session List
+
+USAGE:
+  openchamber session list [--dir <path>] [--limit <count>] [--all] [--with-status]
+
+OPTIONS:
+  --dir <path>            Filter sessions by directory
+  --limit <count>         Maximum sessions to show (default: 10)
+  --all                   Include archived sessions
+  --with-status           Include authoritative idle/busy/retry status
+
+${SESSION_OUTPUT_OPTIONS}`,
+
+  create: `OpenChamber Session Create
+
+USAGE:
+  openchamber session create --dir <path> [--title <title>] [--wait] [OPTIONS]
+  openchamber session create --project <projectId> [--title <title>] [--wait] [OPTIONS]
+
+OPTIONS:
+  --dir <path>            Create the session in this directory
+  --project <projectId>   Create the session in this configured project
+  --title <title>         Session title
+  --name <title>          Alias for --title
+  --prompt <text>         Initial prompt to send to the session
+  --model <provider/model>  Model for the prompt (defaults to configured selection)
+  --agent <id>            Agent for the prompt (defaults to configured selection)
+  --variant <id>          Model variant for the prompt
+  --goal                  Run the initial prompt as a new goal
+  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)
+  --worktree <name>       Create a git worktree before creating the session
+  --branch <name>         Branch name for --worktree
+  --start-ref, --base <ref>  Start ref for --worktree
+  --upstream              Set upstream for the worktree branch
+  --no-upstream           Do not set upstream for the worktree branch
+  --wait                  Wait for the dispatched activity to become idle
+  --last-assistant        Include the last assistant text after waiting
+  --timeout <seconds>     Wait timeout in seconds (default: 600, max: 86400)
+
+${SESSION_OUTPUT_OPTIONS}`,
+
+  send: `OpenChamber Session Send
+
+USAGE:
+  openchamber session send --session <id> --dir <path> --prompt <text> [--wait] [OPTIONS]
+
+OPTIONS:
+  --session <id>          Target session id
+  --dir <path>            Authoritative session directory
+  --prompt <text>         Prompt to send to the session
+  --model <provider/model>  Model for the prompt (defaults to configured selection)
+  --agent <id>            Agent for the prompt (defaults to configured selection)
+  --variant <id>          Model variant for the prompt
+  --goal                  Run the prompt as a new goal
+  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)
+  --wait                  Wait for the dispatched activity to become idle
+  --last-assistant        Include the last assistant text after waiting
+  --timeout <seconds>     Wait timeout in seconds (default: 600, max: 86400)
+
+${SESSION_OUTPUT_OPTIONS}`,
+
+  fork: `OpenChamber Session Fork
+
+USAGE:
+  openchamber session fork --session <id> --dir <path> --prompt <text> [--message <id>] [--wait] [OPTIONS]
+
+OPTIONS:
+  --session <id>          Source session id
+  --dir <path>            Authoritative session directory
+  --prompt <text>         Prompt to send to the forked session
+  --message <id>          Fork from this message (default: latest)
+  --model <provider/model>  Model for the prompt (defaults to configured selection)
+  --agent <id>            Agent for the prompt (defaults to configured selection)
+  --variant <id>          Model variant for the prompt
+  --goal                  Run the prompt as a new goal
+  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)
+  --wait                  Wait for the dispatched activity to become idle
+  --last-assistant        Include the last assistant text after waiting
+  --timeout <seconds>     Wait timeout in seconds (default: 600, max: 86400)
+
+${SESSION_OUTPUT_OPTIONS}`,
+
+  status: `OpenChamber Session Status
+
+USAGE:
+  openchamber session status --session <id> --dir <path> [OPTIONS]
+
+OPTIONS:
+  --session <id>          Session id
+  --dir <path>            Authoritative session directory
+
+${SESSION_OUTPUT_OPTIONS}`,
+
+  messages: `OpenChamber Session Messages
+
+USAGE:
+  openchamber session messages --session <id> --dir <path> [--wait] [OPTIONS]
+
+OPTIONS:
+  --session <id>          Session id
+  --dir <path>            Authoritative session directory
+  --role <role>           Filter messages: all, user, assistant
+  --last                  Return only the latest text-bearing message
+  --last-assistant        Shorthand for --last --role assistant
+  --limit <count>         Maximum text messages to return (default: 10)
+  --all                   Return all text-bearing messages
+  --wait                  Wait for the session to become idle first
+  --timeout <seconds>     Wait timeout in seconds (default: 600, max: 86400)
+
+${SESSION_OUTPUT_OPTIONS}`,
+};
+
+const SESSION_OVERVIEW_HELP = `OpenChamber Session Commands
+
+USAGE:
+  openchamber session <command> [OPTIONS]
+
+COMMANDS:
+  list        List sessions (optionally filtered by directory)
+  create      Create a session, optionally with an initial prompt
+  send        Send a prompt to an existing session
+  fork        Fork a session and send a prompt
+  status      Show authoritative session status
+  messages    Read text messages from a session
+
+FOCUSED HELP:
+  openchamber session <command> --help   Show options for one command
+`;
+
+function showSessionHelp(focus) {
+  const focused = typeof focus === 'string' && Object.prototype.hasOwnProperty.call(SESSION_ACTION_HELP, focus)
+    ? SESSION_ACTION_HELP[focus]
+    : null;
+  process.stdout.write(`${focused ?? SESSION_OVERVIEW_HELP}\n`);
+}
+
+async function sessionCommand(options = {}, action = 'help', helpFocus = null) {
   if (action === 'help') {
-    process.stdout.write(`OpenChamber Session Commands\n\nUSAGE:\n  openchamber session list [--dir <path>] [--limit <count>] [--with-status] [OPTIONS]\n  openchamber session create --dir <path> [--title <title>] [--wait] [OPTIONS]\n  openchamber session create --project <projectId> [--title <title>] [--wait] [OPTIONS]\n  openchamber session send --session <id> --dir <path> --prompt <text> [--wait] [OPTIONS]\n  openchamber session fork --session <id> --dir <path> --prompt <text> [--message <id>] [--wait] [OPTIONS]\n  openchamber session status --session <id> --dir <path> [OPTIONS]\n  openchamber session messages --session <id> --dir <path> [--wait] [OPTIONS]\n\nLIST OPTIONS:\n  --dir <path>            Filter sessions by directory\n  --limit <count>         Maximum sessions to show (default: 10)\n  --all                   Include archived sessions\n  --with-status           Include authoritative idle/busy/retry status\n\nACTION OPTIONS:\n  --session <id>          Source or target session id\n  --dir <path>            Authoritative session directory\n  --prompt <text>         Prompt to send to the session\n  --message <id>          Fork from this message (fork only; default: latest)\n  --model <provider/model>  Model for the prompt (defaults to configured selection)\n  --agent <id>            Agent for the prompt (defaults to configured selection)\n  --variant <id>          Model variant for the prompt\n  --goal                  Run the prompt as a new goal\n  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)\n  --wait                  Wait for the dispatched activity to become idle\n  --last-assistant        Include the last assistant text after waiting\n  --timeout <seconds>     Wait timeout in seconds (default: 600, max: 86400)\n\nCREATE OPTIONS:\n  --worktree <name>       Create a git worktree before creating the session\n  --branch <name>         Branch name for --worktree\n  --start-ref, --base <ref>  Start ref for --worktree\n  --upstream              Set upstream for the worktree branch\n  --no-upstream           Do not set upstream for the worktree branch\n  --name <title>          Alias for --title\n\nSTATUS/MESSAGES OPTIONS:\n  --last                  Return only the latest text-bearing message\n  --last-assistant        Shorthand for --last --role assistant\n  --limit <count>         Maximum text messages to return (default: 10)\n  --all                   Return all text-bearing messages\n  --role <role>           Filter messages: all, user, assistant\n\nOUTPUT OPTIONS:\n  -p, --port <port>       OpenChamber server port\n  --json                  Output machine-readable JSON\n  -q, --quiet             Print compact output\n`);
+    showSessionHelp(helpFocus);
     return;
   }
 
