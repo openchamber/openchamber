@@ -121,8 +121,8 @@ describe('managed agent tool runtime', () => {
     const pluginModule = await import(`${pathToFileURL(pluginPath).href}?both=${Date.now()}`);
     const { tool } = await pluginModule.OpenChamberPlugin();
 
-    const controlActions = tool.openchamber.args.action.enum;
-    const webActions = tool.openchamber_web.args.action.enum;
+    const controlActions = tool.openchamber.args.action.oneOf.map((entry) => entry.const);
+    const webActions = tool.openchamber_web.args.action.oneOf.map((entry) => entry.const);
     expect(webActions).toContain('browser.open');
     expect(controlActions).not.toContain('browser.open');
     expect(webActions).not.toContain('session.create');
@@ -131,6 +131,23 @@ describe('managed agent tool runtime', () => {
     expect(Object.keys(tool.openchamber_web.args.parameters.properties)).toContain('url');
     expect(Object.keys(tool.openchamber.args.parameters.properties)).not.toContain('url');
     expect(Object.keys(tool.openchamber.args.parameters.properties)).toContain('sessionId');
+  });
+
+  it('keeps the action schema to one validator keyword', async () => {
+    // A node carrying both `enum` and `oneOf` is valid JSON Schema, but some
+    // OpenAI-compatible gateways reject it and answer with an empty completion
+    // instead of an error. `oneOf` is the keyword that stayed. Its branches
+    // carry the per-action descriptions the model reads.
+    const { runtime, dataDir } = await createRuntime();
+    await runtime.prepareManagedOpenCodeEnv();
+    const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
+    const pluginModule = await import(`${pathToFileURL(pluginPath).href}?validator=${Date.now()}`);
+    const { tool } = await pluginModule.OpenChamberPlugin();
+
+    for (const entry of Object.values(tool)) {
+      expect(entry.args.action.oneOf).toBeInstanceOf(Array);
+      expect(entry.args.action).not.toHaveProperty('enum');
+    }
   });
 
   it('accepts inputs passed beside the action, not only inside parameters', async () => {

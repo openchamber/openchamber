@@ -48,6 +48,9 @@ both settings are `false`.
 - The tool exposes one shared parameter object rather than repeating parameters
   in a large per-action union. Action descriptions carry only required inputs,
   defaults, or one non-obvious semantic detail.
+- The action schema carries `oneOf` and no `enum`. A node combining `enum` and
+  `oneOf` is valid JSON Schema, but some OpenAI-compatible gateways reject it
+  and answer with an empty completion instead of an error.
 - Obvious fields rely on their names and JSON types. Parameter descriptions are
   reserved for formats, dependencies, scope, and behavior that cannot be safely
   inferred from the field name.
