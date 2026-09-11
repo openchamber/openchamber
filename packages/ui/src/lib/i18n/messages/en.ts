@@ -513,6 +513,7 @@ export const dict = {
   'sessions.archivePage.deleteSessionAria': 'Delete {title}',
   'sessions.archivePage.restoreSessionAria': 'Restore {title}',
   'sessions.switcher.openAria': 'Open session switcher',
+  'sessions.mruSwitcher.title': 'Recently viewed',
   'header.sessionTabs.stripAria': 'Open sessions',
   'header.sessionTabs.tabMenuAria': 'Session tab actions',
   'header.sessionTabs.closeTab': 'Close tab',

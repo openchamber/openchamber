@@ -66,6 +66,11 @@ describe('shortcut schema', () => {
     expect(getShortcutAction('switch_context_surface')?.defaultBinding).toBe('mod+alt');
   });
 
+  test('reserves Ctrl+Tab for recent-session cycling', () => {
+    expect(getShortcutAction('cycle_recent_sessions_forward')?.defaultBinding).toBe('ctrl+tab');
+    expect(getShortcutAction('cycle_recent_sessions_backward')?.defaultBinding).toBe('ctrl+shift+tab');
+  });
+
   test('every action ships with a default binding', () => {
     // Palette-only commands live outside this schema entirely; an action in
     // the schema without a binding would be dead weight in Settings.
