@@ -669,6 +669,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.promptNavigatorEnabled === 'boolean') {
       result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
     }
+    if (typeof candidate.recentSessionCyclingEnabled === 'boolean') {
+      result.recentSessionCyclingEnabled = candidate.recentSessionCyclingEnabled;
+    }
     if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
       result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
     }
