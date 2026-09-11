@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This module lets the Markdown image gallery display images that an assistant
-explicitly referenced from OpenCode's temporary directory when the UI is on a
-different machine.
+This module lets the Markdown image gallery, and the `read`-tool inline image
+thumbnail, display images an assistant message explicitly referenced from
+OpenCode's temporary directory when the UI is on a different machine.
 
 ## Contract
 
@@ -16,7 +16,9 @@ different machine.
   message once and verifies every exact image source before reading files.
 - Authorization recognizes the same common inline and reference-style image
   destinations collected by the UI, including balanced parentheses, while
-  excluding fenced and inline code.
+  excluding fenced and inline code — plus any `read` tool call's file path in
+  that same assistant message, since that input is as authoritative as its
+  Markdown text.
 - Relative and workspace-contained absolute paths resolve against the active
   directory. Other absolute paths are accepted only inside
   `os.tmpdir()/opencode` after `realpath` resolution.
