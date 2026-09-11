@@ -2131,6 +2131,8 @@ export const dict = {
   'chat.pendingChanges.changedInWorkspace': 'changed in workspace',
   'chat.changedFiles.title': 'Changed files',
   'chat.changedFiles.actions.openFileTitle': 'Open {path}',
+  'chat.changedFiles.actions.showMore': 'Show more ({count})',
+  'chat.changedFiles.actions.collapse': 'Collapse',
   'chat.emptyState.opencodeUnreachable': 'OpenCode is not reachable',
   'chat.emptyState.startNewChat': 'Start a new chat',
   'chat.emptyState.draftTitle': 'What are we working on?',

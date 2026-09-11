@@ -539,6 +539,7 @@ const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
 }) => {
     const scrollRef = React.useRef<HTMLElement>(null);
     const isFollowingRef = React.useRef(true);
+    const lastScrollTopRef = React.useRef(0);
 
     React.useLayoutEffect(() => {
         const element = scrollRef.current;
@@ -550,6 +551,8 @@ const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
             return;
         }
         element.scrollTop = element.scrollHeight;
+        // Read back the clamped position before the queued scroll event fires.
+        lastScrollTopRef.current = element.scrollTop;
     }, [followKey]);
 
     return (
@@ -567,7 +570,15 @@ const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
                         return;
                     }
                     const element = event.currentTarget;
-                    isFollowingRef.current = element.scrollHeight - element.scrollTop - element.clientHeight <= 2;
+                    const distanceToEnd = element.scrollHeight - element.scrollTop - element.clientHeight;
+                    // Output can grow between an automatic scroll and its event.
+                    // A larger bottom gap alone does not mean the reader moved up.
+                    if (distanceToEnd <= 2) {
+                        isFollowingRef.current = true;
+                    } else if (element.scrollTop < lastScrollTopRef.current - 1) {
+                        isFollowingRef.current = false;
+                    }
+                    lastScrollTopRef.current = element.scrollTop;
                 }}
                 className={cn(
                     'tool-output-surface p-2 rounded-xl w-full min-w-0',

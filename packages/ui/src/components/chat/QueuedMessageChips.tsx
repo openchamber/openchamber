@@ -23,6 +23,7 @@ import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { ComposerFloatingPanel } from './composer/ui/ComposerFloatingPanel';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
+import { getQueuedMessagePreview } from '@/lib/messages/queuedMessagePreview';
 
 interface QueuedMessageChipProps {
     message: QueuedMessage;
@@ -36,16 +37,7 @@ const QueuedMessageChip = memo(({ message, target, onEdit, onSend }: QueuedMessa
     const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: message.id });
 
-    // Get first line of message, truncated
-    const firstLine = React.useMemo(() => {
-        const lines = message.content.split('\n');
-        const first = lines[0] || '';
-        const maxLength = 100;
-        if (first.length > maxLength) {
-            return first.substring(0, maxLength) + '...';
-        }
-        return first + (lines.length > 1 ? '...' : '');
-    }, [message.content]);
+    const firstLine = getQueuedMessagePreview(message);
 
     const attachmentCount = message.attachments?.length ?? 0;
 
@@ -115,7 +107,7 @@ const EMPTY_QUEUE: QueuedMessage[] = [];
 
 export const QueuedMessageChips = memo(({ target, hidden = false, onEditMessage, onSendMessage }: QueuedMessageChipsProps) => {
     const { t } = useI18n();
-    const [collapsed, setCollapsed] = React.useState(false);
+    const [collapsed, setCollapsed] = React.useState(true);
     const bodyId = React.useId();
     const bodyRef = React.useRef<HTMLDivElement | null>(null);
     const queueKey = target ? getMessageQueueKey(target) : null;

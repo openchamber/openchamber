@@ -141,6 +141,15 @@ describe("server-owned message queue", () => {
     expect(useMessageQueueStore.getState().queuedMessages[key]?.map((m) => m.id)).toEqual(["q1"])
   })
 
+  test("context-only queue previews survive authoritative snapshots", async () => {
+    respond = () => json({ revision: 3, sessions: [session([serverItem("q1", "", { contextPreview: "Explain this quote" })])] })
+    await useMessageQueueStore.getState().hydrate()
+    const queued = useMessageQueueStore.getState().queuedMessages[key]?.[0]
+    expect(queued?.contextPreview).toBe("Explain this quote")
+    expect(queued?.content).toBe("")
+    expect(queued?.context).toBeUndefined()
+  })
+
   test("resync can establish the initial snapshot before bootstrap", async () => {
     activeRuntimeKey = "runtime-never-hydrated"
     respond = () => json({ revision: 1, sessions: [] })
@@ -341,6 +350,7 @@ describe("server-owned message queue", () => {
       sendConfig: { providerID: "p", modelID: "m" },
     })
     expect(calls[0]?.body.item.context).toEqual(context)
+    expect(calls[0]?.body.item.contextPreview).toBe("Bug")
     // The projection carries no context; the server strips payloads from snapshots.
     expect(useMessageQueueStore.getState().queuedMessages[key]?.[0]?.context).toBe(undefined)
 

@@ -150,6 +150,7 @@ describe('live activity report', () => {
             tool('edit-again', 'edit', { input: { filePath: 'new.ts' }, metadata: { diff } }),
         ])]);
         expect(result).toMatchObject({ files: 1, additions: 4, deletions: 2 });
+        expect(result.changedFiles).toEqual([{ path: 'new.ts', additions: 4, deletions: 2 }]);
     });
 
     test('uses the whole-call diff when per-file stats are missing, without adding partial numbers', () => {
@@ -158,6 +159,9 @@ describe('live activity report', () => {
             files: [{ filePath: '/project/a', patch: diff }, { filePath: '/project/b' }],
         } })])]);
         expect(result).toMatchObject({ files: 2, additions: 2, deletions: 2, hasCompleteDiff: true });
+        // The call's patch cannot be split between two files, so only the
+        // file with its own patch keeps numbers.
+        expect(result.changedFiles).toEqual([{ path: 'a', additions: 2, deletions: 1 }, { path: 'b' }]);
     });
 
     test('write content is not a diff and partial stats are not shown as a complete total', () => {
@@ -166,6 +170,31 @@ describe('live activity report', () => {
             tool('write', 'write', { input: { filePath: 'b', content: 'one\ntwo\nthree' } }),
         ])]);
         expect(result).toMatchObject({ files: 2, hasCompleteDiff: false });
+        expect(result.changedFiles).toEqual([{ path: 'a', additions: 2, deletions: 1 }, { path: 'b' }]);
+    });
+
+    test('lists touched files relative to the project root in first-touch order', () => {
+        const result = summarizeLiveActivity([assistant('a', [
+            tool('write', 'write', { input: { filePath: '/project/src/new.ts' }, metadata: { diff } }),
+            tool('edit', 'edit', { input: { filePath: './src/a.ts' }, metadata: { filediff: { file: '/project/src/a.ts', additions: 1, deletions: 0 } } }),
+            tool('again', 'edit', { input: { filePath: '/project/src/new.ts' }, metadata: { diff: '@@ -1,1 +1,0 @@\n-after' } }),
+            tool('relative', 'edit', { input: { filePath: 'lib/x.ts' }, metadata: { diff } }),
+            tool('outside', 'edit', { input: { filePath: '/elsewhere/b.ts' }, metadata: { diff } }),
+        ], { path: { cwd: '/project/packages', root: '/project' } })]);
+        expect(result.changedFiles).toEqual([
+            { path: 'src/new.ts', additions: 2, deletions: 2 },
+            { path: 'src/a.ts', additions: 1, deletions: 0 },
+            { path: 'packages/lib/x.ts', additions: 2, deletions: 1 },
+            { path: '/elsewhere/b.ts', additions: 2, deletions: 1 },
+        ]);
+    });
+
+    test('a Windows tool path joins the forward-slash path git prints for the same file', () => {
+        const result = summarizeLiveActivity([assistant('windows', [
+            tool('one', 'edit', { input: { filePath: 'C:\\Project\\src\\A.ts' }, metadata: { diff } }),
+            tool('two', 'edit', { input: { filePath: 'c:/project/src/a.ts' }, metadata: { diff } }),
+        ], { path: { cwd: 'C:\\Project', root: 'C:\\Project' } })]);
+        expect(result.changedFiles).toEqual([{ path: 'src/A.ts', additions: 4, deletions: 2 }]);
     });
 
     test('rejects truncated diff counts and counts source lines resembling diff headers', () => {

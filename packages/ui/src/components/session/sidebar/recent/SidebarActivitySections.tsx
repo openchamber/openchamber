@@ -246,10 +246,12 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
         }
 
         return (
-          <div key={section.key} className="relative space-y-1">
+          <div key={section.key} className="relative">
+            <div data-sidebar-activity-start={section.key} className="pointer-events-none absolute inset-x-0 top-0 h-px" aria-hidden="true" />
             <div className={cn(
               'relative group/chats',
               '-ml-2.5 -mr-2',
+              !isCollapsed && 'mb-1',
               stickyZoneHeaders && 'sticky top-0 z-20 bg-sidebar',
             )} data-sidebar-sticky-header={stickyZoneHeaders ? 'true' : undefined}>
               <button

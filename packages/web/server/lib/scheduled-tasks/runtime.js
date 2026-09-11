@@ -685,7 +685,8 @@ export const createScheduledTasksRuntime = (deps) => {
   const runTask = async (projectID, taskID, reason, scheduledFor) => {
     const taskMap = tasksByProject.get(projectID);
     const task = taskMap?.get(taskID);
-    if (!task || !task.enabled) {
+    // Manual runNow runs paused tasks too; only scheduled dispatches skip them.
+    if (!task || (reason !== 'manual' && !task.enabled)) {
       return { ok: false, skipped: true };
     }
 

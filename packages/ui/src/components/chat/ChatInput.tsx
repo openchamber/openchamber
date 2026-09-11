@@ -3613,10 +3613,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         isComposerExpanded && 'flex-1 min-h-0',
                         "border border-border/80",
                         "shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]",
-                        "focus-within:ring-1",
-                        inputMode === 'shell'
-                            ? 'focus-within:ring-[var(--status-info)]'
-                            : 'focus-within:ring-primary/50',
+                        "focus-within:ring-1 focus-within:ring-interactive-selection-foreground/25",
                         isDragging && "ring-2 ring-primary ring-offset-2"
                     )}
                     style={{

@@ -169,6 +169,7 @@ const areTurnChangedFilesEqual = (left?: TurnChangedFile[], right?: TurnChangedF
       leftFile.file !== rightFile.file
       || leftFile.additions !== rightFile.additions
       || leftFile.deletions !== rightFile.deletions
+      || leftFile.inTurnDiff !== rightFile.inTurnDiff
     ) {
       return false;
     }

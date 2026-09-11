@@ -31,6 +31,7 @@ send never re-resolves mutable UI state:
 {
   id, createdAt,
   content,        // raw text for display and editing
+  contextPreview?, // bounded display-only summary captured by the UI
   text,           // text to deliver (agent mention stripped, file mentions resolved); defaults to content
   agentMention?,  // delivered as an `agent` part
   attachments: [{ id, filename, mimeType, size, source, serverPath?, dataUrl }],
@@ -55,6 +56,12 @@ the context block back. The payload inside `metadata` is the UI's contract
 context entry). Public snapshots and broadcasts strip the payloads —
 attachment `dataUrl` (megabytes of base64) and `context` (a PR diff, say) —
 so they do not ride every update; the only way to get them back is a `take`.
+
+Snapshots retain `contextPreview`, capped at 100 characters plus an ellipsis.
+It carries the attached comment or context label when `content` is empty and
+never replaces editable text or delivered parts. Older items without a summary
+derive one from the attached comment metadata or the first non-instruction
+context text. This optional field needs no queue-file migration.
 
 ## Persistence
 

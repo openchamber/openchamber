@@ -11,6 +11,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { normalizePath } from '@/lib/pathNormalization';
+import { getQueuedMessagePreview } from '@/lib/messages/queuedMessagePreview';
 
 export type FollowUpBehavior = 'steer' | 'queue';
 
@@ -98,6 +99,8 @@ export interface QueuedMessage {
     attachments?: AttachedFile[];
     /** Absent on a server projection item; a take brings it back. */
     context?: QueuedContextPart[];
+    /** Bounded display-only context summary retained in server projections. */
+    contextPreview?: string;
     createdAt: number;
     /** Send config captured at queue time — used as-is when auto-sending */
     sendConfig?: QueuedMessageSendConfig;
@@ -182,6 +185,7 @@ const serverItemSchema = z.object({
     attachments: z.array(serverAttachmentSchema),
     /** Present only on a taken item; broadcasts and snapshots omit it like attachment payloads. */
     context: z.array(serverContextPartSchema).optional(),
+    contextPreview: z.string().optional(),
     sendConfig: serverSendConfigSchema,
 });
 
@@ -259,6 +263,7 @@ const toQueuedMessage = (item: ServerQueueItem): QueuedMessage => {
     if (item.agentMention) message.agentMention = item.agentMention;
     if (item.attachments.length > 0) message.attachments = item.attachments.map(toAttachedFile);
     if (item.context) message.context = item.context;
+    if (item.contextPreview) message.contextPreview = item.contextPreview;
     return message;
 };
 
@@ -270,6 +275,7 @@ type ServerQueueItemInput = {
     agentMention?: string;
     attachments: ServerQueueAttachmentInput[];
     context: QueuedContextPart[];
+    contextPreview?: string;
     sendConfig: QueuedMessageSendConfig;
 };
 
@@ -300,6 +306,8 @@ const toServerItemInput = (message: QueuedMessageInput, sendConfig: QueuedMessag
         sendConfig,
     };
     if (message.agentMention) item.agentMention = message.agentMention;
+    const contextPreview = getQueuedMessagePreview({ content: '', context: message.context });
+    if (contextPreview) item.contextPreview = contextPreview;
     return item;
 };
 

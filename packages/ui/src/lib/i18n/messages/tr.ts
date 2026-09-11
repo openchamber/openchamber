@@ -2091,6 +2091,8 @@ export const dict = {
   'chat.pendingChanges.changedInWorkspace': 'çalışma alanında değişti',
   'chat.changedFiles.title': 'Değişen dosyalar',
   'chat.changedFiles.actions.openFileTitle': '{path} dosyasını aç',
+  'chat.changedFiles.actions.showMore': 'Daha fazla göster ({count})',
+  'chat.changedFiles.actions.collapse': 'Daralt',
   'chat.emptyState.opencodeUnreachable': 'OpenCode\'a erişilemiyor',
   'chat.emptyState.startNewChat': 'Yeni sohbet başlat',
   'chat.emptyState.draftTitle': 'Ne üzerinde çalışıyoruz?',

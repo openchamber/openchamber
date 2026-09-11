@@ -2097,6 +2097,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.pendingChanges.changedInWorkspace': '工作区中有变更',
   'chat.changedFiles.title': '已更改文件',
   'chat.changedFiles.actions.openFileTitle': '打开 {path}',
+  'chat.changedFiles.actions.showMore': '显示更多（{count}）',
+  'chat.changedFiles.actions.collapse': '收起',
   'chat.emptyState.opencodeUnreachable': '无法连接 OpenCode',
   'chat.emptyState.startNewChat': '开始新的聊天',
   'chat.emptyState.draftTitle': 'What are we working on?',

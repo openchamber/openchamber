@@ -69,7 +69,9 @@ in shared project config under the project write lock:
 - Claiming always writes `nextRunAt` (including `undefined`) so a past once-slot
   is cleared when there is no following occurrence.
 
-Manual `runNow` does not claim a schedule occurrence.
+Manual `runNow` does not claim a schedule occurrence. It also runs paused
+(`enabled: false`) tasks — that is the point of the button — while scheduled
+dispatches still skip disabled tasks, and completion never re-arms a paused task.
 
 ## Files
 

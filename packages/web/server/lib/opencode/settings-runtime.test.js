@@ -39,6 +39,20 @@ const createRuntime = async ({ mergePersistedSettings = (_current, changes) => c
 };
 
 describe('settings runtime', () => {
+  it('round-trips both archived-only retention states through instance settings', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime();
+    try {
+      for (const sessionRetentionOnlyArchived of [true, false]) {
+        const settings = { sessionRetentionOnlyArchived, sessionRetentionAction: 'delete', autoDeleteAfterDays: 30 };
+        await runtime.persistSettings(settings);
+        expect(await runtime.readSettingsFromDisk()).toEqual(settings);
+        expect(JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'))).toEqual(settings);
+      }
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('uses OpenChamber themes when a new install has no theme preferences', async () => {
     const { runtime, cleanup } = await createRuntime();
     try {
@@ -280,8 +294,12 @@ describe('settings runtime', () => {
     const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
     try {
       // Long enough for the bounded name, short enough that an older build
-      // could still have created `<id>/` on this filesystem.
-      const projectPath = path.join(tempRoot, `${'segment-'.repeat(12)}`, 'demo-repo');
+      // could still have created `<id>/` on this filesystem. The temp root
+      // differs per OS (a few characters on Linux runners, dozens on macOS),
+      // so pad to a fixed path length instead of a fixed segment.
+      const projectPathLength = 170;
+      const segment = 'x'.repeat(Math.max(1, projectPathLength - path.join(tempRoot, 'demo-repo').length - 1));
+      const projectPath = path.join(tempRoot, segment, 'demo-repo');
       const projectId = createProjectIdFromPath(projectPath);
       const stem = projectConfigFileStemOf(projectId);
       expect(projectId.length).toBeGreaterThan(200);

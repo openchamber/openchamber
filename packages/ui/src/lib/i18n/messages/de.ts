@@ -1928,6 +1928,8 @@ export const dict = {
   'chat.pendingChanges.changedInWorkspace': 'im Workspace geändert',
   'chat.changedFiles.title': 'Geänderte Dateien',
   'chat.changedFiles.actions.openFileTitle': '{path} öffnen',
+  'chat.changedFiles.actions.showMore': 'Mehr anzeigen ({count})',
+  'chat.changedFiles.actions.collapse': 'Einklappen',
   'chat.emptyState.opencodeUnreachable': 'OpenCode ist nicht erreichbar',
   'chat.emptyState.startNewChat': 'Neuen Chat starten',
   'chat.emptyState.draftTitle': 'Worüber arbeiten wir?',
