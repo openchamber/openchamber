@@ -118,7 +118,7 @@
         "AppImage"
       ],
       "category": "Development",
-      "icon": "resources/icons/icon.png",
+      "icon": "resources/icons/app-icon.svg",
       "executableName": "openchamber",
       "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
       "desktop": {
