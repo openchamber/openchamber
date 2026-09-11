@@ -294,9 +294,10 @@ const collectLiveData = (): LiveData => {
 // Directories worth polling: everywhere the tray's visible sessions live —
 // including synced ones, so the poll reconciles any status event a child
 // store missed (e.g. a session created from another window mid-race). Returns
-// each directory with the session ids the global list places there, so the
-// snapshot can authoritatively clear stale entries by session id.
-const collectStatusPollDirectories = (): Map<string, string[]> => {
+// each directory with the sessions the global list places there, so the
+// snapshot can authoritatively clear stale entries by session id and learn
+// parent-child relations from the records (cold-start child discovery).
+const collectStatusPollDirectories = (): Map<string, { id: string; parentID?: string | null; time?: { updated?: number; created?: number } }[]> => {
   const allSessions = useGlobalSessionsStore.getState().activeSessions;
   const rootDirs = new Set<string>();
   allSessions
@@ -309,14 +310,14 @@ const collectStatusPollDirectories = (): Map<string, string[]> => {
       if (directory) rootDirs.add(directory);
     });
 
-  const targets = new Map<string, string[]>();
+  const targets = new Map<string, { id: string; parentID?: string | null; time?: { updated?: number; created?: number } }[]>();
   for (const session of allSessions) {
     if (!session?.id) continue;
     const directory = resolveGlobalSessionDirectory(session);
     if (!directory || !rootDirs.has(directory)) continue;
-    const ids = targets.get(directory) ?? [];
-    ids.push(session.id);
-    targets.set(directory, ids);
+    const records = targets.get(directory) ?? [];
+    records.push({ id: session.id, parentID: session.parentID ?? null, time: session.time });
+    targets.set(directory, records);
   }
   return targets;
 };
@@ -452,12 +453,15 @@ export const useTraySync = (): void => {
     // Cheap: ~ms per directory, bounded by the tray's visible session count.
     const refreshGlobalStatus = async () => {
       const targets = collectStatusPollDirectories();
-      await Promise.all([...targets.entries()].map(async ([directory, sessionIds]) => {
+      await Promise.all([...targets.entries()].map(async ([directory, sessions]) => {
         // null = fetch failed → keep that directory's current entries;
         // {} = authoritative "everything here is idle".
         const raw = await opencodeClient.getSessionStatusForDirectory(directory).catch(() => null);
         if (disposed || raw === null) return;
-        applyGlobalSessionStatusSnapshot(directory, raw, sessionIds);
+        // The tray's per-directory record set is not proven complete (it comes
+        // from the global cache), so relation omission pruning stays disabled;
+        // relation learning from the records still runs.
+        applyGlobalSessionStatusSnapshot(directory, raw, sessions.map((session) => session.id), sessions, false);
       }));
     };
 
