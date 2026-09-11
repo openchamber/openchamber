@@ -1,4 +1,4 @@
-import { GUEST_CAPABILITIES } from '@openchamber/sdk';
+import { GUEST_ACTIONS_MAX, GUEST_CAPABILITIES, GUEST_COMMANDS_MAX, GUEST_COMMAND_NAME } from '@openchamber/sdk';
 import { z } from 'zod';
 
 import type { InstalledGuest } from './types.ts';
@@ -36,6 +36,20 @@ const publicServiceSchema = z.object({
   socketBindings: z.array(publicSocketBindingSchema).optional(),
 });
 
+const guestActionSchema = z.object({
+  id: z.string().regex(PANEL_ID),
+  label: z.string().trim().min(1),
+  icon: z.string().trim().min(1).optional(),
+  where: z.enum(['message', 'session']),
+  roles: z.array(z.enum(['user', 'assistant'])).optional(),
+  payload: z.array(z.enum(['messages'])).optional(),
+});
+
+const guestCommandSchema = z.object({
+  name: z.string().regex(GUEST_COMMAND_NAME),
+  description: z.string().trim().min(1).optional(),
+});
+
 const installedGuestSchema = z.object({
   id: z.string().regex(PANEL_ID),
   name: z.string().trim().min(1),
@@ -47,6 +61,8 @@ const installedGuestSchema = z.object({
   integration: publicIntegrationSchema.optional(),
   filesystem: z.array(z.string().trim().min(1)).optional(),
   service: publicServiceSchema.optional(),
+  actions: z.array(guestActionSchema).max(GUEST_ACTIONS_MAX).optional(),
+  commands: z.array(guestCommandSchema).max(GUEST_COMMANDS_MAX).optional(),
   capabilities: z.object({
     requested: z.array(z.enum(GUEST_CAPABILITIES)),
     granted: z.array(z.enum(GUEST_CAPABILITIES)),

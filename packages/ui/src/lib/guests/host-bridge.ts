@@ -4,6 +4,7 @@ import {
   OPENCHAMBER_SDK_API_VERSION,
   OPENCHAMBER_SDK_CHANNEL,
   type AttachIssueRequest,
+  type GuestItem,
   type PromptRequest,
   type PromptResult,
   type SessionLifecycleEvent,
@@ -17,6 +18,7 @@ import {
   type HostReadyContext,
   type HostRequestErrorCode,
   type HostResultPayload,
+  type ResolveResultPayload,
   type SessionSnapshot,
   type StartSessionResult,
   type ToastKind,
@@ -58,6 +60,10 @@ type HostBridgeEffects = {
   >;
   /** One handler for read, write, list, and stat; the pane checks scope and grant, the server does the rest. */
   file: (request: GuestFileRequest) => Promise<GuestFileProxyResult>;
+  /** Rail badge for this guest; `null` clears. */
+  setBadge: (count: number | null) => void;
+  /** The guest answered a host `resolve` with this id. Not a request, so no `result` goes back. */
+  resolveResult: (id: string, payload: ResolveResultPayload) => void;
 };
 
 export const buildReadyMessage = (payload: HostReadyContext): HostMessage => ({
@@ -95,11 +101,19 @@ export const buildSettingsMessage = (settings: GuestSettings): HostMessage => ({
   payload: { settings },
 });
 
-export const buildItemMessage = (item: AttachIssueRequest | null): HostMessage => ({
+export const buildItemMessage = (item: GuestItem | null): HostMessage => ({
   channel: OPENCHAMBER_SDK_CHANNEL,
   v: OPENCHAMBER_SDK_API_VERSION,
   type: 'item',
   payload: { item },
+});
+
+export const buildResolveMessage = (id: string, command: string, args: string): HostMessage => ({
+  channel: OPENCHAMBER_SDK_CHANNEL,
+  v: OPENCHAMBER_SDK_API_VERSION,
+  type: 'resolve',
+  id,
+  payload: { command, args },
 });
 
 export const buildSessionLifecycleMessage = (event: SessionLifecycleEvent): HostMessage => ({
@@ -309,5 +323,11 @@ export const answerGuestMessage = async (
       return fileResult(message.id, await effects.file({ op: 'list', path: message.payload.path }));
     case 'file-stat':
       return fileResult(message.id, await effects.file({ op: 'stat', path: message.payload.path }));
+    case 'badge':
+      effects.setBadge(message.payload.count);
+      return okResult(message.id);
+    case 'resolve-result':
+      effects.resolveResult(message.id, message.payload);
+      return null;
   }
 };

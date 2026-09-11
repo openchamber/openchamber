@@ -1,4 +1,11 @@
-import type { AttachContribution, PublicService, PublicGuestCapabilities, PublicIntegration } from '@openchamber/sdk';
+import type {
+  AttachContribution,
+  GuestActionContribution,
+  GuestCommandContribution,
+  PublicService,
+  PublicGuestCapabilities,
+  PublicIntegration,
+} from '@openchamber/sdk';
 
 export type GuestSource = 'bundled' | 'path' | 'zip' | 'git';
 
@@ -16,6 +23,10 @@ export type InstalledGuest = {
   /** Declared `contributes.filesystem` patterns, shown on the approval dialog. */
   filesystem?: string[];
   service?: PublicService;
+  /** Declared `contributes.actions`; the UI shows them only for an active guest. */
+  actions?: GuestActionContribution[];
+  /** Declared `contributes.commands`; the composer routes them only for an active guest. */
+  commands?: GuestCommandContribution[];
   /** What the package asks for and what the user approved at install. */
   capabilities: PublicGuestCapabilities;
   source?: GuestSource;

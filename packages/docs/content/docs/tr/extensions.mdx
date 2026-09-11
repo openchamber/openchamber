@@ -33,9 +33,14 @@ Panel göstermek ve hangi proje ile oturumun açık olduğunu okumak izin gerekt
 - **Açık projedeki dosyaları okuma ve yazma**.
 - **Proje dışındaki dosyaları okuma ve yazma**: yalnızca uzantının iletişim kutusunda listelediği konumlar.
 - **Dış hizmetlere bağlanma**: bağladığınız bir hesapla kendi API'sini çağırır.
+- **Eylemini çalıştırdığında bir oturumun konuşmasını okur**: uzantı o oturumdaki her mesajı alır, ama yalnızca oturum menüsünden onun eylemini seçtiğinizde.
 - **Yerel servis çalıştırma**: kullanıcı hesabınızın erişimiyle bu bilgisayarda ayrı bir program başlatır. Buna yalnızca güvendiğiniz uzantılar için izin verin; bildirdiği izinler niyeti açıklar, onu kısıtlamaz.
 
 Daha yeni bir sürüm izin verdiğinizden fazlasını istediğinde kart **Onay gerekli** ve bir **İzinleri incele** düğmesi gösterir. Yeni listeye izin verene kadar o uzantı kapalı kalır.
+
+## Nerede görünür
+
+Raydaki panelinin yanı sıra bir uzantı, zaten kullandığınız menülere girdiler ekleyebilir: bir sohbet mesajındaki eylemler, bir oturumun menüsü, sohbet kutusunun yanındaki + menüsü ve hiçbir şey açmadan bir şey iliştiren `/task ABC-12` gibi eğik çizgi komutları. Bunlardan hangilerini sunacağına uzantı karar verir; uzantıya izin verene kadar hepsi kapalıdır.
 
 ## Hesabını bağlama
 

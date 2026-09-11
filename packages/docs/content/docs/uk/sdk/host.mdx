@@ -27,7 +27,7 @@ const host = connectHost();
 | `directory` | тека поточного проєкту або `null` |
 | `session` | `{ id, title, busy }` або `null`. Якщо назви немає, замість неї id сесії. `busy` - поточний статус. `model` і `agent` (агент OpenCode) з'являються, коли вони є в сесії. |
 | `surface` | `panel` на рейці, `dialog` у вікні прикріплення |
-| `item` | прикріплений елемент, який користувач клацнув, щоб відкрити цю поверхню (ті самі поля, які ви передали в `attach`, включно з `data`), або `null` |
+| `item` | для чого відкрита ця поверхня, або `null`: прикріплений елемент, який клацнув користувач (ті самі поля, які ви передали в `attach`, включно з `data`), повідомлення (`kind: "message"`) або сесія (`kind: "session"`) з однієї з оголошених вами дій. Див. [Дії](/sdk/#дії-команди-та-бейдж). |
 | `connection` | `{ connected, account }` для вашої інтеграції |
 | `settings` | значення полів, які ви оголосили в `integration.settings` |
 
@@ -58,6 +58,8 @@ const host = connectHost();
 | `writeFile(path, content)` | атомарно записати текстовий файл, створюючи батьківські теки. Повертає `{ written: true }`. |
 | `listDir(path)` | перелічити теку. Повертає `{ entries: [{ name, kind }] }`, `kind` - `file`, `directory` або `other`. |
 | `stat(path)` | `{ kind, size, mtime }`, `kind` - `file`, `directory`, `other` або `missing`. |
+| `onResolve(handler)` | зареєструвати обробник ваших слеш-команд. Він отримує `{ command, args }` і повертає елемент для прикріплення або `null`. |
+| `setBadge(count)` | показати число (від 0 до 999) на вашій іконці в рейці або `null`, щоб прибрати його |
 
 ## attach, startSession і sessionLink
 

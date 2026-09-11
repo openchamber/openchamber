@@ -33,9 +33,14 @@ Mostrar um painel e ler qual projeto e sessão estão abertos não precisa de pe
 - **Ler e gravar arquivos no projeto aberto**.
 - **Ler e gravar arquivos fora do projeto**: só os locais exatos que a extensão lista no diálogo.
 - **Conectar a serviços externos**: chamar a própria API com uma conta que você conecta.
+- **Ler a conversa de uma sessão quando você executa a ação dela**: a extensão recebe todas as mensagens dessa sessão, mas só quando você escolhe a ação dela no menu da sessão.
 - **Executar um serviço local**: iniciar um programa separado neste computador com o acesso da sua conta de usuário. Permita isso só para extensões em que você confia; as permissões declaradas descrevem a intenção, não o restringem.
 
 Quando uma versão mais nova pede mais do que você permitiu, o card mostra **Precisa de aprovação** e um botão **Revisar permissões**. Até você permitir a nova lista, essa extensão fica desligada.
+
+## Onde ela aparece
+
+Além do painel na barra lateral, uma extensão pode adicionar entradas a menus que você já usa: as ações de uma mensagem do chat, o menu de uma sessão, o menu + ao lado da caixa de chat e comandos de barra como `/task ABC-12`, que anexam algo sem abrir nada. A extensão decide quais deles oferece; todos ficam desligados até você permitir a extensão.
 
 ## Conectar a conta dela
 

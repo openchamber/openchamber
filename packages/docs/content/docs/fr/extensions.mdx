@@ -33,9 +33,14 @@ Afficher un panneau et lire quel projet et quelle session sont ouverts ne demand
 - **Lire et écrire des fichiers dans le projet ouvert**.
 - **Lire et écrire des fichiers hors du projet** : seulement les emplacements exacts que l'extension liste dans la boîte de dialogue.
 - **Se connecter à des services externes** : appeler sa propre API avec un compte que tu connectes.
+- **Lire la conversation d’une session quand tu lances son action** : l'extension reçoit tous les messages de cette session, mais seulement quand tu choisis son action dans le menu de la session.
 - **Exécuter un service local** : lancer un programme séparé sur cet ordinateur avec les accès de ton compte utilisateur. N'autorise cela qu'aux extensions en qui tu as confiance ; les autorisations qu'elle déclare décrivent l'intention, elles ne la restreignent pas.
 
 Quand une version plus récente demande plus que ce que tu as autorisé, la carte affiche **Approbation requise** et un bouton **Vérifier les autorisations**. Tant que tu n'as pas autorisé la nouvelle liste, cette extension reste désactivée.
+
+## Où elle apparaît
+
+En plus de son panneau dans la barre latérale, une extension peut ajouter des entrées à des menus que tu utilises déjà : les actions d'un message du chat, le menu d'une session, le menu + à côté de la zone de chat et des commandes slash comme `/task ABC-12` qui attachent quelque chose sans rien ouvrir. L'extension décide lesquels elle propose ; tous restent désactivés tant que tu n'as pas autorisé l'extension.
 
 ## Connecter son compte
 

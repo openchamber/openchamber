@@ -104,7 +104,7 @@ Ein Panel zeichnen und die aktuelle Session lesen braucht keine Berechtigung. Al
 | `sessions` | Sessions und Worktrees anlegen (`startSession`) |
 | `files` | Dateien innerhalb des offenen Projekts lesen und schreiben (`readFile`, `writeFile`, `listDir`, `stat` mit einem relativen Pfad) |
 
-Drei weitere kommen automatisch dazu: `network`, wenn du eine `integration` deklarierst, `service`, wenn du einen `service` deklarierst, und `filesystem`, wenn du `filesystem`-Muster deklarierst.
+Vier weitere kommen automatisch dazu: `network`, wenn du eine `integration` deklarierst, `service`, wenn du einen `service` deklarierst, `filesystem`, wenn du `filesystem`-Muster deklarierst, und `conversation`, wenn eine Session-Aktion die Nachrichten anfordert (siehe [Aktionen, Befehle und das Badge](#aktionen-befehle-und-das-badge)).
 
 Der Nutzer sieht die vollständige Liste einmal, bei der Installation der Erweiterung, und bestätigt sie oder entfernt die Erweiterung. Fordert eine neue Version mehr an, erscheint der Dialog erneut. Ein Aufruf, der eine nicht bestätigte Berechtigung braucht, schlägt mit `NOT_GRANTED` fehl.
 
@@ -146,6 +146,38 @@ const { entries } = await host.listDir(".");
 ```
 
 Schreibvorgänge sind atomar: OpenChamber schreibt eine temporäre Datei und benennt sie um, ein Leser sieht also nie eine halb geschriebene Datei. Dateien werden als UTF-8-Text gelesen und geschrieben, bis 2 MB.
+
+## Aktionen, Befehle und das Badge
+
+Neben der Leiste und dem +-Menü kann eine Erweiterung an drei weiteren Stellen erscheinen. Alle übergeben der Erweiterung ein `item`, genau wie ein Klick auf einen Chip.
+
+**Aktionen auf Nachrichten und Sessions.** Deklariere Menüeinträge, und OpenChamber zeigt sie neben den eingebauten:
+
+```json
+"actions": [
+  { "id": "create-task", "label": "Create task", "icon": "add-line", "where": "message", "roles": ["assistant"] },
+  { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
+]
+```
+
+Eine Nachrichtenaktion öffnet deine Erweiterung mit einem `ctx.item` der Art `kind: "message"`: Session-ID und -Titel, Projektordner, Nachrichten-ID, ihre Rolle und ihr Text. Eine Session-Aktion öffnet sie mit `kind: "session"` sowie Session-ID, Titel und Ordner. Füge `"payload": ["messages"]` hinzu, und der Eintrag trägt außerdem das ganze Gespräch, älteste Nachricht zuerst, derselbe Text, den der Markdown-Export erzeugt. Dafür braucht es die Berechtigung `conversation`, die der Nutzer als eigene Zeile im Freigabedialog sieht. `item.action` sagt dir, welcher Eintrag angeklickt wurde.
+
+**Slash-Befehle, die anhängen.** Deklariere einen Befehl und behandle ihn in der Seite:
+
+```json
+"commands": [{ "name": "task", "description": "Attach a task by id" }]
+```
+
+```ts
+host.onResolve(async ({ command, args }) => {
+  const task = await findTask(args.trim());
+  return task ? { providerId: "acme-tasks", id: task.id, title: task.title, url: task.url } : null;
+});
+```
+
+Wenn der Nutzer `/task ABC-12` ins Chatfeld tippt, bittet OpenChamber deine Erweiterung, das aufzulösen, und hängt das Ergebnis als Chip an, ohne etwas zu öffnen. Gib `null` zurück für "nichts gefunden". Ist dein Panel geschlossen, lädt OpenChamber es für den Aufruf im Hintergrund. Ein Name, den OpenChamber oder OpenCode schon verwendet, wird ignoriert.
+
+**Badge auf dem Symbol in der Leiste.** `host.setBadge(3)` zeigt eine Zahl auf deinem Symbol, zum Beispiel offene Aufgaben; `host.setBadge(null)` entfernt sie. Das Öffnen des Panels entfernt sie ebenfalls.
 
 ## Die ersten Zeilen im Panel
 

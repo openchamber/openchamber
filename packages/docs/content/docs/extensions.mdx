@@ -33,9 +33,14 @@ Showing a panel and reading which project and session are open needs no permissi
 - **Read and write files in the open project**.
 - **Read and write files outside the project**: only the exact locations the extension lists in the dialog.
 - **Connect to external services**: call its own API with an account you connect.
+- **Read a session's conversation when you run its action**: the extension receives every message in that session, but only when you pick its action from the session menu.
 - **Run a local service**: start a separate program on this computer with your user account's access. Allow this only for extensions you trust; the permissions it declares describe intent, they do not restrict it.
 
 When a newer version asks for more than you allowed, the card shows **Needs approval** and a **Review permissions** button. Until you allow the new list, that extension stays off.
+
+## Where it shows up
+
+Besides its panel on the rail, an extension can add entries to menus you already use: the actions on a chat message, the menu of a session, the + menu next to the chat box, and slash commands like `/task ABC-12` that attach something without opening anything. The extension decides which of these it offers; all of them are off until you allow the extension.
 
 ## Connect its account
 

@@ -709,3 +709,81 @@ describe('parseManifest', () => {
     }
   });
 });
+
+describe('contributes.actions and contributes.commands', () => {
+  const withContributes = (extra: Record<string, unknown>) => parseManifest({
+    apiVersion: 1,
+    contributes: { panel: validBlock.contributes.panel, ...extra },
+  });
+
+  test('reads actions and derives the conversation capability from a messages payload', () => {
+    const result = withContributes({
+      actions: [
+        { id: 'create-task', label: 'Create task from message', icon: 'add-line', where: 'message', roles: ['assistant'] },
+        { id: 'summarize', label: 'Summarize session', where: 'session', payload: ['messages'] },
+        { id: 'open-session', label: 'Open in tracker', where: 'session' },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.manifest.contributes.actions).toEqual([
+        { id: 'create-task', label: 'Create task from message', icon: 'add-line', where: 'message', roles: ['assistant'] },
+        { id: 'summarize', label: 'Summarize session', where: 'session', payload: ['messages'] },
+        { id: 'open-session', label: 'Open in tracker', where: 'session' },
+      ]);
+      expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual(['conversation']);
+    }
+    expect(requestedGuestCapabilities({ actions: [{ id: 'a', label: 'A', where: 'session' }] })).toEqual([]);
+    expect(requestedGuestCapabilities({ actions: [{ id: 'a', label: 'A', where: 'message' }] })).toEqual([]);
+    expect(requestedGuestCapabilities({
+      capabilities: ['files'],
+      actions: [{ id: 'a', label: 'A', where: 'session', payload: ['messages'] }],
+    })).toEqual(['files', 'conversation']);
+  });
+
+  test('rejects malformed actions as invalid-actions', () => {
+    const cases: unknown[] = [
+      [],
+      [{ id: 'Bad Id', label: 'x', where: 'message' }],
+      [{ id: 'a', label: '', where: 'message' }],
+      [{ id: 'a', label: 'x'.repeat(41), where: 'message' }],
+      [{ id: 'a', label: 'x', where: 'nowhere' }],
+      [{ id: 'a', label: 'x', where: 'session', roles: ['user'] }],
+      [{ id: 'a', label: 'x', where: 'message', payload: ['messages'] }],
+      [{ id: 'a', label: 'x', where: 'message', roles: [] }],
+      [{ id: 'a', label: 'x', where: 'session', payload: ['files'] }],
+      [{ id: 'a', label: 'x', where: 'message', icon: 'https://x/y.svg' }],
+      [{ id: 'dup', label: 'x', where: 'message' }, { id: 'dup', label: 'y', where: 'session' }],
+      new Array(9).fill(null).map((_, index) => ({ id: `a-${index}`, label: 'x', where: 'message' })),
+    ];
+    for (const actions of cases) {
+      expect(withContributes({ actions })).toMatchObject({ ok: false, code: 'invalid-actions' });
+    }
+  });
+
+  test('reads commands and rejects malformed ones as invalid-commands', () => {
+    const result = withContributes({
+      commands: [{ name: 'task', description: 'Attach a task by id' }, { name: 'pr' }],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.manifest.contributes.commands).toEqual([
+        { name: 'task', description: 'Attach a task by id' },
+        { name: 'pr' },
+      ]);
+    }
+    const cases: unknown[] = [
+      [],
+      [{ name: 'Task' }],
+      [{ name: '1task' }],
+      [{ name: 'a'.repeat(25) }],
+      [{ name: 'task', description: '' }],
+      [{ name: 'task', description: 'x'.repeat(81) }],
+      [{ name: 'task' }, { name: 'task' }],
+      new Array(9).fill(null).map((_, index) => ({ name: `c-${index}` })),
+    ];
+    for (const commands of cases) {
+      expect(withContributes({ commands })).toMatchObject({ ok: false, code: 'invalid-commands' });
+    }
+  });
+});

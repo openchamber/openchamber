@@ -4,6 +4,11 @@ import { OPENCHAMBER_SDK_MANIFEST_API_VERSIONS } from './api-version.ts';
 import { OPENCHAMBER_ENGINE_PATTERN } from './host-version.ts';
 import {
   DECLARED_GUEST_CAPABILITIES,
+  GUEST_ACTIONS_MAX,
+  GUEST_ACTION_LABEL_MAX,
+  GUEST_COMMANDS_MAX,
+  GUEST_COMMAND_DESCRIPTION_MAX,
+  GUEST_COMMAND_NAME,
   GUEST_FILESYSTEM_PATTERNS_MAX,
   GUEST_FILESYSTEM_PATTERN_MAX,
   PANEL_ID,
@@ -184,6 +189,33 @@ const serviceSchema = z.object({
   permissions: servicePermissionsSchema.optional(),
 });
 
+const uniqueBy = <T,>(items: T[], key: (item: T) => string): boolean => (
+  new Set(items.map(key)).size === items.length
+);
+
+// `roles` only means something on a message action and `payload` only on a
+// session action; a dead field is a misconfiguration and fails closed.
+const actionSchema = z.object({
+  id: z.string().trim().regex(PANEL_ID).max(64),
+  label: z.string().trim().min(1).max(GUEST_ACTION_LABEL_MAX),
+  icon: z.string().trim().refine(isPanelIcon).optional(),
+  where: z.enum(['message', 'session']),
+  roles: z.array(z.enum(['user', 'assistant'])).min(1).max(2).optional(),
+  payload: z.array(z.enum(['messages'])).max(1).optional(),
+}).refine((value) => value.where === 'message' || value.roles === undefined, { path: ['roles'] })
+  .refine((value) => value.where === 'session' || value.payload === undefined, { path: ['payload'] });
+
+const actionsSchema = z.array(actionSchema).min(1).max(GUEST_ACTIONS_MAX)
+  .refine((actions) => uniqueBy(actions, (action) => action.id), { message: 'action ids must be unique' });
+
+const commandSchema = z.object({
+  name: z.string().trim().regex(GUEST_COMMAND_NAME),
+  description: z.string().trim().min(1).max(GUEST_COMMAND_DESCRIPTION_MAX).optional(),
+});
+
+const commandsSchema = z.array(commandSchema).min(1).max(GUEST_COMMANDS_MAX)
+  .refine((commands) => uniqueBy(commands, (command) => command.name), { message: 'command names must be unique' });
+
 export const openChamberManifestSchema = z.object({
   apiVersion: z.literal(OPENCHAMBER_SDK_MANIFEST_API_VERSIONS[0]),
   engines: z.object({
@@ -198,6 +230,8 @@ export const openChamberManifestSchema = z.object({
     filesystem: z.array(
       z.string().max(GUEST_FILESYSTEM_PATTERN_MAX).refine(isGuestFilesystemPattern),
     ).min(1).max(GUEST_FILESYSTEM_PATTERNS_MAX).optional(),
+    actions: actionsSchema.optional(),
+    commands: commandsSchema.optional(),
   }),
 });
 
@@ -276,6 +310,18 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
     return fail(
       'invalid-filesystem',
       'contributes.filesystem lists 1 to 16 patterns starting with "/" or "~/", without "..", empty segments, or backslashes.',
+    );
+  }
+  if (path.startsWith('contributes.actions')) {
+    return fail(
+      'invalid-actions',
+      'contributes.actions lists up to 8 entries with a unique kebab-case id, a label of 1 to 40 characters, where "message" or "session", optional roles (message only), and optional payload ["messages"] (session only).',
+    );
+  }
+  if (path.startsWith('contributes.commands')) {
+    return fail(
+      'invalid-commands',
+      'contributes.commands lists up to 8 entries with a unique name matching /^[a-z][a-z0-9-]{0,23}$/ and an optional description of 1 to 80 characters.',
     );
   }
   if (path.startsWith('contributes.integration')) {

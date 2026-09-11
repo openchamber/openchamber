@@ -11,9 +11,10 @@ import { useUIStore } from '@/stores/useUIStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 import { commandMatchesSearch, mergeCommandAutocompleteItems } from './commandAutocompleteItems';
+import { useGuestCommands } from '@/hooks/useGuestSurfaces';
 import { AutocompleteRowTooltip } from './composer/ui/AutocompleteRowTooltip';
 
-type CommandSource = 'openchamber' | 'opencode' | 'skill';
+type CommandSource = 'openchamber' | 'opencode' | 'skill' | 'extension';
 
 export interface CommandInfo {
   id: string;
@@ -27,7 +28,16 @@ export interface CommandInfo {
   isOpenChamber?: boolean;
   isSkill?: boolean;
   scope?: string;
+  /** Name of the extension that contributed the command; shown as its badge. */
+  extensionName?: string;
 }
+
+// Every name the composer runs itself; an extension command with one of
+// these names is dropped before it reaches the list.
+const LOCAL_COMMAND_NAMES = [
+  'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'btw', 'summary', 'workspace-review', 'handoff-review',
+  'plan-feature', 'craft-goal', 'schedule-task', 'catch-up', 'debug', 'weigh', 'explore',
+];
 
 export interface CommandAutocompleteHandle {
   handleKeyDown: (key: string) => void;
@@ -118,6 +128,14 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     void refreshSkills();
   }, [refreshCommands, refreshSkills]);
 
+  const reservedCommandNames = React.useMemo(() => {
+    const names = new Set<string>(LOCAL_COMMAND_NAMES);
+    for (const command of commandsWithMetadata) names.add(command.name.toLowerCase());
+    for (const skill of skills) names.add(skill.name.toLowerCase());
+    return names;
+  }, [commandsWithMetadata, skills]);
+  const guestCommands = useGuestCommands(reservedCommandNames);
+
   React.useEffect(() => {
     const loadCommands = async () => {
       setLoading(true);
@@ -202,7 +220,17 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             : []
           ),
         ];
-        const allCommands = mergeCommandAutocompleteItems(builtInCommands, customCommands, skillCommands);
+        const extensionCommands: CommandInfo[] = guestCommands.map((entry) => ({
+          id: `extension:${entry.guestId}:${entry.command.name}`,
+          name: entry.command.name,
+          source: 'extension',
+          description: entry.command.description,
+          extensionName: entry.guestName,
+        }));
+        const allCommands = [
+          ...mergeCommandAutocompleteItems(builtInCommands, customCommands, skillCommands),
+          ...extensionCommands,
+        ];
 
         const filtered = searchQuery
           ? allCommands.filter(cmd => commandMatchesSearch(cmd, searchQuery))
@@ -293,7 +321,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     };
 
     loadCommands();
-  }, [searchQuery, hasSession, canStartSessionCommand, canUseReviewHandoffFlow, commandsWithMetadata, skills, t]);
+  }, [searchQuery, hasSession, canStartSessionCommand, canUseReviewHandoffFlow, commandsWithMetadata, guestCommands, skills, t]);
 
   React.useEffect(() => {
     setSelectedIndex(0);
@@ -365,6 +393,9 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
       default:
         if (command.isBuiltIn) {
           return <Icon name="flashlight" className="h-3.5 w-3.5 text-yellow-500" />;
+        }
+        if (command.source === 'extension') {
+          return <Icon name="window" className="h-3.5 w-3.5 text-muted-foreground" />;
         }
         return <Icon name="command" className="h-3.5 w-3.5 text-muted-foreground" />;
     }
@@ -464,7 +495,11 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
                           {t('chat.commandAutocomplete.badge.command')}
                         </span>
                       )}
-                      {isOpenChamberBadge ? (
+                      {command.extensionName ? (
+                        <span className={NEUTRAL_BADGE_CLASS}>
+                          {command.extensionName}
+                        </span>
+                      ) : isOpenChamberBadge ? (
                         <span className={NEUTRAL_BADGE_CLASS}>
                           OpenChamber
                         </span>

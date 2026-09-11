@@ -40,6 +40,8 @@ import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
+import { useGuestBadgeStore } from '@/lib/guests/badge-store';
+import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
 import { ContextRailSurfacesDialog } from './ContextRailSurfacesDialog';
 
 const RAIL_TOOLTIP_DELAY_MS = 150;
@@ -264,6 +266,8 @@ export const ContextPanelRail: React.FC = () => {
   );
 
   const guestSurfaces = useGuestSurfaces();
+  const guestBadges = useGuestBadgeStore((state) => state.countByGuest);
+  const clearGuestBadge = useGuestBadgeStore((state) => state.clearBadge);
   const tabs = panelState?.tabs ?? EMPTY_TABS;
   const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? null;
   const activeMode = panelState?.isOpen ? activeTab?.mode ?? null : null;
@@ -335,7 +339,13 @@ export const ContextPanelRail: React.FC = () => {
             // The work-status panel reports the same count in words a few
             // pixels away; two live counts for one fact is one too many.
             const gitChangedCount = surface.id === 'git' && !workStatusPanelVisible ? changedFilesCount : 0;
-            const badgeCount = gitChangedCount > 0 ? gitChangedCount : null;
+            // A guest sets its own count through `host.setBadge`; opening
+            // that panel clears it, so the active surface never shows one.
+            const guestBadgeCount = isPluginContextPanelMode(surface.mode) && activeMode !== surface.mode
+              ? guestBadges[pluginIdFromMode(surface.mode)] ?? 0
+              : 0;
+            const badgeCount = gitChangedCount > 0 ? gitChangedCount : guestBadgeCount > 0 ? guestBadgeCount : null;
+            const isGuestBadge = badgeCount !== null && gitChangedCount === 0;
             return (
               <ContextPanelRailItem
                 key={surface.id}
@@ -347,23 +357,26 @@ export const ContextPanelRail: React.FC = () => {
                 badgeCount={badgeCount}
                 badgeAriaLabel={badgeCount !== null
                   ? t(
-                      badgeCount === 1
-                        ? 'contextRail.surface.git.changesCountAriaSingle'
-                        : 'contextRail.surface.git.changesCountAriaPlural',
+                      isGuestBadge
+                        ? (badgeCount === 1 ? 'contextRail.surface.plugin.badgeAriaSingle' : 'contextRail.surface.plugin.badgeAriaPlural')
+                        : (badgeCount === 1 ? 'contextRail.surface.git.changesCountAriaSingle' : 'contextRail.surface.git.changesCountAriaPlural'),
                       { label, count: badgeCount },
                     )
                   : null}
                 badgeDescription={badgeCount !== null
                   ? t(
-                      badgeCount === 1
-                        ? 'contextRail.surface.git.changesCountTooltipSingle'
-                        : 'contextRail.surface.git.changesCountTooltipPlural',
+                      isGuestBadge
+                        ? (badgeCount === 1 ? 'contextRail.surface.plugin.badgeTooltipSingle' : 'contextRail.surface.plugin.badgeTooltipPlural')
+                        : (badgeCount === 1 ? 'contextRail.surface.git.changesCountTooltipSingle' : 'contextRail.surface.git.changesCountTooltipPlural'),
                       { count: badgeCount },
                     )
                   : null}
                 orderNumber={index + 1}
                 showOrderNumber={revealNumbers}
-                onSelect={(selected) => openContextSurface(directoryKey, selected.mode)}
+                onSelect={(selected) => {
+                  if (isPluginContextPanelMode(selected.mode)) clearGuestBadge(pluginIdFromMode(selected.mode));
+                  openContextSurface(directoryKey, selected.mode);
+                }}
               />
             );
           })}

@@ -32,6 +32,9 @@ export const TASKS: Task[] = [
 
 export const findTask = (id: string): Task | null => TASKS.find((task) => task.id === id) ?? null;
 
+/** What the rail badge counts: everything that is not done. */
+export const openTasks = (): Task[] => TASKS.filter((task) => task.status !== 'Done');
+
 export const attachPayload = (task: Task) => ({
   providerId: PROVIDER,
   id: task.id,

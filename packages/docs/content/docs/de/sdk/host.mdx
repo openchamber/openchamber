@@ -27,7 +27,7 @@ const host = connectHost();
 | `directory` | aktuelles Projektverzeichnis oder `null` |
 | `session` | `{ id, title, busy }` oder `null`. Fehlt der Titel, steht dort die Session-ID. `busy` ist der Live-Status. `model` und `agent` (der OpenCode-Agent) erscheinen, wenn die Session sie hat. |
 | `surface` | `panel` in der Leiste, `dialog` im Anhängen-Fenster |
-| `item` | der angehängte Eintrag, den der Nutzer angeklickt hat, um diese Oberfläche zu öffnen (dieselben Felder, die du an `attach` übergeben hast, einschließlich `data`), oder `null` |
+| `item` | wofür diese Oberfläche geöffnet wurde, oder `null`: der angehängte Eintrag, den der Nutzer angeklickt hat (dieselben Felder, die du an `attach` übergeben hast, einschließlich `data`), eine Nachricht (`kind: "message"`) oder eine Session (`kind: "session"`) aus einer deiner deklarierten Aktionen. Siehe [Aktionen](/sdk/#aktionen-befehle-und-das-badge). |
 | `connection` | `{ connected, account }` für deine Integration |
 | `settings` | Werte der Felder, die du in `integration.settings` deklariert hast |
 
@@ -58,6 +58,8 @@ Zugriffstokens tauchen hier nie auf, auch nicht in einem `request`-Ergebnis.
 | `writeFile(path, content)` | eine Textdatei atomar schreiben, übergeordnete Ordner werden angelegt. Liefert `{ written: true }`. |
 | `listDir(path)` | einen Ordner auflisten. Liefert `{ entries: [{ name, kind }] }`, `kind` ist `file`, `directory` oder `other`. |
 | `stat(path)` | `{ kind, size, mtime }`, `kind` ist `file`, `directory`, `other` oder `missing`. |
+| `onResolve(handler)` | den Handler für deine Slash-Befehle registrieren. Er bekommt `{ command, args }` und liefert einen Eintrag zum Anhängen oder `null`. |
+| `setBadge(count)` | eine Zahl (0 bis 999) auf deinem Symbol in der Leiste zeigen, oder `null`, um sie zu entfernen |
 
 ## attach, startSession und sessionLink
 

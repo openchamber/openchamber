@@ -104,7 +104,7 @@ OpenChamber 会读取清单，并弹出一个对话框列出扩展所请求的�
 | `sessions` | 创建会话和 worktree（`startSession`） |
 | `files` | 读写打开项目中的文件（使用相对路径的 `readFile`、`writeFile`、`listDir`、`stat`） |
 
-另有三项会自动为你加上：声明了 `integration` 时加上 `network`，声明了 `service` 时加上 `service`，声明了 `filesystem` 模式时加上 `filesystem`。
+另有四项会自动为你加上：声明了 `integration` 时加上 `network`，声明了 `service` 时加上 `service`，声明了 `filesystem` 模式时加上 `filesystem`，会话操作请求消息时加上 `conversation`（见[操作、命令和徽标](#操作命令和徽标)）。
 
 用户在安装扩展时会看到完整列表一次，然后批准或移除扩展。如果新版本请求更多权限，对话框会再次出现。调用需要用户尚未批准的能力时，会以 `NOT_GRANTED` 失败。
 
@@ -146,6 +146,38 @@ const { entries } = await host.listDir(".");
 ```
 
 写入是原子的：OpenChamber 先写入临时文件再重命名，读取方永远不会看到写了一半的文件。文件以 UTF-8 文本读写，最大 2 MB。
+
+## 操作、命令和徽标
+
+除了侧栏和 + 菜单，扩展还可以出现在另外三个地方。它们都以和点击标签相同的方式把 `item` 交给扩展。
+
+**消息和会话上的操作。** 声明菜单项，OpenChamber 会把它们显示在内置项旁边：
+
+```json
+"actions": [
+  { "id": "create-task", "label": "Create task", "icon": "add-line", "where": "message", "roles": ["assistant"] },
+  { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
+]
+```
+
+消息操作会以 `kind: "message"` 的 `ctx.item` 打开你的扩展：会话 id 和标题、项目目录、消息 id、它的角色和文本。会话操作则以 `kind: "session"` 打开，附带会话 id、标题和目录。加上 `"payload": ["messages"]`，条目还会携带整段对话，从最早的消息开始，与 Markdown 导出产生的文本相同。这需要 `conversation` 能力，用户会在批准对话框中看到它单独占一行。`item.action` 告诉你点击的是哪一项。
+
+**用于附加的斜杠命令。** 声明一个命令并在页面里处理它：
+
+```json
+"commands": [{ "name": "task", "description": "Attach a task by id" }]
+```
+
+```ts
+host.onResolve(async ({ command, args }) => {
+  const task = await findTask(args.trim());
+  return task ? { providerId: "acme-tasks", id: task.id, title: task.title, url: task.url } : null;
+});
+```
+
+当用户在聊天框中输入 `/task ABC-12` 时，OpenChamber 会请你的扩展解析它，并把你返回的内容作为标签附加上去，不打开任何东西。找不到时返回 `null`。如果你的面板是关闭的，OpenChamber 会为这次调用在后台加载它。OpenChamber 或 OpenCode 已经使用的名称会被忽略。
+
+**侧栏图标上的徽标。** `host.setBadge(3)` 在你的图标上显示一个数字，比如未完成任务数；`host.setBadge(null)` 清除它。打开面板也会清除它。
 
 ## 面板里的前几行代码
 

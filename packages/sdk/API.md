@@ -71,7 +71,8 @@ Each returns an unsubscribe function. Late subscribers get the last known value 
 | `onSessionLifecycle(listener)` | `SessionLifecycleEvent` | `{ sessionId, phase }` — `started` / `completed` / `failure` |
 | `onConnection(listener)`       | `GuestConnection`       | `{ connected, account }`                                     |
 | `onSettings(listener)`         | `GuestSettings`         | Declared integration fields only (`Record<string, string>`)  |
-| `onItem(listener)`             | `AttachIssueRequest     | null`                                                        | The item this surface was opened for (chip click); `null` from the rail icon or + menu |
+| `onItem(listener)`             | `GuestItem              | null`                                                        | The item this surface was opened for: the chip (`AttachIssueRequest`), a message (`GuestMessageItem`), or a session (`GuestSessionItem`); `null` from the rail icon or + menu |
+| `onResolve(handler)`           | `{ command, args }` → `Promise<AttachIssueRequest \| null>` | Answers a `contributes.commands` slash command. Return the chip to attach, `null` for nothing (the user sees a short notice), or throw (the message reaches the user). One handler at a time |
 
 
 `HostReadyContext`
@@ -87,7 +88,33 @@ Each returns an unsubscribe function. Late subscribers get the last known value 
 | `surface`      | `'panel'                 | 'dialog'`                                                                                |
 | `connection`   | `{ connected, account }` | Integration link state                                                                   |
 | `settings`     | `Record<string, string>` | Declared keys only                                                                       |
-| `item`         | `AttachIssueRequest      | null`                                                                                    | Set when the user clicked this guest's chip on the composer. Show that item instead of the list |
+| `item`         | `GuestItem               | null`                                                                                    | Set when the user clicked this guest's chip on the composer, or ran one of this guest's `contributes.actions`. Narrow with `isGuestMessageItem` / `isGuestSessionItem` / `isGuestAttachItem` |
+
+
+`GuestItem` is `AttachIssueRequest | GuestMessageItem | GuestSessionItem`:
+
+```ts
+type GuestMessageItem = {
+  kind: 'message';
+  action: string;          // the action id from the manifest
+  sessionId: string;
+  sessionTitle: string;
+  directory: string;
+  messageId: string;
+  role: 'user' | 'assistant';
+  text: string;            // what the Markdown export renders for that message, at most 200 000 chars
+};
+
+type GuestSessionItem = {
+  kind: 'session';
+  action: string;
+  sessionId: string;
+  sessionTitle: string;
+  directory: string;
+  messages?: Array<{ id: string; role: 'user' | 'assistant'; text: string; createdAt: number }>; // oldest first; only with payload ["messages"] and the conversation grant
+  truncated?: boolean;     // the oldest messages were dropped so the item stays under 2 000 000 serialized chars
+};
+```
 
 
 Access tokens never appear in `ready` or in request results.
@@ -118,6 +145,7 @@ Access tokens never appear in `ready` or in request results.
 | `writeFile`       | `path: string, content: string`   | `Promise<{ written: true }>`   | Atomic (temp + rename), creates parent folders. Same path rules                        |
 | `listDir`         | `path: string`                    | `Promise<{ entries }>`         | `{ name, kind: 'file' \| 'directory' \| 'other' }[]`, sorted, capped at 2 000. Same path rules |
 | `stat`            | `path: string`                    | `Promise<{ kind, size, mtime }>` | `kind` adds `'missing'`; a missing path is not an error. Same path rules              |
+| `setBadge`        | `count: number \| null`          | `Promise<void>`                | Number on this guest's rail icon, 0–999 (clamped); `null` clears. Opening the panel clears it too. In memory only |
 | `dispose`         | —                                 | `void`                         | Remove listener, reject pending RPCs                                                  |
 
 
@@ -187,6 +215,10 @@ Access tokens never appear in `ready` or in request results.
 | Request body                     | 64 000    |
 | Request response                 | 256 000   |
 | Request timeout                  | 20 000 ms |
+| `resolve` answer (host waits)    | 20 000 ms |
+| Badge count                      | 999       |
+| Message item `text`              | 200 000   |
+| Session item (serialized)        | 2 000 000 |
 | File path                        | 1 024     |
 | File content (read and write)    | 2 000 000 |
 | `listDir` entries                | 2 000     |
@@ -280,6 +312,11 @@ Used by the OpenChamber host and by tools that validate packages. Guests rarely 
       "attach": "dialog",
       "capabilities": ["prompt", "sessions", "files"],
       "filesystem": ["~/.config/opencode/opencode.json", "/tmp/acme/**"],
+      "actions": [
+        { "id": "create-task", "label": "Create task from message", "icon": "add-circle", "where": "message", "roles": ["assistant"] },
+        { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
+      ],
+      "commands": [{ "name": "task", "description": "Attach a task by id" }],
       "integration": { /* oauth | token | host */ },
       "service": { /* optional local process */ }
     }
@@ -298,6 +335,8 @@ Used by the OpenChamber host and by tools that validate packages. Guests rarely 
 | `panel.entry`         | Path inside package. No `..`, absolute, or URL. HTML must exist; its relative `.js` scripts must exist (`missing-build` if not)                                                      |
 | `attach`              | `true` / `"panel"` → + menu opens rail; `"dialog"` → host window; omit/`false` → off menus. Object form `{ "mode": "panel" \| "dialog", "entry"?: "panel/attach.html" }`: `entry` (dialog only, same path rules as `panel.entry`, must exist with built scripts) is the page the dialog loads instead of `panel.entry` |
 | `capabilities`        | Optional list of `prompt`, `sessions`, `files`. `files` is read **and** write inside the open project. Approved once at install                                                     |
+| `actions`             | Optional, 1–8 entries, unique kebab-case `id`, `label` 1–40 chars, optional `icon` (same rules as `panel.icon`, falls back to it), `where: "message" \| "session"`. Message actions may narrow `roles` to `["user"]` / `["assistant"]` (default both); session actions may ask for `payload: ["messages"]`, which adds the `conversation` capability. Bad shape is `invalid-actions`. The entry shows in that message's or session's menu and opens the guest with the item as `ready.item` (the attach window for `attach: "dialog"`, otherwise the rail) |
+| `commands`            | Optional, 1–8 entries, unique `name` matching `/^[a-z][a-z0-9-]{0,23}$/`, optional `description` 1–80 chars (`invalid-commands`). `/name args` in the chat box calls `onResolve` instead of the model and attaches what it returns. A name the composer already has (built-in, OpenCode command, skill) is ignored with a console warning |
 | `filesystem`          | Optional, 1–16 globs, each 1–256 chars, starting with `/` or `~/`; `**` spans folders, `*` / `?` stay in one segment; no `..`, empty segment, or backslash (`invalid-filesystem`). Declaring it adds the `filesystem` capability and the dialog lists the globs |
 | `integration`         | Optional. Exactly one of `oauth`, `token`, or `host` (`provider: "linear"` only)                                                                                                     |
 | `service`               | Optional. `entry` must be a built `.js` file on disk. See [GUEST_SERVICES.md](https://github.com/openchamber/openchamber/blob/sdk/packages/sdk/GUEST_SERVICES.md)                        |
@@ -333,10 +372,14 @@ Extra keys are dropped, not forwarded.
 | `hostMessageSchema` / `guestMessageSchema` (`@openchamber/sdk/schemas`)                                           | Zod schemas for `postMessage` data |
 | `clampAttachRequest` / `clampStartSessionRequest` / `clampPromptRequest`                                          | Enforce field max lengths          |
 | `isGuestRequestPath` / `isGuestRequestResult` / `isStartSessionResult` / `isPromptResult` / `isServiceStatusResult` | Narrow result payloads             |
+| `isGuestAttachItem` / `isGuestMessageItem` / `isGuestSessionItem`                                                 | Narrow `ready.item`                |
+| `clampBadgeCount` / `guestActionsNeedConversation`                                                                | Badge range; whether declared actions need `conversation` |
 | `isHostRequestErrorCode` / `resolveHostRequestErrorCode`                                                          | Error code validation              |
 
 
-Constants: `OPENCHAMBER_SDK_CHANNEL`, `OPENCHAMBER_SDK_API_VERSION`, `HOST_LINEAR_API_ORIGIN`, `GUEST_*_MAX`, `GUEST_REQUEST_TIMEOUT_MS`, `HOST_REQUEST_ERROR_CODES`, `SERVICE_STATUS_VALUES`, `SESSION_LIFECYCLE_PHASES`, `START_SESSION_SENT`.
+Constants: `OPENCHAMBER_SDK_CHANNEL`, `OPENCHAMBER_SDK_API_VERSION`, `HOST_LINEAR_API_ORIGIN`, `GUEST_*_MAX`, `GUEST_REQUEST_TIMEOUT_MS`, `GUEST_ACTIONS_MAX`, `GUEST_COMMANDS_MAX`, `GUEST_COMMAND_NAME`, `HOST_REQUEST_ERROR_CODES`, `SERVICE_STATUS_VALUES`, `SESSION_LIFECYCLE_PHASES`, `START_SESSION_SENT`.
+
+Wire messages added for these: host → guest `resolve` (`{ id, payload: { command, args } }`), guest → host `resolve-result` (`{ id, payload: { item } | { error } }`, no `result` comes back) and `badge` (`{ count }`).
 
 ---
 

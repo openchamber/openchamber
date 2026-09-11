@@ -1,7 +1,7 @@
 import { connectHost, HostRequestError } from '@openchamber/sdk';
 import { applyHostReady, mountBanner, mountButton, mountCheckbox, mountList, mountSearchField, mountText } from '@openchamber/sdk/ui';
 
-import { TASKS, attachPayload, findTask } from './tasks.ts';
+import { TASKS, attachPayload, findTask, openTasks } from './tasks.ts';
 
 const host = connectHost();
 const root = document.querySelector('#root');
@@ -11,8 +11,20 @@ const describe = (error: unknown): string => (
   error instanceof HostRequestError ? `${error.code}: ${error.message}` : String(error)
 );
 
+// `/task DEMO-2` in the composer lands here. The host mounts this page
+// off-screen when the panel is closed, so keep the handler free of UI.
+// Returning null tells the user nothing matched; throwing shows the message.
+host.onResolve(({ args }) => {
+  const id = args.trim().toUpperCase();
+  if (!id) throw new Error('Give a task id, e.g. /task DEMO-2');
+  const task = findTask(id);
+  return task ? attachPayload(task) : null;
+});
+
 host.onReady((ctx) => {
   applyHostReady(ctx, document.documentElement);
+  // The rail icon shows how many tasks are open until the user opens the panel.
+  void host.setBadge(openTasks().length).catch(() => undefined);
   while (root.firstChild) root.removeChild(root.firstChild);
   const page = document.createElement('div');
   page.style.padding = '12px';
@@ -76,6 +88,6 @@ host.onReady((ctx) => {
     mountButton(actions, { label: 'Close', variant: 'ghost', size: 'sm', onClick: () => void host.close() });
   }
   mountCheckbox(page, { label: 'Start sessions on a new worktree', checked: worktree, onChange: (v) => { worktree = v; } });
-  mountBanner(page, { tone: 'info', title: 'What this tests', body: 'attach and sessionLink need no capability. startSession needs "sessions" (and "prompt" because it sends text). Send prompt needs "prompt".' });
+  mountBanner(page, { tone: 'info', title: 'What this tests', body: 'attach and sessionLink need no capability. startSession needs "sessions" (and "prompt" because it sends text). Send prompt needs "prompt". Type /task DEMO-2 in the chat to attach through a command; the rail badge counts open tasks; "Create task from message" and "Summarize session" are in the message and session menus.' });
   paint();
 });

@@ -104,7 +104,7 @@ Desenhar um painel e ler a sessão atual não exige permissão. Tudo que age em 
 | `sessions` | criar sessões e worktrees (`startSession`) |
 | `files` | ler e escrever arquivos dentro do projeto aberto (`readFile`, `writeFile`, `listDir`, `stat` com um caminho relativo) |
 
-Outras três são adicionadas por você automaticamente: `network` quando você declara uma `integration`, `service` quando declara um `service`, e `filesystem` quando declara padrões `filesystem`.
+Outras quatro são adicionadas por você automaticamente: `network` quando você declara uma `integration`, `service` quando declara um `service`, `filesystem` quando declara padrões `filesystem`, e `conversation` quando uma ação de sessão pede as mensagens (veja [Ações, comandos e o selo](#ações-comandos-e-o-selo)).
 
 O usuário vê a lista completa uma vez, ao instalar a extensão, e aprova ou remove a extensão. Se uma versão nova pedir mais, o diálogo aparece de novo. Uma chamada que precisa de uma capacidade que o usuário não aprovou falha com `NOT_GRANTED`.
 
@@ -146,6 +146,38 @@ const { entries } = await host.listDir(".");
 ```
 
 As escritas são atômicas: o OpenChamber escreve um arquivo temporário e o renomeia, então quem lê nunca vê um arquivo pela metade. Os arquivos são lidos e escritos como texto UTF-8, até 2 MB.
+
+## Ações, comandos e o selo
+
+Além da barra lateral e do menu +, uma extensão pode aparecer em mais três lugares. Todos entregam à extensão um `item` do mesmo jeito que um clique no chip.
+
+**Ações em mensagens e sessões.** Declare entradas de menu e o OpenChamber as mostra ao lado das embutidas:
+
+```json
+"actions": [
+  { "id": "create-task", "label": "Create task", "icon": "add-line", "where": "message", "roles": ["assistant"] },
+  { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
+]
+```
+
+Uma ação de mensagem abre sua extensão com um `ctx.item` de `kind: "message"`: o id e o título da sessão, a pasta do projeto, o id da mensagem, o papel dela e o texto. Uma ação de sessão abre com `kind: "session"` e o id, o título e a pasta da sessão. Adicione `"payload": ["messages"]` e o item também carrega a conversa inteira, da mais antiga para a mais nova, o mesmo texto que a exportação em Markdown produz. Isso precisa da capacidade `conversation`, que o usuário vê como uma linha separada no diálogo de aprovação. `item.action` diz qual entrada foi clicada.
+
+**Comandos de barra que anexam.** Declare um comando e trate-o na página:
+
+```json
+"commands": [{ "name": "task", "description": "Attach a task by id" }]
+```
+
+```ts
+host.onResolve(async ({ command, args }) => {
+  const task = await findTask(args.trim());
+  return task ? { providerId: "acme-tasks", id: task.id, title: task.title, url: task.url } : null;
+});
+```
+
+Quando o usuário digita `/task ABC-12` na caixa de chat, o OpenChamber pede à sua extensão que o resolva e anexa o que você devolve como um chip, sem abrir nada. Devolva `null` para "nada encontrado". Se o seu painel estiver fechado, o OpenChamber o carrega em segundo plano para essa chamada. Um nome que o OpenChamber ou o OpenCode já usa é ignorado.
+
+**Selo no ícone da barra lateral.** `host.setBadge(3)` mostra um número no seu ícone, por exemplo tarefas abertas; `host.setBadge(null)` o limpa. Abrir o painel também o limpa.
 
 ## Primeiras linhas no painel
 

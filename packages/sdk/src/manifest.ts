@@ -23,6 +23,45 @@ export type AttachContributionObject = {
 
 export type AttachContribution = boolean | AttachMode | AttachContributionObject;
 
+export type GuestActionWhere = 'message' | 'session';
+export type GuestActionRole = 'user' | 'assistant';
+/** What a session action wants alongside the session id and title. */
+export type GuestActionPayload = 'messages';
+
+/** How many `contributes.actions` entries a package may declare. */
+export const GUEST_ACTIONS_MAX = 8;
+/** Characters in an action label. */
+export const GUEST_ACTION_LABEL_MAX = 40;
+/** How many `contributes.commands` entries a package may declare. */
+export const GUEST_COMMANDS_MAX = 8;
+/** Characters in a command description. */
+export const GUEST_COMMAND_DESCRIPTION_MAX = 80;
+/** A slash command name: lower-case, digits and dashes, up to 24 characters. */
+export const GUEST_COMMAND_NAME = /^[a-z][a-z0-9-]{0,23}$/;
+
+/**
+ * A menu entry on a message or a session. Clicking it opens the guest with
+ * the message or session as `ready.item`. `roles` narrows a message action
+ * to user or assistant messages (default both); `payload: ["messages"]` on
+ * a session action asks for the conversation and needs the `conversation`
+ * capability.
+ */
+export type GuestActionContribution = {
+  id: string;
+  label: string;
+  /** Remixicon name or package `.svg` path, same as `panel.icon`. Falls back to the panel icon. */
+  icon?: string;
+  where: GuestActionWhere;
+  roles?: GuestActionRole[];
+  payload?: GuestActionPayload[];
+};
+
+/** A composer slash command the guest resolves into a chip through `host.onResolve`. */
+export type GuestCommandContribution = {
+  name: string;
+  description?: string;
+};
+
 export type IntegrationSettingField = {
   id: string;
   label: string;
@@ -192,7 +231,7 @@ export type PublicService = {
  * follow from `contributes.service`, `contributes.integration`, and
  * `contributes.filesystem`.
  */
-export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'service', 'network', 'filesystem'] as const;
+export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'conversation', 'service', 'network', 'filesystem'] as const;
 
 export type GuestCapability = (typeof GUEST_CAPABILITIES)[number];
 
@@ -233,7 +272,16 @@ export type OpenChamberContributes = {
   service?: ServiceContribution;
   /** Paths outside the project the panel may read and write. Grants `filesystem`. */
   filesystem?: string[];
+  /** Menu entries on messages and sessions. */
+  actions?: GuestActionContribution[];
+  /** Composer slash commands that attach a chip. */
+  commands?: GuestCommandContribution[];
 };
+
+/** Whether any declared action asks for a session's messages, which needs `conversation`. */
+export const guestActionsNeedConversation = (
+  actions: readonly GuestActionContribution[] | undefined,
+): boolean => Boolean(actions?.some((action) => action.payload?.includes('messages')));
 
 /** Catalog view of the approval: what the package asks for and what the user allowed. */
 export type PublicGuestCapabilities = {
@@ -242,9 +290,10 @@ export type PublicGuestCapabilities = {
 };
 
 export const requestedGuestCapabilities = (
-  contributes: Pick<OpenChamberContributes, 'capabilities' | 'integration' | 'service' | 'filesystem'>,
+  contributes: Pick<OpenChamberContributes, 'capabilities' | 'integration' | 'service' | 'filesystem' | 'actions'>,
 ): GuestCapability[] => {
   const declared = new Set<GuestCapability>(contributes.capabilities ?? []);
+  if (guestActionsNeedConversation(contributes.actions)) declared.add('conversation');
   if (contributes.service) declared.add('service');
   if (contributes.integration) declared.add('network');
   if (contributes.filesystem && contributes.filesystem.length > 0) declared.add('filesystem');
@@ -310,7 +359,9 @@ export type ParseManifestErrorCode =
   | 'invalid-capabilities'
   | 'invalid-integration'
   | 'invalid-service'
-  | 'invalid-filesystem';
+  | 'invalid-filesystem'
+  | 'invalid-actions'
+  | 'invalid-commands';
 
 export type ParseManifestFailure = {
   ok: false;

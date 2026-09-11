@@ -60,6 +60,8 @@ const requiredKeys = [
   'settings.extensions.capability.files.detail',
   'settings.extensions.capability.filesystem',
   'settings.extensions.capability.filesystem.detail',
+  'settings.extensions.capability.conversation',
+  'settings.extensions.capability.conversation.detail',
   'settings.extensions.toast.approved',
   'settings.extensions.toast.approveFailed',
   'settings.extensions.service.warning',

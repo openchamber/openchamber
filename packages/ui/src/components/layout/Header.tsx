@@ -67,6 +67,10 @@ import type { IconName } from "@/components/icon/icons";
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { useGuestActions } from '@/hooks/useGuestSurfaces';
+import { guestSessionActions, type GuestActionEntry } from '@/lib/guests/actions';
+import { runGuestSessionAction } from '@/lib/guests/session-action';
 import { SessionAiRenameMenuItem } from '@/components/session/SessionAiRenameMenuItem';
 import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKeyboard';
 import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
@@ -896,6 +900,33 @@ export const Header: React.FC = () => {
     toast.success(t('sessions.sidebar.session.export.success'));
   }, [currentSession?.title, currentSessionId, headerDirectoryStore, openDirectory, sync, t]);
 
+  // Extension session actions on the current session. The conversation is
+  // loaded the same way Export as Markdown loads it.
+  const guestActionEntries = useGuestActions();
+  const guestSessionActionEntries = React.useMemo(() => guestSessionActions(guestActionEntries), [guestActionEntries]);
+  const runCurrentSessionGuestAction = React.useCallback((entry: GuestActionEntry) => {
+    if (!currentSessionId) return;
+    void runGuestSessionAction({
+      entry,
+      session: { id: currentSessionId, title: currentSession?.title, directory: sessionDirectory ?? openDirectory },
+      loadRecords: async () => {
+        if (!openDirectory) return null;
+        try {
+          await sync.loadCompleteHistory(currentSessionId, openDirectory);
+        } catch {
+          return null;
+        }
+        return buildSessionMessageRecordsSnapshot(headerDirectoryStore.getState(), currentSessionId).list;
+      },
+      onLoadFailed: () => toast.error(t('sessions.sidebar.session.export.failedLoadHistory')),
+    });
+  }, [currentSession?.title, currentSessionId, headerDirectoryStore, openDirectory, sessionDirectory, sync, t]);
+  const renderGuestSessionActionItems = React.useCallback((Item: React.ElementType) => guestSessionActionEntries.map((entry) => (
+    <Item key={`${entry.guest.id}:${entry.action.id}`} onClick={() => runCurrentSessionGuestAction(entry)}>
+      <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="mr-2 size-4" />{entry.action.label}
+    </Item>
+  )), [guestSessionActionEntries, runCurrentSessionGuestAction]);
+
   const isCurrentSessionActive = currentSessionStatus?.type === 'busy' || currentSessionStatus?.type === 'retry';
   const moveCurrentSessionToWorktree = React.useCallback(() => {
     if (!currentSessionId || !sessionDirectory || isCurrentSessionActive || isCurrentSessionMovingToWorktree) return;
@@ -1334,6 +1365,7 @@ export const Header: React.FC = () => {
             <Icon name="download" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.exportMarkdown')}
           </Item>
         ) : null}
+        {isActive ? renderGuestSessionActionItems(Item) : null}
         {canMoveToWorktree ? (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -1370,7 +1402,7 @@ export const Header: React.FC = () => {
         </Item>
       </>
     );
-  }, [copySessionIdFor, copySessionShareUrl, currentSession, exportCurrentSession, isChatContext, isCurrentSessionActive, isCurrentSessionMovingToWorktree, isVSCode, moveCurrentSessionToWorktree, sessionDirectory, shareSessionFor, t, unshareSessionFor]);
+  }, [copySessionIdFor, copySessionShareUrl, currentSession, exportCurrentSession, isChatContext, isCurrentSessionActive, isCurrentSessionMovingToWorktree, isVSCode, moveCurrentSessionToWorktree, renderGuestSessionActionItems, sessionDirectory, shareSessionFor, t, unshareSessionFor]);
 
   const renderDesktop = () => (
     <div
@@ -1527,6 +1559,7 @@ export const Header: React.FC = () => {
                       <DropdownMenuItem onClick={() => { if (currentSessionId) void shareSessionFor(currentSessionId); }}><Icon name="share-2" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.share')}</DropdownMenuItem>
                     )}
                     <DropdownMenuItem onClick={() => void exportCurrentSession()}><Icon name="download" className="mr-2 size-4" />{t('sessions.sidebar.session.menu.exportMarkdown')}</DropdownMenuItem>
+                    {renderGuestSessionActionItems(DropdownMenuItem)}
                     {!isVSCode && !isChatContext && currentSession && !currentSession.parentId ? (
                       <Tooltip>
                         <TooltipTrigger asChild>

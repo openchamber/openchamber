@@ -1,10 +1,21 @@
 // The attach dialog page. Opened from the composer + menu (`ctx.item` is
 // null) it is a picker; opened from the chip (`ctx.item` is the attached
-// task) it shows that task's details instead of the whole list.
-import { connectHost, HostRequestError, type AttachIssueRequest, type JsonValue } from '@openchamber/sdk';
+// task) it shows that task's details instead of the whole list; opened from
+// the "Create task from message" or "Summarize session" menu entries it gets
+// that message or session as `ctx.item`.
+import {
+  connectHost,
+  HostRequestError,
+  isGuestMessageItem,
+  isGuestSessionItem,
+  type AttachIssueRequest,
+  type GuestMessageItem,
+  type GuestSessionItem,
+  type JsonValue,
+} from '@openchamber/sdk';
 import { applyHostReady, mountBadge, mountButton, mountList, mountSearchField, mountSeparator, mountText } from '@openchamber/sdk/ui';
 
-import { TASKS, attachPayload, findTask, type TaskComment, type TaskData } from './tasks.ts';
+import { PROVIDER, TASKS, attachPayload, findTask, type TaskComment, type TaskData } from './tasks.ts';
 
 const host = connectHost();
 const root = document.querySelector('#root');
@@ -120,9 +131,89 @@ const renderPicker = (): void => {
   paint();
 };
 
+const closeAfter = async (run: () => Promise<unknown>, label: string): Promise<void> => {
+  try {
+    await run();
+    await host.close();
+  } catch (error) {
+    const reason = error instanceof HostRequestError ? `${error.code}: ${error.message}` : String(error);
+    await host.toast({ kind: 'error', message: `${label} failed. ${reason}` });
+  }
+};
+
+// "Create task from message": the assistant's text becomes a new task and
+// is attached as a chip, so the next prompt can refer to it.
+const renderMessageAction = (item: GuestMessageItem): void => {
+  const page = newPage();
+  const head = document.createElement('div');
+  head.style.display = 'flex';
+  head.style.gap = '8px';
+  page.append(head);
+  mountBadge(head, { label: item.role, tone: 'info' });
+  mountBadge(head, { label: item.sessionTitle, tone: 'primary' });
+  mountText(page, { text: 'Create a task from this message:' });
+  const preview = document.createElement('pre');
+  preview.style.whiteSpace = 'pre-wrap';
+  preview.style.maxHeight = '40vh';
+  preview.style.overflow = 'auto';
+  preview.style.font = 'inherit';
+  preview.textContent = item.text;
+  page.append(preview);
+  mountSeparator(page);
+  const actions = document.createElement('div');
+  actions.style.display = 'flex';
+  actions.style.gap = '8px';
+  page.append(actions);
+  mountButton(actions, {
+    label: 'Create',
+    onClick: () => {
+      const id = `DEMO-${TASKS.length + 1}`;
+      const title = item.text.split('\n').find((line) => line.trim())?.trim().slice(0, 80) ?? 'Task from message';
+      void closeAfter(async () => {
+        await host.toast({ kind: 'success', message: `Created ${id}: ${title}` });
+        await host.attach({
+          providerId: PROVIDER,
+          id,
+          title,
+          url: `https://example.com/tasks/${id}`,
+          text: `Task ${id} was created from message ${item.messageId} in "${item.sessionTitle}":\n${item.text}`,
+        });
+      }, 'Create');
+    },
+  });
+  mountButton(actions, { label: 'Close', variant: 'ghost', onClick: () => void host.close() });
+};
+
+// "Summarize session": `messages` is present because the manifest asked for
+// `payload: ["messages"]` and the user granted `conversation`.
+const renderSessionAction = (item: GuestSessionItem): void => {
+  const page = newPage();
+  mountBadge(page, { label: item.sessionTitle, tone: 'primary' });
+  const messages = item.messages ?? [];
+  mountText(page, {
+    text: item.messages
+      ? `${messages.length} message${messages.length === 1 ? '' : 's'}${item.truncated ? ' (oldest dropped to fit)' : ''}`
+      : 'The conversation was not included.',
+  });
+  mountSeparator(page);
+  for (const message of messages) {
+    const line = message.text.replace(/\s+/g, ' ').slice(0, 200);
+    mountText(page, { text: `${message.role}: ${line}${message.text.length > 200 ? '…' : ''}` });
+  }
+  const actions = document.createElement('div');
+  actions.style.display = 'flex';
+  actions.style.gap = '8px';
+  page.append(actions);
+  mountButton(actions, { label: 'Close', variant: 'ghost', onClick: () => void host.close() });
+};
+
 host.onReady((ctx) => {
   applyHostReady(ctx, document.documentElement);
-  if (ctx.item) {
+  if (isGuestMessageItem(ctx.item)) {
+    renderMessageAction(ctx.item);
+  } else if (isGuestSessionItem(ctx.item)) {
+    renderSessionAction(ctx.item);
+  } else if (ctx.item) {
     renderDetails(ctx.item);
   } else {
     renderPicker();

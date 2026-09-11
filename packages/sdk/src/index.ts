@@ -9,7 +9,13 @@ export {
 } from './host-version.ts';
 export {
   DECLARED_GUEST_CAPABILITIES,
+  GUEST_ACTIONS_MAX,
+  GUEST_ACTION_LABEL_MAX,
   GUEST_CAPABILITIES,
+  GUEST_COMMANDS_MAX,
+  GUEST_COMMAND_DESCRIPTION_MAX,
+  GUEST_COMMAND_NAME,
+  guestActionsNeedConversation,
   GUEST_FILESYSTEM_PATTERN_MAX,
   GUEST_FILESYSTEM_PATTERNS_MAX,
   HOST_LINEAR_API_ORIGIN,
@@ -28,6 +34,11 @@ export {
 export type {
   ServiceContribution,
   ServicePermissions,
+  GuestActionContribution,
+  GuestActionPayload,
+  GuestActionRole,
+  GuestActionWhere,
+  GuestCommandContribution,
   AttachContribution,
   AttachContributionObject,
   AttachMode,
@@ -65,6 +76,7 @@ export { connectHost, HostRequestError } from './host.ts';
 export type { HostClient, HostClientOptions, HostFrame } from './host.ts';
 export {
   clampAttachRequest,
+  clampBadgeCount,
   clampPromptRequest,
   clampStartSessionRequest,
   guestFileScope,
@@ -75,6 +87,9 @@ export {
   isFileStatResult,
   isFileWriteResult,
   isGuestFilePath,
+  isGuestAttachItem,
+  isGuestMessageItem,
+  isGuestSessionItem,
   isServiceStatusResult,
   isGuestRequestPath,
   isGuestRequestResult,
@@ -85,6 +100,17 @@ export {
   resolveHostRequestErrorCode,
 } from './contract.ts';
 export type {
+  BadgeRequest,
+  GuestBadgeMessage,
+  GuestItem,
+  GuestItemRole,
+  GuestMessageItem,
+  GuestResolveResultMessage,
+  GuestSessionItem,
+  GuestSessionItemMessage,
+  HostResolveMessage,
+  ResolveRequest,
+  ResolveResultPayload,
   FileListEntry,
   FileListRequest,
   FileListResult,
@@ -159,6 +185,10 @@ export type {
 } from './contract.ts';
 export {
   EMPTY_GUEST_CONNECTION,
+  GUEST_BADGE_MAX,
+  GUEST_ITEM_MESSAGE_TEXT_MAX,
+  GUEST_ITEM_SESSION_MAX,
+  GUEST_RESOLVE_ERROR_MAX,
   GUEST_FILE_CONTENT_MAX,
   GUEST_FILE_ENTRY_KINDS,
   GUEST_FILE_LIST_MAX,

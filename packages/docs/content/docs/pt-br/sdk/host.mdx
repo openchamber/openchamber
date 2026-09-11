@@ -27,7 +27,7 @@ const host = connectHost();
 | `directory` | o diretório do projeto atual, ou `null` |
 | `session` | `{ id, title, busy }` ou `null`. Sem título, o id da sessão é usado no lugar. `busy` é o status ao vivo. `model` e `agent` (o agente do OpenCode) aparecem quando a sessão os tem. |
 | `surface` | `panel` na barra lateral, `dialog` na janela de anexar |
-| `item` | o item anexado em que o usuário clicou para abrir esta superfície (os mesmos campos que você passou para `attach`, incluindo `data`), ou `null` |
+| `item` | para que esta superfície foi aberta, ou `null`: o item anexado em que o usuário clicou (os mesmos campos que você passou para `attach`, incluindo `data`), uma mensagem (`kind: "message"`) ou uma sessão (`kind: "session"`) vinda de uma das suas ações declaradas. Veja [Ações](/sdk/#ações-comandos-e-o-selo). |
 | `connection` | `{ connected, account }` da sua integração |
 | `settings` | os valores dos campos que você declarou em `integration.settings` |
 
@@ -58,6 +58,8 @@ Tokens de acesso nunca aparecem aqui nem no resultado de um `request`.
 | `writeFile(path, content)` | escreve um arquivo de texto de forma atômica, criando as pastas acima. Devolve `{ written: true }`. |
 | `listDir(path)` | lista uma pasta. Devolve `{ entries: [{ name, kind }] }`, `kind` é `file`, `directory` ou `other`. |
 | `stat(path)` | `{ kind, size, mtime }`, `kind` é `file`, `directory`, `other` ou `missing`. |
+| `onResolve(handler)` | registra o handler dos seus comandos de barra. Ele recebe `{ command, args }` e devolve um item para anexar ou `null`. |
+| `setBadge(count)` | mostra um número (0 a 999) no seu ícone da barra lateral, ou `null` para limpá-lo |
 
 ## attach, startSession e sessionLink
 

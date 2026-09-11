@@ -27,7 +27,7 @@ const host = connectHost();
 | `directory` | 当前项目目录，或 `null` |
 | `session` | `{ id, title, busy }` 或 `null`。没有标题时回退为会话 id。`busy` 是实时状态。会话有 `model` 和 `agent`（OpenCode 的 agent）时也会出现。 |
 | `surface` | 在侧栏中为 `panel`，在附加窗口中为 `dialog` |
-| `item` | 用户为打开此界面而点击的已附加条目（与你传给 `attach` 的字段相同，包括 `data`），或 `null` |
+| `item` | 此界面因何而打开，或 `null`：用户点击的已附加条目（与你传给 `attach` 的字段相同，包括 `data`）、来自你声明的某个操作的消息（`kind: "message"`）或会话（`kind: "session"`）。见[操作](/sdk/#操作命令和徽标)。 |
 | `connection` | 你的集成的 `{ connected, account }` |
 | `settings` | 你在 `integration.settings` 中声明的字段的值 |
 
@@ -58,6 +58,8 @@ const host = connectHost();
 | `writeFile(path, content)` | 原子地写入文本文件，并创建父文件夹。返回 `{ written: true }`。 |
 | `listDir(path)` | 列出文件夹。返回 `{ entries: [{ name, kind }] }`，`kind` 为 `file`、`directory` 或 `other`。 |
 | `stat(path)` | `{ kind, size, mtime }`，`kind` 为 `file`、`directory`、`other` 或 `missing`。 |
+| `onResolve(handler)` | 注册你的斜杠命令处理函数。它收到 `{ command, args }`，返回一个要附加的条目或 `null`。 |
+| `setBadge(count)` | 在你的侧栏图标上显示一个数字（0 到 999），或传 `null` 清除 |
 
 ## attach、startSession 和 sessionLink
 

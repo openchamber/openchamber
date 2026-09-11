@@ -27,7 +27,7 @@ const host = connectHost();
 | `directory` | le dossier du projet en cours, ou `null` |
 | `session` | `{ id, title, busy }` ou `null`. Le titre retombe sur l'id de session. `busy` est le statut en direct. `model` et `agent` (l'agent OpenCode) apparaissent quand la session les a. |
 | `surface` | `panel` dans la barre latérale, `dialog` dans la fenêtre d'attache |
-| `item` | l'élément attaché sur lequel l'utilisateur a cliqué pour ouvrir cette surface (les mêmes champs que vous avez passés à `attach`, y compris `data`), ou `null` |
+| `item` | ce pour quoi cette surface a été ouverte, ou `null` : l'élément attaché sur lequel l'utilisateur a cliqué (les mêmes champs que vous avez passés à `attach`, y compris `data`), un message (`kind: "message"`) ou une session (`kind: "session"`) venant d'une de vos actions déclarées. Voir [Actions](/sdk/#actions-commandes-et-le-badge). |
 | `connection` | `{ connected, account }` pour votre intégration |
 | `settings` | les valeurs des champs déclarés dans `integration.settings` |
 
@@ -58,6 +58,8 @@ Les tokens d'accès n'apparaissent jamais ici ni dans un résultat de `request`.
 | `writeFile(path, content)` | écrit un fichier texte de façon atomique, en créant les dossiers parents. Renvoie `{ written: true }`. |
 | `listDir(path)` | liste un dossier. Renvoie `{ entries: [{ name, kind }] }`, `kind` vaut `file`, `directory` ou `other`. |
 | `stat(path)` | `{ kind, size, mtime }`, `kind` vaut `file`, `directory`, `other` ou `missing`. |
+| `onResolve(handler)` | enregistre le gestionnaire de vos commandes slash. Il reçoit `{ command, args }` et renvoie un élément à attacher ou `null`. |
+| `setBadge(count)` | affiche un nombre (0 à 999) sur votre icône de la barre latérale, ou `null` pour l'effacer |
 
 ## attach, startSession et sessionLink
 

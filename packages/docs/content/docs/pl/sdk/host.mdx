@@ -27,7 +27,7 @@ const host = connectHost();
 | `directory` | katalog bieżącego projektu albo `null` |
 | `session` | `{ id, title, busy }` albo `null`. Tytuł wraca do id sesji, gdy go brak. `busy` to status na żywo. `model` i `agent` (agent OpenCode) pojawiają się, gdy sesja je ma. |
 | `surface` | `panel` na pasku bocznym, `dialog` w oknie dołączania |
-| `item` | dołączony element, który użytkownik kliknął, żeby otworzyć tę powierzchnię (te same pola, które przekazałeś do `attach`, łącznie z `data`), albo `null` |
+| `item` | to, dla czego otwarto tę powierzchnię, albo `null`: dołączony element, który użytkownik kliknął (te same pola, które przekazałeś do `attach`, łącznie z `data`), wiadomość (`kind: "message"`) albo sesja (`kind: "session"`) z jednej z zadeklarowanych przez Ciebie akcji. Zobacz [Akcje](/sdk/#akcje-polecenia-i-odznaka). |
 | `connection` | `{ connected, account }` dla Twojej integracji |
 | `settings` | wartości pól zadeklarowanych w `integration.settings` |
 
@@ -58,6 +58,8 @@ Tokeny dostępu nigdy nie pojawiają się tutaj ani w wyniku `request`.
 | `writeFile(path, content)` | zapisuje plik tekstowy atomowo, tworząc foldery nadrzędne. Zwraca `{ written: true }`. |
 | `listDir(path)` | wypisuje zawartość folderu. Zwraca `{ entries: [{ name, kind }] }`, `kind` to `file`, `directory` lub `other`. |
 | `stat(path)` | `{ kind, size, mtime }`, `kind` to `file`, `directory`, `other` lub `missing`. |
+| `onResolve(handler)` | rejestruje obsługę Twoich poleceń z ukośnikiem. Dostaje `{ command, args }` i zwraca element do dołączenia albo `null`. |
+| `setBadge(count)` | pokazuje liczbę (0 do 999) na Twojej ikonie na pasku bocznym, albo `null`, żeby ją usunąć |
 
 ## attach, startSession i sessionLink
 

@@ -52,9 +52,9 @@ resizing or collapsing the frame updates it.
 | `language/` | What the text *means*: `@` references, `/` and `#` tokens, markdown, and which picker a caret asks for |
 | `editor/` | The CodeMirror view that renders the language and owns the caret |
 | `state/` | Composer-local lifecycle state: ArrowUp/ArrowDown browsing, draft stash/restore, mobile shell, popup placement, draft targeting |
-| `submit/` | Turning what the user has into what gets sent |
+| `submit/` | Turning what the user has into what gets sent. `guestCommands.ts` routes an extension's slash command (`contributes.commands`) before anything is sent: `/name args` never reaches the model, the extension resolves it into a chip |
 | `attachments/` | Files: paths, drop payloads |
-| `ui/` | Presentation. `ComposerAttachmentControls` lists files, GitHub, Linear, then guests with `contributes.attach`. `"panel"` opens the rail. `"dialog"` opens `GuestAttachDialog` with that guest iframe and `ready.surface: "dialog"` (loading `attachEntry` when the manifest declared one). `host.attach` writes the composer chip. Clicking that chip reopens the guest with the chip as `ready.item`: dialog guests get it as a prop, panel guests through `lib/guests/item-store.ts` and the rail. The chip keeps the guest's opaque `data` (also on the `guest-issue` / `guest-pr` context part metadata and the session `LinkedGuestIssue` snapshot) so it comes back byte-identical; it is never part of the context text. VS Code and mobile skip that list. |
+| `ui/` | Presentation. `ComposerAttachmentControls` lists files, GitHub, Linear, then guests with `contributes.attach`. `"panel"` opens the rail. `"dialog"` opens `GuestAttachDialog` with that guest iframe and `ready.surface: "dialog"` (loading `attachEntry` when the manifest declared one). `host.attach` writes the composer chip. Clicking that chip reopens the guest with the chip as `ready.item`: dialog guests get it as a prop, panel guests through `lib/guests/item-store.ts` and the rail. Message and session actions (`contributes.actions`) travel the same two roads with a `GuestMessageItem` / `GuestSessionItem` (`lib/guests/dialog-store.ts` `openGuestWithItem`); the dialog they open lives in `layout/GuestHosts.tsx`, not here, and an `attach` from it closes it through `handleGuestAttach`. The chip keeps the guest's opaque `data` (also on the `guest-issue` / `guest-pr` context part metadata and the session `LinkedGuestIssue` snapshot) so it comes back byte-identical; it is never part of the context text. VS Code and mobile skip that list. |
 | `text.ts` | How inserted text meets the text already there |
 | `largeTextPaste.ts` | Detect large plain-text pastes and build virtual `.txt` files |
 | `largeTextPasteOffer.ts` | Ask-toast offer id begin/resolve (supersede + double-apply guards) |
@@ -195,6 +195,18 @@ and the send path reading the same grammar.
   mention, file mentions, and skill instruction were resolved when it was
   queued, never at delivery — and its context follows it before the next
   queued message.
+- Extension slash commands are routed first (`submit/guestCommands.ts`,
+  entries from `useGuestCommands` minus every name the composer already
+  knows, so an extension can never shadow a built-in, an OpenCode command, or
+  a skill). The command text is cleared and `runGuestCommand`
+  (`lib/guests/run-command.ts`) asks the extension: the rail pane if it is
+  mounted, otherwise a hidden headless `PluginPane` that `GuestHosts` mounts
+  for the call. A returned chip lands through
+  `useInputStore.setPendingGuestIssue`, the same slot a panel's `attach` uses;
+  `null` is an info toast; an error or 20s of silence restores the text and
+  shows an error toast. Queueing runs it instead of queueing, like a local
+  command. `CommandAutocomplete` lists the same entries with the extension's
+  name as their badge, and the language highlights them as known `/tokens`.
 - Local slash commands are planned by `submit/slashCommands.ts` before any
   attached context is consumed. Commands that act on session or UI state
   (`/undo`, `/redo`, `/compact`, `/timeline`, `/handoff-review`) take only

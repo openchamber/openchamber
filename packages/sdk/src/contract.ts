@@ -159,11 +159,82 @@ export type HostReadyContext = {
   connection: GuestConnection;
   settings: GuestSettings;
   /**
-   * The attached item this surface was opened for: the user clicked that
-   * item's chip on the composer. `null` when opened from the rail icon or
-   * the composer + menu.
+   * The item this surface was opened for: the chip the user clicked on the
+   * composer (`AttachIssueRequest`), or the message / session a declared
+   * action ran on (`GuestMessageItem` / `GuestSessionItem`). `null` when
+   * opened from the rail icon or the composer + menu.
    */
-  item: AttachIssueRequest | null;
+  item: GuestItem | null;
+};
+
+export type GuestItemRole = 'user' | 'assistant';
+
+/** A `contributes.actions` entry with `where: "message"` ran on this message. */
+export type GuestMessageItem = {
+  kind: 'message';
+  /** The action id from the manifest. */
+  action: string;
+  sessionId: string;
+  sessionTitle: string;
+  /** The session's project directory, or `null` for a session without one. */
+  directory: string | null;
+  messageId: string;
+  role: GuestItemRole;
+  /** Message text as the Markdown export renders it, capped at `GUEST_ITEM_MESSAGE_TEXT_MAX`. */
+  text: string;
+};
+
+export type GuestSessionItemMessage = {
+  id: string;
+  role: GuestItemRole;
+  text: string;
+  createdAt: number;
+};
+
+/** A `contributes.actions` entry with `where: "session"` ran on this session. */
+export type GuestSessionItem = {
+  kind: 'session';
+  /** The action id from the manifest. */
+  action: string;
+  sessionId: string;
+  sessionTitle: string;
+  /** The session's project directory, or `null` for a session without one. */
+  directory: string | null;
+  /** Present only when the action declared `payload: ["messages"]` and the user granted `conversation`. Oldest first. */
+  messages?: GuestSessionItemMessage[];
+  /** Set when the oldest messages were dropped to stay within `GUEST_ITEM_SESSION_MAX`. */
+  truncated?: boolean;
+};
+
+export type GuestItem = AttachIssueRequest | GuestMessageItem | GuestSessionItem;
+
+export const isGuestMessageItem = (item: GuestItem | null): item is GuestMessageItem => (
+  item !== null && item.kind === 'message'
+);
+
+export const isGuestSessionItem = (item: GuestItem | null): item is GuestSessionItem => (
+  item !== null && item.kind === 'session'
+);
+
+/** The composer chip: what the guest handed to `attach`, with `text` filled from the chip. */
+export const isGuestAttachItem = (item: GuestItem | null): item is AttachIssueRequest => (
+  item !== null && item.kind !== 'message' && item.kind !== 'session'
+);
+
+/** What the host asks a guest that declared `contributes.commands` when the user submits `/name args`. */
+export type ResolveRequest = {
+  command: string;
+  args: string;
+};
+
+/** The guest's answer to `resolve`: the chip to attach, `null` for nothing, or why it failed. */
+export type ResolveResultPayload =
+  | { item: AttachIssueRequest | null }
+  | { error: string };
+
+export type BadgeRequest = {
+  /** 0 to `GUEST_BADGE_MAX`; `null` clears the badge. */
+  count: number | null;
 };
 
 export type ToastKind = 'info' | 'success' | 'error';
@@ -235,6 +306,14 @@ export const GUEST_FILE_PATH_MAX = 1_024;
 export const GUEST_FILE_CONTENT_MAX = 2_000_000;
 /** Entries a `listDir` answer carries; longer directories are truncated. */
 export const GUEST_FILE_LIST_MAX = 2_000;
+/** Characters of one message's text on a `GuestMessageItem` or a `GuestSessionItem` message. */
+export const GUEST_ITEM_MESSAGE_TEXT_MAX = 200_000;
+/** `JSON.stringify` length ceiling for a `GuestSessionItem`; the host drops the oldest messages to stay under it. */
+export const GUEST_ITEM_SESSION_MAX = 2_000_000;
+/** Largest count a rail badge shows. */
+export const GUEST_BADGE_MAX = 999;
+/** Characters in a `resolve-result` error string. */
+export const GUEST_RESOLVE_ERROR_MAX = 500;
 
 export const HOST_REQUEST_ERROR_CODES = [
   'HOST_UNAVAILABLE',
@@ -349,6 +428,12 @@ export const clampPromptRequest = (request: PromptRequest): PromptRequest => {
   return next;
 };
 
+/** Badge counts are whole numbers from 0 to `GUEST_BADGE_MAX`; anything else clears. */
+export const clampBadgeCount = (count: number | null): number | null => {
+  if (count === null || !Number.isFinite(count)) return null;
+  return Math.min(GUEST_BADGE_MAX, Math.max(0, Math.round(count)));
+};
+
 /**
  * Which grant a file path needs. `/…` and `~/…` are outside the project and
  * go through the declared `filesystem` patterns; anything else is joined to
@@ -399,7 +484,9 @@ export type HostSessionMessage = Envelope & { type: 'session'; payload: { sessio
 export type HostConnectionMessage = Envelope & { type: 'connection'; payload: { connection: GuestConnection } };
 export type HostSettingsMessage = Envelope & { type: 'settings'; payload: { settings: GuestSettings } };
 export type HostSessionLifecycleMessage = Envelope & { type: 'session-lifecycle'; payload: SessionLifecycleEvent };
-export type HostItemMessage = Envelope & { type: 'item'; payload: { item: AttachIssueRequest | null } };
+export type HostItemMessage = Envelope & { type: 'item'; payload: { item: GuestItem | null } };
+/** Host → guest request. The guest answers with `resolve-result` carrying the same `id`. */
+export type HostResolveMessage = Envelope & { type: 'resolve'; id: string; payload: ResolveRequest };
 export type HostResultMessage = Envelope & { type: 'result'; id: string } & (
   | { ok: true; payload?: HostResultPayload }
   | { ok: false; error: string; code: HostRequestErrorCode }
@@ -413,6 +500,7 @@ export type HostMessage =
   | HostSettingsMessage
   | HostSessionLifecycleMessage
   | HostItemMessage
+  | HostResolveMessage
   | HostResultMessage;
 
 type GuestCall<Type extends string, Payload = never> = Envelope & { type: Type; id: string } & (
@@ -439,6 +527,9 @@ export type GuestFileReadMessage = GuestCall<'file-read', FileReadRequest>;
 export type GuestFileWriteMessage = GuestCall<'file-write', FileWriteRequest>;
 export type GuestFileListMessage = GuestCall<'file-list', FileListRequest>;
 export type GuestFileStatMessage = GuestCall<'file-stat', FileStatRequest>;
+export type GuestBadgeMessage = GuestCall<'badge', BadgeRequest>;
+/** Answers a host `resolve` by `id`. The host sends no `result` back for it. */
+export type GuestResolveResultMessage = Envelope & { type: 'resolve-result'; id: string; payload: ResolveResultPayload };
 
 export type GuestMessage =
   | GuestHelloMessage
@@ -460,7 +551,9 @@ export type GuestMessage =
   | GuestFileReadMessage
   | GuestFileWriteMessage
   | GuestFileListMessage
-  | GuestFileStatMessage;
+  | GuestFileStatMessage
+  | GuestBadgeMessage
+  | GuestResolveResultMessage;
 
 const serviceStatusSet: ReadonlySet<string> = new Set(SERVICE_STATUS_VALUES);
 
@@ -493,7 +586,7 @@ export const isFileStatResult = (
 );
 
 const HOST_PUSH_TYPES: ReadonlySet<string> = new Set([
-  'ready', 'directory', 'session', 'connection', 'settings', 'session-lifecycle', 'item',
+  'ready', 'directory', 'session', 'connection', 'settings', 'session-lifecycle', 'item', 'resolve',
 ]);
 
 /** What a postMessage payload may carry before it is read as a host message. */

@@ -2,12 +2,15 @@ import React from 'react';
 import { toast } from 'sonner';
 import {
   EMPTY_GUEST_CONNECTION,
+  GUEST_REQUEST_TIMEOUT_MS,
   guestFileScope,
   type AttachIssueRequest,
   type GuestHostSurface,
+  type GuestItem,
   type GuestMessage,
   type HostMessage,
   type HostReadyContext,
+  type ResolveResultPayload,
 } from '@openchamber/sdk';
 import { guestMessageSchema } from '@openchamber/sdk/schemas';
 
@@ -21,6 +24,7 @@ import {
   buildDirectoryMessage,
   buildItemMessage,
   buildReadyMessage,
+  buildResolveMessage,
   buildSessionLifecycleMessage,
   buildSessionMessage,
   buildSettingsMessage,
@@ -28,8 +32,10 @@ import {
   guestSessionModelId,
   toGuestSessionSnapshot,
 } from '@/lib/guests/host-bridge';
+import { useGuestBadgeStore } from '@/lib/guests/badge-store';
 import { guestMay, isGuestActive } from '@/lib/guests/capabilities';
 import { guestFileOperation } from '@/lib/guests/files';
+import { registerGuestResolver, type GuestResolveOutcome } from '@/lib/guests/resolve';
 import { resolveGuestFrameUrl } from '@/lib/guests/frame-url';
 import { useGuestItemStore } from '@/lib/guests/item-store';
 import { fetchHostLinearIssueGet } from '@/lib/guests/host-linear-request';
@@ -58,11 +64,16 @@ type PluginPaneProps = {
   mode: PluginContextPanelMode;
   surface?: GuestHostSurface;
   /**
-   * The attached item this surface was opened for (`ready.item`). The dialog
-   * passes it explicitly; the rail pane takes it from `useGuestItemStore`
-   * when this prop is left undefined.
+   * The item this surface was opened for (`ready.item`). The dialog passes
+   * it explicitly; the rail pane takes it from `useGuestItemStore` when this
+   * prop is left undefined.
    */
-  item?: AttachIssueRequest | null;
+  item?: GuestItem | null;
+  /**
+   * Mounted off-screen only to answer a slash command: never takes a parked
+   * item and never clears the badge, because the user did not open it.
+   */
+  headless?: boolean;
   onDismiss?: () => void;
   onAttach?: (issue: AttachIssueRequest) => void;
   onSessionStarted?: () => void;
@@ -98,6 +109,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   mode,
   surface = 'panel',
   item: itemProp,
+  headless = false,
   onDismiss,
   onAttach,
   onSessionStarted,
@@ -121,12 +133,17 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   // slot) so a later mount of the same pane starts without a stale item.
   const pendingItem = useGuestItemStore((state) => state.pendingItemByGuest[guestId]);
   const takePendingItem = useGuestItemStore((state) => state.takePendingItem);
-  const [railItem, setRailItem] = React.useState<AttachIssueRequest | null>(null);
+  const [railItem, setRailItem] = React.useState<GuestItem | null>(null);
   React.useEffect(() => {
-    if (itemProp !== undefined || !pendingItem) return;
+    if (headless || itemProp !== undefined || !pendingItem) return;
     setRailItem(takePendingItem(guestId));
-  }, [guestId, itemProp, pendingItem, takePendingItem]);
-  const item = itemProp !== undefined ? itemProp : railItem;
+  }, [guestId, headless, itemProp, pendingItem, takePendingItem]);
+  const item = headless ? null : itemProp !== undefined ? itemProp : railItem;
+  // The user opened this guest's panel: whatever it counted is seen.
+  const clearBadge = useGuestBadgeStore((state) => state.clearBadge);
+  React.useEffect(() => {
+    if (surface === 'panel' && !headless) clearBadge(guestId);
+  }, [clearBadge, guestId, headless, surface]);
   const sessionBusy = sessionStatus?.type === 'busy' || sessionStatus?.type === 'retry';
   const lifecyclePhase = guestSessionLifecyclePhase(sessionStatus);
   const sessionSnapshot = React.useMemo(
@@ -233,6 +250,9 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const onSessionStartedRef = React.useRef(onSessionStarted);
   onSessionStartedRef.current = onSessionStarted;
   const oauthPollRef = React.useRef<number | null>(null);
+  // Outstanding `resolve` requests this pane sent; answered by `resolve-result`.
+  const resolveWaitersRef = React.useRef(new Map<string, (outcome: GuestResolveOutcome) => void>());
+  const resolveIdsRef = React.useRef(0);
 
   const stopOauthPoll = React.useCallback(() => {
     if (oauthPollRef.current != null) {
@@ -244,6 +264,39 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const postToGuest = React.useCallback((message: HostMessage) => {
     iframeRef.current?.contentWindow?.postMessage(message, OPAQUE_FRAME_TARGET_ORIGIN);
   }, []);
+
+  // Registered once the guest has connected (hello or iframe load), so a
+  // resolve is never posted into a frame that is not listening yet. The rail
+  // pane and a headless pane both register; the composer asks whichever is up.
+  const resolverReadyRef = React.useRef(false);
+  const unregisterResolverRef = React.useRef<(() => void) | null>(null);
+  const registerResolver = React.useCallback(() => {
+    if (resolverReadyRef.current || surface !== 'panel') return;
+    resolverReadyRef.current = true;
+    unregisterResolverRef.current = registerGuestResolver(guestIdRef.current, (request) => new Promise((resolve) => {
+      resolveIdsRef.current += 1;
+      const id = `resolve-${resolveIdsRef.current}`;
+      const timer = window.setTimeout(() => {
+        resolveWaitersRef.current.delete(id);
+        resolve({ ok: false, reason: 'timeout' });
+      }, GUEST_REQUEST_TIMEOUT_MS);
+      resolveWaitersRef.current.set(id, (outcome) => {
+        window.clearTimeout(timer);
+        resolveWaitersRef.current.delete(id);
+        resolve(outcome);
+      });
+      iframeRef.current?.contentWindow?.postMessage(buildResolveMessage(id, request.command, request.args), OPAQUE_FRAME_TARGET_ORIGIN);
+    }));
+  }, [surface]);
+  React.useEffect(() => () => {
+    unregisterResolverRef.current?.();
+    unregisterResolverRef.current = null;
+    resolverReadyRef.current = false;
+    for (const waiter of resolveWaitersRef.current.values()) {
+      waiter({ ok: false, reason: 'unavailable' });
+    }
+    resolveWaitersRef.current.clear();
+  }, [frameKey]);
 
   const pushHostState = React.useCallback(() => {
     postToGuest(buildReadyMessage(readyRef.current));
@@ -283,6 +336,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
 
       if (message.type === 'hello') {
         pushHostState();
+        registerResolver();
         return;
       }
 
@@ -436,6 +490,19 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           }
           return guestFileOperation(guestIdRef.current, request, directory);
         },
+        setBadge: (count) => {
+          if (!guestEnabledRef.current) return;
+          useGuestBadgeStore.getState().setBadge(guestIdRef.current, count);
+        },
+        resolveResult: (id, payload: ResolveResultPayload) => {
+          const waiter = resolveWaitersRef.current.get(id);
+          if (!waiter) return;
+          if ('error' in payload) {
+            waiter({ ok: false, reason: 'error', message: payload.error });
+            return;
+          }
+          waiter({ ok: true, item: payload.item });
+        },
       }).then((reply) => {
         if (reply) postToGuest(reply);
       });
@@ -445,7 +512,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     return () => {
       window.removeEventListener('message', onMessage);
     };
-  }, [frameKey, postToGuest, pushHostState, refreshOauth, setOauthStatus, src, stopOauthPoll]);
+  }, [frameKey, postToGuest, pushHostState, refreshOauth, registerResolver, setOauthStatus, src, stopOauthPoll]);
 
   // The OAuth poll outlives listener re-attachment: it only stops when the
   // frame goes away, otherwise a parent re-render mid-authorization would
@@ -502,7 +569,10 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         'h-full w-full min-h-0 min-w-0 border-0 overflow-hidden',
         surface === 'dialog' ? 'bg-transparent' : 'bg-[var(--surface-background)]',
       )}
-      onLoad={pushHostState}
+      onLoad={() => {
+        pushHostState();
+        registerResolver();
+      }}
     />
   );
 };

@@ -195,6 +195,12 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (parsed.manifest.contributes.filesystem?.length) {
     guest.filesystem = [...parsed.manifest.contributes.filesystem];
   }
+  if (parsed.manifest.contributes.actions?.length) {
+    guest.actions = parsed.manifest.contributes.actions.map((action) => ({ ...action }));
+  }
+  if (parsed.manifest.contributes.commands?.length) {
+    guest.commands = parsed.manifest.contributes.commands.map((command) => ({ ...command }));
+  }
   if (parsed.manifest.contributes.service) {
     const serviceEntry = await resolveGuestAssetPath(packageRoot, parsed.manifest.contributes.service.entry);
     if (!serviceEntry) {
@@ -242,6 +248,14 @@ export const toPublicGuest = (guest) => {
   }
   if (Array.isArray(guest.filesystem) && guest.filesystem.length > 0) {
     row.filesystem = [...guest.filesystem];
+  }
+  // Actions and commands are the parsed manifest entries as they are: the
+  // UI decides which ones to show from the grant and the enabled flag.
+  if (Array.isArray(guest.actions) && guest.actions.length > 0) {
+    row.actions = guest.actions.map((action) => ({ ...action }));
+  }
+  if (Array.isArray(guest.commands) && guest.commands.length > 0) {
+    row.commands = guest.commands.map((command) => ({ ...command }));
   }
   const granted = Array.isArray(guest.capabilityGrants) ? guest.capabilityGrants : [];
   row.capabilities = {

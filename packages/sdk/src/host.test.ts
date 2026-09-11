@@ -688,3 +688,94 @@ describe('connectHost', () => {
     host.dispose();
   });
 });
+
+describe('connectHost resolve and badge', () => {
+  const resolveMessage = (id: string, command: string, args: string): HostMessage => ({
+    channel: OPENCHAMBER_SDK_CHANNEL,
+    v: OPENCHAMBER_SDK_API_VERSION,
+    type: 'resolve',
+    id,
+    payload: { command, args },
+  });
+
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  test('answers resolve with the handler item, null, or an error, and refuses without a handler', async () => {
+    const parent = createFrame();
+    const guest = createFrame();
+    guest.parent = parent.parent;
+    const host = connectHost({ target: guest, acceptSource: () => true });
+
+    guest.dispatch(new MessageEvent('message', { data: resolveMessage('r-0', 'task', '1') }));
+    await flush();
+    expect(parent.posted[1]).toMatchObject({ type: 'resolve-result', id: 'r-0', payload: { error: 'This extension does not resolve commands.' } });
+
+    const seen: Array<{ command: string; args: string }> = [];
+    const off = host.onResolve(async (request) => {
+      seen.push(request);
+      if (request.args === 'none') return null;
+      if (request.args === 'boom') throw new Error('Task service is down');
+      return { ...demoItem, title: `${demoItem.title} `.repeat(40) };
+    });
+
+    guest.dispatch(new MessageEvent('message', { data: resolveMessage('r-1', 'task', 'DEMO-1') }));
+    guest.dispatch(new MessageEvent('message', { data: resolveMessage('r-2', 'task', 'none') }));
+    guest.dispatch(new MessageEvent('message', { data: resolveMessage('r-3', 'task', 'boom') }));
+    await flush();
+
+    expect(seen).toEqual([
+      { command: 'task', args: 'DEMO-1' },
+      { command: 'task', args: 'none' },
+      { command: 'task', args: 'boom' },
+    ]);
+    const answers = parent.posted.filter((message) => message.type === 'resolve-result');
+    expect(answers).toHaveLength(4);
+    expect(answers[1]).toMatchObject({ id: 'r-1', payload: { item: { id: 'DEMO-1', kind: 'issue' } } });
+    if (answers[1]?.type === 'resolve-result' && 'item' in answers[1].payload && answers[1].payload.item) {
+      expect(answers[1].payload.item.title.length).toBe(GUEST_ATTACH_TITLE_MAX);
+    }
+    expect(answers[2]).toMatchObject({ id: 'r-2', payload: { item: null } });
+    expect(answers[3]).toMatchObject({ id: 'r-3', payload: { error: 'Task service is down' } });
+
+    off();
+    guest.dispatch(new MessageEvent('message', { data: resolveMessage('r-4', 'task', 'x') }));
+    await flush();
+    expect(parent.posted.at(-1)).toMatchObject({ id: 'r-4', payload: { error: 'This extension does not resolve commands.' } });
+    host.dispose();
+  });
+
+  test('setBadge clamps to 0..999 and sends null to clear', async () => {
+    const parent = createFrame();
+    const guest = createFrame();
+    guest.parent = parent.parent;
+    const host = connectHost({ target: guest, acceptSource: () => true });
+
+    const calls = [3, 5000, -2, 2.6, null].map((count) => host.setBadge(count).catch(() => undefined));
+    const badges = parent.posted.filter((message) => message.type === 'badge');
+    expect(badges.map((message) => (message.type === 'badge' ? message.payload.count : undefined))).toEqual([3, 999, 0, 3, null]);
+    host.dispose();
+    await Promise.all(calls);
+  });
+
+  test('replays a message item to a late onItem listener', () => {
+    const parent = createFrame();
+    const guest = createFrame();
+    guest.parent = parent.parent;
+    const host = connectHost({ target: guest, acceptSource: () => true });
+    const messageItem = {
+      kind: 'message' as const,
+      action: 'create-task',
+      sessionId: 'ses-1',
+      sessionTitle: 'Hello',
+      directory: '/repo',
+      messageId: 'msg-1',
+      role: 'assistant' as const,
+      text: 'Do the thing.',
+    };
+    guest.dispatch(new MessageEvent('message', { data: { ...ready, payload: { ...ready.payload, item: messageItem } } }));
+    const seen: unknown[] = [];
+    host.onItem((item) => seen.push(item));
+    expect(seen).toEqual([messageItem]);
+    host.dispose();
+  });
+});

@@ -28,11 +28,22 @@ const requiredKeys = [
   'session.newWorktree.actions.startFromGuest',
   'session.newWorktree.fromGuest',
   'session.newWorktree.error.sendGuestContextFailed',
+  'contextPanel.plugin.actionDialog.description',
+  'contextRail.surface.plugin.badgeAriaSingle',
+  'contextRail.surface.plugin.badgeAriaPlural',
+  'contextRail.surface.plugin.badgeTooltipSingle',
+  'contextRail.surface.plugin.badgeTooltipPlural',
+  'chat.chatInput.toast.guestCommandNothing',
+  'chat.chatInput.toast.guestCommandFailed',
+  'chat.chatInput.toast.guestCommandUnavailable',
 ] as const;
 
 const sameInEveryLocale = new Set<string>([
   'contextRail.surface.plugin',
   'chat.chatInput.linked.guest.pr.number',
+  // "item" is the same word in Portuguese, so the singular forms match English there.
+  'contextRail.surface.plugin.badgeAriaSingle',
+  'contextRail.surface.plugin.badgeTooltipSingle',
 ]);
 
 describe('plugin panel translations', () => {

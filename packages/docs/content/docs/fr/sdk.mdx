@@ -104,7 +104,7 @@ Dessiner un panneau et lire la session en cours ne demandent aucune permission. 
 | `sessions` | créer des sessions et des worktrees (`startSession`) |
 | `files` | lire et écrire des fichiers dans le projet ouvert (`readFile`, `writeFile`, `listDir`, `stat` avec un chemin relatif) |
 
-Trois autres sont ajoutées pour vous : `network` quand vous déclarez une `integration`, `service` quand vous déclarez un `service`, et `filesystem` quand vous déclarez des motifs `filesystem`.
+Quatre autres sont ajoutées pour vous : `network` quand vous déclarez une `integration`, `service` quand vous déclarez un `service`, `filesystem` quand vous déclarez des motifs `filesystem`, et `conversation` quand une action de session demande les messages (voir [Actions, commandes et le badge](#actions-commandes-et-le-badge)).
 
 L'utilisateur voit la liste complète une seule fois, à l'installation de l'extension, et l'approuve ou supprime l'extension. Si une nouvelle version demande davantage, la boîte de dialogue réapparaît. Un appel qui a besoin d'une capacité non approuvée par l'utilisateur échoue avec `NOT_GRANTED`.
 
@@ -146,6 +146,38 @@ const { entries } = await host.listDir(".");
 ```
 
 Les écritures sont atomiques : OpenChamber écrit un fichier temporaire puis le renomme, donc un lecteur ne voit jamais un fichier à moitié écrit. Les fichiers sont lus et écrits en texte UTF-8, jusqu'à 2 Mo.
+
+## Actions, commandes et le badge
+
+Au-delà de la barre latérale et du menu +, une extension peut apparaître à trois autres endroits. Tous transmettent à l'extension un `item`, de la même façon qu'un clic sur une puce.
+
+**Actions sur les messages et les sessions.** Déclarez des entrées de menu et OpenChamber les affiche à côté des entrées intégrées :
+
+```json
+"actions": [
+  { "id": "create-task", "label": "Create task", "icon": "add-line", "where": "message", "roles": ["assistant"] },
+  { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
+]
+```
+
+Une action de message ouvre votre extension avec un `ctx.item` de `kind: "message"` : l'id et le titre de la session, le dossier du projet, l'id du message, son rôle et son texte. Une action de session l'ouvre avec `kind: "session"` et l'id, le titre et le dossier de la session. Ajoutez `"payload": ["messages"]` et l'élément porte aussi toute la conversation, du plus ancien au plus récent, le même texte que produit l'export Markdown. Cela demande la capacité `conversation`, que l'utilisateur voit comme une ligne à part dans la boîte de dialogue d'approbation. `item.action` vous dit quelle entrée a été cliquée.
+
+**Commandes slash qui attachent.** Déclarez une commande et traitez-la dans la page :
+
+```json
+"commands": [{ "name": "task", "description": "Attach a task by id" }]
+```
+
+```ts
+host.onResolve(async ({ command, args }) => {
+  const task = await findTask(args.trim());
+  return task ? { providerId: "acme-tasks", id: task.id, title: task.title, url: task.url } : null;
+});
+```
+
+Quand l'utilisateur tape `/task ABC-12` dans la zone de chat, OpenChamber demande à votre extension de le résoudre et attache ce que vous renvoyez sous forme de puce, sans rien ouvrir. Renvoyez `null` pour "rien trouvé". Si votre panneau est fermé, OpenChamber le charge en arrière-plan pour cet appel. Un nom déjà utilisé par OpenChamber ou OpenCode est ignoré.
+
+**Badge sur l'icône de la barre latérale.** `host.setBadge(3)` affiche un nombre sur votre icône, par exemple les tâches ouvertes ; `host.setBadge(null)` l'efface. Ouvrir le panneau l'efface aussi.
 
 ## Premières lignes dans le panneau
 

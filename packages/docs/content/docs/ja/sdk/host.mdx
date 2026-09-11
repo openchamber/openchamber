@@ -27,7 +27,7 @@ const host = connectHost();
 | `directory` | 現在のプロジェクトディレクトリ、または `null` |
 | `session` | `{ id, title, busy }` または `null`。タイトルがなければセッション ID になります。`busy` はライブの状態です。セッションが持っていれば `model` と `agent`(OpenCode のエージェント)も含まれます。 |
 | `surface` | レール上なら `panel`、添付ウィンドウなら `dialog` |
-| `item` | この画面を開くためにユーザーがクリックした添付済みの項目(`attach` に渡したのと同じフィールド、`data` を含む)、または `null` |
+| `item` | この画面が何のために開かれたか、または `null`。ユーザーがクリックした添付済みの項目(`attach` に渡したのと同じフィールド、`data` を含む)、または宣言したアクションから来たメッセージ(`kind: "message"`)かセッション(`kind: "session"`)。[アクション](/sdk/#アクションコマンドバッジ) を参照。 |
 | `connection` | あなたの連携の `{ connected, account }` |
 | `settings` | `integration.settings` で宣言した入力欄の値 |
 
@@ -58,6 +58,8 @@ const host = connectHost();
 | `writeFile(path, content)` | テキストファイルをアトミックに書き、親フォルダも作成する。`{ written: true }` を返す。 |
 | `listDir(path)` | フォルダを一覧する。`{ entries: [{ name, kind }] }` を返し、`kind` は `file`、`directory`、`other` のいずれか。 |
 | `stat(path)` | `{ kind, size, mtime }`。`kind` は `file`、`directory`、`other`、`missing` のいずれか。 |
+| `onResolve(handler)` | スラッシュコマンドのハンドラーを登録する。`{ command, args }` を受け取り、添付する項目または `null` を返す。 |
+| `setBadge(count)` | レールのアイコンに数字(0 から 999)を表示する。`null` で消す |
 
 ## attach、startSession、sessionLink
 

@@ -27,7 +27,7 @@ const host = connectHost();
 | `directory` | 현재 프로젝트 디렉터리, 또는 `null` |
 | `session` | `{ id, title, busy }` 또는 `null`. 제목이 없으면 세션 id를 사용합니다. `busy`는 실시간 상태입니다. 세션에 있으면 `model`과 `agent`(OpenCode 에이전트)도 포함됩니다. |
 | `surface` | 레일에서는 `panel`, 첨부 창에서는 `dialog` |
-| `item` | 이 화면을 열기 위해 사용자가 클릭한 첨부 항목(`attach`에 넘긴 것과 같은 필드, `data` 포함), 또는 `null` |
+| `item` | 이 화면이 무엇 때문에 열렸는지, 또는 `null`. 사용자가 클릭한 첨부 항목(`attach`에 넘긴 것과 같은 필드, `data` 포함), 또는 선언한 작업에서 온 메시지(`kind: "message"`)나 세션(`kind: "session"`). [작업](/sdk/#작업-명령-배지) 참고. |
 | `connection` | 여러분의 통합에 대한 `{ connected, account }` |
 | `settings` | `integration.settings`에 선언한 입력란의 값 |
 
@@ -58,6 +58,8 @@ const host = connectHost();
 | `writeFile(path, content)` | 텍스트 파일을 원자적으로 쓰고, 상위 폴더도 만듦. `{ written: true }`를 반환. |
 | `listDir(path)` | 폴더 목록. `{ entries: [{ name, kind }] }`를 반환하며, `kind`는 `file`, `directory`, `other` 중 하나. |
 | `stat(path)` | `{ kind, size, mtime }`. `kind`는 `file`, `directory`, `other`, `missing` 중 하나. |
+| `onResolve(handler)` | 슬래시 명령의 핸들러를 등록합니다. `{ command, args }`를 받고 첨부할 항목 또는 `null`을 반환합니다. |
+| `setBadge(count)` | 레일 아이콘에 숫자(0부터 999까지)를 표시하고, `null`이면 지웁니다 |
 
 ## attach, startSession, sessionLink
 

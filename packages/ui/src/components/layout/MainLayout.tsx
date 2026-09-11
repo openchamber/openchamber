@@ -5,6 +5,7 @@ import { SidebarTopBar } from './SidebarTopBar';
 import { TitlebarLeftControls } from './TitlebarLeftControls';
 import { ContextPanel } from './ContextPanel';
 import { ContextPanelRail } from './ContextPanelRail';
+import { GuestHosts } from './GuestHosts';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { CommandPalette } from '../ui/CommandPalette';
 import { HelpDialog } from '../ui/HelpDialog';
@@ -166,6 +167,7 @@ export const MainLayout: React.FC = () => {
                             <div className="border-t border-border" data-page-scroll-lock="true">
                                 <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
                             </div>
+                            <ErrorBoundary><GuestHosts /></ErrorBoundary>
                         </div>
                     </div>
                 </div>

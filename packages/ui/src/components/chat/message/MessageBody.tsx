@@ -36,6 +36,7 @@ import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { toast } from '@/components/ui';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Icon } from "@/components/icon/Icon";
 import { formatTimestampForDisplay } from './timeFormat';
 import { ToolRevealOnMount } from './parts/ToolRevealOnMount';
@@ -444,7 +445,17 @@ interface MessageBodyProps {
     footerAgentName?: string;
     footerVariant?: string;
     isDarkTheme?: boolean;
+    /** Actions installed extensions contribute for this message's role; rendered after the built-ins. */
+    extraActions?: MessageExtraAction[];
 }
+
+/** One extension action on a message: an icon button on hover, a labelled row in the touch sheet. */
+export type MessageExtraAction = {
+    id: string;
+    label: string;
+    icon: React.ReactNode;
+    onSelect: () => void;
+};
 
 const TOOL_REVEAL_CACHE_MAX = 200;
 const revealedToolIdsByMessage = new Map<string, Set<string>>();
@@ -464,7 +475,50 @@ const writeRevealedToolIds = (messageId: string, value: Set<string>): void => {
     revealedToolIdsByMessage.set(messageId, new Set(value));
 };
 
-const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork, contextPinned, contextPinPending, onToggleContextPin, userActionsMode = 'inline', stickyUserHeaderEnabled = true }: {
+/** Extension actions as icon buttons, after the built-in row. Same chrome as the copy button next to them. */
+/**
+ * Extension actions on desktop live behind one "more" button, the same way the
+ * touch sheets already fold every action away, so several extensions never
+ * stretch the hover row.
+ */
+const MessageExtraActionButtons: React.FC<{ actions?: MessageExtraAction[] }> = ({ actions }) => {
+    const { t } = useI18n();
+    if (!actions || actions.length === 0) return null;
+    return (
+        <DropdownMenu>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
+                            aria-label={t('chat.messageBody.actions.moreActions')}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={(event) => event.stopPropagation()}
+                        >
+                            <Icon name="more" className="h-3.5 w-3.5" />
+                        </Button>
+                    </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.moreActions')}</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end" onPointerDown={(event) => event.stopPropagation()}>
+                {actions.map((action) => (
+                    <DropdownMenuItem key={action.id} className="typography-meta" onSelect={() => action.onSelect()}>
+                        <span className="flex items-center gap-2 min-w-0">
+                            <span className="flex size-4 shrink-0 items-center justify-center">{action.icon}</span>
+                            <span className="truncate">{action.label}</span>
+                        </span>
+                    </DropdownMenuItem>
+                ))}
+            </DropdownMenuContent>
+        </DropdownMenu>
+    );
+};
+
+const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork, contextPinned, contextPinPending, onToggleContextPin, userActionsMode = 'inline', stickyUserHeaderEnabled = true, extraActions }: {
     messageId: string;
     parts: Part[];
     messageCreatedAt?: number | null;
@@ -483,6 +537,7 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
     onToggleContextPin?: () => void;
     userActionsMode?: 'inline' | 'external-content' | 'external-actions';
     stickyUserHeaderEnabled?: boolean;
+    extraActions?: MessageExtraAction[];
 }) => {
     const { locale, t } = useI18n();
     const chatSurfaceMode = useChatSurfaceMode();
@@ -618,15 +673,19 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
                 onSelect: () => { onRevert(); },
             });
         }
+        for (const extra of extraActions ?? []) {
+            actions.push({ id: extra.id, label: extra.label, icon: extra.icon, onSelect: extra.onSelect });
+        }
         return actions;
-    }, [canCopyMessage, contextPinPending, contextPinned, effectiveOnFork, hasCopyableText, onCopyMessage, onRevert, onToggleContextPin, t]);
+    }, [canCopyMessage, contextPinPending, contextPinned, effectiveOnFork, extraActions, hasCopyableText, onCopyMessage, onRevert, onToggleContextPin, t]);
     const timestamp = React.useMemo(() => {
         void locale;
         if (typeof messageCreatedAt !== 'number' || messageCreatedAt <= 0) return null;
         const formatted = formatTimestampForDisplay(messageCreatedAt, timeFormatPreference);
         return formatted.length > 0 ? formatted : null;
     }, [locale, messageCreatedAt, timeFormatPreference]);
-    const actionsBlock = chatSurfaceMode !== 'peek' && ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork || onToggleContextPin) && showUserActions ? (
+    const hasExtraActions = Boolean(extraActions && extraActions.length > 0);
+    const actionsBlock = chatSurfaceMode !== 'peek' && ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork || onToggleContextPin || hasExtraActions) && showUserActions ? (
         <div className={cn(
             'group/user-actions',
             isMobile
@@ -815,6 +874,7 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
                             <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.copyMessage')}</TooltipContent>
                         </Tooltip>
                     )}
+                    <MessageExtraActionButtons actions={extraActions} />
                     </>
                 )}
 
@@ -910,6 +970,7 @@ interface AssistantMessageActionButtonsProps {
     };
     onShareImage: (sourceElement?: HTMLElement | null) => Promise<void>;
     ttsText: string;
+    extraActions?: MessageExtraAction[];
 }
 
 const AssistantMessageActionButtons = React.memo(({
@@ -919,6 +980,7 @@ const AssistantMessageActionButtons = React.memo(({
     reviewTransferAction,
     onShareImage,
     ttsText,
+    extraActions,
 }: AssistantMessageActionButtonsProps) => {
     const { t } = useI18n();
     const chatSurfaceMode = useChatSurfaceMode();
@@ -1193,6 +1255,7 @@ const AssistantMessageActionButtons = React.memo(({
                     <TooltipContent sideOffset={6}>{readAloudTooltip}</TooltipContent>
                 </Tooltip>
             )}
+            {chatSurfaceMode !== 'mini-chat' ? <MessageExtraActionButtons actions={extraActions} /> : null}
         </>
     );
 });
@@ -1228,6 +1291,7 @@ const AssistantMessageBody = React.memo(({
     footerAgentName,
     footerVariant,
     isDarkTheme = false,
+    extraActions,
 }: Omit<MessageBodyProps, 'isUser'>) => {
     const { t, locale } = useI18n();
     const chatSurfaceMode = useChatSurfaceMode();
@@ -1781,6 +1845,20 @@ const AssistantMessageBody = React.memo(({
             onShareImage={shareMessageAsImage}
             ttsText={assistantPlanText}
             reviewTransferAction={reviewTransferAction}
+            extraActions={extraActions}
+        />
+    ), [assistantPlanText, extraActions, hasCopyableText, isTouchContext, onCopyMessage, reviewTransferAction, shareMessageAsImage]);
+
+    // The turn footer appends its own buttons (fork, multi-run) after this
+    // group, so extension actions are rendered there separately, last.
+    const footerMessageActionButtons = React.useMemo(() => (
+        <AssistantMessageActionButtons
+            hasCopyableText={hasCopyableText}
+            isTouchContext={isTouchContext}
+            onCopyMessage={onCopyMessage}
+            onShareImage={shareMessageAsImage}
+            ttsText={assistantPlanText}
+            reviewTransferAction={reviewTransferAction}
         />
     ), [assistantPlanText, hasCopyableText, isTouchContext, onCopyMessage, reviewTransferAction, shareMessageAsImage]);
 
@@ -2255,8 +2333,13 @@ const AssistantMessageBody = React.memo(({
                 onSelect: () => { handleForkClick(); },
             });
         }
+        if (!isMiniChatSurface) {
+            for (const extra of extraActions ?? []) {
+                actions.push({ id: extra.id, label: extra.label, icon: extra.icon, onSelect: extra.onSelect });
+            }
+        }
         return actions;
-    }, [assistantPlanText, canUseProjectPlanActions, contextPinPending, contextPinned, currentProjectRef, handleForkClick, handleSaveAsPlanClick, hasCopyableText, isFooterTTSPlaying, isMiniChatSurface, isReviewSessionView, onCopyMessage, onToggleContextPin, playFooterTTS, reviewTransferAction, shareMessageAsImage, showMessageTTSButtons, stopFooterTTS, t]);
+    }, [assistantPlanText, canUseProjectPlanActions, contextPinPending, contextPinned, currentProjectRef, extraActions, handleForkClick, handleSaveAsPlanClick, hasCopyableText, isFooterTTSPlaying, isMiniChatSurface, isReviewSessionView, onCopyMessage, onToggleContextPin, playFooterTTS, reviewTransferAction, shareMessageAsImage, showMessageTTSButtons, stopFooterTTS, t]);
 
     const finalTurnActionButtons = (
         <>
@@ -2520,8 +2603,9 @@ const AssistantMessageBody = React.memo(({
                                 className="flex shrink-0 items-center gap-1.5 pointer-events-none opacity-0 transition-opacity duration-150 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/message:pointer-events-auto group-hover/message:opacity-100 [&_button]:!h-[26px] [&_button]:!w-[26px] [&_svg]:!size-3.5"
                                 data-message-action-group="true"
                             >
-                                {messageActionButtons}
+                                {footerMessageActionButtons}
                                 {finalTurnActionButtons}
+                                {chatSurfaceMode !== 'mini-chat' ? <MessageExtraActionButtons actions={extraActions} /> : null}
                             </div>
                         )}
                       </div>
@@ -2599,6 +2683,7 @@ const MessageBody = React.memo(({ isUser, ...props }: MessageBodyProps) => {
                 onToggleContextPin={props.onToggleContextPin}
                 userActionsMode={props.userActionsMode}
                 stickyUserHeaderEnabled={props.stickyUserHeaderEnabled}
+                extraActions={props.extraActions}
             />
         );
     }

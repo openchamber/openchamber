@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { OPENCHAMBER_SDK_CHANNEL, type GuestMessage, type GuestRequest } from '@openchamber/sdk';
+import { OPENCHAMBER_SDK_CHANNEL, type GuestMessage, type GuestRequest, type ResolveResultPayload } from '@openchamber/sdk';
 
 import type { GuestFileProxyResult, GuestFileRequest } from './files.ts';
 
@@ -53,6 +53,8 @@ const effects = (overrides: {
     | { ok: false; code: 'HOST_REJECTED' | 'NO_SERVICE'; message: string }
   >;
   file?: (request: GuestFileRequest) => Promise<GuestFileProxyResult>;
+  setBadge?: (count: number | null) => void;
+  resolveResult?: (id: string, payload: ResolveResultPayload) => void;
 } = {}) => ({
   toast: overrides.toast ?? (() => {}),
   openUrl: overrides.openUrl ?? (async () => true),
@@ -70,6 +72,8 @@ const effects = (overrides: {
   serviceRequest: overrides.serviceRequest ?? (async () => ({ ok: true, result: { status: 200, body: '{}' } })),
   serviceStatus: overrides.serviceStatus ?? (async () => ({ ok: true, result: { status: 'ready' as const } })),
   file: overrides.file ?? (async () => ({ ok: true, result: { written: true as const } })),
+  setBadge: overrides.setBadge ?? (() => {}),
+  resolveResult: overrides.resolveResult ?? (() => {}),
 });
 
 describe('answerGuestMessage', () => {
@@ -574,5 +578,33 @@ describe('guestSessionLifecyclePhase', () => {
     expect(guestSessionLifecyclePhase({ type: 'error' })).toBe('failure');
     expect(guestSessionLifecyclePhase({})).toBeNull();
     expect(guestSessionLifecyclePhase(null)).toBeNull();
+  });
+});
+
+describe('badge and resolve-result', () => {
+  test('badge sets the count and answers ok', async () => {
+    const seen: Array<number | null> = [];
+    const reply = await answerGuestMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: 1,
+      type: 'badge',
+      id: 'oc-9',
+      payload: { count: 4 },
+    }, effects({ setBadge: (count) => { seen.push(count); } }));
+    expect(seen).toEqual([4]);
+    expect(reply).toMatchObject({ type: 'result', id: 'oc-9', ok: true });
+  });
+
+  test('resolve-result hands the payload to the pane and sends nothing back', async () => {
+    const seen: Array<[string, ResolveResultPayload]> = [];
+    const reply = await answerGuestMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: 1,
+      type: 'resolve-result',
+      id: 'resolve-1',
+      payload: { item: null },
+    }, effects({ resolveResult: (id, payload) => { seen.push([id, payload]); } }));
+    expect(seen).toEqual([['resolve-1', { item: null }]]);
+    expect(reply).toBeNull();
   });
 });

@@ -204,3 +204,33 @@ describe('listInstalledGuests', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 });
+
+describe('actions and commands on the public row', () => {
+  test('copies declared actions and commands and asks for conversation when a session action wants messages', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    await writeBuiltGuest(root);
+    const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
+    pkg.version = '1.0.0';
+    pkg.openchamber.contributes.actions = [
+      { id: 'create-task', label: 'Create task', where: 'message', roles: ['assistant'] },
+      { id: 'summarize', label: 'Summarize', where: 'session', payload: ['messages'] },
+    ];
+    pkg.openchamber.contributes.commands = [{ name: 'task', description: 'Attach a task' }];
+    await fs.writeFile(path.join(root, 'package.json'), JSON.stringify(pkg));
+
+    const inspected = await inspectGuestPackage(root);
+    expect(inspected.ok).toBe(true);
+    if (inspected.ok) {
+      const row = toPublicGuest({ ...inspected.guest, source: 'path', path: root, capabilityGrants: [] });
+      expect(row.actions).toEqual(pkg.openchamber.contributes.actions);
+      expect(row.commands).toEqual(pkg.openchamber.contributes.commands);
+      expect(row.capabilities).toEqual({ requested: ['conversation'], granted: [] });
+    }
+
+    pkg.openchamber.contributes.actions = [{ id: 'x', label: 'X', where: 'message', payload: ['messages'] }];
+    await fs.writeFile(path.join(root, 'package.json'), JSON.stringify(pkg));
+    expect(await inspectGuestPackage(root)).toMatchObject({ ok: false, code: 'invalid-manifest' });
+
+    await fs.rm(root, { recursive: true, force: true });
+  });
+});

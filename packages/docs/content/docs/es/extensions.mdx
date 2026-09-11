@@ -33,9 +33,14 @@ Mostrar un panel y leer qué proyecto y sesión están abiertos no necesita perm
 - **Leer y escribir archivos en el proyecto abierto**.
 - **Leer y escribir archivos fuera del proyecto**: solo las ubicaciones exactas que la extensión enumera en el diálogo.
 - **Conectarse a servicios externos**: llamar a su propia API con una cuenta que tú conectas.
+- **Leer la conversación de una sesión cuando ejecutas su acción**: la extensión recibe todos los mensajes de esa sesión, pero solo cuando eliges su acción en el menú de la sesión.
 - **Ejecutar un servicio local**: iniciar un programa aparte en este equipo con el acceso de tu cuenta de usuario. Permítelo solo a extensiones en las que confíes; los permisos que declara describen la intención, no lo restringen.
 
 Cuando una versión más nueva pide más de lo que permitiste, la tarjeta muestra **Requiere aprobación** y un botón **Revisar permisos**. Hasta que permitas la nueva lista, esa extensión sigue apagada.
+
+## Dónde aparece
+
+Además de su panel en la barra lateral, una extensión puede añadir entradas a menús que ya usas: las acciones de un mensaje del chat, el menú de una sesión, el menú + junto al cuadro de chat y comandos de barra como `/task ABC-12` que adjuntan algo sin abrir nada. La extensión decide cuáles de ellos ofrece; todos están apagados hasta que permites la extensión.
 
 ## Conectar su cuenta
 

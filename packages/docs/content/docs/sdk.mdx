@@ -104,7 +104,7 @@ Drawing a panel and reading the current session need no permission. Anything tha
 | `sessions` | create sessions and worktrees (`startSession`) |
 | `files` | read and write files inside the open project (`readFile`, `writeFile`, `listDir`, `stat` with a relative path) |
 
-Three more are added for you: `network` when you declare an `integration`, `service` when you declare a `service`, and `filesystem` when you declare `filesystem` patterns.
+Four more are added for you: `network` when you declare an `integration`, `service` when you declare a `service`, `filesystem` when you declare `filesystem` patterns, and `conversation` when a session action asks for the messages (see [Actions, commands, and the badge](#actions-commands-and-the-badge)).
 
 The user sees the full list once, when they install the extension, and approves it or removes the extension. If a new version asks for more, the dialog appears again. A call that needs a capability the user has not approved fails with `NOT_GRANTED`.
 
@@ -146,6 +146,38 @@ const { entries } = await host.listDir(".");
 ```
 
 Writes are atomic: OpenChamber writes a temporary file and renames it, so a reader never sees a half-written file. Files are read and written as UTF-8 text, up to 2 MB.
+
+## Actions, commands, and the badge
+
+Beyond the rail and the + menu, an extension can appear in three more places. All of them hand the extension an `item` the same way a chip click does.
+
+**Actions on messages and sessions.** Declare menu entries and OpenChamber shows them next to the built-in ones:
+
+```json
+"actions": [
+  { "id": "create-task", "label": "Create task", "icon": "add-line", "where": "message", "roles": ["assistant"] },
+  { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
+]
+```
+
+A message action opens your extension with `ctx.item` of `kind: "message"`: the session id and title, the project directory, the message id, its role, and its text. A session action opens it with `kind: "session"` and the session id, title, and directory. Add `"payload": ["messages"]` and the item also carries the whole conversation, oldest first, the same text the Markdown export produces. That needs the `conversation` capability, which the user sees as a separate line in the approval dialog. `item.action` tells you which entry was clicked.
+
+**Slash commands that attach.** Declare a command and handle it in the page:
+
+```json
+"commands": [{ "name": "task", "description": "Attach a task by id" }]
+```
+
+```ts
+host.onResolve(async ({ command, args }) => {
+  const task = await findTask(args.trim());
+  return task ? { providerId: "acme-tasks", id: task.id, title: task.title, url: task.url } : null;
+});
+```
+
+When the user types `/task ABC-12` in the chat box, OpenChamber asks your extension to resolve it and attaches what you return as a chip, without opening anything. Return `null` for "nothing found". If your panel is closed, OpenChamber loads it in the background for the call. A name that OpenChamber or OpenCode already uses is ignored.
+
+**Badge on the rail icon.** `host.setBadge(3)` shows a number on your icon, for example open tasks; `host.setBadge(null)` clears it. Opening the panel clears it too.
 
 ## First lines in the panel
 

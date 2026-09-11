@@ -743,3 +743,67 @@ describe('readHostMessage', () => {
     expect(readHostMessage({ channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION, type: 'result', id: 'x', ok: false })).toBeNull();
   });
 });
+
+describe('actions, commands, and badge wire shapes', () => {
+  const envelope = { channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION };
+  const messageItem = {
+    kind: 'message',
+    action: 'create-task',
+    sessionId: 'ses-1',
+    sessionTitle: 'Hello',
+    directory: '/repo',
+    messageId: 'msg-1',
+    role: 'assistant',
+    text: 'Do the thing.',
+  } as const;
+  const sessionItem = {
+    kind: 'session',
+    action: 'summarize',
+    sessionId: 'ses-1',
+    sessionTitle: 'Hello',
+    directory: '/repo',
+    messages: [{ id: 'msg-1', role: 'user', text: 'Hi', createdAt: 1 }],
+    truncated: false,
+  } as const;
+
+  test('accepts message and session items on ready and item pushes', () => {
+    for (const item of [messageItem, sessionItem]) {
+      expect(parseHostMessage({ ...envelope, type: 'ready', payload: { ...readyPayload, item } })).toMatchObject({ type: 'ready', payload: { item } });
+      expect(parseHostMessage({ ...envelope, type: 'item', payload: { item } })).toMatchObject({ payload: { item } });
+    }
+    expect(parseHostMessage({ ...envelope, type: 'item', payload: { item: { ...sessionItem, messages: undefined } } })).not.toBeNull();
+  });
+
+  test('drops a message item over the text cap and an item with an unknown kind', () => {
+    expect(parseHostMessage({ ...envelope, type: 'item', payload: { item: { ...messageItem, text: 'x'.repeat(200_001) } } })).toBeNull();
+    // Junk on purpose: a kind the contract does not know.
+    expect(parseHostMessage({ ...envelope, type: 'item', payload: { item: { ...messageItem, kind: 'thread' } as unknown as typeof messageItem } })).toBeNull();
+    expect(parseHostMessage({ ...envelope, type: 'item', payload: { item: { ...messageItem, role: 'system' } as unknown as typeof messageItem } })).toBeNull();
+  });
+
+  test('accepts resolve and both resolve-result shapes', () => {
+    expect(parseHostMessage({ ...envelope, type: 'resolve', id: 'r-1', payload: { command: 'task', args: '' } }))
+      .toEqual({ ...envelope, type: 'resolve', id: 'r-1', payload: { command: 'task', args: '' } });
+    expect(readHostMessage({ ...envelope, type: 'resolve', id: 'r-1', payload: { command: 'task', args: 'x' } }))
+      .toMatchObject({ type: 'resolve', id: 'r-1' });
+    expect(parseGuestMessage({ ...envelope, type: 'resolve-result', id: 'r-1', payload: { item: null } }))
+      .toEqual({ ...envelope, type: 'resolve-result', id: 'r-1', payload: { item: null } });
+    expect(parseGuestMessage({
+      ...envelope,
+      type: 'resolve-result',
+      id: 'r-1',
+      payload: { item: { providerId: 'tasks-demo', id: 'DEMO-1', title: 'T', url: 'https://example.com/1' } },
+    })).toMatchObject({ payload: { item: { id: 'DEMO-1' } } });
+    expect(parseGuestMessage({ ...envelope, type: 'resolve-result', id: 'r-1', payload: { error: 'nope' } }))
+      .toMatchObject({ payload: { error: 'nope' } });
+    expect(parseGuestMessage({ ...envelope, type: 'resolve-result', id: 'r-1', payload: { error: '' } })).toBeNull();
+  });
+
+  test('accepts badge counts in range and drops the rest', () => {
+    expect(parseGuestMessage({ ...envelope, type: 'badge', id: 'b-1', payload: { count: 4 } })).toMatchObject({ payload: { count: 4 } });
+    expect(parseGuestMessage({ ...envelope, type: 'badge', id: 'b-1', payload: { count: null } })).toMatchObject({ payload: { count: null } });
+    expect(parseGuestMessage({ ...envelope, type: 'badge', id: 'b-1', payload: { count: 1000 } })).toBeNull();
+    expect(parseGuestMessage({ ...envelope, type: 'badge', id: 'b-1', payload: { count: -1 } })).toBeNull();
+    expect(parseGuestMessage({ ...envelope, type: 'badge', id: 'b-1', payload: { count: 1.5 } })).toBeNull();
+  });
+});

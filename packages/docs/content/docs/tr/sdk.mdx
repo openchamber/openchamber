@@ -104,7 +104,7 @@ Panel çizmek ve geçerli oturumu okumak izin gerektirmez. Kullanıcı adına bi
 | `sessions` | oturum ve worktree oluşturmak (`startSession`) |
 | `files` | açık projedeki dosyaları okuyup yazmak (göreli yol ile `readFile`, `writeFile`, `listDir`, `stat`) |
 
-Üç tanesi sizin için otomatik eklenir: bir `integration` tanımladığınızda `network`, bir `service` tanımladığınızda `service`, `filesystem` desenleri tanımladığınızda `filesystem`.
+Dört tanesi sizin için otomatik eklenir: bir `integration` tanımladığınızda `network`, bir `service` tanımladığınızda `service`, `filesystem` desenleri tanımladığınızda `filesystem` ve bir oturum eylemi mesajları istediğinde `conversation` (bkz. [Eylemler, komutlar ve rozet](#eylemler-komutlar-ve-rozet)).
 
 Kullanıcı tam listeyi bir kez, eklentiyi kurarken görür ve ya onaylar ya da eklentiyi kaldırır. Yeni bir sürüm daha fazlasını isterse pencere yeniden görünür. Kullanıcının onaylamadığı bir yeteneği gerektiren çağrı `NOT_GRANTED` ile başarısız olur.
 
@@ -146,6 +146,38 @@ const { entries } = await host.listDir(".");
 ```
 
 Yazmalar atomiktir: OpenChamber geçici bir dosya yazıp yeniden adlandırır, böylece okuyan taraf hiçbir zaman yarım yazılmış bir dosya görmez. Dosyalar UTF-8 metin olarak, en fazla 2 MB'a kadar okunur ve yazılır.
+
+## Eylemler, komutlar ve rozet
+
+Şerit ve + menüsünün ötesinde, bir eklenti üç yerde daha görünebilir. Hepsi eklentiye, bir etiket tıklamasının yaptığı gibi bir `item` verir.
+
+**Mesajlar ve oturumlar üzerindeki eylemler.** Menü girdileri tanımlayın, OpenChamber bunları yerleşik olanların yanında gösterir:
+
+```json
+"actions": [
+  { "id": "create-task", "label": "Create task", "icon": "add-line", "where": "message", "roles": ["assistant"] },
+  { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
+]
+```
+
+Bir mesaj eylemi, eklentinizi `kind: "message"` olan bir `ctx.item` ile açar: oturum id'si ve başlığı, proje dizini, mesaj id'si, rolü ve metni. Bir oturum eylemi ise `kind: "session"` ile, oturum id'si, başlığı ve dizini ile açar. `"payload": ["messages"]` ekleyin, öğe tüm konuşmayı da taşır, en eskisi önce olmak üzere, Markdown dışa aktarmanın ürettiği metnin aynısı. Bu, kullanıcının onay iletişim kutusunda ayrı bir satır olarak gördüğü `conversation` yeteneğini gerektirir. `item.action` hangi girdiye tıklandığını söyler.
+
+**İliştiren eğik çizgi komutları.** Bir komut tanımlayın ve sayfada işleyin:
+
+```json
+"commands": [{ "name": "task", "description": "Attach a task by id" }]
+```
+
+```ts
+host.onResolve(async ({ command, args }) => {
+  const task = await findTask(args.trim());
+  return task ? { providerId: "acme-tasks", id: task.id, title: task.title, url: task.url } : null;
+});
+```
+
+Kullanıcı sohbet kutusuna `/task ABC-12` yazdığında OpenChamber eklentinizden bunu çözmesini ister ve döndürdüğünüzü, hiçbir şey açmadan, etiket olarak iliştirir. "Bir şey bulunamadı" için `null` döndürün. Paneliniz kapalıysa OpenChamber bu çağrı için onu arka planda yükler. OpenChamber'ın veya OpenCode'un zaten kullandığı bir ad yok sayılır.
+
+**Şerit simgesindeki rozet.** `host.setBadge(3)` simgenizde bir sayı gösterir, örneğin açık görevler; `host.setBadge(null)` onu temizler. Paneli açmak da temizler.
 
 ## Paneldeki ilk satırlar
 

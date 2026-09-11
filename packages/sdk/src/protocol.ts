@@ -6,6 +6,10 @@ import {
   ATTACH_PROVIDER_ID,
   GUEST_ACCOUNT_MAX,
   GUEST_ATTACH_AUTHOR_MAX,
+  GUEST_BADGE_MAX,
+  GUEST_ITEM_MESSAGE_TEXT_MAX,
+  GUEST_ITEM_SESSION_MAX,
+  GUEST_RESOLVE_ERROR_MAX,
   GUEST_ATTACH_BRANCH_MAX,
   GUEST_ATTACH_DATA_MAX,
   GUEST_ATTACH_ID_MAX,
@@ -149,6 +153,38 @@ const attachPayloadSchema = z.object({
   data: z.json().refine((value) => JSON.stringify(value).length <= GUEST_ATTACH_DATA_MAX).optional(),
 });
 
+const guestItemRoleSchema = z.enum(['user', 'assistant']);
+
+const messageItemSchema = z.object({
+  kind: z.literal('message'),
+  action: z.string().trim().min(1).max(64),
+  sessionId: z.string().min(1),
+  sessionTitle: z.string(),
+  directory: z.string().nullable(),
+  messageId: z.string().min(1),
+  role: guestItemRoleSchema,
+  text: z.string().max(GUEST_ITEM_MESSAGE_TEXT_MAX),
+});
+
+const sessionItemSchema = z.object({
+  kind: z.literal('session'),
+  action: z.string().trim().min(1).max(64),
+  sessionId: z.string().min(1),
+  sessionTitle: z.string(),
+  directory: z.string().nullable(),
+  messages: z.array(z.object({
+    id: z.string().min(1),
+    role: guestItemRoleSchema,
+    text: z.string().max(GUEST_ITEM_MESSAGE_TEXT_MAX),
+    createdAt: z.number().int().min(0),
+  })).optional(),
+  truncated: z.boolean().optional(),
+}).refine((value) => JSON.stringify(value).length <= GUEST_ITEM_SESSION_MAX);
+
+// Message and session items carry a literal `kind`; the chip's optional
+// `kind` is `issue` / `pull`, so the three never overlap.
+const guestItemSchema = z.union([messageItemSchema, sessionItemSchema, attachPayloadSchema]).nullable();
+
 const readyPayloadSchema = z.object({
   theme: z.object({
     mode: z.enum(['light', 'dark']),
@@ -160,7 +196,7 @@ const readyPayloadSchema = z.object({
   surface: z.enum(['panel', 'dialog']),
   connection: guestConnectionSchema,
   settings: guestSettingsSchema,
-  item: attachPayloadSchema.nullable(),
+  item: guestItemSchema,
 });
 
 const hostResultSchema = z.object({
@@ -252,7 +288,16 @@ export const hostMessageSchema = z.union([
     ...envelope,
     type: z.literal('item'),
     payload: z.object({
-      item: attachPayloadSchema.nullable(),
+      item: guestItemSchema,
+    }),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('resolve'),
+    id: z.string().min(1),
+    payload: z.object({
+      command: z.string().min(1),
+      args: z.string(),
     }),
   }),
   hostResultSchema,
@@ -404,6 +449,23 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
     type: z.literal('file-stat'),
     id: z.string().min(1),
     payload: z.object({ path: filePathSchema }),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('badge'),
+    id: z.string().min(1),
+    payload: z.object({
+      count: z.number().int().min(0).max(GUEST_BADGE_MAX).nullable(),
+    }),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('resolve-result'),
+    id: z.string().min(1),
+    payload: z.union([
+      z.object({ item: attachPayloadSchema.nullable() }),
+      z.object({ error: z.string().trim().min(1).max(GUEST_RESOLVE_ERROR_MAX) }),
+    ]),
   }),
 ]);
 

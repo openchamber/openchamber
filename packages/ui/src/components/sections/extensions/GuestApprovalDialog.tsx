@@ -19,6 +19,7 @@ const CAPABILITY_ROWS = {
   prompt: { icon: 'chat-1', titleKey: 'settings.extensions.capability.prompt', detailKey: 'settings.extensions.capability.prompt.detail' },
   sessions: { icon: 'git-branch', titleKey: 'settings.extensions.capability.sessions', detailKey: 'settings.extensions.capability.sessions.detail' },
   files: { icon: 'file-text', titleKey: 'settings.extensions.capability.files', detailKey: 'settings.extensions.capability.files.detail' },
+  conversation: { icon: 'chat-history', titleKey: 'settings.extensions.capability.conversation', detailKey: 'settings.extensions.capability.conversation.detail' },
   filesystem: { icon: 'hard-drive-2', titleKey: 'settings.extensions.capability.filesystem', detailKey: 'settings.extensions.capability.filesystem.detail' },
   service: { icon: 'terminal', titleKey: 'settings.extensions.capability.service', detailKey: 'settings.extensions.capability.service.detail' },
   network: { icon: 'plug', titleKey: 'settings.extensions.capability.network', detailKey: 'settings.extensions.capability.network.detail' },

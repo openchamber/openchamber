@@ -104,7 +104,7 @@ Rysowanie panelu i odczyt bieżącej sesji nie wymagają żadnej zgody. Wszystko
 | `sessions` | tworzenie sesji i worktree (`startSession`) |
 | `files` | odczyt i zapis plików w otwartym projekcie (`readFile`, `writeFile`, `listDir`, `stat` ze ścieżką względną) |
 
-Trzy kolejne są dodawane automatycznie: `network`, gdy deklarujesz `integration`, `service`, gdy deklarujesz `service`, oraz `filesystem`, gdy deklarujesz wzorce `filesystem`.
+Cztery kolejne są dodawane automatycznie: `network`, gdy deklarujesz `integration`, `service`, gdy deklarujesz `service`, `filesystem`, gdy deklarujesz wzorce `filesystem`, oraz `conversation`, gdy akcja sesji prosi o wiadomości (zobacz [Akcje, polecenia i odznaka](#akcje-polecenia-i-odznaka)).
 
 Użytkownik widzi pełną listę raz, przy instalacji rozszerzenia, i albo ją zatwierdza, albo usuwa rozszerzenie. Jeśli nowa wersja prosi o więcej, okno pojawia się ponownie. Wywołanie, które wymaga niezatwierdzonego uprawnienia, kończy się błędem `NOT_GRANTED`.
 
@@ -146,6 +146,38 @@ const { entries } = await host.listDir(".");
 ```
 
 Zapisy są atomowe: OpenChamber zapisuje plik tymczasowy i zmienia jego nazwę, więc czytający nigdy nie zobaczy pliku zapisanego do połowy. Pliki są czytane i zapisywane jako tekst UTF-8, do 2 MB.
+
+## Akcje, polecenia i odznaka
+
+Poza paskiem bocznym i menu + rozszerzenie może pojawić się w trzech kolejnych miejscach. Wszystkie przekazują rozszerzeniu `item` tak samo jak kliknięcie chipa.
+
+**Akcje na wiadomościach i sesjach.** Zadeklaruj pozycje menu, a OpenChamber pokaże je obok wbudowanych:
+
+```json
+"actions": [
+  { "id": "create-task", "label": "Create task", "icon": "add-line", "where": "message", "roles": ["assistant"] },
+  { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
+]
+```
+
+Akcja na wiadomości otwiera Twoje rozszerzenie z `ctx.item` o `kind: "message"`: id i tytuł sesji, folder projektu, id wiadomości, jej rola i tekst. Akcja na sesji otwiera je z `kind: "session"` oraz id, tytułem i folderem sesji. Dodaj `"payload": ["messages"]`, a element niesie też całą rozmowę, od najstarszej wiadomości, ten sam tekst, który daje eksport do Markdown. To wymaga uprawnienia `conversation`, które użytkownik widzi jako osobny wiersz w oknie zgody. `item.action` mówi, którą pozycję kliknięto.
+
+**Polecenia z ukośnikiem, które dołączają.** Zadeklaruj polecenie i obsłuż je na stronie:
+
+```json
+"commands": [{ "name": "task", "description": "Attach a task by id" }]
+```
+
+```ts
+host.onResolve(async ({ command, args }) => {
+  const task = await findTask(args.trim());
+  return task ? { providerId: "acme-tasks", id: task.id, title: task.title, url: task.url } : null;
+});
+```
+
+Gdy użytkownik wpisze `/task ABC-12` w polu czatu, OpenChamber prosi Twoje rozszerzenie o rozwiązanie go i dołącza to, co zwrócisz, jako chip, niczego nie otwierając. Zwróć `null` dla "nic nie znaleziono". Jeśli Twój panel jest zamknięty, OpenChamber ładuje go w tle na potrzeby tego wywołania. Nazwa, której OpenChamber lub OpenCode już używa, jest ignorowana.
+
+**Odznaka na ikonie na pasku bocznym.** `host.setBadge(3)` pokazuje liczbę na Twojej ikonie, na przykład otwarte zadania; `host.setBadge(null)` ją usuwa. Otwarcie panelu też ją usuwa.
 
 ## Pierwsze linie w panelu
 

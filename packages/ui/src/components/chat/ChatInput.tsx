@@ -80,8 +80,11 @@ import { LinearIssuePickerDialog } from '@/components/session/LinearIssuePickerD
 import { Icon } from "@/components/icon/Icon";
 import { DraftPresetChips } from './DraftPresetChips';
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
-import { useGuestAttachItems } from '@/hooks/useGuestSurfaces';
+import { useGuestAttachItems, useGuestCommands } from '@/hooks/useGuestSurfaces';
+import { useGuestDialogStore } from '@/lib/guests/dialog-store';
 import { useGuestItemStore } from '@/lib/guests/item-store';
+import { runGuestCommand } from '@/lib/guests/run-command';
+import { routeGuestSlashCommand } from './composer/submit/guestCommands';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
@@ -772,6 +775,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         return names;
     }, [availableCommands, availableSkills, isMobile]);
 
+    // Extension slash commands. Built-ins, OpenCode commands, and skills are
+    // reserved: an extension command with one of those names is ignored.
+    const guestCommands = useGuestCommands(knownSlashNames);
+    const knownSlashNamesWithGuests = React.useMemo(() => {
+        if (guestCommands.length === 0) return knownSlashNames;
+        const names = new Set(knownSlashNames);
+        for (const entry of guestCommands) names.add(entry.command.name);
+        return names;
+    }, [guestCommands, knownSlashNames]);
+
     const availableSnippets = useSnippetsStore((s) => s.snippets);
     const knownSnippetTriggers = React.useMemo(() => {
         const triggers = new Set<string>();
@@ -795,10 +808,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         inputMode,
         knownAgentNames,
         confirmedMentions: confirmedMentionsRef.current,
-        knownSlashNames,
+        knownSlashNames: knownSlashNamesWithGuests,
         knownSnippetTriggers,
         attachmentFilenames,
-    }), [attachmentFilenames, inputMode, knownAgentNames, knownSlashNames, knownSnippetTriggers]);
+    }), [attachmentFilenames, inputMode, knownAgentNames, knownSlashNamesWithGuests, knownSnippetTriggers]);
 
     const sanitizeAttachmentsForSend = React.useCallback(
         (files: readonly AttachedFile[] | undefined): AttachedFile[] => [...(files ?? [])]
@@ -1217,9 +1230,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const inputSnapshot = getCurrentInputSnapshot();
         if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
 
-        // A local command is run, not queued: the queue delivers text to the
-        // model, and `/compact` or `/btw` mean nothing there.
-        if (planLocalSlashCommand(inputSnapshot.message, inputMode, hasDrafts, true)) {
+        // A local or extension command is run, not queued: the queue delivers
+        // text to the model, and `/compact`, `/btw`, or `/task` mean nothing there.
+        if (planLocalSlashCommand(inputSnapshot.message, inputMode, hasDrafts, true)
+            || routeGuestSlashCommand(inputSnapshot.message, inputMode, guestCommands)) {
             void handleSubmitRef.current();
             return;
         }
@@ -1343,7 +1357,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
         recordLinkedReferences(queueSessionId, queueTarget.directory, linked);
-        }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, attachedFiles, sanitizeAttachmentsForSend, prepareDocumentMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, inlineDraftTarget, consumeDrafts, linkedIssue, linkedPr, linkedLinearIssue, linkedGuestIssue, scrollToLatest, clearAttachedFiles, isMobile, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
+        }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareDocumentMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, inlineDraftTarget, consumeDrafts, linkedIssue, linkedPr, linkedLinearIssue, linkedGuestIssue, scrollToLatest, clearAttachedFiles, isMobile, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
 
     /** Put the context a queued message was captured with back on the composer chips. */
     const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[]) => {
@@ -1530,6 +1544,35 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (queuedOnly || !inputSnapshot.message) return;
             restoreDraft(chatDraftIdentity, inputSnapshot.message, confirmedMentionsSnapshot);
         };
+
+        // An extension command never reaches the model: the extension turns
+        // `/name args` into a chip, which lands through the same pending slot
+        // a guest panel's `attach` uses. Nothing else in the composer moves.
+        const guestRoute = !queuedOnly && !isBtwActive && inputSnapshot.hasContent
+            ? routeGuestSlashCommand(inputSnapshot.message, inputMode, guestCommands)
+            : null;
+        if (guestRoute) {
+            setMessage('');
+            confirmedMentionsRef.current.clear();
+            persistDraftImmediately(chatDraftIdentity, '');
+            messageHistory.reset();
+            const outcome = await runGuestCommand(guestRoute);
+            if (outcome.ok) {
+                if (outcome.item) {
+                    useInputStore.getState().setPendingGuestIssue(outcome.item);
+                } else {
+                    // Nothing matched: give the command back so the user can fix the argument.
+                    restoreComposerText();
+                    toast.info(t('chat.chatInput.toast.guestCommandNothing', { name: guestRoute.entry.guestName }));
+                }
+                return;
+            }
+            restoreComposerText();
+            toast.error(outcome.reason === 'error'
+                ? t('chat.chatInput.toast.guestCommandFailed', { command: guestRoute.entry.command.name, reason: outcome.message })
+                : t('chat.chatInput.toast.guestCommandUnavailable', { name: guestRoute.entry.guestName }));
+            return;
+        }
 
         // The projection knows the captured send configuration; the full
         // messages are taken from the queue only once nothing below can still
@@ -3173,6 +3216,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         setLinkedLinearIssue(null);
         setAttachDialogGuestId(null);
         setAttachDialogItem(null);
+        // A message or session action may have opened the guest in the
+        // layout-level dialog; attaching from there closes it the same way.
+        useGuestDialogStore.getState().close();
     }, []);
     React.useEffect(() => {
         if (!pendingGuestIssue) {

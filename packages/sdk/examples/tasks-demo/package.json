@@ -18,6 +18,32 @@
       "capabilities": [
         "prompt",
         "sessions"
+      ],
+      "actions": [
+        {
+          "id": "create-task",
+          "label": "Create task from message",
+          "icon": "add-circle",
+          "where": "message",
+          "roles": [
+            "assistant"
+          ]
+        },
+        {
+          "id": "summarize",
+          "label": "Summarize session",
+          "icon": "chat-history",
+          "where": "session",
+          "payload": [
+            "messages"
+          ]
+        }
+      ],
+      "commands": [
+        {
+          "name": "task",
+          "description": "Attach a task by id, e.g. /task DEMO-2"
+        }
       ]
     }
   },

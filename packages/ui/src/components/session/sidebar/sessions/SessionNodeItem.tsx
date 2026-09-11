@@ -23,6 +23,10 @@ import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinne
 import { Icon } from "@/components/icon/Icon";
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getExportRevealLabelKey, revealExportedMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
 import type { ChildSessionExport } from '@/lib/exportSession';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { useGuestActions } from '@/hooks/useGuestSurfaces';
+import { guestSessionActions, type GuestActionEntry } from '@/lib/guests/actions';
+import { runGuestSessionAction } from '@/lib/guests/session-action';
 import { SessionAiRenameMenuItem } from '@/components/session/SessionAiRenameMenuItem';
 import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKeyboard';
 import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
@@ -595,6 +599,18 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     toast.success(t('sessions.sidebar.session.export.success'));
     showSkippedSubtasksWarning(skippedSubtaskCount);
   }, [collectChildExports, loadExportRecords, node.children, resolvedSession.title, session.id, sessionDirectory, showSkippedSubtasksWarning, t]);
+  const guestActionEntries = useGuestActions();
+  const guestSessionActionEntries = React.useMemo(() => guestSessionActions(guestActionEntries), [guestActionEntries]);
+  const handleGuestSessionAction = React.useCallback((entry: GuestActionEntry) => {
+    void runGuestSessionAction({
+      entry,
+      session: { id: session.id, title: resolvedSession.title, directory: sessionDirectory },
+      loadRecords: () => (sessionDirectory
+        ? loadExportRecords({ directory: sessionDirectory, sessionID: session.id }).catch(() => null)
+        : Promise.resolve(null)),
+      onLoadFailed: () => toast.error(t('sessions.sidebar.session.export.failedLoadHistory')),
+    });
+  }, [loadExportRecords, resolvedSession.title, session.id, sessionDirectory, t]);
   const handleExportSession = React.useCallback(async () => {
     if (node.children.length > 0) {
       setExportIncludeSubtasks(true);
@@ -1047,6 +1063,12 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         <Icon name="download" className="mr-1 h-4 w-4" />
         {t('sessions.sidebar.session.menu.exportMarkdown')}
       </Item>
+      {guestSessionActionEntries.map((entry) => (
+        <Item key={`${entry.guest.id}:${entry.action.id}`} onClick={() => handleGuestSessionAction(entry)} className="[&>svg]:mr-1">
+          <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="mr-1 size-4" />
+          {entry.action.label}
+        </Item>
+      ))}
       {canShowSessionWorktreeMenu({ isSubtaskSession, archivedBucket: Boolean(archivedBucket), isVSCode, sessionDirectory }) ? (() => {
         const isWorktreeMenuDisabled = getSessionWorktreeMenuDisabled({
           sessionDirectory,

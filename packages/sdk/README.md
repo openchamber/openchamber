@@ -50,6 +50,11 @@ A complete three-file example is on the [Build an extension](https://openchamber
       },
       "attach": "dialog",
       "capabilities": ["prompt", "sessions"],
+      "actions": [
+        { "id": "create-task", "label": "Create task from message", "where": "message", "roles": ["assistant"] },
+        { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
+      ],
+      "commands": [{ "name": "task", "description": "Attach a task by id" }],
       "integration": {
         "name": "Acme",
         "description": "Tasks from Acme",
@@ -70,7 +75,9 @@ A complete three-file example is on the [Build an extension](https://openchamber
 - `engines.openchamber` is optional (`1.24.0` or `>=1.24.0`). Older OpenChamber builds refuse the install.
 - `panel.id` is kebab-case and unique. `icon` is a Remixicon name (`RiWindowLine` becomes `window`) or an SVG inside the folder. `entry` is the HTML file inside the folder.
 - `attach` is optional. `"dialog"` opens the page in a window from the + menu next to the chat box; `true` or `"panel"` opens the rail panel instead. `ctx.surface` tells the page which one it is in. The object form `{ "mode": "dialog", "entry": "panel/attach.html" }` gives the window its own page. When the user clicks the attached chip, the page opens again with that item in `ctx.item` (`null` from the + menu), so it can show the item instead of the list.
-- `capabilities` lists what needs the user's approval: `prompt` to send messages, `sessions` to create sessions and worktrees, `files` to read and write inside the open project. An `integration` adds `network`, a `service` adds `service`, and `filesystem` patterns (like `["~/.config/opencode/opencode.json"]`) add `filesystem`, which lets `readFile`, `writeFile`, `listDir`, and `stat` reach those paths outside the project. The user approves the whole list once at install. Calls outside it fail with `NOT_GRANTED`.
+- `actions` is optional: menu entries on messages (`where: "message"`, optionally only `roles: ["assistant"]`) and on sessions (`where: "session"`). Picking one opens your page with that message or session in `ctx.item` (`kind: "message"` with the text, or `kind: "session"`; add `payload: ["messages"]` to get the conversation too). Up to 8.
+- `commands` is optional: slash commands for the chat box, up to 8. `/task DEMO-2` calls your `host.onResolve` handler instead of the model; return a chip to attach it, or `null` for nothing. A name the app already has is ignored.
+- `capabilities` lists what needs the user's approval: `prompt` to send messages, `sessions` to create sessions and worktrees, `files` to read and write inside the open project. An `integration` adds `network`, a `service` adds `service`, `filesystem` patterns (like `["~/.config/opencode/opencode.json"]`) add `filesystem`, which lets `readFile`, `writeFile`, `listDir`, and `stat` reach those paths outside the project, and a session action with `payload: ["messages"]` adds `conversation`. The user approves the whole list once at install. Calls outside it fail with `NOT_GRANTED`.
 - `integration` is optional. It adds a card at Settings → Integrations. `token` takes a pasted API token (`scheme: "bearer"` for `Authorization: Bearer`, `"basic"` for a username and token pair as Jira Cloud wants), `oauth` runs an authorize flow with a pasted client id, and `host: { "provider": "linear" }` reuses the Linear account already connected in OpenChamber. The page never sees the token; OpenChamber makes the calls through `host.request`.
 - `service` is optional. It declares a local process OpenChamber starts next to the extension. See [GUEST_SERVICES.md](./GUEST_SERVICES.md).
 
@@ -114,6 +121,18 @@ await host.startSession({
   text: 'Optional first message',
 });
 await host.prompt({ text: 'Fix the login', send: true });
+await host.setBadge(3); // number on the rail icon; null clears it
+
+host.onResolve(({ command, args }) => {
+  // the user typed /task DEMO-2
+  const task = findTask(args.trim());
+  return task ? { providerId: 'acme-hello', id: task.id, title: task.title, url: task.url } : null;
+});
+
+host.onItem((item) => {
+  if (item?.kind === 'message') showMessage(item.text);      // "Create task from message"
+  if (item?.kind === 'session') showSummary(item.messages);  // "Summarize session"
+});
 ```
 
 Every method, its limits, and the error codes are on the [Host API](https://openchamber.dev/docs/sdk/host/) page.
@@ -143,4 +162,4 @@ host.onReady((ctx) => {
 
 ## Scope
 
-This package covers the page, the manifest, the messages, and the UI kit. It does not give an extension files, the terminal, git, or OpenChamber's React tree. `apiVersion` 1 is frozen; new methods arrive with the app's releases and this package's version.
+This package covers the page, the manifest, the messages, and the UI kit. It does not give an extension the terminal, git, files outside what it declared, or OpenChamber's React tree. `apiVersion` 1 is frozen; new methods arrive with the app's releases and this package's version.

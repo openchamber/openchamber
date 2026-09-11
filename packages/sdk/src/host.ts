@@ -3,9 +3,11 @@ import {
   GUEST_FILE_CONTENT_MAX,
   GUEST_FILE_PATH_MAX,
   GUEST_REQUEST_TIMEOUT_MS,
+  GUEST_RESOLVE_ERROR_MAX,
   isGuestFilePath,
   isGuestRequestPath,
   clampAttachRequest,
+  clampBadgeCount,
   clampPromptRequest,
   clampStartSessionRequest,
   readHostMessage,
@@ -16,6 +18,7 @@ import {
   type SessionLifecycleEvent,
   type StartSessionRequest,
   type GuestConnection,
+  type GuestItem,
   type GuestMessage,
   type GuestRequest,
   type GuestRequestResult,
@@ -23,6 +26,8 @@ import {
   type HostReadyContext,
   type HostRequestErrorCode,
   type HostResultPayload,
+  type ResolveRequest,
+  type ResolveResultPayload,
   type SessionSnapshot,
   type StartSessionResult,
   type ToastRequest,
@@ -65,8 +70,19 @@ export type HostClient = {
   onSessionLifecycle: (listener: (event: SessionLifecycleEvent) => void) => () => void;
   onConnection: (listener: (connection: GuestConnection) => void) => () => void;
   onSettings: (listener: (settings: GuestSettings) => void) => () => void;
-  /** The item this surface was opened for. Replays the last value; `null` when there is none. */
-  onItem: (listener: (item: AttachIssueRequest | null) => void) => () => void;
+  /**
+   * The item this surface was opened for: a chip (`AttachIssueRequest`), a
+   * message (`GuestMessageItem`), or a session (`GuestSessionItem`). Replays
+   * the last value; `null` when there is none.
+   */
+  onItem: (listener: (item: GuestItem | null) => void) => () => void;
+  /**
+   * Answer the host when the user submits one of this package's
+   * `contributes.commands`. Return the chip to attach, or `null` for nothing
+   * (the host shows a short notice). A thrown error reaches the user as a
+   * toast. One handler at a time; the returned function removes it.
+   */
+  onResolve: (handler: (request: ResolveRequest) => Promise<AttachIssueRequest | null> | AttachIssueRequest | null) => () => void;
   toast: (request: ToastRequest) => Promise<void>;
   openUrl: (url: string) => Promise<void>;
   openSurface: (surfaceId: string) => Promise<void>;
@@ -100,6 +116,8 @@ export type HostClient = {
   listDir: (path: string) => Promise<FileListResult>;
   /** Kind, size, and mtime of a path. A missing path is `kind: 'missing'`, not an error. Same path rules as `readFile`. */
   stat: (path: string) => Promise<FileStatResult>;
+  /** Number on this guest's rail icon (0 to `GUEST_BADGE_MAX`); `null` clears it. Opening the panel clears it too. */
+  setBadge: (count: number | null) => Promise<void>;
   dispose: () => void;
 };
 
@@ -148,7 +166,8 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
   const lifecycleListeners = new Set<(event: SessionLifecycleEvent) => void>();
   const connectionListeners = new Set<(connection: GuestConnection) => void>();
   const settingsListeners = new Set<(settings: GuestSettings) => void>();
-  const itemListeners = new Set<(item: AttachIssueRequest | null) => void>();
+  const itemListeners = new Set<(item: GuestItem | null) => void>();
+  let resolveHandler: ((request: ResolveRequest) => Promise<AttachIssueRequest | null> | AttachIssueRequest | null) | null = null;
   const pending = new Map<string, Pending>();
   const ids = { value: 0 };
   let lastReady: HostReadyContext | null = null;
@@ -250,6 +269,33 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       return;
     }
 
+    if (message.type === 'resolve') {
+      const answer = (payload: ResolveResultPayload): void => {
+        post({
+          channel: OPENCHAMBER_SDK_CHANNEL,
+          v: OPENCHAMBER_SDK_API_VERSION,
+          type: 'resolve-result',
+          id: message.id,
+          payload,
+        });
+      };
+      const handler = resolveHandler;
+      if (!handler) {
+        answer({ error: 'This extension does not resolve commands.' });
+        return;
+      }
+      Promise.resolve()
+        .then(() => handler(message.payload))
+        .then(
+          (item) => answer({ item: item ? clampAttachRequest(item) : null }),
+          (error) => {
+            const text = (error instanceof Error ? error.message : String(error)).trim();
+            answer({ error: (text || 'Command failed.').slice(0, GUEST_RESOLVE_ERROR_MAX) });
+          },
+        );
+      return;
+    }
+
     const waiter = pending.get(message.id);
     if (!waiter) return;
     clearTimeout(waiter.timer);
@@ -336,6 +382,12 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       if (lastReady) listener(lastReady.item);
       return () => {
         itemListeners.delete(listener);
+      };
+    },
+    onResolve: (handler) => {
+      resolveHandler = handler;
+      return () => {
+        if (resolveHandler === handler) resolveHandler = null;
       };
     },
     toast: (payload) => request({
@@ -520,7 +572,15 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       }
       return result;
     }),
+    setBadge: (count) => request({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: OPENCHAMBER_SDK_API_VERSION,
+      type: 'badge',
+      id: nextId(ids),
+      payload: { count: clampBadgeCount(count) },
+    }),
     dispose: () => {
+      resolveHandler = null;
       target.removeEventListener('message', onMessage);
       for (const waiter of pending.values()) {
         clearTimeout(waiter.timer);

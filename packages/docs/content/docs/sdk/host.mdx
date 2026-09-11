@@ -27,7 +27,7 @@ const host = connectHost();
 | `directory` | current project directory, or `null` |
 | `session` | `{ id, title, busy }` or `null`. Title falls back to the session id. `busy` is the live status. `model` and `agent` (the OpenCode agent) appear when the session has them. |
 | `surface` | `panel` on the rail, `dialog` in the attach window |
-| `item` | the attached item the user clicked to open this surface (the same fields you passed to `attach`, including `data`), or `null` |
+| `item` | what this surface was opened for, or `null`: the attached item the user clicked (the same fields you passed to `attach`, including `data`), a message (`kind: "message"`), or a session (`kind: "session"`) from one of your declared actions. See [Actions](/sdk/#actions-commands-and-the-badge). |
 | `connection` | `{ connected, account }` for your integration |
 | `settings` | values of the fields you declared in `integration.settings` |
 
@@ -58,6 +58,8 @@ Access tokens never appear here or in a `request` result.
 | `writeFile(path, content)` | write a text file atomically, creating parent folders. Returns `{ written: true }`. |
 | `listDir(path)` | list a folder. Returns `{ entries: [{ name, kind }] }`, `kind` is `file`, `directory`, or `other`. |
 | `stat(path)` | `{ kind, size, mtime }`, `kind` is `file`, `directory`, `other`, or `missing`. |
+| `onResolve(handler)` | register the handler for your slash commands. It gets `{ command, args }` and returns an attach item or `null`. |
+| `setBadge(count)` | show a number (0 to 999) on your rail icon, or `null` to clear it |
 
 ## attach, startSession, and sessionLink
 

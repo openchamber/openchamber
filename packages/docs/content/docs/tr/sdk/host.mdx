@@ -27,7 +27,7 @@ const host = connectHost();
 | `directory` | geçerli proje dizini veya `null` |
 | `session` | `{ id, title, busy }` veya `null`. Başlık yoksa oturum id'sine düşer. `busy` canlı durumdur. Oturumda varsa `model` ve `agent` (OpenCode ajanı) de gelir. |
 | `surface` | şeritte `panel`, iliştirme penceresinde `dialog` |
-| `item` | kullanıcının bu yüzeyi açmak için tıkladığı iliştirilmiş öğe (`attach` çağrısına verdiğiniz alanların aynısı, `data` dahil) veya `null` |
+| `item` | bu yüzeyin ne için açıldığı veya `null`: kullanıcının tıkladığı iliştirilmiş öğe (`attach` çağrısına verdiğiniz alanların aynısı, `data` dahil), tanımladığınız eylemlerden birinden gelen bir mesaj (`kind: "message"`) veya oturum (`kind: "session"`). Bkz. [Eylemler](/sdk/#eylemler-komutlar-ve-rozet). |
 | `connection` | entegrasyonunuz için `{ connected, account }` |
 | `settings` | `integration.settings` içinde tanımladığınız alanların değerleri |
 
@@ -58,6 +58,8 @@ Erişim token'ları burada da, `request` sonucunda da asla görünmez.
 | `writeFile(path, content)` | metin dosyasını atomik olarak yazar, üst klasörleri oluşturur. `{ written: true }` döndürür. |
 | `listDir(path)` | klasörü listeler. `{ entries: [{ name, kind }] }` döndürür, `kind` `file`, `directory` veya `other` olur. |
 | `stat(path)` | `{ kind, size, mtime }`, `kind` `file`, `directory`, `other` veya `missing` olur. |
+| `onResolve(handler)` | eğik çizgi komutlarınız için işleyiciyi kaydeder. `{ command, args }` alır ve iliştirilecek bir öğe ya da `null` döndürür. |
+| `setBadge(count)` | şerit simgenizde bir sayı (0 ile 999 arası) gösterir, `null` ile temizler |
 
 ## attach, startSession ve sessionLink
 
