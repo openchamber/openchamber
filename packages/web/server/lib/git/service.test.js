@@ -42,6 +42,7 @@ import {
   validateWorktreeCreate,
   parseBranchCreationSource,
   getRangeFiles,
+  push,
 } from './service.js';
 
 // ---------------------------------------------------------------------------
@@ -602,6 +603,35 @@ describe('getStatus', () => {
     } finally {
       process.chdir(previousCwd);
     }
+  });
+});
+
+describe('push', () => {
+  it('publishes the current branch with an upstream and leaves other local branches alone', async () => {
+    if (!canRunGit()) return;
+
+    const remote = createTempDir();
+    const repo = createTempDir();
+    runGit(remote, ['init', '--bare']);
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    runGit(repo, ['remote', 'add', 'fork', remote]);
+    runGit(repo, ['branch', 'unrelated']);
+    runGit(repo, ['checkout', '-b', 'feature']);
+    fs.writeFileSync(path.join(repo, 'feature.txt'), 'published\n');
+    runGit(repo, ['add', 'feature.txt']);
+    runGit(repo, ['commit', '-m', 'Add feature']);
+
+    await push(repo, { remote: 'fork' });
+
+    expect(runGit(repo, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']).trim()).toBe('fork/feature');
+    expect(runGit(remote, ['rev-parse', 'refs/heads/feature']).trim()).toBe(runGit(repo, ['rev-parse', 'HEAD']).trim());
+    expect(() => runGit(remote, ['rev-parse', 'refs/heads/unrelated'])).toThrow();
+    expect(() => runGit(remote, ['rev-parse', 'refs/heads/main'])).toThrow();
   });
 });
 
