@@ -21,6 +21,7 @@ const AUTH = JSON.stringify({
   openrouter: { key: 'test-token' },
   'zai-coding-plan': { key: 'test-token' },
   deepseek: { key: 'test-token' },
+  'fireworks-ai': { key: 'test-fireworks-token' },
   hyper: { key: 'test-token' },
   'github-copilot': { access: 'test-token' },
   anthropic: { access: 'test-token', refresh: 'test-refresh' },
@@ -28,7 +29,7 @@ const AUTH = JSON.stringify({
 ((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
 ((fs as unknown) as { readFileSync: () => string }).readFileSync = () => AUTH;
 
-import { fetchClinePassQuota, fetchHyperQuota, fetchOllamaCloudQuota, fetchQuotaForProvider } from './quotaProviders';
+import { fetchClinePassQuota, fetchFireworksQuota, fetchHyperQuota, fetchOllamaCloudQuota, fetchQuotaForProvider } from './quotaProviders';
 import { validateCredential } from './quotaCredentials';
 
 type MockResponseInit = { ok?: boolean; status?: number };
@@ -1012,6 +1013,186 @@ describe('DeepSeek quota provider (VS Code parity)', () => {
     const fsMock = fs as unknown as { existsSync: unknown; readFileSync: unknown };
     fsMock.existsSync = ORIGINAL_FS.existsSync;
     fsMock.readFileSync = ORIGINAL_FS.readFileSync;
+  });
+});
+
+describe('Fireworks AI quota provider (VS Code parity)', () => {
+  const quotaPayload = {
+    name: 'accounts/my-account-id/quotas/monthly-spend-usd',
+    value: '50',
+    maxValue: '500',
+    usage: 18.42,
+  };
+
+  test('discovers one account and uses the enforced value for monthly spend', async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const result = await fetchFireworksQuota({
+      readAuth: () => ({ fireworks: { token: 'test-fireworks-token' } }),
+      fetchImpl: async (url, init) => {
+        requests.push({ url, init });
+        if (url.endsWith('/accounts?pageSize=200')) {
+          return Response.json({ accounts: [{ name: 'accounts/my-account-id' }], totalSize: 1 });
+        }
+        return Response.json(quotaPayload);
+      },
+    });
+
+    assert.deepEqual(requests.map((request) => request.url), [
+      'https://api.fireworks.ai/v1/accounts?pageSize=200',
+      'https://api.fireworks.ai/v1/accounts/my-account-id/quotas/monthly-spend-usd',
+    ]);
+    const accountsRequest = requests[0];
+    assert.ok(accountsRequest);
+    assert.equal(new Headers(accountsRequest.init.headers).get('Authorization'), 'Bearer test-fireworks-token');
+    assert.equal(new Headers(accountsRequest.init.headers).get('Content-Type'), 'application/json');
+    assert.equal(result.ok, true);
+    assert.equal(result.providerId, 'fireworks-ai');
+    assert.equal(result.providerName, 'Fireworks AI');
+    assert.ok(result.usage);
+    const monthly = result.usage.windows.monthly;
+    assert.ok(monthly);
+    const usedPercent = monthly.usedPercent;
+    if (typeof usedPercent !== 'number') assert.fail('Expected a numeric Fireworks usage percentage');
+    assert.ok(Math.abs(usedPercent - 36.84) < 0.00001);
+    assert.equal(monthly.valueLabel, '$31.58 left · $18.42 spent');
+    assert.equal(monthly.resetAt, null);
+  });
+
+  for (const accountIdField of ['accountId', 'account_id']) {
+    test(`uses an explicit ${accountIdField} and skips discovery`, async () => {
+      const requests: string[] = [];
+      const result = await fetchFireworksQuota({
+        readAuth: () => ({
+          fireworks_ai: {
+            key: 'test-fireworks-token',
+            [accountIdField]: 'my-account-id',
+          },
+        }),
+        fetchImpl: async (url) => {
+          requests.push(url);
+          return Response.json(quotaPayload);
+        },
+      });
+
+      assert.equal(result.ok, true);
+      assert.deepEqual(requests, [
+        'https://api.fireworks.ai/v1/accounts/my-account-id/quotas/monthly-spend-usd',
+      ]);
+    });
+  }
+
+  test('clamps overspend and formats a usage-only response', async () => {
+    const overLimit = await fetchFireworksQuota({
+      readAuth: () => ({ fireworks: { token: 'test-fireworks-token', accountId: 'my-account-id' } }),
+      fetchImpl: async () => Response.json({ ...quotaPayload, value: '10', maxValue: '1000', usage: 12.5 }),
+    });
+    assert.equal(overLimit.ok, true);
+    assert.equal(overLimit.usage?.windows.monthly?.usedPercent, 100);
+    assert.equal(overLimit.usage?.windows.monthly?.valueLabel, '$0.00 left · $12.50 spent');
+
+    const usageOnly = await fetchFireworksQuota({
+      readAuth: () => ({ fireworks: { token: 'test-fireworks-token', accountId: 'my-account-id' } }),
+      fetchImpl: async () => Response.json({ ...quotaPayload, value: null }),
+    });
+    assert.equal(usageOnly.ok, true);
+    assert.equal(usageOnly.usage?.windows.monthly?.usedPercent, null);
+    assert.equal(usageOnly.usage?.windows.monthly?.valueLabel, '$18.42 spent');
+  });
+
+  test('does not request Fireworks without a valid credential', async () => {
+    let requests = 0;
+    const result = await fetchFireworksQuota({
+      readAuth: () => ({ fireworks: { key: ' ' } }),
+      fetchImpl: async () => {
+        requests += 1;
+        return Response.json(quotaPayload);
+      },
+    });
+
+    assert.equal(requests, 0);
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, false);
+    assert.equal(result.error, 'Not configured');
+    assert.equal(result.usage, null);
+  });
+
+  test('rejects a malformed or unrelated quota response', async () => {
+    const result = await fetchFireworksQuota({
+      readAuth: () => ({ fireworks: { token: 'test-fireworks-token', accountId: 'my-account-id' } }),
+      fetchImpl: async () => Response.json({
+        name: 'accounts/my-account-id/quotas/requests-per-minute',
+        value: '50',
+        usage: 18.42,
+      }),
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'Invalid monthly spend quota response from Fireworks AI');
+    assert.equal(result.usage, null);
+  });
+
+  for (const { name, payload, error } of [
+    {
+      name: 'zero accounts',
+      payload: { accounts: [], totalSize: 0 },
+      error: 'No Fireworks AI accounts are accessible',
+    },
+    {
+      name: 'multiple returned accounts',
+      payload: { accounts: [{ name: 'accounts/one' }, { name: 'accounts/two' }], totalSize: 2 },
+      error: 'Multiple Fireworks AI accounts are accessible. Configure accountId or account_id in the Fireworks auth entry.',
+    },
+    {
+      name: 'total-size metadata indicating multiple accounts',
+      payload: { accounts: [{ name: 'accounts/one' }], totalSize: 2 },
+      error: 'Multiple Fireworks AI accounts are accessible. Configure accountId or account_id in the Fireworks auth entry.',
+    },
+  ]) {
+    test(`reports ${name}`, async () => {
+      const result = await fetchFireworksQuota({
+        readAuth: () => ({ fireworks: { token: 'test-fireworks-token' } }),
+        fetchImpl: async () => Response.json(payload),
+      });
+
+      assert.equal(result.ok, false);
+      assert.equal(result.configured, true);
+      assert.equal(result.error, error);
+      assert.equal(result.usage, null);
+    });
+  }
+
+  test('refuses to guess when pagination metadata indicates more accounts', async () => {
+    const result = await fetchFireworksQuota({
+      readAuth: () => ({ 'fireworks-ai': { key: 'test-fireworks-token' } }),
+      fetchImpl: async () => Response.json({
+        accounts: [{ name: 'accounts/my-account-id' }],
+        nextPageToken: 'another-page',
+      }),
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'Multiple Fireworks AI accounts are accessible. Configure accountId or account_id in the Fireworks auth entry.');
+    assert.equal(result.usage, null);
+  });
+
+  test('returns a safe provider error when Fireworks rejects the quota request', async () => {
+    const result = await fetchFireworksQuota({
+      readAuth: () => ({
+        'fireworks-ai': {
+          key: 'secret-that-must-not-leak',
+          accountId: 'my-account-id',
+        },
+      }),
+      fetchImpl: async () => new Response(null, { status: 401 }),
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'Session expired — please re-authenticate with Fireworks AI');
+    assert.equal(result.usage, null);
+    assert.equal(JSON.stringify(result).includes('secret-that-must-not-leak'), false);
   });
 });
 

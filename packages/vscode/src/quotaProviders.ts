@@ -864,6 +864,11 @@ export const listConfiguredQuotaProviders = () => {
     configured.add('deepseek');
   }
 
+  const fireworksAuth = normalizeAuthEntry(getAuthEntry(auth, ['fireworks-ai', 'fireworks', 'fireworks_ai']));
+  if (fireworksAuth && (asNonEmptyString(fireworksAuth.key) || asNonEmptyString(fireworksAuth.token))) {
+    configured.add('fireworks-ai');
+  }
+
   if (getHyperApiKey(auth)) {
     configured.add('hyper');
   }
@@ -2964,6 +2969,238 @@ const fetchDeepseekQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+const FIREWORKS_API_BASE_URL = 'https://api.fireworks.ai/v1';
+const FIREWORKS_MONTHLY_SPEND_QUOTA_ID = 'monthly-spend-usd';
+
+class FireworksQuotaError extends Error {}
+
+const extractFireworksAccountId = (resourceName: unknown): string | null => {
+  const name = asNonEmptyString(resourceName);
+  if (!name) return null;
+  const match = /^accounts\/([^/?#\s]+)$/.exec(name);
+  return match?.[1] ?? null;
+};
+
+const multipleFireworksAccountsError = () => new FireworksQuotaError(
+  'Multiple Fireworks AI accounts are accessible. Configure accountId or account_id in the Fireworks auth entry.',
+);
+
+const parseFireworksAccountsResponse = (payload: unknown): string => {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)
+    || !('accounts' in payload) || !Array.isArray(payload.accounts)) {
+    throw new FireworksQuotaError('Invalid accounts response from Fireworks AI');
+  }
+
+  let nextPageToken: string | null = null;
+  if ('nextPageToken' in payload) {
+    if (typeof payload.nextPageToken !== 'string') {
+      throw new FireworksQuotaError('Invalid accounts response from Fireworks AI');
+    }
+    nextPageToken = payload.nextPageToken;
+  }
+
+  let totalSize: number | null = null;
+  if ('totalSize' in payload) {
+    if (typeof payload.totalSize !== 'number'
+      || !Number.isSafeInteger(payload.totalSize) || payload.totalSize < 0) {
+      throw new FireworksQuotaError('Invalid accounts response from Fireworks AI');
+    }
+    totalSize = payload.totalSize;
+  }
+
+  const accountIds = payload.accounts.map((account) => {
+    if (account === null || typeof account !== 'object' || Array.isArray(account) || !('name' in account)) {
+      throw new FireworksQuotaError('Invalid accounts response from Fireworks AI');
+    }
+    const accountId = extractFireworksAccountId(account.name);
+    if (!accountId) throw new FireworksQuotaError('Invalid accounts response from Fireworks AI');
+    return accountId;
+  });
+
+  const hasNextPage = nextPageToken !== null && nextPageToken.trim() !== '';
+  if (accountIds.length > 1 || (totalSize !== null && totalSize > 1) || hasNextPage) {
+    throw multipleFireworksAccountsError();
+  }
+  const accountId = accountIds[0];
+  if (!accountId) {
+    throw new FireworksQuotaError('No Fireworks AI accounts are accessible');
+  }
+  if (totalSize !== null && totalSize !== 1) {
+    throw new FireworksQuotaError('Invalid accounts response from Fireworks AI');
+  }
+
+  return accountId;
+};
+
+const parseNonNegativeFireworksNumber = (value: unknown): number | null => {
+  if (typeof value === 'number') return Number.isFinite(value) && value >= 0 ? value : null;
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+};
+
+const parseFireworksMonthlySpendQuota = (
+  payload: unknown,
+  accountId: string,
+): { usedPercent: number | null; valueLabel: string } => {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new FireworksQuotaError('Invalid monthly spend quota response from Fireworks AI');
+  }
+
+  const expectedName = `accounts/${accountId}/quotas/${FIREWORKS_MONTHLY_SPEND_QUOTA_ID}`;
+  if (!('name' in payload) || payload.name !== expectedName || !('usage' in payload)) {
+    throw new FireworksQuotaError('Invalid monthly spend quota response from Fireworks AI');
+  }
+
+  const usage = parseNonNegativeFireworksNumber(payload.usage);
+  if (usage === null) {
+    throw new FireworksQuotaError('Invalid monthly spend quota response from Fireworks AI');
+  }
+
+  const hasLimit = 'value' in payload && payload.value !== undefined && payload.value !== null;
+  const limit = hasLimit ? parseNonNegativeFireworksNumber(payload.value) : null;
+  if (hasLimit && limit === null) {
+    throw new FireworksQuotaError('Invalid monthly spend quota response from Fireworks AI');
+  }
+
+  if (limit === null) {
+    return { usedPercent: null, valueLabel: `$${formatMoney(usage)} spent` };
+  }
+
+  const remaining = Math.max(0, limit - usage);
+  const usedPercent = limit > 0
+    ? Math.max(0, Math.min(100, (usage / limit) * 100))
+    : null;
+  return {
+    usedPercent,
+    valueLabel: `$${formatMoney(remaining)} left · $${formatMoney(usage)} spent`,
+  };
+};
+
+const resolveFireworksAuth = (auth: AuthFile) => {
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['fireworks-ai', 'fireworks', 'fireworks_ai']));
+  return {
+    entry,
+    apiKey: asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token),
+  };
+};
+
+const resolveConfiguredFireworksAccountId = (entry: Record<string, unknown> | null): string | null => {
+  for (const value of [entry?.accountId, entry?.account_id]) {
+    if (value === undefined || value === null || (typeof value === 'string' && value.trim() === '')) continue;
+    const accountId = asNonEmptyString(value);
+    if (!accountId || !/^[^/?#\s]+$/.test(accountId)) {
+      throw new FireworksQuotaError('Configured Fireworks AI account ID is invalid');
+    }
+    return accountId;
+  }
+  return null;
+};
+
+const fireworksApiError = (status: number): string => status === 401 || status === 403
+  ? 'Session expired — please re-authenticate with Fireworks AI'
+  : `API error: ${status}`;
+
+type FireworksQuotaDependencies = {
+  readAuth?: () => AuthFile;
+  fetchImpl?: (url: string, options: RequestInit) => Promise<Response>;
+};
+
+export const fetchFireworksQuota = async ({
+  readAuth = readAuthFile,
+  fetchImpl = fetch,
+}: FireworksQuotaDependencies = {}): Promise<ProviderResult> => {
+  const { entry, apiKey } = resolveFireworksAuth(readAuth());
+  if (!apiKey) {
+    return buildResult({
+      providerId: 'fireworks-ai',
+      providerName: 'Fireworks AI',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  const timeoutSignal = AbortSignal.timeout(15_000);
+  const requestInit: RequestInit = {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Accept-Encoding': 'identity',
+    },
+    signal: timeoutSignal,
+  };
+
+  try {
+    let accountId = resolveConfiguredFireworksAccountId(entry);
+    if (!accountId) {
+      const accountsResponse = await fetchImpl(`${FIREWORKS_API_BASE_URL}/accounts?pageSize=200`, requestInit);
+      if (!accountsResponse.ok) {
+        return buildResult({
+          providerId: 'fireworks-ai',
+          providerName: 'Fireworks AI',
+          ok: false,
+          configured: true,
+          error: fireworksApiError(accountsResponse.status),
+        });
+      }
+      accountId = parseFireworksAccountsResponse(await accountsResponse.json());
+    }
+
+    const quotaResponse = await fetchImpl(
+      `${FIREWORKS_API_BASE_URL}/accounts/${encodeURIComponent(accountId)}/quotas/${FIREWORKS_MONTHLY_SPEND_QUOTA_ID}`,
+      requestInit,
+    );
+    if (!quotaResponse.ok) {
+      return buildResult({
+        providerId: 'fireworks-ai',
+        providerName: 'Fireworks AI',
+        ok: false,
+        configured: true,
+        error: fireworksApiError(quotaResponse.status),
+      });
+    }
+
+    const quota = parseFireworksMonthlySpendQuota(await quotaResponse.json(), accountId);
+    return buildResult({
+      providerId: 'fireworks-ai',
+      providerName: 'Fireworks AI',
+      ok: true,
+      configured: true,
+      usage: {
+        windows: {
+          monthly: toUsageWindow({
+            usedPercent: quota.usedPercent,
+            windowSeconds: null,
+            resetAt: null,
+            valueLabel: quota.valueLabel,
+          }),
+        },
+      },
+    });
+  } catch (error) {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
+    const isParseError = error instanceof SyntaxError;
+    return buildResult({
+      providerId: 'fireworks-ai',
+      providerName: 'Fireworks AI',
+      ok: false,
+      configured: true,
+      error: isTimeout
+        ? 'Request timed out'
+        : isParseError
+          ? 'Invalid response from provider'
+          : error instanceof FireworksQuotaError
+            ? error.message
+            : 'Request failed',
+    });
+  }
+};
+
 const HYPER_QUOTA_URL = 'https://hyper.charm.land/v1/credits';
 const HYPER_CREDIT_TO_USD = 0.05;
 
@@ -3194,6 +3431,8 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
       return fetchClinePassQuota();
     case 'deepseek':
       return fetchDeepseekQuota();
+    case 'fireworks-ai':
+      return fetchFireworksQuota();
     case 'hyper':
       return fetchHyperQuota();
     case 'neuralwatt':

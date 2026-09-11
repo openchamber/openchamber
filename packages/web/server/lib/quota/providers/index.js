@@ -15,6 +15,7 @@ import * as crof from './crof.js';
 import * as cursor from './cursor.js';
 import * as deepseek from './deepseek.js';
 import * as exeDev from './exe-dev.js';
+import * as fireworks from './fireworks.js';
 import * as google from './google/index.js';
 import * as hyper from './hyper.js';
 import * as kimi from './kimi.js';
@@ -73,6 +74,12 @@ const registry = {
     providerName: exeDev.providerName,
     isConfigured: exeDev.isConfigured,
     fetchQuota: exeDev.fetchQuota
+  },
+  'fireworks-ai': {
+    providerId: fireworks.providerId,
+    providerName: fireworks.providerName,
+    isConfigured: fireworks.isConfigured,
+    fetchQuota: fireworks.fetchQuota
   },
   google: {
     providerId: google.providerId,
@@ -234,6 +241,7 @@ export const fetchGoogleQuota = google.fetchGoogleQuota;
 export const fetchCodexQuota = codex.fetchQuota;
 export const fetchCursorQuota = cursor.fetchQuota;
 export const fetchDeepseekQuota = deepseek.fetchQuota;
+export const fetchFireworksQuota = fireworks.fetchQuota;
 export const fetchHyperQuota = hyper.fetchQuota;
 export const fetchCopilotQuota = copilot.fetchQuota;
 export const fetchCopilotAddonQuota = copilot.fetchQuotaAddon;

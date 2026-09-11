@@ -30,6 +30,7 @@ These provider IDs are currently dispatchable via `fetchQuotaForProvider(provide
 | `crof` | CrofAI | `providers/crof.js` | `crof` (API key under `key` or `token`) |
 | `deepseek` | DeepSeek | `providers/deepseek.js` | `deepseek` (API key under `key` or `token`) |
 | `exe-dev` | exe.dev | `providers/exe-dev.js` | Usage API token stored under `~/.config/openchamber/quota/` |
+| `fireworks-ai` | Fireworks AI | `providers/fireworks.js` | `fireworks-ai`, `fireworks`, `fireworks_ai` (API key under `key` or `token`; optional account ID under `accountId` or `account_id`) |
 | `google` | Google | `providers/google/index.js` | `google`, `google.oauth`, Antigravity accounts file |
 | `hyper` | Charm Hyper | `providers/hyper.js` | `hyper` (API key under `key` or `token`) |
 | `github-copilot` | GitHub Copilot | `providers/copilot.js` | `github-copilot`, `copilot` |
@@ -153,6 +154,24 @@ The documented `limit`, `limit_remaining`, and `limit_reset` fields are present 
 Unlimited keys report `usage_monthly` in a `monthly` window with no percent. `limit_reset` is a period string (`daily`, `weekly`, `monthly`, or null), not a timestamp; `resetAt` is derived from the documented midnight-UTC boundaries, with weeks starting Monday. A set `limit` with a null `limit_reset` is a lifetime cap and maps to the `credits` window with no reset.
 
 Keep `packages/web/server/lib/quota/providers/openrouter.js` and `packages/vscode/src/quotaProviders.ts` in sync, as with the Kimi and Copilot providers; the VS Code extension duplicates this parsing logic rather than importing the web provider.
+
+## Fireworks AI monthly spend semantics
+
+Fireworks AI quota reads the API key from the `fireworks-ai`, `fireworks`, or
+`fireworks_ai` OpenCode auth entry. It accepts `key` or `token`. If that same
+entry has `accountId` or `account_id`, OpenChamber uses it directly. Otherwise,
+OpenChamber calls `GET https://api.fireworks.ai/v1/accounts?pageSize=200` and
+uses the account only when the response proves exactly one is accessible.
+Multiple returned accounts, `totalSize > 1`, or a non-empty `nextPageToken`
+require an explicit account ID.
+
+Usage comes from
+`GET https://api.fireworks.ai/v1/accounts/{account_id}/quotas/monthly-spend-usd`.
+The quota's `value` is the enforced monthly spend limit and `usage` is current
+spend. `maxValue` is only the approved ceiling and never participates in the
+percentage. Fireworks does not supply a reset timestamp on this response, so
+the `monthly` window leaves reset fields empty. Keep the web provider and
+`packages/vscode/src/quotaProviders.ts` in sync.
 
 ## Notes for contributors
 - Keep provider IDs stable; clients use them directly.
