@@ -896,6 +896,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.queuedMessage.send': 'send',
   'chat.queuedMessage.removeAria': 'Usuń z kolejki',
   'chat.queuedMessage.reorderAria': 'Przeciągnij, aby zmienić kolejność',
+  'chat.queuedMessage.waiting': 'Zostanie wysłane po zakończeniu sesji',
   'chat.queuedMessage.toast.queueFailed': 'Nie udało się dodać wiadomości do kolejki. Wróciła do pola wpisywania.',
   'chat.queuedMessage.toast.takeFailed': 'Nie udało się wczytać wiadomości z kolejki. Spróbuj ponownie.',
   'chat.container.returnToParent.aria': 'Powrót do sesji nadrzędnej',

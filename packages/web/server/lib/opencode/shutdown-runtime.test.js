@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createGracefulShutdownRuntime } from './shutdown-runtime.js';
 
-const createRuntime = (server) => createGracefulShutdownRuntime({
+const createRuntime = (server, messageQueueRuntime = { stop: vi.fn(), flush: vi.fn() }) => createGracefulShutdownRuntime({
   process: { exit: vi.fn() },
   shutdownTimeoutMs: 1000,
   getExitOnShutdown: () => false,
@@ -16,6 +16,7 @@ const createRuntime = (server) => createGracefulShutdownRuntime({
   clearHealthCheckInterval: vi.fn(),
   getTerminalRuntime: () => null,
   setTerminalRuntime: vi.fn(),
+  messageQueueRuntime,
   getMessageStreamRuntime: () => null,
   setMessageStreamRuntime: vi.fn(),
   shouldSkipOpenCodeStop: () => true,
@@ -54,5 +55,18 @@ describe('graceful shutdown runtime', () => {
 
     expect(warnSpy).not.toHaveBeenCalledWith('Server close timeout reached, forcing shutdown');
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('stops queue dispatch and flushes queue writes before closing the server', async () => {
+    const order = [];
+    const messageQueueRuntime = {
+      stop: vi.fn(async () => order.push('stop')),
+      flush: vi.fn(async () => order.push('flush')),
+    };
+    const server = { close: vi.fn((callback) => { order.push('server'); callback(); }) };
+
+    await createRuntime(server, messageQueueRuntime).gracefulShutdown({ exitProcess: false });
+
+    expect(order).toEqual(['stop', 'flush', 'server']);
   });
 });

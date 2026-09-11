@@ -5,6 +5,7 @@
 
 import { create } from "zustand"
 import type { ContextPartMetadata } from '@/lib/messages/contextParts'
+import { canonicalizePathIdentity } from '@/lib/pathNormalization'
 import type { AttachedFile } from "@/stores/types/sessionTypes"
 import { prepareAttachmentFiles } from "./attachment-files"
 import { getChatDraftIdentityKey, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
@@ -120,11 +121,25 @@ export type SyntheticContextPart = {
   metadata?: ContextPartMetadata
 }
 
+export type PendingSyntheticPartsTarget = {
+  runtimeKey: string
+  directory: string
+  sessionId: string
+}
+
+const pendingSyntheticPartsDirectoryIdentity = (directory: string): string =>
+  canonicalizePathIdentity(directory) ?? directory
+
+const pendingSyntheticPartsKey = (target: PendingSyntheticPartsTarget): string => JSON.stringify([
+  target.runtimeKey,
+  pendingSyntheticPartsDirectoryIdentity(target.directory),
+  target.sessionId,
+])
+
 type PendingBtwComposerRequest = {
   parentSessionId: string
   text: string
 }
-
 export type VSCodeActiveEditorFile = {
   filePath: string
   fileName: string
@@ -142,7 +157,10 @@ export type InputState = {
   consumePendingComposerRestore: (target: ChatDraftIdentity | null) => InputState["pendingComposerRestore"]
   pendingInputText: string | null
   pendingInputMode: "replace" | "append" | "append-inline"
+  /** Unassigned context, kept until a send target consumes it. */
   pendingSyntheticParts: SyntheticContextPart[] | null
+  /** Context consumed or produced concurrently, keyed by its send target. */
+  pendingSyntheticPartsByTarget: Map<string, SyntheticContextPart[]>
   /**
    * Text a draft preset chip asked to submit immediately. Set by surfaces that
    * render the chips outside ChatInput (e.g. under the welcome message on
@@ -157,10 +175,11 @@ export type InputState = {
   consumePendingInputText: () => { text: string; mode: "replace" | "append" | "append-inline" } | null
   requestPresetSubmit: (text: string, type: "command" | "skill") => void
   consumePendingPresetSubmit: () => { text: string; type: "command" | "skill" } | null
+  setPendingSyntheticParts: (parts: SyntheticContextPart[] | null, target?: PendingSyntheticPartsTarget) => void
+  consumePendingSyntheticParts: (target?: PendingSyntheticPartsTarget) => SyntheticContextPart[] | null
+  restorePendingSyntheticParts: (parts: SyntheticContextPart[], target?: PendingSyntheticPartsTarget) => void
   requestBtwComposer: (request: PendingBtwComposerRequest) => void
   consumePendingBtwComposerRequest: (parentSessionId: string | null) => PendingBtwComposerRequest | null
-  setPendingSyntheticParts: (parts: SyntheticContextPart[] | null) => void
-  consumePendingSyntheticParts: () => SyntheticContextPart[] | null
   addAttachedFile: (file: File) => Promise<boolean>
   removeAttachedFile: (id: string) => void
   setAttachedFiles: (files: AttachedFile[]) => void
@@ -183,6 +202,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
   pendingInputText: null,
   pendingInputMode: "replace",
   pendingSyntheticParts: null,
+  pendingSyntheticPartsByTarget: new Map(),
   pendingPresetSubmit: null,
   pendingBtwComposerRequest: null,
   attachedFiles: [],
@@ -216,14 +236,77 @@ export const useInputStore = create<InputState>()((set, get) => ({
     return request
   },
 
-  setPendingSyntheticParts: (parts) => set({ pendingSyntheticParts: parts }),
-
-  consumePendingSyntheticParts: () => {
-    const { pendingSyntheticParts } = get()
-    if (pendingSyntheticParts !== null) {
-      set({ pendingSyntheticParts: null })
+  setPendingSyntheticParts: (parts, target) => {
+    if (!target) {
+      set({
+        pendingSyntheticParts: parts,
+      })
+      return
     }
-    return pendingSyntheticParts
+
+    const key = pendingSyntheticPartsKey(target)
+    set((state) => {
+      const pendingSyntheticPartsByTarget = new Map(state.pendingSyntheticPartsByTarget)
+      if (parts === null) {
+        pendingSyntheticPartsByTarget.delete(key)
+      } else {
+        pendingSyntheticPartsByTarget.set(key, parts)
+      }
+      return { pendingSyntheticPartsByTarget }
+    })
+  },
+
+  consumePendingSyntheticParts: (target) => {
+    let consumed: SyntheticContextPart[] | null = null
+    set((state) => {
+      const canConsumeUnassigned = state.pendingSyntheticParts !== null
+
+      if (target) {
+        const key = pendingSyntheticPartsKey(target)
+        const targetParts = state.pendingSyntheticPartsByTarget.get(key)
+        if (targetParts !== undefined) {
+          consumed = canConsumeUnassigned && state.pendingSyntheticParts !== null
+            ? [...state.pendingSyntheticParts, ...targetParts]
+            : targetParts
+          const pendingSyntheticPartsByTarget = new Map(state.pendingSyntheticPartsByTarget)
+          pendingSyntheticPartsByTarget.delete(key)
+          return canConsumeUnassigned
+            ? {
+              pendingSyntheticParts: null,
+              pendingSyntheticPartsByTarget,
+            }
+            : { pendingSyntheticPartsByTarget }
+        }
+      }
+
+      if (!canConsumeUnassigned) return state
+      consumed = state.pendingSyntheticParts
+      return { pendingSyntheticParts: null }
+    })
+    return consumed
+  },
+
+  restorePendingSyntheticParts: (parts, target) => {
+    if (parts.length === 0) return
+    if (!target) {
+      set((state) => ({
+        pendingSyntheticParts: [
+          ...parts,
+          ...(state.pendingSyntheticParts ?? []),
+        ],
+      }))
+      return
+    }
+
+    const key = pendingSyntheticPartsKey(target)
+    set((state) => {
+      const pendingSyntheticPartsByTarget = new Map(state.pendingSyntheticPartsByTarget)
+      pendingSyntheticPartsByTarget.set(key, [
+        ...parts,
+        ...(pendingSyntheticPartsByTarget.get(key) ?? []),
+      ])
+      return { pendingSyntheticPartsByTarget }
+    })
   },
 
   addAttachedFile: async (file: File) => {

@@ -48,7 +48,12 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     sessionAssistRuntime?.stop?.();
     sessionGoalRuntime?.stop?.();
     contextObligatoryRuntime?.stop?.();
-    messageQueueRuntime?.stop?.();
+    await messageQueueRuntime?.stop?.();
+    try {
+      await messageQueueRuntime?.flush?.();
+    } catch (error) {
+      console.warn('Error flushing message queue during shutdown:', error);
+    }
     scheduledTasksRuntime?.stop?.();
 
     const healthCheckInterval = getHealthCheckInterval();

@@ -18,6 +18,7 @@ import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
+import { createMessageQueueTarget } from '@/stores/messageQueueStore';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
 import { getGitCommitSummaries } from '@/lib/gitApi';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
@@ -243,11 +244,15 @@ export const IntegrateCommitsSection: React.FC<{
     }
 
     setPendingInputText(context.visibleText, 'replace');
+    const target = createMessageQueueTarget(
+      currentSessionId,
+      useSessionUIStore.getState().getDirectoryForSession(currentSessionId) ?? worktreeMetadata.path ?? repoRoot,
+    );
     setPendingSyntheticParts([
       { text: context.instructionsText, synthetic: true },
       { text: context.payloadText, synthetic: true },
-    ]);
-  }, [currentSessionId, buildConflictContext, openNewSessionDraft, setPendingInputText, setPendingSyntheticParts, t]);
+    ], target ?? undefined);
+  }, [currentSessionId, buildConflictContext, openNewSessionDraft, repoRoot, setPendingInputText, setPendingSyntheticParts, t, worktreeMetadata.path]);
 
   const handleMove = React.useCallback(async () => {
     if (ui.kind !== 'ready') return;

@@ -2205,6 +2205,7 @@ export const dict = {
   'chat.queuedMessage.send': 'gönder',
   'chat.queuedMessage.removeAria': 'Kuyruktan kaldır',
   'chat.queuedMessage.reorderAria': 'Yeniden sıralamak için sürükle',
+  'chat.queuedMessage.waiting': 'Oturum sona erdiğinde gönderilecek',
   'chat.queuedMessage.toast.queueFailed': 'Mesaj kuyruğa eklenemedi. Yazma alanına geri kondu.',
   'chat.queuedMessage.toast.takeFailed': 'Kuyruktaki mesaj yüklenemedi. Lütfen tekrar deneyin.',
   'chat.container.returnToParent.aria': 'Üst session\'a dön',

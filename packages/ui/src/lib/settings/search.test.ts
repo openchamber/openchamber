@@ -17,6 +17,17 @@ const runtimeCtx = {
 };
 
 describe('settings search', () => {
+  test('does not expose the removed follow-up behavior setting', () => {
+    const results = buildSettingsSearchResults({
+      query: 'follow up steer queue send immediately',
+      runtimeCtx,
+      t,
+      getPageTitle: (page) => page,
+    });
+
+    expect(results.some((result) => result.id === 'chat.follow-up-behavior')).toBe(false);
+  });
+
   test('finds the scrollbar preference on every surface', () => {
     for (const context of [runtimeCtx, { ...runtimeCtx, isDesktop: true }, { ...runtimeCtx, isVSCode: true }, { ...runtimeCtx, isMobile: true }]) {
       const results = buildSettingsSearchResults({

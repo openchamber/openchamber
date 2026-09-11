@@ -303,6 +303,67 @@ describe('settings helpers', () => {
     });
   });
 
+  it('normalizes follow-up settings to queue at the server boundary', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ followUpBehavior: 'queue' })).toEqual({
+      followUpBehavior: 'queue',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ followUpBehavior: 'steer' })).toEqual({
+      followUpBehavior: 'queue',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ followUpBehavior: 'immediate' })).toEqual({
+      followUpBehavior: 'queue',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ queueModeEnabled: false })).toEqual({
+      followUpBehavior: 'queue',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ queueModeEnabled: true })).toEqual({
+      followUpBehavior: 'queue',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ followUpBehavior: 'queue', queueModeEnabled: false })).toEqual({
+      followUpBehavior: 'queue',
+    });
+  });
+
+  it('preserves missing and malformed follow-up inputs without throwing', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({})).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ followUpBehavior: null })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ followUpBehavior: 42 })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ followUpBehavior: ['queue'] })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ followUpBehavior: 'unsupported' })).toEqual({
+      followUpBehavior: 'queue',
+    });
+    expect(helpers.sanitizeSettingsUpdate(null)).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate('queue')).toEqual({});
+  });
+
+  it('round-trips normalized follow-up settings through persistence and response consumers', () => {
+    const helpers = createTestHelpers();
+    const changes = helpers.sanitizeSettingsUpdate({ followUpBehavior: 'steer' });
+    const persisted = helpers.mergePersistedSettings({ themeId: 'openchamber-dark' }, changes);
+    const response = helpers.formatSettingsResponse(JSON.parse(JSON.stringify(persisted)));
+
+    expect(persisted).toMatchObject({
+      themeId: 'openchamber-dark',
+      followUpBehavior: 'queue',
+    });
+    expect(response).toMatchObject({
+      themeId: 'openchamber-dark',
+      followUpBehavior: 'queue',
+    });
+  });
+
+  it('normalizes legacy persisted steer values when formatting settings responses', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.formatSettingsResponse({ followUpBehavior: 'steer' })).toMatchObject({
+      followUpBehavior: 'queue',
+    });
+  });
+
   it('sanitizes the persisted terminal shell', () => {
     const helpers = createTestHelpers();
 

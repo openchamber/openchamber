@@ -145,19 +145,9 @@ export const createSettingsHelpers = (dependencies) => {
     return fallback;
   };
 
-  const normalizeFollowUpBehavior = (value, legacyQueueModeEnabled = null) => {
-    // "immediate" was removed (it was wire-identical to "steer"); collapse it.
-    if (value === 'immediate') {
-      return 'steer';
-    }
-    if (value === 'steer' || value === 'queue') {
-      return value;
-    }
-    if (legacyQueueModeEnabled === false) {
-      return 'steer';
-    }
-    return 'queue';
-  };
+  // The queue-only contract still accepts legacy settings at the boundary, but
+  // never normalizes one to a steering value.
+  const normalizeFollowUpBehavior = () => 'queue';
 
   const sanitizeSettingsUpdate = (payload) => {
     if (!payload || typeof payload !== 'object') {

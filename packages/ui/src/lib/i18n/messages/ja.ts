@@ -2242,6 +2242,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.queuedMessage.send': '送信',
   'chat.queuedMessage.removeAria': 'キューから削除',
   'chat.queuedMessage.reorderAria': 'ドラッグして並び替え',
+  'chat.queuedMessage.waiting': 'セッションが終了したら送信されます',
   'chat.queuedMessage.toast.queueFailed': 'メッセージをキューに追加できませんでした。入力欄に戻しました。',
   'chat.queuedMessage.toast.takeFailed': 'キューのメッセージを読み込めませんでした。もう一度お試しください。',
   'chat.container.returnToParent.aria': '親セッションに戻る',

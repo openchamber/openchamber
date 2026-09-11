@@ -34,6 +34,7 @@ describe('createSessionOwnershipIndex', () => {
     expect(ownership.bySessionId.get('worktree-fallback')?.scopeDirectory).toBe('/worktrees/app-feature');
     expect(ownership.bySessionId.get('directory-wins')?.projectId).toBe('admin');
     expect(ownership.bySessionId.get('windows')?.projectId).toBe('windows-app');
+    expect(ownership.bySessionId.get('windows')?.projectRoot).toBe('C:/Projects/App');
     expect(ownership.bySessionId.has('unassigned')).toBe(false);
     expect(ownership.sessionsByProject.get('admin')?.map((session) => session.id)).toEqual([
       'nested',
@@ -102,6 +103,7 @@ describe('createSessionOwnershipIndex', () => {
     );
 
     expect(ownership.bySessionId.get('windows-root')?.projectId).toBe('drive');
+    expect(ownership.bySessionId.get('windows-root')?.projectRoot).toBe('C:/');
   });
 
   test('resolves report-sized data once instead of once per project consumer', () => {

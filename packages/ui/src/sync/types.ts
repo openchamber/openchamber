@@ -51,7 +51,7 @@ export type State = {
   path: Path
   session: Session[]
   sessionTotal: number
-  sessionListSource?: "empty" | "persisted" | "live" | "authoritative"
+  sessionListSource?: "empty" | "persisted" | "live" | "partial" | "authoritative"
   sessionRevision?: number
   sessionEventRevision?: Record<string, number>
   sessionDeletedRevision?: Record<string, number>
