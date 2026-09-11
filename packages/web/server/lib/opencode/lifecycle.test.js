@@ -1,24 +1,14 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { createOpenCodeLifecycleRuntime } from './lifecycle.js';
+
 const spawnMock = vi.fn();
 const spawnSyncMock = vi.fn();
 const recordStartupPerformanceMock = vi.fn();
-
-vi.mock('node:child_process', () => ({
-  spawn: spawnMock,
-  spawnSync: spawnSyncMock,
-  // `managed-process-registry.js` (imported transitively via lifecycle.js)
-  // calls `promisify(execFile)` at module load, so the mock must expose a
-  // function here. Lifecycle tests don't exercise the reaper path, so a plain
-  // stub is enough; the registry's best-effort writes are no-ops on errors.
-  execFile: vi.fn(),
-}));
-vi.mock('./startup-performance.js', () => ({
-  recordStartupPerformance: recordStartupPerformanceMock,
-}));
-
-const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
+const registerManagedProcessMock = vi.fn(async () => {});
+const unregisterManagedProcessMock = vi.fn(async () => {});
+const probeManagedPortListenerMock = vi.fn(async () => false);
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
 const originalPath = process.env.PATH;
@@ -28,6 +18,9 @@ afterEach(() => {
   spawnMock.mockReset();
   spawnSyncMock.mockReset();
   recordStartupPerformanceMock.mockReset();
+  registerManagedProcessMock.mockReset().mockImplementation(async () => {});
+  unregisterManagedProcessMock.mockReset().mockImplementation(async () => {});
+  probeManagedPortListenerMock.mockReset().mockImplementation(async () => false);
   globalThis.fetch = originalFetch;
   if (typeof originalOpencodeBinary === 'string') {
     process.env.OPENCODE_BINARY = originalOpencodeBinary;
@@ -119,6 +112,12 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
       SHELL_ONLY: 'yes',
       OPENCODE_SERVER_PASSWORD: 'shell-password',
     })),
+    spawnManagedProcess: spawnMock,
+    spawnSyncImpl: spawnSyncMock,
+    recordStartupPerformance: recordStartupPerformanceMock,
+    registerManagedProcess: registerManagedProcessMock,
+    unregisterManagedProcess: unregisterManagedProcessMock,
+    probeManagedPortListener: probeManagedPortListenerMock,
     ...overrides,
   });
   runtime.testState = state;
@@ -875,6 +874,297 @@ describe('OpenCode lifecycle', () => {
 
     expect(spawnMock).toHaveBeenCalledTimes(2);
     await server.close();
+  });
+
+  it('kills and unregisters a managed child that never starts before the startup timeout', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const firstChild = createMockChild();
+    const secondChild = createMockChild();
+    spawnMock.mockImplementationOnce(() => firstChild);
+    spawnMock.mockImplementationOnce(() => secondChild);
+    const runtime = createRuntime({
+      getManagedOpenCodeStartTimeoutMs: () => 50,
+      probeManagedPortListener: vi.fn(async () => false),
+    });
+
+    await expect(runtime.startOpenCode()).rejects.toThrow(
+      'Timeout waiting for OpenCode to start after 50ms',
+    );
+
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(registerManagedProcessMock).toHaveBeenCalledTimes(2);
+    expect(registerManagedProcessMock).toHaveBeenCalledWith(
+      expect.objectContaining({ pid: 12345, port: 45678 }),
+    );
+    expect(firstChild.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(secondChild.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(unregisterManagedProcessMock).toHaveBeenCalledTimes(2);
+    expect(unregisterManagedProcessMock).toHaveBeenCalledWith(12345);
+    expect(runtime.testState.openCodePort).toBeNull();
+    expect(runtime.testState.lastOpenCodeError).toBe(
+      'Timeout waiting for OpenCode to start after 50ms',
+    );
+  });
+
+  it('honors OPENCHAMBER_OPENCODE_START_TIMEOUT_MS for the startup cap', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const previousTimeout = process.env.OPENCHAMBER_OPENCODE_START_TIMEOUT_MS;
+    process.env.OPENCHAMBER_OPENCODE_START_TIMEOUT_MS = '40';
+    const children = [];
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      children.push(child);
+      return child;
+    });
+    try {
+      const runtime = createRuntime({
+        probeManagedPortListener: vi.fn(async () => false),
+      });
+
+      await expect(runtime.startOpenCode()).rejects.toThrow(
+        'Timeout waiting for OpenCode to start after 40ms',
+      );
+
+      expect(children).toHaveLength(2);
+      expect(unregisterManagedProcessMock).toHaveBeenCalledTimes(2);
+    } finally {
+      if (previousTimeout === undefined) {
+        delete process.env.OPENCHAMBER_OPENCODE_START_TIMEOUT_MS;
+      } else {
+        process.env.OPENCHAMBER_OPENCODE_START_TIMEOUT_MS = previousTimeout;
+      }
+    }
+  });
+
+  it('kills and unregisters a managed child whose listening line cannot be parsed', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const children = [];
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      children.push(child);
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on an unknown address\n');
+      });
+      return child;
+    });
+    const runtime = createRuntime();
+
+    await expect(runtime.startOpenCode()).rejects.toThrow('Failed to parse server url');
+
+    expect(children).toHaveLength(2);
+    for (const child of children) {
+      expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    }
+    expect(unregisterManagedProcessMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('unregisters a managed child that exits before serving', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const firstChild = createMockChild();
+    const secondChild = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => firstChild.emit('exit', null, 'SIGTERM'));
+      return firstChild;
+    });
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => secondChild.emit('exit', null, 'SIGTERM'));
+      return secondChild;
+    });
+    const runtime = createRuntime();
+
+    await expect(runtime.startOpenCode()).rejects.toThrow('OpenCode process exited before serving');
+
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(registerManagedProcessMock).toHaveBeenCalledTimes(2);
+    expect(unregisterManagedProcessMock).toHaveBeenCalledTimes(2);
+    expect(unregisterManagedProcessMock).toHaveBeenCalledWith(12345);
+  });
+
+  it('kills and unregisters a managed child that fails to spawn', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const children = [];
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      children.push(child);
+      queueMicrotask(() => child.emit('error', new Error('spawn failed')));
+      return child;
+    });
+    const runtime = createRuntime();
+
+    await expect(runtime.startOpenCode()).rejects.toThrow('spawn failed');
+
+    expect(children).toHaveLength(2);
+    for (const child of children) {
+      expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    }
+    expect(unregisterManagedProcessMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('terminates, confirms exit, and unregisters a managed child when registration is rejected', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const registrationError = new Error('registry write failed');
+    const timeline = [];
+    const children = [];
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      const baseKill = child.kill;
+      child.kill = vi.fn((signal) => {
+        timeline.push(`kill:${signal}`);
+        return baseKill(signal);
+      });
+      children.push(child);
+      return child;
+    });
+    const registerManagedProcess = vi.fn(async () => {
+      timeline.push('register');
+      throw registrationError;
+    });
+    const unregisterManagedProcess = vi.fn(async (pid) => {
+      timeline.push(`unregister:${pid}`);
+    });
+    const runtime = createRuntime({
+      registerManagedProcess,
+      unregisterManagedProcess,
+      // Keep the shielded startup waiter from holding its default 120s timer
+      // open while the registration failure unwinds.
+      getManagedOpenCodeStartTimeoutMs: () => 50,
+    });
+
+    await expect(runtime.startOpenCode()).rejects.toThrow('registry write failed');
+
+    expect(children).toHaveLength(2);
+    for (const child of children) {
+      expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+      expect(child.signalCode).toBe('SIGTERM');
+    }
+    // Registration is attempted, then the child is terminated and only
+    // unregistered after the mock confirms exit via its signal code — all
+    // before the rejected startup surfaces.
+    expect(timeline).toEqual([
+      'register',
+      'kill:SIGTERM',
+      'unregister:12345',
+      'register',
+      'kill:SIGTERM',
+      'unregister:12345',
+    ]);
+    expect(runtime.testState.lastOpenCodeError).toBe('registry write failed');
+  });
+
+  it('adopts a slow listener once the allocated port accepts connections', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => child);
+    const probeManagedPortListener = vi.fn(async () => true);
+    const runtime = createRuntime({ probeManagedPortListener });
+
+    const server = await runtime.startOpenCode();
+
+    expect(server.url).toBe('http://127.0.0.1:45678');
+    expect(probeManagedPortListener).toHaveBeenCalledWith(45678, '127.0.0.1');
+    expect(runtime.testState.openCodePort).toBe(45678);
+    expect(runtime.testState.isOpenCodeReady).toBe(true);
+    expect(registerManagedProcessMock).toHaveBeenCalledTimes(1);
+    expect(unregisterManagedProcessMock).not.toHaveBeenCalled();
+
+    await server.close();
+    expect(unregisterManagedProcessMock).toHaveBeenCalledWith(12345);
+  });
+
+  it('terminates an adopted process when the authenticated health readiness check still fails', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const children = [];
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      children.push(child);
+      return child;
+    });
+    const runtime = createRuntime({
+      probeManagedPortListener: vi.fn(async () => true),
+      waitForReady: vi.fn(async () => false),
+    });
+
+    await expect(runtime.startOpenCode()).rejects.toThrow(
+      'Server started but health check failed (timeout)',
+    );
+
+    expect(children).toHaveLength(2);
+    for (const child of children) {
+      expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    }
+    expect(unregisterManagedProcessMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not restart a live managed process while its port still accepts connections', async () => {
+    const close = vi.fn(async () => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const probeManagedPortListener = vi.fn(async () => true);
+    let now = 1;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      json: async () => null,
+    }));
+    const runtime = createRuntime({ now: () => now, probeManagedPortListener }, {
+      openCodePort: 45678,
+      openCodeProcess: {
+        pid: process.pid,
+        exitCode: null,
+        signalCode: null,
+        close,
+      },
+      isOpenCodeReady: true,
+    });
+
+    for (let failure = 0; failure < 20; failure += 1) {
+      await runtime.triggerHealthCheck();
+      now += 15_000;
+    }
+
+    expect(close).not.toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(probeManagedPortListener).toHaveBeenCalledWith(45678, '127.0.0.1');
+    expect(runtime.testState.lastOpenCodeHealthFailure).not.toBeNull();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('still accepts connections'));
+    warn.mockRestore();
+  });
+
+  it('restarts a managed process when the threshold is reached and the port no longer accepts connections', async () => {
+    const close = vi.fn(async () => {});
+    const replacement = createMockChild();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let now = 1;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      json: async () => null,
+    }));
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        replacement.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return replacement;
+    });
+    const runtime = createRuntime({
+      now: () => now,
+      probeManagedPortListener: vi.fn(async () => false),
+    }, {
+      openCodePort: 45678,
+      openCodeProcess: {
+        pid: process.pid,
+        exitCode: null,
+        signalCode: null,
+        close,
+      },
+      isOpenCodeReady: true,
+    });
+
+    for (let failure = 0; failure < 20; failure += 1) {
+      await runtime.triggerHealthCheck();
+      now += 15_000;
+    }
+
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
 });
 

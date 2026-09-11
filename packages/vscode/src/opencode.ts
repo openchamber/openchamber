@@ -5,11 +5,11 @@ import * as fs from 'fs';
 import * as net from 'net';
 import { execSync } from 'child_process';
 import { spawnSync } from 'child_process';
-import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkingDirectoryChange } from './workingDirectoryChange';
-import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './opencodeProcessRegistry';
+import { reapOrphanedProcesses } from './opencodeProcessRegistry';
+import { createManagedOpenCodeServerProcess } from './opencode-managed-lifecycle';
 import { applyProviderEnvAliases } from './provider-env-aliases';
 
 const t = vscode.l10n.t;
@@ -169,19 +169,6 @@ function stripWrappingQuotes(value: string): string {
     return trimmed.slice(1, -1).trim();
   }
   return trimmed;
-}
-
-function killProcessTree(pid: number | undefined): void {
-  if (!Number.isInteger(pid)) return;
-  if (process.platform === 'win32') {
-    try {
-      spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
-        stdio: 'ignore', timeout: 5000, windowsHide: true,
-      });
-    } catch {
-      // ignore
-    }
-  }
 }
 
 function appendToPath(dir: string) {
@@ -689,102 +676,16 @@ async function spawnManagedOpenCodeServer(
 ): Promise<{ url: string; close: () => Promise<void> }> {
   const binary = stripWrappingQuotes(process.env.OPENCODE_BINARY || 'opencode') || 'opencode';
   const launch = resolveWindowsLaunchSpec(binary, ['serve', '--hostname', '127.0.0.1', '--port', String(port)]);
-  const child = spawn(launch.binary, launch.args, {
+  return createManagedOpenCodeServerProcess({
+    binary,
+    launchBinary: launch.binary,
+    launchArgs: launch.args,
     cwd: workingDirectory,
     env: applyProviderEnvAliases({ ...process.env }),
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-  });
-
-  const url = await new Promise<string>((resolve, reject) => {
-    let output = '';
-    let settled = false;
-
-    const cleanup = () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      child.stdout?.off('data', onStdout);
-      child.stderr?.off('data', onStderr);
-      child.off('exit', onExit);
-      child.off('error', onError);
-    };
-
-    const onStdout = (chunk: Buffer) => {
-      output += chunk.toString();
-      const lines = output.split('\n');
-      for (const line of lines) {
-        if (!line.startsWith('opencode server listening')) continue;
-        const match = line.match(/on\s+(https?:\/\/[^\s]+)/);
-        if (!match) {
-          cleanup();
-          reject(new Error(`Failed to parse server url from output: ${line}`));
-          return;
-        }
-        cleanup();
-        resolve(match[1]);
-        return;
-      }
-    };
-
-    const onStderr = (chunk: Buffer) => {
-      output += chunk.toString();
-    };
-
-    const onExit = (code: number | null) => {
-      cleanup();
-      const appBundleHint = isMacOpenCodeAppBundlePath(binary)
-        ? ' The configured binary appears to point at the macOS desktop app bundle; OpenChamber needs the standalone opencode CLI.'
-        : '';
-      reject(new Error(`OpenCode process exited before serving with code ${code}. Binary used: ${binary}.${appBundleHint} Output: ${output}`));
-    };
-
-    const onError = (error: Error) => {
-      cleanup();
-      reject(error);
-    };
-
-    const timer = setTimeout(() => {
-      cleanup();
-      // Surface whatever OpenCode printed while we waited — otherwise a hung or
-      // misconfigured start is indistinguishable from a slow one in the status
-      // report, leaving no thread to pull on.
-      const trimmedOutput = output.trim();
-      const outputHint = trimmedOutput ? ` Output: ${trimmedOutput}` : ' Output: (none — process printed nothing)';
-      reject(new Error(`Timeout waiting for server to start after ${timeoutMs}ms.${outputHint}`));
-    }, timeoutMs);
-
-    child.stdout?.on('data', onStdout);
-    child.stderr?.on('data', onStderr);
-    child.on('exit', onExit);
-    child.on('error', onError);
-  });
-
-  // Record this child so a future run can reap it if we crash before teardown.
-  const registration = registerManagedProcess({
-    pid: child.pid,
-    ownerPid: process.pid,
     port,
-    binary,
-    runtime: 'vscode',
-  }).catch(() => {});
-
-  return {
-    url,
-    close: async () => {
-      killProcessTree(child.pid);
-      try {
-        child.kill('SIGTERM');
-      } catch {
-        // ignore
-      }
-      // Both writes touch the same registry file. Unordered, the removal can
-      // land before the registration and leave a stale entry pointing at a dead
-      // pid; awaiting keeps the extension host alive until the file is gone.
-      await registration;
-      await unregisterManagedProcess(child.pid).catch(() => {});
-    },
-  };
+    timeoutMs,
+    binaryIsMacAppBundle: isMacOpenCodeAppBundlePath(binary),
+  });
 }
 
 async function allocateManagedOpenCodePort(): Promise<number> {

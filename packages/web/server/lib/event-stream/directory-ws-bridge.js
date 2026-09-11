@@ -25,6 +25,8 @@ export function acceptDirectoryMessageStreamWsConnection({
   heartbeatIntervalMs,
   upstreamStallTimeoutMs,
   upstreamReconnectDelayMs,
+  upstreamReconnectDelayMaxMs,
+  upstreamBuildUrlFailureLimit,
   fetchImpl,
 }) {
   const controller = new AbortController();
@@ -101,6 +103,8 @@ export function acceptDirectoryMessageStreamWsConnection({
         signal: controller.signal,
         stallTimeoutMs: upstreamStallTimeoutMs,
         reconnectDelayMs: upstreamReconnectDelayMs,
+        reconnectDelayMaxMs: upstreamReconnectDelayMaxMs,
+        buildUrlFailureLimit: upstreamBuildUrlFailureLimit,
         fetchImpl,
         buildUrl: () => {
           buildUrlFailed = false;
@@ -160,6 +164,21 @@ export function acceptDirectoryMessageStreamWsConnection({
           if (error?.type === 'stream_error') {
             console.warn('Message stream WS proxy error:', error.error);
           }
+        },
+        onParked(error) {
+          if (controller.signal.aborted) {
+            return;
+          }
+
+          // Permanent unavailability: the reader stopped retrying, so report
+          // the failure once and close. The client's own reconnect path gets
+          // a fresh reader that can recover after the next explicit rebind.
+          console.warn('Message stream WS proxy error:', error?.error ?? error);
+          closeWithInitialError({
+            message: 'OpenCode service unavailable',
+            closeReason: 'OpenCode service unavailable',
+            triggerHealthCheckFor: false,
+          });
         },
       });
 

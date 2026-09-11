@@ -30,6 +30,39 @@ class FakeSocket extends EventEmitter {
   }
 }
 
+// A stream that delivers one block, then blocks until the test calls `end()`,
+// so the caller controls exactly when the reader reconnects.
+function createManualSseResponse({ block }) {
+  const encoder = new TextEncoder();
+  let sent = false;
+  let release;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+
+  return {
+    end: release,
+    response: {
+      ok: true,
+      status: 200,
+      body: {
+        getReader() {
+          return {
+            async read() {
+              if (!sent) {
+                sent = true;
+                return { value: encoder.encode(block), done: false };
+              }
+              await held;
+              return { value: undefined, done: true };
+            },
+          };
+        },
+      },
+    },
+  };
+}
+
 function createSseResponse({ blocks = [], signal, holdOpen = false }) {
   const encoder = new TextEncoder();
   let index = 0;
@@ -181,6 +214,89 @@ describe('rebindUpstream (#2638)', () => {
     expect(directorySocket.closeCalls.length).toBeGreaterThan(0);
 
     directorySocket.close();
+    await runtime.close();
+  });
+
+  it('resumes a parked hub after rebindUpstream when OpenCode is reachable again', async () => {
+    const server = new EventEmitter();
+    const wsClients = new Set();
+    let port = 4096;
+    let fetchCalls = 0;
+
+    const buildOpenCodeUrl = vi.fn(() => {
+      if (port === null) {
+        throw new Error('OpenCode port is not available');
+      }
+      return `http://127.0.0.1:${port}/global/event`;
+    });
+
+    // The first stream is ended explicitly by the test so the port can be
+    // removed before the reader dials again; otherwise the immediate
+    // reconnect could succeed before `port = null` runs.
+    const firstStream = createManualSseResponse({
+      block: 'id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n',
+    });
+
+    const fetchImpl = vi.fn(async (_url, options) => {
+      fetchCalls += 1;
+      if (fetchCalls === 1) {
+        return firstStream.response;
+      }
+      return createSseResponse({
+        signal: options.signal,
+        holdOpen: true,
+        blocks: ['id: evt-2\ndata: {"type":"session.updated","properties":{"sessionID":"ses_1"}}\n\n'],
+      });
+    });
+
+    const globalHub = createGlobalMessageStreamHub({
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders: () => ({}),
+      fetchImpl,
+      upstreamReconnectDelayMs: 0,
+      upstreamBuildUrlFailureLimit: 2,
+    });
+
+    const runtime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade() {
+        throw new Error('upgrade should not be used in this test');
+      },
+      globalEventHub: globalHub,
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders: () => ({}),
+      processForwardedEventPayload() {},
+      wsClients,
+      heartbeatIntervalMs: 5000,
+      upstreamReconnectDelayMs: 0,
+      fetchImpl,
+    });
+
+    const socket = new FakeSocket();
+    runtime.wsServer.emit('connection', socket, { url: '/api/global/event/ws' });
+    await expect.poll(() => socket.sent.some((frame) => frame.eventId === 'evt-1')).toBe(true);
+
+    // The upstream dies with its port gone: the reader parks after the
+    // configured number of build URL failures and stops dialing.
+    port = null;
+    firstStream.end();
+    await expect.poll(() => globalHub.isParked()).toBe(true);
+    expect(fetchCalls).toBe(1);
+    expect(socket.readyState).toBe(1);
+
+    // The managed restart lands on a new port and rebinds upstream readers.
+    port = 5055;
+    runtime.rebindUpstream();
+    await expect.poll(() => socket.sent.some((frame) => frame.eventId === 'evt-2')).toBe(true);
+
+    expect(fetchCalls).toBe(2);
+    expect(fetchImpl.mock.calls[1][0]).toContain(':5055/global/event');
+    expect(globalHub.isParked()).toBe(false);
+    expect(globalHub.isConnected()).toBe(true);
+
+    socket.close();
     await runtime.close();
   });
 });

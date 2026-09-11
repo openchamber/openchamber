@@ -1,9 +1,13 @@
 import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
 import { stripAppImageArgv0Leak } from '../inherited-env.js';
-import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
+import {
+  registerManagedProcess as defaultRegisterManagedProcess,
+  unregisterManagedProcess as defaultUnregisterManagedProcess,
+  reapOrphanedProcesses,
+} from './managed-process-registry.js';
 import { applyProviderEnvAliases } from './provider-env-aliases.js';
-import { recordStartupPerformance } from './startup-performance.js';
+import { recordStartupPerformance as defaultRecordStartupPerformance } from './startup-performance.js';
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
@@ -24,6 +28,12 @@ const WARMUP_DIRECTORY_LIMIT = 4;
 const WARMUP_REQUEST_TIMEOUT_MS = 30000;
 const MANAGED_STDERR_TAIL_MAX_BYTES = 32 * 1024;
 const HEALTH_FAILURE_DETAIL_MAX_LENGTH = 256;
+// A managed child that is alive but slow to print its listening line is adopted
+// once its allocated port accepts TCP connections. This is the absolute cap for
+// that wait; it replaces the old 30s failure window that abandoned the process.
+const MANAGED_OPENCODE_START_TIMEOUT_DEFAULT_MS = 120_000;
+const MANAGED_OPENCODE_START_LISTENER_PROBE_INTERVAL_MS = 250;
+const MANAGED_OPENCODE_LISTENER_PROBE_TIMEOUT_MS = 500;
 
 const getBoundedTextTail = (value, maxBytes) => {
   const buffer = Buffer.from(String(value ?? ''));
@@ -82,6 +92,53 @@ const classifyHealthProbeError = (error) => {
   return { class: 'error', detail: getHealthFailureDetail(error) };
 };
 
+const resolveLocalProbeHost = (hostname) => {
+  const value = String(hostname ?? '').trim();
+  if (!value || value === '0.0.0.0' || value === '::' || value === '[::]') {
+    return '127.0.0.1';
+  }
+  return value;
+};
+
+// Single-attempt TCP reachability probe. Resolves true only when the target
+// accepted the connection; refused/unreachable/timeout all count as "no
+// listener" evidence for orchestration decisions.
+const probeTcpPortListener = (port, hostname, timeoutMs = MANAGED_OPENCODE_LISTENER_PROBE_TIMEOUT_MS) => new Promise((resolve) => {
+  if (!port) {
+    resolve(false);
+    return;
+  }
+
+  let socket;
+  try {
+    socket = net.connect({ port, host: resolveLocalProbeHost(hostname) });
+  } catch {
+    resolve(false);
+    return;
+  }
+
+  let settled = false;
+  let timer = null;
+  const finish = (reachable) => {
+    if (settled) return;
+    settled = true;
+    if (timer) clearTimeout(timer);
+    socket.removeAllListeners();
+    socket.destroy();
+    resolve(reachable);
+  };
+
+  timer = setTimeout(() => finish(false), timeoutMs);
+  socket.once('connect', () => finish(true));
+  socket.once('error', () => finish(false));
+});
+
+const formatManagedServerUrl = (hostname, port) => {
+  const host = resolveLocalProbeHost(hostname);
+  const formattedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+  return `http://${formattedHost}:${port}`;
+};
+
 export const createOpenCodeLifecycleRuntime = (deps) => {
   const {
     state,
@@ -107,6 +164,16 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     getManagedOpenCodeEnv = async () => ({}),
     getActiveSessionCount = () => 0,
     reapManagedOrphanedProcesses = reapOrphanedProcesses,
+    spawnManagedProcess = spawn,
+    spawnSyncImpl = spawnSync,
+    registerManagedProcess = defaultRegisterManagedProcess,
+    unregisterManagedProcess = defaultUnregisterManagedProcess,
+    recordStartupPerformance = defaultRecordStartupPerformance,
+    probeManagedPortListener = probeTcpPortListener,
+    getManagedOpenCodeStartTimeoutMs = () => parsePositiveInt(
+      process.env.OPENCHAMBER_OPENCODE_START_TIMEOUT_MS,
+      MANAGED_OPENCODE_START_TIMEOUT_DEFAULT_MS,
+    ),
     getWarmupDirectories = async () => [],
     onOpenCodeRestarted = null,
     now = Date.now,
@@ -118,7 +185,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       // netstat's display layer translates (e.g. "LISTENING" renders as
       // "ABHÖREN"/"ÉCOUTE"/"ESCUTANDO" on non-English Windows), so this
       // works regardless of the OS display language.
-      const result = spawnSync(
+      const result = spawnSyncImpl(
         'powershell',
         [
           '-NoProfile',
@@ -137,7 +204,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       }
       for (const pid of pids) {
         try {
-          spawnSync('taskkill', ['/PID', String(pid), '/F'], { stdio: 'ignore', timeout: 3000, windowsHide: true });
+          spawnSyncImpl('taskkill', ['/PID', String(pid), '/F'], { stdio: 'ignore', timeout: 3000, windowsHide: true });
         } catch {
         }
       }
@@ -152,14 +219,14 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       return;
     }
     try {
-      const result = spawnSync('lsof', ['-ti', `:${port}`], { encoding: 'utf8', timeout: 5000, windowsHide: true });
+      const result = spawnSyncImpl('lsof', ['-ti', `:${port}`], { encoding: 'utf8', timeout: 5000, windowsHide: true });
       const output = result.stdout || '';
       const myPid = process.pid;
       for (const pidStr of output.split(/\s+/)) {
         const pid = parseInt(pidStr.trim(), 10);
         if (pid && pid !== myPid) {
           try {
-            spawnSync('kill', ['-9', String(pid)], { stdio: 'ignore', timeout: 2000 });
+            spawnSyncImpl('kill', ['-9', String(pid)], { stdio: 'ignore', timeout: 2000 });
           } catch {
           }
         }
@@ -179,6 +246,17 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     try {
       process.kill(child.pid, 0);
       return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // A3: HTTP probe failures are not proof that the listener is gone. Only a
+  // successful TCP connect to the managed port is treated as "still serving".
+  const isManagedOpenCodeListenerReachable = async () => {
+    if (!state.openCodePort) return false;
+    try {
+      return await probeManagedPortListener(state.openCodePort, env.ENV_CONFIGURED_OPENCODE_HOSTNAME);
     } catch {
       return false;
     }
@@ -243,9 +321,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       return Promise.resolve(true);
     }
 
-    const probeHost = !hostname || hostname === '0.0.0.0' || hostname === '::' || hostname === '[::]'
-      ? '127.0.0.1'
-      : hostname;
+    const probeHost = resolveLocalProbeHost(hostname);
     const deadline = Date.now() + timeoutMs;
 
     return new Promise((resolve) => {
@@ -317,7 +393,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       }
 
       try {
-        spawnSync('taskkill', ['/pid', String(pid), '/t'], {
+        spawnSyncImpl('taskkill', ['/pid', String(pid), '/t'], {
           stdio: 'ignore',
           timeout: 3000,
           windowsHide: true,
@@ -330,7 +406,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       }
 
       try {
-        spawnSync('taskkill', ['/pid', String(pid), '/f', '/t'], {
+        spawnSyncImpl('taskkill', ['/pid', String(pid), '/f', '/t'], {
           stdio: 'ignore',
           timeout: 5000,
           windowsHide: true,
@@ -416,7 +492,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     };
     console.log('[OpenCode] Launching managed server', state.lastOpenCodeLaunchDiagnostics);
 
-    const child = spawn(binary, args, {
+    const child = spawnManagedProcess(binary, args, {
       cwd,
       env: processEnv,
       detached: process.platform !== 'win32',
@@ -452,14 +528,21 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     child.on('exit', recordManagedProcessExit);
     child.on('close', recordManagedProcessExit);
 
-    const url = await new Promise((resolve, reject) => {
+    // The startup waiter is created before the registration await below: the
+    // child can exit or emit an error while registration is in flight, and a
+    // ChildProcess 'error' with no listener is an uncaught exception. All
+    // startup listeners therefore attach synchronously in the spawn tick.
+    const startupUrlPromise = new Promise((resolve, reject) => {
       let stdout = '';
       let stderr = '';
       let done = false;
+      let timer = null;
+      let adoptionTimer = null;
       const finish = (handler, value) => {
         if (done) return;
         done = true;
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
+        if (adoptionTimer) clearTimeout(adoptionTimer);
         child.stdout?.off('data', onStdout);
         child.stderr?.off('data', onStderr);
         child.off('exit', onExit);
@@ -499,7 +582,29 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         finish(reject, error);
       };
 
-      const timer = setTimeout(() => {
+      // A2: a live child that has not printed the listening line yet is not
+      // dead. Keep probing its allocated port and adopt the server once it
+      // accepts a connection; the authenticated readiness check still runs
+      // after adoption. The timeout above bounds the total wait, while an
+      // exit or spawn error still rejects immediately.
+      const probeAdoption = async () => {
+        if (done) return;
+        let reachable = false;
+        try {
+          reachable = await probeManagedPortListener(port, hostname);
+        } catch {
+          reachable = false;
+        }
+        if (done) return;
+        if (!reachable) {
+          adoptionTimer = setTimeout(probeAdoption, MANAGED_OPENCODE_START_LISTENER_PROBE_INTERVAL_MS);
+          return;
+        }
+        attachRuntimeStderrCapture();
+        finish(resolve, formatManagedServerUrl(hostname, port));
+      };
+
+      timer = setTimeout(() => {
         finish(reject, new Error(`Timeout waiting for OpenCode to start after ${timeout}ms`));
       }, timeout);
 
@@ -507,20 +612,41 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       child.stderr?.on('data', onStderr);
       child.on('exit', onExit);
       child.on('error', onError);
+      void probeAdoption();
     });
+    // Registration can finish after an early startup failure; shield the
+    // rejected promise from becoming an unhandled rejection before it is awaited.
+    startupUrlPromise.catch(() => {});
 
-    // Record this child so a future run can reap it if we crash before teardown.
-    // The web-server lifecycle runs in-process inside multiple hosts, so tag the
-    // actual host (Electron sets OPENCHAMBER_RUNTIME='desktop'; the standalone
-    // web CLI leaves it unset → 'web'; SSH remote → 'ssh-remote') rather than a
-    // hardcoded label, matching the server's existing runtimeName convention.
-    await registerManagedProcess({
-      pid: child.pid,
-      ownerPid: process.pid,
-      port,
-      binary,
-      runtime: process.env.OPENCHAMBER_RUNTIME || 'web',
-    });
+    // A1: own the child from spawn to exit. The allocated port is already known
+    // here, so register immediately: a crash while the process is still starting
+    // must not hide it from the reaper. A rejected registration is a fatal
+    // startup failure because continuing would leave an untracked live child.
+    // The runtime tag matches the server's existing runtimeName convention
+    // (Electron sets OPENCHAMBER_RUNTIME='desktop'; the standalone web CLI
+    // leaves it unset → 'web'; SSH remote → 'ssh-remote').
+    try {
+      await registerManagedProcess({
+        pid: child.pid,
+        ownerPid: process.pid,
+        port,
+        binary,
+        runtime: process.env.OPENCHAMBER_RUNTIME || 'web',
+      });
+    } catch (error) {
+      await closeManagedOpenCodeChild(child);
+      throw error;
+    }
+
+    let url;
+    try {
+      url = await startupUrlPromise;
+    } catch (error) {
+      // A1: no failure path may leave a live unowned child behind. Terminate,
+      // await confirmed exit, then unregister before the error propagates.
+      await closeManagedOpenCodeChild(child);
+      throw error;
+    }
 
     return {
       url,
@@ -719,12 +845,27 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     });
     phaseStartedAt = performance.now();
 
+    // A2: the absolute startup cap. A live child that has not printed its
+    // listening line keeps being probed until this bound, then it is terminated.
+    const startTimeoutMs = getManagedOpenCodeStartTimeoutMs();
+    let serverInstance = null;
+    let serverInstanceClosed = false;
+    const closeServerInstance = async () => {
+      if (serverInstanceClosed) return;
+      serverInstanceClosed = true;
+      if (!serverInstance) return;
+      try {
+        await serverInstance.close();
+      } catch {
+      }
+    };
+
     try {
-      const serverInstance = await createManagedOpenCodeServerProcess({
+      serverInstance = await createManagedOpenCodeServerProcess({
         resolvedBinary,
         hostname: env.ENV_CONFIGURED_OPENCODE_HOSTNAME,
         port: spawnPort,
-        timeout: 30000,
+        timeout: startTimeoutMs,
         cwd: state.openCodeWorkingDirectory,
         shellEnvKeysCount: Object.keys(shellEnv).length,
         env: stripAppImageArgv0Leak(applyProviderEnvAliases({
@@ -768,12 +909,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         return serverInstance;
       }
 
-      try {
-        await serverInstance.close();
-      } catch {
-      }
+      await closeServerInstance();
       throw new Error('Server started but health check failed (timeout)');
     } catch (error) {
+      // A1: a failure after the child exists must not leave it running. Its own
+      // startup failure paths already terminate and unregister it; this catches
+      // post-startup failures (for example the health-readiness timeout).
+      await closeServerInstance();
       const message = error instanceof Error ? error.message : String(error);
       state.lastOpenCodeError = message;
       state.openCodePort = null;
@@ -1273,7 +1415,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           return;
         }
         lastCountedHealthFailureAt = checkedAt;
-        consecutiveHealthFailures += 1;
+        consecutiveHealthFailures = Math.min(
+          consecutiveHealthFailures + 1,
+          HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES,
+        );
         const healthFailure = healthResult.failure || {
           class: 'error',
           detail: 'Health check failed without diagnostic detail',
@@ -1290,6 +1435,18 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         if (consecutiveHealthFailures < HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES) return;
         const busyDecision = shouldSkipRestartForBusySessions();
         if (busyDecision.skip) return;
+
+        // A3: a managed process that is alive and whose port still accepts
+        // connections is not dead just because HTTP probes fail. Restart only
+        // with positive evidence that the listener is gone; the retained
+        // lastOpenCodeHealthFailure keeps the probe diagnostics available.
+        if (await isManagedOpenCodeListenerReachable()) {
+          console.warn(
+            `[lifecycle] ${source} health check failure threshold reached, but port ${state.openCodePort} still accepts connections; keeping OpenCode process alive`
+          );
+          return;
+        }
+
         console.log(`[lifecycle] ${source} health check failure threshold reached, restarting OpenCode...`);
         consecutiveHealthFailures = 0;
         lastHealthProbeResult = null;

@@ -14,6 +14,8 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - `packages/web/server/lib/event-stream/protocol.test.js`: unit tests for protocol helpers.
 - `packages/web/server/lib/event-stream/upstream-reader.test.js`: unit tests for upstream SSE reader behavior.
 - `packages/web/server/lib/event-stream/runtime.test.js`: unit tests for runtime-side broadcaster behavior.
+- `packages/web/server/lib/event-stream/global-hub.test.js`: unit tests for shared-hub replay bounds, status fanout, and parking.
+- `packages/web/server/lib/event-stream/rebind.test.js`: unit tests for upstream rebinding after a managed OpenCode restart.
 
 ## Public exports
 
@@ -33,8 +35,10 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 
 ### Upstream reader helpers
 - `DEFAULT_UPSTREAM_STALL_TIMEOUT_MS`: default idle timeout before an attached upstream SSE fetch is aborted for reconnect.
-- `DEFAULT_UPSTREAM_RECONNECT_DELAY_MS`: default delay between upstream reconnect attempts.
-- `createUpstreamSseReader(...)`: creates a start/stop reader for OpenCode SSE streams. The reader parses SSE blocks, tracks the latest `Last-Event-ID`, reconnects after closed or stalled upstream streams, and reports events through callbacks.
+- `DEFAULT_UPSTREAM_RECONNECT_DELAY_MS`: default base delay between upstream reconnect attempts.
+- `DEFAULT_UPSTREAM_RECONNECT_DELAY_MAX_MS`: default cap for the bounded exponential reconnect backoff (30 s).
+- `DEFAULT_UPSTREAM_BUILD_URL_FAILURE_LIMIT`: consecutive `buildUrl` failures that make the reader eligible to park (5). Parking is opt-in: it requires the caller to provide `onParked`.
+- `createUpstreamSseReader(...)`: creates a start/stop reader for OpenCode SSE streams. The reader parses SSE blocks, tracks the latest `Last-Event-ID`, reconnects after closed or stalled upstream streams, and reports events through callbacks. Reconnect waits grow exponentially to the cap while attempts keep failing and reset to the base once upstream bytes arrive. When `buildUrl` keeps throwing and the caller supplied `onParked`, the reader reports the failure through `onParked` once and stops retrying. Without `onParked` it never parks: it reports the failure through `onError` and keeps retrying at the capped backoff, so isolated callers retain recovery.
 
 ## Runtime behavior
 - Browser clients connect to the WS endpoints above.
@@ -46,6 +50,9 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - If an upstream SSE stream stalls after the browser WS is already ready, the reader aborts that upstream fetch and reconnects upstream with `Last-Event-ID`, keeping the browser WS alive when recovery is fast.
 - When the shared global upstream reconnects after it was previously ready, the global WS bridge sends a fresh `ready` frame to already-ready browser clients. The browser treats this as a reconnect edge and can run scoped state repair without requiring the browser WS to close.
 - Health checks are reserved for initial upstream connect failures and explicit upstream-unavailable responses, not for ordinary stall recovery on an already-established stream.
+- Upstream reconnect pacing is bounded. Each consecutive failed attempt (non-OK response, stream error, or a thrown `buildUrl`) doubles the wait from `DEFAULT_UPSTREAM_RECONNECT_DELAY_MS` up to `DEFAULT_UPSTREAM_RECONNECT_DELAY_MAX_MS`; receiving upstream bytes resets the pacing to the base, so a genuinely healthy stream always reconnects promptly.
+- A thrown `buildUrl` means OpenCode has no addressable URL (for example the managed process is dead and its port is gone). When the caller supplied `onParked`, after `DEFAULT_UPSTREAM_BUILD_URL_FAILURE_LIMIT` consecutive build-URL failures the reader parks: it stops dialing and reports one terminal `onParked`. The global hub turns that into an `unavailable` status carrying `buildUrlFailed` and `everConnected`, and stays parked until an explicit `stop()`/`start()` cycle such as `rebindUpstream()` after a managed restart. Transient `upstream_unavailable` and stream errors keep retrying with capped backoff and never park. Callers that do not supply `onParked` (for example the standalone watcher fallback) never park: every failure is reported through `onError` and the reader keeps dialing at the capped backoff.
+- While parked, the global WS bridge logs the failure once instead of on every attempt and keeps already-connected clients parked; clients that connect before the first successful upstream connect still get the initial-error close. Directory-scoped bridges close the socket once when their reader parks so the client reconnect path can recover after the next rebind.
 - Global synthetic events such as `openchamber:session-status`, `openchamber:session-activity`, `openchamber:notification`, and `openchamber:heartbeat` are preserved on the WS path, but heartbeat frames are emitted only while an upstream SSE stream is actively attached.
 - Global UI broadcasts are fan-out capable across both SSE and WS clients.
 - Global UI broadcasts serialize once per wire format, irrespective of client count. The SSE writer accepts an optional pre-serialized payload; isolated callers keep the two-argument contract. Failed or backpressured clients cannot block delivery to healthy clients.
@@ -62,4 +69,6 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - Run `bun test packages/web/server/lib/event-stream/protocol.test.js`
 - Run `bun test packages/web/server/lib/event-stream/upstream-reader.test.js`
 - Run `bun test packages/web/server/lib/event-stream/runtime.test.js`
+- Run `bun test packages/web/server/lib/event-stream/global-hub.test.js`
+- Run `bun test packages/web/server/lib/event-stream/rebind.test.js`
 - Run repo validation before finalizing: `bun run type-check`, `bun run lint`, `bun run build`

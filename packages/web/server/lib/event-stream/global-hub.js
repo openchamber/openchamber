@@ -12,6 +12,8 @@ export function createGlobalMessageStreamHub({
   fetchImpl = fetch,
   upstreamStallTimeoutMs,
   upstreamReconnectDelayMs,
+  upstreamReconnectDelayMaxMs,
+  upstreamBuildUrlFailureLimit,
   replayLimit = MESSAGE_STREAM_GLOBAL_REPLAY_LIMIT,
   replayByteLimit = MESSAGE_STREAM_GLOBAL_REPLAY_BYTES,
 }) {
@@ -29,6 +31,7 @@ export function createGlobalMessageStreamHub({
   let connected = false;
   let everConnected = false;
   let buildUrlFailed = false;
+  let parked = false;
 
   const notifySubscriber = (kind, subscriber, payload) => {
     try {
@@ -76,6 +79,8 @@ export function createGlobalMessageStreamHub({
       signal: controller.signal,
       stallTimeoutMs: upstreamStallTimeoutMs,
       reconnectDelayMs: upstreamReconnectDelayMs,
+      reconnectDelayMaxMs: upstreamReconnectDelayMaxMs,
+      buildUrlFailureLimit: upstreamBuildUrlFailureLimit,
       fetchImpl,
       buildUrl: () => {
         buildUrlFailed = false;
@@ -132,6 +137,21 @@ export function createGlobalMessageStreamHub({
           buildUrlFailed,
         });
       },
+      onParked(error) {
+        if (controller?.signal.aborted) {
+          return;
+        }
+
+        parked = true;
+        // Terminal state: the reader stopped retrying, so consumers must
+        // react to this status instead of waiting for a later attempt.
+        notifyStatus({
+          type: 'unavailable',
+          error,
+          buildUrlFailed,
+          everConnected,
+        });
+      },
     });
 
     void reader.start();
@@ -147,6 +167,7 @@ export function createGlobalMessageStreamHub({
     controller = null;
     everConnected = false;
     buildUrlFailed = false;
+    parked = false;
   };
 
   return {
@@ -157,6 +178,9 @@ export function createGlobalMessageStreamHub({
     },
     hasConnected() {
       return everConnected;
+    },
+    isParked() {
+      return parked;
     },
     subscribeEvent(subscriber) {
       eventSubscribers.add(subscriber);

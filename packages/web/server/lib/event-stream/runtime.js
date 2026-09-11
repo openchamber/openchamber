@@ -12,6 +12,8 @@ import { createGlobalMessageStreamHub } from './global-hub.js';
 import { createGlobalMessageStreamWsBridge } from './global-ws-bridge.js';
 import { acceptDirectoryMessageStreamWsConnection } from './directory-ws-bridge.js';
 import {
+  DEFAULT_UPSTREAM_BUILD_URL_FAILURE_LIMIT,
+  DEFAULT_UPSTREAM_RECONNECT_DELAY_MAX_MS,
   DEFAULT_UPSTREAM_RECONNECT_DELAY_MS,
   DEFAULT_UPSTREAM_STALL_TIMEOUT_MS,
 } from './upstream-reader.js';
@@ -66,6 +68,8 @@ export function createMessageStreamWsRuntime({
   heartbeatIntervalMs = MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS,
   upstreamStallTimeoutMs = DEFAULT_UPSTREAM_STALL_TIMEOUT_MS,
   upstreamReconnectDelayMs = DEFAULT_UPSTREAM_RECONNECT_DELAY_MS,
+  upstreamReconnectDelayMaxMs = DEFAULT_UPSTREAM_RECONNECT_DELAY_MAX_MS,
+  upstreamBuildUrlFailureLimit = DEFAULT_UPSTREAM_BUILD_URL_FAILURE_LIMIT,
   fetchImpl = fetch,
   globalEventHub = null,
 }) {
@@ -86,6 +90,8 @@ export function createMessageStreamWsRuntime({
     fetchImpl,
     upstreamStallTimeoutMs,
     upstreamReconnectDelayMs,
+    upstreamReconnectDelayMaxMs,
+    upstreamBuildUrlFailureLimit,
   });
 
   const globalBridge = createGlobalMessageStreamWsBridge({
@@ -129,6 +135,8 @@ export function createMessageStreamWsRuntime({
       heartbeatIntervalMs,
       upstreamStallTimeoutMs,
       upstreamReconnectDelayMs,
+      upstreamReconnectDelayMaxMs,
+      upstreamBuildUrlFailureLimit,
       fetchImpl,
     });
   });

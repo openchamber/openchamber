@@ -88,6 +88,9 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 - `opencode-upgrade-runtime.ts`
   - Owns managed-versus-external capability decisions, latest-version checks, serialized OpenCode self-upgrades, and restart-after-upgrade behavior.
 
+- `opencode-managed-lifecycle.ts`
+  - Owns the managed `opencode serve` child from spawn to confirmed exit: registers it in the shared process registry at spawn, terminates/awaits exit/unregisters on every startup failure path, and makes `close()` idempotent. Kept free of `vscode` imports with spawn, registry, and process-tree kill injected, so it is unit-tested directly.
+
 - `bridge-permission-auto-accept-runtime.ts`
   - Owns the persisted VS Code permission auto-accept policy and its GET/PUT bridge contract.
   - Serializes reads and read-modify-write updates, persists a monotonic policy revision, and broadcasts the exact committed snapshot to every active OpenChamber webview. Permission replies remain foreground UI-owned because VS Code does not run the OpenChamber server runtime.

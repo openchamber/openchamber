@@ -3,10 +3,25 @@ import { parseSseEventEnvelope } from './protocol.js';
 export const DEFAULT_UPSTREAM_STALL_TIMEOUT_MS = 20_000;
 export const UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS = DEFAULT_UPSTREAM_STALL_TIMEOUT_MS * 3;
 export const DEFAULT_UPSTREAM_RECONNECT_DELAY_MS = 250;
+// Cap the wait between consecutive failed reconnect attempts so a down
+// upstream cannot be retried at the base delay indefinitely.
+export const DEFAULT_UPSTREAM_RECONNECT_DELAY_MAX_MS = 30_000;
+// A throw from `buildUrl` means OpenCode currently has no addressable URL
+// (for example the managed process is dead and its port is gone). Parking is
+// opt-in: only a caller that passes `onParked` can handle the terminal state,
+// so after this many consecutive failures the reader parks until an explicit
+// restart only when `onParked` is provided. Without it the reader keeps
+// retrying with capped backoff and reports each failure through `onError`.
+// Transient upstream/stream errors keep retrying with capped backoff.
+export const DEFAULT_UPSTREAM_BUILD_URL_FAILURE_LIMIT = 5;
 
 function resolveTimeoutMs(value, fallback) {
   const resolved = typeof value === 'function' ? value() : value;
   return Number.isFinite(resolved) ? resolved : fallback;
+}
+
+function resolveCount(value, fallback) {
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
 }
 
 function waitForReconnectDelay(ms, signal) {
@@ -54,16 +69,30 @@ export function createUpstreamSseReader({
   signal,
   stallTimeoutMs = DEFAULT_UPSTREAM_STALL_TIMEOUT_MS,
   reconnectDelayMs = DEFAULT_UPSTREAM_RECONNECT_DELAY_MS,
+  reconnectDelayMaxMs = DEFAULT_UPSTREAM_RECONNECT_DELAY_MAX_MS,
+  buildUrlFailureLimit = DEFAULT_UPSTREAM_BUILD_URL_FAILURE_LIMIT,
   onEvent,
   onConnect,
   onDisconnect,
   onError,
+  onParked,
 }) {
   let running = null;
   let stopped = false;
+  let parked = false;
   let activeController = null;
   let lastEventId = typeof initialLastEventId === 'string' ? initialLastEventId : '';
   let stopListenerAttached = false;
+  let reconnectFailures = 0;
+  let consecutiveBuildUrlFailures = 0;
+
+  const nextReconnectDelayMs = () => {
+    const base = Math.max(0, resolveTimeoutMs(reconnectDelayMs, DEFAULT_UPSTREAM_RECONNECT_DELAY_MS));
+    const max = Math.max(base, resolveTimeoutMs(reconnectDelayMaxMs, DEFAULT_UPSTREAM_RECONNECT_DELAY_MAX_MS));
+    const delay = Math.min(max, base * 2 ** reconnectFailures);
+    reconnectFailures += 1;
+    return delay;
+  };
 
   function detachStopListener() {
     if (!stopListenerAttached) return;
@@ -92,6 +121,9 @@ export function createUpstreamSseReader({
 
     attachStopListener();
     stopped = false;
+    parked = false;
+    reconnectFailures = 0;
+    consecutiveBuildUrlFailures = 0;
     running = (async () => {
       while (!stopped && !signal?.aborted) {
         const controller = new AbortController();
@@ -120,8 +152,18 @@ export function createUpstreamSseReader({
           }, currentStallTimeoutMs);
         };
 
+        let buildUrlFailed = false;
         try {
-          const url = buildUrl();
+          let url;
+          try {
+            url = buildUrl();
+            consecutiveBuildUrlFailures = 0;
+          } catch (error) {
+            buildUrlFailed = true;
+            consecutiveBuildUrlFailures += 1;
+            throw error;
+          }
+
           const headers = {
             Accept: 'text/event-stream',
             'Cache-Control': 'no-cache',
@@ -144,7 +186,7 @@ export function createUpstreamSseReader({
               response,
             });
             await cancelResponseBody(response);
-            await waitForReconnectDelay(reconnectDelayMs, signal);
+            await waitForReconnectDelay(nextReconnectDelayMs(), signal);
             continue;
           }
 
@@ -162,6 +204,9 @@ export function createUpstreamSseReader({
               break;
             }
 
+            // Bytes from the upstream prove it is actually serving, so the
+            // next failed attempt starts over from the base delay.
+            reconnectFailures = 0;
             resetStallTimer();
             buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
 
@@ -203,7 +248,25 @@ export function createUpstreamSseReader({
             }
           }
         } catch (error) {
-          if (!stopped && !signal?.aborted && abortReason !== 'upstream_stalled') {
+          if (buildUrlFailed) {
+            const limit = resolveCount(buildUrlFailureLimit, DEFAULT_UPSTREAM_BUILD_URL_FAILURE_LIMIT);
+            // Parking is opt-in on the caller providing `onParked`. Without a
+            // handler the reader must not enter a terminal state, otherwise an
+            // isolated caller (for example the watcher fallback) silently
+            // loses recovery; report through `onError` and keep retrying.
+            if (onParked && consecutiveBuildUrlFailures >= limit) {
+              parked = true;
+              onParked({
+                type: 'build_url_failed',
+                error,
+              });
+            } else {
+              onError?.({
+                type: 'build_url_failed',
+                error,
+              });
+            }
+          } else if (!stopped && !signal?.aborted && abortReason !== 'upstream_stalled') {
             onError?.({
               type: 'stream_error',
               error,
@@ -218,9 +281,11 @@ export function createUpstreamSseReader({
           onDisconnect?.({ reason: abortReason ?? (stopped || signal?.aborted ? 'stopped' : 'closed') });
         }
 
-        if (!stopped && !signal?.aborted) {
-          await waitForReconnectDelay(reconnectDelayMs, signal);
+        if (parked || stopped || signal?.aborted) {
+          break;
         }
+
+        await waitForReconnectDelay(nextReconnectDelayMs(), signal);
       }
     })().finally(() => {
       detachStopListener();
