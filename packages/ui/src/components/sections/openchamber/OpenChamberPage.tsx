@@ -178,6 +178,7 @@ const VisualSectionContent: React.FC = () => {
         'spacing',
         'scrollbars',
         'inputBarOffset',
+        'animatedActivityIndicators',
     ]} />;
 };
 

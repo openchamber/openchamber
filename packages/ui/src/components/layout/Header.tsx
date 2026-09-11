@@ -1251,8 +1251,6 @@ export const Header: React.FC = () => {
     return formatShortcutForDisplay(getEffectiveShortcutCombo(actionId, shortcutOverrides));
   }, [shortcutOverrides]);
 
-
-
   useKeybinds({
     rename_current_session: () => {
       if (!currentSessionId || isMobile) return false;

@@ -34,6 +34,7 @@ import { CSS } from '@dnd-kit/utilities';
 
 import { DirectoryExplorerDialog } from '@/components/session/DirectoryExplorerDialog';
 import { Icon } from '@/components/icon/Icon';
+import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
 import { Button } from '@/components/ui/button';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
@@ -525,8 +526,8 @@ const SessionRow: React.FC<{
   const title = session.title?.trim() || t('mobile.sessions.untitled');
   const swipeEnabled = Boolean(onRevealedChange && onArchive);
   const aiRename = useSessionAiRenameAction(session.id, session.directory, swipeEnabled && revealed);
-  // Live indicators, same conventions as the desktop sidebar: busy/retry →
-  // spinner; unseen activity on a non-active row → attention dot.
+  // Live indicators use SessionActivityIndicator: busy/retry is running;
+  // unseen activity on a non-active row is unread.
   const liveStatus = useGlobalSessionStatus(session.id);
   const unseenCount = useSessionUnseenCount(session.id);
   const statusType = liveStatus?.type ?? 'idle';
@@ -695,12 +696,11 @@ const SessionRow: React.FC<{
             {aiRename.pending ? (
               <Icon name="loader-4" className="size-3 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
             ) : isStreaming || showUnreadDot ? (
-              <span
-                className={cn(
-                  'size-1.5 rounded-full',
-                  isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
-                )}
-                aria-hidden
+              <SessionActivityIndicator
+                state={isStreaming ? 'running' : 'unread'}
+                label={isStreaming
+                  ? t('sessions.sidebar.session.status.active')
+                  : t('sessions.sidebar.session.status.unread')}
               />
             ) : (
               <RiArrowDownSLine className={cn('size-[18px] transition-transform duration-150', expanded ? 'rotate-0' : '-rotate-90')} />

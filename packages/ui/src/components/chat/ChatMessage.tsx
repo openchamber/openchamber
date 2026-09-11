@@ -455,7 +455,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return visibleParts;
     }, [chatRenderMode, isMessageCompleted, isUser, visibleParts]);
 
-
     const toolParts = React.useMemo(() => {
         if (isUser) {
             return [];

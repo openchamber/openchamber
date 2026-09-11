@@ -37,6 +37,7 @@ const DEFAULT_VARIANTS = [
   "transform-rotate",
   "transform-rotate-willchange",
   "transform-rotate-steps",
+  "transform-stepped",
   "transform-rotate-wrapper",
   "rotate-property",
   "opacity",

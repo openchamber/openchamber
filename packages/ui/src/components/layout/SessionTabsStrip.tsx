@@ -36,6 +36,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionStatus } from '@/sync/sync-context';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
+import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 
 const restrictToXAxis: Modifier = ({ transform }) => ({ ...transform, y: 0 });
 
@@ -201,14 +202,14 @@ const SessionTabItem: React.FC<{
                     {isAiRenaming ? (
                       <Icon name="loader-4" className="ml-1.5 size-3 shrink-0 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
                     ) : showDot ? (
-                      <span
+                      <SessionActivityIndicator
+                        state={isStreaming ? 'running' : 'unread'}
+                        label={dotLabel}
                         className={cn(
-                          'ml-1.5 h-1.5 w-1.5 shrink-0 rounded-full',
-                          isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
+                          'ml-1.5 shrink-0',
                           !suppressControls && 'group-hover/session-tab:opacity-0',
                           overlayVisible && 'opacity-0',
                         )}
-                        aria-label={dotLabel}
                       />
                     ) : null}
                   </div>

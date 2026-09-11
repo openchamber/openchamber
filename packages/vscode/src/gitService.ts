@@ -8,6 +8,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
+import { createHash } from 'node:crypto';
 import { spawn, execFile } from 'child_process';
 import { promisify } from 'util';
 import type { API as GitAPI, Repository, GitExtension, Status } from './git.d';
@@ -34,6 +35,38 @@ const WORKTREE_PHASE_SETUP_READY = 'setup-ready' as const;
 const WORKTREE_INDEX_LOCK_RETRY_DELAY_MS = 250;
 const WORKTREE_INDEX_LOCK_STALE_DELAY_MS = 750;
 const GIT_NULL_REF = '0'.repeat(40);
+const COMMIT_FILE_PREVIEW_MAX_BYTES = 8 * 1024 * 1024;
+const FULL_GIT_OBJECT_ID_PATTERN = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/;
+
+type GitCommitChangedFile = {
+  path: string;
+  originalPath?: string;
+  status: 'A' | 'M' | 'D' | 'R';
+  kind: 'file' | 'symlink' | 'gitlink';
+  originalObjectId?: string;
+  objectId?: string;
+  insertions: number;
+  deletions: number;
+  isBinary: boolean;
+};
+
+type GitCommitChangesRequest = {
+  commitHash: string;
+  parentHash: string | null;
+};
+
+type GitCommitFilePreviewRequest = {
+  commitHash: string;
+  parentHash: string | null;
+  originalPath: string | null;
+  modifiedPath: string | null;
+};
+
+type CommitTreeEntry = {
+  mode: string;
+  objectId: string;
+  path: string;
+};
 
 const toBootstrapStateKey = (directory: string): string => {
   const normalized = normalizeDirectoryPath(directory);
@@ -344,28 +377,217 @@ async function execGit(args: string[], cwd: string): Promise<{ stdout: string; s
 }
 
 function isValidCommitHash(hash: string): boolean {
-  return /^[0-9a-fA-F]{7,40}$/.test(hash);
+  return /^[0-9a-fA-F]{7,64}$/.test(hash);
 }
 
-function extractGitStatusPath(status: string, pathPart: string): string {
-  if ((status === 'R' || status === 'C') && pathPart.includes('\t')) {
-    return pathPart.split('\t').pop() || pathPart;
-  }
-  return pathPart;
+function isFullGitObjectId(hash: string): boolean {
+  return FULL_GIT_OBJECT_ID_PATTERN.test(hash);
 }
 
-function extractGitNumstatDestinationPath(filePath: string): string {
-  if (!filePath.includes(' => ')) {
-    return filePath;
+function isZeroObjectId(hash: string): boolean {
+  return /^0+$/.test(hash);
+}
+
+function isOptionLikeGitName(value: string): boolean {
+  return value.startsWith('-') || value.includes('\0');
+}
+
+function getCommitEntryKind(mode: string): GitCommitChangedFile['kind'] {
+  if (mode === '120000') {
+    return 'symlink';
+  }
+  if (mode === '160000') {
+    return 'gitlink';
+  }
+  return 'file';
+}
+
+function normalizeCommitDiffStatus(status: string): GitCommitChangedFile['status'] | null {
+  if (status === 'A' || status === 'D' || status === 'R') {
+    return status;
+  }
+  if (status === 'M' || status === 'T' || status === 'C') {
+    return 'M';
+  }
+  return null;
+}
+
+function buildCommitDiffEntryKey(pathValue: string, originalPath?: string): string {
+  return `${originalPath ?? ''}\u0000${pathValue}`;
+}
+
+function parseCommitTreeEntry(output: string): CommitTreeEntry | null {
+  const record = output.split('\u0000', 1)[0]?.trim();
+  if (!record) {
+    return null;
+  }
+  const match = /^([0-7]{6})\s+\S+\s+([0-9a-f]{40}|[0-9a-f]{64})\t(.+)$/.exec(record);
+  if (!match) {
+    return null;
+  }
+  const [, mode, objectId, entryPath] = match;
+  return { mode, objectId, path: entryPath };
+}
+
+async function getCommitTreeEntry(directory: string, treeish: string, filePath: string): Promise<CommitTreeEntry | null> {
+  const result = await execGit(['ls-tree', '-z', treeish, '--', filePath], directory);
+  if (result.exitCode !== 0 || !result.stdout) {
+    return null;
+  }
+  return parseCommitTreeEntry(result.stdout);
+}
+
+async function getGitObjectSize(directory: string, objectId: string): Promise<number> {
+  const result = await execGit(['cat-file', '-s', objectId], directory);
+  if (result.exitCode !== 0) {
+    throw new Error(`Failed to read object size for ${objectId}`);
+  }
+  const size = Number.parseInt(result.stdout.trim(), 10);
+  if (!Number.isFinite(size) || size < 0) {
+    throw new Error(`Invalid object size for ${objectId}`);
+  }
+  return size;
+}
+
+async function readGitObjectText(directory: string, objectId: string): Promise<string> {
+  const result = await execGit(['cat-file', '-p', objectId], directory);
+  if (result.exitCode !== 0) {
+    throw new Error(`Failed to read object ${objectId}`);
+  }
+  return result.stdout;
+}
+
+function parseCommitFileChanges(stdout: string): GitCommitChangedFile[] {
+  const rawEntries: Array<Omit<GitCommitChangedFile, 'insertions' | 'deletions' | 'isBinary'>> = [];
+  const indexByKey = new Map<string, number>();
+  let cursor = 0;
+
+  while (cursor < stdout.length && stdout[cursor] === ':') {
+    const headerEnd = stdout.indexOf('\u0000', cursor);
+    if (headerEnd === -1) {
+      break;
+    }
+    const header = stdout.slice(cursor, headerEnd);
+    cursor = headerEnd + 1;
+
+    const headerMatch = /^:([0-7]{6})\s+([0-7]{6})\s+([0-9a-f]{40}|[0-9a-f]{64})\s+([0-9a-f]{40}|[0-9a-f]{64})\s+([A-Z])(\d+)?$/.exec(header);
+    if (!headerMatch) {
+      break;
+    }
+
+    const [, oldMode, newMode, oldObjectId, newObjectId, rawStatus] = headerMatch;
+    const normalizedStatus = normalizeCommitDiffStatus(rawStatus);
+    if (!normalizedStatus) {
+      continue;
+    }
+
+    const firstPathEnd = stdout.indexOf('\u0000', cursor);
+    if (firstPathEnd === -1) {
+      break;
+    }
+    const firstPath = stdout.slice(cursor, firstPathEnd);
+    cursor = firstPathEnd + 1;
+    if (!firstPath) {
+      continue;
+    }
+
+    let originalPath: string | undefined;
+    let resolvedPath = firstPath;
+    if (rawStatus === 'R' || rawStatus === 'C') {
+      const secondPathEnd = stdout.indexOf('\u0000', cursor);
+      if (secondPathEnd === -1) {
+        break;
+      }
+      const secondPath = stdout.slice(cursor, secondPathEnd);
+      cursor = secondPathEnd + 1;
+      if (!secondPath) {
+        continue;
+      }
+      originalPath = firstPath;
+      resolvedPath = secondPath;
+    }
+
+    const kindMode = normalizedStatus === 'D' ? oldMode : newMode;
+    const entry: Omit<GitCommitChangedFile, 'insertions' | 'deletions' | 'isBinary'> = {
+      path: resolvedPath,
+      status: normalizedStatus,
+      kind: getCommitEntryKind(kindMode),
+    };
+    if (originalPath) {
+      entry.originalPath = originalPath;
+    }
+    if (!isZeroObjectId(oldObjectId)) {
+      entry.originalObjectId = oldObjectId;
+    }
+    if (!isZeroObjectId(newObjectId)) {
+      entry.objectId = newObjectId;
+    }
+    indexByKey.set(buildCommitDiffEntryKey(resolvedPath, originalPath), rawEntries.push(entry) - 1);
   }
 
-  const braceMatch = filePath.match(/^(.*)\{([^{}]*)\s=>\s([^{}]*)\}(.*)$/);
-  if (braceMatch) {
-    const [, prefix, , destination, suffix] = braceMatch;
-    return `${prefix}${destination}${suffix}`.replace(/\/+/g, '/');
+  const statsByKey = new Map<string, Pick<GitCommitChangedFile, 'insertions' | 'deletions' | 'isBinary'>>();
+  while (cursor < stdout.length) {
+    const recordEnd = stdout.indexOf('\u0000', cursor);
+    if (recordEnd === -1) {
+      break;
+    }
+    const record = stdout.slice(cursor, recordEnd);
+    cursor = recordEnd + 1;
+    if (!record) {
+      continue;
+    }
+
+    const statMatch = /^([0-9-]+)\t([0-9-]+)\t(.*)$/.exec(record);
+    if (!statMatch) {
+      continue;
+    }
+
+    const [, insertionsRaw, deletionsRaw, pathField] = statMatch;
+    const isRename = pathField.length === 0;
+    let originalPath: string | undefined;
+    let resolvedPath = pathField;
+
+    if (isRename) {
+      const originalPathEnd = stdout.indexOf('\u0000', cursor);
+      if (originalPathEnd === -1) {
+        break;
+      }
+      const renameOriginalPath = stdout.slice(cursor, originalPathEnd);
+      cursor = originalPathEnd + 1;
+      const resolvedPathEnd = stdout.indexOf('\u0000', cursor);
+      if (resolvedPathEnd === -1) {
+        break;
+      }
+      const renameResolvedPath = stdout.slice(cursor, resolvedPathEnd);
+      cursor = resolvedPathEnd + 1;
+      if (!renameOriginalPath || !renameResolvedPath) {
+        continue;
+      }
+      originalPath = renameOriginalPath;
+      resolvedPath = renameResolvedPath;
+    }
+
+    if (!resolvedPath) {
+      continue;
+    }
+
+    const rawEntryIndex = indexByKey.get(buildCommitDiffEntryKey(resolvedPath, originalPath));
+    const rawEntry = rawEntryIndex === undefined ? null : rawEntries[rawEntryIndex];
+    const isBinary = rawEntry?.kind === 'file' && insertionsRaw === '-' && deletionsRaw === '-';
+    statsByKey.set(buildCommitDiffEntryKey(resolvedPath, originalPath), {
+      insertions: isBinary ? 0 : Number.parseInt(insertionsRaw, 10) || 0,
+      deletions: isBinary ? 0 : Number.parseInt(deletionsRaw, 10) || 0,
+      isBinary,
+    });
   }
 
-  return filePath.split(' => ').pop()?.trim() || filePath;
+  return rawEntries.flatMap((entry) => {
+    const stats = statsByKey.get(buildCommitDiffEntryKey(entry.path, entry.originalPath));
+    if (!stats) {
+      return [];
+    }
+    return [{ ...entry, ...stats }];
+  });
 }
 
 // ============== Repository Operations ==============
@@ -820,6 +1042,36 @@ export async function createBranch(directory: string, name: string, startPoint?:
   if (startPoint) args.push(startPoint);
   const result = await execGit(args, directory);
   return { success: result.exitCode === 0, branch: name };
+}
+
+/**
+ * Create a new tag at a commit
+ */
+export async function createTag(directory: string, name: string, commitHash: string): Promise<{ success: boolean; tag: string }> {
+  const normalizedName = name.trim();
+  if (!normalizedName) {
+    throw new Error('Tag name is required');
+  }
+  if (isOptionLikeGitName(normalizedName)) {
+    throw new Error('Invalid tag name');
+  }
+  if (!isFullGitObjectId(commitHash)) {
+    throw new Error('Invalid commit hash');
+  }
+
+  const repo = await getRepository(directory);
+
+  if (repo) {
+    try {
+      await repo.tag(normalizedName, commitHash);
+      return { success: true, tag: normalizedName };
+    } catch (error) {
+      console.error('[GitService] Failed to create tag:', error);
+    }
+  }
+
+  const result = await execGit(['tag', '--', normalizedName, commitHash], directory);
+  return { success: result.exitCode === 0, tag: normalizedName };
 }
 
 /**
@@ -3060,6 +3312,499 @@ export interface GitLogEntry {
   parents: string[];
 }
 
+const GIT_LOG_PRETTY_FORMAT = '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%D%x1f%b%x1d';
+
+const parseGitLogStatistics = (lines: string[]) => {
+  let filesChanged = 0;
+  let insertions = 0;
+  let deletions = 0;
+
+  for (const line of lines) {
+    const filesMatch = line.match(/(\d+)\s+files?\s+changed/);
+    const insertMatch = line.match(/(\d+)\s+insertions?\(\+\)/);
+    const deleteMatch = line.match(/(\d+)\s+deletions?\(-\)/);
+    if (filesMatch) filesChanged = parseInt(filesMatch[1], 10);
+    if (insertMatch) insertions = parseInt(insertMatch[1], 10);
+    if (deleteMatch) deletions = parseInt(deleteMatch[1], 10);
+  }
+
+  return { filesChanged, insertions, deletions };
+};
+
+const parseGitLogRecord = (record: string): GitLogEntry | null => {
+  const [payload, statsRaw = ''] = record.split('\x1d');
+  const [hash, parentsRaw = '', author_name = '', author_email = '', date = '', message = '', refsRaw = '', bodyRaw = ''] = payload
+    .replace(/^\n+/, '')
+    .trimEnd()
+    .split('\x1f');
+  if (!hash) {
+    return null;
+  }
+
+  const parents = parentsRaw ? parentsRaw.trim().split(' ').filter(Boolean) : [];
+  const stats = parseGitLogStatistics(statsRaw.split(/\r?\n/).filter((line) => line.trim().length > 0));
+
+  return {
+    hash,
+    date,
+    message,
+    refs: refsRaw.trim(),
+    body: bodyRaw.trimEnd(),
+    author_name,
+    author_email,
+    filesChanged: stats.filesChanged,
+    insertions: stats.insertions,
+    deletions: stats.deletions,
+    parents,
+  };
+};
+
+type GitHistoryRefKind = 'head' | 'local' | 'remote' | 'tag';
+
+interface GitHistoryRef {
+  id: string;
+  name: string;
+  revision: string | null;
+  kind: GitHistoryRefKind;
+  category: 'branches' | 'remote-branches' | 'tags';
+}
+
+interface GitHistoryRefsResponse {
+  refs: GitHistoryRef[];
+  current: GitHistoryRef | null;
+  upstream: GitHistoryRef | null;
+  base: GitHistoryRef | null;
+  snapshot: string;
+}
+
+interface GitHistoryItem {
+  id: string;
+  parentIds: string[];
+  subject: string;
+  message: string;
+  author: string;
+  authorEmail: string;
+  timestamp: string;
+  statistics: { files: number; insertions: number; deletions: number };
+  references: GitHistoryRef[];
+}
+
+type GitHistoryStatistics = GitHistoryItem['statistics'];
+
+interface GitHistoryPage {
+  items: GitHistoryItem[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  refsSnapshot: string;
+}
+
+interface GitHistoryOptions {
+  refs?: string[];
+  all?: boolean;
+  cursor?: string;
+  limit?: number;
+}
+
+interface GitHistoryMergeBaseResponse {
+  mergeBase: string | null;
+}
+
+type GitHistoryCursor = {
+  offset: number;
+  snapshot: string;
+};
+
+type GitHistoryError = Error & {
+  statusCode: number;
+  code: string;
+};
+
+const GIT_HISTORY_DEFAULT_LIMIT = 50;
+const GIT_HISTORY_MAX_LIMIT = 100;
+const GIT_HISTORY_MAX_REFS = 32;
+
+const createGitHistoryError = (message: string, statusCode = 400, code = 'invalid_git_history_request'): GitHistoryError => Object.assign(
+  new Error(message),
+  { statusCode, code },
+);
+
+const isGitHistoryCursorOffset = (value: number | undefined): value is number => value != null && Number.isInteger(value) && value >= 0;
+
+const isGitHistoryCursorSnapshot = (value: string | undefined): value is string => value != null && Object.prototype.toString.call(value) === '[object String]';
+
+const encodeGitHistoryCursor = (payload: GitHistoryCursor): string => Buffer.from(JSON.stringify(payload)).toString('base64url');
+
+const decodeGitHistoryCursor = (cursor: string): GitHistoryCursor => {
+  try {
+    const parsed: Partial<GitHistoryCursor> = Object.fromEntries(Object.entries(JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'))));
+    const { offset, snapshot } = parsed;
+    if (!isGitHistoryCursorOffset(offset) || !isGitHistoryCursorSnapshot(snapshot)) {
+      throw new Error('invalid');
+    }
+    return { offset, snapshot };
+  } catch {
+    throw createGitHistoryError('stale cursor', 409, 'stale_git_history_cursor');
+  }
+};
+
+const normalizeGitHistoryLimit = (value: number | undefined): number => {
+  if (value == null) {
+    return GIT_HISTORY_DEFAULT_LIMIT;
+  }
+  if (!Number.isInteger(value) || value < 1 || value > GIT_HISTORY_MAX_LIMIT) {
+    throw createGitHistoryError(`limit must be between 1 and ${GIT_HISTORY_MAX_LIMIT}`);
+  }
+  return value;
+};
+
+const mapGitHistoryRef = (id: string, name: string, revision: string | null): GitHistoryRef => {
+  if (id.startsWith('refs/heads/')) {
+    return { id, name, revision, kind: 'local', category: 'branches' };
+  }
+  if (id.startsWith('refs/remotes/')) {
+    return { id, name, revision, kind: 'remote', category: 'remote-branches' };
+  }
+  return { id, name, revision, kind: 'tag', category: 'tags' };
+};
+
+// Hash snapshot so pagination cursor stays small while ref changes invalidate it.
+const buildGitHistorySnapshot = (refs: GitHistoryRef[], current: GitHistoryRef | null): string => createHash('sha256')
+  .update([
+    ...refs,
+    ...(current ? [current] : []),
+  ]
+    .map((ref) => `${ref.id}:${ref.revision || ''}`)
+    .sort((left, right) => left.localeCompare(right))
+    .join('|'))
+  .digest('hex');
+
+const buildGitHistoryBaseRef = ({
+  refsById,
+  refs,
+  headBranch,
+  upstream,
+  defaultBranches,
+}: {
+  refsById: Map<string, GitHistoryRef>;
+  refs: GitHistoryRef[];
+  headBranch: string;
+  upstream: GitHistoryRef | null;
+  defaultBranches: Record<string, string>;
+}): GitHistoryRef | null => {
+  if (!upstream && Object.keys(defaultBranches).length === 0) {
+    return null;
+  }
+
+  const remoteName = upstream?.name.includes('/')
+    ? upstream.name.split('/')[0]
+    : 'origin';
+  const candidates = [defaultBranches[remoteName], defaultBranches.origin, 'main', 'master', 'develop']
+    .map((candidate) => String(candidate || '').trim())
+    .filter(Boolean)
+    .filter((candidate) => candidate !== headBranch);
+
+  for (const candidate of candidates) {
+    const localRef = refsById.get(`refs/heads/${candidate}`);
+    if (localRef) {
+      return localRef;
+    }
+    const remoteRef = refs.find((ref) => ref.kind === 'remote' && ref.name.endsWith(`/${candidate}`));
+    if (remoteRef) {
+      return remoteRef;
+    }
+  }
+
+  return null;
+};
+
+const parseGitHistoryRefs = async (directory: string): Promise<GitHistoryRef[]> => {
+  const result = await execGit([
+    'for-each-ref',
+    '--format=%(refname)\t%(refname:short)\t%(objectname)',
+    'refs/heads',
+    'refs/remotes',
+    'refs/tags',
+  ], directory);
+
+  if (result.exitCode !== 0) {
+    throw createGitHistoryError(result.stderr.trim() || result.stdout.trim() || 'Failed to get git history refs', 500, 'git_history_refs_failed');
+  }
+
+  return String(result.stdout || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [id, name, revision] = line.split('\t');
+      return { id, name, revision: revision || null };
+    })
+    .filter((ref) => ref.id && ref.name && !ref.id.endsWith('/HEAD'))
+    .map((ref) => mapGitHistoryRef(ref.id, ref.name, ref.revision));
+};
+
+const parseGitHistoryStatistics = (lines: string[]): GitHistoryStatistics => {
+  let files = 0;
+  let insertions = 0;
+  let deletions = 0;
+
+  for (const line of lines) {
+    const filesMatch = line.match(/(\d+)\s+files?\s+changed/);
+    const insertionsMatch = line.match(/(\d+)\s+insertions?\(\+\)/);
+    const deletionsMatch = line.match(/(\d+)\s+deletions?\(-\)/);
+    if (filesMatch) files = Number.parseInt(filesMatch[1], 10);
+    if (insertionsMatch) insertions = Number.parseInt(insertionsMatch[1], 10);
+    if (deletionsMatch) deletions = Number.parseInt(deletionsMatch[1], 10);
+  }
+
+  return { files, insertions, deletions };
+};
+
+const buildGitHistoryDecorations = (
+  value: string,
+  refsById: Map<string, GitHistoryRef>,
+  current: GitHistoryRef | null,
+  itemId: string,
+): GitHistoryRef[] => {
+  const references: GitHistoryRef[] = [];
+  const seen = new Set<string>();
+  const pushRef = (ref: GitHistoryRef | undefined | null) => {
+    if (!ref) {
+      return;
+    }
+    const key = `${ref.id}:${ref.kind}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    references.push(ref);
+  };
+  const pushHead = () => pushRef({
+    id: 'HEAD',
+    name: current?.name || 'HEAD',
+    revision: current?.revision || itemId,
+    kind: 'head',
+    category: 'branches',
+  });
+
+  for (const token of String(value || '').split(',').map((entry) => entry.trim()).filter(Boolean)) {
+    if (token === 'HEAD') {
+      pushHead();
+      continue;
+    }
+    if (token.startsWith('HEAD -> ')) {
+      pushHead();
+      const name = token.slice('HEAD -> '.length).trim();
+      pushRef(refsById.get(`refs/heads/${name}`) || refsById.get(name));
+      continue;
+    }
+    if (token.startsWith('tag: ')) {
+      const name = token.slice('tag: '.length).trim();
+      pushRef(refsById.get(`refs/tags/${name}`) || refsById.get(name));
+      continue;
+    }
+    pushRef(
+      refsById.get(token.startsWith('refs/') ? token : `refs/remotes/${token}`)
+      || refsById.get(`refs/heads/${token}`)
+      || refsById.get(`refs/tags/${token}`),
+    );
+  }
+
+  return references;
+};
+
+const getRemoteDefaultBranches = async (directory: string): Promise<Record<string, string>> => {
+  let defaults: Record<string, string> = {};
+
+  const refsResult = await execGit(['for-each-ref', '--format=%(refname) %(symref)', 'refs/remotes'], directory);
+  if (refsResult.exitCode === 0) {
+    defaults = Object.fromEntries(
+      String(refsResult.stdout || '').trim().split('\n').flatMap((line) => {
+        const [ref, symbolicRef] = line.split(' ');
+        const match = ref?.match(/^refs\/remotes\/([^/]+)\/HEAD$/);
+        const prefix = match ? `refs/remotes/${match[1]}/` : '';
+        const symbolicRefName = symbolicRef ?? '';
+        return match && symbolicRefName.startsWith(prefix)
+          ? [[match[1], symbolicRefName.slice(prefix.length)]]
+          : [];
+      })
+    );
+  }
+
+  const remotes = await getRemotes(directory).catch(() => []);
+  const missing = remotes.filter((remote) => remote?.name && !defaults[remote.name]);
+  for (const remote of missing) {
+    const output = await execGit(['ls-remote', '--symref', remote.name, 'HEAD'], directory);
+    if (output.exitCode !== 0) {
+      continue;
+    }
+    const match = String(output.stdout || '').match(/^ref:\s+refs\/heads\/(.+?)\s+HEAD$/m);
+    if (match) {
+      defaults[remote.name] = match[1];
+    }
+  }
+
+  return defaults;
+};
+
+const resolveGitHistoryRequest = async (directory: string): Promise<GitHistoryRefsResponse & { refsById: Map<string, GitHistoryRef> }> => {
+  const refs = await parseGitHistoryRefs(directory);
+  const refsById = new Map(refs.map((ref) => [ref.id, ref]));
+  const defaultBranches = await getRemoteDefaultBranches(directory);
+
+  const headRefResult = await execGit(['symbolic-ref', '-q', 'HEAD'], directory);
+  const headRef = headRefResult.exitCode === 0 ? String(headRefResult.stdout || '').trim() : '';
+  const headRevisionResult = await execGit(['rev-parse', 'HEAD'], directory);
+  const headRevision = headRevisionResult.exitCode === 0 ? String(headRevisionResult.stdout || '').trim() : '';
+  const headBranch = headRef.startsWith('refs/heads/') ? headRef.slice('refs/heads/'.length) : '';
+  const current: GitHistoryRef | null = headRevision ? {
+    id: 'HEAD',
+    name: headBranch || 'HEAD',
+    revision: headRevision,
+    kind: 'head',
+    category: 'branches',
+  } : null;
+
+  const upstreamResult = await execGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], directory);
+  const upstreamName = upstreamResult.exitCode === 0 ? String(upstreamResult.stdout || '').trim() : '';
+  const upstream = upstreamName
+    ? refsById.get(upstreamName.startsWith('refs/') ? upstreamName : `refs/remotes/${upstreamName}`) || null
+    : null;
+  const base = buildGitHistoryBaseRef({ refsById, refs, headBranch, upstream, defaultBranches });
+
+  return {
+    refs,
+    refsById,
+    current,
+    upstream,
+    base,
+    snapshot: buildGitHistorySnapshot(refs, current),
+  };
+};
+
+const validateGitHistoryRequestedRefs = (refsResponse: GitHistoryRefsResponse, requestedRefs: string[]): string[] => {
+  if (!Array.isArray(requestedRefs) || requestedRefs.length === 0) {
+    throw createGitHistoryError('at least one ref is required');
+  }
+  if (requestedRefs.length > GIT_HISTORY_MAX_REFS) {
+    throw createGitHistoryError(`refs must contain at most ${GIT_HISTORY_MAX_REFS} values`);
+  }
+
+  const allowed = new Set(refsResponse.refs.map((ref) => ref.id));
+  if (refsResponse.current) {
+    allowed.add('HEAD');
+  }
+
+  return Array.from(new Set(requestedRefs.map((ref) => String(ref || '').trim()))).map((ref) => {
+    if (!ref) {
+      throw createGitHistoryError('refs must not be empty');
+    }
+    if (ref.startsWith('-') || ref.includes('\0')) {
+      throw createGitHistoryError('refs must not contain option-like values');
+    }
+    if (!allowed.has(ref)) {
+      throw createGitHistoryError(`Unknown ref: ${ref}`);
+    }
+    return ref;
+  });
+};
+
+const validateGitHistorySelection = (
+  refsResponse: GitHistoryRefsResponse,
+  options: GitHistoryOptions,
+): { all: true; refs: [] } | { all: false; refs: string[] } => {
+  const refs = Array.isArray(options.refs) ? options.refs : [];
+  const all = options.all === true;
+
+  if (all && refs.length > 0) {
+    throw createGitHistoryError('all cannot be combined with explicit refs');
+  }
+  if (all) {
+    return { all: true, refs: [] };
+  }
+
+  return {
+    all: false,
+    refs: validateGitHistoryRequestedRefs(refsResponse, refs),
+  };
+};
+
+export async function getGitHistoryRefs(directory: string): Promise<GitHistoryRefsResponse> {
+  const refsResponse = await resolveGitHistoryRequest(directory);
+  return {
+    refs: refsResponse.refs,
+    current: refsResponse.current,
+    upstream: refsResponse.upstream,
+    base: refsResponse.base,
+    snapshot: refsResponse.snapshot,
+  };
+}
+
+export async function getGitHistory(directory: string, options: GitHistoryOptions): Promise<GitHistoryPage> {
+  const refsResponse = await resolveGitHistoryRequest(directory);
+  const selection = validateGitHistorySelection(refsResponse, options);
+  const limit = normalizeGitHistoryLimit(options.limit);
+  const cursor = options.cursor ? decodeGitHistoryCursor(options.cursor) : { offset: 0, snapshot: refsResponse.snapshot };
+  if (cursor.snapshot !== refsResponse.snapshot) {
+    throw createGitHistoryError('stale cursor', 409, 'stale_git_history_cursor');
+  }
+
+  const result = await execGit([
+    'log',
+    '--topo-order',
+    '--decorate=full',
+    '--date=iso-strict',
+    `--skip=${cursor.offset}`,
+    `--max-count=${limit + 1}`,
+    '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%D',
+    '--shortstat',
+    ...(selection.all ? ['--all'] : selection.refs),
+  ], directory);
+
+  if (result.exitCode !== 0) {
+    throw createGitHistoryError(result.stderr.trim() || result.stdout.trim() || 'Failed to get git history', 500, 'git_history_failed');
+  }
+
+  const entries = String(result.stdout || '')
+    .split('\x1e')
+    .map((record) => record.replace(/^\n+/, '').trimEnd())
+    .filter(Boolean)
+    .map((record) => {
+      const lines = record.split(/\r?\n/).filter(Boolean);
+      const [id, parentsRaw = '', author = '', authorEmail = '', timestamp = '', subject = '', decorations = ''] = (lines.shift() || '').split('\x1f');
+      return {
+        id,
+        parentIds: parentsRaw ? parentsRaw.split(' ').filter(Boolean) : [],
+        subject,
+        message: subject,
+        author,
+        authorEmail,
+        timestamp,
+        statistics: parseGitHistoryStatistics(lines),
+        references: buildGitHistoryDecorations(decorations, refsResponse.refsById, refsResponse.current, id),
+      };
+    });
+
+  const hasMore = entries.length > limit;
+  const items = hasMore ? entries.slice(0, limit) : entries;
+  return {
+    items,
+    nextCursor: hasMore ? encodeGitHistoryCursor({ offset: cursor.offset + limit, snapshot: refsResponse.snapshot }) : null,
+    hasMore,
+    refsSnapshot: refsResponse.snapshot,
+  };
+}
+
+export async function getGitHistoryMergeBase(directory: string, options: { refs: string[] }): Promise<GitHistoryMergeBaseResponse> {
+  const refsResponse = await resolveGitHistoryRequest(directory);
+  const refs = validateGitHistoryRequestedRefs(refsResponse, options.refs);
+  if (refs.length < 2) {
+    return { mergeBase: null };
+  }
+
+  const result = await execGit(['merge-base', ...refs], directory);
+  return { mergeBase: result.exitCode === 0 ? String(result.stdout || '').trim() || null : null };
+}
+
 /**
  * Resolve a log base ref using local-first semantics (mirrors web service.js).
  *
@@ -3104,7 +3849,7 @@ export async function getGitLog(
       '--all',
       '--topo-order',
       '--date=iso',
-      '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%D',
+      GIT_LOG_PRETTY_FORMAT,
       '--shortstat',
     ];
 
@@ -3119,43 +3864,7 @@ export async function getGitLog(
       .map((e) => e.trim())
       .filter(Boolean);
 
-    const entries: GitLogEntry[] = [];
-    for (const record of records) {
-      const lines = record.split('\n').filter((l) => l.trim().length > 0);
-      const header = lines.shift() || '';
-      const [hash, parentsRaw, author_name, author_email, date, message, refsRaw] =
-        header.split('\x1f');
-      if (!hash) continue;
-
-      const parents = parentsRaw ? parentsRaw.trim().split(' ').filter(Boolean) : [];
-      const refs = refsRaw ? refsRaw.trim() : '';
-
-      let filesChanged = 0;
-      let insertions = 0;
-      let deletions = 0;
-      for (const line of lines) {
-        const filesMatch = line.match(/(\d+)\s+files?\s+changed/);
-        const insertMatch = line.match(/(\d+)\s+insertions?\(\+\)/);
-        const deleteMatch = line.match(/(\d+)\s+deletions?\(-\)/);
-        if (filesMatch) filesChanged = parseInt(filesMatch[1], 10);
-        if (insertMatch) insertions = parseInt(insertMatch[1], 10);
-        if (deleteMatch) deletions = parseInt(deleteMatch[1], 10);
-      }
-
-      entries.push({
-        hash,
-        date: date || '',
-        message: message || '',
-        refs,
-        body: '',
-        author_name: author_name || '',
-        author_email: author_email || '',
-        filesChanged,
-        insertions,
-        deletions,
-        parents,
-      });
-    }
+    const entries: GitLogEntry[] = records.map(parseGitLogRecord).filter((entry): entry is GitLogEntry => Boolean(entry));
 
     return { all: entries, latest: entries[0] || null, total: entries.length };
   }
@@ -3168,7 +3877,7 @@ export async function getGitLog(
     'log',
     `--max-count=${maxCount}`,
     '--date=iso',
-    '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%D',
+    GIT_LOG_PRETTY_FORMAT,
     '--shortstat',
   ];
 
@@ -3195,55 +3904,7 @@ export async function getGitLog(
     .map((entry) => entry.trim())
     .filter(Boolean);
 
-  const statsMap = new Map<string, { filesChanged: number; insertions: number; deletions: number; parents: string[] }>();
-
-  for (const record of records) {
-    const lines = record.split('\n').filter((line) => line.trim().length > 0);
-    const header = lines.shift() || '';
-    const [hash, parentsRaw] = header.split('\x1f');
-    const parents = parentsRaw ? parentsRaw.trim().split(' ').filter(Boolean) : [];
-    if (!hash) continue;
-
-    let filesChanged = 0;
-    let insertions = 0;
-    let deletions = 0;
-
-    for (const line of lines) {
-      const filesMatch = line.match(/(\d+)\s+files?\s+changed/);
-      const insertMatch = line.match(/(\d+)\s+insertions?\(\+\)/);
-      const deleteMatch = line.match(/(\d+)\s+deletions?\(-\)/);
-      if (filesMatch) filesChanged = parseInt(filesMatch[1], 10);
-      if (insertMatch) insertions = parseInt(insertMatch[1], 10);
-      if (deleteMatch) deletions = parseInt(deleteMatch[1], 10);
-    }
-
-    statsMap.set(hash, { filesChanged, insertions, deletions, parents });
-  }
-
-  const entries: GitLogEntry[] = [];
-  for (const record of records) {
-    const header = record.split('\n').filter((l) => l.trim().length > 0)[0] || '';
-    const [hash] = header.split('\x1f');
-    if (!hash) continue;
-    const stats = statsMap.get(hash) || { filesChanged: 0, insertions: 0, deletions: 0, parents: [] };
-    // Need to re-parse header fields for the final entries array
-    const lines = record.split('\n').filter((l) => l.trim().length > 0);
-    const lineHeader = lines.shift() || '';
-    const [, , author_name, author_email, date, message, refs] = lineHeader.split('\x1f');
-    entries.push({
-      hash,
-      date: date || '',
-      message: message || '',
-      refs: refs?.trim() || '',
-      body: '',
-      author_name: author_name || '',
-      author_email: author_email || '',
-      filesChanged: stats.filesChanged,
-      insertions: stats.insertions,
-      deletions: stats.deletions,
-      parents: stats.parents,
-    });
-  }
+  const entries: GitLogEntry[] = records.map(parseGitLogRecord).filter((entry): entry is GitLogEntry => Boolean(entry));
 
   return {
     all: entries,
@@ -3257,83 +3918,64 @@ export async function getGitLog(
  */
 export async function getCommitFiles(
   directory: string,
-  hash: string
-): Promise<{ files: Array<{ path: string; insertions: number; deletions: number; isBinary: boolean; changeType: string }> }> {
-  const numstatResult = await execGit(['show', '--numstat', '--format=', hash], directory);
+  request: GitCommitChangesRequest
+): Promise<{ files: GitCommitChangedFile[] }> {
+  const { commitHash, parentHash } = request;
+  const args = parentHash
+    ? ['diff-tree', '-r', '--no-commit-id', '-M', '--raw', '--numstat', '--no-abbrev', '-z', parentHash, commitHash]
+    : ['diff-tree', '--root', '-r', '--no-commit-id', '-M', '--raw', '--numstat', '--no-abbrev', '-z', commitHash];
+  const result = await execGit(args, directory);
 
-  if (numstatResult.exitCode !== 0) {
-    return { files: [] };
+  if (result.exitCode !== 0) {
+    const message = [result.stderr, result.stdout]
+      .map((value) => String(value || '').trim())
+      .find(Boolean);
+    throw new Error(message || `Failed to read commit files for ${commitHash}`);
   }
 
-  const files: Array<{ path: string; insertions: number; deletions: number; isBinary: boolean; changeType: string }> = [];
-  const lines = numstatResult.stdout.trim().split('\n').filter(Boolean);
-
-  for (const line of lines) {
-    const parts = line.split('\t');
-    if (parts.length < 3) continue;
-
-    const [insertionsRaw, deletionsRaw, ...pathParts] = parts;
-    const filePath = pathParts.join('\t');
-    if (!filePath) continue;
-
-    const isBinary = insertionsRaw === '-' && deletionsRaw === '-';
-    const insertions = isBinary ? 0 : (parseInt(insertionsRaw, 10) || 0);
-    const deletions = isBinary ? 0 : (parseInt(deletionsRaw, 10) || 0);
-
-    let changeType = 'M';
-    if (filePath.includes(' => ')) {
-      changeType = 'R';
-    }
-
-    files.push({ path: filePath, insertions, deletions, isBinary, changeType });
-  }
-
-  // Get accurate change types from --name-status
-  const nameStatusResult = await execGit(['show', '--name-status', '--format=', hash], directory);
-  if (nameStatusResult.exitCode === 0) {
-    const statusMap = new Map<string, string>();
-    for (const line of nameStatusResult.stdout.trim().split('\n').filter(Boolean)) {
-      const match = line.match(/^([AMDRC])\d*\t(.+)$/);
-      if (match) {
-        const [, status, pathPart] = match;
-        statusMap.set(extractGitStatusPath(status, pathPart), status);
-      }
-    }
-    for (const file of files) {
-      const basePath = extractGitNumstatDestinationPath(file.path);
-      const status = statusMap.get(basePath) ?? statusMap.get(file.path);
-      if (status) {
-        file.changeType = status;
-      }
-    }
-  }
-
-  return { files };
+  return { files: parseCommitFileChanges(result.stdout) };
 }
 
 export async function getCommitFileDiff(
   directory: string,
-  hash: string,
-  filePath: string,
-  isBinary: boolean
-): Promise<{ original: string; modified: string; isBinary: boolean }> {
-  if (isBinary) {
-    return { original: '', modified: '', isBinary: true };
-  }
-
-  const [originalResult, modifiedResult] = await Promise.all([
-    execGit(['show', `${hash}^:${filePath}`], directory),
-    execGit(['show', `${hash}:${filePath}`], directory),
+  request: GitCommitFilePreviewRequest
+): Promise<
+  | { status: 'ready'; original: string; modified: string }
+  | { status: 'too-large'; totalBytes: number; maxBytes: number }
+> {
+  const { commitHash, parentHash, originalPath, modifiedPath } = request;
+  const [originalEntry, modifiedEntry] = await Promise.all([
+    parentHash && originalPath ? getCommitTreeEntry(directory, parentHash, originalPath) : Promise.resolve(null),
+    modifiedPath ? getCommitTreeEntry(directory, commitHash, modifiedPath) : Promise.resolve(null),
   ]);
 
-  if (originalResult.exitCode !== 0 && modifiedResult.exitCode !== 0) {
-    throw new Error(`Failed to read file content at commit ${hash}`);
+  if (!originalEntry && !modifiedEntry) {
+    throw new Error(`Failed to read file content at commit ${commitHash}`);
   }
 
+  const [originalSize, modifiedSize] = await Promise.all([
+    originalEntry?.objectId ? getGitObjectSize(directory, originalEntry.objectId) : Promise.resolve(0),
+    modifiedEntry?.objectId ? getGitObjectSize(directory, modifiedEntry.objectId) : Promise.resolve(0),
+  ]);
+  const totalBytes = originalSize + modifiedSize;
+
+  if (totalBytes > COMMIT_FILE_PREVIEW_MAX_BYTES) {
+    return {
+      status: 'too-large',
+      totalBytes,
+      maxBytes: COMMIT_FILE_PREVIEW_MAX_BYTES,
+    };
+  }
+
+  const [original, modified] = await Promise.all([
+    originalEntry?.objectId ? readGitObjectText(directory, originalEntry.objectId) : Promise.resolve(''),
+    modifiedEntry?.objectId ? readGitObjectText(directory, modifiedEntry.objectId) : Promise.resolve(''),
+  ]);
+
   return {
-    original: originalResult.exitCode === 0 ? originalResult.stdout : '',
-    modified: modifiedResult.exitCode === 0 ? modifiedResult.stdout : '',
-    isBinary: false,
+    status: 'ready',
+    original,
+    modified,
   };
 }
 

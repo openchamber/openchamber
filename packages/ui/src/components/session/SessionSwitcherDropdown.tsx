@@ -8,6 +8,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Icon } from '@/components/icon/Icon';
+import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionStatus } from '@/sync/sync-context';
 import { useSessionUnseenCount } from '@/sync/notification-store';
@@ -332,19 +333,13 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
 
       {isStreaming || showUnreadDot ? (
         <span className="flex h-3 w-3 flex-shrink-0 items-center justify-center self-center">
-          {isStreaming ? (
-            <span
-              className="h-1.5 w-1.5 rounded-full bg-primary animate-busy-pulse"
-              aria-label={t('sessions.sidebar.session.status.active')}
-              title={t('sessions.sidebar.session.status.active')}
-            />
-          ) : (
-            <span
-              className="h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
-              aria-label={t('sessions.sidebar.session.status.unread')}
-              title={t('sessions.sidebar.session.status.unread')}
-            />
-          )}
+          <SessionActivityIndicator
+            state={isStreaming ? 'running' : 'unread'}
+            label={isStreaming
+              ? t('sessions.sidebar.session.status.active')
+              : t('sessions.sidebar.session.status.unread')}
+            runningDotClassName="animate-busy-pulse"
+          />
         </span>
       ) : null}
     </BaseMenu.Item>

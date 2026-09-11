@@ -92,6 +92,7 @@ Measured on this repository's fixture, at any element count from 1 to 32:
 |---|---|---|
 | none | 0 | 0 |
 | `transform` (rotate, translate, scale) | 0 | 0 |
+| `transform` + `steps(30)` | 0 | 0 |
 | `opacity`, `filter` | 0 | 0 |
 | `rotate` (the individual property) | 60 | 0 |
 | `background-position` | 60 | 0 |
@@ -103,6 +104,11 @@ Animate `transform` and `opacity`. Anything else recalculates style on every
 frame for as long as the animation runs, and geometry properties add layout on
 top. Note that `rotate: 360deg` is *not* equivalent to
 `transform: rotate(360deg)` in cost.
+
+VS Code uses `steps(30)` over 1.5 seconds specifically to reduce CPU usage.
+Local repeated 32-element runs showed median main-thread busy 0.04% smooth vs
+0.02% stepped, but these tiny values are environment-sensitive and the
+documented contract is transform-only zero recalc/layout.
 
 Add a variant to `animation-fixture.html` to measure a property or technique
 that is not listed.

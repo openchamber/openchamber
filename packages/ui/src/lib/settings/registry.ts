@@ -344,6 +344,7 @@ export const SETTINGS_REGISTRY = {
   diffLayoutPreference: field({ scope: 'profile', parse: parseOneOf(['dynamic', 'inline', 'side-by-side']), ui: uiStore('diffLayoutPreference', (v) => useUIStore.getState().setDiffLayoutPreference(v)) }),
   diffWrapLines: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('diffWrapLines', (v) => useUIStore.getState().setDiffWrapLines(v)) }),
   gitChangesViewMode: field({ scope: 'profile', parse: parseOneOf(['flat', 'tree']), ui: uiStore('gitChangesViewMode', (v) => useUIStore.getState().setGitChangesViewMode(v)) }),
+  gitReviewLayout: field({ scope: 'profile', parse: parseOneOf(['separate', 'combined']), ui: uiStore('gitReviewLayout', (v) => useUIStore.getState().setGitReviewLayout(v)) }),
   gitmojiEnabled: field({ scope: 'profile', parse: parseBoolean }),
   defaultFileViewerPreview: field({ scope: 'profile', parse: parseBoolean }),
   directoryShowHidden: field({
@@ -527,6 +528,10 @@ export const LOCAL_DEVICE_KEYS = [
   'contextRailHiddenSurfaces',
   'contextEditorTreeVisible',
   'contextEditorTreeWidth',
+  'contextGitSplitDiffWidth',
+  'gitGraphPaneCollapsed',
+  'gitGraphPaneHeight',
+  'gitRepositoryPaneStates',
   'notesPanelHeight',
   'workStatusExpandedSections',
   'workStatusScrollTop',

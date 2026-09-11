@@ -805,6 +805,78 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().terminalLoginShells).toEqual(['zsh', 'fish']);
   });
 
+  test('leaves the local git review layout alone when the server omits the key', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    useUIStore.getState().setGitReviewLayout('combined');
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: { draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
+      source: 'web',
+    }));
+
+    await syncDesktopSettings();
+
+    // A server document without the key means "not set", not "reset": the
+    // registry leaves the local store untouched instead of inventing a default.
+    expect(useUIStore.getState().gitReviewLayout).toBe('combined');
+  });
+
+  test('hydrates the persisted git review layout from server settings', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    useUIStore.getState().setGitReviewLayout('separate');
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: {
+        gitReviewLayout: 'combined',
+        draftStartersCraftGoalAdded: true,
+        draftStartersScheduleTaskAdded: true,
+      },
+      source: 'web',
+    }));
+
+    await syncDesktopSettings();
+
+    expect(useUIStore.getState().gitReviewLayout).toBe('combined');
+  });
+
+  test('drops an invalid git review layout from server settings at the parse boundary', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    useUIStore.getState().setGitReviewLayout('combined');
+    const settings: SettingsPayload = {
+      draftStartersCraftGoalAdded: true,
+      draftStartersScheduleTaskAdded: true,
+    };
+    Object.defineProperty(settings, 'gitReviewLayout', {
+      value: 'invalid',
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+    registerSettingsApi(async () => ({}), async () => ({
+      settings,
+      source: 'web',
+    }));
+
+    await syncDesktopSettings();
+
+    // The registry parser rejects the value, so the document is treated as if
+    // the key were absent and the local choice survives.
+    expect(useUIStore.getState().gitReviewLayout).toBe('combined');
+  });
+
+  test('treats git review layout save responses as partial patches', async () => {
+    getWindow();
+    useUIStore.getState().setTerminalShell('fish');
+    useUIStore.getState().setGitReviewLayout('separate');
+    registerSettingsSave(async () => ({ gitReviewLayout: 'combined' }));
+
+    await updateDesktopSettings({ gitReviewLayout: 'combined' });
+
+    expect(useUIStore.getState().gitReviewLayout).toBe('combined');
+    expect(useUIStore.getState().terminalShell).toBe('fish');
+  });
+
   test('autosaves all model selector settings fields', async () => {
     getWindow();
     const saveCalls: Array<Partial<SettingsPayload>> = [];
@@ -900,6 +972,22 @@ describe('updateDesktopSettings', () => {
     // An unrelated partial save response must not re-enable a hidden section.
     await updateDesktopSettings({ workStatusPanelEnabled: useUIStore.getState().workStatusPanelEnabled });
     expect(useUIStore.getState().workStatusHiddenSections).toEqual(['telemetry']);
+  });
+
+  test('autosaves git review layout changes to shared settings', async () => {
+    getWindow();
+    useUIStore.getState().setGitReviewLayout('separate');
+    const saveCalls: Array<Partial<SettingsPayload>> = [];
+    registerSettingsSave(async (changes) => {
+      saveCalls.push(changes);
+      return changes as SettingsPayload;
+    });
+    startAppearanceAutoSave();
+
+    useUIStore.getState().setGitReviewLayout('combined');
+    await delay(500);
+
+    expect(saveCalls.some((changes) => changes.gitReviewLayout === 'combined')).toBe(true);
   });
 
   test('applies persisted autoSaveEnabled from server settings', async () => {

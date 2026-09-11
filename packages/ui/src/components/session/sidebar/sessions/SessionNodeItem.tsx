@@ -40,6 +40,7 @@ import { getGitHubPrStatusKey, usePrVisualSummary } from '@/stores/useGitHubPrSt
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
+import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useI18n } from '@/lib/i18n';
 import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
@@ -727,20 +728,15 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   });
   const showUnreadStatus = !isSessionActionPending && !isStreaming && needsAttention && !isActive;
   const showStatusMarker = isStreaming || showUnreadStatus;
-  // Both states are the same static dot; only the color separates "running"
-  // from "unread". The elapsed-turn readout on the right carries the motion
-  // that a spinner used to, at one repaint per second instead of per frame.
+  // Dot by default; the opt-in animated indicator setting swaps the running state
+  // to a stepped spinner (SessionActivityIndicator).
   const statusMarkerLabel = isStreaming
     ? t('sessions.sidebar.session.status.active')
     : t('sessions.sidebar.session.status.unread');
   const statusMarkerContent = (
-    <span
-      className={cn(
-        'h-1.5 w-1.5 rounded-full',
-        isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
-      )}
-      aria-label={statusMarkerLabel}
-      title={statusMarkerLabel}
+    <SessionActivityIndicator
+      state={isStreaming ? 'running' : 'unread'}
+      label={statusMarkerLabel}
     />
   );
   // The settled duration lives exactly as long as the unread marker does, so a
