@@ -433,6 +433,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.notifyOnSubtasks === 'boolean') {
       result.notifyOnSubtasks = candidate.notifyOnSubtasks;
     }
+    if (typeof candidate.dockerInstancesEnabled === 'boolean') {
+      result.dockerInstancesEnabled = candidate.dockerInstancesEnabled;
+    }
     if (typeof candidate.notifyOnCompletion === 'boolean') {
       result.notifyOnCompletion = candidate.notifyOnCompletion;
     }

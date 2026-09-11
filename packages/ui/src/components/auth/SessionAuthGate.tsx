@@ -8,6 +8,7 @@ import { invokeDesktop, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { syncDesktopSettings, initializeAppearancePreferences } from '@/lib/persistence';
 import { applyPersistedDirectoryPreferences } from '@/lib/directoryPersistence';
 import { DesktopHostSwitcherInline } from '@/components/desktop/DesktopHostSwitcher';
+import { DockerInstancesWebEntry } from '@/components/desktop/DockerInstanceSection';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
@@ -877,6 +878,8 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
             </p>
           </div>
         )}
+        {/* Web runtimes: docker-backed instance entry (self-hiding). */}
+        <DockerInstancesWebEntry />
       </ErrorScreen>
     );
   }
@@ -1010,6 +1013,8 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
               </p>
             </div>
           )}
+          {/* Web runtimes: docker-backed instance entry (self-hiding). */}
+          <DockerInstancesWebEntry />
         </div>
       </AuthShell>
     );

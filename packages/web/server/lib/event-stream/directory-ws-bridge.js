@@ -1,5 +1,6 @@
 import { sendMessageStreamWsEvent, sendMessageStreamWsFrame } from './protocol.js';
 import { createUpstreamSseReader } from './upstream-reader.js';
+import { getPathMapping } from '../opencode/path-mapping.js';
 
 function shouldTriggerUpstreamHealthCheck(upstream) {
   if (!upstream) {
@@ -113,7 +114,7 @@ export function acceptDirectoryMessageStreamWsConnection({
           }
 
           if (requestedDirectory) {
-            targetUrl.searchParams.set('directory', requestedDirectory);
+            targetUrl.searchParams.set('directory', getPathMapping().toRemote(requestedDirectory));
           }
 
           return targetUrl;

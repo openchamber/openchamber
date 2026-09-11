@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { registerSkillRoutes } from './skill-routes.js';
+import { createPathMapping, setActivePathMapping } from './path-mapping.js';
 import {
   createSkill,
   deleteSkill,
@@ -28,7 +29,7 @@ const createTempProject = () => {
   return projectRoot;
 };
 
-const startSkillsApp = ({ projectRoot }) => {
+const startSkillsApp = ({ projectRoot, getOpenCodePort = null }) => {
   const app = express();
   app.use(express.json());
 
@@ -53,7 +54,7 @@ const startSkillsApp = ({ projectRoot }) => {
     clientReloadDelayMs: 0,
     buildOpenCodeUrl: () => 'http://127.0.0.1:9/',
     getOpenCodeAuthHeaders: () => ({}),
-    getOpenCodePort: () => 0,
+    getOpenCodePort: getOpenCodePort ?? (() => 0),
     getSkillSources,
     discoverSkills,
     mergeDiscoveredSkills,
@@ -95,6 +96,8 @@ describe('skill-routes directory soft fallback', () => {
   let appHandle = null;
 
   afterEach(async () => {
+    setActivePathMapping(null);
+    vi.unstubAllGlobals();
     if (appHandle) {
       await appHandle.close();
       appHandle = null;
@@ -121,7 +124,6 @@ describe('skill-routes directory soft fallback', () => {
     });
     expect(createResponse.status).toBe(200);
     expect(fs.existsSync(path.join(projectRoot, '.agents', 'skills', 'repo-local-skill', 'SKILL.md'))).toBe(true);
-
     const listResponse = await fetch(`${appHandle.baseUrl}/api/config/skills`);
     expect(listResponse.status).toBe(200);
     const payload = await listResponse.json();
@@ -129,6 +131,32 @@ describe('skill-routes directory soft fallback', () => {
     const skill = payload.skills.find((entry) => entry.name === 'repo-local-skill');
     expect(skill.scope).toBe('project');
     expect(skill.source).toBe('agents');
+  });
+
+  it('translates mapped directories for OpenCode-discovered skills', async () => {
+    setActivePathMapping(createPathMapping({
+      platform: 'linux',
+      rules: [{ hostPrefix: '/repo', remotePrefix: '/workspace', compareKey: '/repo' }],
+    }));
+    projectRoot = createTempProject();
+    appHandle = startSkillsApp({ projectRoot, getOpenCodePort: () => 4096 });
+
+    const requests = [];
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', vi.fn(async (request, init) => {
+      const url = new URL(typeof request === 'string' ? request : request.url);
+      if (appHandle && url.origin === appHandle.baseUrl) return realFetch(request, init);
+      requests.push(url.pathname + url.search);
+      return new Response(JSON.stringify([{ name: 'remote-skill', location: '/workspace/.opencode/skills/remote-skill', description: 'Remote', content: 'Content' }]), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }));
+
+    const listResponse = await fetch(`${appHandle.baseUrl}/api/config/skills?directory=/repo/app`);
+    expect(listResponse.status).toBe(200);
+    const payload = await listResponse.json();
+    expect(payload.skills.map((skill) => skill.name)).toContain('remote-skill');
+    expect(requests).toEqual(['/skill?directory=%2Fworkspace%2Fapp']);
   });
 
   it('lists manually created repository-local .agents skills via active-project fallback', async () => {

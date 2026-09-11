@@ -44,6 +44,7 @@ import {
 } from '@/components/ui/collapsible';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitcher';
+import { DockerInstancesWebEntry, useActiveDockerInstanceLabel } from '@/components/desktop/DockerInstanceSection';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
@@ -128,6 +129,7 @@ type DesktopServicesMenuProps = {
   isDesktopApp: boolean;
   currentInstanceLabel: string;
   currentInstanceIsLocal: boolean;
+  dockerActiveLabel?: string | null;
   isDesktopServicesOpen: boolean;
   setIsDesktopServicesOpen: React.Dispatch<React.SetStateAction<boolean>>;
   refreshCurrentInstanceLabel: () => Promise<void>;
@@ -142,6 +144,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   isDesktopApp,
   currentInstanceLabel,
   currentInstanceIsLocal,
+  dockerActiveLabel,
   isDesktopServicesOpen,
   setIsDesktopServicesOpen,
   refreshCurrentInstanceLabel,
@@ -152,6 +155,11 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   onOpenRemoteUpdate,
 }: DesktopServicesMenuProps) {
   const { t } = useI18n();
+  // When a Docker-backed instance is the active upstream, the top-right label
+  // must say so even though the desktop host (client origin) is still Local.
+  const displayInstanceLabel = dockerActiveLabel
+    ? t('dockerInstances.header.activeLabel', { name: dockerActiveLabel })
+    : currentInstanceLabel;
   return (
     <DropdownMenu
       open={isDesktopServicesOpen}
@@ -168,7 +176,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
             <button
               type="button"
               aria-label={isDesktopApp
-                ? t('header.services.openWithCurrent', { current: currentInstanceLabel })
+                ? t('header.services.openWithCurrent', { current: displayInstanceLabel })
                 : t('header.services.open')}
               className={cn(
                 DESKTOP_HEADER_ICON_BUTTON_CLASS,
@@ -177,7 +185,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
             >
               <Icon name="server" className="h-[18px] w-[18px]" />
               {isDesktopApp ? (
-                <span className="truncate typography-ui-label font-medium text-foreground">{currentInstanceLabel}</span>
+                <span className="truncate typography-ui-label font-medium text-foreground">{displayInstanceLabel}</span>
               ) : null}
             </button>
           </DropdownMenuTrigger>
@@ -185,7 +193,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
         <TooltipContent>
           <p>
             {t('header.services.tooltip.currentInstance', {
-              current: currentInstanceLabel,
+              current: displayInstanceLabel,
               toggle: shortcutLabel('toggle_services_menu'),
             })}
           </p>
@@ -1268,6 +1276,8 @@ export const Header: React.FC = () => {
     },
   });
 
+  const dockerActiveLabel = useActiveDockerInstanceLabel();
+
   const desktopSidebarActions = (
     <>
       {projectActionsContext ? (
@@ -1286,6 +1296,7 @@ export const Header: React.FC = () => {
         isDesktopApp={isDesktopApp}
         currentInstanceLabel={currentInstanceLabel}
         currentInstanceIsLocal={currentInstanceIsLocal}
+        dockerActiveLabel={dockerActiveLabel}
         isDesktopServicesOpen={isDesktopServicesOpen}
         setIsDesktopServicesOpen={setIsDesktopServicesOpen}
         refreshCurrentInstanceLabel={refreshCurrentInstanceLabel}
@@ -1295,7 +1306,11 @@ export const Header: React.FC = () => {
         remoteUpdateError={remoteUpdateError}
         onOpenRemoteUpdate={openRemoteInstanceUpdate}
       />
-      ) : null}
+      ) : (
+      // Web runtimes have no desktop instance switcher; the docker-instances
+      // entry self-hides unless the server-side feature is enabled.
+      <DockerInstancesWebEntry variant="icon" />
+      )}
     </>
   );
 

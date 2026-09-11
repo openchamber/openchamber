@@ -11,6 +11,10 @@ export type RuntimeEndpointChangedDetail = {
   previousApiBaseUrl: string;
   runtimeKey: string;
   previousRuntimeKey: string;
+  /** True when only the upstream identity changed (docker switch) and the
+   * client origin is unchanged: consumers re-scope data caches but must not
+   * flip the connection phase (no reconnect splash, dropdowns stay open). */
+  identityOnly?: boolean;
 };
 
 const RUNTIME_ENDPOINT_CHANGED_EVENT = 'openchamber:runtime-endpoint-changed';
@@ -193,6 +197,48 @@ export const subscribeRuntimeEndpointWillChange = (callback: (detail: RuntimeEnd
   };
   window.addEventListener(RUNTIME_ENDPOINT_WILL_CHANGE_EVENT, listener);
   return () => window.removeEventListener(RUNTIME_ENDPOINT_WILL_CHANGE_EVENT, listener);
+};
+
+// Docker-backed instance identity override: the active upstream can change
+// while the client origin stays the local server, so caches and stores keyed
+// by `getRuntimeKey()` must still be reset and re-scoped. This flips ONLY the
+// runtime identity — origin, client token, extra headers, and relay tunnel
+// are left untouched, unlike `switchRuntimeEndpoint`.
+let identityOverrideKey: string | null = null;
+let identityOriginalKey: string | null = null;
+
+export const getRuntimeIdentityOverride = (): string | null => identityOverrideKey;
+
+export const setRuntimeIdentityOverride = (key: string | null): void => {
+  if (identityOverrideKey === key) {
+    return;
+  }
+  const apiBaseUrl = getRuntimeApiBaseUrl();
+  const previousRuntimeKey = getRuntimeKey();
+  const detail: RuntimeEndpointChangedDetail = {
+    apiBaseUrl,
+    previousApiBaseUrl: apiBaseUrl,
+    runtimeKey: key ?? identityOriginalKey ?? previousRuntimeKey,
+    previousRuntimeKey,
+    identityOnly: true,
+  };
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent<RuntimeEndpointChangedDetail>(RUNTIME_ENDPOINT_WILL_CHANGE_EVENT, { detail }));
+  }
+  if (key === null) {
+    activeRuntimeKey = identityOriginalKey ?? previousRuntimeKey;
+    identityOverrideKey = null;
+    identityOriginalKey = null;
+  } else {
+    if (identityOverrideKey === null) {
+      identityOriginalKey = previousRuntimeKey;
+    }
+    identityOverrideKey = key;
+    activeRuntimeKey = key;
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent<RuntimeEndpointChangedDetail>(RUNTIME_ENDPOINT_CHANGED_EVENT, { detail }));
+  }
 };
 
 export const subscribeRuntimeEndpointChanged = (callback: (detail: RuntimeEndpointChangedDetail) => void): (() => void) => {

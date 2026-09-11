@@ -1,3 +1,5 @@
+import { getPathMapping } from '../opencode/path-mapping.js';
+
 const SETTINGS_KEY = 'permissionAutoAccept';
 const RETRY_DELAYS_MS = [0, 250, 1000];
 const REQUEST_TIMEOUT_MS = 5000;
@@ -97,7 +99,7 @@ export function createPermissionAutoAcceptRuntime({
 
   const request = async (path, { directory, method = 'GET', body } = {}) => {
     const url = new URL(buildOpenCodeUrl(path, ''));
-    if (directory) url.searchParams.set('directory', directory);
+    if (directory) url.searchParams.set('directory', getPathMapping().toRemote(directory));
     const response = await fetchImpl(url, {
       method,
       headers: {

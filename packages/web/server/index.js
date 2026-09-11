@@ -49,9 +49,16 @@ import {
 import { createFsSearchRuntime as createFsSearchRuntimeFactory } from './lib/fs/search.js';
 import { createOpenCodeLifecycleRuntime } from './lib/opencode/lifecycle.js';
 import { createOpenCodeEnvRuntime } from './lib/opencode/env-runtime.js';
+import { getPathMapping } from './lib/opencode/path-mapping.js';
 import { resolveOpenCodeEnvConfig } from './lib/opencode/env-config.js';
 import { createHmrStateRuntime } from './lib/opencode/hmr-state-runtime.js';
 import { createOpenCodeNetworkRuntime } from './lib/opencode/network-runtime.js';
+import { createDockerRuntime } from './lib/docker/runtime.js';
+import { createDockerInstanceStore } from './lib/opencode/docker-instances/store.js';
+import { createDockerInstanceLifecycleManager } from './lib/opencode/docker-instances/lifecycle-manager.js';
+import { registerDockerInstanceRoutes } from './lib/opencode/docker-instances/routes.js';
+import { OPENCODE_CONFIG_DIR, SKILL_DIR } from './lib/opencode/shared.js';
+import { AUTH_FILE } from './lib/opencode/auth.js';
 import { createOpenCodeAuthStateRuntime } from './lib/opencode/auth-state-runtime.js';
 import { createProjectDirectoryRuntime } from './lib/opencode/project-directory-runtime.js';
 import { createSettingsNormalizationRuntime } from './lib/opencode/settings-normalization-runtime.js';
@@ -579,6 +586,9 @@ let runtimeManagedRemoteTunnelHostname = '';
 let terminalRuntime = null;
 let dictationRuntime = null;
 let messageStreamRuntime = null;
+// Docker-backed OpenCode instance runtime; created below and assigned here so
+// the network runtime's upstream override can reference it before construction.
+let dockerInstanceManager = null;
 const userProvidedOpenCodePassword = hmrStateRuntime.getUserProvidedOpenCodePassword(hmrState);
 const initialOpenCodeAuthState = hmrStateRuntime.resolveOpenCodeAuthFromState({
   hmrState,
@@ -683,6 +693,8 @@ const openCodeNetworkRuntime = createOpenCodeNetworkRuntime({
   state: openCodeNetworkState,
   getOpenCodeAuthHeaders,
   configuredOpenCodeHostname: ENV_CONFIGURED_OPENCODE_HOSTNAME,
+  // Active Docker-backed instance override (null = Local/external upstream).
+  resolveUpstreamOverride: () => dockerInstanceManager?.getActiveUpstream() ?? null,
 });
 
 const waitForReady = (...args) => openCodeNetworkRuntime.waitForReady(...args);
@@ -691,6 +703,31 @@ const setDetectedOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.setDete
 const buildOpenCodeUrl = (...args) => openCodeNetworkRuntime.buildOpenCodeUrl(...args);
 const ensureOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.ensureOpenCodeApiPrefix(...args);
 const scheduleOpenCodeApiDetection = (...args) => openCodeNetworkRuntime.scheduleOpenCodeApiDetection(...args);
+
+// Docker-backed OpenCode instances: registry, lifecycle manager, and CLI
+// runtime. The feature stays dormant until the settings toggle is enabled;
+// creating the runtime here performs no Docker interaction at all.
+
+// Docker-backed OpenCode instances: registry, lifecycle manager, and CLI
+// runtime. The feature stays dormant until the settings toggle is enabled;
+// creating the runtime here performs no Docker interaction at all.
+dockerInstanceManager = createDockerInstanceLifecycleManager({
+  runtime: createDockerRuntime(),
+  store: createDockerInstanceStore({
+    filePath: path.join(OPENCHAMBER_DATA_DIR, 'docker-instances.json'),
+    fsPromises,
+  }),
+  defaultImage: process.env.OPENCHAMBER_DOCKER_IMAGE || 'opencode-instance:local',
+  onActiveUpstreamChanged: () => {
+    // Same rebinding path as a managed OpenCode restart: long-lived upstream
+    // readers must redial the new active endpoint.
+    try {
+      messageStreamRuntime?.rebindUpstream();
+    } catch (error) {
+      console.warn('Failed to rebind message stream after docker instance switch:', error?.message ?? error);
+    }
+  },
+});
 
 // Plugin-registered providers exist only inside the running OpenCode process.
 // Small-model callers resolve them through this connection; without it they
@@ -860,7 +897,7 @@ const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
   isAgentMemoryEnabled,
   openCodeFetch: async (fetchPath, { directory, method = 'GET', body } = {}) => {
     const params = new URLSearchParams();
-    if (directory) params.set('directory', directory);
+    if (directory) params.set('directory', getPathMapping().toRemote(directory));
     const search = params.toString();
     const response = await fetch(`${buildOpenCodeUrl(fetchPath, '')}${search ? `?${search}` : ''}`, {
       method,
@@ -1906,6 +1943,41 @@ async function main(options = {}) {
   relayService.registerRoutes(app);
 
   registerBrowserControlRoutes(app, { express, broker: browserControlBroker });
+
+  // Docker-backed OpenCode instances (feature-gated). Mutating routes refuse
+  // while the toggle is off; the restore degrades a stale active pointer to
+  // the default upstream instead of poisoning OpenCode-bound requests.
+  registerDockerInstanceRoutes(app, {
+    manager: dockerInstanceManager,
+    isFeatureEnabled: async () => {
+      try {
+        const settings = await readSettingsFromDiskMigrated();
+        return settings.dockerInstancesEnabled === true;
+      } catch {
+        return false;
+      }
+    },
+    fsPromises,
+    paths: { openCodeConfigDir: OPENCODE_CONFIG_DIR, skillDir: SKILL_DIR, authFile: AUTH_FILE },
+    defaultImageName: process.env.OPENCHAMBER_DOCKER_IMAGE || 'opencode-instance:local',
+    dockerRuntime: createDockerRuntime(),
+    dockerFilePath: path.resolve(__dirname, '../../../docker/opencode-instance/Dockerfile'),
+    dockerContextPath: path.resolve(__dirname, '../../../docker/opencode-instance'),
+  });
+  void dockerInstanceManager
+    .restoreActiveInstance({
+      isFeatureEnabled: async () => {
+        try {
+          const settings = await readSettingsFromDiskMigrated();
+          return settings.dockerInstancesEnabled === true;
+        } catch {
+          return false;
+        }
+      },
+    })
+    .catch((error) => {
+      console.warn('[docker-instances] Active instance restore skipped:', error?.message ?? error);
+    });
 
   // One scanner backs both discovery and the tunnel allowlist, so a port the
   // user can see is exactly a port the tunnel will dial.

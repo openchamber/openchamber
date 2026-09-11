@@ -2,9 +2,15 @@ import express from 'express';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { createWorktree, getWorktreeBootstrapStatus } from '../git/index.js';
 import { expandSnippets } from '../opencode/snippets.js';
+import { getPathMapping } from '../opencode/path-mapping.js';
 import { expandCommandGoalObjective, parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { OpenChamberControlError, asControlError } from '../openchamber-control/error.js';
+
+// Directory spelling OpenCode knows for this project. Host paths are
+// translated only on the way to OpenCode; everything user-facing stays in
+// host terms.
+const toUpstreamDirectory = (directory) => getPathMapping().toRemote(directory);
 
 const asNonEmptyString = (value) => {
   if (typeof value !== 'string') return null;
@@ -86,7 +92,7 @@ const buildDirectoryHeaders = (directory) => ({
   // OpenCode rejects non-ASCII header values; the official SDK sends this
   // header percent-encoded, so match that wire format (non-ASCII checkout
   // paths such as "Masaüstü" otherwise fail every dispatched prompt).
-  ...(directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : {}),
+  ...(directory ? { 'x-opencode-directory': encodeURIComponent(toUpstreamDirectory(directory)) } : {}),
 });
 
 const fetchJson = async (url, authHeaders, fallback, directory) => {
@@ -99,12 +105,13 @@ const fetchJson = async (url, authHeaders, fallback, directory) => {
 
 const fetchSelectionInputs = async ({ buildOpenCodeUrl, authHeaders, directory, readSettingsFromDiskMigrated }) => {
   const settings = await readSettingsFromDiskMigrated();
+  const upstreamDirectory = toUpstreamDirectory(directory);
   const providersUrl = new URL(buildOpenCodeUrl('/config/providers', ''));
-  providersUrl.searchParams.set('directory', directory);
+  providersUrl.searchParams.set('directory', upstreamDirectory);
   const agentsUrl = new URL(buildOpenCodeUrl('/agent', ''));
-  agentsUrl.searchParams.set('directory', directory);
+  agentsUrl.searchParams.set('directory', upstreamDirectory);
   const configUrl = new URL(buildOpenCodeUrl('/config', ''));
-  configUrl.searchParams.set('directory', directory);
+  configUrl.searchParams.set('directory', upstreamDirectory);
 
   const [providersBody, agentsBody, configBody] = await Promise.all([
     fetchJson(providersUrl, authHeaders, { providers: [] }, directory),
@@ -178,7 +185,7 @@ const resolveDefaultSelection = ({ agents, providers, settings, opencodeDefaultA
 
 const runPromptAsync = async ({ baseUrl, authHeaders, sessionID, directory, payload }) => {
   const promptUrl = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}/prompt_async`);
-  promptUrl.searchParams.set('directory', directory);
+  promptUrl.searchParams.set('directory', toUpstreamDirectory(directory));
   const response = await fetch(promptUrl.toString(), {
     method: 'POST',
     headers: {
@@ -197,8 +204,9 @@ const runPromptAsync = async ({ baseUrl, authHeaders, sessionID, directory, payl
 };
 
 const createSession = async ({ baseUrl, authHeaders, directory, title }) => {
+  const upstreamDirectory = toUpstreamDirectory(directory);
   const sessionUrl = new URL(`${baseUrl}/session`);
-  sessionUrl.searchParams.set('directory', directory);
+  sessionUrl.searchParams.set('directory', upstreamDirectory);
   const response = await fetch(sessionUrl.toString(), {
     method: 'POST',
     headers: {
@@ -207,7 +215,7 @@ const createSession = async ({ baseUrl, authHeaders, directory, title }) => {
       'content-type': 'application/json',
       accept: 'application/json',
     },
-    body: JSON.stringify({ directory, ...(title ? { title } : {}) }),
+    body: JSON.stringify({ directory: upstreamDirectory, ...(title ? { title } : {}) }),
   });
 
   if (!response.ok) {
@@ -226,7 +234,7 @@ const createSession = async ({ baseUrl, authHeaders, directory, title }) => {
 const forkSession = async ({ client, sessionID, directory, messageID }) => {
   const response = await client.session.fork({
     sessionID,
-    directory,
+    directory: toUpstreamDirectory(directory),
     ...(messageID ? { messageID } : {}),
   });
   const session = response?.data;
@@ -239,7 +247,7 @@ const forkSession = async ({ client, sessionID, directory, messageID }) => {
 const latestCompletedAssistantMessageID = async ({ client, sessionID, directory }) => {
   let response;
   try {
-    response = await client.session.messages({ sessionID, directory, limit: 100 });
+    response = await client.session.messages({ sessionID, directory: toUpstreamDirectory(directory), limit: 100 });
   } catch {
     return null;
   }
@@ -340,7 +348,7 @@ const waitForWorktreeBootstrapReady = async ({ directory }) => {
 const latestUserMessageID = async ({ client, sessionID, directory }) => {
   let response;
   try {
-    response = await client.session.messages({ sessionID, directory, limit: 100 });
+    response = await client.session.messages({ sessionID, directory: toUpstreamDirectory(directory), limit: 100 });
   } catch {
     return { ok: false, messageID: null };
   }
@@ -401,7 +409,7 @@ export const createOpenChamberSessionService = (dependencies) => {
   // null when the session has no user message carrying a model.
   const fetchLastUserSelection = async ({ client, sessionID, directory }) => {
     try {
-      const response = await client.session.messages({ sessionID, directory, limit: 20 });
+      const response = await client.session.messages({ sessionID, directory: toUpstreamDirectory(directory), limit: 20 });
       const records = Array.isArray(response?.data) ? response.data : [];
       for (let index = records.length - 1; index >= 0; index -= 1) {
         const info = records[index]?.info;
@@ -513,7 +521,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     let resolvedCommand = null;
     if (parsedCommand) {
       try {
-        const response = await client.command.list({ directory });
+        const response = await client.command.list({ directory: toUpstreamDirectory(directory) });
         const commands = Array.isArray(response?.data) ? response.data : [];
         const command = commands.find((candidate) => candidate?.name === parsedCommand.command);
         if (command) resolvedCommand = { ...parsedCommand, template: command.template };
@@ -546,7 +554,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       try {
         await client.session.command({
           sessionID,
-          directory,
+          directory: toUpstreamDirectory(directory),
           command: resolvedCommand.command,
           arguments: resolvedCommand.arguments,
           ...(agent ? { agent } : {}),

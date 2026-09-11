@@ -22,6 +22,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { requestGlobalEventReconnect } from '@/sync/sync-context';
 import { resetStreamingState } from '@/sync/streaming';
 import { replaceGlobalSessionStatusById } from '@/sync/global-session-status';
 import { resetSessionOrdering } from '@/sync/session-ordering';
@@ -49,15 +50,23 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   }
   disposeTerminalInputTransport();
   useTerminalStore.getState().clearAll();
-  opencodeClient.reconnectToRuntimeBaseUrl();
-  useConfigStore.setState({
-    providers: [],
-    agents: [],
-    isConnected: false,
-    isInitialized: false,
-    connectionPhase: 'connecting',
-    lastDisconnectReason: null,
-  });
+  if (detail.identityOnly) {
+    // Docker upstream identity switch: same origin, same server — only the
+    // upstream target moved. Re-scope data caches and refetch the new
+    // upstream's config WITHOUT flipping the connection phase (a connecting
+    // splash here would unmount the app shell and close open dropdowns).
+    useConfigStore.setState({ providers: [], agents: [] });
+  } else {
+    opencodeClient.reconnectToRuntimeBaseUrl();
+    useConfigStore.setState({
+      providers: [],
+      agents: [],
+      isConnected: false,
+      isInitialized: false,
+      connectionPhase: 'connecting',
+      lastDisconnectReason: null,
+    });
+  }
   useProjectsStore.getState().resetForRuntimeSwitch();
   // Notes, todos, plans and the pinned-context bookkeeping are keyed by a
   // path-derived project id, which two runtimes can collide on.
@@ -95,5 +104,15 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   useUIStore.getState().applyLinearIssueListFiltersForRuntime();
   useSessionUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
   resetStreamingState();
+  if (detail.identityOnly) {
+    // The global-event pipeline's socket is still piped to the PREVIOUS
+    // upstream (per-connection WS proxy resolves its target at connect time);
+    // force a reconnect so the new upstream's session events arrive instantly
+    // instead of after the stale-stream resync cycle.
+    requestGlobalEventReconnect('docker-upstream-changed');
+    // Refetch the new upstream's providers/agents without the connecting splash.
+    void useConfigStore.getState().loadProviders().catch(() => {});
+    void useConfigStore.getState().loadAgents().catch(() => {});
+  }
   queueMicrotask(() => void syncDesktopSettings());
 };

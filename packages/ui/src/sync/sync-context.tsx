@@ -171,6 +171,17 @@ function useSyncSystem() {
   return ctx
 }
 
+// Bridge for surfaces OUTSIDE the SyncProvider (runtime-endpoint resets,
+// docker upstream switches): forces the global-event pipeline to drop its
+// socket — which is piped to the PREVIOUS upstream until it reconnects — and
+// redial via the current runtime resolution. No-op while the provider is not
+// mounted.
+let globalPipelineReconnect: ((reason?: string) => void) | null = null;
+
+export function requestGlobalEventReconnect(reason = 'runtime-identity-change'): void {
+  globalPipelineReconnect?.(reason);
+}
+
 export function useSyncRuntime() {
   const ctx = useContext(SyncRuntimeContext)
   if (!ctx) throw new Error("useSyncRuntime must be used within <SyncProvider>")
@@ -2587,8 +2598,10 @@ export function SyncProvider(props: {
       },
     })
     pipelineReconnectRef.current = pipeline.reconnect
+    globalPipelineReconnect = pipeline.reconnect
     return () => {
       if (pipelineReconnectRef.current === pipeline.reconnect) {
+        globalPipelineReconnect = null
         pipelineReconnectRef.current = null
       }
       pipeline.cleanup()
