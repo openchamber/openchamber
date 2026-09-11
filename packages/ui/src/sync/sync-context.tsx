@@ -1616,6 +1616,18 @@ export function handleEvent(
     return
   }
 
+  // SAFETY: the realtime payload type does not model OpenChamber synthetic
+  // events; only the discriminant is read before this branch returns.
+  if ((payload as { type?: unknown }).type === "openchamber:settings.updated") {
+    // Another window / deep link / external API changed authoritative settings.
+    // Hand off through a DOM event so the settings lifecycle module owns cache
+    // invalidation and refetch without introducing a persistence import cycle.
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("openchamber:settings-updated"))
+    }
+    return
+  }
+
   if (shouldConsumeBulkArchiveEcho(payload, expectedRuntimeKey)) return
 
   const directory = resolveDirectoryFromRoutingIndex(routingIndex, rawDirectory, payload, childStores, batch)

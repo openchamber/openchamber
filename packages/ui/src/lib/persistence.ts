@@ -375,6 +375,10 @@ const applyServerSettings = (settings: DesktopSettings): void => {
   }
 };
 let _settingsInflight: { promise: Promise<DesktopSettings | null>; context: SettingsRuntimeContext } | null = null;
+// Incremented whenever an `openchamber:settings-updated` event is observed.
+// A load captures this before fetching; if it moves while the request is in
+// flight, the response may predate the persisted change and must be retried.
+let _settingsUpdatedVersion = 0;
 let _pendingSettingsChanges: Partial<DesktopSettings> | null = null;
 let _pendingSettingsContext: SettingsRuntimeContext | null = null;
 let _settingsFlushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -455,6 +459,21 @@ const ensureSettingsRuntimeLifecycle = (): void => {
   if (_settingsLifecycleInitialized || typeof window === 'undefined') return;
   _settingsLifecycleInitialized = true;
 
+  // Server-persisted settings changed outside this window (another window, a
+  // deep link, or the external settings API). Drop the cached snapshot and
+  // reconcile against the authoritative server state. This is idempotent:
+  // unchanged settings produce no store writes and no outbound save, so an
+  // echo of this window's own save converges without a loop.
+  window.addEventListener('openchamber:settings-updated', () => {
+    // Record the event before refetching: a load that was already in flight
+    // when the persisted change landed may return a pre-update snapshot.
+    // `fetchWebSettings` detects the version move and re-runs such loads once.
+    _settingsUpdatedVersion += 1;
+    invalidateSettingsCache();
+    // A reconcile must not adopt another window's workspace pointer or theme.
+    void syncDesktopSettings({ bootstrap: false, adoptTheme: false });
+  });
+
   subscribeRuntimeEndpointWillChange((detail) => {
     if (detail.runtimeKey === detail.previousRuntimeKey) return;
     if (_settingsFlushTimer) clearTimeout(_settingsFlushTimer);
@@ -498,6 +517,46 @@ const ensureSettingsRuntimeLifecycle = (): void => {
   }
 };
 
+// Single uncached settings load attempt. Returns null on failure so callers
+// never mistake a failed request for authoritative empty data.
+const loadWebSettingsOnce = async (context: SettingsRuntimeContext): Promise<DesktopSettings | null> => {
+  if (!isSettingsRuntimeContextCurrent(context)) return null;
+
+  const runtimeSettings = getRuntimeSettingsAPI();
+  if (runtimeSettings) {
+    try {
+      const result = await runtimeSettings.load();
+      if (!isSettingsRuntimeContextCurrent(context)) return null;
+      return sanitizeWebSettings(result.settings);
+    } catch (error) {
+      if (!isSettingsRuntimeContextCurrent(context)) return null;
+      console.warn('Failed to load shared settings from runtime settings API:', error);
+    }
+  }
+
+  if (!isSettingsRuntimeContextCurrent(context)) return null;
+  try {
+    // The surface kind travels as a query parameter, not a header: a header
+    // would turn the request into a CORS preflight, which older instances
+    // (and the packaged desktop's cross-origin shell) refuse.
+    const response = await runtimeFetch(settingsEndpointForSurface(), {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+    if (!isSettingsRuntimeContextCurrent(context)) return null;
+    if (!response.ok) {
+      return null;
+    }
+    const data = await response.json().catch(() => null);
+    if (!isSettingsRuntimeContextCurrent(context)) return null;
+    return sanitizeWebSettings(data);
+  } catch (error) {
+    if (!isSettingsRuntimeContextCurrent(context)) return null;
+    console.warn('Failed to load shared settings from server:', error);
+    return null;
+  }
+};
+
 const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Promise<DesktopSettings | null> => {
   ensureSettingsRuntimeLifecycle();
   // Return cached if fresh
@@ -511,44 +570,21 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
   const inflight = {
     context,
     promise: (async (): Promise<DesktopSettings | null> => {
-      const runtimeSettings = getRuntimeSettingsAPI();
-      if (runtimeSettings) {
-        try {
-          const result = await runtimeSettings.load();
-          if (!isSettingsRuntimeContextCurrent(context)) return null;
-          const settings = sanitizeWebSettings(result.settings);
+      // An `openchamber:settings-updated` event can land while this request is
+      // in flight; its response may predate the persisted change. Re-run the
+      // load when that happened so callers only ever cache/apply a snapshot at
+      // least as new as the latest event. Repeated events during one load
+      // coalesce into that single follow-up because only the version moved.
+      for (;;) {
+        const settingsUpdatedVersion = _settingsUpdatedVersion;
+        const settings = await loadWebSettingsOnce(context);
+        if (!isSettingsRuntimeContextCurrent(context)) return null;
+        if (settingsUpdatedVersion !== _settingsUpdatedVersion) continue;
+        if (settings) {
           _settingsCache = { value: settings, at: Date.now(), context };
-          if (settings) rememberServerSettings(settings);
-          return settings;
-        } catch (error) {
-          if (!isSettingsRuntimeContextCurrent(context)) return null;
-          console.warn('Failed to load shared settings from runtime settings API:', error);
+          rememberServerSettings(settings);
         }
-      }
-
-      if (!isSettingsRuntimeContextCurrent(context)) return null;
-      try {
-        // The surface kind travels as a query parameter, not a header: a header
-        // would turn the request into a CORS preflight, which older instances
-        // (and the packaged desktop's cross-origin shell) refuse.
-        const response = await runtimeFetch(settingsEndpointForSurface(), {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-        });
-        if (!isSettingsRuntimeContextCurrent(context)) return null;
-        if (!response.ok) {
-          return null;
-        }
-        const data = await response.json().catch(() => null);
-        if (!isSettingsRuntimeContextCurrent(context)) return null;
-        const settings = sanitizeWebSettings(data);
-        _settingsCache = { value: settings, at: Date.now(), context };
-        if (settings) rememberServerSettings(settings);
         return settings;
-      } catch (error) {
-        if (!isSettingsRuntimeContextCurrent(context)) return null;
-        console.warn('Failed to load shared settings from server:', error);
-        return null;
       }
     })(),
   };

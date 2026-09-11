@@ -1,16 +1,30 @@
-import { describe, expect, test } from "bun:test"
+import { beforeEach, describe, expect, test } from "bun:test"
 import type { ProjectEntry } from "@/lib/api/types"
 import type { DesktopSettings } from "@/lib/desktop"
+import { createProjectIdFromPath } from "@/lib/projectId"
+import { useSessionUIStore } from "@/sync/session-ui-store"
 import { useProjectsStore } from "./useProjectsStore"
 import { useDirectoryStore } from "./useDirectoryStore"
 
+const project = (id: string, path: string): ProjectEntry => ({
+  id: createProjectIdFromPath(path) ?? id,
+  path,
+  label: id,
+} as ProjectEntry)
+
 describe("useProjectsStore settings synchronization", () => {
+  beforeEach(() => {
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null })
+    useDirectoryStore.setState({ currentDirectory: "/workspace/current" })
+    useProjectsStore.setState({ projects: [], activeProjectId: null, manualProjectOrder: [] })
+  })
+
   test("treats a successful empty project snapshot as authoritative", () => {
-    const project = { id: "project-a", path: "/repo", label: "Repo" } as ProjectEntry
+    const existing = project("project-a", "/repo")
     useProjectsStore.setState({
-      projects: [project],
-      activeProjectId: project.id,
-      manualProjectOrder: [project.id],
+      projects: [existing],
+      activeProjectId: existing.id,
+      manualProjectOrder: [existing.id],
     })
 
     useProjectsStore.getState().synchronizeFromSettings({ projects: [] } as DesktopSettings)
@@ -51,6 +65,47 @@ describe("useProjectsStore settings synchronization", () => {
       { ...raw, activeProjectId: second.id } as DesktopSettings,
     )
     expect(useProjectsStore.getState().activeProjectId).toBe(second.id)
+  })
+
+  test("keeps the open session directory when a persisted active project changes", () => {
+    const sessionDirectory = "/workspace/session"
+    useSessionUIStore.setState({ currentSessionId: "ses_open", currentSessionDirectory: sessionDirectory })
+    useDirectoryStore.setState({ currentDirectory: sessionDirectory })
+    const incoming = project("project-b", "/workspace/project-b")
+
+    useProjectsStore.getState().synchronizeFromSettings({
+      projects: [incoming],
+      activeProjectId: incoming.id,
+    } as DesktopSettings)
+
+    expect(useProjectsStore.getState().projects).toEqual([incoming])
+    expect(useProjectsStore.getState().activeProjectId).toBe(incoming.id)
+    expect(useSessionUIStore.getState().currentSessionDirectory).toBe(sessionDirectory)
+    expect(useDirectoryStore.getState().currentDirectory).toBe(sessionDirectory)
+  })
+
+  test("applies a persisted active project to the directory when no session is open", () => {
+    const incoming = project("project-c", "/workspace/project-c")
+
+    useProjectsStore.getState().synchronizeFromSettings({
+      projects: [incoming],
+      activeProjectId: incoming.id,
+    } as DesktopSettings)
+
+    expect(useProjectsStore.getState().activeProjectId).toBe(incoming.id)
+    expect(useDirectoryStore.getState().currentDirectory).toBe(incoming.path)
+  })
+
+  test("repeated identical project snapshots are a no-op", () => {
+    const incoming = project("project-d", "/workspace/project-d")
+    const settings = { projects: [incoming], activeProjectId: incoming.id } as DesktopSettings
+
+    useProjectsStore.getState().synchronizeFromSettings(settings)
+    const projectsAfterFirst = useProjectsStore.getState().projects
+
+    useProjectsStore.getState().synchronizeFromSettings(settings)
+
+    expect(useProjectsStore.getState().projects).toBe(projectsAfterFirst)
   })
 })
 

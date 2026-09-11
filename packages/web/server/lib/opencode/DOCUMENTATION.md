@@ -210,7 +210,7 @@ Managed health failures are classified as `timeout`, `connection_refused`, `conn
   - `readSettingsFromDisk()`
   - `readSettingsFromDiskMigrated()`
   - `writeSettingsToDisk(settings)`
-  - `persistSettings(changes)`
+  - `persistSettings(changes)`: after a successful `writeSettingsToDisk`, broadcasts one payload-free `openchamber:settings.updated` global UI event so connected windows can reconcile cached settings against the new authoritative snapshot. A failed disk write emits no event. The payload intentionally carries no field names or values because settings updates can contain credentials (UI password, client tokens, tunnel tokens).
 - Persistent permission auto-accept policy is stored under `permissionAutoAccept`; execution ownership lives in `lib/permission-auto-accept/`.
 - Queued follow-up messages live in `<data-dir>/message-queue.json`, not in settings; execution ownership lives in `lib/message-queue/`.
 - Shared sidebar preferences are stored as validated top-level fields: `sidebarProjectDisplayMode`, `sidebarSessionGroupingMode`, `sidebarProjectSortOrder`, and `sidebarShowRecentSection`. Device-local picker selection and sticky-header state do not enter either settings file.

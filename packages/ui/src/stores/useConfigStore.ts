@@ -3195,6 +3195,11 @@ export const useConfigStore = create<ConfigStore>()(
                 },
 
                 initializeApp: async () => {
+                    // Install the projects-store subscription before the
+                    // dedupe check so a concurrent/duplicate init call cannot
+                    // skip the one-time registration (issue #3473).
+                    ensureConfigStoreProjectChangesSubscription();
+
                     if (_initializeAppInFlight) {
                         markStartupTrace('initializeApp:deduped');
                         return _initializeAppInFlight;
@@ -3516,3 +3521,58 @@ if (typeof window !== "undefined" && !unsubscribeConfigStoreDirectoryChanges) {
         void useConfigStore.getState().activateDirectory(state.currentDirectory);
     });
 }
+
+let unsubscribeConfigStoreProjectChanges: (() => void) | null = null;
+
+/**
+ * Registers the projects-store subscription that re-activates the resolved
+ * session/current directory when the project list changes (issue #3473).
+ *
+ * This must stay an explicit setup function instead of module-top-level code:
+ * `useProjectsStore` -> `session-ui-store` -> `useConfigStore` is a cycle, so
+ * when `useProjectsStore` is the entry module its binding is still in TDZ
+ * while this module evaluates. `initializeApp` invokes this once the module
+ * graph is fully evaluated; the guard keeps the registration single.
+ */
+export const ensureConfigStoreProjectChangesSubscription = (): void => {
+    if (unsubscribeConfigStoreProjectChanges) {
+        return;
+    }
+
+    unsubscribeConfigStoreProjectChanges = useProjectsStore.subscribe((state, previousState) => {
+        if (state.projects === previousState.projects) {
+            return;
+        }
+
+        // A project list change can make the current session/working directory
+        // resolve to its owning project even though the directory itself did
+        // not change. The directory subscription above cannot recover that, so
+        // activate the resolved directory here to load providers/agents and
+        // apply its default model/agent (issue #3473).
+        const sessionDirectory = useSessionUIStore.getState().currentSessionDirectory;
+        const directory = sessionDirectory ?? useDirectoryStore.getState().currentDirectory;
+        const resolvedDirectory = resolveConfigDirectory(directory);
+        if (!resolvedDirectory) {
+            return;
+        }
+
+        const configState = useConfigStore.getState();
+        const directoryKey = toDirectoryKey(resolvedDirectory);
+        if (configState.activeDirectoryKey === directoryKey) {
+            const snapshot = configState.directoryScoped[directoryKey];
+            const hasProviders = (snapshot?.providers.length ?? 0) > 0 || configState.providers.length > 0;
+            const hasAgents = (snapshot?.agents.length ?? 0) > 0 || configState.agents.length > 0;
+            if (
+                hasProviders
+                && hasAgents
+                && isConfigFresh(_providersLoadedAt, directoryKey)
+                && isConfigFresh(_agentsLoadedAt, directoryKey)
+            ) {
+                return;
+            }
+        }
+
+        markStartupTrace('projectsStore:changed:activateDirectory', { directory, resolvedDirectory });
+        void configState.activateDirectory(resolvedDirectory);
+    });
+};

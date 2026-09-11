@@ -58,6 +58,7 @@ export const createSettingsRuntime = (deps) => {
     normalizeManagedRemoteTunnelPresetTokens,
     syncManagedRemoteTunnelConfigWithPresets,
     upsertManagedRemoteTunnelToken,
+    getBroadcastGlobalUiEvent,
   } = deps;
 
   let persistSettingsLock = Promise.resolve();
@@ -1031,7 +1032,10 @@ export const createSettingsRuntime = (deps) => {
   };
 
   const persistSettings = async (changes, { surface = null } = {}) => {
-    persistSettingsLock = persistSettingsLock.then(async () => {
+    // A rejected persist must not poison the serialized queue. `run` keeps the
+    // rejection for its own caller, while the stored lock only settles so the
+    // next persist chains after this one and writes normally.
+    const run = persistSettingsLock.catch(() => {}).then(async () => {
       // Log field names only — changes can carry credentials (UI password,
       // client tokens, tunnel tokens) that must never reach the log file.
       console.log('[persistSettings] Updating fields:', Object.keys(changes || {}).join(', ') || '(none)');
@@ -1111,10 +1115,16 @@ export const createSettingsRuntime = (deps) => {
       }
 
       await writeSettingsToDisk(next, { surface, changedKeys: Object.keys(sanitized) });
+      // Notify connected windows that persisted settings changed so they can
+      // reconcile running stores against the new authoritative snapshot.
+      // Intentionally payload-free: settings changes can carry credentials
+      // (UI password, client tokens, tunnel tokens) and changed field names.
+      getBroadcastGlobalUiEvent?.()?.({ type: 'openchamber:settings.updated' });
       return formatSettingsResponse(next);
     });
 
-    return persistSettingsLock;
+    persistSettingsLock = run.catch(() => {});
+    return run;
   };
 
   return {

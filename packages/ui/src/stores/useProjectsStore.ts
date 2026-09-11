@@ -1055,8 +1055,15 @@ export const useProjectsStore = create<ProjectsStore>()(
       if (activeChanged && nextActive) {
         const activeProject = incomingProjects.find((project) => project.id === nextActive);
         if (activeProject) {
-          opencodeClient.setDirectory(activeProject.path);
-          useDirectoryStore.getState().setDirectory(activeProject.path, { showOverlay: false });
+          // An open session owns the working directory. A persisted active
+          // project change from another window must not redirect a running
+          // chat away from its session directory; the config store re-activates
+          // the session directory once the project list can resolve it.
+          const sessionDirectory = useSessionUIStore.getState().currentSessionDirectory;
+          if (!sessionDirectory) {
+            opencodeClient.setDirectory(activeProject.path);
+            useDirectoryStore.getState().setDirectory(activeProject.path, { showOverlay: false });
+          }
         }
       }
     },

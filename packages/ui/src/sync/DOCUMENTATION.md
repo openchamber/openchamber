@@ -508,6 +508,8 @@ Keep this in sync with `handleDirectoryEvent` in `sync-context.tsx`:
 | `question.asked/replied/rejected` | `question` |
 | `lsp.updated` | `lsp` |
 
+OpenChamber synthetic events are handled before directory routing instead of through the directory reducer. `openchamber:settings.updated`, broadcast by the server after a successful settings persist, is forwarded as the `openchamber:settings-updated` DOM event; the settings lifecycle in `lib/persistence.ts` owns cache invalidation and refetches the authoritative snapshot. The event is deliberately payload-free because settings updates can carry credentials.
+
 ### Directory-less session events
 
 The global stream can omit a directory for a session-addressed event. Resolve it through the session routing index first. If the index is briefly stale during a session transition, route only when the event session matches the active session and that directory store exists; otherwise leave it un-routed rather than updating another directory.

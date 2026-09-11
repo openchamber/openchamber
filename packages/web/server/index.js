@@ -396,6 +396,9 @@ const settingsRuntime = createSettingsRuntime({
   normalizeManagedRemoteTunnelPresetTokens,
   syncManagedRemoteTunnelConfigWithPresets,
   upsertManagedRemoteTunnelToken,
+  // Late-bound: the broadcaster is created below, but persistSettings only runs
+  // after startup (HTTP routes / permission runtime), never during module init.
+  getBroadcastGlobalUiEvent: () => broadcastGlobalUiEvent,
 });
 
 const readSettingsFromDiskMigrated = (...args) => settingsRuntime.readSettingsFromDiskMigrated(...args);

@@ -6,11 +6,15 @@ import path from 'path';
 import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
 import { createSettingsRuntime } from './settings-runtime.js';
 
-const createRuntime = async ({ mergePersistedSettings = (_current, changes) => changes } = {}) => {
+const createRuntime = async ({
+  mergePersistedSettings = (_current, changes) => changes,
+  fsPromises: fs = fsPromises,
+  getBroadcastGlobalUiEvent,
+} = {}) => {
   const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-runtime-'));
   const settingsFilePath = path.join(tempRoot, 'settings.json');
   const runtime = createSettingsRuntime({
-    fsPromises,
+    fsPromises: fs,
     path,
     crypto,
     SETTINGS_FILE_PATH: settingsFilePath,
@@ -26,6 +30,7 @@ const createRuntime = async ({ mergePersistedSettings = (_current, changes) => c
     normalizeManagedRemoteTunnelPresetTokens: (value) => value,
     syncManagedRemoteTunnelConfigWithPresets: async () => {},
     upsertManagedRemoteTunnelToken: async () => {},
+    getBroadcastGlobalUiEvent,
   });
 
   return {
@@ -557,6 +562,97 @@ describe('settings runtime: per-surface profile keys', () => {
       const stored = await readJson(path.join(tempRoot, 'preferences.json'));
       expect(stored.fields.fontSize.value).toBe(90);
       expect(stored.fields.fontSize.surfaces).toBeUndefined();
+    } finally {
+      await cleanup();
+    }
+  });
+});
+
+describe('settings runtime: persist broadcast and queue recovery', () => {
+  it('emits exactly one payload-free UI event per successful persist', async () => {
+    const events = [];
+    const { runtime, cleanup } = await createRuntime({
+      getBroadcastGlobalUiEvent: () => (payload) => events.push(payload),
+    });
+    try {
+      await runtime.persistSettings({ themeId: 'dark' });
+      expect(events).toEqual([{ type: 'openchamber:settings.updated' }]);
+
+      await runtime.persistSettings({ themeId: 'light' });
+      expect(events).toEqual([
+        { type: 'openchamber:settings.updated' },
+        { type: 'openchamber:settings.updated' },
+      ]);
+      for (const event of events) {
+        expect(Object.keys(event)).toEqual(['type']);
+        expect(event.properties).toBeUndefined();
+      }
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('emits no UI event when the settings write fails', async () => {
+    const events = [];
+    const failingFs = {
+      ...fsPromises,
+      rename: async () => {
+        const error = new Error('disk failure');
+        error.code = 'EIO';
+        throw error;
+      },
+    };
+    const { runtime, cleanup } = await createRuntime({
+      fsPromises: failingFs,
+      getBroadcastGlobalUiEvent: () => (payload) => events.push(payload),
+    });
+    try {
+      await expect(runtime.persistSettings({ themeId: 'dark' })).rejects.toThrow('disk failure');
+      expect(events).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('recovers the persist queue after a failed write without emitting for the failure', async () => {
+    const events = [];
+    let renameCalls = 0;
+    const flakyFs = {
+      ...fsPromises,
+      rename: async (...args) => {
+        renameCalls += 1;
+        if (renameCalls === 1) {
+          const error = new Error('disk failure');
+          error.code = 'EIO';
+          throw error;
+        }
+        return fsPromises.rename(...args);
+      },
+    };
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({
+      fsPromises: flakyFs,
+      getBroadcastGlobalUiEvent: () => (payload) => events.push(payload),
+    });
+    try {
+      // A valid preferences file keeps the first persist from seeding it: the
+      // settings write itself is the first rename, and the one that fails.
+      await fsPromises.writeFile(
+        path.join(tempRoot, 'preferences.json'),
+        JSON.stringify({ version: 1, fields: {} }),
+        'utf8',
+      );
+
+      const failedPersist = runtime.persistSettings({ themeId: 'dark' });
+      // Queue the next persist while the first is still failing: the queue must
+      // recover and run it instead of replaying the earlier rejection.
+      const recoveredPersist = runtime.persistSettings({ themeId: 'light' });
+
+      await expect(failedPersist).rejects.toThrow('disk failure');
+      await recoveredPersist;
+      expect(events).toEqual([{ type: 'openchamber:settings.updated' }]);
+
+      const persisted = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      expect(persisted).toEqual({ themeId: 'light' });
     } finally {
       await cleanup();
     }

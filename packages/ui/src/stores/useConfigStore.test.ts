@@ -149,15 +149,29 @@ mock.module('@/stores/utils/safeStorage', () => ({
   },
 }));
 
+type MockProjectEntry = { id: string; path: string; label: string };
+let mockProjects: MockProjectEntry[] = [
+  { id: 'project', path: DIRECTORY, label: 'Project' },
+  { id: 'other', path: OTHER_DIRECTORY, label: 'Other' },
+];
+let mockActiveProjectId: string | null = 'project';
+type ProjectsSubscribeListener = (
+  state: { projects: MockProjectEntry[]; activeProjectId: string | null },
+  previousState: { projects: MockProjectEntry[]; activeProjectId: string | null },
+) => void;
+let projectsSubscribeListener: ProjectsSubscribeListener | null = null;
+
 mock.module('@/stores/useProjectsStore', () => ({
   useProjectsStore: {
-    getState: () => ({
-      activeProjectId: 'project',
-      projects: [
-        { id: 'project', path: DIRECTORY, label: 'Project' },
-        { id: 'other', path: OTHER_DIRECTORY, label: 'Other' },
-      ],
-    }),
+    getState: () => ({ activeProjectId: mockActiveProjectId, projects: mockProjects }),
+    subscribe: (listener: ProjectsSubscribeListener) => {
+      projectsSubscribeListener = listener;
+      return () => {
+        if (projectsSubscribeListener === listener) {
+          projectsSubscribeListener = null;
+        }
+      };
+    },
   },
 }));
 
@@ -234,10 +248,20 @@ mock.module('@/lib/configSync', () => ({
   }),
 }));
 
-const { useConfigStore } = await import('./useConfigStore');
+const { ensureConfigStoreProjectChangesSubscription, useConfigStore } = await import('./useConfigStore');
 const { emitSyncConfigChanged, setSyncRefs } = await import('@/sync/sync-refs');
 const { useSelectionStore } = await import('@/sync/selection-store');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
+const { useDirectoryStore } = await import('./useDirectoryStore');
+
+// Module evaluation no longer registers the projects subscription (that would
+// touch `useProjectsStore` before initialization through the
+// useProjectsStore -> session-ui-store -> useConfigStore cycle). Production
+// registers it from initializeApp(); tests use the same explicit setup so the
+// issue #3473 project-list activation cases below can drive the mock listener.
+ensureConfigStoreProjectChangesSubscription();
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe('useConfigStore provider persistence', () => {
   beforeEach(() => {
@@ -256,6 +280,11 @@ describe('useConfigStore provider persistence', () => {
     listAgentsImpl = null;
     withDirectoryCalls = [];
     currentFetchDirectory = DIRECTORY;
+    mockProjects = [
+      { id: 'project', path: DIRECTORY, label: 'Project' },
+      { id: 'other', path: OTHER_DIRECTORY, label: 'Other' },
+    ];
+    mockActiveProjectId = 'project';
     setSyncRefs({} as never, { children: new Map(), getState: () => undefined } as never, DIRECTORY);
     useSelectionStore.setState({
       sessionModelSelections: new Map(),
@@ -263,7 +292,7 @@ describe('useConfigStore provider persistence', () => {
       sessionAgentModelSelections: new Map(),
       lastUsedProvider: null,
     });
-    useSessionUIStore.setState({ currentSessionId: null });
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null });
     useConfigStore.setState({
       activeDirectoryKey: DIRECTORY,
       directoryScoped: {},
@@ -1344,5 +1373,76 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentAgentName).toBe('manual-agent');
     expect(state.currentProviderId).toBe('manual');
     expect(state.selectionSource).toBe('manual');
+  });
+
+  test('project list gaining a resolver reactivates the current session directory', async () => {
+    const worktree = `${DIRECTORY}/.worktrees/feature`;
+    useDirectoryStore.setState({ currentDirectory: worktree });
+    useConfigStore.setState({
+      activeDirectoryKey: '',
+      directoryScoped: {},
+      providers: [],
+      agents: [],
+      defaultProviders: {},
+      currentProviderId: '',
+      currentModelId: '',
+      selectedProviderId: '',
+      currentAgentName: undefined,
+      opencodeDefaultAgent: undefined,
+      opencodeDefaultModel: undefined,
+      selectionSource: 'auto',
+      isConnected: true,
+    });
+    liveAgents = [testAgent('build')];
+    mockProjects = [];
+
+    // The worktree is unknown because its project is not in the list yet:
+    // activation is skipped and the pickers stay empty.
+    await useConfigStore.getState().activateDirectory(worktree);
+    expect(getProvidersCalls).toBe(0);
+    expect(listAgentsCalls).toBe(0);
+    expect(useConfigStore.getState().activeDirectoryKey).toBe('');
+
+    // External settings reconciliation adds the owning project. The directory
+    // store did not change, so only the projects subscription can recover.
+    mockProjects = [{ id: 'project', path: DIRECTORY, label: 'Project' }];
+    mockActiveProjectId = 'project';
+    projectsSubscribeListener?.(
+      { projects: mockProjects, activeProjectId: mockActiveProjectId },
+      { projects: [], activeProjectId: null },
+    );
+    await delay(10);
+
+    const state = useConfigStore.getState();
+    expect(getProvidersCalls).toBe(1);
+    expect(listAgentsCalls).toBe(1);
+    expect(state.activeDirectoryKey).toBe(DIRECTORY);
+    expect(state.providers.map((entry) => entry.id)).toEqual(['live']);
+    expect(state.agents.map((entry) => entry.name)).toEqual(['build']);
+  });
+
+  test('repeated project list changes with fresh config do not refetch', async () => {
+    const worktree = `${DIRECTORY}/.worktrees/feature`;
+    useDirectoryStore.setState({ currentDirectory: worktree });
+    liveAgents = [testAgent('build')];
+    mockProjects = [{ id: 'project', path: DIRECTORY, label: 'Project' }];
+    mockActiveProjectId = 'project';
+
+    projectsSubscribeListener?.(
+      { projects: mockProjects, activeProjectId: mockActiveProjectId },
+      { projects: [], activeProjectId: null },
+    );
+    await delay(10);
+    expect(getProvidersCalls).toBe(1);
+    expect(listAgentsCalls).toBe(1);
+
+    projectsSubscribeListener?.(
+      { projects: [...mockProjects], activeProjectId: mockActiveProjectId },
+      { projects: mockProjects, activeProjectId: mockActiveProjectId },
+    );
+    await delay(10);
+
+    expect(getProvidersCalls).toBe(1);
+    expect(listAgentsCalls).toBe(1);
   });
 });
