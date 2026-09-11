@@ -38,6 +38,7 @@ import { getContextObligatoryMessages } from '@/lib/contextObligatoryMessages';
 import { setContextObligatoryMessage } from '@/sync/session-actions';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { focusChatInput } from './composer/editor/dom';
+import { readUserMessageModelFields } from './userMessageModelFields';
 
 const ToolOutputDialog = lazyWithChunkRecovery(() => import('./message/ToolOutputDialog'));
 
@@ -236,16 +237,14 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
         const mode = getMessageInfoProp(previousMessage.info, 'mode');
         const agent = getMessageInfoProp(previousMessage.info, 'agent');
-        const providerID = getMessageInfoProp(previousMessage.info, 'providerID');
-        const modelID = getMessageInfoProp(previousMessage.info, 'modelID');
-        const variant = getMessageInfoProp(previousMessage.info, 'variant');
+        const userModel = readUserMessageModelFields(previousMessage.info);
         const resolvedAgent =
             typeof mode === 'string' && mode.trim().length > 0
                 ? mode
                 : (typeof agent === 'string' && agent.trim().length > 0 ? agent : undefined);
-        const resolvedProvider = typeof providerID === 'string' && providerID.trim().length > 0 ? providerID : undefined;
-        const resolvedModel = typeof modelID === 'string' && modelID.trim().length > 0 ? modelID : undefined;
-        const resolvedVariant = typeof variant === 'string' && variant.trim().length > 0 ? variant : undefined;
+        const resolvedProvider = userModel.providerID;
+        const resolvedModel = userModel.modelID;
+        const resolvedVariant = userModel.variant;
 
         if (!resolvedAgent && !resolvedProvider && !resolvedModel && !resolvedVariant) {
             return null;
