@@ -372,7 +372,13 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   );
   const tooltipProjectLabel = secondaryMeta?.projectLabel
     ?? (projectLabelFromStore ? formatProjectLabel(projectLabelFromStore) : null);
-  const tooltipBranchLabel = secondaryMeta?.branchLabel ?? node.worktree?.branch ?? null;
+  const tooltipBranchLabel = secondaryMeta
+    // Recent rows carry an explicit secondaryMeta: a null branchLabel there
+    // is a deliberate filter (HEAD/redundant with the project label), not a
+    // missing value, so it must not fall through to the raw worktree branch.
+    // Project rows pass no secondaryMeta and keep the worktree fallback.
+    ? (secondaryMeta.branchLabel ?? null)
+    : (node.worktree?.branch ?? null);
   const prLookupKey = React.useMemo(() => {
     if (isVSCode) return null;
     const branch = node.worktree?.branch?.trim();
