@@ -7,6 +7,7 @@ import { deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredent
 import { getProviderAuth, updateProviderAuth } from './opencodeAuth';
 import { fetchExeDevUsage } from './exeDevQuota';
 import { fetchOllamaUsage } from './ollamaQuota';
+import { fetchCommandQuota, readUsageProviderCommands } from './quotaCommandProvider';
 
 type AuthEntry = Record<string, unknown> | string;
 type AuthFile = Record<string, AuthEntry>;
@@ -25,6 +26,17 @@ type UsageWindow = {
 type ProviderUsage = {
   windows: Record<string, UsageWindow>;
   models?: Record<string, ProviderUsage>;
+  accounts?: Array<{
+    id: string;
+    label: string;
+    detail?: string;
+    current: boolean;
+    available: boolean;
+    status?: string;
+    error?: string;
+    planLabel?: string;
+    windows: Record<string, UsageWindow>;
+  }>;
 };
 
 type OpenAiUsagePayload = {
@@ -195,6 +207,30 @@ export type ProviderResult = {
 
 const OPENCODE_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'opencode');
 const AUTH_FILE = path.join(OPENCODE_DATA_DIR, 'auth.json');
+const SUPPORTED_QUOTA_PROVIDERS = new Set([
+  'claude',
+  'codex',
+  'github-copilot',
+  'github-copilot-addon',
+  'google',
+  'kimi-for-coding',
+  'nano-gpt',
+  'minimax-coding-plan',
+  'minimax-cn-coding-plan',
+  'ollama-cloud',
+  'exe-dev',
+  'openrouter',
+  'zai-coding-plan',
+  'zhipuai-coding-plan',
+  'wafer',
+  'opencode-go',
+  'cursor',
+  'crof',
+  'deepseek',
+  'hyper',
+  'neuralwatt',
+  'xai',
+]);
 
 const XAI_USAGE_ENDPOINT = 'https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig';
 const XAI_TOKEN_ENDPOINT = 'https://auth.x.ai/oauth2/token';
@@ -772,6 +808,9 @@ export const listConfiguredQuotaProviders = () => {
     // Managed credentials remain enumerable; unreadable auth cannot establish xAI configuration.
   }
   const configured = new Set<string>();
+  for (const providerId of Object.keys(readUsageProviderCommands())) {
+    if (SUPPORTED_QUOTA_PROVIDERS.has(providerId)) configured.add(providerId);
+  }
   const openCodeGoAuth = normalizeAuthEntry(getAuthEntry(auth, ['opencode-go']));
   if (openCodeGoAuth && (typeof openCodeGoAuth.key === 'string' || typeof openCodeGoAuth.token === 'string')) configured.add('opencode-go');
   if (readCredential('ollama-cloud')) configured.add('ollama-cloud');
@@ -3089,13 +3128,25 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
 
 const pendingQuotaFetches = new Map<string, Promise<ProviderResult>>();
 
-export const fetchQuotaForProvider = (providerId: string): Promise<ProviderResult> => {
-  const existing = pendingQuotaFetches.get(providerId);
+export const fetchQuotaForProvider = (providerId: string, directory?: string): Promise<ProviderResult> => {
+  const command = SUPPORTED_QUOTA_PROVIDERS.has(providerId)
+    ? readUsageProviderCommands()[providerId]
+    : undefined;
+  const fetchKey = command ? `${providerId}\0${directory ?? ''}` : providerId;
+  const existing = pendingQuotaFetches.get(fetchKey);
   if (existing) return existing;
 
-  const pending = fetchQuotaForProviderUncoalesced(providerId).finally(() => {
-    if (pendingQuotaFetches.get(providerId) === pending) pendingQuotaFetches.delete(providerId);
+  const pending = (command
+    ? fetchCommandQuota(providerId, command, directory).catch((error) => buildResult({
+      providerId,
+      providerName: providerId,
+      ok: false,
+      configured: true,
+      error: error instanceof Error ? error.message : 'Request failed',
+    }))
+    : fetchQuotaForProviderUncoalesced(providerId)).finally(() => {
+    if (pendingQuotaFetches.get(fetchKey) === pending) pendingQuotaFetches.delete(fetchKey);
   });
-  pendingQuotaFetches.set(providerId, pending);
+  pendingQuotaFetches.set(fetchKey, pending);
   return pending;
 };

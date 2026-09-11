@@ -1116,8 +1116,9 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
   const quotaMatch = pathname.match(/^\/api\/quota\/([^/]+)$/);
   if (quotaMatch && method === 'GET') {
     const providerId = decodeURIComponent(quotaMatch[1]);
+    const directory = url.searchParams.get('directory') ?? undefined;
     try {
-      const data = await sendBridgeMessage('api:quota:get', { providerId });
+      const data = await sendBridgeMessage('api:quota:get', { providerId, directory });
       return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

@@ -9,6 +9,8 @@ import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey, isTransientRuntimeKey } from '@/lib/runtime-switch';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 const QUOTA_REFRESH_INTERVAL_MS = 3 * 60 * 1000;
 // Quotas and their display settings are read from the connected OpenChamber
@@ -152,7 +154,12 @@ export const useQuotaStore = create<QuotaStore>()(
           isFetchingProvider: { ...state.isFetchingProvider, [providerId]: true }
         }));
         try {
-          const response = await runtimeFetch(`/api/quota/${encodeURIComponent(providerId)}`);
+          const sessionState = useSessionUIStore.getState();
+          const directory = sessionState.currentSessionId
+            ? sessionState.getDirectoryForSession(sessionState.currentSessionId)
+            : useDirectoryStore.getState().currentDirectory;
+          const query = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+          const response = await runtimeFetch(`/api/quota/${encodeURIComponent(providerId)}${query}`);
           const payload = await response.json().catch(() => null);
           if (!response.ok) {
             throw new Error(payload?.error || 'Failed to fetch quota');

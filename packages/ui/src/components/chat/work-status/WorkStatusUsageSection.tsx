@@ -155,6 +155,45 @@ export const WorkStatusUsageSection: React.FC = () => {
               />
             );
           })}
+          {group.accounts.map((account) => (
+            <React.Fragment key={`${group.providerId}-${account.id}`}>
+              <WorkStatusRow
+                leading={<span className="size-4 shrink-0" />}
+                label={(
+                  <span className={cn('truncate font-medium text-foreground', !account.available && 'opacity-60')}>
+                    {account.label}
+                  </span>
+                )}
+                value={account.status ? <WorkStatusValue tone="muted">{account.status}</WorkStatusValue> : undefined}
+              />
+              {account.rows.map((row) => {
+                const displayPercent = displayMode === 'remaining'
+                  ? row.window.remainingPercent
+                  : row.window.usedPercent;
+                const metricLabel = formatQuotaValueLabel(row.window.valueLabel, displayPercent);
+                const resetLabel = formatQuotaResetLabel(
+                  row.window.resetAt,
+                  row.window.resetAfterFormatted ?? row.window.resetAtFormatted,
+                  timeFormatPreference,
+                );
+                return (
+                  <WorkStatusRow
+                    key={`${group.providerId}-${account.id}-${row.key}`}
+                    leading={<span className="size-4 shrink-0" />}
+                    label={(
+                      <span className="inline-flex min-w-0 items-baseline gap-1.5 pl-2">
+                        <span className="truncate">{row.label}</span>
+                        {resetLabel ? <span className="shrink-0 text-[11px] text-muted-foreground">{resetLabel}</span> : null}
+                      </span>
+                    )}
+                    value={metricLabel === '-' ? undefined : (
+                      <WorkStatusValue tone={windowTone(row.window)}>{metricLabel}</WorkStatusValue>
+                    )}
+                  />
+                );
+              })}
+            </React.Fragment>
+          ))}
         </React.Fragment>
       ))}
     </WorkStatusCollapsibleSection>

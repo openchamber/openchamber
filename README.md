@@ -130,6 +130,7 @@ Go deeper with the OpenChamber guides:
 - [GitHub workflows](packages/docs/content/docs/github.mdx)
 - [Mobile](packages/docs/content/docs/mobile.mdx)
 - [Security](packages/docs/content/docs/security.mdx)
+- [Custom usage providers](packages/docs/content/docs/custom-usage-providers.mdx)
 - [Troubleshooting](packages/docs/content/docs/troubleshooting.mdx)
 
 For self-hosting details, see the [reverse proxy guide](docs/REVERSE_PROXY.md). For custom theme authoring, see the [custom themes guide](docs/CUSTOM_THEMES.md).

@@ -24,8 +24,16 @@ const AUTH = JSON.stringify({
   'github-copilot': { access: 'test-token' },
   anthropic: { access: 'test-token', refresh: 'test-refresh' },
 });
+const readAuthFileMock = (filePath: unknown): string => {
+  if (String(filePath).endsWith('usage-providers.json')) {
+    const error = new Error('not found') as NodeJS.ErrnoException;
+    error.code = 'ENOENT';
+    throw error;
+  }
+  return AUTH;
+};
 ((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
-((fs as unknown) as { readFileSync: () => string }).readFileSync = () => AUTH;
+((fs as unknown) as { readFileSync: (filePath: unknown) => string }).readFileSync = readAuthFileMock;
 
 import { fetchHyperQuota, fetchOllamaCloudQuota, fetchQuotaForProvider } from './quotaProviders';
 import { validateCredential } from './quotaCredentials';
@@ -811,9 +819,9 @@ describe('NeuralWatt quota provider (VS Code parity)', () => {
 
 describe('DeepSeek quota provider (VS Code parity)', () => {
   beforeEach(() => {
-    const fsMock = fs as unknown as { existsSync: () => boolean; readFileSync: () => string };
+    const fsMock = fs as unknown as { existsSync: () => boolean; readFileSync: (filePath: unknown) => string };
     fsMock.existsSync = () => true;
-    fsMock.readFileSync = () => AUTH;
+    fsMock.readFileSync = readAuthFileMock;
   });
 
   test('builds credits_balance window from documented USD payload (string balance)', async () => {

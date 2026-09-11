@@ -583,12 +583,12 @@ export async function handleSystemBridgeMessage(
     }
 
     case 'api:quota:get': {
-      const { providerId } = (payload || {}) as { providerId?: string };
+      const { providerId, directory } = (payload || {}) as { providerId?: string; directory?: string };
       if (!providerId) {
         return { id, type, success: false, error: 'Provider ID is required' };
       }
       try {
-        const result = await fetchQuotaForProvider(providerId);
+        const result = await fetchQuotaForProvider(providerId, directory);
         return { id, type, success: true, data: result };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);

@@ -1,0 +1,83 @@
+---
+title: Custom usage providers
+description: Supply account and quota data from a trusted local command.
+---
+
+# Custom usage providers
+
+OpenChamber can use a local command instead of its built-in quota fetcher for
+an existing provider. This is useful when an authentication plugin, credential
+broker, or account pool owns usage data that OpenChamber cannot read directly.
+
+Create `usage-providers.json` in the OpenChamber data directory:
+
+- macOS and Linux: `~/.config/openchamber/usage-providers.json`
+- Custom server data directory: `$OPENCHAMBER_DATA_DIR/usage-providers.json`
+
+Configure an argv array under the provider ID:
+
+```json
+{
+  "version": 1,
+  "commands": {
+    "codex": ["/absolute/path/to/usage-helper", "limits", "--json"]
+  }
+}
+```
+
+A runnable reference script is provided in the repository at
+`scripts/example-usage-provider.mjs`. You can point your configuration directly
+to it to inspect multi-account rendering:
+
+```json
+{
+  "version": 1,
+  "commands": {
+    "codex": ["node", "/path/to/openchamber/scripts/example-usage-provider.mjs"]
+  }
+}
+```
+
+Use an absolute executable path when launching OpenChamber outside a terminal,
+because desktop applications may not inherit your shell `PATH`.
+
+The command runs without a shell and receives the active session directory as
+its working directory. It must print one JSON object to stdout:
+
+```json
+{
+  "version": 1,
+  "providerName": "Codex",
+  "accounts": [
+    {
+      "id": "account-1",
+      "label": "Work",
+      "current": true,
+      "available": true,
+      "status": "Active",
+      "planType": "plus",
+      "credits": "5.00",
+      "limits": [
+        {
+          "windowMinutes": 300,
+          "usedPercent": 25,
+          "resetAtMs": 1788993918000
+        },
+        {
+          "windowMinutes": 10080,
+          "usedPercent": 40,
+          "resetAtMs": 1789490834000
+        }
+      ]
+    }
+  ]
+}
+```
+
+Each account may also provide a masked `email` for secondary display text and
+an `error` when only that account failed. `current` identifies the account used
+for collapsed usage; unavailable accounts are never presented as current.
+
+Commands have a 30-second timeout and a 1 MiB output limit. Configuration is
+kept outside normal OpenChamber settings so connected clients cannot add or
+change executable commands.

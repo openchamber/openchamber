@@ -74,7 +74,7 @@ export const UsagePage: React.FC = () => {
   const selectedResult = results.find((entry) => entry.providerId === selectedProviderId) ?? null;
 
   const providerMeta = QUOTA_PROVIDERS.find((provider) => provider.id === selectedProviderId);
-  const providerName = providerMeta?.name ?? selectedProviderId ?? t('settings.usage.sidebar.title');
+  const providerName = selectedResult?.providerName ?? providerMeta?.name ?? selectedProviderId ?? t('settings.usage.sidebar.title');
   const usage = selectedResult?.usage;
   const selectedProviderError = selectedResult?.configured && !selectedResult.ok
     ? selectedResult.error
@@ -217,6 +217,21 @@ export const UsagePage: React.FC = () => {
           </div>
         </SettingsSection>
       )}
+
+      {usage?.accounts?.map((account) => (
+        <SettingsSection
+          key={account.id}
+          title={account.label}
+          description={[account.detail, account.status, account.planLabel].filter(Boolean).join(' · ')}
+          contentClassName={!account.available ? 'opacity-60' : undefined}
+        >
+          <div className="divide-y divide-[var(--surface-subtle)]">
+            {Object.entries(account.windows).map(([label, window]) => (
+              <UsageCard key={label} title={label} window={window} />
+            ))}
+          </div>
+        </SettingsSection>
+      ))}
 
       {providerModels.length > 0 && (
         <SettingsSection

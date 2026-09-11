@@ -18,6 +18,7 @@ const group = (providerId: string, rows: Array<{ key: string; label: string; sub
   providerId: providerId as UsageProviderGroup['providerId'],
   providerName: providerId,
   status: null,
+  accounts: [],
   rows: rows.map((row) => ({
     key: row.key,
     label: row.label,
@@ -95,5 +96,30 @@ describe('pickUsageHeadline', () => {
 
   test('returns null for a matched provider that reported no rows', () => {
     expect(pickUsageHeadline([group('codex', [])], 'codex')).toBeNull();
+  });
+
+  test('uses the shortest window from the current available account', () => {
+    const multi = group('codex', []);
+    multi.accounts = [
+      { id: 'one', label: 'One', current: false, available: true, rows: [{ key: 'one-5h', label: '5-Hour', window: window(5 * HOUR) }] },
+      { id: 'two', label: 'Two', current: true, available: true, rows: [
+        { key: 'two-weekly', label: 'Weekly Limit', window: window(7 * 24 * HOUR) },
+        { key: 'two-5h', label: '5-Hour', window: window(5 * HOUR) },
+      ] },
+    ];
+    expect(pickUsageHeadline([multi], 'openai')?.row.key).toBe('two-5h');
+  });
+
+  test('does not present a benched current account as active', () => {
+    const multi = group('codex', []);
+    multi.accounts = [{
+      id: 'one',
+      label: 'One',
+      current: true,
+      available: false,
+      status: 'Benched here',
+      rows: [{ key: 'one-5h', label: '5-Hour', window: window(5 * HOUR) }],
+    }];
+    expect(pickUsageHeadline([multi], 'openai')).toBeNull();
   });
 });
