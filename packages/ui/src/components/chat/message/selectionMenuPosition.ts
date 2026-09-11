@@ -1,6 +1,7 @@
 export const DESKTOP_MENU_SIDE_MARGIN_PX = 8;
 export const DESKTOP_MENU_FALLBACK_WIDTH_PX = 280;
 export const DESKTOP_MENU_FALLBACK_HEIGHT_PX = 38;
+export const DESKTOP_MENU_SELECTION_GAP_PX = 10;
 
 export const getDesktopClampedX = (anchorX: number, viewportWidth: number, menuWidth: number): number => {
   const halfWidth = menuWidth / 2;
@@ -26,4 +27,23 @@ export const getDesktopClampedY = (anchorY: number, viewportHeight: number, menu
   }
 
   return Math.min(Math.max(anchorY, minY), maxY);
+};
+
+// The desktop menu prefers to hang above the selection. `minTop` is the topmost
+// screen Y it may occupy; when the menu does not fit above the selection it is
+// placed below it instead of over it. Painting the menu across the selected text
+// hides what the menu acts on and drops a button under the pointer, where it
+// swallows the next click of a multi-click sequence.
+export const getDesktopSelectionAnchorY = (
+  selection: { top: number; bottom: number },
+  menuHeight: number,
+  minTop: number,
+): number => {
+  const above = selection.top - DESKTOP_MENU_SELECTION_GAP_PX;
+
+  if (above - menuHeight >= minTop) {
+    return above;
+  }
+
+  return selection.bottom + DESKTOP_MENU_SELECTION_GAP_PX + menuHeight;
 };
