@@ -171,6 +171,43 @@ describe('npm registry client', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('https://registry.npmjs.org/@scope%2Fpkg');
   });
 
+  test('configured registry base is used and trailing-slash trimmed', async () => {
+    const previousLower = process.env.npm_config_registry;
+    const previous = process.env.NPM_CONFIG_REGISTRY;
+    process.env.npm_config_registry = '';
+    process.env.NPM_CONFIG_REGISTRY = 'https://mirror.example.com/npm/';
+    try {
+      await npm.getNpmInfo('@scope/pkg');
+
+      expect(fetchMock.mock.calls[0][0]).toBe('https://mirror.example.com/npm/@scope%2Fpkg');
+    } finally {
+      if (previousLower === undefined) delete process.env.npm_config_registry;
+      else process.env.npm_config_registry = previousLower;
+      if (previous === undefined) delete process.env.NPM_CONFIG_REGISTRY;
+      else process.env.NPM_CONFIG_REGISTRY = previous;
+    }
+  });
+
+  test('authenticated registry URLs are redacted and sent with authorization', async () => {
+    const previousLower = process.env.npm_config_registry;
+    const previous = process.env.NPM_CONFIG_REGISTRY;
+    process.env.npm_config_registry = '';
+    process.env.NPM_CONFIG_REGISTRY = 'https://test-user:test-password@mirror.example.com/npm/';
+    try {
+      await npm.getNpmInfo('@scope/private-pkg');
+
+      const [url, options] = fetchMock.mock.calls[0];
+      expect(url).toBe('https://mirror.example.com/npm/@scope%2Fprivate-pkg');
+      expect(String(url)).not.toContain('test-password');
+      expect(options.headers.Authorization).toBe(`Basic ${Buffer.from('test-user:test-password').toString('base64')}`);
+    } finally {
+      if (previousLower === undefined) delete process.env.npm_config_registry;
+      else process.env.npm_config_registry = previousLower;
+      if (previous === undefined) delete process.env.NPM_CONFIG_REGISTRY;
+      else process.env.NPM_CONFIG_REGISTRY = previous;
+    }
+  });
+
   test('user-agent header is present', async () => {
     await npm.getNpmInfo('foo');
 

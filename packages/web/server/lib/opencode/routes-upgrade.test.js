@@ -74,6 +74,34 @@ describe('OpenCode upgrade routes', () => {
     });
   });
 
+  it('checks authenticated registry metadata without exposing credentials', async () => {
+    const previousLower = process.env.npm_config_registry;
+    const previous = process.env.NPM_CONFIG_REGISTRY;
+    process.env.npm_config_registry = '';
+    process.env.NPM_CONFIG_REGISTRY = 'https://test-user:test-password@mirror.example.com/npm/';
+    globalThis.fetch = vi.fn(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/global/health')) return jsonResponse({ version: '1.18.8' });
+      if (url.includes('mirror.example.com')) return jsonResponse({ version: '1.18.9' });
+      return jsonResponse({ tag_name: 'v1.18.9' });
+    });
+    const { app } = createApp({ getOpenCodeUpgradeCapability: () => supportedCapability });
+
+    try {
+      await request(app).get('/api/opencode/upgrade-status').expect(200);
+      const npmCall = globalThis.fetch.mock.calls.find(([input]) => String(input).includes('mirror.example.com'));
+
+      expect(npmCall[0]).toBe('https://mirror.example.com/npm/opencode-ai/latest');
+      expect(npmCall[0]).not.toContain('test-password');
+      expect(npmCall[1].headers.Authorization).toBe(`Basic ${Buffer.from('test-user:test-password').toString('base64')}`);
+    } finally {
+      if (previousLower === undefined) delete process.env.npm_config_registry;
+      else process.env.npm_config_registry = previousLower;
+      if (previous === undefined) delete process.env.NPM_CONFIG_REGISTRY;
+      else process.env.NPM_CONFIG_REGISTRY = previous;
+    }
+  });
+
   it('names the latest release as the upgrade target when the caller sends none', async () => {
     const requests = [];
     globalThis.fetch = vi.fn(async (url, init) => {
