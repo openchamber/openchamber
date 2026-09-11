@@ -16,6 +16,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { projectTurnRecords } from '../lib/turns/projectTurnRecords';
 import type { ChatMessageEntry, TurnChangedFile, TurnRecord } from '../lib/turns/types';
 import { LiveTurnActivity } from './LiveTurnActivity';
+import TurnAssistantBlock from './TurnAssistantBlock';
 
 plugin({
     name: 'live-activity-worker-url',
@@ -162,6 +163,35 @@ describe('live Activity with the real message body', () => {
         expect(container.textContent).toContain('The final answer');
         await act(async () => root.render(<Harness record={turn([progress, { ...final, parts: [...final.parts] }])} />));
         expect(header?.getAttribute('aria-expanded')).toBe('true');
+    });
+
+    test('does not replay compaction summaries as live assistant output', async () => {
+        const progress = assistant('progress', [text('progress-text', 'Prior visible step')], 'tool-calls');
+        const compaction = assistant('compaction', [text('compaction-text', 'PRIVATE COMPACTION SUMMARY')], 'stop');
+        Object.assign(compaction.info, { summary: true });
+        const active = assistant('active', [text('active-text', 'Current live output')]);
+
+        await act(async () => root.render(<Harness record={turn([progress, compaction, active])} />));
+
+        expect(container.textContent).toContain('Prior visible step');
+        expect(container.textContent).toContain('Current live output');
+        expect(container.textContent).not.toContain('PRIVATE COMPACTION SUMMARY');
+    });
+
+    test('does not render compaction summaries in the fallback assistant block', async () => {
+        const compaction = assistant('compaction', [text('compaction-text', 'PRIVATE COMPACTION SUMMARY')], 'stop');
+        Object.assign(compaction.info, { summary: true });
+        const answer = assistant('answer', [text('answer-text', 'Visible answer')], 'stop');
+
+        await act(async () => root.render(
+            <TurnAssistantBlock
+                assistantMessages={[compaction, answer]}
+                renderMessage={(message) => <span key={message.info.id} data-message-id={message.info.id}>{message.info.id}</span>}
+            />,
+        ));
+
+        expect(container.textContent).toBe('answer');
+        expect(container.querySelector('[data-message-id="compaction"]')).toBeNull();
     });
 
     test('keeps thinking in the final message inside Activity, not outside with the answer', async () => {

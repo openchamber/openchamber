@@ -64,7 +64,7 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 
 Activity Default is shared by the settings UI in both render modes. In live
 mode, Expanded preserves the original timeline without a turn disclosure.
-Collapsed adds one Activity header after completion or interruption while preserving the original live rows,
+Collapsed adds one Activity header after completion or interruption while preserving the visible live rows,
 their order, and their individual controls. It adds no tool subgroups, side
 line, height cap, or inner scroller. Sorted rendering keeps its existing path
 and its own per-turn expansion state.
@@ -72,7 +72,11 @@ and its own per-turn expansion state.
 The active turn stays open without an Activity header. A final assistant message with `finish: stop`
 collapses the earlier messages and the final message's non-text parts, keeping
 the answer and its existing footer outside. Intermediate-text summary fallback
-and compaction summaries never become final answers. An older turn without a
+and compaction summaries never become final answers. Messages with
+`info.summary === true` are internal context snapshots: live Activity excludes
+them from its disclosure rows and header summary, while the ordinary assistant
+block omits them in sorted mode and in live turns without an Activity disclosure.
+An older turn without a
 final answer collapses once a later visible turn has an assistant response;
 a queued user message alone is not enough. Hidden user continuations retain
 the visible-turn mapping established by `projectTurnRecords`.
