@@ -2,13 +2,14 @@ import http from 'node:http';
 import https from 'node:https';
 
 import { createProxyMiddleware } from 'http-proxy-middleware';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   createDirectoryQueryCanonicalizer,
   createOpenCodeProxyAgent,
   normalizeForwardedDirectoryHeaders,
 } from './proxy.js';
+import { createPathMapping, setActivePathMapping } from './path-mapping.js';
 
 describe('createDirectoryQueryCanonicalizer', () => {
   it('canonicalizes directory query params and preserves other params', async () => {
@@ -77,6 +78,34 @@ describe('createDirectoryQueryCanonicalizer', () => {
 
     await expect(canonicalize('/session?foo=1')).resolves.toBe('/session?foo=1');
   });
+
+  it('translates mapped host directories to their remote spelling', async () => {
+    const canonicalize = createDirectoryQueryCanonicalizer({
+      realpath: async (value) => value,
+      pathMapping: createPathMapping({
+        platform: 'win32',
+        rules: [{ hostPrefix: 'C:\\Users\\me\\my-project', remotePrefix: '/workspace', compareKey: 'c:\\users\\me\\my-project' }],
+      }),
+    });
+
+    await expect(canonicalize('/session?directory=C:\\Users\\me\\my-project'))
+      .resolves.toBe('/session?directory=%2Fworkspace');
+    await expect(canonicalize('/session?directory=C:\\Users\\me\\my-project\\src'))
+      .resolves.toBe('/session?directory=%2Fworkspace%2Fsrc');
+  });
+
+  it('keeps unmapped host directories out of the translation', async () => {
+    const canonicalize = createDirectoryQueryCanonicalizer({
+      realpath: async (value) => value,
+      pathMapping: createPathMapping({
+        platform: 'win32',
+        rules: [{ hostPrefix: 'C:\\Users\\me\\my-project', remotePrefix: '/workspace', compareKey: 'c:\\users\\me\\my-project' }],
+      }),
+    });
+
+    await expect(canonicalize('/session?directory=C:\\other\\project'))
+      .resolves.toBe('/session?directory=C:\\other\\project');
+  });
 });
 
 describe('normalizeForwardedDirectoryHeaders', () => {
@@ -98,6 +127,44 @@ describe('normalizeForwardedDirectoryHeaders', () => {
 
     expect(headers).toEqual({
       'x-opencode-directory': '/Users/example/project%20literal',
+    });
+  });
+});
+
+describe('normalizeForwardedDirectoryHeaders with a path mapping', () => {
+  afterEach(() => {
+    setActivePathMapping(null);
+  });
+
+  it('translates decoded host directories to the remote spelling', () => {
+    setActivePathMapping(createPathMapping({
+      platform: 'win32',
+      rules: [{ hostPrefix: 'C:\\Users\\me\\my-project', remotePrefix: '/workspace', compareKey: 'c:\\users\\me\\my-project' }],
+    }));
+
+    const headers = normalizeForwardedDirectoryHeaders({
+      'x-opencode-directory': encodeURIComponent('C:\\Users\\me\\my-project\\src'),
+      'x-opencode-directory-encoding': 'uri',
+    });
+
+    expect(headers).toEqual({
+      'x-opencode-directory': '/workspace/src',
+    });
+  });
+
+  it('leaves values outside every mapping rule untouched', () => {
+    setActivePathMapping(createPathMapping({
+      platform: 'win32',
+      rules: [{ hostPrefix: 'C:\\Users\\me\\my-project', remotePrefix: '/workspace', compareKey: 'c:\\users\\me\\my-project' }],
+    }));
+
+    const headers = normalizeForwardedDirectoryHeaders({
+      'x-opencode-directory': encodeURIComponent('C:\\other\\project'),
+      'x-opencode-directory-encoding': 'uri',
+    });
+
+    expect(headers).toEqual({
+      'x-opencode-directory': 'C:\\other\\project',
     });
   });
 });
