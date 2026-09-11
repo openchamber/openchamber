@@ -959,6 +959,11 @@ interface UIStore {
   wideChatLayoutEnabled: boolean;
   codeBlockLineWrap: boolean;
   showToolFileIcons: boolean;
+  /**
+   * Category color accents on tool/activity rows (file edits, shell, search,
+   * thinking, ...). Off keeps the single neutral tool tone.
+   */
+  activityColorCoding: boolean;
   showTurnChangedFiles: boolean;
   showExpandedBashTools: boolean;
   showExpandedEditTools: boolean;
@@ -1148,6 +1153,7 @@ interface UIStore {
   setWideChatLayoutEnabled: (value: boolean) => void;
   setCodeBlockLineWrap: (value: boolean) => void;
   setShowToolFileIcons: (value: boolean) => void;
+  setActivityColorCoding: (value: boolean) => void;
   setShowTurnChangedFiles: (value: boolean) => void;
   setShowExpandedBashTools: (value: boolean) => void;
   setShowExpandedEditTools: (value: boolean) => void;
@@ -1321,8 +1327,9 @@ export const useUIStore = create<UIStore>()(
         enterToSendConfigured: false,
         wideChatLayoutEnabled: false,
         codeBlockLineWrap: true,
-        showToolFileIcons: true,
-        showTurnChangedFiles: false,
+  showToolFileIcons: true,
+  activityColorCoding: true,
+  showTurnChangedFiles: false,
         showExpandedBashTools: false,
         showExpandedEditTools: false,
         timeFormatPreference: 'auto',
@@ -2621,10 +2628,13 @@ export const useUIStore = create<UIStore>()(
         setCodeBlockLineWrap: (value) => {
           set({ codeBlockLineWrap: value });
         },
-        setShowToolFileIcons: (value) => {
-          set({ showToolFileIcons: value });
-        },
-        setShowTurnChangedFiles: (value) => {
+  setShowToolFileIcons: (value) => {
+    set({ showToolFileIcons: value });
+  },
+  setActivityColorCoding: (value) => {
+    set({ activityColorCoding: value });
+  },
+  setShowTurnChangedFiles: (value) => {
           set({ showTurnChangedFiles: value });
         },
         setShowExpandedBashTools: (value) => {
@@ -3057,8 +3067,9 @@ export const useUIStore = create<UIStore>()(
           enterToSendConfigured: state.enterToSendConfigured,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
           codeBlockLineWrap: state.codeBlockLineWrap,
-          showToolFileIcons: state.showToolFileIcons,
-          showTurnChangedFiles: state.showTurnChangedFiles,
+    showToolFileIcons: state.showToolFileIcons,
+    activityColorCoding: state.activityColorCoding,
+    showTurnChangedFiles: state.showTurnChangedFiles,
           showExpandedBashTools: state.showExpandedBashTools,
           showExpandedEditTools: state.showExpandedEditTools,
           timeFormatPreference: state.timeFormatPreference,

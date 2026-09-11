@@ -333,6 +333,7 @@ export const SETTINGS_REGISTRY = {
   wideChatLayoutEnabled: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: uiStore('wideChatLayoutEnabled', (v) => useUIStore.getState().setWideChatLayoutEnabled(v)) }),
   showSplitAssistantMessageActions: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('showSplitAssistantMessageActions', (v) => useUIStore.getState().setShowSplitAssistantMessageActions(v)) }),
   showToolFileIcons: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('showToolFileIcons', (v) => useUIStore.getState().setShowToolFileIcons(v)) }),
+  activityColorCoding: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('activityColorCoding', (v) => useUIStore.getState().setActivityColorCoding(v)) }),
   codeBlockLineWrap: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('codeBlockLineWrap', (v) => useUIStore.getState().setCodeBlockLineWrap(v)) }),
   showTurnChangedFiles: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('showTurnChangedFiles', (v) => useUIStore.getState().setShowTurnChangedFiles(v)) }),
   showExpandedBashTools: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('showExpandedBashTools', (v) => useUIStore.getState().setShowExpandedBashTools(v)) }),

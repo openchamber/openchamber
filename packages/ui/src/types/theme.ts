@@ -131,6 +131,14 @@ export interface Theme {
       edit?: Record<string, string>;
       bash?: Record<string, string>;
       lsp?: Record<string, string>;
+      /**
+       * Per-category accent colors for color-coded tool/activity rows.
+       * Keys mirror the ActivityColorCategory union (minus the neutral
+       * `system`); each feeds the matching `--tools-activity-*` variable.
+       */
+      activity?: Partial<
+        Record<'thinking' | 'read' | 'edit' | 'write' | 'shell' | 'search' | 'web' | 'question' | 'agent', string>
+      >;
     };
     forms?: Record<string, string>;
     buttons?: {

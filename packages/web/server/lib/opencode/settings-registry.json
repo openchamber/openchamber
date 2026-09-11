@@ -272,6 +272,9 @@
     "showToolFileIcons": {
       "scope": "profile"
     },
+    "activityColorCoding": {
+      "scope": "profile"
+    },
     "codeBlockLineWrap": {
       "scope": "profile"
     },

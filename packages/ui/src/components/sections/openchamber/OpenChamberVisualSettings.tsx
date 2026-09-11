@@ -300,7 +300,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'scrollbars' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'inputHistoryScope' | 'inputHistoryLimit' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'enterToSend' | 'reportUsage' | 'autoSaveEnabled' | 'sessionTabs';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'activityColorCoding' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'scrollbars' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'inputHistoryScope' | 'inputHistoryLimit' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'enterToSend' | 'reportUsage' | 'autoSaveEnabled' | 'sessionTabs';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
@@ -408,6 +408,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const enterSendSelected = enterToSendConfigured ? enterToSend : !isMobile;
     const showToolFileIcons = useUIStore(state => state.showToolFileIcons);
     const setShowToolFileIcons = useUIStore(state => state.setShowToolFileIcons);
+    const activityColorCoding = useUIStore(state => state.activityColorCoding);
+    const setActivityColorCoding = useUIStore(state => state.setActivityColorCoding);
     const showTurnChangedFiles = useUIStore(state => state.showTurnChangedFiles);
     const setShowTurnChangedFiles = useUIStore(state => state.setShowTurnChangedFiles);
     const showExpandedBashTools = useUIStore(state => state.showExpandedBashTools);
@@ -611,6 +613,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setShowToolFileIcons(enabled);
         void updateDesktopSettings({ showToolFileIcons: enabled });
     }, [setShowToolFileIcons]);
+
+    const handleActivityColorCodingChange = React.useCallback((enabled: boolean) => {
+        setActivityColorCoding(enabled);
+        void updateDesktopSettings({ activityColorCoding: enabled });
+    }, [setActivityColorCoding]);
 
     const handleShowTurnChangedFilesChange = React.useCallback((enabled: boolean) => {
         setShowTurnChangedFiles(enabled);
@@ -1005,6 +1012,18 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </div>
                                     </div>
                                 </SettingsTwoColumn>
+
+                                {shouldShow('activityColorCoding') && (
+                                    <SettingsInset settingsItem="appearance.activity-color-coding">
+                                        <SettingsCheckboxRow
+                                            checked={activityColorCoding}
+                                            onChange={handleActivityColorCodingChange}
+                                            label={t('settings.openchamber.visual.field.activityColorCoding')}
+                                            info={t('settings.openchamber.visual.field.activityColorCodingHint')}
+                                            ariaLabel={t('settings.openchamber.visual.field.activityColorCodingAria')}
+                                        />
+                                    </SettingsInset>
+                                )}
 
                                 {dockBadgeSupported && (
                                     <SettingsInset settingsItem="appearance.dock-badge">

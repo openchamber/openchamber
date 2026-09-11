@@ -7,6 +7,7 @@ import { Icon } from '@/components/icon/Icon';
 import { BusyDots } from './BusyDots';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
+import { getActivityColorStyle } from '@/lib/activityColors';
 import { MarkdownRenderer } from '../../MarkdownRenderer';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import { commitStreamedText } from '../../lib/streamTextCommit';
@@ -105,6 +106,10 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     defaultExpanded,
 }) => {
     const { t } = useI18n();
+    const activityColorCoding = useUIStore((state) => state.activityColorCoding);
+    // Both reasoning variants share the thinking accent; the expanded body
+    // stays in regular text for readability.
+    const activityColor = activityColorCoding ? getActivityColorStyle('thinking') : null;
     const hasEnded = typeof time?.end === 'number';
     const canAutoExpand = isStreaming && !hasEnded;
     const [expansion, setExpansion] = React.useState<ExpansionState>(() => {
@@ -375,7 +380,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                                 isExpanded && 'opacity-0',
                                 !isExpanded && 'group-hover/tool:opacity-0',
                             )}
-                            style={{ color: 'var(--tools-icon)' }}
+                            style={{ color: activityColor?.icon ?? 'var(--tools-icon)' }}
                         >
                             <Icon name="brain-ai-3" className="h-3.5 w-3.5" />
                         </div>
@@ -385,28 +390,28 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                                 isExpanded && 'opacity-100',
                                 !isExpanded && 'opacity-0 group-hover/tool:opacity-100',
                             )}
-                            style={{ color: 'var(--tools-icon)' }}
+                            style={{ color: activityColor?.icon ?? 'var(--tools-icon)' }}
                         >
                             {isExpanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
                         </div>
                     </div>
 
                     {isStreaming ? (
-                        <span className={cn('flex items-center gap-1', TOOL_ROW_TITLE_CLASS)} style={{ color: 'var(--tools-title)' }}>
+                        <span className={cn('flex items-center gap-1', TOOL_ROW_TITLE_CLASS)} style={{ color: activityColor?.title ?? 'var(--tools-title)' }}>
                             <span>{t(variant === 'justification' ? 'chat.reasoningTrace.justification' : 'chat.reasoningTrace.thinking')}</span>
                             <BusyDots />
                         </span>
                     ) : isExpanded ? (
                         <span
                             className={TOOL_ROW_TITLE_CLASS}
-                            style={{ color: 'var(--tools-title)' }}
+                            style={{ color: activityColor?.title ?? 'var(--tools-title)' }}
                         >
                             {t(variant === 'justification' ? 'chat.reasoningTrace.justification' : 'chat.reasoningTrace.thinking')}
                         </span>
                     ) : (
                         <span
                             className={TOOL_ROW_TITLE_CLASS}
-                            style={{ color: 'var(--tools-title)' }}
+                            style={{ color: activityColor?.title ?? 'var(--tools-title)' }}
                         >
                             {t(variant === 'justification' ? 'chat.reasoningTrace.justification' : 'chat.reasoningTrace.thinking')}
                         </span>

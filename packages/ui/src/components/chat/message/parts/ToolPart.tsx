@@ -14,6 +14,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
 import { useUIStore } from '@/stores/useUIStore';
+import { getActivityColorCategory, getActivityColorStyle } from '@/lib/activityColors';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
@@ -1709,10 +1710,17 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const metadata = stateWithData.metadata;
     const input = stateWithData.input;
     const showToolFileIcons = useUIStore((s) => s.showToolFileIcons);
+    const activityColorCoding = useUIStore((s) => s.activityColorCoding);
     const currentDirectory = useEffectiveDirectory() ?? '';
 
     const normalizedPartTool = normalizeToolName(part.tool);
     const isTaskTool = normalizedPartTool === 'task';
+    // Color-coding keeps the task/agent row on its own agent-color scheme.
+    const activityCategory = React.useMemo(
+        () => getActivityColorCategory(normalizedPartTool || part.tool),
+        [normalizedPartTool, part.tool],
+    );
+    const activityColor = activityColorCoding ? getActivityColorStyle(activityCategory) : null;
 
     const status = state?.status as string | undefined;
     const isFinalized = status === 'completed' || status === 'error' || status === 'aborted' || status === 'failed' || status === 'timeout' || status === 'cancelled';
@@ -2072,8 +2080,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         openQuickTarget();
     };
 
-    const iconStyle = !isTaskTool && isError ? TOOL_ERROR_ICON_STYLE : TOOL_NORMAL_ICON_STYLE;
-    const titleStyle = !isTaskTool && isError ? TOOL_ERROR_TITLE_STYLE : TOOL_NORMAL_TITLE_STYLE;
+    const iconStyle = !isTaskTool && isError ? TOOL_ERROR_ICON_STYLE : activityColor?.icon ? { color: activityColor.icon } : TOOL_NORMAL_ICON_STYLE;
+    const titleStyle = !isTaskTool && isError ? TOOL_ERROR_TITLE_STYLE : activityColor?.title ? { color: activityColor.title } : TOOL_NORMAL_TITLE_STYLE;
     const shouldRenderTaskSummary = useDeferredExpandedContent(isTaskTool && (taskSummaryEntries.length > 0 || isActive || shouldTreatAsFinalized || !!taskSessionId));
     const shouldRenderExpandedContent = useDeferredExpandedContent(!isTaskTool && isExpanded);
 
