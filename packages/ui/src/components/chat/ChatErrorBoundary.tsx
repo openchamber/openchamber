@@ -28,7 +28,7 @@ interface ChatErrorBoundaryViewProps extends ChatErrorBoundaryProps {
   texts: ChatErrorBoundaryTexts;
 }
 
-class ChatErrorBoundaryView extends React.Component<ChatErrorBoundaryViewProps, ChatErrorBoundaryState> {
+export class ChatErrorBoundaryView extends React.Component<ChatErrorBoundaryViewProps, ChatErrorBoundaryState> {
   constructor(props: ChatErrorBoundaryViewProps) {
     super(props);
     this.state = { hasError: false };
@@ -43,6 +43,12 @@ class ChatErrorBoundaryView extends React.Component<ChatErrorBoundaryViewProps, 
 
     if (process.env.NODE_ENV === 'development') {
       console.error('Chat error caught by boundary:', error, errorInfo);
+    }
+  }
+
+  componentDidUpdate(previousProps: ChatErrorBoundaryViewProps) {
+    if (previousProps.sessionId !== this.props.sessionId && this.state.hasError) {
+      this.handleReset();
     }
   }
 
