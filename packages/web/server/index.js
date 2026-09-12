@@ -400,7 +400,33 @@ const readSettingsFromDiskMigrated = (...args) => settingsRuntime.readSettingsFr
 const readSettingsFromDisk = (...args) => settingsRuntime.readSettingsFromDisk(...args);
 const readSettingsFromDiskStrict = (...args) => settingsRuntime.readSettingsFromDiskStrict(...args);
 const writeSettingsToDisk = (...args) => settingsRuntime.writeSettingsToDisk(...args);
-const persistSettings = (...args) => settingsRuntime.persistSettings(...args);
+const persistSettings = async (...args) => {
+  const changes = args[0];
+  const updated = await settingsRuntime.persistSettings(...args);
+  if (changes?.sessionGoalEnabled === true || changes?.sessionGoalEnabled === false) {
+    sessionGoalRuntime?.onSettingsChanged?.();
+  }
+  return updated;
+};
+
+// Known project directories, MRU first (lastDirectory, then projects by
+// lastOpenedAt). The session-goal restart scan uses the strict settings reader
+// so a read failure remains a retryable failure instead of an empty scan.
+const collectKnownDirectories = async (readSettings = readSettingsFromDiskStrict) => {
+  const settings = await readSettings();
+  const directories = [];
+  if (typeof settings.lastDirectory === 'string' && settings.lastDirectory) {
+    directories.push(settings.lastDirectory);
+  }
+  const projects = Array.isArray(settings.projects) ? [...settings.projects] : [];
+  projects.sort((a, b) => (b?.lastOpenedAt ?? 0) - (a?.lastOpenedAt ?? 0));
+  for (const project of projects) {
+    if (typeof project?.path === 'string' && project.path) {
+      directories.push(project.path);
+    }
+  }
+  return [...new Set(directories)];
+};
 
 const requestSecurityRuntime = createRequestSecurityRuntime({
   readSettingsFromDiskMigrated,
@@ -1243,6 +1269,12 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
       console.warn('Failed to reconcile sessions after OpenCode restart:', error?.message ?? error);
     }
   },
+  onOpenCodeReady: () => sessionGoalRuntime.start({
+    listDirectories: collectKnownDirectories,
+    resetRetryWindow: true,
+  }).catch((error) => {
+    console.warn('[session-goal] readiness recovery failed:', error?.message ?? error);
+  }),
   getManagedOpenCodeEnv: async () => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
     // Each capability is its own tool and its own switch; the plugin is only
@@ -2034,6 +2066,19 @@ async function main(options = {}) {
   } catch (error) {
     console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error);
   }
+
+  // Deterministic restart recovery for persisted active goals: an already-idle
+  // session usually emits no SSE event after a restart, so a one-shot scan
+  // over all known directories re-arms the loop (see runtime start). Recovery
+  // is logically complete but resource-bounded via scan concurrency, and it
+  // runs fire-and-forget so a slow OpenCode never stalls server startup; the
+  // onOpenCodeReady edge below remains the authoritative recovery trigger
+  // with a fresh bounded retry window. There is no permanent polling.
+  sessionGoalRuntime.start({
+    listDirectories: collectKnownDirectories,
+  }).catch((error) => {
+    console.warn('[session-goal] restart recovery failed:', error?.message ?? error);
+  });
 
   // Only opens a relay control socket when the user opted in (config enabled).
   // Reconcile the relay lifecycle from demand on startup: run it if any relay

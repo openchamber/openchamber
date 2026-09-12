@@ -156,11 +156,13 @@ describe('OpenCode lifecycle', () => {
   });
 
   it('records an authoritative ready terminal event for external startup', async () => {
+    const onOpenCodeReady = vi.fn();
     globalThis.fetch = vi.fn(async () => ({
       ok: true,
       json: async () => ({ healthy: true }),
     }));
     const runtime = createRuntime({
+      onOpenCodeReady,
       env: {
         ENV_CONFIGURED_OPENCODE_PORT: 45678,
         ENV_CONFIGURED_OPENCODE_HOST: null,
@@ -172,6 +174,8 @@ describe('OpenCode lifecycle', () => {
     });
 
     await runtime.bootstrapOpenCodeAtStartup();
+
+    expect(onOpenCodeReady).toHaveBeenCalledOnce();
 
     expect(recordStartupPerformanceMock).toHaveBeenCalledWith('opencode.bootstrap.ready', {
       totalDurationMs: expect.any(Number),
