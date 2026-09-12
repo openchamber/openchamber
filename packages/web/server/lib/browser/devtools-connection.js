@@ -1,4 +1,8 @@
-import { WebSocket } from 'ws';
+import { createRequire } from 'node:module';
+
+// Bun 1.4 replaces bare `ws` imports with a shim that lacks streams and socket backpressure.
+const requireWebSocketPackage = createRequire(import.meta.resolve('ws/package.json'));
+const { WebSocket, createWebSocketStream } = requireWebSocketPackage('./');
 
 const CONNECT_TIMEOUT_MS = 15_000;
 const MAX_PROTOCOL_MESSAGE_BYTES = 64 * 1024 * 1024;
@@ -9,6 +13,11 @@ export const connectDevToolsWebSocket = (url) => new Promise((resolve, reject) =
   timer.unref?.();
   socket.once('open', () => { clearTimeout(timer); resolve(socket); });
   socket.once('error', () => { clearTimeout(timer); reject(new Error('connection failed')); });
+});
+
+export const createDevToolsWebSocketStream = (socket) => createWebSocketStream(socket, {
+  readableObjectMode: true,
+  readableHighWaterMark: 1,
 });
 
 export const getDevToolsPageSocketUrl = (browserUrl, targetId) => {

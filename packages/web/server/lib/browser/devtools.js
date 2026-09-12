@@ -1,7 +1,8 @@
 import { randomBytes as nodeRandomBytes } from 'node:crypto';
-import { createWebSocketStream } from 'ws';
 import { createDevToolsAssetHandler } from './devtools-assets.js';
-import { connectDevToolsWebSocket, getDevToolsPageSocketUrl } from './devtools-connection.js';
+import {
+  connectDevToolsWebSocket, createDevToolsWebSocketStream, getDevToolsPageSocketUrl,
+} from './devtools-connection.js';
 import { acknowledgeDevToolsMessage, clearDevToolsOutbound, createDevToolsOutbound } from './devtools-outbound.js';
 import { createDevToolsPolicy } from './devtools-policy.js';
 import {
@@ -130,7 +131,7 @@ export function createBrowserDevTools({
           closeWith(state, 'DEVTOOLS_BACKPRESSURE', 'ingress-bytes');
         }
       });
-      state.inbound = createWebSocketStream(state.socket, { readableObjectMode: true, readableHighWaterMark: 1 });
+      state.inbound = createDevToolsWebSocketStream(state.socket);
       state.inbound.on('data', (data) => {
         state.inboundBytes -= Buffer.byteLength(data);
         if (state.closed) handleClosingTraceMessage(state, data); else handleSocketMessage(state, data);

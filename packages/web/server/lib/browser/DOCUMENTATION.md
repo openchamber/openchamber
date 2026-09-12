@@ -456,7 +456,9 @@ The dedicated CDP connection feeds an object-mode WebSocket stream. Delivery
 pauses when two messages await viewer acknowledgments and resumes when one
 finishes, so a burst of script or network events waits for the viewer instead
 of overflowing the outbound queue. The stream also pauses its underlying
-socket; already decoded messages can remain buffered until it resumes.
+socket; already decoded messages can remain buffered until it resumes. The
+connection loads the installed `ws` package from its exported package manifest
+so Node and Bun both use its stream implementation and TCP backpressure.
 Cleanup drains that stream through the tracing completion handler before the
 connection closes. Decoded ingress and logical outbound messages share a
 64 MiB byte budget. The message size and stalled-viewer deadline still apply.
