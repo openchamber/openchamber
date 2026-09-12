@@ -42,6 +42,9 @@ const agent = { name: AGENT, mode: 'primary' as const };
 let latestUserChoice: UserModelChoice | null = null;
 let forcePreserveManualOverride: boolean | null = null;
 
+/** Session ids handed to the agent-scope resolver, in call order. */
+const composerAgentDirectoryCalls: Array<string | null> = [];
+
 /** Every effort written for the session, in order, including `undefined`. */
 const variantWrites: VariantChoice[] = [];
 /** Every `(override, inherited)` pair pushed into the config store. */
@@ -244,11 +247,23 @@ mock.module('@/components/model-picker/ModelPickerList', () => ({
 mock.module('@/hooks/useRuntimeAPIs', () => ({ useIsVSCodeRuntime: () => false }));
 mock.module('@/hooks/useModelLists', () => ({ useModelLists: () => ({ favoriteModelsList: [], recentModelsList: [] }) }));
 mock.module('@/hooks/useIsTextTruncated', () => ({ useIsTextTruncated: () => false }));
+// Keep the picker source out of the rendered graph so the real agent store
+// cannot issue loads; the scope tests below assert the session id it receives.
+// The returned list mirrors the real hook's ambient fallback (the config
+// store's agents) so the catalog tests still react to that store.
+mock.module('@/hooks/useVisibleAgentsForDirectory', () => ({
+  useComposerAgentDirectory: (sessionId: string | null) => {
+    composerAgentDirectoryCalls.push(sessionId);
+    return undefined;
+  },
+  useVisibleAgentsForDirectory: () => useConfigStore((state) => state.agents),
+}));
 mock.module('@/lib/device', () => ({ useDeviceInfo: () => ({ isTouch: false }) }));
 mock.module('@/lib/desktop', () => ({ isDesktopShell: () => false }));
 mock.module('@/lib/startupTrace', () => ({ markStartupTrace: () => undefined }));
 
 const { ModelControls } = await import('./ModelControls');
+const { ChatColumnSessionContext } = await import('./chatColumnSession');
 const { I18nProvider } = await import('@/lib/i18n');
 
 const DOM_GLOBAL_NAMES = [
@@ -316,12 +331,18 @@ const installDom = () => {
   };
 };
 
-const renderModelControls = async (props: React.ComponentProps<typeof ModelControls> = {}) => {
+const renderModelControls = async (
+  props: React.ComponentProps<typeof ModelControls> = {},
+  columnSession: { sessionId: string | null; directory: string | null } | null = null,
+) => {
   const dom = installDom();
   const root = createRoot(dom.container);
+  const content = <ModelControls {...props} />;
   await act(async () => root.render(
     <I18nProvider>
-      <ModelControls {...props} />
+      {columnSession
+        ? <ChatColumnSessionContext.Provider value={columnSession}>{content}</ChatColumnSessionContext.Provider>
+        : content}
     </I18nProvider>,
   ));
   return {
@@ -337,6 +358,7 @@ describe('ModelControls effort restore', () => {
   beforeEach(() => {
     variantWrites.length = 0;
     overrideWrites.length = 0;
+    composerAgentDirectoryCalls.length = 0;
     latestUserChoice = null;
     forcePreserveManualOverride = null;
     useSessionUIStore.setState({ currentSessionId: SESSION_ID });
@@ -564,4 +586,37 @@ describe('ModelControls effort restore', () => {
       }
     });
   }
+
+  describe('agent scope', () => {
+    test('the deferred column session scopes the agent list, not the live selection', async () => {
+      const { cleanup } = await renderModelControls({}, { sessionId: 'ses_column', directory: '/workspace/other' });
+      try {
+        expect(composerAgentDirectoryCalls.at(-1)).toBe('ses_column');
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('without a column session the live selection still scopes the agent list', async () => {
+      const { cleanup } = await renderModelControls();
+      try {
+        expect(composerAgentDirectoryCalls.at(-1)).toBe(SESSION_ID);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('a controlled BTW selection ignores the column session', async () => {
+      const btwSessionId = 'btw-pending:ses_restore';
+      const { cleanup } = await renderModelControls(
+        { sessionId: btwSessionId, selection: { model: { providerId: PROVIDER_ID, modelId: MODEL_ID }, agent: 'plan', variant: undefined } },
+        { sessionId: 'ses_column', directory: '/workspace/other' },
+      );
+      try {
+        expect(composerAgentDirectoryCalls.at(-1)).toBe(btwSessionId);
+      } finally {
+        await cleanup();
+      }
+    });
+  });
 });

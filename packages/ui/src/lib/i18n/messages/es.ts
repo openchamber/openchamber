@@ -2181,6 +2181,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.toast.opencodeRestartInterrupted.title": "Conversación interrumpida",
   "chat.toast.opencodeRestartInterrupted.description": "OpenCode se reinició mientras aún se estaba generando una respuesta. Envía un mensaje para continuar.",
   "chat.toast.opencodeRestartInterrupted.openSession": "Abrir sesión",
+  "chat.toast.agentUnavailable": "El agente {agent} no está disponible en este contexto. Se enviará con el agente predeterminado.",
   "chat.errorBoundary.title": "Error en la conversación",
   "chat.errorBoundary.description": "La interfaz de la conversación encontró un error. Esto podría deberse a un problema de red temporal o a datos de mensaje corruptos.",
   "chat.errorBoundary.sessionLabel": "Sesión",

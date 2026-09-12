@@ -9,6 +9,7 @@ import { setActionRefs, setOptimisticRefs } from './session-actions';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useAgentsStore } from '@/stores/useAgentsStore';
 import { useSelectionStore } from './selection-store';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
@@ -16,6 +17,7 @@ import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { createContextPart } from '@/lib/messages/contextParts';
+import { toast } from '@/components/ui';
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -916,6 +918,212 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// #3420 regression: a draft send must run the agent availability guard against
+// the composer scope captured from the draft being sent — the project draft's
+// directory override, or for a chat draft the prepared chat scratch directory
+// the send actually targets. An unprepared draft has no scope yet and fails
+// open; it must never read `null`, which would resolve the ambient project's
+// list and could send a project-scoped default agent to a directory that does
+// not define it.
+// ---------------------------------------------------------------------------
+describe('sendMessage draft agent availability guard', () => {
+  const DRAFT_SESSION = 'session-draft-agent-scope';
+  const PROVIDER = 'provider-a';
+  const MODEL = 'model-a';
+  const calls = [];
+  const createdDirectories = [];
+  let originalSendMessage;
+  let originalCreateSession;
+  let originalCreateDirectory;
+  let originalAgentsByDirectory;
+  let originalCurrentAgentName;
+  let originalToastInfo;
+  let toastInfoCalls;
+
+  const draft = {
+    draftId: 42,
+    open: true,
+    target: 'chat',
+    directoryOverride: null,
+    bootstrapPendingDirectory: null,
+    preparedChatDirectory: null,
+    parentID: null,
+  };
+
+  beforeEach(() => {
+    calls.length = 0;
+    createdDirectories.length = 0;
+    toastInfoCalls = [];
+    const childStore = {
+      getState: () => ({ session: [], message: {}, part: {}, session_status: {} }),
+      setState: () => {},
+    };
+    const childStores = {
+      children: new Map(),
+      ensureChild: () => childStore,
+      getChild: () => childStore,
+    };
+    setActionRefs(opencodeClient, childStores, () => null);
+    setOptimisticRefs(() => {}, () => {});
+    originalAgentsByDirectory = useAgentsStore.getState().agentsByDirectory;
+    originalCurrentAgentName = useConfigStore.getState().currentAgentName;
+    useConfigStore.setState({
+      isConnected: true,
+      currentProviderId: PROVIDER,
+      currentModelId: MODEL,
+      currentAgentName: null,
+      currentVariant: undefined,
+      currentVariantSelection: { override: undefined, inherited: undefined },
+    });
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      currentSessionDirectory: null,
+      newSessionDraft: { ...draft },
+    });
+    useSelectionStore.getState().clearSessionSelections(DRAFT_SESSION);
+
+    originalSendMessage = opencodeClient.sendMessage;
+    originalCreateSession = opencodeClient.createSession;
+    originalCreateDirectory = opencodeClient.createDirectory;
+    originalToastInfo = toast.info;
+    opencodeClient.sendMessage = async (params) => {
+      calls.push(params);
+      return 'msg';
+    };
+    opencodeClient.createSession = async (_params, directory) => {
+      createdDirectories.push(directory ?? null);
+      return { id: DRAFT_SESSION, directory: directory ?? null };
+    };
+    opencodeClient.createDirectory = async (path) => ({ success: true, path });
+    toast.info = (message, data) => {
+      toastInfoCalls.push({ message, data });
+      return 'toast-id';
+    };
+  });
+
+  afterEach(() => {
+    opencodeClient.sendMessage = originalSendMessage;
+    opencodeClient.createSession = originalCreateSession;
+    opencodeClient.createDirectory = originalCreateDirectory;
+    toast.info = originalToastInfo;
+    useAgentsStore.setState({ agentsByDirectory: originalAgentsByDirectory });
+    useConfigStore.setState({ currentAgentName: originalCurrentAgentName });
+    useSelectionStore.getState().clearSessionSelections(DRAFT_SESSION);
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      currentSessionDirectory: null,
+      newSessionDraft: { open: false, directoryOverride: null, parentID: null },
+    });
+  });
+
+  const send = (agent) => useSessionUIStore.getState().sendMessage(
+    'hello', PROVIDER, MODEL, agent, undefined, undefined, undefined, undefined, 'normal',
+  );
+
+  test('drops an ambient project-scoped agent missing from the prepared chat directory list and says why', async () => {
+    // Temp chat: the composer scope is the generated scratch directory the
+    // send targets, so the previous project's list must not leak in.
+    const preparedChatDirectory = '/home/tester/.openchamber/chats/draft-1';
+    useSessionUIStore.setState({
+      newSessionDraft: { ...draft, preparedChatDirectory },
+    });
+    useAgentsStore.setState({
+      agentsByDirectory: {
+        __default__: [{ name: 'alpha', mode: 'primary', permission: [], options: {} }],
+        [preparedChatDirectory]: [{ name: 'build', mode: 'primary', permission: [], options: {} }],
+      },
+    });
+    useConfigStore.setState({ currentAgentName: 'alpha' });
+
+    await send(undefined);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].agent).toBeUndefined();
+    // The send targets the same prepared scratch directory the guard scoped to.
+    expect(createdDirectories).toHaveLength(1);
+    expect(createdDirectories[0]).toBe(preparedChatDirectory);
+    expect(calls[0].directory).toBe(preparedChatDirectory);
+    expect(toastInfoCalls).toHaveLength(1);
+    expect(String(toastInfoCalls[0].message)).toContain('alpha');
+    expect(toastInfoCalls[0].data.id).toBe(`agent-unavailable:${DRAFT_SESSION}:alpha`);
+    // The choice materialization had stored is reconciled out with the send.
+    expect(useSelectionStore.getState().getSessionAgentSelection(DRAFT_SESSION)).toBeNull();
+    expect(useSelectionStore.getState().getAgentModelForSession(DRAFT_SESSION, 'alpha')).toBeNull();
+  });
+
+  test('keeps an agent the prepared chat directory list defines', async () => {
+    const preparedChatDirectory = '/home/tester/.openchamber/chats/draft-2';
+    useSessionUIStore.setState({
+      newSessionDraft: { ...draft, preparedChatDirectory },
+    });
+    useAgentsStore.setState({
+      agentsByDirectory: {
+        __default__: [{ name: 'build', mode: 'primary', permission: [], options: {} }],
+        [preparedChatDirectory]: [{ name: 'alpha', mode: 'primary', permission: [], options: {} }],
+      },
+    });
+    useConfigStore.setState({ currentAgentName: 'alpha' });
+
+    await send(undefined);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].agent).toBe('alpha');
+    expect(toastInfoCalls).toHaveLength(0);
+    expect(useSelectionStore.getState().getSessionAgentSelection(DRAFT_SESSION)).toBe('alpha');
+  });
+
+  test('keeps the requested agent while an unprepared chat draft scope is unknown (fail open)', async () => {
+    // No scratch directory prepared yet, so the scope is unknown, never the
+    // ambient `__default__` list the old null fallback read.
+    useAgentsStore.setState({
+      agentsByDirectory: { __default__: [{ name: 'build', mode: 'primary', permission: [], options: {} }] },
+    });
+    useConfigStore.setState({ currentAgentName: 'alpha' });
+
+    await send(undefined);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].agent).toBe('alpha');
+    expect(toastInfoCalls).toHaveLength(0);
+  });
+
+  test('resolves the guard scope from the submit-time draft snapshot, not the live draft', async () => {
+    // The composer scoped this send while draft A (/projects/alpha) was open.
+    // By send time the live store holds a different, newly opened draft B, so
+    // only the snapshot knows which directory's agent list this send belongs to.
+    const draftSnapshot = {
+      ...draft,
+      target: 'project',
+      directoryOverride: '/projects/alpha',
+    };
+    useAgentsStore.setState({
+      agentsByDirectory: {
+        '/projects/alpha': [{ name: 'alpha', mode: 'primary', permission: [], options: {} }],
+        '/projects/beta': [{ name: 'other', mode: 'primary', permission: [], options: {} }],
+      },
+    });
+    useConfigStore.setState({ currentAgentName: 'alpha' });
+    useSessionUIStore.setState({
+      newSessionDraft: { ...draft, target: 'project', directoryOverride: '/projects/beta' },
+    });
+
+    await useSessionUIStore.getState().sendMessage(
+      'hello', PROVIDER, MODEL, undefined, undefined, undefined, undefined, undefined, 'normal',
+      { draftSnapshot },
+    );
+
+    // Draft A's loaded list defines alpha, so the guard keeps it even though the
+    // live draft B does not.
+    expect(createdDirectories).toHaveLength(1);
+    expect(createdDirectories[0]).toBe('/projects/alpha');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].agent).toBe('alpha');
+    expect(toastInfoCalls).toHaveLength(0);
+    expect(useSelectionStore.getState().getSessionAgentSelection(DRAFT_SESSION)).toBe('alpha');
+  });
+});
+
 describe('routeMessage skill invocation', () => {
   // OpenCode registers every skill as a command (source: "skill"), so a skill
   // selected from the slash menu must be dispatched via session.command so its
@@ -1306,6 +1514,122 @@ describe('sendMessage effort record', () => {
     await send('high');
 
     expect(readRecord()).toBe(undefined);
+  });
+});
+
+describe('sendMessage agent availability guard', () => {
+  const SESSION = 'session-agent-scope';
+  const DIRECTORY = '/projects/alpha';
+  const PROVIDER = 'provider-a';
+  const MODEL = 'model-a';
+  const calls = [];
+  let originalSendMessage;
+  let originalAgentsByDirectory;
+  let originalCurrentAgentName;
+
+  beforeEach(() => {
+    calls.length = 0;
+    const childStore = {
+      getState: () => ({ session: [], message: {}, part: {}, session_status: {} }),
+      setState: () => {},
+    };
+    const childStores = {
+      children: new Map(),
+      ensureChild: () => childStore,
+      getChild: () => childStore,
+    };
+    setActionRefs(opencodeClient, childStores, () => DIRECTORY);
+    setOptimisticRefs(() => {}, () => {});
+    originalAgentsByDirectory = useAgentsStore.getState().agentsByDirectory;
+    originalCurrentAgentName = useConfigStore.getState().currentAgentName;
+    useConfigStore.setState({
+      isConnected: true,
+      currentProviderId: PROVIDER,
+      currentModelId: MODEL,
+      currentAgentName: null,
+      currentVariant: undefined,
+      currentVariantSelection: { override: undefined, inherited: undefined },
+    });
+    useSessionUIStore.setState({
+      currentSessionId: SESSION,
+      currentSessionDirectory: DIRECTORY,
+      newSessionDraft: { open: false, directoryOverride: null, parentID: null },
+    });
+    useSelectionStore.getState().clearSessionSelections(SESSION);
+
+    originalSendMessage = opencodeClient.sendMessage;
+    opencodeClient.sendMessage = async (params) => {
+      calls.push(params);
+      return 'msg';
+    };
+  });
+
+  afterEach(() => {
+    opencodeClient.sendMessage = originalSendMessage;
+    useAgentsStore.setState({ agentsByDirectory: originalAgentsByDirectory });
+    useConfigStore.setState({ currentAgentName: originalCurrentAgentName });
+    useSelectionStore.getState().clearSessionSelections(SESSION);
+  });
+
+  const send = (agent) => useSessionUIStore.getState().sendMessage(
+    'hello', PROVIDER, MODEL, agent, undefined, undefined, undefined, undefined, 'normal',
+  );
+
+  test('drops a missing agent and clears the stale session selection', async () => {
+    useAgentsStore.setState({
+      agentsByDirectory: { [DIRECTORY]: [{ name: 'build', mode: 'primary', permission: [], options: {} }] },
+    });
+    useSelectionStore.getState().saveSessionAgentSelection(SESSION, 'ghost');
+    useSelectionStore.getState().saveAgentModelForSession(SESSION, 'ghost', PROVIDER, MODEL);
+
+    await send(undefined);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].agent).toBeUndefined();
+    expect(useSelectionStore.getState().getSessionAgentSelection(SESSION)).toBeNull();
+    expect(useSelectionStore.getState().getAgentModelForSession(SESSION, 'ghost')).toBeNull();
+  });
+
+  test('keeps an available agent and its recorded selection', async () => {
+    useAgentsStore.setState({
+      agentsByDirectory: { [DIRECTORY]: [{ name: 'orchestrator', mode: 'primary', permission: [], options: {} }] },
+    });
+    useSelectionStore.getState().saveSessionAgentSelection(SESSION, 'orchestrator');
+
+    await send(undefined);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].agent).toBe('orchestrator');
+    expect(useSelectionStore.getState().getSessionAgentSelection(SESSION)).toBe('orchestrator');
+  });
+
+  test('keeps the requested agent while its directory list has not loaded', async () => {
+    useAgentsStore.setState({ agentsByDirectory: {} });
+    useSelectionStore.getState().saveSessionAgentSelection(SESSION, 'ghost');
+
+    await send(undefined);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].agent).toBe('ghost');
+    expect(useSelectionStore.getState().getSessionAgentSelection(SESSION)).toBe('ghost');
+  });
+
+  test('keeps the requested agent when the session has no directory, because send routing resolves the client fallback', async () => {
+    useAgentsStore.setState({
+      agentsByDirectory: { __default__: [{ name: 'build', mode: 'primary', permission: [], options: {} }] },
+    });
+    useSelectionStore.getState().saveSessionAgentSelection(SESSION, 'alpha');
+    useSessionUIStore.setState({ currentSessionDirectory: null });
+
+    await send(undefined);
+
+    expect(calls).toHaveLength(1);
+    // Intentional asymmetry with the picker's null no-directory scope:
+    // `opencodeClient.sendMessage` falls back to `client.currentDirectory` for
+    // a missing directory, so the guard fails open rather than dropping a name
+    // it cannot disprove against a list the send may never use.
+    expect(calls[0].agent).toBe('alpha');
+    expect(useSelectionStore.getState().getSessionAgentSelection(SESSION)).toBe('alpha');
   });
 });
 

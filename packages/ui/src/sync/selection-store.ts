@@ -27,6 +27,14 @@ export type SelectionState = {
   getSessionModelSelection: (sessionId: string) => { providerId: string; modelId: string } | null
   saveSessionAgentSelection: (sessionId: string, agentName: string) => void
   getSessionAgentSelection: (sessionId: string) => string | null
+  /**
+   * Forget the session's agent choice when it is the named one, along with the
+   * model recorded for that name. Used when the chosen agent does not exist in
+   * the session's directory, so a stale selection cannot keep steering sends at
+   * a name the server cannot resolve. A stored choice that differs is left
+   * alone: the send was not carrying it, and it may still be valid.
+   */
+  clearSessionAgentSelection: (sessionId: string, agentName?: string) => void
   saveAgentModelForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => void
   getAgentModelForSession: (sessionId: string, agentName: string) => { providerId: string; modelId: string } | null
   clearSessionSelections: (sessionId: string) => void
@@ -77,6 +85,30 @@ export const useSelectionStore = create<SelectionState>()(
         }),
 
       getSessionAgentSelection: (sessionId) => get().sessionAgentSelections.get(sessionId) ?? null,
+
+      clearSessionAgentSelection: (sessionId, agentName) => set((state) => {
+        // Match-guarded on purpose: a send can carry an explicit or ambient
+        // name while the session still stores a different valid preference.
+        // Only clear when the dropped name is the stored choice.
+        const storedAgent = state.sessionAgentSelections.get(sessionId)
+        if (agentName === undefined || storedAgent !== agentName) return state
+
+        const sessionAgentSelections = new Map(state.sessionAgentSelections)
+        sessionAgentSelections.delete(sessionId)
+
+        const agentModels = state.sessionAgentModelSelections.get(sessionId)
+        let sessionAgentModelSelections = state.sessionAgentModelSelections
+        if (agentModels?.has(agentName) === true) {
+          const outer = new Map(sessionAgentModelSelections)
+          const inner = new Map(agentModels)
+          inner.delete(agentName)
+          if (inner.size === 0) outer.delete(sessionId)
+          else outer.set(sessionId, inner)
+          sessionAgentModelSelections = outer
+        }
+
+        return { sessionAgentSelections, sessionAgentModelSelections }
+      }),
 
       saveAgentModelForSession: (sessionId, agentName, providerId, modelId) =>
         set((s) => {

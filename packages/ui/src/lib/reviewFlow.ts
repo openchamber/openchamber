@@ -11,6 +11,7 @@ import {
   withReviewSessionMarker,
 } from '@/lib/sessionReviewMetadata';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { resolveAvailableAgentForDirectory } from '@/stores/useAgentsStore';
 import { useAutoReviewStore, type AutoReviewRun } from '@/stores/useAutoReviewStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -353,7 +354,11 @@ const resolveModelContext = (sessionID: string): SessionModelContext | null => {
   };
 };
 
-const sendPlainMessage = async (
+/**
+ * The one send path every review-flow message goes through. Exported so the
+ * agent-availability contract is testable without standing up the whole flow.
+ */
+export const sendPlainMessage = async (
   sessionID: string,
   directory: string,
   text: string,
@@ -366,10 +371,21 @@ const sendPlainMessage = async (
   if (!resolved) throw new Error('Select a model before sending review flow messages');
   const selection = useSelectionStore.getState();
   selection.saveSessionModelSelection(sessionID, resolved.providerID, resolved.modelID);
-  if (resolved.agent) {
-    selection.saveSessionAgentSelection(sessionID, resolved.agent);
-    selection.saveAgentModelForSession(sessionID, resolved.agent, resolved.providerID, resolved.modelID);
-    selection.saveAgentModelVariantForSession(sessionID, resolved.agent, resolved.providerID, resolved.modelID, resolved.variant);
+  // This flow is automated and can send several messages per run, so a missing
+  // agent is logged instead of toasted: the review continues with the server
+  // default, and the unavailable name is never persisted as this session's
+  // choice.
+  const agentAvailability = resolveAvailableAgentForDirectory(directory, resolved.agent);
+  const effectiveAgent = agentAvailability.agent;
+  if (agentAvailability.reason === 'missing' && resolved.agent) {
+    console.warn(
+      `[review-flow] agent "${resolved.agent}" is not available in ${directory}; sending with the default agent`,
+    );
+  }
+  if (effectiveAgent) {
+    selection.saveSessionAgentSelection(sessionID, effectiveAgent);
+    selection.saveAgentModelForSession(sessionID, effectiveAgent, resolved.providerID, resolved.modelID);
+    selection.saveAgentModelVariantForSession(sessionID, effectiveAgent, resolved.providerID, resolved.modelID, resolved.variant);
   }
   markPendingUserSendAnimation(sessionID);
   let sentMessageID: string | null = null;
@@ -379,7 +395,7 @@ const sendPlainMessage = async (
     directory,
     providerID: resolved.providerID,
     modelID: resolved.modelID,
-    agent: resolved.agent,
+    agent: effectiveAgent,
     onMessageID: (messageID) => {
       sentMessageID = messageID;
     },
@@ -392,7 +408,7 @@ const sendPlainMessage = async (
         directory,
         providerID: resolved.providerID,
         modelID: resolved.modelID,
-        agent: resolved.agent,
+        agent: effectiveAgent,
         variant: resolved.variant,
         text,
         additionalParts,

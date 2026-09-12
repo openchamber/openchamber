@@ -2,13 +2,26 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
 type BridgeRequest = { id: string; type: string };
+type BridgeMessage = { type: string; id?: string };
 
 describe('VS Code webview settings API', () => {
   test('propagates a failed bridge read and retries successfully', async () => {
     const originalWindow = globalThis.window;
     // SAFETY: acquireVsCodeApi is an optional webview global and is restored to this exact value below.
     const originalAcquire = (globalThis as typeof globalThis & { acquireVsCodeApi?: unknown }).acquireVsCodeApi;
-    const messages: BridgeRequest[] = [];
+    const messages: BridgeMessage[] = [];
+    // getVSCodeAPI() posts { type: 'webview:ready' } before the first request,
+    // so the first captured message has no request id and must be skipped.
+    const takeRequest = (): BridgeRequest | undefined => {
+      for (let index = 0; index < messages.length; index += 1) {
+        const { id, type } = messages[index];
+        if (id !== undefined) {
+          messages.splice(index, 1);
+          return { id, type };
+        }
+      }
+      return undefined;
+    };
     const testWindow = Object.assign(new EventTarget(), {
       __VSCODE_CONFIG__: { theme: 'light', workspaceFolder: '/workspace' },
     });
@@ -21,7 +34,7 @@ describe('VS Code webview settings API', () => {
       Object.defineProperty(globalThis, 'acquireVsCodeApi', {
         configurable: true,
         value: () => ({
-          postMessage: (message: BridgeRequest) => messages.push(message),
+          postMessage: (message: BridgeMessage) => messages.push(message),
           getState: () => undefined,
           setState: () => undefined,
         }),
@@ -31,7 +44,7 @@ describe('VS Code webview settings API', () => {
       const api = createVSCodeSettingsAPI();
 
       const failedLoad = api.load();
-      const failedRequest = messages.shift();
+      const failedRequest = takeRequest();
       assert.ok(failedRequest);
       testWindow.dispatchEvent(new MessageEvent('message', {
         data: {
@@ -44,7 +57,7 @@ describe('VS Code webview settings API', () => {
       await assert.rejects(failedLoad, /settings unavailable/);
 
       const successfulLoad = api.load();
-      const successfulRequest = messages.shift();
+      const successfulRequest = takeRequest();
       assert.ok(successfulRequest);
       testWindow.dispatchEvent(new MessageEvent('message', {
         data: {

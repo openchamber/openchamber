@@ -2173,6 +2173,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.title': '聊天已中斷',
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode 在回覆仍在產生時重新啟動。傳送訊息以繼續。',
   'chat.toast.opencodeRestartInterrupted.openSession': '開啟會話',
+  'chat.toast.agentUnavailable': 'Agent {agent} 在此上下文中無法使用，將改用預設 Agent 傳送。',
   'chat.errorBoundary.title': '聊天錯誤',
   'chat.errorBoundary.description': '聊天介面發生錯誤，可能是暫時網路問題或訊息資料損毀導致。',
   'chat.errorBoundary.sessionLabel': '會話',

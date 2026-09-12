@@ -854,6 +854,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.title': 'Czat został przerwany',
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode uruchomił się ponownie podczas generowania odpowiedzi. Wyślij wiadomość, aby kontynuować.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Otwórz sesję',
+  'chat.toast.agentUnavailable': 'Agent {agent} nie jest dostępny w tym kontekście. Wysyłanie z domyślnym agentem.',
   'chat.errorBoundary.title': 'Błąd Czatu',
   'chat.errorBoundary.description': 'Interfejs czatu napotkał błąd. Może to być spowodowane tymczasowym problemem sieciowym lub uszkodzonymi danymi wiadomości.',
   'chat.errorBoundary.sessionLabel': 'Sesja',

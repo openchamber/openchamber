@@ -5,6 +5,7 @@ import { renderMagicPrompt } from './magicPrompts';
 import { requestSmallModel } from './smallModelRequest';
 import { materializeOpenDraftSession, useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
+import { resolveAvailableAgentForDirectory } from '@/stores/useAgentsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -740,6 +741,22 @@ const runStructuredGenerationInActiveSession = async ({
     throw new Error('Generation prompts are empty');
   }
 
+  // The generation session carries whatever agent its session selection or the
+  // ambient config last set, and the send target's directory list may no longer
+  // define it. Generation is automated, so an unavailable name is logged and
+  // dropped — the server applies its default and the name is never persisted.
+  // An empty directory keeps the existing fail-open behavior; no scope is
+  // invented from it.
+  const agentAvailability = resolveAvailableAgentForDirectory(
+    trimmedDirectory.length > 0 ? trimmedDirectory : undefined,
+    generationSession.agent,
+  );
+  if (agentAvailability.reason === 'missing' && generationSession.agent) {
+    console.warn(
+      `[git-generation] agent "${generationSession.agent}" is not available in ${trimmedDirectory}; sending with the default agent`,
+    );
+  }
+
   requestChatForceScrollBottom(generationSession.sessionId);
 
   const response = await opencodeClient.withDirectory(directory, async () => {
@@ -750,7 +767,7 @@ const runStructuredGenerationInActiveSession = async ({
         providerID: generationSession.providerID,
         modelID: generationSession.modelID,
       },
-      ...(generationSession.agent ? { agent: generationSession.agent } : {}),
+      ...(agentAvailability.agent ? { agent: agentAvailability.agent } : {}),
       ...(generationSession.variant ? { variant: generationSession.variant } : {}),
       parts: promptParts,
     });

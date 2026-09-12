@@ -3,6 +3,8 @@ import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
+import { useComposerAgentDirectory, useVisibleAgentsForDirectory } from '@/hooks/useVisibleAgentsForDirectory';
+import { useChatColumnSession } from './chatColumnSession';
 import { getAgentDisplayName } from './mobileControlsUtils';
 import { getAgentColor } from '@/lib/agentColors';
 
@@ -17,13 +19,16 @@ const LONG_PRESS_MS = 500;
 // NOTE: Use pointer events instead of onClick to keep soft keyboard open on mobile
 export const MobileAgentButton: React.FC<MobileAgentButtonProps> = ({ onCycleAgent, onOpenAgentPanel, className }) => {
     const currentAgentName = useConfigStore((state) => state.currentAgentName);
-    const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
-    const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+    // Follow the session the timeline is showing while inside the chat column
+    // (see chatColumnSession.ts); elsewhere the live selection.
+    const liveSessionId = useSessionUIStore((state) => state.currentSessionId);
+    const chatColumnSession = useChatColumnSession();
+    const currentSessionId = chatColumnSession ? chatColumnSession.sessionId : liveSessionId;
     const sessionAgentName = useSelectionStore((state) =>
         currentSessionId ? state.getSessionAgentSelection(currentSessionId) : null
     );
 
-    const agents = getVisibleAgents();
+    const agents = useVisibleAgentsForDirectory(useComposerAgentDirectory(currentSessionId));
     const uiAgentName = currentSessionId ? (sessionAgentName || currentAgentName) : currentAgentName;
     const agentLabel = getAgentDisplayName(agents, uiAgentName);
     const agentColor = getAgentColor(uiAgentName);

@@ -75,6 +75,7 @@ import { LinearIssuePickerDialog } from '@/components/session/LinearIssuePickerD
 import { Icon } from "@/components/icon/Icon";
 import { DraftPresetChips } from './DraftPresetChips';
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
+import { useComposerAgentDirectory, useVisibleAgentsForDirectory } from '@/hooks/useVisibleAgentsForDirectory';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useGitStore } from '@/stores/useGitStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -523,8 +524,26 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const currentVariantSelection = useConfigStore((state) => state.currentVariantSelection);
     const currentAgentName = useConfigStore((state) => state.currentAgentName);
     const setAgent = useConfigStore((state) => state.setAgent);
+    // The composer's agent list belongs to the session/draft directory it will
+    // send to, never to whichever project happens to be ambient.
+    const composerSessionAgentDirectory = useComposerAgentDirectory(currentSessionId);
+    // While the BTW fork is still being created `btwDirectory` is null, but the
+    // first send targets the same fallback the send path's draft identity uses
+    // (`btwDirectory ?? currentSessionDirectoryForSync ?? currentDirectory`).
+    // The picker scope must resolve that target, not a null that would read the
+    // ambient project's list.
+    const btwComposerAgentDirectory = btwDirectory
+        ?? currentSessionDirectoryForSync
+        ?? currentDirectory
+        ?? undefined;
+    const composerAgentDirectory = isBtwActive
+        ? btwComposerAgentDirectory
+        : composerSessionAgentDirectory;
+    const agents = useVisibleAgentsForDirectory(composerAgentDirectory);
+    // Keyboard cycling stays on the ambient visible list, as before: the
+    // directory-scoped list only feeds the picker, and the send guard drops a
+    // name the target directory cannot send.
     const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
-    const agents = getVisibleAgents();
     const btwSavedVariant = useSelectionStore(React.useCallback(
         (state) => btwComposerSessionId && btwAgentSelection && btwModelSelection
             ? state.getAgentModelVariantForSession(
@@ -2187,7 +2206,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, [abortCurrentOperation, btwSessionId, clearAbortPrompt, currentSessionId, isBtwActive]);
 
     const handleCycleAgent = React.useCallback((direction: 1 | -1 = 1) => {
-        const nextAgentName = getCycledPrimaryAgentName(agents, currentAgentName, direction);
+        const nextAgentName = getCycledPrimaryAgentName(getVisibleAgents(), currentAgentName, direction);
         if (!nextAgentName) return;
 
         setAgent(nextAgentName);
@@ -2195,7 +2214,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (currentSessionId) {
             saveSessionAgentSelection(currentSessionId, nextAgentName);
         }
-    }, [agents, currentAgentName, currentSessionId, setAgent, saveSessionAgentSelection]);
+    }, [currentAgentName, currentSessionId, getVisibleAgents, setAgent, saveSessionAgentSelection]);
 
     // Height the dictation transcript needs (null when idle). Its overlay sits
     // absolutely over the composer, so the composer must be able to grow for
@@ -3427,6 +3446,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     <ComposerAutocompletePopups
                         open={openAutocomplete}
                         query={autocompleteQuery}
+                        agentDirectory={composerAgentDirectory}
                         overlayPosition={isDesktopExpanded ? autocompleteOverlayPosition : null}
                         commandRef={commandRef}
                         skillRef={skillRef}

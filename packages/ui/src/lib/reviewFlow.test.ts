@@ -1,6 +1,13 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { Message } from '@opencode-ai/sdk/v2/client';
+import { createOpencodeClient } from '@opencode-ai/sdk/v2/client';
 import { switchRuntimeEndpoint } from './runtime-switch';
+import { opencodeClient } from '@/lib/opencode/client';
+import { setActionRefs, setOptimisticRefs } from '@/sync/session-actions';
+import { ChildStoreManager } from '@/sync/child-store';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { useAgentsStore, type AgentWithExtras } from '@/stores/useAgentsStore';
+import { useSelectionStore } from '@/sync/selection-store';
 
 import {
   assertAutoReviewRuntimeStillCurrent,
@@ -9,6 +16,7 @@ import {
   hasFinalReviewMarker,
   isAutoReviewRuntimeCurrent,
   isExpectedAutoReviewAssistantParent,
+  sendPlainMessage,
   stripFinalReviewMarker,
 } from './reviewFlow';
 import type { AutoReviewRun } from '@/stores/useAutoReviewStore';
@@ -77,5 +85,99 @@ describe('reviewFlow auto-review helpers', () => {
     const nextKey = claimAutoReviewForward(run, 'msg_assistant_review');
     expect(nextKey).toBe(key);
     releaseAutoReviewForward(nextKey!);
+  });
+});
+
+describe('sendPlainMessage agent availability guard', () => {
+  const SESSION = 'session-review-guard';
+  const DIRECTORY = '/projects/review-guard';
+  const PROVIDER = 'provider-a';
+  const MODEL = 'model-a';
+
+  const agent = (name: string): AgentWithExtras => ({
+    name,
+    mode: 'subagent',
+    permission: [],
+    options: {},
+  });
+
+  const sentMessages: Array<Parameters<typeof opencodeClient.sendMessage>[0]> = [];
+  const originalSendMessage = opencodeClient.sendMessage;
+  const originalIsConnected = useConfigStore.getState().isConnected;
+  const sdk = createOpencodeClient({
+    baseUrl: 'http://review-flow.test',
+    fetch: async () => Response.json({}),
+  });
+  let childStores: ChildStoreManager;
+
+  beforeEach(() => {
+    sentMessages.length = 0;
+    useAgentsStore.setState({ agentsByDirectory: {} });
+    useSelectionStore.getState().clearSessionSelections(SESSION);
+    childStores = new ChildStoreManager();
+    setActionRefs(sdk, childStores, () => DIRECTORY);
+    setOptimisticRefs(() => {}, () => {});
+    useConfigStore.setState({ isConnected: true });
+    opencodeClient.sendMessage = async (params) => {
+      sentMessages.push(params);
+      return 'msg';
+    };
+  });
+
+  afterEach(() => {
+    opencodeClient.sendMessage = originalSendMessage;
+    useConfigStore.setState({ isConnected: originalIsConnected });
+    childStores.disposeAll();
+    useSelectionStore.getState().clearSessionSelections(SESSION);
+  });
+
+  const send = (agentName: string) => sendPlainMessage(SESSION, DIRECTORY, 'review text', {
+    providerID: PROVIDER,
+    modelID: MODEL,
+    agent: agentName,
+  });
+
+  test('drops a missing agent, does not persist it, and still sends', async () => {
+    useAgentsStore.setState({
+      agentsByDirectory: { [DIRECTORY]: [agent('build')] },
+    });
+
+    const sentMessageID = await send('ghost');
+
+    expect(sentMessageID).toBeTruthy();
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0]?.agent).toBeUndefined();
+    expect(sentMessages[0]?.providerID).toBe(PROVIDER);
+    // The unavailable name must not become this session's persisted choice.
+    expect(useSelectionStore.getState().getSessionAgentSelection(SESSION)).toBeNull();
+    expect(useSelectionStore.getState().getAgentModelForSession(SESSION, 'ghost')).toBeNull();
+  });
+
+  test('keeps an available agent and persists its selection', async () => {
+    useAgentsStore.setState({
+      agentsByDirectory: { [DIRECTORY]: [agent('build')] },
+    });
+
+    const sentMessageID = await send('build');
+
+    expect(sentMessageID).toBeTruthy();
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0]?.agent).toBe('build');
+    expect(useSelectionStore.getState().getSessionAgentSelection(SESSION)).toBe('build');
+    expect(useSelectionStore.getState().getAgentModelForSession(SESSION, 'build')).toEqual({
+      providerId: PROVIDER,
+      modelId: MODEL,
+    });
+  });
+
+  test('fails open while the directory list has not loaded', async () => {
+    useAgentsStore.setState({ agentsByDirectory: {} });
+
+    const sentMessageID = await send('ghost');
+
+    expect(sentMessageID).toBeTruthy();
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0]?.agent).toBe('ghost');
+    expect(useSelectionStore.getState().getSessionAgentSelection(SESSION)).toBe('ghost');
   });
 });

@@ -1602,6 +1602,7 @@ export function ScheduledTaskEditorDialog(props: {
                 <FileMentionAutocomplete
                   ref={mentionRef}
                   searchQuery={mentionQuery}
+                  directory={undefined}
                   onFileSelect={handleFileSelect}
                   onAgentSelect={handleAgentSelect}
                   onClose={() => setShowFileMention(false)}

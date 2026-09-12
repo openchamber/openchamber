@@ -59,6 +59,11 @@ export interface ComposerAutocompletePopupsProps {
     /** Which picker is open, if any. */
     open: AutocompleteKind | null;
     query: string;
+    /**
+     * The composer's agent scope for the mention picker: the directory its send
+     * targets (`null` when it has none), or `undefined` while unknown.
+     */
+    agentDirectory: string | null | undefined;
     /** Caret placement in focus mode; null when the picker anchors itself. */
     overlayPosition: AutocompleteOverlayPosition | null;
     commandRef: React.RefObject<CommandAutocompleteHandle | null>;
@@ -115,6 +120,7 @@ export function ComposerAutocompletePopups(props: ComposerAutocompletePopupsProp
                 <FileMentionAutocomplete
                     ref={props.mentionRef}
                     searchQuery={query}
+                    directory={props.agentDirectory}
                     onFileSelect={props.onFileSelect}
                     onAgentSelect={props.onAgentSelect}
                     onClose={onClose}

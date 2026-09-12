@@ -58,6 +58,13 @@ declare module "bun:test" {
     function module(moduleName: string, factory: () => Record<string, unknown>): void;
     function restore(): void;
   }
+  // Bun exposes a Jest-compatible timer API at runtime; declare the subset the
+  // tests use to drive scheduled timers deterministically.
+  export const jest: {
+    useFakeTimers(): void;
+    useRealTimers(): void;
+    advanceTimersByTime(ms: number): void;
+  };
 }
 
 // Vite asset-query imports need a URL loader when real UI modules run in Bun.

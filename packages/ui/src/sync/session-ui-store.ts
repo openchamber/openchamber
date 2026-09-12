@@ -21,6 +21,8 @@ import { opencodeClient } from "@/lib/opencode/client"
 import { runtimeFetch } from "@/lib/runtime-fetch"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useProjectsStore } from "@/stores/useProjectsStore"
+import { resolveAvailableAgentForDirectory } from "@/stores/useAgentsStore"
+import { resolveComposerAgentDirectory } from "@/lib/composerAgentDirectory"
 import { useSessionDisplayStore } from "@/stores/useSessionDisplayStore"
 import { fetchSessionKnowledge, reportSessionKnowledgeDelivered } from "@/lib/sessionKnowledgeApi"
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from "@/stores/useGlobalSessionsStore"
@@ -31,6 +33,8 @@ import { useSkillsStore } from "@/stores/useSkillsStore"
 import { getDeferredSafeStorage } from "@/stores/utils/safeStorage"
 import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
 import { normalizePath } from "@/lib/pathNormalization"
+import { formatMessage, useI18nStore } from "@/lib/i18n"
+import { toast } from "@/components/ui"
 import { CHAT_DRAFT_PROJECT_ID, createChatDirectory, deleteChatDirectory, getChatsRootFromDirectory, isChatDirectoryPath, warmChatsRootDirectory } from "@/lib/chatDirectories"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { composeForkSessionMessage } from "@/lib/messages/executionMeta"
@@ -1697,6 +1701,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     // ---- New session from draft ----
     if (!capturedTarget && !options?.sessionId && draft?.open) {
+      // The picker scoped this draft's agents by the composer's own identity,
+      // which for a temp chat is the generated scratch directory the send will
+      // target — never the ambient project `listAgents(null)` would read.
+      // Capture that scope before materialization closes and resets the draft.
+      const draftAgentDirectory = resolveComposerAgentDirectory({
+        sessionId: null,
+        sessionDirectory: null,
+        sessionIsKnown: false,
+        draft,
+      })
       const createdDraftSession = await materializeOpenDraftSession({
         providerID,
         modelID,
@@ -1704,6 +1718,26 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         variant,
       }, options?.draftSnapshot)
       if (!createdDraftSession) throw new Error("Failed to create session")
+
+      // Same rule as the existing-session send below: a name the draft scope's
+      // loaded list does not define is dropped for this send and reconciled out
+      // of the new session. An unloaded list cannot prove absence (fail open).
+      const draftAgentAvailability = resolveAvailableAgentForDirectory(
+        draftAgentDirectory,
+        createdDraftSession.agent,
+      )
+      const effectiveDraftSendAgent = draftAgentAvailability.agent
+
+      if (draftAgentAvailability.reason === "missing" && createdDraftSession.agent) {
+        useSelectionStore.getState().clearSessionAgentSelection(
+          createdDraftSession.sessionId,
+          createdDraftSession.agent,
+        )
+        const { dictionary } = useI18nStore.getState()
+        toast.info(formatMessage(dictionary, "chat.toast.agentUnavailable", { agent: createdDraftSession.agent }), {
+          id: `agent-unavailable:${createdDraftSession.sessionId}:${createdDraftSession.agent}`,
+        })
+      }
 
       const draftParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata; systemContext?: 'session-knowledge' }> | undefined = createdDraftSession.syntheticParts?.length
         ? [...(additionalParts || []), ...createdDraftSession.syntheticParts]
@@ -1749,7 +1783,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         content,
         providerID,
         modelID,
-        agent: createdDraftSession.agent,
+        agent: effectiveDraftSendAgent,
         agentMentionName,
         variant,
         inputMode,
@@ -1787,10 +1821,41 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       ? useSelectionStore.getState().getSessionAgentSelection(targetSessionId)
       : null
     const configAgentName = useConfigStore.getState().currentAgentName
-    const effectiveAgent = trimmedAgent || sessionAgentSelection || configAgentName || undefined
+    const requestedAgent = trimmedAgent || sessionAgentSelection || configAgentName || undefined
+    const currentSessionDirectory = targetSessionId
+      ? normalizePath(capturedTarget?.directory ?? options?.directory ?? get().getDirectoryForSession(targetSessionId))
+      : null
+
+    // The picker offers agents for the session's directory, but the send used to
+    // carry whatever name the ambient project had selected. The server resolves
+    // `agent` before storing the prompt and rejects a name its directory does
+    // not define, so drop an unavailable one and let the server apply its
+    // default. A directory list that never loaded cannot prove absence, so the
+    // request stands unchanged (fail open).
+    //
+    // A null directory deliberately does not become the picker's authoritative
+    // no-directory scope here: `opencodeClient.sendMessage` falls back to the
+    // client's current directory for a missing one, so the agent list a send
+    // actually resolves against is unknown. Collapsing null to `undefined`
+    // keeps this guard fail-open.
+    const agentAvailability = resolveAvailableAgentForDirectory(
+      currentSessionDirectory ?? undefined,
+      requestedAgent,
+    )
+    const effectiveAgent = agentAvailability.agent
 
     if (targetSessionId) {
       useSelectionStore.getState().saveSessionModelSelection(targetSessionId, providerID, modelID)
+    }
+
+    if (agentAvailability.reason === 'missing' && targetSessionId && requestedAgent) {
+      // Reconcile the stored choice so the picker stops pinning a name this
+      // session cannot send, then say once why the send changed agent.
+      useSelectionStore.getState().clearSessionAgentSelection(targetSessionId, requestedAgent)
+      const { dictionary } = useI18nStore.getState()
+      toast.info(formatMessage(dictionary, "chat.toast.agentUnavailable", { agent: requestedAgent }), {
+        id: `agent-unavailable:${targetSessionId}:${requestedAgent}`,
+      })
     }
 
     if (targetSessionId && effectiveAgent) {
@@ -1822,9 +1887,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }
     }
 
-    const currentSessionDirectory = targetSessionId
-      ? normalizePath(capturedTarget?.directory ?? options?.directory ?? get().getDirectoryForSession(targetSessionId))
-      : null
     if (targetSessionId) {
       notifyMessageSent(targetSessionId)
     }

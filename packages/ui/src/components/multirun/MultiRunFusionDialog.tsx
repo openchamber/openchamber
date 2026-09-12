@@ -9,6 +9,7 @@ import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useI18n } from '@/lib/i18n';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { resolveAvailableAgentForDirectory } from '@/stores/useAgentsStore';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllLiveSessions } from '@/sync/sync-context';
@@ -166,19 +167,30 @@ export function MultiRunFusionDialog({
       useSessionUIStore.getState().setCurrentSession(fusionSession.id, directory);
       onOpenChange(false);
 
+      // Guard against the directory the send actually targets: a null project
+      // directory falls back to the client's current directory inside
+      // `sendMessage`, so the agent list the server resolves is that one.
+      const sendDirectory = directory ?? opencodeClient.getDirectory();
+      const agentAvailability = resolveAvailableAgentForDirectory(sendDirectory, agent || undefined);
+      if (agentAvailability.reason === 'missing' && agent) {
+        toast.info(t('chat.toast.agentUnavailable', { agent }), {
+          id: `agent-unavailable:fusion:${fusionSession.id}:${agent}`,
+        });
+      }
+
       await opencodeClient.sendMessage({
         id: fusionSession.id,
         providerID,
         modelID,
         variant: variant || undefined,
-        agent: agent || undefined,
+        agent: agentAvailability.agent,
         text: visiblePrompt,
         additionalParts: [
           { text: instructionsPrompt, synthetic: true },
           ...usableSources.map((item, index) => ({ text: buildSourcePart(item.source, item.text, index), synthetic: true })),
           { text: '\n\n--- FUSION INPUTS END ---\nNow write the final fused answer.', synthetic: true },
         ],
-        directory: directory ?? opencodeClient.getDirectory(),
+        directory: sendDirectory,
       });
     } catch (error) {
       console.error('[MultiRunFusion] Failed to start fusion', error);
