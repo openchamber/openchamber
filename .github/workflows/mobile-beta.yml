@@ -1,0 +1,395 @@
+name: Mobile Beta Build & Distribution
+
+on:
+  push:
+    branches:
+      - 'beta'
+      - 'release/**'
+  schedule:
+    # Run nightly beta build at 02:00 UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Target platform to build
+        required: true
+        type: choice
+        options:
+          - both
+          - android
+          - ios
+        default: both
+      version_name:
+        description: Custom marketing version name (leave empty for auto)
+        required: false
+        type: string
+      testflight_public_link:
+        description: TestFlight Public Join URL for QR code generation
+        required: false
+        type: string
+
+concurrency:
+  group: mobile-beta-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MOBILE_PACKAGE_DIR: packages/mobile
+  IOS_PROJECT_DIR: packages/mobile/ios/App
+  ANDROID_PROJECT_DIR: packages/mobile/android
+
+jobs:
+  resolve-version:
+    name: Resolve version & targets
+    runs-on: ubuntu-latest
+    outputs:
+      version_name: ${{ steps.version.outputs.version_name }}
+      build_number: ${{ steps.version.outputs.build_number }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
+      build_android: ${{ steps.version.outputs.build_android }}
+      build_ios: ${{ steps.version.outputs.build_ios }}
+      testflight_url: ${{ steps.version.outputs.testflight_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Calculate version and target flags
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          package_version="$(node -p "require('./package.json').version")"
+          input_version="${{ github.event.inputs.version_name }}"
+          input_platform="${{ github.event.inputs.platform || 'both' }}"
+          input_tf_url="${{ github.event.inputs.testflight_public_link }}"
+          secret_tf_url="${{ secrets.TESTFLIGHT_PUBLIC_LINK }}"
+
+          build_number="${{ github.run_number }}"
+          base_version="${input_version:-$package_version}"
+          version_name="${base_version}-beta.${build_number}"
+          release_tag="beta-v${version_name}"
+          testflight_url="${input_tf_url:-$secret_tf_url}"
+
+          build_android="true"
+          build_ios="true"
+
+          if [[ "$input_platform" == "android" ]]; then
+            build_ios="false"
+          elif [[ "$input_platform" == "ios" ]]; then
+            build_android="false"
+          fi
+
+          {
+            echo "version_name=$version_name"
+            echo "build_number=$build_number"
+            echo "release_tag=$release_tag"
+            echo "build_android=$build_android"
+            echo "build_ios=$build_ios"
+            echo "testflight_url=$testflight_url"
+          } >> "$GITHUB_OUTPUT"
+
+  android-beta:
+    name: Build Android Beta APK & Release
+    needs: resolve-version
+    if: needs.resolve-version.outputs.build_android == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Prepare Android keystore
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$ANDROID_KEYSTORE_BASE64" ]]; then
+            echo "Warning: ANDROID_KEYSTORE_BASE64 secret is missing."
+            exit 1
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/openchamber-beta.keystore"
+
+      - name: Build signed Android APK & AAB
+        env:
+          OPENCHAMBER_ANDROID_VERSION_CODE: ${{ needs.resolve-version.outputs.build_number }}
+          OPENCHAMBER_ANDROID_VERSION_NAME: ${{ needs.resolve-version.outputs.version_name }}
+          OPENCHAMBER_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/openchamber-beta.keystore
+          OPENCHAMBER_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          OPENCHAMBER_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          OPENCHAMBER_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          bun run mobile:sync
+          ./packages/mobile/android/gradlew -p packages/mobile/android bundleRelease assembleRelease
+
+      - name: Create Beta Release & Upload Artifacts
+        id: create_beta_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.resolve-version.outputs.release_tag }}
+          VERSION_NAME: ${{ needs.resolve-version.outputs.version_name }}
+          BUILD_NUMBER: ${{ needs.resolve-version.outputs.build_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK_PATH=$(find packages/mobile/android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          AAB_PATH=$(find packages/mobile/android/app/build/outputs/bundle/release -name "*.aab" | head -n 1)
+
+          if [[ -z "$APK_PATH" ]]; then
+            echo "Error: APK file not found!"
+            exit 1
+          fi
+
+          # Create prerelease tag & release on GitHub
+          gh release create "$RELEASE_TAG" "$APK_PATH" "$AAB_PATH" \
+            --title "OpenChamber Android Beta v${VERSION_NAME}" \
+            --notes "Automated beta build #${BUILD_NUMBER} for Android." \
+            --prerelease \
+            --repo "${{ github.repository }}"
+
+          # Get browser download URL of uploaded APK
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/$(basename "$APK_PATH")"
+          echo "download_url=$DOWNLOAD_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Generate Android Beta QR Code in Summary
+        env:
+          DOWNLOAD_URL: ${{ steps.create_beta_release.outputs.download_url }}
+          VERSION_NAME: ${{ needs.resolve-version.outputs.version_name }}
+          BUILD_NUMBER: ${{ needs.resolve-version.outputs.build_number }}
+        run: |
+          node scripts/generate-beta-qr.mjs \
+            --platform android \
+            --url "$DOWNLOAD_URL" \
+            --version "$VERSION_NAME" \
+            --build "$BUILD_NUMBER"
+
+  ios-beta:
+    name: Build & Upload iOS TestFlight
+    needs: resolve-version
+    if: needs.resolve-version.outputs.build_ios == 'true'
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Apple signing assets
+        shell: bash
+        env:
+          IOS_DISTRIBUTION_CERTIFICATE_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
+          IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+          IOS_APP_PROFILE_BASE64: ${{ secrets.IOS_APP_PROFILE_BASE64 }}
+          IOS_WIDGET_PROFILE_BASE64: ${{ secrets.IOS_WIDGET_PROFILE_BASE64 }}
+          IOS_NSE_PROFILE_BASE64: ${{ secrets.IOS_NSE_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          for name in IOS_DISTRIBUTION_CERTIFICATE_BASE64 IOS_APP_PROFILE_BASE64 IOS_WIDGET_PROFILE_BASE64 IOS_NSE_PROFILE_BASE64; do
+            if [[ -z "${!name}" ]]; then
+              echo "Error: $name secret is required."
+              exit 1
+            fi
+          done
+
+          cert_path="$RUNNER_TEMP/ios_distribution.p12"
+          keychain_path="$RUNNER_TEMP/app-signing.keychain-db"
+          profiles_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$profiles_dir"
+
+          printf '%s' "$IOS_DISTRIBUTION_CERTIFICATE_BASE64" | base64 -D > "$cert_path"
+          security create-keychain -p "$RUNNER_TEMP" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$RUNNER_TEMP" "$keychain_path"
+          security import "$cert_path" -P "$IOS_DISTRIBUTION_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
+          security list-keychain -d user -s "$keychain_path"
+
+          app_profile="$RUNNER_TEMP/openchamber-app.mobileprovision"
+          widget_profile="$RUNNER_TEMP/openchamber-widget.mobileprovision"
+          nse_profile="$RUNNER_TEMP/openchamber-notification-service.mobileprovision"
+          printf '%s' "$IOS_APP_PROFILE_BASE64" | base64 -D > "$app_profile"
+          printf '%s' "$IOS_WIDGET_PROFILE_BASE64" | base64 -D > "$widget_profile"
+          printf '%s' "$IOS_NSE_PROFILE_BASE64" | base64 -D > "$nse_profile"
+
+          profile_uuid() {
+            security cms -D -i "$1" > "$RUNNER_TEMP/profile.plist"
+            /usr/libexec/PlistBuddy -c 'Print :UUID' "$RUNNER_TEMP/profile.plist"
+          }
+          install_profile() {
+            local source_path="$1"
+            local env_name="$2"
+            local uuid
+            uuid="$(profile_uuid "$source_path")"
+            cp "$source_path" "$profiles_dir/$uuid.mobileprovision"
+            echo "$env_name=$uuid" >> "$GITHUB_ENV"
+          }
+          install_profile "$app_profile" IOS_APP_PROFILE_UUID
+          install_profile "$widget_profile" IOS_WIDGET_PROFILE_UUID
+          install_profile "$nse_profile" IOS_NSE_PROFILE_UUID
+
+      - name: Prepare mobile assets
+        run: bun run mobile:sync
+
+      - name: Set TestFlight entitlement and versions
+        shell: bash
+        env:
+          VERSION_NAME: ${{ needs.resolve-version.outputs.version_name }}
+          BUILD_NUMBER: ${{ needs.resolve-version.outputs.build_number }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          IOS_APP_PROFILE_NAME: ${{ secrets.IOS_APP_PROFILE_NAME }}
+          IOS_WIDGET_PROFILE_NAME: ${{ secrets.IOS_WIDGET_PROFILE_NAME }}
+          IOS_NSE_PROFILE_NAME: ${{ secrets.IOS_NSE_PROFILE_NAME }}
+        run: |
+          set -euo pipefail
+          /usr/libexec/PlistBuddy -c "Set :aps-environment production" App/App.entitlements
+          xcrun agvtool new-marketing-version "$VERSION_NAME"
+          xcrun agvtool new-version -all "$BUILD_NUMBER"
+
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+
+          const projectPath = 'App.xcodeproj/project.pbxproj';
+          let project = readFileSync(projectPath, 'utf8');
+          const releaseBlockPattern = /\n\t\t[^\n]+ \/\* Release \*\/ = \{\n\t\t\tisa = XCBuildConfiguration;[\s\S]*?\n\t\t\tname = Release;\n\t\t\};/g;
+          const replacements = [
+            {
+              bundle: 'com.openchamber.app',
+              profile: process.env.IOS_APP_PROFILE_NAME,
+              uuid: process.env.IOS_APP_PROFILE_UUID,
+            },
+            {
+              bundle: 'com.openchamber.app.OpenChamberWidget',
+              profile: process.env.IOS_WIDGET_PROFILE_NAME,
+              uuid: process.env.IOS_WIDGET_PROFILE_UUID,
+            },
+            {
+              bundle: 'com.openchamber.app.OpenChamberNotificationService',
+              profile: process.env.IOS_NSE_PROFILE_NAME,
+              uuid: process.env.IOS_NSE_PROFILE_UUID,
+            },
+          ];
+
+          function setBuildSetting(block, key, value) {
+            const settingPattern = new RegExp(`\\n\\t\\t\\t\\t${key} = [^;]+;`);
+            const line = `\n\t\t\t\t${key} = ${value};`;
+            if (settingPattern.test(block)) return block.replace(settingPattern, line);
+            return block.replace('\n\t\t\t};', `${line}\n\t\t\t};`);
+          }
+
+          for (const { bundle, profile, uuid } of replacements) {
+            if (!profile) throw new Error(`Missing provisioning profile name for ${bundle}`);
+            if (!uuid) throw new Error(`Missing provisioning profile UUID for ${bundle}`);
+            const marker = `PRODUCT_BUNDLE_IDENTIFIER = ${bundle};`;
+            const match = [...project.matchAll(releaseBlockPattern)].find(([block]) => block.includes(marker));
+            if (!match) throw new Error(`Could not find ${bundle} Release build settings block`);
+
+            let block = match[0];
+            block = setBuildSetting(block, 'CODE_SIGN_IDENTITY', '"Apple Distribution"');
+            block = setBuildSetting(block, 'CODE_SIGN_STYLE', 'Manual');
+            block = setBuildSetting(block, 'DEVELOPMENT_TEAM', process.env.APPLE_TEAM_ID);
+            block = setBuildSetting(block, 'PROVISIONING_PROFILE', `"${uuid}"`);
+            block = setBuildSetting(block, 'PROVISIONING_PROFILE_SPECIFIER', `"${profile}"`);
+
+            project = project.replace(match[0], block);
+          }
+
+          writeFileSync(projectPath, project);
+          NODE
+        working-directory: ${{ env.IOS_PROJECT_DIR }}
+
+      - name: Archive iOS app
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild archive \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/OpenChamber.xcarchive" \
+            "OTHER_CODE_SIGN_FLAGS=--keychain $RUNNER_TEMP/app-signing.keychain-db"
+        working-directory: ${{ env.IOS_PROJECT_DIR }}
+
+      - name: Export IPA
+        shell: bash
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          IOS_APP_PROFILE_NAME: ${{ secrets.IOS_APP_PROFILE_NAME }}
+          IOS_WIDGET_PROFILE_NAME: ${{ secrets.IOS_WIDGET_PROFILE_NAME }}
+          IOS_NSE_PROFILE_NAME: ${{ secrets.IOS_NSE_PROFILE_NAME }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>teamID</key>
+            <string>$APPLE_TEAM_ID</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.openchamber.app</key>
+              <string>$IOS_APP_PROFILE_NAME</string>
+              <key>com.openchamber.app.OpenChamberWidget</key>
+              <string>$IOS_WIDGET_PROFILE_NAME</string>
+              <key>com.openchamber.app.OpenChamberNotificationService</key>
+              <string>$IOS_NSE_PROFILE_NAME</string>
+            </dict>
+            <key>uploadSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/OpenChamber.xcarchive" \
+            -exportPath "$RUNNER_TEMP/OpenChamberExport" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+        working-directory: ${{ env.IOS_PROJECT_DIR }}
+
+      - name: Upload to TestFlight
+        shell: bash
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/private_keys"
+          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY_BASE64" | base64 -D > "$HOME/private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
+          xcrun altool --upload-app \
+            --type ios \
+            --file "$RUNNER_TEMP/OpenChamberExport/App.ipa" \
+            --apiKey "$APP_STORE_CONNECT_KEY_ID" \
+            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
+
+      - name: Generate iOS TestFlight QR Code in Summary
+        if: needs.resolve-version.outputs.testflight_url != ''
+        env:
+          TF_URL: ${{ needs.resolve-version.outputs.testflight_url }}
+          VERSION_NAME: ${{ needs.resolve-version.outputs.version_name }}
+          BUILD_NUMBER: ${{ needs.resolve-version.outputs.build_number }}
+        run: |
+          node scripts/generate-beta-qr.mjs \
+            --platform ios \
+            --url "$TF_URL" \
+            --version "$VERSION_NAME" \
+            --build "$BUILD_NUMBER"
