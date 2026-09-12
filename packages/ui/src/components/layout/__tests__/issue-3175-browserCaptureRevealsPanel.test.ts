@@ -25,10 +25,13 @@ beforeEach(() => {
 describe('issue #3175 browser capture while the context panel is closed', () => {
   test('registers the agent browser opener without suppressing panel reveal', () => {
     expect(contextPanelSource).toContain(
-      'registerBrowserOpener((url) => openContextBrowser(effectiveDirectory, url))',
+      'registerBrowserOpener(directoryKey, (url) => {',
+    );
+    expect(contextPanelSource).toContain(
+      'const tabId = openContextBrowser(directoryKey, url);',
     );
     expect(contextPanelSource).not.toContain(
-      'openContextBrowser(effectiveDirectory, url, { reveal: false })',
+      'openContextBrowser(directoryKey, url, { reveal: false })',
     );
   });
 

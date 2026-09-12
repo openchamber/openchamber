@@ -511,6 +511,7 @@ export const useKeyboardShortcuts = () => {
             railOrder: state.contextRailOrder,
             hiddenSurfaces: state.contextRailHiddenSurfaces,
             planModeEnabled: useFeatureFlagsStore.getState().planModeEnabled,
+            serverBrowserEnabled: state.serverBrowserEnabled,
             isVSCode: isVSCodeRuntime(),
             screenWidth: window.innerWidth,
             tabs: panel?.tabs ?? [],

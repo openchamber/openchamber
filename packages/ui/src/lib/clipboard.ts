@@ -2,7 +2,8 @@ export type ClipboardCopyResult =
   | { ok: true; method: 'clipboard' | 'execCommand' }
   | { ok: false; error: string };
 
-export async function copyTextToClipboard(text: string): Promise<ClipboardCopyResult> {
+export async function copyTextToClipboard(text: string, isCurrent: () => boolean = () => true): Promise<ClipboardCopyResult> {
+  if (!isCurrent()) return { ok: false, error: 'Clipboard operation is no longer current' };
   let clipboardError: string | null = null;
 
   if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
@@ -14,7 +15,7 @@ export async function copyTextToClipboard(text: string): Promise<ClipboardCopyRe
     }
   }
 
-  if (typeof document !== 'undefined' && document.body) {
+  if (typeof document !== 'undefined' && document.body && isCurrent()) {
     const textarea = document.createElement('textarea');
     textarea.value = text;
     textarea.setAttribute('readonly', '');
@@ -24,7 +25,7 @@ export async function copyTextToClipboard(text: string): Promise<ClipboardCopyRe
     document.body.appendChild(textarea);
     textarea.select();
     textarea.setSelectionRange(0, textarea.value.length);
-    const copied = document.execCommand('copy');
+    const copied = isCurrent() && document.execCommand('copy');
     document.body.removeChild(textarea);
 
     if (copied) {

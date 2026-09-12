@@ -559,6 +559,22 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'sessions.server-browser',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.field.serverBrowser',
+    descriptionKey: 'settings.openchamber.tools.field.serverBrowserInfo',
+    keywords: ['server', 'browser', 'chrome', 'remote', 'agent', 'headless', 'openchamber'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'sessions.server-browser-debug-port',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.browserDebugPort.label',
+    descriptionKey: 'settings.openchamber.tools.browserDebugPort.info',
+    keywords: ['server', 'browser', 'chrome', 'cdp', 'debug', 'port', 'mcp', 'browserUrl'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'sessions.agent-memory-tool',
     page: 'general',
     titleKey: 'settings.openchamber.tools.field.agentMemoryTool',

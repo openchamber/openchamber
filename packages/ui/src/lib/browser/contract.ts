@@ -9,6 +9,14 @@
  * Navigation is a tagged union rather than a bag of booleans: `loading` and
  * `failed` carry the URL they describe, which is what makes a late event from
  * a superseded navigation discardable instead of ambiguous.
+ *
+ * The agent-control backend contracts (`BrowserTarget`, `BrowserSession`,
+ * `BrowserBackend`, and friends) live at the bottom of this file. The
+ * deferred Phase-3 server backend is plain JavaScript and will mirror these
+ * wire-level types in JSDoc, so they stay free of TypeScript-only machinery.
+ *
+ * Tab-id namespace rule: server-side tab ids are `sc:<cdp-target-id>`;
+ * anything else is a client pane id. Routing reads the prefix.
  */
 
 export type BrowserNavStatus =
@@ -189,3 +197,87 @@ export const isBrowserAnnotationPayload = (value: unknown): value is BrowserAnno
   && Array.isArray(value.strokes)
   && value.strokes.every(isAnnotationStroke)
 );
+
+/**
+ * Agent browser-control contracts.
+ *
+ * One browser pane's identity: one tab of one project on one runtime.
+ */
+export type BrowserControllerKey = {
+  readonly runtimeKey: string;
+  readonly directory: string;
+  readonly tabId: string;
+};
+
+/**
+ * The scope a browser-control request names. `directory` is the project the
+ * action belongs to; `tabId` names an existing tab to act on (absent for a
+ * tab-less open or an action aimed at the visible tab); `openCodeSessionId`
+ * ties the request back to the agent session that issued it.
+ */
+export type BrowserTarget = {
+  readonly directory: string;
+  readonly tabId?: string;
+  readonly openCodeSessionId?: string;
+  /** A session's explicit backend force; absent means the runtime default. */
+  readonly preferBackend?: BrowserBackendKind;
+};
+
+/**
+ * Targets arrive over the server's event stream, so every field a consumer
+ * dereferences is checked here — a malformed target must be droppable, never
+ * half-trusted.
+ */
+export const isBrowserTarget = (value: unknown): value is BrowserTarget => (
+  isRecord(value)
+  && typeof value.directory === 'string'
+  && (value.tabId === undefined || typeof value.tabId === 'string')
+  && (value.openCodeSessionId === undefined || typeof value.openCodeSessionId === 'string')
+  && (value.preferBackend === undefined
+    || value.preferBackend === 'electron-webview'
+    || value.preferBackend === 'server-chrome')
+);
+
+/** One tab as the panel reports it: what it shows and whether it is visible. */
+export type BrowserTabInfo = {
+  readonly tabId: string;
+  readonly url: string;
+  readonly title: string;
+  readonly active: boolean;
+  /** Set when listings merge backends; absent on single-backend listings. */
+  readonly backend?: BrowserBackendKind;
+};
+
+/**
+ * Names the browser backend: a client Electron webview or server-owned Chrome.
+ * Server Chrome uses isolated sessions and the authenticated remote viewer.
+ */
+export type BrowserBackendKind = 'electron-webview' | 'server-chrome';
+
+/**
+ * The reduced Phase-2 read model: a live snapshot of what one project's
+ * browser surface shows, answerable from the registry without any stored
+ * state. `sessionId` and `persistence` are the Phase-3 additions, both
+ * optional: a backend without stored session state simply omits them.
+ */
+export type BrowserSession = {
+  readonly backend: BrowserBackendKind;
+  readonly directory: string;
+  readonly tabs: BrowserTabInfo[];
+  readonly activeTabId: string | null;
+  /** Stable identity of the backend's persisted session, when it has one. */
+  readonly sessionId?: string;
+  /** Whether the backend keeps this session across restarts. */
+  readonly persistence?: 'ephemeral' | 'project';
+};
+
+/**
+ * The dispatch-shaped surface every browser backend implements. One typed
+ * `execute` — rather than per-action methods — covers every current action
+ * without an enumeration that can drift from the server's allowlist.
+ */
+export interface BrowserBackend {
+  getSession(scope: { directory: string }): BrowserSession | null;
+  listTabs(scope: { directory: string }): BrowserTabInfo[];
+  execute(target: BrowserTarget, action: string, parameters: Record<string, unknown>): Promise<unknown>;
+}

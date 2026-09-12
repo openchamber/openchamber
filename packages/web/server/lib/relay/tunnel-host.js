@@ -32,6 +32,7 @@ const ALLOWED_WS_PATHS = new Set([
   '/api/event/ws',
   '/api/terminal/ws',
   '/api/dictation/ws',
+  '/api/browser-surface',
   '/api/dev-tunnel',
 ]);
 export const isAllowedRelayWebSocketPath = (pathname) => ALLOWED_WS_PATHS.has(pathname);

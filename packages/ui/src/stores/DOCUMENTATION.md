@@ -94,6 +94,19 @@ mounted session-chat iframe stay enabled independently of that visibility flag
 so a delayed or lost handshake cannot hide an already-materialized transcript
 (busy subagents would otherwise show only the working-status row).
 
+The local `browser` surface and remote `server-browser` surface have separate
+context-panel identities. The server surface stores one descriptor per directory;
+its saved selections preserve browser session and Chrome target IDs as attachment
+hints, while the connected server owns live availability. Persistence v21 merges
+legacy `browser` tabs with `backend: server-chrome` before per-mode tab limits,
+retains every saved session/target pair, and carries the active remote selection
+into the singleton without changing local browser tabs. The shared selection
+schema and exact-pair merge live in `contextPanelServerBrowser.ts`. Confirmed
+attachment and navigation updates upsert one saved pair without clearing its
+siblings; ending an attachment clears only the selected IDs. ContextPanel passes
+its actual open/active visibility to the remote pane so keeping its UI mounted
+does not keep background capture or viewport work active.
+
 ### Session / project coordination stores
 
 Examples:

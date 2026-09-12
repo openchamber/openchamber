@@ -246,6 +246,8 @@ export const SETTINGS_REGISTRY = {
   }),
   agentControlToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentControlToolEnabled', (v) => useUIStore.getState().setAgentControlToolEnabled(v)) }),
   agentWebToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentWebToolEnabled', (v) => useUIStore.getState().setAgentWebToolEnabled(v)) }),
+  serverBrowserEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('serverBrowserEnabled', (v) => useUIStore.getState().setServerBrowserEnabled(v)) }),
+  serverBrowserDebugPort: field({ scope: 'instance', parse: fromSchema(z.number().int().min(0).max(65_535)), ui: uiStore('serverBrowserDebugPort', (v) => useUIStore.getState().setServerBrowserDebugPort(v)) }),
   agentMemoryToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentMemoryToolEnabled', (v) => useUIStore.getState().setAgentMemoryToolEnabled(v)) }),
   // Server-owned: it says whether this build has the feature at all.
   agentMemoryFeatureAvailable: field({

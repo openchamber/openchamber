@@ -17,6 +17,7 @@ Pairing v2 is implemented by `packages/web/server/lib/client-auth/pairing.js`. I
 - `createUiAuth({ password, cookieName, sessionTtlMs, readSettingsFromDiskMigrated })`: creates UI auth controller with methods:
   - `enabled`
   - `requireAuth(req, res, next)`
+  - `resolveAuthContext(req, res, options)`
   - `handleSessionStatus(req, res)`
   - `handleSessionCreate(req, res)`
   - `handlePasskeyStatus(req, res)`
@@ -29,6 +30,10 @@ Pairing v2 is implemented by `packages/web/server/lib/client-auth/pairing.js`. I
   - `handleResetAuth(req, res)`
   - `ensureSessionToken(req, res)`
   - `dispose()`
+
+`resolveAuthContext` accepts `allowClientAuth`, `allowSessionAuth`, and
+`allowUrlToken`. Set `allowSessionAuth: false` on client-only channels so a
+password-free runtime does not issue a UI session cookie as a fallback.
 
 ## Public exports (ui-passkeys.js)
 - `createUiPasskeys({ passwordBinding, readSettingsFromDiskMigrated, storeFile, rpName, challengeTtlMs })`: creates passkey runtime with methods:

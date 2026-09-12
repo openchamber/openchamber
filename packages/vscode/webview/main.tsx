@@ -382,6 +382,10 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     return unsupportedWebRouteResponse('Preview proxy');
   }
 
+  if (normalizedPathname === '/api/browser/runtime-status') {
+    return unsupportedWebRouteResponse('Server browser');
+  }
+
   if (normalizedPathname.startsWith('/api/openchamber/tunnel/')) {
     return unsupportedWebRouteResponse('Remote tunnel settings');
   }

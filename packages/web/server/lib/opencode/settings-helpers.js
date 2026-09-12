@@ -596,6 +596,12 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.agentControlToolEnabled === 'boolean') {
       result.agentControlToolEnabled = candidate.agentControlToolEnabled;
     }
+    if (typeof candidate.serverBrowserEnabled === 'boolean') {
+      result.serverBrowserEnabled = candidate.serverBrowserEnabled;
+    }
+    if (Number.isInteger(candidate.serverBrowserDebugPort) && candidate.serverBrowserDebugPort >= 0 && candidate.serverBrowserDebugPort <= 65535) {
+      result.serverBrowserDebugPort = candidate.serverBrowserDebugPort;
+    }
     if (typeof candidate.agentMemoryToolEnabled === 'boolean') {
       result.agentMemoryToolEnabled = candidate.agentMemoryToolEnabled;
     }
@@ -1003,6 +1009,7 @@ export const createSettingsHelpers = (dependencies) => {
 
     return {
       ...sanitized,
+      serverBrowserDebugPort: sanitized.serverBrowserDebugPort ?? 0,
       hasManagedRemoteTunnelToken,
       hasDesktopUiPassword,
       // Tells the client whether agent memory exists in this build at all, so

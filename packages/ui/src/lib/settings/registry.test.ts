@@ -87,6 +87,16 @@ describe('settings registry', () => {
     expect(useUIStore.getState().terminalShell).toBe('fish');
   });
 
+  test('keeps server browser settings instance-scoped and parses their full boundary', () => {
+    expect(SETTINGS_REGISTRY.serverBrowserEnabled.scope).toBe('instance');
+    expect(SETTINGS_REGISTRY.serverBrowserDebugPort.scope).toBe('instance');
+    expect(parseSettingsDocument({ serverBrowserEnabled: true, serverBrowserDebugPort: 0 })).toEqual({
+      serverBrowserEnabled: true,
+      serverBrowserDebugPort: 0,
+    });
+    expect(parseSettingsDocument({ serverBrowserEnabled: 'true', serverBrowserDebugPort: 65_536 })).toEqual({});
+  });
+
   test('persists archived-only retention as an opt-in boolean and enforces its delete action', () => {
     expect(useUIStore.getInitialState().sessionRetentionOnlyArchived).toBe(false);
     expect(parseSettingsDocument({ sessionRetentionOnlyArchived: true })).toEqual({ sessionRetentionOnlyArchived: true });

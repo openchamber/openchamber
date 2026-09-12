@@ -108,6 +108,16 @@ import { createRelayService } from './lib/relay/service.js';
 import { createRelayHostLock } from './lib/relay/host-lock.js';
 import { createAgentToolRuntime } from './lib/agent-tool/runtime.js';
 import { createBrowserControlBroker } from './lib/browser-control/broker.js';
+import {
+createInventoryRecorder,
+deliverBrowserControlCancel,
+deliverBrowserControlRequest,
+  hasConnectionAwaitingInventory,
+  selectEligibleConnections,
+} from './lib/browser-control/delivery.js';
+import { createBrowserBackendRouter } from './lib/browser-control/backend-router.js';
+import { createServerBrowserLifecycle, discoverActiveTunnelHost } from './lib/browser/server-browser-lifecycle.js';
+import { registerBrowserRuntimeStatusRoute } from './lib/browser/runtime-status-route.js';
 import { createDevServerScanner } from './lib/dev-servers/routes.js';
 import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
@@ -1379,35 +1389,86 @@ const openChamberSessionService = createOpenChamberSessionService({
   emitSessionCreatedEvent,
   sessionKnowledgeRuntime,
 });
-// Browser actions are published to whichever OpenChamber clients are connected;
-// the one owning the browser panel answers. `emitRequest` returns the number of
-// clients reached so the broker can fail fast when nobody is listening.
+// Browser actions are published only to the clients whose reported inventory
+// matches the request's target scope. `emitRequest` reports who was reached so
+// the broker can fail fast when no connected window can serve the request, and
+// can wait briefly when a window has connected but not yet reported.
+const browserControlInventoryRecorder = createInventoryRecorder();
 const browserControlBroker = createBrowserControlBroker({
-  createId: () => `browser-${crypto.randomUUID()}`,
-  emitRequest: (request) => {
-    // Opening a page only needs a panel to open it in; everything else needs a
-    // client that can actually drive one. Counting the right clients is what
-    // lets the broker say "not here" instead of timing out.
-    const needsBrowserView = request.action !== 'browser.open';
-    let delivered = 0;
-    for (const client of uiOpenChamberEventClients) {
-      if (needsBrowserView && client.openchamberBrowserCapable !== true) continue;
-      try {
-        writeSseEvent(client, {
-          type: 'openchamber:browser-control-request',
-          properties: {
-            requestId: request.requestId,
-            action: request.action,
-            parameters: request.parameters,
-          },
-        });
-        delivered += 1;
-      } catch {
-        uiOpenChamberEventClients.delete(client);
-      }
-    }
-    return delivered;
+createId: () => `browser-${crypto.randomUUID()}`,
+emitRequest: (request) => deliverBrowserControlRequest({
+request,
+clients: uiOpenChamberEventClients,
+writeSseEvent,
+}),
+hasPendingInventory: () => hasConnectionAwaitingInventory(uiOpenChamberEventClients),
+onInventoryUpdated: browserControlInventoryRecorder.onInventoryUpdated,
+emitCancel: ({ requestId, eligibleClientIds }) => deliverBrowserControlCancel({
+requestId,
+eligibleClientIds,
+clients: uiOpenChamberEventClients,
+writeSseEvent,
+  }),
+  // When the server browser exists, the no-client 503 must say so and why it
+  // did not serve, instead of claiming only the desktop app can browse.
+  getNoClientMessage: (target) => {
+    if (!isServerBrowserEnabled()) return null;
+    const scope = target?.directory ? `the browser panel for ${target.directory}` : 'a browser panel';
+    return `No connected OpenChamber window can serve ${scope}. The server browser is enabled but `
+      + 'was not asked to answer: the request routed to client windows, and the server only owns '
+      + 'its own sc:-prefixed tabs. Nothing was changed.';
   },
+});
+
+// Server browser (server-hosted Chrome) backend wiring. The enabled flag lives
+// in the lifecycle and is an injected dependency of the router — never read
+// from the settings file here; the settings PUT route applies changes through
+// `serverBrowserLifecycle.apply`, which owns the disable-time lifecycle
+// (killing Chrome, closing sessions and viewers) through the composition below.
+const disposeBrowserSurfaceGatewayHook = { current: null };
+const serverBrowserLifecycle = createServerBrowserLifecycle({
+  compose: () => Promise.all([
+    import('./lib/browser/chrome-process.js'),
+    import('./lib/browser/session-manager.js'),
+    import('./lib/browser/server-chrome-backend.js'),
+  ]).then(([chromeProcess, sessionManager, serverChromeBackend]) => {
+    const chromeProcessManager = chromeProcess.createChromeProcessManager({ getDebugPort: serverBrowserLifecycle.getDebugPort });
+    const browserSessionManager = sessionManager.createBrowserSessionManager({
+      chromeProcessManager,
+      proxyPolicy: {
+        discoverDevServers: () => (typeof discoverDevServersForBrowserProxy === 'function'
+          ? discoverDevServersForBrowserProxy()
+          : Promise.resolve({ ok: false, reason: 'dev-server discovery unavailable' })),
+        discoverTunnelHosts: () => (typeof discoverTunnelHostsForBrowserProxy === 'function'
+          ? discoverTunnelHostsForBrowserProxy()
+          : []),
+      },
+    });
+    return {
+      chromeProcessManager,
+      browserSessionManager,
+      backend: serverChromeBackend.createServerChromeBackend({ browserSessionManager, chromeProcessManager }),
+    };
+  }),
+  disposeGateway: () => disposeBrowserSurfaceGatewayHook.current?.(),
+});
+const serverBrowserEnabledState = serverBrowserLifecycle.state;
+const isServerBrowserEnabled = serverBrowserLifecycle.isEnabled;
+
+// Dev-server discovery is built inside main(); the lazy composition reads it
+// through this holder so the browser's egress policy can grant local servers.
+let discoverDevServersForBrowserProxy = null;
+let discoverTunnelHostsForBrowserProxy = null;
+
+const composeServerBrowserBackend = () => serverBrowserLifecycle.ensureComposition();
+
+const browserBackendRouter = createBrowserBackendRouter({
+  broker: browserControlBroker,
+  isServerBackendEnabled: isServerBrowserEnabled,
+  getServerBackend: async () => (await composeServerBrowserBackend()).backend,
+  hasServingClient: (action, target) => (
+    selectEligibleConnections(uiOpenChamberEventClients, { action, target }).length > 0
+  ),
 });
 
 const openChamberControlService = createOpenChamberControlService({
@@ -1418,7 +1479,7 @@ const openChamberControlService = createOpenChamberControlService({
   waitForOpenCodeReady,
   sessionService: openChamberSessionService,
   scheduledTaskService,
-  browserControl: browserControlBroker,
+  browserControl: browserBackendRouter,
   agentMemoryActions: createAgentMemoryActions({
     agentMemoryRuntime,
     createError: (message, status) => new OpenChamberControlError(message, status),
@@ -1502,6 +1563,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   setActiveTunnelController: (value) => {
     activeTunnelController = value;
   },
+  shutdownServerBrowser: () => serverBrowserLifecycle.shutdown(),
   tunnelAuthController,
   scheduledTasksRuntime,
 });
@@ -1905,14 +1967,28 @@ async function main(options = {}) {
   relayServiceInstance = relayService;
   relayService.registerRoutes(app);
 
-  registerBrowserControlRoutes(app, { express, broker: browserControlBroker });
+  registerBrowserControlRoutes(app, {
+    express,
+    broker: browserControlBroker,
+    getOpenChamberEventClients: () => uiOpenChamberEventClients,
+    inventoryRecorder: browserControlInventoryRecorder,
+  });
+  registerBrowserRuntimeStatusRoute(app, { lifecycle: serverBrowserLifecycle, uiAuthController });
 
   // One scanner backs both discovery and the tunnel allowlist, so a port the
   // user can see is exactly a port the tunnel will dial.
-  const devServerScanner = createDevServerScanner({ spawn, platform: process.platform });
+  const devServerScanner = createDevServerScanner({
+    spawn,
+    platform: process.platform,
+    getPrivatePorts: serverBrowserLifecycle.getPrivatePorts,
+  });
   const listDevServers = () => devServerScanner.discover({
     ownPorts: [port, openCodePort].filter((value) => Number.isInteger(value) && value > 0),
   });
+  discoverDevServersForBrowserProxy = listDevServers;
+  discoverTunnelHostsForBrowserProxy = async () => {
+    return discoverActiveTunnelHost(server, runtimeManagedRemoteTunnelHostname);
+  };
 
   createDevTunnelRuntime({
     server,
@@ -1922,6 +1998,122 @@ async function main(options = {}) {
     rejectWebSocketUpgrade,
     logger: console,
   });
+
+  // Lazy-instantiated browser surface gateway: created only while the server
+  // browser is enabled, and disposed (with the upgrade handler re-armed) when
+  // the setting flips off.
+  /** @type {import('./lib/browser/surface-gateway.js').BrowserSurfaceGateway | null} */
+  let browserSurfaceGateway = null;
+  let browserSurfaceGatewayPromise = null;
+
+  const maybeCreateBrowserSurfaceGateway = async () => {
+    if (!isServerBrowserEnabled()) return null;
+    if (browserSurfaceGateway) return browserSurfaceGateway;
+    // The gateway's screencast/input paths are inert without the composed
+    // session manager, so the gateway is always built from the lifecycle's
+    // composition — never with a null manager while enabled.
+    // composeWhileEnabled also guards the flip-off-mid-load cases: it returns
+    // null (disposing a stale gateway) when the setting flipped or the
+    // composition was superseded while the module loaded.
+    browserSurfaceGatewayPromise ??= serverBrowserLifecycle.composeWhileEnabled(
+      async (composition) => {
+        const { createBrowserSurfaceGateway } = await import('./lib/browser/surface-gateway.js');
+        if (!isServerBrowserEnabled()) return null;
+        return createBrowserSurfaceGateway({
+          server,
+          uiAuthController,
+          isRequestOriginAllowed,
+          rejectWebSocketUpgrade,
+          browserSessionManager: composition.browserSessionManager,
+          logger: console,
+        });
+      },
+      (gateway) => gateway.dispose(),
+    )
+      .then((gateway) => {
+        if (!gateway) return null;
+        browserSurfaceGateway = gateway;
+        return gateway;
+      })
+      .catch((error) => {
+        // Honest failure: no half-live gateway, and the next upgrade retries.
+        console.warn('[server-browser] Failed to compose the surface gateway:', error?.message ?? error);
+        browserSurfaceGatewayPromise = null;
+        return null;
+      });
+    return browserSurfaceGatewayPromise;
+  };
+
+  // DevTools frontend assets carry a short-lived, static-only grant in their
+  // path. Register this before the generic API proxy so nested ES modules and
+  // workers resolve through the owning browser gateway in every web runtime.
+  app.use('/api/browser-devtools', (req, res) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      res.status(405).end();
+      return;
+    }
+    if (!isServerBrowserEnabled()) {
+      res.status(404).end();
+      return;
+    }
+    void maybeCreateBrowserSurfaceGateway()
+      .then((gateway) => {
+        if (!gateway || !isServerBrowserEnabled()) {
+          res.status(404).end();
+          return;
+        }
+        return gateway.handleDevToolsAssetRequest(req, res);
+      })
+      .catch(() => {
+        if (!res.headersSent) res.status(502).end();
+      });
+  });
+
+  const browserSurfaceUpgradeHandler = (req, socket, head) => {
+    let pathname = '';
+    try { pathname = new URL(String(req.url || ''), 'http://localhost').pathname; } catch { return; }
+    if (pathname !== '/api/browser-surface') return;
+    if (!isServerBrowserEnabled()) {
+      rejectWebSocketUpgrade(socket, 503, 'Server browser is disabled');
+      return;
+    }
+    void maybeCreateBrowserSurfaceGateway()
+      .then((gateway) => {
+        if (!gateway || !isServerBrowserEnabled()) {
+          rejectWebSocketUpgrade(socket, 503, 'Browser backend unavailable');
+          return;
+        }
+        server.off('upgrade', browserSurfaceUpgradeHandler);
+        gateway.handleUpgrade(req, socket, head);
+      })
+      .catch(() => rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'));
+  };
+
+  // Disable-time disposal: close the gateway (connected viewers get an honest
+  // close, new upgrades are rejected by the flag check above) and re-arm the
+  // lazy handler so a later re-enable composes a fresh gateway.
+  disposeBrowserSurfaceGatewayHook.current = () => {
+    const gateway = browserSurfaceGateway;
+    browserSurfaceGateway = null;
+    browserSurfaceGatewayPromise = null;
+    if (gateway) gateway.dispose();
+    if (!server.listeners('upgrade').includes(browserSurfaceUpgradeHandler)) {
+      server.on('upgrade', browserSurfaceUpgradeHandler);
+    }
+  };
+
+  // Arm the flag from the persisted setting before any route or upgrade is
+  // served. Default off: absent or non-boolean values keep it disabled and
+  // nothing is composed.
+  try {
+    const initialSettings = await readSettingsFromDiskMigrated();
+    serverBrowserLifecycle.setDebugPort(formatSettingsResponse(initialSettings ?? {}).serverBrowserDebugPort);
+    await serverBrowserLifecycle.apply(initialSettings?.serverBrowserEnabled === true);
+  } catch {
+    // Unreadable settings stay disabled.
+  }
+
+  server.on('upgrade', browserSurfaceUpgradeHandler);
 
   await featureRoutesRuntime.registerRoutes(app, {
     crypto,
@@ -1971,6 +2163,8 @@ async function main(options = {}) {
     emitSessionCreatedEvent,
     getOpenChamberEventClients: () => uiOpenChamberEventClients,
     writeSseEvent,
+    onServerBrowserEnabledChanged: (enabled) => serverBrowserLifecycle.apply(enabled),
+    onServerBrowserDebugPortChanged: serverBrowserLifecycle.setDebugPort,
     permissionAutoAcceptRuntime,
     messageQueueRuntime,
   });
