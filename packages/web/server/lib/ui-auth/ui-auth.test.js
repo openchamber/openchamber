@@ -213,6 +213,46 @@ describe('ui auth client credential seam', () => {
     });
     expect(mountedServeCalled).toBe(true);
 
+    const guestReq = { method: 'GET', path: '/api/guests/hello/panel/index.html', url: `/api/guests/hello/panel/index.html?oc_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
+    const guestRes = createResponse();
+    let guestCalled = false;
+    await auth.requireAuth(guestReq, guestRes, () => {
+      guestCalled = true;
+    });
+    expect(guestCalled).toBe(true);
+
+    // A guest-scoped token opens only that guest's files. It is the token a
+    // sandboxed guest page can read from its own URL, so it must fail on every
+    // system path and on another guest's files.
+    const guestMintReq = { method: 'POST', path: '/auth/url-token', query: { scope: 'guest:hello' }, headers: { authorization: 'Bearer client-token', accept: 'application/json' } };
+    const guestMintRes = createResponse();
+    await auth.handleUrlAuthToken(guestMintReq, guestMintRes);
+    const guestToken = guestMintRes.body.token;
+    expect(typeof guestToken).toBe('string');
+    const guestScopedReq = { method: 'GET', path: '/api/guests/hello/panel/main.js', url: `/api/guests/hello/panel/main.js?oc_url_token=${encodeURIComponent(guestToken)}`, headers: {} };
+    let guestScopedCalled = false;
+    await auth.requireAuth(guestScopedReq, createResponse(), () => {
+      guestScopedCalled = true;
+    });
+    expect(guestScopedCalled).toBe(true);
+    for (const forbidden of [
+      { method: 'GET', path: '/api/fs/raw', url: `/api/fs/raw?path=%2Ftmp%2Fimage.png&oc_url_token=${encodeURIComponent(guestToken)}` },
+      { method: 'GET', path: '/api/event', url: `/api/event?oc_url_token=${encodeURIComponent(guestToken)}` },
+      { method: 'GET', path: '/api/guests/other/panel/main.js', url: `/api/guests/other/panel/main.js?oc_url_token=${encodeURIComponent(guestToken)}` },
+      { method: 'GET', path: '/api/guests', url: `/api/guests?oc_url_token=${encodeURIComponent(guestToken)}` },
+    ]) {
+      const forbiddenRes = createResponse();
+      let forbiddenCalled = false;
+      await auth.requireAuth({ ...forbidden, headers: {} }, forbiddenRes, () => {
+        forbiddenCalled = true;
+      });
+      expect(forbiddenCalled).toBe(false);
+      expect(forbiddenRes.statusCode).toBe(401);
+    }
+    const badScopeRes = createResponse();
+    await auth.handleUrlAuthToken({ ...guestMintReq, query: { scope: 'admin' } }, badScopeRes);
+    expect(badScopeRes.statusCode).toBe(400);
+
     const dictationWsReq = {
       method: 'GET',
       path: '/api/dictation/ws',

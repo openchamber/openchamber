@@ -90,6 +90,7 @@ describe("input-store attachments", () => {
       pendingInputText: null,
       pendingInputMode: "replace",
       pendingSyntheticParts: null,
+      pendingGuestIssue: null,
       pendingBtwComposerRequest: null,
       activeEditorFile: null,
     })
@@ -402,6 +403,41 @@ describe("input-store attachments", () => {
     // Removing the text entry cascades to the slide image
     useInputStore.getState().removeAttachedFile(files[0].id)
     expect(useInputStore.getState().attachedFiles).toEqual([])
+  })
+})
+
+describe("input-store guest attach", () => {
+  beforeEach(() => {
+    useInputStore.setState({ pendingGuestIssue: null })
+  })
+
+  test("holds a guest issue until the composer consumes it", () => {
+    const issue = {
+      providerId: "clickup",
+      id: "abc",
+      title: "Login",
+      url: "https://app.clickup.com/t/abc",
+    }
+    useInputStore.getState().setPendingGuestIssue(issue)
+    expect(useInputStore.getState().pendingGuestIssue).toEqual(issue)
+    expect(useInputStore.getState().consumePendingGuestIssue()).toEqual(issue)
+    expect(useInputStore.getState().pendingGuestIssue).toBeNull()
+    expect(useInputStore.getState().consumePendingGuestIssue()).toBeNull()
+  })
+
+  test("holds a guest pull with author and branches", () => {
+    const pull = {
+      providerId: "gitlab",
+      id: "!12",
+      title: "Fix login",
+      url: "https://gitlab.com/acme/app/-/merge_requests/12",
+      kind: "pull" as const,
+      author: "ada",
+      branches: { head: "feature", base: "main" },
+    }
+    useInputStore.getState().setPendingGuestIssue(pull)
+    expect(useInputStore.getState().pendingGuestIssue).toEqual(pull)
+    expect(useInputStore.getState().consumePendingGuestIssue()).toEqual(pull)
   })
 })
 

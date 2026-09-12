@@ -96,7 +96,7 @@
     },
     "packages/electron": {
       "name": "@openchamber/electron",
-      "version": "1.23.0",
+      "version": "1.23.1",
       "dependencies": {
         "@openchamber/web": "workspace:*",
         "electron-context-menu": "^4.1.2",
@@ -132,9 +132,54 @@
         "typescript": "~5.9.0",
       },
     },
+    "packages/sdk": {
+      "name": "@openchamber/sdk",
+      "version": "1.23.1",
+      "bin": {
+        "openchamber-guest-bundle": "./scripts/bundle-guest.ts",
+      },
+      "dependencies": {
+        "zod": "^4.3.6",
+      },
+    },
+    "packages/sdk/examples/config-editor": {
+      "name": "@openchamber/example-config-editor",
+      "version": "1.0.0",
+      "dependencies": {
+        "@openchamber/sdk": "workspace:*",
+      },
+    },
+    "packages/sdk/examples/github-token": {
+      "name": "@openchamber/example-github-token",
+      "version": "1.0.0",
+      "dependencies": {
+        "@openchamber/sdk": "workspace:*",
+      },
+    },
+    "packages/sdk/examples/hello-kit": {
+      "name": "@openchamber/example-hello-kit",
+      "version": "1.0.0",
+      "dependencies": {
+        "@openchamber/sdk": "workspace:*",
+      },
+    },
+    "packages/sdk/examples/service-echo": {
+      "name": "@openchamber/example-service-echo",
+      "version": "1.0.0",
+      "dependencies": {
+        "@openchamber/sdk": "workspace:*",
+      },
+    },
+    "packages/sdk/examples/tasks-demo": {
+      "name": "@openchamber/example-tasks-demo",
+      "version": "1.0.0",
+      "dependencies": {
+        "@openchamber/sdk": "workspace:*",
+      },
+    },
     "packages/ui": {
       "name": "@openchamber/ui",
-      "version": "1.23.0",
+      "version": "1.23.1",
       "dependencies": {
         "@aparajita/capacitor-secure-storage": "^8.0.0",
         "@base-ui/react": "^1.4.0",
@@ -169,6 +214,7 @@
         "@dnd-kit/utilities": "^3.2.2",
         "@legendapp/list": "3.3.10",
         "@lezer/highlight": "^1.2.3",
+        "@openchamber/sdk": "workspace:*",
         "@opencode-ai/sdk": "1.18.30",
         "@pierre/diffs": "1.3.0-beta.6",
         "@replit/codemirror-vim": "^6.4.0",
@@ -240,7 +286,7 @@
     },
     "packages/vscode": {
       "name": "openchamber",
-      "version": "1.23.0",
+      "version": "1.23.1",
       "dependencies": {
         "@openchamber/ui": "workspace:*",
         "@opencode-ai/sdk": "1.18.30",
@@ -263,13 +309,14 @@
     },
     "packages/web": {
       "name": "@openchamber/web",
-      "version": "1.23.0",
+      "version": "1.23.1",
       "bin": {
         "openchamber": "./bin/cli.js",
       },
       "dependencies": {
         "@clack/prompts": "^1.1.0",
         "@octokit/rest": "^22.0.1",
+        "@openchamber/sdk": "workspace:*",
         "@opencode-ai/sdk": "1.18.30",
         "@simplewebauthn/server": "13.3.1",
         "bun-pty": "^0.4.5",
@@ -1001,7 +1048,19 @@
 
     "@openchamber/electron": ["@openchamber/electron@workspace:packages/electron"],
 
+    "@openchamber/example-config-editor": ["@openchamber/example-config-editor@workspace:packages/sdk/examples/config-editor"],
+
+    "@openchamber/example-github-token": ["@openchamber/example-github-token@workspace:packages/sdk/examples/github-token"],
+
+    "@openchamber/example-hello-kit": ["@openchamber/example-hello-kit@workspace:packages/sdk/examples/hello-kit"],
+
+    "@openchamber/example-service-echo": ["@openchamber/example-service-echo@workspace:packages/sdk/examples/service-echo"],
+
+    "@openchamber/example-tasks-demo": ["@openchamber/example-tasks-demo@workspace:packages/sdk/examples/tasks-demo"],
+
     "@openchamber/mobile": ["@openchamber/mobile@workspace:packages/mobile"],
+
+    "@openchamber/sdk": ["@openchamber/sdk@workspace:packages/sdk"],
 
     "@openchamber/ui": ["@openchamber/ui@workspace:packages/ui"],
 

@@ -1,0 +1,203 @@
+---
+title: Host API
+description: Bir eklentinin çağırabileceği her connectHost metodu, OpenChamber'ın ona gönderdikleri, sınırlar ve hata kodları.
+---
+
+# Host API
+
+Bu sayfayı `connectHost` metodlarını, sınırları ve hata kodlarını tam olarak bilmeniz gerektiğinde kullanın. Klasör düzeni, manifest ve kurulum için [Eklenti oluşturma](/sdk/) sayfasından başlayın.
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+```
+
+`connectHost`, `window` yoksa `HOST_UNAVAILABLE` fırlatır. OpenChamber dışında, her çağrısı `HOST_UNAVAILABLE` ile reddedilen bir istemci döndürür. Sayfayı kapatırken `dispose()` çağırın; hâlâ süren çağrılar aynı kodla reddedilir.
+
+## OpenChamber'ın size gönderdikleri
+
+`onReady` ilk anlık görüntüyle tetiklenir ve OpenChamber onu her yenilediğinde yeniden tetiklenir.
+
+| Alan | Anlamı |
+| --- | --- |
+| `theme.mode` | `light` veya `dark` |
+| `theme.tokens` | uygulamanın renkleri (yüzeyler, metin, etkileşim durumları, primary, success/warning/error/info), `font`, `mono` ve `radius`. UI'ı bağlamadan önce bunu `applyHostReady` fonksiyonuna verin. |
+| `locale` | uygulamanın dil etiketi |
+| `directory` | geçerli proje dizini veya `null` |
+| `session` | `{ id, title, busy }` veya `null`. Başlık yoksa oturum id'sine düşer. `busy` canlı durumdur. Oturumda varsa `model` ve `agent` (OpenCode ajanı) de gelir. |
+| `surface` | şeritte `panel`, iliştirme penceresinde `dialog` |
+| `item` | bu yüzeyin ne için açıldığı veya `null`: kullanıcının tıkladığı iliştirilmiş öğe (`attach` çağrısına verdiğiniz alanların aynısı, `data` dahil), tanımladığınız eylemlerden birinden gelen bir mesaj (`kind: "message"`) veya oturum (`kind: "session"`). Bkz. [Eylemler](/sdk/#eylemler-komutlar-ve-rozet). |
+| `connection` | entegrasyonunuz için `{ connected, account }` |
+| `settings` | `integration.settings` içinde tanımladığınız alanların değerleri |
+
+Erişim token'ları burada da, `request` sonucunda da asla görünmez.
+
+`onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings` ve `onItem` geç abone olduğunuzda en son değeri yeniden gönderir, sonra değiştikçe tetiklenmeye devam eder.
+
+## Metodlar
+
+| Çağrı | Ne yapar |
+| --- | --- |
+| `toast({ kind, message })` | uygulamada bildirim gösterir. `kind` değeri `info`, `success` veya `error`. |
+| `openUrl(url)` | kullanıcının tarayıcısında bir URL açar |
+| `openSurface(surfaceId)` | uygulamayı o ekrana geçirir |
+| `writeClipboard(text)` | metni kopyalar. 1 ile 32000 karakter arası. |
+| `compose({ text, mode? })` | metni göndermeden sohbet kutusuna koyar. `mode` değeri `append` (varsayılan) veya `replace`. Boşluklar kırpıldıktan sonra 1 ile 16000 karakter arası. |
+| `attach({ ... })` | sohbet kutusuna, GitHub ve Linear öğelerinin düştüğü yere bir etiket koyar. Aynı anda yalnızca bir etiket. |
+| `startSession({ ... })` | o öğe iliştirilmiş bir oturum oluşturur. `{ sessionId, sent }` döndürür. `sessions` yeteneği gerekir. |
+| `prompt({ text, send? })` | geçerli oturuma yazar ya da oradan gönderir. `{ sent }` döndürür. Göndermek için `prompt` yeteneği gerekir. |
+| `sessionLink({ ... })` | yeni oturum oluşturmadan bir öğeyi geçerli oturuma iliştirir |
+| `close()` | iliştirme penceresini kapatır. Şeritte hiçbir şey yapmaz. |
+| `oauthStart()` | sağlayıcının yetkilendirme sayfasını, `host: { provider: "linear" }` entegrasyonu için ise Linear'ınkini açar |
+| `oauthDisconnect()` | saklanan token'ı ya da Linear bağlantısını unutur |
+| `request({ method, path, query?, body? })` | entegrasyonunuzun `apiOrigin` adresini kullanıcının token'ı ekli olarak çağırır |
+| `serviceRequest({ method, path, query?, body? })` | eklentinizin yerel servisini çağırır (bkz. `GUEST_SERVICES.md`) |
+| `serviceStatus()` | `stopped`, `starting`, `ready` veya `failed` |
+| `readFile(path)` | metin dosyası okur. `{ content }` döndürür. |
+| `writeFile(path, content)` | metin dosyasını atomik olarak yazar, üst klasörleri oluşturur. `{ written: true }` döndürür. |
+| `listDir(path)` | klasörü listeler. `{ entries: [{ name, kind }] }` döndürür, `kind` `file`, `directory` veya `other` olur. |
+| `stat(path)` | `{ kind, size, mtime }`, `kind` `file`, `directory`, `other` veya `missing` olur. |
+| `onResolve(handler)` | eğik çizgi komutlarınız için işleyiciyi kaydeder. `{ command, args }` alır ve iliştirilecek bir öğe ya da `null` döndürür. |
+| `setBadge(count)` | şerit simgenizde bir sayı (0 ile 999 arası) gösterir, `null` ile temizler |
+
+## attach, startSession ve sessionLink
+
+Üçü de aynı öğe alanlarını alır:
+
+```ts
+await host.attach({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.attach({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  author: "ada",
+  branches: { head: "feature", base: "main" },
+  text: "Optional notes for the model",
+});
+
+await host.startSession({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  worktree: true,
+  text: "Optional first message",
+});
+```
+
+`providerId` panel id'nizdir; OpenChamber bunun üzerine zaten sizin id'nizi yazar. `id` öğe için kendi tanımlayıcınızdır. `kind` değeri `issue` (varsayılan) veya `pull`. `text` model için isteğe bağlı bağlamdır; boşluklar kırpıldıktan sonra 1 ile 16000 karakter arası. `data` size ait isteğe bağlı bir JSON'dur (durum, yorumlar, ne isterseniz); serileştirildiğinde en fazla 16000 karakter. OpenChamber bunu etiketle birlikte saklar ve kullanıcı etikete tıkladığında `ctx.item` içinde değiştirmeden geri verir; modele hiçbir zaman ulaşmaz.
+
+`startSession` geçerli projede bir oturum oluşturur. `worktree: true` ile OpenChamber önce bir git worktree oluşturur ve oturumu orada açar. `text` verilmişse ve bir model seçiliyse ilk mesaj olarak gönderilir. Sonuç `{ sessionId, sent }` olur; `sent` değeri `sent`, `no-model`, `skipped` veya `failed`. `no-model` ve `failed` sonrasında da oturum var olur. Açık proje olmaması, worktree'nin başarısız olması veya oturum oluşturmanın başarısız olması `HOST_REJECTED` hatasıdır.
+
+`sessionLink` öğeyi şu an açık olan oturuma iliştirir. Proje veya oturum yoksa `NO_SESSION` hatasıdır.
+
+İstemcinin herhangi bir şey gönderilmeden önce uyguladığı sınırlar:
+
+| Alan | En fazla karakter |
+| --- | --- |
+| `id` | 128 |
+| `title` | 200 |
+| `url` | 2000 |
+| `text` | 16000 |
+| `data` (serileştirilmiş) | 16000 |
+| `author` | 80 |
+| her dal adı | 200 |
+
+## prompt ve oturum yaşam döngüsü
+
+```ts
+await host.prompt({ text: "Fix the login" });
+await host.prompt({ text: "Fix the login", send: true });
+
+host.onSessionLifecycle((event) => {
+  document.body.dataset.phase = event.phase;
+});
+```
+
+`send` olmadan `prompt` sohbet kutusundaki metnin yerine geçer. `send: true` ile mesajı kullanıcının seçtiği model ve ajanla gönderir. Eklenti bunları asla kendisi seçmez. Açık oturum yoksa `NO_SESSION`. Oturum meşgulken göndermek `SESSION_BUSY`; meşgulken kutuya yazmak çalışır. Sonuç, `startSession` ile aynı değerleri alan `{ sent }` olur.
+
+`onSessionLifecycle` oturumun ne yaptığını söyler. `phase` model çalışırken `started`, boşa geçtiğinde `completed`, beklenmeyen bir durumda `failure` olur. Geç eklenen bir dinleyici geçerli aşamayı hemen alır.
+
+## request
+
+```ts
+const user = await host.request({ method: "GET", path: "/api/v2/user" });
+```
+
+`path` `/` ile başlar, şema ve host içermez; OpenChamber onu manifestinizdeki `apiOrigin` ile birleştirir ve `Authorization` başlığını ekler. Token entegrasyonları yapıştırılan token'ı olduğu gibi, manifest `token.scheme: "bearer"` ayarlıyorsa `Bearer <token>` olarak, `"basic"` ayarlıyorsa `Basic base64(username:token)` olarak gönderir. OAuth ve Linear entegrasyonları her zaman `Bearer` gönderir. Sonuç `{ status, body }` olur. body metindir; JSON'ı kendiniz ayrıştırın.
+
+Bir Linear entegrasyonu ayrıca `GET /api/linear/issues/get` çağırabilir; OpenChamber bunu kendi Linear rotasından yanıtlar.
+
+20 saniye içinde yanıt gelmezse `HOST_TIMEOUT`.
+
+```ts
+try {
+  await host.request({ method: "GET", path: "/api/v2/user" });
+} catch (error) {
+  if (error instanceof HostRequestError && error.code === "DISCONNECTED") {
+    await host.oauthStart();
+  }
+}
+```
+
+## serviceRequest
+
+Manifest `contributes.service` tanımladığında OpenChamber o süreci başlatır ve sayfanız onunla aynı türden bir çağrıyla konuşur. Sayfa soketi asla kendisi açmaz.
+
+```ts
+const status = await host.serviceStatus();
+const result = await host.serviceRequest({ method: "GET", path: "/containers" });
+```
+
+`path` için `request` ile aynı kurallar geçerlidir. Bir yerel servis tanımlamak, kullanıcının kurulumda onayladığı yeteneklere `service` ekler; o zamana kadar her `serviceRequest` `NO_SERVICE` olur. Tam sözleşme: paket dosyası `GUEST_SERVICES.md`.
+
+## Dosyalar
+
+Göreli bir yol açık projenin içindedir ve `files` yeteneği gerektirir. `/` veya `~/` ile başlayan bir yol, tanımlanmış bir `contributes.filesystem` deseniyle eşleşmeli ve `filesystem` yeteneği gerektirir. Kurallar için bkz. [Eklenti oluşturma](/sdk/#dosyalar).
+
+```ts
+const { content } = await host.readFile("package.json");
+await host.writeFile("notes/today.md", "# Today\n");
+const { entries } = await host.listDir("src");
+const info = await host.stat("~/.config/opencode/opencode.json");
+```
+
+Sınırlar: yol en fazla 1024 karakter, içerik en fazla 2,000,000 karakter, listeleme en fazla 2000 kayıt. İçerik sınırını aşmak `FILE_TOO_LARGE` olur.
+
+## Hata kodları
+
+Başarısız çağrılar `HostRequestError` fırlatır. `code` şunlardan biridir; `message` daha fazlasını söyler.
+
+| Kod | Ne zaman |
+| --- | --- |
+| `HOST_UNAVAILABLE` | window yok, OpenChamber içinde değil veya `dispose()` çalıştı |
+| `HOST_TIMEOUT` | 20 saniye boyunca yanıt yok |
+| `HOST_REJECTED` | OpenChamber reddetti veya bu SDK'nın tanımadığı bir kodla yanıtladı |
+| `DISCONNECTED` | entegrasyonunuz için token veya Linear bağlantısı yok |
+| `BAD_PATH` | `path` hatalı biçimlendirilmiş ya da izin verilen kaynağın dışına çıkmaya çalıştı |
+| `NO_INTEGRATION` | manifestte `integration` yok |
+| `NO_SESSION` | açık oturum yokken `prompt` veya `sessionLink` |
+| `SESSION_BUSY` | oturum meşgulken `prompt({ send: true })` |
+| `DISABLED` | kullanıcı eklentiyi Ayarlar → Uzantılar içinde duraklattı |
+| `NO_SERVICE` | yerel servis tanımlanmamış, onaylanmamış veya çalışmıyor |
+| `NOT_GRANTED` | kullanıcı bu çağrının gerektirdiği yeteneği onaylamadı |
+| `SERVICE_FAILED` | yerel servis çöktü veya hiç hazır olmadı |
+| `NO_DIRECTORY` | açık proje yokken göreli bir dosya yolu kullanıldı |
+| `NOT_FOUND` | var olmayan bir dosyada `readFile` |
+| `FILE_TOO_LARGE` | okuma veya yazmada dosya içeriği sınırın üzerinde |
+| `DENIED` | işletim sistemi dosya işlemini reddetti |
+
+## İlgili sayfalar
+
+- [Eklenti oluşturma](/sdk/): klasör, manifest, kurulum ve yetenekler
+- [UI kiti](/sdk/ui/): düğmeler, alanlar, listeler ve diğer yapı taşları

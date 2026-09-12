@@ -1,3 +1,5 @@
+import { useGuestsStore } from '@/lib/guests/store';
+import { useGuestOauthStore } from '@/lib/guests/oauth-store';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { RuntimeEndpointChangedDetail } from '@/lib/runtime-switch';
 import { disposeTerminalInputTransport } from '@/lib/terminalApi';
@@ -77,6 +79,12 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   useGitHubPrStatusStore.getState().resetForRuntimeSwitch();
   useSessionFoldersStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
   useFilesViewTabsStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
+  // Guest rail icons are instance-owned. Keep the previous catalog and the
+  // new instance mints icon URLs that 404: an invisible, still-clickable slot.
+  useGuestsStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
+  // Guest OAuth status is answered by the instance too; a stale "connected"
+  // would otherwise be pushed to a guest frame on the new instance.
+  useGuestOauthStore.getState().resetForRuntimeSwitch();
   // Linear and GitHub are authenticated on the instance, not in the browser.
   // Left in place, the previous instance's login stayed visible and usable —
   // its rail tab, its issue pickers, its work-status rows — against a runtime

@@ -15,6 +15,7 @@
  */
 
 import { z } from 'zod';
+import type { JsonValue } from '@openchamber/sdk';
 import type { TextPart } from '@opencode-ai/sdk/v2';
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { appendTerminalContexts } from './terminalContext';
@@ -104,6 +105,25 @@ type LinearIssueContext = {
     url: string;
 };
 
+type GuestIssueContext = {
+    kind: 'guest-issue';
+    providerId: string;
+    id: string;
+    title: string;
+    url: string;
+    /** Opaque guest payload; stored for the round trip back to the guest, never rendered. */
+    data?: JsonValue;
+};
+
+type GuestPrContext = {
+    kind: 'guest-pr';
+    providerId: string;
+    id: string;
+    title: string;
+    url: string;
+    data?: JsonValue;
+};
+
 export type ContextPartPayload =
     | CodeCommentContext
     | TerminalContextPayload
@@ -114,7 +134,9 @@ export type ContextPartPayload =
     | ChatQuoteContext
     | GitHubIssueContext
     | GitHubPrContext
-    | LinearIssueContext;
+    | LinearIssueContext
+    | GuestIssueContext
+    | GuestPrContext;
 
 type OpenCodeCommentMetadata = {
     path: string;
@@ -175,8 +197,10 @@ export function formatContextText(payload: ContextPartPayload): string {
         case 'github-issue':
         case 'github-pr':
         case 'linear-issue':
-            // Linked issues/PRs carry server-fetched context text built by
-            // their pickers; there is no default text to derive here.
+        case 'guest-issue':
+        case 'guest-pr':
+            // Linked issues/PRs carry picker-built context text;
+            // there is no default text to derive here.
             return '';
     }
 }
@@ -340,6 +364,22 @@ const contextPayloadSchema = z.discriminatedUnion('kind', [
         title: z.string(),
         url: z.string(),
     }),
+    z.object({
+        kind: z.literal('guest-issue'),
+        providerId: z.string().min(1),
+        id: z.string().min(1),
+        title: z.string(),
+        url: z.string(),
+        data: z.json().optional(),
+    }),
+    z.object({
+        kind: z.literal('guest-pr'),
+        providerId: z.string().min(1),
+        id: z.string().min(1),
+        title: z.string(),
+        url: z.string(),
+        data: z.json().optional(),
+    }),
 ]);
 
 /**
@@ -484,6 +524,8 @@ export function draftFromContextPayload(
         case 'github-issue':
         case 'github-pr':
         case 'linear-issue':
+        case 'guest-issue':
+        case 'guest-pr':
             return null;
     }
 }

@@ -1,0 +1,38 @@
+{
+  "name": "@openchamber/example-github-token",
+  "version": "1.0.0",
+  "private": true,
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": {
+        "id": "github-token",
+        "name": "GitHub Token",
+        "icon": "github",
+        "entry": "panel/index.html"
+      },
+      "attach": "panel",
+      "integration": {
+        "name": "GitHub (token)",
+        "description": "Lists your repositories with a personal access token.",
+        "token": {
+          "apiOrigin": "https://api.github.com",
+          "account": {
+            "path": "/user",
+            "name": "login"
+          },
+          "scheme": "bearer"
+        },
+        "settings": [
+          {
+            "id": "visibility",
+            "label": "Visibility (all, public, private)"
+          }
+        ]
+      }
+    }
+  },
+  "dependencies": {
+    "@openchamber/sdk": "workspace:*"
+  }
+}

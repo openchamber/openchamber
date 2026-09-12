@@ -1,0 +1,55 @@
+{
+  "name": "@openchamber/sdk",
+  "version": "1.23.1",
+  "description": "Contract for OpenChamber guests: manifest parse and iframe host bridge.",
+  "private": false,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openchamber/openchamber.git",
+    "directory": "packages/sdk"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./ui": {
+      "types": "./dist/ui/index.d.ts",
+      "default": "./dist/ui/index.js"
+    },
+    "./schemas": {
+      "types": "./dist/schemas.d.ts",
+      "default": "./dist/schemas.js"
+    }
+  },
+  "bin": {
+    "openchamber-guest-bundle": "./scripts/bundle-guest.ts"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint \"./src/**/*.ts\" --config ../../eslint.config.js",
+    "bundle": "bun scripts/bundle-guest.ts",
+    "test": "node ../../scripts/run-isolated-tests.mjs src scripts",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
+  },
+  "files": [
+    "dist",
+    "scripts/bundle-guest.ts",
+    "README.md",
+    "API.md",
+    "DOCUMENTATION.md",
+    "GUEST_SERVICES.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "zod": "^4.3.6"
+  }
+}

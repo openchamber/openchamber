@@ -1,0 +1,22 @@
+{
+  "name": "@openchamber/example-config-editor",
+  "version": "1.0.0",
+  "private": true,
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": {
+        "id": "config-editor",
+        "name": "Config Editor",
+        "icon": "file-edit",
+        "entry": "panel/index.html"
+      },
+      "filesystem": [
+        "~/.config/opencode/opencode.json"
+      ]
+    }
+  },
+  "dependencies": {
+    "@openchamber/sdk": "workspace:*"
+  }
+}

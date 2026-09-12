@@ -1,0 +1,106 @@
+---
+title: Kit UI
+description: Boutons, champs, listes déroulantes, onglets, listes et autres composants de @openchamber/sdk/ui pour qu'une extension ressemble au reste d'OpenChamber.
+---
+
+# Kit UI
+
+`@openchamber/sdk/ui` est un ensemble de contrôles prêts à l'emploi qui utilisent les couleurs, polices et espacements de l'application, pour que votre extension ressemble au reste d'OpenChamber sans copier ses styles. Chaque contrôle est une fonction : vous lui donnez un élément qui vous appartient et ses réglages, il se dessine dedans et renvoie `{ update, dispose }`. Vous assemblez les contrôles en un écran et vous gardez la main sur les données. Le kit n'appelle jamais votre fournisseur ni OpenChamber ; c'est toujours vous qui appelez `host.request`, `host.attach` et le reste. Vous pouvez écrire votre propre HTML et CSS pour tout ce que le kit ne couvre pas, mais commencez par le kit : ses contrôles suivent automatiquement le thème, les espacements et les habitudes clavier de l'utilisateur, donc un panneau construit avec eux se sent partie intégrante d'OpenChamber plutôt qu'un site web à l'intérieur.
+
+## Appelez `applyHostReady` en premier
+
+Les contrôles lisent leurs couleurs dans des variables CSS que `applyHostReady` écrit sur la page. Il applique aussi la police et la couleur de texte de l'application à la racine de la page, donc le HTML brut que vous ajoutez vous-même s'affiche correctement lui aussi. Appelez-le dans `host.onReady` avant le premier montage, et les couleurs suivront le thème de l'application quand l'utilisateur en change.
+
+```ts
+import { applyHostReady } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  // mount things here
+});
+```
+
+## Ce que vous pouvez monter
+
+| Fonction | Ce qu'elle dessine |
+| --- | --- |
+| `mountButton` | Un bouton. `variant` est `default`, `secondary`, `outline`, `ghost` ou `destructive` ; `size` est `default`, `sm` ou `xs`. `loading` affiche un spinner et bloque les clics. |
+| `mountTextField` | Un champ avec libellé, ou un textarea avec `multiline`. Texte `helper` ou `error` optionnel, masquage `password`, et `mono` pour les tokens et les ids. |
+| `mountSearchField` | Une zone de recherche avec une loupe et un bouton d'effacement. Échap la vide. |
+| `mountSelect` | Une liste déroulante. `searchable` ajoute un filtre en haut de la liste. Les flèches déplacent, Entrée choisit, Échap ferme. |
+| `mountCheckbox`, `mountSwitch` | Une case à cocher ou un interrupteur avec un libellé et une `description` optionnelle. |
+| `mountTabs` | Des onglets en forme de pilule, chacun avec un compteur optionnel. Les flèches gauche et droite passent de l'un à l'autre. |
+| `mountBadge` | Une petite pilule. `tone` est `neutral`, `primary`, `success`, `warning`, `error` ou `info`. |
+| `mountList` | Une liste utilisable au clavier. Chaque ligne peut avoir une clé en tête, un titre, un sous-titre, un texte méta aligné à droite et un badge. |
+| `mountEmpty` | Un état vide centré avec un titre, une ligne de texte et un bouton optionnel. |
+| `mountSpinner` | Un anneau de chargement avec un libellé optionnel. |
+| `mountBanner` | Une notice colorée avec un titre, un texte et une action optionnelle. |
+| `mountSeparator` | Une ligne fine, avec un libellé au milieu si besoin. |
+| `mountProgress` | Une barre de progression de 0 à 100. |
+| `mountMenu` | Un bouton qui ouvre une liste d'actions. Les éléments peuvent être destructifs, désactivés, ou un séparateur. |
+| `mountText` | Du texte venant de votre fournisseur. Les images et liens `http(s)` au format Markdown deviennent de vraies images et de vrais liens ; tout le reste reste du texte brut, donc un contenu non fiable peut être affiché sans risque. |
+
+Trois helpers simples sont livrés à côté des contrôles. `filterSelectOptions(options, query)` est la correspondance qu'utilise `mountSelect`. `splitTextMedia(text)` est ce que fait `mountText` avant de dessiner. `moveListSelection` est le pas clavier partagé par la liste, le select et le menu, au cas où vous construiriez votre propre liste.
+
+## Une liste avec recherche
+
+```ts
+import { applyHostReady, mountEmpty, mountList, mountSearchField } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  const root = document.querySelector("#root")!;
+  const searchRoot = root.appendChild(document.createElement("div"));
+  const listRoot = root.appendChild(document.createElement("div"));
+
+  let query = "";
+  let empty: { dispose: () => void } | null = null;
+
+  const list = mountList(listRoot, {
+    items: [],
+    onSelect: (id) => {
+      const task = tasks.find((item) => item.id === id);
+      if (task) void host.attach({ providerId: "acme-hello", id, title: task.title, url: task.url });
+    },
+  });
+
+  const paint = () => {
+    const rows = tasks
+      .filter((task) => task.title.toLowerCase().includes(query.toLowerCase()))
+      .map((task) => ({ id: task.id, leading: task.key, title: task.title, meta: task.updated }));
+    list.update({ items: rows });
+    empty?.dispose();
+    empty = rows.length === 0
+      ? mountEmpty(listRoot, { title: "No tasks match", body: "Try a shorter search." })
+      : null;
+  };
+
+  mountSearchField(searchRoot, {
+    value: query,
+    placeholder: "Search tasks",
+    onChange: (next) => {
+      query = next;
+      paint();
+    },
+  });
+  paint();
+});
+```
+
+`update` ne prend que les réglages qui ont changé. La liste conserve sa ligne surlignée d'une mise à jour à l'autre tant que cette ligne existe encore.
+
+## Liens dans le texte du fournisseur
+
+Votre page tourne dans un sandbox et ne peut pas ouvrir un nouvel onglet toute seule. Quand vous utilisez `mountText`, passez `onOpenUrl` et confiez le lien à OpenChamber :
+
+```ts
+mountText(root, {
+  text: comment.body,
+  onOpenUrl: (url) => void host.openUrl(url),
+});
+```
+
+## Voir aussi
+
+- [Créer une extension](/sdk/) pour le dossier, le manifeste et l'installation
+- [API hôte](/sdk/host/) pour `connectHost`, attach et les codes d'erreur

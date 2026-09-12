@@ -1,0 +1,106 @@
+---
+title: UI kit
+description: Buttons, fields, dropdowns, tabs, lists, and other building blocks from @openchamber/sdk/ui that make an extension look like the rest of OpenChamber.
+---
+
+# UI kit
+
+`@openchamber/sdk/ui` is a set of ready-made controls that use the app's colours, fonts, and spacing, so your extension looks like the rest of OpenChamber without copying its styles. Each control is a function: you give it an element you own and its settings, it draws itself there and returns `{ update, dispose }`. You put the controls together into a screen and keep the data. The kit never calls your provider or OpenChamber; you still call `host.request`, `host.attach`, and the rest yourself. You can write your own HTML and CSS for anything the kit lacks, but reach for the kit first: its controls follow the user's theme, spacing, and keyboard habits automatically, so a panel built from them feels like part of OpenChamber instead of a website inside it.
+
+## Call `applyHostReady` first
+
+The controls read their colours from CSS variables that `applyHostReady` writes onto the page. It also sets the app's font and text colour on the page root, so plain HTML you add yourself looks right too. Call it inside `host.onReady` before the first mount, and the colours follow the app's theme when the user switches it.
+
+```ts
+import { applyHostReady } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  // mount things here
+});
+```
+
+## What you can mount
+
+| Function | What it draws |
+| --- | --- |
+| `mountButton` | A button. `variant` is `default`, `secondary`, `outline`, `ghost`, or `destructive`; `size` is `default`, `sm`, or `xs`. `loading` shows a spinner and blocks clicks. |
+| `mountTextField` | A labelled input, or a textarea with `multiline`. Optional `helper` or `error` text, `password` masking, and `mono` for tokens and ids. |
+| `mountSearchField` | A search box with a magnifier and a clear button. Escape clears it. |
+| `mountSelect` | A dropdown. `searchable` adds a filter box at the top of the list. Arrow keys move, Enter picks, Escape closes. |
+| `mountCheckbox`, `mountSwitch` | A checkbox or a toggle with a label and an optional `description`. |
+| `mountTabs` | Pill tabs, each with an optional count. Left and right arrows move between them. |
+| `mountBadge` | A small pill. `tone` is `neutral`, `primary`, `success`, `warning`, `error`, or `info`. |
+| `mountList` | A keyboard-friendly list. Each row can have a leading key, a title, a subtitle, right-aligned meta text, and a badge. |
+| `mountEmpty` | A centred empty state with a title, a body line, and an optional button. |
+| `mountSpinner` | A loading ring with an optional label. |
+| `mountBanner` | A toned notice with a title, a body, and an optional action. |
+| `mountSeparator` | A thin line, optionally with a label in the middle. |
+| `mountProgress` | A progress bar from 0 to 100. |
+| `mountMenu` | A button that opens a list of actions. Items can be destructive, disabled, or a separator. |
+| `mountText` | Text from your provider. Markdown-style images and `http(s)` links become real images and links; everything else stays plain text, so untrusted content is safe to show. |
+
+Three plain helpers ship next to the controls. `filterSelectOptions(options, query)` is the match `mountSelect` uses. `splitTextMedia(text)` is what `mountText` does before drawing. `moveListSelection` is the keyboard step the list, select, and menu share, in case you build your own list.
+
+## A list with search
+
+```ts
+import { applyHostReady, mountEmpty, mountList, mountSearchField } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  const root = document.querySelector("#root")!;
+  const searchRoot = root.appendChild(document.createElement("div"));
+  const listRoot = root.appendChild(document.createElement("div"));
+
+  let query = "";
+  let empty: { dispose: () => void } | null = null;
+
+  const list = mountList(listRoot, {
+    items: [],
+    onSelect: (id) => {
+      const task = tasks.find((item) => item.id === id);
+      if (task) void host.attach({ providerId: "acme-hello", id, title: task.title, url: task.url });
+    },
+  });
+
+  const paint = () => {
+    const rows = tasks
+      .filter((task) => task.title.toLowerCase().includes(query.toLowerCase()))
+      .map((task) => ({ id: task.id, leading: task.key, title: task.title, meta: task.updated }));
+    list.update({ items: rows });
+    empty?.dispose();
+    empty = rows.length === 0
+      ? mountEmpty(listRoot, { title: "No tasks match", body: "Try a shorter search." })
+      : null;
+  };
+
+  mountSearchField(searchRoot, {
+    value: query,
+    placeholder: "Search tasks",
+    onChange: (next) => {
+      query = next;
+      paint();
+    },
+  });
+  paint();
+});
+```
+
+`update` takes only the settings that changed. The list keeps its highlighted row across updates as long as that row is still there.
+
+## Links from provider text
+
+Your page runs in a sandbox and cannot open a new tab by itself. When you use `mountText`, pass `onOpenUrl` and hand the link to OpenChamber:
+
+```ts
+mountText(root, {
+  text: comment.body,
+  onOpenUrl: (url) => void host.openUrl(url),
+});
+```
+
+## Related
+
+- [Build an extension](/sdk/) for the folder, manifest, and install
+- [Host API](/sdk/host/) for `connectHost`, attach, and error codes

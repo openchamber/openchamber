@@ -1,0 +1,63 @@
+---
+title: Uzantılar
+description: OpenChamber'a üçüncü taraf uzantılar kurun, neler yapabileceklerini onaylayın, hesaplarını bağlayın ve kaldırın.
+---
+
+# Uzantılar
+
+**Ayarlar → Uzantılar** üzerinden başkalarının yaptığı panelleri OpenChamber'a ekleyebilirsiniz. Uzantı, sağ raya yerleşen ve yerleşik panellerin yanında duran küçük bir sayfadır. Size başka bir hizmetten veri gösterebilir, sohbete bir görev iliştirebilir ve izin verirseniz oturum başlatabilir, istem gönderebilir ya da dosya okuyabilir.
+
+Uzantılar OpenChamber web ve masaüstünde çalışır. VS Code ve mobil uygulama henüz onları yüklemiyor. OpenCode eklentileriyle aynı şey değildir.
+
+## Uzantı kurma
+
+1. **Ayarlar → Uzantılar** sayfasını açın.
+2. Şunlardan birini **Klasör, ZIP veya URL** alanına yapıştırıp **Ekle** seçeneğini seçin:
+   - bu bilgisayardaki bir klasörün tam yolu
+   - bir `.zip` dosyasının yolu
+   - bir git deposuna ya da zip dosyasına giden https bağlantısı
+3. Uzantı izin istiyorsa bir iletişim kutusu bunları listeler. **İzin ver ve etkinleştir** seçeneğini seçin ya da geri çıkarmak için **Kaldır** deyin.
+
+Alana bir `.zip` de bırakabilir ya da yanındaki arşiv düğmesiyle seçebilirsiniz; arşiv OpenChamber sunucusuna yüklenir, bu yüzden uzak bir örnekte de çalışır. Masaüstünde klasör düğmesi sistemin seçim penceresini açar ve bırakılan bir klasör kendi yolundan kurulur.
+
+Uzantının simgesi rayda görünür. Görünmüyorsa [Sorun giderme](/troubleshooting/) sayfasına bakın.
+
+Klasörden kurulum doğrudan o klasörden çalışır, bu yüzden uzantı geliştiren biri düzenleyip yeniden yükleyebilir. Zip ya da URL önce OpenChamber'ın kendi veri klasörüne kopyalanır; özgün dosyaya dokunulmaz.
+
+## Uzantı neler yapabilir
+
+Panel göstermek ve hangi proje ile oturumun açık olduğunu okumak izin gerektirmez. Sizin adınıza bir şey yapan her şey izin gerektirir ve tüm listeyi kurulumda bir kez görürsünüz:
+
+- **Oturumlarınıza mesaj gönderme**: modele istem yazıp gönderir, bu jeton harcar ve araç çalıştırabilir.
+- **Oturum ve çalışma ağacı oluşturma**: geçerli projede.
+- **Proje dosyalarını okuma ve yazma**: açık projedeki her dosya.
+- **Proje dışındaki dosyaları okuma ve yazma**: yalnızca iletişim kutusunda listelenen konumlar.
+- **Dış bir hizmete bağlanma**: Ayarlar → Entegrasyonlar altında bağladığınız hesapla.
+- **Bir oturumun konuşmasını okuma**: yalnızca o oturumda uzantının eylemini çalıştırdığınızda.
+- **Yerel servis çalıştırma**: kullanıcı hesabınızın tüm erişimine sahip ayrı bir program. Yalnızca yazara güveniyorsanız izin verin.
+
+Daha yeni bir sürüm izin verdiğinizden fazlasını istediğinde kart **Onay gerekli** ve bir **İzinleri incele** düğmesi gösterir. Yeni listeye izin verene kadar o uzantı kapalı kalır.
+
+## Nerede görünür
+
+Raydaki panelinin yanı sıra bir uzantı, zaten kullandığınız menülere girdiler ekleyebilir: bir sohbet mesajındaki eylemler, bir oturumun menüsü, sohbet kutusunun yanındaki + menüsü ve hiçbir şey açmadan bir şey iliştiren `/task ABC-12` gibi eğik çizgi komutları. Bunlardan hangilerini sunacağına uzantı karar verir; uzantıya izin verene kadar hepsi kapalıdır.
+
+## Hesabını bağlama
+
+Bir hizmetle konuşan uzantı, **Ayarlar → Entegrasyonlar** altında **Uzantı hesapları** bölümünde bir kart alır. Hizmete göre kart bir API jetonu, kullanıcı adı ve jeton ya da oturum açma akışı için bir client id ister. **Bağlan** seçeneğini seçin; **Bağlantıyı kes** kayıtlı jetonu unutur. Uzantının bildirdiği ek alanlar siz alandan çıkınca kendiliğinden kaydedilir.
+
+Jeton OpenChamber sunucusunda kalır. Uzantının sayfası onu asla görmez.
+
+## Güncelleme
+
+Bir git URL'sinden kurulan uzantılar kendini güncelleyebilir. **Ayarlar → Uzantılar** sayfasını açmak her birini en fazla saatte bir denetler; **Güncellemeleri denetle** hemen denetler. Daha yeni sürümü olan bir kartta **Güncelleme var** yazısı ve bir **Güncelle** düğmesi görünür. Güncelleme izinlerinizi, hesaplarınızı ve ayarlarınızı korur; yeni sürüm daha fazlasını isterse onay iletişim kutusu yeniden açılır. Klasörden ve zip'ten kurulumlar güncellenmez: bunları elle değiştirin.
+
+Varsayılan dal yerine bir etiketi veya dalı izlemek için kurarken git URL'sine `#v1.2.0` ya da `#stable` ekleyin.
+
+## Duraklatma veya kaldırma
+
+Her kartta bir **Etkin** anahtarı vardır. Kapalıyken uzantı kurulu kalır ama paneli gizlenir ve çağrıları engellenir. **Kaldır**, zip ya da URL ile kurulanı OpenChamber'ın veri klasöründen siler; klasörden kurulumda yalnızca yolu unutur, klasörünüz yerinde kalır.
+
+## Kendi uzantınızı yapın
+
+Bir uzantının yapabileceği her şey ve nasıl yapılacağı [Uzantı oluşturma](/sdk/) sayfasında.

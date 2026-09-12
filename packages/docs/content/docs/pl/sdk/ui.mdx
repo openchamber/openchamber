@@ -1,0 +1,106 @@
+---
+title: Zestaw UI
+description: Przyciski, pola, listy rozwijane, zakładki, listy i inne gotowe elementy z @openchamber/sdk/ui, dzięki którym rozszerzenie wygląda jak reszta OpenChamber.
+---
+
+# Zestaw UI
+
+`@openchamber/sdk/ui` to zestaw gotowych kontrolek, które używają kolorów, czcionek i odstępów aplikacji, więc Twoje rozszerzenie wygląda jak reszta OpenChamber bez kopiowania jej styli. Każda kontrolka to funkcja: dajesz jej swój element i ustawienia, ona rysuje się w nim i zwraca `{ update, dispose }`. Ty składasz kontrolki w ekran i trzymasz dane. Zestaw nigdy nie wywołuje Twojego dostawcy ani OpenChamber; `host.request`, `host.attach` i resztę nadal wywołujesz samodzielnie. Własny HTML i CSS możesz napisać dla wszystkiego, czego w zestawie brakuje, ale najpierw sięgaj po zestaw: jego kontrolki same podążają za motywem, odstępami i nawykami klawiaturowymi użytkownika, więc zbudowany z nich panel wygląda jak część OpenChamber, a nie strona internetowa w środku.
+
+## Najpierw wywołaj `applyHostReady`
+
+Kontrolki czytają kolory ze zmiennych CSS, które `applyHostReady` zapisuje na stronie. Ustawia też czcionkę i kolor tekstu aplikacji na korzeniu strony, więc zwykły HTML, który dodasz samodzielnie, też wygląda poprawnie. Wywołaj je w `host.onReady` przed pierwszym montowaniem, a kolory będą podążać za motywem aplikacji, gdy użytkownik go zmieni.
+
+```ts
+import { applyHostReady } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  // mount things here
+});
+```
+
+## Co możesz zamontować
+
+| Funkcja | Co rysuje |
+| --- | --- |
+| `mountButton` | Przycisk. `variant` to `default`, `secondary`, `outline`, `ghost` lub `destructive`; `size` to `default`, `sm` lub `xs`. `loading` pokazuje spinner i blokuje kliknięcia. |
+| `mountTextField` | Pole z etykietą albo textarea z `multiline`. Opcjonalny tekst `helper` lub `error`, maskowanie `password` i `mono` dla tokenów i identyfikatorów. |
+| `mountSearchField` | Pole wyszukiwania z lupą i przyciskiem czyszczenia. Escape je czyści. |
+| `mountSelect` | Lista rozwijana. `searchable` dodaje pole filtra na górze listy. Strzałki przesuwają, Enter wybiera, Escape zamyka. |
+| `mountCheckbox`, `mountSwitch` | Pole wyboru albo przełącznik z etykietą i opcjonalnym `description`. |
+| `mountTabs` | Zakładki w formie pigułek, każda z opcjonalnym licznikiem. Strzałki w lewo i w prawo przechodzą między nimi. |
+| `mountBadge` | Mała pigułka. `tone` to `neutral`, `primary`, `success`, `warning`, `error` lub `info`. |
+| `mountList` | Lista przyjazna klawiaturze. Każdy wiersz może mieć klucz z przodu, tytuł, podtytuł, tekst meta wyrównany do prawej i odznakę. |
+| `mountEmpty` | Wyśrodkowany stan pusty z tytułem, linią treści i opcjonalnym przyciskiem. |
+| `mountSpinner` | Pierścień ładowania z opcjonalną etykietą. |
+| `mountBanner` | Kolorowy komunikat z tytułem, treścią i opcjonalną akcją. |
+| `mountSeparator` | Cienka linia, opcjonalnie z etykietą pośrodku. |
+| `mountProgress` | Pasek postępu od 0 do 100. |
+| `mountMenu` | Przycisk, który otwiera listę akcji. Pozycje mogą być destrukcyjne, wyłączone albo być separatorem. |
+| `mountText` | Tekst od Twojego dostawcy. Obrazy i linki `http(s)` w stylu Markdown stają się prawdziwymi obrazami i linkami; cała reszta pozostaje zwykłym tekstem, więc niezaufaną treść można bezpiecznie pokazać. |
+
+Obok kontrolek dostajesz trzy proste funkcje pomocnicze. `filterSelectOptions(options, query)` to dopasowanie, którego używa `mountSelect`. `splitTextMedia(text)` to to, co `mountText` robi przed rysowaniem. `moveListSelection` to krok klawiatury wspólny dla listy, selecta i menu, na wypadek gdybyś budował własną listę.
+
+## Lista z wyszukiwaniem
+
+```ts
+import { applyHostReady, mountEmpty, mountList, mountSearchField } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  const root = document.querySelector("#root")!;
+  const searchRoot = root.appendChild(document.createElement("div"));
+  const listRoot = root.appendChild(document.createElement("div"));
+
+  let query = "";
+  let empty: { dispose: () => void } | null = null;
+
+  const list = mountList(listRoot, {
+    items: [],
+    onSelect: (id) => {
+      const task = tasks.find((item) => item.id === id);
+      if (task) void host.attach({ providerId: "acme-hello", id, title: task.title, url: task.url });
+    },
+  });
+
+  const paint = () => {
+    const rows = tasks
+      .filter((task) => task.title.toLowerCase().includes(query.toLowerCase()))
+      .map((task) => ({ id: task.id, leading: task.key, title: task.title, meta: task.updated }));
+    list.update({ items: rows });
+    empty?.dispose();
+    empty = rows.length === 0
+      ? mountEmpty(listRoot, { title: "No tasks match", body: "Try a shorter search." })
+      : null;
+  };
+
+  mountSearchField(searchRoot, {
+    value: query,
+    placeholder: "Search tasks",
+    onChange: (next) => {
+      query = next;
+      paint();
+    },
+  });
+  paint();
+});
+```
+
+`update` przyjmuje tylko te ustawienia, które się zmieniły. Lista zachowuje podświetlony wiersz między aktualizacjami, dopóki ten wiersz nadal istnieje.
+
+## Linki w tekście od dostawcy
+
+Twoja strona działa w sandboxie i nie może sama otworzyć nowej karty. Gdy używasz `mountText`, przekaż `onOpenUrl` i oddaj link OpenChamber:
+
+```ts
+mountText(root, {
+  text: comment.body,
+  onOpenUrl: (url) => void host.openUrl(url),
+});
+```
+
+## Zobacz też
+
+- [Tworzenie rozszerzenia](/sdk/) o folderze, manifeście i instalacji
+- [API hosta](/sdk/host/) o `connectHost`, attach i kodach błędów

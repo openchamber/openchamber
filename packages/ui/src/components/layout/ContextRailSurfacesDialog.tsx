@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
 import { sortContextSurfaces } from '@/lib/surfaces/registry';
 
 /**
@@ -31,7 +32,11 @@ export const ContextRailSurfacesDialog: React.FC<{
 
   // The full registry in the user's rail order — including surfaces a runtime
   // filter currently drops, so a choice made on desktop is editable anywhere.
-  const surfaces = React.useMemo(() => sortContextSurfaces(contextRailOrder), [contextRailOrder]);
+  const guestSurfaces = useGuestSurfaces();
+  const surfaces = React.useMemo(
+    () => sortContextSurfaces(contextRailOrder, guestSurfaces),
+    [contextRailOrder, guestSurfaces],
+  );
 
   const allVisible = hidden.length === 0;
   const noneVisible = surfaces.every((surface) => hidden.includes(surface.id));
@@ -51,8 +56,8 @@ export const ContextRailSurfacesDialog: React.FC<{
               settingsItem={`layout.context-rail.surface.${surface.id}`}
               checked={!hidden.includes(surface.id)}
               onChange={(checked) => setSurfaceVisible(surface.id, checked)}
-              label={t(surface.labelKey)}
-              ariaLabel={t(surface.labelKey)}
+              label={surface.label ?? t(surface.labelKey)}
+              ariaLabel={surface.label ?? t(surface.labelKey)}
             />
           ))}
         </div>

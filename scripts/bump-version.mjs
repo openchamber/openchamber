@@ -12,6 +12,7 @@ export const RELEASE_PACKAGE_FILES = [
   'package.json',
   'packages/ui/package.json',
   'packages/web/package.json',
+  'packages/sdk/package.json',
   'packages/electron/package.json',
   'packages/vscode/package.json',
 ];

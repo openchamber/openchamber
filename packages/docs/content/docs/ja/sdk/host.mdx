@@ -1,0 +1,203 @@
+---
+title: Host API
+description: 拡張機能が呼べる connectHost の全メソッド、OpenChamber から届くもの、上限、エラーコード。
+---
+
+# Host API
+
+`connectHost` のメソッド、上限、エラーコードを正確に知りたいときにこのページを使ってください。フォルダ構成、マニフェスト、インストールについては [拡張機能を作る](/sdk/) から始めてください。
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+```
+
+`connectHost` は `window` がないと `HOST_UNAVAILABLE` を throw します。OpenChamber の外では、すべての呼び出しが `HOST_UNAVAILABLE` で reject されるクライアントを返します。ページを破棄するときは `dispose()` を呼んでください。進行中の呼び出しは同じコードで reject されます。
+
+## OpenChamber から届くもの
+
+`onReady` は最初のスナップショットで発火し、OpenChamber がそれを更新するたびに再び発火します。
+
+| フィールド | 内容 |
+| --- | --- |
+| `theme.mode` | `light` または `dark` |
+| `theme.tokens` | アプリの色(サーフェス、テキスト、操作状態、primary、success/warning/error/info)、`font`、`mono`、`radius`。UI をマウントする前に `applyHostReady` に渡してください。 |
+| `locale` | アプリの言語タグ |
+| `directory` | 現在のプロジェクトディレクトリ、または `null` |
+| `session` | `{ id, title, busy }` または `null`。タイトルがなければセッション ID になります。`busy` はライブの状態です。セッションが持っていれば `model` と `agent`(OpenCode のエージェント)も含まれます。 |
+| `surface` | レール上なら `panel`、添付ウィンドウなら `dialog` |
+| `item` | この画面が何のために開かれたか、または `null`。ユーザーがクリックした添付済みの項目(`attach` に渡したのと同じフィールド、`data` を含む)、または宣言したアクションから来たメッセージ(`kind: "message"`)かセッション(`kind: "session"`)。[アクション](/sdk/#アクションコマンドバッジ) を参照。 |
+| `connection` | あなたの連携の `{ connected, account }` |
+| `settings` | `integration.settings` で宣言した入力欄の値 |
+
+アクセストークンはここにも `request` の結果にも決して現れません。
+
+`onDirectory`、`onSession`、`onSessionLifecycle`、`onConnection`、`onSettings`、`onItem` は、遅れて購読しても最新の値を再送し、その後は変化のたびに発火し続けます。
+
+## メソッド
+
+| 呼び出し | 動作 |
+| --- | --- |
+| `toast({ kind, message })` | アプリにトーストを表示します。`kind` は `info`、`success`、`error` のいずれかです。 |
+| `openUrl(url)` | ユーザーのブラウザで URL を開く |
+| `openSurface(surfaceId)` | アプリをその画面に切り替える |
+| `writeClipboard(text)` | テキストをコピーします。1 から 32000 文字。 |
+| `compose({ text, mode? })` | 送信せずにチャット欄にテキストを入れます。`mode` は `append`(デフォルト)または `replace`。トリム後 1 から 16000 文字。 |
+| `attach({ ... })` | チャット欄にチップを付けます。GitHub や Linear の項目が置かれるのと同じ場所です。チップは同時に 1 つだけ。 |
+| `startSession({ ... })` | その項目を添付したセッションを作ります。`{ sessionId, sent }` を返します。`sessions` 権限が必要です。 |
+| `prompt({ text, send? })` | 現在のセッションに書き込む、または送信します。`{ sent }` を返します。送信には `prompt` 権限が必要です。 |
+| `sessionLink({ ... })` | セッションを作らずに、現在のセッションに項目を添付する |
+| `close()` | 添付ウィンドウを閉じます。レール上では何もしません。 |
+| `oauthStart()` | プロバイダーの認可ページを開く。`host: { provider: "linear" }` 連携なら Linear のページ |
+| `oauthDisconnect()` | 保存されたトークン、または Linear 接続を忘れる |
+| `request({ method, path, query?, body? })` | ユーザーのトークンを付けて連携の `apiOrigin` を呼ぶ |
+| `serviceRequest({ method, path, query?, body? })` | 拡張機能のローカルサービスを呼ぶ(`GUEST_SERVICES.md` を参照) |
+| `serviceStatus()` | `stopped`、`starting`、`ready`、`failed` のいずれか |
+| `readFile(path)` | テキストファイルを読む。`{ content }` を返す。 |
+| `writeFile(path, content)` | テキストファイルをアトミックに書き、親フォルダも作成する。`{ written: true }` を返す。 |
+| `listDir(path)` | フォルダを一覧する。`{ entries: [{ name, kind }] }` を返し、`kind` は `file`、`directory`、`other` のいずれか。 |
+| `stat(path)` | `{ kind, size, mtime }`。`kind` は `file`、`directory`、`other`、`missing` のいずれか。 |
+| `onResolve(handler)` | スラッシュコマンドのハンドラーを登録する。`{ command, args }` を受け取り、添付する項目または `null` を返す。 |
+| `setBadge(count)` | レールのアイコンに数字(0 から 999)を表示する。`null` で消す |
+
+## attach、startSession、sessionLink
+
+3 つとも同じ項目フィールドを受け取ります。
+
+```ts
+await host.attach({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.attach({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  author: "ada",
+  branches: { head: "feature", base: "main" },
+  text: "Optional notes for the model",
+});
+
+await host.startSession({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  worktree: true,
+  text: "Optional first message",
+});
+```
+
+`providerId` はパネル ID です。いずれにせよ OpenChamber があなたの ID で上書きします。`id` は項目に対するあなた自身の識別子です。`kind` は `issue`(デフォルト)または `pull` です。`text` はモデルに渡す任意のコンテキストで、トリム後 1 から 16000 文字です。`data` は任意の JSON で、内容は自由です(ステータス、コメントなど)。シリアライズ後 16000 文字までです。OpenChamber はこれをチップと一緒に保存し、ユーザーがチップをクリックしたときに `ctx.item` でそのまま返します。モデルには決して渡りません。
+
+`startSession` は現在のプロジェクトにセッションを作ります。`worktree: true` を付けると、OpenChamber はまず git worktree を作り、そこでセッションを開きます。`text` があってモデルが選択されていれば、最初のメッセージとして送られます。結果は `{ sessionId, sent }` で、`sent` は `sent`、`no-model`、`skipped`、`failed` のいずれかです。`no-model` と `failed` の後もセッションは存在します。開いているプロジェクトがない、worktree の作成に失敗した、セッションの作成に失敗した場合は `HOST_REJECTED` エラーになります。
+
+`sessionLink` は今開いているセッションに項目を添付します。プロジェクトやセッションがない場合は `NO_SESSION` エラーになります。
+
+送信前にクライアント側で適用される上限:
+
+| フィールド | 最大文字数 |
+| --- | --- |
+| `id` | 128 |
+| `title` | 200 |
+| `url` | 2000 |
+| `text` | 16000 |
+| `data`(シリアライズ後) | 16000 |
+| `author` | 80 |
+| 各ブランチ名 | 200 |
+
+## prompt とセッションのライフサイクル
+
+```ts
+await host.prompt({ text: "Fix the login" });
+await host.prompt({ text: "Fix the login", send: true });
+
+host.onSessionLifecycle((event) => {
+  document.body.dataset.phase = event.phase;
+});
+```
+
+`send` なしの `prompt` はチャット欄のテキストを置き換えます。`send: true` を付けると、ユーザーが選択しているモデルとエージェントでメッセージを送ります。拡張機能がそれらを選ぶことはありません。開いているセッションがなければ `NO_SESSION` です。セッションがビジー中の送信は `SESSION_BUSY` になります。ビジー中でも欄への書き込みはできます。結果は `{ sent }` で、値は `startSession` と同じです。
+
+`onSessionLifecycle` はセッションが何をしているかを伝えます。`phase` は、モデルが作業中なら `started`、アイドルになったら `completed`、予期しない状態なら `failure` です。遅れて登録したリスナーにも現在の phase がすぐ届きます。
+
+## request
+
+```ts
+const user = await host.request({ method: "GET", path: "/api/v2/user" });
+```
+
+`path` は `/` で始まり、スキームやホストを含みません。OpenChamber がマニフェストの `apiOrigin` と結合し、`Authorization` ヘッダーを付けます。トークン連携は貼り付けられたトークンをそのまま送るか、マニフェストで `token.scheme: "bearer"` を設定していれば `Bearer <token>` として、`"basic"` を設定していれば `Basic base64(username:token)` として送ります。OAuth と Linear の連携は常に `Bearer` を送ります。結果は `{ status, body }` です。body はテキストなので、JSON は自分でパースしてください。
+
+Linear 連携では `GET /api/linear/issues/get` も呼べます。これには OpenChamber が自身の Linear ルートから応答します。
+
+20 秒以内に応答がなければ `HOST_TIMEOUT` です。
+
+```ts
+try {
+  await host.request({ method: "GET", path: "/api/v2/user" });
+} catch (error) {
+  if (error instanceof HostRequestError && error.code === "DISCONNECTED") {
+    await host.oauthStart();
+  }
+}
+```
+
+## serviceRequest
+
+マニフェストで `contributes.service` を宣言すると、OpenChamber がそのプロセスを起動し、ページは同じ種類の呼び出しでそれと話します。ページ自身がソケットを開くことはありません。
+
+```ts
+const status = await host.serviceStatus();
+const result = await host.serviceRequest({ method: "GET", path: "/containers" });
+```
+
+`path` は `request` と同じ規則に従います。ローカルサービスを宣言すると、インストール時にユーザーが承認する権限に `service` が加わります。承認されるまで、すべての `serviceRequest` は `NO_SERVICE` です。完全な契約はパッケージ内のファイル `GUEST_SERVICES.md` にあります。
+
+## ファイル
+
+相対パスは開いているプロジェクトの中を指し、`files` 権限が必要です。`/` または `~/` で始まるパスは、宣言済みの `contributes.filesystem` パターンに一致する必要があり、`filesystem` 権限が必要です。規則は [拡張機能を作る](/sdk/#ファイル) を参照してください。
+
+```ts
+const { content } = await host.readFile("package.json");
+await host.writeFile("notes/today.md", "# Today\n");
+const { entries } = await host.listDir("src");
+const info = await host.stat("~/.config/opencode/opencode.json");
+```
+
+上限: パスは 1024 文字まで、内容は 2,000,000 文字まで、一覧は 2000 件まで。内容の上限を超えると `FILE_TOO_LARGE` です。
+
+## エラーコード
+
+失敗した呼び出しは `HostRequestError` を throw します。`code` は次のいずれかで、`message` に詳細が入ります。
+
+| コード | 発生条件 |
+| --- | --- |
+| `HOST_UNAVAILABLE` | window がない、OpenChamber の中ではない、または `dispose()` が実行された |
+| `HOST_TIMEOUT` | 20 秒間応答がない |
+| `HOST_REJECTED` | OpenChamber が拒否した、またはこの SDK が知らないコードで応答した |
+| `DISCONNECTED` | 連携用のトークンや Linear 接続がない |
+| `BAD_PATH` | `path` の形式が不正、または許可されたオリジンの外に出ようとした |
+| `NO_INTEGRATION` | マニフェストに `integration` がない |
+| `NO_SESSION` | 開いているセッションがない状態での `prompt` または `sessionLink` |
+| `SESSION_BUSY` | セッションがビジー中の `prompt({ send: true })` |
+| `DISABLED` | ユーザーが 設定 → 拡張機能 で拡張機能を一時停止した |
+| `NO_SERVICE` | ローカルサービスが未宣言、未承認、または未起動 |
+| `NOT_GRANTED` | この呼び出しに必要な権限をユーザーが承認していない |
+| `SERVICE_FAILED` | ローカルサービスがクラッシュした、または ready にならなかった |
+| `NO_DIRECTORY` | 開いているプロジェクトがない状態で相対ファイルパスを使った |
+| `NOT_FOUND` | 存在しないファイルに対する `readFile` |
+| `FILE_TOO_LARGE` | 読み込みまたは書き込み時にファイル内容が上限を超えた |
+| `DENIED` | オペレーティングシステムがファイル操作を拒否した |
+
+## 関連
+
+- [拡張機能を作る](/sdk/): フォルダ、マニフェスト、インストール、権限
+- [UI キット](/sdk/ui/): ボタン、入力欄、リスト、その他の部品

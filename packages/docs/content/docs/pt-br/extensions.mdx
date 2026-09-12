@@ -1,0 +1,63 @@
+---
+title: Extensões
+description: Instale extensões de terceiros no OpenChamber, aprove o que elas podem fazer, conecte as contas delas e remova-as.
+---
+
+# Extensões
+
+Use **Configurações → Extensões** para adicionar ao OpenChamber painéis feitos por outras pessoas. Uma extensão é uma página pequena que fica na barra da direita, ao lado dos painéis integrados. Ela pode mostrar dados de outro serviço, anexar uma tarefa ao chat e, se você permitir, iniciar sessões, enviar prompts ou ler arquivos.
+
+As extensões funcionam no OpenChamber web e desktop. O VS Code e o app móvel ainda não as carregam. Elas não são a mesma coisa que plugins do OpenCode.
+
+## Instalar uma
+
+1. Abra **Configurações → Extensões**.
+2. Cole uma destas opções no campo **Pasta, ZIP ou URL** e escolha **Adicionar**:
+   - o caminho absoluto de uma pasta neste computador
+   - o caminho de um arquivo `.zip`
+   - um link https para um repositório git ou um arquivo zip
+3. Se a extensão pedir permissões, um diálogo lista todas. Escolha **Permitir e ativar**, ou **Remover** para tirá-la de volta.
+
+Você também pode arrastar um `.zip` para o campo ou escolher um com o botão de arquivo ao lado; o arquivo é enviado ao servidor do OpenChamber, então isso funciona também com uma instância remota. No desktop, o botão de pasta abre um seletor nativo, e uma pasta arrastada é instalada a partir do seu caminho.
+
+O ícone da extensão aparece na barra. Se não aparecer, veja [Solução de problemas](/troubleshooting/).
+
+Uma instalação por pasta roda direto daquela pasta, então quem desenvolve uma extensão pode editar e recarregar. Um zip ou uma URL é copiado primeiro para a pasta de dados do OpenChamber; o arquivo original não é tocado.
+
+## O que uma extensão pode fazer
+
+Mostrar um painel e ler qual projeto e sessão estão abertos não precisa de permissão. Tudo que age em seu nome precisa, e você vê a lista inteira uma vez, na instalação:
+
+- **Enviar mensagens nas suas sessões**: escreve e envia prompts ao modelo, o que gasta tokens e pode executar ferramentas.
+- **Criar sessões e worktrees**: no projeto atual.
+- **Ler e gravar arquivos do projeto**: qualquer arquivo do projeto aberto.
+- **Ler e gravar arquivos fora do projeto**: só os locais listados no diálogo.
+- **Conectar a um serviço externo**: com a conta que você conecta em Configurações → Integrações.
+- **Ler a conversa de uma sessão**: só quando você executa a ação da extensão naquela sessão.
+- **Executar um serviço local**: um programa separado com todo o acesso do seu usuário. Permita só se confiar no autor.
+
+Quando uma versão mais nova pede mais do que você permitiu, o card mostra **Precisa de aprovação** e um botão **Revisar permissões**. Até você permitir a nova lista, essa extensão fica desligada.
+
+## Onde ela aparece
+
+Além do painel na barra lateral, uma extensão pode adicionar entradas a menus que você já usa: as ações de uma mensagem do chat, o menu de uma sessão, o menu + ao lado da caixa de chat e comandos de barra como `/task ABC-12`, que anexam algo sem abrir nada. A extensão decide quais deles oferece; todos ficam desligados até você permitir a extensão.
+
+## Conectar a conta dela
+
+Uma extensão que fala com um serviço ganha um card em **Configurações → Integrações** sob **Contas de extensões**. Dependendo do serviço, o card pede um token de API, um usuário e token, ou um client id para um fluxo de login. Escolha **Conectar**; **Desconectar** esquece o token guardado. Campos extras que a extensão declara são salvos sozinhos quando você sai deles.
+
+O token fica no servidor do OpenChamber. A página da extensão nunca o vê.
+
+## Atualizar
+
+Extensões instaladas a partir de uma URL git podem se atualizar sozinhas. Abrir **Configurações → Extensões** verifica cada uma no máximo uma vez por hora; **Verificar atualizações** verifica na hora. Um card com versão mais nova mostra **Atualização disponível** e um botão **Atualizar**. A atualização mantém suas permissões, contas e configurações; se a nova versão pedir mais, o diálogo de aprovação aparece de novo. Instalações por pasta ou zip não se atualizam: substitua-as à mão.
+
+Adicione `#v1.2.0` ou `#stable` à URL git ao instalar para seguir uma tag ou branch em vez do branch padrão.
+
+## Pausar ou remover
+
+Cada card tem uma chave **Ativado**. Desligada, mantém a extensão instalada, mas esconde o painel e bloqueia as chamadas. **Remover** apaga uma instalação por zip ou URL da pasta de dados do OpenChamber; numa instalação por pasta só esquece o caminho, sua pasta continua lá.
+
+## Criar a sua
+
+Tudo que uma extensão pode fazer, e como criar uma, está em [Criar uma extensão](/sdk/).

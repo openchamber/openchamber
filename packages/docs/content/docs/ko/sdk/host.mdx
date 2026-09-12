@@ -1,0 +1,203 @@
+---
+title: Host API
+description: 확장이 호출할 수 있는 모든 connectHost 메서드, OpenChamber가 보내주는 것, 제한, 오류 코드.
+---
+
+# Host API
+
+`connectHost`의 정확한 메서드, 제한, 오류 코드가 필요할 때 이 페이지를 사용하세요. 폴더 구조, 매니페스트, 설치는 [확장 만들기](/sdk/)에서 시작하세요.
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+```
+
+`connectHost`는 `window`가 없으면 `HOST_UNAVAILABLE`을 throw합니다. OpenChamber 밖에서는 모든 호출이 `HOST_UNAVAILABLE`로 reject되는 클라이언트를 반환합니다. 페이지를 정리할 때는 `dispose()`를 호출하세요. 진행 중인 호출은 같은 코드로 reject됩니다.
+
+## OpenChamber가 보내주는 것
+
+`onReady`는 첫 스냅샷과 함께 실행되고, OpenChamber가 스냅샷을 새로 고칠 때마다 다시 실행됩니다.
+
+| 필드 | 내용 |
+| --- | --- |
+| `theme.mode` | `light` 또는 `dark` |
+| `theme.tokens` | 앱의 색상(표면, 텍스트, 상호작용 상태, primary, success/warning/error/info), `font`, `mono`, `radius`. UI를 마운트하기 전에 `applyHostReady`에 넘기세요. |
+| `locale` | 앱 언어 태그 |
+| `directory` | 현재 프로젝트 디렉터리, 또는 `null` |
+| `session` | `{ id, title, busy }` 또는 `null`. 제목이 없으면 세션 id를 사용합니다. `busy`는 실시간 상태입니다. 세션에 있으면 `model`과 `agent`(OpenCode 에이전트)도 포함됩니다. |
+| `surface` | 레일에서는 `panel`, 첨부 창에서는 `dialog` |
+| `item` | 이 화면이 무엇 때문에 열렸는지, 또는 `null`. 사용자가 클릭한 첨부 항목(`attach`에 넘긴 것과 같은 필드, `data` 포함), 또는 선언한 작업에서 온 메시지(`kind: "message"`)나 세션(`kind: "session"`). [작업](/sdk/#작업-명령-배지) 참고. |
+| `connection` | 여러분의 통합에 대한 `{ connected, account }` |
+| `settings` | `integration.settings`에 선언한 입력란의 값 |
+
+액세스 토큰은 여기에도, `request` 결과에도 절대 나타나지 않습니다.
+
+`onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings`, `onItem`은 늦게 구독해도 최신 값을 다시 보내주고, 이후 값이 바뀔 때마다 계속 실행됩니다.
+
+## 메서드
+
+| 호출 | 동작 |
+| --- | --- |
+| `toast({ kind, message })` | 앱에 토스트를 표시합니다. `kind`는 `info`, `success`, `error` 중 하나입니다. |
+| `openUrl(url)` | 사용자의 브라우저에서 URL 열기 |
+| `openSurface(surfaceId)` | 앱을 해당 화면으로 전환 |
+| `writeClipboard(text)` | 텍스트를 복사합니다. 1자에서 32000자. |
+| `compose({ text, mode? })` | 보내지 않고 채팅창에 텍스트를 넣습니다. `mode`는 `append`(기본값) 또는 `replace`. 트림 후 1자에서 16000자. |
+| `attach({ ... })` | 채팅창에 칩을 붙입니다. GitHub와 Linear 항목이 놓이는 곳과 같은 위치입니다. 칩은 한 번에 하나만. |
+| `startSession({ ... })` | 해당 항목을 첨부한 세션을 만듭니다. `{ sessionId, sent }`를 반환합니다. `sessions` 권한이 필요합니다. |
+| `prompt({ text, send? })` | 현재 세션에 쓰거나 보냅니다. `{ sent }`를 반환합니다. 보내려면 `prompt` 권한이 필요합니다. |
+| `sessionLink({ ... })` | 세션을 새로 만들지 않고 현재 세션에 항목 첨부 |
+| `close()` | 첨부 창을 닫습니다. 레일에서는 아무것도 하지 않습니다. |
+| `oauthStart()` | 제공자의 인증 페이지를 엽니다. `host: { provider: "linear" }` 통합이면 Linear 페이지 |
+| `oauthDisconnect()` | 저장된 토큰이나 Linear 연결을 잊기 |
+| `request({ method, path, query?, body? })` | 사용자의 토큰을 붙여 통합의 `apiOrigin` 호출 |
+| `serviceRequest({ method, path, query?, body? })` | 확장의 로컬 서비스 호출(`GUEST_SERVICES.md` 참고) |
+| `serviceStatus()` | `stopped`, `starting`, `ready`, `failed` 중 하나 |
+| `readFile(path)` | 텍스트 파일 읽기. `{ content }`를 반환. |
+| `writeFile(path, content)` | 텍스트 파일을 원자적으로 쓰고, 상위 폴더도 만듦. `{ written: true }`를 반환. |
+| `listDir(path)` | 폴더 목록. `{ entries: [{ name, kind }] }`를 반환하며, `kind`는 `file`, `directory`, `other` 중 하나. |
+| `stat(path)` | `{ kind, size, mtime }`. `kind`는 `file`, `directory`, `other`, `missing` 중 하나. |
+| `onResolve(handler)` | 슬래시 명령의 핸들러를 등록합니다. `{ command, args }`를 받고 첨부할 항목 또는 `null`을 반환합니다. |
+| `setBadge(count)` | 레일 아이콘에 숫자(0부터 999까지)를 표시하고, `null`이면 지웁니다 |
+
+## attach, startSession, sessionLink
+
+세 가지 모두 같은 항목 필드를 받습니다.
+
+```ts
+await host.attach({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.attach({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  author: "ada",
+  branches: { head: "feature", base: "main" },
+  text: "Optional notes for the model",
+});
+
+await host.startSession({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  worktree: true,
+  text: "Optional first message",
+});
+```
+
+`providerId`는 패널 id입니다. 어차피 OpenChamber가 여러분의 id로 덮어씁니다. `id`는 항목에 대한 여러분 자신의 식별자입니다. `kind`는 `issue`(기본값) 또는 `pull`입니다. `text`는 모델에 주는 선택적 컨텍스트로, 트림 후 1자에서 16000자입니다. `data`는 여러분 마음대로 쓰는 선택적 JSON으로(상태, 댓글, 무엇이든), 직렬화했을 때 16000자까지입니다. OpenChamber는 이를 칩과 함께 저장하고, 사용자가 칩을 클릭하면 `ctx.item`으로 그대로 돌려줍니다. 모델에는 절대 전달되지 않습니다.
+
+`startSession`은 현재 프로젝트에 세션을 만듭니다. `worktree: true`를 주면 OpenChamber가 먼저 git worktree를 만들고 거기서 세션을 엽니다. `text`가 있고 모델이 선택되어 있으면 첫 메시지로 전송됩니다. 결과는 `{ sessionId, sent }`이며, `sent`는 `sent`, `no-model`, `skipped`, `failed` 중 하나입니다. `no-model`과 `failed` 이후에도 세션은 존재합니다. 열린 프로젝트가 없거나, worktree 생성이 실패하거나, 세션 생성이 실패하면 `HOST_REJECTED` 오류입니다.
+
+`sessionLink`는 지금 열려 있는 세션에 항목을 첨부합니다. 프로젝트나 세션이 없으면 `NO_SESSION` 오류입니다.
+
+무엇이든 보내기 전에 클라이언트가 적용하는 제한:
+
+| 필드 | 최대 글자 수 |
+| --- | --- |
+| `id` | 128 |
+| `title` | 200 |
+| `url` | 2000 |
+| `text` | 16000 |
+| `data`(직렬화 기준) | 16000 |
+| `author` | 80 |
+| 각 브랜치 이름 | 200 |
+
+## prompt와 세션 수명 주기
+
+```ts
+await host.prompt({ text: "Fix the login" });
+await host.prompt({ text: "Fix the login", send: true });
+
+host.onSessionLifecycle((event) => {
+  document.body.dataset.phase = event.phase;
+});
+```
+
+`send` 없이 `prompt`를 호출하면 채팅창 텍스트를 교체합니다. `send: true`를 주면 사용자가 선택한 모델과 에이전트로 메시지를 보냅니다. 확장이 그것들을 고르는 일은 없습니다. 열린 세션이 없으면 `NO_SESSION`입니다. 세션이 바쁠 때 보내면 `SESSION_BUSY`입니다. 바쁜 중에도 채팅창에 쓰는 것은 됩니다. 결과는 `{ sent }`이며 값은 `startSession`과 같습니다.
+
+`onSessionLifecycle`은 세션이 무엇을 하고 있는지 알려줍니다. `phase`는 모델이 작업 중이면 `started`, 유휴 상태가 되면 `completed`, 예상치 못한 상태면 `failure`입니다. 늦게 등록한 리스너도 현재 phase를 바로 받습니다.
+
+## request
+
+```ts
+const user = await host.request({ method: "GET", path: "/api/v2/user" });
+```
+
+`path`는 `/`로 시작하고 스킴이나 호스트를 포함하지 않습니다. OpenChamber가 매니페스트의 `apiOrigin`과 결합하고 `Authorization` 헤더를 추가합니다. 토큰 통합은 붙여넣은 토큰을 그대로 보내거나, 매니페스트에 `token.scheme: "bearer"`가 설정되어 있으면 `Bearer <token>`으로, `"basic"`이 설정되어 있으면 `Basic base64(username:token)`으로 보냅니다. OAuth와 Linear 통합은 항상 `Bearer`를 보냅니다. 결과는 `{ status, body }`입니다. body는 텍스트이므로 JSON은 직접 파싱하세요.
+
+Linear 통합은 `GET /api/linear/issues/get`도 호출할 수 있으며, OpenChamber가 자체 Linear 라우트에서 응답합니다.
+
+20초 안에 응답이 없으면 `HOST_TIMEOUT`입니다.
+
+```ts
+try {
+  await host.request({ method: "GET", path: "/api/v2/user" });
+} catch (error) {
+  if (error instanceof HostRequestError && error.code === "DISCONNECTED") {
+    await host.oauthStart();
+  }
+}
+```
+
+## serviceRequest
+
+매니페스트에 `contributes.service`를 선언하면 OpenChamber가 그 프로세스를 시작하고, 페이지는 같은 종류의 호출로 그것과 대화합니다. 페이지가 직접 소켓을 여는 일은 없습니다.
+
+```ts
+const status = await host.serviceStatus();
+const result = await host.serviceRequest({ method: "GET", path: "/containers" });
+```
+
+`path`는 `request`와 같은 규칙을 따릅니다. 로컬 서비스를 선언하면 설치 시 사용자가 승인하는 권한에 `service`가 추가됩니다. 승인 전에는 모든 `serviceRequest`가 `NO_SERVICE`입니다. 전체 계약은 패키지 파일 `GUEST_SERVICES.md`에 있습니다.
+
+## 파일
+
+상대 경로는 열린 프로젝트 안을 가리키며 `files` 권한이 필요합니다. `/` 또는 `~/`로 시작하는 경로는 선언된 `contributes.filesystem` 패턴과 일치해야 하며 `filesystem` 권한이 필요합니다. 규칙은 [확장 만들기](/sdk/#파일)를 참고하세요.
+
+```ts
+const { content } = await host.readFile("package.json");
+await host.writeFile("notes/today.md", "# Today\n");
+const { entries } = await host.listDir("src");
+const info = await host.stat("~/.config/opencode/opencode.json");
+```
+
+제한: 경로는 최대 1024자, 내용은 최대 2,000,000자, 목록은 최대 2000개 항목. 내용 제한을 넘으면 `FILE_TOO_LARGE`입니다.
+
+## 오류 코드
+
+실패한 호출은 `HostRequestError`를 throw합니다. `code`는 다음 중 하나이며, `message`에 자세한 내용이 있습니다.
+
+| 코드 | 발생 시점 |
+| --- | --- |
+| `HOST_UNAVAILABLE` | window가 없거나, OpenChamber 안이 아니거나, `dispose()`가 실행됨 |
+| `HOST_TIMEOUT` | 20초 동안 응답 없음 |
+| `HOST_REJECTED` | OpenChamber가 거부했거나, 이 SDK가 모르는 코드로 응답함 |
+| `DISCONNECTED` | 통합에 대한 토큰이나 Linear 연결이 없음 |
+| `BAD_PATH` | `path` 형식이 잘못되었거나 허용된 origin을 벗어나려 함 |
+| `NO_INTEGRATION` | 매니페스트에 `integration`이 없음 |
+| `NO_SESSION` | 열린 세션 없이 `prompt` 또는 `sessionLink` 호출 |
+| `SESSION_BUSY` | 세션이 바쁜 동안 `prompt({ send: true })` 호출 |
+| `DISABLED` | 사용자가 설정 → 확장 에서 확장을 일시 중지함 |
+| `NO_SERVICE` | 로컬 서비스가 선언되지 않았거나, 승인되지 않았거나, 실행 중이 아님 |
+| `NOT_GRANTED` | 이 호출에 필요한 권한을 사용자가 승인하지 않음 |
+| `SERVICE_FAILED` | 로컬 서비스가 충돌했거나 ready 상태가 되지 못함 |
+| `NO_DIRECTORY` | 열린 프로젝트 없이 상대 파일 경로를 사용함 |
+| `NOT_FOUND` | 존재하지 않는 파일에 대한 `readFile` |
+| `FILE_TOO_LARGE` | 읽기 또는 쓰기 시 파일 내용이 제한을 넘음 |
+| `DENIED` | 운영 체제가 파일 작업을 거부함 |
+
+## 관련 문서
+
+- [확장 만들기](/sdk/): 폴더, 매니페스트, 설치, 권한
+- [UI 키트](/sdk/ui/): 버튼, 입력란, 목록, 그 밖의 구성 요소

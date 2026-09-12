@@ -1,0 +1,28 @@
+{
+  "name": "@openchamber/example-service-echo",
+  "version": "1.0.0",
+  "private": true,
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": {
+        "id": "service-echo",
+        "name": "Service Echo",
+        "icon": "robot-2",
+        "entry": "panel/index.html"
+      },
+      "service": {
+        "entry": "service/main.js",
+        "runtime": "host",
+        "permissions": {
+          "exec": [
+            "uname"
+          ]
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "@openchamber/sdk": "workspace:*"
+  }
+}

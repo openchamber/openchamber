@@ -1,3 +1,5 @@
+import { extensionsSettingsI18n } from './extensions.settings.i18n';
+import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
   'settings.openchamber.visual.field.alwaysShowScrollbars': 'Zawsze pokazuj paski przewijania',
@@ -2276,6 +2278,8 @@ export const settingsDict = {
   'settings.openchamber.visual.option.enterToSend.enter.label': 'Wyślij klawiszem Enter',
   'settings.openchamber.visual.option.enterToSend.modifier.label': 'Wyślij klawiszami Ctrl/Cmd+Enter',
   ...linearIntegrationI18n.pl,
+  ...guestIntegrationsI18n.pl,
+  ...extensionsSettingsI18n.pl,
   'settings.page.integrations.title': 'Integracje',
   'settings.page.integrations.description': 'Połącz GitHub i Linear, aby OpenChamber mógł pracować z Twoimi issue i pull requestami.',
 };

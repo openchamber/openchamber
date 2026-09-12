@@ -1,0 +1,203 @@
+---
+title: Tworzenie rozszerzenia
+description: Dodaj własny panel do OpenChamber za pomocą @openchamber/sdk, zainstaluj go z folderu lub adresu git i komunikuj się z aplikacją przez connectHost.
+---
+
+# Tworzenie rozszerzenia
+
+Użyj `@openchamber/sdk`, aby dodać własny panel do OpenChamber. Rozszerzenie to mała strona internetowa, którą OpenChamber pokazuje na prawym pasku bocznym. Komunikuje się z aplikacją przez `connectHost()`: może odczytać bieżący projekt i sesję, pokazywać toasty, wstawiać tekst do pola czatu, dołączać zadanie do sesji, a za zgodą użytkownika także uruchamiać sesje i wysyłać prompty.
+
+Rozszerzenia działają w OpenChamber web i desktop. VS Code i wersja mobilna jeszcze ich nie ładują.
+
+## Czym jest rozszerzenie
+
+Folder z trzema plikami:
+
+- `package.json` z blokiem `openchamber` (manifest)
+- `panel/index.html`, strona, którą pokazuje OpenChamber
+- `panel/main.js`, Twój skrypt, zbudowany do jednego klasycznego pliku (IIFE, nie moduł ES, bo strona ładuje się w iframe z sandboxem)
+
+OpenChamber nigdy nie kompiluje Twojego kodu. Dostarczaj gotowy, zbudowany plik `.js`. SDK zawiera polecenie do bundlowania; zadziała też każdy inny bundler, który wypuszcza IIFE.
+
+```bash
+npm install @openchamber/sdk
+bunx openchamber-guest-bundle panel/main.ts panel/main.js
+```
+
+Polecenie bundlowania działa na Bun. Bez Buna użyj esbuild albo dowolnego innego bundlera z `--format=iife --platform=browser`.
+
+Kompletne, działające rozszerzenie, wszystkie trzy pliki, znajdziesz na stronie [Przykład](/sdk/example/). Skopiuj je i zmień API oraz listę.
+
+Wskaż `main.js` w `index.html` zwykłym `<script src="main.js"></script>`.
+
+## Instalacja w trakcie pracy
+
+1. Uruchom OpenChamber w wersji web lub desktop.
+2. Otwórz Ustawienia → Rozszerzenia.
+3. Wklej bezwzględną ścieżkę do swojego folderu i kliknij Dodaj.
+
+OpenChamber odczytuje manifest i pokazuje okno z listą tego, o co rozszerzenie prosi (zobacz [Uprawnienia](#uprawnienia)). Zatwierdź, a Twoja ikona pojawi się na pasku bocznym. Kliknij ją i Twoja strona się załaduje.
+
+Możesz też dodać lokalny plik `.zip` albo link https do repozytorium git lub pliku zip. Tylko instalacja z git może się aktualizować: podnieś `version` w `package.json`, wypchnij zmiany, a OpenChamber zaproponuje aktualizację, gdy użytkownik następnym razem otworzy Ustawienia → Rozszerzenia. `#tag` albo `#branch` w adresie URL przypina, co jest śledzone. Te są kopiowane do folderu danych OpenChamber i uruchamiane z tej kopii, więc dostarczaj zbudowane pliki, a nie `node_modules` ani źródła TypeScript. Usunięcie rozszerzenia usuwa kopię. Instalacja z folderu działa bezpośrednio z Twojego folderu, więc możesz edytować, przebudowywać i przeładowywać.
+
+## Manifest
+
+```json
+{
+  "name": "@acme/hello",
+  "version": "1.0.0",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": { "openchamber": ">=1.24.0" },
+    "contributes": {
+      "panel": {
+        "id": "acme-hello",
+        "name": "Hello",
+        "icon": "window",
+        "entry": "panel/index.html"
+      },
+      "attach": "dialog",
+      "capabilities": ["prompt", "sessions"],
+      "integration": {
+        "name": "Acme",
+        "description": "Tasks from Acme",
+        "token": {
+          "apiOrigin": "https://api.acme.example",
+          "account": { "path": "/me", "name": "login" },
+          "scheme": "bearer"
+        },
+        "settings": [{ "id": "list-id", "label": "List ID" }]
+      }
+    }
+  }
+}
+```
+
+`version` jest wymagane i musi być zgodne z semver. Ustawienia → Rozszerzenia pokazuje je na karcie.
+
+`apiVersion` to `1`. OpenChamber odrzuca każdą inną wartość.
+
+`engines.openchamber` jest opcjonalne. Podaj najstarszą wersję OpenChamber, z którą działa Twoje rozszerzenie, jako `1.24.0` lub `>=1.24.0`. Starsze wersje odmówią instalacji zamiast zawieść później.
+
+`contributes.panel` opisuje wpis na pasku bocznym. `id` jest w kebab-case i musi być unikalne wśród zainstalowanych rozszerzeń. `icon` to nazwa ikony Remixicon (`RiWindowLine` staje się `window`) albo plik SVG w Twoim folderze, na przykład `icon.svg`. `entry` to plik HTML w Twoim folderze.
+
+`contributes.attach` jest opcjonalne. Dodaje Twoje rozszerzenie do menu + obok pola czatu, żeby użytkownik mógł wybrać zadanie i dołączyć je do sesji.
+
+- `"dialog"` otwiera Twoją stronę w oknie
+- `true` lub `"panel"` otwiera zamiast tego panel na pasku bocznym
+- `{ "mode": "dialog", "entry": "panel/attach.html" }` otwiera w oknie osobną Twoją stronę, żeby wybór nie musiał dzielić kodu z panelem na pasku bocznym
+- bez tego klucza rozszerzenie nie pojawia się w tym menu
+
+Twoja strona rozpozna, gdzie się znajduje, po `ctx.surface` (`panel` lub `dialog`). Gdy użytkownik kliknie element, który wcześniej dołączyłeś, ta sama powierzchnia otwiera się ponownie z `ctx.item` ustawionym na ten element, razem z `data`, które na nim zapisałeś, więc możesz pokazać jego szczegóły zamiast listy. Z menu + lub z ikony na pasku bocznym `ctx.item` to `null`.
+
+`contributes.integration` jest opcjonalne. Dodaje kartę w Ustawienia → Integracje, gdzie użytkownik podłącza konto. Zobacz [Konta i sieć](#konta-i-sieć).
+
+`contributes.service` jest opcjonalne. Deklaruje usługę lokalną (proces, który OpenChamber uruchamia obok rozszerzenia) do rzeczy, do których strona internetowa nie ma dostępu, na przykład socketu Dockera. Zobacz plik `GUEST_SERVICES.md` w pakiecie.
+
+## Uprawnienia
+
+Rysowanie panelu i odczyt bieżącej sesji nie wymagają żadnej zgody. Wszystko, co działa w imieniu użytkownika, już tak. Wymień te rzeczy w `contributes.capabilities`:
+
+| Uprawnienie | Na co pozwala |
+| --- | --- |
+| `prompt` | wysyłanie wiadomości do sesji użytkownika (`prompt({ send: true })`, `startSession` z `text`) |
+| `sessions` | tworzenie sesji i worktree (`startSession`) |
+| `files` | odczyt i zapis plików w otwartym projekcie (`readFile`, `writeFile`, `listDir`, `stat` ze ścieżką względną) |
+
+Cztery kolejne są dodawane automatycznie: `network`, gdy deklarujesz `integration`, `service`, gdy deklarujesz `service`, `filesystem`, gdy deklarujesz wzorce `filesystem`, oraz `conversation`, gdy akcja sesji prosi o wiadomości (zobacz [Akcje, polecenia i odznaka](#akcje-polecenia-i-odznaka)).
+
+Użytkownik widzi pełną listę raz, przy instalacji rozszerzenia, i albo ją zatwierdza, albo usuwa rozszerzenie. Jeśli nowa wersja prosi o więcej, okno pojawia się ponownie. Wywołanie, które wymaga niezatwierdzonego uprawnienia, kończy się błędem `NOT_GRANTED`.
+
+## Konta i sieć
+
+Twoja strona działa w sandboxie i nie może sama łączyć się z internetem. Zadeklaruj `integration`, a OpenChamber wykona wywołania za Ciebie przez `host.request`, dołączając token użytkownika. Token nigdy nie trafia do Twojej strony.
+
+- `token`: użytkownik wkleja token API na karcie w Ustawienia → Integracje. `apiOrigin` to jedyny origin, który `request` może wywołać. `account` jest opcjonalne: ścieżka GET i nazwa pola, żeby karta mogła pokazać, kto jest podłączony. `scheme` określa, jak token jest wysyłany; zobacz tabelę poniżej. Sprawdź w dokumentacji API dostawcy, jakiego nagłówka oczekuje.
+- `oauth`: użytkownik wkleja client id, a OpenChamber przeprowadza proces autoryzacji. Wymaga `authorizeUrl`, `tokenUrl` i `apiOrigin`.
+- `host: { "provider": "linear" }`: używa konta Linear już podłączonego w OpenChamber. Client id nie jest potrzebne.
+
+Co wysyła każdy `scheme`:
+
+| `scheme` | Nagłówek wysyłany przez OpenChamber | Kiedy używać |
+| --- | --- | --- |
+| pominięty | `Authorization: <token>` | API dokumentuje goły token w nagłówku |
+| `"bearer"` | `Authorization: Bearer <token>` | API dokumentuje token bearer lub personal access token |
+| `"basic"` | `Authorization: Basic base64(username:token)` | API dokumentuje HTTP Basic auth z nazwą użytkownika (często e-mail) i tokenem API; karta prosi o oba, a `usernameLabel` nazywa pierwsze pole |
+
+`settings` dodaje do karty zwykłe pola tekstowe. Ich wartości trafiają do `ctx.settings`.
+
+## Pliki
+
+Twoja strona nie może sama dotykać dysku. OpenChamber czyta i zapisuje za nią, w granicach zatwierdzonych przez użytkownika.
+
+- Ścieżka względna (`README.md`, `src/index.ts`, `.`) oznacza otwarty projekt. Wymaga uprawnienia `files`. Brak otwartego projektu to `NO_DIRECTORY`.
+- Ścieżka zaczynająca się od `/` lub `~/` oznacza dowolne inne miejsce. Musi pasować do jednego ze wzorców zadeklarowanych w `contributes.filesystem`, a użytkownik widzi dokładnie te wzorce w oknie zatwierdzania:
+
+```json
+"filesystem": ["~/.config/opencode/opencode.json", "~/notes/**"]
+```
+
+Wzorce używają `*` dla jednego segmentu ścieżki i `**` dla dowolnej głębokości. Wszystko poza nimi to `BAD_PATH`, nawet po zatwierdzeniu. `..` nigdy nie jest dozwolone.
+
+```ts
+const config = await host.readFile("~/.config/opencode/opencode.json");
+await host.writeFile("~/.config/opencode/opencode.json", nextJson);
+const { entries } = await host.listDir(".");
+```
+
+Zapisy są atomowe: OpenChamber zapisuje plik tymczasowy i zmienia jego nazwę, więc czytający nigdy nie zobaczy pliku zapisanego do połowy. Pliki są czytane i zapisywane jako tekst UTF-8, do 2 MB.
+
+## Akcje, polecenia i odznaka
+
+Poza paskiem bocznym i menu + rozszerzenie może pojawić się w trzech kolejnych miejscach. Wszystkie przekazują rozszerzeniu `item` tak samo jak kliknięcie chipa.
+
+**Akcje na wiadomościach i sesjach.** Zadeklaruj pozycje menu, a OpenChamber pokaże je obok wbudowanych:
+
+```json
+"actions": [
+  { "id": "create-task", "label": "Create task", "icon": "add-line", "where": "message", "roles": ["assistant"] },
+  { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
+]
+```
+
+Akcja na wiadomości otwiera Twoje rozszerzenie z `ctx.item` o `kind: "message"`: id i tytuł sesji, folder projektu, id wiadomości, jej rola i tekst. Akcja na sesji otwiera je z `kind: "session"` oraz id, tytułem i folderem sesji. Dodaj `"payload": ["messages"]`, a element niesie też całą rozmowę, od najstarszej wiadomości, ten sam tekst, który daje eksport do Markdown. To wymaga uprawnienia `conversation`, które użytkownik widzi jako osobny wiersz w oknie zgody. `item.action` mówi, którą pozycję kliknięto.
+
+**Polecenia z ukośnikiem, które dołączają.** Zadeklaruj polecenie i obsłuż je na stronie:
+
+```json
+"commands": [{ "name": "task", "description": "Attach a task by id" }]
+```
+
+```ts
+host.onResolve(async ({ command, args }) => {
+  const task = await findTask(args.trim());
+  return task ? { providerId: "acme-tasks", id: task.id, title: task.title, url: task.url } : null;
+});
+```
+
+Gdy użytkownik wpisze `/task ABC-12` w polu czatu, OpenChamber prosi Twoje rozszerzenie o rozwiązanie go i dołącza to, co zwrócisz, jako chip, niczego nie otwierając. Zwróć `null` dla "nic nie znaleziono". Jeśli Twój panel jest zamknięty, OpenChamber ładuje go w tle na potrzeby tego wywołania. Nazwa, której OpenChamber lub OpenCode już używa, jest ignorowana.
+
+**Odznaka na ikonie na pasku bocznym.** `host.setBadge(3)` pokazuje liczbę na Twojej ikonie, na przykład otwarte zadania; `host.setBadge(null)` ją usuwa. Otwarcie panelu też ją usuwa.
+
+## Pierwsze linie w panelu
+
+```ts
+import { connectHost } from "@openchamber/sdk";
+
+const host = connectHost();
+
+host.onReady((ctx) => {
+  document.body.dataset.theme = ctx.theme.mode;
+  document.body.dataset.surface = ctx.surface;
+});
+```
+
+`connectHost` działa tylko wewnątrz OpenChamber. Po otwarciu jako zwykły plik każde wywołanie jest odrzucane z `HOST_UNAVAILABLE`.
+
+Najpierw zbuduj panel z gotowych elementów `@openchamber/sdk/ui`: przycisków, pól, list rozwijanych, zakładek, list i innych, ostylowanych kolorami i czcionkami aplikacji, żeby panel wyglądał jak część OpenChamber. Własny HTML i CSS pisz tylko dla tego, czego w zestawie brakuje. Zobacz [Zestaw UI](/sdk/ui/).
+
+## Zobacz też
+
+- [API hosta](/sdk/host/) z każdą metodą `connectHost`, jej limitami i kodami błędów
+- [Zestaw UI](/sdk/ui/) z gotowymi elementami
+- [Przykład](/sdk/example/) z kompletnym rozszerzeniem w trzech plikach do skopiowania

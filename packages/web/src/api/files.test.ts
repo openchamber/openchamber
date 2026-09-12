@@ -21,6 +21,7 @@ const toUrl = (path: string, query?: RuntimeUrlQuery): string => {
 const urls: RuntimeUrlResolver = {
   api: toUrl,
   authenticatedAsset: toUrl,
+  assetWithUrlToken: (path: string, _token: string, query?: RuntimeUrlQuery) => toUrl(path, query),
   auth: toUrl,
   health: (query?: RuntimeUrlQuery) => toUrl('/health', query),
   rawFile: (path: string) => toUrl('/api/fs/raw', new URLSearchParams({ path })),

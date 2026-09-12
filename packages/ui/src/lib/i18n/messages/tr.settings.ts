@@ -1,3 +1,5 @@
+import { extensionsSettingsI18n } from './extensions.settings.i18n';
+import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
   'settings.openchamber.visual.field.alwaysShowScrollbars': 'Kaydırma çubuklarını her zaman göster',
@@ -2275,4 +2277,6 @@ export const settingsDict = {
   'settings.page.integrations.title': 'Entegrasyonlar',
   'settings.page.integrations.description': 'OpenChamber’ın issue’lar ve pull request’lerle çalışabilmesi için GitHub ve Linear’ı bağlayın.',
   ...linearIntegrationI18n.tr,
+  ...guestIntegrationsI18n.tr,
+  ...extensionsSettingsI18n.tr,
 };

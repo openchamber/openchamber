@@ -1,3 +1,5 @@
+import { extensionsSettingsI18n } from './extensions.settings.i18n';
+import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
   'settings.openchamber.visual.field.alwaysShowScrollbars': 'Always show scrollbars',
@@ -2273,6 +2275,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.inputHistoryLimitAria': 'Prompts to remember',
   'settings.openchamber.visual.field.inputHistoryLimitUnit': 'prompts',
   ...linearIntegrationI18n.en,
+  ...guestIntegrationsI18n.en,
+  ...extensionsSettingsI18n.en,
   'settings.page.integrations.title': 'Integrations',
   'settings.page.integrations.description': 'Connect GitHub and Linear so OpenChamber can work with your issues and pull requests.',
 } as const;

@@ -1,0 +1,203 @@
+---
+title: Host API
+description: 扩展可以调用的每个 connectHost 方法、OpenChamber 推送给它的内容、限制以及错误码。
+---
+
+# Host API
+
+当你需要准确了解 `connectHost` 的方法、限制和错误码时，使用本页。关于文件夹结构、清单和安装，请从[构建扩展](/sdk/)开始。
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+```
+
+没有 `window` 时，`connectHost` 抛出 `HOST_UNAVAILABLE`。在 OpenChamber 之外，它返回一个客户端，其每次调用都以 `HOST_UNAVAILABLE` 拒绝。卸载页面时调用 `dispose()`；仍在进行中的调用会以同一错误码拒绝。
+
+## OpenChamber 推送给你的内容
+
+`onReady` 在第一份快照到达时触发，之后每当 OpenChamber 刷新快照时再次触发。
+
+| 字段 | 含义 |
+| --- | --- |
+| `theme.mode` | `light` 或 `dark` |
+| `theme.tokens` | 应用的颜色（表面、文本、交互状态、primary、success/warning/error/info），以及 `font`、`mono` 和 `radius`。在挂载 UI 之前把它传给 `applyHostReady`。 |
+| `locale` | 应用的语言标签 |
+| `directory` | 当前项目目录，或 `null` |
+| `session` | `{ id, title, busy }` 或 `null`。没有标题时回退为会话 id。`busy` 是实时状态。会话有 `model` 和 `agent`（OpenCode 的 agent）时也会出现。 |
+| `surface` | 在侧栏中为 `panel`，在附加窗口中为 `dialog` |
+| `item` | 此界面因何而打开，或 `null`：用户点击的已附加条目（与你传给 `attach` 的字段相同，包括 `data`）、来自你声明的某个操作的消息（`kind: "message"`）或会话（`kind: "session"`）。见[操作](/sdk/#操作命令和徽标)。 |
+| `connection` | 你的集成的 `{ connected, account }` |
+| `settings` | 你在 `integration.settings` 中声明的字段的值 |
+
+访问令牌永远不会出现在这里，也不会出现在 `request` 的结果中。
+
+`onDirectory`、`onSession`、`onSessionLifecycle`、`onConnection`、`onSettings` 和 `onItem` 在你较晚订阅时会重放最新值，之后随变化持续触发。
+
+## 方法
+
+| 调用 | 作用 |
+| --- | --- |
+| `toast({ kind, message })` | 在应用中显示提示消息。`kind` 为 `info`、`success` 或 `error`。 |
+| `openUrl(url)` | 在用户的浏览器中打开 URL |
+| `openSurface(surfaceId)` | 把应用切换到该界面 |
+| `writeClipboard(text)` | 复制文本。1 到 32000 个字符。 |
+| `compose({ text, mode? })` | 把文本放进聊天框但不发送。`mode` 为 `append`（默认）或 `replace`。去除首尾空白后 1 到 16000 个字符。 |
+| `attach({ ... })` | 在聊天框上放一个标签，和 GitHub、Linear 条目落在同一位置。同一时间只能有一个标签。 |
+| `startSession({ ... })` | 创建一个附加了该条目的会话。返回 `{ sessionId, sent }`。需要 `sessions` 能力。 |
+| `prompt({ text, send? })` | 写入当前会话，或在当前会话中发送。返回 `{ sent }`。发送需要 `prompt` 能力。 |
+| `sessionLink({ ... })` | 把条目附加到当前会话，而不创建新会话 |
+| `close()` | 关闭附加窗口。在侧栏中无效果。 |
+| `oauthStart()` | 打开提供方的授权页面；对于 `host: { provider: "linear" }` 集成，打开 Linear 的授权页面 |
+| `oauthDisconnect()` | 忘记已存储的令牌，或断开 Linear 连接 |
+| `request({ method, path, query?, body? })` | 调用你的集成的 `apiOrigin`，并附上用户的令牌 |
+| `serviceRequest({ method, path, query?, body? })` | 调用你的扩展的本地服务（见 `GUEST_SERVICES.md`） |
+| `serviceStatus()` | `stopped`、`starting`、`ready` 或 `failed` |
+| `readFile(path)` | 读取文本文件。返回 `{ content }`。 |
+| `writeFile(path, content)` | 原子地写入文本文件，并创建父文件夹。返回 `{ written: true }`。 |
+| `listDir(path)` | 列出文件夹。返回 `{ entries: [{ name, kind }] }`，`kind` 为 `file`、`directory` 或 `other`。 |
+| `stat(path)` | `{ kind, size, mtime }`，`kind` 为 `file`、`directory`、`other` 或 `missing`。 |
+| `onResolve(handler)` | 注册你的斜杠命令处理函数。它收到 `{ command, args }`，返回一个要附加的条目或 `null`。 |
+| `setBadge(count)` | 在你的侧栏图标上显示一个数字（0 到 999），或传 `null` 清除 |
+
+## attach、startSession 和 sessionLink
+
+三者接受相同的条目字段：
+
+```ts
+await host.attach({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.attach({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  author: "ada",
+  branches: { head: "feature", base: "main" },
+  text: "Optional notes for the model",
+});
+
+await host.startSession({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  worktree: true,
+  text: "Optional first message",
+});
+```
+
+`providerId` 是你的面板 id；无论如何 OpenChamber 都会用你的 id 覆盖它。`id` 是你自己为条目定义的标识符。`kind` 为 `issue`（默认）或 `pull`。`text` 是给模型的可选上下文，去除首尾空白后 1 到 16000 个字符。`data` 是你自定义的可选 JSON（状态、评论，任何内容），序列化后最多 16000 个字符。OpenChamber 会把它和标签一起保存，并在用户点击标签时通过 `ctx.item` 原样交还；它永远不会到达模型。
+
+`startSession` 在当前项目中创建会话。设置 `worktree: true` 时，OpenChamber 会先创建一个 git worktree，并在那里打开会话。设置了 `text` 且已选择模型时，它会作为第一条消息发送。结果是 `{ sessionId, sent }`，其中 `sent` 为 `sent`、`no-model`、`skipped` 或 `failed`。即使结果是 `no-model` 或 `failed`，会话也已存在。没有打开的项目、worktree 创建失败或会话创建失败，都是 `HOST_REJECTED` 错误。
+
+`sessionLink` 把条目附加到当前打开的会话。没有项目或没有会话时是 `NO_SESSION` 错误。
+
+客户端在发送任何内容之前应用的限制：
+
+| 字段 | 最大字符数 |
+| --- | --- |
+| `id` | 128 |
+| `title` | 200 |
+| `url` | 2000 |
+| `text` | 16000 |
+| `data`（序列化后） | 16000 |
+| `author` | 80 |
+| 每个分支名 | 200 |
+
+## prompt 与会话生命周期
+
+```ts
+await host.prompt({ text: "Fix the login" });
+await host.prompt({ text: "Fix the login", send: true });
+
+host.onSessionLifecycle((event) => {
+  document.body.dataset.phase = event.phase;
+});
+```
+
+不带 `send` 时，`prompt` 会替换聊天框中的文本。带 `send: true` 时，它会用用户已选择的模型和 agent 发送消息。扩展永远不会自己选择它们。没有打开的会话时是 `NO_SESSION`。会话忙碌时发送是 `SESSION_BUSY`；忙碌时写入聊天框仍然可以。结果是 `{ sent }`，取值与 `startSession` 相同。
+
+`onSessionLifecycle` 告诉你会话正在做什么。`phase` 在模型工作时为 `started`，在会话转为空闲时为 `completed`，出现意外状态时为 `failure`。较晚注册的监听器会立即收到当前阶段。
+
+## request
+
+```ts
+const user = await host.request({ method: "GET", path: "/api/v2/user" });
+```
+
+`path` 以 `/` 开头，不含协议和主机名；OpenChamber 会把它拼接到清单中的 `apiOrigin` 之后，并添加 `Authorization` 头。令牌集成会原样发送粘贴的令牌；当清单设置了 `token.scheme: "bearer"` 时，发送为 `Bearer <token>`；设置为 `"basic"` 时，发送为 `Basic base64(username:token)`。OAuth 和 Linear 集成始终发送 `Bearer`。结果是 `{ status, body }`。body 是文本，JSON 需要你自己解析。
+
+Linear 集成还可以 `GET /api/linear/issues/get`，OpenChamber 会用自己的 Linear 路由来响应。
+
+20 秒内没有响应是 `HOST_TIMEOUT`。
+
+```ts
+try {
+  await host.request({ method: "GET", path: "/api/v2/user" });
+} catch (error) {
+  if (error instanceof HostRequestError && error.code === "DISCONNECTED") {
+    await host.oauthStart();
+  }
+}
+```
+
+## serviceRequest
+
+当清单声明了 `contributes.service` 时，OpenChamber 会启动该进程，你的页面通过同样类型的调用与它交互。页面永远不会自己打开 socket。
+
+```ts
+const status = await host.serviceStatus();
+const result = await host.serviceRequest({ method: "GET", path: "/containers" });
+```
+
+`path` 遵循与 `request` 相同的规则。声明本地服务会把 `service` 加入用户在安装时批准的能力；在批准之前，每次 `serviceRequest` 都是 `NO_SERVICE`。完整约定见包内文件 `GUEST_SERVICES.md`。
+
+## 文件
+
+相对路径位于打开的项目中，需要 `files` 能力。以 `/` 或 `~/` 开头的路径必须匹配已声明的 `contributes.filesystem` 模式，需要 `filesystem` 能力。规则见[构建扩展](/sdk/#文件)。
+
+```ts
+const { content } = await host.readFile("package.json");
+await host.writeFile("notes/today.md", "# Today\n");
+const { entries } = await host.listDir("src");
+const info = await host.stat("~/.config/opencode/opencode.json");
+```
+
+限制：路径最长 1024 个字符，内容最多 2,000,000 个字符，列表最多 2000 项。内容超出限制为 `FILE_TOO_LARGE`。
+
+## 错误码
+
+失败的调用会抛出 `HostRequestError`。`code` 是下列之一；`message` 提供更多说明。
+
+| 错误码 | 何时出现 |
+| --- | --- |
+| `HOST_UNAVAILABLE` | 没有 window、不在 OpenChamber 内，或已执行 `dispose()` |
+| `HOST_TIMEOUT` | 20 秒内没有响应 |
+| `HOST_REJECTED` | OpenChamber 拒绝了请求，或返回了本 SDK 不认识的错误码 |
+| `DISCONNECTED` | 你的集成没有令牌或 Linear 连接 |
+| `BAD_PATH` | `path` 格式错误，或试图离开允许的源 |
+| `NO_INTEGRATION` | 清单中没有 `integration` |
+| `NO_SESSION` | 没有打开的会话时调用了 `prompt` 或 `sessionLink` |
+| `SESSION_BUSY` | 会话忙碌时调用了 `prompt({ send: true })` |
+| `DISABLED` | 用户在 设置 → 扩展 中暂停了该扩展 |
+| `NO_SERVICE` | 未声明本地服务、未批准或未运行 |
+| `NOT_GRANTED` | 用户尚未批准此调用所需的能力 |
+| `SERVICE_FAILED` | 本地服务崩溃或从未就绪 |
+| `NO_DIRECTORY` | 在没有打开项目的情况下使用了相对文件路径 |
+| `NOT_FOUND` | 对不存在的文件调用 `readFile` |
+| `FILE_TOO_LARGE` | 读取或写入时文件内容超出限制 |
+| `DENIED` | 操作系统拒绝了该文件操作 |
+
+## 相关页面
+
+- [构建扩展](/sdk/)：文件夹、清单、安装和能力
+- [UI 套件](/sdk/ui/)：按钮、输入框、列表和其他构件

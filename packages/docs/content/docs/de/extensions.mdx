@@ -1,0 +1,63 @@
+---
+title: Erweiterungen
+description: Installiere Erweiterungen von Dritten in OpenChamber, lege fest, was sie dürfen, verbinde ihre Konten und entferne sie wieder.
+---
+
+# Erweiterungen
+
+Unter **Einstellungen → Erweiterungen** fügst du OpenChamber Panels hinzu, die andere Leute gebaut haben. Eine Erweiterung ist eine kleine Seite in der rechten Leiste, neben den eingebauten Panels. Sie kann dir Daten aus einem anderen Dienst zeigen, eine Aufgabe an den Chat anhängen und, wenn du es erlaubst, Sitzungen starten, Prompts senden oder Dateien lesen.
+
+Erweiterungen laufen in OpenChamber Web und Desktop. VS Code und die Mobile-App laden sie noch nicht. Sie sind nicht dasselbe wie OpenCode-Plugins.
+
+## Eine Erweiterung installieren
+
+1. Öffne **Einstellungen → Erweiterungen**.
+2. Füge eines davon in das Feld **Ordner, ZIP oder URL** ein und wähle **Hinzufügen**:
+   - den absoluten Pfad eines Ordners auf diesem Computer
+   - den Pfad einer `.zip`-Datei
+   - einen https-Link zu einem Git-Repository oder einer Zip-Datei
+3. Wenn die Erweiterung Berechtigungen anfragt, listet ein Dialog sie auf. Wähle **Erlauben und aktivieren** oder **Entfernen**, um sie wieder zu entfernen.
+
+Du kannst auch eine `.zip` auf das Feld ziehen oder sie über die Archiv-Schaltfläche daneben auswählen; das Archiv wird auf den OpenChamber-Server hochgeladen, das funktioniert also auch bei einer entfernten Instanz. Auf dem Desktop öffnet die Ordner-Schaltfläche eine native Dateiauswahl, und ein abgelegter Ordner wird über seinen Pfad installiert.
+
+Das Symbol der Erweiterung erscheint in der Leiste. Falls nicht, sieh unter [Fehlerbehebung](/troubleshooting/) nach.
+
+Eine Installation aus einem Ordner läuft direkt aus diesem Ordner, sodass jemand, der eine Erweiterung entwickelt, bearbeiten und neu laden kann. Eine Zip-Datei oder eine URL wird zuerst in den Datenordner von OpenChamber kopiert; die Originaldatei bleibt unberührt.
+
+## Was eine Erweiterung darf
+
+Ein Panel anzeigen und lesen, welches Projekt und welche Sitzung offen sind, braucht keine Berechtigung. Alles, was in deinem Namen handelt, braucht eine, und du siehst die ganze Liste einmal, bei der Installation:
+
+- **Nachrichten in deinen Sitzungen senden**: schreibt und sendet Prompts an das Modell, was Tokens kostet und Tools ausführen kann.
+- **Sitzungen und Worktrees anlegen**: im aktuellen Projekt.
+- **Projektdateien lesen und schreiben**: jede Datei im offenen Projekt.
+- **Dateien außerhalb des Projekts lesen und schreiben**: nur die im Dialog aufgelisteten Orte.
+- **Mit einem externen Dienst verbinden**: mit dem Konto, das du unter Einstellungen → Integrationen verbindest.
+- **Den Gesprächsverlauf einer Sitzung lesen**: nur wenn du die Aktion der Erweiterung auf dieser Sitzung ausführst.
+- **Lokalen Dienst ausführen**: ein separates Programm mit deinen vollen Benutzerrechten. Erlaube das nur, wenn du dem Autor vertraust.
+
+Wenn eine neuere Version mehr verlangt, als du erlaubt hast, zeigt die Karte **Freigabe nötig** und eine Schaltfläche **Berechtigungen prüfen**. Bis du die neue Liste erlaubst, bleibt die Erweiterung aus.
+
+## Wo sie auftaucht
+
+Neben ihrem Panel in der Leiste kann eine Erweiterung Einträge in Menüs ergänzen, die du ohnehin benutzt: die Aktionen an einer Chat-Nachricht, das Menü einer Sitzung, das +-Menü neben dem Chatfeld und Slash-Befehle wie `/task ABC-12`, die etwas anhängen, ohne etwas zu öffnen. Die Erweiterung entscheidet, welche davon sie anbietet; alle bleiben aus, bis du die Erweiterung erlaubst.
+
+## Ihr Konto verbinden
+
+Eine Erweiterung, die mit einem Dienst spricht, bekommt eine Karte unter **Einstellungen → Integrationen** im Abschnitt **Erweiterungskonten**. Je nach Dienst fragt die Karte nach einem API-Token, nach Benutzername und Token oder nach einer Client-ID für einen Anmeldeablauf. Wähle **Verbinden**; **Trennen** vergisst den gespeicherten Token. Zusätzliche Felder, die die Erweiterung deklariert, speichern sich von selbst, sobald du sie verlässt.
+
+Der Token bleibt auf dem OpenChamber-Server. Die Seite der Erweiterung sieht ihn nie.
+
+## Aktualisieren
+
+Erweiterungen, die von einer Git-URL installiert wurden, können sich selbst aktualisieren. Beim Öffnen von **Einstellungen → Erweiterungen** wird jede davon höchstens einmal pro Stunde geprüft; **Nach Updates suchen** prüft sofort. Eine Karte mit neuerer Version zeigt **Update verfügbar** und einen Button **Aktualisieren**. Das Update behält deine Berechtigungen, Konten und Einstellungen; verlangt die neue Version mehr, erscheint der Freigabe-Dialog erneut. Ordner- und Zip-Installationen aktualisieren sich nicht: ersetze sie von Hand.
+
+Häng beim Installieren `#v1.2.0` oder `#stable` an die Git-URL, um einem Tag oder Branch statt dem Standard-Branch zu folgen.
+
+## Pausieren oder entfernen
+
+Jede Karte hat einen Schalter **Aktiviert**. Aus lässt die Erweiterung installiert, versteckt aber ihr Panel und blockiert ihre Aufrufe. **Entfernen** löscht eine Zip- oder URL-Installation aus dem Datenordner von OpenChamber; bei einer Ordner-Installation vergisst es nur den Pfad, dein Ordner bleibt.
+
+## Eine eigene bauen
+
+Alles, was eine Erweiterung kann, und wie du eine baust, steht unter [Eine Erweiterung bauen](/sdk/).

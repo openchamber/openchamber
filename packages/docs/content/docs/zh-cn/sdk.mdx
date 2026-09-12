@@ -1,0 +1,203 @@
+---
+title: 构建扩展
+description: 用 @openchamber/sdk 为 OpenChamber 添加你自己的面板，从文件夹或 git 地址安装，并通过 connectHost 与应用交互。
+---
+
+# 构建扩展
+
+使用 `@openchamber/sdk` 为 OpenChamber 添加你自己的面板。扩展是一个小型网页，OpenChamber 会把它显示在右侧栏。它通过 `connectHost()` 与应用交互：可以读取当前项目和会话、显示提示消息、把文本放进聊天框、把任务附加到会话，并在用户批准后创建会话和发送提示词。
+
+扩展可以在 OpenChamber 的网页版和桌面版中运行。VS Code 和移动端暂不加载扩展。
+
+## 扩展是什么
+
+一个包含三个文件的文件夹：
+
+- `package.json`，其中带有 `openchamber` 块（清单）
+- `panel/index.html`，OpenChamber 显示的页面
+- `panel/main.js`，你的脚本，需构建为单个经典文件（IIFE，而不是 ES 模块，因为页面加载在沙箱化的 iframe 中）
+
+OpenChamber 从不编译你的代码。请直接发布构建好的 `.js` 文件。SDK 附带一个打包命令；任何能输出 IIFE 的打包器也都可以。
+
+```bash
+npm install @openchamber/sdk
+bunx openchamber-guest-bundle panel/main.ts panel/main.js
+```
+
+打包命令依赖 Bun 运行。没有 Bun 时，可以用 esbuild 或其他打包器，并加上 `--format=iife --platform=browser`。
+
+一个完整可运行的扩展（全部三个文件）在[示例](/sdk/example/)页面。复制它，然后改成你自己的 API 和列表。
+
+在 `index.html` 中用普通的 `<script src="main.js"></script>` 引用 `main.js`。
+
+## 开发时安装
+
+1. 在网页版或桌面版运行 OpenChamber。
+2. 打开 设置 → 扩展。
+3. 粘贴你的文件夹的绝对路径，然后点击添加。
+
+OpenChamber 会读取清单，并弹出一个对话框列出扩展所请求的内容（见[能力](#能力)）。批准后，你的图标会出现在侧栏。点击它，你的页面就会加载。
+
+你也可以添加本地 `.zip` 文件，或指向 git 仓库或 zip 文件的 https 链接。只有 git 安装能够更新：提高 `package.json` 里的 `version` 并推送，用户下次打开 设置 → 扩展 时 OpenChamber 就会提供更新。URL 上的 `#tag` 或 `#branch` 固定它跟随的是哪一个。这些会被复制到 OpenChamber 的数据文件夹，并从该副本运行，因此请发布构建好的文件，而不是 `node_modules` 或 TypeScript 源码。移除扩展时会删除该副本。从文件夹安装则直接从你的文件夹运行，你可以编辑、重新构建、再重新加载。
+
+## 清单
+
+```json
+{
+  "name": "@acme/hello",
+  "version": "1.0.0",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": { "openchamber": ">=1.24.0" },
+    "contributes": {
+      "panel": {
+        "id": "acme-hello",
+        "name": "Hello",
+        "icon": "window",
+        "entry": "panel/index.html"
+      },
+      "attach": "dialog",
+      "capabilities": ["prompt", "sessions"],
+      "integration": {
+        "name": "Acme",
+        "description": "Tasks from Acme",
+        "token": {
+          "apiOrigin": "https://api.acme.example",
+          "account": { "path": "/me", "name": "login" },
+          "scheme": "bearer"
+        },
+        "settings": [{ "id": "list-id", "label": "List ID" }]
+      }
+    }
+  }
+}
+```
+
+`version` 是必填项，且必须是 semver 格式。设置 → 扩展 会在卡片上显示它。
+
+`apiVersion` 为 `1`。OpenChamber 拒绝任何其他值。
+
+`engines.openchamber` 可选。填写你的扩展支持的最低 OpenChamber 版本，写成 `1.24.0` 或 `>=1.24.0`。更旧的版本会拒绝安装，而不是之后才出错。
+
+`contributes.panel` 描述侧栏入口。`id` 使用 kebab-case，且在已安装扩展中必须唯一。`icon` 是 Remixicon 图标名（`RiWindowLine` 写成 `window`），或者你文件夹内的 SVG 文件，如 `icon.svg`。`entry` 是你文件夹内的 HTML 文件。
+
+`contributes.attach` 可选。它会把你的扩展加入聊天框旁的 + 菜单，用户可以从中挑选一个任务并附加到会话。
+
+- `"dialog"` 在一个窗口中打开你的页面
+- `true` 或 `"panel"` 改为打开侧栏面板
+- `{ "mode": "dialog", "entry": "panel/attach.html" }` 在窗口中打开你的另一个页面，这样选择器就不必和侧栏面板共用代码
+- 省略它，扩展就不会出现在该菜单中
+
+你的页面可以通过 `ctx.surface`（`panel` 或 `dialog`）判断自己在哪里。当用户点击你之前附加的条目时，同一界面会再次打开，`ctx.item` 指向该条目（包括你存在上面的任何 `data`），因此你可以显示它的详情而不是列表。从 + 菜单或侧栏图标打开时，`ctx.item` 为 `null`。
+
+`contributes.integration` 可选。它会在 设置 → 集成 中添加一张卡片，用户在那里连接账户。见[账户与网络](#账户与网络)。
+
+`contributes.service` 可选。它声明一个由 OpenChamber 在扩展旁启动的本地进程，用于网页无法访问的东西，比如 Docker socket。见包内文件 `GUEST_SERVICES.md`。
+
+## 能力
+
+绘制面板和读取当前会话无需任何权限。凡是代表用户执行操作的，都需要。把它们列在 `contributes.capabilities` 中：
+
+| 能力 | 允许的操作 |
+| --- | --- |
+| `prompt` | 向用户的会话发送消息（`prompt({ send: true })`、带 `text` 的 `startSession`） |
+| `sessions` | 创建会话和 worktree（`startSession`） |
+| `files` | 读写打开项目中的文件（使用相对路径的 `readFile`、`writeFile`、`listDir`、`stat`） |
+
+另有四项会自动为你加上：声明了 `integration` 时加上 `network`，声明了 `service` 时加上 `service`，声明了 `filesystem` 模式时加上 `filesystem`，会话操作请求消息时加上 `conversation`（见[操作、命令和徽标](#操作命令和徽标)）。
+
+用户在安装扩展时会看到完整列表一次，然后批准或移除扩展。如果新版本请求更多权限，对话框会再次出现。调用需要用户尚未批准的能力时，会以 `NOT_GRANTED` 失败。
+
+## 账户与网络
+
+你的页面运行在沙箱中，无法直接访问互联网。声明一个 `integration`，OpenChamber 就会通过 `host.request` 替你发起调用，并附上用户的令牌。令牌永远不会到达你的页面。
+
+- `token`：用户在 设置 → 集成 的卡片上粘贴 API 令牌。`apiOrigin` 是 `request` 唯一可以调用的源。`account` 可选：一个 GET 路径和一个字段名，让卡片能显示已连接的是谁。`scheme` 决定令牌如何发送,见下表。请查看提供方的 API 文档,确认它期望哪种请求头。
+- `oauth`：用户粘贴 client id，由 OpenChamber 执行授权流程。需要 `authorizeUrl`、`tokenUrl` 和 `apiOrigin`。
+- `host: { "provider": "linear" }`：复用 OpenChamber 中已连接的 Linear 账户。无需 client id。
+
+每种 `scheme` 发送的内容:
+
+| `scheme` | OpenChamber 发送的请求头 | 何时使用 |
+| --- | --- | --- |
+| 省略 | `Authorization: <token>` | API 文档中要求在请求头里放不带前缀的令牌 |
+| `"bearer"` | `Authorization: Bearer <token>` | API 文档中要求 bearer 令牌或 personal access token |
+| `"basic"` | `Authorization: Basic base64(username:token)` | API 文档中要求使用用户名(通常是邮箱)加 API 令牌的 HTTP Basic 认证;卡片会要求填写两者,`usernameLabel` 指定第一个字段的名称 |
+
+`settings` 会在卡片上添加纯文本字段。它们的值会通过 `ctx.settings` 传给你。
+
+## 文件
+
+你的页面无法直接访问磁盘。OpenChamber 替它读写，并限制在用户批准的范围内。
+
+- 相对路径（`README.md`、`src/index.ts`、`.`）指打开的项目。需要 `files` 能力。没有打开的项目时为 `NO_DIRECTORY`。
+- 以 `/` 或 `~/` 开头的路径指其他任何位置。它必须匹配你在 `contributes.filesystem` 中声明的某个模式，用户会在批准对话框中看到这些原样的模式：
+
+```json
+"filesystem": ["~/.config/opencode/opencode.json", "~/notes/**"]
+```
+
+模式中 `*` 匹配一个路径段，`**` 匹配任意深度。超出模式范围的一律为 `BAD_PATH`，即使已获批准也是如此。`..` 永远不允许。
+
+```ts
+const config = await host.readFile("~/.config/opencode/opencode.json");
+await host.writeFile("~/.config/opencode/opencode.json", nextJson);
+const { entries } = await host.listDir(".");
+```
+
+写入是原子的：OpenChamber 先写入临时文件再重命名，读取方永远不会看到写了一半的文件。文件以 UTF-8 文本读写，最大 2 MB。
+
+## 操作、命令和徽标
+
+除了侧栏和 + 菜单，扩展还可以出现在另外三个地方。它们都以和点击标签相同的方式把 `item` 交给扩展。
+
+**消息和会话上的操作。** 声明菜单项，OpenChamber 会把它们显示在内置项旁边：
+
+```json
+"actions": [
+  { "id": "create-task", "label": "Create task", "icon": "add-line", "where": "message", "roles": ["assistant"] },
+  { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
+]
+```
+
+消息操作会以 `kind: "message"` 的 `ctx.item` 打开你的扩展：会话 id 和标题、项目目录、消息 id、它的角色和文本。会话操作则以 `kind: "session"` 打开，附带会话 id、标题和目录。加上 `"payload": ["messages"]`，条目还会携带整段对话，从最早的消息开始，与 Markdown 导出产生的文本相同。这需要 `conversation` 能力，用户会在批准对话框中看到它单独占一行。`item.action` 告诉你点击的是哪一项。
+
+**用于附加的斜杠命令。** 声明一个命令并在页面里处理它：
+
+```json
+"commands": [{ "name": "task", "description": "Attach a task by id" }]
+```
+
+```ts
+host.onResolve(async ({ command, args }) => {
+  const task = await findTask(args.trim());
+  return task ? { providerId: "acme-tasks", id: task.id, title: task.title, url: task.url } : null;
+});
+```
+
+当用户在聊天框中输入 `/task ABC-12` 时，OpenChamber 会请你的扩展解析它，并把你返回的内容作为标签附加上去，不打开任何东西。找不到时返回 `null`。如果你的面板是关闭的，OpenChamber 会为这次调用在后台加载它。OpenChamber 或 OpenCode 已经使用的名称会被忽略。
+
+**侧栏图标上的徽标。** `host.setBadge(3)` 在你的图标上显示一个数字，比如未完成任务数；`host.setBadge(null)` 清除它。打开面板也会清除它。
+
+## 面板里的前几行代码
+
+```ts
+import { connectHost } from "@openchamber/sdk";
+
+const host = connectHost();
+
+host.onReady((ctx) => {
+  document.body.dataset.theme = ctx.theme.mode;
+  document.body.dataset.surface = ctx.surface;
+});
+```
+
+`connectHost` 只在 OpenChamber 内部可用。作为普通文件打开时，每次调用都会以 `HOST_UNAVAILABLE` 拒绝。
+
+先用 `@openchamber/sdk/ui` 提供的构件搭建面板：按钮、输入框、下拉框、标签页、列表等，都采用应用的颜色和字体，让面板像是 OpenChamber 的一部分。只为套件没有的东西自己编写 HTML 和 CSS。见 [UI 套件](/sdk/ui/)。
+
+## 相关页面
+
+- [Host API](/sdk/host/)：每个 `connectHost` 方法、其限制和错误码
+- [UI 套件](/sdk/ui/)：构件
+- [示例](/sdk/example/)：一个可直接复制的完整三文件扩展

@@ -1,6 +1,7 @@
 import { settingsDict } from './de.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
+import { pluginPanelI18n } from './plugin-panel.i18n';
 
 export const dict = {
   'sessions.aiRename.action': 'Mit KI umbenennen',
@@ -29,6 +30,7 @@ export const dict = {
   ...settingsDict,
   ...linearIssuePickerI18n.de,
   ...linearPanelI18n.de,
+  ...pluginPanelI18n.de,
   'common.language.german': 'Deutsch',
   'common.loading': 'Wird geladen...',
   'common.unavailable': 'Nicht verfügbar',

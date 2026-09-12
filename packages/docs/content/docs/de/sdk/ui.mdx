@@ -1,0 +1,106 @@
+---
+title: UI-Kit
+description: Buttons, Felder, Dropdowns, Tabs, Listen und andere Bausteine aus @openchamber/sdk/ui, mit denen eine Erweiterung wie der Rest von OpenChamber aussieht.
+---
+
+# UI-Kit
+
+`@openchamber/sdk/ui` ist ein Satz fertiger Bedienelemente, die Farben, Schriften und Abstände der App verwenden. So sieht deine Erweiterung aus wie der Rest von OpenChamber, ohne dass du dessen Styles kopierst. Jedes Element ist eine Funktion: Du gibst ihr ein Element, das dir gehört, und seine Einstellungen; sie zeichnet sich dort und liefert `{ update, dispose }` zurück. Du setzt die Elemente zu einem Bildschirm zusammen und behältst die Daten bei dir. Das Kit ruft nie deinen Provider oder OpenChamber auf; `host.request`, `host.attach` und den Rest rufst du weiterhin selbst. Für alles, was das Kit nicht bietet, kannst du eigenes HTML und CSS schreiben, aber greif zuerst zum Kit: Seine Elemente folgen automatisch dem Theme, den Abständen und den Tastaturgewohnheiten des Nutzers, sodass ein daraus gebautes Panel wie ein Teil von OpenChamber wirkt und nicht wie eine Website darin.
+
+## Zuerst `applyHostReady` aufrufen
+
+Die Elemente lesen ihre Farben aus CSS-Variablen, die `applyHostReady` auf die Seite schreibt. Es setzt außerdem Schrift und Textfarbe der App auf der Seitenwurzel, sodass auch selbst hinzugefügtes einfaches HTML richtig aussieht. Ruf es in `host.onReady` vor dem ersten Mount auf, dann folgen die Farben dem Theme der App, wenn der Nutzer es wechselt.
+
+```ts
+import { applyHostReady } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  // mount things here
+});
+```
+
+## Was du mounten kannst
+
+| Funktion | Was sie zeichnet |
+| --- | --- |
+| `mountButton` | Ein Button. `variant` ist `default`, `secondary`, `outline`, `ghost` oder `destructive`; `size` ist `default`, `sm` oder `xs`. `loading` zeigt einen Spinner und blockiert Klicks. |
+| `mountTextField` | Ein beschriftetes Eingabefeld, oder mit `multiline` eine Textarea. Optionaler `helper`- oder `error`-Text, `password`-Maskierung und `mono` für Tokens und IDs. |
+| `mountSearchField` | Ein Suchfeld mit Lupe und Löschen-Button. Escape leert es. |
+| `mountSelect` | Ein Dropdown. `searchable` setzt ein Filterfeld oben in die Liste. Pfeiltasten bewegen, Enter wählt, Escape schließt. |
+| `mountCheckbox`, `mountSwitch` | Eine Checkbox oder ein Schalter mit Beschriftung und optionaler `description`. |
+| `mountTabs` | Pill-Tabs, jeder mit optionalem Zähler. Pfeil links und rechts wechseln zwischen ihnen. |
+| `mountBadge` | Eine kleine Pill. `tone` ist `neutral`, `primary`, `success`, `warning`, `error` oder `info`. |
+| `mountList` | Eine tastaturfreundliche Liste. Jede Zeile kann einen Schlüssel vorne, einen Titel, einen Untertitel, rechtsbündigen Meta-Text und ein Badge haben. |
+| `mountEmpty` | Ein zentrierter Leerzustand mit Titel, einer Textzeile und optionalem Button. |
+| `mountSpinner` | Ein Ladering mit optionaler Beschriftung. |
+| `mountBanner` | Ein eingefärbter Hinweis mit Titel, Text und optionaler Aktion. |
+| `mountSeparator` | Eine dünne Linie, optional mit Beschriftung in der Mitte. |
+| `mountProgress` | Ein Fortschrittsbalken von 0 bis 100. |
+| `mountMenu` | Ein Button, der eine Liste von Aktionen öffnet. Einträge können destruktiv, deaktiviert oder ein Trenner sein. |
+| `mountText` | Text von deinem Provider. Bilder im Markdown-Stil und `http(s)`-Links werden zu echten Bildern und Links; alles andere bleibt reiner Text, deshalb lässt sich auch nicht vertrauenswürdiger Inhalt sicher anzeigen. |
+
+Neben den Elementen kommen drei einfache Helfer mit. `filterSelectOptions(options, query)` ist der Abgleich, den `mountSelect` verwendet. `splitTextMedia(text)` ist das, was `mountText` vor dem Zeichnen tut. `moveListSelection` ist der Tastaturschritt, den Liste, Select und Menü teilen, falls du eine eigene Liste baust.
+
+## Eine Liste mit Suche
+
+```ts
+import { applyHostReady, mountEmpty, mountList, mountSearchField } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  const root = document.querySelector("#root")!;
+  const searchRoot = root.appendChild(document.createElement("div"));
+  const listRoot = root.appendChild(document.createElement("div"));
+
+  let query = "";
+  let empty: { dispose: () => void } | null = null;
+
+  const list = mountList(listRoot, {
+    items: [],
+    onSelect: (id) => {
+      const task = tasks.find((item) => item.id === id);
+      if (task) void host.attach({ providerId: "acme-hello", id, title: task.title, url: task.url });
+    },
+  });
+
+  const paint = () => {
+    const rows = tasks
+      .filter((task) => task.title.toLowerCase().includes(query.toLowerCase()))
+      .map((task) => ({ id: task.id, leading: task.key, title: task.title, meta: task.updated }));
+    list.update({ items: rows });
+    empty?.dispose();
+    empty = rows.length === 0
+      ? mountEmpty(listRoot, { title: "No tasks match", body: "Try a shorter search." })
+      : null;
+  };
+
+  mountSearchField(searchRoot, {
+    value: query,
+    placeholder: "Search tasks",
+    onChange: (next) => {
+      query = next;
+      paint();
+    },
+  });
+  paint();
+});
+```
+
+`update` nimmt nur die Einstellungen, die sich geändert haben. Die Liste behält ihre markierte Zeile über Updates hinweg, solange diese Zeile noch da ist.
+
+## Links aus Provider-Text
+
+Deine Seite läuft in einer Sandbox und kann nicht selbst einen neuen Tab öffnen. Wenn du `mountText` verwendest, gib `onOpenUrl` mit und reiche den Link an OpenChamber weiter:
+
+```ts
+mountText(root, {
+  text: comment.body,
+  onOpenUrl: (url) => void host.openUrl(url),
+});
+```
+
+## Verwandt
+
+- [Eine Erweiterung bauen](/sdk/) für Ordner, Manifest und Installation
+- [Host API](/sdk/host/) für `connectHost`, Anhängen und Fehlercodes

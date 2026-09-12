@@ -13,6 +13,8 @@ export interface RuntimeUrlConfig {
 export interface RuntimeUrlResolver {
   api(path: string, query?: RuntimeUrlQuery): string;
   authenticatedAsset(path: string, query?: RuntimeUrlQuery): string;
+  /** Same as `authenticatedAsset` with a caller-minted scoped token instead of the session-wide one. */
+  assetWithUrlToken(path: string, token: string, query?: RuntimeUrlQuery): string;
   auth(path: string, query?: RuntimeUrlQuery): string;
   health(query?: RuntimeUrlQuery): string;
   rawFile(path: string, options?: { download?: boolean; allowOutsideWorkspace?: boolean; outsideFileGrant?: string }): string;
@@ -95,8 +97,7 @@ const buildHttpUrl = (baseUrl: string, path: string, query?: RuntimeUrlQuery): s
   return url.toString();
 };
 
-const withUrlAuth = (urlValue: string): string => {
-  const token = getRuntimeUrlAuthTokenSync();
+const withUrlAuth = (urlValue: string, token: string = getRuntimeUrlAuthTokenSync()): string => {
   if (!token) return urlValue;
 
   const url = ABSOLUTE_URL_PATTERN.test(urlValue)
@@ -150,6 +151,7 @@ export const createRuntimeUrlResolver = (config: RuntimeUrlConfig = {}): Runtime
   return {
     api: http,
     authenticatedAsset: (path, query) => withUrlAuth(http(path, query)),
+    assetWithUrlToken: (path, token, query) => withUrlAuth(http(path, query), token),
     auth: http,
     health: (query) => http('/health', query),
     rawFile: (path, options) => http('/api/fs/raw', {

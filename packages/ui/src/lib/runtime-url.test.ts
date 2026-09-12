@@ -188,6 +188,9 @@ describe('createRuntimeUrlResolver', () => {
       expect(urls.sse('/api/openchamber/events')).toBe('https://api.example/api/openchamber/events');
       expect(urls.websocket('/api/global/event/ws')).toBe('wss://api.example/api/global/event/ws');
       expect(urls.authenticatedAsset('/api/projects/p1/icon')).toBe('https://api.example/api/projects/p1/icon');
+      expect(urls.assetWithUrlToken('/api/guests/hello/panel/index.html', 'oc_url_guest', { oc_ui: 'issue-page' })).toBe(
+        'https://api.example/api/guests/hello/panel/index.html?oc_ui=issue-page&oc_url_token=oc_url_guest',
+      );
     } finally {
       setRuntimeBearerToken(null);
     }

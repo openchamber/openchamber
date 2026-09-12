@@ -1,0 +1,109 @@
+---
+title: Beispiel
+description: Eine komplette OpenChamber-Erweiterung aus drei Dateien zum Kopieren. Sie verbindet einen GitHub-Token, listet Repositories auf und hängt eines an den Chat an.
+---
+
+# Beispiel
+
+Diese drei Dateien sind eine funktionierende Erweiterung. Sie verbindet einen GitHub-Token, listet deine Repositories auf und lässt dich eines an den Chat anhängen. Kopiere sie in einen Ordner und tausche dann die API und die Liste für deinen eigenen Anbieter aus. Die Manifest-Felder und die Installation stehen unter [Eine Erweiterung bauen](/sdk/); jede Methode unter [Host API](/sdk/host/).
+
+`package.json`:
+
+```json
+{
+  "name": "my-repos",
+  "version": "1.0.0",
+  "private": true,
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": { "id": "my-repos", "name": "Repos", "icon": "github", "entry": "panel/index.html" },
+      "attach": "panel",
+      "integration": {
+        "name": "GitHub (token)",
+        "description": "Lists your repositories.",
+        "token": {
+          "apiOrigin": "https://api.github.com",
+          "account": { "path": "/user", "name": "login" },
+          "scheme": "bearer"
+        }
+      }
+    }
+  },
+  "dependencies": { "@openchamber/sdk": "^1.24.0" }
+}
+```
+
+`panel/index.html`:
+
+```html
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>html, body { margin: 0; height: 100%; } #root { height: 100%; padding: 12px; box-sizing: border-box; }</style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="main.js"></script>
+  </body>
+</html>
+```
+
+`panel/main.ts`:
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+import { applyHostReady, mountBanner, mountEmpty, mountList, mountSpinner } from "@openchamber/sdk/ui";
+
+type Repo = { full_name: string; html_url: string; description: string | null };
+
+const host = connectHost();
+const root = document.querySelector("#root")!;
+let mounted: Array<{ dispose: () => void }> = [];
+
+const clear = () => {
+  for (const block of mounted) block.dispose();
+  mounted = [];
+};
+
+const paint = async (connected: boolean) => {
+  clear();
+  if (!connected) {
+    mounted.push(mountEmpty(root, {
+      title: "Not connected",
+      body: "Paste a GitHub token in Settings → Integrations → GitHub (token).",
+    }));
+    return;
+  }
+  const spinner = mountSpinner(root, { label: "Loading repositories" });
+  try {
+    const result = await host.request({ method: "GET", path: "/user/repos", query: { per_page: "30", sort: "updated" } });
+    spinner.dispose();
+    if (result.status !== 200) {
+      mounted.push(mountBanner(root, { tone: "error", title: `GitHub answered ${result.status}` }));
+      return;
+    }
+    const repos = JSON.parse(result.body) as Repo[];
+    mounted.push(mountList(root, {
+      items: repos.map((repo) => ({ id: repo.full_name, title: repo.full_name, subtitle: repo.description ?? undefined })),
+      onSelect: (id) => {
+        const repo = repos.find((item) => item.full_name === id);
+        if (repo) void host.attach({ providerId: "my-repos", id: repo.full_name, title: repo.full_name, url: repo.html_url });
+      },
+    }));
+  } catch (error) {
+    spinner.dispose();
+    const text = error instanceof HostRequestError ? `${error.code}: ${error.message}` : String(error);
+    mounted.push(mountBanner(root, { tone: "error", title: "Request failed", body: text }));
+  }
+};
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  void paint(ctx.connection.connected);
+});
+host.onConnection((connection) => void paint(connection.connected));
+```
+
+Baue sie aus dem Ordner mit `bunx openchamber-guest-bundle panel/main.ts panel/main.js` und füge den Ordner dann unter Einstellungen → Erweiterungen hinzu. Vier weitere Beispiele (jedes UI-Element, eine Aufgabenliste mit Sessions und Prompts, ein lokaler Dienst, eine Token-Integration) liegen auf [github.com/openchamber/openchamber/tree/main/packages/sdk/examples](https://github.com/openchamber/openchamber/tree/main/packages/sdk/examples).

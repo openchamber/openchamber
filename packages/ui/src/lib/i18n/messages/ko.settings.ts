@@ -1,3 +1,5 @@
+import { extensionsSettingsI18n } from './extensions.settings.i18n';
+import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
   'settings.openchamber.visual.field.alwaysShowScrollbars': '스크롤바 항상 표시',
@@ -2283,6 +2285,8 @@ export const settingsDict = {
   'settings.openchamber.visual.option.enterToSend.enter.label': 'Enter로 전송',
   'settings.openchamber.visual.option.enterToSend.modifier.label': 'Ctrl/Cmd+Enter로 전송',
   ...linearIntegrationI18n.ko,
+  ...guestIntegrationsI18n.ko,
+  ...extensionsSettingsI18n.ko,
   'settings.page.integrations.title': '통합',
   'settings.page.integrations.description': 'GitHub와 Linear를 연결하면 OpenChamber가 이슈와 풀 리퀘스트를 다룰 수 있습니다.',
 } as const;

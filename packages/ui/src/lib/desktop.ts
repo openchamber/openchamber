@@ -41,6 +41,7 @@ type DesktopBridgeGlobal = {
   openDialog?: (options: Record<string, unknown>) => Promise<unknown>;
   grantFileAccess?: (path: string) => Promise<unknown>;
   openExternal?: (url: string) => Promise<unknown>;
+  pathForFile?: (file: File) => string;
   listen?: (
     event: string,
     handler: (evt: { payload?: unknown }) => void,
@@ -362,6 +363,23 @@ export const focusDesktopWindow = async (): Promise<boolean> => {
 export const canRequestNativeDirectoryAccess = (): boolean => (
   isDesktopShell() && hasDesktopInvoke() && isDesktopLocalOriginActive()
 );
+
+/**
+ * On-disk path of a File dropped from the OS onto the desktop app.
+ * Null outside the desktop local origin (browser drops carry no usable path).
+ */
+const droppedFilePathSchema = z.string().min(1);
+
+export const pathForDroppedFile = (file: File): string | null => {
+  if (!canRequestNativeDirectoryAccess()) return null;
+  try {
+    const parsed = droppedFilePathSchema.safeParse(getDesktopBridge()?.pathForFile?.(file));
+    return parsed.success ? parsed.data : null;
+  } catch (error) {
+    console.warn('Failed to resolve dropped file path', error);
+    return null;
+  }
+};
 
 export const startDesktopWindowDrag = async (): Promise<boolean> => {
   if (!isDesktopShell()) {

@@ -589,7 +589,15 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     res.status(statusCode).json({ error: 'Invalid or expired pairing session' });
   };
 
+  const isGuestOauthCallback = (req) => (
+    req.method === 'GET'
+    && /^\/guests\/[a-z][a-z0-9-]*\/oauth\/callback$/.test(req.path || '')
+  );
+
   const requireApiAuth = async (req, res, next) => {
+    if (isGuestOauthCallback(req)) {
+      return next();
+    }
     const requestScope = tunnelAuthController.classifyRequestScope(req);
     if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
       return tunnelAuthController.requireTunnelSession(req, res, next);

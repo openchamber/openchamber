@@ -1,0 +1,203 @@
+---
+title: Crie uma extensão
+description: Adicione seu próprio painel ao OpenChamber com @openchamber/sdk, instale-o a partir de uma pasta ou de uma URL git e converse com o app por meio do connectHost.
+---
+
+# Crie uma extensão
+
+Use `@openchamber/sdk` para adicionar seu próprio painel ao OpenChamber. Uma extensão é uma pequena página web que o OpenChamber mostra na barra lateral direita. Ela conversa com o app por meio de `connectHost()`: pode ler o projeto e a sessão atuais, mostrar avisos, colocar texto na caixa de chat, anexar uma tarefa a uma sessão e, com a aprovação do usuário, iniciar sessões e enviar prompts.
+
+As extensões funcionam no OpenChamber web e desktop. O VS Code e o mobile ainda não as carregam.
+
+## O que é uma extensão
+
+Uma pasta com três arquivos:
+
+- `package.json` com um bloco `openchamber` (o manifesto)
+- `panel/index.html`, a página que o OpenChamber mostra
+- `panel/main.js`, seu script, compilado em um único arquivo clássico (um IIFE, não um módulo ES, porque a página carrega em um iframe isolado)
+
+O OpenChamber nunca compila seu código. Distribua o arquivo `.js` já compilado. O SDK inclui um comando de empacotamento; qualquer outro bundler que gere um IIFE também serve.
+
+```bash
+npm install @openchamber/sdk
+bunx openchamber-guest-bundle panel/main.ts panel/main.js
+```
+
+O comando de empacotamento roda com Bun. Sem Bun, use esbuild ou qualquer outro bundler com `--format=iife --platform=browser`.
+
+Aponte o `index.html` para o `main.js` com um `<script src="main.js"></script>` comum.
+
+Uma extensão completa e funcional, com os três arquivos, está na página [Exemplo](/sdk/example/). Copie-a e troque a API e a lista.
+
+## Instale enquanto trabalha
+
+1. Execute o OpenChamber na web ou no desktop.
+2. Abra Configurações → Extensões.
+3. Cole o caminho absoluto da sua pasta e clique em Adicionar.
+
+O OpenChamber lê o manifesto e mostra um diálogo com o que a extensão pede (veja [Capacidades](#capacidades)). Aprove, e seu ícone aparece na barra lateral. Clique nele e sua página carrega.
+
+Você também pode adicionar um `.zip` local ou um link https para um repositório git ou um arquivo zip. Só uma instalação por git consegue se atualizar: suba `version` no `package.json`, faça push e o OpenChamber oferece a atualização na próxima vez que o usuário abrir Configurações → Extensões. Um `#tag` ou `#branch` na URL fixa qual ele segue. Esses são copiados para a pasta de dados do OpenChamber e rodam a partir dessa cópia, então distribua os arquivos compilados, não `node_modules` nem fontes em TypeScript. Remover a extensão apaga a cópia. Uma instalação a partir de pasta roda direto da sua pasta, então você pode editar, recompilar e recarregar.
+
+## Manifesto
+
+```json
+{
+  "name": "@acme/hello",
+  "version": "1.0.0",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": { "openchamber": ">=1.24.0" },
+    "contributes": {
+      "panel": {
+        "id": "acme-hello",
+        "name": "Hello",
+        "icon": "window",
+        "entry": "panel/index.html"
+      },
+      "attach": "dialog",
+      "capabilities": ["prompt", "sessions"],
+      "integration": {
+        "name": "Acme",
+        "description": "Tasks from Acme",
+        "token": {
+          "apiOrigin": "https://api.acme.example",
+          "account": { "path": "/me", "name": "login" },
+          "scheme": "bearer"
+        },
+        "settings": [{ "id": "list-id", "label": "List ID" }]
+      }
+    }
+  }
+}
+```
+
+`version` é obrigatório e precisa ser semver. Configurações → Extensões mostra o valor no card.
+
+`apiVersion` é `1`. O OpenChamber recusa qualquer outro valor.
+
+`engines.openchamber` é opcional. Informe a versão mais antiga do OpenChamber com a qual sua extensão funciona, como `1.24.0` ou `>=1.24.0`. Versões anteriores se recusam a instalá-la em vez de falhar depois.
+
+`contributes.panel` descreve a entrada na barra lateral. `id` é em kebab-case e precisa ser único entre as extensões instaladas. `icon` é um nome do Remixicon (`RiWindowLine` vira `window`) ou um arquivo SVG dentro da sua pasta, como `icon.svg`. `entry` é o arquivo HTML dentro da sua pasta.
+
+`contributes.attach` é opcional. Ele adiciona sua extensão ao menu + ao lado da caixa de chat, para o usuário escolher uma tarefa e anexá-la a uma sessão.
+
+- `"dialog"` abre sua página em uma janela
+- `true` ou `"panel"` abre o painel da barra lateral no lugar
+- `{ "mode": "dialog", "entry": "panel/attach.html" }` abre na janela uma página separada sua, para o seletor não precisar compartilhar código com o painel da barra lateral
+- omita, e a extensão fica fora desse menu
+
+Sua página consegue saber em qual dos dois está por `ctx.surface` (`panel` ou `dialog`). Quando o usuário clica em um item que você anexou antes, a mesma superfície abre de novo com `ctx.item` apontando para esse item, incluindo qualquer `data` que você guardou nele, então você pode mostrar os detalhes dele em vez da lista. A partir do menu + ou do ícone da barra lateral, `ctx.item` é `null`.
+
+`contributes.integration` é opcional. Ele adiciona um card em Configurações → Integrações onde o usuário conecta uma conta. Veja [Contas e rede](#contas-e-rede).
+
+`contributes.service` é opcional. Ele declara um serviço local (um processo que o OpenChamber inicia junto com a extensão) para coisas que uma página web não alcança, como um socket do Docker. Veja o arquivo `GUEST_SERVICES.md` do pacote.
+
+## Capacidades
+
+Desenhar um painel e ler a sessão atual não exige permissão. Tudo que age em nome do usuário exige. Liste essas capacidades em `contributes.capabilities`:
+
+| Capacidade | O que permite |
+| --- | --- |
+| `prompt` | enviar mensagens para a sessão do usuário (`prompt({ send: true })`, `startSession` com `text`) |
+| `sessions` | criar sessões e worktrees (`startSession`) |
+| `files` | ler e escrever arquivos dentro do projeto aberto (`readFile`, `writeFile`, `listDir`, `stat` com um caminho relativo) |
+
+Outras quatro são adicionadas por você automaticamente: `network` quando você declara uma `integration`, `service` quando declara um `service`, `filesystem` quando declara padrões `filesystem`, e `conversation` quando uma ação de sessão pede as mensagens (veja [Ações, comandos e o selo](#ações-comandos-e-o-selo)).
+
+O usuário vê a lista completa uma vez, ao instalar a extensão, e aprova ou remove a extensão. Se uma versão nova pedir mais, o diálogo aparece de novo. Uma chamada que precisa de uma capacidade que o usuário não aprovou falha com `NOT_GRANTED`.
+
+## Contas e rede
+
+Sua página roda em um ambiente isolado e não consegue chamar a internet diretamente. Declare uma `integration` e o OpenChamber faz as chamadas por você através de `host.request`, com o token do usuário anexado. O token nunca chega à sua página.
+
+- `token`: o usuário cola um token de API no card de Configurações → Integrações. `apiOrigin` é a única origem que `request` pode chamar. `account` é opcional: um caminho GET e um nome de campo, para o card mostrar quem está conectado. `scheme` diz como o token é enviado; veja a tabela abaixo. Confira na documentação da API do provedor qual header ela espera.
+- `oauth`: o usuário cola um client id, e o OpenChamber executa o fluxo de autorização. Precisa de `authorizeUrl`, `tokenUrl` e `apiOrigin`.
+- `host: { "provider": "linear" }`: reaproveita a conta do Linear já conectada no OpenChamber. Não precisa de client id.
+
+O que cada `scheme` envia:
+
+| `scheme` | Header que o OpenChamber envia | Quando usar |
+| --- | --- | --- |
+| omitido | `Authorization: <token>` | a API documenta um token sem prefixo no header |
+| `"bearer"` | `Authorization: Bearer <token>` | a API documenta um token bearer ou um personal access token |
+| `"basic"` | `Authorization: Basic base64(username:token)` | a API documenta HTTP Basic auth com um usuário (geralmente um email) e um token de API; o card pede os dois, e `usernameLabel` dá nome ao primeiro campo |
+
+`settings` adiciona campos de texto simples ao card. Os valores chegam em `ctx.settings`.
+
+## Arquivos
+
+Sua página não consegue tocar o disco por conta própria. O OpenChamber lê e escreve por ela, dentro dos limites que o usuário aprovou.
+
+- Um caminho relativo (`README.md`, `src/index.ts`, `.`) significa o projeto aberto. Precisa da capacidade `files`. Sem projeto aberto é `NO_DIRECTORY`.
+- Um caminho que começa com `/` ou `~/` significa qualquer outro lugar. Ele precisa bater com um dos padrões que você declara em `contributes.filesystem`, e o usuário vê exatamente esses padrões no diálogo de aprovação:
+
+```json
+"filesystem": ["~/.config/opencode/opencode.json", "~/notes/**"]
+```
+
+Os padrões usam `*` para um segmento do caminho e `**` para qualquer profundidade. Tudo que ficar fora deles é `BAD_PATH`, mesmo depois da aprovação. `..` nunca é permitido.
+
+```ts
+const config = await host.readFile("~/.config/opencode/opencode.json");
+await host.writeFile("~/.config/opencode/opencode.json", nextJson);
+const { entries } = await host.listDir(".");
+```
+
+As escritas são atômicas: o OpenChamber escreve um arquivo temporário e o renomeia, então quem lê nunca vê um arquivo pela metade. Os arquivos são lidos e escritos como texto UTF-8, até 2 MB.
+
+## Ações, comandos e o selo
+
+Além da barra lateral e do menu +, uma extensão pode aparecer em mais três lugares. Todos entregam à extensão um `item` do mesmo jeito que um clique no chip.
+
+**Ações em mensagens e sessões.** Declare entradas de menu e o OpenChamber as mostra ao lado das embutidas:
+
+```json
+"actions": [
+  { "id": "create-task", "label": "Create task", "icon": "add-line", "where": "message", "roles": ["assistant"] },
+  { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
+]
+```
+
+Uma ação de mensagem abre sua extensão com um `ctx.item` de `kind: "message"`: o id e o título da sessão, a pasta do projeto, o id da mensagem, o papel dela e o texto. Uma ação de sessão abre com `kind: "session"` e o id, o título e a pasta da sessão. Adicione `"payload": ["messages"]` e o item também carrega a conversa inteira, da mais antiga para a mais nova, o mesmo texto que a exportação em Markdown produz. Isso precisa da capacidade `conversation`, que o usuário vê como uma linha separada no diálogo de aprovação. `item.action` diz qual entrada foi clicada.
+
+**Comandos de barra que anexam.** Declare um comando e trate-o na página:
+
+```json
+"commands": [{ "name": "task", "description": "Attach a task by id" }]
+```
+
+```ts
+host.onResolve(async ({ command, args }) => {
+  const task = await findTask(args.trim());
+  return task ? { providerId: "acme-tasks", id: task.id, title: task.title, url: task.url } : null;
+});
+```
+
+Quando o usuário digita `/task ABC-12` na caixa de chat, o OpenChamber pede à sua extensão que o resolva e anexa o que você devolve como um chip, sem abrir nada. Devolva `null` para "nada encontrado". Se o seu painel estiver fechado, o OpenChamber o carrega em segundo plano para essa chamada. Um nome que o OpenChamber ou o OpenCode já usa é ignorado.
+
+**Selo no ícone da barra lateral.** `host.setBadge(3)` mostra um número no seu ícone, por exemplo tarefas abertas; `host.setBadge(null)` o limpa. Abrir o painel também o limpa.
+
+## Primeiras linhas no painel
+
+```ts
+import { connectHost } from "@openchamber/sdk";
+
+const host = connectHost();
+
+host.onReady((ctx) => {
+  document.body.dataset.theme = ctx.theme.mode;
+  document.body.dataset.surface = ctx.surface;
+});
+```
+
+`connectHost` só funciona dentro do OpenChamber. Aberta como um arquivo avulso, toda chamada é rejeitada com `HOST_UNAVAILABLE`.
+
+Monte o painel primeiro com os componentes de `@openchamber/sdk/ui`: botões, campos, dropdowns, abas, listas e mais, com as cores e fontes do app, para o painel parecer parte do OpenChamber. Escreva seu próprio HTML e CSS só para o que o kit não tem. Veja [Kit de UI](/sdk/ui/).
+
+## Relacionado
+
+- [API do host](/sdk/host/) para cada método do `connectHost`, seus limites e códigos de erro
+- [Kit de UI](/sdk/ui/) para os componentes
+- [Exemplo](/sdk/example/) para uma extensão completa de três arquivos para copiar

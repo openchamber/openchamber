@@ -52,7 +52,7 @@ So:
 | `viewport-store.ts` | Scroll anchors, session memory, loading indicators | App UI state |
 | `attachment-files.ts` | Attachment picker allowlists, MIME/content validation, structured-text sanitization, and HEIC conversion | Local chat attachments across shared UI runtimes |
 | `document-attachments.ts` | Bounded Office/OpenDocument extraction, document text serialization, embedded-image extraction, and positional citations | DOCX, PPTX, XLSX, ODT, ODP, and ODS chat attachments |
-| `input-store.ts` | Draft input state, attached files, synthetic parts, destination-scoped fork replay handoff | App UI state; fork replay targets runtime + directory + session |
+| `input-store.ts` | Draft input state, attached files, synthetic parts, pending guest attach, destination-scoped fork replay handoff | App UI state; fork replay targets runtime + directory + session |
 | `selection-store.ts` | Model/agent/variant selections | App UI state |
 | `voice-store.ts` | Voice state | App UI state |
 
@@ -620,7 +620,7 @@ The optimization multiplies with targeted event cloning: fewer new references pe
 |-------|------|-----------------|
 | `session-ui-store.ts` | Session selection, draft lifecycle, abort, worktree, SDK actions | Session switch, draft open/close |
 | `voice-store.ts` | Voice connection/activity state | Voice toggle |
-| `input-store.ts` | Pending input text, synthetic parts, attached files | User typing, file attach, revert/fork |
+| `input-store.ts` | Pending input text, synthetic parts, attached files, pending guest attach | User typing, file attach, revert/fork, guest chip |
 | `selection-store.ts` | Per-session model/agent/variant choices | Model/agent picker |
 | `viewport-store.ts` | Scroll anchors, session memory state, sync status | Streaming, scroll, session switch |
 

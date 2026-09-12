@@ -25,6 +25,7 @@ export interface WebAPIsOptions {
 const createActiveRuntimeUrlResolver = (): RuntimeUrlResolver => ({
   api: (...args) => getRuntimeUrlResolver().api(...args),
   authenticatedAsset: (...args) => getRuntimeUrlResolver().authenticatedAsset(...args),
+  assetWithUrlToken: (...args) => getRuntimeUrlResolver().assetWithUrlToken(...args),
   auth: (...args) => getRuntimeUrlResolver().auth(...args),
   health: (...args) => getRuntimeUrlResolver().health(...args),
   rawFile: (...args) => getRuntimeUrlResolver().rawFile(...args),

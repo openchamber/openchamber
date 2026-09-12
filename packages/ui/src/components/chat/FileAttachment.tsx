@@ -556,8 +556,10 @@ interface FilePart {
 const GITHUB_ISSUE_LINK_MIME = 'application/vnd.github.issue-link';
 const GITHUB_PR_LINK_MIME = 'application/vnd.github.pull-request-link';
 const LINEAR_ISSUE_LINK_MIME = 'application/vnd.openchamber.linear-issue-link';
+const GUEST_ISSUE_LINK_MIME = 'application/vnd.openchamber.guest-issue-link';
+const GUEST_PR_LINK_MIME = 'application/vnd.openchamber.guest-pr-link';
 
-type IssueLinkKind = 'github-issue' | 'github-pr' | 'linear-issue';
+type IssueLinkKind = 'github-issue' | 'github-pr' | 'linear-issue' | 'guest-issue' | 'guest-pr';
 
 const getIssueLinkKind = (file: FilePart): IssueLinkKind | null => {
   if (file.mime === GITHUB_ISSUE_LINK_MIME) {
@@ -569,12 +571,19 @@ const getIssueLinkKind = (file: FilePart): IssueLinkKind | null => {
   if (file.mime === LINEAR_ISSUE_LINK_MIME) {
     return 'linear-issue';
   }
+  if (file.mime === GUEST_ISSUE_LINK_MIME) {
+    return 'guest-issue';
+  }
+  if (file.mime === GUEST_PR_LINK_MIME) {
+    return 'guest-pr';
+  }
   return null;
 };
 
-const issueLinkIcon = (kind: IssueLinkKind): 'github' | 'git-pull-request' | 'linear' => {
-  if (kind === 'github-pr') return 'git-pull-request';
+const issueLinkIcon = (kind: IssueLinkKind): 'github' | 'git-pull-request' | 'linear' | 'attachment-2' => {
+  if (kind === 'github-pr' || kind === 'guest-pr') return 'git-pull-request';
   if (kind === 'linear-issue') return 'linear';
+  if (kind === 'guest-issue') return 'attachment-2';
   return 'github';
 };
 

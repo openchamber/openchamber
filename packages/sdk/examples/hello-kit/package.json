@@ -1,0 +1,19 @@
+{
+  "name": "@openchamber/example-hello-kit",
+  "version": "1.0.0",
+  "private": true,
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": {
+        "id": "hello-kit",
+        "name": "Hello Kit",
+        "icon": "palette",
+        "entry": "panel/index.html"
+      }
+    }
+  },
+  "dependencies": {
+    "@openchamber/sdk": "workspace:*"
+  }
+}

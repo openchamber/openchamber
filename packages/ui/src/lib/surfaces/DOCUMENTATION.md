@@ -10,6 +10,10 @@ edge (`components/layout/ContextPanelRail.tsx`) and rendered by
 ## Model
 
 - A surface maps 1:1 to a `ContextPanelMode` tab mode in `useUIStore`.
+  Built-in modes stay a closed list. Installed guests add `plugin:${id}`
+  surfaces through `extras` on `sortContextSurfaces` /
+  `getVisibleContextRailSurfaces`. Do not copy guest types out of
+  `@openchamber/sdk`.
 - `availability: 'always'` surfaces are always present on the rail.
   `availability: 'has-content'` surfaces (chat) are hidden from the
   rail until a tab of their mode exists, and stay visible for as long as one
@@ -37,20 +41,31 @@ edge (`components/layout/ContextPanelRail.tsx`) and rendered by
 
 ## Adding a surface
 
-1. Add a `ContextPanelMode` value in `useUIStore` (type union plus the
-   sanitizer whitelist in `sanitizeContextPanelTabs`).
-2. Register a descriptor here (icon, label key, availability, width fraction).
-3. Render the mode in `ContextPanel.tsx` (content dispatch, label, icon).
-4. Add label/hint i18n keys to every locale dictionary.
+1. Built-in: add a `ContextPanelMode` value in `packages/ui/src/lib/surfaces/modes.ts`
+   (the sanitizer uses `isContextPanelMode`). Register a descriptor here.
+   Render the mode in `ContextPanel.tsx`. Add label/hint i18n keys.
+2. Guest panel: ship a package with `openchamber.contributes.panel`. The host
+  lists it from `GET /api/guests` and renders `PluginPane`. Settings →
+  Extensions installs a folder path on that OpenChamber instance. A runtime
+  switch clears the catalog so a previous instance cannot leave a rail slot
+  from the last host. The rail paints `panel.icon` as a Remixicon glyph.
+  `contributes.attach: true` or `"panel"` puts a row on
+   the desktop/web chat + menu that opens `plugin:${id}`. `"dialog"` opens a
+   host window around the same iframe so the guest can pick an item and call
+   `attach`. New Worktree also opens that window for dialog guests. The guest
+   still owns the list and HTTP. VS Code and mobile omit the row. Do not add
+   a built-in mode for that guest.
 
-No new header buttons: the rail and `openContextSurface` are the only entry
-points for opening surfaces directly; deep links from chat/palette go through
-the `openContext*` actions in `useUIStore`.
+No new header buttons: the rail, `openContextSurface`, the composer +
+menu (`contributes.attach`), and New Worktree's guest icons are the entry
+points for opening surfaces or the attach window directly; deep links from
+chat/palette go through the `openContext*` actions in `useUIStore`.
 
 ## Invariants
 
 - Opening a surface must never require a control outside the rail, the
-  command palette, or an in-content link.
+  command palette, an in-content link, a composer + menu row from
+  `contributes.attach`, or New Worktree's guest icons for dialog attach.
 - Multi-instance and session-holding surfaces (file/editor, diff, browser,
   terminal) are keep-alive panes in `ContextPanel.tsx`. Switching these
   surfaces must not reset their state (open tabs, xterm session, scroll

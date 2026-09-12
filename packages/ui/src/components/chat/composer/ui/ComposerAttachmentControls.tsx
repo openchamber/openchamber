@@ -10,12 +10,14 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import type { GuestAttachItem } from '@/hooks/useGuestSurfaces';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
@@ -32,6 +34,8 @@ type ComposerAttachmentControlsProps = {
     onMenuOpenChange?: (open: boolean) => void;
     /** Mobile: open the attachment bottom sheet instead of the dropdown menu. */
     onOpenMobileSheet?: () => void;
+    attachGuests?: readonly GuestAttachItem[];
+    onOpenGuestAttach?: (guestId: string) => void;
 };
 
 export const ComposerAttachmentControls = React.memo(function ComposerAttachmentControls(props: ComposerAttachmentControlsProps) {
@@ -46,6 +50,8 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
         showLinearPicker,
         openLinearPicker,
         onOpenSettings,
+        attachGuests,
+        onOpenGuestAttach,
     } = props;
 
     return (
@@ -128,6 +134,17 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                                     {t('chat.chatInput.actions.linkLinearIssue')}
                                 </DropdownMenuItem>
                             ) : null}
+                            {attachGuests?.map((guest) => (
+                                <DropdownMenuItem
+                                    key={guest.id}
+                                    onSelect={() => {
+                                        requestAnimationFrame(() => onOpenGuestAttach?.(guest.id));
+                                    }}
+                                >
+                                    <GuestIcon icon={guest.icon} iconSrc={guest.iconSrc} className="size-4" />
+                                    {guest.name}
+                                </DropdownMenuItem>
+                            ))}
                         </DropdownMenuContent>
                     </DropdownMenu>
                 )}
@@ -154,4 +171,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
     && prev.onOpenSettings === next.onOpenSettings
     && prev.onMenuOpenChange === next.onMenuOpenChange
     && prev.onOpenMobileSheet === next.onOpenMobileSheet
+    && prev.onOpenGuestAttach === next.onOpenGuestAttach
+    && (prev.attachGuests ?? []).map((guest) => `${guest.id}:${guest.name}:${guest.mode}`).join()
+        === (next.attachGuests ?? []).map((guest) => `${guest.id}:${guest.name}:${guest.mode}`).join()
 ));

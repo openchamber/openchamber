@@ -1,0 +1,109 @@
+---
+title: 예제
+description: 복사해서 쓸 수 있는, 파일 세 개로 된 완전한 OpenChamber 확장. GitHub 토큰을 연결하고, 저장소를 나열하고, 그중 하나를 채팅에 첨부합니다.
+---
+
+# 예제
+
+이 세 파일은 그대로 동작하는 확장입니다. GitHub 토큰을 연결하고, 여러분의 저장소를 나열하고, 그중 하나를 채팅에 첨부할 수 있게 합니다. 폴더에 복사한 다음 API와 목록을 여러분의 제공자에 맞게 바꾸세요. 매니페스트 필드와 설치 방법은 [확장 만들기](/sdk/)를, 모든 메서드는 [Host API](/sdk/host/)를 참고하세요.
+
+`package.json`:
+
+```json
+{
+  "name": "my-repos",
+  "version": "1.0.0",
+  "private": true,
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": { "id": "my-repos", "name": "Repos", "icon": "github", "entry": "panel/index.html" },
+      "attach": "panel",
+      "integration": {
+        "name": "GitHub (token)",
+        "description": "Lists your repositories.",
+        "token": {
+          "apiOrigin": "https://api.github.com",
+          "account": { "path": "/user", "name": "login" },
+          "scheme": "bearer"
+        }
+      }
+    }
+  },
+  "dependencies": { "@openchamber/sdk": "^1.24.0" }
+}
+```
+
+`panel/index.html`:
+
+```html
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>html, body { margin: 0; height: 100%; } #root { height: 100%; padding: 12px; box-sizing: border-box; }</style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="main.js"></script>
+  </body>
+</html>
+```
+
+`panel/main.ts`:
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+import { applyHostReady, mountBanner, mountEmpty, mountList, mountSpinner } from "@openchamber/sdk/ui";
+
+type Repo = { full_name: string; html_url: string; description: string | null };
+
+const host = connectHost();
+const root = document.querySelector("#root")!;
+let mounted: Array<{ dispose: () => void }> = [];
+
+const clear = () => {
+  for (const block of mounted) block.dispose();
+  mounted = [];
+};
+
+const paint = async (connected: boolean) => {
+  clear();
+  if (!connected) {
+    mounted.push(mountEmpty(root, {
+      title: "Not connected",
+      body: "Paste a GitHub token in Settings → Integrations → GitHub (token).",
+    }));
+    return;
+  }
+  const spinner = mountSpinner(root, { label: "Loading repositories" });
+  try {
+    const result = await host.request({ method: "GET", path: "/user/repos", query: { per_page: "30", sort: "updated" } });
+    spinner.dispose();
+    if (result.status !== 200) {
+      mounted.push(mountBanner(root, { tone: "error", title: `GitHub answered ${result.status}` }));
+      return;
+    }
+    const repos = JSON.parse(result.body) as Repo[];
+    mounted.push(mountList(root, {
+      items: repos.map((repo) => ({ id: repo.full_name, title: repo.full_name, subtitle: repo.description ?? undefined })),
+      onSelect: (id) => {
+        const repo = repos.find((item) => item.full_name === id);
+        if (repo) void host.attach({ providerId: "my-repos", id: repo.full_name, title: repo.full_name, url: repo.html_url });
+      },
+    }));
+  } catch (error) {
+    spinner.dispose();
+    const text = error instanceof HostRequestError ? `${error.code}: ${error.message}` : String(error);
+    mounted.push(mountBanner(root, { tone: "error", title: "Request failed", body: text }));
+  }
+};
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  void paint(ctx.connection.connected);
+});
+host.onConnection((connection) => void paint(connection.connected));
+```
+
+폴더에서 `bunx openchamber-guest-bundle panel/main.ts panel/main.js`로 빌드한 다음, 설정 → 확장 에서 그 폴더를 추가하세요. 예제 네 개(모든 UI 컨트롤, 세션과 프롬프트가 있는 작업 목록, 로컬 서비스, 토큰 통합)가 [github.com/openchamber/openchamber/tree/main/packages/sdk/examples](https://github.com/openchamber/openchamber/tree/main/packages/sdk/examples)에 더 있습니다.

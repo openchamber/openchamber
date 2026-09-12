@@ -1,0 +1,203 @@
+---
+title: API do host
+description: Todos os métodos do connectHost que uma extensão pode chamar, o que o OpenChamber envia para ela, os limites e os códigos de erro.
+---
+
+# API do host
+
+Use esta página quando precisar dos métodos exatos do `connectHost`, dos limites e dos códigos de erro. Para a estrutura da pasta, o manifesto e a instalação, comece em [Crie uma extensão](/sdk/).
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+```
+
+`connectHost` lança `HOST_UNAVAILABLE` quando não há `window`. Fora do OpenChamber ele devolve um cliente cujas chamadas são todas rejeitadas com `HOST_UNAVAILABLE`. Chame `dispose()` quando desmontar a página; chamadas ainda em andamento são rejeitadas com o mesmo código.
+
+## O que o OpenChamber envia para você
+
+`onReady` dispara com o primeiro snapshot e de novo sempre que o OpenChamber o atualiza.
+
+| Campo | O que é |
+| --- | --- |
+| `theme.mode` | `light` ou `dark` |
+| `theme.tokens` | as cores do app (superfícies, texto, estados de interação, primária, success/warning/error/info), `font`, `mono` e `radius`. Passe isso para `applyHostReady` antes de montar a UI. |
+| `locale` | a tag de idioma do app |
+| `directory` | o diretório do projeto atual, ou `null` |
+| `session` | `{ id, title, busy }` ou `null`. Sem título, o id da sessão é usado no lugar. `busy` é o status ao vivo. `model` e `agent` (o agente do OpenCode) aparecem quando a sessão os tem. |
+| `surface` | `panel` na barra lateral, `dialog` na janela de anexar |
+| `item` | para que esta superfície foi aberta, ou `null`: o item anexado em que o usuário clicou (os mesmos campos que você passou para `attach`, incluindo `data`), uma mensagem (`kind: "message"`) ou uma sessão (`kind: "session"`) vinda de uma das suas ações declaradas. Veja [Ações](/sdk/#ações-comandos-e-o-selo). |
+| `connection` | `{ connected, account }` da sua integração |
+| `settings` | os valores dos campos que você declarou em `integration.settings` |
+
+Tokens de acesso nunca aparecem aqui nem no resultado de um `request`.
+
+`onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings` e `onItem` repetem o último valor quando você assina tarde, e depois continuam disparando conforme ele muda.
+
+## Métodos
+
+| Chamada | O que faz |
+| --- | --- |
+| `toast({ kind, message })` | mostra um aviso no app. `kind` é `info`, `success` ou `error`. |
+| `openUrl(url)` | abre uma URL no navegador do usuário |
+| `openSurface(surfaceId)` | leva o app para aquela tela |
+| `writeClipboard(text)` | copia texto. De 1 a 32000 caracteres. |
+| `compose({ text, mode? })` | coloca texto na caixa de chat sem enviar. `mode` é `append` (padrão) ou `replace`. De 1 a 16000 caracteres após remover espaços. |
+| `attach({ ... })` | coloca um chip na caixa de chat, no mesmo lugar onde caem os itens do GitHub e do Linear. Só um chip por vez. |
+| `startSession({ ... })` | cria uma sessão com aquele item anexado. Devolve `{ sessionId, sent }`. Precisa da capacidade `sessions`. |
+| `prompt({ text, send? })` | escreve na sessão atual, ou envia nela. Devolve `{ sent }`. Enviar precisa da capacidade `prompt`. |
+| `sessionLink({ ... })` | anexa um item à sessão atual sem criar uma nova |
+| `close()` | fecha a janela de anexar. Não faz nada na barra lateral. |
+| `oauthStart()` | abre a página de autorização do provedor, ou a do Linear para uma integração `host: { provider: "linear" }` |
+| `oauthDisconnect()` | esquece o token guardado, ou a conexão com o Linear |
+| `request({ method, path, query?, body? })` | chama o `apiOrigin` da sua integração com o token do usuário anexado |
+| `serviceRequest({ method, path, query?, body? })` | chama o serviço local da sua extensão (veja `GUEST_SERVICES.md`) |
+| `serviceStatus()` | `stopped`, `starting`, `ready` ou `failed` |
+| `readFile(path)` | lê um arquivo de texto. Devolve `{ content }`. |
+| `writeFile(path, content)` | escreve um arquivo de texto de forma atômica, criando as pastas acima. Devolve `{ written: true }`. |
+| `listDir(path)` | lista uma pasta. Devolve `{ entries: [{ name, kind }] }`, `kind` é `file`, `directory` ou `other`. |
+| `stat(path)` | `{ kind, size, mtime }`, `kind` é `file`, `directory`, `other` ou `missing`. |
+| `onResolve(handler)` | registra o handler dos seus comandos de barra. Ele recebe `{ command, args }` e devolve um item para anexar ou `null`. |
+| `setBadge(count)` | mostra um número (0 a 999) no seu ícone da barra lateral, ou `null` para limpá-lo |
+
+## attach, startSession e sessionLink
+
+Os três recebem os mesmos campos de item:
+
+```ts
+await host.attach({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.attach({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  author: "ada",
+  branches: { head: "feature", base: "main" },
+  text: "Optional notes for the model",
+});
+
+await host.startSession({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  worktree: true,
+  text: "Optional first message",
+});
+```
+
+`providerId` é o id do seu painel; o OpenChamber o sobrescreve com o seu id de qualquer forma. `id` é o seu próprio identificador do item. `kind` é `issue` (padrão) ou `pull`. `text` é contexto opcional para o modelo, de 1 a 16000 caracteres após remover espaços. `data` é um JSON opcional seu (status, comentários, o que quiser), até 16000 caracteres depois de serializado. O OpenChamber o guarda junto com o chip e o devolve sem alterações em `ctx.item` quando o usuário clica no chip; ele nunca chega ao modelo.
+
+`startSession` cria uma sessão no projeto atual. Com `worktree: true` o OpenChamber cria primeiro um worktree git e abre a sessão nele. Quando `text` está definido e há um modelo selecionado, ele é enviado como primeira mensagem. O resultado é `{ sessionId, sent }`, onde `sent` é `sent`, `no-model`, `skipped` ou `failed`. A sessão existe mesmo após `no-model` e `failed`. Sem projeto aberto, worktree que falhou ou criação de sessão que falhou, o erro é `HOST_REJECTED`.
+
+`sessionLink` anexa o item à sessão aberta agora. Sem projeto ou sem sessão, o erro é `NO_SESSION`.
+
+Limites que o cliente aplica antes de enviar qualquer coisa:
+
+| Campo | Máximo de caracteres |
+| --- | --- |
+| `id` | 128 |
+| `title` | 200 |
+| `url` | 2000 |
+| `text` | 16000 |
+| `data` (serializado) | 16000 |
+| `author` | 80 |
+| cada nome de branch | 200 |
+
+## prompt e ciclo de vida da sessão
+
+```ts
+await host.prompt({ text: "Fix the login" });
+await host.prompt({ text: "Fix the login", send: true });
+
+host.onSessionLifecycle((event) => {
+  document.body.dataset.phase = event.phase;
+});
+```
+
+Sem `send`, `prompt` substitui o texto da caixa de chat. Com `send: true` ele envia a mensagem usando o modelo e o agente que o usuário selecionou. A extensão nunca os escolhe. Sem sessão aberta, o erro é `NO_SESSION`. Enviar enquanto a sessão está ocupada é `SESSION_BUSY`; escrever na caixa funciona mesmo ocupada. O resultado é `{ sent }` com os mesmos valores de `startSession`.
+
+`onSessionLifecycle` diz o que a sessão está fazendo. `phase` é `started` enquanto o modelo trabalha, `completed` quando ele fica ocioso e `failure` em um status inesperado. Um ouvinte que assina tarde recebe a fase atual na hora.
+
+## request
+
+```ts
+const user = await host.request({ method: "GET", path: "/api/v2/user" });
+```
+
+`path` começa com `/` e não tem esquema nem host; o OpenChamber o junta ao `apiOrigin` do seu manifesto e adiciona o cabeçalho `Authorization`. Integrações com token enviam o token colado como está, como `Bearer <token>` quando o manifesto define `token.scheme: "bearer"`, ou como `Basic base64(username:token)` quando define `"basic"`. Integrações OAuth e do Linear sempre enviam `Bearer`. O resultado é `{ status, body }`. O corpo é texto; faça o parse do JSON você mesmo.
+
+Uma integração do Linear também pode fazer `GET /api/linear/issues/get`, que o OpenChamber responde pela própria rota do Linear.
+
+Sem resposta em 20 segundos, o erro é `HOST_TIMEOUT`.
+
+```ts
+try {
+  await host.request({ method: "GET", path: "/api/v2/user" });
+} catch (error) {
+  if (error instanceof HostRequestError && error.code === "DISCONNECTED") {
+    await host.oauthStart();
+  }
+}
+```
+
+## serviceRequest
+
+Quando o manifesto declara `contributes.service`, o OpenChamber inicia esse processo e sua página conversa com ele pelo mesmo tipo de chamada. A página nunca abre o socket por conta própria.
+
+```ts
+const status = await host.serviceStatus();
+const result = await host.serviceRequest({ method: "GET", path: "/containers" });
+```
+
+`path` segue as mesmas regras de `request`. Declarar um serviço local adiciona `service` às capacidades que o usuário aprova na instalação; até lá, todo `serviceRequest` é `NO_SERVICE`. O contrato completo está no arquivo `GUEST_SERVICES.md` do pacote.
+
+## Arquivos
+
+Um caminho relativo fica dentro do projeto aberto e precisa da capacidade `files`. Um caminho que começa com `/` ou `~/` precisa bater com um padrão declarado em `contributes.filesystem` e precisa da capacidade `filesystem`. Veja [Crie uma extensão](/sdk/#arquivos) para as regras.
+
+```ts
+const { content } = await host.readFile("package.json");
+await host.writeFile("notes/today.md", "# Today\n");
+const { entries } = await host.listDir("src");
+const info = await host.stat("~/.config/opencode/opencode.json");
+```
+
+Limites: caminho de até 1024 caracteres, conteúdo de até 2,000,000 caracteres, listagem de até 2000 entradas. Passar do limite de conteúdo é `FILE_TOO_LARGE`.
+
+## Códigos de erro
+
+Chamadas que falham lançam `HostRequestError`. `code` é um destes; `message` traz mais detalhes.
+
+| Código | Quando |
+| --- | --- |
+| `HOST_UNAVAILABLE` | sem window, fora do OpenChamber, ou `dispose()` foi executado |
+| `HOST_TIMEOUT` | sem resposta por 20 segundos |
+| `HOST_REJECTED` | o OpenChamber recusou, ou respondeu com um código que este SDK não conhece |
+| `DISCONNECTED` | sem token nem conexão com o Linear para a sua integração |
+| `BAD_PATH` | `path` estava malformado ou tentou sair da origem permitida |
+| `NO_INTEGRATION` | o manifesto não tem `integration` |
+| `NO_SESSION` | `prompt` ou `sessionLink` sem sessão aberta |
+| `SESSION_BUSY` | `prompt({ send: true })` enquanto a sessão estava ocupada |
+| `DISABLED` | o usuário pausou a extensão em Configurações → Extensões |
+| `NO_SERVICE` | nenhum serviço local declarado, não aprovado ou não está rodando |
+| `NOT_GRANTED` | o usuário não aprovou a capacidade que esta chamada precisa |
+| `SERVICE_FAILED` | o serviço local travou ou nunca ficou pronto |
+| `NO_DIRECTORY` | um caminho de arquivo relativo foi usado sem projeto aberto |
+| `NOT_FOUND` | `readFile` em um arquivo que não existe |
+| `FILE_TOO_LARGE` | conteúdo do arquivo acima do limite, na leitura ou na escrita |
+| `DENIED` | o sistema operacional recusou a operação no arquivo |
+
+## Relacionado
+
+- [Crie uma extensão](/sdk/) para a pasta, o manifesto, a instalação e as capacidades
+- [Kit de UI](/sdk/ui/) para botões, campos, listas e os demais componentes

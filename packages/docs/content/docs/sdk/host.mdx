@@ -1,0 +1,203 @@
+---
+title: Host API
+description: Every connectHost method an extension can call, what OpenChamber pushes to it, the limits, and the error codes.
+---
+
+# Host API
+
+Use this page when you need the exact `connectHost` methods, limits, and error codes. For the folder layout, the manifest, and installing, start at [Build an extension](/sdk/).
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+```
+
+`connectHost` throws `HOST_UNAVAILABLE` when there is no `window`. Outside OpenChamber it returns a client whose every call rejects with `HOST_UNAVAILABLE`. Call `dispose()` when you tear the page down; calls still in flight reject with the same code.
+
+## What OpenChamber pushes to you
+
+`onReady` fires with the first snapshot and again whenever OpenChamber refreshes it.
+
+| Field | What it is |
+| --- | --- |
+| `theme.mode` | `light` or `dark` |
+| `theme.tokens` | the app's colours (surfaces, text, interaction states, primary, success/warning/error/info), `font`, `mono`, and `radius`. Pass this to `applyHostReady` before you mount UI. |
+| `locale` | the app language tag |
+| `directory` | current project directory, or `null` |
+| `session` | `{ id, title, busy }` or `null`. Title falls back to the session id. `busy` is the live status. `model` and `agent` (the OpenCode agent) appear when the session has them. |
+| `surface` | `panel` on the rail, `dialog` in the attach window |
+| `item` | what this surface was opened for, or `null`: the attached item the user clicked (the same fields you passed to `attach`, including `data`), a message (`kind: "message"`), or a session (`kind: "session"`) from one of your declared actions. See [Actions](/sdk/#actions-commands-and-the-badge). |
+| `connection` | `{ connected, account }` for your integration |
+| `settings` | values of the fields you declared in `integration.settings` |
+
+Access tokens never appear here or in a `request` result.
+
+`onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings`, and `onItem` replay the latest value when you subscribe late, then keep firing as it changes.
+
+## Methods
+
+| Call | What it does |
+| --- | --- |
+| `toast({ kind, message })` | show a toast in the app. `kind` is `info`, `success`, or `error`. |
+| `openUrl(url)` | open a URL in the user's browser |
+| `openSurface(surfaceId)` | switch the app to that screen |
+| `writeClipboard(text)` | copy text. 1 to 32000 characters. |
+| `compose({ text, mode? })` | put text in the chat box without sending. `mode` is `append` (default) or `replace`. 1 to 16000 characters after trim. |
+| `attach({ ... })` | put a chip on the chat box, the same place GitHub and Linear items land. Only one chip at a time. |
+| `startSession({ ... })` | create a session with that item attached. Returns `{ sessionId, sent }`. Needs the `sessions` capability. |
+| `prompt({ text, send? })` | write into, or send on, the current session. Returns `{ sent }`. Sending needs the `prompt` capability. |
+| `sessionLink({ ... })` | attach an item to the current session without creating one |
+| `close()` | dismiss the attach window. Does nothing on the rail. |
+| `oauthStart()` | open the provider's authorize page, or the Linear one for a `host: { provider: "linear" }` integration |
+| `oauthDisconnect()` | forget the stored token, or the Linear connection |
+| `request({ method, path, query?, body? })` | call your integration's `apiOrigin` with the user's token attached |
+| `serviceRequest({ method, path, query?, body? })` | call your extension's local service (see `GUEST_SERVICES.md`) |
+| `serviceStatus()` | `stopped`, `starting`, `ready`, or `failed` |
+| `readFile(path)` | read a text file. Returns `{ content }`. |
+| `writeFile(path, content)` | write a text file atomically, creating parent folders. Returns `{ written: true }`. |
+| `listDir(path)` | list a folder. Returns `{ entries: [{ name, kind }] }`, `kind` is `file`, `directory`, or `other`. |
+| `stat(path)` | `{ kind, size, mtime }`, `kind` is `file`, `directory`, `other`, or `missing`. |
+| `onResolve(handler)` | register the handler for your slash commands. It gets `{ command, args }` and returns an attach item or `null`. |
+| `setBadge(count)` | show a number (0 to 999) on your rail icon, or `null` to clear it |
+
+## attach, startSession, and sessionLink
+
+All three take the same item fields:
+
+```ts
+await host.attach({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.attach({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  author: "ada",
+  branches: { head: "feature", base: "main" },
+  text: "Optional notes for the model",
+});
+
+await host.startSession({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  worktree: true,
+  text: "Optional first message",
+});
+```
+
+`providerId` is your panel id; OpenChamber overwrites it with your id anyway. `id` is your own identifier for the item. `kind` is `issue` (default) or `pull`. `text` is optional context for the model, 1 to 16000 characters after trim. `data` is optional JSON of your own (status, comments, anything), up to 16000 characters when serialized. OpenChamber stores it with the chip and hands it back unchanged in `ctx.item` when the user clicks the chip; it never reaches the model.
+
+`startSession` creates a session in the current project. With `worktree: true` OpenChamber creates a git worktree first and opens the session there. When `text` is set and a model is selected, it is sent as the first message. The result is `{ sessionId, sent }`, where `sent` is `sent`, `no-model`, `skipped`, or `failed`. The session exists even after `no-model` and `failed`. No open project, a failed worktree, or a failed session create is a `HOST_REJECTED` error.
+
+`sessionLink` attaches the item to the session that is open now. No project or no session is a `NO_SESSION` error.
+
+Limits the client applies before anything is sent:
+
+| Field | Max characters |
+| --- | --- |
+| `id` | 128 |
+| `title` | 200 |
+| `url` | 2000 |
+| `text` | 16000 |
+| `data` (serialized) | 16000 |
+| `author` | 80 |
+| each branch name | 200 |
+
+## prompt and session lifecycle
+
+```ts
+await host.prompt({ text: "Fix the login" });
+await host.prompt({ text: "Fix the login", send: true });
+
+host.onSessionLifecycle((event) => {
+  document.body.dataset.phase = event.phase;
+});
+```
+
+Without `send`, `prompt` replaces the chat box text. With `send: true` it sends the message using the model and agent the user has selected. The extension never picks them. No open session is `NO_SESSION`. Sending while the session is busy is `SESSION_BUSY`; writing into the box works while busy. The result is `{ sent }` with the same values as `startSession`.
+
+`onSessionLifecycle` tells you what the session is doing. `phase` is `started` while the model works, `completed` when it goes idle, and `failure` on an unexpected status. A late listener gets the current phase right away.
+
+## request
+
+```ts
+const user = await host.request({ method: "GET", path: "/api/v2/user" });
+```
+
+`path` starts with `/` and has no scheme or host; OpenChamber joins it to the `apiOrigin` from your manifest and adds the `Authorization` header. Token integrations send the pasted token as is, as `Bearer <token>` when the manifest sets `token.scheme: "bearer"`, or as `Basic base64(username:token)` when it sets `"basic"`. OAuth and Linear integrations always send `Bearer`. The result is `{ status, body }`. The body is text; parse JSON yourself.
+
+A Linear integration may also `GET /api/linear/issues/get`, which OpenChamber answers from its own Linear route.
+
+No answer within 20 seconds is `HOST_TIMEOUT`.
+
+```ts
+try {
+  await host.request({ method: "GET", path: "/api/v2/user" });
+} catch (error) {
+  if (error instanceof HostRequestError && error.code === "DISCONNECTED") {
+    await host.oauthStart();
+  }
+}
+```
+
+## serviceRequest
+
+When the manifest declares `contributes.service`, OpenChamber starts that process and your page talks to it through the same kind of call. The page never opens the socket itself.
+
+```ts
+const status = await host.serviceStatus();
+const result = await host.serviceRequest({ method: "GET", path: "/containers" });
+```
+
+`path` follows the same rules as `request`. Declaring a service adds `service` to the capabilities the user approves at install; until then every `serviceRequest` is `NO_SERVICE`. Full contract: the package file `GUEST_SERVICES.md`.
+
+## Files
+
+A relative path is inside the open project and needs the `files` capability. A path starting with `/` or `~/` must match a declared `contributes.filesystem` pattern and needs the `filesystem` capability. See [Build an extension](/sdk/#files) for the rules.
+
+```ts
+const { content } = await host.readFile("package.json");
+await host.writeFile("notes/today.md", "# Today\n");
+const { entries } = await host.listDir("src");
+const info = await host.stat("~/.config/opencode/opencode.json");
+```
+
+Limits: path up to 1024 characters, content up to 2,000,000 characters, listing up to 2000 entries. Over the content limit is `FILE_TOO_LARGE`.
+
+## Error codes
+
+Failed calls throw `HostRequestError`. `code` is one of these; `message` says more.
+
+| Code | When |
+| --- | --- |
+| `HOST_UNAVAILABLE` | no window, not inside OpenChamber, or `dispose()` ran |
+| `HOST_TIMEOUT` | no answer for 20 seconds |
+| `HOST_REJECTED` | OpenChamber refused, or answered with a code this SDK does not know |
+| `DISCONNECTED` | no token or Linear connection for your integration |
+| `BAD_PATH` | `path` was malformed or tried to leave the allowed origin |
+| `NO_INTEGRATION` | the manifest has no `integration` |
+| `NO_SESSION` | `prompt` or `sessionLink` with no open session |
+| `SESSION_BUSY` | `prompt({ send: true })` while the session was busy |
+| `DISABLED` | the user paused the extension in Settings → Extensions |
+| `NO_SERVICE` | no service declared, not approved, or not running |
+| `NOT_GRANTED` | the user has not approved the capability this call needs |
+| `SERVICE_FAILED` | the service crashed or never became ready |
+| `NO_DIRECTORY` | a relative file path was used with no open project |
+| `NOT_FOUND` | `readFile` on a file that does not exist |
+| `FILE_TOO_LARGE` | file content over the limit, on read or write |
+| `DENIED` | the operating system refused the file operation |
+
+## Related
+
+- [Build an extension](/sdk/) for the folder, manifest, install, and capabilities
+- [UI kit](/sdk/ui/) for buttons, fields, lists, and the other building blocks

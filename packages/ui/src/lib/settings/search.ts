@@ -1079,6 +1079,29 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['linear', 'project', 'team', 'map', 'workspace', 'directory'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
+  {
+    id: 'integrations.guests',
+    page: 'integrations',
+    titleKey: 'settings.integrations.guests.title',
+    descriptionKey: 'settings.integrations.guests.info',
+    keywords: ['guest', 'extension', 'oauth', 'clickup', 'gitlab', 'panel', 'connect'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'extensions.add',
+    page: 'extensions',
+    titleKey: 'settings.extensions.add.label',
+    descriptionKey: 'settings.extensions.add.info',
+    keywords: ['folder', 'path', 'zip', 'git', 'url', 'install', 'guest', 'panel'],
+    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
+  },
+  {
+    id: 'extensions.updates.check',
+    page: 'extensions',
+    titleKey: 'settings.extensions.updates.check',
+    keywords: ['update', 'upgrade', 'version', 'git', 'extension', 'guest', 'refresh'],
+    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
+  },
 ] as const;
 
 interface BuildSettingsSearchResultsOptions {

@@ -1,0 +1,106 @@
+---
+title: UI 키트
+description: "@openchamber/sdk/ui의 버튼, 입력란, 드롭다운, 탭, 목록 등 구성 요소로 확장을 OpenChamber의 나머지 부분과 같은 모습으로 만듭니다."
+---
+
+# UI 키트
+
+`@openchamber/sdk/ui`는 앱의 색상, 글꼴, 간격을 사용하는 기성 컨트롤 모음입니다. 스타일을 복사하지 않아도 확장이 OpenChamber의 나머지 부분과 같은 모습이 됩니다. 각 컨트롤은 함수입니다. 여러분이 소유한 요소와 설정을 넘기면 거기에 자신을 그리고 `{ update, dispose }`를 반환합니다. 컨트롤을 조합해 화면을 만들고, 데이터는 여러분이 관리합니다. 키트는 제공자나 OpenChamber를 호출하지 않습니다. `host.request`, `host.attach` 등은 여전히 직접 호출해야 합니다. 키트에 없는 것은 직접 HTML과 CSS를 작성해도 되지만, 먼저 키트를 쓰세요. 키트의 컨트롤은 사용자의 테마, 간격, 키보드 습관을 자동으로 따르므로, 그것으로 만든 패널은 안에 들어간 웹사이트가 아니라 OpenChamber의 일부처럼 느껴집니다.
+
+## 먼저 `applyHostReady`를 호출하세요
+
+컨트롤은 `applyHostReady`가 페이지에 기록하는 CSS 변수에서 색상을 읽습니다. 또한 앱의 글꼴과 글자 색상을 페이지 루트에 설정하므로, 직접 추가한 일반 HTML도 제대로 보입니다. 첫 마운트 전에 `host.onReady` 안에서 호출하면, 사용자가 테마를 바꿀 때 색상이 앱을 따라갑니다.
+
+```ts
+import { applyHostReady } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  // mount things here
+});
+```
+
+## 마운트할 수 있는 것
+
+| 함수 | 그리는 것 |
+| --- | --- |
+| `mountButton` | 버튼. `variant`는 `default`, `secondary`, `outline`, `ghost`, `destructive`. `size`는 `default`, `sm`, `xs`. `loading`은 스피너를 표시하고 클릭을 막습니다. |
+| `mountTextField` | 레이블이 있는 입력란. `multiline`이면 textarea가 됩니다. 선택적 `helper` 또는 `error` 텍스트, `password` 마스킹, 토큰과 id를 위한 `mono`가 있습니다. |
+| `mountSearchField` | 돋보기와 지우기 버튼이 있는 검색창. Escape로 지웁니다. |
+| `mountSelect` | 드롭다운. `searchable`을 주면 목록 위에 필터 입력란이 추가됩니다. 화살표 키로 이동, Enter로 선택, Escape로 닫습니다. |
+| `mountCheckbox`, `mountSwitch` | 레이블과 선택적 `description`이 있는 체크박스 또는 토글. |
+| `mountTabs` | 알약 모양 탭. 각 탭에 선택적 개수를 붙일 수 있습니다. 좌우 화살표로 이동합니다. |
+| `mountBadge` | 작은 알약 모양 배지. `tone`은 `neutral`, `primary`, `success`, `warning`, `error`, `info`. |
+| `mountList` | 키보드로 다루기 좋은 목록. 각 행에 앞쪽 키, 제목, 부제목, 오른쪽 정렬 메타 텍스트, 배지를 넣을 수 있습니다. |
+| `mountEmpty` | 가운데 정렬된 빈 상태. 제목, 본문 한 줄, 선택적 버튼. |
+| `mountSpinner` | 선택적 레이블이 있는 로딩 링. |
+| `mountBanner` | 톤이 있는 알림. 제목, 본문, 선택적 동작. |
+| `mountSeparator` | 얇은 선. 가운데에 선택적 레이블을 둘 수 있습니다. |
+| `mountProgress` | 0에서 100까지의 진행 표시줄. |
+| `mountMenu` | 동작 목록을 여는 버튼. 항목은 destructive, disabled, 또는 구분선이 될 수 있습니다. |
+| `mountText` | 제공자에서 온 텍스트. Markdown 형식의 이미지와 `http(s)` 링크는 실제 이미지와 링크가 되고, 나머지는 일반 텍스트로 남으므로 신뢰할 수 없는 내용도 안전하게 보여줄 수 있습니다. |
+
+컨트롤 옆에 단순한 헬퍼 세 개가 함께 제공됩니다. `filterSelectOptions(options, query)`는 `mountSelect`가 사용하는 매칭입니다. `splitTextMedia(text)`는 `mountText`가 그리기 전에 하는 처리입니다. `moveListSelection`은 목록, 셀렉트, 메뉴가 공유하는 키보드 이동으로, 직접 목록을 만들 때 쓸 수 있습니다.
+
+## 검색이 있는 목록
+
+```ts
+import { applyHostReady, mountEmpty, mountList, mountSearchField } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  const root = document.querySelector("#root")!;
+  const searchRoot = root.appendChild(document.createElement("div"));
+  const listRoot = root.appendChild(document.createElement("div"));
+
+  let query = "";
+  let empty: { dispose: () => void } | null = null;
+
+  const list = mountList(listRoot, {
+    items: [],
+    onSelect: (id) => {
+      const task = tasks.find((item) => item.id === id);
+      if (task) void host.attach({ providerId: "acme-hello", id, title: task.title, url: task.url });
+    },
+  });
+
+  const paint = () => {
+    const rows = tasks
+      .filter((task) => task.title.toLowerCase().includes(query.toLowerCase()))
+      .map((task) => ({ id: task.id, leading: task.key, title: task.title, meta: task.updated }));
+    list.update({ items: rows });
+    empty?.dispose();
+    empty = rows.length === 0
+      ? mountEmpty(listRoot, { title: "No tasks match", body: "Try a shorter search." })
+      : null;
+  };
+
+  mountSearchField(searchRoot, {
+    value: query,
+    placeholder: "Search tasks",
+    onChange: (next) => {
+      query = next;
+      paint();
+    },
+  });
+  paint();
+});
+```
+
+`update`에는 바뀐 설정만 넘기면 됩니다. 목록은 강조된 행이 여전히 존재하는 한 업데이트를 거쳐도 그 행을 유지합니다.
+
+## 제공자 텍스트의 링크
+
+페이지는 샌드박스에서 실행되며 스스로 새 탭을 열 수 없습니다. `mountText`를 사용할 때는 `onOpenUrl`을 넘겨서 링크를 OpenChamber에 맡기세요.
+
+```ts
+mountText(root, {
+  text: comment.body,
+  onOpenUrl: (url) => void host.openUrl(url),
+});
+```
+
+## 관련 문서
+
+- [확장 만들기](/sdk/): 폴더, 매니페스트, 설치
+- [Host API](/sdk/host/): `connectHost`, attach, 오류 코드

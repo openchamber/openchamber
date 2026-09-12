@@ -1,0 +1,203 @@
+---
+title: Host API
+description: Кожен метод connectHost, який може викликати розширення, що OpenChamber йому надсилає, обмеження і коди помилок.
+---
+
+# Host API
+
+Ця сторінка для тих, кому потрібні точні методи `connectHost`, обмеження і коди помилок. Про структуру теки, маніфест і встановлення читайте в [Зробити розширення](/sdk/).
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+```
+
+`connectHost` кидає `HOST_UNAVAILABLE`, якщо немає `window`. Поза OpenChamber він повертає клієнт, у якого кожен виклик відхиляється з `HOST_UNAVAILABLE`. Викликайте `dispose()`, коли прибираєте сторінку; незавершені виклики відхиляються з тим самим кодом.
+
+## Що OpenChamber вам надсилає
+
+`onReady` спрацьовує з першим знімком стану і потім щоразу, коли OpenChamber його оновлює.
+
+| Поле | Що це |
+| --- | --- |
+| `theme.mode` | `light` або `dark` |
+| `theme.tokens` | кольори застосунку (поверхні, текст, стани взаємодії, primary, success/warning/error/info), `font`, `mono` і `radius`. Передайте це в `applyHostReady` перед тим, як монтувати UI. |
+| `locale` | тег мови застосунку |
+| `directory` | тека поточного проєкту або `null` |
+| `session` | `{ id, title, busy }` або `null`. Якщо назви немає, замість неї id сесії. `busy` - поточний статус. `model` і `agent` (агент OpenCode) з'являються, коли вони є в сесії. |
+| `surface` | `panel` на рейці, `dialog` у вікні прикріплення |
+| `item` | для чого відкрита ця поверхня, або `null`: прикріплений елемент, який клацнув користувач (ті самі поля, які ви передали в `attach`, включно з `data`), повідомлення (`kind: "message"`) або сесія (`kind: "session"`) з однієї з оголошених вами дій. Див. [Дії](/sdk/#дії-команди-та-бейдж). |
+| `connection` | `{ connected, account }` для вашої інтеграції |
+| `settings` | значення полів, які ви оголосили в `integration.settings` |
+
+Токени доступу тут ніколи не з'являються, як і в результаті `request`.
+
+`onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings` і `onItem` віддають останнє значення, навіть якщо ви підписалися пізно, а далі спрацьовують при кожній зміні.
+
+## Методи
+
+| Виклик | Що робить |
+| --- | --- |
+| `toast({ kind, message })` | показати тост у застосунку. `kind` - `info`, `success` або `error`. |
+| `openUrl(url)` | відкрити URL у браузері користувача |
+| `openSurface(surfaceId)` | перемкнути застосунок на той екран |
+| `writeClipboard(text)` | скопіювати текст. Від 1 до 32000 символів. |
+| `compose({ text, mode? })` | вставити текст у поле чату без надсилання. `mode` - `append` (типово) або `replace`. Від 1 до 16000 символів після обрізання пробілів. |
+| `attach({ ... })` | поставити чип на поле чату, туди ж, куди потрапляють елементи GitHub і Linear. Лише один чип за раз. |
+| `startSession({ ... })` | створити сесію з прикріпленим елементом. Повертає `{ sessionId, sent }`. Потрібен дозвіл `sessions`. |
+| `prompt({ text, send? })` | написати в поточну сесію або надіслати в ній. Повертає `{ sent }`. Для надсилання потрібен дозвіл `prompt`. |
+| `sessionLink({ ... })` | прикріпити елемент до поточної сесії, не створюючи нової |
+| `close()` | закрити вікно прикріплення. На рейці нічого не робить. |
+| `oauthStart()` | відкрити сторінку авторизації провайдера або сторінку Linear для інтеграції з `host: { provider: "linear" }` |
+| `oauthDisconnect()` | забути збережений токен або підключення Linear |
+| `request({ method, path, query?, body? })` | викликати `apiOrigin` вашої інтеграції з доданим токеном користувача |
+| `serviceRequest({ method, path, query?, body? })` | викликати локальний сервіс вашого розширення (див. `GUEST_SERVICES.md`) |
+| `serviceStatus()` | `stopped`, `starting`, `ready` або `failed` |
+| `readFile(path)` | прочитати текстовий файл. Повертає `{ content }`. |
+| `writeFile(path, content)` | атомарно записати текстовий файл, створюючи батьківські теки. Повертає `{ written: true }`. |
+| `listDir(path)` | перелічити теку. Повертає `{ entries: [{ name, kind }] }`, `kind` - `file`, `directory` або `other`. |
+| `stat(path)` | `{ kind, size, mtime }`, `kind` - `file`, `directory`, `other` або `missing`. |
+| `onResolve(handler)` | зареєструвати обробник ваших слеш-команд. Він отримує `{ command, args }` і повертає елемент для прикріплення або `null`. |
+| `setBadge(count)` | показати число (від 0 до 999) на вашій іконці в рейці або `null`, щоб прибрати його |
+
+## attach, startSession і sessionLink
+
+Усі три приймають однакові поля елемента:
+
+```ts
+await host.attach({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.attach({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  author: "ada",
+  branches: { head: "feature", base: "main" },
+  text: "Optional notes for the model",
+});
+
+await host.startSession({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  worktree: true,
+  text: "Optional first message",
+});
+```
+
+`providerId` - це id вашої панелі; OpenChamber усе одно перезаписує його вашим id. `id` - ваш власний ідентифікатор елемента. `kind` - `issue` (типово) або `pull`. `text` - необов'язковий контекст для моделі, від 1 до 16000 символів після обрізання пробілів. `data` - необов'язковий JSON на ваш розсуд (статус, коментарі, будь-що), до 16000 символів у серіалізованому вигляді. OpenChamber зберігає його разом із чипом і віддає назад без змін у `ctx.item`, коли користувач клацає чип; до моделі він ніколи не потрапляє.
+
+`startSession` створює сесію в поточному проєкті. З `worktree: true` OpenChamber спершу створює git worktree і відкриває сесію там. Якщо задано `text` і вибрано модель, він надсилається як перше повідомлення. Результат - `{ sessionId, sent }`, де `sent` дорівнює `sent`, `no-model`, `skipped` або `failed`. Сесія існує навіть після `no-model` і `failed`. Немає відкритого проєкту, не вдалося створити worktree або сесію - це помилка `HOST_REJECTED`.
+
+`sessionLink` прикріплює елемент до сесії, яка відкрита зараз. Немає проєкту або сесії - помилка `NO_SESSION`.
+
+Обмеження, які клієнт перевіряє ще до надсилання:
+
+| Поле | Макс. символів |
+| --- | --- |
+| `id` | 128 |
+| `title` | 200 |
+| `url` | 2000 |
+| `text` | 16000 |
+| `data` (серіалізовано) | 16000 |
+| `author` | 80 |
+| кожна назва гілки | 200 |
+
+## prompt і життєвий цикл сесії
+
+```ts
+await host.prompt({ text: "Fix the login" });
+await host.prompt({ text: "Fix the login", send: true });
+
+host.onSessionLifecycle((event) => {
+  document.body.dataset.phase = event.phase;
+});
+```
+
+Без `send` `prompt` замінює текст у полі чату. З `send: true` він надсилає повідомлення тією моделлю і тим агентом, які вибрав користувач. Розширення їх ніколи не вибирає. Немає відкритої сесії - `NO_SESSION`. Надсилання, поки сесія зайнята, - `SESSION_BUSY`; писати в поле під час зайнятості можна. Результат - `{ sent }` з тими самими значеннями, що й у `startSession`.
+
+`onSessionLifecycle` каже, що зараз робить сесія. `phase` дорівнює `started`, поки модель працює, `completed`, коли вона переходить у стан спокою, і `failure` при неочікуваному статусі. Пізній підписник одразу отримує поточну фазу.
+
+## request
+
+```ts
+const user = await host.request({ method: "GET", path: "/api/v2/user" });
+```
+
+`path` починається з `/` і не містить схеми чи хоста; OpenChamber приклеює його до `apiOrigin` з вашого маніфесту і додає заголовок `Authorization`. Інтеграції з токеном надсилають вставлений токен як є, як `Bearer <token>`, якщо в маніфесті `token.scheme: "bearer"`, або як `Basic base64(username:token)`, якщо там `"basic"`. OAuth- і Linear-інтеграції завжди надсилають `Bearer`. Результат - `{ status, body }`. Тіло приходить текстом; JSON розбирайте самі.
+
+Інтеграція з Linear може також викликати `GET /api/linear/issues/get`, на який OpenChamber відповідає зі свого маршруту Linear.
+
+Немає відповіді протягом 20 секунд - `HOST_TIMEOUT`.
+
+```ts
+try {
+  await host.request({ method: "GET", path: "/api/v2/user" });
+} catch (error) {
+  if (error instanceof HostRequestError && error.code === "DISCONNECTED") {
+    await host.oauthStart();
+  }
+}
+```
+
+## serviceRequest
+
+Якщо в маніфесті оголошено `contributes.service`, OpenChamber запускає той процес, а ваша сторінка спілкується з ним через такий самий виклик. Сторінка ніколи не відкриває сокет сама.
+
+```ts
+const status = await host.serviceStatus();
+const result = await host.serviceRequest({ method: "GET", path: "/containers" });
+```
+
+`path` підкоряється тим самим правилам, що й у `request`. Оголошення сервісу додає `service` до дозволів, які користувач підтверджує під час встановлення; до того кожен `serviceRequest` - `NO_SERVICE`. Повний контракт: файл пакета `GUEST_SERVICES.md`.
+
+## Файли
+
+Відносний шлях лежить усередині відкритого проєкту і потребує дозволу `files`. Шлях, що починається з `/` або `~/`, має збігатися з оголошеним шаблоном `contributes.filesystem` і потребує дозволу `filesystem`. Правила див. у [Зробити розширення](/sdk/#файли).
+
+```ts
+const { content } = await host.readFile("package.json");
+await host.writeFile("notes/today.md", "# Today\n");
+const { entries } = await host.listDir("src");
+const info = await host.stat("~/.config/opencode/opencode.json");
+```
+
+Обмеження: шлях до 1024 символів, вміст до 2,000,000 символів, список до 2000 записів. Перевищення обмеження вмісту - `FILE_TOO_LARGE`.
+
+## Коди помилок
+
+Невдалі виклики кидають `HostRequestError`. `code` - один із цих; `message` пояснює докладніше.
+
+| Код | Коли |
+| --- | --- |
+| `HOST_UNAVAILABLE` | немає window, сторінка не всередині OpenChamber або вже викликано `dispose()` |
+| `HOST_TIMEOUT` | немає відповіді 20 секунд |
+| `HOST_REJECTED` | OpenChamber відмовив або відповів кодом, якого цей SDK не знає |
+| `DISCONNECTED` | для вашої інтеграції немає токена або підключення Linear |
+| `BAD_PATH` | `path` некоректний або намагався вийти за дозволене джерело |
+| `NO_INTEGRATION` | у маніфесті немає `integration` |
+| `NO_SESSION` | `prompt` або `sessionLink` без відкритої сесії |
+| `SESSION_BUSY` | `prompt({ send: true })`, поки сесія була зайнята |
+| `DISABLED` | користувач призупинив розширення в Налаштування → Розширення |
+| `NO_SERVICE` | сервіс не оголошено, не підтверджено або не запущено |
+| `NOT_GRANTED` | користувач не підтвердив дозвіл, потрібний для цього виклику |
+| `SERVICE_FAILED` | сервіс упав або так і не став готовим |
+| `NO_DIRECTORY` | відносний шлях до файлу використано без відкритого проєкту |
+| `NOT_FOUND` | `readFile` файлу, якого не існує |
+| `FILE_TOO_LARGE` | вміст файлу перевищує обмеження, під час читання або запису |
+| `DENIED` | операційна система відмовила у файловій операції |
+
+## Дивіться також
+
+- [Зробити розширення](/sdk/): тека, маніфест, встановлення і дозволи
+- [UI-набір](/sdk/ui/): кнопки, поля, списки та інші готові елементи

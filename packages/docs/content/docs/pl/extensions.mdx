@@ -1,0 +1,63 @@
+---
+title: Rozszerzenia
+description: Zainstaluj rozszerzenia innych autorów w OpenChamber, zdecyduj, co mogą robić, połącz ich konta i usuń je, gdy nie są potrzebne.
+---
+
+# Rozszerzenia
+
+W **Ustawienia → Rozszerzenia** dodasz do OpenChamber panele zrobione przez inne osoby. Rozszerzenie to mała strona na prawym pasku, obok wbudowanych paneli. Może pokazywać dane z innej usługi, dołączać zadanie do czatu, a jeśli na to pozwolisz, uruchamiać sesje, wysyłać prompty lub czytać pliki.
+
+Rozszerzenia działają w OpenChamber w wersji web i desktop. VS Code i aplikacja mobilna jeszcze ich nie ładują. To nie to samo co wtyczki OpenCode.
+
+## Zainstaluj rozszerzenie
+
+1. Otwórz **Ustawienia → Rozszerzenia**.
+2. Wklej jedną z tych rzeczy w pole **Folder, ZIP lub URL** i wybierz **Dodaj**:
+   - pełną ścieżkę do folderu na tym komputerze
+   - ścieżkę do pliku `.zip`
+   - link https do repozytorium git lub pliku zip
+3. Jeśli rozszerzenie prosi o uprawnienia, okno dialogowe je wymienia. Wybierz **Zezwól i włącz** albo **Usuń**, żeby je wycofać.
+
+Możesz też upuścić `.zip` na pole albo wybrać go przyciskiem archiwum obok; archiwum jest wysyłane na serwer OpenChamber, więc działa to także dla zdalnej instancji. Na desktopie przycisk folderu otwiera systemowe okno wyboru, a upuszczony folder instaluje się z jego ścieżki.
+
+Ikona rozszerzenia pojawia się na pasku. Jeśli jej nie ma, zajrzyj do [Rozwiązywania problemów](/troubleshooting/).
+
+Instalacja z folderu działa bezpośrednio z tego folderu, więc ktoś, kto tworzy rozszerzenie, może edytować i przeładowywać. Zip lub URL jest najpierw kopiowany do folderu danych OpenChamber; oryginalny plik zostaje nietknięty.
+
+## Co rozszerzenie może robić
+
+Pokazywanie panelu i odczyt, który projekt i sesja są otwarte, nie wymaga uprawnień. Wszystko, co działa w Twoim imieniu, wymaga, a całą listę widzisz raz, przy instalacji:
+
+- **Wysyłanie wiadomości w Twoich sesjach**: pisze i wysyła prompty do modelu, co kosztuje tokeny i może uruchamiać narzędzia.
+- **Tworzenie sesji i worktree**: w bieżącym projekcie.
+- **Odczyt i zapis plików projektu**: dowolny plik w otwartym projekcie.
+- **Odczyt i zapis plików poza projektem**: tylko lokalizacje wymienione w oknie dialogowym.
+- **Łączenie z usługą zewnętrzną**: z kontem, które połączysz w Ustawienia → Integracje.
+- **Czytanie rozmowy sesji**: tylko gdy uruchamiasz akcję rozszerzenia na tej sesji.
+- **Uruchamianie lokalnej usługi**: osobny program z pełnymi uprawnieniami Twojego konta. Zezwalaj tylko, jeśli ufasz autorowi.
+
+Gdy nowsza wersja prosi o więcej, niż pozwoliłeś, karta pokazuje **Wymaga zgody** i przycisk **Sprawdź uprawnienia**. Dopóki nie zezwolisz na nową listę, to rozszerzenie pozostaje wyłączone.
+
+## Gdzie się pojawia
+
+Poza panelem na pasku bocznym rozszerzenie może dodawać pozycje do menu, z których już korzystasz: akcje na wiadomości w czacie, menu sesji, menu + obok pola czatu oraz polecenia z ukośnikiem, jak `/task ABC-12`, które dołączają coś bez otwierania czegokolwiek. Rozszerzenie samo decyduje, które z nich oferuje; wszystkie są wyłączone, dopóki nie zezwolisz na rozszerzenie.
+
+## Połącz jego konto
+
+Rozszerzenie, które rozmawia z usługą, dostaje kartę w **Ustawienia → Integracje** w sekcji **Konta rozszerzeń**. Zależnie od usługi karta prosi o token API, nazwę użytkownika i token albo client id do logowania. Wybierz **Połącz**; **Rozłącz** zapomina zapisany token. Dodatkowe pola zadeklarowane przez rozszerzenie zapisują się same, gdy je opuszczasz.
+
+Token zostaje na serwerze OpenChamber. Strona rozszerzenia nigdy go nie widzi.
+
+## Aktualizuj
+
+Rozszerzenia zainstalowane z adresu URL git mogą aktualizować się same. Otwarcie **Ustawienia → Rozszerzenia** sprawdza każde z nich najwyżej raz na godzinę; **Sprawdź aktualizacje** sprawdza od razu. Karta z nowszą wersją pokazuje **Dostępna aktualizacja** i przycisk **Aktualizuj**. Aktualizacja zachowuje Twoje uprawnienia, konta i ustawienia; jeśli nowa wersja prosi o więcej, okno dialogowe zgody pojawia się ponownie. Instalacje z folderu i z zip nie aktualizują się: zastąp je ręcznie.
+
+Dodaj `#v1.2.0` albo `#stable` do adresu URL git przy instalacji, żeby śledzić tag lub gałąź zamiast gałęzi domyślnej.
+
+## Wstrzymaj lub usuń
+
+Każda karta ma przełącznik **Włączone**. Wyłączony zostawia rozszerzenie zainstalowane, ale ukrywa jego panel i blokuje jego wywołania. **Usuń** kasuje instalację z zip lub URL z folderu danych OpenChamber; przy instalacji z folderu tylko zapomina ścieżkę, Twój folder zostaje.
+
+## Zbuduj własne
+
+Wszystko, co rozszerzenie potrafi, i jak je zrobić, znajdziesz w [Zbuduj rozszerzenie](/sdk/).

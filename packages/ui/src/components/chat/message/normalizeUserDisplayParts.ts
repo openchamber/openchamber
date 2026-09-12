@@ -180,7 +180,13 @@ export const normalizeUserDisplayParts = (parts: Part[], options?: { planModeEna
 
                 if (synthetic) {
                     const contextPayload = readContextPart(part);
-                    if (contextPayload?.kind === 'github-issue' || contextPayload?.kind === 'github-pr' || contextPayload?.kind === 'linear-issue') {
+                    if (
+                        contextPayload?.kind === 'github-issue'
+                        || contextPayload?.kind === 'github-pr'
+                        || contextPayload?.kind === 'linear-issue'
+                        || contextPayload?.kind === 'guest-issue'
+                        || contextPayload?.kind === 'guest-pr'
+                    ) {
                         // SAFETY: same display-only file-part shape the legacy
                         // buildGitHubAttachmentPart produces; consumed by
                         // FileAttachment, which matches on the mime type.
@@ -189,6 +195,18 @@ export const normalizeUserDisplayParts = (parts: Part[], options?: { planModeEna
                                 type: 'file',
                                 mime: 'application/vnd.openchamber.linear-issue-link',
                                 filename: `${contextPayload.identifier}: ${contextPayload.title}`,
+                                url: contextPayload.url,
+                            } as Part;
+                        }
+                        if (contextPayload.kind === 'guest-issue' || contextPayload.kind === 'guest-pr') {
+                            return {
+                                type: 'file',
+                                mime: contextPayload.kind === 'guest-pr'
+                                    ? 'application/vnd.openchamber.guest-pr-link'
+                                    : 'application/vnd.openchamber.guest-issue-link',
+                                filename: contextPayload.kind === 'guest-pr'
+                                    ? `PR ${contextPayload.id}: ${contextPayload.title}`
+                                    : `${contextPayload.id}: ${contextPayload.title}`,
                                 url: contextPayload.url,
                             } as Part;
                         }

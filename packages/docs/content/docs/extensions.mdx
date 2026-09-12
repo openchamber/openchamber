@@ -1,0 +1,63 @@
+---
+title: Extensions
+description: Install third-party extensions in OpenChamber, approve what they may do, connect their accounts, and remove them.
+---
+
+# Extensions
+
+Use **Settings → Extensions** to add panels made by other people to OpenChamber. An extension is a small page that sits on the right-hand rail, next to the built-in panels. It can show you data from another service, attach a task to the chat, and, if you allow it, start sessions, send prompts, or read files.
+
+Extensions run on OpenChamber web and desktop. VS Code and the mobile app do not load them yet. They are not the same thing as OpenCode plugins.
+
+## Install one
+
+1. Open **Settings → Extensions**.
+2. Paste one of these into the **Folder, ZIP, or URL** field and choose **Add**:
+   - the absolute path of a folder on this computer
+   - the path of a `.zip` file
+   - an https link to a git repository or a zip file
+3. If the extension asks for any permissions, a dialog lists them. Choose **Allow and enable**, or **Remove** to take it back out.
+
+You can also drop a `.zip` onto the field, or pick one with the archive button next to it; the archive is uploaded to the OpenChamber server, so this works for a remote instance too. On desktop the folder button opens a native picker, and a dropped folder installs from its path.
+
+The extension's icon appears on the rail. If it does not, see [Troubleshooting](/troubleshooting/).
+
+A folder install runs straight from that folder, so someone developing an extension can edit and reload. A zip or a URL is copied into OpenChamber's own data folder first; the original file is not touched.
+
+## What an extension may do
+
+Showing a panel and reading which project and session are open needs no permission. Anything that acts on your behalf does, and you see the whole list once, when you install:
+
+- **Send messages in your sessions**: writes and sends prompts to the model, which costs tokens and can run tools.
+- **Create sessions and worktrees**: in the current project.
+- **Read and write project files**: any file in the open project.
+- **Read and write files outside the project**: only the locations listed in the dialog.
+- **Connect to an external service**: with the account you connect in Settings → Integrations.
+- **Read a session's conversation**: only when you run the extension's action on that session.
+- **Run a local service**: a separate program with your full user access. Allow it only if you trust the author.
+
+When a newer version asks for more than you allowed, the card shows **Needs approval** and a **Review permissions** button. Until you allow the new list, that extension stays off.
+
+## Where it shows up
+
+Besides its panel on the rail, an extension can add entries to menus you already use: the actions on a chat message, the menu of a session, the + menu next to the chat box, and slash commands like `/task ABC-12` that attach something without opening anything. The extension decides which of these it offers; all of them are off until you allow the extension.
+
+## Connect its account
+
+An extension that talks to a service gets a card at **Settings → Integrations** under **Extension accounts**. Depending on the service, the card asks for an API token, a username and token, or a client id for a sign-in flow. Choose **Connect**; **Disconnect** forgets the stored token. Extra fields the extension declares save on their own as you leave them.
+
+The token stays on the OpenChamber server. The extension's page never sees it.
+
+## Update
+
+Extensions installed from a git URL can update themselves. Opening **Settings → Extensions** checks each of them at most once an hour; **Check for updates** checks right away. A card with a newer version shows **Update available** and an **Update** button. The update keeps your permissions, accounts, and settings; if the new version asks for more, the approval dialog appears again. Folder and zip installs do not update: replace them by hand.
+
+Add `#v1.2.0` or `#stable` to the git URL when you install to follow a tag or branch instead of the default branch.
+
+## Pause or remove
+
+Each card has an **Enabled** switch. Off keeps the extension installed but hides its panel and blocks its calls. **Remove** deletes a zip or URL install from OpenChamber's data folder; for a folder install it only forgets the path, your folder stays.
+
+## Build your own
+
+Everything an extension can do, and how to make one, is in [Build an extension](/sdk/).

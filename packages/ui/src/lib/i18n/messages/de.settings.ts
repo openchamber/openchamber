@@ -1,3 +1,5 @@
+import { extensionsSettingsI18n } from './extensions.settings.i18n';
+import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
   'settings.openchamber.visual.field.alwaysShowScrollbars': 'Bildlaufleisten immer anzeigen',
@@ -2274,6 +2276,8 @@ export const settingsDict = {
   'settings.openchamber.visual.option.themeMode.dark.description': 'Immer dunkles Erscheinungsbild verwenden',
   'chat.message.userText.collapseAria': 'Benutzernachricht einklappen',
   ...linearIntegrationI18n.de,
+  ...guestIntegrationsI18n.de,
+  ...extensionsSettingsI18n.de,
   'settings.page.integrations.title': 'Integrationen',
   'settings.page.integrations.description': 'Verbinde GitHub und Linear, damit OpenChamber mit deinen Issues und Pull Requests arbeiten kann.',
 };

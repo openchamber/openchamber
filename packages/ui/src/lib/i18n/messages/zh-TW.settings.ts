@@ -1,3 +1,5 @@
+import { extensionsSettingsI18n } from './extensions.settings.i18n';
+import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
   'settings.openchamber.visual.field.alwaysShowScrollbars': '一律顯示捲軸',
@@ -2283,6 +2285,8 @@ export const settingsDict = {
   'settings.openchamber.visual.option.enterToSend.enter.label': '按 Enter 傳送',
   'settings.openchamber.visual.option.enterToSend.modifier.label': '按 Ctrl/Cmd+Enter 傳送',
   ...linearIntegrationI18n['zh-TW'],
+  ...guestIntegrationsI18n['zh-TW'],
+  ...extensionsSettingsI18n['zh-TW'],
   'settings.page.integrations.title': '整合',
   'settings.page.integrations.description': '連接 GitHub 和 Linear，讓 OpenChamber 可以處理你的 issue 和 pull request。',
 } as const;

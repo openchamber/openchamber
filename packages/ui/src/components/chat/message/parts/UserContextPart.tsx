@@ -186,6 +186,8 @@ const UserContextPart: React.FC<{
         case 'github-issue':
         case 'github-pr':
         case 'linear-issue':
+        case 'guest-issue':
+        case 'guest-pr':
             // Rendered as link attachments by normalizeUserDisplayParts.
             return null;
     }

@@ -1,3 +1,5 @@
+import { extensionsSettingsI18n } from './extensions.settings.i18n';
+import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
   'settings.openchamber.visual.field.alwaysShowScrollbars': 'Завжди показувати смуги прокручування',
@@ -2283,6 +2285,8 @@ export const settingsDict = {
   "settings.openchamber.visual.option.enterToSend.enter.label": "Надсилати клавішею Enter",
   "settings.openchamber.visual.option.enterToSend.modifier.label": "Надсилати за допомогою Ctrl/Cmd+Enter",
   ...linearIntegrationI18n.uk,
+  ...guestIntegrationsI18n.uk,
+  ...extensionsSettingsI18n.uk,
   'settings.page.integrations.title': 'Інтеграції',
   'settings.page.integrations.description': 'Підключіть GitHub і Linear, щоб OpenChamber міг працювати з вашими задачами та pull request-ами.',
 } as const;

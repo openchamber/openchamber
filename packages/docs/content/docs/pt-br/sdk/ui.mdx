@@ -1,0 +1,106 @@
+---
+title: Kit de UI
+description: Botões, campos, dropdowns, abas, listas e outros componentes de @openchamber/sdk/ui que fazem uma extensão ficar com a cara do resto do OpenChamber.
+---
+
+# Kit de UI
+
+`@openchamber/sdk/ui` é um conjunto de controles prontos que usam as cores, fontes e espaçamentos do app, para sua extensão ficar com a cara do resto do OpenChamber sem copiar os estilos dele. Cada controle é uma função: você entrega um elemento que é seu e as configurações, ele se desenha ali e devolve `{ update, dispose }`. Você junta os controles em uma tela e fica com os dados. O kit nunca chama seu provedor nem o OpenChamber; você continua chamando `host.request`, `host.attach` e o resto por conta própria. Você pode escrever seu próprio HTML e CSS para tudo que o kit não tem, mas comece pelo kit: os controles dele seguem automaticamente o tema, os espaçamentos e os hábitos de teclado do usuário, então um painel montado com eles parece parte do OpenChamber, e não um site dentro dele.
+
+## Chame `applyHostReady` primeiro
+
+Os controles leem suas cores de variáveis CSS que `applyHostReady` escreve na página. Ele também aplica a fonte e a cor de texto do app na raiz da página, então o HTML simples que você adicionar por conta própria também fica certo. Chame-o dentro de `host.onReady` antes da primeira montagem, e as cores acompanham o tema do app quando o usuário troca.
+
+```ts
+import { applyHostReady } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  // mount things here
+});
+```
+
+## O que você pode montar
+
+| Função | O que desenha |
+| --- | --- |
+| `mountButton` | Um botão. `variant` é `default`, `secondary`, `outline`, `ghost` ou `destructive`; `size` é `default`, `sm` ou `xs`. `loading` mostra um spinner e bloqueia cliques. |
+| `mountTextField` | Um campo com rótulo, ou um textarea com `multiline`. Texto opcional de `helper` ou `error`, mascaramento com `password`, e `mono` para tokens e ids. |
+| `mountSearchField` | Uma caixa de busca com lupa e botão de limpar. Escape limpa. |
+| `mountSelect` | Um dropdown. `searchable` adiciona uma caixa de filtro no topo da lista. Setas movem, Enter escolhe, Escape fecha. |
+| `mountCheckbox`, `mountSwitch` | Uma caixa de seleção ou um interruptor com rótulo e uma `description` opcional. |
+| `mountTabs` | Abas em formato de pílula, cada uma com um contador opcional. As setas esquerda e direita movem entre elas. |
+| `mountBadge` | Uma pílula pequena. `tone` é `neutral`, `primary`, `success`, `warning`, `error` ou `info`. |
+| `mountList` | Uma lista navegável pelo teclado. Cada linha pode ter uma chave à esquerda, um título, um subtítulo, texto meta alinhado à direita e um badge. |
+| `mountEmpty` | Um estado vazio centralizado com título, uma linha de texto e um botão opcional. |
+| `mountSpinner` | Um anel de carregamento com rótulo opcional. |
+| `mountBanner` | Um aviso com tom, título, texto e uma ação opcional. |
+| `mountSeparator` | Uma linha fina, opcionalmente com um rótulo no meio. |
+| `mountProgress` | Uma barra de progresso de 0 a 100. |
+| `mountMenu` | Um botão que abre uma lista de ações. Os itens podem ser destrutivos, desabilitados ou um separador. |
+| `mountText` | Texto vindo do seu provedor. Imagens e links `http(s)` no estilo Markdown viram imagens e links de verdade; todo o resto fica como texto puro, então é seguro mostrar conteúdo não confiável. |
+
+Três helpers simples acompanham os controles. `filterSelectOptions(options, query)` é a busca que `mountSelect` usa. `splitTextMedia(text)` é o que `mountText` faz antes de desenhar. `moveListSelection` é o passo de teclado que a lista, o select e o menu compartilham, caso você monte sua própria lista.
+
+## Uma lista com busca
+
+```ts
+import { applyHostReady, mountEmpty, mountList, mountSearchField } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  const root = document.querySelector("#root")!;
+  const searchRoot = root.appendChild(document.createElement("div"));
+  const listRoot = root.appendChild(document.createElement("div"));
+
+  let query = "";
+  let empty: { dispose: () => void } | null = null;
+
+  const list = mountList(listRoot, {
+    items: [],
+    onSelect: (id) => {
+      const task = tasks.find((item) => item.id === id);
+      if (task) void host.attach({ providerId: "acme-hello", id, title: task.title, url: task.url });
+    },
+  });
+
+  const paint = () => {
+    const rows = tasks
+      .filter((task) => task.title.toLowerCase().includes(query.toLowerCase()))
+      .map((task) => ({ id: task.id, leading: task.key, title: task.title, meta: task.updated }));
+    list.update({ items: rows });
+    empty?.dispose();
+    empty = rows.length === 0
+      ? mountEmpty(listRoot, { title: "No tasks match", body: "Try a shorter search." })
+      : null;
+  };
+
+  mountSearchField(searchRoot, {
+    value: query,
+    placeholder: "Search tasks",
+    onChange: (next) => {
+      query = next;
+      paint();
+    },
+  });
+  paint();
+});
+```
+
+`update` recebe só as configurações que mudaram. A lista mantém a linha destacada entre atualizações enquanto essa linha continuar existindo.
+
+## Links no texto do provedor
+
+Sua página roda em um ambiente isolado e não consegue abrir uma nova aba sozinha. Ao usar `mountText`, passe `onOpenUrl` e entregue o link ao OpenChamber:
+
+```ts
+mountText(root, {
+  text: comment.body,
+  onOpenUrl: (url) => void host.openUrl(url),
+});
+```
+
+## Relacionado
+
+- [Crie uma extensão](/sdk/) para a pasta, o manifesto e a instalação
+- [API do host](/sdk/host/) para `connectHost`, attach e os códigos de erro

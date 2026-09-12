@@ -1,4 +1,5 @@
 import { getActiveRelayTunnel } from '@/lib/relay/runtime-tunnel';
+import { z } from 'zod';
 
 type RuntimeAuthCredential =
   | { type: 'bearer'; token: string }
@@ -217,42 +218,71 @@ const getRuntimeAuthCredential = async (): Promise<RuntimeAuthCredential> => {
 // Performs the actual network mint and swaps the new token in atomically (the
 // previous token stays valid until `setRuntimeUrlAuthToken` replaces it — no
 // empty-token window). Concurrent callers share one in-flight request.
+type UrlAuthScope = `guest:${string}`;
+
+type MintedUrlAuthToken = { token: string; expiresAt: number };
+
+const mintedUrlAuthTokenSchema = z.object({ token: z.string(), expiresAt: z.number() });
+
+// One POST to `/auth/url-token` with the current runtime credentials. In relay
+// mode the mint must ride the tunnel, not the network: there is no reachable
+// network base URL. Same auth headers, same route, tunneled.
+const postUrlAuthTokenMint = async (apiBaseUrl: string | null | undefined, scope?: UrlAuthScope): Promise<MintedUrlAuthToken> => {
+  const credential = await getRuntimeAuthCredential();
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(getRuntimeExtraHeadersSync())) {
+    headers.set(key, value);
+  }
+  if (credential?.type === 'bearer') {
+    headers.set('Authorization', `Bearer ${credential.token}`);
+  }
+  const route = scope ? `/auth/url-token?scope=${encodeURIComponent(scope)}` : '/auth/url-token';
+  const relay = getActiveRelayTunnel();
+  const response = relay
+    ? await relay.fetch(route, { method: 'POST', headers })
+    : await fetch(buildAuthUrl(apiBaseUrl, route), {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+      });
+  if (!response.ok) {
+    throw new Error(`Failed to mint runtime URL auth token (${response.status})`);
+  }
+  const parsed = mintedUrlAuthTokenSchema.safeParse(await response.json().catch(() => null));
+  return parsed.success ? { token: parsed.data.token.trim(), expiresAt: parsed.data.expiresAt } : { token: '', expiresAt: 0 };
+};
+
+/**
+ * A token that opens only one guest's package files. It is never cached: the
+ * guest iframe URL is readable by the guest's own script, so every mount gets a
+ * fresh token that is worthless outside `/api/guests/<id>/`.
+ */
+export const mintGuestFrameUrlAuthToken = async (guestId: string): Promise<string> => {
+  const minted = await postUrlAuthTokenMint(null, `guest:${guestId}`);
+  if (!minted.token) {
+    throw new Error('Guest URL auth token response was invalid');
+  }
+  return minted.token;
+};
+
 const mintRuntimeUrlAuthToken = (apiBaseUrl?: string | null): Promise<string> => {
   if (runtimeUrlAuthRefreshPromise) return runtimeUrlAuthRefreshPromise;
   const generation = runtimeAuthGeneration;
 
   const refreshPromise = (async () => {
-    const credential = await getRuntimeAuthCredential();
-    const headers = new Headers();
-    for (const [key, value] of Object.entries(getRuntimeExtraHeadersSync())) {
-      headers.set(key, value);
-    }
-    if (credential?.type === 'bearer') {
-      headers.set('Authorization', `Bearer ${credential.token}`);
-    }
-    // In relay mode the mint must ride the tunnel, not the network: there is no
-    // reachable network base URL. Same auth headers, same route, tunneled.
-    const relay = getActiveRelayTunnel();
-    const response = relay
-      ? await relay.fetch('/auth/url-token', { method: 'POST', headers })
-      : await fetch(buildAuthUrl(apiBaseUrl, '/auth/url-token'), {
-          method: 'POST',
-          headers,
-          credentials: 'include',
-        });
-    if (!response.ok) {
+    let minted: MintedUrlAuthToken;
+    try {
+      minted = await postUrlAuthTokenMint(apiBaseUrl);
+    } catch (error) {
       if (generation === runtimeAuthGeneration) {
         clearRuntimeUrlAuthToken();
       }
-      throw new Error(`Failed to mint runtime URL auth token (${response.status})`);
+      throw error;
     }
-    const payload = await response.json().catch(() => null) as { token?: unknown; expiresAt?: unknown } | null;
-    const token = typeof payload?.token === 'string' ? payload.token.trim() : '';
-    const expiresAt = typeof payload?.expiresAt === 'number' ? payload.expiresAt : 0;
     if (generation !== runtimeAuthGeneration) {
       throw new Error('Runtime URL auth token response is stale');
     }
-    setRuntimeUrlAuthToken(token, expiresAt);
+    setRuntimeUrlAuthToken(minted.token, minted.expiresAt);
     if (!runtimeUrlAuthToken) {
       throw new Error('Runtime URL auth token response was invalid');
     }

@@ -1,3 +1,5 @@
+import { extensionsSettingsI18n } from './extensions.settings.i18n';
+import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
   'settings.openchamber.visual.field.alwaysShowScrollbars': 'スクロールバーを常に表示',
@@ -2283,6 +2285,8 @@ export const settingsDict = {
   'settings.openchamber.visual.option.enterToSend.enter.label': 'Enter で送信',
   'settings.openchamber.visual.option.enterToSend.modifier.label': 'Ctrl/Cmd+Enter で送信',
   ...linearIntegrationI18n.ja,
+  ...guestIntegrationsI18n.ja,
+  ...extensionsSettingsI18n.ja,
   'settings.page.integrations.title': '連携',
   'settings.page.integrations.description': 'GitHub と Linear を接続すると、OpenChamber が Issue やプルリクエストを扱えるようになります。',
 } as const;

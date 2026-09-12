@@ -6,7 +6,8 @@
   "type": "module",
   "packageManager": "bun@1.3.14",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "packages/sdk/examples/*"
   ],
   "engines": {
     "node": ">=22.0.0"
@@ -40,12 +41,12 @@
     "lint:electron": "bun run --cwd packages/electron lint",
     "lint:mobile": "bun run --cwd packages/mobile lint",
     "lint:anti-slop": "oxlint",
-    "test": "node scripts/run-isolated-tests.mjs scripts && bun run --cwd packages/ui test && bun run --cwd packages/vscode test && bun run --cwd packages/electron test && bun run --cwd packages/web test",
+    "test": "node scripts/run-isolated-tests.mjs scripts && bun run --cwd packages/sdk test && bun run --cwd packages/ui test && bun run --cwd packages/vscode test && bun run --cwd packages/electron test && bun run --cwd packages/web test",
     "clean": "bun run --filter '*' clean",
     "changelog-card": "node scripts/changelog-card/generate.mjs",
     "changelog:build": "node scripts/changelog/build.mjs",
     "changelog:check": "node scripts/changelog/build.mjs --check",
-    "postinstall": "node ./fix-deprecation.js && patch-package && node ./packages/electron/scripts/ensure-electron.mjs --best-effort",
+    "postinstall": "node ./fix-deprecation.js && patch-package && bun run --cwd packages/sdk build && node ./packages/electron/scripts/ensure-electron.mjs --best-effort",
     "dev:web": "bun run --cwd packages/web build:watch",
     "dev:web:server": "bun run --cwd packages/web dev:server:watch",
     "dev:web:full": "node ./scripts/dev-web-full.mjs",

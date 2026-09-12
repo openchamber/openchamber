@@ -1,0 +1,109 @@
+---
+title: Example
+description: A complete three-file OpenChamber extension to copy. It connects a GitHub token, lists repositories, and attaches one to the chat.
+---
+
+# Example
+
+These three files are a working extension. It connects a GitHub token, lists your repositories, and lets you attach one to the chat. Copy them into a folder, then change the API and the list for your own provider. For the manifest fields and installing, see [Build an extension](/sdk/); for every method, see [Host API](/sdk/host/).
+
+`package.json`:
+
+```json
+{
+  "name": "my-repos",
+  "version": "1.0.0",
+  "private": true,
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": { "id": "my-repos", "name": "Repos", "icon": "github", "entry": "panel/index.html" },
+      "attach": "panel",
+      "integration": {
+        "name": "GitHub (token)",
+        "description": "Lists your repositories.",
+        "token": {
+          "apiOrigin": "https://api.github.com",
+          "account": { "path": "/user", "name": "login" },
+          "scheme": "bearer"
+        }
+      }
+    }
+  },
+  "dependencies": { "@openchamber/sdk": "^1.24.0" }
+}
+```
+
+`panel/index.html`:
+
+```html
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>html, body { margin: 0; height: 100%; } #root { height: 100%; padding: 12px; box-sizing: border-box; }</style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="main.js"></script>
+  </body>
+</html>
+```
+
+`panel/main.ts`:
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+import { applyHostReady, mountBanner, mountEmpty, mountList, mountSpinner } from "@openchamber/sdk/ui";
+
+type Repo = { full_name: string; html_url: string; description: string | null };
+
+const host = connectHost();
+const root = document.querySelector("#root")!;
+let mounted: Array<{ dispose: () => void }> = [];
+
+const clear = () => {
+  for (const block of mounted) block.dispose();
+  mounted = [];
+};
+
+const paint = async (connected: boolean) => {
+  clear();
+  if (!connected) {
+    mounted.push(mountEmpty(root, {
+      title: "Not connected",
+      body: "Paste a GitHub token in Settings → Integrations → GitHub (token).",
+    }));
+    return;
+  }
+  const spinner = mountSpinner(root, { label: "Loading repositories" });
+  try {
+    const result = await host.request({ method: "GET", path: "/user/repos", query: { per_page: "30", sort: "updated" } });
+    spinner.dispose();
+    if (result.status !== 200) {
+      mounted.push(mountBanner(root, { tone: "error", title: `GitHub answered ${result.status}` }));
+      return;
+    }
+    const repos = JSON.parse(result.body) as Repo[];
+    mounted.push(mountList(root, {
+      items: repos.map((repo) => ({ id: repo.full_name, title: repo.full_name, subtitle: repo.description ?? undefined })),
+      onSelect: (id) => {
+        const repo = repos.find((item) => item.full_name === id);
+        if (repo) void host.attach({ providerId: "my-repos", id: repo.full_name, title: repo.full_name, url: repo.html_url });
+      },
+    }));
+  } catch (error) {
+    spinner.dispose();
+    const text = error instanceof HostRequestError ? `${error.code}: ${error.message}` : String(error);
+    mounted.push(mountBanner(root, { tone: "error", title: "Request failed", body: text }));
+  }
+};
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  void paint(ctx.connection.connected);
+});
+host.onConnection((connection) => void paint(connection.connected));
+```
+
+Build it from the folder with `bunx openchamber-guest-bundle panel/main.ts panel/main.js`, then add the folder at Settings → Extensions. Four more examples (every UI control, a task list with sessions and prompts, a local service, a token integration) are at [github.com/openchamber/openchamber/tree/main/packages/sdk/examples](https://github.com/openchamber/openchamber/tree/main/packages/sdk/examples).

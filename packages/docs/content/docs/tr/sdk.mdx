@@ -1,0 +1,203 @@
+---
+title: Eklenti oluşturma
+description: @openchamber/sdk ile OpenChamber'a kendi panelinizi ekleyin, bir klasörden veya git adresinden kurun ve connectHost üzerinden uygulamayla konuşun.
+---
+
+# Eklenti oluşturma
+
+OpenChamber'a kendi panelinizi eklemek için `@openchamber/sdk` kullanın. Eklenti, OpenChamber'ın sağ şeritte gösterdiği küçük bir web sayfasıdır. Uygulamayla `connectHost()` üzerinden konuşur: geçerli projeyi ve oturumu okuyabilir, bildirim gösterebilir, sohbet kutusuna metin koyabilir, bir oturuma görev iliştirebilir ve kullanıcının onayıyla oturum başlatıp istem gönderebilir.
+
+Eklentiler OpenChamber web ve masaüstünde çalışır. VS Code ve mobil henüz eklenti yüklemiyor.
+
+## Eklenti nedir
+
+Üç dosyalı bir klasör:
+
+- `openchamber` bloğu (manifest) içeren `package.json`
+- `panel/index.html`, OpenChamber'ın gösterdiği sayfa
+- `panel/main.js`, tek bir klasik dosya olarak derlenmiş betiğiniz (sayfa sandbox'lı bir iframe içinde yüklendiği için ES modülü değil, IIFE)
+
+OpenChamber kodunuzu asla derlemez. Derlenmiş `.js` dosyasını yayınlayın. SDK bir paketleme komutu içerir; IIFE üreten herhangi bir paketleyici de olur.
+
+```bash
+npm install @openchamber/sdk
+bunx openchamber-guest-bundle panel/main.ts panel/main.js
+```
+
+Paketleme komutu Bun üzerinde çalışır. Bun yoksa esbuild'i ya da başka bir paketleyiciyi `--format=iife --platform=browser` ile kullanın.
+
+Üç dosyanın tamamıyla çalışan eksiksiz bir eklenti [Örnek](/sdk/example/) sayfasında. Kopyalayın, API'yi ve listeyi değiştirin.
+
+`index.html` içinde `main.js` dosyasına normal bir `<script src="main.js"></script>` ile bağlanın.
+
+## Çalışırken kurma
+
+1. OpenChamber'ı web veya masaüstünde çalıştırın.
+2. Ayarlar → Uzantılar sayfasını açın.
+3. Klasörünüzün mutlak yolunu yapıştırıp Ekle'ye tıklayın.
+
+OpenChamber manifesti okur ve eklentinin ne istediğini listeleyen bir pencere gösterir (bkz. [Yetenekler](#yetenekler)). Onaylayın, simgeniz şeritte belirir. Tıklayın, sayfanız yüklenir.
+
+Yerel bir `.zip` dosyası ya da bir git deposuna veya zip dosyasına giden https bağlantısı da ekleyebilirsiniz. Yalnızca git kurulumu güncellenebilir: `package.json` içindeki `version` değerini yükseltip push edin; kullanıcı Ayarlar → Uzantılar sayfasını bir sonraki açışında OpenChamber güncellemeyi sunar. URL'deki `#tag` ya da `#branch` neyi izleyeceğini sabitler. Bunlar OpenChamber'ın veri klasörüne kopyalanır ve o kopyadan çalışır; bu yüzden `node_modules` veya TypeScript kaynaklarını değil, derlenmiş dosyaları yayınlayın. Eklentiyi kaldırmak kopyayı siler. Klasörden kurulum doğrudan sizin klasörünüzden çalışır; düzenleyip yeniden derleyip yeniden yükleyebilirsiniz.
+
+## Manifest
+
+```json
+{
+  "name": "@acme/hello",
+  "version": "1.0.0",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": { "openchamber": ">=1.24.0" },
+    "contributes": {
+      "panel": {
+        "id": "acme-hello",
+        "name": "Hello",
+        "icon": "window",
+        "entry": "panel/index.html"
+      },
+      "attach": "dialog",
+      "capabilities": ["prompt", "sessions"],
+      "integration": {
+        "name": "Acme",
+        "description": "Tasks from Acme",
+        "token": {
+          "apiOrigin": "https://api.acme.example",
+          "account": { "path": "/me", "name": "login" },
+          "scheme": "bearer"
+        },
+        "settings": [{ "id": "list-id", "label": "List ID" }]
+      }
+    }
+  }
+}
+```
+
+`version` zorunludur ve semver olmalıdır. Ayarlar → Uzantılar bunu kartta gösterir.
+
+`apiVersion` değeri `1`'dir. OpenChamber başka değerleri reddeder.
+
+`engines.openchamber` isteğe bağlıdır. Eklentinizin çalıştığı en eski OpenChamber sürümünü `1.24.0` veya `>=1.24.0` biçiminde yazın. Daha eski sürümler sonradan hata vermek yerine kurulumu reddeder.
+
+`contributes.panel` şerit girişini tanımlar. `id` kebab-case olmalı ve kurulu eklentiler arasında benzersiz olmalıdır. `icon` bir Remixicon adı (`RiWindowLine` için `window`) ya da klasörünüzdeki bir SVG dosyasıdır, örneğin `icon.svg`. `entry` klasörünüzdeki HTML dosyasıdır.
+
+`contributes.attach` isteğe bağlıdır. Eklentinizi sohbet kutusunun yanındaki + menüsüne ekler; kullanıcı buradan bir görev seçip oturuma iliştirebilir.
+
+- `"dialog"` sayfanızı bir pencerede açar
+- `true` veya `"panel"` bunun yerine şerit panelini açar
+- `{ "mode": "dialog", "entry": "panel/attach.html" }` pencerede size ait ayrı bir sayfa açar; böylece seçicinin şerit paneliyle kod paylaşması gerekmez
+- atlarsanız eklenti o menüde görünmez
+
+Sayfanız `ctx.surface` (`panel` veya `dialog`) üzerinden hangisinde olduğunu anlayabilir. Kullanıcı daha önce iliştirdiğiniz bir öğeye tıkladığında aynı yüzey yeniden açılır ve `ctx.item` o öğeye, üzerine kaydettiğiniz `data` dahil, ayarlanır; böylece liste yerine öğenin ayrıntılarını gösterebilirsiniz. + menüsünden veya şerit simgesinden açıldığında `ctx.item` `null` olur.
+
+`contributes.integration` isteğe bağlıdır. Ayarlar → Entegrasyonlar sayfasına kullanıcının hesap bağladığı bir kart ekler. Bkz. [Hesaplar ve ağ](#hesaplar-ve-ağ).
+
+`contributes.service` isteğe bağlıdır. OpenChamber'ın eklentinin yanında başlattığı yerel bir süreç tanımlar; bir web sayfasının ulaşamadığı şeyler için, örneğin bir Docker soketi. Paket dosyası `GUEST_SERVICES.md` dosyasına bakın.
+
+## Yetenekler
+
+Panel çizmek ve geçerli oturumu okumak izin gerektirmez. Kullanıcı adına bir şey yapan her şey gerektirir. Bunları `contributes.capabilities` içinde listeleyin:
+
+| Yetenek | Neye izin verir |
+| --- | --- |
+| `prompt` | kullanıcının oturumuna mesaj göndermek (`prompt({ send: true })`, `text` ile `startSession`) |
+| `sessions` | oturum ve worktree oluşturmak (`startSession`) |
+| `files` | açık projedeki dosyaları okuyup yazmak (göreli yol ile `readFile`, `writeFile`, `listDir`, `stat`) |
+
+Dört tanesi sizin için otomatik eklenir: bir `integration` tanımladığınızda `network`, bir `service` tanımladığınızda `service`, `filesystem` desenleri tanımladığınızda `filesystem` ve bir oturum eylemi mesajları istediğinde `conversation` (bkz. [Eylemler, komutlar ve rozet](#eylemler-komutlar-ve-rozet)).
+
+Kullanıcı tam listeyi bir kez, eklentiyi kurarken görür ve ya onaylar ya da eklentiyi kaldırır. Yeni bir sürüm daha fazlasını isterse pencere yeniden görünür. Kullanıcının onaylamadığı bir yeteneği gerektiren çağrı `NOT_GRANTED` ile başarısız olur.
+
+## Hesaplar ve ağ
+
+Sayfanız bir sandbox içinde çalışır ve internete doğrudan erişemez. Bir `integration` tanımlayın; OpenChamber çağrıları `host.request` üzerinden, kullanıcının token'ı ekli olarak sizin yerinize yapar. Token sayfanıza asla ulaşmaz.
+
+- `token`: kullanıcı Ayarlar → Entegrasyonlar kartına bir API token'ı yapıştırır. `apiOrigin`, `request` çağrısının erişebileceği tek kaynaktır. `account` isteğe bağlıdır: bir GET yolu ve bir alan adı; kart böylece kimin bağlı olduğunu gösterebilir. `scheme`, token'ın nasıl gönderileceğini belirler; aşağıdaki tabloya bakın. Hangi başlığı beklediğini sağlayıcının API belgelerinden kontrol edin.
+- `oauth`: kullanıcı bir client id yapıştırır, yetkilendirme akışını OpenChamber yürütür. `authorizeUrl`, `tokenUrl` ve `apiOrigin` gerekir.
+- `host: { "provider": "linear" }`: OpenChamber'da zaten bağlı olan Linear hesabını yeniden kullanır. Client id gerekmez.
+
+Her `scheme` ne gönderir:
+
+| `scheme` | OpenChamber'ın gönderdiği başlık | Ne zaman kullanılır |
+| --- | --- | --- |
+| atlanmış | `Authorization: <token>` | API başlıkta çıplak bir token belgeliyorsa |
+| `"bearer"` | `Authorization: Bearer <token>` | API bearer veya personal access token belgeliyorsa |
+| `"basic"` | `Authorization: Basic base64(username:token)` | API kullanıcı adı (çoğunlukla e-posta) ve API token'ı ile HTTP Basic auth belgeliyorsa; kart ikisini de sorar ve `usernameLabel` ilk alanı adlandırır |
+
+`settings` karta düz metin alanları ekler. Değerleri `ctx.settings` içinde gelir.
+
+## Dosyalar
+
+Sayfanız diske kendisi dokunamaz. OpenChamber onun yerine, kullanıcının onayladığı sınırlar içinde okur ve yazar.
+
+- Göreli bir yol (`README.md`, `src/index.ts`, `.`) açık projeyi ifade eder. `files` yeteneği gerektirir. Açık proje yoksa `NO_DIRECTORY` olur.
+- `/` veya `~/` ile başlayan bir yol başka herhangi bir yeri ifade eder. `contributes.filesystem` içinde tanımladığınız desenlerden biriyle eşleşmelidir ve kullanıcı onay penceresinde tam olarak bu desenleri görür:
+
+```json
+"filesystem": ["~/.config/opencode/opencode.json", "~/notes/**"]
+```
+
+Desenlerde `*` tek bir yol parçasını, `**` herhangi bir derinliği karşılar. Bunların dışındaki her şey, onaydan sonra bile `BAD_PATH` olur. `..` hiçbir zaman izinli değildir.
+
+```ts
+const config = await host.readFile("~/.config/opencode/opencode.json");
+await host.writeFile("~/.config/opencode/opencode.json", nextJson);
+const { entries } = await host.listDir(".");
+```
+
+Yazmalar atomiktir: OpenChamber geçici bir dosya yazıp yeniden adlandırır, böylece okuyan taraf hiçbir zaman yarım yazılmış bir dosya görmez. Dosyalar UTF-8 metin olarak, en fazla 2 MB'a kadar okunur ve yazılır.
+
+## Eylemler, komutlar ve rozet
+
+Şerit ve + menüsünün ötesinde, bir eklenti üç yerde daha görünebilir. Hepsi eklentiye, bir etiket tıklamasının yaptığı gibi bir `item` verir.
+
+**Mesajlar ve oturumlar üzerindeki eylemler.** Menü girdileri tanımlayın, OpenChamber bunları yerleşik olanların yanında gösterir:
+
+```json
+"actions": [
+  { "id": "create-task", "label": "Create task", "icon": "add-line", "where": "message", "roles": ["assistant"] },
+  { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
+]
+```
+
+Bir mesaj eylemi, eklentinizi `kind: "message"` olan bir `ctx.item` ile açar: oturum id'si ve başlığı, proje dizini, mesaj id'si, rolü ve metni. Bir oturum eylemi ise `kind: "session"` ile, oturum id'si, başlığı ve dizini ile açar. `"payload": ["messages"]` ekleyin, öğe tüm konuşmayı da taşır, en eskisi önce olmak üzere, Markdown dışa aktarmanın ürettiği metnin aynısı. Bu, kullanıcının onay iletişim kutusunda ayrı bir satır olarak gördüğü `conversation` yeteneğini gerektirir. `item.action` hangi girdiye tıklandığını söyler.
+
+**İliştiren eğik çizgi komutları.** Bir komut tanımlayın ve sayfada işleyin:
+
+```json
+"commands": [{ "name": "task", "description": "Attach a task by id" }]
+```
+
+```ts
+host.onResolve(async ({ command, args }) => {
+  const task = await findTask(args.trim());
+  return task ? { providerId: "acme-tasks", id: task.id, title: task.title, url: task.url } : null;
+});
+```
+
+Kullanıcı sohbet kutusuna `/task ABC-12` yazdığında OpenChamber eklentinizden bunu çözmesini ister ve döndürdüğünüzü, hiçbir şey açmadan, etiket olarak iliştirir. "Bir şey bulunamadı" için `null` döndürün. Paneliniz kapalıysa OpenChamber bu çağrı için onu arka planda yükler. OpenChamber'ın veya OpenCode'un zaten kullandığı bir ad yok sayılır.
+
+**Şerit simgesindeki rozet.** `host.setBadge(3)` simgenizde bir sayı gösterir, örneğin açık görevler; `host.setBadge(null)` onu temizler. Paneli açmak da temizler.
+
+## Paneldeki ilk satırlar
+
+```ts
+import { connectHost } from "@openchamber/sdk";
+
+const host = connectHost();
+
+host.onReady((ctx) => {
+  document.body.dataset.theme = ctx.theme.mode;
+  document.body.dataset.surface = ctx.surface;
+});
+```
+
+`connectHost` yalnızca OpenChamber içinde çalışır. Sayfa düz bir dosya olarak açıldığında her çağrı `HOST_UNAVAILABLE` ile reddedilir.
+
+Paneli önce `@openchamber/sdk/ui` yapı taşlarıyla kurun: düğmeler, alanlar, açılır listeler, sekmeler, listeler ve daha fazlası, uygulamanın renkleri ve yazı tipleriyle; böylece panel OpenChamber'ın bir parçası gibi hissedilir. Kendi HTML ve CSS'inizi yalnızca kitte olmayanlar için yazın. Bkz. [UI kiti](/sdk/ui/).
+
+## İlgili sayfalar
+
+- [Host API](/sdk/host/): her `connectHost` metodu, sınırları ve hata kodları
+- [UI kiti](/sdk/ui/): yapı taşları
+- [Örnek](/sdk/example/): kopyalanacak eksiksiz üç dosyalı bir eklenti

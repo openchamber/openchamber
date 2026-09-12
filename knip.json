@@ -2,7 +2,8 @@
   "$schema": "https://unpkg.com/knip@latest/schema.json",
   "ignore": [
     "packages/mobile/android/app/src/main/assets/public/**",
-    "packages/mobile/ios/App/App/public/**"
+    "packages/mobile/ios/App/App/public/**",
+    "packages/sdk/examples/**",
   ],
   "workspaces": {
     ".": {
@@ -66,6 +67,20 @@
       "project": [
         "src/**/*.{ts,tsx}",
         "webview/**/*.{ts,tsx}"
+      ]
+    },
+    "packages/sdk": {
+      "entry": [
+        "src/index.ts",
+        "src/ui/index.ts",
+        "src/schemas.ts",
+        "scripts/bundle-guest.ts",
+        "src/**/*.{test,spec}.ts",
+        "scripts/**/*.{test,spec}.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "scripts/**/*.ts"
       ]
     },
     "packages/mobile": {

@@ -1,0 +1,4 @@
+*.test.ts
+**/*.test.ts
+scripts/fixtures/
+docs/

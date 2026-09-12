@@ -1,0 +1,106 @@
+---
+title: UI キット
+description: "@openchamber/sdk/ui のボタン、入力欄、ドロップダウン、タブ、リストなどの部品で、拡張機能を OpenChamber の他の部分と同じ見た目にする。"
+---
+
+# UI キット
+
+`@openchamber/sdk/ui` は、アプリの色、フォント、余白を使う既製のコントロール一式です。スタイルをコピーしなくても、拡張機能が OpenChamber の他の部分と同じ見た目になります。各コントロールは関数です。あなたが所有する要素と設定を渡すと、そこに自身を描画して `{ update, dispose }` を返します。コントロールを組み合わせて画面を作り、データはあなたが持ちます。キットがプロバイダーや OpenChamber を呼ぶことはありません。`host.request`、`host.attach` などは引き続きあなたが呼びます。キットにないものは自分で HTML と CSS を書けますが、まずキットを使ってください。キットのコントロールはユーザーのテーマ、余白、キーボード操作の習慣に自動で従うので、それで組んだパネルは中に埋め込まれたウェブサイトではなく、OpenChamber の一部のように感じられます。
+
+## まず `applyHostReady` を呼ぶ
+
+コントロールは、`applyHostReady` がページに書き込む CSS 変数から色を読みます。アプリのフォントと文字色もページのルートに設定するので、自分で追加した素の HTML も正しく見えます。最初のマウントの前に `host.onReady` の中で呼んでください。そうすると、ユーザーがテーマを切り替えたときに色がアプリに追従します。
+
+```ts
+import { applyHostReady } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  // mount things here
+});
+```
+
+## マウントできるもの
+
+| 関数 | 描画するもの |
+| --- | --- |
+| `mountButton` | ボタン。`variant` は `default`、`secondary`、`outline`、`ghost`、`destructive`。`size` は `default`、`sm`、`xs`。`loading` はスピナーを表示してクリックを止めます。 |
+| `mountTextField` | ラベル付きの入力欄。`multiline` で textarea になります。任意の `helper` や `error` テキスト、`password` マスク、トークンや ID 向けの `mono` があります。 |
+| `mountSearchField` | 虫眼鏡とクリアボタン付きの検索欄。Escape でクリアします。 |
+| `mountSelect` | ドロップダウン。`searchable` でリストの上に絞り込み欄が付きます。矢印キーで移動、Enter で選択、Escape で閉じます。 |
+| `mountCheckbox`、`mountSwitch` | ラベルと任意の `description` 付きのチェックボックスまたはトグル。 |
+| `mountTabs` | ピル型のタブ。各タブに任意の件数を付けられます。左右の矢印キーで移動します。 |
+| `mountBadge` | 小さなピル。`tone` は `neutral`、`primary`、`success`、`warning`、`error`、`info`。 |
+| `mountList` | キーボードで扱いやすいリスト。各行に先頭のキー、タイトル、サブタイトル、右寄せのメタテキスト、バッジを持てます。 |
+| `mountEmpty` | 中央寄せの空状態。タイトル、本文 1 行、任意のボタン。 |
+| `mountSpinner` | 任意のラベル付きのローディングリング。 |
+| `mountBanner` | トーン付きの通知。タイトル、本文、任意のアクション。 |
+| `mountSeparator` | 細い線。中央に任意のラベルを置けます。 |
+| `mountProgress` | 0 から 100 のプログレスバー。 |
+| `mountMenu` | アクション一覧を開くボタン。項目は destructive、disabled、または区切り線にできます。 |
+| `mountText` | プロバイダーから来たテキスト。Markdown 形式の画像と `http(s)` リンクは実際の画像とリンクになり、それ以外はプレーンテキストのままなので、信頼できない内容も安全に表示できます。 |
+
+コントロールの隣に、3 つのプレーンなヘルパーが同梱されています。`filterSelectOptions(options, query)` は `mountSelect` が使う絞り込みです。`splitTextMedia(text)` は `mountText` が描画前に行う処理です。`moveListSelection` はリスト、セレクト、メニューが共有するキーボード移動で、自分でリストを作る場合に使えます。
+
+## 検索付きのリスト
+
+```ts
+import { applyHostReady, mountEmpty, mountList, mountSearchField } from "@openchamber/sdk/ui";
+
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  const root = document.querySelector("#root")!;
+  const searchRoot = root.appendChild(document.createElement("div"));
+  const listRoot = root.appendChild(document.createElement("div"));
+
+  let query = "";
+  let empty: { dispose: () => void } | null = null;
+
+  const list = mountList(listRoot, {
+    items: [],
+    onSelect: (id) => {
+      const task = tasks.find((item) => item.id === id);
+      if (task) void host.attach({ providerId: "acme-hello", id, title: task.title, url: task.url });
+    },
+  });
+
+  const paint = () => {
+    const rows = tasks
+      .filter((task) => task.title.toLowerCase().includes(query.toLowerCase()))
+      .map((task) => ({ id: task.id, leading: task.key, title: task.title, meta: task.updated }));
+    list.update({ items: rows });
+    empty?.dispose();
+    empty = rows.length === 0
+      ? mountEmpty(listRoot, { title: "No tasks match", body: "Try a shorter search." })
+      : null;
+  };
+
+  mountSearchField(searchRoot, {
+    value: query,
+    placeholder: "Search tasks",
+    onChange: (next) => {
+      query = next;
+      paint();
+    },
+  });
+  paint();
+});
+```
+
+`update` には変更した設定だけを渡します。リストは、ハイライト中の行がまだ存在する限り、更新をまたいでその行を保持します。
+
+## プロバイダーのテキスト内のリンク
+
+ページはサンドボックスで動き、自力で新しいタブを開けません。`mountText` を使うときは `onOpenUrl` を渡して、リンクを OpenChamber に委ねてください。
+
+```ts
+mountText(root, {
+  text: comment.body,
+  onOpenUrl: (url) => void host.openUrl(url),
+});
+```
+
+## 関連
+
+- [拡張機能を作る](/sdk/): フォルダ、マニフェスト、インストール
+- [Host API](/sdk/host/): `connectHost`、attach、エラーコード
