@@ -390,6 +390,54 @@ export interface GitLogResponse {
   total: number;
 }
 
+export type GitHistoryRefKind = 'head' | 'local' | 'remote' | 'tag';
+
+export interface GitHistoryRef {
+  id: string;
+  name: string;
+  revision: string | null;
+  kind: GitHistoryRefKind;
+  category: 'branches' | 'remote-branches' | 'tags';
+}
+
+export interface GitHistoryRefsResponse {
+  refs: GitHistoryRef[];
+  current: GitHistoryRef | null;
+  upstream: GitHistoryRef | null;
+  base: GitHistoryRef | null;
+  snapshot: string;
+}
+
+export interface GitHistoryItem {
+  id: string;
+  parentIds: string[];
+  subject: string;
+  message: string;
+  author: string;
+  authorEmail: string;
+  timestamp: string;
+  statistics: { files: number; insertions: number; deletions: number };
+  references: GitHistoryRef[];
+}
+
+export interface GitHistoryPage {
+  items: GitHistoryItem[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  refsSnapshot: string;
+}
+
+export interface GitHistoryOptions {
+  refs?: string[];
+  all?: boolean;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface GitHistoryMergeBaseResponse {
+  mergeBase: string | null;
+}
+
 export interface CommitFileEntry {
   path: string;
   previousPath?: string;
@@ -399,8 +447,25 @@ export interface CommitFileEntry {
   changeType: 'A' | 'M' | 'D' | 'R' | 'C' | string;
 }
 
+export interface GitCommitChangedFile {
+  path: string;
+  originalPath?: string;
+  status: 'A' | 'M' | 'D' | 'R';
+  kind: 'file' | 'symlink' | 'gitlink';
+  originalObjectId?: string;
+  objectId?: string;
+  insertions: number;
+  deletions: number;
+  isBinary: boolean;
+}
+
+export interface GitCommitChangesRequest {
+  commitHash: string;
+  parentHash: string | null;
+}
+
 export interface GitCommitFilesResponse {
-  files: CommitFileEntry[];
+  files: GitCommitChangedFile[];
 }
 
 export interface GetGitCommitDiffOptions {
@@ -415,6 +480,17 @@ export interface CommitFileDiffResponse {
   modified: string;
   isBinary: boolean;
 }
+
+export interface GitCommitFilePreviewRequest {
+  commitHash: string;
+  parentHash: string | null;
+  originalPath: string | null;
+  modifiedPath: string | null;
+}
+
+export type GitCommitFilePreviewResponse =
+  | { status: 'ready'; original: string; modified: string }
+  | { status: 'too-large'; totalBytes: number; maxBytes: number };
 
 export interface GitWorktreeInfo {
   head: string;
@@ -536,6 +612,9 @@ interface GitWorktreeAPI {
 export interface GitAPI {
   checkIsGitRepository(directory: string): Promise<boolean>;
   getGitStatus(directory: string, options?: { mode?: 'light'; fresh?: boolean }): Promise<GitStatus>;
+  getGitHistoryRefs?(directory: string): Promise<GitHistoryRefsResponse>;
+  getGitHistory?(directory: string, options: GitHistoryOptions): Promise<GitHistoryPage>;
+  getGitHistoryMergeBase?(directory: string, options: { refs: string[] }): Promise<GitHistoryMergeBaseResponse>;
   getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitDiffResponse>;
   getGitFileDiff(directory: string, options: GetGitFileDiffOptions): Promise<GitFileDiffResponse>;
   getGitRangeDiff?(directory: string, options: GetGitRangeDiffOptions): Promise<GitDiffResponse>;
@@ -578,11 +657,12 @@ export interface GitAPI {
   dropGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }>;
   checkoutBranch(directory: string, branch: string): Promise<{ success: boolean; branch: string }>;
   createBranch(directory: string, name: string, startPoint?: string): Promise<{ success: boolean; branch: string }>;
+  createGitTag?(directory: string, name: string, commitHash: string): Promise<{ success: boolean; tag: string }>;
   renameBranch(directory: string, oldName: string, newName: string): Promise<{ success: boolean; branch: string }>;
   getGitLog(directory: string, options?: GitLogOptions): Promise<GitLogResponse>;
-  getCommitFiles(directory: string, hash: string): Promise<GitCommitFilesResponse>;
+  getCommitFiles(directory: string, request: GitCommitChangesRequest): Promise<GitCommitFilesResponse>;
   getGitCommitDiff?(directory: string, options: GetGitCommitDiffOptions): Promise<GitDiffResponse>;
-  getCommitFileDiff?(directory: string, hash: string, filePath: string, isBinary: boolean): Promise<CommitFileDiffResponse>;
+  getCommitFileDiff?(directory: string, request: GitCommitFilePreviewRequest): Promise<GitCommitFilePreviewResponse>;
   getCurrentGitIdentity(directory: string): Promise<GitIdentitySummary | null>;
   hasLocalIdentity?(directory: string): Promise<boolean>;
   setGitIdentity(directory: string, profileId: string): Promise<{ success: boolean; profile: GitIdentityProfile }>;
@@ -839,6 +919,12 @@ export type GitHubUserSummary = {
   avatarUrl?: string;
   name?: string;
   email?: string;
+};
+
+export type GitHubCommitDetails = {
+  connected: boolean;
+  url?: string | null;
+  author?: GitHubUserSummary | null;
 };
 
 type GitHubRepoRef = {
@@ -1351,6 +1437,26 @@ export interface GitHubAPI {
   issueComments(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueCommentsResult>;
   repoUpstream(directory: string): Promise<GitHubRepoUpstreamResult>;
   repoBranches(owner: string, repo: string): Promise<string[]>;
+  commitDetails?(directory: string, hash: string, remote?: string): Promise<GitHubCommitDetails>;
+}
+
+export type GitCommitHoverDetailsKey = {
+  directory: string;
+  remoteName: string | null;
+  hash: string;
+};
+
+export type GitCommitHoverDetailsSnapshot =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'ready'; details: GitHubCommitDetails }
+  | { status: 'unavailable' };
+
+export interface GitCommitHoverDetailsCache {
+  preload(key: GitCommitHoverDetailsKey): Promise<void>;
+  getSnapshot(key: GitCommitHoverDetailsKey): GitCommitHoverDetailsSnapshot;
+  subscribe(key: GitCommitHoverDetailsKey, listener: () => void): () => void;
+  dispose(): void;
 }
 
 export interface RemoteClientRecord {

@@ -136,6 +136,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       emitSessionCreatedEvent,
       permissionAutoAcceptRuntime,
       messageQueueRuntime,
+      broadcastGlobalUiEvent,
     } = routeDependencies;
 
     registerSettingsUtilityRoutes(app, {
@@ -308,6 +309,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerGitHubRoutes(app);
     registerLinearRoutes(app);
     registerGitRoutes(app, {
+      broadcastGlobalUiEvent,
       emitWorktreeChanged: ({ directories, at }) => {
         const clients = getOpenChamberEventClients();
         for (const client of clients) {

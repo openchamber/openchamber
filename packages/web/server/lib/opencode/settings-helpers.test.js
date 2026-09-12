@@ -733,6 +733,42 @@ describe('settings helpers', () => {
       expect(sanitized.sessionRetentionOnlyArchived).toBe(true);
     });
   });
+
+  describe('git review layout persistence', () => {
+    it('round-trips gitReviewLayout separate and combined through the sanitizer', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+
+      expect(helpers.sanitizeSettingsUpdate({ gitReviewLayout: 'separate' })).toEqual({
+        gitReviewLayout: 'separate',
+      });
+      expect(helpers.sanitizeSettingsUpdate({ gitReviewLayout: 'combined' })).toEqual({
+        gitReviewLayout: 'combined',
+      });
+    });
+
+    it('rejects invalid gitReviewLayout values', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+
+      expect(helpers.sanitizeSettingsUpdate({ gitReviewLayout: 'split' })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ gitReviewLayout: true })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ gitReviewLayout: '' })).toEqual({});
+    });
+
+    it('survives a full settings payload containing gitReviewLayout (regression)', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+      const payload = {
+        diffLayoutPreference: 'side-by-side',
+        gitChangesViewMode: 'tree',
+        gitReviewLayout: 'combined',
+      };
+
+      const sanitized = helpers.sanitizeSettingsUpdate(payload);
+
+      expect(sanitized.diffLayoutPreference).toBe('side-by-side');
+      expect(sanitized.gitChangesViewMode).toBe('tree');
+      expect(sanitized.gitReviewLayout).toBe('combined');
+    });
+  });
 });
 
 describe('settings registry gate', () => {
@@ -768,7 +804,7 @@ describe('settings registry gate', () => {
     stickyUserHeader: true, promptNavigatorEnabled: true, wideChatLayoutEnabled: true, showSplitAssistantMessageActions: true, showToolFileIcons: true,
     codeBlockLineWrap: true, showTurnChangedFiles: true, showExpandedBashTools: true, showExpandedEditTools: true, toolJsonViewMode: 'raw',
     timeFormatPreference: '24h', weekStartPreference: 'monday', messageStreamTransport: 'ws', diffLayoutPreference: 'inline', diffWrapLines: true,
-    gitChangesViewMode: 'tree', gitmojiEnabled: true, defaultFileViewerPreview: true, directoryShowHidden: true, filesViewShowGitignored: true,
+    gitChangesViewMode: 'tree', gitReviewLayout: 'combined', gitmojiEnabled: true, defaultFileViewerPreview: true, directoryShowHidden: true, filesViewShowGitignored: true,
     fileEditorKeymap: 'vim', autoSaveEnabled: true, autoCreateWorktree: true, sessionTabsEnabled: true, showOpenCodeRestartConfirm: true,
     allowPromptingSubagentSessions: true, inputSpellcheckEnabled: true, enterToSend: true, enterToSendConfigured: true, persistChatDraft: true,
     largeTextPasteBehavior: 'attach', followUpBehavior: 'steer', queueModeEnabled: true, inputHistoryScope: 'global', inputHistoryLimit: 40,

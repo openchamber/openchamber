@@ -1,3 +1,5 @@
+import { createGitHubCommitDetailsRoute } from './commit-details-route.js';
+
 const PR_STATUS_CACHE_TTL_MS = 90_000;
 const PR_STATUS_CACHE_MAX_ENTRIES = 200;
 // Upper bound for resolving a single PR status. resolveGitHubPrStatus makes many
@@ -150,14 +152,14 @@ function setPrStatusCache(key, data, fetchedAt) {
   prStatusCache.set(key, { data, fetchedAt });
 }
 
-export function registerGitHubRoutes(app) {
+export function registerGitHubRoutes(app, options = {}) {
   let githubLibraries = null;
-  const getGitHubLibraries = async () => {
+  const getGitHubLibraries = options.getGitHubLibraries ?? (async () => {
     if (!githubLibraries) {
       githubLibraries = await import('./index.js');
     }
     return githubLibraries;
-  };
+  });
 
   const getGitHubUserSummary = async (octokit) => {
     const me = await octokit.rest.users.getAuthenticated();
@@ -493,6 +495,11 @@ export function registerGitHubRoutes(app) {
       return res.status(500).json({ error: error.message || 'Failed to fetch GitHub user' });
     }
   });
+
+  app.get('/api/github/commit/details', createGitHubCommitDetailsRoute({
+    getGitHubLibraries,
+    isGitHubAuthInvalid,
+  }));
 
   // ================= GitHub PR APIs =================
 

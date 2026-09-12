@@ -7,14 +7,16 @@ import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey 
 import type { ShortcutCombo } from '@/lib/shortcuts';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
+import type { GitReviewLayout } from '@/lib/getWorkingTreeDiffDestination';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
-import type { LinearIssueListAssignee, LinearIssueListPriority, LinearIssueListStatus, TerminalShell } from '@/lib/api/types';
+import { getRuntimeKey, isTransientRuntimeKey } from '@/lib/runtime-switch';
+import type { GitCommitChangedFile, LinearIssueListAssignee, LinearIssueListPriority, LinearIssueListStatus, TerminalShell } from '@/lib/api/types';
 import type { ProjectRef } from '@/lib/projectContextApi';
 import { directoryMayHaveActiveProjectAction, useTerminalStore } from '@/stores/useTerminalStore';
 import { useFilesViewTabsStore } from './useFilesViewTabsStore';
+import { useGitDiffTabsStore } from './useGitDiffTabsStore';
 import { isWindowsArm64 } from '@/lib/platform';
 import { isVSCodeRuntime } from '@/lib/desktop';
-import { getRuntimeKey, isTransientRuntimeKey } from '@/lib/runtime-switch';
 
 export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'branch' | 'commit' | 'pr';
 const contextPanelModeSchema = z.enum(['diff', 'walkthrough', 'file', 'context', 'plan', 'chat', 'browser', 'git', 'pr', 'linear', 'notes', 'terminal']);
@@ -42,6 +44,19 @@ export const normalizeLargeTextPasteBehavior = (value: unknown): LargeTextPasteB
     return value;
   }
   return DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR;
+};
+
+export type GitGraphFilterMode = 'auto' | 'all' | 'manual';
+export type GitCommitDiffTarget = {
+  commitHash: string;
+  parentHash: string | null;
+  file: GitCommitChangedFile;
+};
+
+export type GitRepositoryPaneState = {
+  changesCollapsed: boolean;
+  graphFilterMode: GitGraphFilterMode;
+  graphManualRefIds: string[];
 };
 
 function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
@@ -116,6 +131,7 @@ type ContextPanelTab = {
   mode: ContextPanelMode;
   targetPath: string | null;
   targetDirectory: string | null;
+  commitDiffTarget: GitCommitDiffTarget | null;
   /** Saved project plan this tab shows, for `plan` tabs opened from the notes
       panel. Project plans are addressed by id because their markdown is
       server-owned and has no client-visible path. */
@@ -137,6 +153,7 @@ type ContextPanelTabDescriptor = {
   mode: ContextPanelMode;
   targetPath?: string | null;
   targetDirectory?: string | null;
+  commitDiffTarget?: GitCommitDiffTarget | null;
   projectPlanId?: string | null;
   projectPlanRef?: ProjectRef | null;
   dedupeKey?: string | null;
@@ -214,6 +231,7 @@ const isLegacyDefaultTemplates = (value: unknown): boolean => {
 const CONTEXT_PANEL_DEFAULT_WIDTH = 380;
 const CONTEXT_PANEL_MIN_WIDTH = 320;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
+const GIT_OBJECT_ID_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
 /** Per surface, not per panel: see clampContextPanelTabs. */
 const CONTEXT_PANEL_MAX_TABS = 12;
 const CONTEXT_PANEL_MAX_LABEL_LENGTH = 120;
@@ -221,8 +239,69 @@ const LEFT_SIDEBAR_DEFAULT_WIDTH = 280;
 /** Separates browser tabs opened in the same millisecond. */
 let browserTabSequence = 0;
 
+const runtimeMemoryKey = (value?: string | null): string => {
+  const key = (value ?? getRuntimeKey()).trim();
+  return key || 'default';
+};
+
 // Shared with rail/panel consumers so contextPanelByDirectory lookups agree on keys.
 export const normalizeContextPanelDirectoryKey = (value: string): string => normalizeDirectoryPath(value);
+const normalizeRepositoryScopedDirectoryKey = (value: string): string => normalizeDirectoryPath(value);
+
+const GIT_REPOSITORY_PANE_GRAPH_HEIGHT_MIN = 180;
+const GIT_REPOSITORY_PANE_GRAPH_HEIGHT_MAX = 720;
+const DEFAULT_GIT_GRAPH_PANE_COLLAPSED = true;
+const DEFAULT_GIT_GRAPH_PANE_HEIGHT = 280;
+const gitGraphPaneCollapsedSchema = z.boolean().catch(DEFAULT_GIT_GRAPH_PANE_COLLAPSED);
+const gitGraphFilterModeSchema = z.enum(['auto', 'all', 'manual']);
+const gitRepositoryPaneManualRefIdsSchema = z.array(z.string().catch('')).catch([]).transform((ids) => Array.from(
+  new Set(ids.map((item) => item.trim()).filter((item) => item !== ''))
+).sort());
+
+export const DEFAULT_GIT_REPOSITORY_PANE_STATE: GitRepositoryPaneState = {
+  changesCollapsed: false,
+  graphFilterMode: 'auto',
+  graphManualRefIds: [],
+};
+
+const createDefaultGitRepositoryPaneState = (): GitRepositoryPaneState => ({ ...DEFAULT_GIT_REPOSITORY_PANE_STATE });
+
+const clampGitRepositoryPaneGraphHeight = (value: number): number => {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_GIT_GRAPH_PANE_HEIGHT;
+  }
+
+  return Math.min(GIT_REPOSITORY_PANE_GRAPH_HEIGHT_MAX, Math.max(GIT_REPOSITORY_PANE_GRAPH_HEIGHT_MIN, Math.round(value)));
+};
+const gitGraphPaneHeightSchema = z.coerce.number().catch(DEFAULT_GIT_GRAPH_PANE_HEIGHT).transform(clampGitRepositoryPaneGraphHeight);
+
+const gitRepositoryPaneStateSchema = z.object({
+  changesCollapsed: z.boolean().catch(DEFAULT_GIT_REPOSITORY_PANE_STATE.changesCollapsed),
+  graphFilterMode: gitGraphFilterModeSchema.catch(DEFAULT_GIT_REPOSITORY_PANE_STATE.graphFilterMode),
+  graphManualRefIds: gitRepositoryPaneManualRefIdsSchema,
+}).catch(DEFAULT_GIT_REPOSITORY_PANE_STATE);
+const gitRepositoryPaneStatesSchema = z.record(z.string(), z.any()).catch({});
+
+const sanitizeGitRepositoryPaneState = (value: z.input<typeof gitRepositoryPaneStateSchema>): GitRepositoryPaneState => {
+  const parsed = gitRepositoryPaneStateSchema.parse(value);
+  return { ...parsed };
+};
+
+const sanitizeGitRepositoryPaneStates = (value: z.output<typeof gitRepositoryPaneStatesSchema>) => {
+  const nextEntries: Array<[string, GitRepositoryPaneState]> = [];
+  for (const [rawKey, rawValue] of Object.entries(value)) {
+    if (rawKey.trim() === '') {
+      continue;
+    }
+    nextEntries.push([rawKey, sanitizeGitRepositoryPaneState(rawValue)]);
+  }
+  return Object.fromEntries(nextEntries);
+};
+
+export const gitRepositoryPanePreferenceKey = (directory: string, runtimeKey?: string | null): string => JSON.stringify([
+  runtimeMemoryKey(runtimeKey),
+  normalizeRepositoryScopedDirectoryKey(directory),
+]);
 
 const normalizeDirectoryPath = (value: string): string => {
   if (!value) return '';
@@ -271,6 +350,126 @@ const normalizeContextTargetDirectory = (value: string | null | undefined): stri
   }
 
   return normalizeContextPanelDirectoryKey(normalizedPath) || null;
+};
+
+const normalizeGitObjectId = (value: unknown): string | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return GIT_OBJECT_ID_PATTERN.test(trimmed) ? trimmed : null;
+};
+
+const normalizeGitCommitChangedFile = (value: unknown): GitCommitChangedFile | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const candidate = value as {
+    path?: unknown;
+    originalPath?: unknown;
+    status?: unknown;
+    kind?: unknown;
+    originalObjectId?: unknown;
+    objectId?: unknown;
+    insertions?: unknown;
+    deletions?: unknown;
+    isBinary?: unknown;
+  };
+
+  const path = normalizeContextTargetPath(candidate.path as string | null | undefined);
+  if (path === null) {
+    return null;
+  }
+
+  if (candidate.status !== 'A' && candidate.status !== 'M' && candidate.status !== 'D' && candidate.status !== 'R') {
+    return null;
+  }
+
+  if (candidate.kind !== 'file' && candidate.kind !== 'symlink' && candidate.kind !== 'gitlink') {
+    return null;
+  }
+
+  if (typeof candidate.insertions !== 'number' || !Number.isFinite(candidate.insertions) || candidate.insertions < 0) {
+    return null;
+  }
+
+  if (typeof candidate.deletions !== 'number' || !Number.isFinite(candidate.deletions) || candidate.deletions < 0) {
+    return null;
+  }
+
+  if (typeof candidate.isBinary !== 'boolean') {
+    return null;
+  }
+
+  const originalPath = candidate.originalPath === undefined
+    ? undefined
+    : normalizeContextTargetPath(candidate.originalPath as string | null | undefined);
+  if (candidate.originalPath !== undefined && originalPath === null) {
+    return null;
+  }
+
+  const originalObjectId = candidate.originalObjectId === undefined
+    ? undefined
+    : normalizeGitObjectId(candidate.originalObjectId);
+  if (candidate.originalObjectId !== undefined && originalObjectId === null) {
+    return null;
+  }
+
+  const objectId = candidate.objectId === undefined
+    ? undefined
+    : normalizeGitObjectId(candidate.objectId);
+  if (candidate.objectId !== undefined && objectId === null) {
+    return null;
+  }
+
+  return {
+    path,
+    ...(originalPath ? { originalPath } : {}),
+    status: candidate.status,
+    kind: candidate.kind,
+    ...(originalObjectId ? { originalObjectId } : {}),
+    ...(objectId ? { objectId } : {}),
+    insertions: candidate.insertions,
+    deletions: candidate.deletions,
+    isBinary: candidate.isBinary,
+  };
+};
+
+const normalizeGitCommitDiffTarget = (value: unknown): GitCommitDiffTarget | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const candidate = value as {
+    commitHash?: unknown;
+    parentHash?: unknown;
+    file?: unknown;
+  };
+
+  const commitHash = normalizeGitObjectId(candidate.commitHash);
+  if (commitHash === null) {
+    return null;
+  }
+
+  const parentHash = candidate.parentHash == null
+    ? null
+    : normalizeGitObjectId(candidate.parentHash);
+  if (candidate.parentHash != null && parentHash === null) {
+    return null;
+  }
+
+  const file = normalizeGitCommitChangedFile(candidate.file);
+  if (file === null) {
+    return null;
+  }
+
+  return {
+    commitHash,
+    parentHash,
+    file,
+  };
 };
 
 const normalizeContextTabLabel = (value: string | null | undefined): string | null => {
@@ -354,6 +553,7 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     mode: descriptor.mode,
     targetPath: normalizedTargetPath,
     targetDirectory: normalizedTargetDirectory,
+    commitDiffTarget: normalizeGitCommitDiffTarget(descriptor.commitDiffTarget),
     projectPlanId: typeof descriptor.projectPlanId === 'string' && descriptor.projectPlanId.trim()
       ? descriptor.projectPlanId.trim()
       : null,
@@ -418,6 +618,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       mode?: unknown;
       targetPath?: unknown;
       targetDirectory?: string | null;
+      commitDiffTarget?: unknown;
       projectPlanId?: unknown;
       projectPlanRef?: unknown;
       dedupeKey?: unknown;
@@ -450,6 +651,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       ? candidate.projectPlanId.trim()
       : null;
     const projectPlanRef = normalizeContextPanelProjectPlanRef(candidate.projectPlanRef);
+    const normalizedCommitDiffTarget = normalizeGitCommitDiffTarget(candidate.commitDiffTarget);
     // `mode: 'plan'` covers two documents: a saved Project knowledge plan
     // (needs both the plan id and its owning project) and a plain session
     // filesystem plan (has neither). Only the half-identified form — id
@@ -477,6 +679,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       targetDirectory,
       projectPlanId,
       projectPlanRef,
+      commitDiffTarget: normalizedCommitDiffTarget,
       dedupeKey,
       label: normalizeContextTabLabel(typeof candidate.label === 'string' ? candidate.label : null),
       sessionTitleFallback: normalizeContextTabLabel(typeof candidate.sessionTitleFallback === 'string' ? candidate.sessionTitleFallback : null),
@@ -548,6 +751,7 @@ const upsertContextPanelTab = (
           mode: nextTab.mode,
           targetPath: nextTab.targetPath || tab.targetPath,
           targetDirectory: nextTab.targetDirectory,
+          commitDiffTarget: nextTab.commitDiffTarget ?? tab.commitDiffTarget,
           projectPlanId: nextTab.projectPlanId ?? tab.projectPlanId,
           projectPlanRef: nextTab.projectPlanRef ?? tab.projectPlanRef,
           dedupeKey: nextTab.dedupeKey,
@@ -769,6 +973,7 @@ interface UIStore {
   contextRailHiddenSurfaces: string[];
   contextEditorTreeVisible: boolean;
   contextEditorTreeWidth: number;
+  contextGitSplitDiffWidth: number;
   notesPanelHeight: number;
   /** Expanded collapsible sections of the in-chat work-status panel, by id. */
   workStatusExpandedSections: Record<string, boolean>;
@@ -901,6 +1106,10 @@ interface UIStore {
   linearIssueListPriority: LinearIssueListPriority;
   /** One-shot identifier for opening a Linear issue in the rail panel. Not persisted. */
   linearIssueFocus: string | null;
+  gitReviewLayout: GitReviewLayout;
+  gitGraphPaneCollapsed: boolean;
+  gitGraphPaneHeight: number;
+  gitRepositoryPaneStates: Record<string, GitRepositoryPaneState>;
   isTimelineDialogOpen: boolean;
   isPromptNavigatorPanelOpen: boolean;
   isImagePreviewOpen: boolean;
@@ -985,12 +1194,15 @@ interface UIStore {
   setContextRailOrder: (order: string[]) => void;
   toggleContextEditorTree: () => void;
   setContextEditorTreeWidth: (width: number) => void;
+  setContextGitSplitDiffWidth: (width: number) => void;
   openContextSurface: (directory: string, mode: ContextPanelMode) => void;
   openContextPanelTab: (directory: string, tab: ContextPanelTabDescriptor, options?: { reveal?: boolean }) => void;
   openContextDiff: (directory: string, filePath: string, staged?: boolean, scope?: PendingDiffScope | null) => void;
+  openContextCommitDiff: (directory: string, target: GitCommitDiffTarget) => void;
   openContextFile: (directory: string, filePath: string) => void;
   openContextFileAtLine: (directory: string, filePath: string, line: number, column?: number) => void;
   openContextOverview: (directory: string) => void;
+  openContextPlan: (directory: string) => void;
   openContextPreview: (directory: string, url: string) => void;
   openContextBrowser: (directory: string, url?: string, options?: { reveal?: boolean }) => void;
   openNewContextBrowserTab: (directory: string) => void;
@@ -1110,6 +1322,15 @@ interface UIStore {
   setLinearIssueListPriority: (priority: LinearIssueListPriority) => void;
   resetLinearIssueListFilters: () => void;
   setLinearIssueFocus: (identifier: string | null) => void;
+  setGitReviewLayout: (layout: GitReviewLayout) => void;
+  setGitGraphPaneCollapsed: (collapsed: boolean) => void;
+  setGitGraphPaneHeight: (height: number) => void;
+  getGitRepositoryPaneState: (directory: string, runtimeKey?: string | null) => GitRepositoryPaneState;
+  setGitRepositoryPaneState: (
+    directory: string,
+    updates: Partial<GitRepositoryPaneState> | ((current: GitRepositoryPaneState) => Partial<GitRepositoryPaneState>),
+    runtimeKey?: string | null,
+  ) => void;
   setMultiRunLauncherOpen: (open: boolean) => void;
   setTimelineDialogOpen: (open: boolean) => void;
   setPromptNavigatorPanelOpen: (open: boolean) => void;
@@ -1191,6 +1412,7 @@ export const useUIStore = create<UIStore>()(
         contextRailHiddenSurfaces: [],
         contextEditorTreeVisible: true,
         contextEditorTreeWidth: 240,
+        contextGitSplitDiffWidth: 560,
         notesPanelHeight: 112,
         workStatusExpandedSections: {},
         workStatusScrollTop: 0,
@@ -1278,6 +1500,10 @@ export const useUIStore = create<UIStore>()(
         linearIssueListTeamIdByRuntime: {},
         linearIssueListPriority: 'all',
         linearIssueFocus: null,
+        gitReviewLayout: 'separate',
+        gitGraphPaneCollapsed: DEFAULT_GIT_GRAPH_PANE_COLLAPSED,
+        gitGraphPaneHeight: DEFAULT_GIT_GRAPH_PANE_HEIGHT,
+        gitRepositoryPaneStates: {},
         isTimelineDialogOpen: false,
         isPromptNavigatorPanelOpen: false,
         isImagePreviewOpen: false,
@@ -1377,6 +1603,13 @@ export const useUIStore = create<UIStore>()(
           set({ contextEditorTreeWidth: Math.min(480, Math.max(200, Math.round(width))) });
         },
 
+        setContextGitSplitDiffWidth: (width) => {
+          if (!Number.isFinite(width)) {
+            return;
+          }
+          set({ contextGitSplitDiffWidth: Math.min(1200, Math.max(360, Math.round(width))) });
+        },
+
         // Rail entry point: activates the most recent tab of the requested
         // mode, opens a fresh singleton tab when none exists, and toggles the
         // panel closed when the requested mode is already active and visible.
@@ -1466,12 +1699,83 @@ export const useUIStore = create<UIStore>()(
 
           const diffScope = normalizePendingDiffScope(scope) ?? (staged ? 'staged' : 'working');
 
-          get().openContextPanelTab(normalizedDirectory, {
+          useGitDiffTabsStore.getState().openTab(normalizedDirectory, {
+            kind: 'working',
+            path: normalizedFilePath,
+            scope: diffScope,
+          });
+
+          const tab: ContextPanelTabDescriptor = {
             mode: 'diff',
             targetPath: normalizedFilePath,
             stagedDiff: diffScope === 'staged',
             diffScope,
+          };
+
+          const panelState = get().contextPanelByDirectory[normalizedDirectory];
+          const activeTab = panelState?.tabs.find((entry) => entry.id === panelState.activeTabId) ?? null;
+          const gitTabActive = Boolean(panelState?.isOpen && activeTab?.mode === 'git');
+
+          // While the git surface is visible the diff lands in its split pane:
+          // keep the diff panel tab updated in the background without stealing
+          // focus from the git tab.
+          if (gitTabActive) {
+            set((state) => {
+              const prev = state.contextPanelByDirectory[normalizedDirectory];
+              const current = touchContextPanelState(prev);
+              const byDirectory = {
+                ...state.contextPanelByDirectory,
+                [normalizedDirectory]: upsertContextPanelTab(current, tab, { reveal: false }),
+              };
+
+              return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+            });
+            return;
+          }
+
+          get().openContextPanelTab(normalizedDirectory, tab);
+        },
+
+        openContextCommitDiff: (directory, target) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedTarget = normalizeGitCommitDiffTarget(target);
+          if (!normalizedDirectory || normalizedTarget === null) {
+            return;
+          }
+
+          useGitDiffTabsStore.getState().openTab(normalizedDirectory, {
+            kind: 'commit',
+            target: normalizedTarget,
           });
+
+          const tab: ContextPanelTabDescriptor = {
+            mode: 'diff',
+            targetPath: normalizedTarget.file.path,
+            commitDiffTarget: normalizedTarget,
+          };
+
+          const panelState = get().contextPanelByDirectory[normalizedDirectory];
+          const activeTab = panelState?.tabs.find((entry) => entry.id === panelState.activeTabId) ?? null;
+          const gitTabActive = Boolean(panelState?.isOpen && activeTab?.mode === 'git');
+
+          // While the git surface is visible the diff lands in its split pane:
+          // keep the diff panel tab updated in the background without stealing
+          // focus from the git tab.
+          if (gitTabActive) {
+            set((state) => {
+              const prev = state.contextPanelByDirectory[normalizedDirectory];
+              const current = touchContextPanelState(prev);
+              const byDirectory = {
+                ...state.contextPanelByDirectory,
+                [normalizedDirectory]: upsertContextPanelTab(current, tab, { reveal: false }),
+              };
+
+              return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+            });
+            return;
+          }
+
+          get().openContextPanelTab(normalizedDirectory, tab);
         },
 
         openContextFile: (directory, filePath) => {
@@ -1511,6 +1815,15 @@ export const useUIStore = create<UIStore>()(
           }
 
           get().openContextPanelTab(normalizedDirectory, { mode: 'context' });
+        },
+
+        openContextPlan: (directory) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          if (!normalizedDirectory) {
+            return;
+          }
+
+          get().openContextPanelTab(normalizedDirectory, { mode: 'plan' });
         },
 
         openContextPreview: (directory, url) => {
@@ -2257,6 +2570,45 @@ export const useUIStore = create<UIStore>()(
           set({ linearIssueFocus: trimmed || null });
         },
 
+        setGitReviewLayout: (layout) => {
+          set({ gitReviewLayout: layout });
+        },
+        setGitGraphPaneCollapsed: (collapsed) => {
+          const nextCollapsed = collapsed;
+          set((state) => state.gitGraphPaneCollapsed === nextCollapsed ? state : { gitGraphPaneCollapsed: nextCollapsed });
+        },
+        setGitGraphPaneHeight: (height) => {
+          const nextHeight = clampGitRepositoryPaneGraphHeight(height);
+          set((state) => state.gitGraphPaneHeight === nextHeight ? state : { gitGraphPaneHeight: nextHeight });
+        },
+        getGitRepositoryPaneState: (directory, runtimeKey) => {
+          const key = gitRepositoryPanePreferenceKey(directory, runtimeKey);
+          return get().gitRepositoryPaneStates[key] ?? createDefaultGitRepositoryPaneState();
+        },
+        setGitRepositoryPaneState: (directory, updates, runtimeKey) => {
+          const key = gitRepositoryPanePreferenceKey(directory, runtimeKey);
+          set((state) => {
+            const current = state.gitRepositoryPaneStates[key] ?? createDefaultGitRepositoryPaneState();
+            const patch = typeof updates === 'function' ? updates(current) : updates;
+            const next = sanitizeGitRepositoryPaneState({ ...current, ...patch });
+            if (
+              next.changesCollapsed === current.changesCollapsed
+              && next.graphFilterMode === current.graphFilterMode
+              && next.graphManualRefIds.length === current.graphManualRefIds.length
+              && next.graphManualRefIds.every((id, index) => id === current.graphManualRefIds[index])
+            ) {
+              return state;
+            }
+
+            return {
+              gitRepositoryPaneStates: {
+                ...state.gitRepositoryPaneStates,
+                [key]: next,
+              },
+            };
+          });
+        },
+
         setInputBarOffset: (offset) => {
           set({ inputBarOffset: offset });
         },
@@ -2938,6 +3290,15 @@ export const useUIStore = create<UIStore>()(
           delete state.linearIssueListTeamId;
           state.linearIssueListTeamIdByRuntime = sanitizeLinearIssueListTeamIdByRuntime(state.linearIssueListTeamIdByRuntime);
           state.linearIssueListPriority = sanitizeLinearIssueListPriority(state.linearIssueListPriority);
+          if (state.gitReviewLayout !== 'separate' && state.gitReviewLayout !== 'combined') {
+            state.gitReviewLayout = 'separate';
+          }
+          state.gitGraphPaneCollapsed = gitGraphPaneCollapsedSchema.parse(state.gitGraphPaneCollapsed);
+          state.gitGraphPaneHeight = gitGraphPaneHeightSchema.parse(state.gitGraphPaneHeight);
+
+          if (version < 17) {
+            state.contextPanelByDirectory = sanitizeContextPanelByDirectory(state.contextPanelByDirectory);
+          }
 
           state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
           state.largeTextPasteBehavior = normalizeLargeTextPasteBehavior(state.largeTextPasteBehavior);
@@ -2958,6 +3319,7 @@ export const useUIStore = create<UIStore>()(
           state.contextRailOrder = Array.isArray(state.contextRailOrder)
             ? (state.contextRailOrder as unknown[]).filter((id): id is string => typeof id === 'string' && id.trim() !== '')
             : [];
+          state.gitRepositoryPaneStates = sanitizeGitRepositoryPaneStates(gitRepositoryPaneStatesSchema.parse(state.gitRepositoryPaneStates));
 
           return state;
         },
@@ -2970,6 +3332,7 @@ export const useUIStore = create<UIStore>()(
           contextRailHiddenSurfaces: state.contextRailHiddenSurfaces,
           contextEditorTreeVisible: state.contextEditorTreeVisible,
           contextEditorTreeWidth: state.contextEditorTreeWidth,
+          contextGitSplitDiffWidth: state.contextGitSplitDiffWidth,
           notesPanelHeight: state.notesPanelHeight,
           workStatusExpandedSections: state.workStatusExpandedSections,
           workStatusScrollTop: state.workStatusScrollTop,
@@ -3029,6 +3392,10 @@ export const useUIStore = create<UIStore>()(
           linearIssueListAssignee: state.linearIssueListAssignee,
           linearIssueListTeamIdByRuntime: state.linearIssueListTeamIdByRuntime,
           linearIssueListPriority: state.linearIssueListPriority,
+          gitReviewLayout: state.gitReviewLayout,
+          gitGraphPaneCollapsed: state.gitGraphPaneCollapsed,
+          gitGraphPaneHeight: state.gitGraphPaneHeight,
+          gitRepositoryPaneStates: state.gitRepositoryPaneStates,
           nativeNotificationsEnabled: state.nativeNotificationsEnabled,
           notificationMode: state.notificationMode,
           showTerminalQuickKeysOnDesktop: state.showTerminalQuickKeysOnDesktop,

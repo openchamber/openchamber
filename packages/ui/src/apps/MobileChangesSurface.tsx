@@ -193,9 +193,15 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   const comparisonSource = React.useMemo<GitComparisonSource | null>(() => {
     if (mode === 'pr') return selectedPr;
     if (mode === 'branch' && currentBranch && branchComparison.base) return { kind: 'branch', baseRef: branchComparison.base, headRef: currentBranch };
-    if (mode === 'commit' && selectedCommitHash) return { kind: 'commit', hash: selectedCommitHash };
+    if (mode === 'commit' && commitComparison.selectedCommit) {
+      return {
+        kind: 'commit',
+        hash: commitComparison.selectedCommit.hash,
+        parentHash: commitComparison.selectedCommit.parents[0] ?? null,
+      };
+    }
     return null;
-  }, [branchComparison.base, currentBranch, mode, selectedCommitHash, selectedPr]);
+  }, [branchComparison.base, commitComparison.selectedCommit, currentBranch, mode, selectedPr]);
   const comparisonRevision = mode === 'branch' ? branchComparison.revision : '';
   const comparison = useGitComparison(currentDirectory || null, comparisonSource, visible && isGitRepo === true, comparisonRevision);
   const { fetchDiff: loadComparisonDiff } = comparison;

@@ -25,11 +25,9 @@ The following functions are exported and used by the web server:
 
 ### Status and Diff Operations
 - `getStatus(directory)`: Get comprehensive Git status including current branch, tracking, ahead/behind, file changes, diff stats, merge/rebase state.
-- `getDiff(directory, { path, staged, contextLines })`: Get diff output for files or entire working tree with full Git blob identities. Untracked symbolic links are represented as link entries without following their targets.
-- `getRangeDiff(directory, { base, head, path, contextLines, includeWorkingTree })`: Compare the merge base of the exact selected refs with `head`. With `includeWorkingTree: true`, compare with the checked-out branch's current files instead, including committed, staged, unstaged, and untracked work in one net diff. This mode rejects a head that is not the checked-out branch. Exposed as `GET /api/git/range-diff`; omit `path` for the whole comparison.
-- `getRangeFiles(directory, { base, head, includeWorkingTree })`: List changed paths using the same comparison as `getRangeDiff`. A successful empty list means the final files match the merge base, even if staging and working-tree changes cancel each other out.
-- Both range operations honor refs literally. A local `main` is never replaced with `origin/main`, and an unavailable ref fails rather than choosing a different remote. The UI picker sends qualified refs to distinguish local and remote branches with matching display names.
-- Working-tree comparisons use the real index read-only. When untracked paths exist, a temporary copy of the index receives intent-to-add entries so Git computes additions, deletions, recreations, and renames together. Current contents come from the working tree, symlinks remain links, ignored files stay excluded, and temporary files are removed on success or failure.
+- `getDiff(directory, { path, staged, contextLines })`: Get diff output for files or the entire working tree with full Git blob identities. Untracked symbolic links are represented as link entries without following their targets.
+- `getRangeDiff(directory, { base, head, path, contextLines, includeWorkingTree })`: Get diff between two refs. Uses three-dot `base...head` semantics, so work merged into `head` from `base` is excluded and only the branch's own changes are returned. An explicit local base wins; a bare base with no local ref resolves to `origin/<base>` when available. With `includeWorkingTree: true`, the checked-out branch's staged, unstaged, and untracked changes are compared through a private index without mutating the real index. A path absent from the working tree may still be compared when it exists at the merge base, preserving committed deletions. Exposed as `GET /api/git/range-diff` (`path` optional; omit it for the whole range).
+- `getRangeFiles(directory, { base, head, includeWorkingTree })`: Get list of changed files between two refs, optionally including the checked-out branch's staged, unstaged, and untracked changes without mutating the real index.
 - `getFileDiff(directory, { path, staged })`: Get original and modified file contents for a single file (handles images as data URLs and symbolic links as their link-target text).
 - `listUntrackedPaths(directory)`: List individual untracked file paths honoring ignore rules. Much cheaper than `getStatus` when that is all a caller needs. Deliberately not `--directory`: collapsed directory entries end in a slash and are rejected by the per-file diff helpers, so a caller would silently lose every file inside a new directory.
 - `getUntrackedDiffs(directory, filePaths, { concurrency, contextLines })`: Diffs for untracked files against an empty tree. Resolves the repository context once instead of per file (`getDiff` re-resolves every call, costing an extra `rev-parse` each time) and bounds how many diff processes run at once. Returns one entry per input path in order; unreadable paths yield `''` rather than failing the batch.
@@ -37,20 +35,21 @@ The following functions are exported and used by the web server:
 - `revertFile(directory, filePath, options)`: Revert a file. Default scope `all` discards staged and working-tree changes; scope `working` discards only unstaged/working-tree changes.
 - `stageFile(directory, filePath)`: Add one file path to the index.
 - `unstageFile(directory, filePath)`: Remove one file path from the index while preserving working-tree content.
-- `applyHunk(directory, filePath, options)`: Apply a single-hunk patch via `git apply`. `options.action` is `stage` (`git apply --cached`), `unstage` (`git apply --cached --reverse`), or `discard` (`git apply --reverse` in the working tree). Inside the index mutation queue, the server verifies that the complete patch exactly matches one current three-context-line hunk for that file and scope, then runs `--check` before applying. Applicability alone cannot prove an unstaged change: old staged or committed hunks can reverse cleanly too. Stale, historical and multi-file patches fail with a refresh error. Temporary patch files are removed on success and failure; hunk content retains CRLF bytes.
+- `applyHunk(directory, filePath, options)`: Apply a single-hunk patch via `git apply`. `options.action` is `stage` (`git apply --cached`), `unstage` (`git apply --cached --reverse`), or `discard` (`git apply --reverse` in the working tree). The submitted patch must exactly equal one canonical hunk from the current diff, then a `--check` runs before mutation so stale or shifted hunks fail with a clear "refresh and try again" error. The patch target path must match the requested file.
 
 ### Branch Operations
-- `getBranchBase(directory, branch)`: Read a named creation source from reflog. After a rebase, the creation source is no longer a current parent record, so return `null` and let the user choose a base. Explicit per-runtime, directory, and branch choices in the shared UI outrank detection.
 - `getBranches(directory)`: Get list of local and remote branches (filtered to active remote branches).
 - `getUnpushedBranchCounts(directory, branchNames)`: Count commits ahead of each locally known upstream for up to five supplied local branches. This reads local refs only and omits branches without an upstream.
 - `createBranch(directory, branchName, options)`: Create and checkout a new branch.
+- `createTag(directory, tagName, commitHash)`: Create a lightweight tag at the requested commit. The web route requires a full commit SHA, rejects option-like tag names, and the service executes `git tag -- <name> <commit>` with bounded argv.
 - `checkoutBranch(directory, branchName)`: Checkout an existing branch. A remote-tracking name (`origin/main`, or the `remotes/`-prefixed form) resolves to the local branch of that name, created with `--track` when it does not exist yet, because the branch selector offers remote branches as places to work rather than commits to inspect — a literal checkout of the remote ref would detach HEAD. A local branch whose own name looks like a remote ref wins over that resolution, and anything unresolvable is checked out as requested. The returned `branch` is the branch that was actually checked out, which callers should report instead of the requested name.
 - `deleteBranch(directory, branch, options)`: Delete a branch (supports force flag).
 - `renameBranch(directory, oldName, newName)`: Rename a branch and preserve upstream tracking.
+- `getBranchBase(directory, branch)`: Resolve a branch's creation source from its reflog. Rebased branches return `{ base: null }`, because their original creation source is no longer authoritative.
 - `getRemotes(directory)`: Get list of configured remotes.
 
 ### Worktree Operations
-- `getWorktrees(directory)`: List all git worktrees for a repository. A directory outside any repository (or one that does not exist) is an authoritative empty list; any other git failure throws so callers keep their last known topology instead of clearing it. `GET /api/git/worktrees` answers such a failure with 500.
+- `getWorktrees(directory)`: List all git worktrees for a repository. Worktrees Git marks `prunable` remain in the list so callers can remove their stale metadata. A directory outside any repository (or one that does not exist) is an authoritative empty list; any other git failure throws so callers keep their last known topology instead of clearing it. `GET /api/git/worktrees` answers such a failure with 500.
 - `observeWorktreeTopology(directory)`: Compare the repository's registered linked-worktree set with the last one seen for it and notify `subscribeWorktreeTopologyChanges` listeners when it changed. The set is fingerprinted from the `worktrees` directory under the common Git directory (mtime plus entry names), so the check is a stat and a readdir; the common directory is resolved with `git rev-parse --git-common-dir` once per requested directory and cached. The first observation only records a baseline. Never throws.
 - `subscribeWorktreeTopologyChanges(listener)`: Listener receives `{ directories, at }`, where `directories` are every directory of that repository the server has observed, so clients can map them onto registered projects. Returns an unsubscribe function.
 - `validateWorktreeCreate(directory, input)`: Validate worktree creation parameters (mode, branchName, startRef, upstream config).
@@ -82,10 +81,11 @@ bootstrap, tracking is left unset rather than writing `branch.*.remote` /
 - `deleteRemoteBranch(directory, options)`: Delete a remote branch.
 
 ### Log Operations
-- `getLog(directory, options)`: Get commit history with stats (supports maxCount, from, to, file filters).
-- `getCommitFiles(directory, commitHash)`: Get file changes for a specific commit relative to its first parent, or the empty tree for a root commit. NUL-delimited paths preserve whitespace; renamed files return their destination in `path` and source in `previousPath`.
-- `getCommitDiff(directory, { hash, path, previousPath, contextLines })`: Get the same commit's patch, with optional file filtering and context depth. `previousPath` keeps a rename's old and new paths in the per-file patch. Reads committed objects only, never the working tree. Exposed as `GET /api/git/commit-diff`; an unavailable hash fails rather than returning an empty diff.
-- `getCommitFileDiff(directory, hash, filePath, isBinary)`: Get before/after content for a specific file in a commit. Returns `{ original, modified, isBinary }`. Runs `git show <hash>^:<path>` and `git show <hash>:<path>` in parallel; returns empty strings on failure (added/deleted/root-commit edge cases).
+- `getLog(directory, options)`: Get commit history with stats (supports maxCount, from, to, file filters). A `to` ref without `from` is passed as the positional log ref, preserving its file and max-count filters.
+- `getGitHistory(directory, options)`: Graph history pages. Explicit requests require at least one validated ref and remain capped at 32 refs; `{ all: true }` is the only supported all-refs selector and maps to an internally authored `--all` argument instead of enumerating refs.
+- `getCommitFiles(directory, request)`: Get normalized file changes in two forms. The request form `{ commitHash, parentHash }` requires the authoritative first parent for non-root commits (`null` only for a true root) and returns `status`/`originalPath`; the legacy string form compares the commit with its first parent (or the empty tree for a root) and returns `changeType`/`previousPath`. Both preserve rename paths, full 40- or 64-character blob IDs, binary flags, symlink/gitlink kinds, and deterministic Git order.
+- `getCommitDiff(directory, { hash, path, previousPath, contextLines })`: Get a committed patch for the existing comparison walkthrough. `previousPath` keeps both sides of a rename in a filtered patch.
+- `getCommitFileDiff(directory, request)`: Get before/after content for a specific file preview using `{ commitHash, parentHash, originalPath, modifiedPath }`. Returns `{ status: 'ready', original, modified }` for accepted previews or `{ status: 'too-large', totalBytes, maxBytes }` when combined blob sizes exceed 8 MiB. The backend treats null sides as authoritative, validates expected objects and repository-relative paths, measures blobs with `git cat-file -s`, then reads permitted sides concurrently with `git cat-file -p`.
 
 ### Merge and Rebase Operations
 - `rebase(directory, options)`: Start a rebase onto a target branch.
@@ -143,7 +143,9 @@ The following functions are internal helpers used by exported functions:
 
 ### Runtime availability of range diffs
 - `GET /api/git/range-diff` is served by the OpenChamber web server, so it is available to web, desktop, and mobile clients. The shared `GitAPI.getGitRangeDiff` is therefore optional: web supplies the HTTP implementation, and VS Code does not implement it because the extension host serves Git through its own bridge rather than these routes. Features built on range diffs (currently the AI diff walkthrough) are not offered in VS Code.
-- Commit comparison uses the same server boundary through optional `GitAPI.getGitCommitDiff`. Desktop Changes, mobile Changes, and the existing walkthrough surface share branch/commit comparison semantics. Mobile Changes uses the same selectors and `useGitComparison` file-list owner, with a read-only list-to-detail flow. VS Code keeps its existing modes because its Git bridge does not provide these comparison operations. The HTTP operations are available to web, Electron, hosted mobile, and Capacitor clients.
+
+### Runtime availability of commit comparison
+- Commit-file metadata and previews use the OpenChamber web server in web, Electron, hosted mobile, and Capacitor. VS Code provides the same parent-aware operations through its Git bridge, although the shared `DiffView` does not offer Commit scope there.
 
 ### Staged and unstaged change handling
 - Desktop Changes floats a compact action capsule after each hunk's last changed row,
@@ -187,6 +189,28 @@ The following functions are internal helpers used by exported functions:
 - `latest`: Latest commit object or null.
 - `total`: Total number of commits.
 
+### Git history route errors
+- `GET /api/git/history` returns history service errors as `{ error: string, code?: string }` with the service status code.
+- Stale history cursors return `409` with `{ error: 'stale cursor', code: 'stale_git_history_cursor' }` so HTTP runtimes can restart pagination from page one.
+- Other history failures omit `code` unless the Git service provided one.
+
+### Commit File Metadata Response
+- `files`: Array in Git diff order.
+- Each file entry contains:
+  - `path`: destination path.
+  - `originalPath`: source path for renames only.
+  - `status`: `A`, `M`, `D`, or `R`. Type changes (`T`) normalize to `M`.
+  - `kind`: `file`, `symlink`, or `gitlink`, derived from raw modes (`120000` and `160000`).
+  - `originalObjectId` / `objectId`: omitted on null sides (adds/deletes).
+  - `insertions` / `deletions`: line counts, or `0/0` for binary files, symlinks, and gitlinks.
+  - `isBinary`: true only for regular files with `-/-` numstat output.
+
+### Commit File Preview Route Contract
+- `GET /api/git/commit-files` expects `directory`, `commitHash`, and `parentHash` query fields.
+- `GET /api/git/commit-file-diff` expects `directory`, `commitHash`, `parentHash`, `originalPath`, and `modifiedPath` query fields.
+- Web/Electron HTTP adapters serialize `null` parent/path values as the explicit root marker `__ROOT__`; routes decode that marker back to `null`.
+- Web routes require full 40-character SHA-1 or 64-character SHA-256 commit hashes. Abbreviated SHAs are rejected at the route boundary.
+
 ## Notes for Contributors
 
 ### Adding a New Git Operation
@@ -220,6 +244,7 @@ The following functions are internal helpers used by exported functions:
 
 ### Error Handling
 - All exported functions should throw errors with descriptive messages.
+- `git diff --no-index` treats numeric exit code `1` as an ordinary difference. Spawn, buffer, and other process failures have no numeric Git exit code and must remain failures.
 - Use `console.error` for logging Git operation failures.
 - Return structured objects for operations that need partial success reporting (e.g., merge/rebase conflicts).
 

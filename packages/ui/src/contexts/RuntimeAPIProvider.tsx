@@ -2,6 +2,7 @@ import React, { type JSX, type ReactNode } from 'react';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import type { FilesAPI, RuntimeAPIs } from '@/lib/api/types';
 import { createContentCachedFiles } from '@/contexts/content-cache-owner';
+import { withGitMutationRefreshHints } from '@/lib/api/gitMutationHints';
 
 type ContentCachedFiles = ReturnType<typeof createContentCachedFiles>;
 
@@ -21,12 +22,14 @@ export function RuntimeAPIProvider({ apis, children }: { apis: RuntimeAPIs; chil
   }, [apis.files]);
 
   const files: FilesAPI = cachedOwner?.files ?? apis.files;
+  const git = React.useMemo(() => withGitMutationRefreshHints(apis.git), [apis]);
   const cachedApis = React.useMemo<RuntimeAPIs>(
     () => ({
       ...apis,
       files,
+      git,
     }),
-    [apis, files],
+    [apis, files, git],
   );
   return <RuntimeAPIContext.Provider value={cachedApis}>{children}</RuntimeAPIContext.Provider>;
 }

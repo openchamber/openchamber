@@ -10,7 +10,7 @@ interface GitEmptyStateProps {
 export const GitEmptyState: React.FC<GitEmptyStateProps> = ({ onOpenStashes }) => {
   const { t } = useI18n();
   return (
-    <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
+    <div className="flex h-full flex-1 flex-col items-center justify-center px-4 text-center">
       <Icon name="git-commit" className="size-10 text-muted-foreground/70 mb-4" />
       <p className="typography-ui-label font-semibold text-foreground mb-1">
         {t('gitView.empty.cleanTitle')}
