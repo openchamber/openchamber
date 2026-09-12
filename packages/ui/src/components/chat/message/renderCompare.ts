@@ -322,6 +322,10 @@ export const areRelevantTurnGroupingContextsEqual = (
   const segmentsRelevant = hasRelevantActivitySegments(left.activityGroupSegments, messageId)
     || hasRelevantActivitySegments(right.activityGroupSegments, messageId);
 
+  if ((ownerRelevant || segmentsRelevant) && left.activitySettled !== right.activitySettled) {
+    return false;
+  }
+
   if ((ownerRelevant || segmentsRelevant) && left.isGroupExpanded !== right.isGroupExpanded) {
     return false;
   }

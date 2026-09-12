@@ -88,6 +88,15 @@ Cleanup stops the animation, so a same-target early return can leave a cached
 pre-collapse height on the DOM indefinitely. Failed animations also settle;
 callbacks from cancelled, superseded animations never settle a newer target.
 
+Sorted mode uses the same final-answer and interruption boundary as live mode.
+While a turn is unfinished, a collapsed Activity group shows its seven most
+recent rows. Once the turn has a genuine final answer, or a later assistant
+response retires an interrupted turn, the collapsed group shows no preview
+rows. A queued user message alone does not settle the earlier turn. Manual
+expansion and the Expanded preference continue to show every row. Pending
+questions and permission requests remain available because they do not create
+a final-answer boundary.
+
 The virtualizer also adds temporary end padding while compensating prepended
 history. The Bun patch for `@legendapp/list@3.3.10` stores that padding's CSSOM
 read-back value: Chromium rounds fractional pixel strings, so comparing the
