@@ -20,6 +20,12 @@ type PersistedEnvelope = {
   runtimes: Record<string, PersistedEntry>
 }
 
+let lastActiveSessionClearGeneration = 0
+
+export function getLastActiveSessionClearGeneration(): number {
+  return lastActiveSessionClearGeneration
+}
+
 const emptyEnvelope = (): PersistedEnvelope => ({ version: 1, runtimes: {} })
 
 const readEnvelope = (storage: Storage): PersistedEnvelope => {
@@ -79,11 +85,25 @@ export function readLastActiveSession(
   return entry ? { sessionId: entry.sessionId, directory: entry.directory } : null
 }
 
+// A server can be opened through several equivalent origins (LAN address,
+// reverse proxy, or the public hostname). If the current origin has no exact
+// entry, the newest pointer is the safest continuity fallback; the caller
+// still validates the session against an authoritative snapshot.
+export function readMostRecentLastActiveSession(
+  storage: Storage = getDeferredSafeStorage(),
+): PersistedLastSession | null {
+  const entries = Object.values(readEnvelope(storage).runtimes)
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+  const entry = entries[0]
+  return entry ? { sessionId: entry.sessionId, directory: entry.directory } : null
+}
+
 export function clearLastActiveSession(
   runtimeKey: string,
   storage: Storage = getDeferredSafeStorage(),
 ): void {
   if (!runtimeKey) return
+  lastActiveSessionClearGeneration += 1
   const envelope = readEnvelope(storage)
   if (!envelope.runtimes[runtimeKey]) return
   delete envelope.runtimes[runtimeKey]

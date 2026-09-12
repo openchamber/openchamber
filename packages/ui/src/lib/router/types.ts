@@ -36,6 +36,14 @@ export const VALID_SETTINGS_SECTIONS: readonly SidebarSection[] = [
 ] as const;
 
 /**
+ * Special value for the `?session=` parameter that resolves to the last
+ * active session persisted for the current runtime (see
+ * `@/sync/last-session-cache`). Falls back to the default new-session
+ * behavior when no usable persisted session exists.
+ */
+export const RECENT_SESSION_TOKEN = 'recent';
+
+/**
  * URL parameter names used for routing.
  */
 export const ROUTE_PARAMS = {
