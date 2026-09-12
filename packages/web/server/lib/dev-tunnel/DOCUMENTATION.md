@@ -40,6 +40,11 @@ and what made it fragile per framework.
   "any loopback port". Without that restriction an authenticated client could
   dial arbitrary local services on the host — databases, admin panels, the
   OpenCode API — through this socket.
+- The scanner caches listener enumeration, then applies current private-port
+  exclusions on every call. The server browser contributes its configured,
+  launching and active CDP ports. A cached listener must never authorize raw
+  debugger access through this tunnel. Discovery waits for Chrome startup or
+  teardown when its automatic port is not yet settled; failures deny access.
 - Authentication depends on whether the caller is a browser, and this is
   deliberate rather than a relaxation:
   - With an `Origin` header the request came from a browser context, and the

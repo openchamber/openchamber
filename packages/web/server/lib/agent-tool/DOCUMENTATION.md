@@ -43,6 +43,24 @@ both settings are `false`.
    required inputs or one non-obvious behavior, while completed calls use the
    short title in native tool metadata.
 
+## Web tool targeting
+
+- Every `openchamber_web` request is scoped to a target: the session directory
+  (or an explicit `directory`), plus an optional `tabId` naming one tab from
+  a `browser.tabs` result. Without a `tabId`, an action served by a connected
+  client acts on the tab the window is currently showing for that project,
+  and an unknown client `tabId` is claimed by nobody and fails instead of
+  landing on the visible tab. On the server path there is no implicit
+  visible tab: rich actions require an explicit `sc:` tab id and fail with a
+  scoped 400 naming the target when it is missing, while `browser.open`
+  creates a fresh server tab and returns its `sc:` id for follow-ups.
+- `browser.tabs` lists the target project's tabs from both backends (client
+  panel tabs plus any `sc:` server session tabs) with their ids, urls,
+  titles, and which one is active. It is read-only: it never drives a page.
+- The plugin forwards OpenCode's session id as `openCodeSessionId`, and it
+  rides the request target end to end (service, broker, client), so the
+  browser panel can attribute agent actions to the session that issued them.
+
 ## Agent context budget
 
 - The tool exposes one shared parameter object rather than repeating parameters
@@ -92,8 +110,14 @@ Every completed call returns JSON:
 ```
 
 Command and operational failures use the same envelope with `ok: false` and
-an `error` object. OpenCode-level cancellation can still produce a native tool
-error state.
+an `error` object. Browser action results, successes and failures alike, carry
+a top-level `target` naming the tab that served the action or the scope a
+failed call was aimed at; a tab-less request that failed while running against
+the resolved visible tab names that tab. `browser.capture` keeps the captured
+tab's identity through its rebuilt result, and a screenshot that fails to save
+fails with the same target attached. The direct control route
+(`/api/openchamber/control`) mirrors this by including `target` in its error
+body. OpenCode-level cancellation can still produce a native tool error state.
 
 ## Runtime parity
 
@@ -117,3 +141,19 @@ tool fails rather than driving the browser. An unresolvable action answers with
 the actions that tool actually has, because an error that only says
 "unsupported" leaves the model to guess a second wrong name — which is exactly
 what happened before this existed.
+
+## Server browser backend
+
+- `openchamber_web` accepts an optional additive `preferBackend` parameter
+  (`'server-chrome'` only) on browser actions. It forces the server-hosted
+  Chrome backend even when a connected client window could serve the request.
+  Any other value fails with a 400 naming the constraint.
+- Without `preferBackend`, a connected capable client still wins; the server
+  backend answers when no client matches, so unattended sessions (scheduled
+  tasks, sessions with no open window) can browse. Tab ids returned from the
+  server path carry the `sc:` prefix and route back to the server by
+  ownership on follow-up actions.
+- The server backend lives behind the `serverBrowserEnabled` setting, which
+  defaults to off. A request forced or routed to the server while the setting
+  is off fails with a 503 naming the setting; nothing about the client path
+  changes.

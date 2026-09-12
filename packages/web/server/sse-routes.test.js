@@ -30,11 +30,12 @@ const createRouteRegistry = () => {
   };
 };
 
-const createMockRequest = () => {
+const createMockRequest = (query) => {
   const listeners = new Map();
 
   return {
     headers: {},
+    ...(query ? { query } : {}),
     on(event, handler) {
       listeners.set(event, handler);
       return this;
@@ -185,5 +186,35 @@ describe('local SSE routes', () => {
 
     req.emit('close');
     expect(clients.has(res)).toBe(false);
+  });
+
+  it('records the per-window clientId on the OpenChamber SSE connection', () => {
+    const { app, getRoute } = createRouteRegistry();
+    const clients = new Set();
+
+    registerScheduledTaskRoutes(app, {
+      getOpenChamberEventClients: () => clients,
+      writeSseEvent(res, payload) {
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      },
+    });
+
+    const handler = getRoute('GET', '/api/openchamber/events');
+
+    const reqIdentified = createMockRequest({ browser: '1', clientId: 'abc' });
+    const resIdentified = createMockResponse();
+    handler(reqIdentified, resIdentified);
+    expect(resIdentified.openchamberClientId).toBe('abc');
+    expect(resIdentified.openchamberBrowserCapable).toBe(true);
+    expect(clients.has(resIdentified)).toBe(true);
+    reqIdentified.emit('close');
+
+    const reqLegacy = createMockRequest();
+    const resLegacy = createMockResponse();
+    handler(reqLegacy, resLegacy);
+    expect(resLegacy.openchamberClientId).toBeNull();
+    expect(resLegacy.openchamberBrowserCapable).toBe(false);
+    expect(clients.has(resLegacy)).toBe(true);
+    reqLegacy.emit('close');
   });
 });

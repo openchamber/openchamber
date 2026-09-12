@@ -10,6 +10,7 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
+import { BrowserDebugPortSettings } from './BrowserDebugPortSettings';
 
 /**
  * Which OpenChamber capabilities agents are given.
@@ -28,6 +29,9 @@ export const OpenChamberToolsSettings: React.FC = () => {
   const setAgentControlToolEnabled = useUIStore((state) => state.setAgentControlToolEnabled);
   const agentWebToolEnabled = useUIStore((state) => state.agentWebToolEnabled);
   const setAgentWebToolEnabled = useUIStore((state) => state.setAgentWebToolEnabled);
+  const serverBrowserEnabled = useUIStore((state) => state.serverBrowserEnabled);
+  const setServerBrowserEnabled = useUIStore((state) => state.setServerBrowserEnabled);
+  const [browserStatusRevision, refreshBrowserStatus] = React.useReducer((value: number) => value + 1, 0);
   const agentMemoryToolEnabled = useUIStore((state) => state.agentMemoryToolEnabled);
   // Absent, not merely off: the feature is finished but unreleased, and a
   // visible switch invites turning on something that was never announced.
@@ -45,6 +49,13 @@ export const OpenChamberToolsSettings: React.FC = () => {
     void updateDesktopSettings({ agentWebToolEnabled: enabled });
     recordDeferredOpenCodeRestart('cli', { id: 'agent-web-tool' });
   }, [setAgentWebToolEnabled]);
+
+  // Live on the server: enabling arms the backend, disabling tears it down
+  // immediately — no OpenCode restart is needed.
+  const handleServerBrowserChange = React.useCallback((enabled: boolean) => {
+    setServerBrowserEnabled(enabled);
+    void updateDesktopSettings({ serverBrowserEnabled: enabled }).finally(refreshBrowserStatus);
+  }, [setServerBrowserEnabled]);
 
   // Turning memory off removes the whole feature, not just the tool: the panel
   // tab goes with it and sessions stop being given the index. Showing the user
@@ -85,6 +96,15 @@ export const OpenChamberToolsSettings: React.FC = () => {
           info={t('settings.openchamber.tools.field.agentWebToolInfo')}
         />
 
+        <SettingsCheckboxRow
+          settingsItem="sessions.server-browser"
+          checked={serverBrowserEnabled}
+          onChange={handleServerBrowserChange}
+          label={t('settings.openchamber.tools.field.serverBrowser')}
+          ariaLabel={t('settings.openchamber.tools.field.serverBrowserAria')}
+          info={t('settings.openchamber.tools.field.serverBrowserInfo')}
+        />
+
         {agentMemoryAvailable ? (
         <SettingsCheckboxRow
           settingsItem="sessions.agent-memory-tool"
@@ -96,6 +116,7 @@ export const OpenChamberToolsSettings: React.FC = () => {
         />
         ) : null}
       </div>
+      <BrowserDebugPortSettings statusRevision={browserStatusRevision} />
     </SettingsSection>
   );
 };

@@ -445,6 +445,7 @@ describe('updateDesktopSettings', () => {
     registerSettingsApi(async () => ({}), async () => ({
       settings: {
         showReasoningTraces: false,
+        serverBrowserDebugPort: 9222,
         terminalShell: 'fish',
         favoriteModels: [{ providerID: 'anthropic', modelID: 'claude-sonnet-4' }],
         toolJsonViewMode: 'raw',
@@ -458,6 +459,7 @@ describe('updateDesktopSettings', () => {
     await syncDesktopSettings();
 
     expect(useUIStore.getState().showReasoningTraces).toBe(false);
+    expect(useUIStore.getState().serverBrowserDebugPort).toBe(9222);
     expect(useUIStore.getState().terminalShell).toBe('fish');
     expect(useUIStore.getState().favoriteModels).toHaveLength(1);
     expect(useUIStore.getState().toolJsonViewMode).toBe('raw');
@@ -475,6 +477,7 @@ describe('updateDesktopSettings', () => {
     // An omitted key is "unset", not "reset to default": the window keeps what
     // it holds and nothing is written back.
     expect(useUIStore.getState().showReasoningTraces).toBe(false);
+    expect(useUIStore.getState().serverBrowserDebugPort).toBe(9222);
     expect(useUIStore.getState().terminalShell).toBe('fish');
     expect(useUIStore.getState().favoriteModels).toHaveLength(1);
     expect(useUIStore.getState().toolJsonViewMode).toBe('raw');
@@ -494,6 +497,18 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().showReasoningTraces).toBe(false);
     expect(useUIStore.getState().terminalShell).toBe('fish');
     expect(localStorage.getItem('selectedThemeId')).toBe('existing-theme');
+  });
+
+  test('ignores malformed browser CDP ports returned by a settings runtime', async () => {
+    getWindow();
+    useUIStore.getState().setServerBrowserDebugPort(9222);
+    const invalidSettings: SettingsPayload = {};
+    Object.defineProperty(invalidSettings, 'serverBrowserDebugPort', { value: '9223', enumerable: true });
+    registerSettingsSave(async () => invalidSettings);
+
+    await updateDesktopSettings({ showReasoningTraces: false });
+
+    expect(useUIStore.getState().serverBrowserDebugPort).toBe(9222);
   });
 
   test('ignores an invalid JSON view mode in a settings save response', async () => {

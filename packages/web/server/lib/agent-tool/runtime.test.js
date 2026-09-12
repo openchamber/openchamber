@@ -335,6 +335,54 @@ describe('managed agent tool runtime', () => {
     expect(executeAction).toHaveBeenCalledWith('projects.list', { action: 'projects.list' }, undefined, { signal: controller.signal });
   });
 
+  it('forwards the OpenCode session id into the control service', async () => {
+    const executeAction = vi.fn(async () => ({}));
+    const { runtime } = await createRuntime({ executeAction });
+    await runtime.execute({
+      input: { action: 'projects.list' },
+      contextDirectory: '/work/project',
+      openCodeSessionId: 'ses_1',
+    });
+    expect(executeAction).toHaveBeenCalledWith('projects.list', { action: 'projects.list' }, '/work/project', { openCodeSessionId: 'ses_1' });
+  });
+
+  it('carries the tool context session id in the generated POST body', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    const prepared = await runtime.prepareManagedOpenCodeEnv();
+    const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
+    const pluginModule = await import(`${pathToFileURL(pluginPath).href}?session=${Date.now()}`);
+    const { tool } = await pluginModule.OpenChamberPlugin();
+
+    const sent = [];
+    const originalFetch = globalThis.fetch;
+    const originalUrl = process.env.OPENCHAMBER_AGENT_TOOL_URL;
+    const originalToken = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    process.env.OPENCHAMBER_AGENT_TOOL_URL = prepared.OPENCHAMBER_AGENT_TOOL_URL;
+    process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = prepared.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    globalThis.fetch = async (_endpoint, init) => {
+      sent.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ schemaVersion: 1, ok: true, action: 'browser.open', data: {} }));
+    };
+
+    try {
+      await tool.openchamber_web.execute(
+        { action: 'browser.open', parameters: { url: 'https://example.test' } },
+        { directory: '/work/project', sessionID: 'ses_abc', abort: new AbortController().signal, metadata: () => {} },
+      );
+      await tool.openchamber_web.execute(
+        { action: 'browser.open', parameters: { url: 'https://example.test' } },
+        { directory: '/work/project', abort: new AbortController().signal, metadata: () => {} },
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      process.env.OPENCHAMBER_AGENT_TOOL_URL = originalUrl;
+      process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = originalToken;
+    }
+
+    expect(sent[0].openCodeSessionId).toBe('ses_abc');
+    expect('openCodeSessionId' in sent[1]).toBe(false);
+  });
+
   it('requires the per-child token on the loopback route', async () => {
     const { runtime } = await createRuntime();
     const env = await runtime.prepareManagedOpenCodeEnv();
@@ -401,5 +449,88 @@ describe('managed agent tool runtime', () => {
       else process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = previousToken;
       await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
+  });
+
+  it('lists browser.tabs and the tabId input on the web tool only', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    await runtime.prepareManagedOpenCodeEnv();
+    const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
+    const pluginModule = await import(`${pathToFileURL(pluginPath).href}?tabs=${Date.now()}`);
+    const { tool } = await pluginModule.OpenChamberPlugin();
+
+    expect(tool.openchamber_web.args.action.enum).toContain('browser.tabs');
+    expect(tool.openchamber.args.action.enum).not.toContain('browser.tabs');
+    expect(tool.openchamber_web.args.parameters.properties.tabId).toEqual({
+      type: 'string',
+      description: 'Target tab id from browser.tabs; defaults to the visible tab',
+    });
+expect(Object.keys(tool.openchamber.args.parameters.properties)).not.toContain('tabId');
+  });
+
+  it('exposes the preferBackend enum on the web tool only', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    await runtime.prepareManagedOpenCodeEnv();
+    const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
+    const pluginModule = await import(`${pathToFileURL(pluginPath).href}?prefer=${Date.now()}`);
+    const { tool } = await pluginModule.OpenChamberPlugin();
+
+    expect(tool.openchamber_web.args.parameters.properties.preferBackend).toEqual({
+      type: 'string',
+      enum: ['server-chrome'],
+      description: "Force the server-hosted browser backend ('server-chrome') instead of a connected client window",
+    });
+    expect(Object.keys(tool.openchamber.args.parameters.properties)).not.toContain('preferBackend');
+  });
+
+  it('carries a flat tabId beside the action into the POST body', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    const prepared = await runtime.prepareManagedOpenCodeEnv();
+    const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
+    const pluginModule = await import(`${pathToFileURL(pluginPath).href}?flattab=${Date.now()}`);
+    const { tool } = await pluginModule.OpenChamberPlugin();
+
+    const sent = [];
+    const originalFetch = globalThis.fetch;
+    const originalUrl = process.env.OPENCHAMBER_AGENT_TOOL_URL;
+    const originalToken = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    process.env.OPENCHAMBER_AGENT_TOOL_URL = prepared.OPENCHAMBER_AGENT_TOOL_URL;
+    process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = prepared.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    globalThis.fetch = async (_endpoint, init) => {
+      sent.push(JSON.parse(init.body));
+      return new Response(JSON.stringify({ schemaVersion: 1, ok: true, action: 'browser.click', data: {} }));
+    };
+    const context = { directory: '/work/project', abort: new AbortController().signal, metadata: () => {} };
+
+    try {
+      await tool.openchamber_web.execute(
+        { action: 'browser.click', selector: 'button', tabId: 'tab-7' },
+        context,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      process.env.OPENCHAMBER_AGENT_TOOL_URL = originalUrl;
+      process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = originalToken;
+    }
+
+    expect(sent[0].input).toEqual({ action: 'browser.click', selector: 'button', tabId: 'tab-7' });
+  });
+
+  it('includes the structured target of a scoped failure in the tool result', async () => {
+    const error = Object.assign(new Error('No connected OpenChamber window can serve the browser panel for /repo'), {
+      statusCode: 503,
+      target: { directory: '/repo', tabId: 'tab-b' },
+    });
+    const { runtime } = await createRuntime({ executeAction: vi.fn(async () => { throw error; }) });
+
+    await expect(runtime.execute({
+      input: { action: 'browser.click', selector: 'button' },
+      contextDirectory: '/repo',
+    })).resolves.toEqual(expect.objectContaining({
+      schemaVersion: 1,
+      ok: false,
+      action: 'browser.click',
+      target: { directory: '/repo', tabId: 'tab-b' },
+      error: { message: 'No connected OpenChamber window can serve the browser panel for /repo', kind: 'runtime' },
+    }));
   });
 });

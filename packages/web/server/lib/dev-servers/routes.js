@@ -68,7 +68,7 @@ const readProcListeners = async (readFile) => {
   return [...byPort.values()].sort((left, right) => left.port - right.port);
 };
 
-export const createDevServerScanner = ({ spawn, platform, readFile = fsPromises.readFile }) => {
+export const createDevServerScanner = ({ spawn, platform, readFile = fsPromises.readFile, getPrivatePorts = async () => [] }) => {
   let cache = null;
 
   const scan = async () => {
@@ -95,25 +95,25 @@ export const createDevServerScanner = ({ spawn, platform, readFile = fsPromises.
      */
     async discover({ ownPorts = [] } = {}) {
       const now = Date.now();
-      if (cache && now - cache.at < CACHE_TTL_MS) return cache.value;
-
-      const result = await scan();
-      if (!result.ok) {
-        // Not cached: a transient failure should not suppress the next attempt.
-        return result;
+      if (!cache || now - cache.at >= CACHE_TTL_MS) {
+        const result = await scan();
+        if (!result.ok) {
+          // Not cached: a transient failure should not suppress the next attempt.
+          return result;
+        }
+        cache = { at: now, listeners: result.listeners };
       }
-
-      const servers = selectDevServerCandidates(result.listeners, {
-        ownPorts,
+      // Listener enumeration can be cached; authorization exclusions cannot.
+      const privatePorts = await getPrivatePorts();
+      const servers = selectDevServerCandidates(cache.listeners, {
+        ownPorts: [...ownPorts, ...privatePorts],
         ownPids: [process.pid],
       }).map((entry) => ({
         ...entry,
         url: `http://localhost:${entry.port}/`,
       }));
 
-      const value = { ok: true, servers };
-      cache = { at: now, value };
-      return value;
+      return { ok: true, servers };
     },
   };
 };

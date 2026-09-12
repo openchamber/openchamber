@@ -44,6 +44,21 @@ type BrowserControlRequestEvent = {
   requestId: string;
   action: string;
   parameters: Record<string, unknown>;
+  target?: {
+    directory?: string;
+    tabId?: string;
+    openCodeSessionId?: string;
+  };
+};
+
+/**
+ * The server settled a browser request early (agent abort, execution
+ * timeout). Clients that never claimed it ignore it; the claimant drops
+ * queued work and discards the in-flight result.
+ */
+type BrowserControlCancelEvent = {
+  type: 'browser-control-cancel';
+  requestId: string;
 };
 
 /**
@@ -64,6 +79,7 @@ type OpenChamberEvent =
   | SessionCreatedEvent
   | WorktreeChangedEvent
   | BrowserControlRequestEvent
+  | BrowserControlCancelEvent
   | AgentMemoryChangedEvent;
 type Listener = (event: OpenChamberEvent) => void;
 
@@ -81,6 +97,39 @@ const listeners = new Set<Listener>();
 
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const HEARTBEAT_TIMEOUT_MS = 45_000;
+
+// Per-window, in-memory only: desktop multi-window shares an origin, so a
+// persisted id would collide. The Math.random fallback keeps the event stream
+// alive on custom-scheme loads where crypto.randomUUID is unavailable.
+const clientId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+  ? crypto.randomUUID()
+  : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+    });
+
+export const getBrowserControlClientId = (): string => clientId;
+
+const streamReadyListeners = new Set<() => void>();
+
+/**
+ * Fires when the stream becomes usable: on every EventSource open and on the
+ * server's stream-ready envelope. A reconnect is a brand-new server-side
+ * connection object, so anything the server keeps per connection must be
+ * re-sent.
+ */
+export const subscribeEventStreamReady = (listener: () => void): (() => void) => {
+  streamReadyListeners.add(listener);
+  return () => { streamReadyListeners.delete(listener); };
+};
+
+export const isEventStreamConnected = (): boolean => (
+  eventSource !== null && eventSource.readyState === EventSource.OPEN
+);
+
+const notifyStreamReady = (): void => {
+  for (const listener of streamReadyListeners) listener();
+};
 
 const clearHeartbeatTimer = () => {
   if (!heartbeatTimer) {
@@ -149,6 +198,7 @@ const getEventProperties = (properties: unknown): Record<string, unknown> | null
 const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) => {
   if (envelope.type === 'openchamber:event-stream-ready') {
     reconnectAttempt = 0;
+    notifyStreamReady();
     for (const listener of listeners) listener({ type: 'event-stream-ready' });
     return;
   }
@@ -227,6 +277,16 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     }
 
     const rawParameters = properties?.parameters;
+    const rawTarget = properties?.target;
+    const targetRecord = rawTarget && typeof rawTarget === 'object' && !Array.isArray(rawTarget)
+      ? rawTarget as Record<string, unknown>
+      : null;
+    // Only strings pass; anything else is dropped so a malformed target
+    // degrades to absent rather than poisoning controller resolution.
+    const target: NonNullable<BrowserControlRequestEvent['target']> = {};
+    if (typeof targetRecord?.directory === 'string') target.directory = targetRecord.directory;
+    if (typeof targetRecord?.tabId === 'string') target.tabId = targetRecord.tabId;
+    if (typeof targetRecord?.openCodeSessionId === 'string') target.openCodeSessionId = targetRecord.openCodeSessionId;
     const nextEvent: BrowserControlRequestEvent = {
       type: 'browser-control-request',
       requestId,
@@ -234,7 +294,22 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
       parameters: rawParameters && typeof rawParameters === 'object' && !Array.isArray(rawParameters)
         ? rawParameters as Record<string, unknown>
         : {},
+      ...(Object.keys(target).length > 0 ? { target } : {}),
     };
+    for (const listener of listeners) {
+      listener(nextEvent);
+    }
+    return;
+  }
+
+  if (envelope.type === 'openchamber:browser-control-cancel') {
+    const properties = getEventProperties(envelope.properties);
+    const requestId = typeof properties?.requestId === 'string' ? properties.requestId : '';
+    if (!requestId) {
+      return;
+    }
+
+    const nextEvent: BrowserControlCancelEvent = { type: 'browser-control-cancel', requestId };
     for (const listener of listeners) {
       listener(nextEvent);
     }
@@ -291,11 +366,12 @@ const connect = () => {
   const canControlBrowser = typeof window !== 'undefined' && Boolean(window.__OPENCHAMBER_ELECTRON__);
   const source = new EventSource(getRuntimeUrlResolver().sse(
     '/api/openchamber/events',
-    canControlBrowser ? { browser: '1' } : undefined,
+    { ...(canControlBrowser ? { browser: '1' } : {}), clientId },
   ));
   source.onopen = () => {
     if (eventSource !== source) return;
     resetHeartbeatTimer();
+    notifyStreamReady();
   };
   source.onmessage = (event) => {
     if (eventSource !== source) return;

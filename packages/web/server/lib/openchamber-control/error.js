@@ -10,7 +10,9 @@ export class OpenChamberControlError extends Error {
 export const asControlError = (error, fallbackMessage, fallbackStatus = 500) => {
   if (error instanceof OpenChamberControlError) return error;
   const message = error instanceof Error ? error.message : fallbackMessage;
-  return new OpenChamberControlError(message || fallbackMessage, Number(error?.statusCode) || fallbackStatus, {
+  return new OpenChamberControlError(message || fallbackMessage, Number(error?.status ?? error?.statusCode) || fallbackStatus, {
     ...(error?.goalConfigured === true ? { goalConfigured: true } : {}),
+    // A scoped failure keeps naming its scope through the conversion.
+    ...(error?.target ? { target: error.target } : {}),
   });
 };

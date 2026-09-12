@@ -21,6 +21,28 @@ const asNonEmptyString = (value) => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
+// Mirrors the UI store's directory-key algorithm
+// (packages/ui/src/stores/useUIStore.ts normalizeDirectoryPath) so a scoped
+// request names the same directory the client registered under.
+const canonicalizeDirectory = (value) => {
+  if (!value) return '';
+
+  const raw = value.replace(/\\/g, '/');
+  const hadUncPrefix = raw.startsWith('//');
+  let normalized = raw.replace(/\/+$/g, '');
+  normalized = normalized.replace(/\/+/g, '/');
+
+  if (hadUncPrefix && !normalized.startsWith('//')) {
+    normalized = `/${normalized}`;
+  }
+
+  if (normalized === '') {
+    return raw.startsWith('/') ? '/' : '';
+  }
+
+  return normalized;
+};
+
 const positiveInteger = (value, fallback, field) => {
   if (value === undefined || value === null) return fallback;
   const number = Number(value);
@@ -329,95 +351,124 @@ export const createOpenChamberControlService = (dependencies) => {
    * should come back as a usage error the agent can correct, without waking a
    * client or waiting for a round trip.
    */
-  const browserAction = async (action, input, signal, contextDirectory) => {
+  const browserAction = async (action, input, options, contextDirectory) => {
+    // The scope is decided before anything is validated, so every failure
+    // past this point — validation, delivery, execution — can name it.
+    const target = {
+      directory: canonicalizeDirectory(asNonEmptyString(input.directory) || asNonEmptyString(contextDirectory)),
+    };
+    const openCodeSessionId = asNonEmptyString(options.openCodeSessionId);
+    if (openCodeSessionId) target.openCodeSessionId = openCodeSessionId;
+    const tabId = asNonEmptyString(input.tabId);
+    if (tabId) target.tabId = tabId;
+    if (!target.directory) {
+      throw new OpenChamberControlError('directory is required', 400);
+    }
+
     const parameters = {};
 
-    const readViewport = (required) => {
-      const viewport = asNonEmptyString(input.viewport);
-      if (!viewport) {
-        if (required) throw new OpenChamberControlError('viewport is required for browser.resize', 400);
-        return;
+    try {
+      const readViewport = (required) => {
+        const viewport = asNonEmptyString(input.viewport);
+        if (!viewport) {
+          if (required) throw new OpenChamberControlError('viewport is required for browser.resize', 400);
+          return;
+        }
+        if (!['mobile', 'tablet', 'desktop', 'fill'].includes(viewport)) {
+          throw new OpenChamberControlError('viewport must be mobile, tablet, desktop, or fill', 400);
+        }
+        parameters.viewport = viewport;
+      };
+
+      // The one backend force the tool schema exposes; the router decides
+      // what answering with it means.
+      const preferBackend = asNonEmptyString(input.preferBackend);
+      if (preferBackend) {
+        if (preferBackend !== 'server-chrome') {
+          throw new OpenChamberControlError("preferBackend must be 'server-chrome'", 400);
+        }
+        target.preferBackend = 'server-chrome';
       }
-      if (!['mobile', 'tablet', 'desktop', 'fill'].includes(viewport)) {
-        throw new OpenChamberControlError('viewport must be mobile, tablet, desktop, or fill', 400);
+
+      if (action === 'browser.resize') readViewport(true);
+
+      if (action === 'browser.capture') {
+        const label = asNonEmptyString(input.label);
+        if (label) parameters.label = label;
       }
-      parameters.viewport = viewport;
-    };
 
-    if (action === 'browser.resize') readViewport(true);
-
-    if (action === 'browser.capture') {
-      const label = asNonEmptyString(input.label);
-      if (label) parameters.label = label;
-    }
-
-    if (action === 'browser.open') {
-      readViewport(false);
-      const url = asNonEmptyString(input.url);
-      if (!url) throw new OpenChamberControlError('url is required for browser.open', 400);
-      let parsed;
-      try {
-        parsed = new URL(url);
-      } catch {
-        throw new OpenChamberControlError('url must be an absolute http(s) URL', 400);
+      if (action === 'browser.open') {
+        readViewport(false);
+        const url = asNonEmptyString(input.url);
+        if (!url) throw new OpenChamberControlError('url is required for browser.open', 400);
+        let parsed;
+        try {
+          parsed = new URL(url);
+        } catch {
+          throw new OpenChamberControlError('url must be an absolute http(s) URL', 400);
+        }
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+          throw new OpenChamberControlError('url must use http or https', 400);
+        }
+        parameters.url = parsed.toString();
       }
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        throw new OpenChamberControlError('url must use http or https', 400);
+
+
+      if (action === 'browser.click') {
+        const selector = asNonEmptyString(input.selector);
+        const text = asNonEmptyString(input.text);
+        if (!selector && !text) {
+          throw new OpenChamberControlError('browser.click requires selector or text', 400);
+        }
+        if (selector) parameters.selector = selector;
+        if (text) parameters.text = text;
       }
-      parameters.url = parsed.toString();
-    }
 
-
-    if (action === 'browser.click') {
-      const selector = asNonEmptyString(input.selector);
-      const text = asNonEmptyString(input.text);
-      if (!selector && !text) {
-        throw new OpenChamberControlError('browser.click requires selector or text', 400);
+      if (action === 'browser.snapshot') {
+        const selector = asNonEmptyString(input.selector);
+        if (selector) parameters.selector = selector;
       }
-      if (selector) parameters.selector = selector;
-      if (text) parameters.text = text;
-    }
 
-    if (action === 'browser.snapshot') {
-      const selector = asNonEmptyString(input.selector);
-      if (selector) parameters.selector = selector;
-    }
-
-    if (action === 'browser.inspect') {
-      const selector = asNonEmptyString(input.selector);
-      if (!selector) throw new OpenChamberControlError('selector is required for browser.inspect', 400);
-      parameters.selector = selector;
-    }
-
-    if (action === 'browser.type') {
-      const selector = asNonEmptyString(input.selector);
-      if (!selector) throw new OpenChamberControlError('selector is required for browser.type', 400);
-      if (typeof input.value !== 'string') {
-        throw new OpenChamberControlError('value is required for browser.type', 400);
+      if (action === 'browser.inspect') {
+        const selector = asNonEmptyString(input.selector);
+        if (!selector) throw new OpenChamberControlError('selector is required for browser.inspect', 400);
+        parameters.selector = selector;
       }
-      parameters.selector = selector;
-      parameters.value = input.value;
-      parameters.submit = input.submit === true;
-    }
 
-    if (action === 'browser.scroll') {
-      const selector = asNonEmptyString(input.selector);
-      const direction = asNonEmptyString(input.direction);
-      if (!selector && !direction) {
-        throw new OpenChamberControlError('browser.scroll requires direction or selector', 400);
+      if (action === 'browser.type') {
+        const selector = asNonEmptyString(input.selector);
+        if (!selector) throw new OpenChamberControlError('selector is required for browser.type', 400);
+        if (typeof input.value !== 'string') {
+          throw new OpenChamberControlError('value is required for browser.type', 400);
+        }
+        parameters.selector = selector;
+        parameters.value = input.value;
+        parameters.submit = input.submit === true;
       }
-      if (direction && !['up', 'down', 'top', 'bottom'].includes(direction)) {
-        throw new OpenChamberControlError('direction must be up, down, top, or bottom', 400);
+
+      if (action === 'browser.scroll') {
+        const selector = asNonEmptyString(input.selector);
+        const direction = asNonEmptyString(input.direction);
+        if (!selector && !direction) {
+          throw new OpenChamberControlError('browser.scroll requires direction or selector', 400);
+        }
+        if (direction && !['up', 'down', 'top', 'bottom'].includes(direction)) {
+          throw new OpenChamberControlError('direction must be up, down, top, or bottom', 400);
+        }
+        if (selector) parameters.selector = selector;
+        if (direction) parameters.direction = direction;
       }
-      if (selector) parameters.selector = selector;
-      if (direction) parameters.direction = direction;
+    } catch (error) {
+      // A scoped failure always names its scope.
+      if (error instanceof OpenChamberControlError && !error.target) error.target = target;
+      throw error;
     }
 
     // Opening a page waits for the navigation to settle, so its budget has to
     // exceed the client's own wait; sharing one timeout with the quick actions
     // made a slow page indistinguishable from an unreachable browser.
     const timeoutMs = action === 'browser.open' ? 45_000 : 20_000;
-    const result = await browserControl.request(action, parameters, { signal, timeoutMs });
+    const result = await browserControl.request(action, parameters, { signal: options.signal, timeoutMs, target });
 
     // The image is written here rather than in the renderer: the file belongs
     // beside the code it documents, and the client that took it may be on a
@@ -428,12 +479,22 @@ export const createOpenChamberControlService = (dependencies) => {
         throw new OpenChamberControlError('directory is required to save a screenshot', 400);
       }
       const capture = result && typeof result === 'object' ? result : {};
-      const saved = await writeScreenshot({
-        directory,
-        base64: capture.base64,
-        mime: capture.mime,
-        label: input.label,
-      });
+      // The client names the tab it captured; that identity rides the rebuilt
+      // result below, and any failure to save the image names it too.
+      const captureTarget = capture.target && typeof capture.target === 'object' ? capture.target : null;
+      let saved;
+      try {
+        saved = await writeScreenshot({
+          directory,
+          base64: capture.base64,
+          mime: capture.mime,
+          label: input.label,
+        });
+      } catch (error) {
+        const failure = asControlError(error, 'Failed to save the screenshot');
+        if (!failure.target) failure.target = captureTarget ?? target;
+        throw failure;
+      }
       // The base64 never goes back to the caller: it is large, and the path is
       // what an answer, a commit, or a review can actually use.
       return {
@@ -448,6 +509,7 @@ export const createOpenChamberControlService = (dependencies) => {
         viewport: capture.viewport ?? null,
         width: capture.width ?? null,
         height: capture.height ?? null,
+        ...(captureTarget ? { target: captureTarget } : {}),
       };
     }
 
@@ -469,7 +531,7 @@ export const createOpenChamberControlService = (dependencies) => {
         if (!browserControl) {
           throw new OpenChamberControlError('The in-app browser is not available on this server', 503);
         }
-        return browserAction(action, input, options.signal, contextDirectory);
+        return browserAction(action, input, options, contextDirectory);
       }
       if (action === 'projects.list') return { projects: await projects() };
       if (action === 'models.list') return models();

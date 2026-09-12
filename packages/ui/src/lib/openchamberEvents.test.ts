@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
 class MockEventSource {
   static CLOSED = 2;
+  static OPEN = 1;
   static instances: MockEventSource[] = [];
 
   readyState = 1;
@@ -19,6 +20,30 @@ class MockEventSource {
 }
 
 describe('openchamber events', () => {
+  test('mints a UUID v4 fallback clientId when crypto.randomUUID is unavailable', async () => {
+    const originalCrypto = globalThis.crypto;
+    Object.defineProperty(globalThis, 'crypto', {
+      value: {},
+      configurable: true,
+      writable: true,
+    });
+    try {
+      const { getBrowserControlClientId } = await import('./openchamberEvents');
+      expect(typeof getBrowserControlClientId).toBe('function');
+      expect(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+          getBrowserControlClientId(),
+        ),
+      ).toBe(true);
+    } finally {
+      Object.defineProperty(globalThis, 'crypto', {
+        value: originalCrypto,
+        configurable: true,
+        writable: true,
+      });
+    }
+  });
+
   beforeEach(() => {
     MockEventSource.instances = [];
     Object.defineProperty(globalThis, 'window', {
@@ -82,6 +107,53 @@ describe('openchamber events', () => {
     unsubscribe();
   });
 
+  test('sends the per-window clientId on the SSE connect params', async () => {
+    const { getBrowserControlClientId, subscribeOpenchamberEvents } = await import('./openchamberEvents');
+
+    const unsubscribePlain = subscribeOpenchamberEvents(() => undefined);
+    const plainUrl = new URL(MockEventSource.instances[0].url, window.location.href);
+    expect(plainUrl.pathname).toBe('/api/openchamber/events');
+    expect(plainUrl.searchParams.get('clientId')).toBe(getBrowserControlClientId());
+    expect(plainUrl.searchParams.has('browser')).toBe(false);
+    unsubscribePlain();
+
+    Object.defineProperty(window, '__OPENCHAMBER_ELECTRON__', { value: true, configurable: true });
+    const unsubscribeElectron = subscribeOpenchamberEvents(() => undefined);
+    const electronUrl = new URL(MockEventSource.instances[1].url, window.location.href);
+    expect(electronUrl.searchParams.get('clientId')).toBe(getBrowserControlClientId());
+    expect(electronUrl.searchParams.get('browser')).toBe('1');
+    unsubscribeElectron();
+  });
+
+  test('notifies stream-ready subscribers on open and on the stream-ready envelope', async () => {
+    const { subscribeEventStreamReady, subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    let notifications = 0;
+    const unsubscribeReady = subscribeEventStreamReady(() => { notifications += 1; });
+    const unsubscribe = subscribeOpenchamberEvents(() => undefined);
+    const source = MockEventSource.instances[0];
+
+    source.onopen?.();
+    expect(notifications).toBe(1);
+
+    source.onmessage?.({ data: JSON.stringify({ type: 'openchamber:event-stream-ready' }) });
+    expect(notifications).toBe(2);
+
+    unsubscribeReady();
+    source.onopen?.();
+    expect(notifications).toBe(2);
+    unsubscribe();
+  });
+
+  test('reports whether the event stream is currently connected', async () => {
+    const { isEventStreamConnected, subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    expect(isEventStreamConnected()).toBe(false);
+
+    const unsubscribe = subscribeOpenchamberEvents(() => undefined);
+    expect(isEventStreamConnected()).toBe(true);
+
+    unsubscribe();
+    expect(isEventStreamConnected()).toBe(false);
+  });
   test('a connected control SSE stream clears delivered queues without reconnecting or polling', async () => {
     const { subscribeMessageQueueSync } = await import('@/sync/message-queue-sync');
     const { getRuntimeKey } = await import('./runtime-switch');

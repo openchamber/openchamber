@@ -17,7 +17,9 @@ import {
   type PageCapture,
 } from '@/lib/browser/annotationSession';
 import { resolveAnnotationOverlayTheme } from '@/lib/browser/overlayTheme';
-import { registerBrowserController } from '@/lib/browser/controlClient';
+import { registerBrowserController, serializeBrowserControllerKey } from '@/lib/browser/controlClient';
+import { isAgentControlling, noteUserAction, subscribeAgentControl } from '@/lib/browser/controlCoordinator';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { suggestFromHistory } from '@/lib/browser/history';
 import { selectBrowserHistory, useBrowserHistoryStore } from '@/stores/useBrowserHistoryStore';
 import {
@@ -134,6 +136,21 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
   const servedOkRef = React.useRef(false);
   const openedAtRef = React.useRef(Date.now());
 
+  // The coordinator key for this tab: host-observable user actions bump its
+  // generation, which discards any in-flight agent write with a conflict the
+  // agent can retry. The agent-driven paths below never touch it.
+  const controlKey = React.useMemo(
+    () => serializeBrowserControllerKey({ runtimeKey: getRuntimeKey(), directory, tabId: tabID }),
+    [directory, tabID],
+  );
+  const agentControlling = React.useSyncExternalStore(
+    subscribeAgentControl,
+    () => isAgentControlling(controlKey),
+  );
+  const noteUserControlAction = React.useCallback(() => {
+    noteUserAction(controlKey);
+  }, [controlKey]);
+
   const persistUrl = React.useCallback((url: string) => {
     if (!url || url === BLANK_URL || !directory || !tabID) return;
     setContextPanelTabTargetPath(directory, tabID, url);
@@ -147,6 +164,11 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
       persistUrl(display);
     }, [persistUrl]),
   });
+
+  // Read by the registered controller's getInfo, so reporting the current
+  // location never re-registers the controller.
+  const navigationInfoRef = React.useRef(navigation);
+  navigationInfoRef.current = navigation;
 
   /** Set when a remote dev server could not be reached from this machine. */
   const [tunnelFailedUrl, setTunnelFailedUrl] = React.useState<string | null>(null);
@@ -253,6 +275,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
     );
 
     setIsAnnotating(true);
+    noteUserControlAction();
     void runAnnotationSession({
       host: annotationHost,
       theme,
@@ -267,7 +290,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
         setIsAnnotating(false);
         toast.error(t('contextPanel.browser.annotate.failed'));
       });
-  }, [annotationHost, attachAnnotation, currentTheme, isAnnotating, navigation.url, overlayLabels, t]);
+  }, [annotationHost, attachAnnotation, currentTheme, isAnnotating, navigation.url, noteUserControlAction, overlayLabels, t]);
 
   // Escape leaves annotation mode from the app side too: the overlay owns the
   // in-page Escape, but the panel can be focused instead.
@@ -473,9 +496,18 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
     return result;
   }, [annotationHost, directory, loadUrl, waitForIdle]);
 
+  const getControlInfo = React.useCallback(() => ({
+    tabId: tabID,
+    url: toDisplayUrl(navigationInfoRef.current.url),
+    title: navigationInfoRef.current.title,
+  }), [tabID]);
+
   React.useEffect(
-    () => registerBrowserController({ run: runControlAction }),
-    [runControlAction],
+    () => registerBrowserController(
+      { runtimeKey: getRuntimeKey(), directory, tabId: tabID },
+      { run: runControlAction, getInfo: getControlInfo },
+    ),
+    [runControlAction, getControlInfo, directory, tabID],
   );
 
   // Leaving the tab must not strand an overlay or live style overrides on the page.
@@ -529,9 +561,11 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
   // Asking for an address again is a fresh request, so the recovery budget
   // comes back with it. The automatic retry deliberately does not reset it.
   const loadUrlFromUser = React.useCallback((value: string) => {
+    noteUserControlAction();
     retunneledUrlsRef.current.clear();
     loadUrl(value);
-  }, [loadUrl]);
+  }, [loadUrl, noteUserControlAction]);
+
   React.useEffect(() => {
     if (!webviewElement) return;
 
@@ -651,13 +685,26 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
   }, [t]);
 
   const handleReload = React.useCallback(() => {
+    noteUserControlAction();
     try {
       if (isLoading) webviewRef.current?.stop();
       else webviewRef.current?.reload();
     } catch {
       // Not attached yet.
     }
-  }, [isLoading]);
+  }, [isLoading, noteUserControlAction]);
+
+  const handleAddressChange = React.useCallback((value: string) => {
+    // Typing alone invalidates an in-flight agent write: the user is taking
+    // the tab over before anything was even submitted.
+    noteUserControlAction();
+    setAddress(value);
+  }, [noteUserControlAction]);
+
+  const handleViewportPresetChange = React.useCallback((next: BrowserViewport) => {
+    noteUserControlAction();
+    setViewport(next);
+  }, [noteUserControlAction]);
 
   // A page opened the moment its dev server launched is not ready twice over:
   // first nothing is listening at all, then a gateway answers while the app
@@ -744,12 +791,12 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
     <div className="absolute inset-0 flex flex-col bg-background">
       <BrowserToolbar
         address={address}
-        onAddressChange={setAddress}
+        onAddressChange={handleAddressChange}
         onSubmit={loadUrlFromUser}
         suggestions={suggestions}
         onForgetSuggestion={(url) => forgetHistoryVisit(directory, url)}
-        onBack={() => { try { webviewRef.current?.goBack(); } catch { /* not attached */ } }}
-        onForward={() => { try { webviewRef.current?.goForward(); } catch { /* not attached */ } }}
+        onBack={() => { noteUserControlAction(); try { webviewRef.current?.goBack(); } catch { /* not attached */ } }}
+        onForward={() => { noteUserControlAction(); try { webviewRef.current?.goForward(); } catch { /* not attached */ } }}
         onReload={handleReload}
         onOpenExternal={() => void openExternalUrl(navigation.url || address)}
         canGoBack={navigation.canGoBack}
@@ -758,7 +805,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
         onAnnotate={handleAnnotate}
         isAnnotating={isAnnotating}
         onOpenDevTools={() => { try { webviewRef.current?.openDevTools(); } catch { /* not attached */ } }}
-        onHardReload={() => { try { webviewRef.current?.reloadIgnoringCache(); } catch { /* not attached */ } }}
+        onHardReload={() => { noteUserControlAction(); try { webviewRef.current?.reloadIgnoringCache(); } catch { /* not attached */ } }}
         onZoomIn={() => applyZoom(zoomLevel + ZOOM_STEP)}
         onZoomOut={() => applyZoom(zoomLevel - ZOOM_STEP)}
         onZoomReset={() => applyZoom(0)}
@@ -767,11 +814,12 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
         onClearCache={() => clearBrowsingData('cache')}
         onToggleDeviceBar={() => setShowDeviceBar((current) => !current)}
         isDeviceBarOpen={showDeviceBar}
+        agentControlling={agentControlling}
       />
       {showDeviceBar ? (
         <BrowserDeviceBar
           viewport={viewport}
-          onViewportChange={setViewport}
+          onViewportChange={handleViewportPresetChange}
           colorScheme={colorScheme}
           onColorSchemeChange={applyColorScheme}
           scale={layout?.scale ?? 1}

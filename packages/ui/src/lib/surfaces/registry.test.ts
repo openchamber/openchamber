@@ -9,6 +9,7 @@ import {
 const baseOptions = {
   railOrder: [],
   planModeEnabled: true,
+  serverBrowserEnabled: true,
   isVSCode: false,
   screenWidth: 1200,
   tabs: [],
@@ -38,11 +39,21 @@ describe('getVisibleContextRailSurfaces', () => {
     ).toBe(true);
   });
 
-  test('offers no browser surface inside VS Code', () => {
+  test('keeps local and server browsers distinct and offers neither inside VS Code', () => {
+    const browser = CONTEXT_SURFACES.find((surface) => surface.id === 'browser');
+    const serverBrowser = CONTEXT_SURFACES.find((surface) => surface.id === 'server-browser');
+    expect(browser?.mode).toBe('browser');
+    expect(browser?.icon).toBe('global');
+    expect(serverBrowser?.mode).toBe('server-browser');
+    expect(serverBrowser?.icon).toBe('server');
+    expect(serverBrowser?.labelKey).toBe('contextPanel.browser.remote.tabLabel');
+    expect(serverBrowser?.descriptionKey).toBe('contextRail.surface.server-browser.description');
     expect(getVisibleContextRailSurfaces(baseOptions).some((s) => s.id === 'browser')).toBe(true);
+    expect(getVisibleContextRailSurfaces(baseOptions).some((s) => s.id === 'server-browser')).toBe(true);
     // Nothing that makes the panel worth having works there, so offering it
     // would promise the panel people see on the desktop.
     expect(getVisibleContextRailSurfaces({ ...baseOptions, isVSCode: true }).some((s) => s.id === 'browser')).toBe(false);
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, isVSCode: true }).some((s) => s.id === 'server-browser')).toBe(false);
   });
 
   test('hides content-driven surfaces until a matching tab exists', () => {
@@ -59,6 +70,21 @@ describe('getVisibleContextRailSurfaces', () => {
     const browser = CONTEXT_SURFACES.find((surface) => surface.id === 'browser');
     expect(browser?.availability).toBe('always');
     expect(getVisibleContextRailSurfaces(baseOptions).some((s) => s.id === 'browser')).toBe(true);
+  });
+
+  test('shows the server browser only when the feature is enabled', () => {
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, serverBrowserEnabled: false }).some((s) => s.id === 'server-browser')).toBe(false);
+    expect(getVisibleContextRailSurfaces(baseOptions).some((s) => s.id === 'server-browser')).toBe(true);
+  });
+
+  test('keeps server-browser visibility and user order independent from Browser', () => {
+    const surfaces = getVisibleContextRailSurfaces({
+      ...baseOptions,
+      railOrder: ['server-browser', 'browser'],
+      hiddenSurfaces: ['browser'],
+    });
+    expect(surfaces[0]?.id).toBe('server-browser');
+    expect(surfaces.some((surface) => surface.id === 'browser')).toBe(false);
   });
 
   test('respects the persisted user rail order', () => {

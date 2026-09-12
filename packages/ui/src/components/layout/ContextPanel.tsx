@@ -28,13 +28,14 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useBrowserFaviconStore } from '@/stores/useBrowserFaviconStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
-import { useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
+import { useUIStore, type ContextPanelMode, type PendingDiffScope, type SavedServerBrowserSelection } from '@/stores/useUIStore';
 import { markSessionViewed } from '@/sync/notification-store';
 import { setExternallyViewedSession, useDirectoryStore } from '@/sync/sync-context';
 import { ContextPanelContent } from './ContextSidebarTab';
 import { BrowserPane } from '@/components/browser/BrowserPane';
+import { RemoteBrowserPane } from '@/components/browser/RemoteBrowserPane';
 import { browserUrlLabel } from '@/lib/browser/url';
-import { registerBrowserOpener } from '@/lib/browser/controlClient';
+import { registerBrowserOpener, setActiveBrowserTarget } from '@/lib/browser/controlClient';
 import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getActiveRelayDescriptor } from '@/lib/relay/runtime-tunnel';
@@ -51,6 +52,7 @@ import {
 } from './contextPanelEmbeddedChat';
 import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
+import { isVSCodeRuntime } from '@/lib/desktop';
 
 const CONTEXT_PANEL_MIN_WIDTH = 320;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
@@ -120,6 +122,7 @@ const getModeLabel = (
   if (mode === 'walkthrough') return t('contextPanel.mode.walkthrough');
   if (mode === 'plan') return t('contextPanel.mode.plan');
   if (mode === 'browser') return t('contextPanel.mode.browser');
+  if (mode === 'server-browser') return t('contextPanel.browser.remote.tabLabel');
   if (mode === 'git') return t('layout.rightSidebar.git');
   if (mode === 'pr') return t('contextPanel.mode.pr');
   if (mode === 'linear') return t('contextPanel.mode.linear');
@@ -147,7 +150,7 @@ const getFileNameFromPath = (path: string | null): string | null => {
 };
 
 const getTabLabel = (
-  tab: { mode: ContextPanelMode; label: string | null; targetPath: string | null; dedupeKey?: string; sessionTitleFallback?: string | null; stagedDiff?: boolean },
+  tab: { mode: ContextPanelMode; label: string | null; targetPath: string | null; dedupeKey?: string; sessionTitleFallback?: string | null; stagedDiff?: boolean; backend?: 'server-chrome' },
   sessionTitleById: ReadonlyMap<string, string>,
   t: TranslateFn
 ): string => {
@@ -173,7 +176,9 @@ const getTabLabel = (
   // Keeping that would leave the tab claiming one host while the address bar
   // shows another.
   if (tab.mode === 'browser') {
-    return browserUrlLabel(tab.targetPath ?? '') || tab.label || t('contextPanel.mode.browser');
+    return browserUrlLabel(tab.targetPath ?? '')
+      || tab.label
+      || (tab.backend === 'server-chrome' ? t('contextPanel.browser.remote.tabLabel') : t('contextPanel.mode.browser'));
   }
 
   if (tab.label) {
@@ -192,7 +197,7 @@ const getTabLabel = (
 };
 
 const getTabIcon = (
-  tab: { mode: ContextPanelMode; targetPath: string | null },
+  tab: { mode: ContextPanelMode; targetPath: string | null; backend?: 'server-chrome' },
   faviconByOrigin: Record<string, string> = {},
 ): React.ReactNode | undefined => {
   if (tab.mode === 'file') {
@@ -229,6 +234,10 @@ const getTabIcon = (
     return <Icon name="terminal-box" className="h-3.5 w-3.5" />;
   }
 
+  if (tab.mode === 'server-browser') {
+    return <Icon name="server" className="h-3.5 w-3.5" />;
+  }
+
   if (tab.mode === 'plan') {
     return <Icon name="file-text" className="h-3.5 w-3.5" />;
   }
@@ -247,7 +256,7 @@ const getTabIcon = (
     // including in runtimes where a page never can.
     return icon
       ? <img src={icon} alt="" aria-hidden="true" className="h-3.5 w-3.5 rounded-[3px] object-contain" />
-      : <Icon name="global" className="h-3.5 w-3.5" />;
+      : <Icon name={tab.backend === 'server-chrome' ? 'server' : 'global'} className="h-3.5 w-3.5" />;
   }
 
   return undefined;
@@ -465,21 +474,40 @@ export const ContextPanel: React.FC = () => {
   // panel so Electron gives the webview a composited surface; capturePage()
   // cannot capture the zero-width webview inside a closed panel.
   React.useEffect(() => {
-    if (!effectiveDirectory) return;
-    return registerBrowserOpener((url) => openContextBrowser(effectiveDirectory, url));
-  }, [effectiveDirectory, openContextBrowser]);
+    if (!directoryKey) return;
+    return registerBrowserOpener(directoryKey, (url) => {
+      const tabId = openContextBrowser(directoryKey, url);
+      return tabId ? { tabId } : null;
+    });
+  }, [directoryKey, openContextBrowser]);
   const reorderContextPanelTabs = useUIStore((state) => state.reorderContextPanelTabs);
   const setSelectedFilePath = useFilesViewTabsStore((state) => state.setSelectedPath);
   const contextEditorTreeVisible = useUIStore((state) => state.contextEditorTreeVisible);
   const toggleContextEditorTree = useUIStore((state) => state.toggleContextEditorTree);
   const openNewContextBrowserTab = useUIStore((state) => state.openNewContextBrowserTab);
+  const setServerBrowser = useUIStore((state) => state.setContextPanelTabServerBrowser);
+  const serverBrowserEnabled = useUIStore((state) => state.serverBrowserEnabled);
   const faviconByOrigin = useBrowserFaviconStore((state) => state.byOrigin);
   const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
   const { themeMode, setThemeMode, lightThemeId, darkThemeId, currentTheme } = useThemeSystem();
 
   const tabs = React.useMemo(() => panelState?.tabs ?? [], [panelState?.tabs]);
-  const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? tabs[tabs.length - 1] ?? null;
+  const selectedTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? tabs[tabs.length - 1] ?? null;
+  const serverBrowserAvailable = serverBrowserEnabled && !isVSCodeRuntime();
+  const activeTab = selectedTab?.mode === 'server-browser' && !serverBrowserAvailable ? null : selectedTab;
   const isOpen = Boolean(panelState?.isOpen && activeTab);
+
+  // Tab-less agent actions resolve to the browser tab the user is actually
+  // looking at. Any other surface — or a closed panel — clears the target, so
+  // a hidden pane never keeps control. A closed active tab re-fires this with
+  // the fallback tab, or clears when none is left.
+  React.useEffect(() => {
+    if (isOpen && directoryKey && activeTab?.mode === 'browser') {
+      setActiveBrowserTarget({ runtimeKey: getRuntimeKey(), directory: directoryKey, tabId: activeTab.id });
+      return;
+    }
+    setActiveBrowserTarget(null);
+  }, [activeTab?.id, activeTab?.mode, directoryKey, isOpen]);
   const isExpanded = Boolean(isOpen && panelState?.expanded);
   const [availablePanelAreaWidth, setAvailablePanelAreaWidth] = React.useState<number | null>(null);
   const activeModeForWidth = activeTab?.mode ?? null;
@@ -976,6 +1004,18 @@ export const ContextPanel: React.FC = () => {
     () => tabs.filter((tab) => tab.mode === 'browser'),
     [tabs],
   );
+  const serverBrowserTab = React.useMemo(
+    () => tabs.find((tab) => tab.mode === 'server-browser') ?? null,
+    [tabs],
+  );
+  const selectSavedServerBrowser = React.useCallback((selection: SavedServerBrowserSelection) => {
+    if (!serverBrowserTab || !serverBrowserAvailable) return;
+    setServerBrowser(directoryKey, serverBrowserTab.id, {
+      browserSessionId: selection.browserSessionId ?? null,
+      serverTargetId: selection.serverTargetId ?? null,
+      targetPath: selection.targetPath,
+    });
+  }, [directoryKey, serverBrowserAvailable, serverBrowserTab, setServerBrowser]);
   const diffTabs = React.useMemo(
     () => tabs.filter((tab) => tab.mode === 'diff'),
     [tabs],
@@ -1272,6 +1312,19 @@ export const ContextPanel: React.FC = () => {
             <BrowserPane initialUrl={tab.targetPath ?? ''} directory={directoryKey} tabID={tab.id} />
           </div>
         ))}
+        {serverBrowserTab && serverBrowserAvailable ? (
+          <div className={cn('absolute inset-0', activeTab?.mode !== 'server-browser' && 'hidden')}>
+            <RemoteBrowserPane
+              directory={directoryKey}
+              visible={isOpen && activeTab?.mode === 'server-browser'}
+              tabID={serverBrowserTab.id}
+              sessionId={serverBrowserTab.browserSessionId}
+              serverTargetId={serverBrowserTab.serverTargetId}
+              savedSelections={serverBrowserTab.savedSelections}
+              onSelectSavedSelection={selectSavedServerBrowser}
+            />
+          </div>
+        ) : null}
         {diffTabs.map((tab) => (
           <div
             key={tab.id}
@@ -1307,7 +1360,7 @@ export const ContextPanel: React.FC = () => {
             </React.Suspense>
           </div>
         ) : null}
-        {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'diff' && activeTab?.mode !== 'terminal' && activeTab?.mode !== 'walkthrough' ? activeNonChatContent : null}
+        {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'server-browser' && activeTab?.mode !== 'diff' && activeTab?.mode !== 'terminal' && activeTab?.mode !== 'walkthrough' ? activeNonChatContent : null}
       </div>
       </div>
     </aside>

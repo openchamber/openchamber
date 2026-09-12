@@ -15,12 +15,17 @@ export const registerOpenChamberControlRoutes = (app, { controlService }) => {
       const input = requestInput && typeof requestInput === 'object' && !Array.isArray(requestInput)
         ? requestInput
         : {};
-      const data = await controlService.execute(action, input, req.body?.contextDirectory, { signal: controller.signal });
+      const data = await controlService.execute(action, input, req.body?.contextDirectory, {
+        signal: controller.signal,
+        openCodeSessionId: req.body?.openCodeSessionId,
+      });
       return res.json(data);
     } catch (error) {
       const controlError = asControlError(error, 'OpenChamber control action failed');
       return res.status(controlError.statusCode).json({
         error: controlError.message,
+        // A scoped failure still names the tab it targeted.
+        ...(controlError.target ? { target: controlError.target } : {}),
         ...(controlError.partial === true ? {
           partial: true,
           partialAction: controlError.partialAction,

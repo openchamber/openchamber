@@ -9,7 +9,9 @@ edge (`components/layout/ContextPanelRail.tsx`) and rendered by
 
 ## Model
 
-- A surface maps 1:1 to a `ContextPanelMode` tab mode in `useUIStore`.
+- A surface maps 1:1 to a `ContextPanelMode` tab mode in `useUIStore`. Browser
+  and server-browser are separate modes: Browser owns local browser tabs and
+  server-browser owns the server-hosted Chrome surface.
 - `availability: 'always'` surfaces are always present on the rail.
   `availability: 'has-content'` surfaces (chat) are hidden from the
   rail until a tab of their mode exists, and stay visible for as long as one
@@ -32,8 +34,33 @@ edge (`components/layout/ContextPanelRail.tsx`) and rendered by
   Linear unless a workspace is connected, hides the pull-request surface
   unless GitHub is connected (OAuth or `gh` CLI — signed in from Settings →
   Integrations), and hides `has-content` surfaces
-  until a tab of their mode exists. Both consumers use it so the digit shown
+  until a tab of their mode exists, and hides server-browser until the
+  server-browser feature is enabled. Both consumers use it so the digit shown
   on a rail badge always maps to the same surface the shortcut opens.
+
+## Mobile browser
+
+The dedicated mobile shell opens server Chrome from the Server browser tab
+in `apps/MobileWorkspaceDrawer.tsx`, independently of the desktop registry.
+Hosted mobile and Capacitor both use `RemoteBrowserPane` and its authenticated
+runtime transport. They offer no local Chrome option. The tab requires the
+server-browser feature setting and a selected directory.
+The runtime reset clears the previous server's browser setting before loading
+the destination settings. Transport changes for the same paired device keep it.
+
+`apps/MobileBrowserSurface.tsx` mounts the viewer only while its workspace tab
+is visible. Closing the workspace, choosing another tab, opening an app-level
+overlay, disabling the feature, or changing server or directory unmounts it and
+releases the viewer connection.
+The browser toolbar opens Chrome DevTools, the only visible inspector. If
+DevTools cannot load or connect, its error UI offers Console and network as a
+recovery action.
+Scope changes also return the workspace to Changes. The selection cache in
+`apps/mobileBrowserSelection.ts` stores only genuine session and target IDs,
+scoped by runtime identity and directory. Those IDs are attachment hints;
+the server determines whether they still exist when the user reopens the tab.
+The shared viewer also pauses its connection while the app is backgrounded and
+reattaches the selected page when it becomes visible again.
 
 ## Adding a surface
 
@@ -57,7 +84,10 @@ the `openContext*` actions in `useUIStore`.
   positions). Chat tab records stay open, but only the active chat iframe is
   mounted while the panel is open. A selected chat restores its state from
   the session stores. A closed panel mounts no chat iframe.
-  Singleton surfaces (git, pr, linear, notes, plan, context) remount on switch. These
+  Server-browser is a singleton remote surface. Its inner target strip manages
+  actual Chrome pages and saved server selections; it has no outer browser tab
+  strip or address field. Singleton surfaces (git, pr, linear, notes, plan,
+  context) remount on switch. These
   surfaces must restore their state from stores or snapshots.
 - Runtime scope: desktop/web `MainLayout` only. VS Code and the dedicated
   mobile shell have their own layouts and do not consume this registry.

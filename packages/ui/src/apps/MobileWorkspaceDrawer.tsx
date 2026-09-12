@@ -9,12 +9,15 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import { TerminalView } from '@/components/views/TerminalView';
 import { useI18n } from '@/lib/i18n';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import type { ProjectRef } from '@/lib/projectContextApi';
 import { cn } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useMcpStore } from '@/stores/useMcpStore';
+import { useUIStore } from '@/stores/useUIStore';
 
+import { MobileBrowserSurface } from './MobileBrowserSurface';
 import { MobileChangesSurface } from './MobileChangesSurface';
 import { MobileFilesSurface } from './MobileFilesSurface';
 import { useEdgeSwipe } from './useEdgeSwipe';
@@ -26,7 +29,7 @@ const ENTER_DELAY_MS = 16;
 const ENTER_DURATION_MS = 320;
 const DRAWER_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
-export type MobileWorkspaceTab = 'changes' | 'files' | 'terminal' | 'notes' | 'mcp';
+export type MobileWorkspaceTab = 'changes' | 'files' | 'terminal' | 'browser' | 'notes' | 'mcp';
 
 /** Quick MCP enable/disable toggles as a workspace pane, with its own slim
     action row (add server → settings, refresh) replacing the old fullscreen
@@ -111,10 +114,21 @@ export const MobileWorkspaceDrawer: React.FC<{
   onOpenPlan: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
   /** MCP tab: jump to the MCP settings page pre-seeded with a new server draft. */
   onOpenMcpSettings: () => void;
+  browserVisible?: boolean;
   variant?: 'drawer' | 'panel';
-}> = ({ open, onClose, tab, onTabChange, pendingChangesDiff, onOpenPlan, onOpenMcpSettings, variant = 'drawer' }) => {
+}> = ({ open, onClose, tab, onTabChange, pendingChangesDiff, onOpenPlan, onOpenMcpSettings, browserVisible = true, variant = 'drawer' }) => {
   const { t } = useI18n();
   const rootRef = React.useRef<HTMLElement | null>(null);
+  const directory = useDirectoryStore((state) => state.currentDirectory);
+  const serverBrowserEnabled = useUIStore((state) => state.serverBrowserEnabled);
+  const runtimeKey = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeKey, getRuntimeKey);
+  const browserScopeKey = JSON.stringify([runtimeKey, directory]);
+  const [browserScope, setBrowserScope] = React.useState(browserScopeKey);
+  const browserAvailable = serverBrowserEnabled && Boolean(directory);
+  React.useEffect(() => {
+    if (browserScope !== browserScopeKey) setBrowserScope(browserScopeKey);
+    if (tab === 'browser' && (!browserAvailable || browserScope !== browserScopeKey)) onTabChange('changes');
+  }, [browserAvailable, browserScope, browserScopeKey, onTabChange, tab]);
   const drawerRef = React.useRef<HTMLElement>(null);
   const [entered, setEntered] = React.useState(false);
   // Kept visible through the exit slide; flipped to hidden once it finishes.
@@ -187,20 +201,21 @@ export const MobileWorkspaceDrawer: React.FC<{
     };
   }, [open, variant]);
 
-  if (variant === 'drawer' && !rootRef.current) return null;
-
-  const tabItems: SortableTabsStripItem[] = [
+  const tabItems: Array<SortableTabsStripItem & { id: MobileWorkspaceTab }> = [
     { id: 'changes', label: t('mobile.menu.changes'), icon: <Icon name="git-branch" className="h-3.5 w-3.5" /> },
     { id: 'files', label: t('mobile.menu.files'), icon: <Icon name="file-text" className="h-3.5 w-3.5" /> },
     { id: 'terminal', label: t('mobile.menu.terminal'), icon: <Icon name="terminal" className="h-3.5 w-3.5" /> },
     { id: 'notes', label: t('contextRail.surface.notes'), icon: <Icon name="sticky-note" className="h-3.5 w-3.5" /> },
     { id: 'mcp', label: t('mobile.menu.mcp'), icon: <McpIcon className="h-3.5 w-3.5" /> },
   ];
+  if (browserAvailable) {
+    tabItems.splice(3, 0, { id: 'browser', label: t('contextPanel.browser.remote.tabLabel'), icon: <Icon name="server" className="h-3.5 w-3.5" /> });
+  }
 
   const body = (
     <>
       <div className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 px-3">
-        <div className="flex h-9 min-w-0 flex-1 items-center">
+        <div className="flex h-10 min-w-0 flex-1 items-center">
           {/* Mounted only while shown; nonCompositedIndicator keeps the active
               pill off its own compositing layer — creating one inside the
               drawer's slide flickers in WKWebView. */}
@@ -208,12 +223,16 @@ export const MobileWorkspaceDrawer: React.FC<{
             <SortableTabsStrip
               items={tabItems}
               activeId={tab}
-              onSelect={(id) => onTabChange(id as MobileWorkspaceTab)}
-              layoutMode="fit"
+              onSelect={(id) => {
+                const selected = tabItems.find((item) => item.id === id);
+                if (selected) onTabChange(selected.id);
+              }}
+              layoutMode={browserAvailable ? 'scrollable' : 'fit'}
               variant="active-pill"
+              activePillButtonClassName="h-10 min-w-10"
               nonCompositedIndicator
-              // Five tabs don't fit with labels — the active tab keeps
-              // icon + label, the rest collapse to icons.
+              // The active tab keeps its label; remaining tools use icons.
+              // Browser support adds a sixth tool, so allow touch scrolling.
               inactiveTabsIconOnly
               className="h-full"
             />
@@ -230,6 +249,11 @@ export const MobileWorkspaceDrawer: React.FC<{
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
+        {browserAvailable && directory && browserScope === browserScopeKey ? (
+          <ErrorBoundary>
+            <MobileBrowserSurface scope={{ runtimeKey, directory }} active={open && tab === 'browser' && browserVisible} />
+          </ErrorBoundary>
+        ) : null}
         {/* Panes stay MOUNTED once visited (hidden when inactive/closed), so
             reopening the drawer lands exactly where the user left off — an
             open diff, an edited file, an attached terminal. */}
@@ -288,6 +312,8 @@ export const MobileWorkspaceDrawer: React.FC<{
     return <div className="flex h-full min-h-0 flex-col bg-background text-foreground">{body}</div>;
   }
 
+  if (!rootRef.current) return null;
+
   return createPortal(
     <section
       ref={drawerRef}
@@ -308,6 +334,6 @@ export const MobileWorkspaceDrawer: React.FC<{
     >
       {body}
     </section>,
-    rootRef.current as HTMLElement,
+    rootRef.current,
   );
 };

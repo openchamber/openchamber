@@ -129,6 +129,22 @@ describe('ui auth client credential seam', () => {
     expect(deniedRes.body).toEqual({ error: 'Client authentication required', locked: true, clientAuthRequired: true });
   });
 
+  it('can resolve client credentials without issuing a password-free UI session', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({
+      clientAuthController: {
+        authenticateBearerToken: async () => null,
+      },
+    });
+    const req = { method: 'GET', headers: { authorization: 'Bearer invalid' } };
+    const res = createResponse();
+
+    const context = await auth.resolveAuthContext(req, res, { allowSessionAuth: false });
+
+    expect(context).toBe(null);
+    expect(res.getHeader('set-cookie')).toBeUndefined();
+  });
+
   it('reports authenticated client session status with bearer credentials', async () => {
     const createUiAuth = await loadCreateUiAuth();
     const auth = createUiAuth({
@@ -220,6 +236,14 @@ describe('ui auth client credential seam', () => {
       headers: { upgrade: 'websocket' },
     };
     expect(await auth.ensureSessionToken(dictationWsReq, null)).toBe('client:device-1');
+
+    const browserSurfaceWsReq = {
+      method: 'GET',
+      path: '/api/browser-surface',
+      url: `/api/browser-surface?oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { upgrade: 'websocket' },
+    };
+    expect(await auth.ensureSessionToken(browserSurfaceWsReq, null)).toBe('client:device-1');
 
     const devTunnelWsReq = {
       method: 'GET',
