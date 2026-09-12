@@ -8,6 +8,18 @@ import { useFilePreviewScrollPosition } from './useFilePreviewScrollPosition';
 
 type RestorePreview = ReturnType<typeof useFilePreviewScrollPosition>['restore'];
 
+// happy-dom 18 stores a MutationObserver listener callback in a WeakRef with no
+// other strong reference, so a garbage collection between observe() and the
+// mutation can drop the callback and the scroll restore never runs. Retaining
+// the targets for the test keeps the observer's callback alive.
+const retainedWeakRefTargets: object[] = [];
+class RetainedWeakRef<T extends object> extends WeakRef<T> {
+  constructor(target: T) {
+    super(target);
+    retainedWeakRefTargets.push(target);
+  }
+}
+
 class MeasuredPreviewFile extends VirtualizedFile {
   lineTop = 1000;
 
@@ -57,6 +69,7 @@ describe('file preview scroll positions', () => {
       DOMRect: windowInstance.DOMRect,
       MutationObserver: windowInstance.MutationObserver,
       ResizeObserver: windowInstance.ResizeObserver,
+      WeakRef: RetainedWeakRef,
       IS_REACT_ACT_ENVIRONMENT: true,
     });
     const host = document.createElement('div');
@@ -96,6 +109,15 @@ describe('file preview scroll positions', () => {
     scroller.scrollTop = nextTop;
     scroller.scrollLeft = nextLeft;
     scroller.dispatchEvent(new Event('scroll'));
+  };
+  // The mutation observer that commits a restored position runs as a microtask;
+  // happyDOM.waitUntilComplete() can resolve before it does on a loaded runner,
+  // so poll the restored offset instead of assuming the callback has fired.
+  const untilTop = async (expected: number) => {
+    for (let attempt = 0; attempt < 300 && top !== expected; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    if (top !== expected) throw new Error(`scroll top never reached ${expected}`);
   };
 
   test('keeps positions independent across files, runtimes, modes and surfaces', async () => {
@@ -151,7 +173,7 @@ describe('file preview scroll positions', () => {
     expect(top).toBe(0);
     height = 2000;
     content.append(document.createElement('p'));
-    await windowInstance.happyDOM.waitUntilComplete();
+    await untilTop(1000);
     expect(top).toBe(1000);
   });
 

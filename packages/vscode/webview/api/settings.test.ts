@@ -9,6 +9,15 @@ describe('VS Code webview settings API', () => {
     // SAFETY: acquireVsCodeApi is an optional webview global and is restored to this exact value below.
     const originalAcquire = (globalThis as typeof globalThis & { acquireVsCodeApi?: unknown }).acquireVsCodeApi;
     const messages: BridgeRequest[] = [];
+    // The bridge announces `webview:ready` before its first request; skip it so
+    // each shift returns the pending settings request being answered.
+    const nextBridgeRequest = (): BridgeRequest => {
+      while (messages.length > 0) {
+        const message = messages.shift();
+        if (message && message.type !== 'webview:ready') return message;
+      }
+      throw new Error('expected a pending bridge request');
+    };
     const testWindow = Object.assign(new EventTarget(), {
       __VSCODE_CONFIG__: { theme: 'light', workspaceFolder: '/workspace' },
     });
@@ -31,7 +40,7 @@ describe('VS Code webview settings API', () => {
       const api = createVSCodeSettingsAPI();
 
       const failedLoad = api.load();
-      const failedRequest = messages.shift();
+      const failedRequest = nextBridgeRequest();
       assert.ok(failedRequest);
       testWindow.dispatchEvent(new MessageEvent('message', {
         data: {
@@ -44,7 +53,7 @@ describe('VS Code webview settings API', () => {
       await assert.rejects(failedLoad, /settings unavailable/);
 
       const successfulLoad = api.load();
-      const successfulRequest = messages.shift();
+      const successfulRequest = nextBridgeRequest();
       assert.ok(successfulRequest);
       testWindow.dispatchEvent(new MessageEvent('message', {
         data: {
