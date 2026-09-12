@@ -81,6 +81,7 @@ class FakeBrowserSessionManager {
     this.autoCreateTab = true;
     this.commandHooks = new Map();
     this.selectionResult = { result: { value: { text: 'selected text' } } };
+    this.viewerEvents = [];
   }
 
   keyOf({ directory, openCodeSessionId }) {
@@ -215,7 +216,13 @@ class FakeBrowserSessionManager {
     return lease;
   }
 
+  viewerConnect(sessionId, viewerId) {
+    this.viewerEvents.push({ type: 'connect', sessionId, viewerId });
+    return true;
+  }
+
   viewerDisconnect(sessionId, viewerId) {
+    this.viewerEvents.push({ type: 'disconnect', sessionId, viewerId });
     if (this.leases.get(sessionId)?.viewerId !== viewerId) return false;
     this.leases.delete(sessionId);
     const generation = (this.controlGenerations.get(sessionId) ?? 0) + 1;
@@ -332,8 +339,8 @@ const createServer = async (options = {}) => {
   return { server, port, gateway, browserSessionManager, warnings };
 };
 
-const connect = async (port, { directory = '/project', sessionId = '', origin = 'http://127.0.0.1:3000', headers = {} } = {}) => {
-  const url = `ws://127.0.0.1:${port}${SURFACE_WS_PATH}?directory=${encodeURIComponent(directory)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ''}`;
+const connect = async (port, { directory = '/project', sessionId = '', urlToken = '', origin = 'http://127.0.0.1:3000', headers = {} } = {}) => {
+  const url = `ws://127.0.0.1:${port}${SURFACE_WS_PATH}?directory=${encodeURIComponent(directory)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ''}${urlToken ? `&oc_url_token=${encodeURIComponent(urlToken)}` : ''}`;
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(url, { origin, headers });
     socket.binaryType = 'arraybuffer';
@@ -403,13 +410,30 @@ describe('surface gateway auth floor', () => {
       authenticateBearerToken: async (token) => token === 'client-token' ? { ok: true, clientId: 'device-1' } : null,
     } });
     ctx = await createServer({ uiAuthController: auth });
-    await expect(connect(ctx.port, { headers: { cookie: 'oc_ui_session=arbitrary' } })).rejects.toThrow();
-    await expect(connect(ctx.port)).rejects.toThrow();
+    await expect(connect(ctx.port, { headers: { cookie: 'oc_ui_session=arbitrary' } }))
+      .rejects.toThrow('Unexpected server response: 401');
+    await expect(connect(ctx.port)).rejects.toThrow('Unexpected server response: 401');
+    await expect(connect(ctx.port, { headers: { authorization: 'Bearer invalid' } }))
+      .rejects.toThrow('Unexpected server response: 401');
+    await expect(connect(ctx.port, { urlToken: 'invalid' }))
+      .rejects.toThrow('Unexpected server response: 401');
     const socket = await connect(ctx.port, { headers: {
       authorization: 'Bearer client-token', cookie: 'oc_ui_session=arbitrary',
     } });
     expect((await nextJson(socket)).type).toBe('hello');
     await closeSocket(socket);
+
+    let issuedUrlToken = '';
+    await auth.handleUrlAuthToken(
+      { method: 'POST', path: '/auth/url-token', headers: { authorization: 'Bearer client-token' } },
+      {
+        setHeader: () => undefined,
+        json: (body) => { issuedUrlToken = body.token; },
+      },
+    );
+    const urlSocket = await connect(ctx.port, { urlToken: issuedUrlToken });
+    expect((await nextJson(urlSocket)).type).toBe('hello');
+    await closeSocket(urlSocket);
     auth.dispose?.();
   });
 });
@@ -431,6 +455,23 @@ describe('surface gateway handshake and frames', () => {
     }
     return { socket, sessionId: attached.session.id, tabId: activeTabId };
   };
+
+  it('registers an attached viewer until its socket disconnects', async () => {
+    const { socket, sessionId } = await attachSocket();
+    expect(ctx.browserSessionManager.viewerEvents).toEqual([
+      { type: 'connect', sessionId, viewerId: expect.any(String) },
+    ]);
+
+    await closeSocket(socket);
+    await waitFor(() => ctx.browserSessionManager.viewerEvents.length === 2);
+
+    expect(ctx.browserSessionManager.viewerEvents).toEqual([
+      { type: 'connect', sessionId, viewerId: expect.any(String) },
+      { type: 'disconnect', sessionId, viewerId: expect.any(String) },
+    ]);
+    expect(ctx.browserSessionManager.viewerEvents[1].viewerId)
+      .toBe(ctx.browserSessionManager.viewerEvents[0].viewerId);
+  });
   afterEach(async () => {
     if (!ctx) return;
     const s = ctx;

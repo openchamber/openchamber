@@ -249,9 +249,8 @@ export type BrowserTabInfo = {
 };
 
 /**
- * Names the transport a backend drives. 'server-chrome' is a type-level
- * discriminant ONLY: no implementation, branch, or wiring for it exists in
- * this phase.
+ * Names the browser backend: a client Electron webview or server-owned Chrome.
+ * Server Chrome uses isolated sessions and the authenticated remote viewer.
  */
 export type BrowserBackendKind = 'electron-webview' | 'server-chrome';
 

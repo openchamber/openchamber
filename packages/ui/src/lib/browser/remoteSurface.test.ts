@@ -65,7 +65,11 @@ type Harness = {
   readonly order: string[];
 };
 
-const createHarness = (input: { readonly sessionId?: string; readonly preferredTabId?: string } = {}): Harness => {
+const createHarness = (input: {
+  readonly sessionId?: string;
+  readonly preferredTabId?: string;
+  readonly refreshAuthToken?: () => Promise<unknown>;
+} = {}): Harness => {
   const sockets: FakeSocket[] = [];
   const scheduled: Array<{ callback: () => void; delayMs: number }> = [];
   const warnings: string[] = [];
@@ -75,11 +79,11 @@ const createHarness = (input: { readonly sessionId?: string; readonly preferredT
     directory: '/project',
     sessionId: input.sessionId,
     preferredTabId: input.preferredTabId,
-    refreshAuthToken: async () => {
+    refreshAuthToken: input.refreshAuthToken ?? (async () => {
       refreshCount += 1;
       order.push('refresh');
       return `token-${refreshCount}`;
-    },
+    }),
     resolveSocketUrl: (directory) => {
       order.push('resolve');
       return `ws://runtime/api/browser-surface?directory=${encodeURIComponent(directory)}`;
@@ -287,6 +291,20 @@ describe('surface frame protocol', () => {
 });
 
 describe('RemoteSurfaceClient', () => {
+  test('does not open a tokenless socket when URL authentication fails', async () => {
+    const harness = createHarness({ refreshAuthToken: async () => {
+      throw new Error('URL authentication unavailable');
+    } });
+
+    await harness.client.start();
+
+    expect(harness.sockets).toHaveLength(0);
+    expect(harness.client.getState()).toMatchObject({
+      phase: 'error',
+      errorMessage: 'URL authentication unavailable',
+    });
+  });
+
   test('refreshes the URL token before opening and requests the session list on hello', async () => {
     const harness = createHarness();
     await harness.client.start();

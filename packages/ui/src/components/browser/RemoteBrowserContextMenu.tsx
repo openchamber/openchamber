@@ -1,5 +1,6 @@
 import React from 'react';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
+import { getDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
 import { useI18n } from '@/lib/i18n';
 import { viewerPointToFrameCss, type RemoteSurfaceClient, type SurfaceFrameHeader } from '@/lib/browser/remoteSurface';
 import type { useRemoteBrowserClipboard } from './useRemoteBrowserClipboard';
@@ -95,7 +96,10 @@ export function RemoteBrowserContextMenu({ client, enabled, canvas, frame, clipb
   return <>
     <ContextMenu open={enabled && outcome === 'menu'} onOpenChange={(open) => { if (!open) dismiss(); }}>
       <ContextMenuTrigger render={children} onContextMenu={request} />
-      <ContextMenuContent ref={menu} className="bg-[var(--surface-elevated)]">
+      <ContextMenuContent ref={menu} className="bg-[var(--surface-elevated)]"
+        onKeyDown={(event) => {
+          if (!getDropdownNavigationKey(event)) event.stopPropagation();
+        }}>
         <ContextMenuItem disabled={!activeTab?.canGoBack} onClick={() => navigate('back')}>{t('contextPanel.browser.back')}</ContextMenuItem>
         <ContextMenuItem disabled={!activeTab?.canGoForward} onClick={() => navigate('forward')}>{t('contextPanel.browser.forward')}</ContextMenuItem>
         <ContextMenuItem onClick={() => navigate('reload')}>{t('contextPanel.browser.reload')}</ContextMenuItem>

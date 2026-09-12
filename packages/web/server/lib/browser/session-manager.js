@@ -3,6 +3,7 @@ import { createPolicyProxy as defaultCreatePolicyProxy } from './policy-proxy.js
 
 const DEFAULT_LEASE_TTL_MS = 30_000;
 const DEFAULT_IDLE_TTL_MS = 5 * 60_000;
+const IDLE_SWEEP_INTERVAL_MS = 60_000;
 const USER_KEY = 'user';
 
 const keyOf = ({ directory, openCodeSessionId }) => `${directory}\0${openCodeSessionId ?? USER_KEY}`;
@@ -34,6 +35,9 @@ export const createBrowserSessionManager = ({
   const controlListeners = new Set();
   const contextAdmissions = new Set();
   let exclusiveBrowserContext = null;
+  let idleSweepTimer = null;
+  let idleSweepPromise = null;
+  let closed = false;
   let cdp = null;
   let cdpGeneration = null;
   let processDeathCleanup = null;
@@ -251,6 +255,7 @@ export const createBrowserSessionManager = ({
       id, directory, openCodeSessionId, persistence: openCodeSessionId ? 'ephemeral' : 'project',
       contextId: null, proxy: null, resourcesPromise: null, dead: false, closed: false, generation: 0,
       lease: null, leaseTimer: null, queue: [], running: false, inFlight: null,
+      activeOperations: 0, viewers: new Set(),
       createdAt: timestamp, lastActivityAt: timestamp,
     };
     sessions.set(id, session);
@@ -332,34 +337,45 @@ export const createBrowserSessionManager = ({
 
   const withAbort = async (session, targetId, abortSignal, operation, mutating = false) => {
     if (abortSignal?.aborted) throw scopedError(targetId, 'operation aborted');
-    if (!abortSignal) return operation();
-    const aborted = Promise.withResolvers();
-    const onAbort = () => {
-      aborted.reject(scopedError(targetId, 'operation aborted'));
-      if (sessions.get(session.id) !== session) return;
-      if (session.lease?.actor === 'user') return;
-      if (mutating) clearLease(session, 'operation aborted');
-      if (session.persistence === 'ephemeral') {
-        void endSession(session.id, 'operation aborted').catch(() => {});
-      }
-    };
-    abortSignal.addEventListener('abort', onAbort, { once: true });
+    session.activeOperations += 1;
     try {
-      const result = await Promise.race([operation(), aborted.promise]);
-      if (abortSignal.aborted) throw scopedError(targetId, 'operation aborted');
-      return result;
+      if (!abortSignal) return await operation();
+      const aborted = Promise.withResolvers();
+      const onAbort = () => {
+        aborted.reject(scopedError(targetId, 'operation aborted'));
+        if (sessions.get(session.id) !== session) return;
+        if (session.lease?.actor === 'user') return;
+        if (mutating) clearLease(session, 'operation aborted');
+        if (session.persistence === 'ephemeral') {
+          void endSession(session.id, 'operation aborted').catch(() => {});
+        }
+      };
+      abortSignal.addEventListener('abort', onAbort, { once: true });
+      try {
+        const result = await Promise.race([operation(), aborted.promise]);
+        if (abortSignal.aborted) throw scopedError(targetId, 'operation aborted');
+        return result;
+      } finally {
+        abortSignal.removeEventListener('abort', onAbort);
+      }
     } finally {
-      abortSignal.removeEventListener('abort', onAbort);
+      session.activeOperations -= 1;
+      session.lastActivityAt = now();
     }
   };
 
   const createTab = async (locator) => {
     const session = requireSession(locator, 'new tab');
-    const client = await ensureResources(session, 'new tab');
-    const result = await client.send('Target.createTarget', { url: 'about:blank', browserContextId: session.contextId });
-    if (typeof result?.targetId !== 'string') throw scopedError('new tab', 'Chrome returned no target id');
-    session.lastActivityAt = now();
-    return { id: `sc:${result.targetId}`, targetId: result.targetId, url: 'about:blank', title: '' };
+    session.activeOperations += 1;
+    try {
+      const client = await ensureResources(session, 'new tab');
+      const result = await client.send('Target.createTarget', { url: 'about:blank', browserContextId: session.contextId });
+      if (typeof result?.targetId !== 'string') throw scopedError('new tab', 'Chrome returned no target id');
+      return { id: `sc:${result.targetId}`, targetId: result.targetId, url: 'about:blank', title: '' };
+    } finally {
+      session.activeOperations -= 1;
+      session.lastActivityAt = now();
+    }
   };
 
   const listTabs = async (locator, { abortSignal } = {}) => {
@@ -451,21 +467,49 @@ export const createBrowserSessionManager = ({
     return leaseSnapshot(session);
   };
 
+  const viewerConnect = (locator, viewerId) => {
+    const session = requireSession(locator, 'viewer');
+    if (!viewerId) throw scopedError('viewer', 'viewer identity is required');
+    if (session.viewers.has(viewerId)) return false;
+    session.viewers.add(viewerId);
+    session.lastActivityAt = now();
+    return true;
+  };
+
   const viewerDisconnect = (locator, viewerId) => {
     const session = sessions.get(locatorOf(locator));
-    if (!session || session.lease?.actor !== 'user' || session.lease.viewerId !== viewerId) return false;
+    if (!session) return false;
+    if (session.viewers.delete(viewerId)) session.lastActivityAt = now();
+    if (session.lease?.actor !== 'user' || session.lease.viewerId !== viewerId) return false;
     clearLease(session, 'viewer disconnected');
     return true;
   };
 
   const expireIdleSessions = async () => {
     const timestamp = now();
+    const expirations = [];
     for (const session of [...sessions.values()]) {
+      if (session.activeOperations > 0 || session.viewers.size > 0) continue;
       if (timestamp - session.lastActivityAt < idleTtlMs) continue;
       clearLease(session, 'session idle expiry');
-      if (session.persistence === 'ephemeral') await endSession(session.id, 'session idle expiry');
+      if (session.persistence === 'ephemeral') expirations.push(endSession(session.id, 'session idle expiry'));
     }
+    await Promise.allSettled(expirations);
   };
+
+  const scheduleIdleSweep = () => {
+    if (closed) return;
+    idleSweepTimer = setTimer(() => {
+      idleSweepTimer = null;
+      idleSweepPromise = expireIdleSessions().finally(() => {
+        idleSweepPromise = null;
+        scheduleIdleSweep();
+      });
+    }, IDLE_SWEEP_INTERVAL_MS);
+    idleSweepTimer?.unref?.();
+  };
+
+  scheduleIdleSweep();
 
   return {
     createSession,
@@ -479,6 +523,7 @@ export const createBrowserSessionManager = ({
     runReadOnlyOperation,
     getPageConnection,
     acquireExclusiveBrowserContext,
+    viewerConnect,
     viewerTakeover,
     viewerDisconnect,
     getLease(locator) { return leaseSnapshot(sessions.get(locatorOf(locator))); },
@@ -494,6 +539,10 @@ export const createBrowserSessionManager = ({
     expireIdleSessions,
     handleProcessDeath,
     async close() {
+      closed = true;
+      if (idleSweepTimer) clearTimer(idleSweepTimer);
+      idleSweepTimer = null;
+      await idleSweepPromise;
       await Promise.allSettled([...sessions.keys()].map((id) => endSession(id)));
       processDeathCleanup?.();
       cdp?.close();

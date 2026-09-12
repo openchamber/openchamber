@@ -208,10 +208,12 @@ removed when Chrome destroys the target.
   generation and lets an agent acquire control again. A reconnect has a new
   viewer identity and must take control explicitly. Lease state is broadcast
   with `controlling` calculated separately for each connection.
-- The manager exposes `expireIdleSessions` (five-minute idle threshold,
-  ends ephemeral sessions), but no production scheduler invokes it today.
-  Socket cleanup releases control without ending the session or affecting
-  other viewers.
+- The manager checks for idle sessions once a minute. Each check finishes
+  before it schedules the next one, and manager shutdown cancels the timer and
+  waits for a running check. A check ends ephemeral sessions after five idle
+  minutes. Connected viewers and active browser operations protect a session;
+  disconnecting the last viewer restarts its idle period. Socket cleanup
+  releases control without ending the session or affecting other viewers.
 - `getControlState` and `onControlChange` expose copied lease state and its
   generation to viewport and DevTools consumers. `getPageConnection` validates
   page ownership before returning an internal debugger connection descriptor.

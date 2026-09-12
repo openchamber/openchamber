@@ -3,6 +3,66 @@ import { describe, expect, test } from 'bun:test';
 import { dom, mountCanvas } from './RemoteBrowserCanvas.test-support';
 
 describe('RemoteBrowserCanvas native input', () => {
+  for (const modifier of ['ctrlKey', 'metaKey'] as const) {
+    test(`keeps ${modifier === 'ctrlKey' ? 'Ctrl' : 'Command'} shortcuts inside the remote page`, async () => {
+      // Given the remote page has keyboard focus and the host listens for application shortcuts.
+      const { socket, canvas } = await mountCanvas();
+      const stage = canvas.parentElement;
+      if (!(stage instanceof HTMLElement)) throw new Error('Expected the remote browser stage');
+      let hostShortcutCount = 0;
+      const hostShortcut = (event: KeyboardEvent) => {
+        if (event.key.toLowerCase() === 'p' && event[modifier]) hostShortcutCount += 1;
+      };
+      window.addEventListener('keydown', hostShortcut);
+      const event = new KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        key: 'p',
+        [modifier]: true,
+      });
+      try {
+        // When the user invokes Chrome's print shortcut in the remote page.
+        await act(async () => { stage.dispatchEvent(event); });
+      } finally {
+        window.removeEventListener('keydown', hostShortcut);
+      }
+
+      // Then Chrome receives it while the host command palette listener does not.
+      expect(socket.sent.map((message) => JSON.parse(message))).toEqual([
+        { type: 'key', eventType: 'keydown', key: 'p', modifiers: [modifier === 'ctrlKey' ? 'Control' : 'Meta'], tabId: 'sc:target' },
+      ]);
+      expect(event.defaultPrevented).toBe(true);
+      expect(hostShortcutCount).toBe(0);
+    });
+  }
+
+  test('leaves host shortcuts active outside the remote page input boundary', async () => {
+    // Given a regular host control beside the remote page and a host shortcut listener.
+    const { socket, button } = await mountCanvas();
+    let hostShortcutCount = 0;
+    const hostShortcut = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() === 'p' && event.ctrlKey) hostShortcutCount += 1;
+    };
+    window.addEventListener('keydown', hostShortcut);
+    try {
+      // When the regular host control emits Ctrl+P.
+      await act(async () => {
+        button.dispatchEvent(new KeyboardEvent('keydown', {
+          bubbles: true,
+          cancelable: true,
+          key: 'p',
+          ctrlKey: true,
+        }));
+      });
+    } finally {
+      window.removeEventListener('keydown', hostShortcut);
+    }
+
+    // Then the host still receives the shortcut and the remote page does not.
+    expect(hostShortcutCount).toBe(1);
+    expect(socket.sent).toEqual([]);
+  });
+
   for (const { name, options, deltaX, deltaY } of [
     { name: 'default pixel', options: {}, deltaX: 4, deltaY: 6 },
     { name: 'line', options: { deltaMode: 1 }, deltaX: 64, deltaY: 96 },

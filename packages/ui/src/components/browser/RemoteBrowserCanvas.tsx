@@ -107,7 +107,9 @@ export const RemoteBrowserCanvas: React.FC<Props> = ({ client, activeTabId, enab
   };
   const keyEvent = (event: React.KeyboardEvent, eventType: 'keydown' | 'keyup') => {
     if (event.target !== event.currentTarget && event.target !== inputRef.current) return;
-    if (!enabled || event.nativeEvent.isComposing || event.key === 'Unidentified') return;
+    if (!enabled) return;
+    event.stopPropagation();
+    if (event.nativeEvent.isComposing || event.key === 'Unidentified') return;
     const clipboardKey = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey;
     if (clipboardKey && event.key.toLowerCase() === 'v') return;
     if (clipboardKey && event.key.toLowerCase() === 'c') {

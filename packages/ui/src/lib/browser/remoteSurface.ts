@@ -545,8 +545,13 @@ export class RemoteSurfaceClient {
   private async openSocket(generation = this.generation): Promise<void> {
     try {
       await this.refreshAuthToken();
-    } catch {
-      // No auth configured (unauthenticated local runtime) — connect tokenless.
+    } catch (error) {
+      if (this.disposed || generation !== this.generation) return;
+      this.setState({
+        phase: 'error',
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      return;
     }
     if (this.disposed || generation !== this.generation || this.socket) return;
     let socket: RelayTunnelWebSocket;

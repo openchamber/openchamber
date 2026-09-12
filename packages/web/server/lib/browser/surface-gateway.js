@@ -212,7 +212,7 @@ export function createBrowserSurfaceGateway({
     // Password-free UI cookies are not credentials for this input-bearing channel.
     const context = await uiAuthController?.resolveAuthContext?.({
       ...req, headers: { ...req.headers, cookie: '' },
-    }, null, { allowUrlToken: true });
+    }, null, { allowSessionAuth: false, allowUrlToken: true });
     return context?.type === 'client' ? context : null;
   };
 
@@ -624,6 +624,7 @@ export function createBrowserSurfaceGateway({
     detachViewer(viewer);
     viewer.surfaceSession = createSurfaceSession(session.id, directory);
     viewer.surfaceSession.viewers.add(viewer);
+    browserSessionManager.viewerConnect(session.id, viewer.id);
     await watchSessionTabs(viewer.surfaceSession);
   };
 

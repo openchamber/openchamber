@@ -893,6 +893,67 @@ describe('control lease', () => {
     expect(manager.getLease(user.id)).toBeNull();
   });
 
+  it('automatically expires idle ephemeral sessions without overlapping sweeps', async () => {
+    const clock = new ManualClock();
+    const { manager, server } = await setup({
+      now: () => clock.now, setTimer: clock.setTimer, clearTimer: clock.clearTimer,
+      idleTtlMs: 100,
+    });
+    const session = await manager.createSession({ directory: '/project', openCodeSessionId: 'agent' });
+    await manager.createTab(session.id);
+    const disposal = server.deferNextCommand('Target.disposeBrowserContext');
+
+    clock.advance(60_000);
+    await disposal.received;
+    expect(server.calls.filter((call) => call.method === 'Target.disposeBrowserContext')).toHaveLength(1);
+    expect(clock.timers.size).toBe(0);
+
+    clock.advance(60_000);
+    expect(server.calls.filter((call) => call.method === 'Target.disposeBrowserContext')).toHaveLength(1);
+
+    let closed = false;
+    const closing = manager.close().then(() => { closed = true; });
+    await Promise.resolve();
+    expect(closed).toBe(false);
+    disposal.release();
+    await closing;
+    expect(clock.timers.size).toBe(0);
+  });
+
+  it('does not expire an ephemeral session while a viewer or operation is active', async () => {
+    const clock = new ManualClock();
+    const { manager } = await setup({
+      now: () => clock.now, setTimer: clock.setTimer, clearTimer: clock.clearTimer,
+      idleTtlMs: 100,
+    });
+    const session = await manager.createSession({ directory: '/project', openCodeSessionId: 'agent' });
+    expect(manager.viewerConnect(session.id, 'viewer-1')).toBe(true);
+    expect(manager.viewerConnect(session.id, 'viewer-1')).toBe(false);
+    clock.advance(101);
+    await manager.expireIdleSessions();
+    expect(manager.getSession(session.id)).toBeDefined();
+
+    expect(manager.viewerDisconnect(session.id, 'viewer-1')).toBe(false);
+    await manager.expireIdleSessions();
+    expect(manager.getSession(session.id)).toBeDefined();
+    const operation = deferred();
+    const started = deferred();
+    const pending = manager.runReadOnlyOperation(session.id, {
+      targetId: 'active-operation',
+      operation: async () => { started.resolve(); return operation.promise; },
+    });
+    await started.promise;
+    clock.advance(101);
+    await manager.expireIdleSessions();
+    expect(manager.getSession(session.id)).toBeDefined();
+
+    operation.resolve('done');
+    await expect(pending).resolves.toBe('done');
+    clock.advance(101);
+    await manager.expireIdleSessions();
+    expect(manager.getSession(session.id)).toBeUndefined();
+  });
+
   it('releases and rejects queued work on session close', async () => {
     const { manager } = await setup();
     const session = await manager.createSession({ directory: '/project', openCodeSessionId: 'agent' });

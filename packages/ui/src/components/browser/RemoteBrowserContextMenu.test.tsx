@@ -69,8 +69,8 @@ const mountInsidePanel = async (fixture: Awaited<ReturnType<typeof mountCanvas>>
   fixture.socket.sent.length = 0;
   return { canvas, keyTarget };
 };
-const dispatchKey = async (target: HTMLElement, key: string) => {
-  const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key });
+const dispatchKey = async (target: HTMLElement, key: string, init: KeyboardEventInit = {}) => {
+  const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key, ...init });
   await act(async () => { target.dispatchEvent(event); });
   return event;
 };
@@ -97,6 +97,39 @@ describe('RemoteBrowserContextMenu', () => {
     expect(itemNamed('Copy')).not.toBeNull();
     expect(itemNamed('Paste')).not.toBeNull();
   });
+
+  for (const modifier of ['ctrlKey', 'metaKey'] as const) {
+    test(`keeps ${modifier === 'ctrlKey' ? 'Ctrl' : 'Command'} shortcuts out of the host while the remote context menu is open`, async () => {
+      // Given the portaled remote browser menu is open and the host listens for application shortcuts.
+      const fixture = await mountCanvas();
+      await requestMenu(fixture);
+      await answerMenu(fixture, 'menu');
+      const menuItem = modifier === 'ctrlKey' ? itemNamed('Paste') : itemNamed('Reload');
+      const menu = menuItem.closest('[role="menu"]');
+      if (!(menu instanceof HTMLElement)) throw new Error('Expected the remote browser menu');
+      let hostShortcutCount = 0;
+      let localNavigationCount = 0;
+      const hostShortcut = (event: KeyboardEvent) => {
+        if (event.key.toLowerCase() === 'p' && event[modifier]) hostShortcutCount += 1;
+      };
+      const localNavigation = (event: Event) => {
+        if (event instanceof KeyboardEvent && event.key === 'ArrowUp') localNavigationCount += 1;
+      };
+      window.addEventListener('keydown', hostShortcut);
+      menu.addEventListener('keydown', localNavigation);
+      try {
+        // When the user presses Chrome's print shortcut from the menu.
+        await dispatchKey(menuItem, 'p', { [modifier]: true });
+      } finally {
+        window.removeEventListener('keydown', hostShortcut);
+        menu.removeEventListener('keydown', localNavigation);
+      }
+
+      // Then the shortcut remains within the remote browser interaction boundary.
+      expect(hostShortcutCount).toBe(0);
+      expect(localNavigationCount).toBe(modifier === 'ctrlKey' ? 1 : 0);
+    });
+  }
 
   for (const status of ['page-handled', 'unavailable'] as const) {
     test(`preserves page content when the server reports ${status}`, async () => {
