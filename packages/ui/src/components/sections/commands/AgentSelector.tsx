@@ -181,7 +181,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                             <Icon name="arrow-down-s" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
                         </div>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent className="max-w-[300px]" portalToBody={dropdownPortalToBody}>
+                    <DropdownMenuContent className="max-w-[300px] overflow-y-auto" portalToBody={dropdownPortalToBody}>
                         <DropdownMenuItem
                             className="typography-meta"
                             onSelect={() => handleAgentChange('')}
