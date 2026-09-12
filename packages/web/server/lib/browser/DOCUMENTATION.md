@@ -476,6 +476,11 @@ the session manager retains admission until confirmed context disposal or
 Chrome process death. Lease, attachment, target, session, and socket changes
 invalidate stale replies.
 
+DevTools reads network resources through `Network.loadNetworkResource` followed
+by `IO.read`. The policy registers the returned stream only after matching the
+successful response to its pending request and CDP session. Unknown stream
+handles remain blocked; closing a stream revokes its read permission.
+
 This frontend provides Chrome's own panels through the constrained page
 connection. Static checks and simulated protocol tests do not establish that
 every Chromium panel works in a real client; runtime validation must exercise
