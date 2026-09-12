@@ -94,7 +94,10 @@ export class DictationWorkerClient {
   }
 
   commitSession(sessionId) {
-    void this.sendRequest({ type: 'session.commit', sessionId }).catch((err) => {
+    // Decoding a segment is synchronous inside the worker, so a long segment on
+    // a loaded or low-core machine can exceed the default watchdog. A commit
+    // that is merely slow must not fail the dictation and drop the transcript.
+    void this.sendRequest({ type: 'session.commit', sessionId }, { timeoutMs: 120000 }).catch((err) => {
       this.emitSessionError(sessionId, err);
     });
   }

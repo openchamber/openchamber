@@ -75,8 +75,8 @@ openaiCompatible?: { baseUrl, model, apiKey } }`.
 ## Segmentation
 
 A dictation is one segment unless it runs long. Past `segmentMinSeconds`
-(60 s) the manager commits on the first silent chunk, so cuts land at a pause
-rather than mid-word; `segmentMaxSeconds` (90 s) is a hard cap for speech with
+(20 s) the manager commits on the first silent chunk, so cuts land at a pause
+rather than mid-word; `segmentMaxSeconds` (30 s) is a hard cap for speech with
 no pause in it. Client chunks are ~1 s, so "silent chunk" is roughly a second
 of silence.
 
@@ -85,6 +85,15 @@ and peak memory grow quadratically with segment length. Measured on Parakeet
 v3 int8 with 2 threads: 60 s took 2.1 s and +90 MB, 180 s took 9.3 s and
 +490 MB, 300 s took 21.3 s and +1.5 GB. Committed segments decode while the
 user is still speaking, so only the tail is left to transcribe on stop.
+
+The commit decode is **synchronous inside the worker process**, so a segment
+that is too long for the machine blocks the worker and can trip the client's
+request watchdog (`Dictation worker request timed out: session.commit`). The
+caps keep every decode short enough to stay well inside it: on the same
+hardware a 30 s segment decodes in well under a second, while a 90 s segment
+on a loaded machine can take tens of seconds and drop minutes of dictation.
+`commitSession` therefore also allows a longer watchdog (120 s) than the
+default 30 s, so a merely slow commit finishes instead of failing the stream.
 
 ## Invariants
 
