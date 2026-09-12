@@ -260,11 +260,19 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         const reportHeight = () => {
             const style = window.getComputedStyle(area);
             const padding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+            const firstReport = !hasReportedHeightRef.current;
+            // Follow the newest words only while the reader is already at the
+            // end. A re-report (rotation, rewrap) must not yank a user who
+            // scrolled up back down — reading and copying earlier salvage text
+            // is the recovery path this overlay exists for.
+            const atEnd = area.scrollHeight - area.scrollTop - area.clientHeight <= 24;
             hasReportedHeightRef.current = true;
             onContentHeightChangeRef.current?.(content.offsetHeight + padding);
             // Once the composer hits its line cap the salvage area starts
             // scrolling — follow the newest words like a textarea caret would.
-            area.scrollTop = area.scrollHeight;
+            if (firstReport || atEnd) {
+                area.scrollTop = area.scrollHeight;
+            }
         };
         reportHeight();
         if (!window.ResizeObserver) return;
