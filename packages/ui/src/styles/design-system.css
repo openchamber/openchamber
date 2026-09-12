@@ -331,6 +331,13 @@
   backdrop-filter: blur(4px);
 }
 
+/* The recap hint floats in the band above the composer; a panel docked
+   there (queue, suggestion, BTW) would push it up over the transcript, so it
+   hides while any panel is mounted. See ComposerFloatingPanel. */
+[data-composer-bound][data-floating-panel] .oc-recap-hint {
+  opacity: 0;
+}
+
 @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .oc-glass-popover,
   .oc-glass-tooltip,

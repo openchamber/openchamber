@@ -2,6 +2,56 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [1.23.1] - 2026-09-11
+
+### New
+
+- **Diff review:** Review the changes in a published pull request directly in Changes, on desktop and mobile.
+- Sessions: Ask AI to rename a session based on its recent conversation from the session menu or mobile actions.
+- Settings/Sessions: Limit retention cleanup to archived sessions, with the retention period starting when each session was archived.
+- Chat: Paste or drop non-image files into a message, with file references added to the draft automatically.
+
+### Improvements
+
+- **Chat:** Visual refinements across the message box, attachments, menus, and panels give the conversation more room and a more consistent look on desktop and mobile.
+- Chat: Attachments and linked issues sit inside the message box, with model and agent controls grouped together on mobile. Queued messages start collapsed.
+- Chat: Recaps retain the substance of recent work after short closing exchanges, and follow-up suggestions can stay quiet when there's nothing useful to add.
+- Sessions: Markdown exports include attached quotes and comments with their source.
+- App: Hidden Files, Changes, terminal, and walkthrough panels pause background work while you're using another panel.
+- Chat: Inline code colors follow the selected theme.
+- Mobile: A dot on the workspace button marks uncommitted changes.
+- Chat: Removed the extra changed-files dropdown under answers in non-Git folders.
+
+### Fixes
+
+- Sessions: Default model, agent, and thinking choices survive restarts and instance switches, with faster loading in the model and agent pickers (thanks to @alvins82).
+- Chat: Model favorites save from the first change, including when you reload immediately (thanks to @alvins82).
+- Chat: Reading older messages keeps your place as earlier history loads, and a growing message box keeps the latest message in view.
+- Chat: Reasoning and shell output keep scrolling with incoming text until you scroll up yourself.
+- Chat: File lists under answers use the turn's direct edits, reducing unrelated files from other sessions. Long lists collapse after four files (thanks to @yulia-ivashko).
+- Chat: Queued messages containing only quotes or comments show a preview of their attached context.
+- Chat: Slash commands stay available when switching projects.
+- Chat: Session recaps disappear without making the conversation jump when you send a message.
+- Files: Large text files can be edited and saved in full without cutting off their contents or changing line endings.
+- Sessions: Retention cleanup protects child sessions that should be kept and avoids false failures when deleting session families.
+- Sessions: Pressing Enter saves a renamed session.
+- Worktrees: New sessions pick up the project's settings after checkout, fixing missing configuration in freshly created worktrees.
+- Worktrees: Worktrees added or removed in another window, by an agent, or from a terminal appear in the sidebar on the next Git refresh (thanks to @yulia-ivashko).
+- Projects: Deeply nested projects can save settings, notes, plans, and memory without file-name errors (thanks to @yulia-ivashko).
+- Scheduled tasks: A project that fails to load no longer stops tasks in other projects from starting (thanks to @yulia-ivashko).
+- Scheduled tasks: Run now works for paused tasks while their schedule stays paused.
+- Terminal: Right-click opens Copy and Paste actions again.
+- Terminal: On macOS, Option+Left/Right moves by word and Option+Backspace deletes the previous word at shell prompts.
+- Terminal: Attaching selected output to chat puts the cursor in the message box.
+- Shortcuts: Cmd/Ctrl number shortcuts for sessions and panels work while typing in chat.
+- Desktop: After an AppImage update, OpenCode starts from the current app bundle, fixing stale paths and incorrect upgrade offers (thanks to @yulia-ivashko).
+- Sessions: Long tab titles fade before the buttons when you hover over a tab.
+
+### Misc
+
+- MCP: Removed OpenChamber's automatic reconnects, which could repeatedly start failed local servers. Failed connections now need manual reconnection.
+- Desktop: Updated Electron to 43.7.0.
+
 ## [1.23.0] - 2026-09-09
 
 ### New

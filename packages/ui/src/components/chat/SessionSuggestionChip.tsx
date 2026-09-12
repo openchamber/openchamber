@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button';
 import { useSessionAssistState } from '@/hooks/useSessionAssist';
 import { patchSessionMetadata } from '@/sync/session-actions';
 import { useI18n } from '@/lib/i18n';
-import { ComposerFloatingPanel } from './composer/ui/ComposerFloatingPanel';
 
 interface SessionSuggestionChipProps {
   sessionId: string | null;
@@ -13,20 +12,16 @@ interface SessionSuggestionChipProps {
   /** The composer already has content — the suggestion must stay out of the way. */
   hidden: boolean;
   onApply: (text: string) => void;
-  /**
-   * `panel`: a floating card docked above the composer (desktop).
-   * `row`: the composer's own top row, inside the mobile pill and box.
-   */
-  variant?: 'panel' | 'row';
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
-// A suggested follow-up docked above the composer, like the BTW panel.
-// Tapping it fills the composer (no auto-send); the X patches the
-// suggestion out of the session metadata so it stays dismissed everywhere.
-export const SessionSuggestionChip: React.FC<SessionSuggestionChipProps> = React.memo(({ sessionId, directory, hidden, onApply, variant = 'panel' }) => {
+// A suggested follow-up rendered as the composer's own top row (inside the
+// box, and inside the mobile pill). Tapping it fills the composer (no
+// auto-send); the X patches the suggestion out of the session metadata so
+// it stays dismissed everywhere.
+export const SessionSuggestionChip: React.FC<SessionSuggestionChipProps> = React.memo(({ sessionId, directory, hidden, onApply }) => {
   const { suggestion } = useSessionAssistState(sessionId ?? '', directory);
   const { t } = useI18n();
   const [dismissing, setDismissing] = React.useState(false);
@@ -90,15 +85,11 @@ export const SessionSuggestionChip: React.FC<SessionSuggestionChipProps> = React
     </>
   );
 
-  if (variant === 'row') {
-    return (
-      <div className="flex h-10 items-center gap-1 border-b border-border/60 pl-3 pr-1.5">
-        {content}
-      </div>
-    );
-  }
-
-  return <ComposerFloatingPanel compact header={content} />;
+  return (
+    <div className="flex h-10 items-center gap-1 border-b border-border/60 pl-3 pr-1.5">
+      {content}
+    </div>
+  );
 });
 
 SessionSuggestionChip.displayName = 'SessionSuggestionChip';

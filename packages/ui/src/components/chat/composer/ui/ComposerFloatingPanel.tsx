@@ -10,6 +10,9 @@ interface ComposerFloatingPanelProps {
 }
 
 /** Shared dock for mutually exclusive BTW, queue, and suggestion panels. */
+/** Panels mounted per chat column, so the marker survives an overlap. */
+const mountedPanels = new WeakMap<HTMLElement, number>();
+
 export function ComposerFloatingPanel({ header, children, compact = false, role, ariaLabel }: ComposerFloatingPanelProps) {
     const panelRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -17,6 +20,10 @@ export function ComposerFloatingPanel({ header, children, compact = false, role,
         const panel = panelRef.current;
         const column = panel?.closest<HTMLElement>('[data-composer-bound]');
         if (!panel || !column) return;
+        // Marks the column while any panel is docked above the composer, so
+        // chrome that would end up over the panel (the recap hint) can hide.
+        mountedPanels.set(column, (mountedPanels.get(column) ?? 0) + 1);
+        column.setAttribute('data-floating-panel', 'true');
         // Only the floating status/navigation overlays use this offset.
         // Transcript dimensions and scroll insets remain unchanged.
         const update = () => {
@@ -32,6 +39,13 @@ export function ComposerFloatingPanel({ header, children, compact = false, role,
         return () => {
             observer?.disconnect();
             column.style.removeProperty('--chat-floating-panel-clearance');
+            const remaining = (mountedPanels.get(column) ?? 1) - 1;
+            if (remaining <= 0) {
+                mountedPanels.delete(column);
+                column.removeAttribute('data-floating-panel');
+            } else {
+                mountedPanels.set(column, remaining);
+            }
         };
     }, []);
 

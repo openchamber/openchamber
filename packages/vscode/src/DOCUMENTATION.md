@@ -101,6 +101,13 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 
 ## Shared webview message ordering
 
+The bridge sends `webview:ready` once per document, before its first outbound
+message. Sidebar, session-editor, and agent-manager hosts abort that panel's old
+SSE streams before accepting new requests and resend the current connection
+state. A VS Code webview reload or cross-window move replaces the document
+without disposing its panel; relying only on panel disposal leaked one upstream
+stream per reload, including its ongoing idle heartbeat traffic.
+
 Message and part ordering is owned by [`packages/ui/src/sync/DOCUMENTATION.md`](../../ui/src/sync/DOCUMENTATION.md#session-message-loading). The VS Code webview consumes that shared sync implementation; bridge and proxy runtimes pass OpenCode records through without adding runtime-specific ordering.
 
 The OpenChamber control stream (`/api/openchamber/events`) requires the

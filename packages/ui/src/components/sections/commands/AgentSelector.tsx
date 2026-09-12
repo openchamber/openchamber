@@ -33,7 +33,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
     dropdownPortalToBody = false,
 }) => {
     const { t } = useI18n();
-    const { isReady, isUnavailable } = useOpenCodeReadiness();
+    const { isReady, isUnavailable } = useOpenCodeReadiness('agents');
     const configAgents = useConfigStore((state) => state.agents);
     const agentsStoreAgents = useAgentsStore((state) => state.agents);
     const loadAgentsStore = useAgentsStore((state) => state.loadAgents);
@@ -139,7 +139,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                     )}
                 >
                     <div className="flex items-center gap-2">
-                        {!isReady ? (
+                        {!isReady && !agentName ? (
                             <>
                                 <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
                                 <span className="typography-meta text-muted-foreground">{isUnavailable ? t('common.unavailable') : t('common.loading')}</span>
@@ -161,9 +161,9 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                     'w-fit opacity-60',
                     className
                 )}>
-                    <Icon name="loader-4" className="h-3 w-3 animate-spin text-muted-foreground flex-shrink-0" />
+                    <Icon name={agentName ? 'robot-2' : 'loader-4'} className={cn('h-3 w-3 text-muted-foreground flex-shrink-0', !agentName && 'animate-spin')} />
                     <span className="typography-micro font-medium whitespace-nowrap text-muted-foreground">
-                        {isUnavailable ? t('common.unavailable') : t('common.loading')}
+                        {agentName || (isUnavailable ? t('common.unavailable') : t('common.loading'))}
                     </span>
                 </div>
             ) : (

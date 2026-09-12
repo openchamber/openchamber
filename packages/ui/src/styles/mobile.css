@@ -680,6 +680,13 @@
   padding-bottom: 12px;
 }
 
+/* The recap hint is for reading, not writing: with the mobile composer
+   expanded (keyboard up) it hides, whatever the scroll position. The class
+   lands in the same frame as the pill swap, so the hint leaves with it. */
+:root.oc-composer-expanded .oc-recap-hint {
+  opacity: 0;
+}
+
 /* Draft starter chips leave when the full composer takes over — with the
    composer expanded (and hence the keyboard up) there is only room for the
    draft title. oc-composer-expanded is set in the SAME frame as the pill swap

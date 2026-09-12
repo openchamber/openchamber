@@ -6,7 +6,6 @@ import ToolPart from './parts/ToolPart';
 import AssistantTextPart from './parts/AssistantTextPart';
 import ReasoningPart from './parts/ReasoningPart';
 import { MessageFilesDisplay } from '../FileAttachment';
-import { TurnChangedFilesDropdown } from '../TurnChangedFilesDropdown';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
 import type { StreamPhase, ToolPopupContent, AgentMentionInfo } from './types';
 import type { TurnActivityGroup, TurnChangedFile, TurnGroupingContext } from '../lib/turns/types';
@@ -2658,7 +2657,6 @@ const AssistantMessageBody = React.memo(({
                             grows, not a fact about the run. */}
                         {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
                             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-                                <TurnChangedFilesDropdown activityParts={turnGroupingContext?.activityParts} />
                                 <TurnChangedFilePills
                                     files={turnGroupingContext?.changedFiles}
                                     isInteractive={turnGroupingContext?.isLatestTurn === true}

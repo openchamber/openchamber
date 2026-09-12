@@ -17,6 +17,7 @@ import {
   getRuntimeSettingsMirrorStorageKey,
   getSettingsSaveState,
   invalidateSettingsCache,
+  loadDesktopSettings,
   subscribeToSettingsSaveState,
   syncDesktopSettings,
   updateDesktopSettings,
@@ -841,6 +842,32 @@ describe('updateDesktopSettings', () => {
     }
   });
 
+  test('autosaves the first model preference change', async () => {
+    getWindow();
+    const saveCalls: Array<Partial<SettingsPayload>> = [];
+    registerSettingsSave(async (changes) => {
+      saveCalls.push(changes);
+      return changes as SettingsPayload;
+    });
+    const stop = startModelPrefsAutoSave();
+
+    try {
+      useUIStore.setState({ favoriteModels: [{ providerID: 'anthropic', modelID: 'claude-haiku-4' }] });
+      await delay(300);
+
+      expect(saveCalls).toEqual([{
+        favoriteModels: [{ providerID: 'anthropic', modelID: 'claude-haiku-4' }],
+        hiddenModels: [],
+        collapsedModelProviders: [],
+        recentModels: [],
+        recentAgents: [],
+        recentEfforts: {},
+      }]);
+    } finally {
+      stop();
+    }
+  });
+
   test('autosaves appearance preferences to shared settings', async () => {
     getWindow();
     useUIStore.getState().setTerminalShell('auto');
@@ -1162,6 +1189,61 @@ describe('updateDesktopSettings', () => {
     expect(saveCalls).toEqual([{ fontSize: 16 }]);
   });
 
+  test('reconciles warm cached reads with pending and in-flight settings writes', async () => {
+    const saveResult = deferred<SettingsPayload>();
+    const savedSettings = { defaultModel: 'provider/new-model' } satisfies SettingsPayload;
+    const saveCalls: Array<Partial<SettingsPayload>> = [];
+    registerSettingsApi(
+      async (changes) => {
+        saveCalls.push(changes);
+        return saveResult.promise;
+      },
+      async () => ({
+        settings: { defaultModel: 'provider/old-model' },
+        source: 'web',
+      }),
+    );
+
+    const initialSettings = await loadDesktopSettings();
+    expect(initialSettings?.defaultModel).toBe('provider/old-model');
+    const update = updateDesktopSettings({ defaultModel: 'provider/new-model' });
+
+    const pendingSettings = await loadDesktopSettings();
+    expect(pendingSettings?.defaultModel).toBe('provider/new-model');
+    await delay(250);
+    expect(saveCalls).toEqual([{ defaultModel: 'provider/new-model' }]);
+    const inFlightSettings = await loadDesktopSettings();
+    expect(inFlightSettings?.defaultModel).toBe('provider/new-model');
+
+    saveResult.resolve(savedSettings);
+    await update;
+  });
+
+  test('a delayed read retains an edit whose write finishes before the read', async () => {
+    const readResult = deferred<{ settings: SettingsPayload; source: 'web' }>();
+    const newDefaults = { defaultModel: 'provider/new', defaultVariant: 'high', defaultAgent: 'review' };
+    const writes: Array<Partial<SettingsPayload>> = [];
+    registerSettingsApi(async (changes) => { writes.push(changes); return { ...changes }; }, () => readResult.promise);
+    const update = updateDesktopSettings(newDefaults);
+    const read = loadDesktopSettings();
+    await update;
+    readResult.resolve({ settings: { defaultModel: 'provider/old', defaultVariant: 'low', defaultAgent: 'build' }, source: 'web' });
+    expect(await read).toMatchObject(newDefaults);
+    expect(await loadDesktopSettings()).toMatchObject(newDefaults);
+    await updateDesktopSettings({ defaultModel: 'provider/old' });
+    expect(writes).toHaveLength(2);
+  });
+
+  test('a read started before an edit cannot undo its completed write', async () => {
+    const readResult = deferred<{ settings: SettingsPayload; source: 'web' }>();
+    registerSettingsApi(async (changes) => ({ ...changes }), () => readResult.promise);
+    const read = loadDesktopSettings();
+    await updateDesktopSettings({ defaultModel: 'provider/new' });
+    readResult.resolve({ settings: { defaultModel: 'provider/old' }, source: 'web' });
+    expect((await read)?.defaultModel).toBe('provider/new');
+    expect((await loadDesktopSettings())?.defaultModel).toBe('provider/new');
+  });
+
   test('toggling back to the server value inside the debounce window cancels the pending write', async () => {
     getWindow();
     invalidateSettingsCache();
@@ -1360,6 +1442,32 @@ describe('unload lifecycle flush (#2197)', () => {
     } finally {
       useUIStore.getState().setShowDeletionDialog(true);
       // Let the restore write drain so it cannot leak into other tests.
+      await delay(300);
+    }
+  });
+
+  test('persists a first model preference followed by an immediate unload', async () => {
+    const saveCalls: Array<Partial<SettingsPayload>> = [];
+    registerSettingsSave(async (changes) => {
+      saveCalls.push(changes);
+      return {};
+    });
+    const stopModelPrefs = startModelPrefsAutoSave();
+
+    try {
+      useUIStore.setState({ favoriteModels: [{ providerID: 'anthropic', modelID: 'claude-haiku-4' }] });
+      getWindow().dispatchEvent(new Event('pagehide'));
+
+      expect(saveCalls).toEqual([{
+        favoriteModels: [{ providerID: 'anthropic', modelID: 'claude-haiku-4' }],
+        hiddenModels: [],
+        collapsedModelProviders: [],
+        recentModels: [],
+        recentAgents: [],
+        recentEfforts: {},
+      }]);
+    } finally {
+      stopModelPrefs();
       await delay(300);
     }
   });

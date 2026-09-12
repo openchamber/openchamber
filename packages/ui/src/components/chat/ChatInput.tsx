@@ -3423,14 +3423,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             ) : null}
         </div>
     ) : null;
-    // Mobile: the suggested follow-up is the composer's own top row, and model
-    // and agent its bottom row, inside the pill and the expanded box alike, so
-    // the surface stays one shape. Desktop keeps the suggestion as a floating
-    // card above the composer.
+    // The suggested follow-up is the composer's own top row on every surface
+    // (inside the mobile pill and the box alike); on mobile the model and
+    // agent are its bottom row too, so the surface stays one shape.
     const suggestionHidden = hasContent || newSessionDraftOpen || isBtwActive || isBtwPanelVisible || hasQueuedMessages;
-    const mobileSuggestionRow = isMobile && !isBtwActive ? (
+    const suggestionRow = !isBtwActive ? (
         <SessionSuggestionChip
-            variant="row"
             sessionId={currentSessionId}
             directory={currentSessionDirectoryForSync ?? currentDirectory}
             hidden={suggestionHidden}
@@ -3643,7 +3641,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         iconSizeClass={iconSizeClass}
                         sendIconSizeClass={sendIconSizeClass}
                         stopIconSizeClass={stopIconSizeClass}
-                        topRow={mobileSuggestionRow}
+                        topRow={suggestionRow}
                         attachments={(
                             <div className="px-3 pt-1">
                                 <AttachedFilesList onShowPopup={handleShowAttachmentPreview} className="pt-2" />
@@ -3670,6 +3668,26 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     directory={currentSessionDirectoryForSync ?? currentDirectory}
                     className="mb-1.5"
                 /> : null}
+                {/* The autocomplete popups anchor to this wrapper, not to the
+                    glass box: a backdrop-filter ancestor is a backdrop root,
+                    so a glass popup inside the box would only blur the box's
+                    own contents and read as a flat tint over the transcript. */}
+                <div className={cn('relative', isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}>
+                    <ComposerAutocompletePopups
+                        open={openAutocomplete}
+                        query={autocompleteQuery}
+                        overlayPosition={isDesktopExpanded ? autocompleteOverlayPosition : null}
+                        commandRef={commandRef}
+                        skillRef={skillRef}
+                        snippetRef={snippetRef}
+                        mentionRef={mentionRef}
+                        onCommandSelect={handleCommandSelect}
+                        onSkillSelect={handleSkillSelect}
+                        onSnippetSelect={handleSnippetSelect}
+                        onFileSelect={handleFileSelect}
+                        onAgentSelect={handleAgentSelect}
+                        onClose={closeAutocomplete}
+                    />
                 <div
                     className={cn(
                         "flex flex-col relative overflow-visible",
@@ -3710,26 +3728,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         </div>
                     )}
 
-                    <ComposerAutocompletePopups
-                        open={openAutocomplete}
-                        query={autocompleteQuery}
-                        overlayPosition={isDesktopExpanded ? autocompleteOverlayPosition : null}
-                        commandRef={commandRef}
-                        skillRef={skillRef}
-                        snippetRef={snippetRef}
-                        mentionRef={mentionRef}
-                        onCommandSelect={handleCommandSelect}
-                        onSkillSelect={handleSkillSelect}
-                        onSnippetSelect={handleSnippetSelect}
-                        onFileSelect={handleFileSelect}
-                        onAgentSelect={handleAgentSelect}
-                        onClose={closeAutocomplete}
-                    />
                     {/* Positioning context for the dictation overlay: covers the
                         text area + footer exactly. */}
                     <div className={cn('relative flex flex-col', isComposerExpanded && 'flex-1 min-h-0')}>
                     <div className={cn("overflow-hidden", isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}>
-                        {mobileSuggestionRow}
+                        {suggestionRow}
                         {isMobile && isBtwActive ? (
                             <div className="scrollbar-none relative z-10 flex items-center gap-x-2 overflow-x-auto px-3 pb-0.5 pt-1.5">
                                 <ModelControls
@@ -3852,6 +3855,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     </div>
 
                 </div>
+                </div>
                 </>
                 )}
                 {/* Wrapper-level dictation engine + overlay: stays mounted across
@@ -3889,14 +3893,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 <DraftPresetChips
                     onSubmit={(starter) => submitPresetPrompt(starter.submitText, starter.ref.type)}
                     className={cn('chat-input-column mt-4', draftPresentationClassName)}
-                />
-            ) : null}
-            {!isMobile ? (
-                <SessionSuggestionChip
-                    sessionId={currentSessionId}
-                    directory={currentSessionDirectoryForSync ?? currentDirectory}
-                    hidden={suggestionHidden}
-                    onApply={applyAssistSuggestion}
                 />
             ) : null}
             <QueuedMessageChips

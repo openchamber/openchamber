@@ -17,19 +17,21 @@ animation. Do not restore separate draft and session composer branches:
 remounting the editor loses focus and interrupts the transition. Keep the
 existing mobile fixed-position rules unchanged.
 
-`ComposerFloatingPanel` is the shared frame for `BtwPanel`, `QueuedMessageChips`,
-and `SessionSuggestionChip`. They mount inside the composer form, outside both
-the full editor and collapsed mobile pill, with one absolute `bottom-full`
+`ComposerFloatingPanel` is the shared frame for `BtwPanel` and
+`QueuedMessageChips`. They mount inside the composer form, outside both the
+full editor and collapsed mobile pill, with one absolute `bottom-full`
 anchor, input-column width, gap, and glass surface. Appearing, disappearing,
 or collapsing a panel does not resize the transcript or composer.
-The frame also owns the header row through its `header` and `compact` props.
-Suggestion and collapsed queue/BTW use the same compact header sizing; callers
-supply controls and content, not their own header padding.
+The frame also owns the header row through its `header` and `compact` props;
+callers supply controls and content, not their own header padding.
 
-Visibility priority is BTW, then a nonempty queue, then suggestion. Every BTW
-frame, including its collapsed strip, creation state, and pending draft, hides
-the other two. Composer content also hides suggestion; new-session drafts hide
-both queue and suggestion. Hiding the queue does not pause its delivery.
+`SessionSuggestionChip` is not a frame: it renders as the composer's own top
+row, inside the box and inside the mobile pill, so the surface stays one
+shape. Visibility priority is BTW, then a nonempty queue, then suggestion.
+Every BTW frame, including its collapsed strip, creation state, and pending
+draft, hides the other two. Composer content also hides suggestion;
+new-session drafts hide both queue and suggestion. Hiding the queue does not
+pause its delivery.
 
 The queue header toggles an `aria-expanded` disclosure with the current count.
 Its collapse state is local to the mounted runtime/directory/session queue key
@@ -41,9 +43,11 @@ so embedded chat columns address their own queue.
 
 The shared frame measures its height and gap into the chat column's
 `--chat-floating-panel-clearance`. The floating status row and
-`ScrollToBottomButton` translate upward by that amount. Transcript height,
-insets, and scroll position remain unchanged. Unmounting clears the offset;
-resizing or collapsing the frame updates it.
+`ScrollToBottomButton` translate upward by that amount, and the column
+carries `data-floating-panel` while any frame is mounted so the recap hint
+hides instead of landing over the transcript. Transcript height, insets, and
+scroll position remain unchanged. Unmounting clears the offset and the
+marker; resizing or collapsing the frame updates it.
 
 ## Floating composer
 

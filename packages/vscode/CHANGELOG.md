@@ -1,3 +1,32 @@
+## [1.23.1] - 2026-09-11
+
+### New
+
+- Settings/Sessions: Retention cleanup can target archived sessions only, counting their age from the archive date.
+- Chat: Pasted and dropped files get references in the message draft automatically.
+
+### Improvements
+
+- **Chat:** Visual refinements to the message box, attachments, and menus make better use of the space in the sidebar and editor tabs.
+- Chat: Attachments sit inside the message box, and queued messages start collapsed.
+- Sessions: Markdown exports preserve attached quotes and comments with their source.
+- Chat: Removed the changed-files bar above the message box and the extra file dropdown under answers in non-Git folders.
+- Chat: Inline code uses colors from your VS Code theme.
+
+### Fixes
+
+- Sessions: Saved model, agent, and thinking defaults survive reloads and temporary provider unavailability, and their pickers display saved choices sooner (thanks to @alvins82).
+- Chat: The first model you add to favorites stays saved after reloading the panel (thanks to @alvins82).
+- Chat: Reloading panels or moving them between windows now closes old background connections, fixing a connection leak.
+- Chat: Loading older history keeps your reading position, and the latest message stays in view as the message box grows.
+- Chat: Reasoning and shell output continue following incoming text until you scroll up.
+- Chat: File lists under answers use the turn's direct edits, reducing unrelated files from other sessions. Show more reveals files beyond the first four (thanks to @yulia-ivashko).
+- Chat: Queued quotes and comments show their context in the message preview.
+- Chat: Switching projects preserves the available slash commands.
+- Sessions: Retention cleanup keeps protected child sessions and avoids false deletion failures for session families.
+- Sessions: Enter saves a session rename from the sidebar.
+- Projects: Settings save correctly for deeply nested workspace paths (thanks to @yulia-ivashko).
+
 ## [1.23.0] - 2026-09-09
 
 ### New

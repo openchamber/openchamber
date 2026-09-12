@@ -1310,12 +1310,24 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // the project's config instead so the default cascade matches app startup, then re-apply it
     // (a fresh draft must start from defaults, not inherit the previous session's selection).
     const configDirectory = normalizePath(selectedProject?.path ?? null) ?? directory
-    void activateConfigForDirectory(configDirectory).then(() => {
+    const runtimeKey = getRuntimeKey()
+    const activation = activateConfigForDirectory(configDirectory)
+    const applyDraftDefaults = () => {
+      const current = get()
+      if (getRuntimeKey() !== runtimeKey || current.currentSessionId
+        || current.newSessionDraft !== nextDraft || useConfigStore.getState().selectionSource === 'manual') return
       useConfigStore.getState().applyDefaultModelAgentSelection({
         projectDefaultModel: selectedProject?.defaultModel,
         projectDefaultVariant: selectedProject?.defaultVariant,
       })
+    }
+    // Paint the configured identifier immediately. Discovery fills its metadata
+    // later; it must not turn a new draft into an unrelated fallback model.
+    useConfigStore.getState().applyDefaultModelAgentSelection({
+      projectDefaultModel: selectedProject?.defaultModel,
+      projectDefaultVariant: selectedProject?.defaultVariant,
     })
+    void activation.then(applyDraftDefaults)
 
     if (directory && directory !== useDirectoryStore.getState().currentDirectory) {
       useDirectoryStore.getState().setDirectory(directory)
