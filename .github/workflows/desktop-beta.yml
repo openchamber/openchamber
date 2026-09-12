@@ -1,0 +1,458 @@
+name: Desktop & Extension Beta Build
+
+on:
+  push:
+    branches:
+      - 'beta'
+      - 'release/**'
+  schedule:
+    # Run nightly beta build at 02:00 UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Target platforms to build
+        required: true
+        type: choice
+        options:
+          - all
+          - macos
+          - windows
+          - linux
+          - vscode
+          - npm
+        default: all
+      version_name:
+        description: Custom version name (leave empty for auto)
+        required: false
+        type: string
+
+concurrency:
+  group: desktop-beta-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: short
+
+jobs:
+  resolve-version:
+    name: Resolve beta version
+    runs-on: ubuntu-latest
+    outputs:
+      version_name: ${{ steps.version.outputs.version_name }}
+      build_number: ${{ steps.version.outputs.build_number }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
+      build_macos: ${{ steps.version.outputs.build_macos }}
+      build_windows: ${{ steps.version.outputs.build_windows }}
+      build_linux: ${{ steps.version.outputs.build_linux }}
+      build_vscode: ${{ steps.version.outputs.build_vscode }}
+      build_npm: ${{ steps.version.outputs.build_npm }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Calculate version and target flags
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          package_version="$(node -p "require('./package.json').version")"
+          input_version="${{ github.event.inputs.version_name }}"
+          input_target="${{ github.event.inputs.target || 'all' }}"
+          build_number="${{ github.run_number }}"
+
+          base_version="${input_version:-$package_version}"
+          version_name="${base_version}-beta.${build_number}"
+          release_tag="desktop-beta-v${version_name}"
+
+          build_macos="true"
+          build_windows="true"
+          build_linux="true"
+          build_vscode="true"
+          build_npm="true"
+
+          if [[ "$input_target" != "all" ]]; then
+            build_macos="false"
+            build_windows="false"
+            build_linux="false"
+            build_vscode="false"
+            build_npm="false"
+
+            case "$input_target" in
+              macos) build_macos="true" ;;
+              windows) build_windows="true" ;;
+              linux) build_linux="true" ;;
+              vscode) build_vscode="true" ;;
+              npm) build_npm="true" ;;
+            esac
+          fi
+
+          {
+            echo "version_name=$version_name"
+            echo "build_number=$build_number"
+            echo "release_tag=$release_tag"
+            echo "build_macos=$build_macos"
+            echo "build_windows=$build_windows"
+            echo "build_linux=$build_linux"
+            echo "build_vscode=$build_vscode"
+            echo "build_npm=$build_npm"
+          } >> "$GITHUB_OUTPUT"
+
+  build-desktop-macos:
+    name: macOS Electron (${{ matrix.arch }})
+    needs: resolve-version
+    if: needs.resolve-version.outputs.build_macos == 'true'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            arch: arm64
+            runner: macos-26
+          - target: x86_64-apple-darwin
+            arch: x64
+            runner: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Get bundled OpenCode CLI version
+        id: opencode_cli_version
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').dependencies['@opencode-ai/sdk']")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Cache bundled OpenCode CLI artifact
+        uses: actions/cache@v4
+        with:
+          path: packages/electron/.cache/opencode-cli
+          key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
+          restore-keys: |
+            opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
+
+      - name: Install Apple Certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          if [[ -z "$APPLE_CERTIFICATE" ]]; then
+            echo "Notice: APPLE_CERTIFICATE secret not set; skipping signing keychain setup."
+            exit 0
+          fi
+          KEYCHAIN_PATH=$RUNNER_TEMP/electron-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Build Electron App
+        working-directory: packages/electron
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ELECTRON_BUILDER_ARCH: ${{ matrix.arch }}
+        run: |
+          bun run build:web-assets
+          bun run prepare:opencode-cli
+          bun run verify:opencode-cli
+          bun run bundle:main
+          bun run rebuild:native
+          bunx electron-builder --mac --${{ matrix.arch }} --publish=never
+          bun run verify:opencode-cli:packaged
+
+      - name: Upload macOS Beta Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openchamber-desktop-macos-${{ matrix.arch }}
+          path: |
+            packages/electron/dist/*.dmg
+            packages/electron/dist/*.zip
+
+  build-desktop-windows:
+    name: Windows Electron (${{ matrix.arch }})
+    needs: resolve-version
+    if: needs.resolve-version.outputs.build_windows == 'true'
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+          - arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Get bundled OpenCode CLI version
+        id: opencode_cli_version
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').dependencies['@opencode-ai/sdk']")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Cache bundled OpenCode CLI artifact
+        uses: actions/cache@v4
+        with:
+          path: packages/electron/.cache/opencode-cli
+          key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
+          restore-keys: |
+            opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
+
+      - name: Build web assets & main bundle
+        working-directory: packages/electron
+        shell: bash
+        run: |
+          bun run build:web-assets
+          bun run prepare:opencode-cli
+          bun run verify:opencode-cli
+          bun run bundle:main
+
+      - name: Rebuild native modules & package Windows App
+        working-directory: packages/electron
+        shell: bash
+        env:
+          ELECTRON_BUILDER_ARCH: ${{ matrix.arch }}
+        run: |
+          node ./scripts/rebuild-native.mjs
+          node ./scripts/package.mjs --win --${{ matrix.arch }} --publish=never
+          bun run verify:opencode-cli:packaged
+
+      - name: Upload Windows Beta Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openchamber-desktop-windows-${{ matrix.arch }}
+          path: packages/electron/dist/*.exe
+
+  build-desktop-linux:
+    name: Linux Electron (${{ matrix.arch }})
+    needs: resolve-version
+    if: needs.resolve-version.outputs.build_linux == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x64
+            host_arch: x86_64
+            artifact_arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            host_arch: aarch64
+            artifact_arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build and package Linux AppImage
+        working-directory: packages/electron
+        env:
+          OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          bun run build:web-assets
+          bun run prepare:opencode-cli
+          bun run verify:opencode-cli
+          bun run bundle:main
+          bun run rebuild:native
+          node ./scripts/package.mjs --linux --${{ matrix.arch }} --publish=never
+          bun run verify:opencode-cli:packaged
+
+      - name: Upload Linux Beta Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openchamber-desktop-linux-${{ matrix.arch }}
+          path: packages/electron/dist/*.AppImage
+
+  build-vscode-extension:
+    name: VS Code Extension (.vsix)
+    needs: resolve-version
+    if: needs.resolve-version.outputs.build_vscode == 'true'
+    runs-on: ubuntu-latest
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build VS Code extension
+        run: bun run --cwd packages/vscode build
+
+      - name: Package extension
+        run: cd packages/vscode && bunx vsce package --no-dependencies
+
+      - name: Publish Pre-Release to VS Code Marketplace
+        if: env.VSCE_PAT != ''
+        run: cd packages/vscode && bunx vsce publish --pre-release -p "$VSCE_PAT" --no-dependencies
+
+      - name: Publish Pre-Release to Open VSX
+        if: env.OVSX_PAT != ''
+        run: bunx ovsx publish packages/vscode/*.vsix -p "$OVSX_PAT"
+
+      - name: Upload VSIX Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openchamber-vscode-extension
+          path: packages/vscode/*.vsix
+
+  publish-npm-beta:
+    name: NPM Beta Packages
+    needs: resolve-version
+    if: needs.resolve-version.outputs.build_npm == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build packages
+        run: bun run build
+
+      - name: Create npm tarball
+        working-directory: packages/web
+        run: bun pm pack
+
+      - name: Upload NPM Tarball Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openchamber-npm-tarball
+          path: packages/web/*.tgz
+
+      - name: Publish Beta Packages to NPM
+        if: env.NPM_TOKEN != ''
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd packages/sdk && bun publish --tag beta --access public
+          cd ../web && bun publish --tag beta --access public
+
+  create-beta-release:
+    name: Create GitHub Beta Release & Summary
+    needs: [resolve-version, build-desktop-macos, build-desktop-windows, build-desktop-linux, build-vscode-extension, publish-npm-beta]
+    if: always() && !cancelled() && needs.resolve-version.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Organize artifacts & Create Prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.resolve-version.outputs.release_tag }}
+          VERSION_NAME: ${{ needs.resolve-version.outputs.version_name }}
+          BUILD_NUMBER: ${{ needs.resolve-version.outputs.build_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-files
+
+          find artifacts -type f \( -name "*.dmg" -o -name "*.zip" -o -name "*.exe" -o -name "*.AppImage" -o -name "*.vsix" -o -name "*.tgz" \) -exec cp {} release-files/ \;
+
+          if [ -z "$(ls -A release-files)" ]; then
+            echo "No artifacts were created."
+            exit 0
+          fi
+
+          gh release create "$RELEASE_TAG" release-files/* \
+            --title "OpenChamber Desktop & Extension Beta v${VERSION_NAME}" \
+            --notes "Automated multi-platform beta build #${BUILD_NUMBER} for macOS, Windows, Linux, VS Code, and Web CLI." \
+            --prerelease \
+            --repo "${{ github.repository }}"
+
+      - name: Add Beta Release Summary
+        env:
+          VERSION_NAME: ${{ needs.resolve-version.outputs.version_name }}
+          BUILD_NUMBER: ${{ needs.resolve-version.outputs.build_number }}
+          RELEASE_TAG: ${{ needs.resolve-version.outputs.release_tag }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          ### 💻 OpenChamber Desktop & Extension Beta v${VERSION_NAME}
+
+          | Parameter | Value |
+          | :--- | :--- |
+          | **Beta Tag** | \`${RELEASE_TAG}\` |
+          | **Build Number** | \`${BUILD_NUMBER}\` |
+          | **GitHub Prerelease** | [View All Beta Artifacts](https://github.com/${REPO}/releases/tag/${RELEASE_TAG}) |
+
+          #### 📦 Available Beta Artifacts
+          - **macOS (Apple Silicon & Intel):** \`.dmg\` / \`.zip\`
+          - **Windows (x64 & ARM64):** \`.exe\` installer
+          - **Linux (x64 & ARM64):** \`.AppImage\`
+          - **VS Code Extension:** \`.vsix\` (Install via *VS Code -> Install from VSIX...*)
+          - **Web CLI:** \`.tgz\` package / \`npm install @openchamber/web@beta\`
+          EOF
