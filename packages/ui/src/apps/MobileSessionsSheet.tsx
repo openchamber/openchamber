@@ -959,7 +959,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const archiveSession = useSessionUIStore((state) => state.archiveSession);
   const deleteSession = useSessionUIStore((state) => state.deleteSession);
   const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
-  const unarchiveSession = useSessionUIStore((state) => state.unarchiveSession);
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const setActiveProject = useProjectsStore((state) => state.setActiveProject);
   const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
@@ -1446,12 +1445,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     }
   };
 
-  const handleRestore = async (session: Session) => {
-    const ok = await unarchiveSession(session.id);
-    if (ok) toast.success(t('sessions.sidebar.session.restore.success'));
-    else toast.error(t('sessions.sidebar.session.restore.error'));
-  };
-
   // Long-press action sheet. The sheet holds the session id (not the object) so
   // it re-derives against the latest list and closes itself if the session goes
   // away (e.g. archived underneath it).
@@ -1474,7 +1467,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     const directory = getSessionDirectory(actionSheetSession);
     return buildMobileSessionActionItems({
       isPinned: isSessionPinned(pinnedSessionIds, directory, actionSheetSession.id),
-      isArchived: Boolean(actionSheetSession.time?.archived),
       confirmDelete: actionSheetConfirmDelete,
       title: actionSheetSession.title?.trim() || t('mobile.sessions.untitled'),
     });
@@ -1500,9 +1492,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         break;
       case 'archive':
         void handleArchive(session);
-        break;
-      case 'restore':
-        void handleRestore(session);
         break;
       case 'delete':
         void handleConfirmDelete(session);
@@ -1929,7 +1918,13 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                       <button
                         type="button"
                         className="flex min-h-12 min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
-                        onClick={() => toggleProject(RECENT_SECTION_ID, recentExpanded)}
+                        onClick={() => {
+                          if (revealedRowId) {
+                            handleRowKeyRevealedChange(revealedRowId, false);
+                            return;
+                          }
+                          toggleProject(RECENT_SECTION_ID, recentExpanded);
+                        }}
                         aria-expanded={recentExpanded}
                         aria-label={
                           recentExpanded

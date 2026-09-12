@@ -38,11 +38,12 @@ export const createLongPressController = (
       timer = null;
     }
     origin = null;
+    suppressClick = false;
   };
 
   const fire = () => {
-    suppressClick = true;
     clear();
+    suppressClick = true;
     onLongPress?.();
   };
 

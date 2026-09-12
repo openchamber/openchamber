@@ -2,7 +2,7 @@ import type { IconName } from '@/components/icon/icons';
 import type { I18nKey, I18nParams } from '@/lib/i18n';
 
 export interface MobileSessionActionItem {
-  id: 'pin' | 'unpin' | 'rename' | 'archive' | 'restore' | 'delete';
+  id: 'pin' | 'unpin' | 'rename' | 'archive' | 'delete';
   icon: IconName;
   labelKey: I18nKey;
   labelParams?: I18nParams;
@@ -11,14 +11,12 @@ export interface MobileSessionActionItem {
 
 export interface BuildMobileSessionActionItemsArgs {
   isPinned: boolean;
-  isArchived: boolean;
   confirmDelete: boolean;
   title: string;
 }
 
 export const buildMobileSessionActionItems = ({
   isPinned,
-  isArchived,
   confirmDelete,
   title,
 }: BuildMobileSessionActionItemsArgs): MobileSessionActionItem[] => {
@@ -44,19 +42,11 @@ export const buildMobileSessionActionItems = ({
     labelKey: 'sessions.sidebar.session.menu.rename',
   });
 
-  if (isArchived) {
-    items.push({
-      id: 'restore',
-      icon: 'inbox-unarchive',
-      labelKey: 'sessions.sidebar.bulkActions.restore',
-    });
-  } else {
-    items.push({
-      id: 'archive',
-      icon: 'inbox-archive',
-      labelKey: 'sessions.sidebar.bulkActions.archive',
-    });
-  }
+  items.push({
+    id: 'archive',
+    icon: 'inbox-archive',
+    labelKey: 'sessions.sidebar.bulkActions.archive',
+  });
 
   if (confirmDelete) {
     items.push({

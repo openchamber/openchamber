@@ -7,7 +7,6 @@ describe('buildMobileSessionActionItems', () => {
   test('offers pin for an unpinned active session', () => {
     const items = buildMobileSessionActionItems({
       isPinned: false,
-      isArchived: false,
       confirmDelete: false,
       title: 'Deploy release',
     });
@@ -19,23 +18,9 @@ describe('buildMobileSessionActionItems', () => {
     expect(items[3].destructive).toBe(true);
   });
 
-  test('offers unpin and restore for a pinned archived session', () => {
-    const items = buildMobileSessionActionItems({
-      isPinned: true,
-      isArchived: true,
-      confirmDelete: false,
-      title: 'Deploy release',
-    });
-
-    expect(ids(items)).toEqual(['unpin', 'rename', 'restore', 'delete']);
-    expect(items[0].labelKey).toBe('sessions.sidebar.session.menu.unpin');
-    expect(items[2].labelKey).toBe('sessions.sidebar.bulkActions.restore');
-  });
-
   test('relabels delete with the session title while confirming', () => {
     const items = buildMobileSessionActionItems({
       isPinned: false,
-      isArchived: false,
       confirmDelete: true,
       title: 'Deploy release',
     });

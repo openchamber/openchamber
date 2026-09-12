@@ -96,6 +96,21 @@ describe('createLongPressController', () => {
     expect(second.preventDefault.count()).toBe(0);
   });
 
+  test('clears pending click suppression once the gesture ends', async () => {
+    const onLongPress = recorder();
+    const controller = createLongPressController(onLongPress.fn, { delayMs: 5 });
+    controller.handlers.onPointerDown(pointerEvent());
+    await flush(20);
+    expect(onLongPress.count()).toBe(1);
+
+    controller.handlers.onPointerUp();
+
+    const click = mouseEvent();
+    controller.handlers.onClickCapture(click.event);
+    expect(click.preventDefault.count()).toBe(0);
+    expect(click.stopPropagation.count()).toBe(0);
+  });
+
   test('ignores non-primary mouse buttons', async () => {
     const onLongPress = recorder();
     const controller = createLongPressController(onLongPress.fn, { delayMs: 5 });
