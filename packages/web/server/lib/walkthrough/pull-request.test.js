@@ -56,6 +56,22 @@ describe('getPullRequestDiff', () => {
     expect(request).not.toHaveBeenCalled();
   });
 
+  it('uses the selected upstream repository rather than the local fork', async () => {
+    const result = await getPullRequestDiff('/repo', 42, { owner: 'upstream', repo: 'project' });
+    expect(result.meta).toEqual({ owner: 'upstream', repo: 'project', number: 42 });
+    expect(resolveGitHubRepoFromDirectory).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
+      owner: 'upstream', repo: 'project', pull_number: 42, headers: { accept: 'application/vnd.github.v3.diff' },
+    });
+  });
+
+  it('allows an empty comparison but rejects malformed GitHub bodies', async () => {
+    request.mockResolvedValue({ data: '' });
+    expect((await getPullRequestDiff('/repo', 42, undefined, { allowEmpty: true })).patch).toBe('');
+    request.mockResolvedValue({ data: { message: 'Not a diff' } });
+    await expect(getPullRequestDiff('/repo', 42)).rejects.toThrow();
+  });
+
   it('asks the user to connect GitHub before anything else', async () => {
     getOctokitOrNull.mockReturnValue(null);
 

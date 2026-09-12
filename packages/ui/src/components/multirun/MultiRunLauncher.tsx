@@ -208,7 +208,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
   const desktopHeaderPaddingClass = React.useMemo(() => {
     if ((isDesktopApp && isMacPlatform) || isTabletStandalonePwa) {
       // Match main app header: reserve space for Mac/iPadOS traffic lights.
-      return 'pl-[5.5rem]';
+      return 'pl-[88px]';
     }
     return 'pl-3';
   }, [isDesktopApp, isMacPlatform, isTabletStandalonePwa]);

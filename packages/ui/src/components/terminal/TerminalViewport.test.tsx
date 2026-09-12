@@ -2,18 +2,28 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
+import { toast } from 'sonner';
 
 import { I18nProvider } from '@/lib/i18n';
 import { useTerminalStore, type TerminalChunk } from '@/stores/useTerminalStore';
 
-import { TerminalViewport, type TerminalSurface, type TerminalSurfaceFactory } from './TerminalViewport';
+import type { TerminalSurface, TerminalSurfaceFactory } from './TerminalViewport';
+
+// Base UI determines DOM availability when its modules load.
+const initialWindow = new Window({ url: 'http://localhost/' });
+Object.assign(globalThis, { window: initialWindow, document: initialWindow.document });
+const { TerminalViewport } = await import('./TerminalViewport');
 
 type TerminalEvent =
   | { type: 'write'; data: string }
   | { type: 'reset'; data: string; size?: { cols: number; rows: number } }
   | { type: 'visible'; visible: boolean }
+  | { type: 'paste'; data: string }
   | { type: 'dispose' };
 const terminalEvents: TerminalEvent[] = [];
+let selectedText = '';
+let reportMouse = false;
+let focusCount = 0;
 
 class TerminalSurfaceDouble implements TerminalSurface {
   write(data: string) {
@@ -35,9 +45,13 @@ class TerminalSurfaceDouble implements TerminalSurface {
     return true;
   }
   refresh() {}
-  focus() {}
+  focus() { focusCount += 1; }
   getSelection() {
-    return '';
+    return selectedText;
+  }
+  async pasteFromClipboard(readText: () => Promise<string>, isCurrent: () => boolean = () => true) {
+    const data = await readText();
+    if (isCurrent()) terminalEvents.push({ type: 'paste', data });
   }
   getSelectionPosition() {
     return null;
@@ -52,7 +66,15 @@ class TerminalSurfaceDouble implements TerminalSurface {
   }
 }
 
-const createSurface: TerminalSurfaceFactory = () => Promise.resolve(new TerminalSurfaceDouble());
+const createSurface: TerminalSurfaceFactory = (mount, options) => {
+  const canvas = document.createElement('canvas');
+  canvas.addEventListener('contextmenu', (event) => {
+    if (reportMouse && !event.shiftKey) event.preventDefault();
+    else options.onContextMenu?.(event);
+  });
+  mount.appendChild(canvas);
+  return Promise.resolve(new TerminalSurfaceDouble());
+};
 
 const theme = {
   background: '#000000',
@@ -99,11 +121,11 @@ const buildReplacedBufferChunks = (content: string): TerminalChunk[] => {
   return [...useTerminalStore.getState().getBuffer(directory, tabId).chunks];
 };
 
-const renderViewport = (root: Root, chunks: TerminalChunk[], isVisible = true) => act(async () => {
+const renderViewport = (root: Root, chunks: TerminalChunk[], isVisible = true, sessionKey = 'session-1', enableTouchScroll = false) => act(async () => {
   root.render(
     <I18nProvider>
       <TerminalViewport
-        sessionKey="session-1"
+        sessionKey={sessionKey}
         chunks={chunks}
         onInput={() => undefined}
         onResize={() => undefined}
@@ -112,19 +134,23 @@ const renderViewport = (root: Root, chunks: TerminalChunk[], isVisible = true) =
         fontFamily="Menlo"
         fontSize={14}
         isVisible={isVisible}
+        enableTouchScroll={enableTouchScroll}
         createSurface={createSurface}
       />
     </I18nProvider>,
   );
 });
 
-describe('TerminalViewport chunk replay integration', () => {
+describe('TerminalViewport integration', () => {
   let windowInstance: Window;
   let host: HTMLDivElement;
   let root: Root;
 
   beforeEach(() => {
     terminalEvents.length = 0;
+    selectedText = '';
+    reportMouse = false;
+    focusCount = 0;
     useTerminalStore.getState().clearAll();
     windowInstance = new Window({ url: 'http://localhost/' });
     Object.assign(globalThis, {
@@ -135,6 +161,10 @@ describe('TerminalViewport chunk replay integration', () => {
       Element: windowInstance.Element,
       Node: windowInstance.Node,
       Event: windowInstance.Event,
+      MouseEvent: windowInstance.MouseEvent,
+      KeyboardEvent: windowInstance.KeyboardEvent,
+      DOMRect: windowInstance.DOMRect,
+      getComputedStyle: windowInstance.getComputedStyle.bind(windowInstance),
       requestAnimationFrame: (callback: FrameRequestCallback) => {
         callback(0);
         return 1;
@@ -152,6 +182,133 @@ describe('TerminalViewport chunk replay integration', () => {
     await act(async () => root.unmount());
     host.remove();
     useTerminalStore.getState().clearAll();
+  });
+
+  const openContextMenu = async (shiftKey = false) => {
+    const canvas = host.querySelector('canvas');
+    if (!canvas) throw new Error('terminal canvas missing');
+    await act(async () => {
+      canvas.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: 30, shiftKey,
+      }));
+    });
+  };
+
+  const menuItem = (label: string) => {
+    const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+      .find((element) => element.textContent === label);
+    if (!item) throw new Error(`menu item missing: ${label}`);
+    return item;
+  };
+
+  test('opens Copy/Paste on a surface-approved right click and copies the selected output', async () => {
+    selectedText = 'terminal output\n';
+    await renderViewport(root, []);
+    await flushSurfaceLoad();
+    await openContextMenu();
+    expect(menuItem('Paste')).toBeDefined();
+    await act(async () => menuItem('Copy').click());
+    expect(await navigator.clipboard.readText()).toBe('terminal output\n');
+    expect(host.querySelectorAll('canvas')).toHaveLength(1);
+    expect(terminalEvents.filter((event) => event.type === 'dispose')).toHaveLength(0);
+  });
+
+  test('supports arrow and Ctrl+N/P menu navigation and returns focus on Escape', async () => {
+    selectedText = 'selection';
+    await renderViewport(root, []);
+    await flushSurfaceLoad();
+    await openContextMenu();
+    await act(async () => menuItem('Copy').focus());
+    const press = async (key: string, ctrlKey = false) => {
+      await act(async () => document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', {
+        key, ctrlKey, bubbles: true, cancelable: true,
+      })));
+    };
+    await press('ArrowDown');
+    expect(document.activeElement).toBe(menuItem('Paste'));
+    await press('ArrowUp');
+    expect(document.activeElement).toBe(menuItem('Copy'));
+    await press('n', true);
+    expect(document.activeElement).toBe(menuItem('Paste'));
+    await press('p', true);
+    expect(document.activeElement).toBe(menuItem('Copy'));
+    const beforeClose = focusCount;
+    await press('Escape');
+    expect(focusCount).toBeGreaterThan(beforeClose);
+  });
+
+  test('disables Copy without a selection and pastes through the terminal surface', async () => {
+    await navigator.clipboard.writeText('echo hello\n');
+    await renderViewport(root, []);
+    await flushSurfaceLoad();
+    await openContextMenu();
+    expect(menuItem('Copy').getAttribute('aria-disabled')).toBe('true');
+    await act(async () => menuItem('Paste').click());
+    expect(terminalEvents.filter((event) => event.type === 'paste')).toEqual([
+      { type: 'paste', data: 'echo hello\n' },
+    ]);
+  });
+
+  test('leaves application-owned right clicks alone and permits the surface Shift override', async () => {
+    reportMouse = true;
+    await renderViewport(root, []);
+    await flushSurfaceLoad();
+    await openContextMenu();
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    await openContextMenu(true);
+    expect(menuItem('Paste')).toBeDefined();
+  });
+
+  test('keeps the desktop menu out of touch-owned terminals', async () => {
+    await renderViewport(root, [], true, 'session-1', true);
+    await flushSurfaceLoad();
+    await openContextMenu();
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  test('drops a pending clipboard read when the terminal session changes', async () => {
+    let finishRead: (text: string) => void = () => { throw new Error('read not started'); };
+    Object.defineProperty(navigator.clipboard, 'readText', {
+      configurable: true,
+      value: () => new Promise<string>((resolve) => { finishRead = resolve; }),
+    });
+    await renderViewport(root, []);
+    await flushSurfaceLoad();
+    await openContextMenu();
+    await act(async () => menuItem('Paste').click());
+    await renderViewport(root, [], true, 'session-2');
+    await act(async () => finishRead('must not reach the new session'));
+    expect(terminalEvents.filter((event) => event.type === 'paste')).toHaveLength(0);
+  });
+
+  test('reports denied clipboard access without sending terminal input', async () => {
+    Object.defineProperty(navigator.clipboard, 'readText', {
+      configurable: true,
+      value: () => Promise.reject(new Error('Clipboard access denied')),
+    });
+    await renderViewport(root, []);
+    await flushSurfaceLoad();
+    await openContextMenu();
+    await act(async () => menuItem('Paste').click());
+    expect(terminalEvents.filter((event) => event.type === 'paste')).toHaveLength(0);
+    expect(toast.getHistory().some((entry) => 'title' in entry
+      && entry.title === 'Could not read the clipboard. Use the paste keyboard shortcut.')).toBe(true);
+  });
+
+  test('drops a pending clipboard read even if the terminal is hidden and shown again', async () => {
+    let finishRead: (text: string) => void = () => { throw new Error('read not started'); };
+    Object.defineProperty(navigator.clipboard, 'readText', {
+      configurable: true,
+      value: () => new Promise<string>((resolve) => { finishRead = resolve; }),
+    });
+    await renderViewport(root, []);
+    await flushSurfaceLoad();
+    await openContextMenu();
+    await act(async () => menuItem('Paste').click());
+    await renderViewport(root, [], false);
+    await renderViewport(root, [], true);
+    await act(async () => finishRead('stale clipboard'));
+    expect(terminalEvents.filter((event) => event.type === 'paste')).toHaveLength(0);
   });
 
   test('replays adopted history as one reset and keeps the capped buffer payload intact', async () => {

@@ -28,13 +28,13 @@ export type UsageProviderGroup = {
  * the two cannot drift on which providers appear, how model rows are filtered,
  * or what counts as a provider-level status.
  *
- * Only providers the user put in the dropdown *and* that reported themselves as
- * configured are included — an unconfigured provider has nothing to say, and
- * listing it reads as a fault.
+ * Include selected, configured providers and first-load failures whose
+ * configuration is still unknown. Confirmed unconfigured providers stay hidden.
  */
 export const useUsageProviderGroups = (): UsageProviderGroup[] => {
   const { t } = useI18n();
   const quotaResults = useQuotaStore((state) => state.results);
+  const refreshErrors = useQuotaStore((state) => state.refreshErrors);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
   const selectedQuotaModels = useQuotaStore((state) => state.selectedModels);
 
@@ -42,9 +42,12 @@ export const useUsageProviderGroups = (): UsageProviderGroup[] => {
     const resultsByProvider = new Map(quotaResults.map((result) => [result.providerId, result]));
     return QUOTA_PROVIDERS
       .filter((providerMeta) => dropdownProviderIds.includes(providerMeta.id))
-      .filter((providerMeta) => resultsByProvider.get(providerMeta.id)?.configured === true)
+      .filter((providerMeta) => {
+        const result = resultsByProvider.get(providerMeta.id);
+        return result?.configured === true || (!result && Boolean(refreshErrors[providerMeta.id]));
+      })
       .map((providerMeta) => {
-        const result = resultsByProvider.get(providerMeta.id)!;
+        const result = resultsByProvider.get(providerMeta.id);
         const rows: UsageLimitRow[] = [];
 
         for (const [label, window] of Object.entries(result?.usage?.windows ?? {})) {
@@ -68,19 +71,25 @@ export const useUsageProviderGroups = (): UsageProviderGroup[] => {
           });
         }
 
-        const status = !result.ok && result.error
-          ? result.error
-          : rows.length === 0
-            ? t('header.services.noRateLimitsReported')
-            : null;
+        const refreshError = refreshErrors[providerMeta.id];
+        let status: string | null = null;
+        if (refreshError) {
+          status = result?.usage
+            ? t('header.services.usageRefreshFailedStale', { error: refreshError })
+            : refreshError;
+        } else if (!result?.ok && result?.error) {
+          status = result.error;
+        } else if (rows.length === 0) {
+          status = t('header.services.noRateLimitsReported');
+        }
 
         return {
           providerId: providerMeta.id,
           providerName: providerMeta.name,
-          planLabel: result.planLabel,
+          planLabel: result?.planLabel,
           rows,
           status,
         };
       });
-  }, [dropdownProviderIds, quotaResults, selectedQuotaModels, t]);
+  }, [dropdownProviderIds, quotaResults, refreshErrors, selectedQuotaModels, t]);
 };

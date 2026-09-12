@@ -1,3 +1,5 @@
+import { isIMECompositionEvent } from '../lib/ime';
+
 const OPEN_DROPDOWN_SELECTOR = [
   '[data-slot="dropdown-menu-content"][data-open]',
   '[data-slot="select-content"][data-open]',
@@ -25,4 +27,11 @@ export function isEditableEventTarget(target: EventTarget | null): boolean {
   if (target.isContentEditable) return true;
   const tagName = target.tagName;
   return tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT';
+}
+
+export function canUseDigitShortcut(event: KeyboardEvent): boolean {
+  if (isIMECompositionEvent(event)) return false;
+  if (!isEditableEventTarget(event.target)) return true;
+  // AltGraph and prefixes without Cmd/Ctrl can produce ordinary text.
+  return (event.metaKey || event.ctrlKey) && !event.getModifierState('AltGraph');
 }

@@ -290,6 +290,10 @@ const applyDesktopUiPreferences = (settings: DesktopSettings): void => {
 const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => parseSettingsDocument(payload);
 
 type SettingsRuntimeContext = { runtimeKey: string; generation: number };
+type SettingsWrite = {
+  context: SettingsRuntimeContext;
+  changes: Partial<DesktopSettings>;
+};
 /** Whether a settings write reached its store. A no-op (nothing to send) counts as ok. */
 export type SettingsWriteResult = { ok: boolean };
 type SettingsMutation = { revision: number; changes: Partial<DesktopSettings> };
@@ -381,6 +385,7 @@ let _settingsFlushTimer: ReturnType<typeof setTimeout> | null = null;
 let _settingsFlushWaiters: Array<(result: SettingsWriteResult) => void> = [];
 let _settingsLifecycleInitialized = false;
 let _pendingSettingsRevision = 0;
+let _settingsWritesInFlight: SettingsWrite[] = [];
 const _settingsMutationTracker = new SettingsMutationTracker();
 const SETTINGS_CACHE_TTL = 2_000; // 2 seconds — covers the startup burst
 const SETTINGS_DEBOUNCE_MS = 200;
@@ -426,6 +431,30 @@ const withoutRedundantSettings = (changes: Partial<DesktopSettings>): Partial<De
 const isSameSettingsRuntimeContext = (left: SettingsRuntimeContext, right: SettingsRuntimeContext): boolean => (
   left.runtimeKey === right.runtimeKey && left.generation === right.generation
 );
+
+const getSettingsWriteOverlay = (context: SettingsRuntimeContext): Partial<DesktopSettings> | null => {
+  let overlay: Partial<DesktopSettings> | null = null;
+
+  for (const write of _settingsWritesInFlight) {
+    if (isSameSettingsRuntimeContext(write.context, context)) {
+      overlay = { ...(overlay ?? {}), ...write.changes };
+    }
+  }
+
+  if (_pendingSettingsChanges && _pendingSettingsContext && isSameSettingsRuntimeContext(_pendingSettingsContext, context)) {
+    overlay = { ...(overlay ?? {}), ..._pendingSettingsChanges };
+  }
+
+  return overlay;
+};
+
+const reconcileSettingsRead = (
+  settings: DesktopSettings | null,
+  context: SettingsRuntimeContext,
+): DesktopSettings | null => {
+  const overlay = getSettingsWriteOverlay(context);
+  return settings && overlay ? { ...settings, ...overlay } : settings;
+};
 
 const isSettingsRuntimeContextCurrent = (context: SettingsRuntimeContext): boolean => (
   context.generation === _settingsRuntimeGeneration && context.runtimeKey === getRuntimeKey()
@@ -502,11 +531,34 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
   ensureSettingsRuntimeLifecycle();
   // Return cached if fresh
   if (_settingsCache && isSameSettingsRuntimeContext(_settingsCache.context, context) && Date.now() - _settingsCache.at < SETTINGS_CACHE_TTL) {
-    return _settingsCache.value;
+    return reconcileSettingsRead(_settingsCache.value, context);
   }
 
   // Dedup concurrent calls
   if (_settingsInflight && isSameSettingsRuntimeContext(_settingsInflight.context, context)) return _settingsInflight.promise;
+
+  // Keep overlapping intent alive until this read settles, even if its write
+  // has already completed. A late GET must not refill the cache with old data.
+  const operation = _settingsMutationTracker.begin();
+  const initialOverlay = getSettingsWriteOverlay(context);
+  const commitRead = (settings: DesktopSettings | null): DesktopSettings | null => {
+    if (!isSettingsRuntimeContextCurrent(context) || !settings) return null;
+    const reconciled = reconcileSettingsRead(
+      _settingsMutationTracker.reconcile({ ...settings, ...initialOverlay }, operation),
+      context,
+    );
+    _settingsCache = { value: reconciled, at: Date.now(), context };
+    // Do not undo knowledge from a completed save with an older GET either:
+    // that would incorrectly drop a later user change back to the old value.
+    const unchanged: Partial<DesktopSettings> = {};
+    for (const key of settingsKeysOf(settings)) {
+      if (isSameSettingValue(settings[key], reconciled?.[key])) {
+        Object.assign(unchanged, { [key]: settings[key] });
+      }
+    }
+    rememberServerSettings(unchanged);
+    return reconciled;
+  };
 
   const inflight = {
     context,
@@ -517,9 +569,7 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
           const result = await runtimeSettings.load();
           if (!isSettingsRuntimeContextCurrent(context)) return null;
           const settings = sanitizeWebSettings(result.settings);
-          _settingsCache = { value: settings, at: Date.now(), context };
-          if (settings) rememberServerSettings(settings);
-          return settings;
+          return commitRead(settings);
         } catch (error) {
           if (!isSettingsRuntimeContextCurrent(context)) return null;
           console.warn('Failed to load shared settings from runtime settings API:', error);
@@ -542,9 +592,7 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
         const data = await response.json().catch(() => null);
         if (!isSettingsRuntimeContextCurrent(context)) return null;
         const settings = sanitizeWebSettings(data);
-        _settingsCache = { value: settings, at: Date.now(), context };
-        if (settings) rememberServerSettings(settings);
-        return settings;
+        return commitRead(settings);
       } catch (error) {
         if (!isSettingsRuntimeContextCurrent(context)) return null;
         console.warn('Failed to load shared settings from server:', error);
@@ -554,6 +602,7 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
   };
   _settingsInflight = inflight;
   void inflight.promise.finally(() => {
+    _settingsMutationTracker.finish(operation);
     if (_settingsInflight === inflight) _settingsInflight = null;
   });
 
@@ -683,6 +732,8 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
       return;
     }
     const operation = _settingsMutationTracker.begin(revision);
+    const inFlightWrite: SettingsWrite = { context, changes: { ...changes } };
+    _settingsWritesInFlight.push(inFlightWrite);
     // Assume the merge lands so a same-value write arriving mid-flight is not
     // sent twice; a failed request forgets these keys so a retry goes through.
     rememberServerSettings(changes);
@@ -756,6 +807,7 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
         }
       }
     } finally {
+      _settingsWritesInFlight = _settingsWritesInFlight.filter((write) => write !== inFlightWrite);
       _settingsMutationTracker.finish(operation);
     }
   } finally {
@@ -795,6 +847,9 @@ export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): 
   for (const key of settingsKeysOf(changes)) {
     if (isWritableSettingsKey(key)) Object.assign(writable, { [key]: changes[key] });
   }
+  // A toggle back cancels its pending PUT but is still newer intent for any
+  // read that captured the previous pending value.
+  const revision = _settingsMutationTracker.record(writable);
   const pending = withoutRedundantSettings({ ...(_pendingSettingsChanges ?? {}), ...writable });
   if (Object.keys(pending).length === 0) {
     _pendingSettingsChanges = null;
@@ -811,7 +866,7 @@ export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): 
   }
   _pendingSettingsChanges = pending;
   _pendingSettingsContext = context;
-  _pendingSettingsRevision = _settingsMutationTracker.record(withoutRedundantSettings(writable));
+  _pendingSettingsRevision = revision;
   dispatchSettingsSaveState('saving');
 
   if (_settingsFlushTimer) {

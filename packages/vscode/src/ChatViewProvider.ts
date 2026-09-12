@@ -146,6 +146,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
 
     webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string }) => {
+      if (message.type === 'webview:ready') {
+        for (const [streamId, stream] of this._sseStreams) {
+          if (stream.view !== webviewView) continue;
+          stream.controller.abort();
+          this._sseStreams.delete(streamId);
+        }
+        if (this._view === webviewView) {
+          this._clearPendingMessages();
+          this._sendCachedState();
+        }
+        return;
+      }
+
       if (message.type === 'bridge:ack' && typeof message._msgId === 'string') {
         this._confirmMessage(message._msgId);
         return;

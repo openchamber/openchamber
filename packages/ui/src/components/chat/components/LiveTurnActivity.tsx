@@ -67,7 +67,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
         <div className="relative z-0" data-live-turn-activity={turn.turnId}>
             {settled ? (
                 <div className="chat-message-column @container">
-                    <div className="mt-1 mb-2">
+                    <div className="mt-1">
                         <Button variant="ghost" size="sm" className={headerClass} onClick={onToggle}
                             aria-expanded={isExpanded} aria-controls={finalMessage ? `${contentId} ${finalContentId}` : contentId}>
                             {label}

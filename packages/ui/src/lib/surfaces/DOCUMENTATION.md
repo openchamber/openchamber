@@ -15,8 +15,10 @@ edge (`components/layout/ContextPanelRail.tsx`) and rendered by
   rail until a tab of their mode exists, and stay visible for as long as one
   does — they must not disappear while in use.
 - `defaultWidthFraction` is the panel width as a fraction of the content area,
-  used until the user manually resizes that surface (manual widths are stored
-  per mode in `useUIStore.contextPanelByDirectory[dir].widthByMode`).
+  used until the user manually resizes that surface. Manual widths are stored
+  per mode in `useUIStore.contextPanelByDirectory[dir].widthFractionByMode`;
+  `widthByMode` retains the last pixel size until the available area is known.
+  Every surface, including walkthrough, restores both values on reload.
 - Rail order is user-reorderable and persisted globally in
   `useUIStore.contextRailOrder`; `sortContextSurfaces` applies it on top of the
   registry's default order and appends any missing surfaces.

@@ -1,4 +1,4 @@
-import { sendMessageStreamWsEvent, sendMessageStreamWsFrame } from './protocol.js';
+import { sendMessageStreamWsEvent, sendMessageStreamWsFrame, sendSerializedMessageStreamWsFrame, serializeMessageStreamWsEvent } from './protocol.js';
 
 function shouldTriggerUpstreamHealthCheck(upstream) {
   if (!upstream) {
@@ -31,12 +31,9 @@ export function createGlobalMessageStreamWsBridge({
     wsClients.delete(socket);
   };
 
-  const replayEvents = (socket, requestedLastEventId) => {
-    for (const entry of globalHub.replayAfter(requestedLastEventId)) {
-      const sent = sendMessageStreamWsEvent(socket, entry.payload, {
-        directory: entry.directory,
-        eventId: entry.eventId,
-      });
+  const replayEvents = (socket, entries) => {
+    for (const entry of entries) {
+      const sent = sendSerializedMessageStreamWsFrame(socket, entry.serializedFrame);
       if (!sent) {
         removeClient(socket);
         return;
@@ -49,10 +46,10 @@ export function createGlobalMessageStreamWsBridge({
       return;
     }
 
-    const sent = sendMessageStreamWsFrame(socket, {
-      type: 'ready',
-      scope: 'global',
-    });
+    const replay = globalHub.replayAfter(requestedLastEventId);
+    const ready = { type: 'ready', scope: 'global' };
+    if (replay === null) ready.replayReset = true;
+    const sent = sendMessageStreamWsFrame(socket, ready);
     if (!sent) {
       removeClient(socket);
       return;
@@ -60,7 +57,7 @@ export function createGlobalMessageStreamWsBridge({
 
     readyClients.add(socket);
     wsClients.add(socket);
-    replayEvents(socket, requestedLastEventId);
+    if (replay !== null) replayEvents(socket, replay);
   };
 
   const stopHubIfUnused = () => {
@@ -88,26 +85,26 @@ export function createGlobalMessageStreamWsBridge({
     }
   };
 
-  const unsubscribeEvent = globalHub.subscribeEvent(({ payload, directory, eventId }) => {
+  const unsubscribeEvent = globalHub.subscribeEvent((event) => {
+    const { payload } = event;
     for (const socket of Array.from(clients)) {
       if (!readyClients.has(socket)) {
         continue;
       }
-      const sent = sendMessageStreamWsEvent(socket, payload, {
-        directory,
-        eventId,
-      });
+      const sent = sendSerializedMessageStreamWsFrame(socket, event.serialize());
       if (!sent) {
         removeClient(socket);
       }
     }
 
     processForwardedEventPayload(payload, (syntheticPayload) => {
+      if (readyClients.size === 0) return;
+      const serializedFrame = serializeMessageStreamWsEvent(syntheticPayload, { directory: 'global' });
       for (const socket of Array.from(clients)) {
         if (!readyClients.has(socket)) {
           continue;
         }
-        const sent = sendMessageStreamWsEvent(socket, syntheticPayload, { directory: 'global' });
+        const sent = sendSerializedMessageStreamWsFrame(socket, serializedFrame);
         if (!sent) {
           removeClient(socket);
         }

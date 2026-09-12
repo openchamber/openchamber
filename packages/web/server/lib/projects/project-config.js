@@ -1,7 +1,7 @@
 import { DateTime, IANAZone } from 'luxon';
 import parser from 'cron-parser';
 
-import { projectPathFromId } from './project-id.js';
+import { projectConfigFileStemOf, projectPathFromId } from './project-id.js';
 import {
   DEFAULT_PLANS_DIR,
   EMPTY_SHARED_PROJECT_CONFIG,
@@ -399,6 +399,15 @@ export const createProjectConfigRuntime = (deps) => {
 
   const resolveProjectConfigPath = (projectID) => {
     const safeProjectID = sanitizeProjectID(projectID);
+    return path.join(projectsDirPath, `${projectConfigFileStemOf(safeProjectID)}.json`);
+  };
+
+  // Where a build before the bounded file name stored an id too long for one
+  // (on a filesystem that still accepted it), or null when the id's own name
+  // is the current one. Read as a fallback, moved on the next write.
+  const resolveLegacyProjectConfigPath = (projectID) => {
+    const safeProjectID = sanitizeProjectID(projectID);
+    if (projectConfigFileStemOf(safeProjectID) === safeProjectID) return null;
     return path.join(projectsDirPath, `${safeProjectID}.json`);
   };
 
@@ -500,18 +509,31 @@ export const createProjectConfigRuntime = (deps) => {
     throw new Error(`timeout acquiring project config lock for ${projectID}`);
   };
 
-  const readRawProjectConfigFromDisk = async (projectID) => {
-    const filePath = resolveProjectConfigPath(projectID);
+  // The parsed document, or null when there is no file (one of
+  // `missingCodes`). Malformed JSON still throws; it is a broken file, not
+  // an empty one.
+  const readJsonDocumentIfPresent = async (filePath, missingCodes) => {
+    let raw;
     try {
-      const raw = await fsPromises.readFile(filePath, 'utf8');
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      raw = await fsPromises.readFile(filePath, 'utf8');
     } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') {
-        return {};
-      }
+      const code = error && typeof error === 'object' ? error.code : null;
+      if (missingCodes.includes(code)) return null;
       throw error;
     }
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  };
+
+  // The legacy name of a long id may exceed what the filesystem can hold;
+  // ENAMETOOLONG there means "no such file". On the bounded path it would
+  // mean the projects dir itself is unusable, so it stays an error.
+  const readRawProjectConfigFromDisk = async (projectID) => {
+    const current = await readJsonDocumentIfPresent(resolveProjectConfigPath(projectID), ['ENOENT']);
+    if (current) return current;
+    const legacyPath = resolveLegacyProjectConfigPath(projectID);
+    const legacy = legacyPath ? await readJsonDocumentIfPresent(legacyPath, ['ENOENT', 'ENAMETOOLONG']) : null;
+    return legacy ?? {};
   };
 
   // Normalized tasks for reading, plus the raw on-disk record of each one for
@@ -577,6 +599,13 @@ export const createProjectConfigRuntime = (deps) => {
     } catch (error) {
       await fsPromises.rm(temporaryPath, { force: true }).catch(() => {});
       throw error;
+    }
+    // Every write goes through a read of the whole document, so the legacy
+    // file's content is now in the current one; drop it so a later read (or an
+    // older build) cannot see two copies drifting apart.
+    const legacyPath = resolveLegacyProjectConfigPath(projectID);
+    if (legacyPath) {
+      await fsPromises.rm(legacyPath, { force: true }).catch(() => {});
     }
   };
 

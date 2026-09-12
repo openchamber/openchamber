@@ -13,8 +13,14 @@ import {
   deleteRemoteBranch,
   dropGitStash,
   getGitBranches,
+  getGitRangeDiff,
+  getGitRangeFiles,
+  getGitCommitDiff,
+  getCommitFiles,
+  getGitLog,
   getGitStatus,
   gitFetch,
+  gitPush,
   merge,
   popGitStash,
   rebase,
@@ -30,6 +36,8 @@ import {
 } from './gitApiHttp';
 import type { GitStatus } from './api/types';
 import { sessionEvents } from './sessionEvents';
+import { gitPushScopeKey, subscribeGitPush } from './gitPushEvents';
+import { getRuntimeKey } from './runtime-switch';
 
 type FetchCall = {
   input: RequestInfo | URL;
@@ -38,6 +46,28 @@ type FetchCall = {
 
 const previousFetch = globalThis.fetch;
 const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+
+test('only a confirmed successful push invalidates published PR snapshots', async () => {
+  const events: string[] = [];
+  const unsubscribe = subscribeGitPush((scope) => { events.push(scope); });
+  installWindowMock();
+  try {
+    globalThis.fetch = Object.assign(async () => Response.json({ error: 'Rejected' }, { status: 500 }), previousFetch);
+    await expect(gitPush('/repo')).rejects.toThrow('Rejected');
+    expect(events).toEqual([]);
+    globalThis.fetch = Object.assign(async () => Response.json({ success: false }), previousFetch);
+    await gitPush('/repo');
+    expect(events).toEqual([]);
+    globalThis.fetch = Object.assign(async () => Response.json({ success: true }), previousFetch);
+    await gitPush('/repo');
+    expect(events).toEqual([gitPushScopeKey('/repo', getRuntimeKey())]);
+    await gitFetch('/repo');
+    expect(events).toHaveLength(1);
+  } finally {
+    unsubscribe();
+    restoreMocks();
+  }
+});
 
 const installFetchMock = () => {
   const calls: FetchCall[] = [];
@@ -135,6 +165,74 @@ describe('gitApiHttp index mutations', () => {
       expect(unstageError).toBeInstanceOf(Error);
       expect((unstageError as Error).message).toBe('path is required to unstage git changes');
       expect(calls).toHaveLength(0);
+    } finally {
+      restoreMocks();
+    }
+  });
+});
+
+describe('gitApiHttp branch comparisons', () => {
+  test('sends commit hashes and rename paths without trimming and rejects incomplete commit lists', async () => {
+    installWindowMock();
+    const urls: URL[] = [];
+    globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost');
+      urls.push(url);
+      return Response.json(url.pathname.endsWith('/commit-diff') ? { diff: 'commit patch' } : { files: [{ path: 'incomplete' }] });
+    }, previousFetch);
+    try {
+      const hash = 'a'.repeat(40);
+      expect(await getGitCommitDiff('/repo', { hash, path: ' new\nfile.ts', previousPath: 'old.ts', contextLines: 20 }))
+        .toEqual({ diff: 'commit patch' });
+      expect(urls[0].pathname).toBe('/api/git/commit-diff');
+      expect(urls[0].searchParams.get('hash')).toBe(hash);
+      expect(urls[0].searchParams.get('path')).toBe(' new\nfile.ts');
+      expect(urls[0].searchParams.get('previousPath')).toBe('old.ts');
+      expect(urls[0].searchParams.get('context')).toBe('20');
+      await expect(getCommitFiles('/repo', hash)).rejects.toThrow();
+      await expect(getGitLog('/repo', { maxCount: 50, to: 'refs/heads/feature' })).rejects.toThrow();
+      expect(urls[2].searchParams.get('maxCount')).toBe('50');
+      expect(urls[2].searchParams.get('to')).toBe('refs/heads/feature');
+      expect(urls[2].searchParams.has('all')).toBe(false);
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('sends the exact selected refs and working-tree option to both range endpoints', async () => {
+    installWindowMock();
+    const urls: URL[] = [];
+    globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost');
+      urls.push(url);
+      return Response.json(url.pathname.endsWith('/range-files')
+        ? { files: [{ path: 'new.ts', status: 'A' }] }
+        : { diff: 'current patch' });
+    }, previousFetch);
+    try {
+      const options = { base: 'refs/heads/parent', head: 'child', includeWorkingTree: true };
+      expect(await getGitRangeDiff('/repo', options)).toEqual({ diff: 'current patch' });
+      expect(await getGitRangeFiles('/repo', options)).toEqual([{ path: 'new.ts', status: 'A' }]);
+      expect(urls).toHaveLength(2);
+      for (const url of urls) {
+        expect(url.searchParams.get('base')).toBe('refs/heads/parent');
+        expect(url.searchParams.get('head')).toBe('child');
+        expect(url.searchParams.get('includeWorkingTree')).toBe('true');
+      }
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('rejects malformed file lists and preserves the server ref error', async () => {
+    installWindowMock();
+    globalThis.fetch = Object.assign(async () => Response.json({ files: [{ path: 'new.ts' }] }), previousFetch);
+    const options = { base: 'missing', head: 'child', includeWorkingTree: true };
+    try {
+      await expect(getGitRangeFiles('/repo', options)).rejects.toThrow();
+      globalThis.fetch = Object.assign(async () => Response.json({ error: 'Fetch the selected ref first.' }, { status: 500 }), previousFetch);
+      await expect(getGitRangeDiff('/repo', options)).rejects.toThrow('Fetch the selected ref first.');
+      await expect(getGitRangeFiles('/repo', options)).rejects.toThrow('Fetch the selected ref first.');
     } finally {
       restoreMocks();
     }

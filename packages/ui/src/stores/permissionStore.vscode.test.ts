@@ -9,7 +9,9 @@ mock.module("@/lib/runtime-fetch", () => ({
     return new Response(JSON.stringify({ sessions: { root: body.enabled === true } }), { status: 200 })
   },
 }))
-mock.module("@/lib/desktop", () => ({ isVSCodeRuntime: () => true }))
+// Modules under test import other desktop helpers too; keep the real ones.
+const desktop = await import("@/lib/desktop")
+mock.module("@/lib/desktop", () => ({ ...desktop, isVSCodeRuntime: () => true }))
 mock.module("@/sync/sync-refs", () => ({ getAllSyncSessionMap: () => new Map() }))
 mock.module("@/sync/session-ui-store", () => ({
   useSessionUIStore: { getState: () => ({ getDirectoryForSession: () => "/repo" }) },

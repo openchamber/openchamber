@@ -11,6 +11,7 @@ import {
 import { createRealpathCache } from '../path-realpath-cache.js';
 import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS } from '../event-stream/upstream-reader.js';
 import { recordStartupPerformance } from './startup-performance.js';
+import { getWorktreeBootstrapStatus } from '../git/service.js';
 
 const DEFAULT_SSE_HEARTBEAT_INTERVAL_MS = 20_000;
 
@@ -286,6 +287,8 @@ export const registerOpenCodeProxy = (app, deps) => {
     SSE_HEARTBEAT_INTERVAL_MS = DEFAULT_SSE_HEARTBEAT_INTERVAL_MS,
     SSE_UPSTREAM_STALL_TIMEOUT_MS = DEFAULT_UPSTREAM_STALL_TIMEOUT_MS,
     getSseUpstreamStallTimeoutMs = () => SSE_UPSTREAM_STALL_TIMEOUT_MS,
+    readWorktreeBootstrapStatus = getWorktreeBootstrapStatus,
+    WORKTREE_READY_TIMEOUT_MS = 5 * 60 * 1000,
   } = deps;
 
   if (app.get('opencodeProxyConfigured')) {
@@ -772,6 +775,36 @@ export const registerOpenCodeProxy = (app, deps) => {
         error: 'OpenCode is restarting',
         restarting: true,
       });
+    }
+  });
+
+  // Any directory-scoped read can initialize OpenCode's cached project/config,
+  // before session.create runs. Hold all upstream requests until Git population
+  // finishes, independently of the user's optional setup-script wait.
+  app.use('/api', async (req, res, next) => {
+    normalizeForwardedDirectoryHeaders(req.headers);
+    const url = new URL(req.url, 'http://localhost');
+    const directory = url.searchParams.get('directory') || req.get('x-opencode-directory');
+    if (!directory) return next();
+
+    const deadline = Date.now() + WORKTREE_READY_TIMEOUT_MS;
+    try {
+      while (!res.destroyed && !res.writableEnded && !req.aborted) {
+        const status = await readWorktreeBootstrapStatus(directory);
+        if (res.destroyed || res.writableEnded || req.aborted) return;
+        if (status.status === 'failed') {
+          return res.status(503).json({ error: status.error || 'Worktree bootstrap failed' });
+        }
+        if (status.status === 'ready' || status.phase === 'git-ready' || status.phase === 'setup-ready') {
+          return next();
+        }
+        if (Date.now() >= deadline) {
+          return res.status(503).json({ error: 'Timed out waiting for worktree checkout' });
+        }
+        await sleep(75);
+      }
+    } catch (error) {
+      next(error);
     }
   });
 

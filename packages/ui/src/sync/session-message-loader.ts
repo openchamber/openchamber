@@ -176,6 +176,30 @@ export class SessionMessageLoader {
     this.disposed = false
   }
 
+  initializeCreatedSession(target: SessionMessageTarget): void {
+    const normalized = this.normalizeTarget(target)
+    if (!normalized || this.disposed) return
+    const store = this.childStores.ensureChild(normalized.directory, { bootstrap: false })
+    const current = store.getState()
+    // The create response establishes an empty transcript, but events or a
+    // prompt may already have materialized a newer snapshot while it travelled.
+    if (current.message[normalized.sessionID] !== undefined) return
+    const entry = this.getEntry(normalized)
+    this.bumpGeneration(entry)
+    entry.inflight = null
+    store.setState({ message: { ...current.message, [normalized.sessionID]: [] } })
+    this.patchEntry(entry, {
+      status: "ready",
+      loadingKind: null,
+      error: null,
+      resolved: true,
+      cursor: undefined,
+      complete: true,
+      updatedAt: Date.now(),
+    })
+    this.persistCoverage(normalized, entry.snapshot)
+  }
+
   ensure(
     target: SessionMessageTarget,
     options?: { force?: boolean; reason?: "navigation" | "reactive" | "prefetch" },

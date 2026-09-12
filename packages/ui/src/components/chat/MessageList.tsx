@@ -993,12 +993,9 @@ const TimelineList = React.memo(({
         registerList(list);
     }, [registerList]);
 
-    // A width change re-wraps every row, so all content above the viewport
-    // changes height at once; without size compensation the accumulated delta
-    // throws the read position around. Size restoration stays off otherwise —
-    // rows growing in place (a tool result expanding) must grow downward —
-    // so compensation is enabled only while the list width is actively
-    // resizing, and released shortly after it settles.
+    // A width change re-wraps every row. Suspend the list's end maintenance
+    // while the owning hook holds the measured end and decides whether to
+    // release the pin once the resize settles.
     const [isWidthResizing, setIsWidthResizing] = React.useState(false);
     React.useEffect(() => {
         const node = listRef.current?.getScrollableNode();
@@ -1082,13 +1079,12 @@ const TimelineList = React.memo(({
                         animated: true,
                         on: { dataChange: true, itemLayout: true, layout: true, footerLayout: true },
                     }}
-                // Prepending older history must not move what the user is
-                // reading. Size restoration applies only during a width
-                // resize (see the observer above) and only for a reader who
-                // left the end: a pinned reader is held on the end by the
-                // owning hook, and compensating the rows above them would pull
-                // the viewport away from it.
-                maintainVisibleContentPosition={{ data: true, size: isWidthResizing && endPinningReleased }}
+                // A prepend first positions rows using estimated heights;
+                // later measurements must preserve the same visible row too.
+                // Keep size compensation active while reading history, including
+                // when scrolling mounts older rows above the viewport. A pinned
+                // reader is held on the end by the owning hook instead.
+                maintainVisibleContentPosition={{ data: true, size: endPinningReleased }}
                 onScroll={handleScroll}
                 onMetricsChange={onListMetricsChange}
                 ListHeaderComponent={header}

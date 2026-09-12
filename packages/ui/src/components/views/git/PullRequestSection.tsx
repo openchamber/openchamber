@@ -1512,7 +1512,8 @@ export const PullRequestSection: React.FC<{
                 size="sm"
                 className={cn('pr-actions__walkthrough-button h-7 shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}
                 onClick={() => {
-                  requestWalkthroughSource(directory, { kind: 'pr', number: pr.number });
+                  requestWalkthroughSource(directory, { kind: 'pr', number: pr.number,
+                    sourceRepo: status?.repo ? { owner: status.repo.owner, repo: status.repo.repo } : undefined });
                   openContextSurface(directory, 'walkthrough');
                 }}
                 aria-label={t('walkthrough.action.open')}

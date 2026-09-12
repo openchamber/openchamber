@@ -13,6 +13,8 @@ import { GhosttyRuntime, loadGhosttyRuntime } from './runtime';
 const GHOSTTY_SUCCESS = 0;
 const GHOSTTY_OUT_OF_SPACE = -3;
 const MAX_SCROLLBACK_ROWS = 10_000;
+type GhosttyKeyInput = Pick<KeyboardEvent,
+  'key' | 'code' | 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey' | 'isComposing' | 'repeat' | 'getModifierState'>;
 // wasm32 C ABI layout for GhosttyTerminalSelectionFormatOptions at the
 // libghostty-vt revision pinned alongside this module.
 const SELECTION_FORMAT_OPTIONS_SIZE = 16;
@@ -518,7 +520,26 @@ export class GhosttyTerminalCore {
     );
   }
 
-  encodeKey(event: KeyboardEvent, action: 'press' | 'release' = 'press'): string {
+  /** macOS word editing for legacy prompts; application keyboard modes keep the original key. */
+  encodeMacWordShortcut(event: GhosttyKeyInput, platform: string): string | null {
+    this.ensureActive();
+    if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.isComposing) return null;
+    let data: string;
+    switch (event.key) {
+      case 'ArrowLeft': data = '\x1bb'; break;
+      case 'ArrowRight': data = '\x1bf'; break;
+      case 'Backspace': data = '\x17'; break;
+      default: return null;
+    }
+    if (!/mac/i.test(platform) || this.isAlternateScreen()) return null;
+    // GHOSTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS is a uint8_t in the pinned ABI.
+    // Query only these three shortcuts, not every character typed in the terminal.
+    if (this.runtime.call('ghostty_terminal_get', this.terminal, 8, this.scratch) !== GHOSTTY_SUCCESS
+      || this.runtime.bytes(this.scratch, 1)[0] !== 0) return null;
+    return data;
+  }
+
+  encodeKey(event: GhosttyKeyInput, action: 'press' | 'release' = 'press'): string {
     this.ensureActive();
     this.runtime.call('ghostty_key_encoder_setopt_from_terminal', this.keyEncoder, this.terminal);
     this.runtime.call(

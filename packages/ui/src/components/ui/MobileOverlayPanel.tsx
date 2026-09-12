@@ -112,11 +112,12 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
   const content = (
     <div
       className={cn(
-        'oc-keyboard-inset-surface fixed inset-0 z-[60] flex flex-col bg-[rgb(0_0_0_/_0.45)] transition-opacity duration-200 ease-out',
+        'oc-keyboard-inset-surface oc-bottom-safe-surface fixed inset-0 z-[60] flex flex-col bg-[rgb(0_0_0_/_0.45)] transition-opacity duration-200 ease-out',
         !enterSettled && 'oc-keyboard-inset-snap',
         entered ? 'opacity-100' : 'opacity-0',
       )}
       role="dialog"
+      aria-label={title}
       aria-modal="true"
       onClick={onClose}
       // The panel centers over the CHAT column, not the whole app: on a tablet

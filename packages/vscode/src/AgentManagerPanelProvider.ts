@@ -95,6 +95,15 @@ export class AgentManagerPanelProvider {
 
     // Handle messages
     this._panel.webview.onDidReceiveMessage(async (message: BridgeRequest) => {
+      if (message.type === 'webview:ready') {
+        for (const controller of this._sseStreams.values()) {
+          controller.abort();
+        }
+        this._sseStreams.clear();
+        this._sendCachedState();
+        return;
+      }
+
       if (message.type === 'restartApi') {
         await this._openCodeManager?.restart();
         return;

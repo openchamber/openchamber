@@ -15,6 +15,7 @@ import {
   applySettingsToStores,
   buildSettingsRegistrySnapshot,
   parseSettingsDocument,
+  readAutoSaveSnapshot,
 } from './registry';
 import { renderSettingsRegistrySnapshot, SETTINGS_REGISTRY_SNAPSHOT_PATHS } from './registry-snapshot';
 
@@ -84,6 +85,31 @@ describe('settings registry', () => {
     applySettingsToStores({ showReasoningTraces: false });
     expect(useUIStore.getState().showReasoningTraces).toBe(false);
     expect(useUIStore.getState().terminalShell).toBe('fish');
+  });
+
+  test('persists archived-only retention as an opt-in boolean and enforces its delete action', () => {
+    expect(useUIStore.getInitialState().sessionRetentionOnlyArchived).toBe(false);
+    expect(parseSettingsDocument({ sessionRetentionOnlyArchived: true })).toEqual({ sessionRetentionOnlyArchived: true });
+    expect(parseSettingsDocument({ sessionRetentionOnlyArchived: false })).toEqual({ sessionRetentionOnlyArchived: false });
+    expect(parseSettingsDocument({ sessionRetentionOnlyArchived: 'true' })).toEqual({});
+    expect(AUTO_SAVE_KEYS).toContain('sessionRetentionOnlyArchived');
+    expect(MIRRORED_KEYS).toContain('sessionRetentionOnlyArchived');
+
+    applySettingsToStores({ sessionRetentionOnlyArchived: false, sessionRetentionAction: 'archive' });
+    useUIStore.getState().setSessionRetentionOnlyArchived(true);
+    expect(useUIStore.getState().sessionRetentionAction).toBe('delete');
+    useUIStore.getState().setSessionRetentionAction('archive');
+    expect(useUIStore.getState().sessionRetentionAction).toBe('delete');
+    expect(readAutoSaveSnapshot().sessionRetentionOnlyArchived).toBe(true);
+    expect(readAutoSaveSnapshot().sessionRetentionAction).toBe('delete');
+
+    applySettingsToStores({ sessionRetentionOnlyArchived: true, sessionRetentionAction: 'archive' });
+    expect(useUIStore.getState().sessionRetentionAction).toBe('delete');
+    applySettingsToStores({ fontSize: 100 });
+    expect(useUIStore.getState().sessionRetentionOnlyArchived).toBe(true);
+    applySettingsToStores({ sessionRetentionOnlyArchived: false, sessionRetentionAction: 'archive' });
+    expect(useUIStore.getState().sessionRetentionOnlyArchived).toBe(false);
+    expect(useUIStore.getState().sessionRetentionAction).toBe('archive');
   });
 
   test('applies the hidden-sections list together with its explicit marker', () => {

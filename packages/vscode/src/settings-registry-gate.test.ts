@@ -28,6 +28,14 @@ describe('withoutSecretSettings', () => {
 });
 
 describe('filterPersistableSettingsChanges', () => {
+  test('accepts archived-only retention in the shared instance settings', () => {
+    assert.equal(SETTINGS_REGISTRY_FIELDS.sessionRetentionOnlyArchived.scope, 'instance');
+    for (const sessionRetentionOnlyArchived of [true, false]) {
+      const settings = { sessionRetentionOnlyArchived, sessionRetentionAction: 'delete' };
+      assert.deepEqual(filterPersistableSettingsChanges(settings), settings);
+    }
+  });
+
   test('keeps stored shared fields and preserves their values as sent', () => {
     const result = filterPersistableSettingsChanges(
       { themeId: 'nord', smallModelOverride: '', unrelated: 1 },

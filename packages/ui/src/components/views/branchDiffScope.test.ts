@@ -3,7 +3,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { describe, expect, test } from 'bun:test';
 
 import {
-    branchRangeKey,
     coerceDiffScope,
     isBranchScopeAvailable,
     isBranchScopeDefinitelyUnavailable,
@@ -130,20 +129,6 @@ describe('isBranchScopeDefinitelyUnavailable', () => {
     });
 });
 
-describe('branchRangeKey', () => {
-    test('distinguishes bases, heads, and directories for the same path', () => {
-        // The same file path can carry different diff content per range; a cache
-        // keyed by path alone would leak a previous branch's patch.
-        const keys = [
-            branchRangeKey('/repo', 'main', 'feature-a'),
-            branchRangeKey('/repo', 'develop', 'feature-a'),
-            branchRangeKey('/repo', 'main', 'feature-b'),
-            branchRangeKey('/other', 'main', 'feature-a'),
-        ];
-        expect(new Set(keys).size).toBe(4);
-    });
-});
-
 // ---------------------------------------------------------------------------
 // useRangeKeyedCache
 // ---------------------------------------------------------------------------
@@ -219,6 +204,48 @@ const installMinimalDom = () => {
 };
 
 describe('useRangeKeyedCache', () => {
+    test('refreshes visible paths on revision changes without blanking completed diffs or refetching on rerender', async () => {
+        const dom = installMinimalDom();
+        const root = createRoot(dom.container);
+        let revision = '1';
+        let paths = 'a.ts';
+        const requests: Array<{ path: string; result: ReturnType<typeof deferred<string>> }> = [];
+        type CapturedEntries = { entries: ReadonlyMap<string, string> | null };
+        const captured: CapturedEntries = { entries: null };
+        const Harness = () => {
+            captured.entries = useRangeKeyedCache('range', paths, (path) => {
+                const result = deferred<string>();
+                requests.push({ path, result });
+                return result.promise;
+            }, 'loading', revision);
+            return null;
+        };
+        try {
+            await act(async () => root.render(React.createElement(Harness)));
+            await act(async () => requests[0].result.resolve('old'));
+            await act(async () => root.render(React.createElement(Harness)));
+            expect(requests).toHaveLength(1);
+            revision = '2';
+            await act(async () => root.render(React.createElement(Harness)));
+            expect(requests).toHaveLength(2);
+            expect(captured.entries?.get('a.ts')).toBe('old');
+            // Changing visible paths cancels the stale refresh and must retry it.
+            paths = 'a.ts\0b.ts';
+            await act(async () => root.render(React.createElement(Harness)));
+            expect(requests.map(({ path }) => path)).toEqual(['a.ts', 'a.ts', 'a.ts', 'b.ts']);
+            await act(async () => {
+                requests[2].result.resolve('current');
+                requests[3].result.resolve('new file');
+                requests[1].result.resolve('stale');
+            });
+            expect(captured.entries?.get('a.ts')).toBe('current');
+            expect(captured.entries?.get('b.ts')).toBe('new file');
+        } finally {
+            await act(async () => root.unmount());
+            dom.restore();
+        }
+    });
+
     test('a stale completion from the previous range cannot write into the new range', async () => {
         const dom = installMinimalDom();
         const root: Root = createRoot(dom.container);
@@ -359,6 +386,45 @@ describe('useRangeKeyedCache', () => {
             dom.restore();
         }
     });
+});
+
+describe('range cache visibility', () => {
+    test('pausing requested paths retains completed diffs and defers revision refresh until resume', async () => {
+        const dom = installMinimalDom();
+        const root = createRoot(dom.container);
+        const pending = deferred<string>();
+        const fetched: string[] = [];
+        let visible = true;
+        let revision = 'one';
+        const captured: { entries: ReadonlyMap<string, string> | null } = { entries: null };
+        const Harness = () => {
+            captured.entries = useRangeKeyedCache('range', visible ? 'a\0b' : '', async path => {
+                fetched.push(`${revision}:${path}`);
+                return path === 'b' && revision === 'one' ? pending.promise : `${revision}:${path}`;
+            }, 'loading', revision);
+            return null;
+        };
+        try {
+            await act(async () => root.render(React.createElement(Harness)));
+            expect(captured.entries?.get('a')).toBe('one:a');
+            visible = false;
+            revision = 'two';
+            await act(async () => root.render(React.createElement(Harness)));
+            await act(async () => pending.resolve('stale:b'));
+            expect(fetched).toEqual(['one:a', 'one:b']);
+            expect(captured.entries?.get('a')).toBe('one:a');
+            expect(captured.entries?.has('b')).toBe(false);
+            visible = true;
+            await act(async () => root.render(React.createElement(Harness)));
+            expect(fetched).toEqual(['one:a', 'one:b', 'two:a', 'two:b']);
+            expect(captured.entries?.get('a')).toBe('two:a');
+            expect(captured.entries?.get('b')).toBe('two:b');
+        } finally {
+            await act(async () => root.unmount());
+            dom.restore();
+        }
+    });
+
 });
 
 describe('useBoundedDirectoryRetry', () => {

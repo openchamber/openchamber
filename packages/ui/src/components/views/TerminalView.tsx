@@ -9,6 +9,7 @@ import { useFontPreferences } from '@/hooks/useFontPreferences';
 import { CODE_FONT_OPTION_MAP, DEFAULT_MONO_FONT } from '@/lib/fontOptions';
 import { convertThemeToXterm } from '@/lib/terminalTheme';
 import { TerminalViewport, type TerminalController } from '@/components/terminal/TerminalViewport';
+import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import type { MonoFontOption } from '@/lib/fontOptions';
 import type { TerminalTheme } from '@/lib/terminalTheme';
 import { cn } from '@/lib/utils';
@@ -764,6 +765,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory }
             terminalId: activeTab.terminalSessionId ?? activeTab.id,
             text: '',
         });
+        queueMicrotask(focusChatInput);
     }, [activeTab, addContextDraft, contextDirectory, currentSessionId, newSessionDraft?.open]);
 
     // Touch hosts have no keyboard shortcut for copy, so the toolbar offers the

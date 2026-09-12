@@ -17,7 +17,7 @@ import {
   sharedTrustHashOf,
   type PersonalProjectSetup,
 } from './project-setup';
-import { createProjectSetupStore, handleProjectSetupBridgeMessage, projectPathFromId } from './bridge-project-setup-runtime';
+import { createProjectSetupStore, handleProjectSetupBridgeMessage, projectConfigFileStemOf, projectPathFromId } from './bridge-project-setup-runtime';
 
 const emptyPersonal: PersonalProjectSetup = {
   setupWorktree: [],
@@ -148,6 +148,43 @@ describe('project setup bridge', () => {
       await fs.promises.rm(dir, { recursive: true, force: true });
     }
   };
+
+  test('stores a project whose id is too long for a file name under a bounded name', async () => {
+    await withStore(async (store, dir) => {
+      const projectId = projectIdFor(`/private/tmp/${'segment-'.repeat(20)}/demo`);
+      assert.ok(projectId.length > 240);
+      const stem = projectConfigFileStemOf(projectId);
+      assert.ok(stem.startsWith('path_sha256_'));
+      assert.ok(stem.length < 100);
+      assert.equal(projectConfigFileStemOf('path_short'), 'path_short');
+
+      const view = await store.update(projectId, { setupWorktree: ['bun install'] });
+      assert.deepEqual(view.setupWorktree, ['bun install']);
+      const raw = JSON.parse(await fs.promises.readFile(path.join(dir, `${stem}.json`), 'utf8'));
+      assert.deepEqual(raw['setup-worktree'], ['bun install']);
+      assert.deepEqual((await store.read(projectId)).setupWorktree, ['bun install']);
+    });
+  });
+
+  test('reads a long id from its pre-bound file name and moves it on the next write', async () => {
+    await withStore(async (store, dir) => {
+      const projectId = `path_${'a'.repeat(200)}`;
+      const legacyPath = path.join(dir, `${projectId}.json`);
+      const currentPath = path.join(dir, `${projectConfigFileStemOf(projectId)}.json`);
+      assert.notEqual(currentPath, legacyPath);
+      await fs.promises.writeFile(legacyPath, JSON.stringify({ version: 1, scheduledTasks: [{ id: 'keep' }], 'setup-worktree': ['bun install'] }));
+
+      assert.deepEqual((await store.read(projectId)).setupWorktree, ['bun install']);
+
+      const updated = await store.update(projectId, { projectActions: [{ id: 'a1', name: 'Run', command: 'bun run dev' }] });
+      assert.deepEqual(updated.setupWorktree, ['bun install']);
+      const raw = JSON.parse(await fs.promises.readFile(currentPath, 'utf8'));
+      assert.deepEqual(raw.scheduledTasks, [{ id: 'keep' }]);
+      assert.deepEqual(raw['setup-worktree'], ['bun install']);
+      assert.equal(raw.projectActions.length, 1);
+      await assert.rejects(fs.promises.readFile(legacyPath, 'utf8'), { code: 'ENOENT' });
+    });
+  });
 
   test('round-trips a patch through the bridge and preserves foreign keys', async () => {
     await withStore(async (store, dir) => {

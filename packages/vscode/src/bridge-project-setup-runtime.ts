@@ -6,6 +6,7 @@
 // file (`version`, `scheduledTasks`) and keys from newer builds survive a
 // write untouched.
 
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -37,6 +38,20 @@ export type ProjectSetupStore = {
 
 const PROJECT_ID_PATTERN = /^[a-zA-Z0-9._:-]+$/;
 
+// Mirror of `projectConfigFileStemOf` in the server's
+// `packages/web/server/lib/projects/project-id.js`; keep the two in sync. The
+// file is named by the id while that fits a file name; a `path_<base64url>`
+// id grows with the checkout path, so a long one maps to a fixed-length
+// digest instead of a name the filesystem rejects (ENAMETOOLONG).
+const MAX_PROJECT_CONFIG_FILE_STEM_LENGTH = 200;
+const HASHED_PROJECT_CONFIG_FILE_STEM_PREFIX = 'path_sha256_';
+
+export const projectConfigFileStemOf = (projectId: string): string => {
+  if (projectId.length <= MAX_PROJECT_CONFIG_FILE_STEM_LENGTH) return projectId;
+  const digest = crypto.createHash('sha256').update(projectId, 'utf8').digest('hex');
+  return `${HASHED_PROJECT_CONFIG_FILE_STEM_PREFIX}${digest}`;
+};
+
 /** The checkout a `path_<base64url>` id names, or `''` for ids of another form. */
 export const projectPathFromId = (projectId: string): string => {
   if (!projectId.startsWith('path_')) return '';
@@ -55,12 +70,14 @@ const sanitizeProjectId = (value: unknown): string => {
   return projectId;
 };
 
-const readJsonDocument = async (filePath: string): Promise<Record<string, unknown>> => {
+// The parsed document, or null when there is no file (one of `missingCodes`).
+// Malformed JSON still throws; it is a broken file, not an empty one.
+const readJsonDocumentIfPresent = async (filePath: string, missingCodes: string[]): Promise<Record<string, unknown> | null> => {
   let raw: string;
   try {
     raw = await fs.promises.readFile(filePath, 'utf8');
   } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return {};
+    if (error instanceof Error && 'code' in error && typeof error.code === 'string' && missingCodes.includes(error.code)) return null;
     throw error;
   }
   const parsed: unknown = JSON.parse(raw);
@@ -83,7 +100,28 @@ const writeJsonAtomic = async (filePath: string, text: string): Promise<void> =>
 export const createProjectSetupStore = (
   projectsDir: string = path.join(os.homedir(), '.config', 'openchamber', 'projects'),
 ): ProjectSetupStore => {
-  const filePathFor = (projectId: string): string => path.join(projectsDir, `${sanitizeProjectId(projectId)}.json`);
+  const filePathFor = (projectId: string): string => path.join(projectsDir, `${projectConfigFileStemOf(sanitizeProjectId(projectId))}.json`);
+  // Where a build before the bounded name stored a long id's file, or null
+  // when the id's own name is the current one. Read as a fallback and removed
+  // once a write has moved its content to the bounded file, the same way the
+  // server does it.
+  const legacyFilePathFor = (projectId: string): string | null => {
+    const safeProjectId = sanitizeProjectId(projectId);
+    if (projectConfigFileStemOf(safeProjectId) === safeProjectId) return null;
+    return path.join(projectsDir, `${safeProjectId}.json`);
+  };
+  const readPersonalDocument = async (projectId: string): Promise<Record<string, unknown>> => {
+    const current = await readJsonDocumentIfPresent(filePathFor(projectId), ['ENOENT']);
+    if (current) return current;
+    const legacyPath = legacyFilePathFor(projectId);
+    const legacy = legacyPath ? await readJsonDocumentIfPresent(legacyPath, ['ENOENT', 'ENAMETOOLONG']) : null;
+    return legacy ?? {};
+  };
+  const writePersonalDocument = async (projectId: string, document: Record<string, unknown>): Promise<void> => {
+    await writeJsonAtomic(filePathFor(projectId), JSON.stringify(document, null, 2));
+    const legacyPath = legacyFilePathFor(projectId);
+    if (legacyPath) await fs.promises.rm(legacyPath, { force: true }).catch(() => {});
+  };
   // Writes to one file are chained so two quick saves from the webview cannot
   // interleave their read-modify-write.
   const writeChains = new Map<string, Promise<unknown>>();
@@ -113,19 +151,19 @@ export const createProjectSetupStore = (
   const mergedViewOf = async (projectId: string, personalRaw: Record<string, unknown>): Promise<ProjectSetupView> =>
     mergeProjectSetup(personalProjectSetupOf(personalRaw), await readShared(projectId, personalRaw));
 
-  const read = async (projectId: string): Promise<ProjectSetupView> => mergedViewOf(projectId, await readJsonDocument(filePathFor(projectId)));
+  const read = async (projectId: string): Promise<ProjectSetupView> => mergedViewOf(projectId, await readPersonalDocument(projectId));
 
   const update = async (projectId: string, patch: unknown): Promise<ProjectSetupView> => {
     const filePath = filePathFor(projectId);
     const stored = projectSetupPatchToStored(patch);
     const previous = writeChains.get(filePath) ?? Promise.resolve();
     const next = previous.then(async () => {
-      const existing = await readJsonDocument(filePath);
+      const existing = await readPersonalDocument(projectId);
       const merged: Record<string, unknown> = { ...existing, ...stored };
       for (const [key, value] of Object.entries(stored)) {
         if (value === undefined) delete merged[key];
       }
-      await writeJsonAtomic(filePath, JSON.stringify(merged, null, 2));
+      await writePersonalDocument(projectId, merged);
       return mergedViewOf(projectId, merged);
     });
     writeChains.set(filePath, next.catch(() => undefined));
@@ -139,7 +177,7 @@ export const createProjectSetupStore = (
     const filePath = filePathFor(projectId);
     const previous = writeChains.get(filePath) ?? Promise.resolve();
     const next = previous.then(async () => {
-      const personalRaw = await readJsonDocument(filePath);
+      const personalRaw = await readPersonalDocument(projectId);
       const projectPath = projectPathOf(projectId, personalRaw);
       if (!projectPath) throw new ProjectSetupValidationError('project checkout not found');
       const isDirectory = await fs.promises.stat(projectPath).then((stat) => stat.isDirectory()).catch(() => false);
@@ -158,7 +196,7 @@ export const createProjectSetupStore = (
       const personalNext: Record<string, unknown> = { ...personalRaw };
       if (hash) personalNext.sharedTrust = { hash, trustedAt: Date.now() };
       else delete personalNext.sharedTrust;
-      await writeJsonAtomic(filePath, JSON.stringify(personalNext, null, 2));
+      await writePersonalDocument(projectId, personalNext);
       return mergedViewOf(projectId, personalNext);
     });
     writeChains.set(filePath, next.catch(() => undefined));

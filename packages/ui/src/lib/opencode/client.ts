@@ -370,9 +370,8 @@ class OpencodeService {
   reconnectToRuntimeBaseUrl(): void {
     const runtimeBase = resolveRuntimeBaseUrl();
     const nextBaseUrl = ensureAbsoluteBaseUrl(runtimeBase || DEFAULT_BASE_URL);
-    if (nextBaseUrl === this.baseUrl) {
-      return;
-    }
+    // An explicit reconnect can change the instance or transport behind the
+    // same URL. Its SDK client and in-flight directory requests are obsolete.
     this.baseUrl = nextBaseUrl;
     this.client = createRuntimeOpencodeClient({ baseUrl: this.baseUrl });
     this.scopedClients.clear();
@@ -1584,7 +1583,7 @@ class OpencodeService {
     try {
       return await request;
     } finally {
-      this.configProvidersInFlight.delete(key);
+      if (this.configProvidersInFlight.get(key) === request) this.configProvidersInFlight.delete(key);
     }
   }
 
@@ -1655,7 +1654,7 @@ class OpencodeService {
     try {
       return await request;
     } finally {
-      this.listAgentsInFlight.delete(key);
+      if (this.listAgentsInFlight.get(key) === request) this.listAgentsInFlight.delete(key);
     }
   }
 

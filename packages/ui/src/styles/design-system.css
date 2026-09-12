@@ -157,6 +157,44 @@
     font-family: var(--font-mono, ui-monospace, SFMono-Regular, 'Liberation Mono', Menlo, monospace) !important;
   }
 
+  .markdown-content details[data-md-details] {
+    margin-block: 0.75rem;
+    min-width: 0;
+  }
+
+  .markdown-content details[data-md-details] > summary {
+    display: flex;
+    align-items: baseline;
+    gap: 0.375rem;
+    list-style: none;
+    cursor: pointer;
+    padding-block: 0.375rem;
+    overflow-wrap: anywhere;
+    font-weight: 500;
+    border-radius: 0.25rem;
+  }
+
+  .markdown-content details[data-md-details] > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .markdown-content [data-md-disclosure-icon] {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-self: flex-start;
+    margin-top: 0.25em;
+    color: var(--surface-muted-foreground);
+  }
+
+  .markdown-content details[data-md-details][open] > summary > [data-md-disclosure-icon] {
+    transform: rotate(90deg);
+  }
+
+  .markdown-content details[data-md-details] > summary:focus-visible {
+    outline: 2px solid var(--interactive-focus-ring);
+    outline-offset: 2px;
+  }
+
   /* Restore list styling inside markdown content - override Tailwind preflight.
      Native markers with a compact gutter; nesting cycles the marker shape so
      depth stays readable without extra indentation. */
@@ -241,7 +279,8 @@
      Utilities remain able to opt an individual consumer out. */
   .oc-glass-popover,
 .oc-glass-tooltip,
-.oc-glass-panel {
+.oc-glass-panel,
+.oc-glass-composer {
   background-color: color-mix(in srgb, var(--oc-glass-color) var(--oc-glass-opacity), transparent);
   -webkit-backdrop-filter: blur(var(--oc-glass-blur)) saturate(var(--oc-glass-saturation));
   backdrop-filter: blur(var(--oc-glass-blur)) saturate(var(--oc-glass-saturation));
@@ -259,6 +298,12 @@
 
 .oc-glass-panel {
   --oc-glass-color: var(--surface-muted);
+}
+
+/* The chat composer floating over the transcript. */
+.oc-glass-composer {
+  --oc-glass-color: var(--surface-subtle);
+  --oc-glass-opacity: var(--oc-glass-popover-opacity);
 }
 
 .oc-glass-floating {
@@ -286,10 +331,18 @@
   backdrop-filter: blur(4px);
 }
 
+/* The recap hint floats in the band above the composer; a panel docked
+   there (queue, suggestion, BTW) would push it up over the transcript, so it
+   hides while any panel is mounted. See ComposerFloatingPanel. */
+[data-composer-bound][data-floating-panel] .oc-recap-hint {
+  opacity: 0;
+}
+
 @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .oc-glass-popover,
   .oc-glass-tooltip,
-  .oc-glass-panel {
+  .oc-glass-panel,
+  .oc-glass-composer {
     background-color: var(--oc-glass-color);
   }
 }
@@ -298,6 +351,7 @@
   .oc-glass-popover,
   .oc-glass-tooltip,
   .oc-glass-panel,
+  .oc-glass-composer,
   .oc-glass-backdrop {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
@@ -305,7 +359,8 @@
 
   .oc-glass-popover,
   .oc-glass-tooltip,
-  .oc-glass-panel {
+  .oc-glass-panel,
+  .oc-glass-composer {
     background-color: var(--oc-glass-color);
   }
 }

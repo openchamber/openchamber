@@ -1,4 +1,4 @@
-/** Raw HTML in assistant markdown is untrusted and must stay inert text. */
+/** Raw HTML stays inert; supported disclosures are constructed by the Markdown tokenizer. */
 export const escapeRawMarkdownHtml = (value: string): string =>
   value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 

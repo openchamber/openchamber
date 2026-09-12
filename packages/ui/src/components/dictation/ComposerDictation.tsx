@@ -350,19 +350,16 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                     // shorthand `.overflow-hidden` to overflow-y:auto on touch
                     // devices, which painted a phantom scrollbar on Android.
                     className={cn(
-                        'absolute inset-0 z-50 flex flex-col overflow-x-hidden overflow-y-hidden',
+                        // Same glass as the composer box, so the overlay reads
+                        // as the same surface, not a layer on top.
+                        'oc-glass-composer absolute inset-0 z-50 flex flex-col overflow-x-hidden overflow-y-hidden',
                         // Mobile: the overlay surface shows instantly (riding the
                         // pill → voice morph), its content fades in only after the
                         // shape has grown — otherwise the controls paint clipped
                         // inside the still-small pill.
                         isMobile && 'oc-composer-morph-content-fade',
                     )}
-                    style={{
-                        borderRadius: radius,
-                        // Must match the composer box background exactly so the
-                        // overlay reads as the same surface, not a layer on top.
-                        backgroundColor: currentTheme.colors.surface.subtle,
-                    }}
+                    style={{ borderRadius: radius }}
                     role="dialog"
                     aria-label={t('chat.dictation.overlayAria')}
                 >

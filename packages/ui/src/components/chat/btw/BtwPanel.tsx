@@ -1,4 +1,5 @@
 import React from 'react';
+import { ComposerFloatingPanel } from '../composer/ui/ComposerFloatingPanel';
 import type { Message, Part } from '@opencode-ai/sdk/v2';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
@@ -245,45 +246,38 @@ const BtwFrame: React.FC<{
     draftHint?: string;
     children?: React.ReactNode;
 }> = ({ actions, onTitleClick, titleClickLabel, collapsed, headerSpinner, draftHint, children }) => (
-    <div
-        className="chat-input-column absolute bottom-full left-0 right-0 z-30 mb-3"
-        role="dialog"
-        aria-label="btw"
-    >
-        <div className="oc-glass-popover w-full overflow-hidden rounded-xl border border-[var(--interactive-border)] shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]">
-            <div className="flex items-center gap-2 px-3 py-1.5">
-                {onTitleClick ? (
-                    <button
-                        type="button"
-                        onClick={onTitleClick}
-                        aria-label={titleClickLabel}
-                        title={titleClickLabel}
-                        className="flex min-w-0 items-center gap-2 text-left text-muted-foreground transition-colors hover:text-foreground"
-                    >
-                        {headerSpinner ? (
-                            <Icon name="loader-4" className="size-3.5 shrink-0 animate-spin" />
-                        ) : (
-                            <Icon name="chat-ai-3" className="size-3.5 shrink-0" />
-                        )}
-                        <Icon name={collapsed ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" />
-                    </button>
-                ) : (
-                    <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
+    <ComposerFloatingPanel role="dialog" ariaLabel="btw" compact={collapsed} header={<>
+            {onTitleClick ? (
+                <button
+                    type="button"
+                    onClick={onTitleClick}
+                    aria-label={titleClickLabel}
+                    title={titleClickLabel}
+                    className="flex min-w-0 items-center gap-2 text-left text-muted-foreground transition-colors hover:text-foreground"
+                >
+                    {headerSpinner ? (
+                        <Icon name="loader-4" className="size-3.5 shrink-0 animate-spin" />
+                    ) : (
                         <Icon name="chat-ai-3" className="size-3.5 shrink-0" />
-                        {draftHint ? <span className="typography-ui-label truncate">{draftHint}</span> : null}
-                    </span>
-                )}
-                <div className="min-w-0 flex-1" />
-                {actions}
-            </div>
-            {children ? (
-                <>
-                    {children}
-                    <div className="h-2" />
-                </>
-            ) : null}
-        </div>
-    </div>
+                    )}
+                    <Icon name={collapsed ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" />
+                </button>
+            ) : (
+                <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
+                    <Icon name="chat-ai-3" className="size-3.5 shrink-0" />
+                    {draftHint ? <span className="typography-ui-label truncate">{draftHint}</span> : null}
+                </span>
+            )}
+            <div className="min-w-0 flex-1" />
+            {actions}
+    </>}>
+        {children ? (
+            <>
+                {children}
+                <div className="h-2" />
+            </>
+        ) : null}
+    </ComposerFloatingPanel>
 );
 
 const BtwSheet: React.FC<{

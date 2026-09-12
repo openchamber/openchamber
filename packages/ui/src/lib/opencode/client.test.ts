@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
 type ConfigResponse = { data: Record<string, unknown> };
+type ProvidersResponse = { data: { providers: []; default: { default: string } } };
+const providerResolvers: Array<(response: ProvidersResponse) => void> = [];
 
 (mock as unknown as { restore?: () => void }).restore?.();
 
@@ -29,6 +31,7 @@ const pathGetMock = mock(async () => {
 mock.module('@opencode-ai/sdk/v2', () => ({
   createOpencodeClient: mock(() => ({
     config: {
+      providers: () => new Promise<ProvidersResponse>((resolve) => { providerResolvers.push(resolve); }),
       get: mock(() => {
         configCalls += 1;
         return new Promise<ConfigResponse>((resolve) => {
@@ -96,6 +99,22 @@ beforeEach(() => {
   runtimeFetchCalls.length = 0;
   runtimeFetchResults.length = 0;
   fsHomeResponses.length = 0;
+});
+
+test('same-URL reconnect isolates provider requests and old completion cannot delete new deduplication', async () => {
+  const oldClient = opencodeClient.getSdkClient();
+  const oldRequest = opencodeClient.getProvidersForConfig('/same/path');
+  opencodeClient.reconnectToRuntimeBaseUrl();
+  expect(opencodeClient.getSdkClient()).not.toBe(oldClient);
+  const newRequest = opencodeClient.getProvidersForConfig('/same/path');
+  expect(providerResolvers).toHaveLength(2);
+  providerResolvers[0]({ data: { providers: [], default: { default: 'old' } } });
+  await oldRequest;
+  const joinedRequest = opencodeClient.getProvidersForConfig('/same/path');
+  expect(providerResolvers).toHaveLength(2);
+  providerResolvers[1]({ data: { providers: [], default: { default: 'new' } } });
+  expect((await newRequest).default.default).toBe('new');
+  expect((await joinedRequest).default.default).toBe('new');
 });
 
 describe('opencodeClient directory availability', () => {

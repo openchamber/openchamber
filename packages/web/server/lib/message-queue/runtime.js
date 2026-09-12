@@ -133,6 +133,8 @@ export const parseQueuedItemInput = (value) => {
   if (agentMention) item.agentMention = agentMention;
   item.attachments = attachments;
   item.context = context;
+  const contextPreview = asNonEmptyString(raw.contextPreview).slice(0, 103);
+  if (contextPreview) item.contextPreview = contextPreview;
   item.sendConfig = sendConfig;
   return item;
 };
@@ -157,6 +159,17 @@ const toPublicItem = (item) => {
   const publicItem = { id: item.id, createdAt: item.createdAt, content: item.content, text: item.text };
   if (item.agentMention) publicItem.agentMention = item.agentMention;
   publicItem.attachments = item.attachments.map(toPublicAttachment);
+  // Older persisted items have no UI summary. Prefer their attached comment
+  // before falling back to the model-facing context text.
+  const contextPreview = item.contextPreview || item.context
+    .filter((part) => part.kind !== 'instruction')
+    .map((part) => asNonEmptyString(asRecord(part.metadata?.openchamberContext)?.text) || part.text.trim())
+    .find(Boolean);
+  if (contextPreview) {
+    const firstLine = contextPreview.split('\n', 1)[0];
+    publicItem.contextPreview = firstLine.slice(0, 100)
+      + (contextPreview.length > firstLine.length || firstLine.length > 100 ? '...' : '');
+  }
   publicItem.sendConfig = { ...item.sendConfig };
   return publicItem;
 };

@@ -130,8 +130,12 @@ const hydrateTurnRecord = (
     turn.summary = projectTurnSummary(turn.assistantMessages);
     turn.summaryText = turn.summary.text ?? getUserSummaryBody(turn.userMessage);
     turn.diffStats = projectTurnDiffStats(turn.userMessage);
-    turn.changedFiles = effectiveOptions.showTurnChangedFiles
-        ? projectTurnChangedFiles(turn.userMessage)
+    // The list is only shown under a finished answer, so tool patches are not
+    // parsed while the turn still streams.
+    const finalMessage = turn.assistantMessages[turn.assistantMessages.length - 1];
+    const hasFinalAnswer = finalMessage?.info.role === 'assistant' && finalMessage.info.finish === 'stop';
+    turn.changedFiles = effectiveOptions.showTurnChangedFiles && hasFinalAnswer
+        ? projectTurnChangedFiles(turn.assistantMessages, turn.userMessage)
         : undefined;
 
     const activity = projectTurnActivity({

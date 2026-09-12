@@ -39,11 +39,17 @@ const startFakeRelay = () => {
     clients: new Map(), // connectionId -> ws
     buffered: new Map(), // connectionId -> [[data, isBinary]] awaiting host-data
     relayFrames: [], // observed forwarded frames (for plaintext assertions)
+    apps: new Map(),
   };
 
   wss.on('connection', (ws, req) => {
     const url = new URL(req.url, 'http://localhost');
     const role = url.searchParams.get('role');
+    state.apps.set(role, {
+      appId: url.searchParams.get('appId'),
+      appVersion: url.searchParams.get('appVersion'),
+      platform: url.searchParams.get('platform'),
+    });
     const connectionId = url.searchParams.get('connectionId');
 
     if (role === 'host-control') {
@@ -101,6 +107,7 @@ const startFakeRelay = () => {
           // A socket a failed test left open would hold server.close() until
           // the hook timeout; drop them so a failure is reported once.
           for (const client of wss.clients) client.terminate();
+          server.closeAllConnections();
           wss.close();
           server.close(() => r());
         }),
@@ -286,6 +293,13 @@ describe('relay host-client integration', () => {
     });
 
     expect(result.status).toBe(200);
+    for (const role of ['host-control', 'host-data']) {
+      expect(relay.state.apps.get(role)).toEqual({
+        appId: 'openchamber',
+        appVersion: expect.stringMatching(/^\d+\.\d+\.\d+/),
+        platform: process.env.OPENCHAMBER_RUNTIME || 'web',
+      });
+    }
     expect(result.body.ok).toBe(true);
     expect(result.body.relayConn).toBe('conn-test-1');
     expect(result.body.origin).toBe(`http://127.0.0.1:${origin.port}`);

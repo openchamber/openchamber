@@ -52,6 +52,7 @@ const ICONS = {
   fit: 'refresh',
   textWrap: 'text-wrap',
   image: 'file-image',
+  disclosure: 'arrow-right-s',
 } as const satisfies Record<string, IconName>;
 
 const ICON_BTN_CLASS =
@@ -78,6 +79,19 @@ const decorateImageLabels = (root: HTMLElement): void => {
     icon.setAttribute('data-openchamber-markdown-image-label-icon', 'true');
     setIcon(icon, 'image');
     label.prepend(icon);
+  }
+};
+
+const decorateDisclosures = (root: HTMLElement): void => {
+  for (const summary of root.querySelectorAll<HTMLElement>('details[data-md-details] > summary')) {
+    if (summary.querySelector('[data-md-disclosure-icon]')) continue;
+    const label = document.createElement('span');
+    label.append(...Array.from(summary.childNodes));
+    const icon = document.createElement('span');
+    icon.setAttribute('data-md-disclosure-icon', '');
+    icon.setAttribute('aria-hidden', 'true');
+    setIcon(icon, 'disclosure');
+    summary.append(icon, label);
   }
 };
 
@@ -611,6 +625,7 @@ const decorateLinks = (root: HTMLElement, ctx: DecorateContext): void => {
 
 /** Run all idempotent DOM decoration passes over freshly-rendered markdown. */
 export const decorateMarkdown = (root: HTMLElement, ctx: DecorateContext): void => {
+  decorateDisclosures(root);
   decorateImageLabels(root);
   decorateInlineCode(root);
   decorateMermaid(root, ctx);

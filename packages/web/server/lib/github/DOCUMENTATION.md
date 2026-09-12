@@ -63,6 +63,11 @@
 
 ## Consumers of PR data
 
+PR list/search failures propagate as errors instead of successful empty lists.
+Comparison pickers use these responses to offer retry rather than claiming the
+repository has no PRs. A failed repository in a multi-repository listing fails
+that page, so callers cannot mistake a partial page for a complete one.
+
 - `packages/ui/src/components/session/SessionSidebar.tsx` reads all PR entries and maps them to `directory::branch`.
 - `packages/ui/src/components/session/sidebar/SessionGroupSection.tsx` renders the compact badge, PR number, title, checks summary, and GitHub link.
 - `packages/ui/src/components/views/git/PullRequestSection.tsx` uses the same shared entry for the full PR workflow.
