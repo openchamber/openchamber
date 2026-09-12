@@ -4,6 +4,7 @@ import parser from 'cron-parser';
 import { expandSnippets } from '../opencode/snippets.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { discoverLoops } from './loops.js';
+import { PreflightDeniedError } from './preflight.js';
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
@@ -255,6 +256,7 @@ export const createScheduledTasksRuntime = (deps) => {
     emitTaskRunEvent,
     setSessionAutoAccept,
     sessionKnowledgeRuntime = null,
+    preflight,
     logger = console,
     maxGlobalConcurrency = DEFAULT_GLOBAL_CONCURRENCY,
     maxProjectConcurrency = DEFAULT_PROJECT_CONCURRENCY,
@@ -547,7 +549,7 @@ export const createScheduledTasksRuntime = (deps) => {
 
   };
 
-  const runTaskWithWatchdog = async (projectID, task, reason) => {
+  const runTaskWithWatchdog = async (projectID, task, reason, scheduledFor) => {
     const startedAt = Date.now();
     const title = formatScheduledSessionTitle(task, startedAt);
     const projectPath = projectPathByID.get(projectID);
@@ -558,6 +560,8 @@ export const createScheduledTasksRuntime = (deps) => {
     if (typeof waitForOpenCodeReady === 'function') {
       await waitForOpenCodeReady(10_000, 250);
     }
+
+    await preflight?.evaluate({ projectID, projectPath, taskID: task.id, taskName: task.name, reason, scheduledFor: Number.isFinite(scheduledFor) ? scheduledFor : null });
 
     const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
     const authHeaders = getOpenCodeAuthHeaders();
@@ -861,7 +865,7 @@ export const createScheduledTasksRuntime = (deps) => {
       let errorMessage;
 
       try {
-        const runPromise = runTaskWithWatchdog(projectID, task, reason);
+        const runPromise = runTaskWithWatchdog(projectID, task, reason, scheduledFor);
         let timeoutID;
         const timeoutPromise = new Promise((_, reject) => {
           timeoutID = setTimeout(() => {
@@ -882,7 +886,7 @@ export const createScheduledTasksRuntime = (deps) => {
           { projectID, taskID, status, reason, sessionID, durationMs }
         );
       } catch (error) {
-        status = 'error';
+        status = error instanceof PreflightDeniedError ? 'denied' : 'error';
         errorMessage = safeErrorMessage(error);
         logger.warn?.('[ScheduledTasks] run failed', {
           projectID,
@@ -898,7 +902,7 @@ export const createScheduledTasksRuntime = (deps) => {
         durationMs = Math.max(0, finishedAt - runStartedAt);
       }
       let latestTask = (tasksByProject.get(projectID)?.get(taskID)) || task;
-      const shouldConsumeOneTimeTask = latestTask?.schedule?.kind === 'once' && reason === 'scheduled';
+      const shouldConsumeOneTimeTask = latestTask?.schedule?.kind === 'once' && reason === 'scheduled' && status !== 'denied';
       if (shouldConsumeOneTimeTask && latestTask?.enabled) {
         try {
           const consumed = await projectConfigRuntime.upsertScheduledTask(projectID, {
@@ -921,7 +925,7 @@ export const createScheduledTasksRuntime = (deps) => {
       const statePatch = {
         lastStatus: status,
         lastDurationMs: durationMs,
-        lastError: status === 'error' ? errorMessage : undefined,
+        lastError: status === 'error' || status === 'denied' ? errorMessage : undefined,
         lastSessionId: status === 'success' ? sessionID : undefined,
         nextRunAt: Number.isFinite(nextRunAt) ? nextRunAt : undefined,
         updatedAt: finishedAt,
@@ -958,7 +962,7 @@ export const createScheduledTasksRuntime = (deps) => {
             ...(latestTask.state || {}),
             lastStatus: status,
             lastDurationMs: durationMs,
-            lastError: status === 'error' ? errorMessage : undefined,
+            lastError: status === 'error' || status === 'denied' ? errorMessage : undefined,
             lastSessionId: status === 'success' ? sessionID : undefined,
             nextRunAt: Number.isFinite(nextRunAt) ? nextRunAt : undefined,
             updatedAt: finishedAt,
@@ -994,7 +998,7 @@ export const createScheduledTasksRuntime = (deps) => {
           status,
           sessionID,
           task: stateResult.task || recoveredTask,
-          error: status === 'error' ? errorMessage : undefined,
+          error: status === 'error' || status === 'denied' ? errorMessage : undefined,
           persistError: message,
           reason: 'completion-state-failed',
         };
