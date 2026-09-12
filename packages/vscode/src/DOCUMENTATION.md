@@ -17,6 +17,7 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 
 - `bridge-git-special-runtime.ts`
   - Specialized Git flows (`pr-description`, `conflict-details`) and generation helpers.
+  - Generation model choice lives in `bridge-git-generation-model.ts`: request model first, then the user's small-model override (`smallModelUseDefault === false` plus `smallModelOverride` as `provider/model`) when the catalog has it, then the zen fallback. The old `gitProviderId`/`gitModelId` pair is no longer read.
 
 - `bridge-git-process-runtime.ts`
   - Git process execution and environment setup (`execGit`), including SSH agent socket resolution.
@@ -49,6 +50,7 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 
 - `bridge-localfs-proxy-runtime.ts`
   - Local `/api/fs/read` and `/api/fs/raw` proxy helpers and shared proxy utility helpers.
+  - `/api/fs/directory-stat` returns 501 locally. Directory-availability probes remain unknown in VS Code rather than falling through to OpenCode.
   - Workspace-contained Markdown gallery images use these local filesystem
     routes without calling the server grant route. Grant requests for OpenCode
     temporary-directory images return an explicit unsupported response instead
@@ -64,8 +66,15 @@ The webview build emits each worker as one self-contained file. VS Code webviews
   - Includes OpenCode resolution diagnostics parity handler used by shared UI (`/api/config/opencode-resolution`).
   - OpenCode JSONC reads in `opencodeConfig.ts` fail closed on a partial or non-object `jsonc-parser` tree (`INVALID_JSONC`) so mutations cannot rewrite a `$schema`-only stub over an existing config. Comment-only files read as empty, while other content that yields no JSON value (YAML, plain text) fails closed. A broken layer is omitted from the merge and recorded on `layerErrors`; valid sibling layers still load, including plugin list/read via `getPluginConfigSources`. Writes still refuse to overwrite the broken file.
 
+- `bridge-project-setup-runtime.ts`
+  - Extension-host side of `GET/PUT /api/projects/:projectId/config` (the webview handles the route locally and bridges `api:project-setup:get` / `api:project-setup:update`). Reads and writes the client-owned keys of `~/.config/openchamber/projects/<projectId>.json` (worktree setup commands, project actions, draft starters) with the rules in `project-setup.ts`, a mirror of the server's `packages/web/server/lib/projects/project-setup.js`; keep the two in sync. The file name follows the server's bounded rule (`projectConfigFileStemOf`, mirrored from `packages/web/server/lib/projects/project-id.js`): an id over 200 characters is stored as `path_sha256_<digest>.json` so a deeply nested checkout does not exceed the file name limit. A file an older build wrote under the long name is still read when the bounded one is missing and is removed once a write has moved its content. Writes to one file are chained; server-owned and unknown keys survive. The read also merges the team's optional `<workspace>/.openchamber/project.json` (checkout path decoded from the `path_<base64url>` id) by the same rules as the server, so the webview sees one view with `shared` / `personal` blocks. The shared UI (`openchamberConfig.ts`) no longer composes that path or reads it through the fs bridge.
 - `bridge-settings-runtime.ts`
   - Settings read/write and OpenCode skills discovery via API for bridge consumers.
+  - Writes are gated by the generated registry snapshot (`settings-registry.json`, via `settings-registry-gate.ts`): keys the registry does not list, or marks `computed`, `local`, or `owner: desktop-shell`, never reach the shared settings files. Regenerate the snapshot with `bun run settings-registry:generate` when the UI registry changes.
+  - Shared settings live in two files under `~/.config/openchamber/`, split by `settings-files.ts` (a pure mirror of the server's `settings-files.js`; both write the same bytes): `settings.json` holds instance facts and legacy keys, `preferences.json` (`{ version: 1, fields: { key: { value, updatedAt } } }`) holds every registry `profile` key. `updatedAt` is stamped by the extension host only when a value actually changes. Reads return the merged view (preferences win). A missing `preferences.json` is seeded once from the profile keys still in `settings.json`; every write keeps a copy of the profile's base values in `settings.json` too, so a build from before the split (which reads only that file) still finds the user's preferences; it is ignored by current builds.
+  - An existing but unparseable `preferences.json` is a failure, not an empty profile: it is never seeded over or rewritten, one warning is logged per process, reads return `settings.json` only, and writes drop the profile part until a later read succeeds.
+  - Both files are written atomically (tmp file + rename). Write failures throw, so `persistSettings` rejects and the webview sees the save fail instead of a silent success.
+  - The extension host is always the `vscode` surface kind: per-surface profile keys it changes land under `surfaces.vscode` in `preferences.json` and reads resolve `vscode` first, base otherwise (mirrors the server's header-driven behaviour).
 
 - `bridge-system-runtime.ts`
   - System/editor/provider/quota/notification/update-check message handlers.
@@ -74,6 +83,7 @@ The webview build emits each worker as one self-contained file. VS Code webviews
   - Owns managed OpenCode upgrade status and mutation handlers, including capability reporting, upgrade serialization, and process restart after a successful upgrade.
   - Provider handlers cover source lookup, disconnect (`DELETE /api/provider/:id/auth`), and custom provider upsert (`PUT /api/provider`; create/update OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages config with explicit `scope` for user/project/custom layers; requires `env` or stored auth; secrets via OpenCode auth API). Updates preserve existing provider, option, and retained-model fields that the form does not manage while honoring explicit model, header, and env removal. Legacy `providers` entries migrate to the canonical `provider` key when edited.
   - Quota handlers keep managed exe.dev, Ollama Cloud, and Cursor credentials in the extension data directory with the same private-file contract as the web runtime. exe.dev uses one command-scoped usage token for the aggregate billing shared by every `exe-*` model provider.
+  - `ollamaQuota.ts` owns the Ollama settings request and parser shared by credential validation and quota refresh. Both reject redirects, failed HTTP responses, and pages without parsed windows, with a 15-second request timeout. Validation finishes before the bridge writes a replacement cookie. Monthly dollar quotas and legacy session/weekly/premium quotas remain supported; zero extra-credit balances are omitted.
 
 - `opencode-upgrade-runtime.ts`
   - Owns managed-versus-external capability decisions, latest-version checks, serialized OpenCode self-upgrades, and restart-after-upgrade behavior.
@@ -91,7 +101,25 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 
 ## Shared webview message ordering
 
+The bridge sends `webview:ready` once per document, before its first outbound
+message. Sidebar, session-editor, and agent-manager hosts abort that panel's old
+SSE streams before accepting new requests and resend the current connection
+state. A VS Code webview reload or cross-window move replaces the document
+without disposing its panel; relying only on panel disposal leaked one upstream
+stream per reload, including its ongoing idle heartbeat traffic.
+
 Message and part ordering is owned by [`packages/ui/src/sync/DOCUMENTATION.md`](../../ui/src/sync/DOCUMENTATION.md#session-message-loading). The VS Code webview consumes that shared sync implementation; bridge and proxy runtimes pass OpenCode records through without adding runtime-specific ordering.
+
+The OpenChamber control stream (`/api/openchamber/events`) requires the
+OpenChamber server, which the extension does not run. `subscribeOpenchamberEvents`
+therefore returns a no-op subscription in VS Code before resolving URLs or
+opening a connection. Session sync still uses the OpenCode SSE bridge and
+global session polling. Sending the control stream to the webview origin caused
+repeated `403` responses and URL-token requests to `/auth/url-token`.
+
+Shared lazy imports retry a failed chunk load, but skip browser-navigation
+recovery in VS Code. `window.location.reload()` is unsupported inside webviews;
+the original import error must reach the UI error boundary instead.
 
 ## Extension guideline
 
@@ -174,11 +202,19 @@ Handlers with no reachable caller in the VS Code webview.
 | `api:fs:write`, `api:fs:rename`, `api:fs:delete`, `api:fs:reveal`, `api:fs:mkdir` | `FilesView`, `SidebarFilesTree`, `PlanView` only |
 | `api:fs:exec` | Terminal API is a throwing stub; no other caller |
 
-Reachable filesystem routes: `api:fs:read` (attachments, config), `api:fs:search`
+Reachable filesystem routes: `api:fs:read` (attachments), `api:fs:search`
 (`useFileSearchStore` behind composer file mentions), `api:fs:list`, `api:fs:stat`.
 
 Maintenance: reviews, changelog entries, and parity claims consult this map;
 whoever mounts or unmounts a surface updates it in the same change.
+
+## Network connections
+
+Extension activation applies `networkDefaults.ts` before registering handlers.
+It gives Node connection attempts 5 seconds, matching the web runtime, so quota
+requests to distant providers can connect. This is an extension-host process
+default, including other Node connections in that host. Address-family selection
+stays unchanged; runtimes without the setter retain their existing behavior.
 
 ## Global OpenCode paths
 

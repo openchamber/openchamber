@@ -10,26 +10,15 @@ const sanitizePayload = (data: unknown): SettingsPayload => {
 
 export const createVSCodeSettingsAPI = (): SettingsAPI => ({
   async load(): Promise<SettingsLoadResult> {
-    try {
-      const payload = sanitizePayload(await sendBridgeMessage('api:config/settings:get'));
-      return {
-        settings: {
-          ...payload,
-          // Override with VS Code settings
-          lastDirectory: window.__VSCODE_CONFIG__?.workspaceFolder || payload.lastDirectory || '',
-        },
-        source: 'web',
-      };
-    } catch {
-      // Fallback to VS Code config
-      return {
-        settings: {
-          themeVariant: window.__VSCODE_CONFIG__?.theme === 'light' ? 'light' : 'dark',
-          lastDirectory: window.__VSCODE_CONFIG__?.workspaceFolder || '',
-        },
-        source: 'web',
-      };
-    }
+    const payload = sanitizePayload(await sendBridgeMessage('api:config/settings:get'));
+    return {
+      settings: {
+        ...payload,
+        // Override with VS Code settings
+        lastDirectory: window.__VSCODE_CONFIG__?.workspaceFolder || payload.lastDirectory || '',
+      },
+      source: 'web',
+    };
   },
 
   async save(changes: Partial<SettingsPayload>): Promise<SettingsPayload> {

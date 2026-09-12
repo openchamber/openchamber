@@ -398,6 +398,27 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     return unsupportedWebRouteResponse('Scheduled tasks');
   }
 
+  // Project setup (worktree setup commands, project actions, draft starters)
+  // lives in the user's OpenChamber config dir; the extension host owns the
+  // file the way the OpenChamber server does elsewhere.
+  const projectSetupMatch = normalizedPathname.match(/^\/api\/projects\/([^/]+)\/config(\/shared)?$/);
+  if (projectSetupMatch && (method === 'GET' || method === 'PUT') && !(method === 'GET' && projectSetupMatch[2])) {
+    const projectId = decodeURIComponent(projectSetupMatch[1]);
+    const payload = method === 'GET'
+      ? { projectId }
+      : { projectId, patch: await extractJsonBody(input, init, method) };
+    const bridgeType = method === 'GET'
+      ? 'api:project-setup:get'
+      : projectSetupMatch[2] ? 'api:project-setup:update-shared' : 'api:project-setup:update';
+    try {
+      const data = await sendBridgeMessage(bridgeType, payload);
+      return jsonResponse(data, 200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Project config request failed';
+      return jsonResponse({ error: message }, /must be|is required|unsupported characters/.test(message) ? 400 : 500);
+    }
+  }
+
   if (normalizedPathname === '/api/fs/git-dirs') {
     return unsupportedWebRouteResponse('Nested git repository discovery');
   }

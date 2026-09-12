@@ -118,6 +118,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
   const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
   const addContextDraft = useInlineCommentDraftStore((state) => state.addDraft);
   const setPendingInputText = useInputStore((state) => state.setPendingInputText);
+  const requestBtwComposer = useInputStore((state) => state.requestBtwComposer);
   const isMobile = useUIStore((state) => state.isMobile);
   const projects = useProjectsStore((state) => state.projects);
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
@@ -469,6 +470,19 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     addMarkdownToChat(selectedTextMarkdown);
   }, [addMarkdownToChat, selectedTextMarkdown]);
 
+  const handleAskOpenChamber = React.useCallback(() => {
+    if (!currentSessionId || !selectedTextMarkdown) return;
+    requestBtwComposer({
+      parentSessionId: currentSessionId,
+      text: wrapMarkdownSelectionForChat(selectedTextMarkdown),
+    });
+    hideMenu();
+    window.getSelection()?.removeAllRanges();
+    queueMicrotask(() => {
+      focusChatInput();
+    });
+  }, [currentSessionId, hideMenu, requestBtwComposer, selectedTextMarkdown]);
+
   const handleOpenComment = React.useCallback(() => {
     if (!selectedTextMarkdown) return;
     setCommentMode(true);
@@ -705,6 +719,24 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
             <span className="min-w-0 whitespace-normal">{t('chat.textSelection.actions.addToInput')}</span>
           </button>
 
+          {currentSessionId ? (
+            <button
+              onClick={handleAskOpenChamber}
+              className={cn(
+                'flex min-w-0 items-center gap-2 rounded-xl px-3 py-2.5 text-left',
+                'text-sm font-medium leading-tight',
+                'bg-[var(--surface-muted)] text-[var(--surface-foreground)]',
+                'active:opacity-80',
+                'transition-opacity duration-150'
+              )}
+              title={t('chat.textSelection.title.askOpenChamber')}
+              type="button"
+            >
+              <Icon name="chat-ai-3" className="h-5 w-5 flex-shrink-0" />
+              <span className="min-w-0 whitespace-normal">{t('chat.textSelection.actions.askOpenChamber')}</span>
+            </button>
+          ) : null}
+
           {!isVSCodeRuntime() ? (
             <button
               onClick={handleAddToNotes}
@@ -765,6 +797,26 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
           >
             {t('chat.textSelection.actions.comment')}
           </button>
+
+          {currentSessionId ? (
+            <>
+              <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)]" />
+              <button
+                onClick={handleAskOpenChamber}
+                className={cn(
+                  'px-3.5 py-1.5 rounded-full',
+                  'text-sm font-medium',
+                  'text-[var(--surface-foreground)]',
+                  'hover:bg-[var(--interactive-hover)]',
+                  'transition-colors duration-150'
+                )}
+                title={t('chat.textSelection.title.askOpenChamber')}
+                type="button"
+              >
+                {t('chat.textSelection.actions.askOpenChamber')}
+              </button>
+            </>
+          ) : null}
 
 
           {!isVSCodeRuntime() ? (

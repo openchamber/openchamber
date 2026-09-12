@@ -41,7 +41,7 @@ export const QuotaCredentials: React.FC<{ providerId: ProviderId; providerName: 
         <p className="typography-meta text-muted-foreground">{t('settings.providers.page.quotaCredentials.exeDevTokenInstructions')}</p>
         <code className="typography-code block whitespace-pre-wrap break-all rounded bg-muted/50 px-2 py-1.5 text-xs text-foreground">{EXE_DEV_TOKEN_COMMAND}</code>
       </div>}
-      {providerId === 'ollama-cloud' && field('cookie', t('settings.providers.page.openCodeGo.authCookie'), 'session=...')}
+      {providerId === 'ollama-cloud' && field('cookie', t('settings.providers.page.openCodeGo.authCookie'), 'aid=...; __Secure-session=...')}
       {providerId === 'exe-dev' && field('usageToken', t('settings.providers.page.quotaCredentials.usageToken'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}
       {providerId === 'cursor' && field('accessToken', t('settings.providers.page.quotaCredentials.accessToken'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}
       {providerId === 'cursor' && field('refreshToken', t('settings.providers.page.quotaCredentials.refreshToken'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}

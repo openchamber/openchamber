@@ -98,7 +98,7 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
           const percent = getUsagePercent(result?.usage);
           const tone = resolveUsageTone(percent);
           const isSelected = provider.id === selectedProviderId;
-          const configured = result?.configured ?? false;
+          const configured = result?.configured;
 
           const statusStyle = !configured
             ? { backgroundColor: 'var(--surface-muted-foreground)', opacity: 0.4 }
@@ -129,7 +129,7 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
                 <span className="typography-ui-label font-normal truncate flex-1 min-w-0 text-foreground">
                   {provider.name}
                 </span>
-              {!configured && (
+              {configured === false && (
                 <span className="typography-micro text-muted-foreground/60 flex-shrink-0">{t('settings.usage.sidebar.status.notSet')}</span>
               )}
             </button>

@@ -251,7 +251,7 @@ describe('message queue runtime', () => {
     const first = createRuntime({ dataDir });
     first.runtime.start();
     first.openCode.state.statuses = { [SESSION]: { type: 'busy' } };
-    await first.runtime.enqueue(SESSION, DIRECTORY, item({ content: 'persisted', text: 'persisted' }));
+    await first.runtime.enqueue(SESSION, DIRECTORY, item({ content: 'persisted', text: 'persisted', contextPreview: 'Saved context preview' }));
     await first.runtime.flush();
     first.runtime.stop();
 
@@ -259,6 +259,7 @@ describe('message queue runtime', () => {
     second.runtime.start();
     await second.runtime.load();
     expect(second.runtime.sessionSnapshot(SESSION).items.map((entry) => entry.content)).toEqual(['persisted']);
+    expect(second.runtime.sessionSnapshot(SESSION).items[0].contextPreview).toBe('Saved context preview');
     second.connect();
     await settle();
     expect(second.openCode.state.sent).toHaveLength(1);
@@ -313,6 +314,35 @@ describe('message queue runtime', () => {
     const all = await runtime.takeAll(SESSION);
     expect(all.items.map((entry) => entry.content)).toEqual(['plain']);
     expect(runtime.snapshot().sessions).toEqual([]);
+  });
+
+  it('retains a bounded context preview in snapshots and broadcasts without exposing the full payload', async () => {
+    const { runtime, broadcasts } = createRuntime();
+    runtime.start();
+    const context = [{ kind: 'context', text: 'Full quoted content', metadata: { openchamberContext: { kind: 'chat-quote', quote: 'Original answer', text: 'Explain this' } } }];
+    const { itemId } = await runtime.enqueue(SESSION, DIRECTORY, item({ content: '', text: '', context, contextPreview: 'Explain this' }));
+    const projected = runtime.sessionSnapshot(SESSION).items[0];
+    expect(projected.contextPreview).toBe('Explain this');
+    expect(projected.content).toBe('');
+    expect(projected.text).toBe('');
+    expect(projected).not.toHaveProperty('context');
+    expect(broadcasts.at(-1).properties.session.items[0].contextPreview).toBe('Explain this');
+    const taken = await runtime.take(SESSION, itemId);
+    expect(taken.item.context).toEqual(context);
+    expect(taken.item.content).toBe('');
+
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: '', text: '', context, contextPreview: 'a'.repeat(5000) }));
+    expect(runtime.sessionSnapshot(SESSION).items[0].contextPreview).toBe('a'.repeat(100) + '...');
+  });
+
+  it('derives a preview for older queued annotations without a saved summary', async () => {
+    const { runtime } = createRuntime();
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: '', text: '', context: [
+      { kind: 'instruction', text: 'Use the skill' },
+      { kind: 'context', text: 'Model-facing wrapper', metadata: { openchamberContext: { kind: 'browser-annotation', text: 'Fix the button\nMore detail' } } },
+    ] }));
+    expect(runtime.sessionSnapshot(SESSION).items[0].contextPreview).toBe('Fix the button...');
   });
 
   it('names the directory in the broadcast that empties a queue', async () => {

@@ -1,4 +1,32 @@
+import { createRequire } from 'node:module';
+
 import { isAgentMemoryFeatureAvailable } from '../agent-memory/feature-flag.js';
+
+// Generated from packages/ui/src/lib/settings/registry.ts by
+// `bun run settings-registry:generate`; `registry.test.ts` fails when stale.
+// The server is plain ESM without a bundler, so the snapshot is read with
+// `createRequire` (import attributes differ across the Node versions we run on).
+const settingsRegistry = createRequire(import.meta.url)('./settings-registry.json');
+
+/**
+ * Whether a client may persist this key through PUT /api/config/settings:
+ * it must be a registry key, not a server-computed flag, not a device field
+ * that only lives in the browser, and not one the desktop shell writes itself.
+ */
+const isPersistableSettingsKey = (key) => {
+  const field = settingsRegistry.fields[key];
+  if (!field) return false;
+  if (field.computed || field.local) return false;
+  if (field.owner === 'desktop-shell') return false;
+  return true;
+};
+
+/** Keys accepted on write but never returned by a read. */
+const SECRET_SETTINGS_KEYS = Object.freeze(
+  Object.entries(settingsRegistry.fields)
+    .filter(([, field]) => field.secret === true)
+    .map(([key]) => key),
+);
 import {
   DEFAULT_INPUT_HISTORY_LIMIT,
   DEFAULT_INPUT_HISTORY_SCOPE,
@@ -18,7 +46,6 @@ export const createSettingsHelpers = (dependencies) => {
     normalizeManagedRemoteTunnelHostname,
     normalizeManagedRemoteTunnelPresets,
     normalizeManagedRemoteTunnelPresetTokens,
-    sanitizeTypographySizesPartial,
     normalizeStringArray,
     sanitizeModelRefs,
     sanitizeSkillCatalogs,
@@ -203,6 +230,9 @@ export const createSettingsHelpers = (dependencies) => {
         ...new Set(candidate.workStatusHiddenSections.filter((entry) => typeof entry === 'string' && entry.length > 0)),
       ];
     }
+    if (typeof candidate.workStatusHiddenSectionsExplicit === 'boolean') {
+      result.workStatusHiddenSectionsExplicit = candidate.workStatusHiddenSectionsExplicit;
+    }
     if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
       result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
     }
@@ -313,9 +343,6 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.monoFont === 'string' && candidate.monoFont.length > 0) {
       result.monoFont = candidate.monoFont;
     }
-    if (typeof candidate.markdownDisplayMode === 'string' && candidate.markdownDisplayMode.length > 0) {
-      result.markdownDisplayMode = candidate.markdownDisplayMode;
-    }
     if (typeof candidate.githubClientId === 'string') {
       const trimmed = candidate.githubClientId.trim();
       if (trimmed.length > 0) {
@@ -330,6 +357,45 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.showReasoningTraces === 'boolean') {
       result.showReasoningTraces = candidate.showReasoningTraces;
+    }
+    if (typeof candidate.streamingAutoFollowEnabled === 'boolean') {
+      result.streamingAutoFollowEnabled = candidate.streamingAutoFollowEnabled;
+    }
+    if (typeof candidate.codeBlockLineWrap === 'boolean') {
+      result.codeBlockLineWrap = candidate.codeBlockLineWrap;
+    }
+    if (typeof candidate.autoSaveEnabled === 'boolean') {
+      result.autoSaveEnabled = candidate.autoSaveEnabled;
+    }
+    if (typeof candidate.diffWrapLines === 'boolean') {
+      result.diffWrapLines = candidate.diffWrapLines;
+    }
+    if (typeof candidate.persistChatDraft === 'boolean') {
+      result.persistChatDraft = candidate.persistChatDraft;
+    }
+    if (typeof candidate.allowPromptingSubagentSessions === 'boolean') {
+      result.allowPromptingSubagentSessions = candidate.allowPromptingSubagentSessions;
+    }
+    if (typeof candidate.showOpenCodeRestartConfirm === 'boolean') {
+      result.showOpenCodeRestartConfirm = candidate.showOpenCodeRestartConfirm;
+    }
+    if (typeof candidate.sessionTabsEnabled === 'boolean') {
+      result.sessionTabsEnabled = candidate.sessionTabsEnabled;
+    }
+    if (typeof candidate.largeTextPasteBehavior === 'string') {
+      const mode = candidate.largeTextPasteBehavior.trim();
+      if (mode === 'ask' || mode === 'attach' || mode === 'inline') {
+        result.largeTextPasteBehavior = mode;
+      }
+    }
+    if (typeof candidate.fileEditorKeymap === 'string') {
+      const mode = candidate.fileEditorKeymap.trim();
+      if (mode === 'default' || mode === 'vim') {
+        result.fileEditorKeymap = mode;
+      }
+    }
+    if (Array.isArray(candidate.providerOrder)) {
+      result.providerOrder = normalizeStringArray(candidate.providerOrder);
     }
     if (typeof candidate.sessionRecapEnabled === 'boolean') {
       result.sessionRecapEnabled = candidate.sessionRecapEnabled;
@@ -407,6 +473,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (candidate.sessionRetentionAction === 'archive' || candidate.sessionRetentionAction === 'delete') {
       result.sessionRetentionAction = candidate.sessionRetentionAction;
     }
+    if (typeof candidate.sessionRetentionOnlyArchived === 'boolean') {
+      result.sessionRetentionOnlyArchived = candidate.sessionRetentionOnlyArchived;
+    }
     if (candidate.tunnelBootstrapTtlMs === null) {
       result.tunnelBootstrapTtlMs = null;
     } else if (typeof candidate.tunnelBootstrapTtlMs === 'number' && Number.isFinite(candidate.tunnelBootstrapTtlMs)) {
@@ -450,11 +519,6 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.managedRemoteTunnelSelectedPresetId === 'string') {
       const id = candidate.managedRemoteTunnelSelectedPresetId.trim();
       result.managedRemoteTunnelSelectedPresetId = id || undefined;
-    }
-
-    const typography = sanitizeTypographySizesPartial(candidate.typographySizes);
-    if (typography) {
-      result.typographySizes = typography;
     }
 
     if (typeof candidate.defaultModel === 'string') {
@@ -502,14 +566,6 @@ export const createSettingsHelpers = (dependencies) => {
       const trimmed = candidate.zenModel.trim();
       result.zenModel = trimmed.length > 0 ? trimmed : undefined;
     }
-    if (typeof candidate.gitProviderId === 'string') {
-      const trimmed = candidate.gitProviderId.trim();
-      result.gitProviderId = trimmed.length > 0 ? trimmed : undefined;
-    }
-    if (typeof candidate.gitModelId === 'string') {
-      const trimmed = candidate.gitModelId.trim();
-      result.gitModelId = trimmed.length > 0 ? trimmed : undefined;
-    }
     if (typeof candidate.pwaAppName === 'string') {
       result.pwaAppName = normalizePwaAppName(candidate.pwaAppName, undefined);
     }
@@ -520,12 +576,6 @@ export const createSettingsHelpers = (dependencies) => {
       const mode = normalizeMobileKeyboardMode(candidate.mobileKeyboardMode, null);
       if (mode) {
         result.mobileKeyboardMode = mode;
-      }
-    }
-    if (typeof candidate.toolCallExpansion === 'string') {
-      const mode = candidate.toolCallExpansion.trim();
-      if (mode === 'collapsed' || mode === 'activity' || mode === 'detailed' || mode === 'changes') {
-        result.toolCallExpansion = mode;
       }
     }
     if (typeof candidate.inputSpellcheckEnabled === 'boolean') {
@@ -618,9 +668,6 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.promptNavigatorEnabled === 'boolean') {
       result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
-    }
-    if (typeof candidate.expandedEditorToolbar === 'boolean') {
-      result.expandedEditorToolbar = candidate.expandedEditorToolbar;
     }
     if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
       result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
@@ -722,11 +769,6 @@ export const createSettingsHelpers = (dependencies) => {
       if (trimmed.length > 0) {
         result.openInAppId = trimmed;
       }
-    }
-
-    // Message limit — single setting for fetch / trim / Load More chunk
-    if (typeof candidate.messageLimit === 'number' && Number.isFinite(candidate.messageLimit)) {
-      result.messageLimit = Math.max(10, Math.min(500, Math.round(candidate.messageLimit)));
     }
 
     const skillCatalogs = sanitizeSkillCatalogs(candidate.skillCatalogs);
@@ -912,6 +954,16 @@ export const createSettingsHelpers = (dependencies) => {
       }
     }
 
+    // The registry is the last word on what a client may persist: a key the
+    // code above still names but the registry no longer lists is dropped here,
+    // so the two cannot drift apart silently (settings-helpers.test.js checks
+    // the other direction).
+    for (const key of Object.keys(result)) {
+      if (!isPersistableSettingsKey(key)) {
+        delete result[key];
+      }
+    }
+
     return result;
   };
 
@@ -922,13 +974,6 @@ export const createSettingsHelpers = (dependencies) => {
         ? current.securityScopedBookmarks
         : [];
 
-    const nextTypographySizes = changes.typographySizes
-      ? {
-          ...(current.typographySizes || {}),
-          ...changes.typographySizes
-        }
-      : current.typographySizes;
-
     const next = {
       ...current,
       ...changes,
@@ -937,7 +982,6 @@ export const createSettingsHelpers = (dependencies) => {
           baseBookmarks.filter((entry) => typeof entry === 'string' && entry.length > 0)
         )
       ),
-      typographySizes: nextTypographySizes
     };
 
     return next;
@@ -945,9 +989,12 @@ export const createSettingsHelpers = (dependencies) => {
 
   const formatSettingsResponse = (settings) => {
     const sanitized = sanitizeSettingsUpdate(settings);
-    delete sanitized.managedRemoteTunnelToken;
+    for (const key of SECRET_SETTINGS_KEYS) {
+      delete sanitized[key];
+    }
     const bookmarks = normalizeStringArray(settings.securityScopedBookmarks);
     const hasManagedRemoteTunnelToken = typeof settings?.managedRemoteTunnelToken === 'string' && settings.managedRemoteTunnelToken.trim().length > 0;
+    const hasDesktopUiPassword = typeof settings?.desktopUiPassword === 'string' && settings.desktopUiPassword.trim().length > 0;
     const pwaAppName = normalizePwaAppName(settings?.pwaAppName, '');
     const pwaOrientation = normalizePwaOrientation(settings?.pwaOrientation, 'system');
     const mobileKeyboardMode = normalizeMobileKeyboardMode(settings?.mobileKeyboardMode, 'native');
@@ -957,6 +1004,7 @@ export const createSettingsHelpers = (dependencies) => {
     return {
       ...sanitized,
       hasManagedRemoteTunnelToken,
+      hasDesktopUiPassword,
       // Tells the client whether agent memory exists in this build at all, so
       // its settings row and panel tab can be absent rather than merely off.
       agentMemoryFeatureAvailable: isAgentMemoryFeatureAvailable(),
@@ -967,7 +1015,6 @@ export const createSettingsHelpers = (dependencies) => {
       inputHistoryLimit,
       securityScopedBookmarks: bookmarks,
       pinnedDirectories: normalizeStringArray(settings.pinnedDirectories),
-      typographySizes: sanitizeTypographySizesPartial(settings.typographySizes),
       ...(process.env.OPENCHAMBER_RUNTIME === 'desktop'
         ? {
             desktopLanAccessActive: process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_ACTIVE === 'true',

@@ -1,4 +1,4 @@
-import { runtimeFetch } from './runtime-fetch';
+import { loadDesktopSettings } from './persistence';
 
 export const RESPONSE_STYLE_PRESETS = ['concise', 'detailed', 'mentor', 'pushback', 'noFiller', 'matchEnergy', 'warmPeer'] as const;
 export type ResponseStylePreset = typeof RESPONSE_STYLE_PRESETS[number];
@@ -45,16 +45,7 @@ const buildResponseStyleInstruction = ({
 };
 
 export const fetchResponseStyleInstruction = async (): Promise<string | null> => {
-  const response = await runtimeFetch('/api/config/settings', {
-    method: 'GET',
-    headers: { Accept: 'application/json' },
-  });
-  if (!response.ok) return null;
-  const settings = await response.json().catch(() => null) as {
-    responseStyleEnabled?: unknown;
-    responseStylePreset?: unknown;
-    responseStyleCustomInstructions?: unknown;
-  } | null;
+  const settings = await loadDesktopSettings();
   if (!settings) return null;
   return buildResponseStyleInstruction({
     enabled: settings.responseStyleEnabled === true,

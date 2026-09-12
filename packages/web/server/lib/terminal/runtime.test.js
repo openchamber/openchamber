@@ -319,12 +319,12 @@ describe('terminal runtime', () => {
       expect(response.body).toEqual({ sessionId: 'term-1', cols: 120, rows: 40, status: 'running', mode: 'interactive', purpose: { type: 'terminal' } });
       expect(harness.processes[0].options.cwd).toBe('/repo');
       expect(harness.processes[0].options.env.COLORFGBG).toBe('0;15');
-      expect(harness.processes[0].options.env.NODE_CHANNEL_FD).toBe('');
+      expect(harness.processes[0].options.env).not.toHaveProperty('NODE_CHANNEL_FD');
       expect(harness.processes[0].options.env).not.toHaveProperty('ARGV0');
       expect(harness.processes[0].options.env).not.toHaveProperty('ELECTRON_RUN_AS_NODE');
-      if (process.platform === 'linux') {
+      if (process.platform !== 'win32') {
         expect(harness.processes[0].shell).toMatch(/\/env$/);
-        expect(harness.processes[0].args.slice(0, 3)).toEqual(['-u', 'ARGV0', expect.any(String)]);
+        expect(harness.processes[0].args.slice(0, 5)).toEqual(['-u', 'ARGV0', '-u', 'NODE_CHANNEL_FD', expect.any(String)]);
       }
       harness.processes[0].emitData('\u001b[?2031h\u001b]10;?\u0007\u001b]11;?\u0007\u001b[0c');
       expect(harness.processes[0].writes).toEqual(['\u001b]10;rgb:1b1b/1b1b/1b1b\u001b\\', '\u001b]11;rgb:fafa/f8f8/f0f0\u001b\\', '\u001b[?1;2c']);
@@ -380,7 +380,7 @@ describe('terminal runtime', () => {
       await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-argv0', cwd: '/repo', cols: 80, rows: 24 } }, response);
       expect(response.statusCode).toBe(200);
       expect(harness.processes[0].options.env).not.toHaveProperty('ARGV0');
-      if (process.platform === 'linux') {
+      if (process.platform !== 'win32') {
         expect(harness.processes[0].shell).toMatch(/\/env$/);
         expect(harness.processes[0].args[0]).toBe('-u');
         expect(harness.processes[0].args[1]).toBe('ARGV0');
@@ -417,9 +417,9 @@ describe('terminal runtime', () => {
       const created = createResponse();
       await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-shell', cwd: '/repo', shell: 'zsh', loginShell: true } }, created);
       expect(created.statusCode).toBe(200);
-      if (process.platform === 'linux') {
+      if (process.platform !== 'win32') {
         expect(harness.processes[0].shell).toMatch(/\/env$/);
-        expect(harness.processes[0].args).toEqual(['-u', 'ARGV0', '/bin/zsh', '-l']);
+        expect(harness.processes[0].args).toEqual(['-u', 'ARGV0', '-u', 'NODE_CHANNEL_FD', '/bin/zsh', '-l']);
       } else {
         expect(harness.processes[0].shell).toBe('/bin/zsh');
         expect(harness.processes[0].args).toEqual(['-l']);
@@ -428,9 +428,9 @@ describe('terminal runtime', () => {
       const restarted = createResponse();
       await harness.routes.post.get('/api/terminal/:sessionId/restart')({ params: { sessionId: 'term-shell' }, body: { shell: 'bash', loginShell: true } }, restarted);
       expect(restarted.statusCode).toBe(200);
-      if (process.platform === 'linux') {
+      if (process.platform !== 'win32') {
         expect(harness.processes[1].shell).toMatch(/\/env$/);
-        expect(harness.processes[1].args).toEqual(['-u', 'ARGV0', '/bin/bash', '-l']);
+        expect(harness.processes[1].args).toEqual(['-u', 'ARGV0', '-u', 'NODE_CHANNEL_FD', '/bin/bash', '-l']);
       } else {
         expect(harness.processes[1].shell).toBe('/bin/bash');
         expect(harness.processes[1].args).toEqual(['-l']);
@@ -682,8 +682,8 @@ describe('terminal runtime', () => {
       sockets.push(first.socket);
       first.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'term-live' }));
       first.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'term-second' }));
-      expect(await first.next('snapshot', 'term-live')).toMatchObject({ s: 'term-live', q: 0, history: '', status: 'running' });
-      expect(await first.next('snapshot', 'term-second')).toMatchObject({ s: 'term-second', q: 0, history: '', status: 'running' });
+      expect(await first.next('snapshot', 'term-live')).toMatchObject({ s: 'term-live', q: 0, history: '', status: 'running', cols: 80, rows: 24 });
+      expect(await first.next('snapshot', 'term-second')).toMatchObject({ s: 'term-second', q: 0, history: '', status: 'running', cols: 80, rows: 24 });
       first.socket.send(createTerminalWsControlFrame({ t: 'write', v: 3, s: 'term-live', d: 'echo ok\r' }));
       first.socket.send(createTerminalWsControlFrame({ t: 'write', v: 3, s: 'term-second', d: 'pwd\r' }));
       first.socket.send(createTerminalWsControlFrame({ t: 'write', v: 3, s: 'term-live', d: 'echo next\r' }));
@@ -707,10 +707,17 @@ describe('terminal runtime', () => {
       expect(secondClosed.status).toBe(200);
       first.socket.close();
 
+      // A reconnecting client replays history at the size the PTY currently has.
+      const resized = await fetch(`${base}/api/terminal/term-live/resize`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ cols: 120, rows: 40 }),
+      });
+      expect(resized.status).toBe(200);
+
       const second = await openTerminalSocket(socketUrl);
       sockets.push(second.socket);
       second.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'term-live' }));
-      expect(await second.next('snapshot')).toMatchObject({ s: 'term-live', q: 2, history: 'ok\r\n', status: 'running' });
+      expect(await second.next('snapshot')).toMatchObject({ s: 'term-live', q: 2, history: 'ok\r\n', status: 'running', cols: 120, rows: 40 });
       processes[0].emitExit(7);
       expect(await second.next('exit')).toMatchObject({ s: 'term-live', q: 3, exitCode: 7 });
 
@@ -750,9 +757,9 @@ describe('terminal runtime', () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.body).toEqual({ sessionId: 'term-command', cols: 80, rows: 24, status: 'running', mode: 'command', purpose: { type: 'terminal' } });
-      if (process.platform === 'linux') {
+      if (process.platform !== 'win32') {
         expect(harness.processes[0].shell).toMatch(/\/env$/);
-        expect(harness.processes[0].args).toEqual(['-u', 'ARGV0', '/bin/bash', '-l', '-i', '-c', 'printf ready']);
+        expect(harness.processes[0].args).toEqual(['-u', 'ARGV0', '-u', 'NODE_CHANNEL_FD', '/bin/bash', '-l', '-i', '-c', 'printf ready']);
       } else {
         expect(harness.processes[0].args).toEqual(['-l', '-i', '-c', 'printf ready']);
       }

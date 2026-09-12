@@ -17,6 +17,52 @@ animation. Do not restore separate draft and session composer branches:
 remounting the editor loses focus and interrupts the transition. Keep the
 existing mobile fixed-position rules unchanged.
 
+`ComposerFloatingPanel` is the shared frame for `BtwPanel` and
+`QueuedMessageChips`. They mount inside the composer form, outside both the
+full editor and collapsed mobile pill, with one absolute `bottom-full`
+anchor, input-column width, gap, and glass surface. Appearing, disappearing,
+or collapsing a panel does not resize the transcript or composer.
+The frame also owns the header row through its `header` and `compact` props;
+callers supply controls and content, not their own header padding.
+
+`SessionSuggestionChip` is not a frame: it renders as the composer's own top
+row, inside the box and inside the mobile pill, so the surface stays one
+shape. Visibility priority is BTW, then a nonempty queue, then suggestion.
+Every BTW frame, including its collapsed strip, creation state, and pending
+draft, hides the other two. Composer content also hides suggestion;
+new-session drafts hide both queue and suggestion. Hiding the queue does not
+pause its delivery.
+
+The queue header toggles an `aria-expanded` disclosure with the current count.
+Its collapse state is local to the mounted runtime/directory/session queue key
+and survives temporary hiding behind BTW. Switching queue identity resets it.
+The expanded list retains its drag sensors, ordering, edit, send, and remove
+actions, and clamps to available space above the composer. It receives the
+composer's main-session queue target instead of resolving the global selection,
+so embedded chat columns address their own queue.
+
+The shared frame measures its height and gap into the chat column's
+`--chat-floating-panel-clearance`. The floating status row and
+`ScrollToBottomButton` translate upward by that amount, and the column
+carries `data-floating-panel` while any frame is mounted so the recap hint
+hides instead of landing over the transcript. Transcript height, insets, and
+scroll position remain unchanged. Unmounting clears the offset and the
+marker; resizing or collapsing the frame updates it.
+
+## Floating composer
+
+In a normal session view the composer slot is an absolute layer over the
+bottom of the transcript (`ChatContainer`), and the input box is glass
+(`oc-glass-composer`). The draft screen and the expanded editor keep the slot
+in flow. A `ResizeObserver` on the slot writes its height into the chat
+column's `--chat-composer-inset`; the timeline's tail spacer reads that
+variable plus a fixed gap, so the last row always ends above the composer.
+The variable is written straight to the DOM, so composer growth never
+re-renders the timeline: the list's own footer observer extends the content
+and the scroll hook's pinned-end observer keeps a reader on the end. The
+mobile keyboard choreography is unchanged: the form inside the slot is still
+the keyboard mover and the column shrinks around it at settle.
+
 ## Layers
 
 | Directory | Owns |
@@ -32,7 +78,11 @@ existing mobile fixed-position rules unchanged.
 | `largeTextPasteOffer.ts` | Ask-toast offer id begin/resolve (supersede + double-apply guards) |
 
 `ChatInput.handlePaste` owns paste orchestration: URL-over-selection markdown
-links, clipboard images (attach + citation), and large plain-text pastes.
+links, clipboard files, and large plain-text pastes. Pasted and dropped files
+share `attachFilesWithCitation`: every file attaches and is cited in the draft
+as `[name]`; images get a generated unique name first, other files keep their
+own name and are cited only after they attached. A copied file's filename text
+is suppressed so only the citation lands in the draft.
 Large pastes (about 2,000 characters or 25 lines) follow the composer setting
 `largeTextPasteBehavior` (`ask` / `attach` / `inline`). Attaching creates an
 in-memory `text/plain` file named `pasted-context-N.txt`, inserts a bracket
@@ -171,7 +221,7 @@ and the send path reading the same grammar.
   attached context is consumed. Commands that act on session or UI state
   (`/undo`, `/redo`, `/compact`, `/timeline`, `/handoff-review`) take only
   their command text and leave comments, files, and linked context attached;
-  commands that produce a prompt (`/btw` and the magic prompts) send that
+   magic prompt commands send that
   context with the prompt they produce. Session actions are planned only when
   a session exists, so typing one into a new-session draft stays on the normal
   send path. A local command is never queued as text: queueing runs it
@@ -183,14 +233,30 @@ and the send path reading the same grammar.
   draft. Two orderings are load-bearing: the debounced write is skipped once
   while a draft is being restored, and a deleted draft's empty signature is
   recorded before a queued write could resurrect it.
+  Fork replay text and files arrive in `input-store.pendingComposerRestore`,
+  addressed to the fork's runtime, directory, and session. The hook consumes
+  them after loading that identity's draft. Selection alone is not enough:
+  the deferred chat column can still show the source composer. Ordinary
+  pending text insertions keep their existing path in `ChatInput`.
 - `state/useDraftTarget.ts` — the draft can target a directory that does not
   exist yet (a worktree being created). It must survive not appearing in the
   branch list, or the selector snaps back to the project root mid-creation. It
   also owns the advisory dirty state for the selected directory, clearing it as
   soon as the target changes so a warning never names a previous branch.
 - `ui/DraftTargetSelectors.tsx` owns the controlled project/worktree picker
-  state and registers its application shortcuts locally. The selectors only
-  consume their shared prefix while the draft target UI is mounted.
+  state and registers its application shortcuts locally. The desktop project
+  picker is a searchable popup: it ranks the current projects with
+  `rankByQuery` over display label and path, keeps the query and the active
+  result as transient local state that resets on every close, and commits
+  through the existing project-change flow only on explicit activation.
+  Filtering changes the result area below the anchored input without moving
+  the search field. The worktree picker remains a Select; mobile keeps its
+  bottom sheets. The selectors only consume their shared prefix while the
+  draft target UI is mounted.
+  Keyboard selection returns focus to the current form's composer, including
+  when the selected value is unchanged.
+- `ChatInput.tsx` maps Ctrl+N/P to the active command, skill, snippet, or
+  mention picker after its IME guard.
 
 ## Input recall ownership
 
@@ -215,6 +281,34 @@ sessions that predate the persisted store still recall, and the persisted
 session bucket, which adds attachments and keeps prompts a revert hid from the
 timeline. A prompt present in both collapses to the persisted entry. Global
 scope reads the persisted runtime bucket only.
+
+## BTW composer
+
+An empty `/btw` opens an unsent draft. `/btw <question>` opens BTW and sends
+that question immediately after its own draft and model selection are active.
+**By the way…** opens an unsent draft with Quote-formatted selection text.
+The first send creates the fork; Enter follows the user's preference. Pending text and references then
+move to the fork's draft identity. Normal and BTW drafts remain independent,
+including in memory when persistence is disabled.
+
+Both modes reuse `ComposerEditor` and `ModelControls`; BTW transitions put the
+caret at the end. BTW copies the main model/effort once, including explicit
+Default, and uses `plan` or the first selectable agent. Its controlled model
+path only writes BTW selections. Attachments, goals, expansion, shell, and
+agent selection and file/agent mention autocomplete are unavailable. Auto-accept is applied before the first send.
+On mobile, model and effort controls sit in the input's upper-left row; the
+footer only contains auto-accept and send/stop controls.
+
+Escape closes menus first. Otherwise it returns to normal: an unsent BTW is
+discarded with its text, references, selections and panel; a creating or real
+fork is only collapsed. Neither exit sends, aborts, or deletes a server session,
+nor consumes the main draft's files, queue, or linked context. Pending snippet
+expansion belongs to the unsent panel. Discarding that panel invalidates the
+send, and a runtime change prevents fork creation and stale UI recovery.
+
+The unsent panel shows "Ask your question" until fork creation starts.
+Existing panels hide titles. Promotion retains the existing internal title, without
+transcript fetching or Small Model generation.
 
 ## Mobile
 
@@ -247,10 +341,13 @@ suites that install module mocks are order-dependent.
 
 ## Enter preference
 
-`keyboardPolicy.ts` owns the submission decision. Until the Chat setting is
-changed, desktop Enter sends, mobile and focus mode require Ctrl/Cmd+Enter,
-and Shift-modified Enter does not send. An explicit choice applies across
-shared composers; Ctrl/Cmd+Enter sends in either configured mode.
+`keyboardPolicy.ts` owns the submission decision. The expanded desktop composer
+always inserts a newline with Enter, including Shift+Enter, and sends with
+Ctrl/Cmd+Enter; it ignores the Enter-to-send preference. Outside expanded mode,
+until the Chat setting is changed, desktop Enter sends, mobile requires
+Ctrl/Cmd+Enter, and Shift-modified Enter does not send. An explicit choice
+applies across the other shared composers; Ctrl/Cmd+Enter sends in either
+configured mode.
 
 CodeMirror's deferred mobile Enter loses modifier information. Untouched
 settings restore Shift to keep the original policy. Once configured, with mobile

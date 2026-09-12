@@ -606,6 +606,8 @@ const readProviderConfig = (workingDirectory, providerID) => {
   }
 }
 
+const getRuntimeModel = (runtimeProvider, modelID) => runtimeProvider?.models?.get(modelID) ?? null;
+
 // ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
@@ -650,6 +652,7 @@ export async function callSmallModel({ auth, catalog, workingDirectory, sessionI
   const tokens = Number(maxOutputTokens) > 0 ? Number(maxOutputTokens) : DEFAULT_MAX_OUTPUT_TOKENS;
   const providerConfig = readProviderConfig(workingDirectory, providerID);
   const runtimeProvider = await getRuntimeProvider(providerID);
+  const runtimeModel = getRuntimeModel(runtimeProvider, modelID);
   // Match OpenCode's resolveSDK precedence: config `provider.<id>.options`
   // wins, then what OpenCode itself resolved at runtime (the only place a
   // plugin's credential exists), and the auth.json entry last.
@@ -759,9 +762,10 @@ export async function callSmallModel({ auth, catalog, workingDirectory, sessionI
   // base URL for that provider (openai itself included). When a custom provider
   // is not in the catalog (e.g. a user-configured OpenAI-compatible proxy),
   // fall back to its baseURL from the OpenCode provider config, then to the
-  // endpoint OpenCode resolved at runtime — which for a plugin provider is the
-  // only place it exists, and for several of them is a local proxy the plugin
-  // itself runs. The openai provider also respects
+  // selected model's endpoint OpenCode resolved at runtime, then to the
+  // provider-level runtime endpoint. For a plugin provider, the runtime listing
+  // is the only place those endpoints exist, and several are local proxies the
+  // plugin itself runs. The openai provider also respects
   // provider.openai.options.baseURL — OpenCode itself uses the same config for
   // all providers including openai.
   const provider = getCatalogProvider(catalog, providerID);
@@ -771,7 +775,8 @@ export async function callSmallModel({ auth, catalog, workingDirectory, sessionI
     ? providerConfigUrl
     : providerID === 'openai'
       ? defaultOpenaiUrl
-      : runtimeProvider?.baseURL
+      : runtimeModel?.api?.url
+        ?? runtimeProvider?.baseURL
         ?? (typeof provider?.api === 'string' && provider.api
           ? provider.api
           : null);

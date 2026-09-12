@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { StoreApi, UseBoundStore } from "zustand";
 import { devtools, persist } from "zustand/middleware";
 import type { Provider, Agent, Config } from "@opencode-ai/sdk/v2";
+import type { DesktopSettings } from "@/lib/desktop";
 import { opencodeClient } from "@/lib/opencode/client";
 import { scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
 import type { ModelMetadata } from "@/types";
@@ -10,8 +11,7 @@ import { filterVisibleAgents } from "./useAgentsStore";
 import { isPrimaryMode } from "@/components/chat/mobileControlsUtils";
 import { useSessionUIStore } from "@/sync/session-ui-store";
 import { useSelectionStore } from "@/sync/selection-store";
-import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
-import { updateDesktopSettings } from "@/lib/persistence";
+import { loadDesktopSettings, updateDesktopSettings } from "@/lib/persistence";
 import { useDirectoryStore } from "@/stores/useDirectoryStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution";
@@ -21,7 +21,7 @@ import { runtimeFetch } from "@/lib/runtime-fetch";
 import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
 import { normalizePath } from "@/lib/pathNormalization";
 import { getSyncConfig, subscribeToSyncConfigChanges } from "@/sync/sync-refs";
-import { getRuntimeKey } from "@/lib/runtime-switch";
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from "@/lib/runtime-switch";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
@@ -35,21 +35,6 @@ const ADD_PROVIDER_SENTINEL = "__add_provider__";
 const GIT_UTILITY_PROVIDER_ID = "zen";
 const GIT_UTILITY_PREFERRED_MODEL_ID = "big-pickle";
 const PROVIDER_CONFIG_REFRESH_CONCURRENCY = 4;
-
-const normalizeSttProvider = (value: unknown): 'local' | 'openai-compatible' | undefined => {
-    if (value === 'local' || value === 'openai-compatible') {
-        return value;
-    }
-    // Legacy providers: 'server' used an OpenAI-compatible endpoint;
-    // 'browser' and 'wasm' map to the local default.
-    if (value === 'server') {
-        return 'openai-compatible';
-    }
-    if (value === 'browser' || value === 'wasm') {
-        return 'local';
-    }
-    return undefined;
-};
 
 interface OpenChamberDefaults {
     defaultModel?: string;
@@ -71,122 +56,112 @@ interface OpenChamberDefaults {
 // not per directory: one request serves the switches that land inside this
 // window, and concurrent activations share the in-flight one.
 const OPENCHAMBER_DEFAULTS_FRESH_MS = 15_000;
-let openChamberDefaultsCache: { at: number; request: Promise<OpenChamberDefaults> } | null = null;
+type ConfigRuntimeContext = { runtimeKey: string; generation: number };
 
-const fetchOpenChamberDefaults = (): Promise<OpenChamberDefaults> => {
+let configRuntimeGeneration = 0;
+
+const captureConfigRuntimeContext = (): ConfigRuntimeContext => ({
+    runtimeKey: getRuntimeKey(),
+    generation: configRuntimeGeneration,
+});
+
+const isConfigRuntimeContextCurrent = (context: ConfigRuntimeContext): boolean => (
+    context.generation === configRuntimeGeneration && context.runtimeKey === getRuntimeKey()
+);
+
+const isSameConfigRuntimeContext = (left: ConfigRuntimeContext, right: ConfigRuntimeContext): boolean => (
+    left.runtimeKey === right.runtimeKey && left.generation === right.generation
+);
+
+let openChamberDefaultsCache: {
+    at: number;
+    context: ConfigRuntimeContext;
+    request: Promise<OpenChamberDefaults | null>;
+} | null = null;
+let openChamberDefaultsUserRevision = 0;
+
+const invalidateOpenChamberDefaultsCache = (): void => {
+    openChamberDefaultsCache = null;
+};
+
+const recordOpenChamberDefaultsChange = (): void => {
+    openChamberDefaultsUserRevision += 1;
+    invalidateOpenChamberDefaultsCache();
+};
+
+const fetchOpenChamberDefaults = (context: ConfigRuntimeContext): Promise<OpenChamberDefaults | null> => {
     const now = Date.now();
-    if (openChamberDefaultsCache && now - openChamberDefaultsCache.at < OPENCHAMBER_DEFAULTS_FRESH_MS) {
+    if (
+        openChamberDefaultsCache
+        && isSameConfigRuntimeContext(openChamberDefaultsCache.context, context)
+        && now - openChamberDefaultsCache.at < OPENCHAMBER_DEFAULTS_FRESH_MS
+    ) {
         return openChamberDefaultsCache.request;
     }
-    const request = requestOpenChamberDefaults();
-    openChamberDefaultsCache = { at: now, request };
-    request.catch(() => {
-        if (openChamberDefaultsCache?.request === request) openChamberDefaultsCache = null;
+    const request = requestOpenChamberDefaults(context);
+    const cacheEntry = { at: now, context, request };
+    openChamberDefaultsCache = cacheEntry;
+    void request.then((result) => {
+        // A failed settings read must not become a 15-second authoritative
+        // empty result. The next directory activation should retry it.
+        if (result === null && openChamberDefaultsCache === cacheEntry) {
+            openChamberDefaultsCache = null;
+        }
+    }).catch(() => {
+        if (openChamberDefaultsCache === cacheEntry) openChamberDefaultsCache = null;
     });
     return request;
 };
 
-const requestOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
+const toOpenChamberDefaults = (data: DesktopSettings): OpenChamberDefaults => {
+    const defaultModel = data.defaultModel?.trim() ?? '';
+    const defaultVariant = data.defaultVariant?.trim() ?? '';
+    const defaultAgent = data.defaultAgent?.trim() ?? '';
+    const zenModel = data.zenModel ?? '';
+
+    return {
+        defaultModel: defaultModel.length > 0 ? defaultModel : undefined,
+        defaultVariant: defaultVariant.length > 0 ? defaultVariant : undefined,
+        defaultAgent: defaultAgent.length > 0 ? defaultAgent : undefined,
+        autoCreateWorktree: data.autoCreateWorktree,
+        gitmojiEnabled: data.gitmojiEnabled,
+        defaultFileViewerPreview: data.defaultFileViewerPreview,
+        zenModel: zenModel.length > 0 ? zenModel : undefined,
+        messageStreamTransport: data.messageStreamTransport,
+        sttProvider: data.sttProvider,
+        sttServerUrl: data.sttServerUrl,
+        sttModel: data.sttModel,
+        sttLocalModel: data.sttLocalModel,
+        sttLanguage: data.sttLanguage,
+    };
+};
+
+const requestOpenChamberDefaults = async (context: ConfigRuntimeContext): Promise<OpenChamberDefaults | null> => {
     markStartupTrace('config.defaults:start');
     const started = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    const finish = (source: string, result: OpenChamberDefaults) => {
+    const finish = (source: string, result: OpenChamberDefaults | null) => {
         const ended = typeof performance !== 'undefined' ? performance.now() : Date.now();
         markStartupTrace('config.defaults:end', {
             source,
             durationMs: Math.round(ended - started),
-            hasDefaultModel: Boolean(result.defaultModel),
-            hasDefaultAgent: Boolean(result.defaultAgent),
+            hasDefaultModel: Boolean(result?.defaultModel),
+            hasDefaultAgent: Boolean(result?.defaultAgent),
         });
         return result;
     };
     try {
-        // 1. Runtime settings API (VSCode)
-        const runtimeSettings = getRegisteredRuntimeAPIs()?.settings;
-        if (runtimeSettings) {
-            try {
-                const result = await runtimeSettings.load();
-                const data = result?.settings;
-                if (data) {
-                    const defaultModel = typeof data?.defaultModel === 'string' ? data.defaultModel.trim() : '';
-                    const defaultVariant = typeof data?.defaultVariant === 'string' ? data.defaultVariant.trim() : '';
-                    const defaultAgent = typeof data?.defaultAgent === 'string' ? data.defaultAgent.trim() : '';
-                    const gitmojiEnabled = typeof data?.gitmojiEnabled === 'boolean' ? data.gitmojiEnabled : undefined;
-                    const defaultFileViewerPreview = typeof data?.defaultFileViewerPreview === 'boolean' ? data.defaultFileViewerPreview : undefined;
-                    const zenModel = typeof data?.zenModel === 'string' ? data.zenModel.trim() : '';
-                    const messageStreamTransport =
-                        data?.messageStreamTransport === 'ws' || data?.messageStreamTransport === 'sse' || data?.messageStreamTransport === 'auto'
-                            ? data.messageStreamTransport
-                            : undefined;
-                    const sttProvider = normalizeSttProvider(data?.sttProvider);
-                    const sttServerUrl = typeof data?.sttServerUrl === 'string' ? data.sttServerUrl.trim() : undefined;
-                    const sttModel = typeof data?.sttModel === 'string' ? data.sttModel.trim() : undefined;
-                    const sttLocalModel = typeof data?.sttLocalModel === 'string' ? data.sttLocalModel.trim() : undefined;
-                    const sttLanguage = typeof data?.sttLanguage === 'string' ? data.sttLanguage.trim() : undefined;
-
-                    return finish('runtime-settings', {
-                        defaultModel: defaultModel.length > 0 ? defaultModel : undefined,
-                        defaultVariant: defaultVariant.length > 0 ? defaultVariant : undefined,
-                        defaultAgent: defaultAgent.length > 0 ? defaultAgent : undefined,
-                        autoCreateWorktree: typeof data?.autoCreateWorktree === 'boolean' ? data.autoCreateWorktree : undefined,
-                        gitmojiEnabled,
-                        defaultFileViewerPreview,
-                        zenModel: zenModel.length > 0 ? zenModel : undefined,
-                        messageStreamTransport,
-                        sttProvider,
-                        sttServerUrl,
-                        sttModel,
-                        sttLocalModel,
-                        sttLanguage,
-                    });
-                }
-            } catch {
-                // Fall through to fetch
-            }
+        const data = await loadDesktopSettings();
+        if (!isConfigRuntimeContextCurrent(context)) {
+            return finish('stale', null);
+        }
+        if (!data) {
+            return finish('settings-unavailable', null);
         }
 
-        // 2. Fetch API (Web/server)
-        const response = await runtimeFetch('/api/config/settings', {
-            method: 'GET',
-            headers: { Accept: 'application/json' },
-        });
-        if (!response.ok) {
-            return finish('settings-route-not-ok', {});
-        }
-        const data = await response.json();
-        const defaultModel = typeof data?.defaultModel === 'string' ? data.defaultModel.trim() : '';
-        const defaultVariant = typeof data?.defaultVariant === 'string' ? data.defaultVariant.trim() : '';
-        const defaultAgent = typeof data?.defaultAgent === 'string' ? data.defaultAgent.trim() : '';
-        const gitmojiEnabled = typeof data?.gitmojiEnabled === 'boolean' ? data.gitmojiEnabled : undefined;
-        const defaultFileViewerPreview = typeof data?.defaultFileViewerPreview === 'boolean' ? data.defaultFileViewerPreview : undefined;
-        const zenModel = typeof data?.zenModel === 'string' ? data.zenModel.trim() : '';
-        const messageStreamTransport =
-            data?.messageStreamTransport === 'ws' || data?.messageStreamTransport === 'sse' || data?.messageStreamTransport === 'auto'
-                ? data.messageStreamTransport
-                : undefined;
-        const sttProvider = normalizeSttProvider(data?.sttProvider);
-        const sttServerUrl = typeof data?.sttServerUrl === 'string' ? data.sttServerUrl.trim() : undefined;
-        const sttModel = typeof data?.sttModel === 'string' ? data.sttModel.trim() : undefined;
-        const sttLocalModel = typeof data?.sttLocalModel === 'string' ? data.sttLocalModel.trim() : undefined;
-        const sttLanguage = typeof data?.sttLanguage === 'string' ? data.sttLanguage.trim() : undefined;
-
-        return finish('settings-route', {
-            defaultModel: defaultModel.length > 0 ? defaultModel : undefined,
-            defaultVariant: defaultVariant.length > 0 ? defaultVariant : undefined,
-            defaultAgent: defaultAgent.length > 0 ? defaultAgent : undefined,
-            autoCreateWorktree: typeof data?.autoCreateWorktree === 'boolean' ? data.autoCreateWorktree : undefined,
-            gitmojiEnabled,
-            defaultFileViewerPreview,
-            zenModel: zenModel.length > 0 ? zenModel : undefined,
-            messageStreamTransport,
-            sttProvider,
-            sttServerUrl,
-            sttModel,
-            sttLocalModel,
-            sttLanguage,
-        });
+        return finish('settings', toOpenChamberDefaults(data));
     } catch (error) {
         markStartupTrace('config.defaults:error', { error: error instanceof Error ? error.message : String(error) });
-        return finish('error', {});
+        return finish('error', null);
     }
 };
 
@@ -233,6 +208,7 @@ const resolveProviderModelSelection = ({
     currentVariant,
     settingsDefaultModel,
     settingsDefaultVariant,
+    allowFallback,
 }: {
     providers: ProviderWithModelList[];
     currentProviderId?: string;
@@ -240,6 +216,7 @@ const resolveProviderModelSelection = ({
     currentVariant?: string;
     settingsDefaultModel?: string;
     settingsDefaultVariant?: string;
+    allowFallback: boolean;
 }): ProviderModelSelection => {
     const resolveVariant = (providerId: string, modelId: string, variant?: string): string | undefined => {
         if (!variant) {
@@ -265,15 +242,18 @@ const resolveProviderModelSelection = ({
 
     if (settingsDefaultModel) {
         const parsed = parseModelString(settingsDefaultModel);
-        if (parsed && hasProviderModel(providers, parsed.providerId, parsed.modelId)) {
+        if (parsed) {
             return {
                 providerId: parsed.providerId,
                 modelId: parsed.modelId,
-                variant: resolveVariant(parsed.providerId, parsed.modelId, settingsDefaultVariant),
+                variant: hasProviderModel(providers, parsed.providerId, parsed.modelId)
+                    ? resolveVariant(parsed.providerId, parsed.modelId, settingsDefaultVariant)
+                    : settingsDefaultVariant,
             };
         }
     }
 
+    if (!allowFallback) return null;
     if (hasProviderModel(providers, FALLBACK_PROVIDER_ID, FALLBACK_MODEL_ID)) {
         return { providerId: FALLBACK_PROVIDER_ID, modelId: FALLBACK_MODEL_ID };
     }
@@ -302,7 +282,9 @@ type DefaultAgentModelSelection = {
 //          → opencode/big-pickle → first
 //
 // The opencode default_agent / default model (config fields on the OpenCode server) are honored
-// only when our own settings have no valid default. OpenCode itself resolves a model the same way:
+// only when our own settings have no default. A configured identifier remains
+// selected through discovery gaps; catalog absence must not select a different model.
+// OpenCode itself resolves a model the same way:
 // an agent's pinned model wins, otherwise the global `model` config applies — so we check the
 // agent's model before opencodeDefaultModel. When the agent supplies the model, its `variant` is
 // carried through too (if the model actually exposes that variant).
@@ -316,6 +298,7 @@ const resolveDefaultAgentModelSelection = ({
     settingsDefaultVariant,
     opencodeDefaultAgent,
     opencodeDefaultModel,
+    allowFallback = true,
 }: {
     agents: Agent[];
     providers: ProviderWithModelList[];
@@ -326,11 +309,8 @@ const resolveDefaultAgentModelSelection = ({
     settingsDefaultVariant?: string;
     opencodeDefaultAgent?: string;
     opencodeDefaultModel?: string;
+    allowFallback?: boolean;
 }): DefaultAgentModelSelection => {
-    if (agents.length === 0) {
-        return { agentName: undefined };
-    }
-
     const resolveVariant = (providerId: string, modelId: string, variant?: string): string | undefined => {
         if (!variant) {
             return undefined;
@@ -360,10 +340,6 @@ const resolveDefaultAgentModelSelection = ({
     if (!resolvedAgent) {
         resolvedAgent = primaryAgents.find((agent) => agent.name === "build") || primaryAgents[0] || agents[0];
     }
-    if (!resolvedAgent) {
-        return { agentName: undefined };
-    }
-
     // --- Model cascade ---
     let providerId: string | undefined;
     let modelId: string | undefined;
@@ -373,28 +349,36 @@ const resolveDefaultAgentModelSelection = ({
 
     if (effectiveDefaultModel) {
         const parsed = parseModelString(effectiveDefaultModel);
-        if (parsed && hasProviderModel(providers, parsed.providerId, parsed.modelId)) {
+        if (parsed) {
             providerId = parsed.providerId;
             modelId = parsed.modelId;
             // A project default carries its own variant; the settings variant
             // belongs to the settings model and must not leak onto it.
-            variant = resolveVariant(providerId, modelId, projectDefaultModel ? projectDefaultVariant : settingsDefaultVariant);
+            const configuredVariant = projectDefaultModel ? projectDefaultVariant : settingsDefaultVariant;
+            variant = hasProviderModel(providers, providerId, modelId)
+                ? resolveVariant(providerId, modelId, configuredVariant)
+                : configuredVariant;
         }
     }
 
+    if (providerId || !allowFallback) {
+        return { agentName: resolvedAgent?.name ?? settingsDefaultAgent, providerId, modelId, variant };
+    }
+
     if (!providerId
-        && resolvedAgent.model?.providerID
-        && resolvedAgent.model?.modelID
-        && hasProviderModel(providers, resolvedAgent.model.providerID, resolvedAgent.model.modelID)) {
+        && resolvedAgent?.model?.providerID
+        && resolvedAgent.model?.modelID) {
         providerId = resolvedAgent.model.providerID;
         modelId = resolvedAgent.model.modelID;
-        variant = resolveVariant(providerId, modelId, resolvedAgent.variant);
+        variant = hasProviderModel(providers, providerId, modelId)
+            ? resolveVariant(providerId, modelId, resolvedAgent.variant)
+            : resolvedAgent.variant;
     }
 
     // OpenCode's global default model — used when neither our settings nor the agent pin a model.
     if (!providerId && opencodeDefaultModel) {
         const parsed = parseModelString(opencodeDefaultModel);
-        if (parsed && hasProviderModel(providers, parsed.providerId, parsed.modelId)) {
+        if (parsed) {
             providerId = parsed.providerId;
             modelId = parsed.modelId;
         }
@@ -414,7 +398,7 @@ const resolveDefaultAgentModelSelection = ({
         }
     }
 
-    return { agentName: resolvedAgent.name, providerId, modelId, variant };
+    return { agentName: resolvedAgent?.name, providerId, modelId, variant };
 };
 
 const resolveGitGenerationModelSelection = ({
@@ -883,12 +867,53 @@ const _providersLoadedAt = new Map<string, number>();
 const _agentsLoadedAt = new Map<string, number>();
 const CONFIG_REFRESH_TTL_MS = 30_000;
 const PROJECT_CONFIG_PREWARM_DELAY_MS = 1_000;
+const getConfigLoadKey = (context: ConfigRuntimeContext, directoryKey: string): string => (
+    JSON.stringify([context.generation, context.runtimeKey, directoryKey])
+);
+
+subscribeRuntimeEndpointChanged((detail) => {
+    configRuntimeGeneration += 1;
+    invalidateOpenChamberDefaultsCache();
+    _providersLoadedAt.clear();
+    _agentsLoadedAt.clear();
+    _initializeAppInFlight = null;
+    if (detail.runtimeKey === detail.previousRuntimeKey) return;
+    useConfigStore.setState({
+        configRuntimeKey: detail.runtimeKey,
+        directoryScoped: {},
+        providers: [],
+        agents: [],
+        providersLoaded: false,
+        agentsLoaded: false,
+        currentProviderId: '',
+        currentModelId: '',
+        currentAgentName: undefined,
+        currentVariant: undefined,
+        currentVariantSelection: { override: undefined, inherited: undefined },
+        selectedProviderId: '',
+        agentModelSelections: {},
+        defaultProviders: {},
+        opencodeDefaultAgent: undefined,
+        opencodeDefaultModel: undefined,
+        settingsDefaultModel: undefined,
+        settingsDefaultVariant: undefined,
+        settingsDefaultAgent: undefined,
+        settingsDefaultsLoaded: false,
+        settingsZenModel: undefined,
+        selectionSource: 'auto',
+        isInitialized: false,
+        isConnected: false,
+    });
+});
+
 const isConfigFresh = (loadedAt: Map<string, number>, key: string): boolean => {
     const at = loadedAt.get(key);
     return typeof at === 'number' && Date.now() - at < CONFIG_REFRESH_TTL_MS;
 };
 
 interface DirectoryScopedConfig {
+    providersLoaded?: boolean;
+    agentsLoaded?: boolean;
 
     providers: ProviderWithModelList[];
     agents: Agent[];
@@ -1041,9 +1066,12 @@ interface ConfigStore {
 
     activeDirectoryKey: string;
     directoryScoped: Record<string, DirectoryScopedConfig>;
+    configRuntimeKey: string;
 
     providers: ProviderWithModelList[];
     agents: Agent[];
+    providersLoaded: boolean;
+    agentsLoaded: boolean;
     currentProviderId: string;
     currentModelId: string;
     currentVariant: string | undefined;
@@ -1061,6 +1089,7 @@ interface ConfigStore {
     modelsMetadata: Map<string, ModelMetadata>;
     // OpenChamber settings-based defaults (take precedence over agent preferences)
     settingsDefaultModel: string | undefined; // format: "provider/model"
+    settingsDefaultsLoaded: boolean;
     settingsDefaultVariant: string | undefined;
     settingsDefaultAgent: string | undefined;
     // OpenCode server's own `default_agent` config field (name of a primary agent), used as a
@@ -1140,6 +1169,7 @@ interface ConfigStore {
     activateDirectory: (directory: string | null | undefined) => Promise<void>;
 
     loadProviders: (options?: { directory?: string | null; source?: string }) => Promise<void>;
+    loadSessionDefaults: () => Promise<boolean>;
     loadAgents: (options?: { directory?: string | null; source?: string }) => Promise<boolean>;
     invalidateModelMetadataCache: () => void;
     invalidateProviderCache: (directory?: string | null) => void;
@@ -1214,9 +1244,12 @@ export const useConfigStore = create<ConfigStore>()(
 
                 activeDirectoryKey: resolveInitialDirectoryKey(),
                 directoryScoped: {},
+                configRuntimeKey: getRuntimeKey(),
 
                 providers: [],
                 agents: [],
+                providersLoaded: false,
+                agentsLoaded: false,
                 currentProviderId: "",
                 currentModelId: "",
                 currentVariant: undefined,
@@ -1233,6 +1266,7 @@ export const useConfigStore = create<ConfigStore>()(
                 isInitialized: false,
                 modelsMetadata: new Map<string, ModelMetadata>(),
                 settingsDefaultModel: undefined,
+                settingsDefaultsLoaded: false,
                 settingsDefaultVariant: undefined,
                 settingsDefaultAgent: undefined,
                 opencodeDefaultAgent: undefined,
@@ -1477,6 +1511,7 @@ export const useConfigStore = create<ConfigStore>()(
                     return 500;
                 })(),
                 activateDirectory: async (directory) => {
+                    const runtimeContext = captureConfigRuntimeContext();
                     // Resolve the worktree to its owning project up-front so the
                     // active key + snapshot key always match and stay project-scoped.
                     // Everything below operates on this key unchanged; the OpenCode
@@ -1499,6 +1534,8 @@ export const useConfigStore = create<ConfigStore>()(
                                 activeDirectoryKey: directoryKey,
                                 providers: snapshot.providers,
                                 agents: snapshot.agents,
+                                providersLoaded: snapshot.providersLoaded ?? snapshot.providers.length > 0,
+                                agentsLoaded: snapshot.agentsLoaded ?? snapshot.agents.length > 0,
                                 currentProviderId: snapshot.currentProviderId,
                                 currentModelId: snapshot.currentModelId,
                                 currentVariant: snapshot.currentVariant,
@@ -1517,6 +1554,8 @@ export const useConfigStore = create<ConfigStore>()(
                             activeDirectoryKey: directoryKey,
                             providers: [],
                             agents: [],
+                            providersLoaded: false,
+                            agentsLoaded: false,
                             currentProviderId: "",
                             currentModelId: "",
                             currentVariantSelection: { override: undefined, inherited: undefined },
@@ -1538,6 +1577,7 @@ export const useConfigStore = create<ConfigStore>()(
                     // populated the pickers, refresh in the background so the UI
                     // stays instant but never shows stale provider/agent data for
                     // longer than one fetch. Only block when there is nothing to show.
+                    const requiredLoads: Promise<void | boolean>[] = [];
                     if (snapshotHadProviders) {
                         if (isConfigFresh(_providersLoadedAt, directoryKey)) {
                             markStartupTrace('activateDirectory:providersFresh', { directoryKey });
@@ -1546,9 +1586,10 @@ export const useConfigStore = create<ConfigStore>()(
                             void get().loadProviders({ directory: fromDirectoryKey(directoryKey), source: 'activateDirectory:refresh' });
                         }
                     } else {
-                        await get().loadProviders({ directory: fromDirectoryKey(directoryKey), source: 'activateDirectory' });
+                        requiredLoads.push(get().loadProviders({ directory: fromDirectoryKey(directoryKey), source: 'activateDirectory' }));
                     }
 
+                    if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
                     if (snapshotHadAgents) {
                         if (isConfigFresh(_agentsLoadedAt, directoryKey)) {
                             markStartupTrace('activateDirectory:agentsFresh', { directoryKey });
@@ -1557,8 +1598,9 @@ export const useConfigStore = create<ConfigStore>()(
                             void get().loadAgents({ directory: fromDirectoryKey(directoryKey), source: 'activateDirectory:refresh' });
                         }
                     } else {
-                        await get().loadAgents({ directory: fromDirectoryKey(directoryKey), source: 'activateDirectory' });
+                        requiredLoads.push(get().loadAgents({ directory: fromDirectoryKey(directoryKey), source: 'activateDirectory' }));
                     }
+                    await Promise.all(requiredLoads);
                 },
 
                 invalidateProviderCache: (directory) => {
@@ -1572,7 +1614,7 @@ export const useConfigStore = create<ConfigStore>()(
                         };
 
                         const clearSnapshot = (snapshot: DirectoryScopedConfig): DirectoryScopedConfig => {
-                            if (snapshot.providers.length === 0 && Object.keys(snapshot.defaultProviders).length === 0) {
+                            if (!snapshot.providersLoaded && snapshot.providers.length === 0 && Object.keys(snapshot.defaultProviders).length === 0) {
                                 return snapshot;
                             }
 
@@ -1580,6 +1622,7 @@ export const useConfigStore = create<ConfigStore>()(
                             return {
                                 ...snapshot,
                                 providers: [],
+                                providersLoaded: false,
                                 defaultProviders: {},
                             };
                         };
@@ -1600,6 +1643,7 @@ export const useConfigStore = create<ConfigStore>()(
                         }
 
                         if (targetDirectoryKey === null || targetDirectoryKey === state.activeDirectoryKey) {
+                            nextState.providersLoaded = false;
                             if (state.providers.length > 0) {
                                 nextState.providers = [];
                             }
@@ -1613,6 +1657,7 @@ export const useConfigStore = create<ConfigStore>()(
                 },
 
                 loadProviders: async (options) => {
+                    const runtimeContext = captureConfigRuntimeContext();
                     const requestedDirectory = options?.directory ?? fromDirectoryKey(get().activeDirectoryKey);
                     // Providers are project-scoped: resolve a worktree to its project
                     // so it reuses one shared snapshot instead of its own.
@@ -1623,17 +1668,19 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     const effectiveDirectory = configDirectory ?? opencodeClient.getDirectory() ?? null;
                     const directoryKey = toDirectoryKey(configDirectory);
+                    const inFlightKey = getConfigLoadKey(runtimeContext, directoryKey);
                     const source = options?.source ?? 'unknown';
                     markStartupTrace('loadProviders:called', { directoryKey, source, requestedDirectory, effectiveDirectory });
 
                     // Dedup: if a load is already in-flight for this directory, reuse it
-                    const existing = _inFlightProviders.get(directoryKey);
+                    const existing = _inFlightProviders.get(inFlightKey);
                     if (existing) {
                         markStartupTrace('loadProviders:deduped', { directoryKey, source, requestedDirectory, effectiveDirectory });
                         return existing;
                     }
 
                     const promise = (async () => {
+                    if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
                     const loaderStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
                     markStartupTrace('loadProviders:start', { directoryKey, source, requestedDirectory, effectiveDirectory });
                     const existingSnapshot = get().directoryScoped[directoryKey];
@@ -1645,13 +1692,18 @@ export const useConfigStore = create<ConfigStore>()(
                         try {
                             ensureModelsMetadataFetch(
                                 () => get().modelsMetadata,
-                                (metadata) => set({ modelsMetadata: metadata }),
+                                (metadata) => {
+                                    if (isConfigRuntimeContextCurrent(runtimeContext)) {
+                                        set({ modelsMetadata: metadata });
+                                    }
+                                },
                             );
                             const apiResult = await measureStartupTrace(
                                 'loadProviders:api',
                                 () => opencodeClient.getProvidersForConfig(fromDirectoryKey(directoryKey)),
                                 { directoryKey, source, requestedDirectory, effectiveDirectory, attempt: attempt + 1 },
                             );
+                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
                             const providers = Array.isArray(apiResult?.providers) ? apiResult.providers : [];
                             const defaults = apiResult?.default || {};
 
@@ -1664,7 +1716,9 @@ export const useConfigStore = create<ConfigStore>()(
                                 };
                             });
 
+                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
                             set((state) => {
+                                if (!isConfigRuntimeContextCurrent(runtimeContext)) return state;
                                 const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
                                     providers: [],
                                     agents: [],
@@ -1685,13 +1739,15 @@ export const useConfigStore = create<ConfigStore>()(
                                 const currentVariant = state.activeDirectoryKey === directoryKey
                                     ? state.currentVariant
                                     : baseSnapshot.currentVariant;
+                                const project = useProjectsStore.getState().projects.find((entry) => toDirectoryKey(entry.path) === directoryKey);
                                 const resolvedModel = resolveProviderModelSelection({
                                     providers: processedProviders,
                                     currentProviderId,
                                     currentModelId,
                                     currentVariant,
-                                    settingsDefaultModel: state.settingsDefaultModel,
-                                    settingsDefaultVariant: state.settingsDefaultVariant,
+                                    settingsDefaultModel: project?.defaultModel || state.settingsDefaultModel,
+                                    settingsDefaultVariant: project?.defaultModel ? project.defaultVariant : state.settingsDefaultVariant,
+                                    allowFallback: state.settingsDefaultsLoaded,
                                 });
                                 const currentSelectedProviderId = state.activeDirectoryKey === directoryKey
                                     ? state.selectedProviderId
@@ -1709,6 +1765,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 const nextSnapshot: DirectoryScopedConfig = {
                                     ...baseSnapshot,
                                     providers: processedProviders,
+                                    providersLoaded: true,
                                     defaultProviders: defaults,
                                     currentProviderId: resolvedModel?.providerId ?? "",
                                     currentModelId: resolvedModel?.modelId ?? "",
@@ -1725,6 +1782,7 @@ export const useConfigStore = create<ConfigStore>()(
 
                                 if (state.activeDirectoryKey === directoryKey) {
                                     nextState.providers = processedProviders;
+                                    nextState.providersLoaded = true;
                                     nextState.defaultProviders = defaults;
                                     nextState.currentProviderId = nextSnapshot.currentProviderId;
                                     nextState.currentModelId = nextSnapshot.currentModelId;
@@ -1735,6 +1793,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 return nextState;
                             });
 
+                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
                             const loaderEnded = typeof performance !== 'undefined' ? performance.now() : Date.now();
                             markStartupTrace('loadProviders:end', {
                                 directoryKey,
@@ -1759,9 +1818,11 @@ export const useConfigStore = create<ConfigStore>()(
                             });
                             const waitMs = 200 * (attempt + 1);
                             await new Promise((resolve) => setTimeout(resolve, waitMs));
+                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
                         }
                     }
 
+                    if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
                     console.error("Failed to load providers:", lastError);
                     markStartupTrace('loadProviders:error', {
                         directoryKey,
@@ -1771,7 +1832,9 @@ export const useConfigStore = create<ConfigStore>()(
                         error: lastError instanceof Error ? lastError.message : String(lastError),
                     });
 
+                    if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
                     set((state) => {
+                        if (!isConfigRuntimeContextCurrent(runtimeContext)) return state;
                         const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
                             providers: [],
                             agents: [],
@@ -1831,9 +1894,9 @@ export const useConfigStore = create<ConfigStore>()(
 
                         return nextState;
                     });
-                    })().finally(() => _inFlightProviders.delete(directoryKey));
+                    })().finally(() => _inFlightProviders.delete(inFlightKey));
 
-                    _inFlightProviders.set(directoryKey, promise);
+                    _inFlightProviders.set(inFlightKey, promise);
                     return promise;
                 },
 
@@ -2063,7 +2126,48 @@ export const useConfigStore = create<ConfigStore>()(
                     return agentModelSelections[agentName] || null;
                 },
 
+                loadSessionDefaults: async () => {
+                    const runtimeContext = captureConfigRuntimeContext();
+                    const revision = openChamberDefaultsUserRevision;
+                    const defaults = await fetchOpenChamberDefaults(runtimeContext);
+                    if (!isConfigRuntimeContextCurrent(runtimeContext) || !defaults) return false;
+
+                    set((state) => {
+                        const edited = revision !== openChamberDefaultsUserRevision;
+                        const next: Partial<ConfigStore> = {
+                            configRuntimeKey: runtimeContext.runtimeKey,
+                            settingsDefaultsLoaded: true,
+                            settingsDefaultModel: edited ? state.settingsDefaultModel : defaults.defaultModel,
+                            settingsDefaultVariant: edited ? state.settingsDefaultVariant : defaults.defaultVariant,
+                            settingsDefaultAgent: edited ? state.settingsDefaultAgent : defaults.defaultAgent,
+                            settingsAutoCreateWorktree: defaults.autoCreateWorktree ?? false,
+                            settingsGitmojiEnabled: defaults.gitmojiEnabled ?? false,
+                            settingsDefaultFileViewerPreview: defaults.defaultFileViewerPreview ?? false,
+                            settingsZenModel: defaults.zenModel,
+                            settingsMessageStreamTransport: defaults.messageStreamTransport ?? state.settingsMessageStreamTransport,
+                            sttProvider: defaults.sttProvider ?? state.sttProvider,
+                            sttServerUrl: defaults.sttServerUrl ?? state.sttServerUrl,
+                            sttModel: defaults.sttModel ?? state.sttModel,
+                            sttLocalModel: defaults.sttLocalModel ?? state.sttLocalModel,
+                            sttLanguage: defaults.sttLanguage ?? state.sttLanguage,
+                        };
+                        if (!useSessionUIStore.getState().currentSessionId && state.selectionSource === 'auto' && next.settingsDefaultAgent) {
+                            next.currentAgentName = next.settingsDefaultAgent;
+                        }
+                        return next;
+                    });
+                    const state = get();
+                    const project = useProjectsStore.getState().projects.find((entry) => toDirectoryKey(entry.path) === state.activeDirectoryKey);
+                    if (!useSessionUIStore.getState().currentSessionId && state.selectionSource === 'auto'
+                        && (project?.defaultModel || state.settingsDefaultModel)) {
+                        state.applyDefaultModelAgentSelection({ projectDefaultModel: project?.defaultModel, projectDefaultVariant: project?.defaultVariant });
+                    }
+                    markStartupTrace('config.defaults:published');
+                    return true;
+                },
+
                 loadAgents: async (options) => {
+                    const runtimeContext = captureConfigRuntimeContext();
                     const requestedDirectory = options?.directory ?? fromDirectoryKey(get().activeDirectoryKey);
                     // Agents are project-scoped: resolve a worktree to its project
                     // so it reuses one shared snapshot instead of its own.
@@ -2074,17 +2178,19 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     const effectiveDirectory = configDirectory ?? opencodeClient.getDirectory() ?? null;
                     const directoryKey = toDirectoryKey(configDirectory);
+                    const inFlightKey = getConfigLoadKey(runtimeContext, directoryKey);
                     const source = options?.source ?? 'unknown';
                     markStartupTrace('loadAgents:called', { directoryKey, source, requestedDirectory, effectiveDirectory });
 
                     // Dedup: if a load is already in-flight for this directory, reuse it
-                    const existing = _inFlightAgents.get(directoryKey);
+                    const existing = _inFlightAgents.get(inFlightKey);
                     if (existing) {
                         markStartupTrace('loadAgents:deduped', { directoryKey, source, requestedDirectory, effectiveDirectory });
                         return existing;
                     }
 
                     const promise = (async (): Promise<boolean> => {
+                    if (!isConfigRuntimeContextCurrent(runtimeContext)) return false;
                     const loaderStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
                     markStartupTrace('loadAgents:start', { directoryKey, source, requestedDirectory, effectiveDirectory });
                     const existingSnapshot = get().directoryScoped[directoryKey];
@@ -2102,22 +2208,20 @@ export const useConfigStore = create<ConfigStore>()(
                             if (initialSyncedOpencodeConfig) {
                                 markStartupTrace('loadAgents:syncConfigHit', { directoryKey, source });
                             }
-                            const [agents, openChamberDefaults] = await Promise.all([
+                            const [agents, defaultsLoaded] = await Promise.all([
                                 measureStartupTrace(
                                     'loadAgents:api',
                                     () => opencodeClient.listAgents(configDirectoryPath),
                                     { directoryKey, source, requestedDirectory, effectiveDirectory, attempt: attempt + 1 },
                                 ),
-                                fetchOpenChamberDefaults(),
+                                get().loadSessionDefaults(),
                             ]);
 
-                            const safeAgents = Array.isArray(agents) ? agents : [];
-
-                            const providerLoad = _inFlightProviders.get(directoryKey);
-                            if (providerLoad) {
-                                markStartupTrace('loadAgents:awaitProviders', { directoryKey, source });
-                                await providerLoad;
+                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return false;
+                            if (!defaultsLoaded && !get().settingsDefaultsLoaded) {
+                                throw new Error('Session defaults are not available yet');
                             }
+                            const safeAgents = Array.isArray(agents) ? agents : [];
 
                             const latestSyncedOpencodeConfig = getSyncConfig(requestedDirectory ?? undefined)
                                 ?? getSyncConfig(configDirectoryPath ?? undefined);
@@ -2133,25 +2237,16 @@ export const useConfigStore = create<ConfigStore>()(
                                 ? get().providers
                                 : (get().directoryScoped[directoryKey]?.providers ?? []);
 
-                            const existingZenModel = normalizeOptionalString(get().settingsZenModel);
-
-                            const defaultZenModel = normalizeOptionalString(openChamberDefaults.zenModel);
-
-                            const resolvedExistingGitSelection = resolveGitGenerationModelSelection({
-                                providers,
-                                settingsZenModel: existingZenModel,
-                            });
-
-                            const resolvedDefaultGitSelection = resolveGitGenerationModelSelection({
+                            const defaultZenModel = normalizeOptionalString(get().settingsZenModel);
+                            const resolvedGitSelection = resolveGitGenerationModelSelection({
                                 providers,
                                 settingsZenModel: defaultZenModel,
                             });
+                            const resolvedZenModel = resolvedGitSelection?.modelId || defaultZenModel;
 
-                            const resolvedGitSelection = resolvedExistingGitSelection || resolvedDefaultGitSelection;
-                            const resolvedGitModelId = resolvedGitSelection?.modelId;
-                            const resolvedZenModel = resolvedGitModelId || defaultZenModel || existingZenModel;
-
+                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return false;
                             set((state) => {
+                                if (!isConfigRuntimeContextCurrent(runtimeContext)) return state;
                                 const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
                                     providers,
                                     agents: previousAgents,
@@ -2178,19 +2273,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 };
 
                                 const nextState: Partial<ConfigStore> = {
-                                    settingsDefaultModel: openChamberDefaults.defaultModel,
-                                    settingsDefaultVariant: openChamberDefaults.defaultVariant,
-                                    settingsDefaultAgent: openChamberDefaults.defaultAgent,
-                                    settingsAutoCreateWorktree: openChamberDefaults.autoCreateWorktree ?? false,
-                                    settingsGitmojiEnabled: openChamberDefaults.gitmojiEnabled ?? false,
-                                    settingsDefaultFileViewerPreview: openChamberDefaults.defaultFileViewerPreview ?? false,
                                     settingsZenModel: resolvedZenModel,
-                                    settingsMessageStreamTransport: openChamberDefaults.messageStreamTransport ?? state.settingsMessageStreamTransport ?? 'auto',
-                                    sttProvider: openChamberDefaults.sttProvider ?? state.sttProvider,
-                                    sttServerUrl: openChamberDefaults.sttServerUrl ?? state.sttServerUrl,
-                                    sttModel: openChamberDefaults.sttModel ?? state.sttModel,
-                                    sttLocalModel: openChamberDefaults.sttLocalModel ?? state.sttLocalModel,
-                                    sttLanguage: openChamberDefaults.sttLanguage ?? state.sttLanguage,
                                     directoryScoped: {
                                         ...state.directoryScoped,
                                         [directoryKey]: nextSnapshot,
@@ -2220,15 +2303,19 @@ export const useConfigStore = create<ConfigStore>()(
                             if (shouldPersistResolvedZenModel && resolvedZenModel) {
                                 updateDesktopSettings({
                                     zenModel: resolvedZenModel,
-                                    gitProviderId: '',
-                                    gitModelId: '',
                                 }).catch(() => {
                                     // Ignore errors - best effort cleanup
                                 });
                             }
 
                             if (safeAgents.length === 0) {
+                                if (get().activeDirectoryKey === directoryKey && !useSessionUIStore.getState().currentSessionId && get().selectionSource === 'auto') {
+                                    const project = useProjectsStore.getState().projects.find((entry) => toDirectoryKey(entry.path) === directoryKey);
+                                    get().applyDefaultModelAgentSelection({ projectDefaultModel: project?.defaultModel, projectDefaultVariant: project?.defaultVariant });
+                                }
+                                if (!isConfigRuntimeContextCurrent(runtimeContext)) return false;
                                 set((state) => {
+                                    if (!isConfigRuntimeContextCurrent(runtimeContext)) return state;
                                     const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
                                         providers,
                                         agents: [],
@@ -2246,6 +2333,7 @@ export const useConfigStore = create<ConfigStore>()(
                                         providers,
                                         agents: [],
                                         currentAgentName: undefined,
+                                        agentsLoaded: true,
                                     };
 
                                     const nextState: Partial<ConfigStore> = {
@@ -2257,6 +2345,7 @@ export const useConfigStore = create<ConfigStore>()(
 
                                     if (state.activeDirectoryKey === directoryKey) {
                                         nextState.currentAgentName = undefined;
+                                        nextState.agentsLoaded = true;
                                     }
 
                                     return nextState;
@@ -2275,53 +2364,30 @@ export const useConfigStore = create<ConfigStore>()(
                                 return true;
                             }
 
-                            // Helper to validate model exists in providers
-                            const validateModel = (providerId: string, modelId: string): boolean => {
-                                const provider = providers.find((p) => p.id === providerId);
-                                if (!provider) return false;
-                                return provider.models.some((m) => m.id === modelId);
-                            };
-
-                            // Detect invalid OpenChamber settings so we can clear them from storage.
-                            // This is independent of resolution: even though the cascade below falls
-                            // back gracefully, stale settings pointing at removed agents/models/variants
-                            // should be cleaned up.
-                            const invalidSettings: { defaultModel?: string; defaultVariant?: string; defaultAgent?: string } = {};
-                            if (openChamberDefaults.defaultAgent && !safeAgents.some((agent) => agent.name === openChamberDefaults.defaultAgent)) {
-                                invalidSettings.defaultAgent = '';
-                            }
-                            if (openChamberDefaults.defaultModel) {
-                                const parsed = parseModelString(openChamberDefaults.defaultModel);
-                                if (!parsed || !validateModel(parsed.providerId, parsed.modelId)) {
-                                    invalidSettings.defaultModel = '';
-                                } else if (openChamberDefaults.defaultVariant) {
-                                    const provider = providers.find((p) => p.id === parsed.providerId);
-                                    const model = provider?.models.find((m) => m.id === parsed.modelId) as { variants?: Record<string, unknown> } | undefined;
-                                    const variants = model?.variants;
-                                    if (!(variants && Object.prototype.hasOwnProperty.call(variants, openChamberDefaults.defaultVariant))) {
-                                        invalidSettings.defaultVariant = '';
-                                    }
-                                }
-                            }
-
                             // Resolve agent + model via the shared cascade:
                             //   settings.defaultAgent → opencode default_agent → build → first primary → first
                             //   settings.defaultModel → resolved agent's model+variant → opencode/big-pickle → first
+                            const project = useProjectsStore.getState().projects.find((entry) => toDirectoryKey(entry.path) === directoryKey);
                             const resolvedDefault = resolveDefaultAgentModelSelection({
                                 agents: safeAgents,
                                 providers,
-                                settingsDefaultAgent: openChamberDefaults.defaultAgent,
-                                settingsDefaultModel: openChamberDefaults.defaultModel,
-                                settingsDefaultVariant: openChamberDefaults.defaultVariant,
+                                projectDefaultModel: project?.defaultModel,
+                                projectDefaultVariant: project?.defaultVariant,
+                                settingsDefaultAgent: get().settingsDefaultAgent,
+                                settingsDefaultModel: get().settingsDefaultModel,
+                                settingsDefaultVariant: get().settingsDefaultVariant,
                                 opencodeDefaultAgent,
                                 opencodeDefaultModel,
+                                allowFallback: get().settingsDefaultsLoaded,
                             });
                             const resolvedAgentName = resolvedDefault.agentName ?? safeAgents[0].name;
                             const resolvedProviderId = resolvedDefault.providerId;
                             const resolvedModelId = resolvedDefault.modelId;
                             const resolvedVariant = resolvedDefault.variant;
 
+                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return false;
                             set((state) => {
+                                if (!isConfigRuntimeContextCurrent(runtimeContext)) return state;
                                 const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
                                     providers,
                                     agents: safeAgents,
@@ -2357,6 +2423,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     providers,
                                     agents: safeAgents,
                                     currentAgentName: nextSelection.agentName,
+                                    agentsLoaded: true,
                                     currentProviderId: nextSelection.providerId ?? baseSnapshot.currentProviderId,
                                     currentModelId: nextSelection.modelId ?? baseSnapshot.currentModelId,
                                     currentVariant: nextSelection.variant,
@@ -2373,6 +2440,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 };
 
                                 if (isActive) {
+                                    nextState.agentsLoaded = true;
                                     nextState.currentAgentName = nextSelection.agentName;
                                     nextState.opencodeDefaultAgent = opencodeDefaultAgent;
                                     nextState.opencodeDefaultModel = opencodeDefaultModel;
@@ -2386,19 +2454,6 @@ export const useConfigStore = create<ConfigStore>()(
 
                                 return nextState;
                             });
-
-                            // Clear invalid settings from storage (best-effort cleanup)
-                            if (Object.keys(invalidSettings).length > 0) {
-                                // Also clear from store state
-                                 set({
-                                     settingsDefaultModel: invalidSettings.defaultModel !== undefined ? undefined : get().settingsDefaultModel,
-                                     settingsDefaultVariant: invalidSettings.defaultVariant !== undefined ? undefined : get().settingsDefaultVariant,
-                                     settingsDefaultAgent: invalidSettings.defaultAgent !== undefined ? undefined : get().settingsDefaultAgent,
-                                 });
-                                updateDesktopSettings(invalidSettings).catch(() => {
-                                    // Ignore errors - best effort cleanup
-                                });
-                            }
 
                             const loaderEnded = typeof performance !== 'undefined' ? performance.now() : Date.now();
                             markStartupTrace('loadAgents:end', {
@@ -2423,9 +2478,11 @@ export const useConfigStore = create<ConfigStore>()(
                             });
                             const waitMs = 200 * (attempt + 1);
                             await new Promise((resolve) => setTimeout(resolve, waitMs));
+                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return false;
                         }
                     }
 
+                    if (!isConfigRuntimeContextCurrent(runtimeContext)) return false;
                     console.error("Failed to load agents:", lastError);
                     markStartupTrace('loadAgents:error', {
                         directoryKey,
@@ -2435,7 +2492,9 @@ export const useConfigStore = create<ConfigStore>()(
                         error: lastError instanceof Error ? lastError.message : String(lastError),
                     });
 
+                    if (!isConfigRuntimeContextCurrent(runtimeContext)) return false;
                     set((state) => {
+                        if (!isConfigRuntimeContextCurrent(runtimeContext)) return state;
                         const providers = state.activeDirectoryKey === directoryKey
                             ? state.providers
                             : (state.directoryScoped[directoryKey]?.providers ?? []);
@@ -2472,9 +2531,9 @@ export const useConfigStore = create<ConfigStore>()(
                     });
 
                     return false;
-                    })().finally(() => _inFlightAgents.delete(directoryKey));
+                    })().finally(() => _inFlightAgents.delete(inFlightKey));
 
-                    _inFlightAgents.set(directoryKey, promise);
+                    _inFlightAgents.set(inFlightKey, promise);
                     return promise;
                 },
 
@@ -2730,10 +2789,6 @@ export const useConfigStore = create<ConfigStore>()(
                         opencodeDefaultModel,
                     } = get();
 
-                    if (agents.length === 0 || providers.length === 0) {
-                        return;
-                    }
-
                     const {
                         agentName: resolvedAgentName,
                         providerId: resolvedProviderId,
@@ -2749,11 +2804,8 @@ export const useConfigStore = create<ConfigStore>()(
                         settingsDefaultVariant,
                         opencodeDefaultAgent,
                         opencodeDefaultModel,
+                        allowFallback: get().settingsDefaultsLoaded,
                     });
-
-                    if (!resolvedAgentName) {
-                        return;
-                    }
 
                     set((state) => {
                         const directoryKey = state.activeDirectoryKey;
@@ -2772,34 +2824,24 @@ export const useConfigStore = create<ConfigStore>()(
                         const nextSnapshot: DirectoryScopedConfig = {
                             ...baseSnapshot,
                             currentAgentName: resolvedAgentName,
-                            ...(resolvedProviderId && resolvedModelId
-                                ? {
-                                    currentProviderId: resolvedProviderId,
-                                    currentModelId: resolvedModelId,
-                                    currentVariant: resolvedVariant,
-                                }
-                                : {}),
+                            currentProviderId: resolvedProviderId ?? '',
+                            currentModelId: resolvedModelId ?? '',
+                            currentVariant: resolvedVariant,
                             selectionSource: "auto",
                         };
 
                         const nextState: Partial<ConfigStore> = {
                             currentAgentName: resolvedAgentName,
+                            currentProviderId: nextSnapshot.currentProviderId,
+                            currentModelId: nextSnapshot.currentModelId,
+                            currentVariant: resolvedVariant,
+                            currentVariantSelection: { override: resolvedVariant, inherited: resolvedVariant },
                             selectionSource: "auto",
                             directoryScoped: {
                                 ...state.directoryScoped,
                                 [directoryKey]: nextSnapshot,
                             },
                         };
-
-                        if (resolvedProviderId && resolvedModelId) {
-                            nextState.currentProviderId = resolvedProviderId;
-                            nextState.currentModelId = resolvedModelId;
-                            nextState.currentVariant = resolvedVariant;
-                            nextState.currentVariantSelection = {
-                                override: resolvedVariant,
-                                inherited: resolvedVariant,
-                            };
-                        }
 
                         return nextState;
                     });
@@ -2859,14 +2901,18 @@ export const useConfigStore = create<ConfigStore>()(
                             return nextState;
                         }
 
+                        const project = useProjectsStore.getState().projects.find((entry) => toDirectoryKey(entry.path) === directoryKey);
                         const resolved = resolveDefaultAgentModelSelection({
                             agents,
                             providers,
+                            projectDefaultModel: project?.defaultModel,
+                            projectDefaultVariant: project?.defaultVariant,
                             settingsDefaultAgent: state.settingsDefaultAgent,
                             settingsDefaultModel: state.settingsDefaultModel,
                             settingsDefaultVariant: state.settingsDefaultVariant,
                             opencodeDefaultAgent,
                             opencodeDefaultModel,
+                            allowFallback: state.settingsDefaultsLoaded,
                         });
 
                         if (!resolved.agentName) {
@@ -2950,15 +2996,21 @@ export const useConfigStore = create<ConfigStore>()(
                 },
 
                  setSettingsDefaultModel: (model: string | undefined) => {
+                     recordOpenChamberDefaultsChange();
                      set({ settingsDefaultModel: model });
+                     if (!useSessionUIStore.getState().currentSessionId) get().applyDefaultModelAgentSelection();
                  },
 
                  setSettingsDefaultVariant: (variant: string | undefined) => {
+                     recordOpenChamberDefaultsChange();
                      set({ settingsDefaultVariant: variant });
+                     if (!useSessionUIStore.getState().currentSessionId) get().applyDefaultModelAgentSelection();
                  },
  
                  setSettingsDefaultAgent: (agent: string | undefined) => {
+                     recordOpenChamberDefaultsChange();
                      set({ settingsDefaultAgent: agent });
+                     if (!useSessionUIStore.getState().currentSessionId) get().applyDefaultModelAgentSelection();
                  },
 
                 setSettingsAutoCreateWorktree: (enabled: boolean) => {
@@ -3217,12 +3269,14 @@ export const useConfigStore = create<ConfigStore>()(
                 },
 
                 checkConnection: async () => {
+                    const runtimeContext = captureConfigRuntimeContext();
                     markStartupTrace('checkConnection:start');
                     const maxAttempts = 5;
                     let attempt = 0;
                     let lastError: unknown = null;
 
                     while (attempt < maxAttempts) {
+                        if (!isConfigRuntimeContextCurrent(runtimeContext)) return false;
                         try {
                             markStartupTrace('checkConnection:attempt', { attempt: attempt + 1 });
                             const isHealthy = await measureStartupTrace(
@@ -3230,6 +3284,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 () => opencodeClient.checkHealth(),
                                 { attempt: attempt + 1 },
                             );
+                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return false;
                             if (!isHealthy && attempt < maxAttempts - 1) {
                                 const hasEverConnected = get().hasEverConnected;
                                 set({
@@ -3260,6 +3315,7 @@ export const useConfigStore = create<ConfigStore>()(
                         }
                     }
 
+                    if (!isConfigRuntimeContextCurrent(runtimeContext)) return false;
                     if (lastError) {
                         console.warn("[ConfigStore] Failed to reach OpenCode after retrying:", lastError);
                     }
@@ -3278,6 +3334,7 @@ export const useConfigStore = create<ConfigStore>()(
                         return _initializeAppInFlight;
                     }
 
+                    const runtimeContext = captureConfigRuntimeContext();
                     const run = (async () => {
                         const initStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
                         markStartupTrace('initializeApp:start');
@@ -3285,7 +3342,11 @@ export const useConfigStore = create<ConfigStore>()(
                             const debug = streamDebugEnabled();
                             if (debug) console.log("Starting app initialization...");
 
+                            // OpenChamber preferences do not depend on OpenCode health
+                            // or project discovery. Publish a known choice immediately.
+                            void get().loadSessionDefaults();
                             const isConnected = await get().checkConnection();
+                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
                             if (debug) console.log("Connection check result:", isConnected);
 
                             if (!isConnected) {
@@ -3340,11 +3401,13 @@ export const useConfigStore = create<ConfigStore>()(
                             }
 
                             if (debug) console.log("Loading providers and agents...");
-                            await Promise.all([
+                            const [, agentsLoaded] = await Promise.all([
                                 get().loadProviders({ directory: configDirectory, source: 'initializeApp' }),
                                 get().loadAgents({ directory: configDirectory, source: 'initializeApp' }),
                             ]);
 
+                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                            if (!agentsLoaded) return;
                             set({ isInitialized: true, isConnected: true, hasEverConnected: true, connectionPhase: "connected" });
                             void get().prewarmProjectConfigs(configDirectory);
                             const initEnded = typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -3355,6 +3418,7 @@ export const useConfigStore = create<ConfigStore>()(
                             });
                             if (debug) console.log("App initialized successfully");
                         } catch (error) {
+                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
                             console.error("Failed to initialize app:", error);
                             set({
                                 isInitialized: false,
@@ -3365,7 +3429,7 @@ export const useConfigStore = create<ConfigStore>()(
                             markStartupTrace('initializeApp:error', { error: error instanceof Error ? error.message : String(error) });
                         }
                     })().finally(() => {
-                        _initializeAppInFlight = null;
+                        if (_initializeAppInFlight === run) _initializeAppInFlight = null;
                     });
 
                     _initializeAppInFlight = run;
@@ -3373,6 +3437,7 @@ export const useConfigStore = create<ConfigStore>()(
                 },
 
                 prewarmProjectConfigs: async (initialDirectory?: string | null) => {
+                    const runtimeContext = captureConfigRuntimeContext();
                     if (!get().isConnected) {
                         return;
                     }
@@ -3403,7 +3468,7 @@ export const useConfigStore = create<ConfigStore>()(
 
                     for (const directory of queuedDirectories) {
                         await sleep(PROJECT_CONFIG_PREWARM_DELAY_MS);
-                        if (!get().isConnected) {
+                        if (!isConfigRuntimeContextCurrent(runtimeContext) || !get().isConnected) {
                             return;
                         }
                         const directoryKey = toConfigDirectoryKey(directory);
@@ -3471,19 +3536,20 @@ export const useConfigStore = create<ConfigStore>()(
             {
                 name: "config-store",
                 storage: createDeferredSafeJSONStorage(),
-                merge: (persistedState, currentState) =>
-                    hydrateActiveDirectorySnapshot({
-                        ...currentState,
-                        ...(persistedState && typeof persistedState === 'object'
-                            ? (persistedState as Partial<ConfigStore>)
-                            : {}),
-                    }),
+                merge: (persistedState, currentState) => {
+                    // SAFETY: Zustand's storage boundary supplies an unknown
+                    // partial store. Only an explicitly matching runtime may hydrate it.
+                    const persisted = persistedState as Partial<ConfigStore> | undefined;
+                    if (!persisted || persisted.configRuntimeKey !== getRuntimeKey()) return currentState;
+                    return hydrateActiveDirectorySnapshot({ ...currentState, ...persisted });
+                },
                 // Stale-while-revalidate: persist the last-known provider/agent
                 // snapshots so the model/agent pickers paint instantly on cold
                 // start. Freshness is guaranteed by the background refresh in
                 // initializeApp() / activateDirectory() (which overwrite these on
                 // success) and by the provider/agent config-change subscriptions.
                 partialize: (state) => ({
+                    configRuntimeKey: state.configRuntimeKey,
                     activeDirectoryKey: state.activeDirectoryKey,
                     directoryScoped: Object.fromEntries(
                         Object.entries(state.directoryScoped).map(([directoryKey, snapshot]) => [
@@ -3525,6 +3591,7 @@ if (typeof window !== "undefined") {
 }
 
 const refreshKnownProviderDirectories = async (source: string): Promise<void> => {
+    const runtimeContext = captureConfigRuntimeContext();
     const state = useConfigStore.getState();
     const directoryKeys = Array.from(new Set([
         state.activeDirectoryKey,
@@ -3537,6 +3604,7 @@ const refreshKnownProviderDirectories = async (source: string): Promise<void> =>
     const workerCount = Math.min(PROVIDER_CONFIG_REFRESH_CONCURRENCY, directoryKeys.length);
     const workers = Array.from({ length: workerCount }, async () => {
         while (nextIndex < directoryKeys.length) {
+            if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
             const directoryKey = directoryKeys[nextIndex];
             nextIndex += 1;
             await useConfigStore.getState().loadProviders({

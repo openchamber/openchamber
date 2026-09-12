@@ -117,10 +117,10 @@ const {
   createWorktree,
   getLatestWorktreeMetadata,
   listProjectWorktrees,
-  notifyWorktreeTopologyChanged,
   partitionWorktreesByRegisteredProject,
+  preserveClientTrackedWorktreeStatus,
+  replaceRepositoryWorktrees,
   removeProjectWorktree,
-  subscribeWorktreeTopologyChanged,
   validateWorktreeCreate,
   worktreeMapsEqual,
 } = await import('./worktreeManager');
@@ -336,6 +336,30 @@ describe('worktreeManager list invalidation', () => {
     expect(metadata.worktreeStatus).toBe('pending');
     expect(sessionState.availableWorktrees[0]?.worktreeStatus).toBe('pending');
     expect(bootstrapWatcherCalls).toEqual(['/repo-feature']);
+  });
+
+  test('does not duplicate a worktree already published by discovery', async () => {
+    const discovered: WorktreeMetadata = {
+      path: '/repo-feature',
+      projectDirectory: '/repo',
+      branch: 'feature',
+      label: 'feature',
+      worktreeStatus: 'ready',
+    };
+    sessionState.availableWorktrees = [discovered];
+    sessionState.availableWorktreesByProject = new Map([['/repo', [discovered]]]);
+
+    await createWorktree({ id: 'project-linked', path: '/repo-linked' }, {
+      preferredName: 'feature',
+      mode: 'new',
+      branchName: 'feature',
+      worktreeName: 'feature',
+      returnAfterDirectoryCreated: true,
+    });
+
+    expect(sessionState.availableWorktrees.map((worktree) => worktree.path)).toEqual(['/repo-feature']);
+    expect(sessionState.availableWorktreesByProject.get('/repo')?.map((worktree) => worktree.path)).toEqual(['/repo-feature']);
+    expect(sessionState.availableWorktreesByProject.has('/repo-linked')).toBe(false);
   });
 
   test('treats legacy create responses without bootstrap state as fully ready', async () => {
@@ -595,6 +619,71 @@ describe('partitionWorktreesByRegisteredProject', () => {
   });
 });
 
+describe('replaceRepositoryWorktrees', () => {
+  test('replaces every bucket that belongs to the refreshed repository', () => {
+    const metadata = (path: string, projectDirectory: string): WorktreeMetadata => ({
+      path,
+      projectDirectory,
+      branch: 'feature',
+      label: 'feature',
+    });
+    const staleRoot = metadata('/repo-stale', '/repo');
+    const staleLinked = metadata('/repo-linked-stale', '/repo');
+    const refreshed = metadata('/repo-fresh', '/repo');
+    const topology = new Map<string, WorktreeMetadata[]>([
+      ['/repo', [staleRoot]],
+      ['/repo-linked', [staleLinked]],
+      ['/other', [metadata('/other-worktree', '/other')]],
+    ]);
+
+    const result = replaceRepositoryWorktrees(topology, '/repo-linked', [refreshed]);
+
+    expect(result.get('/repo')?.map((worktree) => worktree.path)).toEqual(['/repo-fresh']);
+    expect(result.get('/repo-linked')?.map((worktree) => worktree.path)).toEqual(['/repo-fresh']);
+    expect(result.get('/other')?.map((worktree) => worktree.path)).toEqual(['/other-worktree']);
+  });
+});
+
+describe('preserveClientTrackedWorktreeStatus', () => {
+  const metadata = (path: string, status: WorktreeMetadata['worktreeStatus'], source?: WorktreeMetadata['worktreeSource']): WorktreeMetadata => ({
+    path,
+    projectDirectory: '/repo',
+    branch: 'feature',
+    label: 'feature',
+    worktreeStatus: status,
+    ...(source ? { worktreeSource: source } : {}),
+  });
+
+  test('keeps pending and invalid statuses this client tracks over a ready listing', () => {
+    const published = new Map<string, WorktreeMetadata[]>([
+      ['/repo', [metadata('/repo-pending', 'pending', 'created-for-session'), metadata('/repo-invalid', 'invalid'), metadata('/repo-done', 'ready')]],
+    ]);
+    const refreshed = new Map<string, WorktreeMetadata[]>([
+      ['/repo', [metadata('/repo-pending', 'ready'), metadata('/repo-invalid', 'ready'), metadata('/repo-done', 'ready')]],
+      ['/other', [metadata('/other-feature', 'ready')]],
+    ]);
+
+    const result = preserveClientTrackedWorktreeStatus(refreshed, published);
+
+    expect(result.get('/repo')?.map((worktree) => [worktree.path, worktree.worktreeStatus, worktree.worktreeSource])).toEqual([
+      ['/repo-pending', 'pending', 'created-for-session'],
+      ['/repo-invalid', 'invalid', undefined],
+      ['/repo-done', 'ready', undefined],
+    ]);
+    expect(result.get('/other')).toBe(refreshed.get('/other'));
+  });
+
+  test('lets git win when the directory is gone and returns the same map when nothing is tracked', () => {
+    const published = new Map<string, WorktreeMetadata[]>([['/repo', [metadata('/repo-pending', 'pending')]]]);
+    const missing = new Map<string, WorktreeMetadata[]>([['/repo', [metadata('/repo-pending', 'missing')]]]);
+    expect(preserveClientTrackedWorktreeStatus(missing, published).get('/repo')?.[0]?.worktreeStatus).toBe('missing');
+
+    const untracked = new Map<string, WorktreeMetadata[]>([['/repo', [metadata('/repo-done', 'ready')]]]);
+    const refreshed = new Map<string, WorktreeMetadata[]>([['/repo', [metadata('/repo-done', 'ready')]]]);
+    expect(preserveClientTrackedWorktreeStatus(refreshed, untracked)).toBe(refreshed);
+  });
+});
+
 describe('worktreeManager fork remote payload wiring', () => {
   beforeEach(() => {
     listCalls.length = 0;
@@ -679,21 +768,4 @@ describe('worktreeManager missing worktrees', () => {
     expect(worktreeMapsEqual(new Map([['/repo', [ready]]]), new Map([['/repo', [missing]]]))).toBe(false);
   });
 
-  test('a topology-changed signal drops the cached listing and reaches subscribers', async () => {
-    const project = { id: 'project-signal', path: '/repo-signal/' };
-    listImplementation = async () => [];
-    await listProjectWorktrees(project, { force: true });
-    await listProjectWorktrees(project);
-    expect(listCalls).toEqual(['/repo-signal']);
-
-    const notified: string[] = [];
-    const unsubscribe = subscribeWorktreeTopologyChanged((directory) => notified.push(directory));
-    notifyWorktreeTopologyChanged('/repo-signal/');
-    unsubscribe();
-    notifyWorktreeTopologyChanged('/repo-signal');
-
-    expect(notified).toEqual(['/repo-signal']);
-    await listProjectWorktrees(project);
-    expect(listCalls).toEqual(['/repo-signal', '/repo-signal']);
-  });
 });

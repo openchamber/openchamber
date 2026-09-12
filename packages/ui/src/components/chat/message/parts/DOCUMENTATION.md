@@ -46,10 +46,93 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 - `ReasoningPart.tsx`
   - Thinking block UI (`ReasoningTimelineBlock`), summary + optional duration.
 
+- `components/LiveTurnActivity.tsx` (relative to the chat folder)
+  - Owns the optional live-only turn disclosure. `MessageList` enables it when
+    Activity Default is Collapsed and the turn has visible Activity content.
+  - `components/LiveActivityCollapse.tsx` owns the finite height transition;
+    `components/liveActivityContext.ts` scopes the final message's non-text
+    disclosure without changing sorted message context or tool rendering.
+  - `lib/turns/liveActivity.ts` owns final-answer and interruption boundaries.
+  - `lib/turns/liveActivitySummary.ts` derives the report from tool results.
+
 - `JustificationBlock.tsx`
   - Justification block wrapper over `ReasoningTimelineBlock`.
 
 ## Current important behavior
+
+### Optional live history disclosure
+
+Activity Default is shared by the settings UI in both render modes. In live
+mode, Expanded preserves the original timeline without a turn disclosure.
+Collapsed adds one Activity header after completion or interruption while preserving the original live rows,
+their order, and their individual controls. It adds no tool subgroups, side
+line, height cap, or inner scroller. Sorted rendering keeps its existing path
+and its own per-turn expansion state.
+
+The active turn stays open without an Activity header. A final assistant message with `finish: stop`
+collapses the earlier messages and the final message's non-text parts, keeping
+the answer and its existing footer outside. Intermediate-text summary fallback
+and compaction summaries never become final answers. An older turn without a
+final answer collapses once a later visible turn has an assistant response;
+a queued user message alone is not enough. Hidden user continuations retain
+the visible-turn mapping established by `projectTurnRecords`.
+
+Manual expansion survives later metadata updates and timeline virtualization
+within the session. The disclosure uses a finite 180ms height transition,
+respects reduced motion, and delegates end pinning to the existing timeline.
+It never calls scroll-to-bottom. Collapsed history does not mount its hidden
+message bodies; initial history loads do not animate collapse.
+Layout-effect replay after a Suspense hide/reveal must settle the requested
+height and retained children even when the expanded target did not change.
+Cleanup stops the animation, so a same-target early return can leave a cached
+pre-collapse height on the DOM indefinitely. Failed animations also settle;
+callbacks from cancelled, superseded animations never settle a newer target.
+
+The virtualizer also adds temporary end padding while compensating prepended
+history. The Bun patch for `@legendapp/list@3.3.10` stores that padding's CSSOM
+read-back value: Chromium rounds fractional pixel strings, so comparing the
+original input with `style.paddingBottom` can skip cleanup permanently. This
+leaves a phantom tail even when every Activity region is already zero-height.
+The patch covers both web entry points in ESM and CJS; its installed-controller
+regression tests live in `scripts/legend-list-padding.test.mjs`. Retain this
+fix when updating the dependency unless upstream has equivalent ownership and
+cleanup behavior. Chat padding and scroll policies do not compensate for it.
+
+The header retains its report when expanded and has no hover background. Its
+left inset matches sorted Activity. Diff deletions use the ASCII hyphen.
+The header reports five categories: changed files, codebase
+exploration, commands, web research, and subagents. Narrow chat columns only
+show file changes. Exploration and research are flags, not synthetic counts.
+Subagents count distinct child session IDs; commands count calls, not shell
+subcommands. Unknown tools and administrative tools stay in the disclosure
+without a guessed summary category.
+
+File statistics come exclusively from successful edit/write/patch tool
+results, not user-message summary diffs or the current workspace Git diff.
+Unique normalized paths determine file count; renames preserve identities.
+Line totals sum performed edits, including lines later removed by another
+call. Per-file patches/counts take precedence over a whole-call patch; the two
+representations are never added together. Missing or truncated diffs suppress
+the line total rather than presenting a partial total as complete. Write input
+content is not evidence of added lines. Repeated records of one call count once.
+
+The completed-turn file pills under the final answer (the "show changed files"
+setting) use the same tool-result file identities, in first-touch order, with
+paths relative to the message's project root. The user message's
+`summary.diffs` is a working-tree snapshot between turn start and end, so it
+also lists edits made by other sessions or by hand in the same directory; it
+never decides which files belong to the turn on its own. It supplies a touched
+file's line counts, because those match the turn diff a pill opens; a file the
+snapshot does not list falls back to its tool patch and renders as a plain
+chip, since the turn diff has nothing to open for it. A file with no
+recoverable counts, or a snapshot entry without line changes, shows its name
+alone. One exception: edits delegated to `task` subagents live in child
+sessions the projection cannot see, so when a turn ran subagents the snapshot
+entries no own tool call touched are appended after the turn's own files. The
+list is projected once the last assistant message finished with `stop`, so no
+tool patch is parsed while the turn streams.
+
+### Message parts
 
 - Assistant markdown treats raw HTML as inert visible text. The final generated
   HTML is sanitized as defense in depth, with script and style elements

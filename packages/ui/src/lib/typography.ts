@@ -1,23 +1,23 @@
 export const SEMANTIC_TYPOGRAPHY = {
-  markdown: '0.9375rem',
-  code: '0.8125rem',
-  uiHeader: '0.9375rem',
-  uiLabel: '0.8750rem',
-  meta: '0.875rem',
-  micro: '0.875rem',
+  markdown: '0.875rem',
+  code: '0.75rem',
+  uiHeader: '0.875rem',
+  uiLabel: '0.8125rem',
+  meta: '0.8125rem',
+  micro: '0.8125rem',
   /** Settings page / detail-pane title — larger than section headers */
-  settingsPageTitle: '1.125rem',
+  settingsPageTitle: '1.0625rem',
 } as const;
 
 export const VSCODE_TYPOGRAPHY = {
   // Keep VS Code webview typography slightly tighter; VS Code UI chrome already provides density.
-  markdown: '0.9063rem',
-  code: '0.8750rem',
-  uiHeader: '0.9063rem',
-  uiLabel: '0.8438rem',
-  meta: '0.8438rem',
-  micro: '0.7813rem',
-  settingsPageTitle: '1.0625rem',
+  markdown: '0.8438rem',
+  code: '0.8125rem',
+  uiHeader: '0.8438rem',
+  uiLabel: '0.7813rem',
+  meta: '0.7813rem',
+  micro: '0.75rem',
+  settingsPageTitle: '1rem',
 } as const;
 
 export type SemanticTypographyKey = keyof typeof SEMANTIC_TYPOGRAPHY;

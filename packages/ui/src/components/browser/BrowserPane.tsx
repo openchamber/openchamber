@@ -111,6 +111,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
   const [isAnnotating, setIsAnnotating] = React.useState(false);
   const [isWaitingForServer, setIsWaitingForServer] = React.useState(false);
   const [zoomLevel, setZoomLevel] = React.useState(0);
+  const zoomLevelRef = React.useRef(0);
   const [showDeviceBar, setShowDeviceBar] = React.useState(false);
   const [viewport, setViewport] = React.useState<BrowserViewport>(FILL_VIEWPORT);
   // Read inside agent actions, which are not re-created when the viewport
@@ -580,6 +581,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
 
   const applyZoom = React.useCallback((level: number) => {
     const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, level));
+    zoomLevelRef.current = next;
     setZoomLevel(next);
     try {
       webviewRef.current?.setZoomLevel(next);
@@ -587,6 +589,20 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
       // Not attached yet; the next change applies it.
     }
   }, []);
+
+  React.useEffect(() => {
+    const handleZoom = (event: Event) => {
+      if (!(event instanceof CustomEvent)) return;
+      const action = event.detail;
+      const webview = webviewRef.current;
+      if (!webview || document.activeElement !== webview) return;
+      if (action === 'zoom-in') applyZoom(zoomLevelRef.current + ZOOM_STEP);
+      else if (action === 'zoom-out') applyZoom(zoomLevelRef.current - ZOOM_STEP);
+      else if (action === 'zoom-reset') applyZoom(0);
+    };
+    window.addEventListener('openchamber:zoom', handleZoom);
+    return () => window.removeEventListener('openchamber:zoom', handleZoom);
+  }, [applyZoom]);
 
   const clearBrowsingData = React.useCallback((what: 'cookies' | 'cache') => {
     void invokeDesktopCommand('desktop_browser_clear_data', {

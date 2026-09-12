@@ -22,6 +22,7 @@ import { formatSessionCompactDateLabel } from './sidebar/utils';
 import type { SessionNode } from './sidebar/types';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type SecondaryMeta = SwitcherItem['secondaryMeta'];
 
@@ -86,7 +87,7 @@ function SwitcherContent({ onSelect, variant, scopeProjectId }: SwitcherContentP
   }, [onSelect, openNewSessionDraft]);
 
   const [expandedParents, setExpandedParents] = React.useState<Set<string>>(new Set());
-  const contentRef = React.useRef<HTMLDivElement>(null);
+  const contentRef = React.useRef<HTMLElement>(null);
   const initialFocusCompleteRef = React.useRef(false);
   const initialTarget = isNewSessionDraftOpen ? NEW_SESSION_SWITCHER_TARGET : currentSessionId;
   const toggleParent = React.useCallback((sessionId: string) => {
@@ -127,7 +128,11 @@ function SwitcherContent({ onSelect, variant, scopeProjectId }: SwitcherContentP
   }, [expandedParents, initialTarget, items]);
 
   return (
-    <div ref={contentRef} className="max-h-[60vh] overflow-y-auto">
+    <ScrollableOverlay
+      ref={contentRef}
+      outerClassName="max-h-[60vh]"
+      disableHorizontal
+    >
       <div className="space-y-0.5">
         <BaseMenu.Item
           data-switcher-item-id={NEW_SESSION_SWITCHER_TARGET}
@@ -138,7 +143,7 @@ function SwitcherContent({ onSelect, variant, scopeProjectId }: SwitcherContentP
           )}
         >
           <Icon name="chat-new" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-          <span className="truncate text-[14px] font-normal leading-tight text-foreground">
+          <span className="truncate typography-ui-label font-normal leading-tight text-foreground">
             {t('sessions.sidebar.header.actions.newSession')}
           </span>
         </BaseMenu.Item>
@@ -160,7 +165,7 @@ function SwitcherContent({ onSelect, variant, scopeProjectId }: SwitcherContentP
           ))
         )}
       </div>
-    </div>
+    </ScrollableOverlay>
   );
 }
 
@@ -288,7 +293,7 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
               {isExpanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
             </span>
           ) : null}
-          <span className={cn('truncate text-[14px] font-normal leading-tight', isActive ? 'text-primary' : 'text-foreground')}>
+          <span className={cn('truncate typography-ui-label font-normal leading-tight', isActive ? 'text-primary' : 'text-foreground')}>
             {sessionTitle}
           </span>
         </div>

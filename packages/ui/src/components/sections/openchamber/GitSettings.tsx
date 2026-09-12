@@ -1,11 +1,9 @@
 import React from 'react';
-import { updateDesktopSettings } from '@/lib/persistence';
+import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { setFilesViewShowGitignored, useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
 import {
   SettingsSection,
   SettingsControlGroup,
@@ -32,58 +30,16 @@ export const GitSettings: React.FC = () => {
     [t]
   );
 
-  type GitSettingsPayload = {
-    gitmojiEnabled?: boolean;
-    gitChangesViewMode?: 'flat' | 'tree';
-  };
-
   // Load current settings
   React.useEffect(() => {
     const loadSettings = async () => {
       try {
-        let data: GitSettingsPayload | null = null;
-
-        // 1. Runtime settings API (VSCode)
-        if (!data) {
-          const runtimeSettings = getRegisteredRuntimeAPIs()?.settings;
-          if (runtimeSettings) {
-            try {
-              const result = await runtimeSettings.load();
-              const settings = result?.settings;
-              if (settings) {
-                data = {
-                  gitmojiEnabled: typeof (settings as Record<string, unknown>).gitmojiEnabled === 'boolean'
-                    ? ((settings as Record<string, unknown>).gitmojiEnabled as boolean)
-                    : undefined,
-                  gitChangesViewMode:
-                    (settings as Record<string, unknown>).gitChangesViewMode === 'flat'
-                    || (settings as Record<string, unknown>).gitChangesViewMode === 'tree'
-                      ? ((settings as Record<string, unknown>).gitChangesViewMode as 'flat' | 'tree')
-                      : undefined,
-                };
-              }
-            } catch {
-              // fall through
-            }
-          }
-        }
-
-        // 2. Fetch API (Web/server)
-        if (!data) {
-          const response = await runtimeFetch('/api/config/settings', {
-            method: 'GET',
-            headers: { Accept: 'application/json' },
-          });
-          if (response.ok) {
-            data = await response.json();
-          }
-        }
-
+        const data = await loadDesktopSettings();
         if (data) {
-          if (typeof data.gitmojiEnabled === 'boolean') {
+          if (data.gitmojiEnabled !== undefined) {
             setSettingsGitmojiEnabled(data.gitmojiEnabled);
           }
-          if (data.gitChangesViewMode === 'flat' || data.gitChangesViewMode === 'tree') {
+          if (data.gitChangesViewMode !== undefined) {
             setGitChangesViewMode(data.gitChangesViewMode);
           }
         }

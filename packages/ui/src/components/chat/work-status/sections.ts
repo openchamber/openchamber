@@ -14,6 +14,7 @@ export const WORK_STATUS_SECTION_IDS = [
   'session',
   'repository',
   'usage',
+  'telemetry',
   'subagents',
   'tasks',
   'mcp',
@@ -23,16 +24,17 @@ export const WORK_STATUS_SECTION_IDS = [
 
 type WorkStatusSectionId = (typeof WORK_STATUS_SECTION_IDS)[number];
 
-export const WORK_STATUS_SECTION_LABEL_KEYS: Record<WorkStatusSectionId, I18nKey> = {
+export const WORK_STATUS_SECTION_LABEL_KEYS = {
   session: 'chat.workStatus.section.session',
   repository: 'chat.workStatus.section.project',
   usage: 'chat.workStatus.section.usage',
+  telemetry: 'chat.workStatus.section.telemetry',
   subagents: 'chat.workStatus.section.subagents',
   tasks: 'chat.workStatus.section.tasks',
   mcp: 'chat.workStatus.section.mcp',
   pinned: 'chat.workStatus.section.pinned',
   contextSources: 'chat.workStatus.section.contextBreakdown',
-};
+} as const satisfies Record<WorkStatusSectionId, I18nKey>;
 
 const KNOWN_IDS = new Set<string>(WORK_STATUS_SECTION_IDS);
 
@@ -40,9 +42,7 @@ const isWorkStatusSectionId = (value: unknown): value is WorkStatusSectionId =>
   typeof value === 'string' && KNOWN_IDS.has(value);
 
 /**
- * Hidden sections are stored, not visible ones: everything is on by default, so
- * an empty list means "the user has changed nothing" and a section added later
- * appears without touching anyone's saved settings.
+ * Hidden sections are stored, not visible ones. Every section is on by default.
  */
 export const isWorkStatusSectionVisible = (
   hidden: readonly string[] | null | undefined,
@@ -75,11 +75,13 @@ export const getWorkStatusPanelPresentation = ({
   showEmptyState: contentMounted && allSectionsHidden,
 });
 
-export const sanitizeWorkStatusHiddenSections = (value: unknown): WorkStatusSectionId[] => {
+export const sanitizeWorkStatusHiddenSections = (value: unknown, explicit = true): WorkStatusSectionId[] => {
   if (!Array.isArray(value)) return [];
   const seen = new Set<WorkStatusSectionId>();
   for (const entry of value) {
     if (isWorkStatusSectionId(entry)) seen.add(entry);
   }
+  // Older clients hid telemetry automatically until the user chose a list.
+  if (!explicit) seen.delete('telemetry');
   return [...seen];
 };

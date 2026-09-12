@@ -65,7 +65,17 @@ mock.module('@/lib/walkthrough/api', () => ({
 }));
 mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => 'local' }));
 
-const { useWalkthroughStore } = await import('./useWalkthroughStore');
+const { useWalkthroughStore, walkthroughSourceKey } = await import('./useWalkthroughStore');
+
+test('PR cache and handoff identity include the selected repository', () => {
+  const upstream: WalkthroughSource = { kind: 'pr', number: 42, sourceRepo: { owner: 'upstream', repo: 'project' } };
+  const fork: WalkthroughSource = { kind: 'pr', number: 42, sourceRepo: { owner: 'fork', repo: 'project' } };
+  expect(walkthroughSourceKey({ kind: 'pr', number: 42 })).toBe('pr:42');
+  expect(walkthroughSourceKey(upstream)).toBe('pr:upstream/project:42');
+  expect(walkthroughSourceKey(fork)).toBe('pr:fork/project:42');
+  useWalkthroughStore.getState().requestSource('/repo', upstream);
+  expect(useWalkthroughStore.getState().requestedSource['/repo']).toEqual(upstream);
+});
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -167,6 +177,18 @@ describe('useWalkthroughStore — model selection', () => {
     expect(useWalkthroughStore.getState().getSelectedModel("/repo", branch)).toBe(undefined);
     expect(useWalkthroughStore.getState().getSelectedModel('/repo', SOURCE))
       .toBe('anthropic/claude-haiku-4-5');
+  });
+
+  test('keeps commit walkthroughs separate and selecting one does not generate', () => {
+    const generatedBefore = generateCalls;
+    const first: WalkthroughSource = { kind: 'commit', hash: 'a'.repeat(40) };
+    const second: WalkthroughSource = { kind: 'commit', hash: 'b'.repeat(40) };
+    useWalkthroughStore.getState().selectModel('/repo', first, 'anthropic/claude-haiku-4-5');
+    useWalkthroughStore.getState().requestSource('/repo', second);
+    expect(useWalkthroughStore.getState().getSelectedModel('/repo', first)).toBe('anthropic/claude-haiku-4-5');
+    expect(useWalkthroughStore.getState().getSelectedModel('/repo', second)).toBeUndefined();
+    expect(useWalkthroughStore.getState().requestedSource['/repo']).toEqual(second);
+    expect(generateCalls).toBe(generatedBefore);
   });
 });
 

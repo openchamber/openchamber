@@ -25,7 +25,7 @@ export const parseOpenCodeGoUsage = (payload) => {
     if (typeof resetAt !== 'string' || !Number.isFinite(new Date(resetAt).getTime())) continue;
     windows[key] = toUsageWindow({
       usedPercent: Math.min(100, Math.max(0, usedPercent)),
-      resetAt,
+      resetAt: new Date(resetAt).getTime(),
       windowSeconds: null,
     });
   }

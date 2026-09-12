@@ -22,8 +22,8 @@ export const createNotificationEmitterRuntime = (dependencies) => {
     onDesktopNotification = typeof cb === 'function' ? cb : null;
   };
 
-  const writeSseEvent = (res, payload) => {
-    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  const writeSseEvent = (res, payload, serializedPayload = JSON.stringify(payload)) => {
+    res.write(`data: ${serializedPayload}\n\n`);
   };
 
   const emitDesktopNotification = (payload) => {
@@ -91,9 +91,10 @@ export const createNotificationEmitterRuntime = (dependencies) => {
       return;
     }
 
+    const serializedPayload = JSON.stringify(syntheticPayload);
     for (const res of clients) {
       try {
-        writeSseEvent(res, syntheticPayload);
+        writeSseEvent(res, syntheticPayload, serializedPayload);
       } catch {
         // ignore
       }

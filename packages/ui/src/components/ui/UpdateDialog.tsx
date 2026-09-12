@@ -13,7 +13,7 @@ import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { installWebUpdate, waitForUpdateApplied } from '@/lib/web-update';
 
 type WebUpdateState = 'idle' | 'updating' | 'restarting' | 'reconnecting' | 'error';
 
@@ -111,85 +111,6 @@ function parseChangelogSections(body: string): ChangelogSection[] {
   });
 }
 
-type InstallWebUpdateResult = {
-  success: boolean;
-  error?: string;
-  autoRestart?: boolean;
-};
-
-const WEB_UPDATE_POLL_INTERVAL_MS = 2000;
-const WEB_UPDATE_MAX_WAIT_MS = 10 * 60 * 1000;
-
-async function installWebUpdate(): Promise<InstallWebUpdateResult> {
-  try {
-    const response = await runtimeFetch('/api/openchamber/update-install', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      return { success: false, error: data.error || `Server error: ${response.status}` };
-    }
-
-    const data = await response.json().catch(() => ({}));
-    return {
-      success: true,
-      autoRestart: data.autoRestart !== false,
-    };
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : undefined };
-  }
-}
-
-async function isServerReachable(): Promise<boolean> {
-  try {
-    const response = await runtimeFetch('/health', {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
-async function waitForUpdateApplied(
-  previousVersion?: string,
-  maxAttempts = Math.ceil(WEB_UPDATE_MAX_WAIT_MS / WEB_UPDATE_POLL_INTERVAL_MS),
-  intervalMs = WEB_UPDATE_POLL_INTERVAL_MS,
-): Promise<boolean> {
-  for (let i = 0; i < maxAttempts; i++) {
-    try {
-      // Status-only poll while waiting for the update to apply; not a usage report.
-      const response = await runtimeFetch('/api/openchamber/update-check?reportUsage=false', {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-      });
-      if (response.ok) {
-        const data = await response.json().catch(() => null);
-        if (data && data.available === false) {
-          return true;
-        }
-        if (
-          data &&
-          typeof data.currentVersion === 'string' &&
-          typeof previousVersion === 'string' &&
-          data.currentVersion !== previousVersion
-        ) {
-          return true;
-        }
-      } else if ((response.status === 401 || response.status === 403) && await isServerReachable()) {
-        return true;
-      }
-    } catch {
-      // Server may be restarting
-    }
-    await new Promise(resolve => setTimeout(resolve, intervalMs));
-  }
-  return false;
-}
-
 export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   open,
   onOpenChange,
@@ -258,13 +179,13 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
 
     setWebUpdateState('reconnecting');
 
-    const applied = await waitForUpdateApplied(info?.currentVersion);
+    const applied = await waitForUpdateApplied(result.target, info?.currentVersion);
 
-    if (applied) {
+    if (applied.status === 'applied') {
       window.location.reload();
     } else {
       setWebUpdateState('error');
-      setWebError(t('updateDialog.error.takingLonger'));
+      setWebError(applied.status === 'failed' ? applied.error : t('updateDialog.error.takingLonger'));
     }
   }, [info?.currentVersion, t]);
 
@@ -414,7 +335,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
           )}
 
           {/* Web runtime fallback command */}
-          {isWebRuntime && webUpdateState === 'error' && (
+          {isWebRuntime && info?.packageManager !== 'electron' && webUpdateState === 'error' && (
             <div className="space-y-2 mt-4">
               <div className="flex items-center gap-2 typography-meta text-muted-foreground">
                 <Icon name="terminal" className="h-4 w-4" />

@@ -20,6 +20,16 @@ const SESSION_SWITCH_HOLD_MS = 400;
 // End inset reserved for the status row that floats over the timeline's
 // bottom edge (its tallest resting height plus the mb-2 gap).
 const STATUS_OVERLAY_RESERVED_HEIGHT = 40;
+/**
+ * Gap between the last transcript row and the floating composer's top edge,
+ * on top of the status row reserve. Generous on purpose: the recap note and
+ * the rows docked above the composer (context chips, linked references, the
+ * queue) land in this band, and a follow glide that trails the live edge
+ * should still leave the last line clear of the glass.
+ */
+const FLOATING_COMPOSER_GAP_PX = 80;
+/** Footer reserve before the floating composer slot has been measured. */
+const FLOATING_COMPOSER_DEFAULT_HEIGHT = 128;
 // A freshly opened timeline is shown once its content height has held still
 // for this many consecutive frames, or after the cap.
 const TIMELINE_SETTLE_STABLE_FRAMES = 2;
@@ -167,14 +177,15 @@ type ChatViewportProps = {
     currentSessionKey: string;
     isDesktopExpandedInput: boolean;
     isMobile: boolean;
+    /** The composer floats over the transcript and reserves its band via
+        `--chat-composer-inset` on the chat column. */
+    floatingComposer: boolean;
     directory?: string;
     scrollRef: React.RefObject<HTMLDivElement | null>;
     messageListRef: React.RefObject<MessageListHandle | null>;
     registerList: (list: TimelineListHandle | null) => void;
-    anchorMessageId: string | null;
-    onAnchorReady: (messageId: string, anchorIndex: number) => void;
-    onAnchorSizeChanged: (messageId: string) => void;
     onIsAtEndChange: (isAtEnd: boolean) => void;
+    onListMetricsChange: (metrics: { readonly footerSize: number }) => void;
     onTimelineDataChange: () => void;
     renderedMessages: SessionMessageRecord[];
     isLoadingOlder: boolean;
@@ -211,14 +222,13 @@ const ChatViewport = React.memo(({
     currentSessionKey,
     isDesktopExpandedInput,
     isMobile,
+    floatingComposer,
     directory,
     scrollRef,
     messageListRef,
     registerList,
-    anchorMessageId,
-    onAnchorReady,
-    onAnchorSizeChanged,
     onIsAtEndChange,
+    onListMetricsChange,
     onTimelineDataChange,
     renderedMessages,
     isLoadingOlder,
@@ -378,11 +388,25 @@ const ChatViewport = React.memo(({
             )}
 
             <SessionErrorNotice sessionId={currentSessionId} directory={directory} />
-            <SessionRecapNote sessionId={currentSessionId} directory={directory} isMobile={isMobile} />
 
-            <div className="flex-shrink-0" style={{ height: isMobile ? '40px' : '10vh' }} aria-hidden="true" />
+            {/* Tail spacer. With a floating composer it reserves the band the
+                composer covers, so the end of the transcript stays readable
+                above it; the extra gap is the breathing room between the last
+                row and the composer's top edge. The height comes from a CSS
+                variable the composer slot's observer writes directly, so a
+                growing composer resizes the footer without a list re-render;
+                the list's own footer observer then extends the content. */}
+            <div
+                className="flex-shrink-0"
+                style={{
+                    height: floatingComposer
+                        ? `calc(var(--chat-composer-inset, ${FLOATING_COMPOSER_DEFAULT_HEIGHT}px) + ${FLOATING_COMPOSER_GAP_PX}px)`
+                        : (isMobile ? '40px' : '10vh'),
+                }}
+                aria-hidden="true"
+            />
         </>
-    ), [currentSessionId, directory, isMobile, sessionPermissions, sessionQuestions]);
+    ), [currentSessionId, directory, floatingComposer, isMobile, sessionPermissions, sessionQuestions]);
 
     // Opening a session paints the timeline as one finished picture: the root
     // stays invisible while any renderer holds a provisional first paint, then
@@ -499,14 +523,12 @@ const ChatViewport = React.memo(({
                     endPinningReleased={endPinningReleased}
                     directory={directory}
                     registerList={registerList}
-                    anchorMessageId={anchorMessageId}
-                    onAnchorReady={onAnchorReady}
-                    onAnchorSizeChanged={onAnchorSizeChanged}
                     // Zero end inset: the footer spacer already reserves the
                     // zone the floating status row covers; adding its height
                     // again produced a double-tall blank band at rest.
                     composerOverlayHeight={0}
                     onIsAtEndChange={onIsAtEndChange}
+                    onListMetricsChange={onListMetricsChange}
                     onTimelineDataChange={onTimelineDataChange}
                     listHeader={listHeader}
                     listFooter={listFooter}
@@ -533,6 +555,7 @@ const ChatViewport = React.memo(({
         && prev.currentSessionKey === next.currentSessionKey
         && prev.isDesktopExpandedInput === next.isDesktopExpandedInput
         && prev.isMobile === next.isMobile
+        && prev.floatingComposer === next.floatingComposer
         && prev.directory === next.directory
         && prev.scrollRef === next.scrollRef
         && prev.messageListRef === next.messageListRef
@@ -543,6 +566,7 @@ const ChatViewport = React.memo(({
         && prev.activeStreamingPhase === next.activeStreamingPhase
         && prev.retryOverlay === next.retryOverlay
         && prev.scrollToBottom === next.scrollToBottom
+        && prev.onListMetricsChange === next.onListMetricsChange
         && prev.endPinningReleased === next.endPinningReleased
         && prev.revealWaited === next.revealWaited
         && prev.revealGate === next.revealGate
@@ -948,8 +972,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // mounted so its visibility can animate rather than snap.
     const workStatusPanelMountable = !isMobile
         && !isVSCode
-        && chatSurfaceMode !== 'mini-chat'
-        && !isDesktopExpandedInput;
+        && chatSurfaceMode !== 'mini-chat';
     const showWorkStatusPanel = workStatusPanelMountable && workStatusVisible;
 
     // Offered over the chat when there is no room beside it. The panel is still
@@ -1106,24 +1129,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         statusOverlayObserverRef.current?.disconnect();
         statusOverlayObserverRef.current = null;
     }, []);
-    const lastUserMessageId = React.useMemo(() => {
-        for (let index = sessionMessages.length - 1; index >= 0; index -= 1) {
-            const message = sessionMessages[index];
-            if (message.info.role === 'user') {
-                return message.info.id;
-            }
-        }
-        return null;
-    }, [sessionMessages]);
-
     const {
         scrollRef,
         scrollNode,
         registerList,
-        anchorMessageId,
-        onAnchorReady,
-        onAnchorSizeChanged,
         onIsAtEndChange,
+        onListMetricsChange,
         onManualNavigation,
         onTimelineDataChange,
         goToBottom,
@@ -1133,12 +1144,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         isFollowingProgrammatically,
         showScrollButton,
         userOwnsScroll,
+        viewportAtEnd,
     } = useChatTimelineScroll({
         currentSessionId,
         currentSessionKey,
         sessionMessageCount,
         composerOverlayHeight,
-        lastUserMessageId,
         sessionIsWorking,
         revealGate,
         onActiveTurnChange: handleActiveTurnChange,
@@ -1158,13 +1169,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         releaseAutoFollow: onManualNavigation,
         isPinned,
         showScrollButton,
-    });
-    // The list owns the scroll element, so the shadows and the load-older
-    // trigger bind to its node rather than to a wrapper we render.
-    const scrollNodeRef = React.useMemo(() => ({ current: scrollNode }), [scrollNode]);
-    useScrollShadow(scrollNodeRef, {
-        observeMutations: false,
-        hideTopShadow: isMobile && stickyUserHeader,
     });
 
     const handleHistoryScroll = timelineController.handleHistoryScroll;
@@ -1374,6 +1378,13 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     }, [currentSessionId, ensureSessionRenderable, hasRenderableSessionSnapshot, messagesEnabled]);
 
     const composerSlotRef = React.useRef<HTMLDivElement | null>(null);
+    // The slot mounts after the first commit (behind the session gate), so
+    // the inset observer keys on the node itself rather than on mount.
+    const [composerSlotNode, setComposerSlotNode] = React.useState<HTMLDivElement | null>(null);
+    const attachComposerSlot = React.useCallback((node: HTMLDivElement | null) => {
+        composerSlotRef.current = node;
+        setComposerSlotNode(node);
+    }, []);
     const previousComposerRectRef = React.useRef<DOMRect | null>(null);
     const previousDraftOpenRef = React.useRef(draftOpen);
     const previousDraftLayoutVisibleRef = React.useRef(draftOpen);
@@ -1384,6 +1395,38 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const draftPresentationExiting = draftExitAnimating
         || (previousDraftOpenRef.current && !draftOpen && shouldAnimateDraftTransition);
     const draftLayoutVisible = draftOpen || draftPresentationExiting;
+    // The composer floats over the transcript in a normal session view; the
+    // draft screen (centred composer) and the expanded editor keep it in flow.
+    // On mobile the keyboard choreography still moves the form inside the
+    // slot and shrinks the column around it, so the slot rides along unchanged.
+    const floatingComposer = !draftLayoutVisible && !isDesktopExpandedInput;
+    // The slot's height is published as `--chat-composer-inset` on the chat
+    // column (the list footer's tail spacer reads it), written straight from
+    // the observer so composer growth never re-renders the timeline.
+    React.useLayoutEffect(() => {
+        const slot = composerSlotNode;
+        const column = slot?.parentElement;
+        if (!floatingComposer || !slot || !column || !globalThis.ResizeObserver) return;
+        const update = () => {
+            column.style.setProperty('--chat-composer-inset', `${Math.round(slot.getBoundingClientRect().height)}px`);
+        };
+        const observer = new ResizeObserver(update);
+        observer.observe(slot);
+        update();
+        return () => {
+            observer.disconnect();
+            column.style.removeProperty('--chat-composer-inset');
+        };
+    }, [composerSlotNode, floatingComposer]);
+    // The list owns the scroll element, so the shadows and the load-older
+    // trigger bind to its node rather than to a wrapper we render.
+    const scrollNodeRef = React.useMemo(() => ({ current: scrollNode }), [scrollNode]);
+    useScrollShadow(scrollNodeRef, {
+        observeMutations: false,
+        hideTopShadow: isMobile && stickyUserHeader,
+        // The glass composer is the visible end of the transcript.
+        hideBottomShadow: floatingComposer,
+    });
 
     React.useLayoutEffect(() => {
         if (draftOpen) {
@@ -1546,13 +1589,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 currentSessionKey={currentSessionKey ?? currentSessionId ?? ''}
                 isDesktopExpandedInput={isDesktopExpandedInput}
                 isMobile={isMobile}
+                floatingComposer={floatingComposer}
                 directory={effectiveSessionDirectory}
                 scrollRef={scrollRef}
                 registerList={registerList}
-                anchorMessageId={anchorMessageId}
-                onAnchorReady={onAnchorReady}
-                onAnchorSizeChanged={onAnchorSizeChanged}
                 onIsAtEndChange={onIsAtEndChange}
+                onListMetricsChange={onListMetricsChange}
                 onTimelineDataChange={onTimelineDataChange}
                 messageListRef={messageListRef}
                 renderedMessages={timelineController.renderedMessages}
@@ -1589,14 +1631,17 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 			{sessionSurface}
 
             <div
-                ref={composerSlotRef}
+                ref={attachComposerSlot}
                 className={cn(
-                    'relative z-10 flex min-h-0',
+                    'z-10 flex min-h-0',
+                    floatingComposer
+                        ? 'absolute inset-x-0 bottom-0'
+                        : 'relative',
                     isDesktopExpandedInput
                         ? 'flex-1 min-h-0 bg-background'
                         : draftLayoutVisible && !useCompactDraftLayout
                             ? 'flex-1 items-center justify-center bg-background pb-[6vh]'
-                        : 'bg-background'
+                        : !floatingComposer && 'bg-background'
                 )}
             >
                 {!draftLayoutVisible && !isDesktopExpandedInput && sessionMessages.length > 0 && (
@@ -1614,6 +1659,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                                 'pointer-events-none absolute bottom-full inset-x-0 mb-2 transition-opacity duration-100',
                                 userOwnsScroll && 'opacity-0',
                             )}
+                            style={{ transform: 'translateY(calc(-1 * var(--chat-floating-panel-clearance, 0px)))' }}
                         >
                             <div className="chat-input-column">
                                 {/* The glass chip itself is rendered inside
@@ -1630,6 +1676,31 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                                 </div>
                             </div>
                         </div>
+                        {/* The recap hint shares the anchor but keys its fade
+                            on the measured distance to the end, not on the
+                            user-owns-scroll intent flag or the list's at-end
+                            transitions: a session switch or a sideways swipe
+                            that nudges the viewport must not strand it either
+                            way. It stays out of the measured status node — it
+                            lives inside the fixed composer gap, so its arrival
+                            must not move the end. */}
+                        {currentSessionId ? (
+                            <div
+                                className={cn(
+                                    'oc-recap-hint pointer-events-none absolute bottom-full inset-x-0 mb-2 transition-opacity duration-100',
+                                    !viewportAtEnd && 'opacity-0',
+                                )}
+                                style={{ transform: 'translateY(calc(-1 * var(--chat-floating-panel-clearance, 0px)))' }}
+                            >
+                                <div className="chat-input-column">
+                                    <SessionRecapNote
+                                        sessionId={currentSessionId}
+                                        directory={effectiveSessionDirectory}
+                                        isMobile={isMobile}
+                                    />
+                                </div>
+                            </div>
+                        ) : null}
                     </>
                 )}
                 {promptReadOnly ? (

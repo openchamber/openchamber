@@ -22,6 +22,8 @@ type WireMessage = {
   v?: number;
   d?: string;
   r?: string;
+  cols?: number;
+  rows?: number;
   history?: string;
   status?: TerminalStreamEvent['status'];
   exitCode?: number;
@@ -118,6 +120,36 @@ describe('terminal transport', () => {
     } finally {
       nextFetchResponse = () => new Response(null, { status: 500 });
     }
+  });
+
+  test('carries the PTY size through snapshots, projection replays, and accepted resizes', async () => {
+    const socket = new FakeSocket();
+    const transport = new TerminalTransport({ refreshAuth: async () => '', openSocket: () => socket });
+    const sizes: Array<[number | undefined, number | undefined]> = [];
+    transport.subscribe('term-1', { onEvent: (event) => { if (event.type === 'snapshot') sizes.push([event.cols, event.rows]); } });
+    await tick();
+    socket.open();
+    await tick();
+
+    socket.emit({ t: 'snapshot', v: 3, s: 'term-1', q: 1, history: 'prompt', status: 'running', cols: 94, rows: 56 });
+    await tick();
+    expect(sizes).toEqual([[94, 56]]);
+
+    const lateSizes: Array<[number | undefined, number | undefined]> = [];
+    transport.subscribe('term-1', { onEvent: (event) => { if (event.type === 'snapshot') lateSizes.push([event.cols, event.rows]); } });
+    expect(lateSizes).toEqual([[94, 56]]);
+
+    transport.noteResize('term-1', 80, 24);
+    const afterResize: Array<[number | undefined, number | undefined]> = [];
+    transport.subscribe('term-1', { onEvent: (event) => { if (event.type === 'snapshot') afterResize.push([event.cols, event.rows]); } });
+    expect(afterResize).toEqual([[80, 24]]);
+
+    socket.emit({ t: 'snapshot', v: 3, s: 'term-2', q: 0, history: '', status: 'running' });
+    const legacy: Array<[number | undefined, number | undefined]> = [];
+    transport.subscribe('term-2', { onEvent: (event) => { if (event.type === 'snapshot') legacy.push([event.cols, event.rows]); } });
+    await tick();
+    expect(legacy).toEqual([]);
+    transport.dispose();
   });
 
   test('hydrates simultaneous subscribers and rejects duplicate sequences', async () => {

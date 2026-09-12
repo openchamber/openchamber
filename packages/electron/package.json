@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/electron",
-  "version": "1.22.2",
+  "version": "1.23.1",
   "private": true,
   "description": "Electron desktop runtime for OpenChamber",
   "author": "OpenChamber",
@@ -10,11 +10,12 @@
     "@openchamber/web": "workspace:*",
     "electron-context-menu": "^4.1.2",
     "electron-log": "^5.4.3",
-    "electron-updater": "^6.8.3"
+    "electron-updater": "^6.8.3",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
-    "electron": "^43.3.0",
+    "electron": "^43.7.0",
     "electron-builder": "^26.0.0",
     "node-abi": "^4.33.0"
   },

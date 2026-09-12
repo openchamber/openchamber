@@ -15,8 +15,10 @@ const ORIGINAL_FS = { ...fs };
 const AUTH = JSON.stringify({
   openai: { access: 'test-token' },
   crof: { key: 'test-token' },
+  'cline-pass': { key: 'test-token' },
   neuralwatt: { key: 'test-token' },
   'opencode-go': { key: 'test-token' },
+  openrouter: { key: 'test-token' },
   'zai-coding-plan': { key: 'test-token' },
   deepseek: { key: 'test-token' },
   hyper: { key: 'test-token' },
@@ -26,7 +28,8 @@ const AUTH = JSON.stringify({
 ((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
 ((fs as unknown) as { readFileSync: () => string }).readFileSync = () => AUTH;
 
-import { fetchHyperQuota, fetchQuotaForProvider } from './quotaProviders';
+import { fetchClinePassQuota, fetchHyperQuota, fetchOllamaCloudQuota, fetchQuotaForProvider } from './quotaProviders';
+import { validateCredential } from './quotaCredentials';
 
 type MockResponseInit = { ok?: boolean; status?: number };
 
@@ -113,6 +116,180 @@ describe('OpenCode Go quota provider (VS Code parity)', () => {
   });
 });
 
+describe('OpenRouter quota provider (VS Code parity)', () => {
+  const documentedPayload = {
+    data: {
+      label: 'test-key',
+      usage: 3.17561396,
+      usage_daily: 0.0000018,
+      usage_weekly: 0.0000018,
+      usage_monthly: 3.17561396,
+      limit: 30,
+      limit_remaining: 29.9999982,
+      limit_reset: 'daily',
+      is_free_tier: true,
+      is_management_key: false,
+      include_byok_in_limit: false,
+      byok_usage: 0,
+    },
+  };
+
+  test('reads the documented key endpoint and emits the current reset window', async () => {
+    let requestedUrl = '';
+    let requestInit: RequestInit | undefined;
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      requestedUrl = url;
+      requestInit = init;
+      return mockResponse(documentedPayload);
+    }) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('openrouter');
+
+    assert.equal(requestedUrl, 'https://openrouter.ai/api/v1/key');
+    assert.equal(requestedUrl.includes('/api/v1/credits'), false);
+    assert.equal(new Headers(requestInit?.headers).get('Authorization'), 'Bearer test-token');
+    assert.equal(new Headers(requestInit?.headers).get('Accept-Encoding'), 'identity');
+    assert.ok(requestInit?.signal instanceof AbortSignal);
+    assert.deepEqual(Object.keys(result.usage!.windows), ['daily']);
+    assert.equal(result.usage!.windows.daily!.windowSeconds, 86400);
+    assert.equal(result.usage!.windows.daily!.valueLabel, '$0.00 / $30.00');
+    assert.ok(typeof result.usage!.windows.daily!.resetAt === 'number');
+  });
+
+  test('maps an unlimited null-limit key to a monthly spent window', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: { limit: null, limit_remaining: null, limit_reset: null, usage_monthly: 12.5, is_management_key: false },
+    })));
+
+    const result = await fetchQuotaForProvider('openrouter');
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(Object.keys(result.usage!.windows), ['monthly']);
+    assert.equal(result.usage!.windows.monthly!.usedPercent, null);
+    assert.equal(result.usage!.windows.monthly!.windowSeconds, 30 * 86400);
+    assert.equal(result.usage!.windows.monthly!.valueLabel, '$12.50 spent');
+    assert.ok(typeof result.usage!.windows.monthly!.resetAt === 'number');
+  });
+
+  test('maps a lifetime cap to a credits window without reset metadata', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: { limit: 30, limit_remaining: 25, limit_reset: null, usage_monthly: 5 },
+    })));
+
+    const result = await fetchQuotaForProvider('openrouter');
+    const window = result.usage!.windows.credits;
+
+    assert.ok(window);
+    assert.equal(window!.windowSeconds, null);
+    assert.equal(window!.resetAt, null);
+  });
+
+  test('maps an unrecognized reset period to a credits window', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: { limit: 30, limit_remaining: 25, limit_reset: 'yearly', usage_monthly: 5 },
+    })));
+
+    const result = await fetchQuotaForProvider('openrouter');
+
+    assert.ok(result.usage!.windows.credits);
+    assert.equal(result.usage!.windows.credits!.windowSeconds, null);
+    assert.equal(result.usage!.windows.credits!.resetAt, null);
+  });
+
+  test('clamps percent at 100 while leaving the money label unclamped', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: { limit: 30, limit_remaining: -1, limit_reset: 'monthly', usage_monthly: 31 },
+    })));
+
+    const result = await fetchQuotaForProvider('openrouter');
+    const window = result.usage!.windows.monthly;
+
+    assert.equal(window!.usedPercent, 100);
+    assert.equal(window!.valueLabel, '$31.00 / $30.00');
+  });
+
+  test('uses a weekly window and derives its reset on Monday UTC', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: { limit: 30, limit_remaining: 25, limit_reset: 'weekly', usage_monthly: 5 },
+    })));
+
+    const result = await fetchQuotaForProvider('openrouter');
+    const window = result.usage!.windows.weekly;
+
+    assert.ok(window);
+    assert.equal(window!.windowSeconds, 604800);
+    assert.equal(new Date(window!.resetAt!).getUTCDay(), 1);
+  });
+
+  test('rejects management keys with an inference-key error', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({ data: { is_management_key: true } })));
+
+    const result = await fetchQuotaForProvider('openrouter');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.usage, null);
+    assert.equal(result.error, 'Management key configured — quota needs an inference API key');
+  });
+
+  for (const status of [401, 403]) {
+    test(`maps HTTP ${status} to session expiry`, async () => {
+      stubFetchFailing(async () => ({}), { ok: false, status });
+
+      const result = await fetchQuotaForProvider('openrouter');
+
+      assert.equal(result.ok, false);
+      assert.equal(result.error, 'Session expired — please re-authenticate with OpenRouter');
+    });
+  }
+
+  test('reports invalid JSON as a parse failure', async () => {
+    globalThis.fetch = (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => { throw new SyntaxError('Unexpected token'); },
+    }) as unknown as Response) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('openrouter');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Invalid response from provider');
+  });
+
+  test('normalizes timeout failures', async () => {
+    stubFetchReturning(() => Promise.reject(new DOMException('Timed out', 'TimeoutError')));
+
+    const result = await fetchQuotaForProvider('openrouter');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Request timed out');
+  });
+
+  test('rejects a response without usable quota data', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({ data: { limit: 30, limit_remaining: null } })));
+
+    const result = await fetchQuotaForProvider('openrouter');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.usage, null);
+    assert.equal(result.error, 'No quota data in response');
+  });
+
+  for (const payload of [{ data: {} }, { data: null }]) {
+    test(`rejects ${JSON.stringify(payload)} without quota data`, async () => {
+      stubFetchReturning(() => Promise.resolve(mockResponse(payload)));
+
+      const result = await fetchQuotaForProvider('openrouter');
+
+      assert.equal(result.ok, false);
+      assert.equal(result.configured, true);
+      assert.equal(result.usage, null);
+      assert.equal(result.error, 'No quota data in response');
+    });
+  }
+});
+
 
 describe('Crof quota provider (VS Code parity)', () => {
   test('reports credits balance as valueLabel with null percent', async () => {
@@ -157,6 +334,121 @@ describe('Crof quota provider (VS Code parity)', () => {
 
     assert.equal(result.ok, false);
     assert.equal(result.error, 'Invalid response from provider');
+  });
+});
+
+describe('ClinePass quota provider (VS Code parity)', () => {
+  // Live-verified response shape of
+  // GET https://api.cline.bot/api/v1/users/me/plan/usage-limits
+  const documentedPayload = {
+    data: {
+      limits: [
+        { type: 'five_hour', percentUsed: 43, resetsAt: '2026-09-08T17:00:44.598174595Z' },
+        { type: 'weekly', percentUsed: 17, resetsAt: '2026-09-13T17:00:44.598174595Z' },
+        { type: 'monthly', percentUsed: 8, resetsAt: '2026-10-01T00:00:00Z' },
+      ],
+    },
+    success: true,
+  };
+
+  test('maps documented limit kinds to 5h/weekly/monthly windows', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse(documentedPayload)));
+
+    const result = await fetchQuotaForProvider('cline-pass');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.providerId, 'cline-pass');
+    assert.equal(result.usage?.windows['5h']?.usedPercent, 43);
+    assert.equal(result.usage?.windows['5h']?.windowSeconds, 18_000);
+    assert.equal(result.usage?.windows['5h']?.resetAt, Date.parse('2026-09-08T17:00:44.598174595Z'));
+    assert.equal(result.usage?.windows.weekly?.usedPercent, 17);
+    assert.equal(result.usage?.windows.weekly?.windowSeconds, 604_800);
+    assert.equal(result.usage?.windows.monthly?.usedPercent, 8);
+    assert.equal(result.usage?.windows.monthly?.windowSeconds, null);
+  });
+
+  test('ignores unknown limit types and rejects responses without quota data', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({ data: { limits: [{ type: 'quarterly', percentUsed: 5 }] } })));
+
+    const result = await fetchQuotaForProvider('cline-pass');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.usage, null);
+    assert.equal(result.error, 'No quota data in response');
+  });
+
+  test('maps 401 to session-expired with ClinePass branding', async () => {
+    stubFetchFailing(async () => ({}), { ok: false, status: 401 });
+
+    const result = await fetchQuotaForProvider('cline-pass');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'Session expired — please re-authenticate with ClinePass');
+  });
+
+  test('reports invalid-response on JSON parse failure', async () => {
+    stubFetchFailing(async () => { throw new SyntaxError('Unexpected token'); }, { ok: true, status: 200 });
+
+    const result = await fetchQuotaForProvider('cline-pass');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Invalid response from provider');
+  });
+
+  const readAuth = () => ({ 'cline-pass': { key: 'test-token' } });
+
+  for (const limit of [
+    { type: 'constructor', percentUsed: 5 }, { type: 'toString', percentUsed: 5 },
+    { type: '__proto__', percentUsed: 5 }, { type: 'weekly', percentUsed: '' },
+    { type: 'weekly', percentUsed: ' ' }, { type: 'weekly', percentUsed: true },
+    { type: 'weekly', percentUsed: null }, null,
+  ]) {
+    test(`skips malformed windows independently: ${JSON.stringify(limit)}`, async () => {
+      const invalid = await fetchClinePassQuota({ readAuth, fetchImpl: async () => Response.json({ data: { limits: [limit] } }) });
+      assert.equal(invalid.ok, false);
+      assert.equal(invalid.usage, null);
+      const mixed = await fetchClinePassQuota({ readAuth, fetchImpl: async () => Response.json({ data: { limits: [limit, { type: 'monthly', percentUsed: 8 }] } }) });
+      assert.equal(mixed.ok, true);
+      assert.ok(mixed.usage);
+      assert.deepEqual(Object.keys(mixed.usage.windows), ['monthly']);
+    });
+  }
+
+  for (const percentUsed of [0, '0', '51']) {
+    test(`accepts percentage ${JSON.stringify(percentUsed)}`, async () => {
+      const result = await fetchClinePassQuota({ readAuth, fetchImpl: async () => Response.json({ data: { limits: [{ type: 'weekly', percentUsed }] } }) });
+      assert.equal(result.ok, true);
+      assert.equal(result.usage?.windows.weekly?.usedPercent, Number(percentUsed));
+    });
+  }
+
+  for (const entry of [{ key: '' }, { key: ' ' }, { key: 42 }, {}]) {
+    test(`falls back to a usable token: ${JSON.stringify(entry)}`, async () => {
+      const result = await fetchClinePassQuota({
+        readAuth: () => ({ 'cline-pass': { ...entry, token: 'test-token' } }),
+        fetchImpl: async (_url, options) => {
+          assert.equal(new Headers(options.headers).get('Authorization'), 'Bearer test-token');
+          return Response.json(documentedPayload);
+        },
+      });
+      assert.equal(result.ok, true);
+    });
+  }
+
+  test('does not request usage without usable credentials', async () => {
+    const result = await fetchClinePassQuota({ readAuth: () => ({ 'cline-pass': { key: 42 } }), fetchImpl: async () => { throw new Error('Unexpected fetch'); } });
+    assert.equal(result.configured, false);
+    assert.equal(result.error, 'Not configured');
+  });
+
+  test('recognizes the timeout exception from AbortSignal.timeout', async () => {
+    const result = await fetchClinePassQuota({ readAuth, fetchImpl: async () => { throw new DOMException('Timed out', 'TimeoutError'); } });
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.usage, null);
+    assert.equal(result.error, 'Request timed out');
   });
 });
 
@@ -429,7 +721,7 @@ describe('NeuralWatt quota provider (VS Code parity)', () => {
     assert.equal(result.usage!.windows.credits_balance!.valueLabel, '$32.68');
   });
 
-  test('surfaces subscription and allowance windows (allowance keyed by period, key name in valueLabel)', async () => {
+  test('surfaces subscription and allowance windows (allowance keyed by period, percent value)', async () => {
     const payload = {
       ...DOCUMENTED_SUBSCRIPTION_PAYLOAD,
       balance: { credits_remaining_usd: 200 },
@@ -447,11 +739,11 @@ describe('NeuralWatt quota provider (VS Code parity)', () => {
     assert.ok(Math.abs((subWindow!.usedPercent as number) - (13.9023 / 20.0) * 100) < 1e-2);
 
     // Allowance window is keyed by the localized period label ("monthly");
-    // key name flows through valueLabel for identification.
+    // the usage value stays a percent — no key-name valueLabel.
     const allowWindow = result.usage!.windows.monthly;
     assert.ok(allowWindow);
     assert.equal(allowWindow!.usedPercent, 25);
-    assert.equal(allowWindow!.valueLabel, 'Prod');
+    assert.equal(allowWindow!.valueLabel, undefined);
     assert.equal(allowWindow!.resetAt, Date.parse('2026-08-01T00:00:00Z'));
 
     assert.equal(result.usage!.windows.credits_balance, undefined);
@@ -476,7 +768,7 @@ describe('NeuralWatt quota provider (VS Code parity)', () => {
     assert.ok(Math.abs((window!.usedPercent as number) - (25 / 55) * 100) < 1e-2);
     assert.equal(window!.windowSeconds, 30 * 86400);
     assert.equal(window!.resetAt, Date.parse('2026-08-01T00:00:00Z'));
-    assert.equal(window!.valueLabel, 'prod-key');
+    assert.equal(window!.valueLabel, undefined);
     assert.equal(result.usage!.windows.credits_balance, undefined);
   });
 
@@ -515,7 +807,7 @@ describe('NeuralWatt quota provider (VS Code parity)', () => {
     assert.ok(window);
     assert.equal(window!.windowSeconds, 604800);
     assert.equal(window!.resetAt, Date.parse('2026-07-04T00:00:00Z'));
-    assert.equal(window!.valueLabel, 'Prod');
+    assert.equal(window!.valueLabel, undefined);
   });
 
   test('uses daily as the allowance key when period is daily', async () => {
@@ -555,7 +847,7 @@ describe('NeuralWatt quota provider (VS Code parity)', () => {
     assert.equal(window!.usedPercent, 25);
   });
 
-  test('marks blocked allowance as 100% with valueLabel set', async () => {
+  test('marks blocked allowance as 100% with percent value', async () => {
     const payload = {
       balance: { credits_remaining_usd: 30 },
       subscription: null,
@@ -571,7 +863,7 @@ describe('NeuralWatt quota provider (VS Code parity)', () => {
     const window = result.usage!.windows.monthly;
     assert.ok(window);
     assert.equal(window!.usedPercent, 100);
-    assert.equal(window!.valueLabel, 'sample');
+    assert.equal(window!.valueLabel, undefined);
   });
 
   test('falls back to credits_balance when neither subscription nor allowance exists', async () => {
@@ -720,6 +1012,104 @@ describe('DeepSeek quota provider (VS Code parity)', () => {
     const fsMock = fs as unknown as { existsSync: unknown; readFileSync: unknown };
     fsMock.existsSync = ORIGINAL_FS.existsSync;
     fsMock.readFileSync = ORIGINAL_FS.readFileSync;
+  });
+});
+
+describe('Ollama Cloud quota validation and refresh', () => {
+  const credential = { cookie: 'test-ollama-cookie' };
+  const readCookie = () => credential.cookie;
+
+  for (const { html, expected } of [
+    { html: '<h1>Monthly usage</h1><p>$25.00 of $100.00</p>', expected: { monthly: { usedPercent: 25, valueLabel: '$25.00 / $100.00' } } },
+    { html: 'Monthly usage $1,250.00 of $2,500.00', expected: { monthly: { usedPercent: 50, valueLabel: '$1,250.00 / $2,500.00' } } },
+    { html: 'Session usage 12% Weekly usage 34% Premium 2 / 10', expected: { session: { usedPercent: 12 }, weekly: { usedPercent: 34 }, premium: { usedPercent: 20, valueLabel: '2 / 10' } } },
+    { html: 'Monthly usage $0 of $100 Balance remaining $5.25 Add $5', expected: { monthly: { usedPercent: 0, valueLabel: '$0 / $100' }, credits_balance: { usedPercent: null, valueLabel: '$5.25' } } },
+    { html: 'Monthly usage $0 of $100 Balance remaining $0.00 Add $5', expected: { monthly: { usedPercent: 0, valueLabel: '$0 / $100' } } },
+    { html: 'Monthly usage $125 of $100 Add $5', expected: { monthly: { usedPercent: 100, valueLabel: '$125 / $100' } } },
+  ]) {
+    test(`accepts and displays ${html}`, async () => {
+      let requests = 0;
+      const fetchImpl = async (url: string, init: RequestInit) => {
+        requests += 1;
+        assert.equal(url, 'https://ollama.com/settings');
+        assert.equal(init.redirect, 'manual');
+        assert.equal(init.method, 'GET');
+        assert.equal(new Headers(init.headers).get('Cookie'), credential.cookie);
+        assert.ok(init.signal instanceof AbortSignal);
+        return new Response(html);
+      };
+      await validateCredential('ollama-cloud', credential, fetchImpl);
+      const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+      assert.equal(requests, 2);
+      assert.equal(result.ok, true);
+      assert.ok(result.usage);
+      assert.deepEqual(Object.keys(result.usage.windows), Object.keys(expected));
+      for (const [key, expectedWindow] of Object.entries(expected)) {
+        const window: NonNullable<typeof result.usage>['windows'][string] = result.usage.windows[key];
+        assert.ok(window);
+        assert.equal(window.usedPercent, expectedWindow.usedPercent);
+        if ('valueLabel' in expectedWindow) assert.equal(window.valueLabel, expectedWindow.valueLabel);
+        assert.equal(window.resetAt, null);
+      }
+      assert.equal(JSON.stringify(result).includes(credential.cookie), false);
+    });
+  }
+
+  for (const html of ['', '<h1>Monthly usage</h1>', 'Session usage', 'Session usage 1.2.3%', 'Weekly usage 1.2.3%', 'Add $5', 'Monthly usage $1.2.3 of $100', 'Balance remaining $1.2.3']) {
+    test(`rejects unparseable HTML ${JSON.stringify(html)} in both consumers`, async () => {
+      const fetchImpl = async () => new Response(html);
+      await assert.rejects(validateCredential('ollama-cloud', credential, fetchImpl), /usage data could not be parsed/);
+      const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+      assert.equal(result.ok, false);
+      assert.equal(result.configured, true);
+      assert.equal(result.usage, null);
+      assert.equal(result.error, 'Ollama Cloud usage data could not be parsed');
+    });
+  }
+
+  for (const status of [302, 307, 401, 403, 429, 500]) {
+    test(`rejects HTTP ${status} in both consumers`, async () => {
+      const fetchImpl = async () => new Response('Monthly usage $25 of $100', { status });
+      await assert.rejects(validateCredential('ollama-cloud', credential, fetchImpl), /authentication failed/);
+      const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+      assert.equal(result.ok, false);
+      assert.equal(result.usage, null);
+      assert.equal(result.error, 'Ollama Cloud authentication failed');
+    });
+  }
+
+  for (const failure of [new DOMException('Request timed out', 'TimeoutError'), new Error('Network unavailable')]) {
+    test(`reports ${failure.message} in both consumers`, async () => {
+      const fetchImpl = async () => { throw failure; };
+      await assert.rejects(validateCredential('ollama-cloud', credential, fetchImpl), failure);
+      const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+      assert.equal(result.ok, false);
+      assert.equal(result.usage, null);
+      assert.equal(result.error, failure.message);
+    });
+  }
+
+  test('does not request usage without a cookie', async () => {
+    const result = await fetchOllamaCloudQuota({ readCookie: () => undefined, fetchImpl: async () => { assert.fail('Unexpected request'); } });
+    assert.equal(result.configured, false);
+    assert.equal(result.ok, false);
+  });
+
+  test('reports response body failures in both consumers', async () => {
+    const failure = new Error('Response body interrupted');
+    const fetchImpl = async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(failure);
+      },
+    }));
+
+    await assert.rejects(validateCredential('ollama-cloud', credential, fetchImpl), failure);
+    const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.usage, null);
+    assert.equal(result.error, failure.message);
+    assert.deepEqual(credential, { cookie: 'test-ollama-cookie' });
   });
 });
 

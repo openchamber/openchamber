@@ -29,6 +29,7 @@ export type SelectionState = {
   getSessionAgentSelection: (sessionId: string) => string | null
   saveAgentModelForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => void
   getAgentModelForSession: (sessionId: string, agentName: string) => { providerId: string; modelId: string } | null
+  clearSessionSelections: (sessionId: string) => void
   /**
    * `variant` is the effort chosen for this agent/model in this session:
    * a name, `null` for an explicit "Default" (send no effort), or `undefined`
@@ -94,6 +95,20 @@ export const useSelectionStore = create<SelectionState>()(
       getAgentModelForSession: (sessionId, agentName) =>
         get().sessionAgentModelSelections.get(sessionId)?.get(agentName) ?? null,
 
+      clearSessionSelections: (sessionId) => set((state) => {
+        const hadVariant = agentModelVariantSelections.delete(sessionId)
+        if (!hadVariant && !state.sessionModelSelections.has(sessionId)
+          && !state.sessionAgentSelections.has(sessionId)
+          && !state.sessionAgentModelSelections.has(sessionId)) return state
+        const sessionModelSelections = new Map(state.sessionModelSelections)
+        const sessionAgentSelections = new Map(state.sessionAgentSelections)
+        const sessionAgentModelSelections = new Map(state.sessionAgentModelSelections)
+        sessionModelSelections.delete(sessionId)
+        sessionAgentSelections.delete(sessionId)
+        sessionAgentModelSelections.delete(sessionId)
+        return { sessionModelSelections, sessionAgentSelections, sessionAgentModelSelections }
+      }),
+
       saveAgentModelVariantForSession: (sessionId, agentName, providerId, modelId, variant) => {
         const key = `${providerId}/${modelId}`
         const clears = variant === undefined
@@ -118,10 +133,12 @@ export const useSelectionStore = create<SelectionState>()(
           if (agentMap.size === 0) {
             agentModelVariantSelections.delete(sessionId)
           }
+          set((state) => ({ ...state }))
           return
         }
 
         modelMap.set(key, variant)
+        set((state) => ({ ...state }))
       },
 
       getAgentModelVariantForSession: (sessionId, agentName, providerId, modelId) => {

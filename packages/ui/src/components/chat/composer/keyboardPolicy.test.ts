@@ -26,6 +26,10 @@ const enterPolicyCases: Array<[string, Partial<EnterKeyPolicyInput>, boolean]> =
         ['configured enabled Shift+Enter inserts a newline', { enterToSendConfigured: true, enterToSend: true, shiftKey: true }, false],
         ['configured disabled Enter inserts a newline', { enterToSendConfigured: true, enterToSend: false }, false],
         ['configured disabled Shift+Enter sends', { enterToSendConfigured: true, enterToSend: false, shiftKey: true }, true],
+        ['expanded composer Enter inserts a newline when Enter-to-send is enabled', { isDesktopExpanded: true, enterToSendConfigured: true, enterToSend: true }, false],
+        ['expanded composer Shift+Enter inserts a newline when Enter-to-send is disabled', { isDesktopExpanded: true, enterToSendConfigured: true, enterToSend: false, shiftKey: true }, false],
+        ['expanded composer Ctrl+Enter sends despite Enter-to-send being disabled', { isDesktopExpanded: true, enterToSendConfigured: true, ctrlKey: true }, true],
+        ['expanded composer Cmd+Enter sends despite Enter-to-send being enabled', { isDesktopExpanded: true, enterToSendConfigured: true, enterToSend: true, metaKey: true }, true],
         ['configured Ctrl+Enter always sends', { enterToSendConfigured: true, isMobile: true, isDesktopExpanded: true, shiftKey: true, ctrlKey: true }, true],
         ['configured Meta+Enter always sends', { enterToSendConfigured: true, isMobile: true, isDesktopExpanded: true, shiftKey: true, metaKey: true }, true],
 ];
@@ -33,8 +37,9 @@ const enterPolicyCases: Array<[string, Partial<EnterKeyPolicyInput>, boolean]> =
 describe('Enter key policy', () => {
     for (const surface of [{}, { isMobile: true }, { isDesktopExpanded: true }]) {
         for (const modifiers of [{}, { ctrlKey: true }, { metaKey: true }, { ctrlKey: true, metaKey: true }]) {
-            test(`untouched Shift+Enter does not submit: ${JSON.stringify({ ...surface, ...modifiers })}`, () => {
-                expect(shouldSubmitEnter(policy({ ...surface, ...modifiers, shiftKey: true }))).toBe(false);
+            test(`untouched Shift+Enter only submits with a modifier in expanded mode: ${JSON.stringify({ ...surface, ...modifiers })}`, () => {
+                expect(shouldSubmitEnter(policy({ ...surface, ...modifiers, shiftKey: true })))
+                    .toBe(Boolean(surface.isDesktopExpanded && (modifiers.ctrlKey || modifiers.metaKey)));
             });
         }
     }

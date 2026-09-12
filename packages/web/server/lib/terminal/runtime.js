@@ -10,7 +10,7 @@ import {
 import { sanitizeTerminalHistoryChunk } from './history.js';
 import { consumeTerminalThemeQueries, terminalThemeModeReport } from './theme-response.js';
 import { buildTerminalShellLaunch, createTerminalShellResolver, normalizeTerminalShell } from './shells.js';
-import { stripAppImageArgv0Leak, resolveLinuxPtyLaunch } from '../inherited-env.js';
+import { stripAppImageArgv0Leak, resolvePosixPtyLaunch } from '../inherited-env.js';
 
 const MAX_SESSIONS = 20;
 const MAX_HISTORY_BYTES = 512 * 1024;
@@ -123,15 +123,16 @@ export function createTerminalRuntime({
     for (const executable of resolvedShell.executables) {
       try {
         const env = { ...process.env, PATH: buildAugmentedPath(), TERM: 'xterm-256color', COLORTERM: 'truecolor', COLORFGBG: themeMode === 'light' ? '0;15' : '15;0' };
-        // The daemon's IPC fd is closed inside the PTY. An explicit override is
-        // required because bun-pty also inherits Bun's native process environment.
-        env.NODE_CHANNEL_FD = '';
+        // The daemon's IPC fd is closed inside the PTY; an inherited NODE_CHANNEL_FD
+        // (even an empty one) makes Node CLIs warn about an unparsable IPC channel.
+        delete env.NODE_CHANNEL_FD;
         delete env.BASH_XTRACEFD; delete env.BASH_ENV; delete env.ENV; delete env.ELECTRON_RUN_AS_NODE;
         // AppImage exports ARGV0; zsh would otherwise rewrite argv[0] for every command (#2588).
-        // bun-pty also merges the native OS environ, so wrap with `env -u ARGV0` on Linux.
         stripAppImageArgv0Leak(env);
         const shellLaunch = buildTerminalShellLaunch(executable, { mode, command, loginShell });
-        const launch = resolveLinuxPtyLaunch(shellLaunch.executable, shellLaunch.args);
+        // bun-pty merges the native OS environ back in, so the POSIX launch is
+        // wrapped with `env -u` for the variables deleted above.
+        const launch = resolvePosixPtyLaunch(shellLaunch.executable, shellLaunch.args);
         const options = { name: 'xterm-256color', cwd, cols, rows, env };
         if (process.platform === 'win32') options.useConpty = true;
         return { process: await provider.spawn(launch.executable, launch.args, options), backend: provider.backend, shell: resolvedShell.id, loginShell };
@@ -184,6 +185,10 @@ export function createTerminalRuntime({
 
   const snapshot = (session) => ({
     t: 'snapshot', v: 3, s: session.id, q: session.sequence, history: session.history,
+    // The PTY size the history was drawn for: a client replays history at this
+    // size before fitting its own viewport, so shell output wrapped for one
+    // width never gets re-laid-out at another.
+    cols: session.cols, rows: session.rows,
     status: session.status, exitCode: session.exitCode, signal: session.signal,
     mode: session.mode ?? INTERACTIVE_TERMINAL_MODE, purpose: getSessionPurpose(session),
     runtime, ptyBackend: session.backend,

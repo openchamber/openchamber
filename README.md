@@ -152,7 +152,7 @@ Special thanks to:
 
 - [OpenCode](https://opencode.ai) for the API and open-source architecture OpenChamber builds on
 - [Pierre](https://pierrejs-docs.vercel.app/) for the diff viewer and syntax highlighting
-- [Ghostty-web](https://github.com/coder/ghostty-web) for its Ghostty web renderer
+- The [T3 Code](https://github.com/pingdotgg/t3code) team for their browser adapter for [libghostty-vt](https://github.com/ghostty-org/ghostty), which our terminal is built on
 - [Yulia Ivashko](https://github.com/yulia-ivashko), who built the firework celebration that plays on every successful push
 - Everyone who contributed code, reported bugs, or shared ideas
 

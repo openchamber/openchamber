@@ -44,4 +44,27 @@ describe('i18n dictionaries', () => {
       expect(dictionary['common.language.japanese']).toBeTruthy();
     }
   });
+
+  test('telemetry translations retain the numeric token placeholders', () => {
+    for (const dictionary of Object.values(localeDictionaries)) {
+      expect(dictionary['chat.workStatus.telemetry.tokens.inOut']).toContain('{input}');
+      expect(dictionary['chat.workStatus.telemetry.tokens.inOut']).toContain('{output}');
+      for (const parameter of ['input', 'output', 'reasoning']) {
+        expect(dictionary['chat.workStatus.telemetry.tokensDescription']).toContain(`{${parameter}}`);
+      }
+    }
+  });
+
+  test('all telemetry rows have translated explanations and compact labels', () => {
+    const metrics = ['responseSpeed', 'speed', 'llmDuration', 'toolDuration', 'ttft', 'steps', 'tokens', 'cacheHit', 'cost'] as const;
+    for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
+      for (const metric of metrics) {
+        const label = dictionary[`chat.workStatus.telemetry.${metric}`];
+        const description = dictionary[`chat.workStatus.telemetry.${metric}Description`];
+        expect(label.length <= 16).toBe(true);
+        expect(description.length > 30).toBe(true);
+        if (locale !== 'en') expect(description === enDict[`chat.workStatus.telemetry.${metric}Description`]).toBe(false);
+      }
+    }
+  });
 });

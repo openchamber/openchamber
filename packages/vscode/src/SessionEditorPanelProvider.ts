@@ -183,6 +183,14 @@ export class SessionEditorPanelProvider {
     }, null, this._context.subscriptions);
 
     panel.webview.onDidReceiveMessage(async (message: BridgeRequest) => {
+      if (message.type === 'webview:ready') {
+        for (const controller of state.sseStreams.values()) {
+          controller.abort();
+        }
+        state.sseStreams.clear();
+        this._sendCachedStateToPanel(state);
+      }
+
       // Any inbound message proves the webview script is running, which is the
       // only readiness signal this panel has. Flush whatever was held for it.
       state.webviewReady = true;
@@ -193,6 +201,8 @@ export class SessionEditorPanelProvider {
           payload: { ...pending, targetSessionId: state.sessionId ?? undefined },
         });
       }
+
+      if (message.type === 'webview:ready') return;
 
       // Editor comment threads mirror the composer's drafts, so the webview
       // reports every change. One-way notification, no response expected.

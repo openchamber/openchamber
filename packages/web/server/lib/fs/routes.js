@@ -864,6 +864,37 @@ export const registerFsRoutes = (app, dependencies) => {
     }
   });
 
+  app.get('/api/fs/directory-stat', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const paths = new URL(req.url, 'http://openchamber.local').searchParams.getAll('path');
+    const directoryPath = paths.length === 1 ? paths[0].trim() : '';
+    if (!directoryPath) {
+      return res.status(400).json({ error: 'Path is required' });
+    }
+
+    try {
+      // Directory discovery uses the same path policy as /api/fs/list, including
+      // paths outside the current workspace. stat follows symlinks without readdir.
+      const resolvedPath = path.resolve(normalizeDirectoryPath(directoryPath));
+      const stats = await fsPromises.stat(resolvedPath);
+      if (!stats.isDirectory()) {
+        return res.status(400).json({ error: 'Specified path is not a directory', reason: 'not-directory' });
+      }
+      return res.json({ isDirectory: true });
+    } catch (error) {
+      if (error.code === 'ENOENT' || error.code === 'ENOTDIR') {
+        return res.status(error.code === 'ENOENT' ? 404 : 400).json({
+          error: error.code === 'ENOENT' ? 'Directory not found' : 'Specified path is not a directory',
+          reason: error.code === 'ENOENT' ? 'not-found' : 'not-directory',
+        });
+      }
+      if (isOsPermissionError(error)) {
+        return sendOsPermissionDenied(res, 'Access to directory denied');
+      }
+      return res.status(500).json({ error: 'Failed to stat directory' });
+    }
+  });
+
   app.get('/api/fs/stat', async (req, res) => {
     const filePath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
     const optional = req.query.optional === 'true';

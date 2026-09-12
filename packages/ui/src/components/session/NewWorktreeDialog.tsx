@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   Dialog,
   DialogContent,
@@ -37,7 +38,8 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { validateWorktreeCreate } from '@/lib/worktrees/worktreeManager';
 import { createWorktreeWithDefaults } from '@/lib/worktrees/worktreeCreate';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
-import { getWorktreeSetupCommands, getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
+import { getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
+import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
@@ -962,7 +964,7 @@ export function NewWorktreeDialog({
       const includePrDiff = mode === 'new-branch' ? newBranchState.includePrDiff : false;
       const shouldCreateSession = Boolean(linkedIssue || linkedPrState || linkedLinearIssue);
 
-      const setupCommands = await getWorktreeSetupCommands(projectRef);
+      const setupCommands = await resolveWorktreeSetupCommands(projectRef);
       const sourceBranch = newBranchState.sourceBranch;
 
       let sourceLabel = '';
@@ -1787,7 +1789,7 @@ export function NewWorktreeDialog({
               </div>
             </DialogHeader>
 
-            <div className="flex-1 overflow-y-auto mt-2 space-y-6">
+            <ScrollableOverlay outerClassName="flex-1 mt-2" className="space-y-6" disableHorizontal>
               {/* Branch Name / Existing Branch Selection */}
               {mode === 'existing-branch' ? (
                 <div className="space-y-1.5">
@@ -2212,7 +2214,7 @@ export function NewWorktreeDialog({
                   )}
                 </div>
               )}
-            </div>
+            </ScrollableOverlay>
 
             {/* Footer */}
             <DialogFooter className="mt-1 flex items-center justify-between">

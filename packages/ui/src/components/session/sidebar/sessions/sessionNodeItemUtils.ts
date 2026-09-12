@@ -217,6 +217,7 @@ export const selectFolderIdsForProjection = (
   entries: readonly FolderProjectionEntry[],
   options: FolderProjectionOptions,
 ): Set<string> => {
+  const isIdQuery = options.searchQuery.trim().toLowerCase().startsWith('ses_');
   const entryById = new Map(entries.map((entry) => [entry.id, entry]));
   const childIdsByParentId = new Map<string, string[]>();
   const malformedIds = new Set<string>();
@@ -260,7 +261,7 @@ export const selectFolderIdsForProjection = (
       keep = (childIdsByParentId.get(folderId) ?? []).some(shouldKeep);
     } else {
       if (!keep && !options.searchQuery) keep = true;
-      if (!keep && (entry.nodeCount > 0 || matchesRankQuery([entry.name], options.searchQuery))) keep = true;
+      if (!keep && (entry.nodeCount > 0 || (!isIdQuery && matchesRankQuery([entry.name], options.searchQuery)))) keep = true;
       if (!keep) keep = (childIdsByParentId.get(folderId) ?? []).some(shouldKeep);
     }
 

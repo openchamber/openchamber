@@ -13,6 +13,8 @@ declare module "bun:test" {
     toThrow(expected?: string | RegExp | (new (...args: never[]) => unknown)): void;
     toContain(expected: unknown): void;
     toBeDefined(): void;
+    toBeUndefined(): void;
+    toMatchObject(expected: unknown): void;
     rejects: {
       toThrow(expected?: string | RegExp | (new (...args: never[]) => unknown)): Promise<void>;
     };
@@ -56,4 +58,17 @@ declare module "bun:test" {
     function module(moduleName: string, factory: () => Record<string, unknown>): void;
     function restore(): void;
   }
+}
+
+// Vite asset-query imports need a URL loader when real UI modules run in Bun.
+declare module "bun" {
+  export function plugin(options: {
+    name: string;
+    setup(build: {
+      onLoad(options: { filter: RegExp }, callback: (args: { path: string }) => {
+        contents: string;
+        loader: "js" | "ts";
+      }): void;
+    }): void;
+  }): void;
 }

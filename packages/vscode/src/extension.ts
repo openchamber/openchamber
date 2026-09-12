@@ -7,6 +7,7 @@ import { startGlobalEventWatcher, stopGlobalEventWatcher, setChatViewProvider } 
 import { pathsEqualWithNormalizedDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 import { InlineCommentThreads, SIDEBAR_SURFACE_ID } from './InlineCommentThreads';
+import { applyConnectAttemptTimeout } from './networkDefaults';
 
 let chatViewProvider: ChatViewProvider | undefined;
 
@@ -52,6 +53,7 @@ const formatDurationMs = (value: number | null | undefined) => {
 };
 
 export async function activate(context: vscode.ExtensionContext) {
+  applyConnectAttemptTimeout();
   outputChannel = vscode.window.createOutputChannel('OpenChamber');
 
   let moveToRightSidebarScheduled = false;

@@ -101,6 +101,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     }), [placeholder, t]);
 
     const selectedModel = providerId && modelId ? { providerID: providerId, modelID: modelId } : null;
+    const displayReady = isReady || Boolean(selectedModel);
     // Show the model's display name (as in the picker list), not the raw provider/model id.
     const triggerLabel = React.useMemo(() => {
         if (!providerId || !modelId) {
@@ -149,7 +150,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     )}
                 >
                     <div className="flex min-w-0 items-center gap-2">
-                        {!isReady ? (
+                        {!displayReady ? (
                             <>
                                 <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
                                 <span className="typography-meta text-muted-foreground">{isUnavailable ? t('common.unavailable') : t('common.loading')}</span>
@@ -159,7 +160,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                         ) : (
                             <Icon name="pencil-ai" className="h-3 w-3 text-muted-foreground" />
                         )}
-                        {isReady ? <span className="typography-meta font-medium text-foreground truncate">{triggerLabel}</span> : null}
+                        {displayReady ? <span className="typography-meta font-medium text-foreground truncate">{triggerLabel}</span> : null}
                     </div>
                     <Icon name="arrow-down-s" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
                 </button>
@@ -186,9 +187,9 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     )}
                     // The name is gone from the trigger, so it has to stay
                     // reachable somewhere.
-                    title={compact && isReady ? triggerLabel : undefined}
+                    title={compact && displayReady ? triggerLabel : undefined}
                 >
-                    {!isReady ? (
+                    {!displayReady ? (
                         <>
                             <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground flex-shrink-0" />
                             {!compact && (

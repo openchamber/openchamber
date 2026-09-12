@@ -63,8 +63,9 @@ export const COMPOSER_EDITOR_THEME_SPEC = {
     // Kebab-case: the theme emits `--surface-muted-foreground`. A camelCased
     // name here is not a missing colour but an invalid declaration, and since
     // `color` inherits, the placeholder silently renders at full text
-    // brightness instead.
-    '.cm-placeholder': { color: 'var(--surface-muted-foreground)' },
+    // brightness instead. Kept faint on purpose: the hint should read as a
+    // whisper behind the caret, not compete with the composer's controls.
+    '.cm-placeholder': { color: 'color-mix(in srgb, var(--surface-muted-foreground) 40%, transparent)' },
     // `drawSelection()` paints its own selection layer, and CodeMirror styles
     // it for the focused editor through
     // `&light.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground`

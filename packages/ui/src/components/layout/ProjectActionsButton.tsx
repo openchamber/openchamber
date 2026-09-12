@@ -17,6 +17,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { isDesktopShell } from '@/lib/desktop';
 import { useUIStore } from '@/stores/useUIStore';
 import { useTerminalStore } from '@/stores/useTerminalStore';
+import { terminalSnapshotSize } from '@/lib/terminalApi';
 import { extractAnnouncedUrls, extractProjectActionUrl } from '@/lib/terminalPreview';
 import { setAnnouncedDevServers } from '@/lib/browser/announcedServers';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -25,9 +26,12 @@ import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
 import {
   getProjectActionsState,
+  getProjectSetup,
   type OpenChamberProjectAction,
+  type ProjectSetup,
   type ProjectRef,
 } from '@/lib/openchamberConfig';
+import { ensureSharedSetupTrusted } from '@/lib/sharedTrustConfirmation';
 import {
   normalizeProjectActionDirectory,
   PROJECT_ACTION_ICONS,
@@ -143,6 +147,8 @@ export const ProjectActionsButton = ({
   const captureStartedActionMutationRevisions = useTerminalStore((state) => state.captureStartedActionMutationRevisions);
 
   const [actions, setActions] = React.useState<OpenChamberProjectAction[]>([]);
+  // The last merged setup, for the trust check before a shared action runs.
+  const setupRef = React.useRef<ProjectSetup | null>(null);
   const [selectedActionId, setSelectedActionId] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
   const urlWatchByRunKeyRef = React.useRef<Record<string, UrlWatchEntry>>({});
@@ -183,11 +189,12 @@ export const ProjectActionsButton = ({
 
     setIsLoading(true);
     try {
-      const state = await getProjectActionsState(stableProjectRef);
+      const setup = await getProjectSetup(stableProjectRef);
       if (loadRequestIdRef.current !== requestId) {
         return;
       }
-      const filtered = state.actions;
+      setupRef.current = setup;
+      const filtered = setup.projectActions;
       setActions(filtered);
       setSelectedActionId((current) => {
         if (current === AUTO_DISCOVER_ACTION_ID) {
@@ -641,7 +648,7 @@ export const ProjectActionsButton = ({
           onEvent: (event) => {
             if (!matchesActionExecution(tabDirectory, tab.id, currentExecutionId)) return;
             if (event.type === 'snapshot') {
-              useTerminalStore.getState().replaceBuffer(tabDirectory, tab.id, event.data ?? '', event.sequence ?? 0);
+              useTerminalStore.getState().replaceBuffer(tabDirectory, tab.id, event.data ?? '', event.sequence ?? 0, terminalSnapshotSize(event));
               if (event.status === 'running') {
                 useTerminalStore.getState().setTabLifecycle(tabDirectory, tab.id, 'running', { expectedExecutionId: currentExecutionId });
               }
@@ -851,7 +858,7 @@ export const ProjectActionsButton = ({
             if (!matchesActionExecution(executionDirectory, tabId, adoptedExecutionId)) return;
             if (event.purpose?.type === 'project-action' && event.purpose.executionId !== adoptedExecutionId) return;
             if (event.type === 'snapshot') {
-              useTerminalStore.getState().replaceBuffer(executionDirectory, tabId, event.data ?? '', event.sequence ?? 0);
+              useTerminalStore.getState().replaceBuffer(executionDirectory, tabId, event.data ?? '', event.sequence ?? 0, terminalSnapshotSize(event));
               useTerminalStore.getState().setConnecting(executionDirectory, tabId, false, { expectedExecutionId: adoptedExecutionId });
               if (event.purpose?.type === 'project-action') {
                 useTerminalStore.getState().setTabPurpose(executionDirectory, tabId, { type: 'project-action', actionId: event.purpose.actionId, executionId: event.purpose.executionId });
@@ -1035,11 +1042,25 @@ export const ProjectActionsButton = ({
     void runAction(action);
   }, [displayActions, executionDirectoryFor, runAction, projectActionRuns, selectedAction, stopAction]);
 
+  // A shared action comes from the repo: the first time one would run, the
+  // trust prompt shows the team's commands; "not this time" runs nothing.
+  const runActionWithTrust = React.useCallback(async (action: OpenChamberProjectAction) => {
+    if (action.source === 'shared' && stableProjectRef) {
+      const setup = setupRef.current?.trust.trusted ? setupRef.current : await getProjectSetup(stableProjectRef);
+      setupRef.current = setup;
+      if (!(await ensureSharedSetupTrusted(stableProjectRef, setup))) {
+        return;
+      }
+      setupRef.current = { ...setup, trust: { ...setup.trust, trusted: true } };
+    }
+    await runAction(action);
+  }, [runAction, stableProjectRef]);
+
   const handleSelectAction = React.useCallback((action: OpenChamberProjectAction, toggleStopIfRunning = false) => {
     setSelectedActionId(action.id);
 
     if (!toggleStopIfRunning) {
-      void runAction(action);
+      void runActionWithTrust(action);
       return;
     }
 
@@ -1052,8 +1073,8 @@ export const ProjectActionsButton = ({
       void stopAction(action);
       return;
     }
-    void runAction(action);
-  }, [executionDirectoryFor, runAction, projectActionRuns, stopAction]);
+    void runActionWithTrust(action);
+  }, [executionDirectoryFor, runActionWithTrust, projectActionRuns, stopAction]);
 
   const openProjectActionsSettings = React.useCallback(() => {
     if (!stableProjectRef?.id) {
@@ -1173,6 +1194,11 @@ export const ProjectActionsButton = ({
                 >
                   <Icon name={iconName} className="h-4 w-4" />
                   <span className="typography-ui-label text-foreground truncate">{entry.name}</span>
+                  {entry.source === 'shared' ? (
+                    <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-muted-foreground bg-[var(--surface-subtle)]">
+                      {t('projectActions.menu.sharedBadge')}
+                    </span>
+                  ) : null}
                   {isStopping || runState?.status === 'waiting-for-preview'
                     ? <Icon name="loader-4" className="ml-auto h-4 w-4 animate-spin text-[var(--status-warning)]" />
                     : isRunning
@@ -1283,6 +1309,11 @@ export const ProjectActionsButton = ({
               >
                 <Icon name={iconName} className="h-4 w-4" />
                 <span className="typography-ui-label text-foreground truncate">{entry.name}</span>
+                {entry.source === 'shared' ? (
+                  <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-muted-foreground bg-[var(--surface-subtle)]">
+                    {t('projectActions.menu.sharedBadge')}
+                  </span>
+                ) : null}
                 {isStopping || runState?.status === 'waiting-for-preview'
                   ? <Icon name="loader-4" className="ml-auto h-4 w-4 animate-spin text-[var(--status-warning)]" />
                   : isRunning

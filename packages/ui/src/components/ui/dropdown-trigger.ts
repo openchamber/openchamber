@@ -12,6 +12,7 @@ import { cva } from 'class-variance-authority';
  * Sizes:
  * - `sm`      — dense surfaces: chat composer, toolbars, list rows (h-6).
  * - `default` — forms, dialogs, and settings pages (h-8).
+ * - `touch`   — mobile value pickers (h-11).
  */
 export const dropdownTriggerVariants = cva(
   [
@@ -27,6 +28,7 @@ export const dropdownTriggerVariants = cva(
       size: {
         sm: "h-6 min-h-6 px-2 [&_svg:not([class*='size-'])]:size-3.5",
         default: "h-8 min-h-8 px-3 [&_svg:not([class*='size-'])]:size-4",
+        touch: "h-11 min-h-11 px-3 [&_svg:not([class*='size-'])]:size-4",
       },
     },
     defaultVariants: {

@@ -225,6 +225,22 @@
           }
         },
         {
+          "label": "Repository config",
+          "link": "/repository-config/",
+          "translations": {
+            "uk": "Конфіг у репозиторії",
+            "zh-CN": "仓库配置",
+            "es": "Configuración en el repositorio",
+            "pt-BR": "Configuração no repositório",
+            "ko": "저장소 설정",
+            "pl": "Konfiguracja w repozytorium",
+            "fr": "Configuration du dépôt",
+            "ja": "リポジトリ設定",
+            "de": "Repository-Konfiguration",
+            "tr": "Depo yapılandırması"
+          }
+        },
+        {
           "label": "Preview & Dev Servers",
           "link": "/preview/",
           "translations": {

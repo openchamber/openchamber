@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { Message, Part } from "@opencode-ai/sdk/v2/client"
+import type { Message, Part, ToolPart } from "@opencode-ai/sdk/v2/client"
 import {
   getSessionMaterializationRequestKey,
   getSessionMaterializationStatus,
@@ -16,6 +16,23 @@ function userMessage(id: string, sessionID = "ses_1"): Message {
   return { id, sessionID, role: "user", time: { created: 1 } } as Message
 }
 
+function completedAssistantMessage(id: string, sessionID = "ses_1"): Message {
+  return {
+    id,
+    sessionID,
+    role: "assistant",
+    time: { created: 1, completed: 4000 },
+    parentID: "msg_parent",
+    modelID: "model",
+    providerID: "provider",
+    mode: "mode",
+    agent: "agent",
+    path: { cwd: "/repo", root: "/repo" },
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  }
+}
+
 function part(id: string, messageID: string, type = "text", text = id): Part {
   return { id, messageID, sessionID: "ses_1", type, text } as Part
 }
@@ -28,6 +45,69 @@ describe("getSessionMaterializationRequestKey", () => {
 })
 
 describe("materializeSessionSnapshots", () => {
+  test("finalizes an active tool under a completed assistant message", () => {
+    const completedMessage = completedAssistantMessage("msg_1")
+    const staleRunningTool = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      tool: "bash",
+      state: { status: "running", input: { command: "ls" }, time: { start: 1000 } },
+      callID: "call-prt_1",
+    } satisfies ToolPart
+
+    const result = materializeSessionSnapshots(
+      { message: {}, part: {} },
+      "ses_1",
+      [{ info: completedMessage, parts: [staleRunningTool] }],
+    )
+
+    const reconciledPart = result.part.msg_1[0]
+    if (!reconciledPart || reconciledPart.type !== "tool") throw new Error("Expected tool part")
+    if (reconciledPart.state.status !== "error") throw new Error("Expected interrupted tool part")
+    expect(reconciledPart.state.error).toBe("Interrupted")
+    expect(reconciledPart.state.time).toEqual({ start: 1000, end: 4000 })
+    expect(getStaleRunningToolMessageID(result, "ses_1")).toBe(undefined)
+  })
+
+  test("preserves a terminal tool already observed when a completed snapshot is stale", () => {
+    const completedMessage = completedAssistantMessage("msg_1")
+    const terminalTool = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      tool: "bash",
+      state: {
+        status: "completed",
+        input: { command: "ls" },
+        output: "done",
+        title: "bash",
+        metadata: {},
+        time: { start: 1000, end: 2000 },
+      },
+      callID: "call-prt_1",
+    } satisfies ToolPart
+    const staleRunningTool = {
+      ...terminalTool,
+      state: { status: "running", input: {}, time: { start: 1000 } },
+    } satisfies ToolPart
+    const state = {
+      message: { ses_1: [completedMessage] },
+      part: { msg_1: [terminalTool] },
+    }
+
+    const result = materializeSessionSnapshots(
+      state,
+      "ses_1",
+      [{ info: completedMessage, parts: [staleRunningTool] }],
+    )
+
+    expect(result.part).toBe(state.part)
+    expect(result.part.msg_1[0]).toBe(terminalTool)
+  })
+
   test("marks an empty successful page as materialized", () => {
     const result = materializeSessionSnapshots(
       { message: {}, part: {} },

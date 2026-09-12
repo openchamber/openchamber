@@ -1,3 +1,5 @@
+export const branchRefLabel = (ref: string): string => ref.replace(/^refs\/(heads|remotes)\//, '').replace(/^remotes\//, '');
+
 /**
  * Derives the base ("target") branch a feature branch should compare and
  * merge against. Shared by GitView and the standalone pull-request surface so

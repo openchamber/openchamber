@@ -142,6 +142,7 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
     getState: () => ({
       activeSessions: [],
       archivedSessions: [],
+      entityById: new Map(),
     }),
   },
   resolveGlobalSessionDirectory: () => null,
@@ -309,7 +310,6 @@ mock.module("../session-actions", () => ({
   unrevertSession: mock(async () => undefined),
   forkFromMessage: mock(async () => undefined),
   fetchMessagesForSession: mock(async () => undefined),
-  relocateSessionFromMissingDirectory: mock(async () => ({ status: "unchanged" })),
   getSessionLastAssistantModel: () => null,
   patchSessionMetadata: mock(async () => undefined),
   abortCurrentOperation: mock(async () => undefined),
@@ -322,6 +322,9 @@ mock.module("@/lib/git/branchNameGenerator", () => ({
 mock.module("@/lib/openchamberConfig", () => ({
   getWorktreeSetupCommands: async () => [],
   getWorktreeSetupWaitEnabled: async () => false,
+}))
+mock.module("@/lib/sharedTrustConfirmation", () => ({
+  resolveWorktreeSetupCommands: async () => [],
 }))
 
 mock.module("@/lib/worktrees/worktreeBootstrap", () => ({

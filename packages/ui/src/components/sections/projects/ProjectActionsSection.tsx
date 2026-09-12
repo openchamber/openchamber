@@ -25,8 +25,10 @@ import { Icon } from '@/components/icon/Icon';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { isDesktopShell } from '@/lib/desktop';
 import {
-  getProjectActionsState,
+  getProjectSetup,
   saveProjectActionsState,
+  updateProjectSetup,
+  updateSharedProjectSetup,
   type OpenChamberProjectAction,
   type ProjectRef,
 } from '@/lib/openchamberConfig';
@@ -78,6 +80,14 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
   const loadDesktopSsh = useDesktopSshStore((state) => state.load);
 
   const [actions, setActions] = React.useState<EditableProjectAction[]>([]);
+  // Read-only here: the team's actions from the repo file, and whether that
+  // file could be read at all (a broken file is shown, never treated as empty).
+  const [sharedActions, setSharedActions] = React.useState<OpenChamberProjectAction[]>([]);
+  const [sharedState, setSharedState] = React.useState<{ path: string; status: 'missing' | 'ok' | 'invalid'; reason?: string } | null>(null);
+  const [hiddenSharedIds, setHiddenSharedIds] = React.useState<string[]>([]);
+  const [isSharing, setIsSharing] = React.useState(false);
+  const reloadCounterRef = React.useRef(0);
+  const [reloadCounter, setReloadCounter] = React.useState(0);
   const [isLoading, setIsLoading] = React.useState(false);
   const [initialSnapshot, setInitialSnapshot] = React.useState<string | null>(null);
   const [expandedActions, setExpandedActions] = React.useState<Record<string, boolean>>({});
@@ -97,17 +107,25 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
 
     (async () => {
       try {
-        const state = await getProjectActionsState(projectRef);
+        // The page edits the user's own actions; a teammate's shared actions
+        // are read from the repo and must never be copied into the personal file.
+        const setup = await getProjectSetup(projectRef);
         if (cancelled) {
           return;
         }
-        setActions(state.actions);
-        setInitialSnapshot(JSON.stringify({ actions: state.actions }));
+        setActions(setup.personal.projectActions);
+        setSharedActions(setup.shared.projectActions);
+        setSharedState({ path: setup.shared.path, status: setup.shared.status, reason: setup.shared.reason });
+        setHiddenSharedIds(setup.personal.hiddenSharedActionIds);
+        setInitialSnapshot(JSON.stringify({ actions: setup.personal.projectActions }));
       } catch {
         if (cancelled) {
           return;
         }
         setActions([]);
+        setSharedActions([]);
+        setSharedState(null);
+        setHiddenSharedIds([]);
         setInitialSnapshot(JSON.stringify({ actions: [] }));
       } finally {
         if (!cancelled) {
@@ -119,7 +137,79 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
     return () => {
       cancelled = true;
     };
-  }, [projectRef]);
+  }, [projectRef, reloadCounter]);
+
+  const reload = React.useCallback(() => {
+    reloadCounterRef.current += 1;
+    setReloadCounter(reloadCounterRef.current);
+  }, []);
+
+  const notifyActionsUpdated = React.useCallback(() => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(PROJECT_ACTIONS_UPDATED_EVENT, { detail: { projectId: projectRef.id } }));
+    }
+  }, [projectRef.id]);
+
+  // Sharing moves an action between the two files: first into the repo file,
+  // then out of the personal one (a failure after the first step leaves the
+  // action visible once, as personal, which the merge resolves). The lists
+  // reload from the server afterwards so both blocks show what is on disk.
+  const shareAction = React.useCallback(async (action: EditableProjectAction) => {
+    if (isSharing) return;
+    setIsSharing(true);
+    try {
+      const shared = await updateSharedProjectSetup(projectRef, {
+        projectActions: [...sharedActions.filter((entry) => entry.id !== action.id), action],
+      });
+      if (!shared) {
+        toast.error(t('settings.projects.shared.toast.shareFailed'));
+        return;
+      }
+      await saveProjectActionsState(projectRef, {
+        actions: actions.filter((entry) => entry.id !== action.id),
+        primaryActionId: null,
+      });
+      reload();
+      notifyActionsUpdated();
+    } finally {
+      setIsSharing(false);
+    }
+  }, [actions, isSharing, notifyActionsUpdated, projectRef, reload, sharedActions, t]);
+
+  const makeActionPersonal = React.useCallback(async (action: OpenChamberProjectAction) => {
+    if (isSharing) return;
+    setIsSharing(true);
+    try {
+      const shared = await updateSharedProjectSetup(projectRef, {
+        projectActions: sharedActions.filter((entry) => entry.id !== action.id),
+      });
+      if (!shared) {
+        toast.error(t('settings.projects.shared.toast.shareFailed'));
+        return;
+      }
+      await saveProjectActionsState(projectRef, {
+        actions: [...actions.filter((entry) => entry.id !== action.id), action],
+        primaryActionId: null,
+      });
+      reload();
+      notifyActionsUpdated();
+    } finally {
+      setIsSharing(false);
+    }
+  }, [actions, isSharing, notifyActionsUpdated, projectRef, reload, sharedActions, t]);
+
+  const setSharedActionHidden = React.useCallback(async (actionId: string, hidden: boolean) => {
+    const next = hidden
+      ? [...hiddenSharedIds.filter((id) => id !== actionId), actionId]
+      : hiddenSharedIds.filter((id) => id !== actionId);
+    setHiddenSharedIds(next);
+    if (!(await updateProjectSetup(projectRef, { hiddenSharedActionIds: next }))) {
+      toast.error(t('settings.projects.actions.toast.saveFailed'));
+      setHiddenSharedIds(hiddenSharedIds);
+      return;
+    }
+    notifyActionsUpdated();
+  }, [hiddenSharedIds, notifyActionsUpdated, projectRef, t]);
 
   const desktopForwardOptions = React.useMemo(() => {
     if (!isDesktopShellApp) {
@@ -243,11 +333,44 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
       )}
       contentClassName="space-y-0"
     >
+      {!isLoading && sharedState?.status === 'invalid' ? (
+        <p className="typography-meta text-[var(--status-warning)]">
+          {t('settings.projects.shared.invalid', { path: sharedState.path, reason: sharedState.reason ?? '' })}
+        </p>
+      ) : null}
+      {!isLoading && sharedActions.length > 0 && sharedState ? (
+        <div className={cn('space-y-0 pb-1.5', PROJECT_SETTINGS_CONTROL_WIDTH)}>
+          <p className="typography-meta text-muted-foreground">
+            {t('settings.projects.shared.actionsFromRepo', { path: sharedState.path })}
+          </p>
+          {sharedActions.map((action) => {
+            const sharedIconKey = (action.icon as keyof typeof PROJECT_ACTION_ICON_MAP) || 'play';
+            const sharedIconName = PROJECT_ACTION_ICON_MAP[sharedIconKey] || 'play';
+            const hidden = hiddenSharedIds.includes(action.id);
+            return (
+              <div key={action.id} className="flex items-center gap-2 py-1">
+                <Icon name={sharedIconName} className={cn('h-4 w-4 shrink-0 text-muted-foreground', hidden && 'opacity-50')} />
+                <span className={cn('typography-ui-label truncate', hidden ? 'text-muted-foreground' : 'text-foreground')}>{action.name}</span>
+                <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-muted-foreground bg-[var(--surface-subtle)]">
+                  {hidden ? t('settings.projects.shared.hiddenBadge') : t('settings.projects.shared.badge')}
+                </span>
+                <span className="min-w-0 flex-1 typography-meta font-mono text-muted-foreground truncate">{action.command}</span>
+                <Button type="button" variant="ghost" size="xs" className="!font-normal shrink-0" disabled={isSharing} title={hidden ? t('settings.projects.shared.actions.showTitle') : t('settings.projects.shared.actions.hideTitle')} onClick={() => void setSharedActionHidden(action.id, !hidden)}>
+                  {hidden ? t('settings.projects.shared.actions.show') : t('settings.projects.shared.actions.hide')}
+                </Button>
+                <Button type="button" variant="ghost" size="xs" className="!font-normal shrink-0" disabled={isSharing} title={t('settings.projects.shared.actions.makePersonalTitle')} onClick={() => void makeActionPersonal(action)}>
+                  {t('settings.projects.shared.actions.makePersonal')}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
       {isLoading ? (
         <p className="typography-meta text-muted-foreground">{t('settings.projects.actions.state.loading')}</p>
-      ) : actions.length === 0 ? (
+      ) : actions.length === 0 && sharedActions.length === 0 ? (
         <p className="typography-meta text-muted-foreground">{t('settings.projects.actions.state.empty')}</p>
-      ) : (
+      ) : actions.length === 0 ? null : (
         <div className={cn('space-y-0', PROJECT_SETTINGS_CONTROL_WIDTH)}>
           {actions.map((action) => {
             const selectedIconKey = (action.icon as keyof typeof PROJECT_ACTION_ICON_MAP) || 'play';
@@ -280,6 +403,19 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
                     </div>
                   </CollapsibleTrigger>
 
+                  {action.name.trim() && action.command.trim() ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      className="!font-normal shrink-0"
+                      disabled={isSharing || hasChanges}
+                      title={hasChanges ? t('settings.projects.shared.actions.shareAfterSave') : t('settings.projects.shared.actions.shareTitle', { path: sharedState?.path ?? '.openchamber/project.json' })}
+                      onClick={() => void shareAction(action)}
+                    >
+                      {t('settings.projects.shared.actions.share')}
+                    </Button>
+                  ) : null}
                   <Button
                     type="button"
                     variant="ghost"

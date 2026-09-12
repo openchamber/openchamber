@@ -1,5 +1,9 @@
 import { EventEmitter } from 'events';
 import path from 'path';
+import { copyFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { mintOutsideFileGrant, registerFsRoutes } from './routes.js';
@@ -1385,7 +1389,11 @@ describe('fs stat directory scope (issue 3019)', () => {
       path: path.posix,
       fsPromises: {
         realpath: async (targetPath) => targetPath,
-        stat: async () => ({ isFile: () => true, size: 12 }),
+        stat: async (targetPath) => (
+          targetPath === '/repo-b'
+            ? { isDirectory: () => true, mtimeMs: 123 }
+            : { isFile: () => true, size: 12, mtimeMs: 456 }
+        ),
       },
       spawn: vi.fn(),
       crypto: { randomUUID: () => 'job-0' },
@@ -1427,6 +1435,107 @@ describe('fs stat directory scope (issue 3019)', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body.isFile).toBe(true);
+  });
+
+});
+
+describe('fs stat directory error handling', () => {
+  it('loads in Node without workspace node_modules, as packaged desktop does', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'openchamber-fs-import-'));
+    try {
+      await mkdir(path.join(directory, 'fs'));
+      await copyFile(new URL('./routes.js', import.meta.url), path.join(directory, 'fs/routes.mjs'));
+      await copyFile(new URL('../path-realpath-cache.js', import.meta.url), path.join(directory, 'path-realpath-cache.js'));
+      expect(() => execFileSync('node', [
+        '--input-type=module',
+        '--eval',
+        'await import(process.argv[1])',
+        pathToFileURL(path.join(directory, 'fs/routes.mjs')).href,
+      ], { cwd: directory, stdio: 'pipe' })).not.toThrow();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('returns directory-missing reasons and permission errors for directory stat', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    const enoent = Object.assign(new Error('missing'), { code: 'ENOENT' });
+    const enotdir = Object.assign(new Error('not a directory'), { code: 'ENOTDIR' });
+    const eacces = Object.assign(new Error('denied'), { code: 'EACCES' });
+    const stat = vi.fn(async (targetPath) => {
+      if (targetPath === '/repo-b') throw enoent;
+      if (targetPath === '/repo-b/file.txt/child') throw enotdir;
+      if (targetPath === '/repo-b/protected') throw eacces;
+      if (targetPath === '/repo-b/file.txt') return { isDirectory: () => false };
+      if (targetPath === '/repo-b/failure') throw new Error('unavailable');
+      return { isDirectory: () => true, mtimeMs: 1 };
+    });
+    const readdir = vi.fn(async () => []);
+    const callStat = async (handler, { headers = {}, query }) => {
+      const res = createMockResponse();
+      const req = {
+        url: `/api/fs/directory-stat?${new URLSearchParams(query)}`,
+        query,
+        get: (name) => headers[name.toLowerCase()] ?? undefined,
+      };
+      await handler(req, res);
+      return res;
+    };
+    registerFsRoutes(app, {
+      os: { homedir: () => '/home/user' },
+      path: path.posix,
+      fsPromises: {
+        realpath: async (targetPath) => targetPath,
+        stat,
+        readdir,
+      },
+      spawn: vi.fn(),
+      crypto: { randomUUID: () => 'job-0' },
+      normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: '/repo' }),
+      buildAugmentedPath: () => '/usr/bin',
+      resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: '/home/user/.config',
+    });
+    const handler = getRoute('GET', '/api/fs/directory-stat');
+
+    const available = await callStat(handler, { query: { path: '/other-project' } });
+    expect(available.statusCode).toBe(200);
+    expect(available.body).toEqual({ isDirectory: true });
+    expect(available.getHeader('Cache-Control')).toBe('no-store');
+    expect(stat).toHaveBeenCalledTimes(1);
+
+    const invalid = await callStat(handler, { query: { path: ' ' } });
+    expect(invalid.statusCode).toBe(400);
+    expect(stat).toHaveBeenCalledTimes(1);
+
+    for (const query of ['path=/repo&path=/other', 'path[]=/repo', '']) {
+      const malformed = createMockResponse();
+      await handler({ url: `/api/fs/directory-stat?${query}` }, malformed);
+      expect(malformed.statusCode).toBe(400);
+    }
+    expect(stat).toHaveBeenCalledTimes(1);
+
+    const missing = await callStat(handler, { headers: { 'x-opencode-directory': '/repo-b' }, query: { path: '/repo-b', directory: 'true' } });
+    expect(missing.statusCode).toBe(404);
+    expect(missing.body).toEqual({ error: 'Directory not found', reason: 'not-found' });
+
+    const notDir = await callStat(handler, { headers: { 'x-opencode-directory': '/repo-b' }, query: { path: '/repo-b/file.txt/child', directory: 'true' } });
+    expect(notDir.statusCode).toBe(400);
+    expect(notDir.body).toEqual({ error: 'Specified path is not a directory', reason: 'not-directory' });
+
+    const denied = await callStat(handler, { headers: { 'x-opencode-directory': '/repo-b' }, query: { path: '/repo-b/protected', directory: 'true' } });
+    expect(denied.statusCode).toBe(403);
+    expect(denied.body).toEqual({ error: 'Access to directory denied', reason: 'os-permission' });
+
+    const file = await callStat(handler, { query: { path: '/repo-b/file.txt' } });
+    expect(file.statusCode).toBe(400);
+    expect(file.body.reason).toBe('not-directory');
+
+    const failure = await callStat(handler, { query: { path: '/repo-b/failure' } });
+    expect(failure.statusCode).toBe(500);
+    expect(failure.body).toEqual({ error: 'Failed to stat directory' });
+    expect(readdir).not.toHaveBeenCalled();
   });
 });
 

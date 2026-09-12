@@ -539,6 +539,7 @@ const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
 }) => {
     const scrollRef = React.useRef<HTMLElement>(null);
     const isFollowingRef = React.useRef(true);
+    const lastScrollTopRef = React.useRef(0);
 
     React.useLayoutEffect(() => {
         const element = scrollRef.current;
@@ -550,6 +551,8 @@ const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
             return;
         }
         element.scrollTop = element.scrollHeight;
+        // Read back the clamped position before the queued scroll event fires.
+        lastScrollTopRef.current = element.scrollTop;
     }, [followKey]);
 
     return (
@@ -567,7 +570,15 @@ const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
                         return;
                     }
                     const element = event.currentTarget;
-                    isFollowingRef.current = element.scrollHeight - element.scrollTop - element.clientHeight <= 2;
+                    const distanceToEnd = element.scrollHeight - element.scrollTop - element.clientHeight;
+                    // Output can grow between an automatic scroll and its event.
+                    // A larger bottom gap alone does not mean the reader moved up.
+                    if (distanceToEnd <= 2) {
+                        isFollowingRef.current = true;
+                    } else if (element.scrollTop < lastScrollTopRef.current - 1) {
+                        isFollowingRef.current = false;
+                    }
+                    lastScrollTopRef.current = element.scrollTop;
                 }}
                 className={cn(
                     'tool-output-surface p-2 rounded-xl w-full min-w-0',
@@ -907,7 +918,7 @@ const TaskSummaryEntryRow = React.memo(({
                 </span>
                 {hasLabel ? (
                     status !== 'error' && shouldRenderGitPathLabel(toolName, label) ? (
-                        renderAnimatedPathWithIcon(label, animateTailText, true, showToolFileIcons)
+                        renderAnimatedPathWithIcon(label, animateTailText, true, showToolFileIcons, 'typography-meta')
                     ) : (
                         status === 'error' ? (
                             <span className={cn(
@@ -958,7 +969,7 @@ const TaskSummaryEntriesList = React.memo(({
     const visibleStartIndex = entries.length - visibleEntries.length;
 
     return (
-        <ToolScrollableSection maxHeightClass={isExpanded ? 'max-h-[40vh]' : 'max-h-56'} disableHorizontal>
+        <ToolScrollableSection maxHeightClass={isExpanded ? 'max-h-[40vh]' : 'max-h-56'} className="pt-0" disableHorizontal>
             <div className="w-full min-w-0 space-y-1">
                 {hiddenCount > 0 ? (
                     <div className="typography-micro text-muted-foreground/70">+{hiddenCount} more…</div>
@@ -1154,7 +1165,7 @@ const renderPathLikeGitChanges = (path: string, grow = true) => {
     );
 };
 
-const renderAnimatedPathWithIcon = (path: string, animate = true, grow = true, showFileIcons = true) => {
+const renderAnimatedPathWithIcon = (path: string, animate = true, grow = true, showFileIcons = true, textClassName = TOOL_ROW_DESCRIPTION_CLASS) => {
     const lastSlash = path.lastIndexOf('/');
 
     if (lastSlash === -1) {
@@ -1163,7 +1174,7 @@ const renderAnimatedPathWithIcon = (path: string, animate = true, grow = true, s
                 {showFileIcons ? <FileTypeIcon filePath={path} className="h-3.5 w-3.5 flex-shrink-0" /> : null}
                 <Text
                     variant={animate ? 'generate-effect' : 'static'}
-                    className={cn('min-w-0 truncate whitespace-nowrap', TOOL_ROW_DESCRIPTION_CLASS, grow && 'flex-1')}
+                    className={cn('min-w-0 truncate whitespace-nowrap', textClassName, grow && 'flex-1')}
                     style={{ color: 'var(--tools-title)' }}
                 >
                     {path}
@@ -1180,7 +1191,7 @@ const renderAnimatedPathWithIcon = (path: string, animate = true, grow = true, s
     return (
         <span className={cn('min-w-0 inline-flex items-center gap-1 overflow-hidden', grow && 'flex-1')} title={path}>
             {showFileIcons ? <FileTypeIcon filePath={path} className="h-3.5 w-3.5 flex-shrink-0" /> : null}
-            <span className={cn('min-w-0 inline-flex max-w-full items-baseline overflow-hidden', TOOL_ROW_DESCRIPTION_CLASS, grow && 'flex-1')}>
+            <span className={cn('min-w-0 inline-flex max-w-full items-baseline overflow-hidden', textClassName, grow && 'flex-1')}>
                 {hasAbsoluteRoot ? <span className="flex-shrink-0" style={{ color: 'var(--tools-description)' }}>/</span> : null}
                 <span
                     className="min-w-0 shrink truncate whitespace-nowrap"

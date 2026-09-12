@@ -480,10 +480,9 @@ export function ScheduledTasksDialog() {
                 key={task.id}
                 className={cn(
                   'rounded-lg border border-border p-4 transition-opacity',
-                  !task.enabled && 'opacity-60',
                 )}
               >
-                <div className="min-w-0">
+                <div className={cn('min-w-0', !task.enabled && 'opacity-60')}>
                   <div className="typography-ui-header truncate font-semibold text-foreground">
                     {task.name}
                   </div>
@@ -500,7 +499,7 @@ export function ScheduledTasksDialog() {
                   ) : null}
                 </div>
 
-                <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 typography-micro text-muted-foreground">
+                <div className={cn('mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 typography-micro text-muted-foreground', !task.enabled && 'opacity-60')}>
                   <span className="inline-flex items-center gap-1.5">
                     <Icon name="timer" className="h-3.5 w-3.5" />
                     <span className="font-medium text-foreground">{t('sessions.scheduledTasks.dialog.nextRun.label')}</span>
@@ -547,7 +546,7 @@ export function ScheduledTasksDialog() {
 
                 {task.state?.lastError ? (
                   <div
-                    className="mt-3 flex items-start gap-2 rounded-md border p-2 typography-micro"
+                    className={cn('mt-3 flex items-start gap-2 rounded-md border p-2 typography-micro', !task.enabled && 'opacity-60')}
                     style={toneStyle('error')}
                   >
                     <Icon name="error-warning" className="mt-0.5 h-3.5 w-3.5 shrink-0" />

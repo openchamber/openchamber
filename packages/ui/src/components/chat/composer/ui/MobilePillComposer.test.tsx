@@ -7,7 +7,6 @@ import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { SyncProvider } from '@/sync/sync-context';
 import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
 import { I18nProvider } from '@/lib/i18n';
-import { getDefaultTheme } from '@/lib/theme/themes';
 
 import { MobilePillComposer } from './MobilePillComposer';
 
@@ -37,12 +36,9 @@ const renderPill = async (options: { hasContent: boolean; newSessionDraftOpen: b
                 iconSizeClass="icon-size"
                 sendIconSizeClass="send-icon-size"
                 stopIconSizeClass="stop-icon-size"
-                theme={getDefaultTheme(false)}
                 onExpand={() => {}}
-                onApplySuggestion={() => {}}
                 onPrimaryAction={() => { primaryActions += 1; }}
                 onQueueMessage={() => { queued += 1; }}
-                onNewSession={() => {}}
                 onPickLocalFiles={() => {}}
                 onOpenIssuePicker={() => {}}
                 onOpenPrPicker={() => {}}
@@ -83,8 +79,7 @@ describe('MobilePillComposer', () => {
         const markup = await renderPill({ hasContent: true, newSessionDraftOpen: false });
 
         expect(markup).toContain('aria-label="Send message"');
-        expect(markup).toContain('aria-label="New chat"');
-        expect(markup.indexOf('aria-label="Send message"')).toBeLessThan(markup.indexOf('aria-label="New chat"'));
+        expect(markup).toContain('w-0 opacity-0 overflow-hidden');
     });
 
     test('uses the trailing action to queue content while the session is running', async () => {
@@ -96,7 +91,7 @@ describe('MobilePillComposer', () => {
         expect(markup).toContain('aria-label="Queue message"');
         expect(markup).toContain('-rotate-90');
         expect(markup).not.toContain('aria-label="Send message"');
-        expect(markup).not.toContain('aria-label="New chat"');
+        expect(markup).not.toContain('w-0 opacity-0 overflow-hidden');
         expect(markup.indexOf('aria-label="Stop generating"')).toBeLessThan(markup.indexOf('aria-label="Queue message"'));
     });
 
@@ -107,10 +102,10 @@ describe('MobilePillComposer', () => {
         expect(markup).toContain('w-0 opacity-0 overflow-hidden');
     });
 
-    test('keeps the new-session action for an empty existing session', async () => {
+    test('keeps the trailing slot collapsed for an empty existing session', async () => {
         const markup = await renderPill({ hasContent: false, newSessionDraftOpen: false });
 
-        expect(markup).toContain('aria-label="New chat"');
+        expect(markup).toContain('w-0 opacity-0 overflow-hidden');
         expect(markup).not.toContain('aria-label="Send message"');
     });
 
@@ -121,11 +116,11 @@ describe('MobilePillComposer', () => {
         expect(markup).not.toContain('aria-label="Send message"');
     });
 
-    test('keeps abort and new-session actions while a session runs without content', async () => {
+    test('keeps only abort while a session runs without content', async () => {
         const markup = await renderPill({ hasContent: false, newSessionDraftOpen: false, canAbort: true });
 
         expect(markup).toContain('aria-label="Stop generating"');
-        expect(markup).toContain('aria-label="New chat"');
+        expect(markup).toContain('w-0 opacity-0 overflow-hidden');
         expect(markup).not.toContain('aria-label="Send message"');
     });
 });

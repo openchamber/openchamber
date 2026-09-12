@@ -72,7 +72,12 @@ export const deriveRecentActivitySections = ({
   key: 'active-now',
   items: sessions.flatMap((session) => {
     const title = typeof session.title === 'string' ? session.title.toLowerCase() : '';
-    if (query && !title.includes(query)) return [];
+    const normalizedQuery = query.trim().toLowerCase();
+    const isIdQuery = normalizedQuery.startsWith('ses_');
+    const matches = isIdQuery
+      ? session.id.toLowerCase() === normalizedQuery
+      : !query || title.includes(query);
+    if (!matches) return [];
     const location = getSessionLocation(session.id);
     return [{
       node: getSessionNode?.(session) ?? { session, children: [], worktree: null },

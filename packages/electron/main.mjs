@@ -16,6 +16,8 @@ import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
+import { probeDirectHostWithRetry } from './host-probe-policy.mjs';
+import { probeElectronHostWithDeadline } from './electron-host-probe.mjs';
 import { assertUpdaterCapability } from './updater-capability.mjs';
 import { checkForDesktopUpdate } from './updater-check.mjs';
 import { resolveUpdaterChannel } from './updater-channel.mjs';
@@ -37,6 +39,7 @@ import { createRelayDevTunnelBridge } from './relay-dev-tunnel.mjs';
 import { attachRendererRecovery } from './renderer-recovery.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 import { fetchUpdateNotes } from '@openchamber/web/server/lib/changelog/update-notes.js';
+import { applyConnectAttemptTimeout } from '@openchamber/web/server/lib/network-defaults.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -104,6 +107,11 @@ if (shouldIgnoreLoopbackConnectionLimit({
 })) {
   app.commandLine.appendSwitch('ignore-connections-limit', '127.0.0.1,localhost');
 }
+// This process runs quota/provider fetches under Node/undici, whose happy-eyeballs
+// default aborts each connect attempt after 250ms — distant provider endpoints
+// routinely need longer handshakes, surfacing as "fetch failed" (#3399). No-op on
+// runtimes without the setter.
+applyConnectAttemptTimeout();
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -240,6 +248,9 @@ const GITHUB_FEATURE_REQUEST_URL = 'https://github.com/openchamber/openchamber/i
 const DISCORD_INVITE_URL = 'https://discord.gg/ZYRSdnwwKA';
 const INSTALLED_APPS_CACHE_TTL_SECS = 60 * 60 * 24;
 const INSTALLED_APPS_CACHE_FILE = 'discovered-apps.json';
+// Bump when discovery results change shape or matching semantics change, so cached
+// entries written by an older build are treated as stale and refresh immediately.
+const INSTALLED_APPS_CACHE_VERSION = 2;
 const LINUX_DESKTOP_ENTRIES_CACHE_TTL_MS = 30_000;
 const OPENCODE_SHUTDOWN_GRACE_MS = 100;
 const { autoUpdater } = updaterPkg;
@@ -247,6 +258,7 @@ const { autoUpdater } = updaterPkg;
 const state = {
   serverHandle: null,
   sidecarUrl: null,
+  localUiUrl: null,
   localOrigin: null,
   apiBaseUrl: null,
   clientToken: null,
@@ -579,6 +591,30 @@ const readSettingsRoot = () => {
   return root && typeof root === 'object' && !Array.isArray(root) ? root : {};
 };
 
+// The user's profile (theme mode among it) lives in preferences.json beside
+// settings.json since the settings split; each entry is { value, updatedAt }.
+// Installs that predate the split still carry those keys in settings.json, so
+// readers merge both, preferences winning.
+const readPreferencesValues = () => {
+  const root = readJsonFile(path.join(path.dirname(settingsFilePath()), 'preferences.json'));
+  const fields = root && typeof root === 'object' && root.version === 1 && root.fields && typeof root.fields === 'object'
+    ? root.fields
+    : {};
+  // Per-surface keys (theme mode among them) are resolved for the desktop
+  // shell: its own value first, the base value otherwise.
+  const values = {};
+  for (const [key, entry] of Object.entries(fields)) {
+    if (!entry || typeof entry !== 'object') continue;
+    const own = entry.surfaces && typeof entry.surfaces === 'object' ? entry.surfaces.desktop : undefined;
+    if (own && typeof own === 'object' && 'value' in own) {
+      values[key] = own.value;
+    } else if ('value' in entry) {
+      values[key] = entry.value;
+    }
+  }
+  return values;
+};
+
 // Serializes read-modify-write of the settings file within this process.
 // Multiple call sites (spawnLocalServer, writeDesktopHostsConfig, theme
 // preference saves, ssh manager imports, etc.) would otherwise have their
@@ -902,123 +938,16 @@ const buildHealthUrl = (url) => {
   }
 };
 
-const buildVersionUrl = (url) => {
-  try {
-    const parsed = new URL(url);
-    parsed.pathname = `${parsed.pathname.replace(/\/$/, '') || ''}/api/version`;
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-};
-
-const buildSessionStatusUrl = (url) => {
-  try {
-    const parsed = new URL(url);
-    parsed.pathname = `${parsed.pathname.replace(/\/$/, '') || ''}/auth/session`;
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-};
-
-const classifyVersionPayload = (payload) => {
-  const compatibility = payload?.compatibility;
-  if (!payload || payload.status !== 'ok' || !compatibility || typeof compatibility !== 'object') {
-    return 'wrong-service';
-  }
-
-  if (!Array.isArray(compatibility.capabilities) || !compatibility.capabilities.includes('api.runtime-url.v1')) {
-    return 'incompatible';
-  }
-
-  if (compatibility.apiVersion !== 1 || compatibility.minClientApiVersion > 1) {
-    return 'update-recommended';
-  }
-
-  return 'ok';
-};
-
-const fetchVersionPayload = async (versionUrl, { headers, timeoutMs }) => {
-  const timeoutSignal = AbortSignal.timeout(timeoutMs);
-  try {
-    return await fetch(versionUrl, { signal: timeoutSignal, headers });
-  } catch (error) {
-    if (timeoutSignal.aborted) {
-      throw error;
-    }
-    return await Promise.race([
-      electronNet.fetch(versionUrl, { headers }),
-      new Promise((_, reject) => setTimeout(() => reject(error), timeoutMs)),
-    ]);
-  }
-};
-
 const probeHostWithTimeout = async (url, timeoutMs, clientToken = '', requestHeaders = {}, expectedServerId = '') => {
-  const versionUrl = buildVersionUrl(url);
-  const sessionStatusUrl = buildSessionStatusUrl(url);
-  if (!versionUrl || !sessionStatusUrl) {
-    throw new Error('Invalid URL');
-  }
-
-  const started = Date.now();
-
-  // Identity gate for learned/untrusted addresses: verify the UNAUTHENTICATED
-  // /health identity before the token-carrying version fetch, so the bearer
-  // token is never sent to a re-assigned address that now belongs to a
-  // different machine. Older servers omit serverId from /health; only an
-  // explicit mismatch rejects.
-  if (typeof expectedServerId === 'string' && expectedServerId.trim()) {
-    const healthUrl = buildHealthUrl(url);
-    if (healthUrl) {
-      try {
-        const response = await fetch(healthUrl, { signal: AbortSignal.timeout(timeoutMs), headers: { Accept: 'application/json' } });
-        if (response.ok) {
-          const payload = await response.json().catch(() => null);
-          const reported = typeof payload?.serverId === 'string' ? payload.serverId.trim() : '';
-          if (reported && reported !== expectedServerId.trim()) {
-            return { status: 'wrong-service', latencyMs: Date.now() - started };
-          }
-        }
-      } catch {
-        // Unreachable/timeout surfaces in the version fetch below.
-      }
-    }
-  }
-
-  try {
-    const headers = { ...sanitizeRuntimeRequestHeaders(requestHeaders), Accept: 'application/json' };
-    const token = typeof clientToken === 'string' ? clientToken.trim() : '';
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-    const response = await fetchVersionPayload(versionUrl, { headers, timeoutMs });
-    const status = response.status;
-    if (status === 401 || status === 403) {
-      return { status: 'auth', latencyMs: Date.now() - started };
-    }
-    if (status < 200 || status >= 300) {
-      return { status: 'unreachable', latencyMs: Date.now() - started };
-    }
-    const payload = await response.json().catch(() => null);
-    const versionStatus = classifyVersionPayload(payload);
-    if (versionStatus !== 'ok') {
-      return { status: versionStatus, latencyMs: Date.now() - started };
-    }
-    const sessionResponse = await fetchVersionPayload(sessionStatusUrl, { headers, timeoutMs });
-    if (sessionResponse.status === 401 || sessionResponse.status === 403) {
-      return { status: 'auth', latencyMs: Date.now() - started };
-    }
-    if (!sessionResponse.ok) {
-      return { status: 'unreachable', latencyMs: Date.now() - started };
-    }
-    return {
-      status: versionStatus,
-      latencyMs: Date.now() - started,
-    };
-  } catch {
-    return { status: 'unreachable', latencyMs: Date.now() - started };
-  }
+  return probeElectronHostWithDeadline({
+    url,
+    timeoutMs,
+    clientToken,
+    requestHeaders,
+    expectedServerId,
+    chromiumFetch: (requestUrl, options) => electronNet.fetch(requestUrl, options),
+    isReady: () => app.isReady(),
+  });
 };
 
 const resolveStoredClientTokenForUrl = (targetUrl, config = readDesktopHostsConfig()) => {
@@ -1588,6 +1517,16 @@ const spawnLocalServer = async () => {
       apiBaseUrl: state.apiBaseUrl || '',
       requestHeaders: sanitizeRuntimeRequestHeaders(state.requestHeaders || {}),
     }),
+    desktopUpdater: {
+      check: () => handleInvoke(null, 'desktop_check_for_updates'),
+      install: async () => {
+        const updateInfo = await handleInvoke(null, 'desktop_check_for_updates');
+        if (!updateInfo.available) return updateInfo;
+        await handleInvoke(null, 'desktop_download_and_install_update');
+        return updateInfo;
+      },
+      restart: () => handleInvoke(null, 'desktop_restart'),
+    },
   });
 
   const port = handle.getPort();
@@ -1784,12 +1723,24 @@ const computeBootOutcome = ({ envTargetUrl, probe, config, localAvailable }) => 
   return { target: 'remote', status, hostId: host.id, url: host.apiUrl || host.url, ...availability };
 };
 
+const readSplashColor = (settings, key, fallback) => {
+  // The renderer hands the colours over IPC (desktop_set_window_theme) and
+  // main stores them under `desktopSplashColors`; the flat `splash*` keys are
+  // what builds before the settings split wrote and are read as a fallback.
+  const owned = settings.desktopSplashColors && typeof settings.desktopSplashColors === 'object'
+    ? settings.desktopSplashColors[key]
+    : undefined;
+  const legacy = settings[`splash${key.charAt(0).toUpperCase()}${key.slice(1)}`];
+  const value = typeof owned === 'string' ? owned : legacy;
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+};
+
 const buildStartupSplashHtml = () => {
   const settings = readSettingsRoot();
-  const splashBgLight = typeof settings.splashBgLight === 'string' ? settings.splashBgLight.trim() : '#f5f5f4';
-  const splashFgLight = typeof settings.splashFgLight === 'string' ? settings.splashFgLight.trim() : '#1c1917';
-  const splashBgDark = typeof settings.splashBgDark === 'string' ? settings.splashBgDark.trim() : '#0c0a09';
-  const splashFgDark = typeof settings.splashFgDark === 'string' ? settings.splashFgDark.trim() : '#fafaf9';
+  const splashBgLight = readSplashColor(settings, 'bgLight', '#f5f5f4');
+  const splashFgLight = readSplashColor(settings, 'fgLight', '#1c1917');
+  const splashBgDark = readSplashColor(settings, 'bgDark', '#0c0a09');
+  const splashFgDark = readSplashColor(settings, 'fgDark', '#fafaf9');
 
   return `<!doctype html>
   <html>
@@ -2358,6 +2309,13 @@ const getMenuTargetWindow = () => {
 
 const dispatchMenuAction = (action) => {
   const target = getMenuTargetWindow();
+  // Zoom actions are consumed by the renderer's DOM listener. Sending them
+  // through both the IPC bridge and the DOM event would invoke the handler
+  // multiple times because preload fans the IPC event back into both paths.
+  if (action === 'zoom-in' || action === 'zoom-out' || action === 'zoom-reset') {
+    dispatchDomEventToWindow(target, 'openchamber:zoom', action);
+    return;
+  }
   emitToWindow(target, 'openchamber:menu-action', action);
   dispatchDomEventToWindow(target, 'openchamber:menu-action', action);
 };
@@ -2408,7 +2366,7 @@ const nextWindowLabel = () => {
 };
 
 const readThemeSource = () => {
-  const settings = readSettingsRoot();
+  const settings = { ...readSettingsRoot(), ...readPreferencesValues() };
   // themeMode is the user's intent; themeVariant is only the resolved
   // concrete appearance at persist time. When mode === 'system', we must
   // follow the OS even if variant was saved as a specific value.
@@ -2798,7 +2756,7 @@ const createAdditionalWindow = async (url, runtimeConfig = {}) => {
 const buildMiniChatUrl = ({ mode, sessionId, directory, projectId }) => {
   const base = shouldUsePackagedUi()
     ? buildPackagedUiUrl('/mini-chat.html')
-    : state.localOrigin || state.sidecarUrl;
+    : state.localUiUrl || state.localOrigin || state.sidecarUrl;
   if (!base) {
     throw new Error('Local UI is not available');
   }
@@ -3013,6 +2971,7 @@ const resolveInitialUrl = async () => {
     : localUrl;
 
   state.sidecarUrl = localUrl;
+  state.localUiUrl = localUiUrl;
   const localAvailable = Boolean(localUrl);
 
   const localOrigin = localUrl ? new URL(localUrl).origin : null;
@@ -4386,11 +4345,13 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       }
       const cachedApps = Array.isArray(cache?.apps) ? cache.apps : [];
       const hasCache = Boolean(cache);
-      const isCacheStale = !cache || (now - Number(cache.updatedAt || 0)) > INSTALLED_APPS_CACHE_TTL_SECS;
+      const isCacheStale = !cache
+        || cache.version !== INSTALLED_APPS_CACHE_VERSION
+        || (now - Number(cache.updatedAt || 0)) > INSTALLED_APPS_CACHE_TTL_SECS;
       const refresh = async () => {
         const apps = await buildPlatformInstalledApps(Array.isArray(args.apps) ? args.apps : []);
         await fsp.mkdir(path.dirname(cachePath), { recursive: true });
-        await fsp.writeFile(cachePath, JSON.stringify({ updatedAt: now, apps }, null, 2));
+        await fsp.writeFile(cachePath, JSON.stringify({ version: INSTALLED_APPS_CACHE_VERSION, updatedAt: now, apps }, null, 2));
         emitToAllWindows('openchamber:installed-apps-updated', apps);
       };
       if (process.platform !== 'darwin' && process.platform !== 'win32' && process.platform !== 'linux') {
@@ -4434,7 +4395,13 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return getOrCreateDesktopInstallId();
 
     case 'desktop_host_probe':
-      return probeHostWithTimeout(String(args.url || ''), 2_000, String(args.clientToken || ''), args.requestHeaders || {}, String(args.expectedServerId || ''));
+      return probeDirectHostWithRetry((timeoutMs) => probeHostWithTimeout(
+        String(args.url || ''),
+        timeoutMs,
+        String(args.clientToken || ''),
+        args.requestHeaders || {},
+        String(args.expectedServerId || ''),
+      ));
 
     case 'desktop_remote_password_login':
       return loginRemoteAndIssueClientToken({
@@ -4447,6 +4414,21 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_set_window_theme': {
       const mode = typeof args.themeMode === 'string' ? args.themeMode : '';
       const variant = typeof args.themeVariant === 'string' ? args.themeVariant : '';
+      const splash = args.splash && typeof args.splash === 'object' ? args.splash : null;
+      if (splash) {
+        const colors = {};
+        for (const key of ['bgLight', 'fgLight', 'bgDark', 'fgDark']) {
+          if (typeof splash[key] === 'string' && splash[key].trim()) colors[key] = splash[key].trim();
+        }
+        if (Object.keys(colors).length === 4) {
+          const current = readSettingsRoot().desktopSplashColors;
+          const unchanged = current && typeof current === 'object'
+            && ['bgLight', 'fgLight', 'bgDark', 'fgDark'].every((key) => current[key] === colors[key]);
+          if (!unchanged) {
+            void mutateSettingsRoot((root) => ({ ...root, desktopSplashColors: colors }));
+          }
+        }
+      }
       // Priority order: themeMode expresses the user's intent (including
       // "follow OS"). Variant is just the resolved variant at send time;
       // when mode === 'system' with variant === 'dark' (because OS is
@@ -4891,6 +4873,10 @@ const buildMacMenu = () => {
         { role: 'minimize' },
         { role: 'zoom' },
         { type: 'separator' },
+        { label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: () => dispatchAction('zoom-in') },
+        { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: () => dispatchAction('zoom-out') },
+        { label: 'Reset Zoom', accelerator: 'CmdOrCtrl+0', click: () => dispatchAction('zoom-reset') },
+        { type: 'separator' },
         { role: 'close' },
       ],
     },
@@ -5004,6 +4990,9 @@ const buildAutoHiddenMenu = () => {
       label: 'Window',
       submenu: [
         { role: 'minimize' },
+        { label: 'Zoom In', accelerator: 'Ctrl+=', click: () => dispatchAction('zoom-in') },
+        { label: 'Zoom Out', accelerator: 'Ctrl+-', click: () => dispatchAction('zoom-out') },
+        { label: 'Reset Zoom', accelerator: 'Ctrl+0', click: () => dispatchAction('zoom-reset') },
         { role: 'togglefullscreen' },
         { type: 'separator' },
         { role: 'close' },

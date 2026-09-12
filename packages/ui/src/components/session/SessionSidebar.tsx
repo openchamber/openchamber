@@ -28,9 +28,11 @@ import { useShallow } from 'zustand/react/shallow';
 import {
   listProjectWorktrees,
   partitionWorktreesByRegisteredProject,
-  subscribeWorktreeTopologyChanged,
   worktreeMapsEqual,
+  type ProjectRef,
 } from '@/lib/worktrees/worktreeManager';
+import { resolveProjectsForWorktreeChange } from '@/lib/worktrees/worktreeTopologyRefresh';
+import type { WorktreeMetadata } from '@/types/worktree';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { normalizePath } from './sidebar/utils';
@@ -39,11 +41,13 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { streamPerfCount, streamPerfMark } from '@/stores/utils/streamDebug';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { buildKnownSessionDirectories } from './sidebar/list/sessionListDirectories';
+import { sortProjectsByOrder } from './sidebar/list/projectSort';
 import { z } from 'zod';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import {
   commitDiscoveredRawWorktreesByProject,
   ensureRawWorktreesByProjectScope,
+  refreshProjectWorktreeTopology,
   startSessionWorktreeMenuLoad,
   type RawWorktreesByProjectScope,
   type StartSessionWorktreeMenuLoadArgs,
@@ -317,18 +321,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     };
   }, [isVSCode, projectWorktreeDiscoveryKey, runtimeKey, worktreeDiscoveryRevision]);
 
-  React.useEffect(() => {
-    if (isVSCode) return;
-    return subscribeOpenchamberEvents((event) => {
-      if (event.type === 'session-created') requestWorktreeDiscovery();
-    });
-  }, [isVSCode]);
-
-  React.useEffect(() => {
-    if (isVSCode) return;
-    return subscribeWorktreeTopologyChanged(() => requestWorktreeDiscovery());
-  }, [isVSCode]);
-
   const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
 
   const { isTablet } = useDeviceInfo();
@@ -498,43 +490,10 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   }
   previousSidebarRenderSourcesRef.current = sidebarRenderSources;
 
-  const sortedProjects = React.useMemo(() => {
-    const list = [...normalizedProjects];
-
-    switch (projectSortOrder) {
-      case 'a-z':
-        list.sort((a, b) => {
-          const aLabel = (a.label || a.path).toLowerCase();
-          const bLabel = (b.label || b.path).toLowerCase();
-          return aLabel.localeCompare(bLabel);
-        });
-        break;
-      case 'z-a':
-        list.sort((a, b) => {
-          const aLabel = (a.label || a.path).toLowerCase();
-          const bLabel = (b.label || b.path).toLowerCase();
-          return bLabel.localeCompare(aLabel);
-        });
-        break;
-      case 'date-added':
-        list.sort((a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0));
-        break;
-      case 'recent':
-        list.sort((a, b) => (b.lastOpenedAt ?? 0) - (a.lastOpenedAt ?? 0));
-        break;
-      case 'manual': {
-        const orderMap = new Map(manualProjectOrder.map((id, i) => [id, i]));
-        list.sort((a, b) => {
-          const ai = orderMap.get(a.id) ?? Infinity;
-          const bi = orderMap.get(b.id) ?? Infinity;
-          return ai - bi;
-        });
-        break;
-      }
-    }
-
-    return list;
-  }, [normalizedProjects, projectSortOrder, manualProjectOrder]);
+  const sortedProjects = React.useMemo(
+    () => sortProjectsByOrder(normalizedProjects, projectSortOrder, manualProjectOrder),
+    [normalizedProjects, projectSortOrder, manualProjectOrder],
+  );
   const projectView = useSessionProjectViewState({ isVSCode, projects: sortedProjects });
 
   const searchEmptyState = React.useMemo(() => (
@@ -566,28 +525,66 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     openMultiRunLauncher();
   }, [mobileVariant, openMultiRunLauncher, setSessionSwitcherOpen]);
 
+  const worktreeRefreshDependencies = React.useMemo(() => ({
+    projects,
+    getCurrentProjects: () => useProjectsStore.getState().projects,
+    rawWorktreesByProjectRef,
+    getPublishedWorktreesByProject: () => useSessionUIStore.getState().availableWorktreesByProject,
+    resolveProject: (directory: string) => resolveProjectRef(directory),
+    listProjectWorktrees,
+    partitionWorktreesByRegisteredProject,
+    worktreeMapsEqual,
+    recordWorktreesSeen,
+    publishTopology: (next: {
+      availableWorktrees: WorktreeMetadata[];
+      availableWorktreesByProject: Map<string, WorktreeMetadata[]>;
+    }) => {
+      useSessionUIStore.setState(next);
+    },
+    getRuntimeKey,
+    now: () => Date.now(),
+  }), [projects]);
+
   const handleSessionWorktreeMenuLoad = React.useCallback((args: StartSessionWorktreeMenuLoadArgs) => {
-    const resolvedProject = args.projectId
+    const resolvedProject: ProjectRef | null = args.projectId
       ? (projects.find((candidate) => candidate.id === args.projectId) ?? null)
       : (args.sourceDirectory ? resolveProjectRef(args.sourceDirectory) : null);
     return startSessionWorktreeMenuLoad(args, {
-      projects,
-      getCurrentProjects: () => useProjectsStore.getState().projects,
-      rawWorktreesByProjectRef,
-      getPublishedWorktreesByProject: () => useSessionUIStore.getState().availableWorktreesByProject,
-      resolveProject: (directory) => resolveProjectRef(directory),
-      listProjectWorktrees,
-      partitionWorktreesByRegisteredProject,
-      worktreeMapsEqual,
-      recordWorktreesSeen,
-      publishTopology: (next) => {
-        useSessionUIStore.setState(next);
-      },
-      getRuntimeKey,
-      now: () => Date.now(),
+      ...worktreeRefreshDependencies,
       projectRootBranch: resolvedProject ? (projectRootBranches.get(resolvedProject.id) ?? null) : null,
     });
-  }, [projectRootBranches, projects]);
+  }, [projectRootBranches, projects, worktreeRefreshDependencies]);
+
+  React.useEffect(() => {
+    if (isVSCode) return;
+    return subscribeOpenchamberEvents((event) => {
+      if (event.type === 'session-created') {
+        requestWorktreeDiscovery();
+        return;
+      }
+      if (event.type !== 'worktree-changed') return;
+
+      // One event names every directory of the changed repository the server
+      // has seen; refresh each registered project among them exactly once.
+      for (const project of resolveProjectsForWorktreeChange(event.directories)) {
+        const projectPath = normalizePath(project.path);
+        void refreshProjectWorktreeTopology(project, null, worktreeRefreshDependencies)
+          .then(() => {
+            if (!projectPath) return;
+            setUnresolvedWorktreeProjectPaths((current) => {
+              if (!current.has(projectPath)) return current;
+              const next = new Set(current);
+              next.delete(projectPath);
+              return next;
+            });
+          })
+          .catch(() => {
+            if (!projectPath) return;
+            setUnresolvedWorktreeProjectPaths((current) => new Set(current).add(projectPath));
+          });
+      }
+    });
+  }, [isVSCode, worktreeRefreshDependencies]);
 
   const handleOpenNewSessionDraftFromHeader = React.useCallback(() => {
     useUIStore.getState().closeMainSurfaces();

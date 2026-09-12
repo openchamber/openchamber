@@ -30,6 +30,7 @@ export interface AutocompleteTrigger {
 export interface TriggerContext {
     /** Shell mode (`!cmd`) disables every picker. */
     inputMode: 'normal' | 'shell';
+    mentionsEnabled?: boolean;
     /** Whether the change that moved the caret came from a paste. */
     inputSource?: FileMentionAutocompleteInputSource;
     /** The text that change inserted, when known. */
@@ -106,6 +107,7 @@ function matchMention(
     cursorPosition: number,
     context: TriggerContext,
 ): AutocompleteTrigger | null {
+    if (context.mentionsEnabled === false) return null;
     const query = getFileMentionAutocompleteQuery({
         value,
         cursorPosition,

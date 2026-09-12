@@ -1,16 +1,13 @@
 import { useConfigStore } from '@/stores/useConfigStore';
 
-export function useOpenCodeReadiness() {
-  const isInitialized = useConfigStore((s) => s.isInitialized);
+export function useOpenCodeReadiness(resource: 'models' | 'agents' = 'models') {
   const connectionPhase = useConfigStore((s) => s.connectionPhase);
   const lastDisconnectReason = useConfigStore((s) => s.lastDisconnectReason);
-  // Stale-while-revalidate: when provider data was hydrated from the persisted
-  // cache, treat the pickers as ready immediately so they paint last-known
-  // models/agents while initializeApp() refreshes in the background. Without
-  // this, the cache is invisible — the pickers stay on "Loading…" until the
-  // full init round-trip completes even though the data is already in the store.
-  const hasCachedProviders = useConfigStore((s) => s.providers.length > 0);
-  const isReady = isInitialized || hasCachedProviders;
+  // Each catalog owns its readiness. Providers arriving cannot finish the
+  // agent picker, and a successful empty catalog is different from loading.
+  const isReady = useConfigStore((s) => resource === 'models'
+    ? s.providersLoaded || s.providers.length > 0
+    : s.agentsLoaded || s.agents.length > 0);
   // Only surface "unavailable" when we have nothing to show AND init failed.
   const isUnavailable = !isReady && lastDisconnectReason === 'init_error';
 

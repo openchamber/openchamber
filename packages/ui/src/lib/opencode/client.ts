@@ -71,7 +71,7 @@ type SdkResult<T> = {
 };
 
 type DirectoryAvailability = "available" | "missing" | "unknown";
-const directoryProbeErrorSchema = z.object({ reason: z.string().optional() });
+const directoryProbeErrorSchema = z.object({ reason: z.string().optional(), isDirectory: z.boolean().optional() });
 
 
 function unwrapSdkData<T>(result: SdkResult<T>, operation: string): T {
@@ -370,9 +370,8 @@ class OpencodeService {
   reconnectToRuntimeBaseUrl(): void {
     const runtimeBase = resolveRuntimeBaseUrl();
     const nextBaseUrl = ensureAbsoluteBaseUrl(runtimeBase || DEFAULT_BASE_URL);
-    if (nextBaseUrl === this.baseUrl) {
-      return;
-    }
+    // An explicit reconnect can change the instance or transport behind the
+    // same URL. Its SDK client and in-flight directory requests are obsolete.
     this.baseUrl = nextBaseUrl;
     this.client = createRuntimeOpencodeClient({ baseUrl: this.baseUrl });
     this.scopedClients.clear();
@@ -597,25 +596,26 @@ class OpencodeService {
   }
 
   /**
-   * Distinguishes a confirmed-missing directory from an unavailable probe.
-   * Offline, permission, and other transport failures stay `unknown` so callers
-   * do not treat a temporary outage as proof the path was deleted.
-   *
-   * The probe is OpenChamber's own `/api/fs/list`, which stats the path on the
-   * server's disk. OpenCode's `/path` cannot answer this question: it echoes
-   * the requested directory and resolves its project through Git discovery
-   * that swallows errors, so a deleted worktree still comes back as a valid
-   * location. A runtime without that route (VS Code) answers `unknown`.
-   */
+    * Distinguishes a confirmed-missing directory from an unavailable probe.
+    * Offline, permission, and other transport failures stay `unknown` so callers
+    * do not treat a temporary outage as proof the path was deleted.
+    *
+    * The probe is OpenChamber's own `/api/fs/directory-stat`, which asks the
+    * server to stat the path without listing its contents. OpenCode's `/path`
+    * cannot answer this question: it echoes the requested directory and resolves
+    * its project through Git discovery that swallows errors, so a deleted worktree
+    * still comes back as a valid location. A runtime without that route (VS Code)
+    * answers `unknown`.
+    */
   async getDirectoryAvailability(directory: string): Promise<DirectoryAvailability> {
     const normalized = this.normalizeCandidatePath(directory);
     if (!normalized) {
       return "unknown";
     }
     try {
-      const response = await runtimeFetch("/api/fs/list", { query: { path: normalized } });
-      if (response.ok) return "available";
+      const response = await runtimeFetch("/api/fs/directory-stat", { query: { path: normalized } });
       const body = directoryProbeErrorSchema.safeParse(await response.json().catch(() => null)).data;
+      if (response.ok && body?.isDirectory === true) return "available";
       const reason = parseFilesystemErrorReason(body?.reason);
       return reason === "not-found" || reason === "not-directory" ? "missing" : "unknown";
     } catch {
@@ -1583,7 +1583,7 @@ class OpencodeService {
     try {
       return await request;
     } finally {
-      this.configProvidersInFlight.delete(key);
+      if (this.configProvidersInFlight.get(key) === request) this.configProvidersInFlight.delete(key);
     }
   }
 
@@ -1654,7 +1654,7 @@ class OpencodeService {
     try {
       return await request;
     } finally {
-      this.listAgentsInFlight.delete(key);
+      if (this.listAgentsInFlight.get(key) === request) this.listAgentsInFlight.delete(key);
     }
   }
 

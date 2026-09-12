@@ -125,3 +125,12 @@ describe('precedence and disabling', () => {
         expect(at('|')).toBeNull();
     });
 });
+
+
+test('BTW leaves file and agent references as text while retaining other pickers', () => {
+    const btw: TriggerContext = { inputMode: 'normal', mentionsEnabled: false };
+    expect(at('@src/file|', btw)).toBeNull();
+    expect(at('@plan|', btw)).toBeNull();
+    expect(at('#snippet|', btw)).toEqual({ kind: 'snippet', query: 'snippet' });
+    expect(at('@plan|')?.kind).toBe('mention');
+});

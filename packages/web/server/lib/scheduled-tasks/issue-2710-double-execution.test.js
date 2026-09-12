@@ -485,4 +485,32 @@ describe('issue 2710: daily scheduled task double execution at the configured ti
 
     runtime.stop();
   });
+
+  it('manual runNow runs a paused task but does not schedule future runs', async () => {
+    vi.setSystemTime(UTC(2026, 0, 1, 14, 0, 0));
+    const task = { ...makeTask({ kind: 'daily', times: ['15:00'] }), enabled: false };
+    const projectConfigRuntime = createSharedProjectConfigRuntime(task);
+
+    const runtime = createScheduledTasksRuntime(createRuntimeDeps(projectConfigRuntime));
+    await runtime.start();
+
+    // The scheduler must not fire a disabled task on its own.
+    await vi.advanceTimersByTimeAsync(HOUR + 3_000);
+    expect(sdk.sessionCreates.length).toBe(0);
+
+    const manual = await runtime.runNow('p1', 'task-1');
+    expect(manual.ok).toBe(true);
+    expect(manual.sessionID).toBeTruthy();
+    expect(sdk.sessionCreates.length).toBe(1);
+    expect(runtime.getStatus().runningScheduledTasksCount).toBe(0);
+
+    // Completion records state but leaves the task paused with no next run.
+    const tasks = await projectConfigRuntime.listScheduledTasks('p1');
+    expect(tasks[0].enabled).toBe(false);
+    expect(tasks[0].state.lastStatus).toBe('success');
+    expect(tasks[0].state.lastSessionId).toBe('sess-1');
+    expect(tasks[0].state.nextRunAt).toBeUndefined();
+
+    runtime.stop();
+  });
 });

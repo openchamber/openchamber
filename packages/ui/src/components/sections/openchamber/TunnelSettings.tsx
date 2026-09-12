@@ -8,8 +8,8 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
-import { requestFileAccess } from '@/lib/desktop';
-import { updateDesktopSettings } from '@/lib/persistence';
+import { requestFileAccess, type DesktopSettings } from '@/lib/desktop';
+import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
@@ -524,37 +524,27 @@ export const TunnelSettings: React.FC = () => {
 
   const checkAvailabilityAndStatus = React.useCallback(async (signal: AbortSignal) => {
     try {
-      const [checkRes, statusRes, settingsRes, providersRes] = await Promise.all([
+      const [checkRes, statusRes, loadedSettings, providersRes] = await Promise.all([
         runtimeFetch('/api/openchamber/tunnel/check', { signal }),
         runtimeFetch('/api/openchamber/tunnel/status', { signal }),
-        runtimeFetch('/api/config/settings', { signal, headers: { Accept: 'application/json' } }),
+        loadDesktopSettings(),
         runtimeFetch('/api/openchamber/tunnel/providers', { signal }),
       ]);
 
       const checkData = (await checkRes.json()) as TunnelCheckResponse;
       const statusData = (await statusRes.json()) as TunnelStatusResponse;
-      const settingsData = settingsRes.ok ? await settingsRes.json() : {};
+      const settingsData: DesktopSettings = loadedSettings ?? {};
       const providersData = providersRes.ok ? await providersRes.json() : {};
 
       const loadedBootstrapTtl = statusData.ttlConfig?.bootstrapTtlMs
-        ?? (settingsData?.tunnelBootstrapTtlMs === null
-          ? null
-          : typeof settingsData?.tunnelBootstrapTtlMs === 'number'
-            ? settingsData.tunnelBootstrapTtlMs
-            : 30 * 60 * 1000);
+        ?? (settingsData.tunnelBootstrapTtlMs === undefined ? 30 * 60 * 1000 : settingsData.tunnelBootstrapTtlMs);
       const loadedSessionTtl = typeof statusData.ttlConfig?.sessionTtlMs === 'number'
         ? statusData.ttlConfig.sessionTtlMs
-        : typeof settingsData?.tunnelSessionTtlMs === 'number'
-          ? settingsData.tunnelSessionTtlMs
-          : 8 * 60 * 60 * 1000;
+        : settingsData.tunnelSessionTtlMs ?? 8 * 60 * 60 * 1000;
 
-      const loadedMode: TunnelMode = toUiTunnelMode(statusData.mode ?? settingsData?.tunnelMode);
-      const loadedProvider = typeof settingsData?.tunnelProvider === 'string' && settingsData.tunnelProvider.trim().length > 0
-        ? settingsData.tunnelProvider.trim().toLowerCase()
-        : 'cloudflare';
-      const loadedManagedLocalConfigPath = typeof settingsData?.managedLocalTunnelConfigPath === 'string'
-        ? settingsData.managedLocalTunnelConfigPath.trim() || null
-        : null;
+      const loadedMode: TunnelMode = toUiTunnelMode(statusData.mode ?? settingsData.tunnelMode);
+      const loadedProvider = settingsData.tunnelProvider ?? 'cloudflare';
+      const loadedManagedLocalConfigPath = settingsData.managedLocalTunnelConfigPath ?? null;
       const dependencyAvailable = applyDependencyCheck(checkData, loadedProvider);
 
       const loadedPresetsFromStatus = sanitizePresets(statusData?.managedRemoteTunnelPresets);

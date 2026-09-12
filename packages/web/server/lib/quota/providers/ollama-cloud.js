@@ -35,6 +35,37 @@ export const parseOllamaSettingsHtml = (html) => {
       valueLabel: `${used ?? 0} / ${total ?? 0}`
     });
   }
+  // Cost-based plans render "Monthly usage" with a dollar amount instead of
+  // session/weekly/premium windows; support both page shapes.
+  const monthlyMatch = html.match(/Monthly\s+usage[\s\S]{0,200}?\$([0-9][0-9,.]*)\s+of\s+\$([0-9][0-9,.]*)/i);
+  if (monthlyMatch) {
+    const used = toNumber(monthlyMatch[1].replace(/,/g, ''));
+    const total = toNumber(monthlyMatch[2].replace(/,/g, ''));
+    const usedPercent = total && used !== null ? Math.min(100, (used / total) * 100) : null;
+    windows.monthly = toUsageWindow({
+      usedPercent,
+      windowSeconds: null,
+      resetAt: null,
+      valueLabel: `$${monthlyMatch[1]} / $${monthlyMatch[2]}`
+    });
+  }
+  // "Extra usage" credits block (visible when credits/auto-reload is enabled):
+  // a balance, not a percent. Anchor on "Balance remaining" — nearby "Add $5"
+  // and auto-reload copy also contain dollar amounts. Surfaced with the
+  // credits_balance key and OpenAI-style plain money label (the UI renders
+  // it as "Credits Balance"); a $0 balance is omitted rather than shown.
+  const balanceMatch = html.match(/Balance\s+remaining[\s\S]{0,200}?\$([0-9][0-9,.]*)/i);
+  if (balanceMatch) {
+    const balance = toNumber(balanceMatch[1].replace(/,/g, ''));
+    if (balance !== 0) {
+      windows.credits_balance = toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel: `$${balanceMatch[1]}`
+      });
+    }
+  }
   return windows;
 };
 

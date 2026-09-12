@@ -56,6 +56,12 @@
     min-width: 36px;
   }
 
+  /* The Changes section and source pickers take their height from dropdownTriggerVariants,
+     rather than the generic mobile button minimum. */
+  :root.mobile-pointer:not(.desktop-runtime) button[data-mobile-comparison-trigger] {
+    min-height: 0;
+  }
+
   /* Composer footer action buttons (sessions / attach / auto-accept): hug the
      icon so the group stays tight. The container only renders in the mobile
      JSX, so no pointer/runtime gating is needed; !important overrides both the
@@ -470,6 +476,22 @@
   padding-top: var(--oc-safe-area-top);
 }
 
+/* Android 15+ enforces edge-to-edge, and once the WebView can read the insets
+   itself Capacitor stops padding the view and just hands them over — so the app
+   draws under the navigation/gesture bar and every full-cover surface has to
+   keep its own content clear of it. Marked surfaces opt in through
+   .oc-bottom-safe-surface; iOS deliberately stays on its softer visual inset,
+   where the home indicator is a thin overlay rather than a bar that eats taps.
+   Capacitor reports a zero bottom inset while the keyboard is up, so this never
+   stacks with --oc-keyboard-inset. */
+:root.oc-capacitor-app.oc-platform-android {
+  --oc-app-bottom-safe: max(16px, var(--oc-safe-area-bottom));
+}
+
+:root.oc-capacitor-app.oc-platform-android .oc-bottom-safe-surface {
+  padding-bottom: var(--oc-safe-area-bottom);
+}
+
 :root.oc-capacitor-app.oc-platform-android [data-sonner-toaster][data-y-position='top'] {
   top: calc(var(--oc-safe-area-top) + 16px) !important;
 }
@@ -591,13 +613,8 @@
    .oc-draft-center note below) are moved with INLINE transform/transition set
    by useNativeMobileChrome — WebKit does not reliably start transitions when a
    transform changes via a CSS custom property, which parked the composer until
-   the keyboard finished. Only the sliding backdrop lives here. */
-:root.oc-capacitor-app.oc-kb-animating .oc-mobile-composer {
-  /* While sliding, the composer passes over chat content that hasn't moved (user
-     scrolled up) — give it an opaque backdrop so text doesn't show through the
-     form's transparent padding. */
-  background: var(--background);
-}
+   the keyboard finished. The composer floats over the transcript on a glass
+   box, so nothing else lives here. */
 
 /* Constant-viewport trick for the chat scroller: when the keyboard settles the
    shell shrinks by --oc-kb-layout, but the scroller keeps its full height by
@@ -661,6 +678,13 @@
    every frame). */
 :root.oc-capacitor-app.oc-keyboard-open .oc-mobile-composer {
   padding-bottom: 12px;
+}
+
+/* The recap hint is for reading, not writing: with the mobile composer
+   expanded (keyboard up) it hides, whatever the scroll position. The class
+   lands in the same frame as the pill swap, so the hint leaves with it. */
+:root.oc-composer-expanded .oc-recap-hint {
+  opacity: 0;
 }
 
 /* Draft starter chips leave when the full composer takes over — with the

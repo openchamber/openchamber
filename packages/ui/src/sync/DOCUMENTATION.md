@@ -52,7 +52,7 @@ So:
 | `viewport-store.ts` | Scroll anchors, session memory, loading indicators | App UI state |
 | `attachment-files.ts` | Attachment picker allowlists, MIME/content validation, structured-text sanitization, and HEIC conversion | Local chat attachments across shared UI runtimes |
 | `document-attachments.ts` | Bounded Office/OpenDocument extraction, document text serialization, embedded-image extraction, and positional citations | DOCX, PPTX, XLSX, ODT, ODP, and ODS chat attachments |
-| `input-store.ts` | Draft input state, attached files, synthetic parts | App UI state |
+| `input-store.ts` | Draft input state, attached files, synthetic parts, destination-scoped fork replay handoff | App UI state; fork replay targets runtime + directory + session |
 | `selection-store.ts` | Model/agent/variant selections | App UI state |
 | `voice-store.ts` | Voice state | App UI state |
 
@@ -63,6 +63,12 @@ Office and OpenDocument packages are metadata-validated before asynchronous extr
 The composer compares normalized attachment MIME types with the selected model's declared input modalities. It warns when a newly attached file or an existing attachment after a model change requires an unsupported modality, but does not block sending. Missing modality metadata remains unknown and does not produce a warning.
 
 ## Session list rules
+
+Opening a new draft applies its configured model identifier immediately, then
+reconciles after project config activation. That continuation belongs to the
+same runtime and draft object and yields to a manual choice made while loading.
+The config store owns default selection and discovery-gap behavior, documented
+in `packages/ui/src/stores/DOCUMENTATION.md`.
 
 ### Layout-mounted session-list lifecycle
 
@@ -128,9 +134,36 @@ full-list timers. Surface-specific refreshes, such as opening the mobile session
 sheet or returning from suspension, may still request freshness at their
 explicit lifecycle edge; the store coalesces an overlapping in-flight load.
 
-Current consumers:
+### Session retention
 
-- `useSessionAutoCleanup.ts`
+`session-retention.ts` owns eligibility and cleanup execution;
+`useSessionAutoCleanup.ts` connects it to the app and Settings. Manual and
+automatic runs share a lock acquired before loading. Each run requests a fresh
+complete global snapshot and refuses the loader's error/fallback state. A
+runtime switch stops the batch and prevents writing its cooldown into the new
+runtime. Automatic attempts are limited to once per day while the app is open;
+manual runs bypass the cooldown and enabled checkbox.
+
+Retention targets unarchived sessions by last activity by default. The opt-in
+`sessionRetentionOnlyArchived` setting switches both the preview and execution
+to archived sessions and measures their retention period from `time.archived`.
+It forces Delete in the store and cleanup runner; Archive is disabled in Settings.
+Turning it off leaves Delete selected and makes Archive available again. The
+setting uses the instance settings registry across web, desktop, VS Code and mobile.
+
+Both modes preserve the five most recent sessions in the selected scope, ranked
+by that scope's retention timestamp, plus the selected session, shared sessions,
+and sessions with observed live activity. Parents with an attached `/btw` conversation also stay,
+because the canonical archive/delete actions remove that temporary fork.
+Sessions outside the selected scope remain protected. Because
+OpenCode cascades deletion, every ancestor of a retained session is protected
+too. Eligible deletions run children first and recheck current selection,
+activity, sharing, age, and child membership before each request. A failed child
+blocks deletion of its ancestors while unrelated sessions continue.
+
+Cleanup uses the canonical archive/delete actions, including confirmed `404`
+deletion, persisted-state cleanup and runtime guards. Settings shares the run
+state and shows loading or fetch failure separately from an eligible count.
 
 ### Live cross-directory session/status view
 
@@ -185,6 +218,12 @@ Live activity/status indicators must not depend on this cache. They must use the
 
 ## Session message loading
 
+The event pipeline's reconnect callback carries `replayReset`. A global WS
+`ready` frame with that flag means the server's bounded replay suffix no longer
+covers the client cursor. The pipeline clears that cursor and the sync provider
+runs normal authoritative gap repair even during early boot. Ordinary reconnects
+retain their existing startup grace period.
+
 `SessionMessageLoader` is the shared authority for session message requests. Navigation, reactive chat loading, sidebar prefetch, pagination, reconnect/recovery, and optimistic reconciliation must delegate to it rather than issuing parallel initial requests.
 
 Rules:
@@ -195,11 +234,14 @@ Rules:
 4. Async commits are generation-checked. Runtime switches, forced refreshes, eviction, and disposal must reject stale completion.
 5. Prefetch coverage and persisted directory data are runtime-scoped. Legacy persisted directory entries may seed startup continuity, but they are not live truth.
 6. Message and part materialization preserves references for unchanged records and maintains direct message-to-parts lookup. Consumers subscribe to the selected session's records rather than broad message/part containers.
+   Directory `sessionStatusReady` records successful status-snapshot authority independently of bootstrap's general readiness. Before that flag or an explicit session status arrives, telemetry treats an omitted status as unknown. A failed status request cannot grant idle authority; the flag is not persisted.
 7. Pagination demand must carry the selected session's effective directory. It must not fall back to the sync provider directory because the visible session may belong to another worktree.
 8. The ref-stable loader is disposed only after the current task when its provider unmounts. This lets React Strict Mode's development setup → cleanup → setup probe retain a usable loader for child effects, while real disposal still invalidates the preceding lifecycle's work.
 9. Transcript arrays are chronological by `message.time.created`, with message ID used only as a deterministic equal-time tie-breaker. Message IDs are identity and reconciliation keys, not chronology: OpenCode's fixed-width sortable timestamp prefix rolls over, so a newer `msg_000...` can follow an older `msg_fff...`. Fetch, pagination, materialization, optimistic insertion, events, reconnect inspection, rendering, and revert/undo/redo must preserve this contract.
 10. Session-scoped ArrowUp and ArrowDown recall merges the visible transcript's user prompts (`useUserMessageHistory`) with the persisted input-history bucket for runtime + normalized directory + session identity. Revert markers hide prompts from the transcript source only; the persisted bucket still recalls them. Global scope reads the persisted runtime bucket alone.
 11. Part arrays preserve authoritative response/event order. Part IDs are identity keys and have the same rollover limitation; identity lookup/removal must not require a part array to be lexically ID-sorted.
+
+A successful local session creation publishes its session record and calls `SessionMessageLoader.initializeCreatedSession` before selection starts navigation loading. The create response establishes an empty transcript only if no transcript has arrived yet. Initialization supersedes an earlier unresolved history load, preserves any messages or metadata received before the create response, and uses the server-returned directory. Opening that new session needs no history read; forced recovery and later eviction still use normal fetching. Creation responses from a previous runtime cannot select or initialize a session in the current runtime.
 
 Initial loads use smaller pages on constrained VS Code/mobile surfaces. Prefetch resolves only the initial renderable page; it does not eagerly download older history. The mounted chat timeline requests older pages when its viewport is underfilled or the user scrolls toward history, while mobile uses its explicit load-older action. Timeline caches, pending work, prepend snapshots, and stale checks use runtime + directory + session identity so equal session IDs in different worktrees cannot share lifecycle state. Older pages are fetched through the same loader and merged with optimistic records before publication. The same chronology contract applies in the VS Code webview because it consumes this shared loader and sync store; the extension bridge must transport OpenCode records without introducing its own ID-based ordering.
 
@@ -245,7 +287,9 @@ Incomplete-session materialization is deduplicated by runtime, directory, and se
 
 When `session.idle` or `session.error` settles a session but the trailing assistant message still contains a `pending` or `running` tool, sync refreshes that session tail. This narrowly reconciles a missed terminal tool-part event without refetching normally completed turns or stale tools from older turns. A stale refresh or delayed part event cannot regress a locally observed terminal tool to an active status.
 
-When a session is authoritatively settled — `session.idle`/`session.error` event, or an authoritative status snapshot that lowers a previously busy session — and the trailing assistant message is still *unfinished* (`time.completed` missing) with no pending question/permission, the turn is treated as interrupted (managed OpenCode process died mid-turn; the server never finalizes the message or parts, see openchamber#2577 / anomalyco/opencode#19023). The unfinished assistant message is completed locally with `MessageAbortedError`, including text-only turns and turns whose tools had already finished, so the chat shows a visible interrupted state. Any active parts are also finalized as `error`/`Interrupted` with an end time, so tool timers stop and cards render the error state. The mark is gated on an explicit idle status (absent status is "unknown", never judged), never applies while the session is busy (including question/permission waits), and a later terminal event can supersede it while a stale unfinished refresh cannot regress the locally finalized message or parts.
+A completed assistant message is authoritative for its own tool parts. During materialization, a `pending` or `running` tool under `time.completed` becomes `error`/`Interrupted` with an end time. This handles stale persisted tool state during reload. The merge preserves a terminal part already observed live, and a later terminal server snapshot can replace the local interrupted marker.
+
+When a session is authoritatively settled — `session.idle`/`session.error` event, or an authoritative status snapshot that lowers a previously busy session — and the trailing assistant message is still *unfinished* (`time.completed` missing) with no pending question/permission, the turn is treated as interrupted (managed OpenCode process died mid-turn; the server never finalizes the message or parts, see openchamber#2577 / anomalyco/opencode#19023). The unfinished assistant message is completed locally with `MessageAbortedError`, including text-only turns and turns whose tools had already finished, so the chat shows a visible interrupted state. Any active parts are also finalized as `error`/`Interrupted` with an end time, so tool timers stop and cards render the error state. The mark is gated on an explicit idle status (absent status is "unknown", never judged), never applies while the session is busy (including question/permission waits), and a later terminal event can supersede it while a stale unfinished refresh cannot regress the locally finalized message or parts. A successful authoritative snapshot records explicit idle for previously unknown candidates, and message hydration retries this reconciliation after the transcript arrives; a failed status fetch leaves the session unknown. Recovery rejects responses after a runtime or SDK switch, request invalidation, or directory-store disposal before publishing local or global state.
 
 Directory stores also own session-keyed sidecar notification channels for permissions, questions, and message materialization. High-frequency realtime part events annotate the exact session/message before committing, so visible records, user history, renderability, and sidebar permission and question rows are not notified by unrelated sessions. Structural message replacements notify only changed subscribed session buckets; unannotated bulk part replacement conservatively resets active message subscribers so bootstrap, pagination, rollback, and legacy writers cannot leave stale projections.
 
@@ -269,11 +313,39 @@ The discriminator is whether the server confirmed the path, not whether the valu
 
 Rules:
 
-1. Ownership comes from the session record's own `directory`. `getSyncSessionDirectory()` reports *containment*, not ownership, and is only the fallback for a record without a directory: a project's session list includes the sessions of its worktrees so the sidebar can group them, so the parent repository holds worktree sessions too, and reading ownership from membership routes a worktree session to its parent. `null` means "not indexed yet", never "no directory".
+1. Ownership comes from the session record's own `directory`. When directory sync has no owning record yet, the global session index supplies that record's directory before local selection, worktree, or remembered hints. `getSyncSessionDirectory()` reports *containment*, not ownership, and is only the fallback for a record without a directory: a project's session list includes the sessions of its worktrees so the sidebar can group them, so the parent repository holds worktree sessions too, and reading ownership from membership routes a worktree session to its parent. `null` means "not indexed yet", never "no directory".
 2. `attachment` and `worktreeMetadata` hold the worktree path this client asked for, before the server canonicalized it. They are a hint for a session sync has not indexed yet, never a correction of a confirmed directory — otherwise a stale local path re-creates the very mismatch this precedence exists to prevent.
 3. Never persist or rank a guessed directory. `selectSession` may fall back to the active directory to keep routing usable, but that value is not written to runtime memory, not written to the last-active snapshot, and not passed as `selected` — a persisted guess outlives the race that produced it and survives reloads and restarts.
 4. Components must not read `currentSessionDirectory` to build request or queue keys; use `getDirectoryForSession()` so every consumer resolves identically.
 5. A disagreement between sources is logged once per session, and `__opencodeDebug.diagnoseSessionDirectory()` reports every source in precedence order.
+
+## AI session titles
+
+`use-session-ai-rename.ts` connects the shared menus to Small Model and the
+existing title action. `session-title-context.ts` uses `SessionMessageLoader`
+to page backward only until three completed user/final-answer pairs are covered.
+Opening a menu checks eligibility on demand; row mounts do not load history.
+The collector uses chronological records and assistant parent IDs, excludes
+unfinished, failed, summary, synthetic-only and reverted turns, and retains
+user-attached context even when its transport part is synthetic.
+
+`session-title-generation.ts` owns runtime/directory/session-scoped pending
+operations. Manual title saves cancel generation before sending their write.
+Runtime changes abort pending generation, including a switch away and back.
+After generation, a fresh session read rejects changed titles, directories,
+archive state and revert markers before the normal title action saves. Failure
+retains the old title and always releases pending state. The current OpenCode
+title endpoint has no compare-and-set operation, so another client's write
+after this final read cannot be guarded atomically.
+
+`lib/messages/messageMarkdown.ts` formats attached quotes and user comments for
+both title context and Markdown export. Export keeps full text; title input
+limits individual fields and each message while retaining head/tail excerpts.
+Web, Electron, hosted mobile and Capacitor use the existing Small Model route.
+Mobile session rows expose the same action beside manual rename when swiped
+open, with four 48px action slots and a session-scoped generation spinner.
+VS Code has no Small Model route and exposes a disabled action with an explicit
+explanation.
 
 ## Session action rules
 
@@ -287,7 +359,7 @@ Rules:
 4. Sending after a revert commits the new branch optimistically: remove the reverted tail and marker before inserting the new message, and restore both if the send is rejected.
 5. Composer and queued sends carry their captured runtime, directory, and session through asynchronous preparation. A runtime change cancels the send instead of re-resolving it against the new runtime. Outside VS Code the queue itself is server-owned (`packages/web/server/lib/message-queue/`): the UI hands the server the captured send configuration, resolved text, attachments, and attached context at queue time and the server delivers on idle; the composer only sends a queued message itself after taking it back from the server (`takeForSend`). See the `messageQueueStore.ts` section in `stores/DOCUMENTATION.md`.
 6. After session creation, the directory returned by the server is authoritative over the requested draft directory. The server may canonicalize a worktree path, and the first prompt must use the same directory identity as the created session.
-7. Regular new-chat drafts that inherit the persisted current/last directory must not create a session against a confirmed-missing path. Fall back to the active project only when OpenCode reports the directory missing; keep explicit worktree targets, in-flight worktree creation, and unknown/offline probes unchanged, and do not persist the fallback until session creation succeeds. A concurrent draft rewrite to that same active-project fallback must not abort session creation.
+7. Regular new-chat drafts that inherit the persisted current/last directory must not create a session against a confirmed-missing path. Fall back to the active project only when OpenChamber's directory stat reports the directory missing; keep explicit worktree targets, in-flight worktree creation, and unknown/offline probes unchanged, and do not persist the fallback until session creation succeeds. A concurrent draft rewrite to that same active-project fallback must not abort session creation.
 8. A prompt send that fails **after** the request left the client is ambiguous, never a definite failure: the server may already be answering it. Transports tag those errors (`markAmbiguousTransportFailure` in `@/lib/relay/transport-error`; the relay tunnel tags every stream that dies with a request in flight), and `isAmbiguousSendFailure` reads the tag before falling back to status/text heuristics. An ambiguous failure waits for the connection to return, refetches recent messages, and confirms the optimistic message in place instead of rolling it back — rolling it back lets the message queue re-send a prompt the engine is already running, producing two independent AI responses for one user message.
 9. `SessionLiveActivity` has three answers and `unknown` is never `idle`. `getSessionLiveActivity` reports `active` when any child store or the global session-status index holds a non-idle status, `idle` only when a child store actually covers the session's directory, and `unknown` otherwise — child stores are evicted for background directories, and the global index keeps only non-idle entries, so absence of a status is not proof of idleness. Callers that gate a destructive action (worktree moves) must refuse on `unknown`.
 10. Revert and unrevert cascade through known descendant sessions before mutating the parent. Revert uses the first descendant user message at or after the parent's target timestamp, including equal timestamps because message IDs do not define chronology. A descendant failure is logged and does not block its siblings or the parent. The parent runs last so its shared-directory file snapshot remains authoritative. A busy descendant is aborted before it is reverted, like the parent, so nothing keeps writing past the revert boundary. Redo clears the revert marker on every descendant, including markers the user set on a subagent independently of the parent undo.
@@ -340,25 +412,9 @@ feedback stays truthful.
 Callers whose confirmation can span a runtime switch may pass an
 `expectedRuntimeKey` captured earlier; ordinary callers are guarded by default.
 
-When the session being restored belongs to a worktree that no longer exists,
-writing `time.archived = 0` alone would leave it grouped under a directory the
-sidebar can never surface. Restore therefore probes the session's owned
-directory with `getDirectoryAvailability` and, only on an exact `missing`
-result, relocates it: it resolves the owning OpenCode project's primary
-directory by the session's server `projectID` (from `project.list()`, never a
-local project ID or the active project), then unarchives and moves the whole
-subtree still stranded in the missing directory to that project directory
-through `moveSessionToDirectory(..., false)`. `available`, `unknown`, an
-availability probe failure, a missing project record, and non-worktree sessions
-keep the plain restore path. The subtree is drawn from the global cache so
-archived descendants that never materialized in a live child store are still
-relocated, and a node is kept while it is archived **or** still owns the
-missing directory, so a retry after a partial restore (root already unarchived
-but not yet moved) completes the move instead of reporting a false success.
-`moveSessionToDirectory` accepts the captured `expectedRuntimeKey` and skips all
-local store/routing publication when the runtime changed during the
-control-plane request, so the server move can complete without seeding the new
-runtime with stale directory state.
+`unarchiveSession` clears the archive timestamp in the session's existing directory. It never moves the session, including when that directory is missing. Server failure keeps the session archived locally; confirmation updates the global cache. `unarchiveSessions` preserves partial results and stops committing when its captured runtime changes.
+
+### Deletion runtime guard
 
 Deletion needs this guard more than archiving does. Session IDs are not unique
 across runtimes, and a committed deletion does more than hide a row: it evicts
@@ -382,30 +438,9 @@ reports failure instead of committing. The deletion already accepted by the
 server stays deleted there; its persisted state is left as harmless stale
 metadata and the next authoritative load reconciles it.
 
-### Missing directory relocation (active sessions)
+### Missing worktree directories
 
-The same directory can disappear under an active session: a worktree removed
-by the agent or by hand leaves the session, its tabs, and its prompts pointed
-at a path that no longer exists, and the terminal server answers every create
-and restart with `Invalid working directory`. `relocateSessionFromMissingDirectory`
-(`session-actions.ts`) applies the restore fallback's gate to a live session:
-an exact `missing` probe, the destination resolved from the server `projectID`,
-and `available`, `unknown`, probe failures, project-root sessions, and sessions
-without a project left untouched. Every session of the root's subtree still
-stranded in that directory moves with it, root first, so the session the user
-is looking at is usable even when a descendant move fails; the result names
-the sessions already moved. Moves carry no changes because the source is gone.
-
-`session-ui-store.recoverMissingSessionDirectory` owns the user-visible side:
-one shared attempt per runtime and session, the worktree hint cleared for each
-moved session (it is the first thing every directory lookup reads), the current
-session re-selected through `setCurrentSession` so the active directory,
-project, and OpenCode client follow it, and one toast naming the destination.
-It runs from two places: a terminal create/restart rejected with the server's
-`TERMINAL_CWD_MISSING` code, and session activation for any session whose
-directory is neither a registered project root nor a managed chat directory
-(the same probe a reopened draft performs on its inherited directory). VS Code
-registers no worktrees, so activation never probes there.
+Existing sessions keep their directory when a worktree disappears. Session activation makes no directory-availability probe, and terminal failures and archive restoration never move sessions. Manual movement still goes through `moveSessionToDirectory`. Worktree deletion still archives its sessions before removing the worktree. Missing-worktree groups stay visible with a warning so users can choose either action.
 
 ## The golden rule
 
@@ -456,6 +491,12 @@ Zustand skips re-renders when a selector returns the same reference (`Object.is`
 During streaming, `message.part.delta` fires ~60 times/sec. Eagerly cloning all fields caused every subscriber in the entire app to re-render 60/sec — a 10x overhead. Targeted cloning reduced MessageList renders from ~1972 to ~296 per session.
 
 ## Event → field mapping
+
+Queue recovery is independent of the directory-bootstrap debounce. The sync
+provider subscribes to `message-queue-sync.ts` for control-stream updates and
+requests a queue refresh on every main-stream connection or transport switch,
+including the first connection. The queue store coalesces these requests with
+bootstrap and owns snapshot ordering and legacy-upload lifetime.
 
 Keep this in sync with `handleDirectoryEvent` in `sync-context.tsx`:
 

@@ -326,6 +326,50 @@ afterAll(() => {
 });
 
 describe('MarkdownRenderer DOM mount performance contract', () => {
+  test('preserves disclosure choices through streaming, settlement, and redecorating', async () => {
+    const host = document.createElement('div');
+    document.body.replaceChildren(host);
+    const root = createRoot(host);
+    const prefix = 'Introduction\n\n<details><summary>Review</summary>\n\n';
+    const render = async (content: string, streaming: boolean) => {
+      await act(async () => {
+        root.render(<MarkdownRenderer content={content} messageId="disclosures" isAnimated={false} isStreaming={streaming} enableFileReferences={false} />);
+        await waitForSettledEffects();
+      });
+      await act(async () => waitForSettledEffects());
+    };
+    try {
+      await render(`${prefix}First`, true);
+      const first = host.querySelector<HTMLDetailsElement>('details');
+      expect(first).not.toBeNull();
+      expect(first?.open).toBe(false);
+      expect(first?.querySelector('summary [data-md-disclosure-icon] use')?.getAttribute('href')).toBe('#oc-arrow-right-s');
+      if (!first) throw new Error('Expected disclosure');
+      first.open = true;
+      for (let count = 1; count <= 5; count += 1) {
+        await render(`${prefix}First\n\n${'More text. '.repeat(count)}`, true);
+        expect(host.querySelector<HTMLDetailsElement>('details')?.open).toBe(true);
+      }
+      const settled = `${prefix}First\n\n</details>\n\n<details open><summary>Second</summary>\n\nBody\n\n</details>`;
+      await render(settled, false);
+      const disclosures = host.querySelectorAll<HTMLDetailsElement>('details');
+      expect(disclosures).toHaveLength(2);
+      expect(disclosures[0]?.open).toBe(true);
+      expect(disclosures[1]?.open).toBe(true);
+      disclosures[1]!.open = false;
+      // The fixture supplies a fresh theme/translation context on each render,
+      // exercising whole-block replacement with unchanged source as well.
+      await render(settled, false);
+      expect(host.querySelectorAll<HTMLDetailsElement>('details')[0]?.open).toBe(true);
+      expect(host.querySelectorAll<HTMLDetailsElement>('details')[1]?.open).toBe(false);
+      expect(host.querySelectorAll('summary [data-md-disclosure-icon]')).toHaveLength(2);
+      await render('<details><summary>Different</summary>\n\nNew body\n\n</details>', false);
+      expect(host.querySelector<HTMLDetailsElement>('details')?.open).toBe(false);
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+
   test('fixes body-sized table columns once the stream settles', async () => {
     const content = [
       '| An intentionally oversized header | Another oversized header | A third oversized header |',
@@ -383,6 +427,9 @@ describe('MarkdownRenderer DOM mount performance contract', () => {
       expect(table?.classList.contains('min-w-full')).toBe(false);
       expect(table?.classList.contains('w-full')).toBe(false);
       expect(table?.parentElement?.classList.contains('overflow-x-auto')).toBe(true);
+      const wrapper = table?.closest('[data-markdown="table-wrapper"]');
+      expect(wrapper?.classList.contains('w-fit')).toBe(true);
+      expect(wrapper?.classList.contains('max-w-full')).toBe(true);
       expect(cells.length).toBeGreaterThan(0);
       expect(cells.every((cell) => cell.classList.contains('min-w-[120px]'))).toBe(true);
       expect(cells.every((cell) => cell.classList.contains('max-w-[320px]'))).toBe(true);
