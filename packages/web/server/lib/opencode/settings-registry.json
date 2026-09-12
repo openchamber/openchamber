@@ -450,6 +450,9 @@
     "providerOrder": {
       "scope": "profile"
     },
+    "disabledProviders": {
+      "scope": "profile"
+    },
     "sessionRecapEnabled": {
       "scope": "profile"
     },

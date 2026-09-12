@@ -170,6 +170,8 @@ export const ProvidersPage: React.FC = () => {
   const toggleHiddenModel = useUIStore((state) => state.toggleHiddenModel);
   const hideAllModels = useUIStore((state) => state.hideAllModels);
   const showAllModels = useUIStore((state) => state.showAllModels);
+  const disabledProviders = useUIStore((state) => state.disabledProviders);
+  const toggleProviderDisabled = useUIStore((state) => state.toggleProviderDisabled);
 
   const [authMethodsByProvider, setAuthMethodsByProvider] = React.useState<Record<string, AuthMethod[]>>({});
   const [authLoading, setAuthLoading] = React.useState(false);
@@ -856,6 +858,7 @@ export const ProvidersPage: React.FC = () => {
   }
 
   const providerModels = Array.isArray(selectedProvider.models) ? selectedProvider.models : [];
+  const isProviderDisabled = disabledProviders.includes(selectedProvider.id);
   const providerAuthMethods = authMethodsByProvider[selectedProvider.id] ?? [];
   const oauthAuthMethods = toOAuthMethods(
     getOAuthAuthMethods(providerAuthMethods),
@@ -920,6 +923,13 @@ export const ProvidersPage: React.FC = () => {
     <SettingsPageLayout
       title={selectedProvider.name || selectedProvider.id}
       titleLeading={<ProviderLogo providerId={selectedProvider.id} className="h-5 w-5 shrink-0" />}
+      titleAccessory={isProviderDisabled ? (
+        <span className="flex items-center gap-1 typography-micro font-normal text-muted-foreground">
+          <Icon name="eye-off" className="h-3.5 w-3.5" />
+          {t('settings.providers.page.badge.disabled')}
+          <SettingsInfoHint>{t('settings.providers.page.badge.disabledHint')}</SettingsInfoHint>
+        </span>
+      ) : undefined}
       description={<span className="font-mono typography-settings-description text-muted-foreground">{selectedProvider.id}</span>}
       showSaveStatus={false}
     >
@@ -928,6 +938,14 @@ export const ProvidersPage: React.FC = () => {
         divider={false}
         headerAction={(
           <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="xs"
+              className="!font-normal"
+              onClick={() => toggleProviderDisabled(selectedProvider.id)}
+            >
+              {isProviderDisabled ? t('settings.providers.page.actions.enableProvider') : t('settings.providers.page.actions.disableProvider')}
+            </Button>
             {isEditableCustomProvider ? (
               <Button
                 variant="outline"

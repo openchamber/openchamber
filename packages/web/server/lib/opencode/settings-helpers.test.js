@@ -778,7 +778,7 @@ describe('settings registry gate', () => {
     defaultModel: 'anthropic/claude', defaultVariant: 'high', defaultAgent: 'build', smallModelUseDefault: false, smallModelOverride: 'anthropic/haiku',
     walkthroughModelOverride: 'anthropic/claude', zenModel: 'zen/model',
     favoriteModels: [{ providerID: 'anthropic', modelID: 'claude' }], hiddenModels: [{ providerID: 'openai', modelID: 'gpt' }], collapsedModelProviders: ['openai'],
-    recentModels: [{ providerID: 'anthropic', modelID: 'claude' }], recentAgents: ['build'], recentEfforts: { 'anthropic/claude': ['high'] }, providerOrder: ['anthropic'],
+    recentModels: [{ providerID: 'anthropic', modelID: 'claude' }], recentAgents: ['build'], recentEfforts: { 'anthropic/claude': ['high'] }, providerOrder: ['anthropic'], disabledProviders: ['openai'],
     sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionGoalEnabled: true, sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
     summarizeLastMessage: true, summaryThreshold: 100, summaryLength: 50, maxLastMessageLength: 200, showDeletionDialog: true,
     nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnSubtasks: true, notifyOnCompletion: true, notifyOnError: true, notifyOnQuestion: true,
@@ -862,6 +862,7 @@ describe('settings registry gate', () => {
     const helpers = createTestHelpersWithRealSanitizers();
     expect(helpers.sanitizeSettingsUpdate({
       providerOrder: ['b', 'a', 'a'],
+      disabledProviders: ['b', 'a', 'a'],
       diffWrapLines: true,
       persistChatDraft: false,
       largeTextPasteBehavior: 'inline',
@@ -873,6 +874,7 @@ describe('settings registry gate', () => {
       autoSaveEnabled: false,
     })).toEqual({
       providerOrder: ['b', 'a'],
+      disabledProviders: ['b', 'a'],
       diffWrapLines: true,
       persistChatDraft: false,
       largeTextPasteBehavior: 'inline',

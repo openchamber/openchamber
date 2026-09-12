@@ -428,6 +428,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
     const setSettingsPage = useUIStore((state) => state.setSettingsPage);
     const hiddenModels = useUIStore((state) => state.hiddenModels);
+    const disabledProviders = useUIStore((state) => state.disabledProviders);
     const cycleAgentShortcutOverride = useUIStore((state) => state.shortcutOverrides.cycle_agent);
     const cycleAgentShortcut = React.useMemo(() => (
         getEffectiveShortcutCombo('cycle_agent', cycleAgentShortcutOverride ? { cycle_agent: cycleAgentShortcutOverride } : undefined)
@@ -585,6 +586,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const visibleProviders = React.useMemo(() => {
         const result: typeof providers = [];
         for (const provider of providers) {
+            if (disabledProviders.includes(String(provider.id))) {
+                continue;
+            }
             const providerModels = Array.isArray(provider.models) ? provider.models : [];
             const visibleModels = providerModels.filter((model: ProviderModel) => {
                 const modelId = typeof model?.id === 'string' ? model.id : '';
@@ -597,7 +601,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             }
         }
         return result;
-    }, [providers, hiddenModels]);
+    }, [providers, hiddenModels, disabledProviders]);
 
     const matchesModelSearch = React.useCallback(
         (candidate: string, query: string) => matchesRankQuery([candidate], query),
@@ -2454,6 +2458,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 reorderFavoriteAriaLabel={t('chat.modelControls.reorderFavoriteAria')}
                                 reorderFavoriteTitle={t('chat.modelControls.reorderFavoriteTitle')}
                                 providerOrder={providerOrder}
+                                disabledProviderIds={disabledProviders}
                                 onReorderProvider={setProviderOrder}
                                 reorderProviderTitle={t('chat.modelControls.reorderProviderTitle')}
                                 footerContent={(activeEntry) => {
