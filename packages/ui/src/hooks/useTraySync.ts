@@ -1,11 +1,19 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive } from '@/lib/desktop';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import {
+  getRuntimeApiBaseUrl,
+  getRuntimeKey,
+  subscribeRuntimeEndpointWillChange,
+} from '@/lib/runtime-switch';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { opencodeClient } from '@/lib/opencode/client';
-import { useGlobalSessionStatusStore, applyGlobalSessionStatusSnapshot } from '@/sync/global-session-status';
+import {
+  useGlobalSessionStatusStore,
+  applyGlobalSessionStatusSnapshot,
+  markDirectoryStatusUnavailable,
+} from '@/sync/global-session-status';
 import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
 import { useNotificationStore } from '@/sync/notification-store';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
@@ -40,7 +48,7 @@ const POLL_INTERVAL_MS = 5000;
 const FLUSH_DEBOUNCE_MS = 500;
 const MAX_SESSIONS = 20;
 
-type TraySessionStatus = 'idle' | 'busy' | 'retry';
+type TraySessionStatus = 'idle' | 'busy' | 'retry' | 'reconnecting';
 
 type TraySession = {
   id: string;
@@ -128,6 +136,63 @@ const basenameOf = (p: string): string => {
   const norm = p.replace(/\\/g, '/').replace(/\/+$/, '');
   const idx = norm.lastIndexOf('/');
   return idx >= 0 ? norm.slice(idx + 1) : norm;
+};
+
+type TrayRuntimeGenerationToken = { generation: number; runtimeKey: string };
+
+type TrayRuntimeGenerationGuard = {
+  capture: () => TrayRuntimeGenerationToken;
+  invalidate: (nextRuntimeKey?: string) => void;
+  isCurrent: (token: TrayRuntimeGenerationToken) => boolean;
+};
+
+// The tray hook can outlive an endpoint switch in desktop windows. Keep the
+// same generation + runtime identity commit guard used by sync-context so an
+// old status request cannot write into the new global live-status store.
+export const createTrayRuntimeGenerationGuard = (
+  readRuntimeKey: () => string = getRuntimeKey,
+): TrayRuntimeGenerationGuard => {
+  let generation = 0;
+  let runtimeKey = readRuntimeKey();
+
+  return {
+    capture: (): TrayRuntimeGenerationToken => ({ generation, runtimeKey }),
+    invalidate: (nextRuntimeKey?: string): void => {
+      generation += 1;
+      runtimeKey = nextRuntimeKey ?? readRuntimeKey();
+    },
+    isCurrent: (token: TrayRuntimeGenerationToken): boolean => (
+      token.generation === generation
+      && token.runtimeKey === runtimeKey
+      && token.runtimeKey === readRuntimeKey()
+    ),
+  };
+};
+
+/**
+ * Commit a completed per-directory status fetch to the global live-status
+ * store. `null` means the fetch failed, which is NOT an authoritative empty
+ * snapshot: preserve the directory's last known busy/retry entries and mark it
+ * temporarily unavailable so presentation can resolve them to `reconnecting`
+ * instead of destroying evidence or flipping to idle.
+ *
+ * The runtime-generation check runs in the same synchronous tick as the write,
+ * so a completion from a previous runtime can never mark the new runtime's
+ * directories unavailable.
+ */
+export const applyTrayStatusFetchCompletion = (
+  directory: string,
+  raw: Record<string, { type?: string }> | null,
+  sessionIds: Iterable<string>,
+  token: TrayRuntimeGenerationToken,
+  guard: TrayRuntimeGenerationGuard,
+): void => {
+  if (!guard.isCurrent(token)) return;
+  if (raw === null) {
+    markDirectoryStatusUnavailable(directory);
+    return;
+  }
+  applyGlobalSessionStatusSnapshot(directory, raw, sessionIds);
 };
 
 // Resolve the "project · branch" metadata line for a session from its directory,
@@ -219,15 +284,17 @@ const resolveInstanceName = async (): Promise<string> => {
 
 // Live data lives in the directory-scoped sync child stores. Aggregate it once
 // into flat lookups so we can attach it to the global session list by id.
+type LiveStatusEntry = { type: TraySessionStatus; directory: string };
+
 type LiveData = {
-  statusById: Map<string, TraySessionStatus>;
+  statusById: Map<string, LiveStatusEntry>;
   branchByDirectory: Map<string, string>;
   approvals: TrayApproval[];
   titleById: Map<string, string>;
 };
 
 const collectLiveData = (): LiveData => {
-  const statusById = new Map<string, TraySessionStatus>();
+  const statusById = new Map<string, LiveStatusEntry>();
   const branchByDirectory = new Map<string, string>();
   const approvals: TrayApproval[] = [];
   const titleById = new Map<string, string>();
@@ -243,7 +310,8 @@ const collectLiveData = (): LiveData => {
     const state = store.getState();
     // Normalize the key so it matches the session directory regardless of
     // trailing slashes / separators.
-    if (state.vcs?.branch) branchByDirectory.set(normalizeProjectPath(directory) ?? directory, state.vcs.branch);
+    const normalizedDirectory = normalizeProjectPath(directory) ?? directory;
+    if (state.vcs?.branch) branchByDirectory.set(normalizedDirectory, state.vcs.branch);
 
     for (const session of state.session) {
       if (!session?.id) continue;
@@ -254,12 +322,14 @@ const collectLiveData = (): LiveData => {
     // just-created session can have a live status entry before (or without)
     // appearing in this store's list, and the same session can be listed by
     // several stores. Never let one store's missing/idle entry clobber another
-    // store's busy/retry.
+    // store's busy/retry. The store's directory is kept with the entry so
+    // freshness can be resolved directory-scoped even when the global index
+    // has no entry for the session.
     for (const [sessionId, status] of Object.entries(state.session_status ?? {})) {
       const type = status?.type;
       const mapped: TraySessionStatus = type === 'busy' ? 'busy' : type === 'retry' ? 'retry' : 'idle';
       const existing = statusById.get(sessionId);
-      if (!existing || existing === 'idle') statusById.set(sessionId, mapped);
+      if (!existing || existing.type === 'idle') statusById.set(sessionId, { type: mapped, directory: normalizedDirectory });
     }
 
     for (const [sessionId, requests] of Object.entries(state.permission ?? {})) {
@@ -321,7 +391,7 @@ const collectStatusPollDirectories = (): Map<string, string[]> => {
   return targets;
 };
 
-const buildSnapshot = (instanceName: string): TraySnapshot => {
+export const buildSnapshot = (instanceName: string): TraySnapshot => {
   const live = collectLiveData();
   const notif = useNotificationStore.getState().index.session;
 
@@ -360,17 +430,38 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
   // (instant, but can miss sessions created outside this window) or the
   // cross-project status map (event-driven for every directory + polled
   // reconciliation). Requiring agreement would re-introduce the gaps.
-  const globalStatusById = useGlobalSessionStatusStore.getState().statusById;
+  const globalStatusState = useGlobalSessionStatusStore.getState();
+  const globalStatusById = globalStatusState.statusById;
   const resolveStatus = (id: string): TraySessionStatus => {
     const fromStores = live.statusById.get(id);
-    if (fromStores && fromStores !== 'idle') return fromStores;
-    return globalStatusById.get(id)?.status.type ?? fromStores ?? 'idle';
+    const globalEntry = globalStatusById.get(id);
+    const activeSource = fromStores && fromStores.type !== 'idle' ? fromStores : undefined;
+    const raw: TraySessionStatus = activeSource?.type
+      ?? globalEntry?.status.type
+      ?? fromStores?.type
+      ?? 'idle';
+    // While this session's directory is unavailable, preserved busy/retry is
+    // last-known data and must NOT be presented as confirmed active. Convert
+    // it to 'reconnecting' so the tray shows the session is there but not
+    // confirmed running — neither a busy spinner nor idle. Freshness is
+    // directory-scoped: a failed fetch for one directory does not make
+    // another directory's status appear as reconnecting.
+    const directory = activeSource?.directory ?? globalEntry?.directory;
+    if (
+      directory
+      && globalStatusState.unavailableDirectories.has(directory)
+      && (raw === 'busy' || raw === 'retry')
+    ) {
+      return 'reconnecting';
+    }
+    return raw;
   };
 
   const rollupStatus = (family: string[]): TraySessionStatus => {
     const statuses = family.map((id) => resolveStatus(id));
     if (statuses.includes('busy')) return 'busy';
     if (statuses.includes('retry')) return 'retry';
+    if (statuses.includes('reconnecting')) return 'reconnecting';
     return 'idle';
   };
 
@@ -431,6 +522,7 @@ export const useTraySync = (): void => {
     // The active instance is fixed per window load (switching hosts re-navigates
     // the window, remounting this hook). Resolve it once, then re-push.
     let instanceName = '';
+    const runtimeGeneration = createTrayRuntimeGenerationGuard();
     const flushNow = () => {
       if (disposed) return;
       const snapshot = buildSnapshot(instanceName);
@@ -440,8 +532,16 @@ export const useTraySync = (): void => {
       void invokeDesktop('desktop_tray_update', snapshot);
     };
 
+    const unsubscribeRuntimeWillChange = subscribeRuntimeEndpointWillChange((detail) => {
+      runtimeGeneration.invalidate(detail.runtimeKey);
+      // The next runtime must publish even when its first snapshot serializes
+      // identically to the previous runtime's snapshot.
+      lastSerialized = '';
+    });
+
+    const instanceNameRequest = runtimeGeneration.capture();
     void resolveInstanceName().then((name) => {
-      if (disposed) return;
+      if (disposed || !runtimeGeneration.isCurrent(instanceNameRequest)) return;
       instanceName = name;
       flushNow();
     });
@@ -451,13 +551,14 @@ export const useTraySync = (): void => {
     // sessions already busy before this window opened and any missed events.
     // Cheap: ~ms per directory, bounded by the tray's visible session count.
     const refreshGlobalStatus = async () => {
+      const requestGeneration = runtimeGeneration.capture();
       const targets = collectStatusPollDirectories();
       await Promise.all([...targets.entries()].map(async ([directory, sessionIds]) => {
         // null = fetch failed → keep that directory's current entries;
         // {} = authoritative "everything here is idle".
         const raw = await opencodeClient.getSessionStatusForDirectory(directory).catch(() => null);
-        if (disposed || raw === null) return;
-        applyGlobalSessionStatusSnapshot(directory, raw, sessionIds);
+        if (disposed) return;
+        applyTrayStatusFetchCompletion(directory, raw, sessionIds, requestGeneration, runtimeGeneration);
       }));
     };
 
@@ -566,6 +667,7 @@ export const useTraySync = (): void => {
       unsubscribeSessionOrder();
       unsubscribePinnedSessions();
       unsubscribeQuota();
+      unsubscribeRuntimeWillChange();
       unsubscribeRegistry?.();
       for (const unsub of storeUnsubs.values()) unsub();
       storeUnsubs.clear();

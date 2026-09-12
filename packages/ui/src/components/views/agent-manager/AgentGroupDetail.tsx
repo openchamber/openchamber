@@ -7,7 +7,9 @@ import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useAgentGroupsStore, type AgentGroup, type AgentGroupSession } from '@/stores/useAgentGroupsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useGlobalSessionStatus, useAllSessionStatuses } from '@/sync/sync-context';
+import { useSessionDisplayStatus, useAllSessionStatuses } from '@/sync/sync-context';
+import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { normalizeProjectPath } from '@/lib/projectResolution';
 import { ChatContainer } from '@/components/chat/ChatContainer';
 import { ChatErrorBoundary } from '@/components/chat/ChatErrorBoundary';
 import {
@@ -33,10 +35,29 @@ interface AgentGroupDetailProps {
 }
 
 const SessionStatusDot: React.FC<{ sessionId: string }> = ({ sessionId }) => {
-  const status = useGlobalSessionStatus(sessionId);
-  if (!status || status.type === 'idle') return null;
+  const { t } = useI18n();
+  const displayStatus = useSessionDisplayStatus(sessionId);
+  // `reconnecting` is NOT confirmed active: no animated amber ping. Instead it
+  // shows a static cloud-off icon so the session is identifiable as needing
+  // attention without implying a running turn. Fresh busy/retry keeps the
+  // ping animation; preserved busy/retry during unavailability does not.
+  if (displayStatus.type === 'reconnecting') {
+    const label = t('sessions.sidebar.session.status.reconnecting');
+    return (
+      <span
+        role="img"
+        className="inline-flex flex-shrink-0 items-center"
+        title={label}
+        aria-label={label}
+      >
+        <Icon name="cloud-off" className="h-2 w-2 text-muted-foreground/70" />
+      </span>
+    );
+  }
+  if (displayStatus.type !== 'busy' && displayStatus.type !== 'retry') return null;
+  const status = displayStatus.rawStatus;
   return (
-    <span className="relative flex h-2 w-2 flex-shrink-0" title={status.type}>
+    <span className="relative flex h-2 w-2 flex-shrink-0" title={status?.type}>
       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
       <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
     </span>
@@ -142,12 +163,23 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
     }
   }, [deleteGroupSessions, group.sessions, isProcessing, t, worktreeDialog]);
 
-  // Group-level status: show if any session is busy
+  // Group-level status: confirmed busy/retry only. Preserved busy/retry whose
+  // directory is currently unavailable is "reconnecting" (unconfirmed), not
+  // busy — it renders a static cloud-off icon instead of the animated loader.
   const allStatuses = useAllSessionStatuses();
-  const groupBusy = React.useMemo(
-    () => group.sessions.some((s) => allStatuses[s.id]?.type === 'busy'),
-    [group.sessions, allStatuses],
-  );
+  const unavailableDirectories = useGlobalSessionStatusStore((state) => state.unavailableDirectories);
+  const groupActivity = React.useMemo(() => {
+    let busy = false;
+    let reconnecting = false;
+    for (const session of group.sessions) {
+      const type = allStatuses[session.id]?.type;
+      if (type !== 'busy' && type !== 'retry') continue;
+      const directory = normalizeProjectPath(session.path) ?? session.path;
+      if (directory && unavailableDirectories.has(directory)) reconnecting = true;
+      else busy = true;
+    }
+    return { busy, reconnecting };
+  }, [allStatuses, group.sessions, unavailableDirectories]);
 
   return (
     <div className={cn('flex h-full flex-col bg-background', className)}>
@@ -157,7 +189,17 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h1 className="typography-heading-lg text-foreground truncate">{group.name}</h1>
-              {groupBusy && <Icon name="loader-4" className="h-4 w-4 animate-spin text-amber-500 flex-shrink-0" />}
+              {groupActivity.busy && <Icon name="loader-4" className="h-4 w-4 animate-spin text-amber-500 flex-shrink-0" />}
+              {!groupActivity.busy && groupActivity.reconnecting ? (
+                <span
+                  role="img"
+                  className="inline-flex flex-shrink-0 items-center text-muted-foreground/70"
+                  title={t('sessions.sidebar.session.status.reconnecting')}
+                  aria-label={t('sessions.sidebar.session.status.reconnecting')}
+                >
+                  <Icon name="cloud-off" className="h-4 w-4" />
+                </span>
+              ) : null}
             </div>
             <div className="flex items-center gap-2 mt-1 typography-meta text-muted-foreground">
               <span>

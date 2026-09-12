@@ -47,6 +47,7 @@ import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./reconnect-recovery"
 import { messagesBefore } from "./message-ordering"
 import { opencodeClient } from "@/lib/opencode/client"
+import { normalizeProjectPath } from "@/lib/projectResolution"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { applyMessageQueueUpdatedEvent, useMessageQueueStore } from "@/stores/messageQueueStore"
 import { subscribeMessageQueueSync } from "./message-queue-sync"
@@ -64,6 +65,10 @@ import {
   applyGlobalSessionStatusEvent,
   applyGlobalSessionStatusEvents,
   applyGlobalSessionStatusSnapshot,
+  areGlobalSessionStatusEventsEnabled,
+  isDirectoryStatusUnavailable,
+  markDirectoryStatusUnavailable,
+  markTransportStatusUnavailable,
   useGlobalSessionStatusStore,
 } from "./global-session-status"
 import type { State } from "./types"
@@ -275,6 +280,107 @@ export function useGlobalSessionStatus(sessionId: string): SessionStatus | undef
   )
 }
 
+/**
+ * Read whether a directory's status data is currently fresh (not unavailable).
+ * Freshness is determined from the session's own directory: a failed fetch for
+ * `/repo-a` does not make `/repo-b`'s status stale. A transport-wide disconnect
+ * or transport switch marks all known directories unavailable; a per-directory
+ * fetch failure marks only that directory.
+ *
+ * The `directory` parameter is required because `statusById` intentionally
+ * stores only busy/retry entries — absence means "last known was idle", NOT
+ * "definitely idle right now while the directory is unavailable". A session
+ * with no active-status entry whose directory is unavailable must NOT be
+ * treated as fresh for control decisions.
+ *
+ * Internal to this module: presentation/control consumers use the derived
+ * hooks below.
+ */
+function useSessionStatusFresh(directory: string): boolean {
+  const normalizedDirectory = normalizeProjectPath(directory) ?? directory
+  return useGlobalSessionStatusStore(
+    useCallback((state) => {
+      if (!normalizedDirectory) return true;
+      return !state.unavailableDirectories.has(normalizedDirectory);
+    }, [normalizedDirectory]),
+  )
+}
+
+/**
+ * Derived presentation status for a session. Combines the raw last-known
+ * status from `useGlobalSessionStatus` with directory-scoped freshness so
+ * consumers don't each have to check freshness separately.
+ *
+ * - `fresh + busy/retry` → `'busy'` / `'retry'`
+ * - `fresh + no status`   → `'idle'`
+ * - `unavailable + last known busy/retry` → `'reconnecting'`
+ *   (preserved data stays in `rawStatus` for when freshness returns)
+ * - `unavailable + no status` → `'idle'`
+ *
+ * Freshness is scoped to the session's own directory: a failed fetch for
+ * `/repo-a` does not make `/repo-b`'s status appear as `reconnecting`.
+ *
+ * The raw last-known status is always available in `rawStatus` so consumers
+ * that need the underlying data (e.g. retry details) can still read it without
+ * re-subscribing to the raw hook. Preserved busy/retry must NOT be presented
+ * as a confirmed active spinner while `type === 'reconnecting'`.
+ */
+export type SessionDisplayStatus = {
+  type: 'busy' | 'retry' | 'idle' | 'reconnecting';
+  /** The raw last-known status, preserved for when freshness returns. */
+  rawStatus: SessionStatus | undefined;
+};
+
+export function useSessionDisplayStatus(sessionId: string, directory?: string): SessionDisplayStatus {
+  const status = useGlobalSessionStatus(sessionId);
+  const entryDirectory = useGlobalSessionStatusStore(
+    useCallback((state) => state.statusById.get(sessionId)?.directory, [sessionId]),
+  );
+  // Resolve the directory: prefer the explicit parameter (callers that know
+  // it), then fall back to the status entry's own directory (for sessions with
+  // preserved busy/retry data). If neither is available, the session has no
+  // known status and no known directory — treat it as fresh idle.
+  const dir = directory ?? entryDirectory ?? '';
+  // Always call the hook unconditionally (rules-of-hooks). When dir is empty,
+  // the selector returns true (fresh) since an empty directory can't be in the
+  // unavailable set.
+  const fresh = useSessionStatusFresh(dir);
+  if (!fresh && status && (status.type === 'busy' || status.type === 'retry')) {
+    return { type: 'reconnecting', rawStatus: status };
+  }
+  return { type: status?.type ?? 'idle', rawStatus: status };
+}
+
+/**
+ * Derived control predicate: whether the session is KNOWN to be inactive
+ * (idle). This is separate from presentation status because `reconnecting`
+ * means "last known = busy/retry, current truth = unknown" — it does NOT
+ * mean inactive. Operations that require the session to be definitely
+ * inactive (e.g. move-to-worktree) must fail closed while status is
+ * unavailable.
+ *
+ * The `directory` parameter is required because `statusById` intentionally
+ * stores only busy/retry entries — absence means "last known was idle", NOT
+ * "definitely idle right now while the directory is unavailable". A session
+ * with no active-status entry whose directory is unavailable must fail closed.
+ *
+ * - `fresh + idle` → `true` (confirmed inactive, operation allowed)
+ * - `fresh + busy/retry` → `false` (confirmed active, operation blocked)
+ * - `unavailable + last known busy/retry` → `false` (unknown, operation blocked)
+ * - `unavailable + no status` → `false` (unknown, operation blocked)
+ */
+export function useSessionKnownInactive(sessionId: string, directory: string): boolean {
+  const status = useGlobalSessionStatus(sessionId);
+  const fresh = useSessionStatusFresh(directory);
+  if (!fresh) return false;
+  // `status.type === 'error'` is defensive: the SDK's SessionStatus type is
+  // currently idle/busy/retry, but a future or alternate status authority could
+  // report error. The cast preserves the runtime check without tripping TS's
+  // no-overlap narrowing on the current union.
+  // SAFETY: the assertion only widens the current union for the defensive check.
+  return !status || status.type === 'idle' || (status.type as string) === 'error';
+}
+
 /** Read all session statuses (for sidebar) */
 export function useAllSessionStatuses(): Record<string, SessionStatus> {
   return useLiveSyncSelector(
@@ -315,7 +421,7 @@ const BOOT_DEBOUNCE_MS = 1500
 const RECONNECT_MESSAGE_LIMIT = 30
 const SESSION_MATERIALIZATION_MESSAGE_LIMIT = 30
 const ACTIVE_SESSION_WATCHDOG_INTERVAL_MS = 5_000
-const ACTIVE_SESSION_STATUS_POLL_INTERVAL_MS = 5_000
+export const ACTIVE_SESSION_STATUS_POLL_INTERVAL_MS = 5_000
 const ACTIVE_SESSION_STALE_EVENT_MS = 20_000
 const ACTIVE_SESSION_FULL_RESYNC_COOLDOWN_MS = 15_000
 const CHILD_SESSION_DISCOVERY_INTERVAL_MS = 15_000
@@ -680,6 +786,22 @@ function getActiveSessionCandidateIds(directory: string, state: DirectoryStore):
   })
 }
 
+/**
+ * Reconnect/bootstrap status snapshots need every locally known session as a
+ * candidate. A successful empty snapshot can only clear stale busy/retry
+ * state when the candidate set includes sessions that currently look idle in
+ * local history. The periodic poll deliberately keeps its smaller active
+ * candidate set and escalates omissions to this authoritative path.
+ */
+function getAuthoritativeSessionCandidateIds(directory: string, state: DirectoryStore): string[] {
+  return Array.from(new Set([
+    ...getActiveSessionCandidateIds(directory, state),
+    ...state.session.map((session) => session.id),
+    ...Object.keys(state.session_status ?? {}),
+    ...Object.keys(state.message ?? {}),
+  ]))
+}
+
 type DirectorySessionStatusSnapshot = NonNullable<
   Awaited<ReturnType<typeof opencodeClient.getSessionStatusForDirectory>>
 >
@@ -690,10 +812,10 @@ type DirectorySessionStatusSnapshot = NonNullable<
 // absent candidate means "idle per this snapshot".
 //
 // - "monotonic": only confirm/raise active status. Never lowers a busy/retry
-//   session to idle. Used by the periodic watchdog poll — real idle arrives via
-//   SSE (session.status / session.idle) or via an authoritative resync that the
-//   watchdog escalates to when it detects a stale busy entry. This keeps the
-//   blind 5s poll from clobbering live state on a transient/misscoped snapshot.
+//   session to idle from omission alone. Used by the periodic watchdog poll —
+//   real idle arrives via SSE (session.status / session.idle) or via an
+//   authoritative resync that the watchdog escalates to when it detects a
+//   stale busy entry. A failed fetch follows the separate unavailable path.
 // - "authoritative": treat the snapshot as ground truth — absent/idle candidates
 //   are lowered to idle. Used by reconnect/escalated resyncs, a deliberate edge
 //   where the live server snapshot is the source of truth (mirrors the bootstrap
@@ -746,6 +868,50 @@ export function applySessionStatusSnapshot(
   return changed
 }
 
+/** Apply one complete snapshot to both live status owners. */
+export function reconcileDirectorySessionStatusSnapshot(
+  directory: string,
+  store: StoreApi<DirectoryStore>,
+  snapshot: DirectorySessionStatusSnapshot,
+  candidateSessionIds: string[],
+  mode: StatusSnapshotMode,
+): boolean {
+  const changed = applySessionStatusSnapshot(store, snapshot, candidateSessionIds, mode)
+  if (mode === "authoritative") {
+    applyGlobalSessionStatusSnapshot(directory, snapshot, candidateSessionIds)
+  }
+  return changed
+}
+
+/**
+ * Mark live activity for a specific directory as temporarily unavailable after
+ * a failed/null status fetch. This is intentionally separate from an empty
+ * snapshot and from a real runtime replacement:
+ *
+ * - It does NOT mutate any child store's `session_status`: last known
+ *   busy/retry state is preserved so the UI does not flip to idle on a
+ *   transient HTTP failure, 502, network interruption, relay interruption, or
+ *   temporary SSE disconnect. Messages and durable session history are
+ *   untouched.
+ * - It marks only the given directory as unavailable (via
+ *   `markDirectoryStatusUnavailable`) so consumers can present the state
+ *   as "reconnecting" rather than as confirmed activity or as idle.
+ *
+ * Freshness is directory-scoped: a failed fetch for `/repo-a` does not mark
+ * `/repo-b` unavailable. The next successful authoritative snapshot for this
+ * directory clears the flag with fresh data, inside the same state update that
+ * applies the snapshot. A real OpenCode runtime replacement (issue #2421) uses
+ * `resetGlobalSessionStatus({ blockEventUpdates: true })`
+ * (via `resetAppForRuntimeEndpointChange`) instead, which destroys stale data
+ * and blocks old events.
+ */
+export function markDirectorySessionStatusesUnavailable(directory: string): boolean {
+  // Preserve last known status data; only flag this directory as unavailable.
+  // Child stores' session_status maps are intentionally not mutated.
+  markDirectoryStatusUnavailable(directory)
+  return false
+}
+
 async function resyncDirectorySessionStatuses(
   directory: string,
   store: StoreApi<DirectoryStore>,
@@ -753,14 +919,28 @@ async function resyncDirectorySessionStatuses(
   mode: StatusSnapshotMode,
   isStale?: () => boolean,
 ): Promise<DirectorySessionStatusSnapshot | null> {
+  const expectedRuntimeKey = getRuntimeKey()
   const nextStatuses = await opencodeClient.getSessionStatusForDirectory(directory)
-  // null = fetch failed; preserve existing state. {} or populated = a snapshot
-  // of active sessions — reconciled per `mode` (absence ≠ idle under monotonic).
-  if (nextStatuses === null || isStale?.()) return null
-  applySessionStatusSnapshot(store, nextStatuses, candidateSessionIds, mode)
+  // A completion that lost its runtime or was fenced out must not mark a
+  // directory unavailable or overwrite a newer result.
+  if (expectedRuntimeKey !== getRuntimeKey() || isStale?.()) return null
+  // null = fetch failed. It is not an empty snapshot and is returned as such
+  // to the caller. A transient failure must not destroy last known busy/retry
+  // state or lower it to idle: it only marks status as temporarily
+  // unavailable so the UI can show "reconnecting". The watchdog's
+  // `needsSnapshotAfterStatusPoll` escalation logic still runs on the next
+  // successful poll.
+  if (nextStatuses === null) {
+    markDirectorySessionStatusesUnavailable(directory)
+    return null
+  }
+  reconcileDirectorySessionStatusSnapshot(directory, store, nextStatuses, candidateSessionIds, mode)
+  // Freshness is cleared only by the authoritative reconcile above, atomically
+  // with applying its snapshot. A monotonic success has no authority to lower
+  // busy/retry, so clearing the flag here would present preserved busy as
+  // confirmed activity until a second, authoritative fetch corrected it.
   if (mode === "authoritative") {
     store.setState({ sessionStatusReady: true })
-    applyGlobalSessionStatusSnapshot(directory, nextStatuses, candidateSessionIds)
     // An authoritative snapshot that settles sessions previously observed
     // busy/retry can leave their trailing assistant message and tool parts
     // unfinished (managed process died mid-turn, #2577): finalize them now.
@@ -775,6 +955,61 @@ async function resyncDirectorySessionStatuses(
 }
 
 /**
+ * The status fetch mode a directory must use right now. A directory marked
+ * unavailable is fetched authoritatively: only an authoritative reconcile may
+ * clear the flag, and it clears it inside the same state update that applies
+ * the snapshot, so preserved busy/retry can never be presented as confirmed
+ * activity between a fetch and an escalation. Fresh directories keep the cheap
+ * monotonic pass, which never lowers busy/retry on its own.
+ */
+function statusFetchModeForDirectory(directory: string): StatusSnapshotMode {
+  return isDirectoryStatusUnavailable(directory) ? "authoritative" : "monotonic"
+}
+
+/**
+ * Bounded self-recovery for a directory whose status data is marked
+ * unavailable while it has no active candidates. A failed status fetch is not
+ * proof of idleness: the session may already have settled, and the flag would
+ * otherwise persist — keeping `useSessionKnownInactive` false and
+ * move-to-worktree disabled for every session in the directory — until a
+ * reconnect or reload.
+ *
+ * The recovery is status-only (`triggerDirectoryResync` owns session/message
+ * refetching) and authoritative: the candidate set comes from the authoritative
+ * helper so a missed busy status seeds both the child store and the global
+ * index, while an empty candidate list still clears the flag by omission.
+ *
+ * Rate-limited by the caller's poll cadence map and the shared per-directory
+ * in-flight guard, so a runtime that stays down is retried once per window,
+ * not in a storm.
+ */
+export async function recoverUnavailableDirectoryStatus(
+  directory: string,
+  store: StoreApi<DirectoryStore>,
+  lastStatusPollAtByDirectory: Map<string, number>,
+  now: number,
+): Promise<void> {
+  if (!isDirectoryStatusUnavailable(directory)) return
+  if (statusPollingDirectories.has(directory)) return
+  const lastStatusPollAt = lastStatusPollAtByDirectory.get(directory) ?? 0
+  if (now - lastStatusPollAt < ACTIVE_SESSION_STATUS_POLL_INTERVAL_MS) return
+
+  lastStatusPollAtByDirectory.set(directory, now)
+  statusPollingDirectories.add(directory)
+  try {
+    await runBackgroundNetworkTask(() =>
+      resyncDirectorySessionStatuses(
+        directory,
+        store,
+        getAuthoritativeSessionCandidateIds(directory, store.getState()),
+        statusFetchModeForDirectory(directory),
+      ))
+  } finally {
+    statusPollingDirectories.delete(directory)
+  }
+}
+
+/**
  * Re-check the session status shortly after an assistant message completes.
  * The turn-ending `session.idle` event can be delayed or lost; left alone, the
  * busy spinner keeps showing until the next watchdog poll tick (up to ~5s) and
@@ -784,9 +1019,11 @@ async function resyncDirectorySessionStatuses(
  * status is read again when the timer fires: a normal turn whose `session.idle`
  * arrives inside that window settles on its own and issues no request at all.
  * Only a session the store still believes busy costs one status fetch, which
- * mirrors the watchdog escalation — the monotonic pass confirms/raises busy but
- * never lowers it, and when the snapshot reports the session idle while the
- * store still believes it busy, an authoritative resync settles the status.
+ * mirrors the watchdog escalation. A directory whose status data is unavailable
+ * is fetched authoritatively so the flag clears atomically with the snapshot;
+ * otherwise the monotonic pass confirms/raises busy but never lowers it, and
+ * when the snapshot reports the session idle while the store still believes it
+ * busy, an authoritative resync settles the status.
  *
  * Bounded: one scheduled check per session, one in-flight status fetch per
  * directory (shared with the watchdog poll), best-effort — the watchdog poll
@@ -813,10 +1050,14 @@ export function maybePollStatusAfterMessageCompletion(
     statusPollingDirectories.add(directory)
     void (async () => {
       try {
+        const mode = statusFetchModeForDirectory(directory)
         const statuses = await runBackgroundNetworkTask(() =>
-          resyncDirectorySessionStatuses(directory, store, [sessionID], "monotonic"))
+          resyncDirectorySessionStatuses(directory, store, [sessionID], mode))
         if (!statuses) return
-        if (needsSnapshotAfterStatusPoll(store.getState(), sessionID, statuses[sessionID])) {
+        // An authoritative pass already reconciled the store against the
+        // snapshot; only the monotonic pass needs the contradiction escalation.
+        if (mode === "monotonic"
+          && needsSnapshotAfterStatusPoll(store.getState(), sessionID, statuses[sessionID])) {
           await runBackgroundNetworkTask(() =>
             resyncDirectorySessionStatuses(directory, store, [sessionID], "authoritative"))
         }
@@ -829,6 +1070,18 @@ export function maybePollStatusAfterMessageCompletion(
   }, MESSAGE_COMPLETION_STATUS_POLL_DELAY_MS)
 
   pendingMessageCompletionPolls.set(pendingKey, timer)
+}
+
+export async function adoptAuthoritativeSessionDirectoryAfterResync(
+  context: Pick<DirectoryBootstrapContext, "isCurrent">,
+  resync: () => Promise<DirectorySessionStatusSnapshot | null>,
+): Promise<void> {
+  await resync()
+  if (!context.isCurrent()) return
+  // A guessed selection is settled only after the owning store is readable;
+  // the generation check above keeps a runtime switch from settling it from
+  // the previous runtime's directory state.
+  useSessionUIStore.getState().adoptAuthoritativeSessionDirectory()
 }
 
 // After a monotonic poll, decide whether to escalate to a full authoritative
@@ -1535,14 +1788,20 @@ async function resyncDirectoryAfterReconnect(
 ) {
   if (isStale()) return
   const current = store.getState()
-  const candidateSessionIds = getActiveSessionCandidateIds(directory, current)
-  if (candidateSessionIds.length === 0) return
+  const candidateSessionIds = getAuthoritativeSessionCandidateIds(directory, current)
 
   await resyncDirectorySessionStatuses(directory, store, candidateSessionIds, "authoritative", isStale)
   if (isStale()) return
 
+  const materializationSessionIds = getActiveSessionCandidateIds(directory, store.getState())
+  if (materializationSessionIds.length === 0) {
+    ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
+    return
+  }
+
   const scopedClient = opencodeClient.getScopedSdkClient(directory)
-  await Promise.all(candidateSessionIds.map(async (sessionId) => {
+  await Promise.all(materializationSessionIds.map(async (sessionId) => {
+    if (isStale()) return
     syncDebug.recovery.materializing({ reason, directory, sessionID: sessionId })
     const loader = getImperativeSessionMessageLoader()
     const [sessionResponse] = await Promise.all([
@@ -1580,7 +1839,7 @@ async function resyncDirectoryAfterReconnect(
   }))
 
   if (isStale()) return
-  await resyncBlockingRequestsForDirectory(directory, store, candidateSessionIds)
+  await resyncBlockingRequestsForDirectory(directory, store, materializationSessionIds)
 
   if (isStale()) return
   ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
@@ -1597,10 +1856,23 @@ export function handleEvent(
   batch?: DirectoryEventBatch,
   globalEffectsAlreadyApplied = false,
 ) {
+  // A stream from a previous runtime can finish a queued flush after the
+  // endpoint switch has already mounted the new provider. It must never
+  // reintroduce old live status or session data into the new runtime.
+  if (expectedRuntimeKey !== getRuntimeKey()) return
+
   if ((payload as { type?: unknown }).type === "openchamber:message-queue.updated") {
     applyMessageQueueUpdatedEvent(payload, expectedRuntimeKey)
     return
   }
+
+  // After a runtime/connection boundary, status-bearing events from the old
+  // stream are not evidence for the new runtime. Wait for its first complete
+  // `/session/status` snapshot before accepting any status lifecycle event.
+  if (
+    (payload.type === "session.status" || payload.type === "session.idle" || payload.type === "session.error")
+    && !areGlobalSessionStatusEventsEnabled()
+  ) return
 
   if ((payload as { type?: unknown }).type === "openchamber:permission-auto-accept.updated") {
     const properties = (payload as unknown as { properties?: unknown }).properties
@@ -2333,6 +2605,31 @@ export function SyncProvider(props: {
     return () => window.removeEventListener("openchamber:system-resume", onSystemResume)
   }, [childStores])
 
+  // A transport disconnect or transport switch is NOT authoritative proof of
+  // an OpenCode runtime replacement (issue #2421). It is a transient transport
+  // event: the same runtime is expected to come back (reconnect) or a fresh
+  // snapshot will be fetched over HTTP (transport switch). Last known busy/retry
+  // status is preserved and all known directories are marked unavailable, so
+  // the UI shows "reconnecting" instead of destroying live evidence or flipping
+  // to idle. The reconnect/transport-switch
+  // resyncs call `applyGlobalSessionStatusSnapshot`, which clears each
+  // directory's freshness individually with fresh data.
+  //
+  // A real runtime replacement (runtime key change) is handled separately by
+  // `resetAppForRuntimeEndpointChange` -> `resetGlobalSessionStatus({ blockEventUpdates: true })`,
+  // which does destroy stale data and block old events.
+  const markLiveSessionStatusesUnavailable = useCallback(() => {
+    // A transport-wide disconnect or transport switch affects every directory
+    // at once. Mark all currently known directories stale deterministically —
+    // do not depend on the ordering of concurrent per-directory resync
+    // completions. Status data is preserved; each directory's freshness is
+    // restored individually when its own next successful authoritative snapshot
+    // arrives. Include child-store directories (which may have only idle
+    // sessions and no statusById entry) so freshness can be determined even
+    // for idle sessions whose directory is unavailable.
+    markTransportStatusUnavailable(childStores.children.keys())
+  }, [childStores])
+
   // Configure child store manager
   useEffect(() => {
     void usePermissionStore.getState().hydrate().catch(() => undefined)
@@ -2443,6 +2740,18 @@ export function SyncProvider(props: {
 
         const result = await runBootstrap(0)
         if (result === "failed") {
+          // The session-list request can fail independently of the live status
+          // request. Reconcile the known cached candidates before surfacing the
+          // bootstrap failure so stale busy/retry is not presented as active.
+          if (context.isCurrent()) {
+            const latest = store.getState()
+            await resyncDirectorySessionStatuses(
+              directory,
+              store,
+              getAuthoritativeSessionCandidateIds(directory, latest),
+              "authoritative",
+            )
+          }
           // OpenCode can mask the underlying errno while initializing an
           // inaccessible workspace. Probe the exact directory through the
           // owning runtime filesystem API so only an authoritative local
@@ -2458,14 +2767,17 @@ export function SyncProvider(props: {
           throw new Error(`Directory bootstrap failed for ${directory}`)
         }
 
-        // Selecting a session whose directory this client had not indexed yet
-        // routes it through the active directory as a documented guess. This is
-        // the moment that guess can be settled: the owning store now holds the
-        // session, so the authoritative directory is finally readable. Without
-        // this the guess survives, every fetch is addressed to a directory that
-        // does not own the session, and the session never renders.
-        if (result === "complete") {
-          useSessionUIStore.getState().adoptAuthoritativeSessionDirectory()
+        if (result === "complete" && context.isCurrent()) {
+          const latest = store.getState()
+          await adoptAuthoritativeSessionDirectoryAfterResync(
+            context,
+            () => resyncDirectorySessionStatuses(
+              directory,
+              store,
+              getAuthoritativeSessionCandidateIds(directory, latest),
+              "authoritative",
+            ),
+          )
         }
       },
       onDispose: (directory) => {
@@ -2555,15 +2867,21 @@ export function SyncProvider(props: {
         })
         const isFirstConnect = !pipelineHasConnectedRef.current
         pipelineHasConnectedRef.current = true
-        if (!replayReset && isFirstConnect && !pipelineDisconnectedBeforeFirstConnectRef.current) {
+        const needsStatusSnapshot = !areGlobalSessionStatusEventsEnabled()
+        if (!replayReset && isFirstConnect && !pipelineDisconnectedBeforeFirstConnectRef.current && !needsStatusSnapshot) {
           return
         }
-        if (!replayReset && isRecentBoot()) {
+        if (!replayReset && isRecentBoot() && !needsStatusSnapshot) {
           return
         }
         resyncAfterStreamGap("stream-reconnect")
       },
       onDisconnect: (reason) => {
+        // A transport disconnect is transient, not a runtime replacement: mark
+        // status as unavailable (preserve last known data) so the UI shows
+        // "reconnecting" instead of destroying live evidence or flipping to
+        // idle. The reconnect resyncs clear the flag with fresh data.
+        markLiveSessionStatusesUnavailable()
         if (!pipelineHasConnectedRef.current) {
           pipelineDisconnectedBeforeFirstConnectRef.current = true
         }
@@ -2576,8 +2894,10 @@ export function SyncProvider(props: {
       },
       onTransportSwitch: () => {
         void useMessageQueueStore.getState().resync().catch(() => undefined)
-        // Transport changes are gap-prone in real networks. Treat them like a
-        // reconnect and refresh active session snapshots from HTTP.
+        // Transport changes are gap-prone in real networks. Mark status as
+        // unavailable (preserve last known data) and refresh active session
+        // snapshots from HTTP; the resyncs clear the flag with fresh data.
+        markLiveSessionStatusesUnavailable()
         useConfigStore.setState({
           isConnected: true,
           hasEverConnected: true,
@@ -2594,7 +2914,15 @@ export function SyncProvider(props: {
       pipeline.cleanup()
       unsubscribeQueueEvents()
     }
-  }, [props.sdk, childStores, routingIndex, messageStreamTransport, runtimeKey, triggerDirectoryResync])
+  }, [
+    props.sdk,
+    childStores,
+    routingIndex,
+    messageStreamTransport,
+    runtimeKey,
+    triggerDirectoryResync,
+    markLiveSessionStatusesUnavailable,
+  ])
 
   useEffect(() => {
     let stopped = false
@@ -2666,9 +2994,14 @@ export function SyncProvider(props: {
       if (polling.has(directory)) return
       polling.add(directory)
       try {
+        const mode = statusFetchModeForDirectory(directory)
         const before = store.getState()
-        const statuses = await runBackgroundNetworkTask(() => resyncDirectorySessionStatuses(directory, store, candidateSessionIds, "monotonic"))
+        const statuses = await runBackgroundNetworkTask(() =>
+          resyncDirectorySessionStatuses(directory, store, candidateSessionIds, mode))
         if (!statuses) return
+        // The authoritative pass already reconciled contradictions; only the
+        // monotonic pass escalates a store/snapshot mismatch.
+        if (mode === "authoritative") return
         const needsSnapshot = candidateSessionIds.some((sessionId) => (
           needsSnapshotAfterStatusPoll(before, sessionId, statuses[sessionId])
         ))
@@ -2691,6 +3024,19 @@ export function SyncProvider(props: {
             const state = store.getState()
             const candidateSessionIds = getActiveSessionCandidateIds(directory, state)
             if (candidateSessionIds.length === 0) {
+              // A flagged directory keeps a bounded status-only recovery fetch
+              // on the normal cadence; the flag, not the candidate list, is
+              // what needs a fetch here. An unflagged idle directory keeps the
+              // existing skip and clears its poll bookkeeping.
+              if (isDirectoryStatusUnavailable(directory)) {
+                void recoverUnavailableDirectoryStatus(
+                  directory,
+                  store,
+                  lastStatusPollAtByDirectoryRef.current,
+                  now,
+                ).catch(() => undefined)
+                continue
+              }
               lastStatusPollAtByDirectoryRef.current.delete(directory)
               lastFullResyncAtByDirectoryRef.current.delete(directory)
               continue

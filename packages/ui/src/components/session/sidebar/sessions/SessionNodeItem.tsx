@@ -26,7 +26,7 @@ import type { ChildSessionExport } from '@/lib/exportSession';
 import { SessionAiRenameMenuItem } from '@/components/session/SessionAiRenameMenuItem';
 import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKeyboard';
 import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
-import { useGlobalSessionStatus, useSessionPermissions, useSessionQuestionCount } from '@/sync/sync-context';
+import { useSessionDisplayStatus, useSessionKnownInactive, useSessionPermissions, useSessionQuestionCount } from '@/sync/sync-context';
 import { usePrefetchSessionMessages, useSessionMessageRecordsForExport } from '@/sync/use-sync';
 import { getSyncSessionMaterializationStatus } from '@/sync/sync-refs';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
@@ -459,15 +459,25 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const isZombie = useViewportStore(
     React.useCallback((state) => Boolean(state.sessionMemoryState.get(viewportSessionKey(session.id))?.isZombie), [session.id]),
   );
-  const sessionStatus = useGlobalSessionStatus(session.id);
-  const statusType = sessionStatus?.type ?? 'idle';
+  const sessionDisplayStatus = useSessionDisplayStatus(session.id);
+  const statusType = sessionDisplayStatus.type;
+  // `reconnecting` (statusUnavailable + preserved busy/retry) is NOT confirmed
+  // active: no spinner. It is distinct from idle, though — show a static
+  // cloud-off icon so the session is identifiable as needing attention. The
+  // last-known busy/retry data stays in rawStatus for when freshness returns,
+  // but is not presented as a running turn.
   const isStreaming = statusType === 'busy' || statusType === 'retry';
+  const isReconnecting = statusType === 'reconnecting';
   // Read as a boolean, not as the value: the row must not re-render on every
   // tick of the counter it only decides to mount.
   const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
   const isMovingToWorktree = useIsSessionWorktreeMovePending(session.id);
   const isAiRenaming = useIsSessionAiRenamePending(session.id, sessionDirectory);
   const isSessionActionPending = isMovingToWorktree || isAiRenaming;
+  // Control predicate: move-to-worktree requires the session to be KNOWN
+  // inactive. `reconnecting` (unavailable + preserved busy/retry) means
+  // "current truth = unknown", NOT inactive — the operation must fail closed.
+  const isSessionKnownInactive = useSessionKnownInactive(session.id, sessionDirectory ?? '');
   const currentWorktreeMetadata = node.worktree ?? useSessionUIStore.getState().getWorktreeMetadata(session.id) ?? null;
   const [worktreeTargets, setWorktreeTargets] = React.useState<SessionWorktreeMenuTarget[]>([]);
   const [worktreeTargetsLoading, setWorktreeTargetsLoading] = React.useState(false);
@@ -725,9 +735,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     menuOpen: isSessionMenuOpen,
     hideOnHoverClass,
   });
-  const showUnreadStatus = !isSessionActionPending && !isStreaming && needsAttention && !isActive;
-  const showStatusMarker = isStreaming || showUnreadStatus;
-  // Both states are the same static dot; only the color separates "running"
+  const showUnreadStatus = !isSessionActionPending && !isStreaming && !isReconnecting && needsAttention && !isActive;
+  const showStatusMarker = isStreaming || isReconnecting || showUnreadStatus;
+  // The dot states are the same static shape; only the color separates "running"
   // from "unread". The elapsed-turn readout on the right carries the motion
   // that a spinner used to, at one repaint per second instead of per frame.
   const statusMarkerLabel = isStreaming
@@ -735,6 +745,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     : t('sessions.sidebar.session.status.unread');
   const statusMarkerContent = (
     <span
+      role="img"
       className={cn(
         'h-1.5 w-1.5 rounded-full',
         isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
@@ -742,6 +753,19 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       aria-label={statusMarkerLabel}
       title={statusMarkerLabel}
     />
+  );
+  // `reconnecting` is distinct from both: a static cloud-off icon (no pulse,
+  // no spinner) signalling the session needs attention without implying a run.
+  const reconnectingMarkerLabel = t('sessions.sidebar.session.status.reconnecting');
+  const reconnectingMarkerContent = (
+    <span
+      role="img"
+      className="inline-flex items-center"
+      title={reconnectingMarkerLabel}
+      aria-label={reconnectingMarkerLabel}
+    >
+      <Icon name="cloud-off" className="h-3 w-3 text-muted-foreground/70" />
+    </span>
   );
   // The settled duration lives exactly as long as the unread marker does, so a
   // session read (or watched) while it finishes never keeps a stale total.
@@ -769,6 +793,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           className="h-3 w-3 animate-spin text-primary"
           aria-label={isAiRenaming ? t('sessions.aiRename.generating') : t('sessions.sidebar.session.status.movingToWorktree')}
         />
+      ) : isReconnecting ? (
+        reconnectingMarkerContent
       ) : showStatusMarker ? statusMarkerContent : showPinnedMarker ? pinnedMarkerContent : null}
     </span>
   ) : null;
@@ -1050,7 +1076,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       {canShowSessionWorktreeMenu({ isSubtaskSession, archivedBucket: Boolean(archivedBucket), isVSCode, sessionDirectory }) ? (() => {
         const isWorktreeMenuDisabled = getSessionWorktreeMenuDisabled({
           sessionDirectory,
-          isStreaming,
+          isStreaming: isStreaming || !isSessionKnownInactive,
           isMovingToWorktree,
         });
         const worktreeMenuState = getSessionWorktreeMenuState({
@@ -1074,7 +1100,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
               <TooltipContent side="right" className="max-w-72">
                 {isMovingToWorktree
                   ? t('sessions.sidebar.session.moveToWorktree.tooltipMoving')
-                  : isStreaming
+                  : isStreaming || !isSessionKnownInactive
                     ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy')
                     : t('sessions.sidebar.session.moveToWorktree.tooltipTargets')}
               </TooltipContent>

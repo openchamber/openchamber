@@ -27,13 +27,14 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass } from '@/components/ui/dropdown-menu.styles';
 import { Icon } from '@/components/icon/Icon';
+import { SessionStatusIndicator } from '@/components/session/SessionStatusIndicator';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useSessionTabsStore } from '@/stores/useSessionTabsStore';
 import { closeSessionTabAndActivateNeighbour } from '@/lib/sessionTabs';
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useGlobalSessionStatus } from '@/sync/sync-context';
+import { useSessionDisplayStatus } from '@/sync/sync-context';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
 
@@ -107,15 +108,16 @@ const SessionTabItem: React.FC<{
   const overlayVisible = !suppressControls && (menuOpen || menuVisible);
 
   // Session state for the dot and the hover tooltip.
-  const sessionStatus = useGlobalSessionStatus(tab.id);
+  const sessionDisplayStatus = useSessionDisplayStatus(tab.id);
   const isAiRenaming = useIsSessionAiRenamePending(tab.id, resolveGlobalSessionDirectory(tab.session));
-  const isStreaming = sessionStatus?.type === 'busy' || sessionStatus?.type === 'retry';
+  const statusType = sessionDisplayStatus.type;
+  const isStreaming = statusType === 'busy' || statusType === 'retry';
+  // `reconnecting` (statusUnavailable + preserved busy/retry) is NOT confirmed
+  // active: no busy pulse. SessionStatusIndicator renders a static cloud-off
+  // icon for it and keeps it distinct from both active and unread.
+  const isReconnecting = statusType === 'reconnecting';
   const unseenCount = useSessionUnseenCount(tab.id);
-  const showUnread = unseenCount > 0 && !isActive && !isStreaming;
-  const showDot = isStreaming || showUnread;
-  const dotLabel = isStreaming
-    ? t('sessions.sidebar.session.status.active')
-    : t('sessions.sidebar.session.status.unread');
+  const showUnread = unseenCount > 0 && !isActive && !isStreaming && !isReconnecting;
 
   const menuArgsFor = (components: SessionTabMenuComponents): SessionTabMenuArgs => ({
     session: tab.session,
@@ -200,17 +202,18 @@ const SessionTabItem: React.FC<{
                     </div>
                     {isAiRenaming ? (
                       <Icon name="loader-4" className="ml-1.5 size-3 shrink-0 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
-                    ) : showDot ? (
-                      <span
+                    ) : (
+                      <SessionStatusIndicator
+                        statusType={statusType}
+                        showUnread={showUnread}
+                        size="sm"
                         className={cn(
-                          'ml-1.5 h-1.5 w-1.5 shrink-0 rounded-full',
-                          isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
+                          'ml-1.5 shrink-0',
                           !suppressControls && 'group-hover/session-tab:opacity-0',
                           overlayVisible && 'opacity-0',
                         )}
-                        aria-label={dotLabel}
                       />
-                    ) : null}
+                    )}
                   </div>
                   {!suppressControls ? (
                     <div

@@ -23,6 +23,8 @@ import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { useAgentGroupsStore, type AgentGroup } from '@/stores/useAgentGroupsStore';
 import { useAllSessionStatuses } from '@/sync/sync-context';
+import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { normalizeProjectPath } from '@/lib/projectResolution';
 import { useI18n } from '@/lib/i18n';
 
 const formatRelativeTime = (timestamp: number): { unit: 'now' | 'minutes' | 'hours' | 'days'; count?: number } => {
@@ -43,10 +45,11 @@ interface AgentGroupItemProps {
   group: AgentGroup;
   isSelected: boolean;
   isBusy: boolean;
+  isReconnecting: boolean;
   onSelect: () => void;
 }
 
-const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, isBusy, onSelect }) => {
+const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, isBusy, isReconnecting, onSelect }) => {
   const { t } = useI18n();
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [contextMenuOpen, setContextMenuOpen] = React.useState(false);
@@ -110,7 +113,20 @@ const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, isBu
               <span className="truncate typography-ui-label font-normal text-foreground">
                 {group.name}
               </span>
-              {isBusy && <Icon name="loader-4" className="h-3 w-3 animate-spin text-amber-500 flex-shrink-0" />}
+              {isBusy ? (
+                <Icon name="loader-4" className="h-3 w-3 animate-spin text-amber-500 flex-shrink-0" />
+              ) : isReconnecting ? (
+                // Preserved busy/retry whose directory is unavailable: static
+                // (no spinner) — the group is not confirmed active.
+                <span
+                  role="img"
+                  className="inline-flex flex-shrink-0 items-center text-muted-foreground/70"
+                  title={t('sessions.sidebar.session.status.reconnecting')}
+                  aria-label={t('sessions.sidebar.session.status.reconnecting')}
+                >
+                  <Icon name="cloud-off" className="h-3 w-3" />
+                </span>
+              ) : null}
             </div>
             <div className="flex items-center gap-2">
                 <span className="typography-micro text-muted-foreground/60 flex items-center gap-1">
@@ -201,17 +217,28 @@ export const AgentManagerSidebar: React.FC<AgentManagerSidebarProps> = ({
   const [showAll, setShowAll] = React.useState(false);
   const isLoading = useAgentGroupsStore((s) => s.isLoading);
 
-  // Session statuses for busy indicators
+  // Session statuses for busy/reconnecting indicators. A directory's status
+  // being unavailable converts its preserved busy/retry into `reconnecting`:
+  // unconfirmed work must not render as the confirmed-busy spinner.
   const allStatuses = useAllSessionStatuses();
-  const busyGroups = React.useMemo(() => {
-    const set = new Set<string>();
+  const unavailableDirectories = useGlobalSessionStatusStore((state) => state.unavailableDirectories);
+  const groupActivityByName = React.useMemo(() => {
+    const activity = new Map<string, 'busy' | 'reconnecting'>();
     for (const group of groups) {
-      if (group.sessions.some((s) => allStatuses[s.id]?.type === 'busy')) {
-        set.add(group.name);
+      let busy = false;
+      let reconnecting = false;
+      for (const session of group.sessions) {
+        const type = allStatuses[session.id]?.type;
+        if (type !== 'busy' && type !== 'retry') continue;
+        const directory = normalizeProjectPath(session.path) ?? session.path;
+        if (directory && unavailableDirectories.has(directory)) reconnecting = true;
+        else busy = true;
       }
+      if (busy) activity.set(group.name, 'busy');
+      else if (reconnecting) activity.set(group.name, 'reconnecting');
     }
-    return set;
-  }, [groups, allStatuses]);
+    return activity;
+  }, [groups, allStatuses, unavailableDirectories]);
 
   const MAX_VISIBLE = 5;
 
@@ -273,7 +300,8 @@ export const AgentManagerSidebar: React.FC<AgentManagerSidebarProps> = ({
             key={group.name}
             group={group}
             isSelected={selectedGroupName === group.name}
-            isBusy={busyGroups.has(group.name)}
+            isBusy={groupActivityByName.get(group.name) === 'busy'}
+            isReconnecting={groupActivityByName.get(group.name) === 'reconnecting'}
             onSelect={() => onGroupSelect?.(group.name)}
           />
         ))}

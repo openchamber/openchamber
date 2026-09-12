@@ -82,8 +82,15 @@ export const useCollapsedSessionActivityState = ({
   const active = useGlobalSessionStatusStore(React.useCallback((state): CollapsedActivityState => {
     if (!enabled) return null;
     for (const sessionId of ids.active) {
-      const status = state.statusById.get(sessionId)?.status.type;
-      if (status === 'busy' || status === 'retry') return 'active';
+      const entry = state.statusById.get(sessionId);
+      if (!entry) continue;
+      const status = entry.status.type;
+      if (status !== 'busy' && status !== 'retry') continue;
+      // Preserved busy/retry whose directory is currently unavailable is
+      // unconfirmed work: a collapsed group must not claim a confirmed-active
+      // turn. The session-level reconnecting indicator shows once expanded.
+      if (state.unavailableDirectories.has(entry.directory)) continue;
+      return 'active';
     }
     return null;
   }, [enabled, ids.active]));

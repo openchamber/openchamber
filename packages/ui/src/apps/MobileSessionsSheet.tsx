@@ -69,16 +69,16 @@ import {
   useSessionOrderingStore,
 } from '@/sync/session-ordering';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useAllLiveSessions, useGlobalSessionStatus } from '@/sync/sync-context';
+import { useAllLiveSessions, useSessionDisplayStatus } from '@/sync/sync-context';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
-import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { useSessionAiRenameAction } from '@/components/session/useSessionAiRenameAction';
 import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKeyboard';
 import type { WorktreeMetadata } from '@/types/worktree';
 
 import { MobileDeleteWorktreeDialog } from './MobileDeleteWorktreeDialog';
 import { MobileProjectEditSurface } from './MobileProjectEditSurface';
+import { MobileSessionRowStatus } from './MobileSessionRowStatus';
 import { useEdgeSwipe } from './useEdgeSwipe';
 
 type MobileSessionsSheetProps = {
@@ -525,13 +525,17 @@ const SessionRow: React.FC<{
   const title = session.title?.trim() || t('mobile.sessions.untitled');
   const swipeEnabled = Boolean(onRevealedChange && onArchive);
   const aiRename = useSessionAiRenameAction(session.id, session.directory, swipeEnabled && revealed);
-  // Live indicators, same conventions as the desktop sidebar: busy/retry →
-  // spinner; unseen activity on a non-active row → attention dot.
-  const liveStatus = useGlobalSessionStatus(session.id);
+  // Live status indicators render in the row's status area (right side)
+  // via SessionStatusIndicator, NOT in the left gutter. The left gutter is
+  // exclusively subsession expand/collapse (and the AI-rename progress
+  // spinner). Reconnecting is a static cloud-off icon (no animation) —
+  // distinct from busy (pulse) and from idle (no indicator).
+  const liveDisplayStatus = useSessionDisplayStatus(session.id);
   const unseenCount = useSessionUnseenCount(session.id);
-  const statusType = liveStatus?.type ?? 'idle';
+  const statusType = liveDisplayStatus.type;
   const isStreaming = statusType === 'busy' || statusType === 'retry';
-  const showUnreadDot = !isStreaming && unseenCount > 0 && !active;
+  const isReconnecting = statusType === 'reconnecting';
+  const showUnreadDot = !isStreaming && !isReconnecting && unseenCount > 0 && !active;
   const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
   const showActivityDuration = (isStreaming || showUnreadDot) && hasActivityDuration;
 
@@ -673,10 +677,12 @@ const SessionRow: React.FC<{
             : 'bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]'),
         )}
       >
-        {/* Left gutter slot: live activity indicator takes priority over the
-            subsession chevron — same position, so rows never shift. When the
-            row has children the slot still toggles them either way. */}
-        {aiRename.pending || isStreaming || showUnreadDot || (hasChildren && onToggleChildren) ? (
+        {/* Left gutter: subsession expand/collapse control (and the AI-rename
+            progress spinner while it runs). Live status — busy/retry,
+            reconnecting, unread — is rendered separately in the row's status
+            area via MobileSessionRowStatus, so it never replaces or hides the
+            expand/collapse action. */}
+        {aiRename.pending || (hasChildren && onToggleChildren) ? (
           <button
             type="button"
             className="absolute z-10 flex w-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -694,14 +700,6 @@ const SessionRow: React.FC<{
           >
             {aiRename.pending ? (
               <Icon name="loader-4" className="size-3 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
-            ) : isStreaming || showUnreadDot ? (
-              <span
-                className={cn(
-                  'size-1.5 rounded-full',
-                  isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
-                )}
-                aria-hidden
-              />
             ) : (
               <RiArrowDownSLine className={cn('size-[18px] transition-transform duration-150', expanded ? 'rotate-0' : '-rotate-90')} />
             )}
@@ -746,17 +744,17 @@ const SessionRow: React.FC<{
               >
                 {title}
               </span>
-              {/* The elapsed turn takes the time slot while it matters, then
-                  hands it back to the relative timestamp. */}
-              {showActivityDuration ? (
-                <SessionActivityDuration
-                  sessionId={session.id}
-                  running={isStreaming}
-                  className="typography-micro"
-                />
-              ) : time ? (
-                <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{time}</span>
-              ) : null}
+              {/* Live status (busy/retry/reconnecting/unread) plus the elapsed
+                  turn readout, which hands the time slot back to the relative
+                  timestamp when it does not apply. */}
+              <MobileSessionRowStatus
+                statusType={statusType}
+                showUnread={showUnreadDot}
+                showActivityDuration={showActivityDuration}
+                sessionId={session.id}
+                isStreaming={isStreaming}
+                time={time}
+              />
             </span>
             {contextLabel ? (
               <span className="block truncate typography-micro text-muted-foreground">{contextLabel}</span>

@@ -1,6 +1,8 @@
 import React from 'react';
 import { useI18n } from '@/lib/i18n';
 import { useAllLiveSessions, useAllSessionStatuses, useDirectorySync } from '@/sync/sync-context';
+import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { normalizeProjectPath } from '@/lib/projectResolution';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -33,6 +35,16 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
     () => (sessionId ? liveSessions.filter((candidate) => candidate.parentID === sessionId) : []),
     [liveSessions, sessionId],
   );
+
+  // Freshness is directory-scoped. Subagents run in the parent session's
+  // directory, so while that directory's status is unavailable a preserved
+  // busy child is unconfirmed: it must not display as "Working" (and must not
+  // disappear into "Done" either).
+  const unavailableDirectories = useGlobalSessionStatusStore((state) => state.unavailableDirectories);
+  const directoryUnavailable = React.useMemo(() => {
+    if (!directory) return false;
+    return unavailableDirectories.has(normalizeProjectPath(directory) ?? directory);
+  }, [directory, unavailableDirectories]);
 
   // Each child's own subtree total (its cost plus every descendant of its
   // own), so nested subagent-of-subagent cost rolls up under the immediate
@@ -79,7 +91,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
 
   if (children.length === 0) return null;
 
-  const busyChildren = children.filter((child) => statuses[child.id]?.type === 'busy').length;
+  const busyChildren = children.filter((child) => statuses[child.id]?.type === 'busy' && !directoryUnavailable).length;
 
   return (
     <WorkStatusCollapsibleSection
@@ -94,6 +106,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
           const blocked = (permissions[child.id]?.length ?? 0) > 0;
           const asked = (questions[child.id]?.length ?? 0) > 0;
           const busy = statuses[child.id]?.type === 'busy';
+          const reconnecting = busy && directoryUnavailable;
           const label = child.title?.trim() || t('chat.workStatus.subagent.untitled');
           const childCost = perChildCost.get(child.id) ?? 0;
           return (
@@ -108,6 +121,8 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
                     <WorkStatusValue tone="warning">{t('chat.workStatus.subagent.needsPermission')}</WorkStatusValue>
                   ) : asked ? (
                     <WorkStatusValue tone="warning">{t('chat.workStatus.subagent.askedQuestion')}</WorkStatusValue>
+                  ) : reconnecting ? (
+                    <WorkStatusValue tone="muted">{t('sessions.sidebar.session.status.reconnecting')}</WorkStatusValue>
                   ) : busy ? (
                     <WorkStatusValue tone="info">{t('chat.workStatus.subagent.working')}</WorkStatusValue>
                   ) : (
