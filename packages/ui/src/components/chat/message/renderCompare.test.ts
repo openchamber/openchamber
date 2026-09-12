@@ -8,6 +8,7 @@ const finalAnswerContext: TurnGroupingContext = {
   isLastAssistantInTurn: true,
   isLatestTurn: true,
   isWorking: false,
+  activitySettled: true,
   hasTools: false,
   hasReasoning: false,
   hasEarlierAssistantText: false,
@@ -47,5 +48,37 @@ describe('completed-turn changed files', () => {
     const before = { ...finalAnswerContext, changedFiles: files };
     const after = { ...finalAnswerContext, changedFiles: [{ ...files[0] }] };
     expect(areRelevantTurnGroupingContextsEqual(before, after, 'answer', false)).toBe(true);
+  });
+});
+
+describe('settled activity context', () => {
+  const activityOwnerContext: TurnGroupingContext = {
+    ...finalAnswerContext,
+    activityOwnerMessageId: 'owner',
+    activitySettled: false,
+  };
+
+  test('invalidates the activity owner when completion changes', () => {
+    expect(areRelevantTurnGroupingContextsEqual(
+      activityOwnerContext,
+      { ...activityOwnerContext, activitySettled: true },
+      'owner',
+      false,
+    )).toBe(false);
+  });
+
+  test('invalidates a segment anchor when completion changes', () => {
+    const segment = { id: 'segment', anchorMessageId: 'anchor', afterToolPartId: null, parts: [] };
+    const before = { ...activityOwnerContext, activityOwnerMessageId: 'owner', activityGroupSegments: [segment] };
+    expect(areRelevantTurnGroupingContextsEqual(before, { ...before, activitySettled: true }, 'anchor', false)).toBe(false);
+  });
+
+  test('does not invalidate an unrelated assistant message when completion changes', () => {
+    expect(areRelevantTurnGroupingContextsEqual(
+      activityOwnerContext,
+      { ...activityOwnerContext, activitySettled: true },
+      'other',
+      false,
+    )).toBe(true);
   });
 });

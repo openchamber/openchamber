@@ -1,7 +1,7 @@
 import React, { act } from 'react';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { plugin } from 'bun';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { createRoot, type Root } from 'react-dom/client';
@@ -15,6 +15,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { projectTurnRecords } from '../lib/turns/projectTurnRecords';
 import type { ChatMessageEntry, TurnChangedFile, TurnRecord } from '../lib/turns/types';
+import { getLiveFinalMessage } from '../lib/turns/liveActivity';
 import { LiveTurnActivity } from './LiveTurnActivity';
 
 plugin({
@@ -49,9 +50,9 @@ const runtimeApis: RuntimeAPIs = {
 const sdk = createOpencodeClient({ baseUrl: 'http://localhost', fetch: async () => new Response('[]', { headers: { 'Content-Type': 'application/json' } }) });
 let MessageBody: typeof import('../message/MessageBody').default;
 
-function assistant(id: string, parts: Part[], finish?: string): ChatMessageEntry {
+function assistant(id: string, parts: Part[], finish?: string, parentID = 'user'): ChatMessageEntry {
     const info: AssistantMessage = {
-        id, sessionID: 'session', role: 'assistant', parentID: 'user', time: { created: 2, completed: finish ? 3 : undefined },
+        id, sessionID: 'session', role: 'assistant', parentID, time: { created: 2, completed: finish ? 3 : undefined },
         modelID: 'model', providerID: 'provider', mode: 'build', agent: 'build', path: { cwd: '/project', root: '/project' },
         cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, finish,
     };
@@ -64,6 +65,12 @@ const readPart: Part = {
     type: 'tool', tool: 'read', id: 'read', callID: 'read', sessionID: 'session', messageID: 'progress',
     state: { status: 'completed', input: { filePath: '/project/source.ts' }, output: 'code', title: 'Read', metadata: {}, time: { start: 1, end: 2 } },
 };
+function bashPart(index: number): Part {
+    return {
+        type: 'tool', tool: 'bash', id: `bash-${index}`, callID: `bash-${index}`, sessionID: 'session', messageID: 'progress',
+        state: { status: 'completed', input: { command: `printf activity-${index}` }, output: `activity-${index}`, title: 'Run command', metadata: {}, time: { start: index, end: index + 1 } },
+    };
+}
 function turn(messages: ChatMessageEntry[]): TurnRecord {
     return projectTurnRecords([{
         info: { id: 'user', sessionID: 'session', role: 'user', time: { created: 1 }, agent: 'build', model: { providerID: 'provider', modelID: 'model' } },
@@ -71,13 +78,16 @@ function turn(messages: ChatMessageEntry[]): TurnRecord {
     }, ...messages]).turns[0];
 }
 
-function Harness({ record, retired = false, changedFiles, isLatestTurn = true }: {
+function Harness({ record, retired = false, changedFiles, isLatestTurn = true, renderMode = 'live', initialExpanded = false }: {
     record: TurnRecord;
     retired?: boolean;
     changedFiles?: TurnChangedFile[];
     isLatestTurn?: boolean;
+    renderMode?: 'sorted' | 'live';
+    initialExpanded?: boolean;
 }) {
-    const [expanded, setExpanded] = React.useState(false);
+    const [expanded, setExpanded] = React.useState(initialExpanded);
+    const activitySettled = Boolean(getLiveFinalMessage(record.assistantMessages)) || retired;
     const renderMessage = (message: ChatMessageEntry) => (
         <div key={message.info.id} data-fixture-message={message.info.id}>
             <MessageBody
@@ -91,6 +101,10 @@ function Harness({ record, retired = false, changedFiles, isLatestTurn = true }:
                     turnId: 'user', isFirstAssistantInTurn: message === record.assistantMessages[0],
                     isLastAssistantInTurn: message === record.assistantMessages.at(-1),
                     isLatestTurn, changedFiles, isWorking: false, hasTools: record.hasTools, hasReasoning: record.hasReasoning,
+                    activitySettled,
+                    activityOwnerMessageId: record.assistantMessages[0]?.info.id,
+                    activityParts: record.activityParts, activityGroupSegments: record.activitySegments,
+                    isGroupExpanded: expanded, toggleGroup: () => setExpanded((value) => !value),
                 }}
             />
         </div>
@@ -98,8 +112,10 @@ function Harness({ record, retired = false, changedFiles, isLatestTurn = true }:
     return <RuntimeAPIContext.Provider value={runtimeApis}>
         <SyncProvider sdk={sdk} directory="/project">
             <I18nProvider>
-                <LiveTurnActivity turn={record} hasLaterAssistant={retired} expanded={expanded}
-                    onToggle={() => setExpanded((value) => !value)} renderMessage={renderMessage} />
+                {renderMode === 'live' ? (
+                    <LiveTurnActivity turn={record} hasLaterAssistant={retired} expanded={expanded}
+                        onToggle={() => setExpanded((value) => !value)} renderMessage={renderMessage} />
+                ) : record.assistantMessages.map(renderMessage)}
             </I18nProvider>
         </SyncProvider>
     </RuntimeAPIContext.Provider>;
@@ -273,5 +289,65 @@ describe('live Activity with the real message body', () => {
         await act(async () => container.querySelector<HTMLButtonElement>('[data-fixture-message="final"] button[aria-expanded]')?.click());
         expect(container.textContent).toContain('file-4.ts');
         expect(container.querySelectorAll('button[aria-label^="Open src/file-"]')).toHaveLength(0);
+    });
+
+    test('Sorted keeps seven recent activity rows while working, then hides them behind Activity after a final answer', async () => {
+        useUIStore.setState({ chatRenderMode: 'sorted' });
+        const progress = assistant('progress', Array.from({ length: 8 }, (_, index) => bashPart(index)), 'tool-calls');
+        await act(async () => root.render(<Harness record={turn([progress])} renderMode="sorted" />));
+        expect(container.textContent).not.toContain('activity-0');
+        for (let index = 1; index < 8; index += 1) expect(container.textContent).toContain(`activity-${index}`);
+
+        const final = assistant('final', [text('final-text', 'The final answer')], 'stop');
+        await act(async () => root.render(<Harness record={turn([progress, final])} renderMode="sorted" />));
+        expect(container.textContent).toContain('The final answer');
+        for (let index = 0; index < 8; index += 1) expect(container.textContent).not.toContain(`activity-${index}`);
+
+        const activity = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('Activity'));
+        await act(async () => activity?.click());
+        for (let index = 0; index < 8; index += 1) expect(container.textContent).toContain(`activity-${index}`);
+    });
+
+    test('Sorted preserves an already-expanded group when the turn settles', async () => {
+        useUIStore.setState({ chatRenderMode: 'sorted' });
+        const progress = assistant('progress', Array.from({ length: 8 }, (_, index) => bashPart(index)), 'tool-calls');
+        const final = assistant('final', [text('answer', 'Done')], 'stop');
+        await act(async () => root.render(<Harness record={turn([progress])} renderMode="sorted" initialExpanded />));
+        await act(async () => root.render(<Harness record={turn([progress, final])} renderMode="sorted" initialExpanded />));
+        expect(container.textContent).toContain('activity-0');
+        expect(container.textContent).toContain('activity-7');
+    });
+
+    test('Sorted settles interrupted history only after a later assistant response, not a queued user message', async () => {
+        useUIStore.setState({ chatRenderMode: 'sorted' });
+        const progress = assistant('progress', Array.from({ length: 8 }, (_, index) => bashPart(index)), 'tool-calls');
+        const record = turn([progress]);
+        await act(async () => root.render(<Harness record={record} renderMode="sorted" />));
+        expect(container.textContent).toContain('activity-7');
+        await act(async () => root.render(<Harness record={record} renderMode="sorted" retired />));
+        expect(container.textContent).not.toContain('activity-7');
+    });
+
+    test('MessageList retirement wiring applies to Sorted mode independently of the default expansion preference', () => {
+        const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../MessageList.tsx'), 'utf8');
+        const wiringStart = source.indexOf('const turnsWithLaterAssistant = React.useMemo');
+        const wiringEnd = source.indexOf('const staticEntryMessages', wiringStart);
+        const wiring = source.slice(wiringStart, wiringEnd);
+        expect(wiring).toContain('getTurnsWithLaterAssistant(staticTurns)');
+        expect(wiring).toContain('if (tailHasAssistant)');
+        expect(wiring).not.toContain('chatRenderMode');
+        expect(wiring).not.toContain('defaultActivityExpanded');
+    });
+
+    test('Sorted keeps a pending question and its preceding context visible', async () => {
+        useUIStore.setState({ chatRenderMode: 'sorted' });
+        const question: Part = {
+            type: 'tool', tool: 'question', id: 'question', callID: 'question', sessionID: 'session', messageID: 'progress',
+            state: { status: 'pending', input: { questions: [{ header: 'Choice', question: 'Which option?', options: [{ label: 'One', description: 'First' }, { label: 'Two', description: 'Second' }] }] }, raw: '' },
+        };
+        const record = turn([assistant('progress', [text('context', 'Choose before I continue'), question], 'tool-calls')]);
+        await act(async () => root.render(<Harness record={record} renderMode="sorted" />));
+        expect(container.textContent).toContain('Choose before I continue');
+        expect(container.textContent).toContain('Asked 1 question');
     });
 });
