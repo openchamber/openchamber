@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { getModelDisplayName, getProviderModelDisplayName, humanizeModelId } from './modelDisplay';
+import {
+  getModelDisplayName,
+  getProviderModelDisplayName,
+  humanizeModelId,
+  sortModelsByDisplayName,
+} from './modelDisplay';
 
 describe('modelDisplay', () => {
   test('prefers model name over ids', () => {
@@ -43,5 +48,42 @@ describe('modelDisplay', () => {
   test('humanizes alias and custom model ids without provider data', () => {
     expect(humanizeModelId('~openai/gpt-mini-latest')).toBe('GPT Mini Latest');
     expect(humanizeModelId('my-custom_provider/myAwesomeModel-v2-fast')).toBe('My Awesome Model V2 Fast');
+  });
+
+  test('sorts models alphabetically by display name without mutating the input', () => {
+    const models = [
+      { id: 'gpt-4o', name: 'GPT-4o' },
+      { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
+      { id: 'gemini-3-pro', name: 'Gemini 3 Pro' },
+    ];
+    const sorted = sortModelsByDisplayName(models);
+
+    expect(sorted.map((model) => model.id)).toEqual(['claude-sonnet-4-5', 'gemini-3-pro', 'gpt-4o']);
+    expect(models.map((model) => model.id)).toEqual(['gpt-4o', 'claude-sonnet-4-5', 'gemini-3-pro']);
+  });
+
+  test('sorts case-insensitively and falls back to the humanized id when name is missing', () => {
+    const sorted = sortModelsByDisplayName([
+      { id: 'provider/zebra-model' },
+      { id: 'provider/beta', name: 'beta' },
+      { id: 'provider/alpha', name: 'Alpha' },
+    ]);
+
+    expect(sorted.map((model) => model.id)).toEqual([
+      'provider/alpha',
+      'provider/beta',
+      'provider/zebra-model',
+    ]);
+  });
+
+  test('orders numeric segments naturally and breaks display-name ties by id', () => {
+    const sorted = sortModelsByDisplayName([
+      { id: 'model-10', name: 'Model 10' },
+      { id: 'model-2', name: 'Model 2' },
+      { id: 'b-same', name: 'Same' },
+      { id: 'a-same', name: 'Same' },
+    ]);
+
+    expect(sorted.map((model) => model.id)).toEqual(['model-2', 'model-10', 'a-same', 'b-same']);
   });
 });

@@ -20,7 +20,7 @@ import { handleDropdownNavigationKey } from '@/components/ui/dropdown-navigation
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { mergeModelMetadataWithLiveModel } from '@/lib/modelMetadata';
 import { orderProvidersByUserOrder } from '@/lib/providerOrdering';
-import { getModelDisplayName as getSharedModelDisplayName } from '@/lib/modelDisplay';
+import { getModelDisplayName as getSharedModelDisplayName, sortModelsByDisplayName } from '@/lib/modelDisplay';
 import { cn } from '@/lib/utils';
 import { useModelPickerSectionsStore } from '@/stores/useModelPickerSectionsStore';
 import type { ModelMetadata } from '@/types';
@@ -505,7 +505,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
         if (isModelAllowed && !isModelAllowed(provider.id, modelID)) return false;
         return matchesQuery(getModelDisplayName(model), provider.name || provider.id, modelID);
       });
-      return { ...provider, models: filteredModels };
+      return { ...provider, models: sortModelsByDisplayName(filteredModels) };
     })
     .filter((provider) => provider.models.length > 0), [allowedProviderSet, isHidden, isModelAllowed, matchesQuery, orderedProviders]);
 

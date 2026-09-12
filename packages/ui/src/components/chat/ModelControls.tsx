@@ -24,7 +24,7 @@ import { isDesktopShell } from '@/lib/desktop';
 import { getAgentColor } from '@/lib/agentColors';
 import { useDeviceInfo } from '@/lib/device';
 import { mergeModelMetadataWithLiveModel } from '@/lib/modelMetadata';
-import { getModelDisplayName as getSharedModelDisplayName } from '@/lib/modelDisplay';
+import { getModelDisplayName as getSharedModelDisplayName, sortModelsByDisplayName } from '@/lib/modelDisplay';
 import { getEditModeColors } from '@/lib/permissions/editModeColors';
 import { cn } from '@/lib/utils';
 import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
@@ -597,7 +597,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 );
             });
             if (visibleModels.length > 0) {
-                result.push({ ...provider, models: visibleModels });
+                result.push({ ...provider, models: sortModelsByDisplayName(visibleModels) });
             }
         }
         return result;
