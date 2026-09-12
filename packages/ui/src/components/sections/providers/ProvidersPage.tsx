@@ -23,6 +23,7 @@ import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import type { ConfigChangeScope } from '@/lib/configSync';
 import { recordDeferredOpenCodeRestart } from '@/lib/opencode/deferredRestart';
 import { cn } from '@/lib/utils';
+import { sortModelsByDisplayName } from '@/lib/modelDisplay';
 import type { ModelMetadata } from '@/types';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -857,7 +858,9 @@ export const ProvidersPage: React.FC = () => {
     );
   }
 
-  const providerModels = Array.isArray(selectedProvider.models) ? selectedProvider.models : [];
+  const providerModels = sortModelsByDisplayName(
+    Array.isArray(selectedProvider.models) ? selectedProvider.models : [],
+  );
   const isProviderDisabled = disabledProviders.includes(selectedProvider.id);
   const providerAuthMethods = authMethodsByProvider[selectedProvider.id] ?? [];
   const oauthAuthMethods = toOAuthMethods(
