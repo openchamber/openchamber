@@ -250,3 +250,19 @@ describe('DictationStreamManager', () => {
     expect(session.clears).toBe(1);
   });
 });
+
+describe('default segment caps', () => {
+  it('keeps a segment short enough for its commit to finish inside the request watchdog', () => {
+    const manager = new DictationStreamManager({
+      emit() {},
+      createSttSession: async () => ({ session: new FakeSttSession() }),
+    });
+
+    // The worker decodes a segment synchronously, so a long segment can trip
+    // the client's request watchdog and drop the transcript. Measured on the
+    // reported M1/16 GB: a 90 s segment decodes in ~29 s (the old 30 s
+    // watchdog), a 30 s segment in ~8 s. Keep the defaults well below it.
+    expect(manager.segmentMinSeconds).toBe(20);
+    expect(manager.segmentMaxSeconds).toBe(30);
+  });
+});
