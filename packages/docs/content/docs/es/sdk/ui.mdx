@@ -5,7 +5,7 @@ description: Botones, campos, desplegables, pestañas, listas y otros componente
 
 # Kit de UI
 
-`@openchamber/sdk/ui` es un conjunto de controles listos para usar que emplean los colores, fuentes y espaciados de la app, para que tu extensión se vea como el resto de OpenChamber sin copiar sus estilos. Cada control es una función: le das un elemento que te pertenece y su configuración, se dibuja ahí y devuelve `{ update, dispose }`. Tú combinas los controles en una pantalla y conservas los datos. El kit nunca llama a tu proveedor ni a OpenChamber; sigues llamando tú a `host.request`, `host.attach` y el resto. También puedes prescindir del kit y escribir tu propio HTML y CSS.
+`@openchamber/sdk/ui` es un conjunto de controles listos para usar que emplean los colores, fuentes y espaciados de la app, para que tu extensión se vea como el resto de OpenChamber sin copiar sus estilos. Cada control es una función: le das un elemento que te pertenece y su configuración, se dibuja ahí y devuelve `{ update, dispose }`. Tú combinas los controles en una pantalla y conservas los datos. El kit nunca llama a tu proveedor ni a OpenChamber; sigues llamando tú a `host.request`, `host.attach` y el resto. Puedes escribir tu propio HTML y CSS para todo lo que el kit no cubra, pero recurre primero al kit: sus controles siguen automáticamente el tema, los espaciados y los hábitos de teclado del usuario, así que un panel construido con ellos se siente parte de OpenChamber y no un sitio web dentro de la app.
 
 ## Llama primero a `applyHostReady`
 

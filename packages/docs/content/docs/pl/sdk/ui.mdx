@@ -5,7 +5,7 @@ description: Przyciski, pola, listy rozwijane, zakładki, listy i inne gotowe el
 
 # Zestaw UI
 
-`@openchamber/sdk/ui` to zestaw gotowych kontrolek, które używają kolorów, czcionek i odstępów aplikacji, więc Twoje rozszerzenie wygląda jak reszta OpenChamber bez kopiowania jej styli. Każda kontrolka to funkcja: dajesz jej swój element i ustawienia, ona rysuje się w nim i zwraca `{ update, dispose }`. Ty składasz kontrolki w ekran i trzymasz dane. Zestaw nigdy nie wywołuje Twojego dostawcy ani OpenChamber; `host.request`, `host.attach` i resztę nadal wywołujesz samodzielnie. Możesz też pominąć zestaw i napisać własny HTML i CSS.
+`@openchamber/sdk/ui` to zestaw gotowych kontrolek, które używają kolorów, czcionek i odstępów aplikacji, więc Twoje rozszerzenie wygląda jak reszta OpenChamber bez kopiowania jej styli. Każda kontrolka to funkcja: dajesz jej swój element i ustawienia, ona rysuje się w nim i zwraca `{ update, dispose }`. Ty składasz kontrolki w ekran i trzymasz dane. Zestaw nigdy nie wywołuje Twojego dostawcy ani OpenChamber; `host.request`, `host.attach` i resztę nadal wywołujesz samodzielnie. Własny HTML i CSS możesz napisać dla wszystkiego, czego w zestawie brakuje, ale najpierw sięgaj po zestaw: jego kontrolki same podążają za motywem, odstępami i nawykami klawiaturowymi użytkownika, więc zbudowany z nich panel wygląda jak część OpenChamber, a nie strona internetowa w środku.
 
 ## Najpierw wywołaj `applyHostReady`
 

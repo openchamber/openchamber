@@ -5,7 +5,7 @@ description: @openchamber/sdk/ui içindeki düğmeler, alanlar, açılır listel
 
 # UI kiti
 
-`@openchamber/sdk/ui`, uygulamanın renklerini, yazı tiplerini ve boşluklarını kullanan hazır kontroller kümesidir; böylece eklentiniz stilleri kopyalamadan OpenChamber'ın geri kalanı gibi görünür. Her kontrol bir fonksiyondur: ona size ait bir öğe ve ayarlarını verirsiniz, kendini oraya çizer ve `{ update, dispose }` döndürür. Kontrolleri bir ekrana siz yerleştirir, veriyi siz tutarsınız. Kit sağlayıcınızı ya da OpenChamber'ı asla çağırmaz; `host.request`, `host.attach` ve diğerlerini yine kendiniz çağırırsınız. Kiti atlayıp kendi HTML ve CSS'inizi de yazabilirsiniz.
+`@openchamber/sdk/ui`, uygulamanın renklerini, yazı tiplerini ve boşluklarını kullanan hazır kontroller kümesidir; böylece eklentiniz stilleri kopyalamadan OpenChamber'ın geri kalanı gibi görünür. Her kontrol bir fonksiyondur: ona size ait bir öğe ve ayarlarını verirsiniz, kendini oraya çizer ve `{ update, dispose }` döndürür. Kontrolleri bir ekrana siz yerleştirir, veriyi siz tutarsınız. Kit sağlayıcınızı ya da OpenChamber'ı asla çağırmaz; `host.request`, `host.attach` ve diğerlerini yine kendiniz çağırırsınız. Kitte olmayan her şey için kendi HTML ve CSS'inizi yazabilirsiniz, ama önce kite başvurun: kontrolleri kullanıcının temasını, boşluklarını ve klavye alışkanlıklarını kendiliğinden izler; böylece onlarla kurulan bir panel içine gömülü bir web sitesi gibi değil, OpenChamber'ın bir parçası gibi hissedilir.
 
 ## Önce `applyHostReady` çağırın
 

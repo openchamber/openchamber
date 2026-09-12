@@ -5,7 +5,7 @@ description: Boutons, champs, listes déroulantes, onglets, listes et autres com
 
 # Kit UI
 
-`@openchamber/sdk/ui` est un ensemble de contrôles prêts à l'emploi qui utilisent les couleurs, polices et espacements de l'application, pour que votre extension ressemble au reste d'OpenChamber sans copier ses styles. Chaque contrôle est une fonction : vous lui donnez un élément qui vous appartient et ses réglages, il se dessine dedans et renvoie `{ update, dispose }`. Vous assemblez les contrôles en un écran et vous gardez la main sur les données. Le kit n'appelle jamais votre fournisseur ni OpenChamber ; c'est toujours vous qui appelez `host.request`, `host.attach` et le reste. Vous pouvez aussi vous passer du kit et écrire votre propre HTML et CSS.
+`@openchamber/sdk/ui` est un ensemble de contrôles prêts à l'emploi qui utilisent les couleurs, polices et espacements de l'application, pour que votre extension ressemble au reste d'OpenChamber sans copier ses styles. Chaque contrôle est une fonction : vous lui donnez un élément qui vous appartient et ses réglages, il se dessine dedans et renvoie `{ update, dispose }`. Vous assemblez les contrôles en un écran et vous gardez la main sur les données. Le kit n'appelle jamais votre fournisseur ni OpenChamber ; c'est toujours vous qui appelez `host.request`, `host.attach` et le reste. Vous pouvez écrire votre propre HTML et CSS pour tout ce que le kit ne couvre pas, mais commencez par le kit : ses contrôles suivent automatiquement le thème, les espacements et les habitudes clavier de l'utilisateur, donc un panneau construit avec eux se sent partie intégrante d'OpenChamber plutôt qu'un site web à l'intérieur.
 
 ## Appelez `applyHostReady` en premier
 

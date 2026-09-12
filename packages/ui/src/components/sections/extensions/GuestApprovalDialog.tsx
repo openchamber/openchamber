@@ -42,6 +42,8 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
   const { t } = useI18n();
   const requested = guest?.capabilities.requested ?? [];
   const filesystemPatterns = guest?.filesystem ?? [];
+  const serviceExec = guest?.service?.permissions?.exec ?? [];
+  const serviceSockets = guest?.service?.permissions?.sockets ?? [];
 
   return (
     <Dialog
@@ -77,6 +79,18 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
                         <li key={pattern} className="typography-meta break-all font-mono text-foreground">{pattern}</li>
                       ))}
                     </ul>
+                  ) : null}
+                  {capability === 'service' && serviceExec.length > 0 ? (
+                    <p className="typography-meta mt-1 text-foreground">
+                      {t('settings.extensions.capability.service.runs')}{' '}
+                      <span className="break-all font-mono">{serviceExec.join(', ')}</span>
+                    </p>
+                  ) : null}
+                  {capability === 'service' && serviceSockets.length > 0 ? (
+                    <p className="typography-meta mt-0.5 text-foreground">
+                      {t('settings.extensions.capability.service.sockets')}{' '}
+                      <span className="break-all font-mono">{serviceSockets.join(', ')}</span>
+                    </p>
                   ) : null}
                 </div>
               </li>

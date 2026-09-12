@@ -5,7 +5,7 @@ description: 来自 @openchamber/sdk/ui 的按钮、输入框、下拉框、标�
 
 # UI 套件
 
-`@openchamber/sdk/ui` 是一组现成的控件，采用应用的颜色、字体和间距，让你的扩展无需复制样式就能与 OpenChamber 的其余部分保持一致。每个控件都是一个函数：你给它一个你拥有的元素和它的设置，它就在那里绘制自己并返回 `{ update, dispose }`。你把控件组合成一个界面，并自己管理数据。套件从不调用你的提供方或 OpenChamber；`host.request`、`host.attach` 等仍由你自己调用。你也可以不用套件，自己编写 HTML 和 CSS。
+`@openchamber/sdk/ui` 是一组现成的控件，采用应用的颜色、字体和间距，让你的扩展无需复制样式就能与 OpenChamber 的其余部分保持一致。每个控件都是一个函数：你给它一个你拥有的元素和它的设置，它就在那里绘制自己并返回 `{ update, dispose }`。你把控件组合成一个界面，并自己管理数据。套件从不调用你的提供方或 OpenChamber；`host.request`、`host.attach` 等仍由你自己调用。套件没有的东西你可以自己编写 HTML 和 CSS，但请先用套件：它的控件会自动跟随用户的主题、间距和键盘习惯，所以用它们搭出的面板像是 OpenChamber 的一部分，而不是嵌在里面的网站。
 
 ## 先调用 `applyHostReady`
 

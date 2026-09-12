@@ -139,7 +139,7 @@ Every method, its limits, and the error codes are on the [Host API](https://open
 
 ## UI kit
 
-`@openchamber/sdk/ui` has buttons, fields, a searchable dropdown, checkboxes, tabs, badges, lists, empty states, spinners, banners, separators, progress bars, menus, and safe text, all drawn with the app's colours and fonts. Call `applyHostReady` from `onReady` first, then mount what you need. Every mount returns `{ update, dispose }`.
+`@openchamber/sdk/ui` has buttons, fields, a searchable dropdown, checkboxes, tabs, badges, lists, empty states, spinners, banners, separators, progress bars, menus, and safe text, all drawn with the app's colours and fonts. Call `applyHostReady` from `onReady` first, then mount what you need. Every mount returns `{ update, dispose }`. Reach for the kit before writing your own controls: it follows the user's theme and keyboard habits, so the panel feels like part of the app.
 
 ```ts
 import { applyHostReady, mountList } from '@openchamber/sdk/ui';

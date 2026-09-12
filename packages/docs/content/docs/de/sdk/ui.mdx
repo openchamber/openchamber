@@ -5,7 +5,7 @@ description: Buttons, Felder, Dropdowns, Tabs, Listen und andere Bausteine aus @
 
 # UI-Kit
 
-`@openchamber/sdk/ui` ist ein Satz fertiger Bedienelemente, die Farben, Schriften und Abstände der App verwenden. So sieht deine Erweiterung aus wie der Rest von OpenChamber, ohne dass du dessen Styles kopierst. Jedes Element ist eine Funktion: Du gibst ihr ein Element, das dir gehört, und seine Einstellungen; sie zeichnet sich dort und liefert `{ update, dispose }` zurück. Du setzt die Elemente zu einem Bildschirm zusammen und behältst die Daten bei dir. Das Kit ruft nie deinen Provider oder OpenChamber auf; `host.request`, `host.attach` und den Rest rufst du weiterhin selbst. Du kannst das Kit auch weglassen und eigenes HTML und CSS schreiben.
+`@openchamber/sdk/ui` ist ein Satz fertiger Bedienelemente, die Farben, Schriften und Abstände der App verwenden. So sieht deine Erweiterung aus wie der Rest von OpenChamber, ohne dass du dessen Styles kopierst. Jedes Element ist eine Funktion: Du gibst ihr ein Element, das dir gehört, und seine Einstellungen; sie zeichnet sich dort und liefert `{ update, dispose }` zurück. Du setzt die Elemente zu einem Bildschirm zusammen und behältst die Daten bei dir. Das Kit ruft nie deinen Provider oder OpenChamber auf; `host.request`, `host.attach` und den Rest rufst du weiterhin selbst. Für alles, was das Kit nicht bietet, kannst du eigenes HTML und CSS schreiben, aber greif zuerst zum Kit: Seine Elemente folgen automatisch dem Theme, den Abständen und den Tastaturgewohnheiten des Nutzers, sodass ein daraus gebautes Panel wie ein Teil von OpenChamber wirkt und nicht wie eine Website darin.
 
 ## Zuerst `applyHostReady` aufrufen
 

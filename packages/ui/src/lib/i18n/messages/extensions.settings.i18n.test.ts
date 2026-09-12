@@ -59,6 +59,8 @@ const requiredKeys = [
   'settings.extensions.capability.sessions.detail',
   'settings.extensions.capability.service',
   'settings.extensions.capability.service.detail',
+  'settings.extensions.capability.service.runs',
+  'settings.extensions.capability.service.sockets',
   'settings.extensions.capability.network',
   'settings.extensions.capability.network.detail',
   'settings.extensions.capability.files',

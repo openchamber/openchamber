@@ -5,7 +5,7 @@ description: Buttons, fields, dropdowns, tabs, lists, and other building blocks 
 
 # UI kit
 
-`@openchamber/sdk/ui` is a set of ready-made controls that use the app's colours, fonts, and spacing, so your extension looks like the rest of OpenChamber without copying its styles. Each control is a function: you give it an element you own and its settings, it draws itself there and returns `{ update, dispose }`. You put the controls together into a screen and keep the data. The kit never calls your provider or OpenChamber; you still call `host.request`, `host.attach`, and the rest yourself. You can also skip the kit and write your own HTML and CSS.
+`@openchamber/sdk/ui` is a set of ready-made controls that use the app's colours, fonts, and spacing, so your extension looks like the rest of OpenChamber without copying its styles. Each control is a function: you give it an element you own and its settings, it draws itself there and returns `{ update, dispose }`. You put the controls together into a screen and keep the data. The kit never calls your provider or OpenChamber; you still call `host.request`, `host.attach`, and the rest yourself. You can write your own HTML and CSS for anything the kit lacks, but reach for the kit first: its controls follow the user's theme, spacing, and keyboard habits automatically, so a panel built from them feels like part of OpenChamber instead of a website inside it.
 
 ## Call `applyHostReady` first
 
