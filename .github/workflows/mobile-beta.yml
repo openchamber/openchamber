@@ -393,3 +393,30 @@ jobs:
             --url "$TF_URL" \
             --version "$VERSION_NAME" \
             --build "$BUILD_NUMBER"
+
+  notify-discord:
+    name: Notify Discord Channel
+    needs: [resolve-version, android-beta, ios-beta]
+    if: always() && !cancelled() && needs.resolve-version.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Send Beta Discord Notification
+        env:
+          DISCORD_BETA_WEBHOOK_URL: ${{ secrets.DISCORD_BETA_WEBHOOK_URL || secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_BETA_ROLE_ID: ${{ secrets.DISCORD_BETA_ROLE_ID || secrets.DISCORD_UPDATE_ROLE_ID }}
+          VERSION_NAME: ${{ needs.resolve-version.outputs.version_name }}
+          BUILD_NUMBER: ${{ needs.resolve-version.outputs.build_number }}
+          RELEASE_TAG: ${{ needs.resolve-version.outputs.release_tag }}
+          TF_URL: ${{ needs.resolve-version.outputs.testflight_url }}
+        run: |
+          APK_URL="https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/OpenChamber-${VERSION_NAME}-android.apk"
+          node scripts/notify-beta-discord.mjs \
+            --platform mobile \
+            --version "$VERSION_NAME" \
+            --build "$BUILD_NUMBER" \
+            --tag "$RELEASE_TAG" \
+            --apk-url "$APK_URL" \
+            --tf-url "$TF_URL"
+

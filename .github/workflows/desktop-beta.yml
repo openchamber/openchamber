@@ -456,3 +456,18 @@ jobs:
           - **VS Code Extension:** \`.vsix\` (Install via *VS Code -> Install from VSIX...*)
           - **Web CLI:** \`.tgz\` package / \`npm install @openchamber/web@beta\`
           EOF
+
+      - name: Send Beta Discord Notification
+        env:
+          DISCORD_BETA_WEBHOOK_URL: ${{ secrets.DISCORD_BETA_WEBHOOK_URL || secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_BETA_ROLE_ID: ${{ secrets.DISCORD_BETA_ROLE_ID || secrets.DISCORD_UPDATE_ROLE_ID }}
+          VERSION_NAME: ${{ needs.resolve-version.outputs.version_name }}
+          BUILD_NUMBER: ${{ needs.resolve-version.outputs.build_number }}
+          RELEASE_TAG: ${{ needs.resolve-version.outputs.release_tag }}
+        run: |
+          node scripts/notify-beta-discord.mjs \
+            --platform desktop \
+            --version "$VERSION_NAME" \
+            --build "$BUILD_NUMBER" \
+            --tag "$RELEASE_TAG"
+
