@@ -4982,8 +4982,12 @@ const buildAutoHiddenMenu = () => {
         { label: 'Previous Session', accelerator: 'Alt+Up', click: () => dispatchAction('previous-session') },
         { label: 'Next Session', accelerator: 'Alt+Down', click: () => dispatchAction('next-session') },
         { type: 'separator' },
-        { label: 'Previous Project', accelerator: 'Ctrl+Alt+Up', click: () => dispatchAction('previous-project') },
-        { label: 'Next Project', accelerator: 'Ctrl+Alt+Down', click: () => dispatchAction('next-project') },
+        // No accelerator: Ctrl+Alt+Up/Down must stay unassigned. Registering
+        // them here hijacks the keys globally and cycles the active project
+        // (sidebar jumps in project order without changing the session),
+        // which reads as random session jumping.
+        { label: 'Previous Project', click: () => dispatchAction('previous-project') },
+        { label: 'Next Project', click: () => dispatchAction('next-project') },
       ],
     },
     {
