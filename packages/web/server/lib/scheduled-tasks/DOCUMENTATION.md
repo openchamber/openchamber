@@ -35,9 +35,12 @@ Schema:
 ```
 
 - `command` (required): non-empty array of non-empty strings. `command[0]` is
-  the executable; the rest are its argv. Run via `execFile` with `shell:
-  false` — it never runs through a shell, so no argument is subject to shell
-  interpolation.
+  an absolute executable path; the rest are its argv. Relative executables are
+  rejected so a repository cannot replace the local policy command through the
+  task project `cwd`. The policy runs from the configuration file's directory,
+  not the task project, so relative arguments cannot load repository-controlled
+  code. Run via `execFile` with `shell: false` — it never runs through a shell,
+  so no argument is subject to shell interpolation.
 - `timeoutMs` (optional): a positive integer, clamped to a 30&nbsp;000&nbsp;ms
   ceiling; defaults to 5000ms when absent or invalid.
 - `onError` (optional): `"allow"` or `"deny"` (default). Governs what happens
@@ -49,10 +52,10 @@ Schema:
   not only automatically scheduled occurrences. Set `"scheduled"` to exempt
   manual runs from the gate.
 
-Protocol: the command's `cwd` is the task's project path. It receives the run
-context as a single JSON line on stdin (`projectID`, `projectPath`, `taskID`,
-`taskName`, `reason`, `scheduledFor`) and is not otherwise given secrets or
-environment beyond its own process environment.
+Protocol: the command's `cwd` is the directory containing `preflight.json`.
+It receives the run context as a single JSON line on stdin (`projectID`,
+`projectPath`, `taskID`, `taskName`, `reason`, `scheduledFor`) and is not
+otherwise given secrets or environment beyond its own process environment.
 
 The command's exit code and stdout together decide the outcome:
 

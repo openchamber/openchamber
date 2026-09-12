@@ -22,9 +22,10 @@ const parseConfig = (raw) => {
     !value ||
     !Array.isArray(value.command) ||
     value.command.length === 0 ||
-    !value.command.every((part) => String(part) === part && part.length > 0)
+    !value.command.every((part) => String(part) === part && part.length > 0) ||
+    !path.isAbsolute(value.command[0])
   ) {
-    throw new Error("preflight command must be a non-empty argv array");
+    throw new Error("preflight command must be a non-empty argv array with an absolute executable path");
   }
   return {
     command: value.command,
@@ -66,7 +67,7 @@ export const createScheduledTaskPreflight = ({
           file,
           args,
           {
-            cwd: context.projectPath,
+            cwd: path.dirname(configPath),
             shell: false,
             windowsHide: true,
             timeout: config.timeoutMs,

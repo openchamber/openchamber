@@ -301,6 +301,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.relativeTime.durationAgo': '{duration} önce',
   'sessions.scheduledTasks.dialog.status.success': 'Başarılı',
   'sessions.scheduledTasks.dialog.status.error': 'Hata',
+  'sessions.scheduledTasks.dialog.status.denied': 'Reddedildi',
   'sessions.scheduledTasks.dialog.status.running': 'Çalışıyor',
   'sessions.scheduledTasks.dialog.status.idle': 'Boşta',
   'sessions.scheduledTasks.dialog.nextRun.label': 'Sıradaki',

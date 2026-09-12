@@ -1,3 +1,5 @@
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   createScheduledTaskPreflight,
@@ -44,7 +46,10 @@ describe("scheduled task preflight", () => {
     expect(execute).toHaveBeenCalledWith(
       "/usr/bin/preflight",
       ["--check"],
-      expect.objectContaining({ shell: false }),
+      expect.objectContaining({
+        cwd: path.dirname(path.join(os.homedir(), ".config", "openchamber", "preflight.json")),
+        shell: false,
+      }),
       expect.any(Function),
     );
     expect(stdin.end).toHaveBeenCalledWith(`${JSON.stringify(context)}\n`);
@@ -144,6 +149,39 @@ describe("scheduled task preflight", () => {
     });
     await expect(gate.evaluate(context)).rejects.toBeInstanceOf(
       PreflightDeniedError,
+    );
+  });
+
+  it("fails closed on a relative executable path", async () => {
+    const execute = vi.fn();
+    const gate = createScheduledTaskPreflight({
+      readFile: async () => JSON.stringify({ command: ["./preflight"] }),
+      execFile: execute,
+    });
+    await expect(gate.evaluate(context)).rejects.toBeInstanceOf(
+      PreflightDeniedError,
+    );
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("does not run policy arguments from the task project", async () => {
+    const execute = vi.fn((_file, _args, _options, callback) => {
+      callback(null, "");
+      return { stdin: { end: vi.fn() } };
+    });
+    const configPath = "/policy/preflight.json";
+    const gate = createScheduledTaskPreflight({
+      configPath,
+      readFile: async () =>
+        JSON.stringify({ command: ["/usr/bin/node", "./preflight.js"] }),
+      execFile: execute,
+    });
+    await expect(gate.evaluate(context)).resolves.toBeUndefined();
+    expect(execute).toHaveBeenCalledWith(
+      "/usr/bin/node",
+      ["./preflight.js"],
+      expect.objectContaining({ cwd: path.dirname(configPath) }),
+      expect.any(Function),
     );
   });
 });
