@@ -39,6 +39,24 @@ describe('deriveRecentSessions', () => {
 });
 
 describe('deriveRecentActivitySections', () => {
+  test('matches full IDs only, without falling back to titles or changing the matched subtree', () => {
+    const target = { ...session('ses_f88b1a2b3c4d'), title: 'Release' };
+    const other = { ...session('ses_f88b1a2b3c4e'), title: target.id };
+    const node = { session: target, worktree: null, children: [{ session: other, worktree: null, children: [] }] };
+    for (const query of [target.id, ` ${target.id.toUpperCase()} `, 'ses_f88b', 'ses_f88b1a2b3c4f']) {
+      const sections = deriveRecentActivitySections({
+        sessions: [target, other],
+        getSessionLocation: () => null,
+        getSessionNode: () => node,
+        query,
+      });
+      const expected = query.trim().toLowerCase() === target.id ? [target.id] : [];
+      expect(sections[0].items.map((item) => item.node.session.id)).toEqual(expected);
+      for (const item of sections[0].items) expect(item.node).toBe(node);
+    }
+    expect(node.children).toHaveLength(1);
+  });
+
   test('filters recent roots by search text and falls back to topology metadata', () => {
     const matching = {
       ...session('matching', { updated: RECENT }),

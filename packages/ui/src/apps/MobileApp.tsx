@@ -28,6 +28,7 @@ import type { ProjectRef } from '@/lib/projectContextApi';
 import { readTabletLayout, useOrientation, useTabletLayout } from '@/lib/device';
 import { useHardwareKeyboard } from '@/lib/hardwareKeyboard';
 import { useI18n } from '@/lib/i18n';
+import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint, MOBILE_DISCONNECTED_RUNTIME_KEY } from '@/lib/runtime-switch';
 import { refreshGlobalSessions, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
@@ -46,6 +47,7 @@ import {
   partitionWorktreesByRegisteredProject,
   worktreeMapsEqual,
 } from '@/lib/worktrees/worktreeManager';
+import { refreshWorktreeTopologyForChange } from '@/lib/worktrees/worktreeTopologyRefresh';
 import { useUIStore } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -84,8 +86,14 @@ const MOBILE_SETTINGS_PAGES = [
   'sessions',
   'git',
   'magic-prompts',
+  'snippets',
   'behavior',
+  'agents',
+  'commands',
   'mcp',
+  'plugins',
+  'skills.installed',
+  'skills.catalog',
   'providers',
   'usage',
   'voice',
@@ -296,12 +304,22 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     onRightEdgeSwipe: () => setWorkspaceOpen(true),
   });
 
+  // Settings owns a drill-down of its own (nav → page list → item), so the
+  // hardware back button asks it to step up before the shell closes it.
+  const settingsBackRef = React.useRef<(() => boolean) | null>(null);
+  const registerSettingsBackHandler = React.useCallback((handler: (() => boolean) | null) => {
+    settingsBackRef.current = handler;
+  }, []);
+
   // Top-most layer first: a plan or fullscreen surface can sit ABOVE a drawer
   // (opened from the drawer footer / workspace tabs), so they close before the
   // drawers underneath.
   const handleNativeBack = React.useCallback(() => {
     if (openPlan) {
       setOpenPlan(null);
+      return true;
+    }
+    if (activeSurface === 'settings' && settingsBackRef.current?.()) {
       return true;
     }
     if (activeSurface) {
@@ -592,6 +610,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                 forceMobile
                 isWindowed
                 initialMobileStage={settingsInitialMobileStage}
+                registerBackHandler={registerSettingsBackHandler}
                 // About exists for server updates — meaningful in a browser
                 // (hosted mobile), not in the Capacitor shell (store updates).
                 visiblePageSlugs={MOBILE_SETTINGS_PAGES.filter(
@@ -1097,6 +1116,22 @@ export function MobileApp({ apis }: MobileAppProps) {
 
     return () => {
       cancelled = true;
+    };
+  }, [isConnected, projects]);
+
+  // A worktree added or removed anywhere (another window, an agent, a
+  // terminal) arrives as a server control event; refresh only the projects it
+  // names so the draft's worktree picker stays current without polling.
+  React.useEffect(() => {
+    if (!isConnected) return;
+    let cancelled = false;
+    const unsubscribe = subscribeOpenchamberEvents((event) => {
+      if (event.type !== 'worktree-changed') return;
+      void refreshWorktreeTopologyForChange(projects, event.directories, () => cancelled);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
     };
   }, [isConnected, projects]);
 

@@ -2,6 +2,132 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [1.23.1] - 2026-09-11
+
+### New
+
+- **Diff review:** Review the changes in a published pull request directly in Changes, on desktop and mobile.
+- Sessions: Ask AI to rename a session based on its recent conversation from the session menu or mobile actions.
+- Settings/Sessions: Limit retention cleanup to archived sessions, with the retention period starting when each session was archived.
+- Chat: Paste or drop non-image files into a message, with file references added to the draft automatically.
+
+### Improvements
+
+- **Chat:** Visual refinements across the message box, attachments, menus, and panels give the conversation more room and a more consistent look on desktop and mobile.
+- Chat: Attachments and linked issues sit inside the message box, with model and agent controls grouped together on mobile. Queued messages start collapsed.
+- Chat: Recaps retain the substance of recent work after short closing exchanges, and follow-up suggestions can stay quiet when there's nothing useful to add.
+- Sessions: Markdown exports include attached quotes and comments with their source.
+- App: Hidden Files, Changes, terminal, and walkthrough panels pause background work while you're using another panel.
+- Chat: Inline code colors follow the selected theme.
+- Mobile: A dot on the workspace button marks uncommitted changes.
+- Chat: Removed the extra changed-files dropdown under answers in non-Git folders.
+
+### Fixes
+
+- Sessions: Default model, agent, and thinking choices survive restarts and instance switches, with faster loading in the model and agent pickers (thanks to @alvins82).
+- Chat: Model favorites save from the first change, including when you reload immediately (thanks to @alvins82).
+- Chat: Reading older messages keeps your place as earlier history loads, and a growing message box keeps the latest message in view.
+- Chat: Reasoning and shell output keep scrolling with incoming text until you scroll up yourself.
+- Chat: File lists under answers use the turn's direct edits, reducing unrelated files from other sessions. Long lists collapse after four files (thanks to @yulia-ivashko).
+- Chat: Queued messages containing only quotes or comments show a preview of their attached context.
+- Chat: Slash commands stay available when switching projects.
+- Chat: Session recaps disappear without making the conversation jump when you send a message.
+- Files: Large text files can be edited and saved in full without cutting off their contents or changing line endings.
+- Sessions: Retention cleanup protects child sessions that should be kept and avoids false failures when deleting session families.
+- Sessions: Pressing Enter saves a renamed session.
+- Worktrees: New sessions pick up the project's settings after checkout, fixing missing configuration in freshly created worktrees.
+- Worktrees: Worktrees added or removed in another window, by an agent, or from a terminal appear in the sidebar on the next Git refresh (thanks to @yulia-ivashko).
+- Projects: Deeply nested projects can save settings, notes, plans, and memory without file-name errors (thanks to @yulia-ivashko).
+- Scheduled tasks: A project that fails to load no longer stops tasks in other projects from starting (thanks to @yulia-ivashko).
+- Scheduled tasks: Run now works for paused tasks while their schedule stays paused.
+- Terminal: Right-click opens Copy and Paste actions again.
+- Terminal: On macOS, Option+Left/Right moves by word and Option+Backspace deletes the previous word at shell prompts.
+- Terminal: Attaching selected output to chat puts the cursor in the message box.
+- Shortcuts: Cmd/Ctrl number shortcuts for sessions and panels work while typing in chat.
+- Desktop: After an AppImage update, OpenCode starts from the current app bundle, fixing stale paths and incorrect upgrade offers (thanks to @yulia-ivashko).
+- Sessions: Long tab titles fade before the buttons when you hover over a tab.
+
+### Misc
+
+- MCP: Removed OpenChamber's automatic reconnects, which could repeatedly start failed local servers. Failed connections now need manual reconnection.
+- Desktop: Updated Electron to 43.7.0.
+
+## [1.23.0] - 2026-09-09
+
+### New
+
+- **Git:** Stage, unstage, or discard individual blocks of changes with controls beside each block in the web and desktop Changes view (thanks to @LABCAT).
+- **Turn stats:** The work status panel now shows response speed, model and tool time, tokens, and reported cost after a turn finishes. It's enabled by default (thanks to @alvins82).
+- **Projects:** Move project actions, worktree setup commands, and draft starters into the repository for teammates to use. Repository commands ask for trust before running, and ask again when they change.
+- Plans: Move plans into the repository, or point the Plans tab at an existing folder of Markdown files in your project.
+- Git: Choose a recent commit to review in Changes or Walkthrough, with the same selection shared between both panels.
+- Mobile: Compare branches and review individual commits from the Changes panel (thanks to @gaojunran).
+- Mobile: Manage snippets, agents, commands, plugins, and skills from Settings on your phone.
+- Mobile: Start a session in a project's root folder with the + beside its name in the sessions drawer.
+- Sessions: Search projects by name or path in the new-session project picker on web and desktop (thanks to @maximtop).
+- Sessions: Paste a full session ID into sidebar or archive search to find an exact match on web and desktop (thanks to @yulia-ivashko).
+- Chat: Open and close collapsible Markdown sections in replies, including while the answer is still arriving.
+- Usage: ClinePass shows five-hour, weekly, and monthly limits in Usage settings, with an option to show them in work status (thanks to @NemeZZiZZ).
+- Usage: Charm Hyper now shows your remaining Hypercredits and their dollar value (thanks to @airtaxi).
+- Settings: "Always show scrollbars" keeps scrollbars visible on this device when you move the pointer away.
+
+### Improvements
+
+- Chat: Completed live Activity can collapse into a summary of tools used and files changed, keeping the final answer visible. It follows your Activity Default setting.
+- Chat: `/btw` now opens a separate composer with its own draft, model, and effort. Select message text and choose "By the way…" to ask about it, or use `/btw <question>` to send immediately (thanks to @ChangeHow).
+- Files: Returning to a file restores your place in its code or Markdown preview, including the cursor position in the editor.
+- Settings: Theme, fonts, and chat layout can differ between web, desktop, mobile, and VS Code. Panel sizes and other device choices stay on the device.
+- Desktop: Zoom controls act on the focused browser, terminal, or file editor, and adjust interface scale when you're in chat or Mini Chat (thanks to @khafaji-ahmed).
+- Mobile: Back steps through Settings from an item to its list, then to the settings menu.
+- Mobile: Choose project sorting from the sessions drawer header. The drawer follows the same project order as desktop.
+- Mobile: Close either drawer with the reverse edge swipe. Swipe session, project, and worktree rows right to reveal their actions.
+- Comments: Enter attaches a code comment on desktop; Shift+Enter adds a newline.
+- Terminal: Text renders consistently across tabs, borders and block graphics join cleanly, and touch users get a copy button beside the tabs.
+- Chat: Ctrl+N/P navigation works across model lists, menus, and autocomplete. Reopening the model picker brings the selected model into view (thanks to @ChangeHow).
+- Settings/Chat: Send-shortcut choices and large-text paste behavior have clearer descriptions (thanks to @ChangeHow).
+- Chat: Tighter text and Activity spacing, stronger headings, and a softer divider make final answers easier to read. Message action buttons are smaller, with touch actions grouped in a menu.
+- Chat: Selected text uses the same visible highlight in messages, file previews, and comments across themes.
+
+### Fixes
+
+- Chat: Queued messages already sent by the server disappear from the queue after reconnecting (thanks to @IbrahimKhan12).
+- Sessions: Creating a session or opening a worktree session no longer shows a false history-loading error.
+- Remote access: Large streamed replies no longer hold up other requests on slow tunnel connections, and broken connections stop leaving new requests hanging.
+- Chat: Forking a user message restores its text and attachments in the new composer's draft and preserves the source draft (thanks to @karimodm).
+- Chat: Interrupted tools stop showing an endless running timer after a reload (thanks to @alvins82).
+- Chat: Attached images no longer appear twice just after sending.
+- Chat: Opening panels or resizing the window keeps you at the end when following the latest reply. Sending or collapsing Activity no longer leaves a large blank area below it.
+- Chat: Message details fit narrow columns without leaving gaps, keeping the model name readable as less important details disappear.
+- Chat: Streaming Thinking stays inside its scroll box. Scrolling or dragging upward pauses its automatic scrolling so you can read earlier reasoning (thanks to @alvins82).
+- Chat: Enter adds a newline in the expanded composer; Ctrl/Cmd+Enter sends. Keyboard selection of a project or worktree returns focus to the input (thanks to @ChangeHow).
+- Chat: Narrow Markdown tables fit their columns, removing the empty bordered space on the right (thanks to @ChangeHow).
+- Sessions: Opening or restoring a session whose worktree was deleted leaves moving it to another directory up to you.
+- Mobile: The uncommitted-changes warning no longer flashes over the chat when starting a session.
+- Mobile/Android: Settings, drawers, and chat controls stay clear of the system navigation bar.
+- Terminal: Switching projects or tabs keeps each terminal's output separate. Reopening or resizing the panel no longer leaves stray prompt fragments.
+- Terminal: Exiting Node-based commands on macOS and Linux no longer prints an empty IPC-channel warning.
+- Updates: Updating a desktop host from the browser uses its native updater, confirms the installed version, and reports restart failures with a retry option (thanks to @ChangeHow).
+- Git: Switching to a token-based identity no longer fails with a credential-helper permission error (thanks to @ICEY16360).
+- Git: Branch comparisons include local edits and follow the selected base branch when you switch comparisons.
+- Git: New-file diffs and walkthroughs still load when Git prints line-ending warnings (thanks to @jakoss).
+- Usage: A failed refresh keeps the last known usage visible and shows the error without clearing other providers.
+- Usage: OpenCode Go shows the correct reset countdowns for its usage limits.
+- Usage: OpenRouter shows per-key spending and limits, or monthly spending for unlimited keys, fixing misleading zero balances (thanks to @leducmaxime).
+- Usage: Ollama Cloud's dollar-based plans show monthly spending and extra credits, fixing missing usage and rejected credentials (thanks to @kydorn).
+- Usage: NeuralWatt allowance rows show usage percentages and respond to the used/remaining toggle (thanks to @kydorn).
+- Usage: Slow connections to providers such as z.ai no longer fail because the connection attempt ends too early (thanks to @ouyangjian28).
+- Model tools: Summaries, titles, and walkthroughs use the selected model's connection details, fixing failures with providers whose models use different addresses (thanks to @mcowger).
+- Desktop: Reachable instances no longer appear offline just because their connection check takes longer to respond (thanks to @jibanez-staticduo).
+- Layout: Interface scaling keeps panels and controls usable, with room for macOS window buttons at smaller scales (thanks to @khafaji-ahmed).
+- Sidebar: Closing and reopening the sidebar preserves the width you chose.
+- Desktop/Linux: "Open in" no longer lists unrelated editors or launches the wrong app when an installed app has a non-Latin name (thanks to @ouyangjian28).
+- Scrollbars: Hovering over a scrollable area reveals its scrollbar, including in Settings and dialogs, without shifting the content (thanks to @sergiofspedro).
+- Language/Turkish: Agent and prompt labels use consistent terminology in Activity, turn stats, and input-history settings (thanks to @fitzgpt).
+
+### Misc
+
+- Server: `OPENCHAMBER_DATA_DIR` also covers project settings, themes, speech models, and new managed chats. Existing managed chats stay in their current location.
+
 ## [1.22.2] - 2026-09-05
 
 ### New

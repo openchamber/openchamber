@@ -136,6 +136,36 @@ async function runPipelineWithEvents(events, waitMs = 80) {
 }
 
 describe('createEventPipeline', () => {
+  it('reports explicit replay gaps and retires the stale cursor before another connection', async () => {
+    installDomStubs();
+    globalThis.WebSocket = FakeWebSocket;
+    const reconnects = [];
+    const pipeline = createEventPipeline({
+      sdk: createSdkWithEvents([], new Promise(() => {})),
+      transport: 'ws',
+      onEvent() {},
+      onReconnect: details => reconnects.push(details),
+      heartbeatTimeoutMs: 60_000,
+    });
+    const nextSocket = async index => {
+      await withTimeout((async () => {
+        while (!FakeWebSocket.instances[index]) await new Promise(resolve => setTimeout(resolve, 5));
+      })(), 1000, 'socket was not opened');
+      return FakeWebSocket.instances[index];
+    };
+    try {
+      const socket = await nextSocket(0);
+      socket.emitOpen();
+      socket.emitMessage({ type: 'ready', scope: 'global' });
+      socket.emitMessage({ type: 'event', eventId: 'expired', directory: '/repo', payload: { type: 'session.idle', properties: { sessionID: 's1' } } });
+      socket.emitMessage({ type: 'ready', scope: 'global', replayReset: true });
+      expect(reconnects).toEqual([{ replayReset: false }, { replayReset: true }]);
+      pipeline.reconnect('test');
+      const second = await nextSocket(1);
+      expect(new URL(second.url).searchParams.has('lastEventId')).toBe(false);
+    } finally { pipeline.cleanup(); }
+  });
+
   it('falls back to payload.properties.directory when the SDK event omits top-level directory', async () => {
     installDomStubs();
 

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { z } from 'zod';
 import { devtools, persist } from 'zustand/middleware';
 import type { SidebarSection } from '@/constants/sidebar';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
@@ -22,8 +23,13 @@ import {
 
 export type { SavedServerBrowserSelection } from './contextPanelServerBrowser';
 
-export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'branch';
-export type ContextPanelMode = 'diff' | 'walkthrough' | 'file' | 'context' | 'plan' | 'chat' | 'browser' | 'server-browser' | 'git' | 'pr' | 'linear' | 'notes' | 'terminal';
+export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'branch' | 'commit' | 'pr';
+const contextPanelModeSchema = z.enum(['diff', 'walkthrough', 'file', 'context', 'plan', 'chat', 'browser', 'server-browser', 'git', 'pr', 'linear', 'notes', 'terminal']);
+export type ContextPanelMode = z.infer<typeof contextPanelModeSchema>;
+const persistedPanelWidthsSchema = z.object({
+  widthByMode: z.record(z.string(), z.number().finite().optional().catch(undefined)).catch({}),
+  widthFractionByMode: z.record(z.string(), z.number().positive().max(1).optional().catch(undefined)).catch({}),
+});
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
@@ -161,9 +167,12 @@ type ContextPanelDirectoryState = {
   expanded: boolean;
   tabs: ContextPanelTab[];
   activeTabId: string | null;
-  // Manual per-surface widths (px), populated only by user resize; surfaces
-  // without an entry fall back to their registry defaultWidthFraction.
+  // Legacy pixel widths and the last resize value, used until the panel's
+  // available area is known and a responsive ratio can be captured.
   widthByMode: Partial<Record<ContextPanelMode, number>>;
+  // Ratios captured when a user resizes a surface. These remain responsive
+  // across window sizes while widthByMode preserves older persisted values.
+  widthFractionByMode: Partial<Record<ContextPanelMode, number>>;
   touchedAt: number;
 };
 
@@ -218,12 +227,12 @@ const isLegacyDefaultTemplates = (value: unknown): boolean => {
 };
 
 const CONTEXT_PANEL_DEFAULT_WIDTH = 380;
-const CONTEXT_PANEL_MIN_WIDTH = 380;
+const CONTEXT_PANEL_MIN_WIDTH = 320;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
 /** Per surface, not per panel: see clampContextPanelTabs. */
 const CONTEXT_PANEL_MAX_TABS = 12;
 const CONTEXT_PANEL_MAX_LABEL_LENGTH = 120;
-const LEFT_SIDEBAR_MIN_WIDTH = 280;
+const LEFT_SIDEBAR_DEFAULT_WIDTH = 280;
 /** Separates browser tabs opened in the same millisecond. */
 let browserTabSequence = 0;
 
@@ -295,7 +304,7 @@ const normalizeContextTabLabel = (value: string | null | undefined): string | nu
 };
 
 const normalizePendingDiffScope = (value: unknown): PendingDiffScope | null => {
-  return value === 'working' || value === 'staged' || value === 'turn' || value === 'branch' ? value : null;
+  return value === 'working' || value === 'staged' || value === 'turn' || value === 'branch' || value === 'commit' || value === 'pr' ? value : null;
 };
 
 /** A plan tab's owner must be a complete project reference or nothing; a
@@ -581,6 +590,7 @@ const touchContextPanelState = (prev?: ContextPanelDirectoryState): ContextPanel
     tabs: [],
     activeTabId: null,
     widthByMode: {},
+    widthFractionByMode: {},
     touchedAt: Date.now(),
   };
 };
@@ -811,16 +821,13 @@ const sanitizeContextPanelByDirectory = (
     // Legacy single `width` values are intentionally dropped: widths are now
     // per-surface, seeded from registry defaults until the user resizes.
     const widthByMode: Partial<Record<ContextPanelMode, number>> = {};
-    if (candidate.widthByMode && typeof candidate.widthByMode === 'object') {
-      for (const [mode, value] of Object.entries(candidate.widthByMode as Record<string, unknown>)) {
-        if (
-          (mode === 'diff' || mode === 'file' || mode === 'context' || mode === 'plan' || mode === 'chat' || mode === 'browser' || mode === 'server-browser' || mode === 'git' || mode === 'pr' || mode === 'linear' || mode === 'notes' || mode === 'terminal')
-          && typeof value === 'number'
-          && Number.isFinite(value)
-        ) {
-          widthByMode[mode] = clampContextPanelWidth(value);
-        }
-      }
+    const widthFractionByMode: Partial<Record<ContextPanelMode, number>> = {};
+    const savedWidths = persistedPanelWidthsSchema.parse(rawState);
+    for (const mode of contextPanelModeSchema.options) {
+      const pixels = savedWidths.widthByMode[mode];
+      const fraction = savedWidths.widthFractionByMode[mode];
+      if (pixels !== undefined) widthByMode[mode] = clampContextPanelWidth(pixels);
+      if (fraction !== undefined) widthFractionByMode[mode] = fraction;
     }
     if (tabs.some((tab) => tab.mode === 'server-browser') && widthByMode['server-browser'] === undefined) {
       widthByMode['server-browser'] = widthByMode.browser;
@@ -832,6 +839,7 @@ const sanitizeContextPanelByDirectory = (
       tabs: clampedTabs,
       activeTabId: resolveActiveContextPanelTabID(clampedTabs, resolvedActiveTabId),
       widthByMode,
+      widthFractionByMode,
       touchedAt: typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
         ? candidate.touchedAt
         : Date.now(),
@@ -865,7 +873,6 @@ interface UIStore {
   multiRunLauncherPrefillPrompt: string;
   isSidebarOpen: boolean;
   sidebarWidth: number;
-  hasManuallyResizedLeftSidebar: boolean;
   contextPanelByDirectory: Record<string, ContextPanelDirectoryState>;
   contextRailOrder: string[];
   /** Surface ids the user hid from the context rail; stored as the hidden set
@@ -957,6 +964,7 @@ interface UIStore {
   autoSaveEnabled: boolean;
   autoDeleteAfterDays: number;
   sessionRetentionAction: SessionRetentionAction;
+  sessionRetentionOnlyArchived: boolean;
   autoDeleteLastRunAt: number | null;
   messageLimit: number;
   fontSize: number;
@@ -1112,7 +1120,7 @@ interface UIStore {
   closeContextPanelTabs: (directory: string, tabIds: readonly string[]) => void;
   closeContextPanel: (directory: string) => void;
   toggleContextPanelExpanded: (directory: string) => void;
-  setContextPanelWidth: (directory: string, mode: ContextPanelMode, width: number) => void;
+  setContextPanelWidth: (directory: string, mode: ContextPanelMode, width: number, availableWidth?: number) => void;
   setNotesPanelHeight: (height: number) => void;
   setWorkStatusSectionExpanded: (sectionId: string, expanded: boolean) => void;
   setWorkStatusScrollTop: (scrollTop: number) => void;
@@ -1171,6 +1179,7 @@ interface UIStore {
   setAutoSaveEnabled: (value: boolean) => void;
   setAutoDeleteAfterDays: (days: number) => void;
   setSessionRetentionAction: (value: SessionRetentionAction) => void;
+  setSessionRetentionOnlyArchived: (value: boolean) => void;
   setAutoDeleteLastRunAt: (timestamp: number | null) => void;
   setMessageLimit: (value: number) => void;
   setFontSize: (size: number) => void;
@@ -1297,8 +1306,7 @@ export const useUIStore = create<UIStore>()(
         isMultiRunLauncherOpen: false,
         multiRunLauncherPrefillPrompt: '',
         isSidebarOpen: true,
-        sidebarWidth: LEFT_SIDEBAR_MIN_WIDTH,
-        hasManuallyResizedLeftSidebar: false,
+        sidebarWidth: LEFT_SIDEBAR_DEFAULT_WIDTH,
         contextPanelByDirectory: {},
         contextRailOrder: [],
         contextRailHiddenSurfaces: [],
@@ -1357,6 +1365,7 @@ export const useUIStore = create<UIStore>()(
         autoSaveEnabled: true,
         autoDeleteAfterDays: 30,
         sessionRetentionAction: 'archive',
+        sessionRetentionOnlyArchived: false,
         autoDeleteLastRunAt: null,
         messageLimit: 200,
         fontSize: 100,
@@ -1462,45 +1471,15 @@ export const useUIStore = create<UIStore>()(
         },
 
         toggleSidebar: () => {
-          set((state) => {
-            const newOpen = !state.isSidebarOpen;
-
-            if (newOpen && !state.hasManuallyResizedLeftSidebar) {
-              return {
-                isSidebarOpen: newOpen,
-                sidebarWidth: LEFT_SIDEBAR_MIN_WIDTH,
-              };
-            }
-            return { isSidebarOpen: newOpen };
-          });
+          set((state) => ({ isSidebarOpen: !state.isSidebarOpen }));
         },
 
         setSidebarOpen: (open) => {
-          set((state) => {
-            if (state.isSidebarOpen === open) {
-              if (!open) {
-                return state;
-              }
-              if (!state.hasManuallyResizedLeftSidebar && state.sidebarWidth !== LEFT_SIDEBAR_MIN_WIDTH) {
-                return {
-                  isSidebarOpen: open,
-                  sidebarWidth: LEFT_SIDEBAR_MIN_WIDTH,
-                };
-              }
-              return state;
-            }
-            if (open && !state.hasManuallyResizedLeftSidebar) {
-              return {
-                isSidebarOpen: open,
-                sidebarWidth: LEFT_SIDEBAR_MIN_WIDTH,
-              };
-            }
-            return { isSidebarOpen: open };
-          });
+          set((state) => state.isSidebarOpen === open ? state : { isSidebarOpen: open });
         },
 
         setSidebarWidth: (width) => {
-          set({ sidebarWidth: width, hasManuallyResizedLeftSidebar: true });
+          set({ sidebarWidth: width });
         },
 
         setContextRailOrder: (order) => {
@@ -1896,7 +1875,7 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
-        setContextPanelWidth: (directory, mode, width) => {
+        setContextPanelWidth: (directory, mode, width, availableWidth) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           if (!normalizedDirectory) {
             return;
@@ -1905,14 +1884,22 @@ export const useUIStore = create<UIStore>()(
           set((state) => {
             const prev = state.contextPanelByDirectory[normalizedDirectory];
             const current = touchContextPanelState(prev);
+            const clampedWidth = clampContextPanelWidth(width);
+            const widthFractionByMode = { ...current.widthFractionByMode };
+            if (availableWidth !== undefined && Number.isFinite(availableWidth) && availableWidth > 0) {
+              widthFractionByMode[mode] = Math.min(1, clampedWidth / availableWidth);
+            } else {
+              delete widthFractionByMode[mode];
+            }
             const byDirectory = {
               ...state.contextPanelByDirectory,
               [normalizedDirectory]: {
                 ...current,
                 widthByMode: {
                   ...current.widthByMode,
-                  [mode]: clampContextPanelWidth(width),
+                  [mode]: clampedWidth,
                 },
+                widthFractionByMode,
               },
             };
 
@@ -2220,7 +2207,14 @@ export const useUIStore = create<UIStore>()(
         },
 
         setSessionRetentionAction: (value) => {
-          set({ sessionRetentionAction: value });
+          set((state) => ({ sessionRetentionAction: state.sessionRetentionOnlyArchived ? 'delete' : value }));
+        },
+
+        setSessionRetentionOnlyArchived: (value) => {
+          set((state) => ({
+            sessionRetentionOnlyArchived: value,
+            sessionRetentionAction: value ? 'delete' : state.sessionRetentionAction,
+          }));
         },
 
         setAutoDeleteLastRunAt: (timestamp) => {
@@ -2295,21 +2289,20 @@ export const useUIStore = create<UIStore>()(
 
           const entries = Object.entries(SEMANTIC_TYPOGRAPHY) as Array<[SemanticTypographyKey, string]>;
 
-          // Default must be SEMANTIC_TYPOGRAPHY (from CSS). Remove overrides.
+          // Scale the root rem unit so regular utility classes, icons, spacing,
+          // and semantic typography all respond to the same interface setting.
           if (scale === 1) {
+            root.style.removeProperty('font-size');
             for (const [key] of entries) {
               root.style.removeProperty(getTypographyVariable(key));
             }
             return;
           }
 
-          for (const [key, baseValue] of entries) {
-            const numericValue = parseFloat(baseValue);
-            if (!Number.isFinite(numericValue)) {
-              continue;
-            }
-            root.style.setProperty(getTypographyVariable(key), `${numericValue * scale}rem`);
-          }
+          root.style.fontSize = `${scale * 100}%`;
+
+          // The variables remain authored in rem and inherit the root scale.
+          for (const [key] of entries) root.style.removeProperty(getTypographyVariable(key));
         },
 
         applyPadding: () => {
@@ -3170,6 +3163,7 @@ export const useUIStore = create<UIStore>()(
           autoSaveEnabled: state.autoSaveEnabled,
           autoDeleteAfterDays: state.autoDeleteAfterDays,
           sessionRetentionAction: state.sessionRetentionAction,
+          sessionRetentionOnlyArchived: state.sessionRetentionOnlyArchived,
           autoDeleteLastRunAt: state.autoDeleteLastRunAt,
           messageLimit: state.messageLimit,
           fontSize: state.fontSize,

@@ -61,17 +61,8 @@ export const resolveRealContentEndOffset = ({
     return Math.max(0, lastBottom + Math.max(0, footerSize) - visibleLength);
 };
 
-// "At the end" for follow purposes is half a viewport. Leaving the end is
-// only ever decided by a real gesture, so this band never yanks a reader who
-// is still on the end; what it decides is how close to the live edge a reader
-// who scrolled away must come back before follow re-arms and the pill hides.
-// Half a screen reads as "I am back at the bottom" without having to land on
-// the last pixel, and stray row growth or late measurements cannot push a
-// pinned reader out of it. Distance is measured against the full content
-// length.
-const FOLLOW_REARM_MIN_THRESHOLD_PX = 40;
-export const resolveFollowRearmThresholdPx = (scrollLength: number): number =>
-    Math.max(FOLLOW_REARM_MIN_THRESHOLD_PX, scrollLength / 2);
+// Keep return-to-end detection in a tight band, rather than half a viewport.
+export const TIMELINE_FOLLOW_REARM_THRESHOLD_PX = 40;
 
 export const resolveTimelineIsAtEnd = (
     state: {
@@ -90,7 +81,7 @@ export const resolveTimelineIsAtEnd = (
         && typeof scrollLength === 'number'
         && Number.isFinite(contentLength)
     ) {
-        return contentLength - (scroll + scrollLength) <= resolveFollowRearmThresholdPx(scrollLength);
+        return contentLength - (scroll + scrollLength) <= TIMELINE_FOLLOW_REARM_THRESHOLD_PX;
     }
     return state.isNearEnd ?? state.isAtEnd;
 };

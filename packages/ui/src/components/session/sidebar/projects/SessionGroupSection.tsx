@@ -1146,7 +1146,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
           {...(dragHandleProps?.listeners ?? {})}
         >
           <div className="min-w-0 flex flex-1 flex-col justify-center gap-0.5 overflow-hidden">
-            <p className="text-[14px] font-normal truncate text-foreground/92">
+            <p className="typography-ui-label font-normal truncate text-foreground/92">
               {group.isArchivedBucket ? (
                 <span className="inline-flex min-w-0 max-w-full items-center gap-1">
                   <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">

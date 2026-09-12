@@ -264,7 +264,8 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       className={cn(
         'flex items-center gap-3 bg-background',
         usesFramelessChrome && windowControlsSide === 'right' ? 'pr-0' : 'pr-3',
-        hasMacTrafficLights ? 'pl-[5.5rem]' : 'pl-3',
+        // Native traffic lights are fixed-size OS chrome, not scaled UI.
+        hasMacTrafficLights ? 'pl-[88px]' : 'pl-3',
         usesFramelessChrome ? 'h-12' : macosHeaderSizeClass || 'min-h-14',
       )}
       style={dragRegionStyle}

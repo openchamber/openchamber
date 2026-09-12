@@ -690,6 +690,14 @@ describe('settings helpers', () => {
   });
 
   describe('session retention settings persistence', () => {
+    it('round-trips archived-only retention and rejects non-boolean values', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+      for (const sessionRetentionOnlyArchived of [true, false]) {
+        expect(helpers.sanitizeSettingsUpdate({ sessionRetentionOnlyArchived })).toEqual({ sessionRetentionOnlyArchived });
+      }
+      expect(helpers.sanitizeSettingsUpdate({ sessionRetentionOnlyArchived: 'true' })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ sessionRetentionOnlyArchived: null })).toEqual({});
+    });
     it('round-trips sessionRetentionAction archive and delete through the sanitizer', () => {
       const helpers = createTestHelpersWithRealSanitizers();
 
@@ -714,6 +722,7 @@ describe('settings helpers', () => {
         autoDeleteEnabled: true,
         autoDeleteAfterDays: 60,
         sessionRetentionAction: 'delete',
+        sessionRetentionOnlyArchived: true,
       };
 
       const sanitized = helpers.sanitizeSettingsUpdate(payload);
@@ -721,6 +730,7 @@ describe('settings helpers', () => {
       expect(sanitized.autoDeleteEnabled).toBe(true);
       expect(sanitized.autoDeleteAfterDays).toBe(60);
       expect(sanitized.sessionRetentionAction).toBe('delete');
+      expect(sanitized.sessionRetentionOnlyArchived).toBe(true);
     });
   });
 });
@@ -747,7 +757,7 @@ describe('settings registry gate', () => {
     defaultGitIdentityId: 'global', permissionAutoAccept: { sessions: { s: true }, revision: 1 },
     agentControlToolEnabled: true, agentWebToolEnabled: true, agentMemoryToolEnabled: true, openCodeUpdateToastDismissedVersion: '1.0.0',
     serverBrowserEnabled: true, serverBrowserDebugPort: 9222,
-    autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionAction: 'archive', terminalShell: 'zsh', terminalLoginShells: ['zsh'],
+    autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionOnlyArchived: false, sessionRetentionAction: 'archive', terminalShell: 'zsh', terminalLoginShells: ['zsh'],
     openInAppId: 'vscode', dictationEnabled: true, sttProvider: 'local', sttServerUrl: 'http://localhost:8001/v1', sttModel: 'm', sttLocalModel: 'm', sttLanguage: 'en',
     tunnelProvider: 'cloudflare', tunnelMode: 'quick', tunnelBootstrapTtlMs: 600000, tunnelSessionTtlMs: 86400000, managedLocalTunnelConfigPath: '/tmp/x',
     managedRemoteTunnelHostname: 'x.example', managedRemoteTunnelToken: 'token', managedRemoteTunnelPresets: [{ id: 'a', name: 'A', hostname: 'a.example' }],

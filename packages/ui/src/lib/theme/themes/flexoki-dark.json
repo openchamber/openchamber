@@ -135,6 +135,8 @@
       "heading4": "#CECDC3",
       "link": "#4385BE",
       "linkHover": "#205EA6",
+      "inlineCode": "#A0AF53",
+      "inlineCodeBackground": "#242222",
       "blockquote": "#878580",
       "blockquoteBorder": "#343331",
       "listMarker": "#D0A21599"

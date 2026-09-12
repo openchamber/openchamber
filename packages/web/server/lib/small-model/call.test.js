@@ -565,6 +565,35 @@ describe('callSmallModel — custom provider config', () => {
       expect(init.headers.Authorization).toBe('Bearer plugin-key');
     });
 
+    it('uses the selected runtime model endpoint', async () => {
+      readConfig.mockReturnValue({});
+      getRuntimeProvider.mockResolvedValue({
+        id: 'runtime-provider',
+        apiKey: 'plugin-key',
+        baseURL: 'https://runtime-provider/v1beta',
+        models: new Map([
+          ['first-model', { api: { url: 'https://runtime-provider/v1beta', npm: '@ai-sdk/google' } }],
+          ['selected-model', { api: { url: 'https://runtime-provider/v1', npm: '@ai-sdk/openai' } }],
+        ]),
+        anonymousZen: false,
+      });
+      fetchMock.mockResolvedValue(ok('done'));
+
+      await callSmallModel({
+        auth: {},
+        catalog: {},
+        workingDirectory: '/proj',
+        providerID: 'runtime-provider',
+        modelID: 'selected-model',
+        prompt: 'hi',
+      });
+
+      const { url, init } = lastCall(fetchMock);
+      expect(url).toBe('https://runtime-provider/v1/chat/completions');
+      expect(url).not.toContain('/v1beta');
+      expect(JSON.parse(init.body).model).toBe('selected-model');
+    });
+
     it('keeps the ChatGPT-plan login on its own transport instead of the runtime key', async () => {
       readConfig.mockReturnValue({});
       // OpenCode reports an OAuth access token as `options.apiKey` for openai;

@@ -23,6 +23,7 @@ These provider IDs are currently dispatchable via `fetchQuotaForProvider(provide
 | Provider ID | Display name | Module | Auth aliases/keys |
 | --- | --- | --- | --- |
 | `claude` | Claude | `providers/claude/` | Claude Code Keychain entry, Claude Code credentials file, OpenCode `auth.json` (`anthropic`, `claude`), `CLAUDE_CODE_OAUTH_TOKEN` |
+| `cline-pass` | ClinePass | `providers/cline-pass.js` | `cline-pass` (API key under `key` or `token`) |
 | `codex` | Codex | `providers/codex.js` | `openai`, `codex`, `chatgpt` |
 | `command-code` | Command Code | `providers/command-code.js` | `command-code` OAuth/API credential in OpenCode `auth.json`, or `COMMAND_CODE_API_KEY` |
 | `cursor` | Cursor | `providers/cursor.js` | Environment/token files, OpenChamber-managed credentials, or explicit one-time Cursor import |
@@ -95,6 +96,16 @@ In 2025/2026 MiniMax rebranded "Coding Plan" to "Token Plan" alongside the M3 mo
 - **Percentage-based plans**: Legacy Coding Plan accounts return `current_interval_total_count: 0` but include `current_interval_remaining_percent`. The provider prefers this field when count fields are absent.
 - **model_remains array**: Now contains entries for multiple model categories (chat, speech, video, image). The provider selects the chat-model entry by matching `MiniMax-M*`, then `general`/`chat`/`text` by name, then any entry with a remaining percent.
 - **Window status**: The `current_interval_status` and `current_weekly_status` fields indicate whether a window is active. Status `3` means the window is not applicable for the current plan tier (e.g. legacy plans without weekly limits). The provider omits inactive windows.
+
+## ClinePass quota semantics
+
+ClinePass reads `data.limits` from its usage-limits endpoint. Web/Electron and
+VS Code accept only known window types with finite numeric or non-empty numeric
+string percentages. Invalid windows are skipped independently; no usable windows
+is a failed refresh, not zero usage. Both implementations choose a non-empty
+`key`, then `token`, and expose auth/fetch dependencies for focused tests.
+Saved UI provider-visibility lists remain authoritative; installations without a
+saved list include ClinePass through the provider registry.
 
 ## Charm Hyper balance semantics
 

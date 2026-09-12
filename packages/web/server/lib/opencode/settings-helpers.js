@@ -473,6 +473,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (candidate.sessionRetentionAction === 'archive' || candidate.sessionRetentionAction === 'delete') {
       result.sessionRetentionAction = candidate.sessionRetentionAction;
     }
+    if (typeof candidate.sessionRetentionOnlyArchived === 'boolean') {
+      result.sessionRetentionOnlyArchived = candidate.sessionRetentionOnlyArchived;
+    }
     if (candidate.tunnelBootstrapTtlMs === null) {
       result.tunnelBootstrapTtlMs = null;
     } else if (typeof candidate.tunnelBootstrapTtlMs === 'number' && Number.isFinite(candidate.tunnelBootstrapTtlMs)) {

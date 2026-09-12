@@ -1215,9 +1215,13 @@ export class GhosttyTerminalSurface {
       return;
     }
     this.clearPrimedCopy();
-    const data = this.core.encodeKey(event);
+    const wordShortcut = this.core.encodeMacWordShortcut(event, navigator.platform);
+    const data = wordShortcut ?? this.core.encodeKey(event);
     if (data.length === 0) return;
-    this.suppressedKeyCodes.delete(event.code);
+    // A shortcut emits shell input rather than the physical key. Suppress its
+    // release even if the program enables Kitty event reporting before keyup.
+    if (wordShortcut !== null) this.suppressedKeyCodes.add(event.code);
+    else this.suppressedKeyCodes.delete(event.code);
     event.preventDefault();
     event.stopPropagation();
     this.options.onData(data);

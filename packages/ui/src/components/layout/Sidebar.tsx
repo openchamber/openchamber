@@ -6,7 +6,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 const SIDEBAR_CONTENT_WIDTH = 280;
-const SIDEBAR_MIN_WIDTH = 280;
+const SIDEBAR_MIN_WIDTH = 168;
 const SIDEBAR_MAX_WIDTH = 500;
 
 interface SidebarProps {

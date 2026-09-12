@@ -332,6 +332,8 @@ export const MobileSessionMetadataButton = React.memo(function MobileSessionMeta
     ),
   );
   const quotaResults = useQuotaStore((state) => state.results);
+  const quotaRefreshErrors = useQuotaStore((state) => state.refreshErrors);
+  const quotaRefreshAttempted = React.useRef(false);
   const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
   const fetchAllQuotas = useQuotaStore((state) => state.fetchAllQuotas);
   const isQuotaLoading = useQuotaStore((state) => state.isLoading);
@@ -350,13 +352,20 @@ export const MobileSessionMetadataButton = React.memo(function MobileSessionMeta
   }, [dropdownProviderIds]);
 
   React.useEffect(() => {
-    if (!open || isQuotaLoading) return;
+    if (!open) {
+      quotaRefreshAttempted.current = false;
+      return;
+    }
+    if (quotaRefreshAttempted.current || isQuotaLoading) return;
     const missingEnabledProvider = dropdownProviderIds.some((providerId) => (
-      !quotaResults.some((result) => result.providerId === providerId)
+      !quotaResults.some((result) => result.providerId === providerId) || quotaRefreshErrors[providerId]
     ));
     if (!missingEnabledProvider) return;
+    // Trigger at most one attempt per opening. A failed first load remains
+    // unknown, not an empty result that can suppress retries.
+    quotaRefreshAttempted.current = true;
     void fetchAllQuotas();
-  }, [dropdownProviderIds, fetchAllQuotas, isQuotaLoading, open, quotaResults]);
+  }, [dropdownProviderIds, fetchAllQuotas, isQuotaLoading, open, quotaResults, quotaRefreshErrors]);
 
   const latestMessageModel = React.useMemo(() => {
     for (let i = activeSessionMessages.length - 1; i >= 0; i -= 1) {

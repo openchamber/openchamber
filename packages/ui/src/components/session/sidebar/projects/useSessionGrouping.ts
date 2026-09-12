@@ -50,8 +50,13 @@ export const useSessionGrouping = (args: Args) => {
         return nodes;
       }
 
+      const normalizedQuery = query.trim().toLowerCase();
+      const isIdQuery = normalizedQuery.startsWith('ses_');
       return nodes.flatMap((node) => {
-        const nodeMatches = matchesRankQuery([buildSessionSearchText(node.session)], query);
+        if (isIdQuery && isArchivedSession(node.session)) return [];
+        const nodeMatches = isIdQuery
+          ? node.session.id.toLowerCase() === normalizedQuery
+          : matchesRankQuery([buildSessionSearchText(node.session)], query);
         if (nodeMatches) {
           return [node];
         }

@@ -3,6 +3,7 @@ import fsPromises from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
 import { createAgentMemoryRuntime } from './runtime.js';
 
 const PROJECT_ID = 'path_dGVzdA';
@@ -46,6 +47,27 @@ describe('scope resolution', () => {
     expect((await runtime.read(PROJECT)).entries.map((e) => e.title)).toEqual(['Uses bun']);
     await fsPromises.access(globalPath());
     await fsPromises.access(projectPath());
+  });
+
+  test('a project id too long for a folder name is stored under the bounded stem', async () => {
+    // A checkout nested deep enough that its `path_<base64url>` id is longer
+    // than a folder name may be; the store lands under the bounded stem the
+    // config file and project context use, instead of failing with ENAMETOOLONG.
+    const longProjectId = createProjectIdFromPath(`/private/tmp/claude-501/${'segment-'.repeat(18)}/scratchpad/evidence/demo-repo`);
+    const stem = projectConfigFileStemOf(longProjectId);
+    expect(longProjectId.length).toBeGreaterThan(240);
+    expect(stem.startsWith('path_sha256_')).toBe(true);
+    const target = { scope: 'project', projectId: longProjectId };
+
+    expect((await runtime.read(target)).entries).toEqual([]);
+    await runtime.create(target, { title: 'Uses bun', body: 'Tests run with bun test.' });
+
+    expect((await runtime.read(target)).entries.map((e) => e.title)).toEqual(['Uses bun']);
+    expect((await runtime.readAll(longProjectId)).project.map((e) => e.title)).toEqual(['Uses bun']);
+    await fsPromises.access(path.join(rootDir, 'config', 'projects', stem, 'memory.json'));
+    expect(await fsPromises.readdir(path.join(rootDir, 'config', 'projects'))).toEqual([stem]);
+    // A short id keeps naming its folder itself.
+    expect(runtime.resolveTarget(PROJECT).filePath).toBe(projectPath());
   });
 
   test('rejects an unknown scope', async () => {

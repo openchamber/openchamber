@@ -12,6 +12,8 @@
  * directory never invalidates a reference.
  */
 
+import { projectConfigFileStemOf } from '../projects/project-id.js';
+
 const PROJECT_CONTEXT_VERSION = 2;
 const PROJECT_NOTE_BODY_MAX_LENGTH = 3000;
 const PROJECT_NOTE_MAX_ITEMS = 200;
@@ -221,10 +223,14 @@ export const createProjectContextRuntime = (deps) => {
     return value;
   };
 
-  const storageDirFor = (projectId) => path.join(projectsDirPath, sanitizeProjectId(projectId));
+  // The folder and the client-owned config file share one bounded stem
+  // (`projectConfigFileStemOf`): an id too long for a file name would
+  // otherwise fail every read with ENAMETOOLONG instead of reading as empty.
+  const storageStemFor = (projectId) => projectConfigFileStemOf(sanitizeProjectId(projectId));
+  const storageDirFor = (projectId) => path.join(projectsDirPath, storageStemFor(projectId));
   const contextPathFor = (projectId) => path.join(storageDirFor(projectId), 'context.json');
   const plansDirFor = (projectId) => path.join(storageDirFor(projectId), 'plans');
-  const legacyConfigPathFor = (projectId) => path.join(projectsDirPath, `${sanitizeProjectId(projectId)}.json`);
+  const legacyConfigPathFor = (projectId) => path.join(projectsDirPath, `${storageStemFor(projectId)}.json`);
 
   const readJson = async (filePath) => {
     let raw;

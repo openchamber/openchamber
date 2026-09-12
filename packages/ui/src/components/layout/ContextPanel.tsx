@@ -54,7 +54,7 @@ import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
 import { isVSCodeRuntime } from '@/lib/desktop';
 
-const CONTEXT_PANEL_MIN_WIDTH = 380;
+const CONTEXT_PANEL_MIN_WIDTH = 320;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
 const CONTEXT_PANEL_DEFAULT_WIDTH = 600;
 const RESIZE_FOLLOW_INTERVAL_MS = 100;
@@ -275,7 +275,7 @@ const EDITOR_TREE_MAX_WIDTH = 480;
 
 // The editor surface's file-tree column: docked on the right, resizable from
 // its left edge, and animated open/closed like the app sidebars.
-const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
+const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean }> = ({ visible, active }) => {
   const { t } = useI18n();
   const width = useUIStore((state) => state.contextEditorTreeWidth);
   const setWidth = useUIStore((state) => state.setContextEditorTreeWidth);
@@ -388,7 +388,7 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
         style={{ width: 'var(--oc-editor-tree-width)' }}
         aria-hidden={!visible}
       >
-        <SidebarFilesTree />
+        <SidebarFilesTree visible={visible && active} />
       </div>
     </div>
   );
@@ -512,10 +512,21 @@ export const ContextPanel: React.FC = () => {
   const [availablePanelAreaWidth, setAvailablePanelAreaWidth] = React.useState<number | null>(null);
   const activeModeForWidth = activeTab?.mode ?? null;
   const manualWidth = activeModeForWidth ? panelState?.widthByMode?.[activeModeForWidth] : undefined;
+  const manualWidthFraction = activeModeForWidth ? panelState?.widthFractionByMode?.[activeModeForWidth] : undefined;
   const widthFraction = activeModeForWidth ? getContextSurfaceWidthFraction(activeModeForWidth) : 0.5;
   const widthFallbackBase = availablePanelAreaWidth
     ?? (typeof window !== 'undefined' ? window.innerWidth : CONTEXT_PANEL_DEFAULT_WIDTH * 2);
-  const width = clampWidth(manualWidth ?? Math.round(widthFraction * widthFallbackBase));
+  const effectiveManualWidth = manualWidthFraction != null && availablePanelAreaWidth != null
+    ? Math.round(manualWidthFraction * availablePanelAreaWidth)
+    : manualWidth;
+  const width = clampWidth(effectiveManualWidth ?? Math.round(widthFraction * widthFallbackBase));
+
+  // Convert legacy pixel-only preferences to a ratio the first time the
+  // available area is known, so existing users also get responsive sizing.
+  React.useEffect(() => {
+    if (!directoryKey || !activeModeForWidth || manualWidthFraction != null || manualWidth == null || availablePanelAreaWidth == null) return;
+    setContextPanelWidth(directoryKey, activeModeForWidth, manualWidth, availablePanelAreaWidth);
+  }, [activeModeForWidth, availablePanelAreaWidth, directoryKey, manualWidth, manualWidthFraction, setContextPanelWidth]);
   const chatSessionIDs = React.useMemo(() => {
     const ids: string[] = [];
     for (const tab of tabs) {
@@ -537,8 +548,7 @@ export const ContextPanel: React.FC = () => {
   const chatFrameSrcByTabIDRef = React.useRef<Map<string, EmbeddedSessionChatURLCacheEntry>>(new Map());
   const wasOpenRef = React.useRef(false);
 
-  // Tracks the panel area width so fraction-based surface defaults stay
-  // proportional as the window resizes; manual widths remain fixed px.
+  // Defaults and manually resized surfaces track the same available area.
   React.useLayoutEffect(() => {
     const parent = panelRef.current?.parentElement;
     if (!parent || typeof ResizeObserver === 'undefined') {
@@ -620,6 +630,7 @@ export const ContextPanel: React.FC = () => {
     // Apply the final width once, letting the regular 200ms width transition
     // carry the panel to the release position.
     const finalWidth = clampWidthForDrag(resizingWidthRef.current ?? width);
+    const availableWidth = resizeAvailableWidthRef.current;
     resizingWidthRef.current = null;
     resizeAvailableWidthRef.current = null;
     if (resizeFollowTimerRef.current !== null) {
@@ -628,7 +639,7 @@ export const ContextPanel: React.FC = () => {
     }
     document.documentElement.style.cursor = '';
     if (directoryKey && activeModeForWidth) {
-      setContextPanelWidth(directoryKey, activeModeForWidth, finalWidth);
+      setContextPanelWidth(directoryKey, activeModeForWidth, finalWidth, availableWidth ?? undefined);
     }
     setIsResizing(false);
     activeResizePointerIDRef.current = null;
@@ -1258,7 +1269,7 @@ export const ContextPanel: React.FC = () => {
           <div className={cn('absolute inset-0 flex', isFileTabActive ? 'flex' : 'hidden')}>
             <div className="h-full min-w-0 flex-1">
               {hasOpenEditorFile ? (
-                <React.Suspense fallback={null}><FilesView mode="editor-only" /></React.Suspense>
+                <React.Suspense fallback={null}><FilesView mode="editor-only" visible={isOpen && isFileTabActive} /></React.Suspense>
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
                   <Icon name="file-code" className="h-12 w-12 text-muted-foreground/50" />
@@ -1267,7 +1278,7 @@ export const ContextPanel: React.FC = () => {
                 </div>
               )}
             </div>
-            <EditorTreeColumn visible={contextEditorTreeVisible} />
+            <EditorTreeColumn visible={contextEditorTreeVisible} active={isOpen && isFileTabActive} />
           </div>
         ) : null}
         {activeChatTab && activeChatSessionID && activeChatSrc ? (
@@ -1324,6 +1335,7 @@ export const ContextPanel: React.FC = () => {
           >
             <React.Suspense fallback={null}>
               <DiffView
+                visible={isOpen && activeTab?.id === tab.id}
                 hideStackedFileSidebar
                 stackedDefaultCollapsedAll
                 pinSelectedFileHeaderToTopOnNavigate
@@ -1344,7 +1356,7 @@ export const ContextPanel: React.FC = () => {
         {hasWalkthroughTab ? (
           <div className={cn('absolute inset-0', activeTab?.mode === 'walkthrough' ? 'block' : 'hidden')}>
             <React.Suspense fallback={null}>
-              <WalkthroughView directory={effectiveDirectory} visible={activeTab?.mode === 'walkthrough'} />
+              <WalkthroughView directory={effectiveDirectory} visible={isOpen && activeTab?.mode === 'walkthrough'} />
             </React.Suspense>
           </div>
         ) : null}

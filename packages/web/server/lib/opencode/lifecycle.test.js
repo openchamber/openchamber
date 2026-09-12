@@ -126,6 +126,35 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
 };
 
 describe('OpenCode lifecycle', () => {
+  it('uses the resolved binary directly on startup and managed restart without an env override', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const binaries = ['/bundle one/opencode-cli/opencode', '/bundle two/opencode-cli/opencode'];
+    const ensureOpencodeCliEnv = vi.fn()
+      .mockReturnValueOnce(binaries[0])
+      .mockReturnValueOnce(binaries[1]);
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    globalThis.fetch = vi.fn(async () => ({ ok: false }));
+    const runtime = createRuntime({ ensureOpencodeCliEnv });
+    const firstServer = await runtime.startOpenCode();
+    runtime.testState.openCodeProcess = firstServer;
+    try {
+      await runtime.restartOpenCode();
+      expect(firstServer.signalCode).toBe('SIGTERM');
+      expect(spawnMock.mock.calls.map(([binary]) => binary)).toEqual(binaries);
+      expect(runtime.testState.lastOpenCodeLaunchDiagnostics.sourceBinary).toBe(binaries[1]);
+      expect(process.env.OPENCODE_BINARY).toBeUndefined();
+      for (const [, , options] of spawnMock.mock.calls) {
+        expect(options.env).not.toHaveProperty('OPENCODE_BINARY');
+      }
+    } finally {
+      await runtime.testState.openCodeProcess.close();
+    }
+  });
+
   it('records an authoritative ready terminal event for external startup', async () => {
     globalThis.fetch = vi.fn(async () => ({
       ok: true,

@@ -232,9 +232,12 @@ export const useCommandsStore = create<CommandsStore>()(
           const isAmbient = cacheKey === getCommandsCacheKey(getRequestDirectory());
           const now = Date.now();
           const loadedAt = commandsLastLoadedAt.get(cacheKey) ?? 0;
-          const hasCachedCommands = (get().commandsByDirectory[cacheKey] ?? (isAmbient ? get().commands : [])).length > 0;
+          const cachedCommands = get().commandsByDirectory[cacheKey];
+          if (isAmbient && get().commands !== (cachedCommands ?? EMPTY_COMMANDS)) {
+            set({ commands: cachedCommands ?? EMPTY_COMMANDS });
+          }
 
-          if (hasCachedCommands && now - loadedAt < COMMANDS_LOAD_CACHE_TTL_MS) {
+          if (cachedCommands !== undefined && now - loadedAt < COMMANDS_LOAD_CACHE_TTL_MS) {
             return true;
           }
 
@@ -245,10 +248,10 @@ export const useCommandsStore = create<CommandsStore>()(
 
           const request = (async () => {
             set({ isLoading: true });
-            // Failure must never look like an empty project. The mirror is the
-            // fallback so a directory loaded before this map existed still counts.
-            const previousCommands = get().commandsByDirectory[cacheKey] ?? (isAmbient ? get().commands : []);
-            const previousSignature = buildCommandsSignature(previousCommands);
+            // Only this directory can supply the comparison baseline. The mirror
+            // may still describe the project we just left.
+            const previousCommands = get().commandsByDirectory[cacheKey];
+            const previousSignature = buildCommandsSignature(previousCommands ?? EMPTY_COMMANDS);
             let lastError: unknown = null;
 
             for (let attempt = 0; attempt < 3; attempt++) {
@@ -256,10 +259,7 @@ export const useCommandsStore = create<CommandsStore>()(
                 const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
                 // Ensure the list is scoped to the same directory we use for config source detection.
-                const commands = await runBackgroundNetworkTask(() => opencodeClient.withDirectory(
-                  directory,
-                  () => opencodeClient.listCommandsWithDetails()
-                ));
+                const commands = await runBackgroundNetworkTask(() => opencodeClient.listCommandsWithDetails(directory));
 
                 const configurableCommands = commands.filter((cmd) => cmd.source !== 'skill');
                 const commandsWithScope = await Promise.all(
@@ -303,18 +303,19 @@ export const useCommandsStore = create<CommandsStore>()(
                 );
 
                 const nextSignature = buildCommandsSignature(commandsWithScope);
-                if (previousSignature !== nextSignature) {
-                  set((state) => {
-                    const next: Partial<CommandsStore> = {
-                      commandsByDirectory: { ...state.commandsByDirectory, [cacheKey]: commandsWithScope },
-                      isLoading: false,
-                    };
-                    if (isAmbient) next.commands = commandsWithScope;
-                    return next;
-                  });
-                } else {
-                  set({ isLoading: false });
-                }
+                const nextCommands = previousCommands !== undefined && previousSignature === nextSignature
+                  ? previousCommands
+                  : commandsWithScope;
+                set((state) => {
+                  const next: Partial<CommandsStore> = { isLoading: false };
+                  if (state.commandsByDirectory[cacheKey] !== nextCommands) {
+                    next.commandsByDirectory = { ...state.commandsByDirectory, [cacheKey]: nextCommands };
+                  }
+                  if (cacheKey === getCommandsCacheKey(getRequestDirectory())) {
+                    next.commands = nextCommands;
+                  }
+                  return next;
+                });
                 commandsLastLoadedAt.set(cacheKey, Date.now());
                 return true;
               } catch (error) {
@@ -325,14 +326,8 @@ export const useCommandsStore = create<CommandsStore>()(
             }
 
             console.error("Failed to load commands:", lastError);
-            set((state) => {
-              const next: Partial<CommandsStore> = {
-                commandsByDirectory: { ...state.commandsByDirectory, [cacheKey]: previousCommands },
-                isLoading: false,
-              };
-              if (isAmbient) next.commands = previousCommands;
-              return next;
-            });
+            // Keep the current directory cache, including edits made during the load.
+            set({ isLoading: false });
             return false;
           })();
 

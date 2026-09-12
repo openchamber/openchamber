@@ -10,7 +10,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { checkIsGitRepository, previewGitWorktree } from '@/lib/gitApi';
+import { checkIsGitRepository } from '@/lib/gitApi';
 import { generateBranchName } from '@/lib/git/branchNameGenerator';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
@@ -217,7 +217,7 @@ const createInstantWorktreeDraft = async (options?: {
     const pendingRequestId = createPendingDraftWorktreeRequest();
 
     // Lock the draft immediately so no React effect can reset it to the project
-    // root while we await the preview / worktree creation below.
+    // root while we await worktree creation below.
     const sessionStore = useSessionUIStore.getState();
     if (sessionStore.newSessionDraft?.open) {
       sessionStore.overrideNewSessionDraftTarget({
@@ -241,26 +241,8 @@ const createInstantWorktreeDraft = async (options?: {
 
     const preferredName = generateBranchName();
 
-    const preview = await previewGitWorktree(projectRef.path, {
-      mode: 'new',
-      branchName: preferredName,
-      worktreeName: preferredName,
-    }).catch(() => null);
-
-    // Refine draft target once we know the actual worktree path from the preview.
-    if (preview?.path) {
-      useSessionUIStore.getState().overrideNewSessionDraftTarget({
-        projectId: projectRef.id,
-        directoryOverride: preview.path,
-        pendingWorktreeRequestId: pendingRequestId,
-        bootstrapPendingDirectory: preview.path,
-        preserveDirectoryOverride: true,
-        title: options?.title,
-        initialPrompt: options?.initialPrompt,
-      });
-      useDirectoryStore.getState().setDirectory(preview.path, { showOverlay: false });
-    }
-
+    // A preview path has no bootstrap state yet. Selecting it lets background
+    // OpenCode reads initialize an instance before the worktree exists.
     const metadata = await createQuickWorktree(projectRef, { preferredName });
 
     resolvePendingDraftWorktreeRequest(pendingRequestId, metadata.path);

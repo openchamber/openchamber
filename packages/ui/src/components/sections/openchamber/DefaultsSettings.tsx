@@ -273,19 +273,6 @@ export const DefaultsSettings: React.FC = () => {
 
   const supportsVariants = availableVariants.length > 0;
 
-  React.useEffect(() => {
-    if (!supportsVariants && defaultVariant) {
-      setDefaultVariant(undefined);
-      setSettingsDefaultVariant(undefined);
-      if (!chatHasOwnModel) {
-        setCurrentVariant(undefined);
-      }
-      updateDesktopSettings({ defaultVariant: '' }).catch(() => {
-        // best effort
-      });
-    }
-  }, [chatHasOwnModel, defaultVariant, setCurrentVariant, setSettingsDefaultVariant, supportsVariants]);
-
   if (isLoading) {
     return null;
   }

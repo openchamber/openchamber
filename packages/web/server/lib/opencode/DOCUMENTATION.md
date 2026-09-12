@@ -34,8 +34,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/startup-performance.js`: opt-in startup phase diagnostics with fixed labels and numeric metadata allowlists.
 - `packages/web/server/lib/agent-tool/runtime.js`: managed OpenCode custom-tool materialization, environment injection, loopback authentication, and fixed CLI action dispatch.
 - `packages/web/server/lib/system-prompt/runtime.js`: opt-in managed OpenCode system-prompt optimizer materialization and plugin injection.
-- `packages/web/server/lib/mcp-reconnect/runtime.js`: always-on managed OpenCode plugin that reconnects MCP servers OpenCode marked `failed`, with per-server backoff.
-- `packages/web/server/lib/opencode/managed-plugin-config.js`: the one `OPENCODE_CONFIG_CONTENT` merge every managed plugin (agent tools, system prompt optimizer, MCP reconnect) appends itself through.
+- `packages/web/server/lib/opencode/managed-plugin-config.js`: the one `OPENCODE_CONFIG_CONTENT` merge every managed plugin (agent tools, system prompt optimizer) appends itself through.
 - `packages/web/server/lib/opencode/server-utils-runtime.js`: shared server runtime utilities for OpenCode proxy wiring, OpenCode port/readiness helpers, and snapshot fetchers.
 - `packages/web/server/lib/opencode/openchamber-routes.js`: OpenChamber update and models metadata route registration.
 - `packages/web/server/lib/opencode/pwa-manifest-routes.js`: PWA manifest route registration with recent-session shortcut resolution and short-lived caching.
@@ -132,8 +131,12 @@ The runtime maintains active-session count incrementally from idempotent activit
   - `killProcessOnPort(port)`
 
 Managed OpenCode launch also merges the environment returned by the agent-tool
-runtime, the opt-in system prompt optimizer, and the always-on MCP reconnect
-plugin, each appending its `file://` entry to the previous one's config. PATH and `OPENCODE_SERVER_PASSWORD` remain lifecycle-owned and cannot
+runtime and the opt-in system prompt optimizer, each appending its `file://`
+entry to the previous one's config. OpenChamber adds no automatic MCP reconnect
+loop; recovery after a failed connection is manual for both local and remote
+servers. Previously generated reconnect plugin files are inert because managed
+launch no longer registers them. User-configured plugins remain user-owned.
+PATH and `OPENCODE_SERVER_PASSWORD` remain lifecycle-owned and cannot
 be replaced by injected values. External OpenCode processes receive no
 OpenChamber tool injection. Managed launch env strips AppImage `ARGV0` before
 spawn so zsh-backed OpenCode tools do not rewrite child argv[0] to the AppImage
@@ -156,6 +159,7 @@ Managed health failures are classified as `timeout`, `connection_refused`, `conn
 ## Public exports (env-runtime.js)
 - `createOpenCodeEnvRuntime(dependencies)`: creates runtime that owns OpenCode CLI environment and binary discovery state.
 - OpenCode CLI resolution order is persisted settings, environment overrides, bundled Desktop CLI when available, PATH, known install locations, then platform shell discovery.
+- Automatic bundled resolution under `OPENCHAMBER_RUNTIME=desktop` stays in runtime state and is returned to the managed launch function, including on OpenCode restart. It does not populate `process.env.OPENCODE_BINARY`: AppImage updater relaunch inherits that environment and would mistake the previous bundle path for an explicit override. Explicit settings/env selections and non-desktop or non-bundled resolution retain their existing environment behavior. This prevents future inheritance; it does not reinterpret overrides already inherited from older releases.
 - Returned API:
   - `applyLoginShellEnvSnapshot()`
   - `getLoginShellEnvSnapshot()`
@@ -423,6 +427,16 @@ within a ten-minute overall deadline.
   - Generic `/api/*` forwarding with hop-by-hop header filtering
   - Windows `/session` merge fallback path behavior
   - OpenCode readiness gate for proxied `/api` requests
+  - Worktree checkout gate before directory-scoped upstream reads and writes
+
+Git bootstrap must reach `git-ready` before OpenCode can cache a new worktree's
+project identity or config. Setup scripts may still be running; the optional UI
+setup wait remains separate. Failed or timed-out checkout returns 503 without
+forwarding. The shared draft creator keeps the project directory selected until
+creation returns, because preview paths have no bootstrap state.
+
+This server gate covers web, Electron, hosted mobile, and Capacitor connections.
+The VS Code extension owns its separate Git and proxy implementation.
 
 ## Public exports (watcher.js)
 - `createOpenCodeWatcherRuntime(dependencies)`: creates global event watcher runtime backed by the shared upstream SSE reader.

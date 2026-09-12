@@ -144,7 +144,9 @@ mock.module('@/components/ui', () => ({
 mock.module('@/components/icon/Icon', () => ({ Icon: ({ name, className }: { name: string; className?: string }) => React.createElement('span', { 'data-icon': name, className }) }));
 mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ terminal, runtime: { isVSCode: false, platform: 'web' } }) }));
 mock.module('@/lib/device', () => ({ useDeviceInfo: () => mockedDeviceInfo }));
-mock.module('@/lib/desktop', () => ({ isDesktopShell: () => false }));
+// Modules under test import other desktop helpers too; keep the real ones.
+const desktop = await import('@/lib/desktop');
+mock.module('@/lib/desktop', () => ({ ...desktop, isDesktopShell: () => false }));
 mock.module('@/stores/useUIStore', () => ({ useUIStore: useUiStoreMock }));
 mock.module('@/contexts/useThemeSystem', () => ({ useThemeSystem: () => ({ currentTheme: { metadata: { variant: 'dark' }, colors: { surface: { background: '#000' }, syntax: { base: { foreground: '#fff' } } } } }) }));
 mock.module('@/stores/useDesktopSshStore', () => ({ useDesktopSshStore: useDesktopSshStoreMock }));

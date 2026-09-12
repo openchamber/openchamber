@@ -1,6 +1,6 @@
 {
   "name": "openchamber-monorepo",
-  "version": "1.22.2",
+  "version": "1.23.1",
   "description": "OpenChamber monorepo workspace for web, ui, and desktop runtimes",
   "private": true,
   "type": "module",
@@ -119,7 +119,7 @@
     "@heroui/theme": "^2.4.23",
     "@lezer/highlight": "^1.2.3",
     "@octokit/rest": "^22.0.1",
-    "@opencode-ai/sdk": "1.18.29",
+    "@opencode-ai/sdk": "1.18.30",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
@@ -198,6 +198,7 @@
   },
   "patchedDependencies": {
     "@tanstack/virtual-core@3.17.3": "bun-patches/@tanstack+virtual-core+3.17.3.patch",
-    "bun-pty@0.4.8": "bun-patches/bun-pty@0.4.8.patch"
+    "bun-pty@0.4.8": "bun-patches/bun-pty@0.4.8.patch",
+    "@legendapp/list@3.3.10": "bun-patches/@legendapp%2Flist@3.3.10.patch"
   }
 }

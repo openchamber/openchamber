@@ -605,6 +605,8 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
         heading4: foreground,
         link: accentMuted,
         linkHover: read('textLink.activeForeground', accentHover),
+        inlineCode: read('textPreformat.foreground', syntaxString),
+        inlineCodeBackground: subtle,
         blockquote: foreground,
         blockquoteBackground: read('textBlockQuote.background', 'transparent'),
         blockquoteBorder: read('textBlockQuote.border', effectiveBorder),

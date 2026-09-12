@@ -23,7 +23,7 @@ export const DedicatedMobileAppProvider: React.FC<{
  * Returns the dedicated mobile app's surface-opening actions, or null when
  * not inside the dedicated mobile root. Components living in shared chat /
  * input code can use this to route navigation to mobile-native surfaces
- * (e.g. open the Changes diff for a file from PendingChangesBar) instead of
+ * (e.g. open the Changes diff for a file) instead of
  * desktop sidebars.
  */
 export const useMobileAppActions = (): MobileAppActions | null => React.useContext(DedicatedMobileAppContext);

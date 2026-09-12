@@ -426,7 +426,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   return (
       <div
         ref={containerRef}
-        className="absolute z-[100] min-w-0 w-full max-w-[640px] max-h-64 bg-background border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 left-0 flex flex-col"
+        className="absolute z-[100] min-w-0 w-full max-w-[640px] max-h-64 oc-glass-popover border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 left-0 flex flex-col"
         style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}
       >
         <ScrollableOverlay preventOverscroll outerClassName="flex-1 min-h-0" className="px-0">

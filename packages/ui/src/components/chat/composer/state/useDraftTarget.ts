@@ -273,12 +273,15 @@ export function useDraftTarget(enabled: boolean) {
     }, [projectRootBranchOption, selectedDraftDirectory, shouldKeepMissingSelectedDraftDirectory, worktreeBranchOptions]);
 
     const selectedDraftBranchLabel = React.useMemo(() => {
+        if (newSessionDraft?.pendingWorktreeRequestId) {
+            return t('session.newWorktree.actions.creating');
+        }
         const selectedValue = selectedDraftDirectory ?? draftBranchItems[0]?.value ?? null;
         if (!selectedValue) {
             return null;
         }
         return draftBranchItems.find((item) => item.value === selectedValue)?.label ?? formatDirectoryName(selectedValue);
-    }, [draftBranchItems, selectedDraftDirectory]);
+    }, [draftBranchItems, newSessionDraft?.pendingWorktreeRequestId, selectedDraftDirectory, t]);
 
 
     const selectedDraftBranchIsKnown = React.useMemo(() => {

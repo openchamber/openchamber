@@ -67,6 +67,9 @@ export function ArchiveView(): React.ReactNode {
   // while not searching.
   const filteredSessions = React.useMemo(() => {
     if (normalizedQuery) {
+      if (normalizedQuery.startsWith('ses_')) {
+        return sortedSessions.filter((session) => session.id.toLowerCase() === normalizedQuery);
+      }
       return rankByQuery(sortedSessions, normalizedQuery, (session) => [session.title]);
     }
     if (selectedDirectory === null) return sortedSessions;

@@ -984,6 +984,15 @@ export async function getCommitFiles(
   return gitHttp.getCommitFiles(directory, hash);
 }
 
+export async function getGitCommitDiff(directory: string, options: import('./api/types').GetGitCommitDiffOptions): Promise<import('./api/types').GitDiffResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime) {
+    if (!runtime.getGitCommitDiff) throw new Error('Commit comparisons are unavailable in this runtime');
+    return runtime.getGitCommitDiff(directory, options);
+  }
+  return gitHttp.getGitCommitDiff(directory, options);
+}
+
 export async function getCommitFileDiff(
   directory: string,
   hash: string,

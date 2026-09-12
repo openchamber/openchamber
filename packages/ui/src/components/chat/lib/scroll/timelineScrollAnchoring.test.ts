@@ -94,11 +94,11 @@ describe('resolveRealContentEndOffset', () => {
 });
 
 describe('resolveTimelineIsAtEnd', () => {
-    test('counts half a viewport from the full content length as the end', () => {
+    test('uses a 40px band regardless of viewport height', () => {
         expect(resolveTimelineIsAtEnd({ contentLength: 2000, scroll: 1400, scrollLength: 600 })).toBe(true);
-        expect(resolveTimelineIsAtEnd({ contentLength: 2000, scroll: 1100, scrollLength: 600 })).toBe(true);
-        expect(resolveTimelineIsAtEnd({ contentLength: 2000, scroll: 1099, scrollLength: 600 })).toBe(false);
-        // Tiny viewports keep a 40px floor.
+        expect(resolveTimelineIsAtEnd({ contentLength: 2000, scroll: 1360, scrollLength: 600 })).toBe(true);
+        expect(resolveTimelineIsAtEnd({ contentLength: 2000, scroll: 1359, scrollLength: 600 })).toBe(false);
+        expect(resolveTimelineIsAtEnd({ contentLength: 2000, scroll: 1100, scrollLength: 600 })).toBe(false);
         expect(resolveTimelineIsAtEnd({ contentLength: 2000, scroll: 1900, scrollLength: 60 })).toBe(true);
         expect(resolveTimelineIsAtEnd({ contentLength: 2000, scroll: 1899, scrollLength: 60 })).toBe(false);
     });

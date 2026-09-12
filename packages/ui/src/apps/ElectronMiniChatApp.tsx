@@ -27,6 +27,8 @@ import {
   partitionWorktreesByRegisteredProject,
   worktreeMapsEqual,
 } from '@/lib/worktrees/worktreeManager';
+import { refreshWorktreeTopologyForChange } from '@/lib/worktrees/worktreeTopologyRefresh';
+import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 
@@ -219,6 +221,22 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
 
     return () => {
       cancelled = true;
+    };
+  }, [projects]);
+
+  // The main window (or an agent, or a terminal) may add or remove a worktree
+  // while this window is open; the server's control event names the affected
+  // repository so only its projects are re-listed.
+  React.useEffect(() => {
+    if (projects.length === 0) return;
+    let cancelled = false;
+    const unsubscribe = subscribeOpenchamberEvents((event) => {
+      if (event.type !== 'worktree-changed') return;
+      void refreshWorktreeTopologyForChange(projects, event.directories, () => cancelled);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
     };
   }, [projects]);
 

@@ -67,7 +67,7 @@ The webview build emits each worker as one self-contained file. VS Code webviews
   - OpenCode JSONC reads in `opencodeConfig.ts` fail closed on a partial or non-object `jsonc-parser` tree (`INVALID_JSONC`) so mutations cannot rewrite a `$schema`-only stub over an existing config. Comment-only files read as empty, while other content that yields no JSON value (YAML, plain text) fails closed. A broken layer is omitted from the merge and recorded on `layerErrors`; valid sibling layers still load, including plugin list/read via `getPluginConfigSources`. Writes still refuse to overwrite the broken file.
 
 - `bridge-project-setup-runtime.ts`
-  - Extension-host side of `GET/PUT /api/projects/:projectId/config` (the webview handles the route locally and bridges `api:project-setup:get` / `api:project-setup:update`). Reads and writes the client-owned keys of `~/.config/openchamber/projects/<projectId>.json` (worktree setup commands, project actions, draft starters) with the rules in `project-setup.ts`, a mirror of the server's `packages/web/server/lib/projects/project-setup.js`; keep the two in sync. Writes to one file are chained; server-owned and unknown keys survive. The read also merges the team's optional `<workspace>/.openchamber/project.json` (checkout path decoded from the `path_<base64url>` id) by the same rules as the server, so the webview sees one view with `shared` / `personal` blocks. The shared UI (`openchamberConfig.ts`) no longer composes that path or reads it through the fs bridge.
+  - Extension-host side of `GET/PUT /api/projects/:projectId/config` (the webview handles the route locally and bridges `api:project-setup:get` / `api:project-setup:update`). Reads and writes the client-owned keys of `~/.config/openchamber/projects/<projectId>.json` (worktree setup commands, project actions, draft starters) with the rules in `project-setup.ts`, a mirror of the server's `packages/web/server/lib/projects/project-setup.js`; keep the two in sync. The file name follows the server's bounded rule (`projectConfigFileStemOf`, mirrored from `packages/web/server/lib/projects/project-id.js`): an id over 200 characters is stored as `path_sha256_<digest>.json` so a deeply nested checkout does not exceed the file name limit. A file an older build wrote under the long name is still read when the bounded one is missing and is removed once a write has moved its content. Writes to one file are chained; server-owned and unknown keys survive. The read also merges the team's optional `<workspace>/.openchamber/project.json` (checkout path decoded from the `path_<base64url>` id) by the same rules as the server, so the webview sees one view with `shared` / `personal` blocks. The shared UI (`openchamberConfig.ts`) no longer composes that path or reads it through the fs bridge.
 - `bridge-settings-runtime.ts`
   - Settings read/write and OpenCode skills discovery via API for bridge consumers.
   - Writes are gated by the generated registry snapshot (`settings-registry.json`, via `settings-registry-gate.ts`): keys the registry does not list, or marks `computed`, `local`, or `owner: desktop-shell`, never reach the shared settings files. Regenerate the snapshot with `bun run settings-registry:generate` when the UI registry changes.
@@ -101,7 +101,25 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 
 ## Shared webview message ordering
 
+The bridge sends `webview:ready` once per document, before its first outbound
+message. Sidebar, session-editor, and agent-manager hosts abort that panel's old
+SSE streams before accepting new requests and resend the current connection
+state. A VS Code webview reload or cross-window move replaces the document
+without disposing its panel; relying only on panel disposal leaked one upstream
+stream per reload, including its ongoing idle heartbeat traffic.
+
 Message and part ordering is owned by [`packages/ui/src/sync/DOCUMENTATION.md`](../../ui/src/sync/DOCUMENTATION.md#session-message-loading). The VS Code webview consumes that shared sync implementation; bridge and proxy runtimes pass OpenCode records through without adding runtime-specific ordering.
+
+The OpenChamber control stream (`/api/openchamber/events`) requires the
+OpenChamber server, which the extension does not run. `subscribeOpenchamberEvents`
+therefore returns a no-op subscription in VS Code before resolving URLs or
+opening a connection. Session sync still uses the OpenCode SSE bridge and
+global session polling. Sending the control stream to the webview origin caused
+repeated `403` responses and URL-token requests to `/auth/url-token`.
+
+Shared lazy imports retry a failed chunk load, but skip browser-navigation
+recovery in VS Code. `window.location.reload()` is unsupported inside webviews;
+the original import error must reach the UI error boundary instead.
 
 ## Extension guideline
 

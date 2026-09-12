@@ -13,6 +13,8 @@ declare module "bun:test" {
     toThrow(expected?: string | RegExp | (new (...args: never[]) => unknown)): void;
     toContain(expected: unknown): void;
     toBeDefined(): void;
+    toBeUndefined(): void;
+    toMatchObject(expected: unknown): void;
     rejects: {
       toThrow(expected?: string | RegExp | (new (...args: never[]) => unknown)): Promise<void>;
     };
@@ -65,7 +67,7 @@ declare module "bun" {
     setup(build: {
       onLoad(options: { filter: RegExp }, callback: (args: { path: string }) => {
         contents: string;
-        loader: "js";
+        loader: "js" | "ts";
       }): void;
     }): void;
   }): void;

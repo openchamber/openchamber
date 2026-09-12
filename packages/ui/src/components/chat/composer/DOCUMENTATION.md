@@ -17,6 +17,52 @@ animation. Do not restore separate draft and session composer branches:
 remounting the editor loses focus and interrupts the transition. Keep the
 existing mobile fixed-position rules unchanged.
 
+`ComposerFloatingPanel` is the shared frame for `BtwPanel` and
+`QueuedMessageChips`. They mount inside the composer form, outside both the
+full editor and collapsed mobile pill, with one absolute `bottom-full`
+anchor, input-column width, gap, and glass surface. Appearing, disappearing,
+or collapsing a panel does not resize the transcript or composer.
+The frame also owns the header row through its `header` and `compact` props;
+callers supply controls and content, not their own header padding.
+
+`SessionSuggestionChip` is not a frame: it renders as the composer's own top
+row, inside the box and inside the mobile pill, so the surface stays one
+shape. Visibility priority is BTW, then a nonempty queue, then suggestion.
+Every BTW frame, including its collapsed strip, creation state, and pending
+draft, hides the other two. Composer content also hides suggestion;
+new-session drafts hide both queue and suggestion. Hiding the queue does not
+pause its delivery.
+
+The queue header toggles an `aria-expanded` disclosure with the current count.
+Its collapse state is local to the mounted runtime/directory/session queue key
+and survives temporary hiding behind BTW. Switching queue identity resets it.
+The expanded list retains its drag sensors, ordering, edit, send, and remove
+actions, and clamps to available space above the composer. It receives the
+composer's main-session queue target instead of resolving the global selection,
+so embedded chat columns address their own queue.
+
+The shared frame measures its height and gap into the chat column's
+`--chat-floating-panel-clearance`. The floating status row and
+`ScrollToBottomButton` translate upward by that amount, and the column
+carries `data-floating-panel` while any frame is mounted so the recap hint
+hides instead of landing over the transcript. Transcript height, insets, and
+scroll position remain unchanged. Unmounting clears the offset and the
+marker; resizing or collapsing the frame updates it.
+
+## Floating composer
+
+In a normal session view the composer slot is an absolute layer over the
+bottom of the transcript (`ChatContainer`), and the input box is glass
+(`oc-glass-composer`). The draft screen and the expanded editor keep the slot
+in flow. A `ResizeObserver` on the slot writes its height into the chat
+column's `--chat-composer-inset`; the timeline's tail spacer reads that
+variable plus a fixed gap, so the last row always ends above the composer.
+The variable is written straight to the DOM, so composer growth never
+re-renders the timeline: the list's own footer observer extends the content
+and the scroll hook's pinned-end observer keeps a reader on the end. The
+mobile keyboard choreography is unchanged: the form inside the slot is still
+the keyboard mover and the column shrinks around it at settle.
+
 ## Layers
 
 | Directory | Owns |
@@ -32,7 +78,11 @@ existing mobile fixed-position rules unchanged.
 | `largeTextPasteOffer.ts` | Ask-toast offer id begin/resolve (supersede + double-apply guards) |
 
 `ChatInput.handlePaste` owns paste orchestration: URL-over-selection markdown
-links, clipboard images (attach + citation), and large plain-text pastes.
+links, clipboard files, and large plain-text pastes. Pasted and dropped files
+share `attachFilesWithCitation`: every file attaches and is cited in the draft
+as `[name]`; images get a generated unique name first, other files keep their
+own name and are cited only after they attached. A copied file's filename text
+is suppressed so only the citation lands in the draft.
 Large pastes (about 2,000 characters or 25 lines) follow the composer setting
 `largeTextPasteBehavior` (`ask` / `attach` / `inline`). Attaching creates an
 in-memory `text/plain` file named `pasted-context-N.txt`, inserts a bracket

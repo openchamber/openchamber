@@ -1,4 +1,4 @@
-import { createProjectIdFromPath } from '../projects/project-id.js';
+import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
 import {
   buildPreferencesFields,
   flattenPreferences,
@@ -288,10 +288,10 @@ export const createSettingsRuntime = (deps) => {
       return;
     }
 
-    const oldConfigPath = path.join(PROJECTS_ROOT_DIR, `${oldId}.json`);
-    const newConfigPath = path.join(PROJECTS_ROOT_DIR, `${newId}.json`);
-    const oldStorageDir = path.join(PROJECTS_ROOT_DIR, oldId);
-    const newStorageDir = path.join(PROJECTS_ROOT_DIR, newId);
+    const oldConfigPath = path.join(PROJECTS_ROOT_DIR, `${projectConfigFileStemOf(oldId)}.json`);
+    const newConfigPath = path.join(PROJECTS_ROOT_DIR, `${projectConfigFileStemOf(newId)}.json`);
+    const oldStorageDir = path.join(PROJECTS_ROOT_DIR, projectConfigFileStemOf(oldId));
+    const newStorageDir = path.join(PROJECTS_ROOT_DIR, projectConfigFileStemOf(newId));
 
     const [oldConfig, newConfig] = await Promise.all([
       readJsonFile(oldConfigPath),
@@ -306,6 +306,28 @@ export const createSettingsRuntime = (deps) => {
     await mergeProjectContextFiles(oldStorageDir, newStorageDir);
     await moveDirectoryContents(oldStorageDir, newStorageDir);
     await fsPromises.rm(oldConfigPath, { force: true });
+  };
+
+  /**
+   * A build before the bounded folder name created `<projectId>/` for an id
+   * the filesystem still accepted (201 to 255 characters; longer ids never
+   * got a folder). Only the bounded folder is read now, so that folder's
+   * notes, plans, and memory are moved over once. A raw name the filesystem
+   * cannot hold (ENAMETOOLONG) means no such folder ever existed.
+   */
+  const migrateRawIdStorageFolder = async (projectId) => {
+    const stem = projectConfigFileStemOf(projectId);
+    if (stem === projectId) return;
+    const rawStorageDir = path.join(PROJECTS_ROOT_DIR, projectId);
+    try {
+      await fsPromises.stat(rawStorageDir);
+    } catch (error) {
+      if (error?.code === 'ENOENT' || error?.code === 'ENAMETOOLONG') return;
+      throw error;
+    }
+    const boundedStorageDir = path.join(PROJECTS_ROOT_DIR, stem);
+    await mergeProjectContextFiles(rawStorageDir, boundedStorageDir);
+    await moveDirectoryContents(rawStorageDir, boundedStorageDir);
   };
 
   const migrateSettingsToDeterministicProjectIds = async (current) => {
@@ -328,6 +350,7 @@ export const createSettingsRuntime = (deps) => {
         await migrateProjectScopedStorage({ oldId: project.id, newId: nextId, projectPath: project.path });
         await migrateProjectIconFiles({ oldId: project.id, newId: nextId });
       }
+      await migrateRawIdStorageFolder(nextId);
       nextProjects.push({ ...project, id: nextId });
     }
 
@@ -468,19 +491,23 @@ export const createSettingsRuntime = (deps) => {
     for (const [projectId, orphansForProject] of matches.entries()) {
       const project = canonicalProjects.find((p) => p.id === projectId);
       if (!project) continue;
-      const targetPath = path.join(PROJECTS_ROOT_DIR, `${project.id}.json`);
+      const targetStem = projectConfigFileStemOf(project.id);
+      const targetPath = path.join(PROJECTS_ROOT_DIR, `${targetStem}.json`);
+      const targetStorageDir = path.join(PROJECTS_ROOT_DIR, targetStem);
 
       for (const orphan of orphansForProject) {
         const targetExisting = (await readJsonFile(targetPath)) || {};
+        // An orphan is named by the file found on disk, so its folder is the raw name.
+        const orphanStorageDir = path.join(PROJECTS_ROOT_DIR, orphan.orphanId);
         const merged = mergeProjectConfigData({
           oldConfig: orphan.content,
           newConfig: targetExisting,
-          oldStorageDir: path.join(PROJECTS_ROOT_DIR, orphan.orphanId),
-          newStorageDir: path.join(PROJECTS_ROOT_DIR, project.id),
+          oldStorageDir: orphanStorageDir,
+          newStorageDir: targetStorageDir,
           projectPath: project.path,
         });
         await writeJsonFile(targetPath, merged);
-        await moveDirectoryContents(path.join(PROJECTS_ROOT_DIR, orphan.orphanId), path.join(PROJECTS_ROOT_DIR, project.id));
+        await moveDirectoryContents(orphanStorageDir, targetStorageDir);
         await fsPromises.rm(orphan.filePath, { force: true });
         orphansConsumed.add(orphan.orphanId);
         console.log(`[projects] Recovered orphan ${orphan.orphanId} -> ${project.id} (${project.path})`);

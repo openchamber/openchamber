@@ -142,6 +142,7 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
     getState: () => ({
       activeSessions: [],
       archivedSessions: [],
+      entityById: new Map(),
     }),
   },
   resolveGlobalSessionDirectory: () => null,

@@ -31,7 +31,7 @@ The default layout follows three modes: single chords for everyday actions, the 
 
 The internal `switch_tab_*` bindings remain available to mobile handlers. Desktop numeric context-surface switching is resolved by the configurable `switch_context_surface` prefix before normal dispatcher matching and falls through on mobile.
 
-Both digit prefixes yield when the event target is editable: an input, textarea, select, or contenteditable element. `switch_session_tab` defaults to a bare `mod` prefix, so without that guard plain ctrl/cmd+digit would switch tabs while the user is typing in the composer.
+Both digit prefixes work from editable targets when Cmd or Ctrl is held, including the chat composer. Custom prefixes without Cmd/Ctrl and AltGraph combinations yield to text input in inputs, textareas, selects, and contenteditable elements. Both digit shortcuts also yield during IME composition.
 
 The settings recorder captures up to two chords with at most three simultaneous physical keys per chord and checks the complete schema, not only customizable actions. After the first chord it waits up to 3000ms for a second; conflict and browser-risk feedback appears only when the second chord, timeout, or Confirm settles the recording. It keeps the recording local until the user clicks Confirm, allows an exact customizable conflict to replace the previous assignment, and blocks prefix conflicts unless the single-chord action explicitly allows sequence fallback. Those contextual prefixes remain saveable with a warning because their handler yields outside its owning context. Internal bindings are authoritative: persisted overrides cannot change or unassign them, and recorder conflicts with them cannot be replaced.
 

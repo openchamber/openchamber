@@ -105,6 +105,61 @@ describe('markdown sanitization', () => {
 
 });
 
+describe('Markdown disclosures', () => {
+  test('renders summaries and rich Markdown without allowing raw HTML attributes', () => {
+    const html = renderMarkdownSync('<details open><summary>Review **ready**</summary>\n\n> Quoted review\n\n1. First\n2. Second\n\n```sh\nbun test\n```\n\n</details>\n\nAfter');
+    expect(html).toContain('<details data-md-details open>');
+    expect(html).toContain('<summary>Review <strong>ready</strong></summary>');
+    expect(html).toContain('<blockquote>');
+    expect(html).toContain('<ol>');
+    expect(html).toContain('<code class="language-sh">bun test');
+    expect(html).toContain('</details><p>After</p>');
+    const unsafe = renderMarkdownSync('<details onclick="alert(1)"><summary>Unsafe</summary>text</details>');
+    expect(unsafe).not.toContain('<details');
+    expect(unsafe).toContain('&lt;details');
+    expect(renderMarkdownSync('<details><summary>Safe</summary>\n\n<style>body{display:none}</style>\n\n</details>')).not.toContain('<style>');
+  });
+
+  test('keeps nested disclosures and literal closing tags inside code in their owner', () => {
+    const source = '<details><summary>Outer</summary>\n\n`</details>`\n\n```html\n</details>\n```\n\n<details open><summary>Inner</summary>\n\n**Nested**\n\n</details>\n\nOuter end\n\n</details>\n\nAfter';
+    const html = renderMarkdownSync(source);
+    expect(html.match(/<details /g)).toHaveLength(2);
+    expect(html).toContain('<code>&lt;/details&gt;</code>');
+    expect(html).toContain('<strong>Nested</strong>');
+    expect(html).toContain('</details><p>Outer end</p>');
+    expect(html).toContain('</details><p>After</p>');
+    expect(renderMarkdownSync('```html\n<details><summary>Example</summary></details>\n```')).not.toContain('<details');
+  });
+
+  test('keeps streamed bodies together and settled leading blocks cache-stable', async () => {
+    const prefix = 'Introduction\n\n<details><summary>Review</summary>\n\n';
+    const first = await renderMarkdownBlocks(`${prefix}> First\n\n1. Item`, true);
+    const next = await renderMarkdownBlocks(`${prefix}> First\n\n1. Item\n2. More\n\n\`\`\`sh\nbun test`, true);
+    expect(first).toHaveLength(2);
+    expect(next).toHaveLength(2);
+    expect(next[0]).toEqual(first[0]);
+    expect(next[1]?.html).toContain('<details data-md-details>');
+    expect(next[1]?.html).toContain('<li>More</li>');
+    expect(next[1]?.html).toContain('bun test');
+    expect(next[1]?.html.endsWith('</details>')).toBe(true);
+    const finished = await renderMarkdownBlocks(`${prefix}> First\n\n</details>\n\nAfter`, true);
+    expect(finished).toHaveLength(3);
+    expect(finished[2]?.html).toContain('<p>After</p>');
+  });
+
+  test('handles incomplete summary and closing tag prefixes without losing content', async () => {
+    const source = '<details><summary>Review</summary>\n\n**Body**\n\n</details>';
+    for (let length = 1; length <= source.length; length += 1) {
+      const blocks = await renderMarkdownBlocks(source.slice(0, length), true);
+      const html = blocks.map((block) => block.html).join('');
+      if (length >= source.indexOf('\n\n')) expect(html).toContain('<details data-md-details>');
+      if (length >= source.indexOf('\n\n</details>')) {
+        expect(html).toContain('<strong>Body</strong>');
+      }
+    }
+  });
+});
+
 describe('Markdown block cache reads', () => {
   test('returns all settled blocks synchronously after a full cache hit', async () => {
     resetMarkdownHtmlCacheForTests();

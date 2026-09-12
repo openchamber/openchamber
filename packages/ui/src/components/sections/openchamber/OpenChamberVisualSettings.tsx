@@ -691,7 +691,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('userMessageRendering')
         || shouldShow('chatRenderMode')
         || shouldShow('messageTransport')
-        || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted')
+        || shouldShow('activityRenderMode')
         || shouldShow('collapsibleUserMessages')
         || shouldShow('stickyUserHeader')
         || (shouldShow('promptNavigatorEnabled') && !isVSCode)
@@ -713,7 +713,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || (!isMobile && shouldShow('inputSpellcheck'))
         || shouldShow('enterToSend');
     const showBehaviorDisplaySettings = shouldShow('chatRenderMode')
-        || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted');
+        || shouldShow('activityRenderMode');
     const showTransportSection = shouldShow('messageTransport');
     const showBehaviorMessageOptions = shouldShow('userMessageRendering')
         || shouldShow('mermaidRendering')
@@ -1685,8 +1685,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     </SettingsControlGroup>
                                 )}
 
-                                {shouldShow('activityRenderMode') && chatRenderMode === 'sorted' && (
-                                    <SettingsControlGroup title={t('settings.openchamber.visual.section.activityDefault')}>
+                                {shouldShow('activityRenderMode') && (
+                                    <SettingsControlGroup title={t('settings.openchamber.visual.section.activityDefault')} settingsItem="chat.activity-default">
                                         <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.activityDefaultAria')}>
                                             {ACTIVITY_RENDER_MODE_OPTIONS.map((option) => (
                                                 <SettingsRadioOption

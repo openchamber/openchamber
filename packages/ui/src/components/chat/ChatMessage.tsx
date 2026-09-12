@@ -399,8 +399,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return typeof timeInfo?.created === 'number' ? timeInfo.created : null;
     }, [message.info.time]);
     const isPinnedIntoContext = useGlobalSessionsStore((state) => {
-        const session = state.activeSessions.find((candidate) => candidate.id === sessionId)
-            ?? state.archivedSessions.find((candidate) => candidate.id === sessionId);
+        const session = state.entityById.get(sessionId);
         return getContextObligatoryMessages(session).some((entry) => entry.id === message.info.id);
     });
     const [pinPending, setPinPending] = React.useState(false);
