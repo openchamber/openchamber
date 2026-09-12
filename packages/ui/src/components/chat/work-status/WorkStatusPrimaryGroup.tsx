@@ -37,6 +37,11 @@ type Props = {
   showRepository: boolean;
 };
 
+const formatTokens = (tokens: number): string => {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}K`;
+  return tokens.toFixed(1).replace(/\.0$/, '');
+};
 // Matches the header readout exactly: one decimal, capped the same way, so the
 // two places that report context fill never disagree by a rounding step.
 const formatPercent = (percent: number): string => `${Math.min(percent, 999).toFixed(1)}%`;
@@ -235,6 +240,9 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
             : null;
 
   const usagePercent = contextUsage?.percent ?? null;
+  const usageLabel = contextUsage
+    ? `${formatTokens(contextUsage.totalTokens)} (${formatPercent(contextUsage.percent)})`
+    : null;
   // Colour threshold uses the rounded percentage, matching what the header
   // feeds `resolveUsageTone`; the displayed number stays unrounded.
   const usageTone = usagePercent === null ? null : resolveUsageTone(Math.round(usagePercent));
@@ -274,7 +282,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                 label={t('chat.workStatus.context.label')}
                 value={(
                   <>
-                    <WorkStatusValue>{formatPercent(usagePercent)}</WorkStatusValue>
+                    <WorkStatusValue>{usageLabel}</WorkStatusValue>
                     {/* No icon of its own: the sprite has no currency glyph, and
                         spend belongs with consumption anyway. The `$` labels it. */}
                     {cost !== null ? <WorkStatusValue tone="muted">{formatCost(cost)}</WorkStatusValue> : null}
