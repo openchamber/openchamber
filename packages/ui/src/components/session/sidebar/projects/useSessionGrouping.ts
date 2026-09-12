@@ -2,7 +2,7 @@ import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { WorktreeMetadata } from '@/types/worktree';
-import type { SessionGroup, SessionNode } from '../types';
+import type { SessionGroup, SessionNode, SessionNodeSearchResult } from '../types';
 import {
   dedupeSessionsById,
   getArchivedScopeKey,
@@ -26,6 +26,20 @@ type Args = {
 
 const isArchivedSession = (session: Session): boolean => Boolean(session.time?.archived);
 
+/**
+ * Count every node in the list. Used for the empty-query total and for the
+ * kept subtree of a directly matched text node — the region the search filter
+ * deliberately does not descend into, so a search visits each input node
+ * exactly once.
+ */
+const countSessionNodes = (nodes: readonly SessionNode[]): number => {
+  let total = 0;
+  for (const node of nodes) {
+    total += 1 + countSessionNodes(node.children);
+  }
+  return total;
+};
+
 export const useSessionGrouping = (args: Args) => {
   const { t } = useI18n();
   // Read at call time rather than captured: the branch map is rebuilt whenever
@@ -45,29 +59,43 @@ export const useSessionGrouping = (args: Args) => {
   }, [t]);
 
   const filterSessionNodesForSearch = React.useCallback(
-    (nodes: SessionNode[], query: string): SessionNode[] => {
+    (nodes: SessionNode[], query: string): SessionNodeSearchResult => {
       if (!query) {
-        return nodes;
+        return { nodes, matchedCount: countSessionNodes(nodes) };
       }
 
       const normalizedQuery = query.trim().toLowerCase();
       const isIdQuery = normalizedQuery.startsWith('ses_');
-      return nodes.flatMap((node) => {
-        if (isIdQuery && isArchivedSession(node.session)) return [];
-        const nodeMatches = isIdQuery
-          ? node.session.id.toLowerCase() === normalizedQuery
-          : matchesRankQuery([buildSessionSearchText(node.session)], query);
-        if (nodeMatches) {
-          return [node];
-        }
+      let matchedCount = 0;
 
-        const filteredChildren = filterSessionNodesForSearch(node.children, query);
-        if (filteredChildren.length === 0) {
-          return [];
-        }
+      const filterNodes = (list: SessionNode[]): SessionNode[] => {
+        const filtered: SessionNode[] = [];
+        for (const node of list) {
+          if (isIdQuery && isArchivedSession(node.session)) continue;
+          const nodeMatches = isIdQuery
+            ? node.session.id.toLowerCase() === normalizedQuery
+            : matchesRankQuery([buildSessionSearchText(node.session)], query);
+          if (nodeMatches) {
+            // The node itself is visited here; counting its descendants walks
+            // exactly the region this recursion deliberately skips, so a
+            // search visits each input node exactly once. ID queries count
+            // exact matches only — a kept subtree's descendants are context.
+            matchedCount += isIdQuery ? 1 : 1 + countSessionNodes(node.children);
+            filtered.push(node);
+            continue;
+          }
 
-        return [{ ...node, children: filteredChildren }];
-      });
+          const filteredChildren = filterNodes(node.children);
+          if (filteredChildren.length === 0) continue;
+          // An ancestor retained only because a descendant matched counts for
+          // text queries.
+          if (!isIdQuery) matchedCount += 1;
+          filtered.push({ ...node, children: filteredChildren });
+        }
+        return filtered;
+      };
+
+      return { nodes: filterNodes(nodes), matchedCount };
     },
     [buildSessionSearchText],
   );

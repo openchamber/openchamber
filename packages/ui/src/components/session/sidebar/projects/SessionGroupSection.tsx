@@ -4,12 +4,9 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useShallow } from 'zustand/react/shallow';
 import type { Session } from '@opencode-ai/sdk/v2';
 
-// Archived buckets routinely grow into the hundreds/thousands; virtualize
-// when we cross this row count so the DOM stays bounded.
-const ARCHIVED_VIRTUALIZE_THRESHOLD = 50;
-// Compact rows in the archived bucket without nested subagents render
-// around 24-32px; virtua measures mounted rows and uses this as the initial hint.
-const ARCHIVED_ROW_ESTIMATE_PX = 28;
+// Compact rows without nested subagents render around 24-32px; the
+// virtualizer measures mounted rows and uses this as the initial hint.
+const ROW_ESTIMATE_PX = 28;
 const EMPTY_FOLDERS: readonly never[] = [];
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
@@ -24,6 +21,7 @@ import type { GroupSearchData, SessionGroup, SessionNode } from '../types';
 import { isBranchDifferentFromLabel, normalizePath, renderHighlightedText } from '../utils';
 import { compareSessionsByLifecycleOrder, EMPTY_SESSION_ORDER_RANKS } from '@/sync/session-ordering';
 import {
+  SESSION_GROUP_VIRTUALIZE_THRESHOLD,
   collectSubtreeContainingId,
   computeNodeStructureKey,
   nodeHasPinnedMembershipChange,
@@ -32,6 +30,8 @@ import {
   resolveMenuOpenSessionId,
   selectFolderIdsForProjection,
   selectFolderRootNodes,
+  selectSessionGroupScrollElement,
+  selectSessionGroupVirtualizationMode,
 } from '../sessions/sessionNodeItemUtils';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 
@@ -44,6 +44,8 @@ import { CollapsedSessionActivityIndicator } from '../sessions/collapsedActivity
 import { useCollapsedSessionActivityState } from '../sessions/collapsedActivityState';
 import { SessionTreeItem, type SessionTreeItemProps } from '../sessions/SessionTreeItem';
 import { FolderDeleteConfirmDialog } from '../shell/ConfirmDialogs';
+import { useRegisterSessionRowOrder } from '../sessions/sessionRowOrder';
+import { buildSessionGroupRowModel, type SessionRowOrderItem } from '../sessions/sessionRowOrderUtils';
 
 type DeleteFolderConfirm = {
   scopeKey: string;
@@ -58,6 +60,12 @@ export type SessionGroupSectionProps = {
   groupKey: string;
   projectId?: string | null;
   hideGroupLabel?: boolean;
+  /**
+   * Base of this group's segment in the sidebar's logical row order. Callers
+   * assign disjoint ranges in document order (Recent/Chats < project
+   * sections) so selection can flatten every rendered list deterministically.
+   */
+  rowOrderBase: number;
   hasSessionSearchQuery: boolean;
   normalizedSessionSearchQuery: string;
   groupSearchDataByGroup: WeakMap<SessionGroup, GroupSearchData>;
@@ -88,7 +96,7 @@ export type SessionGroupSectionProps = {
    * Optional scroll container ref threaded from the outer ScrollableOverlay.
    * When provided, the virtualization effect can resolve the scrolling
    * ancestor synchronously and skip the getComputedStyle walk on every
-   * render of an expanded archived bucket.
+   * render of a virtualized group.
    */
   scrollContainerRef?: React.RefObject<HTMLElement | null>;
   folderRename: { scopeKey: string; folderId: string; draft: string } | null;
@@ -101,10 +109,7 @@ export type SessionGroupSectionProps = {
   | 'setOpenSidebarMenuKey'
   | 'allowReselect'
   | 'onSessionSelected'
-  | 'isSessionSearchOpen'
-  | 'sessionSearchQuery'
-  | 'setSessionSearchQuery'
-  | 'setIsSessionSearchOpen'
+  | 'resetSessionSearch'
   | 'deleteSessionConfirm'
   | 'setDeleteSessionConfirm'
   | 'startFolderRename'
@@ -227,7 +232,8 @@ const areGroupPropsEqual = (prev: SessionGroupSectionProps, next: SessionGroupSe
   // to reference equality (the cheap path) and only re-render when the
   // parent actually swapped something.
   return (
-    prev.hasSessionSearchQuery === next.hasSessionSearchQuery
+    prev.rowOrderBase === next.rowOrderBase
+    && prev.hasSessionSearchQuery === next.hasSessionSearchQuery
     && prev.normalizedSessionSearchQuery === next.normalizedSessionSearchQuery
     && prev.hideDirectoryControls === next.hideDirectoryControls
     && prev.showMoreGroupSessions === next.showMoreGroupSessions
@@ -247,10 +253,7 @@ const areGroupPropsEqual = (prev: SessionGroupSectionProps, next: SessionGroupSe
     && prev.setOpenSidebarMenuKey === next.setOpenSidebarMenuKey
     && prev.allowReselect === next.allowReselect
     && prev.onSessionSelected === next.onSessionSelected
-    && prev.isSessionSearchOpen === next.isSessionSearchOpen
-    && prev.sessionSearchQuery === next.sessionSearchQuery
-    && prev.setSessionSearchQuery === next.setSessionSearchQuery
-    && prev.setIsSessionSearchOpen === next.setIsSessionSearchOpen
+    && prev.resetSessionSearch === next.resetSessionSearch
     && prev.deleteSessionConfirm === next.deleteSessionConfirm
     && prev.setDeleteSessionConfirm === next.setDeleteSessionConfirm
     && prev.startFolderRename === next.startFolderRename
@@ -268,6 +271,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     groupKey,
     projectId,
     hideGroupLabel,
+    rowOrderBase,
     hasSessionSearchQuery,
     normalizedSessionSearchQuery,
     groupSearchDataByGroup,
@@ -553,58 +557,97 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   }), [subtreeContainsEditing, menuOpenSessionId, resolveNodeStructureKey]);
 
   const totalSessions = ungroupedSessions.length;
-  const visibleSessions = group.isArchivedBucket
-    ? ungroupedSessions
-    : hasSessionSearchQuery
+  // Stable identity matters for the row-order segment: the registration
+  // effect re-runs on reference changes, and an unsliced new array on every
+  // group render would rebuild the whole segment for no content change.
+  const visibleSessions = React.useMemo(
+    () => (group.isArchivedBucket || hasSessionSearchQuery
       ? ungroupedSessions
-      : ungroupedSessions.slice(0, nonArchivedVisibleCount);
+      : ungroupedSessions.slice(0, nonArchivedVisibleCount)),
+    [group.isArchivedBucket, hasSessionSearchQuery, nonArchivedVisibleCount, ungroupedSessions],
+  );
   const remainingCount = totalSessions - visibleSessions.length;
   const canShowLess = !group.isArchivedBucket && !hasSessionSearchQuery && totalSessions > maxVisible && remainingCount === 0;
 
-  // Virtualize archived buckets, which can grow into the thousands. Active
-  // groups retain normal flow because their incremental Show more control and
-  // the shared ancestor scroller cannot expose an unmounted virtual tail.
   // Hooks below MUST stay above the search-empty early-return so they fire in
   // the same order every render — rules-of-hooks.
-  const shouldVirtualize = group.isArchivedBucket === true
-    && !hasSessionSearchQuery
-    && visibleSessions.length >= ARCHIVED_VIRTUALIZE_THRESHOLD;
+  const rowModel = React.useMemo(() => buildSessionGroupRowModel({
+    isCollapsed,
+    hasSessionSearchQuery,
+    collapsedFolderIds,
+    expandedParents: effectiveExpandedParents,
+    archivedBucket: group.isArchivedBucket === true,
+    projectId,
+    groupDirectory: group.directory,
+    rootFolders,
+    childFoldersByParentId,
+    visibleSessions,
+  }), [
+    childFoldersByParentId,
+    collapsedFolderIds,
+    effectiveExpandedParents,
+    group.directory,
+    group.isArchivedBucket,
+    hasSessionSearchQuery,
+    isCollapsed,
+    projectId,
+    rootFolders,
+    visibleSessions,
+  ]);
+  useRegisterSessionRowOrder(rowOrderBase, rowModel.entries);
 
-  // Check if any parent node is expanded - expanded parents render their
-  // children inline, making them much taller than the fixed estimate.
-  // When expanded parents exist, increase bufferSize to cover the extra height.
+  // One virtualizer serves three shapes at the shared threshold: a searched
+  // list virtualizes row by row (`flat`) so a matched parent's whole subtree
+  // stays bounded; an unsearched archived bucket virtualizes whole root
+  // subtrees (`roots`); everything else stays in normal flow (small lists and
+  // the non-search active Show more flow).
+  const virtualizationMode = selectSessionGroupVirtualizationMode({
+    isArchivedBucket: group.isArchivedBucket === true,
+    hasSessionSearchQuery,
+    rootCount: visibleSessions.length,
+    flatRowCount: rowModel.items.length,
+  });
+  const shouldVirtualize = virtualizationMode !== 'none';
+
+  // Expanded parents render their children inline, making them much taller
+  // than the fixed estimate, so widen the window that stays mounted. Only the
+  // roots mode has inline children; flat items are single rows. While a
+  // search is active every parent renders expanded regardless of the
+  // persisted expansion set.
   const bucketTag = group.isArchivedBucket ? 'archived' : 'active';
-  const hasExpandedParent = shouldVirtualize && visibleSessions.some((node) => {
+  const hasExpandedParent = virtualizationMode === 'roots' && visibleSessions.some((node) => {
     if (node.children.length === 0) return false;
+    if (hasSessionSearchQuery) return true;
     const expansionKey = `project:${bucketTag}:${node.session.id}`;
     return effectiveExpandedParents.has(expansionKey);
   });
 
-  const archivedVirtualContainerRef = React.useRef<HTMLDivElement | null>(null);
-  const [archivedScrollEl, setArchivedScrollEl] = React.useState<HTMLElement | null>(null);
+  const virtualContainerRef = React.useRef<HTMLDivElement | null>(null);
+  const [virtualScrollEl, setVirtualScrollEl] = React.useState<HTMLElement | null>(null);
   // Offset of the virtual container from the scroll element's content origin.
   // virtua reads startMargin from Virtualizer options and uses it
   // to translate scrollTop into container-relative coordinates. Without this,
   // when the scroll element is an ancestor (the sidebar's ScrollableOverlay),
   // the virtualizer assumes the container starts at the top of the scroll
   // element and renders rows in the wrong subset / position.
-  const [archivedScrollMargin, setArchivedScrollMargin] = React.useState(0);
+  const [virtualScrollMargin, setVirtualScrollMargin] = React.useState(0);
 
   // Resolve the scrolling ancestor. When the parent has threaded a
   // `scrollContainerRef` (Layer 1.4), use it directly to skip the
-  // `getComputedStyle` walk on every render of an expanded archived
-  // bucket — the walk is one of the more expensive operations in the
-  // hot path because it forces a style recalc on every parent up the
-  // tree. Fall back to the legacy walk only when the ref is missing.
+  // `getComputedStyle` walk on every render of a virtualized group — the walk
+  // is one of the more expensive operations in the hot path because it forces
+  // a style recalc on every parent up the tree. Fall back to the legacy walk
+  // only when the ref is missing.
   //
-  // We also still re-run when the archive flips between expanded/collapsed,
-  // and on a ResizeObserver-driven layout change of the container, so a
-  // dep-gated effect that only fires when shouldVirtualizeArchived flips
-  // would miss the eventual mount and leave the scroll element null.
+  // We also still re-run when the group flips between virtualized and
+  // normal-flow rendering, and on a ResizeObserver-driven layout change of
+  // the container, so a dep-gated effect that only fires when
+  // `shouldVirtualize` flips would miss the eventual mount and leave the
+  // scroll element null.
   const [, setLayoutVersion] = React.useState(0);
   React.useEffect(() => {
     if (!shouldVirtualize) return;
-    const container = archivedVirtualContainerRef.current;
+    const container = virtualContainerRef.current;
     if (!container) return;
     if (!globalThis.ResizeObserver) return;
     const ro = new ResizeObserver(() => setLayoutVersion((v) => v + 1));
@@ -615,22 +658,22 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   // eslint-disable-next-line react-hooks/exhaustive-deps
   React.useLayoutEffect(() => {
     if (!shouldVirtualize) {
-      if (archivedScrollEl !== null) setArchivedScrollEl(null);
-      if (archivedScrollMargin !== 0) setArchivedScrollMargin(0);
+      if (virtualScrollEl !== null) setVirtualScrollEl(null);
+      if (virtualScrollMargin !== 0) setVirtualScrollMargin(0);
       return;
     }
-    const container = archivedVirtualContainerRef.current;
+    const container = virtualContainerRef.current;
     if (!container) {
-      // Bucket still collapsed — body not mounted. We'll re-run on the
-      // render that mounts it.
+      // Group body not mounted yet — we'll re-run on the render that mounts
+      // it.
       return;
     }
-    let scrollEl: HTMLElement | null = archivedScrollEl;
+    let scrollEl: HTMLElement | null = virtualScrollEl;
     const providedScrollEl = scrollContainerRef?.current ?? null;
     if (providedScrollEl && providedScrollEl.contains(container)) {
       scrollEl = providedScrollEl;
-      if (scrollEl !== archivedScrollEl) {
-        setArchivedScrollEl(scrollEl);
+      if (scrollEl !== virtualScrollEl) {
+        setVirtualScrollEl(scrollEl);
         return;
       }
     } else if (!scrollEl || !scrollEl.contains(container)) {
@@ -645,8 +688,8 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
         }
         el = el.parentElement;
       }
-      if (scrollEl !== archivedScrollEl) {
-        setArchivedScrollEl(scrollEl);
+      if (scrollEl !== virtualScrollEl) {
+        setVirtualScrollEl(scrollEl);
         return;
       }
     }
@@ -654,32 +697,43 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     const offset = container.getBoundingClientRect().top
       - scrollEl.getBoundingClientRect().top
       + scrollEl.scrollTop;
-    setArchivedScrollMargin((prev) => (Math.abs(prev - offset) < 1 ? prev : offset));
+    setVirtualScrollMargin((prev) => (Math.abs(prev - offset) < 1 ? prev : offset));
   });
 
   // The scroll element is an ANCESTOR of this section (the sidebar's
   // ScrollableOverlay), so scrollMargin translates its scrollTop into
   // container-relative coordinates — the tanstack equivalent of virtua's
   // startMargin this replaces.
-  // Enable ONLY once the ancestor scroll element is resolved. While the
-  // virtualizer is disabled the core resets its cached scroll offset, so the
-  // first enabled read takes initialOffset() from the LIVE scrollTop below —
-  // making the core's attach-time scrollTo target the current position (a
-  // visual no-op) instead of a stale 0 that reset the sidebar to the top.
+  // Enable ONLY once a scroll element is known. The parent-threaded ref is
+  // already populated after the first mount, so readiness is true on the same
+  // commit that turns virtualization on; the locally resolved element from
+  // the layout effect remains the fallback source (and wins once set). While
+  // the virtualizer is disabled the core resets its cached scroll offset, so
+  // the first enabled read takes initialOffset() from the LIVE scrollTop
+  // below — making the core's attach-time scrollTo target the current position
+  // (a visual no-op) instead of a stale 0 that reset the sidebar to the top.
   // The core only learns the offset from scroll events after that, so this
   // initial seeding is what makes the first render window correct too.
-  const virtualizerReady = shouldVirtualize && archivedScrollEl !== null;
+  const providedScrollElement = scrollContainerRef?.current ?? null;
+  const effectiveScrollElement = selectSessionGroupScrollElement({
+    providedScrollElement,
+    resolvedScrollElement: virtualScrollEl,
+  });
+  const virtualizerReady = shouldVirtualize && effectiveScrollElement !== null;
+  const virtualItemCount = virtualizationMode === 'flat' ? rowModel.items.length : visibleSessions.length;
   const sessionVirtualizer = useVirtualizer<HTMLElement, HTMLDivElement>({
-    count: visibleSessions.length,
+    count: virtualItemCount,
     enabled: virtualizerReady,
-    getScrollElement: () => archivedScrollEl,
-    initialOffset: () => archivedScrollEl?.scrollTop ?? 0,
-    estimateSize: () => ARCHIVED_ROW_ESTIMATE_PX,
-    // Expanded parents render children inline and dwarf the row estimate;
-    // widen the window so their extra height stays covered.
+    getScrollElement: () => effectiveScrollElement,
+    initialOffset: () => effectiveScrollElement?.scrollTop ?? 0,
+    estimateSize: () => ROW_ESTIMATE_PX,
+    // Roots mode can inline expanded parent subtrees, which dwarf the row
+    // estimate; flat items are single rows. Widen the window only for roots.
     overscan: hasExpandedParent ? 20 : 8,
-    scrollMargin: archivedScrollMargin,
-    getItemKey: (index) => visibleSessions[index]?.session.id ?? index,
+    scrollMargin: virtualScrollMargin,
+    getItemKey: (index) => (virtualizationMode === 'flat'
+      ? rowModel.items[index]?.node.session.id ?? index
+      : visibleSessions[index]?.session.id ?? index),
   });
 
   // Hooks below MUST stay above the search-empty early-return so they
@@ -850,10 +904,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                setOpenSidebarMenuKey={props.setOpenSidebarMenuKey}
                allowReselect={props.allowReselect}
                onSessionSelected={props.onSessionSelected}
-               isSessionSearchOpen={props.isSessionSearchOpen}
-               sessionSearchQuery={props.sessionSearchQuery}
-               setSessionSearchQuery={props.setSessionSearchQuery}
-               setIsSessionSearchOpen={props.setIsSessionSearchOpen}
+               resetSessionSearch={props.resetSessionSearch}
                deleteSessionConfirm={props.deleteSessionConfirm}
               setDeleteSessionConfirm={props.setDeleteSessionConfirm}
               startFolderRename={props.startFolderRename}
@@ -946,7 +997,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     </span>
   ) : null;
 
-  const renderSessionNode = (node: SessionNode): React.ReactNode => <SessionTreeItem
+  const renderSessionRow = (node: SessionNode, depth?: number, renderChildren?: boolean): React.ReactNode => <SessionTreeItem
     key={node.session.id}
     node={node}
     pinnedSessionIds={pinnedSessionIds}
@@ -960,6 +1011,8 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     openSidebarMenuKey={openSidebarMenuKey}
     mobileVariant={mobileVariant}
     alwaysShowActions={alwaysShowActions}
+    depth={depth}
+    renderChildren={renderChildren}
     groupDirectory={group.directory}
     projectId={projectId}
     archivedBucket={group.isArchivedBucket === true}
@@ -970,16 +1023,18 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
      setOpenSidebarMenuKey={props.setOpenSidebarMenuKey}
      allowReselect={props.allowReselect}
      onSessionSelected={props.onSessionSelected}
-     isSessionSearchOpen={props.isSessionSearchOpen}
-     sessionSearchQuery={props.sessionSearchQuery}
-     setSessionSearchQuery={props.setSessionSearchQuery}
-     setIsSessionSearchOpen={props.setIsSessionSearchOpen}
+     resetSessionSearch={props.resetSessionSearch}
      deleteSessionConfirm={props.deleteSessionConfirm}
      setDeleteSessionConfirm={props.setDeleteSessionConfirm}
      startFolderRename={props.startFolderRename}
      setCopiedSessionId={props.setCopiedSessionId}
      startSessionWorktreeMenuLoad={props.startSessionWorktreeMenuLoad}
    />;
+
+  const renderSessionNode = (node: SessionNode): React.ReactNode => renderSessionRow(node);
+  // Flat search rows render one session each: children are separate virtual
+  // items, and `depth` preserves the tree indentation.
+  const renderFlatRow = (item: SessionRowOrderItem): React.ReactNode => renderSessionRow(item.node, item.depth, false);
 
   const body = (
     <SessionFolderDndScope
@@ -1002,14 +1057,20 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     >
       {renderFolderItems()}
       {shouldVirtualize ? (
-        <div ref={archivedVirtualContainerRef}>
+        <div ref={virtualContainerRef}>
           {!virtualizerReady ? (
-            // At most one pre-paint frame: this wrapper must exist for the
-            // layout effect to resolve the ancestor scroll element, which
-            // re-renders synchronously before paint. Rendering the plain rows
+            // No scroll element yet: the initial mount before the parent ref
+            // is committed, or a section without a provided ref (e.g. the
+            // chats section) until the ancestor walk resolves one. This
+            // wrapper must exist for that resolution; rendering plain rows
             // meanwhile keeps the container's height real so the scroller
-            // never collapses/clamps during the flip.
-            visibleSessions.map(renderSessionNode)
+            // never collapses/clamps during the flip. Flat mode caps those
+            // plain rows at the threshold so the first commit of a broad
+            // search cannot mount thousands of rows; the layout effect flips
+            // to the virtual window before paint.
+            virtualizationMode === 'flat'
+              ? rowModel.items.slice(0, SESSION_GROUP_VIRTUALIZE_THRESHOLD).map(renderFlatRow)
+              : visibleSessions.map(renderSessionNode)
           ) : (
           <div style={{ height: sessionVirtualizer.getTotalSize(), position: 'relative' }}>
             {/* Absolutely positioned rows (canonical tanstack layout): with
@@ -1018,7 +1079,8 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                 below the group. Per-item offsets cannot drift. item.start
                 includes scrollMargin (ancestor-scroll offset), so subtract it. */}
             {sessionVirtualizer.getVirtualItems().map((item) => {
-              const node = visibleSessions[item.index];
+              const flatItem = virtualizationMode === 'flat' ? rowModel.items[item.index] : null;
+              const node = virtualizationMode === 'flat' ? flatItem?.node : visibleSessions[item.index];
               if (!node) return null;
               return (
                 <div
@@ -1039,10 +1101,10 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                     top: 0,
                     left: 0,
                     width: '100%',
-                    transform: `translateY(${item.start - archivedScrollMargin}px)`,
+                    transform: `translateY(${item.start - virtualScrollMargin}px)`,
                   }}
                 >
-                  {renderSessionNode(node)}
+                  {flatItem ? renderFlatRow(flatItem) : renderSessionNode(node)}
                 </div>
               );
             })}

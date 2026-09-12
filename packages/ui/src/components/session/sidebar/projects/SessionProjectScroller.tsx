@@ -51,10 +51,7 @@ type SessionProjectScrollerGroupProps = Pick<SessionGroupSectionProps,
   | 'toggleParent'
   | 'allowReselect'
   | 'onSessionSelected'
-  | 'isSessionSearchOpen'
-  | 'sessionSearchQuery'
-  | 'setSessionSearchQuery'
-  | 'setIsSessionSearchOpen'
+  | 'resetSessionSearch'
   | 'deleteSessionConfirm'
   | 'setDeleteSessionConfirm'
   | 'startFolderRename'
@@ -294,10 +291,11 @@ function SessionProjectScrollerComponent(props: Props): React.ReactNode {
             if (!descriptors.length) {
               return <div className="py-1 text-left typography-micro text-muted-foreground">{t('sessions.sidebar.empty.noSessions.title')}</div>;
             }
-            return descriptors.map(({ group, groupKey, projectId, hideGroupLabel }) => {
+            const sectionOrderBase = 1000 + renderedSections.indexOf(activeSection) * 1000;
+            return descriptors.map(({ group, groupKey, projectId, hideGroupLabel }, groupIndex) => {
               return (
                 <React.Fragment key={groupKey}>
-                  <SessionGroupSection {...model.groupProps} {...actions.group} editingId={model.state.editingId} openSidebarMenuKey={model.state.openSidebarMenuKey} setOpenSidebarMenuKey={model.state.setOpenSidebarMenuKey} group={group} groupKey={groupKey} projectId={projectId} hideGroupLabel={hideGroupLabel} visibleSessionCount={model.state.visibleSessionCountByGroup.get(groupKey)} compactBodyPadding scrollContainerRef={scrollContainerRef} />
+                  <SessionGroupSection {...model.groupProps} {...actions.group} editingId={model.state.editingId} openSidebarMenuKey={model.state.openSidebarMenuKey} setOpenSidebarMenuKey={model.state.setOpenSidebarMenuKey} group={group} groupKey={groupKey} projectId={projectId} hideGroupLabel={hideGroupLabel} rowOrderBase={sectionOrderBase + groupIndex} visibleSessionCount={model.state.visibleSessionCountByGroup.get(groupKey)} compactBodyPadding scrollContainerRef={scrollContainerRef} />
                 </React.Fragment>
               );
             });
@@ -320,7 +318,7 @@ function SessionProjectScrollerComponent(props: Props): React.ReactNode {
           }}
         >
             <SortableContext items={renderedSections.map((section) => section.project.id)} strategy={verticalListSortingStrategy}>
-            {renderedSections.map((section) => {
+            {renderedSections.map((section, sectionIndex) => {
               const project = section.project;
               const projectKey = project.id;
               const projectLabel = getProjectLabel(project, view.homeDirectory);
@@ -378,6 +376,11 @@ function SessionProjectScrollerComponent(props: Props): React.ReactNode {
                         const nestedGroups = rootGroup
                           ? orderedGroups.filter((group) => group.id !== rootGroup.id)
                           : orderedGroups;
+                        // Each rendered group owns one slot in this section's
+                        // row-order segment: root first, then the nested groups
+                        // in their actual render order.
+                        const sectionOrderBase = 1000 + sectionIndex * 1000;
+                        const nestedGroupOrderBase = sectionOrderBase + (rootGroup ? 1 : 0);
                         return (
                           <DndContext
                             sensors={groupSensors}
@@ -401,13 +404,13 @@ function SessionProjectScrollerComponent(props: Props): React.ReactNode {
                             {/* Root/flat sessions render directly under the
                                 project zone header; worktree and archived
                                 groups keep their own slim sortable sub-header. */}
-                              {rootGroup ? <SessionGroupSection {...model.groupProps} {...actions.group} editingId={model.state.editingId} openSidebarMenuKey={model.state.openSidebarMenuKey} setOpenSidebarMenuKey={model.state.setOpenSidebarMenuKey} group={rootGroup} groupKey={`${projectKey}:${rootGroup.id}`} projectId={projectKey} hideGroupLabel visibleSessionCount={model.state.visibleSessionCountByGroup.get(`${projectKey}:${rootGroup.id}`)} scrollContainerRef={scrollContainerRef} /> : null}
+                              {rootGroup ? <SessionGroupSection {...model.groupProps} {...actions.group} editingId={model.state.editingId} openSidebarMenuKey={model.state.openSidebarMenuKey} setOpenSidebarMenuKey={model.state.setOpenSidebarMenuKey} group={rootGroup} groupKey={`${projectKey}:${rootGroup.id}`} projectId={projectKey} hideGroupLabel rowOrderBase={sectionOrderBase} visibleSessionCount={model.state.visibleSessionCountByGroup.get(`${projectKey}:${rootGroup.id}`)} scrollContainerRef={scrollContainerRef} /> : null}
                             <SortableContext items={nestedGroups.map((group) => group.id)} strategy={verticalListSortingStrategy}>
-                              {nestedGroups.map((group) => {
+                              {nestedGroups.map((group, groupIndex) => {
                                 const groupKey = `${projectKey}:${group.id}`;
                                 return (
                                    <SortableGroupItem key={group.id} id={group.id} disabled={isInlineEditing}>
-                                      {(dragHandleProps) => <SessionGroupSection {...model.groupProps} {...actions.group} editingId={model.state.editingId} openSidebarMenuKey={model.state.openSidebarMenuKey} setOpenSidebarMenuKey={model.state.setOpenSidebarMenuKey} group={group} groupKey={groupKey} projectId={projectKey} visibleSessionCount={model.state.visibleSessionCountByGroup.get(groupKey)} dragHandleProps={dragHandleProps} scrollContainerRef={scrollContainerRef} />}
+                                      {(dragHandleProps) => <SessionGroupSection {...model.groupProps} {...actions.group} editingId={model.state.editingId} openSidebarMenuKey={model.state.openSidebarMenuKey} setOpenSidebarMenuKey={model.state.setOpenSidebarMenuKey} group={group} groupKey={groupKey} projectId={projectKey} rowOrderBase={nestedGroupOrderBase + groupIndex} visibleSessionCount={model.state.visibleSessionCountByGroup.get(groupKey)} dragHandleProps={dragHandleProps} scrollContainerRef={scrollContainerRef} />}
                                   </SortableGroupItem>
                                 );
                               })}

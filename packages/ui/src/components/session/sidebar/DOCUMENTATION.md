@@ -77,6 +77,36 @@ ID search does not include archived sessions. `ArchiveView` applies the same
 exact-ID rule to its own archived list. Other queries keep each view's existing
 matching and ordering. Search does not fetch sessions or broaden list membership.
 
+## Selection order
+
+Selection order and bulk scope come from the render model, not the DOM. Each
+rendered list registers its rows with `sessions/sessionRowOrder.tsx` in the
+order it renders them — managed Chats and Recent sections above the project
+sections, in that order — and shift-range selection, Ctrl/Cmd+A, and the bulk
+archive/delete scope read that registry. Rows that virtualization keeps
+unmounted are included because the entries come from the model, registration
+runs in layout effects so the registry matches the committed tree before any
+click, and registering never triggers a render.
+
+## Row virtualization
+
+`SessionGroupSection` owns the sidebar's only virtualizer
+(`@tanstack/react-virtual`). `selectSessionGroupVirtualizationMode`
+(`sessions/sessionNodeItemUtils.ts`) picks the mode at the shared 50-row
+threshold: a searched group with 50+ retained rows virtualizes each row
+individually (`flat`), so a directly matched parent's hundreds of descendants
+stay bounded too; otherwise an unsearched archived bucket with 50+ roots
+virtualizes whole root subtrees with their expanded children inline (`roots`);
+everything else keeps normal flow (the non-search active flow needs it for the
+incremental Show more control).
+Flat rows carry their DFS depth and render without children, so content,
+order, and indentation match the tree. The pre-ready fallback renders plain
+rows for roots mode and at most one threshold batch for flat mode; the layout
+effect switches to the virtual window before paint. Folders still render above
+the virtual list in normal flow — folder contents are not flattened in this
+step, and the flat model covers the ungrouped region. The selection registry
+still carries every model row.
+
 ## Loading rules
 
 - Always publish every known project root and worktree directory. Collapse/visibility changes priority only; they do not opt a directory out of authoritative refresh.

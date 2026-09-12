@@ -86,6 +86,15 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const [searchMatchCount, setSearchMatchCount] = React.useState(0);
   const sessionSearchContainerRef = React.useRef<HTMLDivElement | null>(null);
   const sessionSearchInputRef = React.useRef<HTMLInputElement | null>(null);
+  // The list subtree asks to reset search through this one stable intent
+  // callback instead of receiving the raw query and setters, so typing a
+  // character cannot invalidate the memoized list below the header. Functional
+  // updates keep the callback dependency-free while still avoiding a state
+  // change (and a re-render) when search is already cleared and closed.
+  const resetSessionSearch = React.useCallback(() => {
+    setSessionSearchQuery((current) => (current.length === 0 ? current : ''));
+    setIsSessionSearchOpen((current) => (current ? false : current));
+  }, []);
   const [editingProjectDialogId, setEditingProjectDialogId] = React.useState<string | null>(null);
   const safeStorage = React.useMemo(() => getDeferredSafeStorage(), []);
   const [projectRepoStatus, setProjectRepoStatus] = React.useState<Map<string, boolean | null>>(new Map());
@@ -398,6 +407,10 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     sessionEvents.requestDirectoryDialog();
   }, []);
 
+  const openWorktreesPage = React.useCallback((projectId: string) => {
+    if (mobileVariant) setSessionSwitcherOpen(false);
+    setWorktreesPageProjectId(projectId);
+  }, [mobileVariant, setSessionSwitcherOpen, setWorktreesPageProjectId]);
 
   const normalizedProjects = React.useMemo(() => {
     return projects.flatMap((project) => {
@@ -434,11 +447,16 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   });
 
   const isSessionsLoading = useSessionUIStore((state) => state.isLoading);
-  // Keep last-known repo status to avoid UI jiggling during project switch
+  // Keep last-known repo status to avoid UI jiggling during project switch.
+  // Exposing it as a boolean keeps the memoized topology prop stable: even
+  // when the project leaves the status map, the value is the same primitive.
   const lastRepoStatusRef = React.useRef(false);
   if (activeProjectId && projectRepoStatus.has(activeProjectId)) {
     lastRepoStatusRef.current = Boolean(projectRepoStatus.get(activeProjectId));
   }
+  const lastRepoStatus = activeProjectId && projectRepoStatus.has(activeProjectId)
+    ? Boolean(projectRepoStatus.get(activeProjectId))
+    : lastRepoStatusRef.current;
 
   const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
@@ -594,6 +612,67 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     openNewSessionDraft();
   }, [mobileVariant, openNewSessionDraft, setSessionSwitcherOpen]);
 
+  // The three collection props objects are the memo boundary for the session
+  // tree. Keeping them referentially stable across unrelated sidebar renders
+  // (the raw search keystroke is the hot one) lets React.memo below bail out
+  // instead of rebuilding every project, group and row.
+  const collectionTopology = React.useMemo(() => ({
+    projects: sortedProjects,
+    availableWorktreesByProject,
+    knownDirectories: knownSessionDirectories,
+    isVSCode,
+    worktreeMetadata,
+    gitBranches,
+    projectRepoStatus,
+    projectRootBranches,
+    lastRepoStatus,
+  }), [availableWorktreesByProject, gitBranches, isVSCode, knownSessionDirectories, lastRepoStatus, projectRepoStatus, projectRootBranches, sortedProjects, worktreeMetadata]);
+
+  const collectionView = React.useMemo(() => ({
+    isVisible,
+    hasSessionSearchQuery,
+    normalizedSessionSearchQuery,
+    activeProjectId,
+    showInlineArchived,
+    useGroupedSections,
+    homeDirectory,
+    mobileVariant,
+    hideDirectoryControls,
+    showOnlyMainWorkspace,
+    isDesktopShellRuntime,
+    stickyZoneHeaders,
+    projectSortOrder,
+    emptyState,
+    searchEmptyState,
+    isSessionsLoading,
+    isWorktreeTopologyLoading,
+    unresolvedWorktreeProjectPaths,
+    projectView: projectView.state,
+    onSearchMatchCountChange: setSearchMatchCount,
+  }), [activeProjectId, emptyState, hasSessionSearchQuery, hideDirectoryControls, homeDirectory, isDesktopShellRuntime, isSessionsLoading, isVisible, isWorktreeTopologyLoading, mobileVariant, normalizedSessionSearchQuery, projectSortOrder, projectView.state, searchEmptyState, showInlineArchived, showOnlyMainWorkspace, stickyZoneHeaders, unresolvedWorktreeProjectPaths, useGroupedSections]);
+
+  const collectionActions = React.useMemo(() => ({
+    rowActions: {
+      allowReselect,
+      onSessionSelected,
+      resetSessionSearch,
+    },
+    alwaysShowActions: alwaysShowSidebarActions,
+    notifyOnSubtasks,
+    setActiveProjectIdOnly,
+    setSessionSwitcherOpen,
+    openNewSessionDraft: openNewSessionDraftFromTree,
+    openNewWorktreeDialog,
+    openWorktreesPage,
+    openProjectEditDialog: setEditingProjectDialogId,
+    removeProject,
+    reorderProjects,
+    startSessionWorktreeMenuLoad: handleSessionWorktreeMenuLoad,
+    initialActiveSessionByProject,
+    persistActiveSessionByProject,
+    projectViewActions: projectView.actions,
+  }), [allowReselect, alwaysShowSidebarActions, handleSessionWorktreeMenuLoad, initialActiveSessionByProject, notifyOnSubtasks, onSessionSelected, openNewSessionDraftFromTree, openNewWorktreeDialog, openWorktreesPage, persistActiveSessionByProject, projectView.actions, removeProject, reorderProjects, resetSessionSearch, setActiveProjectIdOnly, setSessionSwitcherOpen]);
+
   return (
     // One shared tooltip provider for the whole sidebar, matching the opencode
     // sidebar feel: 400ms before the first tooltip opens, instant close on
@@ -641,66 +720,9 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       />
 
       <SessionProjectCollection
-        topology={{
-          projects: sortedProjects,
-          availableWorktreesByProject,
-          knownDirectories: knownSessionDirectories,
-          isVSCode,
-          worktreeMetadata,
-          gitBranches,
-          projectRepoStatus,
-          projectRootBranches,
-          lastRepoStatus: lastRepoStatusRef.current,
-        }}
-        view={{
-          isVisible,
-          hasSessionSearchQuery,
-          normalizedSessionSearchQuery,
-          activeProjectId,
-          showInlineArchived,
-          useGroupedSections,
-          homeDirectory,
-          mobileVariant,
-          hideDirectoryControls,
-          showOnlyMainWorkspace,
-          isDesktopShellRuntime,
-          stickyZoneHeaders,
-          projectSortOrder,
-          emptyState,
-          searchEmptyState,
-          isSessionsLoading,
-          isWorktreeTopologyLoading,
-          unresolvedWorktreeProjectPaths,
-          projectView: projectView.state,
-          onSearchMatchCountChange: setSearchMatchCount,
-        }}
-        actions={{
-          rowActions: {
-            allowReselect,
-            onSessionSelected,
-            isSessionSearchOpen,
-            sessionSearchQuery,
-            setSessionSearchQuery,
-            setIsSessionSearchOpen,
-          },
-          alwaysShowActions: alwaysShowSidebarActions,
-          notifyOnSubtasks,
-          setActiveProjectIdOnly,
-          setSessionSwitcherOpen,
-          openNewSessionDraft: openNewSessionDraftFromTree,
-          openNewWorktreeDialog,
-          openWorktreesPage: (projectId) => {
-            if (mobileVariant) setSessionSwitcherOpen(false);
-            setWorktreesPageProjectId(projectId);
-          },
-          openProjectEditDialog: setEditingProjectDialogId,
-          removeProject,
-          reorderProjects,
-          startSessionWorktreeMenuLoad: handleSessionWorktreeMenuLoad,
-          initialActiveSessionByProject,
-          persistActiveSessionByProject,
-          projectViewActions: projectView.actions,
-        }}
+        topology={collectionTopology}
+        view={collectionView}
+        actions={collectionActions}
       />
 
       <SidebarFooter

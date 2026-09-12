@@ -31,6 +31,7 @@ import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import type { DeleteSessionConfirmState } from '../sessions/useSessionActions';
 import { useExpandedParents } from '../sessions/useExpandedParents';
 import { SessionGroupSection } from '../projects/SessionGroupSection';
+import { SessionRowOrderProvider } from '../sessions/sessionRowOrder';
 import { CHAT_DRAFT_PROJECT_ID, getChatsRootForHome, getChatsRootFromDirectory } from '@/lib/chatDirectories';
 import { isCapacitorApp } from '@/lib/platform';
 
@@ -100,10 +101,7 @@ type SessionProjectCollectionProps = {
     rowActions: {
       allowReselect: boolean;
       onSessionSelected?: (sessionId: string) => void;
-      isSessionSearchOpen: boolean;
-      sessionSearchQuery: string;
-      setSessionSearchQuery: (value: string) => void;
-      setIsSessionSearchOpen: (open: boolean) => void;
+      resetSessionSearch: () => void;
     };
     alwaysShowActions: boolean;
     notifyOnSubtasks: boolean;
@@ -379,10 +377,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     toggleParent,
     allowReselect: rowActions.allowReselect,
     onSessionSelected: rowActions.onSessionSelected,
-    isSessionSearchOpen: rowActions.isSessionSearchOpen,
-    sessionSearchQuery: rowActions.sessionSearchQuery,
-    setSessionSearchQuery: rowActions.setSessionSearchQuery,
-    setIsSessionSearchOpen: rowActions.setIsSessionSearchOpen,
+    resetSessionSearch: rowActions.resetSessionSearch,
     deleteSessionConfirm,
     setDeleteSessionConfirm,
     startFolderRename,
@@ -443,6 +438,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       groupKey="managed-chats"
       projectId={null}
       hideGroupLabel
+      rowOrderBase={0}
       sessionBatchSize={20}
       scrollContainerRef={undefined}
       openSidebarMenuKey={openSidebarMenuKey}
@@ -481,10 +477,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       setOpenSidebarMenuKey={setOpenSidebarMenuKey}
       allowReselect={rowActions.allowReselect}
       onSessionSelected={rowActions.onSessionSelected}
-      isSessionSearchOpen={rowActions.isSessionSearchOpen}
-      sessionSearchQuery={rowActions.sessionSearchQuery}
-      setSessionSearchQuery={rowActions.setSessionSearchQuery}
-      setIsSessionSearchOpen={rowActions.setIsSessionSearchOpen}
+      resetSessionSearch={rowActions.resetSessionSearch}
       deleteSessionConfirm={deleteSessionConfirm}
       setDeleteSessionConfirm={setDeleteSessionConfirm}
       startFolderRename={startFolderRename}
@@ -618,7 +611,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     scrollerActions.renderProjectStatusIndicator,
     setSingleProjectId,
   ]);
-  return <>
+  return <SessionRowOrderProvider>
     <SidebarTerminalActivity />
     <ProjectSessionSelectionEffect
       projectSections={projectSections}
@@ -642,7 +635,13 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       isInlineEditing={editingId !== null}
       startFolderRename={startFolderRename}
     />
-  </>;
+  </SessionRowOrderProvider>;
 };
 
-export const SessionProjectCollection: React.FC<SessionProjectCollectionProps> = (props) => props.view.isVisible ? <VisibleSessionProjects {...props} /> : null;
+// The sidebar memoizes topology/view/actions, so the default shallow
+// comparator is the intended boundary: a prop change that can alter the tree
+// re-renders it, while an unrelated sidebar render (a raw search keystroke
+// before the debounce) bails out.
+export const SessionProjectCollection = React.memo(function SessionProjectCollection(props: SessionProjectCollectionProps) {
+  return props.view.isVisible ? <VisibleSessionProjects {...props} /> : null;
+});

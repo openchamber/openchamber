@@ -25,10 +25,12 @@ type Args = {
   mobileVariant: boolean;
   allowReselect: boolean;
   onSessionSelected?: (sessionId: string) => void;
-  isSessionSearchOpen: boolean;
-  sessionSearchQuery: string;
-  setSessionSearchQuery: (value: string) => void;
-  setIsSessionSearchOpen: (open: boolean) => void;
+  /**
+   * The sidebar owns raw search state; rows only ask it to reset. Passing the
+   * raw query and setters through every row made each keystroke rebuild every
+   * row callback, which defeated the row memo comparators before the debounce.
+   */
+  resetSessionSearch: () => void;
   descendantIds: readonly string[];
   showDeletionDialog: boolean;
   setDeleteSessionConfirm: (value: DeleteSessionConfirmState) => void;
@@ -66,10 +68,7 @@ export const useSessionActions = (args: Args) => {
     mobileVariant,
     allowReselect,
     onSessionSelected,
-    isSessionSearchOpen,
-    sessionSearchQuery,
-    setSessionSearchQuery,
-    setIsSessionSearchOpen,
+    resetSessionSearch,
     descendantIds,
     showDeletionDialog,
     setDeleteSessionConfirm,
@@ -92,13 +91,6 @@ export const useSessionActions = (args: Args) => {
       // Selecting a session always leaves any full-page surface, even when
       // the session is already the current one (no store transition fires).
       useUIStore.getState().closeMainSurfaces();
-      const resetSessionSearch = () => {
-        if (!isSessionSearchOpen && sessionSearchQuery.length === 0) {
-          return;
-        }
-        setSessionSearchQuery('');
-        setIsSessionSearchOpen(false);
-      };
 
       if (mobileVariant) {
         setSessionSwitcherOpen(false);
@@ -116,7 +108,7 @@ export const useSessionActions = (args: Args) => {
       onSessionSelected?.(sessionId);
       resetSessionSearch();
     },
-    [allowReselect, isSessionSearchOpen, mobileVariant, onSessionSelected, sessionSearchQuery, setCurrentSession, setIsSessionSearchOpen, setSessionSearchQuery, setSessionSwitcherOpen],
+    [allowReselect, mobileVariant, onSessionSelected, resetSessionSearch, setCurrentSession, setSessionSwitcherOpen],
   );
 
   const handleSessionDoubleClick = React.useCallback((sessionId: string, sessionTitle: string) => {

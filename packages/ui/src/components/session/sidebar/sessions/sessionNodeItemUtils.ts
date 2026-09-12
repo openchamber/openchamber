@@ -274,6 +274,50 @@ export const selectFolderIdsForProjection = (
   return new Set(entries.filter((entry) => keptIds.has(entry.id)).map((entry) => entry.id));
 };
 
+/**
+ * Row count at which a session group switches to the shared virtualizer.
+ * Archived buckets routinely grow into the hundreds/thousands; active groups
+ * virtualize only while a search lists every match (their non-search flow
+ * keeps the incremental Show more control in normal flow).
+ */
+export const SESSION_GROUP_VIRTUALIZE_THRESHOLD = 50;
+
+type SessionGroupVirtualizationMode = 'none' | 'roots' | 'flat';
+
+/**
+ * Pick the group's virtualization mode at the shared row threshold:
+ * - `flat` when a search retains 50+ rows, so every row of a matched parent's
+ *   subtree becomes its own virtual item;
+ * - `roots` when an archived bucket has 50+ root subtrees (no search);
+ * - `none` otherwise — small lists and the non-search active flow, which
+ *   keeps its incremental Show more control in normal flow.
+ */
+export const selectSessionGroupVirtualizationMode = (input: {
+  isArchivedBucket: boolean;
+  hasSessionSearchQuery: boolean;
+  rootCount: number;
+  flatRowCount: number;
+  threshold?: number;
+}): SessionGroupVirtualizationMode => {
+  const threshold = input.threshold ?? SESSION_GROUP_VIRTUALIZE_THRESHOLD;
+  if (input.hasSessionSearchQuery && input.flatRowCount >= threshold) return 'flat';
+  if (input.isArchivedBucket && input.rootCount >= threshold) return 'roots';
+  return 'none';
+};
+
+/**
+ * The scroll element a group virtualizer should use: the locally resolved one
+ * wins once set (it may come from the ancestor walk when no ref is threaded),
+ * otherwise the element threaded in by the scroller. Readiness can therefore
+ * be true on the same commit that turns virtualization on whenever the parent
+ * has already mounted its scroller, instead of waiting a commit for the
+ * layout-effect state update.
+ */
+export const selectSessionGroupScrollElement = <T>(input: {
+  providedScrollElement: T | null;
+  resolvedScrollElement: T | null;
+}): T | null => input.resolvedScrollElement ?? input.providedScrollElement;
+
 const sessionObjectVersions = new WeakMap<object, number>();
 let nextSessionObjectVersion = 1;
 
