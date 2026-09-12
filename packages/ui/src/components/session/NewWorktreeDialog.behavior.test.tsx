@@ -22,7 +22,7 @@ let selectGitHubItem: ((selection: GitHubSelection) => void) | null = null;
 const projectStoreState = { getActiveProject: () => project };
 const githubAuthState = { status: { connected: true }, hasChecked: true };
 const linearAuthState = { status: null, hasChecked: true };
-const uiState = { isMobile: false };
+const uiState = { isMobile: false, favoriteModels: [], recentModels: [], hiddenModels: [] };
 const gitState = { fetchBranches: async () => undefined };
 
 const selectProjectState = <T,>(selector: (state: typeof projectStoreState) => T): T => selector(projectStoreState);
@@ -58,6 +58,7 @@ mock.module('@/components/ui', () => ({
 mock.module('@/components/ui/dropdown-menu', () => ({
   DropdownMenu: passthrough,
   DropdownMenuContent: passthrough,
+  DropdownMenuItem: passthrough,
   DropdownMenuTrigger: passthrough,
 }));
 
@@ -74,6 +75,7 @@ mock.module('@/components/ui/command', () => ({
 mock.module('@/components/ui/sortable-tabs-strip', () => ({ SortableTabsStrip: () => null }));
 mock.module('@/components/ui/MobileOverlayPanel', () => ({ MobileOverlayPanel: passthrough }));
 mock.module('@/components/icon/Icon', () => ({ Icon: () => null }));
+mock.module('@/components/ui/ProviderLogo', () => ({ ProviderLogo: () => null }));
 mock.module('@/components/ui/dropdown-trigger', () => ({ dropdownTriggerVariants: () => '' }));
 mock.module('@/lib/utils', () => ({ cn: (...values: Array<string | false | null | undefined>) => values.filter(Boolean).join(' ') }));
 
@@ -106,6 +108,7 @@ mock.module('@/stores/useGitStore', () => ({
   useGitStore: selectGitState,
 }));
 mock.module('@/lib/worktrees/worktreeManager', () => ({
+  removeProjectWorktree: async () => undefined,
   validateWorktreeCreate: async () => ({ ok: true, errors: [] }),
 }));
 mock.module('@/lib/worktrees/worktreeCreate', () => ({ createWorktreeWithDefaults: async () => null }));
@@ -118,7 +121,7 @@ mock.module('@/lib/sharedTrustConfirmation', () => ({
   resolveWorktreeSetupCommands: async () => [],
 }));
 mock.module('@/lib/worktrees/worktreeStatus', () => ({ getRootBranch: async () => 'main' }));
-mock.module('@/lib/git/branchNameGenerator', () => ({ generateBranchSlug: () => 'draft-name' }));
+mock.module('@/lib/git/branchNameGenerator', () => ({ generateBranchName: () => 'draft-name', generateBranchSlug: () => 'draft-name' }));
 
 mock.module('./GitHubIntegrationDialog', () => ({
   GitHubIntegrationDialog: ({ onSelect }: { onSelect: (selection: GitHubSelection) => void }) => {
@@ -127,6 +130,8 @@ mock.module('./GitHubIntegrationDialog', () => ({
   },
 }));
 mock.module('./LinearIssuePickerDialog', () => ({ LinearIssuePickerDialog: () => null }));
+mock.module('@/components/model-picker/ModelPickerList', () => ({ ModelPickerList: () => null }));
+mock.module('@/hooks/useModelLists', () => ({ useModelLists: () => ({ favoriteModelsList: [], recentModelsList: [] }) }));
 
 const { NewWorktreeDialog } = await import('./NewWorktreeDialog');
 const { I18nProvider } = await import('@/lib/i18n');
