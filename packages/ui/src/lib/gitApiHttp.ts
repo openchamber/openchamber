@@ -168,7 +168,7 @@ export class GitDirectoriesUnsupportedError extends Error {
 }
 
 export async function listGitDirectories(root: string): Promise<string[]> {
-  const response = await runtimeFetch('/api/fs/git-dirs', { query: { path: root } });
+  const response = await runtimeFetch('/api/fs/git-dirs', { query: { path: root, directory: root } });
   if (response.status === 501) {
     throw new GitDirectoriesUnsupportedError();
   }
