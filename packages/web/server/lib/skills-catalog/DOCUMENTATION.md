@@ -37,10 +37,10 @@ The following functions are exported and used by the web server:
 - `parseSkillRepoSource(source, { subpath })`: Parse git repository source string into structured object with SSH/HTTPS clone URLs, normalized repo, and effective subpath. Supports SSH URLs, HTTPS URLs, and shorthand `owner/repo[/subpath]` format.
 
 ### Git Repository Scanning (`scan.js`)
-- `scanSkillsRepository({ source, subpath, defaultSubpath, identity })`: Scan git repository for skills by cloning and analyzing SKILL.md files. Returns array of skill items with metadata.
+- `scanSkillsRepository({ source, subpath, defaultSubpath, identity, gitExecutionService })`: Scan git repository for skills by cloning and analyzing SKILL.md files. Returns array of skill items with metadata. When supplied, the shared coordinator reserves the canonical temporary clone destination through sparse checkout, filesystem processing, and cleanup. Network capacity stays held until that work finishes, including cleanup.
 
 ### Git Repository Installation (`install.js`)
-- `installSkillsFromRepository({ source, subpath, defaultSubpath, identity, scope, targetSource, workingDirectory, userSkillDir, selections, conflictPolicy, conflictDecisions })`: Install skills from git repository. Supports user/project scopes, opencode/agents targets, conflict resolution (prompt/skipAll/overwriteAll), and sparse checkout for efficiency.
+- `installSkillsFromRepository({ source, subpath, defaultSubpath, identity, scope, targetSource, workingDirectory, userSkillDir, selections, conflictPolicy, conflictDecisions, gitExecutionService })`: Install skills from git repository. Supports user/project scopes, opencode/agents targets, conflict resolution (prompt/skipAll/overwriteAll), and sparse checkout for efficiency. Coordinated calls retain the clone-destination reservation and network capacity through sparse checkout, copying, and cleanup.
 
 ## Internal Helpers
 
@@ -50,6 +50,7 @@ The following functions are internal helpers used by exported functions:
 - `runGit(args, options)`: Execute git command with optional SSH identity, timeout, and max buffer. Returns `{ ok, stdout, stderr, message, code, signal }`.
 - `looksLikeAuthError(message)`: Detect if error message indicates authentication failure (permission denied, publickey, etc.).
 - `assertGitAvailable()`: Check if git is available in PATH.
+- `runWithGitCloneReservation({ destination, label, queueTimeoutMs, gitExecutionService }, task)`: Run a clone workflow under the shared bounded clone-destination reservation when the execution service is available.
 
 ### Skill Name Validation (used in `install.js`, `scan.js`)
 - `validateSkillName(skillName)`: Validate skill name against pattern `/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/` (1-64 chars, lowercase alphanumeric with hyphens).
@@ -132,7 +133,7 @@ The following functions are internal helpers used by exported functions:
 ### Security Considerations
 - Path traversal protection in `copyDirectoryNoSymlinks`: resolves real paths and checks containment.
 - Symlinks are explicitly rejected to prevent escape from skill directory.
-- SSH key paths are trimmed but not escaped in `git.js` (assumes safe input from profiles).
+- SSH key paths are validated and shell-quoted by the shared Git helper before they are used in `core.sshCommand`.
 - Temporary directories are cleaned up in `finally` blocks.
 
 ### Error Handling

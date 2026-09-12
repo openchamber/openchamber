@@ -96,6 +96,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       fsPromises,
       spawn,
       resolveGitBinaryForSpawn,
+      gitExecutionService,
       createFsSearchRuntime,
       openchamberDataDir,
       openchamberUserConfigRoot,
@@ -178,6 +179,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       createFsSearchRuntime,
       spawn,
       resolveGitBinaryForSpawn,
+      gitExecutionService,
     });
 
     registerScheduledTaskRoutes(app, {
@@ -291,11 +293,13 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       SKILL_SCOPE,
       SKILL_DIR,
       getCuratedSkillsSources,
-      getCacheKey,
-      scanWithCache,
-      parseSkillRepoSource,
-      scanSkillsRepository,
-      installSkillsFromRepository,
+       getCacheKey,
+       scanWithCache,
+       parseSkillRepoSource,
+       scanSkillsRepository,
+       installSkillsFromRepository,
+       resolveGitBinaryForSpawn,
+       gitExecutionService,
       fetchGitHubRepoMetas,
       getProfiles,
       getProfile,
@@ -348,6 +352,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       resolveProjectDirectory,
       buildAugmentedPath,
       resolveGitBinaryForSpawn,
+      gitExecutionService,
       openchamberUserConfigRoot,
       managedChatsRoot,
     });
