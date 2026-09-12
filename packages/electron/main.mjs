@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
-import { replaceFileWithRetry } from './windows-file-replace.mjs';
+import { writeJsonFile } from './json-file-store.mjs';
 import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.mjs';
@@ -565,24 +565,6 @@ const readJsonFile = (filePath) => {
     // {} as before. Writes are atomic (tmp + rename) so this race is rare.
     log.warn?.('[electron] failed to read JSON file', filePath, error);
     return {};
-  }
-};
-
-const writeJsonFile = async (filePath, data) => {
-  const directory = path.dirname(filePath);
-  await fsp.mkdir(directory, { recursive: true, mode: 0o700 });
-  if (process.platform !== 'win32') await fsp.chmod(directory, 0o700);
-  // Atomic: write to a temp file then rename. Readers never see a partial
-  // JSON file that could parse-error and get coerced to {}.
-  const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  try {
-    await fsp.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
-    if (process.platform !== 'win32') await fsp.chmod(tmp, 0o600);
-    await replaceFileWithRetry(tmp, filePath);
-    if (process.platform !== 'win32') await fsp.chmod(filePath, 0o600);
-  } catch (error) {
-    await fsp.rm(tmp, { force: true }).catch(() => {});
-    throw error;
   }
 };
 
