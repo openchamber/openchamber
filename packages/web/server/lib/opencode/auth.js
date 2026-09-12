@@ -24,10 +24,10 @@ function readAuthFile() {
 
 function writeAuthFile(auth) {
   try {
-    if (!fs.existsSync(OPENCODE_DATA_DIR)) {
-      fs.mkdirSync(OPENCODE_DATA_DIR, { recursive: true, mode: 0o700 });
-    }
-    if (process.platform !== 'win32') fs.chmodSync(OPENCODE_DATA_DIR, 0o700);
+    // Restrictive mode on creation only: re-chmodding an existing directory
+    // would clobber granted group access (chmod replaces the POSIX ACL mask).
+    const createdDirectory = fs.mkdirSync(OPENCODE_DATA_DIR, { recursive: true, mode: 0o700 });
+    if (createdDirectory !== undefined && process.platform !== 'win32') fs.chmodSync(OPENCODE_DATA_DIR, 0o700);
 
     if (fs.existsSync(AUTH_FILE)) {
       const backupFile = `${AUTH_FILE}.openchamber.backup`;

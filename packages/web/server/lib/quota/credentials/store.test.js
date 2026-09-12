@@ -18,6 +18,20 @@ describe('quota credential store', () => {
     deleteQuotaCredential('exe-dev');
   });
 
+  it.skipIf(process.platform === 'win32')('preserves pre-existing credential directory permissions across writes', () => {
+    const quotaDirectory = path.join(temporaryDirectory, 'quota');
+    fs.mkdirSync(quotaDirectory, { recursive: true });
+    fs.chmodSync(quotaDirectory, 0o770);
+
+    writeQuotaCredential('ollama-cloud', { cookie: 'secret' });
+    expect(fs.statSync(quotaDirectory).mode & 0o777).toBe(0o770);
+
+    writeQuotaCredential('ollama-cloud', { cookie: 'rotated' });
+    expect(fs.statSync(quotaDirectory).mode & 0o777).toBe(0o770);
+    expect(readQuotaCredential('ollama-cloud', (value) => value)).toEqual({ cookie: 'rotated' });
+    deleteQuotaCredential('ollama-cloud');
+  });
+
   it('removes the obsolete OpenCode Go credential without parsing it', () => {
     const legacyPath = path.join(temporaryDirectory, 'quota', 'opencode-go.json');
     fs.mkdirSync(path.dirname(legacyPath), { recursive: true });

@@ -2,6 +2,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
 type BridgeRequest = { id: string; type: string };
+type BridgeMessage = BridgeRequest | { type: string };
 
 describe('VS Code webview settings API', () => {
   test('propagates a failed bridge read and retries successfully', async () => {
@@ -21,7 +22,11 @@ describe('VS Code webview settings API', () => {
       Object.defineProperty(globalThis, 'acquireVsCodeApi', {
         configurable: true,
         value: () => ({
-          postMessage: (message: BridgeRequest) => messages.push(message),
+          // The bridge posts lifecycle notifications (webview:ready) alongside
+          // requests; only request/response pairing matters to this test.
+          postMessage: (message: BridgeMessage) => {
+            if ('id' in message) messages.push(message);
+          },
           getState: () => undefined,
           setState: () => undefined,
         }),
