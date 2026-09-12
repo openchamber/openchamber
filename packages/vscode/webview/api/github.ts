@@ -20,7 +20,7 @@ import type {
   GitHubUserSummary,
 } from '@openchamber/ui/lib/api/types';
 
-import { sendBridgeMessage } from './bridge';
+import { sendBridgeMessage, sendBridgeMessageWithOptions } from './bridge';
 
 export const createVSCodeGitHubAPI = (): GitHubAPI => ({
   authStatus: async () => sendBridgeMessage<GitHubAuthStatus>('api:github/auth:status'),
@@ -46,15 +46,23 @@ export const createVSCodeGitHubAPI = (): GitHubAPI => ({
   prReady: async (payload: GitHubPullRequestReadyInput) =>
     sendBridgeMessage<GitHubPullRequestReadyResult>('api:github/pr:ready', payload),
 
-  issuesList: async (directory: string, options?: { page?: number; query?: string }) =>
-    sendBridgeMessage<GitHubIssuesListResult>('api:github/issues:list', { directory, page: options?.page ?? 1, query: options?.query ?? '' }),
+  issuesList: async (directory: string, options?: { page?: number; query?: string; signal?: AbortSignal }) =>
+    sendBridgeMessageWithOptions<GitHubIssuesListResult>(
+      'api:github/issues:list',
+      { directory, page: options?.page ?? 1, query: options?.query ?? '' },
+      { signal: options?.signal },
+    ),
   issueGet: async (directory: string, number: number, options?: { sourceRepo?: { owner: string; repo: string } | null }) =>
     sendBridgeMessage<GitHubIssueGetResult>('api:github/issues:get', { directory, number, sourceRepo: options?.sourceRepo ?? null }),
   issueComments: async (directory: string, number: number, options?: { sourceRepo?: { owner: string; repo: string } | null }) =>
     sendBridgeMessage<GitHubIssueCommentsResult>('api:github/issues:comments', { directory, number, sourceRepo: options?.sourceRepo ?? null }),
 
-  prsList: async (directory: string, options?: { page?: number; query?: string }) =>
-    sendBridgeMessage<GitHubPullRequestsListResult>('api:github/pulls:list', { directory, page: options?.page ?? 1, query: options?.query ?? '' }),
+  prsList: async (directory: string, options?: { page?: number; query?: string; signal?: AbortSignal }) =>
+    sendBridgeMessageWithOptions<GitHubPullRequestsListResult>(
+      'api:github/pulls:list',
+      { directory, page: options?.page ?? 1, query: options?.query ?? '' },
+      { signal: options?.signal },
+    ),
   prContext: async (directory: string, number: number, options?: { includeDiff?: boolean; includeCheckDetails?: boolean; sourceRepo?: { owner: string; repo: string } | null }) =>
     sendBridgeMessage<GitHubPullRequestContextResult>('api:github/pulls:context', {
       directory,

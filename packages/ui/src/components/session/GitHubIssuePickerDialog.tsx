@@ -29,27 +29,9 @@ import { useDeviceInfo } from '@/lib/device';
 import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { getGitHubApiErrorCode } from '@/lib/api/github-errors';
 import type { GitHubIssue, GitHubIssueComment, GitHubIssuesListResult, GitHubIssueSummary, GitHubRepoSelector } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
-
-const parseIssueNumber = (value: string): number | null => {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-
-  const urlMatch = trimmed.match(/\/issues\/(\d+)(?:\b|\/|$)/i);
-  if (urlMatch) {
-    const parsed = Number(urlMatch[1]);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-  }
-
-  const hashMatch = trimmed.match(/^#?(\d+)$/);
-  if (hashMatch) {
-    const parsed = Number(hashMatch[1]);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-  }
-
-  return null;
-};
 
 const buildIssueContextText = (args: {
   repo: GitHubIssuesListResult['repo'] | undefined;
@@ -102,11 +84,25 @@ export function GitHubIssuePickerDialog({
   const [isLoadingMore, setIsLoadingMore] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  const directNumber = React.useMemo(() => parseIssueNumber(query), [query]);
-  const debouncedQuery = useDebouncedValue(query, 350);
-  const isTextSearch = debouncedQuery.trim().length > 0 && !directNumber;
+  // One owner for "which query owns the in-flight data": every page-1 load
+  // bumps the generation, page-2 loads capture it and drop their result when a
+  // newer page-1 load has taken over.
+  const requestGenerationRef = React.useRef(0);
+  const loadMoreControllerRef = React.useRef<AbortController | null>(null);
 
-  const refresh = React.useCallback(async () => {
+  const debouncedQuery = useDebouncedValue(query, 350);
+  const isTextSearch = debouncedQuery.trim().length > 0;
+
+  const describeError = React.useCallback((e: unknown): string => {
+    const code = getGitHubApiErrorCode(e);
+    if (code === 'search_timeout') return t('session.githubIssuePicker.error.searchTimedOut');
+    if (code === 'not_found') return t('session.githubIssuePicker.error.issueNotFound');
+    if (code === 'repo_unavailable') return t('session.githubIssuePicker.error.repoNotResolvable');
+    return e instanceof Error ? e.message : String(e);
+  }, [t]);
+
+  const refresh = React.useCallback(async (signal?: AbortSignal) => {
+    if (signal?.aborted) return;
     if (!projectDirectory) {
       setResult(null);
       setError(t('session.githubIssuePicker.error.noActiveProject'));
@@ -126,55 +122,46 @@ export function GitHubIssuePickerDialog({
       return;
     }
 
+    const generation = ++requestGenerationRef.current;
     setIsLoading(true);
     setError(null);
     try {
-      const next = await github.issuesList(projectDirectory, { page: 1 });
+      const next = await github.issuesList(projectDirectory, {
+        page: 1,
+        query: debouncedQuery.trim() || undefined,
+        signal,
+      });
+      if (signal?.aborted || generation !== requestGenerationRef.current) return;
       setResult(next);
       setIssues(next.issues ?? []);
       setPage(next.page ?? 1);
       setHasMore(Boolean(next.hasMore));
-      if (next.connected === false) {
-        setError(null);
-      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (signal?.aborted || generation !== requestGenerationRef.current) return;
+      setIssues([]);
+      setPage(1);
+      setHasMore(false);
+      setError(describeError(e));
     } finally {
-      setIsLoading(false);
+      if (!signal?.aborted) setIsLoading(false);
     }
-  }, [github, githubAuthChecked, githubAuthStatus, projectDirectory, t]);
+  }, [debouncedQuery, describeError, github, githubAuthChecked, githubAuthStatus, projectDirectory, t]);
 
   React.useEffect(() => {
     if (!open || !projectDirectory) return;
     if (githubAuthChecked && githubAuthStatus?.connected === false) return;
     if (!github?.issuesList) return;
-    if (!debouncedQuery.trim() || directNumber) {
-      void refresh();
-      return;
-    }
 
     const controller = new AbortController();
-    setIsLoading(true);
-    setError(null);
+    void refresh(controller.signal);
 
-    github.issuesList(projectDirectory, { page: 1, query: debouncedQuery.trim() })
-      .then((next) => {
-        if (controller.signal.aborted) return;
-        setResult(next);
-        setIssues(next.issues ?? []);
-        setPage(next.page ?? 1);
-        setHasMore(Boolean(next.hasMore));
-      })
-      .catch((e) => {
-        if (controller.signal.aborted) return;
-        setError(e instanceof Error ? e.message : String(e));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setIsLoading(false);
-      });
-
-    return () => controller.abort();
-  }, [open, projectDirectory, github, githubAuthChecked, githubAuthStatus, debouncedQuery, directNumber, refresh, t]);
+    return () => {
+      controller.abort();
+      loadMoreControllerRef.current?.abort();
+      loadMoreControllerRef.current = null;
+      setIsLoading(false);
+    };
+  }, [open, projectDirectory, github, githubAuthChecked, githubAuthStatus, refresh]);
 
   const loadMore = React.useCallback(async () => {
     if (!projectDirectory) return;
@@ -182,39 +169,44 @@ export function GitHubIssuePickerDialog({
     if (isLoadingMore || isLoading) return;
     if (!hasMore) return;
 
+    const generation = requestGenerationRef.current;
+    const controller = new AbortController();
+    loadMoreControllerRef.current = controller;
     setIsLoadingMore(true);
     try {
       const nextPage = page + 1;
       const next = isTextSearch
-        ? await github.issuesList(projectDirectory, { page: nextPage, query: debouncedQuery.trim() })
-        : await github.issuesList(projectDirectory, { page: nextPage });
+        ? await github.issuesList(projectDirectory, { page: nextPage, query: debouncedQuery.trim(), signal: controller.signal })
+        : await github.issuesList(projectDirectory, { page: nextPage, signal: controller.signal });
+      if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
       setResult(next);
       setIssues((prev) => [...prev, ...(next.issues ?? [])]);
       setPage(next.page ?? nextPage);
       setHasMore(Boolean(next.hasMore));
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+      if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
+      const message = getGitHubApiErrorCode(e) === 'search_timeout'
+        ? t('session.githubIssuePicker.error.searchTimedOut')
+        : e instanceof Error ? e.message : String(e);
       toast.error(t('session.githubIssuePicker.toast.loadMoreFailed'), { description: message });
     } finally {
+      if (loadMoreControllerRef.current === controller) loadMoreControllerRef.current = null;
       setIsLoadingMore(false);
     }
   }, [github, hasMore, isLoading, isLoadingMore, isTextSearch, debouncedQuery, page, projectDirectory, t]);
 
   React.useEffect(() => {
-    if (!open) {
-      setQuery('');
-      setCreateInWorktree(false);
-      setStartingIssueNumber(null);
-      setError(null);
-      setResult(null);
-      setIssues([]);
-      setPage(1);
-      setHasMore(false);
-      setIsLoading(false);
-      return;
-    }
-    void refresh();
-  }, [open, refresh]);
+    if (open) return;
+    setQuery('');
+    setCreateInWorktree(false);
+    setStartingIssueNumber(null);
+    setError(null);
+    setResult(null);
+    setIssues([]);
+    setPage(1);
+    setHasMore(false);
+    setIsLoading(false);
+  }, [open]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -546,26 +538,6 @@ export function GitHubIssuePickerDialog({
             <div className="text-center text-muted-foreground py-8 break-words">{error}</div>
           ) : null}
 
-          {directNumber && projectDirectory && github && connected ? (
-            <div
-              className={cn(
-                'group flex items-center gap-2 py-1.5 hover:bg-interactive-hover/30 rounded transition-colors cursor-pointer',
-                startingIssueNumber === directNumber && 'bg-interactive-selection/30'
-              )}
-              onClick={() => void startSession(directNumber)}
-            >
-              <span className="typography-meta text-muted-foreground w-5 text-right flex-shrink-0">#</span>
-              <p className="flex-1 min-w-0 typography-small text-foreground truncate ml-0.5">
-                {t('session.githubIssuePicker.actions.useIssue', { number: directNumber })}
-              </p>
-              <div className="flex-shrink-0 h-5 flex items-center mr-2">
-                {startingIssueNumber === directNumber ? (
-                  <Icon name="loader-4" className="h-4 w-4 animate-spin text-muted-foreground" />
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-
           {issues.length === 0 && !isLoading && connected && github && projectDirectory ? (
             <div className="text-center text-muted-foreground py-8">{debouncedQuery.trim() ? t('session.githubIssuePicker.empty.noIssuesFound') : t('session.githubIssuePicker.empty.noOpenIssuesFound')}</div>
           ) : null}
@@ -685,7 +657,7 @@ export function GitHubIssuePickerDialog({
                   </a>
                 </Button>
               ) : null}
-              <Button variant="outline" size="sm" onClick={refresh} disabled={isLoading || Boolean(startingIssueNumber)}>
+              <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={isLoading || Boolean(startingIssueNumber)}>
                 {t('session.githubIssuePicker.actions.refresh')}
               </Button>
             </div>

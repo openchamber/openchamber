@@ -10,6 +10,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -20,6 +21,7 @@ import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Icon } from "@/components/icon/Icon";
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { getGitHubApiErrorCode } from '@/lib/api/github-errors';
 import type {
   GitHubIssue,
   GitHubIssueSummary,
@@ -82,20 +84,41 @@ export function GitHubIntegrationDialog({
   const [page, setPage] = React.useState(1);
   const [hasMore, setHasMore] = React.useState(false);
 
+  // One owner for "which query/tab owns the in-flight data": every page-1 load
+  // bumps the generation, page-2 loads capture it and drop their result when a
+  // newer page-1 load has taken over.
+  const requestGenerationRef = React.useRef(0);
+  const loadMoreControllerRef = React.useRef<AbortController | null>(null);
+
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 350);
 
-  const loadData = React.useCallback(async (query?: string) => {
+  const describeLoadError = React.useCallback((err: unknown): string => {
+    const code = getGitHubApiErrorCode(err);
+    if (code === 'search_timeout') return t('session.githubIntegration.error.searchTimedOut');
+    if (code === 'not_found') {
+      return activeTab === 'issues'
+        ? t('session.githubIntegration.empty.noIssuesFound')
+        : t('session.githubIntegration.empty.noPullRequestsFound');
+    }
+    if (code === 'repo_unavailable') return t('session.githubIntegration.error.repoNotResolvable');
+    return err instanceof Error ? err.message : t('session.githubIntegration.error.loadDataFailed');
+  }, [activeTab, t]);
+
+  const loadData = React.useCallback(async (query?: string, signal?: AbortSignal) => {
+    if (signal?.aborted) return;
     if (!projectDirectory || !github) return;
     if (githubAuthChecked && githubAuthStatus?.connected === false) return;
-    
+
+    const generation = ++requestGenerationRef.current;
     setLoading(true);
     setError(null);
     setPage(1);
     setHasMore(false);
-    
+
     try {
       if (activeTab === 'issues' && github.issuesList) {
-        const result = await github.issuesList(projectDirectory, { page: 1, query });
+        const result = await github.issuesList(projectDirectory, { page: 1, query, signal });
+        if (signal?.aborted || generation !== requestGenerationRef.current) return;
         if (result.connected === false) {
           setError(t('session.githubIntegration.error.notConnected'));
           setIssues([]);
@@ -105,7 +128,8 @@ export function GitHubIntegrationDialog({
           setHasMore(Boolean(result.hasMore));
         }
       } else if (activeTab === 'prs' && github.prsList) {
-        const result = await github.prsList(projectDirectory, { page: 1, query });
+        const result = await github.prsList(projectDirectory, { page: 1, query, signal });
+        if (signal?.aborted || generation !== requestGenerationRef.current) return;
         if (result.connected === false) {
           setError(t('session.githubIntegration.error.notConnected'));
           setPrs([]);
@@ -116,86 +140,51 @@ export function GitHubIntegrationDialog({
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('session.githubIntegration.error.loadDataFailed'));
+      if (signal?.aborted || generation !== requestGenerationRef.current) return;
+      setIssues([]);
+      setPrs([]);
+      setSelectedIssue(null);
+      setSelectedPr(null);
+      setError(describeLoadError(err));
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
-  }, [projectDirectory, github, githubAuthChecked, githubAuthStatus, activeTab, t]);
+  }, [activeTab, describeLoadError, github, githubAuthChecked, githubAuthStatus, projectDirectory, t]);
 
   React.useEffect(() => {
     if (!open || !projectDirectory) return;
     if (githubAuthChecked && githubAuthStatus?.connected === false) return;
     if (!github) return;
-    if (!debouncedSearchQuery.trim()) {
-      void loadData();
-      return;
-    }
 
     const controller = new AbortController();
-    setLoading(true);
-    setError(null);
-    setPage(1);
-    setHasMore(false);
+    void loadData(debouncedSearchQuery.trim() || undefined, controller.signal);
 
-    const apiCall = activeTab === 'issues' && github.issuesList
-      ? github.issuesList(projectDirectory, { page: 1, query: debouncedSearchQuery.trim() })
-      : activeTab === 'prs' && github.prsList
-        ? github.prsList(projectDirectory, { page: 1, query: debouncedSearchQuery.trim() })
-        : null;
-
-    if (!apiCall) {
+    return () => {
+      controller.abort();
+      loadMoreControllerRef.current?.abort();
+      loadMoreControllerRef.current = null;
       setLoading(false);
-      return;
-    }
-
-    apiCall
-      .then((result) => {
-        if (controller.signal.aborted) return;
-        if ('issues' in result) {
-          if (result.connected === false) {
-            setError(t('session.githubIntegration.error.notConnected'));
-            setIssues([]);
-          } else {
-            setIssues(result.issues ?? []);
-            setPage(result.page ?? 1);
-            setHasMore(Boolean(result.hasMore));
-          }
-        } else if ('prs' in result) {
-          if (result.connected === false) {
-            setError(t('session.githubIntegration.error.notConnected'));
-            setPrs([]);
-          } else {
-            setPrs(result.prs ?? []);
-            setPage(result.page ?? 1);
-            setHasMore(Boolean(result.hasMore));
-          }
-        }
-      })
-      .catch((err) => {
-        if (controller.signal.aborted) return;
-        setError(err instanceof Error ? err.message : t('session.githubIntegration.error.loadDataFailed'));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-
-    return () => controller.abort();
-  }, [open, projectDirectory, github, githubAuthChecked, githubAuthStatus, activeTab, debouncedSearchQuery, loadData, t]);
+    };
+  }, [open, projectDirectory, github, githubAuthChecked, githubAuthStatus, debouncedSearchQuery, loadData]);
 
   const loadMore = React.useCallback(async () => {
     if (!projectDirectory || !github) return;
     if (loading || loadingMore) return;
     if (!hasMore) return;
-    
+
+    const generation = requestGenerationRef.current;
+    const controller = new AbortController();
+    loadMoreControllerRef.current = controller;
     setLoadingMore(true);
-    
+
     try {
       const nextPage = page + 1;
-      
+
       if (activeTab === 'issues' && github.issuesList) {
         const result = debouncedSearchQuery.trim()
-          ? await github.issuesList(projectDirectory, { page: nextPage, query: debouncedSearchQuery.trim() })
-          : await github.issuesList(projectDirectory, { page: nextPage });
+          ? await github.issuesList(projectDirectory, { page: nextPage, query: debouncedSearchQuery.trim(), signal: controller.signal })
+          : await github.issuesList(projectDirectory, { page: nextPage, signal: controller.signal });
+        if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
         if (result.connected !== false) {
           setIssues(prev => [...prev, ...(result.issues ?? [])]);
           setPage(result.page ?? nextPage);
@@ -203,40 +192,41 @@ export function GitHubIntegrationDialog({
         }
       } else if (activeTab === 'prs' && github.prsList) {
         const result = debouncedSearchQuery.trim()
-          ? await github.prsList(projectDirectory, { page: nextPage, query: debouncedSearchQuery.trim() })
-          : await github.prsList(projectDirectory, { page: nextPage });
+          ? await github.prsList(projectDirectory, { page: nextPage, query: debouncedSearchQuery.trim(), signal: controller.signal })
+          : await github.prsList(projectDirectory, { page: nextPage, signal: controller.signal });
+        if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
         if (result.connected !== false) {
           setPrs(prev => [...prev, ...(result.prs ?? [])]);
           setPage(result.page ?? nextPage);
           setHasMore(Boolean(result.hasMore));
         }
       }
-    } catch {
-      // Silently fail on load more errors
+    } catch (err) {
+      if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
+      if (getGitHubApiErrorCode(err) === 'search_timeout') {
+        toast.error(t('session.githubIntegration.error.searchTimedOut'));
+      }
     } finally {
+      if (loadMoreControllerRef.current === controller) loadMoreControllerRef.current = null;
       setLoadingMore(false);
     }
-  }, [projectDirectory, github, activeTab, page, hasMore, loading, loadingMore, debouncedSearchQuery]);
+  }, [projectDirectory, github, activeTab, page, hasMore, loading, loadingMore, debouncedSearchQuery, t]);
 
-  // Reset state when dialog opens/closes
+  // Reset state when dialog closes
   React.useEffect(() => {
-    if (!open) {
-      setActiveTab('issues');
-      setSearchQuery('');
-      setIssues([]);
-      setPrs([]);
-      setSelectedIssue(null);
-      setSelectedPr(null);
-      setIncludeDiff(false);
-      setError(null);
-      setValidations(new Map());
-      setPage(1);
-      setHasMore(false);
-      return;
-    }
-    
-    void loadData();
-  }, [open, loadData]);
+    if (open) return;
+    setActiveTab('issues');
+    setSearchQuery('');
+    setIssues([]);
+    setPrs([]);
+    setSelectedIssue(null);
+    setSelectedPr(null);
+    setIncludeDiff(false);
+    setError(null);
+    setValidations(new Map());
+    setPage(1);
+    setHasMore(false);
+  }, [open]);
 
   // Validate branches for worktree creation
   const validateBranch = React.useCallback(async (branchName: string) => {

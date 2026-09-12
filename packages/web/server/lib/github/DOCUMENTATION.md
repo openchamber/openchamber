@@ -73,6 +73,15 @@ that page, so callers cannot mistake a partial page for a complete one.
 - `packages/ui/src/components/views/git/PullRequestSection.tsx` uses the same shared entry for the full PR workflow.
 - `packages/ui/src/components/ui/MemoryDebugPanel.tsx` reads request counters for debugging.
 
+## Issue and PR list routes
+
+- `GET /api/github/issues/list` and `GET /api/github/pulls/list` take `directory`, `page`, and an optional `query`.
+- A non-empty `query` that parses as an exact reference (bare `N`, `#N`, or an issue/PR URL) resolves that single item through `issues.get`/`pulls.get` on page 1 instead of the Search API.
+- A URL naming a repo outside the project's fork network is rejected with `422`/`repo_unavailable`; a URL of the wrong kind or an item GitHub cannot find is `404`/`not_found`.
+- Free text runs GitHub Search. A search timeout is `504`/`search_timeout`; every other failure is a `500`. A successful empty list is the only "no results" signal.
+- UI callers read failures as thrown errors carrying a `code`, never as an `error` field on a success payload.
+- `packages/web/server/lib/github/reference.js` is the pure exact-reference parser; route-level query validation decides what reaches it.
+
 ## How PR resolution works
 
 - It reads local git status and remotes first.
