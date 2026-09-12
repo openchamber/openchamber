@@ -6,13 +6,11 @@ import {
   RiArrowDownSLine,
   RiArrowUpSLine,
   RiCheckLine,
-  RiCloseLine,
   RiDeleteBinLine,
   RiDragMove2Line,
   RiEdit2Line,
   RiFolder6Line,
   RiFolderAddLine,
-  RiSearchLine,
 } from '@remixicon/react';
 import type { Session } from '@opencode-ai/sdk/v2/client';
 import {
@@ -58,10 +56,11 @@ import {
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { mergeLiveSessionWithGlobalSession, refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useMobileSessionExpansionStore } from '@/stores/useMobileSessionExpansionStore';
+import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useMobileSessionTreeStore } from '@/stores/useMobileSessionTreeStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore, type ProjectSortOrder } from '@/stores/useSessionDisplayStore';
-import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { orderWorktrees, useWorktreeOrderStore } from '@/stores/useWorktreeOrderStore';
 import {
   EMPTY_SESSION_ORDER_RANKS,
@@ -80,6 +79,9 @@ import type { WorktreeMetadata } from '@/types/worktree';
 import { MobileDeleteWorktreeDialog } from './MobileDeleteWorktreeDialog';
 import { MobileProjectEditSurface } from './MobileProjectEditSurface';
 import { useEdgeSwipe } from './useEdgeSwipe';
+import { useLongPress } from './useLongPress';
+import { buildMobileSessionActionItems, type MobileSessionActionItem } from './mobileSessionActions';
+import { selectRecentMobileSessions } from './mobileRecentSessions';
 
 type MobileSessionsSheetProps = {
   open: boolean;
@@ -100,6 +102,7 @@ type MobileSessionsSheetProps = {
 };
 
 const EMPTY_PINNED_SESSION_IDS = new Set<string>();
+const EMPTY_ACTIVE_SESSION_IDS: ReadonlySet<string> = new Set();
 
 // Same orders, same labels as the desktop sidebar's sort menu — the setting
 // itself is shared, so the two surfaces must offer the same choices.
@@ -111,7 +114,8 @@ const PROJECT_SORT_OPTIONS = [
   ['recent', 'sessions.sidebar.header.projectSort.recent'],
 ] as const;
 
-// Pseudo-project key for the collapsible "recent" group's persisted expansion.
+// Pseudo-project key for the collapsible Recent group's persisted expansion.
+const RECENT_SECTION_ID = '__recent__';
 
 type ProjectMeta = {
   id: string;
@@ -500,6 +504,8 @@ const SessionRow: React.FC<{
   onRequestRename?: () => void;
   onSubmitRename?: (title: string) => void;
   onCancelRename?: () => void;
+  /** Long-press on the row opens the session action sheet. */
+  onLongPress?: () => void;
 }> = ({
   session,
   active,
@@ -519,8 +525,10 @@ const SessionRow: React.FC<{
   onRequestRename,
   onSubmitRename,
   onCancelRename,
+  onLongPress,
 }) => {
   const { t } = useI18n();
+  const longPressHandlers = useLongPress(onLongPress);
   const time = formatRelativeShort(getSessionTimestamp(session));
   const title = session.title?.trim() || t('mobile.sessions.untitled');
   const swipeEnabled = Boolean(onRevealedChange && onArchive);
@@ -735,6 +743,7 @@ const SessionRow: React.FC<{
             }
             onSelect();
           }}
+          {...(onLongPress ? longPressHandlers : undefined)}
         >
           <span className="flex min-w-0 flex-1 flex-col">
             <span className="flex items-center gap-2.5">
@@ -933,6 +942,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     (state) => open || variant === 'sidebar' ? state.ids : EMPTY_PINNED_SESSION_IDS,
     [open, variant],
   ));
+  const togglePinnedSession = useSessionPinnedStore((state) => state.toggle);
+  const activeSessionIds = useGlobalSessionStatusStore(React.useCallback(
+    (state) => open || variant === 'sidebar' ? state.activeSessionIds : EMPTY_ACTIVE_SESSION_IDS,
+    [open, variant],
+  ));
   const sessionOrderRanks = useSessionOrderingStore(React.useCallback(
     (state) => open || variant === 'sidebar' ? state.rankById : EMPTY_SESSION_ORDER_RANKS,
     [open, variant],
@@ -945,6 +959,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const archiveSession = useSessionUIStore((state) => state.archiveSession);
   const deleteSession = useSessionUIStore((state) => state.deleteSession);
   const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
+  const unarchiveSession = useSessionUIStore((state) => state.unarchiveSession);
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const setActiveProject = useProjectsStore((state) => state.setActiveProject);
   const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
@@ -962,6 +977,13 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const expandedParents = useMobileSessionExpansionStore((state) => state.expandedParents);
   const toggleParent = useMobileSessionExpansionStore((state) => state.toggleParent);
   const [query, setQuery] = React.useState('');
+  // Search moved into the header: the field is summoned by the header toggle
+  // and stays fixed above the scrolling list instead of scrolling away.
+  const [searchOpen, setSearchOpen] = React.useState(false);
+  const searchInputRef = React.useRef<HTMLDivElement>(null);
+  // Long-press action sheet for a single session row.
+  const [actionSheetSessionId, setActionSheetSessionId] = React.useState<string | null>(null);
+  const [actionSheetConfirmDelete, setActionSheetConfirmDelete] = React.useState(false);
   const [editingProjectId, setEditingProjectId] = React.useState<string | null>(null);
   // Swipe-right actions: which row has its actions revealed, and whether its
   // delete button is armed (two-step). One row at a time.
@@ -1009,6 +1031,9 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   React.useEffect(() => {
     if (!open) {
       setQuery('');
+      setSearchOpen(false);
+      setActionSheetSessionId(null);
+      setActionSheetConfirmDelete(false);
       setEditingOrder(false);
       setReorderExpandedProjects(new Set());
       setVisibleCountByBucket(new Map());
@@ -1028,6 +1053,13 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   React.useEffect(() => {
     if (!editingOrder) setReorderExpandedProjects(new Set());
   }, [editingOrder]);
+
+  // Focus the search field when the header toggle reveals it (the Input does
+  // not forward a ref, so reach the inner input through the wrapper).
+  React.useEffect(() => {
+    if (!searchOpen) return;
+    searchInputRef.current?.querySelector('input')?.focus();
+  }, [searchOpen]);
 
   React.useEffect(() => {
     if (!open || projects.length === 0) return;
@@ -1128,6 +1160,15 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     () => chatSessions.filter((session) => !getParentId(session)).length,
     [chatSessions],
   );
+
+  // Desktop-parity Recent: project root sessions inside the shared retention
+  // window (or active right now), chats excluded, ordered like every other list.
+  const recentSessions = React.useMemo(() => selectRecentMobileSessions(
+    projectSessions,
+    activeSessionIds,
+    pinnedSessionIds,
+    sessionOrderRanks,
+  ), [activeSessionIds, pinnedSessionIds, projectSessions, sessionOrderRanks]);
 
   const normalizedQuery = query.trim().toLowerCase();
 
@@ -1304,6 +1345,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             onRequestRename={() => handleRequestRename(session.id)}
             onSubmitRename={(nextTitle) => void handleSubmitRename(session.id, nextTitle)}
             onCancelRename={() => setRenamingSessionId(null)}
+            onLongPress={() => handleLongPressSession(session)}
           />
           {hasChildren && expanded
             ? children.map((child) => renderNode(child, rowIndent + CHILD_INDENT_STEP))
@@ -1401,6 +1443,70 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       await updateSessionTitle(sessionId, title);
     } catch {
       toast.error(t('mobile.sessions.renameError'));
+    }
+  };
+
+  const handleRestore = async (session: Session) => {
+    const ok = await unarchiveSession(session.id);
+    if (ok) toast.success(t('sessions.sidebar.session.restore.success'));
+    else toast.error(t('sessions.sidebar.session.restore.error'));
+  };
+
+  // Long-press action sheet. The sheet holds the session id (not the object) so
+  // it re-derives against the latest list and closes itself if the session goes
+  // away (e.g. archived underneath it).
+  const actionSheetSession = actionSheetSessionId
+    ? sessions.find((entry) => entry.id === actionSheetSessionId) ?? null
+    : null;
+
+  const closeSessionActionSheet = React.useCallback(() => {
+    setActionSheetSessionId(null);
+    setActionSheetConfirmDelete(false);
+  }, []);
+
+  const handleLongPressSession = (session: Session) => {
+    setActionSheetSessionId(session.id);
+    setActionSheetConfirmDelete(false);
+  };
+
+  const actionSheetItems = React.useMemo<MobileSessionActionItem[]>(() => {
+    if (!actionSheetSession) return [];
+    const directory = getSessionDirectory(actionSheetSession);
+    return buildMobileSessionActionItems({
+      isPinned: isSessionPinned(pinnedSessionIds, directory, actionSheetSession.id),
+      isArchived: Boolean(actionSheetSession.time?.archived),
+      confirmDelete: actionSheetConfirmDelete,
+      title: actionSheetSession.title?.trim() || t('mobile.sessions.untitled'),
+    });
+  }, [actionSheetConfirmDelete, actionSheetSession, pinnedSessionIds, t]);
+
+  const handleSessionAction = (item: MobileSessionActionItem) => {
+    const session = actionSheetSession;
+    if (!session) return;
+    // Delete is two-step: the first tap relabels the item to confirm, the
+    // second performs it. Any other action fires immediately.
+    if (item.id === 'delete' && !actionSheetConfirmDelete) {
+      setActionSheetConfirmDelete(true);
+      return;
+    }
+    closeSessionActionSheet();
+    switch (item.id) {
+      case 'pin':
+      case 'unpin':
+        togglePinnedSession({ directory: getSessionDirectory(session), sessionId: session.id });
+        break;
+      case 'rename':
+        handleRequestRename(session.id);
+        break;
+      case 'archive':
+        void handleArchive(session);
+        break;
+      case 'restore':
+        void handleRestore(session);
+        break;
+      case 'delete':
+        void handleConfirmDelete(session);
+        break;
     }
   };
 
@@ -1549,6 +1655,27 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     </Button>
   ) : null;
 
+  const searchToggle = !editingOrder ? (
+    <Button
+      type="button"
+      variant="chip"
+      size="sm"
+      aria-label={t('sessions.sidebar.header.actions.searchSessions')}
+      aria-pressed={searchOpen}
+      onClick={() => {
+        if (searchOpen) {
+          setSearchOpen(false);
+          setQuery('');
+          return;
+        }
+        setSearchOpen(true);
+      }}
+      style={{ touchAction: 'manipulation' }}
+    >
+      <Icon name="search" className="size-4" />
+    </Button>
+  ) : null;
+
   const newChatButton =
     !editingOrder && projectsMeta.length > 0 ? (
       <Button
@@ -1582,8 +1709,9 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   // it is the one action people reach for without looking, so it must not slide
   // around as the icons beside it come and go.
   const trailingActions =
-    newChatButton || addProjectButton || sortToggle || editToggle ? (
+    newChatButton || addProjectButton || sortToggle || editToggle || searchToggle ? (
       <>
+        {searchToggle}
         {addProjectButton}
         {sortToggle}
         {editToggle}
@@ -1596,13 +1724,12 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   // clipped overflow swallowed the footer.
   const surfaceContent = (
       <div ref={contentRootRef} className="flex min-h-0 flex-1 flex-col">
-        <ScrollShadow className="min-h-0 flex-1 overflow-y-auto pb-4">
-          {/* The search bar scrolls WITH the list (iOS-style): the open-time
-              auto-scroll to the current session naturally tucks it away, and
-              scrolling to the very top brings it back. */}
-          <div className={cn('px-4 pb-2 pt-1', editingOrder && 'hidden')}>
-            <div className="relative">
-              <RiSearchLine className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        {/* Search lives in the sheet header (fixed above the scrolling list)
+            instead of scrolling away with the content. */}
+        {searchOpen && !editingOrder ? (
+          <div className="shrink-0 px-4 pb-2 pt-1">
+            <div ref={searchInputRef} className="relative">
+              <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -1617,11 +1744,13 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                   onClick={() => setQuery('')}
                   style={{ touchAction: 'manipulation' }}
                 >
-                  <RiCloseLine className="size-4" />
+                  <Icon name="close" className="size-4" />
                 </button>
               ) : null}
             </div>
           </div>
+        ) : null}
+        <ScrollShadow className="min-h-0 flex-1 overflow-y-auto pb-4">
           {projectsMeta.length === 0 && chatSessions.length === 0 ? (
             <MobileSessionsEmpty
               title={t('mobile.sessions.empty.noProjectsTitle')}
@@ -1663,6 +1792,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                           indent={12}
                           contextLabel={buildSessionContextLabel(session)}
                           onSelect={() => handleSelectSession(session)}
+                          onLongPress={() => handleLongPressSession(session)}
                         />
                       </div>
                     ))}
@@ -1790,6 +1920,63 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                   </section>
                 );
               })()}
+              {recentSessions.length > 0 ? (() => {
+                const recentExpanded = projectExpandedMap[RECENT_SECTION_ID] ?? true;
+                const recentLabel = t('sessions.sidebar.activity.recentTitle');
+                return (
+                  <section className="border-t border-border/70">
+                    <div className="flex min-h-12 w-full items-center">
+                      <button
+                        type="button"
+                        className="flex min-h-12 min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+                        onClick={() => toggleProject(RECENT_SECTION_ID, recentExpanded)}
+                        aria-expanded={recentExpanded}
+                        aria-label={
+                          recentExpanded
+                            ? t('sessions.sidebar.group.collapseAria', { label: recentLabel })
+                            : t('sessions.sidebar.group.expandAria', { label: recentLabel })
+                        }
+                        style={{ touchAction: 'manipulation' }}
+                      >
+                        <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--surface-muted)] text-muted-foreground">
+                          <Icon name="history" className="size-4" />
+                        </span>
+                        <span className="block min-w-0 flex-1 truncate capitalize typography-ui-label font-semibold text-foreground">
+                          {recentLabel}
+                        </span>
+                        <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">
+                          {recentSessions.length}
+                        </span>
+                      </button>
+                    </div>
+                    {recentExpanded ? (
+                      <div className="pb-2">
+                        {recentSessions.map((session) => (
+                          <SessionRow
+                            key={session.id}
+                            session={session}
+                            active={currentSessionId === session.id}
+                            indent={PROJECT_SESSION_INDENT}
+                            contextLabel={buildSessionContextLabel(session)}
+                            onSelect={() => handleSelectSession(session)}
+                            revealed={revealedSessionId === session.id}
+                            onRevealedChange={(nextRevealed) => handleRowRevealedChange(session.id, nextRevealed)}
+                            confirmingDelete={confirmingDeleteSessionId === session.id}
+                            onArchive={() => void handleArchive(session)}
+                            onRequestDelete={() => setConfirmingDeleteSessionId(session.id)}
+                            onConfirmDelete={() => void handleConfirmDelete(session)}
+                            renaming={renamingSessionId === session.id}
+                            onRequestRename={() => handleRequestRename(session.id)}
+                            onSubmitRename={(nextTitle) => void handleSubmitRename(session.id, nextTitle)}
+                            onCancelRename={() => setRenamingSessionId(null)}
+                            onLongPress={() => handleLongPressSession(session)}
+                          />
+                        ))}
+                      </div>
+                    ) : null}
+                  </section>
+                );
+              })() : null}
               {orderedNodes.map((node) => {
                 const projectExpanded = isProjectExpanded(node);
                 const buckets = normalizedQuery
@@ -2093,6 +2280,30 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
               >
                 <span className="typography-ui-label">{t(labelKey)}</span>
                 {projectSortOrder === order ? <Icon name="check" className="size-4" /> : null}
+              </button>
+            ))}
+          </div>
+        </MobileOverlayPanel>
+
+        <MobileOverlayPanel
+          open={actionSheetSession !== null}
+          onClose={closeSessionActionSheet}
+          title={actionSheetSession ? (actionSheetSession.title?.trim() || t('mobile.sessions.untitled')) : ''}
+        >
+          <div className="flex flex-col">
+            {actionSheetItems.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={cn(
+                  'flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left transition-colors active:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
+                  item.destructive ? 'text-destructive' : 'text-foreground',
+                )}
+                onClick={() => handleSessionAction(item)}
+                style={{ touchAction: 'manipulation' }}
+              >
+                <Icon name={item.icon} className="size-4 shrink-0" />
+                <span className="typography-ui-label">{t(item.labelKey, item.labelParams)}</span>
               </button>
             ))}
           </div>
