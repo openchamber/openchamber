@@ -68,7 +68,7 @@ type Harness = {
 const createHarness = (input: {
   readonly sessionId?: string;
   readonly preferredTabId?: string;
-  readonly refreshAuthToken?: () => Promise<unknown>;
+  readonly refreshAuthToken?: () => Promise<string | void>;
 } = {}): Harness => {
   const sockets: FakeSocket[] = [];
   const scheduled: Array<{ callback: () => void; delayMs: number }> = [];
