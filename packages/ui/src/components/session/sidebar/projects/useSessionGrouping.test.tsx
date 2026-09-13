@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { Session } from '@opencode-ai/sdk/v2';
+import type { WorktreeMetadata } from '@/types/worktree';
 import { I18nProvider } from '@/lib/i18n';
 import { useSessionActions } from '../sessions/useSessionActions';
 import { useSessionGrouping } from './useSessionGrouping';
@@ -99,5 +100,40 @@ describe('useSessionGrouping malformed hierarchy fallbacks', () => {
 
     handleDeleteSession(session('root'));
     handleDeleteSession(session('root'), { hardDelete: true });
+  });
+
+  test('keeps a mixed archived and live tree in its registered worktree group', () => {
+    type GroupingCapture = { buildGroupedSessions?: ReturnType<typeof useSessionGrouping>['buildGroupedSessions'] };
+    const state: GroupingCapture = {};
+    const Harness = () => {
+      state.buildGroupedSessions = useSessionGrouping({
+        homeDirectory: null,
+        worktreeMetadata: new Map(),
+        pinnedSessionIds: new Set(),
+        sessionOrderRanks: new Map(),
+        gitBranches: new Map(),
+        isVSCode: false,
+      }).buildGroupedSessions;
+      return null;
+    };
+    renderToStaticMarkup(React.createElement(I18nProvider, null, React.createElement(Harness)));
+    if (!state.buildGroupedSessions) throw new Error('grouping callback was not mounted');
+
+    const parent = {
+      ...session('parent'),
+      directory: '/worktrees/feature',
+      time: { created: 1, updated: 1, archived: 2 },
+    };
+    const child = { ...session('child', parent.id), directory: undefined };
+    const worktree: WorktreeMetadata = {
+      path: '/worktrees/feature',
+      projectDirectory: '/workspace',
+      branch: 'feature',
+      label: 'feature',
+    };
+    const groups = state.buildGroupedSessions([parent, child], '/workspace', [worktree], null, true);
+    const worktreeGroup = groups.find((group) => group.directory === worktree.path);
+
+    expect(collectIds(worktreeGroup?.sessions ?? [])).toEqual(['parent', 'child']);
   });
 });

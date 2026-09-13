@@ -63,7 +63,11 @@ const isKnownActiveSessionDirectory = (
 ): boolean => {
   if (session.time?.archived) return true;
   const directory = normalizePath(resolveGlobalSessionDirectory(session))?.toLowerCase();
-  if (!directory) return !isVSCode;
+  // A child may inherit its directory from an archived parent, which joins
+  // this active collection only later during ownership indexing. Keep that
+  // child long enough for the lineage-aware owner to decide; directory-less
+  // roots remain excluded from VS Code.
+  if (!directory) return !isVSCode || Boolean(parentIdOf(session));
   if (knownDirectories.size === 0) return !isVSCode;
   return knownDirectories.has(directory);
 };
@@ -283,6 +287,10 @@ export const useSessionProjectCollection = ({
       .filter((id) => options.includeArchived || !sessionById.get(id)?.time?.archived),
     [childrenMap, sessionById],
   );
+  const isSessionArchived = React.useCallback(
+    (sessionId: string) => Boolean(sessionById.get(sessionId)?.time?.archived),
+    [sessionById],
+  );
 
   return {
     archivedSessions,
@@ -290,6 +298,7 @@ export const useSessionProjectCollection = ({
     chatSessions,
     getDescendantIds: getDescendantIdsForAction,
     hasAuthoritativeGlobalSessions,
+    isSessionArchived,
     liveSessions,
     orderedSessions,
     pinnedSessionIds,
