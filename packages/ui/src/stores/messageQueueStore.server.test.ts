@@ -6,6 +6,7 @@ import type { MessageQueueUpdatedEvent } from "./messageQueueStore"
 type FetchCall = { path: string; method: string; body: ReturnType<typeof JSON.parse> }
 let calls: FetchCall[] = []
 let activeRuntimeKey = "runtime-a"
+let isVSCodeRuntimeEnabled = false
 let respond: (call: FetchCall) => Response | Promise<Response> = () => new Response("{}", { status: 200 })
 
 mock.module("@/lib/runtime-fetch", () => ({
@@ -20,7 +21,7 @@ mock.module("@/lib/runtime-fetch", () => ({
   },
 }))
 const desktop = await import("@/lib/desktop")
-mock.module("@/lib/desktop", () => ({ ...desktop, isVSCodeRuntime: () => false }))
+mock.module("@/lib/desktop", () => ({ ...desktop, isVSCodeRuntime: () => isVSCodeRuntimeEnabled }))
 mock.module("@/lib/runtime-switch", () => ({ getRuntimeKey: () => activeRuntimeKey }))
 mock.module("@/lib/persistence", () => ({ updateDesktopSettings: async () => undefined }))
 
@@ -93,6 +94,7 @@ const attachment: AttachedFile = {
 beforeEach(() => {
   useMessageQueueStore.getState().resetForRuntimeSwitch(activeRuntimeKey)
   activeRuntimeKey = "runtime-a"
+  isVSCodeRuntimeEnabled = false
   useInputHistoryStore.setState({ globalBuckets: {}, sessionBuckets: {} })
   calls = []
   respond = () => json({ revision: 1, session: session([]) })
@@ -420,6 +422,42 @@ describe("server-owned message queue", () => {
     await expect(useMessageQueueStore.getState().takeForSend(target, "q1")).rejects.toThrow()
 
     expect(useMessageQueueStore.getState().queuedMessages[key]).toBe(undefined)
+  })
+
+  test("a failed resume recovery preserves the existing queue and does not clear it", async () => {
+    applyMessageQueueUpdatedEvent(updated(10, session([serverItem("q1", "queued")])), "runtime-a")
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toHaveLength(1)
+
+    respond = () => new Response(null, { status: 503 })
+    await expect(useMessageQueueStore.getState().resync()).rejects.toThrow()
+
+    expect(useMessageQueueStore.getState().queuedMessages[key]?.map((m) => m.id)).toEqual(["q1"])
+  })
+
+  test("resume recovery is a no-op on VS Code (non-server-owned queue)", async () => {
+    isVSCodeRuntimeEnabled = true
+
+    respond = () => json({ revision: 10, sessions: [] })
+    await useMessageQueueStore.getState().resync()
+
+    expect(calls).toHaveLength(0)
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toBeUndefined()
+  })
+
+  test("a reconnect immediately after resume shares the request and reads once after it", async () => {
+    isVSCodeRuntimeEnabled = false
+
+    const first = deferredResponse()
+    respond = () => calls.length === 1 ? first.promise : json({ revision: 12, sessions: [] })
+    const resumeRecovery = useMessageQueueStore.getState().resync()
+    const reconnectRecovery = useMessageQueueStore.getState().resync()
+    expect(calls).toHaveLength(1)
+
+    first.resolve(json({ revision: 10, sessions: [session([serverItem("q1", "delivered during recovery")])] }))
+    await Promise.all([resumeRecovery, reconnectRecovery])
+
+    expect(calls).toHaveLength(2)
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toBeUndefined()
   })
 
   test("broadcasts update the projection but never move it backwards", () => {

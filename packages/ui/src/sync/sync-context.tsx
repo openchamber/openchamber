@@ -2319,6 +2319,8 @@ export function SyncProvider(props: {
     if (typeof window === "undefined") return
 
     const onSystemResume = () => {
+      void useMessageQueueStore.getState().resync().catch(() => undefined)
+
       const directory = currentDirectoryRef.current
       if (!directory || !childStores.getChild(directory)) return
 
