@@ -4,10 +4,15 @@ import fsp from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 
 import { ElectronSshManager } from './ssh-manager.mjs';
+
+// Mirrors managedServerConfigTag() in ssh-manager.mjs.
+const configTagFor = (password, bindHost = '127.0.0.1') =>
+  createHash('sha256').update(`${password ?? ''}\n${bindHost}`).digest('hex').slice(0, 24);
 
 const servers = [];
 const tempDirs = [];
@@ -445,5 +450,362 @@ describe('ElectronSshManager', () => {
     };
     await manager.startRemoteServerManaged(parsed, '/tmp/control.sock', secured, 4321, '/bin/openchamber');
     expect(started).toContain('--hostname 0.0.0.0');
+  });
+
+  const MANAGED_BIN_PATH = '/home/pi/.openchamber/npm-global/bin/openchamber';
+
+  const createManagedServerManager = ({ appVersion = '1.2.3', portStates = {}, managedPorts, managedServerStopWaitMs } = {}) => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-ssh-managed-test-'));
+    tempDirs.push(tempDir);
+    const settingsFilePath = path.join(tempDir, 'settings.json');
+    if (managedPorts) {
+      fs.writeFileSync(settingsFilePath, JSON.stringify({ desktopSshManagedServers: managedPorts }));
+    }
+    const manager = new ElectronSshManager({
+      settingsFilePath,
+      appVersion,
+      emit: () => undefined,
+      managedServerStopWaitMs,
+    });
+    const calls = { probes: [], starts: [], stops: [] };
+    manager.remoteOpenChamberCandidates = async () => [{ binPath: MANAGED_BIN_PATH, version: appVersion }];
+    manager.probeRemoteSystemInfo = async (_parsed, _controlPath, port) => {
+      calls.probes.push(port);
+      const state = portStates[port];
+      if (!state?.alive) throw new Error(`nothing answers on port ${port}`);
+      return state.version ? { openchamberVersion: state.version } : {};
+    };
+    manager.startRemoteServerManaged = async (_parsed, _controlPath, _instance, desiredPort) => {
+      calls.starts.push(desiredPort);
+      portStates[desiredPort] = { alive: true, version: appVersion };
+      return desiredPort;
+    };
+    manager.stopRemoteServerBestEffort = async (_parsed, _controlPath, port, binPath) => {
+      calls.stops.push({ port, binPath });
+      if (portStates[port]) portStates[port].alive = false;
+    };
+    return { manager, settingsFilePath, calls };
+  };
+
+  const managedInstance = (remoteOpenchamber = {}, auth = {}) => ({
+    id: 'ssh-1',
+    auth,
+    remoteOpenchamber: { mode: 'managed', ...remoteOpenchamber },
+  });
+
+  test('adopts a daemon answering on the persisted managed port without restarting it', async () => {
+    const { manager, calls } = createManagedServerManager({
+      portStates: { 4500: { alive: true, version: '1.2.3' } },
+      managedPorts: { 'ssh-1': { port: 4500 } },
+    });
+
+    const result = await manager.ensureRemoteServer(managedInstance(), { destination: 'user@example.test', args: [] }, '/tmp/control.sock');
+
+    expect(result).toEqual({ remotePort: 4500, startedByUs: true, remoteBinPath: MANAGED_BIN_PATH });
+    // Candidate probe plus the final reachability check on the reused port.
+    expect(calls.probes).toEqual([4500, 4500]);
+    expect(calls.starts).toEqual([]);
+    expect(calls.stops).toEqual([]);
+  });
+
+  test('reuses a preferred-port daemon untouched and never adopts it', async () => {
+    const { manager, calls } = createManagedServerManager({
+      portStates: { 4600: { alive: true, version: '1.0.0-other' }, 4500: { alive: true, version: '1.2.3' } },
+      managedPorts: { 'ssh-1': { port: 4500 } },
+    });
+
+    const result = await manager.ensureRemoteServer(
+      managedInstance({ preferredPort: 4600 }),
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+    );
+
+    expect(result).toEqual({ remotePort: 4600, startedByUs: false, remoteBinPath: MANAGED_BIN_PATH });
+    expect(calls.probes).toEqual([4600, 4600]);
+    expect(calls.starts).toEqual([]);
+    expect(calls.stops).toEqual([]);
+  });
+
+  test('probes the preferred port before the persisted port', async () => {
+    const { manager, calls } = createManagedServerManager({
+      portStates: { 4500: { alive: true, version: '1.2.3' } },
+      managedPorts: { 'ssh-1': { port: 4500 } },
+    });
+
+    const result = await manager.ensureRemoteServer(
+      managedInstance({ preferredPort: 4600 }),
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+    );
+
+    expect(result.remotePort).toBe(4500);
+    expect(result.startedByUs).toBe(true);
+    expect(calls.probes).toEqual([4600, 4500, 4500]);
+  });
+
+  test('treats a persisted port identical to the preferred port as user-pinned', async () => {
+    const { manager, calls } = createManagedServerManager({
+      portStates: { 4600: { alive: true, version: '1.0.0-other' } },
+      managedPorts: { 'ssh-1': { port: 4600 } },
+    });
+
+    const result = await manager.ensureRemoteServer(
+      managedInstance({ preferredPort: 4600 }),
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+    );
+
+    expect(result).toEqual({ remotePort: 4600, startedByUs: false, remoteBinPath: MANAGED_BIN_PATH });
+    expect(calls.probes).toEqual([4600, 4600]);
+    expect(calls.stops).toEqual([]);
+  });
+
+  test('restarts a stale adopted daemon and persists the replacement port', async () => {
+    const { manager, settingsFilePath, calls } = createManagedServerManager({
+      appVersion: '1.2.3',
+      portStates: { 4500: { alive: true, version: '1.2.2' } },
+      managedPorts: { 'ssh-1': { port: 4500 } },
+    });
+
+    const result = await manager.ensureRemoteServer(managedInstance(), { destination: 'user@example.test', args: [] }, '/tmp/control.sock');
+
+    expect(result.startedByUs).toBe(true);
+    expect(result.remotePort).not.toBe(4500);
+    expect(calls.stops).toEqual([{ port: 4500, binPath: MANAGED_BIN_PATH }]);
+    expect(calls.starts).toEqual([result.remotePort]);
+    const settings = JSON.parse(fs.readFileSync(settingsFilePath, 'utf8'));
+    expect(settings.desktopSshManagedServers['ssh-1'].port).toBe(result.remotePort);
+  });
+
+  test('restarts an adopted daemon that reports a newer version', async () => {
+    const { manager, calls } = createManagedServerManager({
+      portStates: { 4500: { alive: true, version: '9.9.9' } },
+      managedPorts: { 'ssh-1': { port: 4500 } },
+    });
+
+    const result = await manager.ensureRemoteServer(managedInstance(), { destination: 'user@example.test', args: [] }, '/tmp/control.sock');
+
+    expect(result.startedByUs).toBe(true);
+    expect(result.remotePort).not.toBe(4500);
+    expect(calls.stops).toEqual([{ port: 4500, binPath: MANAGED_BIN_PATH }]);
+    expect(calls.starts).toEqual([result.remotePort]);
+  });
+
+  test('never restarts a daemon that cannot report its version', async () => {
+    const { manager, calls } = createManagedServerManager({
+      portStates: { 4500: { alive: true, version: 'unknown' } },
+      managedPorts: { 'ssh-1': { port: 4500 } },
+    });
+
+    const result = await manager.ensureRemoteServer(managedInstance(), { destination: 'user@example.test', args: [] }, '/tmp/control.sock');
+
+    expect(result).toEqual({ remotePort: 4500, startedByUs: true, remoteBinPath: MANAGED_BIN_PATH });
+    expect(calls.stops).toEqual([]);
+    expect(calls.starts).toEqual([]);
+  });
+
+  test('still starts fresh when a stale daemon refuses to stop', async () => {
+    const { manager, settingsFilePath, calls } = createManagedServerManager({
+      portStates: { 4500: { alive: true, version: '1.2.2' } },
+      managedPorts: { 'ssh-1': { port: 4500 } },
+      managedServerStopWaitMs: 50,
+    });
+    // The daemon survives the stop command: the bounded wait expires and the
+    // replacement starts on a fresh port instead of failing the connect.
+    manager.stopRemoteServerBestEffort = async (_parsed, _controlPath, port, binPath) => {
+      calls.stops.push({ port, binPath });
+    };
+
+    const result = await manager.ensureRemoteServer(managedInstance(), { destination: 'user@example.test', args: [] }, '/tmp/control.sock');
+
+    expect(result.startedByUs).toBe(true);
+    expect(result.remotePort).not.toBe(4500);
+    expect(calls.stops).toEqual([{ port: 4500, binPath: MANAGED_BIN_PATH }]);
+    expect(calls.starts).toEqual([result.remotePort]);
+    const settings = JSON.parse(fs.readFileSync(settingsFilePath, 'utf8'));
+    expect(settings.desktopSshManagedServers['ssh-1'].port).toBe(result.remotePort);
+  });
+
+  test('treats an auth-rejected probe on the persisted port as not running and starts fresh', async () => {
+    // Known limitation: the still-running old daemon loses its persisted
+    // tracking entry here, so nothing will adopt or stop it later. Distinguish
+    // 401/403 from connection-refused in a follow-up.
+    const { manager, settingsFilePath, calls } = createManagedServerManager({
+      managedPorts: { 'ssh-1': { port: 4500 } },
+    });
+    manager.probeRemoteSystemInfo = async (_parsed, _controlPath, port) => {
+      calls.probes.push(port);
+      if (port === 4500) {
+        throw new Error('Remote OpenChamber requires UI authentication and configured password was rejected (auth status 401)');
+      }
+      return { openchamberVersion: '1.2.3' };
+    };
+
+    const result = await manager.ensureRemoteServer(managedInstance(), { destination: 'user@example.test', args: [] }, '/tmp/control.sock');
+
+    expect(result.startedByUs).toBe(true);
+    expect(result.remotePort).not.toBe(4500);
+    expect(calls.probes).toEqual([4500, result.remotePort]);
+    const settings = JSON.parse(fs.readFileSync(settingsFilePath, 'utf8'));
+    expect(settings.desktopSshManagedServers['ssh-1'].port).toBe(result.remotePort);
+  });
+
+  test('starts and persists a server on the first connect without any persisted port', async () => {
+    const { manager, settingsFilePath, calls } = createManagedServerManager();
+
+    const result = await manager.ensureRemoteServer(managedInstance(), { destination: 'user@example.test', args: [] }, '/tmp/control.sock');
+
+    expect(result.startedByUs).toBe(true);
+    expect(calls.starts).toEqual([result.remotePort]);
+    const settings = JSON.parse(fs.readFileSync(settingsFilePath, 'utf8'));
+    expect(settings.desktopSshManagedServers['ssh-1'].port).toBe(result.remotePort);
+  });
+
+  test('ignores malformed managed server entries', async () => {
+    const { manager } = createManagedServerManager({
+      managedPorts: {
+        'ssh-zero': { port: 0 },
+        'ssh-string': { port: 'abc' },
+        'ssh-bare': 'nope',
+        'ssh-valid': { port: 4500 },
+      },
+    });
+
+    expect(manager.readManagedServerPort('ssh-zero')).toBeNull();
+    expect(manager.readManagedServerPort('ssh-string')).toBeNull();
+    expect(manager.readManagedServerPort('ssh-bare')).toBeNull();
+    expect(manager.readManagedServerPort('ssh-missing')).toBeNull();
+    expect(manager.readManagedServerPort('ssh-valid')).toBe(4500);
+  });
+
+  test('starts and persists a fresh server when the persisted port is dead', async () => {
+    const { manager, settingsFilePath, calls } = createManagedServerManager({
+      managedPorts: { 'ssh-1': { port: 4500 } },
+    });
+
+    const result = await manager.ensureRemoteServer(managedInstance(), { destination: 'user@example.test', args: [] }, '/tmp/control.sock');
+
+    expect(result.startedByUs).toBe(true);
+    expect(calls.probes).toEqual([4500, result.remotePort]);
+    expect(calls.starts).toEqual([result.remotePort]);
+    const settings = JSON.parse(fs.readFileSync(settingsFilePath, 'utf8'));
+    expect(settings.desktopSshManagedServers['ssh-1'].port).toBe(result.remotePort);
+    expect(Number.isFinite(settings.desktopSshManagedServers['ssh-1'].updatedAtMs)).toBe(true);
+  });
+
+  test('reuses an adopted daemon whose version is unknown instead of restarting blind', async () => {
+    const { manager, calls } = createManagedServerManager({
+      portStates: { 4500: { alive: true, version: null } },
+      managedPorts: { 'ssh-1': { port: 4500 } },
+    });
+
+    const result = await manager.ensureRemoteServer(managedInstance(), { destination: 'user@example.test', args: [] }, '/tmp/control.sock');
+
+    expect(result).toEqual({ remotePort: 4500, startedByUs: true, remoteBinPath: MANAGED_BIN_PATH });
+    expect(calls.probes).toEqual([4500, 4500]);
+    expect(calls.stops).toEqual([]);
+    expect(calls.starts).toEqual([]);
+  });
+
+  test('restarts an adopted daemon when the UI password changes', async () => {
+    // Without the tag comparison this deadlocks: the probe succeeds against
+    // the public /api/system/info, the old-password daemon is adopted, and the
+    // client token request then 401s on every connect.
+    const { manager, settingsFilePath, calls } = createManagedServerManager({
+      portStates: { 4500: { alive: true, version: '1.2.3' } },
+      managedPorts: { 'ssh-1': { port: 4500, configTag: configTagFor('old-secret') } },
+    });
+
+    const instance = managedInstance({}, { openchamberPassword: { enabled: true, value: 'new-secret', store: 'settings' } });
+    const result = await manager.ensureRemoteServer(instance, { destination: 'user@example.test', args: [] }, '/tmp/control.sock');
+
+    expect(result.startedByUs).toBe(true);
+    expect(result.remotePort).not.toBe(4500);
+    expect(calls.stops).toEqual([{ port: 4500, binPath: MANAGED_BIN_PATH }]);
+    expect(calls.starts).toEqual([result.remotePort]);
+    const settings = JSON.parse(fs.readFileSync(settingsFilePath, 'utf8'));
+    expect(settings.desktopSshManagedServers['ssh-1'].port).toBe(result.remotePort);
+    expect(settings.desktopSshManagedServers['ssh-1'].configTag).toBe(configTagFor('new-secret'));
+  });
+
+  test('reuses an adopted daemon whose config tag matches', async () => {
+    const { manager, calls } = createManagedServerManager({
+      portStates: { 4500: { alive: true, version: '1.2.3' } },
+      managedPorts: { 'ssh-1': { port: 4500, configTag: configTagFor(null) } },
+    });
+
+    const result = await manager.ensureRemoteServer(managedInstance(), { destination: 'user@example.test', args: [] }, '/tmp/control.sock');
+
+    expect(result).toEqual({ remotePort: 4500, startedByUs: true, remoteBinPath: MANAGED_BIN_PATH });
+    expect(calls.probes).toEqual([4500, 4500]);
+    expect(calls.stops).toEqual([]);
+    expect(calls.starts).toEqual([]);
+  });
+
+  test('restarts an adopted daemon when the bind host changes', async () => {
+    const { manager, calls } = createManagedServerManager({
+      portStates: { 4500: { alive: true, version: '1.2.3' } },
+      managedPorts: { 'ssh-1': { port: 4500, configTag: configTagFor(null) } },
+    });
+
+    const instance = managedInstance(
+      { bindHost: '0.0.0.0' },
+      { openchamberPassword: { enabled: true, value: 'lan-secret', store: 'settings' } },
+    );
+    const result = await manager.ensureRemoteServer(instance, { destination: 'user@example.test', args: [] }, '/tmp/control.sock');
+
+    expect(result.startedByUs).toBe(true);
+    expect(result.remotePort).not.toBe(4500);
+    expect(calls.stops).toEqual([{ port: 4500, binPath: MANAGED_BIN_PATH }]);
+    expect(calls.starts).toEqual([result.remotePort]);
+  });
+
+  test('adopts a daemon whose entry predates config tags and backfills the tag', async () => {
+    const { manager, settingsFilePath, calls } = createManagedServerManager({
+      portStates: { 4500: { alive: true, version: '1.2.3' } },
+      managedPorts: { 'ssh-1': { port: 4500 } },
+    });
+
+    const result = await manager.ensureRemoteServer(managedInstance(), { destination: 'user@example.test', args: [] }, '/tmp/control.sock');
+
+    expect(result).toEqual({ remotePort: 4500, startedByUs: true, remoteBinPath: MANAGED_BIN_PATH });
+    expect(calls.stops).toEqual([]);
+    expect(calls.starts).toEqual([]);
+    const settings = JSON.parse(fs.readFileSync(settingsFilePath, 'utf8'));
+    expect(settings.desktopSshManagedServers['ssh-1'].port).toBe(4500);
+    expect(settings.desktopSshManagedServers['ssh-1'].configTag).toBe(configTagFor(null));
+  });
+
+  test('restarts an adopted daemon whose version cannot be reported once its config tag changes', async () => {
+    // The 'unknown' version guard suppresses version restarts only; a config
+    // edit still forces a restart so the change takes effect.
+    const { manager, calls } = createManagedServerManager({
+      portStates: { 4500: { alive: true, version: 'unknown' } },
+      managedPorts: { 'ssh-1': { port: 4500, configTag: configTagFor(null) } },
+    });
+
+    const instance = managedInstance({}, { openchamberPassword: { enabled: true, value: 'new-secret', store: 'settings' } });
+    const result = await manager.ensureRemoteServer(instance, { destination: 'user@example.test', args: [] }, '/tmp/control.sock');
+
+    expect(result.startedByUs).toBe(true);
+    expect(result.remotePort).not.toBe(4500);
+    expect(calls.stops).toEqual([{ port: 4500, binPath: MANAGED_BIN_PATH }]);
+    expect(calls.starts).toEqual([result.remotePort]);
+  });
+
+  test('prunes managed server ports of deleted instances on setInstances', async () => {
+    const { manager, settingsFilePath } = createManagedServerManager({
+      managedPorts: {
+        'ssh-keep': { port: 4500, updatedAtMs: 1 },
+        'ssh-gone': { port: 4600, updatedAtMs: 1 },
+      },
+    });
+
+    await manager.setInstances({ instances: [{ id: 'ssh-keep', sshCommand: 'ssh host' }] });
+
+    const settings = JSON.parse(fs.readFileSync(settingsFilePath, 'utf8'));
+    expect(settings.desktopSshManagedServers).toEqual({ 'ssh-keep': { port: 4500, updatedAtMs: 1 } });
+    expect(manager.readManagedServerPort('ssh-keep')).toBe(4500);
+    expect(manager.readManagedServerPort('ssh-gone')).toBeNull();
   });
 });
