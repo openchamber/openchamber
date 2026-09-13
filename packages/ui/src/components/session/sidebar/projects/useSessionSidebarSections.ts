@@ -5,6 +5,9 @@ import type { SessionGroup, SessionNode, GroupSearchData } from '../types';
 import { dedupeSessionsById, normalizePath } from '../utils';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SessionFoldersMap } from '@/stores/useSessionFoldersStore';
+import type { ProjectSortOrder } from '@/stores/useSessionDisplayStore';
+import { getSessionLifecycleOrderValue } from '@/sync/session-ordering';
+import { orderProjectsByLiveActivity, type ProjectActivitySignal } from '../list/projectSort';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 
 type ProjectItem = {
@@ -16,6 +19,8 @@ type ProjectItem = {
   color?: string;
   iconImage?: { mime: string; updatedAt: number; source: 'custom' | 'auto' };
   iconBackground?: string;
+  addedAt?: number | null;
+  lastOpenedAt?: number | null;
 };
 
 type ProjectSection = {
@@ -76,7 +81,15 @@ type Args = {
    * chat vanish the moment a query was typed.
    */
   standaloneGroups: SessionGroup[];
+  /** Already-applied project mode; `recent`/`date-added` get live-session promotion. */
+  projectSortOrder: ProjectSortOrder;
+  /** Authoritative non-idle session set from global status. */
+  activeSessionIds: ReadonlySet<string>;
+  /** Live lifecycle ranks used for the `recent` recency signal. */
+  sessionOrderRanks: ReadonlyMap<string, number>;
 };
+
+const EMPTY_PROJECT_ACTIVITY: ReadonlyMap<string, ProjectActivitySignal> = new Map();
 
 export const useSessionSidebarSections = (args: Args) => {
   const {
@@ -95,8 +108,36 @@ export const useSessionSidebarSections = (args: Args) => {
     buildGroupSearchText,
     foldersMap,
     standaloneGroups,
+    projectSortOrder,
+    activeSessionIds,
+    sessionOrderRanks,
   } = args;
   const projectSectionCacheRef = React.useRef<Map<string, ProjectSectionCacheEntry>>(new Map());
+
+  // Live per-project activity is derived here, where each project's sessions
+  // are already indexed by ownership — never re-matched from directories.
+  const projectActivityByProjectId = React.useMemo(() => {
+    if (projectSortOrder !== 'recent' && projectSortOrder !== 'date-added') {
+      return EMPTY_PROJECT_ACTIVITY;
+    }
+    const activityByProjectId = new Map<string, ProjectActivitySignal>();
+    for (const project of normalizedProjects) {
+      let hasActiveSession = false;
+      let latestSessionActivityAt = 0;
+      for (const session of getSessionsForProject(project.id)) {
+        if (activeSessionIds.has(session.id)) hasActiveSession = true;
+        const activityAt = getSessionLifecycleOrderValue(session, sessionOrderRanks);
+        if (activityAt > latestSessionActivityAt) latestSessionActivityAt = activityAt;
+      }
+      activityByProjectId.set(project.id, { hasActiveSession, latestSessionActivityAt });
+    }
+    return activityByProjectId;
+  }, [activeSessionIds, getSessionsForProject, normalizedProjects, projectSortOrder, sessionOrderRanks]);
+
+  const orderedProjects = React.useMemo(
+    () => orderProjectsByLiveActivity(normalizedProjects, projectSortOrder, projectActivityByProjectId),
+    [normalizedProjects, projectActivityByProjectId, projectSortOrder],
+  );
 
   const projectSections = React.useMemo<ProjectSection[]>(() => {
     const previousCache = projectSectionCacheRef.current;
@@ -107,7 +148,7 @@ export const useSessionSidebarSections = (args: Args) => {
       left.length === right.length && left.every((session, index) => session === right[index])
     );
 
-    const sections = normalizedProjects.map((project) => {
+    const sections = orderedProjects.map((project) => {
       const activeSessions = getSessionsForProject(project.id);
       const archivedSessions = getArchivedSessionsForProject(project.id);
       const worktreesForProject = availableWorktreesByProject.get(project.normalizedPath) ?? EMPTY_WORKTREES;
@@ -174,7 +215,7 @@ export const useSessionSidebarSections = (args: Args) => {
     if (rebuiltSections > 0) streamPerfCount('ui.sidebar.project_section.rebuilt', rebuiltSections);
     return sections;
   }, [
-    normalizedProjects,
+    orderedProjects,
     getSessionsForProject,
     getArchivedSessionsForProject,
     availableWorktreesByProject,

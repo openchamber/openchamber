@@ -3,6 +3,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { I18nProvider } from '@/lib/i18n';
+import type { ProjectSortOrder } from '@/stores/useSessionDisplayStore';
 import { useSessionGrouping } from './useSessionGrouping';
 import { useSessionSidebarSections } from './useSessionSidebarSections';
 import type { SessionGroup } from '../types';
@@ -35,23 +36,45 @@ const chatsGroup = (sessions: Session[]): SessionGroup => ({
 
 type Sections = ReturnType<typeof useSessionSidebarSections>;
 
+type ProjectFixture = {
+  id: string;
+  path: string;
+  sessions: Session[];
+};
+
+type SectionsOptions = {
+  projects?: ProjectFixture[];
+  projectSortOrder?: ProjectSortOrder;
+  activeSessionIds?: ReadonlySet<string>;
+  sessionOrderRanks?: ReadonlyMap<string, number>;
+};
+
 // The real matcher and the real grouping callbacks run here: the reported bug
 // was never about matching, so a stubbed matcher would test nothing.
-const renderSections = (group: SessionGroup, query: string, projectSessions?: Session[]): Sections => {
+const renderSections = (
+  group: SessionGroup,
+  query: string,
+  projectSessions?: Session[],
+  options: SectionsOptions = {},
+): Sections => {
+  const projects = options.projects
+    ?? (projectSessions ? [{ id: 'project', path: CHATS_ROOT, sessions: projectSessions }] : []);
+  const sessionsByProjectId = new Map(projects.map((project) => [project.id, project.sessions]));
   let captured: Sections | null = null;
   const Harness = () => {
+    const sessionOrderRanks = options.sessionOrderRanks ?? new Map<string, number>();
     const grouping = useSessionGrouping({
       homeDirectory: '/home/user',
       worktreeMetadata: new Map(),
       pinnedSessionIds: new Set(),
-      sessionOrderRanks: new Map(),
+      sessionOrderRanks,
       gitBranches: new Map(),
       isVSCode: false,
     });
     captured = useSessionSidebarSections({
-      normalizedProjects: projectSessions ? [{ id: 'project', path: CHATS_ROOT, normalizedPath: CHATS_ROOT }] : [],
-      getSessionsForProject: () => projectSessions?.filter((session) => !session.time.archived) ?? [],
-      getArchivedSessionsForProject: () => projectSessions?.filter((session) => Boolean(session.time.archived)) ?? [],
+      normalizedProjects: projects.map((project) => ({ id: project.id, path: project.path, normalizedPath: project.path })),
+      getSessionsForProject: (projectId) => sessionsByProjectId.get(projectId)?.filter((session) => !session.time.archived) ?? [],
+      getArchivedSessionsForProject: (projectId) => sessionsByProjectId.get(projectId)?.filter((session) => Boolean(session.time.archived)) ?? [],
       availableWorktreesByProject: new Map(),
       projectRepoStatus: new Map(),
       projectRootBranches: new Map(),
@@ -63,7 +86,10 @@ const renderSections = (group: SessionGroup, query: string, projectSessions?: Se
       filterSessionNodesForSearch: grouping.filterSessionNodesForSearch,
       buildGroupSearchText: grouping.buildGroupSearchText,
       foldersMap: { [CHATS_ROOT]: [{ id: 'folder', name: group.label, sessionIds: [], createdAt: 1 }] },
-      standaloneGroups: projectSessions ? [] : [group],
+      standaloneGroups: projects.length === 0 ? [group] : [],
+      projectSortOrder: options.projectSortOrder ?? 'manual',
+      activeSessionIds: options.activeSessionIds ?? new Set(),
+      sessionOrderRanks,
     });
     return null;
   };
@@ -72,6 +98,16 @@ const renderSections = (group: SessionGroup, query: string, projectSessions?: Se
   if (!captured) throw new Error('sections hook was not mounted');
   return captured;
 };
+
+const projectSession = (id: string, directory: string, updated: number): Session => ({
+  id,
+  slug: id,
+  projectID: 'project',
+  title: id,
+  version: '1',
+  directory,
+  time: { created: updated, updated },
+});
 
 // Issue #3200: the managed chats render outside every project section. They
 // were left out of the search pass, and a group without search data renders
@@ -178,5 +214,60 @@ describe('sidebar search over standalone groups', () => {
 
     expect(sections.groupSearchDataByGroup.has(group)).toBe(false);
     expect(sections.searchMatchCount).toBe(0);
+  });
+});
+
+// Issue #3444: the project zones never rose for a running session. The
+// reorder happens here, where each project's owned sessions are already known.
+describe('project live-activity ordering', () => {
+  const older = projectSession('ses_older', '/repos/older', 10);
+  const newer = projectSession('ses_newer', '/repos/newer', 20);
+  const projects = [
+    { id: 'newer', path: '/repos/newer', sessions: [newer] },
+    { id: 'older', path: '/repos/older', sessions: [older] },
+  ];
+  const ids = (sections: Sections): string[] => sections.projectSections.map((section) => section.project.id);
+
+  test('date-added promotes the project that owns a running session', () => {
+    const sections = renderSections(chatsGroup([]), '', undefined, {
+      projects,
+      projectSortOrder: 'date-added',
+      activeSessionIds: new Set([older.id]),
+    });
+
+    expect(ids(sections)).toEqual(['older', 'newer']);
+  });
+
+  test('recent promotes a running project even when its recency key is lower', () => {
+    const sections = renderSections(chatsGroup([]), '', undefined, {
+      projects,
+      projectSortOrder: 'recent',
+      activeSessionIds: new Set([older.id]),
+      sessionOrderRanks: new Map([[newer.id, 1000], [older.id, 1]]),
+    });
+
+    expect(ids(sections)).toEqual(['older', 'newer']);
+  });
+
+  test('recent folds the live lifecycle value into its recency key', () => {
+    const sections = renderSections(chatsGroup([]), '', undefined, {
+      projects,
+      projectSortOrder: 'recent',
+      sessionOrderRanks: new Map([[older.id, 100]]),
+    });
+
+    expect(ids(sections)).toEqual(['older', 'newer']);
+  });
+
+  test('manual, a-z, and z-a keep the incoming order', () => {
+    for (const projectSortOrder of ['manual', 'a-z', 'z-a'] as const) {
+      const sections = renderSections(chatsGroup([]), '', undefined, {
+        projects,
+        projectSortOrder,
+        activeSessionIds: new Set([older.id]),
+      });
+
+      expect(ids(sections)).toEqual(['newer', 'older']);
+    }
   });
 });

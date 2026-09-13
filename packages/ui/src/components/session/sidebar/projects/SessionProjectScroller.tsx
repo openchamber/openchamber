@@ -63,6 +63,7 @@ type SessionProjectScrollerGroupProps = Pick<SessionGroupSectionProps,
 > & {
   pinnedSessionIds: Set<string>;
   sessionOrderIndex: Map<string, number>;
+  sessionOrderRanks: ReadonlyMap<string, number>;
 };
 
 type SessionProjectScrollerGroupActions = Pick<SessionGroupSectionProps,

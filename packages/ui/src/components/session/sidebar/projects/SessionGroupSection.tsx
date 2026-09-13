@@ -22,7 +22,7 @@ import type { SortableDragHandleProps } from './sortableItems';
 import { DroppableFolderWrapper, SessionFolderDndScope } from '../folders/sessionFolderDnd';
 import type { GroupSearchData, SessionGroup, SessionNode } from '../types';
 import { isBranchDifferentFromLabel, normalizePath, renderHighlightedText } from '../utils';
-import { compareSessionsByLifecycleOrder, EMPTY_SESSION_ORDER_RANKS } from '@/sync/session-ordering';
+import { compareSessionsByLifecycleOrder } from '@/sync/session-ordering';
 import {
   collectSubtreeContainingId,
   computeNodeStructureKey,
@@ -75,6 +75,12 @@ export type SessionGroupSectionProps = {
   openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null; targetFolderId?: string; target?: 'chat' | 'project' }) => void;
   pinnedSessionIds: Set<string>;
   sessionOrderIndex: Map<string, number>;
+  /**
+   * The live lifecycle rank index (`useSessionOrderingStore.rankById`). Rows
+   * missing from `sessionOrderIndex` — archived sessions, most of them — still
+   * order by this authority instead of a frozen empty map.
+   */
+  sessionOrderRanks: ReadonlyMap<string, number>;
   notifyOnSubtasks: boolean;
   expandedParents: Set<string>;
   editingId: string | null;
@@ -256,6 +262,7 @@ const areGroupPropsEqual = (prev: SessionGroupSectionProps, next: SessionGroupSe
     && prev.startFolderRename === next.startFolderRename
     && prev.setCopiedSessionId === next.setCopiedSessionId
     && prev.startSessionWorktreeMenuLoad === next.startSessionWorktreeMenuLoad
+    && prev.sessionOrderRanks === next.sessionOrderRanks
     && prev.setFolderRenameDraft === next.setFolderRenameDraft
     && prev.clearFolderRename === next.clearFolderRename
   );
@@ -285,6 +292,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     openNewSessionDraft,
     pinnedSessionIds,
     sessionOrderIndex,
+    sessionOrderRanks,
     notifyOnSubtasks,
     onToggleCollapsedGroup,
     dragHandleProps,
@@ -313,8 +321,19 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
       if (bIndex === undefined) return -1;
       if (aIndex !== bIndex) return aIndex - bIndex;
     }
-    return compareSessionsByLifecycleOrder(a.session, b.session, pinnedSessionIds, EMPTY_SESSION_ORDER_RANKS);
-  }, [pinnedSessionIds, sessionOrderIndex]);
+    return compareSessionsByLifecycleOrder(a.session, b.session, pinnedSessionIds, sessionOrderRanks);
+  }, [pinnedSessionIds, sessionOrderIndex, sessionOrderRanks]);
+
+  // The grouping hook assembles child lists from ownership order, so every
+  // sibling list below a project root needs the same lifecycle sort the
+  // top-level rows already get. Returns the input node untouched when its
+  // subtree order is unchanged so row memoization keeps its identity.
+  const sortSessionNodeChildren = React.useCallback(function sortNode(node: SessionNode): SessionNode {
+    if (node.children.length === 0) return node;
+    const sortedChildren = [...node.children].sort(compareSessionNodes).map(sortNode);
+    if (sortedChildren.every((child, index) => child === node.children[index])) return node;
+    return { ...node, children: sortedChildren };
+  }, [compareSessionNodes]);
 
   const searchData = hasSessionSearchQuery ? groupSearchDataByGroup.get(group) : null;
   const isCollapsed = hasSessionSearchQuery ? false : collapsedGroups.has(groupKey);
@@ -385,8 +404,9 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   const shouldFilterGroupContents = hasSessionSearchQuery;
   const sourceGroupNodes = React.useMemo(
     () => [...(shouldFilterGroupContents ? (searchData?.filteredNodes ?? []) : group.sessions)]
-      .sort(compareSessionNodes),
-    [compareSessionNodes, group.sessions, searchData?.filteredNodes, shouldFilterGroupContents],
+      .sort(compareSessionNodes)
+      .map(sortSessionNodeChildren),
+    [compareSessionNodes, group.sessions, searchData?.filteredNodes, shouldFilterGroupContents, sortSessionNodeChildren],
   );
   const folderScopeKey = group.folderScopeKey ?? normalizePath(group.directory ?? null);
   // Merged flat groups list every contributing scope; single-scope groups
