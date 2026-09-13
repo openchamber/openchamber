@@ -17,6 +17,33 @@ import { getFullText, getMessagePreview } from './lib/messagePreview';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 
+// Wrap occurrences of `query` in a yellow background span. Used by the
+// TimelineDialog to highlight the currently active match in the row
+// preview. Returns a `{__html}` object for dangerouslySetInnerHTML;
+// query is HTML-escaped first to prevent injection.
+function renderPreviewWithHighlight(preview: string, query: string): { __html: string } {
+    const trimmed = query.trim();
+    if (!trimmed) return { __html: escapeHtml(preview) };
+    const escapedQuery = escapeHtml(trimmed).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escapedPreview = escapeHtml(preview);
+    const re = new RegExp(escapedQuery, 'gi');
+    return {
+        __html: escapedPreview.replace(
+            re,
+            (m) => '<mark class="rounded bg-yellow-300/40 px-0.5 text-foreground">' + m + '</mark>',
+        ),
+    };
+}
+
+function escapeHtml(s: string): string {
+    return s
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 interface TimelineDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
@@ -49,6 +76,9 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
     const [forkingMessageId, setForkingMessageId] = React.useState<string | null>(null);
     const [searchQuery, setSearchQuery] = React.useState('');
     const [selectedIndex, setSelectedIndex] = React.useState(0);
+    // Index across all match occurrences in filteredMessages (not per-message).
+    // e.g. 3 matches in msg A, 2 in msg B -> indices 0,1,2 belong to A, 3,4 belong to B.
+    const [currentMatchIndex, setCurrentMatchIndex] = React.useState(0);
     const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
     const listRef = React.useRef<HTMLDivElement | null>(null);
     const pendingLoadAnchorRef = React.useRef<{ messageId: string; top: number } | null>(null);
@@ -88,6 +118,48 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
             return fullText.includes(query);
         });
     }, [userMessages, searchQuery]);
+    // Flat list of (messageIdx) pairs covering every match of the search
+    // query across the filtered messages. Used by the input counter and
+    // the keyboard navigation (next/prev match).
+    const matchMap = React.useMemo(() => {
+        const trimmed = searchQuery.trim();
+        if (!trimmed) return [] as Array<{ messageIdx: number }>;
+        const needle = trimmed.toLowerCase();
+        const out: Array<{ messageIdx: number }> = [];
+        filteredMessages.forEach(({ message }, messageIdx) => {
+            const hay = getFullText(message.parts).toLowerCase();
+            let from = 0;
+            while (true) {
+                const idx = hay.indexOf(needle, from);
+                if (idx < 0) break;
+                out.push({ messageIdx });
+                from = idx + needle.length || idx + 1;
+            }
+        });
+        return out;
+    }, [filteredMessages, searchQuery]);
+
+    const totalMatches = matchMap.length;
+
+    // Keep currentMatchIndex in range whenever the query or filter changes.
+    React.useEffect(() => {
+        if (totalMatches === 0) {
+            setCurrentMatchIndex(0);
+            return;
+        }
+        setCurrentMatchIndex((current) => current % totalMatches);
+    }, [totalMatches]);
+
+    // Derived: which filtered-message holds the active match.
+    const activeMessageIdx = totalMatches > 0
+        ? matchMap[((currentMatchIndex % totalMatches) + totalMatches) % totalMatches].messageIdx
+        : 0;
+
+    // Keep selectedIndex in sync with the active match so list highlight
+    // and the "N of M" badge stay aligned.
+    React.useEffect(() => {
+        setSelectedIndex(activeMessageIdx);
+    }, [activeMessageIdx]);
 
     React.useEffect(() => {
         if (preservingLoadPositionRef.current) {
@@ -181,33 +253,46 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
         onOpenChange(false);
     }, [onOpenChange, onScrollToMessage]);
 
+    // Shared by the chevron buttons and the ArrowUp/ArrowDown keyboard shortcuts,
+    // so the two entry points can never drift into different wrap-around behavior.
+    const goToNextMatch = React.useCallback(() => {
+        if (totalMatches === 0) return;
+        setCurrentMatchIndex((current) => (current + 1) % totalMatches);
+    }, [totalMatches]);
+
+    const goToPreviousMatch = React.useCallback(() => {
+        if (totalMatches === 0) return;
+        setCurrentMatchIndex((current) => (current - 1 + totalMatches) % totalMatches);
+    }, [totalMatches]);
+
     const handleSearchKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
-        const total = filteredMessages.length;
-        if (total === 0) {
+        // Next/prev match across the whole filter, not per-message navigation.
+        if (totalMatches === 0) {
             return;
         }
 
         if (event.key === 'ArrowDown') {
             event.preventDefault();
-            setSelectedIndex((current) => (current + 1) % total);
+            goToNextMatch();
             return;
         }
 
         if (event.key === 'ArrowUp') {
             event.preventDefault();
-            setSelectedIndex((current) => (current - 1 + total) % total);
+            goToPreviousMatch();
             return;
         }
 
         if (event.key === 'Enter') {
             event.preventDefault();
-            const safeIndex = ((selectedIndex % total) + total) % total;
-            const selected = filteredMessages[safeIndex];
+            const safeMatch = ((currentMatchIndex % totalMatches) + totalMatches) % totalMatches;
+            const target = matchMap[safeMatch];
+            const selected = target ? filteredMessages[target.messageIdx] : undefined;
             if (selected) {
                 void navigateToMessage(selected.message.info.id);
             }
         }
-    }, [filteredMessages, navigateToMessage, selectedIndex]);
+    }, [totalMatches, matchMap, filteredMessages, navigateToMessage, currentMatchIndex, goToNextMatch, goToPreviousMatch]);
 
     // Handle fork with loading state and session refresh
     const handleFork = async (messageId: string) => {
@@ -249,31 +334,72 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
         </>
     );
 
+    if (!open) return null;
+
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-2xl max-h-[70vh] max-md:max-h-[85dvh] flex flex-col overflow-y-auto">
-                <DialogHeader className="shrink-0">
-                    <DialogTitle className="flex items-center gap-2">
-                        <Icon name="time" className="h-5 w-5" />
-                        {t('chat.timeline.title')}
-                    </DialogTitle>
-                    {!isMobile && (
-                        <DialogDescription>
-                            {t('chat.timeline.description')}
-                        </DialogDescription>
-                    )}
-                </DialogHeader>
-
-                <div className="relative mt-2 shrink-0">
-                    <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            {/* Title/description stay for accessibility (Base UI's Dialog requires
+                one) but render nothing visible: the find-bar below carries the
+                dialog's whole visible chrome, so a second title row would be
+                redundant with it. */}
+            <DialogHeader className="sr-only">
+                <DialogTitle>{t('chat.timeline.title')}</DialogTitle>
+                <DialogDescription>{t('chat.timeline.description')}</DialogDescription>
+            </DialogHeader>
+            <DialogContent
+                showCloseButton={false}
+                className="max-w-2xl max-h-[70vh] max-md:max-h-[85dvh] flex flex-col overflow-y-auto"
+            >
+                {/* Browser find-in-page style: icon, input, match counter, prev/next
+                    chevrons, close — all in one row instead of a modal header. */}
+                <div className="flex shrink-0 items-center gap-1 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] pl-2 pr-1">
+                    <Icon name="search" className="h-4 w-4 shrink-0 text-muted-foreground" />
                     <Input
                         autoFocus
                         placeholder={t('chat.timeline.searchPlaceholder')}
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         onKeyDown={handleSearchKeyDown}
-                        className="pl-9 w-full"
+                        className="h-8 flex-1 min-w-0 border-0 bg-transparent px-1.5 shadow-none focus-visible:ring-0"
                     />
+                    {searchQuery && (
+                        <span
+                            className="shrink-0 px-1 text-xs text-muted-foreground tabular-nums"
+                            aria-live="polite"
+                        >
+                            {totalMatches === 0
+                                ? t('chat.timeline.search.noMatches')
+                                : ((currentMatchIndex % totalMatches) + totalMatches) % totalMatches + 1 + '/' + totalMatches}
+                        </span>
+                    )}
+                    <div className="flex shrink-0 items-center gap-0.5 border-l border-[var(--interactive-border)] pl-1">
+                        <button
+                            type="button"
+                            aria-label={t('chat.timeline.search.previousMatch')}
+                            disabled={totalMatches === 0}
+                            onClick={goToPreviousMatch}
+                            className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                        >
+                            <Icon name="arrow-up-s" className="h-4 w-4" />
+                        </button>
+                        <button
+                            type="button"
+                            aria-label={t('chat.timeline.search.nextMatch')}
+                            disabled={totalMatches === 0}
+                            onClick={goToNextMatch}
+                            className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                        >
+                            <Icon name="arrow-down-s" className="h-4 w-4" />
+                        </button>
+                        <button
+                            type="button"
+                            aria-label={t('dialog.common.actions.close')}
+                            onClick={() => onOpenChange(false)}
+                            className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground"
+                        >
+                            <Icon name="close" className="h-4 w-4" />
+                        </button>
+                    </div>
                 </div>
 
                 {canLoadEarlier && onLoadEarlier && (
@@ -302,6 +428,9 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                     ) : (
                         filteredMessages.map(({ message }, index) => {
                             const preview = getMessagePreview(message.parts, undefined, t);
+                            // Highlight the active match in the preview when this row holds it.
+                            const isActiveRow = index === activeMessageIdx;
+                            const previewHtml = isActiveRow && searchQuery ? renderPreviewWithHighlight(preview, searchQuery) : null;
                             const timestamp = message.info.time.created;
                             const dateGroup = formatDateGroup(timestamp);
                             const previous = filteredMessages[index - 1];
@@ -349,8 +478,14 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                                             "flex-1 min-w-0 typography-small truncate",
                                             isSelected ? "text-interactive-selection-foreground" : "text-foreground"
                                         )}>
-                                            {snippet ?? (preview || t('chat.timeline.noTextContent'))}
-                                            {!snippet && preview && preview.length >= 80 && '…'}
+                                            {previewHtml ? (
+                                                <span dangerouslySetInnerHTML={previewHtml} />
+                                            ) : (
+                                                <>
+                                                    {snippet ?? (preview || t('chat.timeline.noTextContent'))}
+                                                    {!snippet && preview && preview.length >= 80 && '…'}
+                                                </>
+                                            )}
                                         </p>
 
                                         <div className="flex-shrink-0 h-5 flex items-center mr-2">
