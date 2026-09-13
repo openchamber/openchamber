@@ -162,6 +162,9 @@ mock.module("@/stores/useCommandsStore", () => ({
       commands: [],
     }),
   },
+  // useAgentsStore imports this helper through session-ui-store's new
+  // availability guard dependency chain.
+  invalidateCommandsLoadCache: () => undefined,
 }))
 
 mock.module("@/stores/useSkillsStore", () => ({
@@ -170,6 +173,10 @@ mock.module("@/stores/useSkillsStore", () => ({
       skills: [],
     }),
   },
+  // session-ui-store now pulls useAgentsStore, which pulls these helpers
+  // through useSkillsCatalogStore; the stub must cover every named import.
+  invalidateSkillsLoadCache: () => undefined,
+  refreshSkillsAfterOpenCodeRestart: async () => undefined,
 }))
 
 mock.module("@/components/ui", () => ({

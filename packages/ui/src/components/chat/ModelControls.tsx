@@ -1,6 +1,7 @@
 import React from 'react';
 import { focusChatInput } from './composer/editor/dom';
 import { MobileModelButton } from './MobileModelButton';
+import { useChatColumnSession } from './chatColumnSession';
 import type { EditPermissionMode } from '@/stores/types/sessionTypes';
 import type { ModelMetadata } from '@/types';
 import {
@@ -37,6 +38,7 @@ import { useSync } from '@/sync/use-sync';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
+import { useComposerAgentDirectory, useVisibleAgentsForDirectory } from '@/hooks/useVisibleAgentsForDirectory';
 import { formatEffortLabel, getCycledPrimaryAgentName, isPrimaryMode, type MobileControlsPanel } from './mobileControlsUtils';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
@@ -357,10 +359,17 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const getCurrentProvider = useConfigStore((state) => state.getCurrentProvider);
     const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
     const getCurrentAgent = useConfigStore((state) => state.getCurrentAgent);
-    const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
+    // Inside the chat column the session-scoped controls follow the session the
+    // timeline is showing (see chatColumnSession.ts); elsewhere the live one.
+    const liveSessionId = useSessionUIStore((s) => selection ? null : s.currentSessionId);
+    const chatColumnSession = useChatColumnSession();
+    const currentSessionId = selection ? null : (chatColumnSession ? chatColumnSession.sessionId : liveSessionId);
 
-    // Use visible agents (excludes hidden internal agents)
-    const agents = getVisibleAgents();
+    // Use visible agents (excludes hidden internal agents) that the target
+    // session/draft directory actually defines.
+    const agents = useVisibleAgentsForDirectory(
+        useComposerAgentDirectory(selection ? controlledSessionId : currentSessionId),
+    );
     const primaryAgents = React.useMemo(() => agents.filter((agent) => agent.mode === 'primary'), [agents]);
     const tracedReadyRef = React.useRef(false);
 
@@ -377,7 +386,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     }, [agents.length, currentAgentName, currentModelId, currentProviderId, isReady, providers.length, selection]);
 
     // Controlled selections never restore from the main session or its history.
-    const currentSessionId = useSessionUIStore((s) => selection ? null : s.currentSessionId);
     const getDirectoryForSession = useSessionUIStore((s) => s.getDirectoryForSession);
     const sync = useSync();
 

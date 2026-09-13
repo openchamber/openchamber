@@ -964,6 +964,7 @@ const RunGroupCard: React.FC<RunGroupCardProps> = ({
             <FileMentionAutocomplete
               ref={mentionRef}
               searchQuery={mentionQuery}
+              directory={undefined}
               onFileSelect={handleFileSelect}
               onAgentSelect={handleAgentSelect}
               onClose={() => setShowFileMention(false)}

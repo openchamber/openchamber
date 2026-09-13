@@ -4,6 +4,8 @@ import { devtools, persist } from "zustand/middleware";
 import type { Agent, PermissionConfig } from "@opencode-ai/sdk/v2";
 import { opencodeClient } from "@/lib/opencode/client";
 import { emitConfigChange, scopeMatches, subscribeToConfigChanges, type ConfigChangeScope } from "@/lib/configSync";
+import { resolveAgentAvailability, type AgentAvailability } from "@/lib/agentAvailability";
+import { normalizePath } from "@/lib/pathNormalization";
 import {
   startConfigUpdate,
   finishConfigUpdate,
@@ -79,13 +81,17 @@ const AGENTS_LOAD_CACHE_TTL_MS = 5000;
 const DEFAULT_AGENTS_CACHE_KEY = '__default__';
 const agentsLastLoadedAt = new Map<string, number>();
 const agentsLoadInFlight = new Map<string, Promise<boolean>>();
+// Bumped for every key a refresh drops. A load captures its key's value when
+// the request starts and discards its completion when the value moved on: the
+// response was formed against the pre-change list.
+const agentsLoadGeneration = new Map<string, number>();
 
 const getAgentsCacheKey = (directory: string | null): string => {
   return directory?.trim() || DEFAULT_AGENTS_CACHE_KEY;
 };
 
-const invalidateAgentsLoadCache = (directory: string | null = getConfigDirectory()) => {
-  agentsLastLoadedAt.delete(getAgentsCacheKey(directory));
+const getAgentsLoadGeneration = (cacheKey: string): number => {
+  return agentsLoadGeneration.get(cacheKey) ?? 0;
 };
 
 const buildAgentsSignature = (agents: Agent[]): string => {
@@ -308,6 +314,20 @@ export const selectAgentsForDirectory = (
   return state.agentsByDirectory[cacheKey] ?? EMPTY_AGENTS;
 };
 
+/**
+ * The stored agent list for one directory, or `undefined` while that directory
+ * has never loaded. Callers that must tell "loaded but empty" apart from "not
+ * loaded yet" use this instead of `selectAgentsForDirectory`, which collapses
+ * both into an empty array.
+ */
+export const selectLoadedAgentsForDirectory = (
+  state: Pick<AgentsStore, 'agentsByDirectory'>,
+  directory?: string | null,
+): Agent[] | undefined => {
+  const cacheKey = getAgentsCacheKey(resolveDirectory(directory));
+  return state.agentsByDirectory[cacheKey];
+};
+
 export const useAgentsStore = create<AgentsStore>()(
   devtools(
     persist(
@@ -333,9 +353,14 @@ export const useAgentsStore = create<AgentsStore>()(
           const isAmbient = cacheKey === getAgentsCacheKey(getConfigDirectory());
           const now = Date.now();
           const loadedAt = agentsLastLoadedAt.get(cacheKey) ?? 0;
-          const hasCachedAgents = (get().agentsByDirectory[cacheKey] ?? (isAmbient ? get().agents : [])).length > 0;
+          const cachedEntry = get().agentsByDirectory[cacheKey];
+          // Legacy fallback: an ambient load recorded before this map existed
+          // lives in the `agents` mirror. A present (even empty) entry counts as
+          // loaded so empty directories keep their result instead of re-fetching
+          // on every mount.
+          const hasLoadedEntry = cachedEntry !== undefined || (isAmbient && get().agents.length > 0);
 
-          if (hasCachedAgents && now - loadedAt < AGENTS_LOAD_CACHE_TTL_MS) {
+          if (hasLoadedEntry && now - loadedAt < AGENTS_LOAD_CACHE_TTL_MS) {
             return true;
           }
 
@@ -344,11 +369,14 @@ export const useAgentsStore = create<AgentsStore>()(
             return inFlight;
           }
 
+          const generation = getAgentsLoadGeneration(cacheKey);
+
           const request = (async () => {
             set({ isLoading: true });
             // Failure must never look like an empty project. The mirror is the
             // fallback so a directory loaded before this map existed still counts.
-            const previousAgents = get().agentsByDirectory[cacheKey] ?? (isAmbient ? get().agents : []);
+            const previousEntry = get().agentsByDirectory[cacheKey];
+            const previousAgents = previousEntry ?? (isAmbient ? get().agents : []);
             const previousSignature = buildAgentsSignature(previousAgents);
 
             for (let attempt = 0; attempt < 3; attempt++) {
@@ -405,7 +433,21 @@ export const useAgentsStore = create<AgentsStore>()(
                 );
 
                 const nextSignature = buildAgentsSignature(agentsWithScope);
-                if (previousSignature !== nextSignature) {
+
+                // The key was refreshed while this request was in flight, so
+                // this response predates the change. Discard it whole (no list,
+                // no TTL, no commit); the refresh already started a newer
+                // request that owns the entry and the loading flag.
+                if (getAgentsLoadGeneration(cacheKey) !== generation) {
+                  return false;
+                }
+
+                // A successful load that is byte-identical to what we already had
+                // still has to land the first time: otherwise an empty directory
+                // never gets an entry of its own and the "loaded but empty" answer
+                // is unreachable.
+                const entryMissing = get().agentsByDirectory[cacheKey] === undefined;
+                if (previousSignature !== nextSignature || entryMissing) {
                   set((state) => {
                     const next: Partial<AgentsStore> = {
                       agentsByDirectory: { ...state.agentsByDirectory, [cacheKey]: agentsWithScope },
@@ -424,7 +466,9 @@ export const useAgentsStore = create<AgentsStore>()(
               }
             }
 
-            set({ isLoading: false });
+            if (getAgentsLoadGeneration(cacheKey) === generation) {
+              set({ isLoading: false });
+            }
             return false;
           })();
 
@@ -432,7 +476,11 @@ export const useAgentsStore = create<AgentsStore>()(
           try {
             return await request;
           } finally {
-            agentsLoadInFlight.delete(cacheKey);
+            // A refresh may have replaced this request with a newer one for the
+            // same key; only the owner may clear the slot.
+            if (getAgentsLoadGeneration(cacheKey) === generation) {
+              agentsLoadInFlight.delete(cacheKey);
+            }
           }
         },
 
@@ -474,8 +522,6 @@ export const useAgentsStore = create<AgentsStore>()(
               throw new Error(message);
             }
 
-            invalidateAgentsLoadCache(configDirectory);
-
             if (payload?.requiresManualRestart) {
               upsertOptimisticAgentLocal(set, get, config.name, config);
               return { ok: true, requiresManualRestart: true };
@@ -486,6 +532,11 @@ export const useAgentsStore = create<AgentsStore>()(
               emitConfigChange("agents", { source: CONFIG_EVENT_SOURCE });
               return { ok: true, restartDeferred: true };
             }
+
+            // Effective change: the pre-change lists are stale now. Responses
+            // that deferred the restart returned above, where the optimistic
+            // overlay is the truth until OpenCode actually reloads.
+            void refreshLoadedAgentDirectories();
 
             startConfigUpdate("Creating agent configuration…");
             const needsReload = payload?.requiresReload ?? true;
@@ -544,8 +595,6 @@ export const useAgentsStore = create<AgentsStore>()(
               throw new Error(message);
             }
 
-            invalidateAgentsLoadCache(configDirectory);
-
             if (payload?.requiresManualRestart) {
               upsertOptimisticAgentLocal(set, get, name, config);
               return { ok: true, requiresManualRestart: true };
@@ -556,6 +605,11 @@ export const useAgentsStore = create<AgentsStore>()(
               emitConfigChange("agents", { source: CONFIG_EVENT_SOURCE });
               return { ok: true, restartDeferred: true };
             }
+
+            // Effective change: the pre-change lists are stale now. Responses
+            // that deferred the restart returned above, where the optimistic
+            // overlay is the truth until OpenCode actually reloads.
+            void refreshLoadedAgentDirectories();
 
             startConfigUpdate("Updating agent configuration…");
             const needsReload = payload?.requiresReload ?? true;
@@ -602,8 +656,6 @@ export const useAgentsStore = create<AgentsStore>()(
               throw new Error(message);
             }
 
-            invalidateAgentsLoadCache(configDirectory);
-
             if (get().selectedAgentName === name) {
               set({ selectedAgentName: null });
             }
@@ -622,6 +674,11 @@ export const useAgentsStore = create<AgentsStore>()(
               emitConfigChange("agents", { source: CONFIG_EVENT_SOURCE });
               return { ok: true, restartDeferred: true };
             }
+
+            // Effective change: the pre-change lists are stale now. Responses
+            // that deferred the restart returned above, where the local removal
+            // is the truth until OpenCode actually reloads.
+            void refreshLoadedAgentDirectories();
 
             startConfigUpdate("Deleting agent configuration…");
             const needsReload = payload?.requiresReload ?? true;
@@ -671,6 +728,86 @@ export const useAgentsStore = create<AgentsStore>()(
     },
   ),
 );
+
+/**
+ * Drop every loaded per-directory agent list and refetch each one. Called
+ * after an effective agent create/update/delete and after an external agents
+ * config change. Entries are removed before the first fetch starts, so a
+ * reader arriving while the refresh is in flight gets `unknown` from the send
+ * guard (fail open) and the ambient fallback in the picker.
+ *
+ * Keys are enumerated from the union of loaded entries, TTL stamps, and
+ * in-flight requests. An earlier refresh deletes a key's entry before its
+ * replacement fetch resolves, so a later refresh that read only
+ * `agentsByDirectory` would skip that key: the earlier replacement would stay
+ * the current generation and could commit its pre-change response with a fresh
+ * TTL after the later change.
+ *
+ * Each refreshed key gets a new generation: a request that was already in
+ * flight was formed against the pre-change state, so its completion is
+ * discarded instead of writing the list or refreshing its TTL, and its
+ * in-flight slot is cleared so the refetch below starts fresh instead of
+ * joining it. Same-generation loads still share one request.
+ *
+ * The ambient config directory is always part of the refresh, matching the
+ * path the config-change subscription used before.
+ */
+export const refreshLoadedAgentDirectories = async (): Promise<boolean> => {
+  const directories = new Set<string>([
+    ...Object.keys(useAgentsStore.getState().agentsByDirectory),
+    ...agentsLastLoadedAt.keys(),
+    ...agentsLoadInFlight.keys(),
+  ]);
+  directories.add(getAgentsCacheKey(getConfigDirectory()));
+
+  useAgentsStore.setState((state) => {
+    const nextAgentsByDirectory = { ...state.agentsByDirectory };
+    for (const key of directories) {
+      delete nextAgentsByDirectory[key];
+    }
+    return { agentsByDirectory: nextAgentsByDirectory };
+  });
+  for (const key of directories) {
+    agentsLastLoadedAt.delete(key);
+    // Bump before the refetch below: the older request's generation no longer
+    // matches, so it will discard its completion and leave the slot alone.
+    agentsLoadGeneration.set(key, getAgentsLoadGeneration(key) + 1);
+    // Do not join the older request; it predates the change. Clearing the slot
+    // makes the refetch start a fresh fetch for this key.
+    agentsLoadInFlight.delete(key);
+  }
+
+  const loaded = await Promise.all(
+    Array.from(directories, (key) =>
+      useAgentsStore.getState().loadAgents(key === DEFAULT_AGENTS_CACHE_KEY ? null : key),
+    ),
+  );
+  return loaded.every(Boolean);
+};
+
+/**
+ * Effective agent for a send to `directory`, resolved against that directory's
+ * loaded list. Every direct send path reads the store through this adapter so a
+ * name one directory cannot resolve never reaches the wire; the pure decision
+ * core stays in `resolveAgentAvailability`.
+ *
+ * `directory` is tri-state like the picker's scope: a path resolves that
+ * directory's list, `null` the no-directory list, and `undefined` means the
+ * scope is unknown, so the request stands (fail open). A list that has never
+ * loaded likewise cannot prove absence and keeps the request.
+ */
+export const resolveAvailableAgentForDirectory = (
+  directory: string | null | undefined,
+  requestedAgent: string | null | undefined,
+): AgentAvailability => {
+  const normalizedDirectory = directory === undefined ? undefined : normalizePath(directory);
+  return resolveAgentAvailability(
+    requestedAgent,
+    normalizedDirectory === undefined
+      ? undefined
+      : selectLoadedAgentsForDirectory(useAgentsStore.getState(), normalizedDirectory),
+  );
+};
 
 if (typeof window !== "undefined") {
   window.__zustand_agents_store__ = useAgentsStore;
@@ -796,7 +933,7 @@ async function performConfigRefresh(options: {
 
     const uiRefreshTasks: Promise<void>[] = [];
     if (refreshAgentConfigs) {
-      invalidateAgentsLoadCache(currentDirectory);
+      void refreshLoadedAgentDirectories();
       uiRefreshTasks.push(agentConfigStore.loadAgents().then(() => undefined));
     }
     if (refreshCommands) {
@@ -891,6 +1028,25 @@ export async function reloadOpenCodeConfiguration(options?: {
 
 let unsubscribeAgentsConfigChanges: (() => void) | null = null;
 
+// OpenCode reload can emit several `agents` config events in a burst. Every
+// refresh refetches each loaded directory plus one config request per agent,
+// so the subscription schedules at most one trailing refresh per burst
+// instead of one per event. A lone event still runs on the next macrotask.
+// The immediate call sites (effective create/update/delete mutations and
+// performConfigRefresh) keep calling refreshLoadedAgentDirectories directly.
+let externalAgentsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+const scheduleExternalAgentsRefresh = (): void => {
+  if (externalAgentsRefreshTimer !== null) {
+    return;
+  }
+
+  externalAgentsRefreshTimer = setTimeout(() => {
+    externalAgentsRefreshTimer = null;
+    void refreshLoadedAgentDirectories();
+  }, 0);
+};
+
 if (!unsubscribeAgentsConfigChanges) {
   unsubscribeAgentsConfigChanges = subscribeToConfigChanges((event) => {
     if (event.source === CONFIG_EVENT_SOURCE) {
@@ -898,8 +1054,9 @@ if (!unsubscribeAgentsConfigChanges) {
     }
 
     if (scopeMatches(event, "agents")) {
-      const { loadAgents } = useAgentsStore.getState();
-      void loadAgents();
+      // Refresh every loaded directory, not only the ambient one: a composer
+      // scoped elsewhere must not keep resolving a pre-change list.
+      scheduleExternalAgentsRefresh();
     }
   });
 }

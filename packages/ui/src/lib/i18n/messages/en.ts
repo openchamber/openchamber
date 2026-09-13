@@ -2203,6 +2203,7 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.title': 'Chat interrupted',
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode restarted while a response was still running. Send a message to continue.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Open session',
+  'chat.toast.agentUnavailable': 'Agent {agent} is not available in this context. Sending with the default agent instead.',
   'chat.errorBoundary.title': 'Chat Error',
   'chat.errorBoundary.description': 'The chat interface encountered an error. This might be due to a temporary network issue or corrupted message data.',
   'chat.errorBoundary.sessionLabel': 'Session',

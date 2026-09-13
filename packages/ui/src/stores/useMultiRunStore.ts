@@ -15,7 +15,11 @@ import { useProjectsStore } from './useProjectsStore';
 import { useSnippetsStore } from './useSnippetsStore';
 import { useGlobalSessionsStore } from './useGlobalSessionsStore';
 import { getMultiRunSessionTitle } from '@/lib/multirun/title';
+import { normalizePath } from '@/lib/pathNormalization';
 import { getSyncChildStores, registerSessionDirectory } from '@/sync/sync-refs';
+import { resolveAvailableAgentForDirectory, useAgentsStore } from './useAgentsStore';
+import { toast } from '@/components/ui';
+import { formatMessage, useI18nStore } from '@/lib/i18n';
 
 const toGitSafeSlug = (value: string): string => {
   return value
@@ -35,16 +39,15 @@ const generateWorktreeNameSeed = (groupSlug: string, modelSlug: string): string 
   return `${groupSlug}/${modelSlug}`;
 };
 
-const normalizePath = (value: string): string => {
-  const replaced = value.replace(/\\/g, '/');
-  if (replaced === '/') {
-    return '/';
-  }
-  return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
-};
+/**
+ * Distinguishes notices from separate `createMultiRun` batches. Two concurrent
+ * batches can drop the same agent name, and the toast store dedupes by id, so
+ * without a per-batch token the second batch's notice would be swallowed.
+ */
+let multiRunNoticeBatchSequence = 0;
 
 const registerCreatedSession = (session: Session, directory: string): Session => {
-  const normalizedDirectory = normalizePath(directory);
+  const normalizedDirectory = normalizePath(directory) ?? directory;
   const sessionDirectory = (session as Session & { directory?: string | null }).directory;
   const sessionWithDirectory = typeof sessionDirectory === 'string' && sessionDirectory.trim().length > 0
     ? session
@@ -289,13 +292,44 @@ export const useMultiRunStore = create<MultiRunStore>()(
             url: f.url,
           }));
 
+          // One identity for this batch's notices: a later batch dropping the
+          // same agent must still show its own toast.
+          const noticeBatchToken = `batch-${++multiRunNoticeBatchSequence}`;
+
           void (async () => {
             try {
               const expandText = useSnippetsStore.getState().expandText;
+              const droppedAgentNames = new Set<string>();
+              // A run sends into its own directory, so the guard can only prove
+              // absence against that directory's list. A freshly created
+              // worktree has never loaded: load each distinct run directory
+              // before resolving, or the guard fails open and the unavailable
+              // agent still reaches the wire. Loading uses the same normalized
+              // spelling the guard reads, so the entry lands under the key it
+              // checks on every platform. A failed load leaves the entry
+              // missing, which keeps that fail-open behavior. Without a
+              // requested agent there is nothing to resolve, so no load runs.
+              if (agent) {
+                const runDirectories = Array.from(new Set(
+                  createdRuns
+                    .map((run) => normalizePath(run.worktreePath))
+                    .filter((directory): directory is string => directory !== null),
+                ));
+                await Promise.allSettled(
+                  runDirectories.map((directory) => useAgentsStore.getState().loadAgents(directory)),
+                );
+              }
               await Promise.allSettled(
                 createdRuns.map(async (run) => {
                   try {
                     const text = await expandText(run.prompt).catch(() => run.prompt);
+                    // Each run sends into its own directory; a name that one
+                    // directory cannot resolve is dropped for that run and the
+                    // server applies its default. One notice covers the batch.
+                    const runAgentAvailability = resolveAvailableAgentForDirectory(run.worktreePath, agent);
+                    if (runAgentAvailability.reason === 'missing' && agent) {
+                      droppedAgentNames.add(agent);
+                    }
                     await routeMessage({
                       sessionId: run.sessionId,
                       directory: run.worktreePath,
@@ -303,7 +337,7 @@ export const useMultiRunStore = create<MultiRunStore>()(
                       providerID: run.providerID,
                       modelID: run.modelID,
                       variant: run.variant,
-                      agent,
+                      agent: runAgentAvailability.agent,
                       files: filesForMessage,
                     });
                   } catch (err) {
@@ -311,6 +345,14 @@ export const useMultiRunStore = create<MultiRunStore>()(
                   }
                 }),
               );
+              if (droppedAgentNames.size > 0) {
+                const { dictionary } = useI18nStore.getState();
+                for (const droppedName of droppedAgentNames) {
+                  toast.info(formatMessage(dictionary, 'chat.toast.agentUnavailable', { agent: droppedName }), {
+                    id: `agent-unavailable:multirun:${noticeBatchToken}:${droppedName}`,
+                  });
+                }
+              }
             } catch (err) {
               console.warn('[MultiRun] Failed to start runs:', err);
             }

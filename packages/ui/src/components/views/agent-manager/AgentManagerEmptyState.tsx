@@ -653,6 +653,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
               <FileMentionAutocomplete
                 ref={mentionRef}
                 searchQuery={mentionQuery}
+                directory={undefined}
                 onFileSelect={handleAutocompleteFileSelect}
                 onAgentSelect={handleAutocompleteAgentSelect}
                 onClose={() => setShowFileMention(false)}

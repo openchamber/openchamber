@@ -1,11 +1,11 @@
 import React from 'react';
 import { cn, truncatePathMiddle } from '@/lib/utils';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
-import { useConfigStore } from '@/stores/useConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
+import { useVisibleAgentsForDirectory } from '@/hooks/useVisibleAgentsForDirectory';
 import type { ProjectFileSearchHit } from '@/lib/opencode/client';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
@@ -31,6 +31,12 @@ export interface FileMentionHandle {
 
 interface FileMentionAutocompleteProps {
   searchQuery: string;
+  /**
+   * Agent scope for `@` mentions. The composer passes the session/draft
+   * directory its send targets (`null` for a chat with no project directory);
+   * dialogs that keep the ambient agent list pass `undefined`.
+   */
+  directory?: string | null;
   onFileSelect: (file: FileInfo) => void;
   onAgentSelect?: (agentName: string) => void;
   onClose: () => void;
@@ -39,6 +45,7 @@ interface FileMentionAutocompleteProps {
 
 export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileMentionAutocompleteProps>(({
   searchQuery,
+  directory,
   onFileSelect,
   onAgentSelect,
   onClose,
@@ -63,7 +70,10 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
       [projectRoot],
     ),
   );
-  const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
+  // Agent mentions resolve against the scope the caller hands in — the
+  // composer's column/btw directory or a dialog's explicit ambient choice —
+  // never against whichever chat session happens to be live.
+  const directoryAgents = useVisibleAgentsForDirectory(directory);
   const searchFiles = useFileSearchStore((state) => state.searchFiles);
   const debouncedQuery = useDebouncedValue(searchQuery, 180);
   const showHidden = useDirectoryShowHidden();
@@ -254,8 +264,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   }, [currentDirectory, debouncedQuery, searchFiles, showHidden, showGitignored]);
 
   React.useEffect(() => {
-    const visibleAgents = getVisibleAgents();
-    const subagents = visibleAgents
+    const subagents = directoryAgents
       .filter((agent) => agent.mode && agent.mode !== 'primary')
       .map((agent) => ({
         name: agent.name,
@@ -264,7 +273,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
     setAgents(rankByQuery(subagents, searchQuery ?? '', (agent) => [agent.name, agent.description]));
-  }, [getVisibleAgents, searchQuery]);
+  }, [directoryAgents, searchQuery]);
 
   React.useEffect(() => {
     setSelectedIndex(0);
