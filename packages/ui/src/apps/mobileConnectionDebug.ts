@@ -5,7 +5,7 @@
 // mirrors it. Never persisted; details are the already-masked logConnect
 // payloads (no tokens or secrets reach this module).
 
-import React from 'react';
+import { useLongPress } from './useLongPress';
 
 type MobileConnectDebugEntry = {
   at: number;
@@ -60,47 +60,5 @@ export const getMobileConnectDebugText = (): string =>
 // click that follows a long-press release is swallowed in the capture phase so
 // the host element's normal tap action does not also run.
 export const useDebugPanelLongPress = (onLongPress: () => void, delayMs = 700) => {
-  const timerRef = React.useRef<number | null>(null);
-  const originRef = React.useRef<{ x: number; y: number } | null>(null);
-  const firedRef = React.useRef(false);
-
-  const clear = React.useCallback(() => {
-    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-    timerRef.current = null;
-    originRef.current = null;
-  }, []);
-
-  React.useEffect(() => clear, [clear]);
-
-  const onPointerDown = React.useCallback((event: React.PointerEvent) => {
-    firedRef.current = false;
-    originRef.current = { x: event.clientX, y: event.clientY };
-    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-    timerRef.current = window.setTimeout(() => {
-      timerRef.current = null;
-      firedRef.current = true;
-      onLongPress();
-    }, delayMs);
-  }, [delayMs, onLongPress]);
-
-  const onPointerMove = React.useCallback((event: React.PointerEvent) => {
-    const origin = originRef.current;
-    if (!origin) return;
-    if (Math.abs(event.clientX - origin.x) > 10 || Math.abs(event.clientY - origin.y) > 10) clear();
-  }, [clear]);
-
-  const onClickCapture = React.useCallback((event: React.MouseEvent) => {
-    if (!firedRef.current) return;
-    firedRef.current = false;
-    event.preventDefault();
-    event.stopPropagation();
-  }, []);
-
-  return {
-    onPointerDown,
-    onPointerMove,
-    onPointerUp: clear,
-    onPointerCancel: clear,
-    onClickCapture,
-  };
+  return useLongPress(onLongPress, { delayMs });
 };

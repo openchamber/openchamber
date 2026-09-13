@@ -9,6 +9,17 @@ describe('VS Code webview settings API', () => {
     // SAFETY: acquireVsCodeApi is an optional webview global and is restored to this exact value below.
     const originalAcquire = (globalThis as typeof globalThis & { acquireVsCodeApi?: unknown }).acquireVsCodeApi;
     const messages: BridgeRequest[] = [];
+    // bridge.ts emits a one-time { type: 'webview:ready' } handshake before the
+    // first request. It carries no `id`, so skip past it and take the first
+    // frame that is an actual request.
+    const takeRequest = (): BridgeRequest => {
+      for (let frame = messages.shift(); frame; frame = messages.shift()) {
+        if (typeof frame.id === 'string') {
+          return frame;
+        }
+      }
+      throw new Error('Expected the bridge to post a request');
+    };
     const testWindow = Object.assign(new EventTarget(), {
       __VSCODE_CONFIG__: { theme: 'light', workspaceFolder: '/workspace' },
     });
@@ -31,8 +42,7 @@ describe('VS Code webview settings API', () => {
       const api = createVSCodeSettingsAPI();
 
       const failedLoad = api.load();
-      const failedRequest = messages.shift();
-      assert.ok(failedRequest);
+      const failedRequest = takeRequest();
       testWindow.dispatchEvent(new MessageEvent('message', {
         data: {
           id: failedRequest.id,
@@ -44,8 +54,7 @@ describe('VS Code webview settings API', () => {
       await assert.rejects(failedLoad, /settings unavailable/);
 
       const successfulLoad = api.load();
-      const successfulRequest = messages.shift();
-      assert.ok(successfulRequest);
+      const successfulRequest = takeRequest();
       testWindow.dispatchEvent(new MessageEvent('message', {
         data: {
           id: successfulRequest.id,
