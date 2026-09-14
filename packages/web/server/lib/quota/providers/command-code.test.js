@@ -14,54 +14,82 @@ const creditsPayload = {
   },
 };
 
+const summaryPayload = { totalMonthlyCredits: 80 };
+
+const jsonResponse = (payload) => new Response(JSON.stringify(payload));
+
 describe('Command Code quota provider', () => {
-  it('parses balances and rate-limit windows', () => {
+  it('parses five-hour and weekly limits as percentages without labels', () => {
     const windows = parseCommandCodeCredits(creditsPayload);
-    expect(windows.monthly_credits).toMatchObject({ usedPercent: null, valueLabel: '120' });
-    expect(windows.purchased_credits).toMatchObject({ usedPercent: null, valueLabel: '30' });
-    expect(windows.free_credits).toMatchObject({ usedPercent: null, valueLabel: '5' });
-    expect(windows['5h']).toMatchObject({ usedPercent: 25, valueLabel: '25 / 100', resetAt: 1_776_000_000_000 });
-    expect(windows.weekly.usedPercent).toBe(35);
+    expect(windows['5h']).toMatchObject({ usedPercent: 25, windowSeconds: 18_000, resetAt: 1_776_000_000_000 });
+    expect(windows['5h']).not.toHaveProperty('valueLabel');
+    expect(windows.weekly).toMatchObject({ usedPercent: 35, windowSeconds: 604_800 });
+    expect(windows.weekly).not.toHaveProperty('valueLabel');
   });
 
-  it('formats fractional credit values for display', () => {
-    const windows = parseCommandCodeCredits({
-      credits: { monthlyCredits: 69.7947070034 },
-      windowLimits: { fiveHour: { used: 0.2052929966, cap: 14 } },
-    });
-    expect(windows.monthly_credits.valueLabel).toBe('69.79');
-    expect(windows['5h'].valueLabel).toBe('0.21 / 14');
+  it('omits purchased, free, and monthly balance windows from the credits payload', () => {
+    const windows = parseCommandCodeCredits(creditsPayload);
+    expect(windows).not.toHaveProperty('purchased_credits');
+    expect(windows).not.toHaveProperty('free_credits');
+    expect(windows).not.toHaveProperty('monthly_credits');
   });
 
-  it('resolves the organization before fetching credits', async () => {
+  it('computes monthly usage from summary used plus remaining credits', async () => {
     const requests = [];
     const windows = await fetchCommandCodeUsage('secret', async (url, options) => {
       requests.push({ url, options });
-      return new Response(JSON.stringify(url.endsWith('/alpha/whoami') ? { org: { id: 'org/a' } } : creditsPayload));
+      if (url.endsWith('/alpha/whoami')) return jsonResponse({ org: { id: 'org/a' } });
+      if (url.endsWith('/alpha/usage/summary')) return jsonResponse(summaryPayload);
+      return jsonResponse(creditsPayload);
     });
     expect(requests.map(({ url }) => url)).toEqual([
       'https://api.commandcode.ai/alpha/whoami',
       'https://api.commandcode.ai/alpha/billing/credits?orgId=org%2Fa',
+      'https://api.commandcode.ai/alpha/usage/summary',
     ]);
     expect(requests[0].options.headers.Authorization).toBe('Bearer secret');
-    expect(windows['5h'].usedPercent).toBe(25);
+    expect(windows.monthly_credits).toMatchObject({ usedPercent: 40 });
+    expect(windows.monthly_credits).not.toHaveProperty('valueLabel');
+    expect(Object.keys(windows).sort()).toEqual(['5h', 'monthly_credits', 'weekly']);
+  });
+
+  it('falls back to the remaining monthly balance when the summary is unavailable', async () => {
+    const windows = await fetchCommandCodeUsage('secret', async (url) => {
+      if (url.endsWith('/alpha/whoami')) return jsonResponse({ org: { id: 'org-1' } });
+      if (url.endsWith('/alpha/usage/summary')) return new Response('', { status: 503 });
+      return jsonResponse({ credits: { monthlyCredits: 69.7947070034 }, windowLimits: creditsPayload.windowLimits });
+    });
+    expect(windows.monthly_credits).toMatchObject({ usedPercent: null, valueLabel: '69.79' });
+  });
+
+  it('falls back to the remaining monthly balance when the summary is unparseable', async () => {
+    const windows = await fetchCommandCodeUsage('secret', async (url) => {
+      if (url.endsWith('/alpha/whoami')) return jsonResponse({ org: { id: 'org-1' } });
+      if (url.endsWith('/alpha/usage/summary')) return jsonResponse(null);
+      return jsonResponse(creditsPayload);
+    });
+    expect(windows.monthly_credits).toMatchObject({ usedPercent: null, valueLabel: '120' });
   });
 
   it('fetches account-scoped credits without orgId for personal accounts', async () => {
     const urls = [];
     await fetchCommandCodeUsage('secret', async (url) => {
       urls.push(url);
-      return new Response(JSON.stringify(url.endsWith('/alpha/whoami') ? { user: { id: 'user-1' }, org: null } : creditsPayload));
+      if (url.endsWith('/alpha/whoami')) return jsonResponse({ user: { id: 'user-1' }, org: null });
+      if (url.endsWith('/alpha/usage/summary')) return jsonResponse(summaryPayload);
+      return jsonResponse(creditsPayload);
     });
     expect(urls).toEqual([
       'https://api.commandcode.ai/alpha/whoami',
       'https://api.commandcode.ai/alpha/billing/credits',
+      'https://api.commandcode.ai/alpha/usage/summary',
     ]);
   });
 
   it('rejects identity responses without an explicit account scope', async () => {
-    await expect(fetchCommandCodeUsage('secret', async () => new Response(JSON.stringify({ user: { id: 'user-1' } })))).rejects.toThrow('account could not be determined');
-    await expect(fetchCommandCodeUsage('secret', async () => new Response(JSON.stringify({ org: {} })))).rejects.toThrow('account could not be determined');
+    await expect(fetchCommandCodeUsage('secret', async () => jsonResponse({ user: { id: 'user-1' } }))).rejects.toThrow('account could not be determined');
+    await expect(fetchCommandCodeUsage('secret', async () => jsonResponse({ org: {} }))).rejects.toThrow('account could not be determined');
+    await expect(fetchCommandCodeUsage('secret', async () => jsonResponse({ org: { id: '   ' } }))).rejects.toThrow('account could not be determined');
   });
 
   it('isolates endpoint failures in the provider result', async () => {
@@ -100,12 +128,14 @@ describe('Command Code quota provider', () => {
 
   it('reads OAuth access credentials from the OpenCode auth file', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ org: { id: 'org-1' } })))
-      .mockResolvedValueOnce(new Response(JSON.stringify(creditsPayload)));
+      .mockResolvedValueOnce(jsonResponse({ org: { id: 'org-1' } }))
+      .mockResolvedValueOnce(jsonResponse(creditsPayload))
+      .mockResolvedValueOnce(jsonResponse(summaryPayload));
     vi.stubGlobal('fetch', fetchMock);
     try {
       const result = await fetchQuota({ 'command-code': { type: 'oauth', access: 'test-token' } });
       expect(result).toMatchObject({ providerId: 'command-code', ok: true, configured: true });
+      expect(result.usage.windows.monthly_credits).toMatchObject({ usedPercent: 40 });
       expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer test-token');
     } finally {
       vi.unstubAllGlobals();
@@ -116,8 +146,9 @@ describe('Command Code quota provider', () => {
     expect(aliases).toEqual(['command-code', 'commandcode', 'command_code', 'command code']);
     for (const authProviderId of ['commandcode', 'command_code', 'command code']) {
       const fetchMock = vi.fn()
-        .mockResolvedValueOnce(new Response(JSON.stringify({ org: { id: 'org-1' } })))
-        .mockResolvedValueOnce(new Response(JSON.stringify(creditsPayload)));
+        .mockResolvedValueOnce(jsonResponse({ org: { id: 'org-1' } }))
+        .mockResolvedValueOnce(jsonResponse(creditsPayload))
+        .mockResolvedValueOnce(jsonResponse(summaryPayload));
       vi.stubGlobal('fetch', fetchMock);
 
       try {
@@ -148,8 +179,9 @@ describe('Command Code quota provider', () => {
     vi.spyOn(fs, 'existsSync').mockReturnValue(true);
     vi.spyOn(fs, 'readFileSync').mockImplementation(() => { throw new Error('invalid auth'); });
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ org: null })))
-      .mockResolvedValueOnce(new Response(JSON.stringify(creditsPayload)));
+      .mockResolvedValueOnce(jsonResponse({ org: null }))
+      .mockResolvedValueOnce(jsonResponse(creditsPayload))
+      .mockResolvedValueOnce(jsonResponse(summaryPayload));
     vi.stubGlobal('fetch', fetchMock);
 
     try {
@@ -169,8 +201,9 @@ describe('Command Code quota provider', () => {
     process.env.COMMAND_CODE_API_KEY = 'environment-token';
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response('', { status: 401 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ org: null })))
-      .mockResolvedValueOnce(new Response(JSON.stringify(creditsPayload)));
+      .mockResolvedValueOnce(jsonResponse({ org: null }))
+      .mockResolvedValueOnce(jsonResponse(creditsPayload))
+      .mockResolvedValueOnce(jsonResponse(summaryPayload));
     vi.stubGlobal('fetch', fetchMock);
 
     try {
@@ -178,6 +211,7 @@ describe('Command Code quota provider', () => {
       expect(result).toMatchObject({ providerId: 'command-code', ok: true, configured: true });
       expect(fetchMock.mock.calls.map(([, options]) => options.headers.Authorization)).toEqual([
         'Bearer stale-token',
+        'Bearer environment-token',
         'Bearer environment-token',
         'Bearer environment-token',
       ]);

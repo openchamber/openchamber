@@ -45,12 +45,10 @@ const getApiKeys = (auth) => {
     }
   }
   const entry = normalizeAuthEntry(getAuthEntry(resolvedAuth, aliases));
-  const stored = entry?.key ?? entry?.access ?? entry?.token;
-  return [...new Set([
-    typeof stored === 'string' ? stored.trim() : '',
-    process.env.COMMAND_CODE_API_KEY?.trim(),
-    readCommandCodeCliApiKey()
-  ].filter(Boolean))];
+  const stored = asNonEmptyString(entry?.key ?? entry?.access ?? entry?.token);
+  const envKey = asNonEmptyString(process.env.COMMAND_CODE_API_KEY);
+  const cliKey = readCommandCodeCliApiKey();
+  return [...new Set([stored, envKey, cliKey].filter(Boolean))];
 };
 
 const requestJson = async (requestPath, apiKey, fetchImpl) => {
@@ -82,14 +80,8 @@ const toBalanceWindow = (value) => toUsageWindow({
 
 export const parseCommandCodeCredits = (payload) => {
   const root = asObject(payload);
-  const credits = asObject(root?.credits);
   const limits = asObject(root?.windowLimits);
   const windows = {};
-
-  for (const [label, field] of [['monthly_credits', 'monthlyCredits'], ['purchased_credits', 'purchasedCredits'], ['free_credits', 'freeCredits']]) {
-    const value = toNumber(credits?.[field]);
-    if (value !== null) windows[label] = toBalanceWindow(value);
-  }
 
   for (const [label, field, windowSeconds] of [['5h', 'fiveHour', 5 * 60 * 60], ['weekly', 'weekly', 7 * 24 * 60 * 60]]) {
     const limit = asObject(limits?.[field]);
@@ -97,11 +89,13 @@ export const parseCommandCodeCredits = (payload) => {
     const cap = toNumber(limit?.cap);
     if (used === null || cap === null || cap <= 0) continue;
     const resetAt = toNumber(limit?.resetAt);
+    // No valueLabel: the UI then renders usedPercent as a percentage
+    // (dk(valueLabel, percent) falls back to the percent when the label is absent),
+    // matching how the other rate-limit providers display 5h/weekly windows.
     windows[label] = toUsageWindow({
       usedPercent: Math.min(100, Math.max(0, used / cap * 100)),
       windowSeconds,
-      resetAt: resetAt === null ? null : resetAt < 1_000_000_000_000 ? resetAt * 1000 : resetAt,
-      valueLabel: `${formatCredits(used)} / ${formatCredits(cap)}`
+      resetAt: resetAt === null ? null : resetAt < 1_000_000_000_000 ? resetAt * 1000 : resetAt
     });
   }
 
@@ -113,16 +107,36 @@ export const fetchCommandCodeUsage = async (apiKey, fetchImpl = fetch) => {
   if (!identity || !Object.prototype.hasOwnProperty.call(identity, 'org')) {
     throw new Error('Command Code account could not be determined');
   }
-  const org = identity.org === null ? null : asObject(identity.org);
-  if (identity.org !== null && (!org || typeof org.id !== 'string' || !org.id.trim())) {
+  const orgId = asNonEmptyString(asObject(identity.org)?.id);
+  if (identity.org !== null && orgId === null) {
     throw new Error('Command Code account could not be determined');
   }
-  const orgId = typeof org?.id === 'string' ? org.id.trim() : '';
-  const creditsPath = orgId
-    ? `/alpha/billing/credits?orgId=${encodeURIComponent(orgId)}`
-    : '/alpha/billing/credits';
-  const credits = await requestJson(creditsPath, apiKey, fetchImpl);
+  const orgSuffix = orgId ? `?orgId=${encodeURIComponent(orgId)}` : '';
+  const credits = await requestJson(`/alpha/billing/credits${orgSuffix}`, apiKey, fetchImpl);
   const windows = parseCommandCodeCredits(credits);
+
+  // Monthly credits: /alpha/usage/summary reports credits consumed in the current
+  // billing period and /alpha/billing/credits reports what remains, so their sum
+  // is the plan allowance. That lets the monthly window render as a percentage
+  // like the 5h/weekly limits. Balance-only purchased/free credits are omitted.
+  const remaining = toNumber(asObject(asObject(credits)?.credits)?.monthlyCredits);
+  let monthlyWindow = null;
+  try {
+    const summary = asObject(await requestJson('/alpha/usage/summary', apiKey, fetchImpl));
+    const used = toNumber(summary?.totalMonthlyCredits);
+    if (used !== null && remaining !== null && used + remaining > 0) {
+      monthlyWindow = toUsageWindow({
+        usedPercent: Math.min(100, Math.max(0, used / (used + remaining) * 100)),
+        windowSeconds: null,
+        resetAt: null
+      });
+    }
+  } catch {
+    monthlyWindow = null;
+  }
+  if (monthlyWindow) windows.monthly_credits = monthlyWindow;
+  else if (remaining !== null) windows.monthly_credits = toBalanceWindow(remaining);
+
   if (Object.keys(windows).length === 0) throw new Error('Command Code usage data could not be parsed');
   return windows;
 };

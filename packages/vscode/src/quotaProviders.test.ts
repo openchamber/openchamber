@@ -297,9 +297,12 @@ describe('Command Code quota provider (VS Code parity)', () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     globalThis.fetch = (async (url: string, init?: RequestInit) => {
       requests.push({ url, init });
-      return mockResponse(url.endsWith('/alpha/whoami')
-        ? { org: { id: 'org/a' } }
-        : { credits: { monthlyCredits: 120 }, windowLimits: { fiveHour: { used: 25, cap: 100, resetAt: 1_776_000_000 } } });
+      if (url.endsWith('/alpha/whoami')) return mockResponse({ org: { id: 'org/a' } });
+      if (url.endsWith('/alpha/usage/summary')) return mockResponse({ totalMonthlyCredits: 30 });
+      return mockResponse({
+        credits: { monthlyCredits: 120, purchasedCredits: 50, freeCredits: 10 },
+        windowLimits: { fiveHour: { used: 25, cap: 100, resetAt: 1_776_000_000 }, weekly: { used: 10, cap: 200 } },
+      });
     }) as typeof fetch;
 
     const result = await fetchQuotaForProvider('command-code');
@@ -308,19 +311,30 @@ describe('Command Code quota provider (VS Code parity)', () => {
     assert.deepEqual(requests.map(({ url }) => url), [
       'https://api.commandcode.ai/alpha/whoami',
       'https://api.commandcode.ai/alpha/billing/credits?orgId=org%2Fa',
+      'https://api.commandcode.ai/alpha/usage/summary',
     ]);
     assert.equal((requests[0].init?.headers as Record<string, string>).Authorization, 'Bearer test-token');
+    assert.equal(result.usage!.windows.monthly_credits!.usedPercent, 20);
+    assert.equal(result.usage!.windows.monthly_credits!.valueLabel, undefined);
+    assert.equal(result.usage!.windows.monthly_credits!.windowSeconds, null);
     assert.equal(result.usage!.windows['5h']!.usedPercent, 25);
-    assert.equal(result.usage!.windows.monthly_credits!.valueLabel, '120');
+    assert.equal(result.usage!.windows['5h']!.valueLabel, undefined);
+    assert.equal(result.usage!.windows['5h']!.windowSeconds, 18000);
+    assert.equal(result.usage!.windows['5h']!.resetAt, 1_776_000_000_000);
+    assert.equal(result.usage!.windows.weekly!.usedPercent, 5);
+    assert.equal(result.usage!.windows.weekly!.valueLabel, undefined);
+    assert.equal(result.usage!.windows.weekly!.windowSeconds, 604800);
+    assert.equal(result.usage!.windows.purchased_credits, undefined);
+    assert.equal(result.usage!.windows.free_credits, undefined);
   });
 
   test('omits orgId for personal accounts', async () => {
     const urls: string[] = [];
     globalThis.fetch = (async (url: string) => {
       urls.push(url);
-      return mockResponse(url.endsWith('/alpha/whoami')
-        ? { user: { id: 'user-1' }, org: null }
-        : { credits: { monthlyCredits: 120 } });
+      if (url.endsWith('/alpha/whoami')) return mockResponse({ user: { id: 'user-1' }, org: null });
+      if (url.endsWith('/alpha/usage/summary')) return mockResponse({ totalMonthlyCredits: 30 });
+      return mockResponse({ credits: { monthlyCredits: 120 } });
     }) as typeof fetch;
 
     const result = await fetchQuotaForProvider('command-code');
@@ -329,30 +343,70 @@ describe('Command Code quota provider (VS Code parity)', () => {
     assert.deepEqual(urls, [
       'https://api.commandcode.ai/alpha/whoami',
       'https://api.commandcode.ai/alpha/billing/credits',
+      'https://api.commandcode.ai/alpha/usage/summary',
     ]);
+    assert.equal(result.usage!.windows.monthly_credits!.usedPercent, 20);
   });
 
-  test('formats fractional credit values for display', async () => {
+  test('derives the monthly percent from fractional summary and credit values', async () => {
     globalThis.fetch = (async (url: string) => mockResponse(url.endsWith('/alpha/whoami')
       ? { org: null }
-      : { credits: { monthlyCredits: 69.7947070034 }, windowLimits: { fiveHour: { used: 0.2052929966, cap: 14 } } })) as typeof fetch;
+      : url.endsWith('/alpha/usage/summary')
+        ? { totalMonthlyCredits: 30.2052929966 }
+        : { credits: { monthlyCredits: 69.7947070034 }, windowLimits: { fiveHour: { used: 0.2052929966, cap: 14 } } })) as typeof fetch;
 
     const result = await fetchQuotaForProvider('command-code');
 
-    assert.equal(result.usage!.windows.monthly_credits!.valueLabel, '69.79');
-    assert.equal(result.usage!.windows['5h']!.valueLabel, '0.21 / 14');
+    assert.ok(Math.abs(result.usage!.windows.monthly_credits!.usedPercent! - 30.2052929966) < 1e-9);
+    assert.equal(result.usage!.windows.monthly_credits!.valueLabel, undefined);
+    assert.ok(Math.abs(result.usage!.windows['5h']!.usedPercent! - (0.2052929966 / 14) * 100) < 1e-9);
+    assert.equal(result.usage!.windows['5h']!.valueLabel, undefined);
   });
 
   test('accepts numeric strings from the best-effort endpoint', async () => {
     globalThis.fetch = (async (url: string) => mockResponse(url.endsWith('/alpha/whoami')
       ? { org: null }
-      : { credits: { monthlyCredits: '69.79' }, windowLimits: { fiveHour: { used: '0.21', cap: '14' } } })) as typeof fetch;
+      : url.endsWith('/alpha/usage/summary')
+        ? { totalMonthlyCredits: '30.21' }
+        : { credits: { monthlyCredits: '69.79' }, windowLimits: { fiveHour: { used: '0.21', cap: '14' } } })) as typeof fetch;
 
     const result = await fetchQuotaForProvider('command-code');
 
     assert.equal(result.ok, true);
+    assert.ok(Math.abs(result.usage!.windows.monthly_credits!.usedPercent! - 30.21) < 1e-9);
+    assert.equal(result.usage!.windows.monthly_credits!.valueLabel, undefined);
+    assert.equal(result.usage!.windows['5h']!.usedPercent, 1.5);
+    assert.equal(result.usage!.windows['5h']!.valueLabel, undefined);
+  });
+
+  test('falls back to a monthly balance window when the summary fails', async () => {
+    globalThis.fetch = (async (url: string) => {
+      if (url.endsWith('/alpha/whoami')) return mockResponse({ org: null });
+      if (url.endsWith('/alpha/usage/summary')) return mockResponse(null, { ok: false, status: 503 });
+      return mockResponse({ credits: { monthlyCredits: 69.7947070034 }, windowLimits: { fiveHour: { used: 7, cap: 14 } } });
+    }) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('command-code');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.monthly_credits!.usedPercent, null);
     assert.equal(result.usage!.windows.monthly_credits!.valueLabel, '69.79');
-    assert.equal(result.usage!.windows['5h']!.valueLabel, '0.21 / 14');
+    assert.equal(result.usage!.windows['5h']!.usedPercent, 50);
+    assert.equal(result.usage!.windows['5h']!.valueLabel, undefined);
+  });
+
+  test('falls back to a monthly balance window when the summary has no usable values', async () => {
+    globalThis.fetch = (async (url: string) => mockResponse(url.endsWith('/alpha/whoami')
+      ? { org: null }
+      : url.endsWith('/alpha/usage/summary')
+        ? {}
+        : { credits: { monthlyCredits: 70 } })) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('command-code');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.monthly_credits!.usedPercent, null);
+    assert.equal(result.usage!.windows.monthly_credits!.valueLabel, '70');
   });
 
   test('isolates endpoint failures in the provider result', async () => {
@@ -373,6 +427,7 @@ describe('Command Code quota provider (VS Code parity)', () => {
       const authorization = new Headers(init?.headers).get('Authorization') ?? '';
       authorizations.push(authorization);
       if (authorization === 'Bearer test-token') return mockResponse(null, { ok: false, status: 401 });
+      if (String(url).endsWith('/alpha/usage/summary')) return mockResponse({ totalMonthlyCredits: 30 });
       return mockResponse(String(url).endsWith('/alpha/whoami') ? { org: null } : { credits: { monthlyCredits: 70 } });
     }) as typeof fetch;
 
@@ -383,7 +438,9 @@ describe('Command Code quota provider (VS Code parity)', () => {
         'Bearer test-token',
         'Bearer environment-token',
         'Bearer environment-token',
+        'Bearer environment-token',
       ]);
+      assert.equal(result.usage!.windows.monthly_credits!.usedPercent, 30);
     } finally {
       if (previousApiKey === undefined) delete process.env.COMMAND_CODE_API_KEY;
       else process.env.COMMAND_CODE_API_KEY = previousApiKey;
@@ -409,13 +466,14 @@ describe('Command Code quota provider (VS Code parity)', () => {
         assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer cli-token');
         return mockResponse({ org: null });
       }
+      if (String(url).endsWith('/alpha/usage/summary')) return mockResponse({ totalMonthlyCredits: 30 });
       return mockResponse({ credits: { monthlyCredits: 70 } });
     }) as typeof fetch;
 
     try {
       const result = await fetchQuotaForProvider('command-code');
       assert.equal(result.ok, true);
-      assert.equal(result.usage!.windows.monthly_credits!.valueLabel, '70');
+      assert.equal(result.usage!.windows.monthly_credits!.usedPercent, 30);
     } finally {
       Object.defineProperty(fs, 'readFileSync', { configurable: true, value: originalReadFileSync });
       console.error = originalConsoleError;
