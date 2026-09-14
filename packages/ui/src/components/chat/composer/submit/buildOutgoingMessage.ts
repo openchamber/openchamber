@@ -43,10 +43,13 @@ export interface OutgoingMessage {
  * travels with it. Assembly only places it.
  */
 export interface QueuedInput {
-    text: string;
+    text?: string;
+    /** Legacy local-queue shape retained while persisted messages migrate. */
+    content?: string;
     agentMention?: string;
     attachments?: AttachedFile[];
     context?: readonly QueuedContextPart[];
+    additionalParts?: readonly OutgoingPart[];
 }
 
 /** What the composer has attached besides text and files. */
@@ -66,6 +69,8 @@ export interface OutgoingMessageInput extends ComposerContextInput {
     /** The composer's own text, or null when this send skips it. */
     composerText: string | null;
     composerAttachments: readonly AttachedFile[];
+    /** Legacy captured parts restored into the composer before a resend. */
+    composerAdditionalParts?: readonly OutgoingPart[];
 }
 
 /**
@@ -84,6 +89,15 @@ export interface OutgoingMessageDeps {
     /** Instruction telling the model which skills the user named. */
     buildSkillInstruction: (names: string[]) => string | null;
 }
+
+/** Assemble store-owned context after the authored message parts. */
+export const buildContextParts = (
+    inlineComments: readonly InlineCommentDraft[],
+    syntheticParts: readonly OutgoingPart[],
+): OutgoingPart[] => [
+    ...inlineComments.map((draft) => createContextPart(contextPayloadFromDraft(draft))),
+    ...syntheticParts,
+];
 
 export function buildOutgoingMessage(
     input: OutgoingMessageInput,
@@ -121,14 +135,19 @@ export function buildOutgoingMessage(
     input.queued.forEach((queued, index) => {
         noteAgent(queued.agentMention);
         const attachments = deps.sanitizeAttachments(queued.attachments);
+        const queuedText = queued.text ?? queued.content ?? '';
 
         if (index === 0) {
-            primaryText = queued.text;
+            primaryText = queuedText;
             primaryAttachments = attachments;
         } else {
-            additionalParts.push({ text: queued.text, attachments });
+            additionalParts.push({ text: queuedText, attachments });
         }
-        additionalParts.push(...queuedContextToParts(queued.context ?? []));
+        additionalParts.push(
+            ...(queued.context !== undefined
+                ? queuedContextToParts(queued.context)
+                : queued.additionalParts ?? []),
+        );
     });
 
     // The composer's own text follows, becoming primary only when nothing was
@@ -149,6 +168,7 @@ export function buildOutgoingMessage(
     }
 
     // Everything the composer had attached follows its text.
+    additionalParts.push(...(input.composerAdditionalParts ?? []));
     additionalParts.push(...queuedContextToParts(
         buildComposerContext(input, deps.buildSkillInstruction(skillNames)),
     ));

@@ -20,7 +20,8 @@ Wiring: created in `server/index.js` after the global event hub and the
 session-knowledge runtime; routes registered in
 `opencode/feature-routes-runtime.js` (before the generic OpenCode proxy) with
 JSON bodies enabled in `opencode/core-routes.js`; stopped by
-`opencode/shutdown-runtime.js`.
+`opencode/shutdown-runtime.js`, which waits for in-flight sends and the queued
+write chain before closing the server.
 
 ## Item
 
@@ -66,14 +67,27 @@ context text. This optional field needs no queue-file migration.
 ## Persistence
 
 `<data-dir>/message-queue.json` (`OPENCHAMBER_DATA_DIR` or
-`~/.config/openchamber`): `{ version, revision, sessions: { [sessionId]:
-{ directory, items } } }`, written atomically (temp file + rename) through a
-serialized write chain. A missing file is an empty queue. A malformed file is
-a failure, not an empty queue: it is moved aside as
-`message-queue.json.corrupt-<timestamp>` before the runtime starts empty, so
-the next write cannot overwrite the user's data. A failed read leaves writes
-disabled until a later load succeeds. `revision` is a global monotonic counter
-bumped on every mutation; clients use it to reject stale snapshots.
+`~/.config/openchamber`) stores `{ version, revision, sessions,
+sessionLifecycles, takeReceipts, completedRestores, enqueueIdempotency }`. The
+file is written atomically through a serialized temp-file and rename chain.
+Lifecycle tombstones retain a session generation and directory after deletion.
+Take receipts protect payloads until the client acknowledges delivery, and
+bounded operation history makes retries idempotent across a restart. A missing
+file is an empty queue. Malformed syntax and structurally invalid envelopes are
+moved aside as `message-queue.json.corrupt-<timestamp>` before the runtime
+starts empty, so the next write cannot overwrite the original data. A failed
+read or quarantine leaves writes disabled until a later load succeeds. Valid
+queue entries next to malformed entries are recovered when their enclosing
+maps are structurally valid. `revision` is a global monotonic counter bumped on
+every mutation; clients use it to reject stale snapshots.
+
+After the initial load, durable mutations from public routes and upstream hub
+events share one FIFO transaction chain. Each transaction captures the full
+in-memory queue state, applies its change, and lets `commit()` bump `revision`,
+write the file atomically, and broadcast only after the write succeeds. A
+failed write restores the captured state, including lifecycle and receipt
+metadata. Holds and dispatch markers remain in memory and do not enter this
+durable chain.
 
 In-memory only, deliberately: the in-flight item (`sendingId`), retry
 backoff, abort timestamps, and holds. A restart has no in-flight sends; a
@@ -126,8 +140,20 @@ Auto-review is driven from the UI and bounces the original session through
 idle between iterations; the UI tells the server to hold that session's queue
 (`PUT .../hold { held: true, ttlMs? }`) while a run is going and releases it
 when the run ends. A hold expires on its own (default 5 min, cap 10 min)
-because the UI that asserted it may be gone; the UI re-asserts it every two
-minutes while the run continues. Releasing arms a dispatch.
+because the UI that asserted it may be gone. Expiry re-arms a queued session
+through the normal quiet, abort, and retry gates. The UI re-asserts it every
+two minutes while the run continues. The UI persists one `clientToken` per
+runtime and the last accepted or echoed `sequence` per session in browser
+storage, so a reload continues as the same owner with a monotonically
+increasing sequence. While a hold is active, only its current token can
+mutate it; a different token's sequence-1 assertion cannot replace the active
+owner. After the hold is released or expires, a different token may establish
+a new hold at sequence 1. Delayed lower-sequence mutations from the same
+token are ignored. When the server refuses a stale sequence it echoes the
+sequence it holds, and the UI retries just above that echo (bounded; failed
+releases keep retrying in the UI's bounded release lane). Hold requests also
+carry the captured session generation, so deletion and session-ID reuse
+reject stale holds. Releasing arms a dispatch.
 
 ## Routes (`/api/message-queue`)
 
@@ -136,14 +162,16 @@ allowlists.
 
 | Route | Purpose |
 |---|---|
-| `GET /api/message-queue` | Full snapshot `{ revision, sessions[] }` |
-| `POST .../sessions/:id/items` | Append `{ directory, item }`; returns `{ revision, session, itemId }` and arms a dispatch (the session may already be idle) |
-| `DELETE .../sessions/:id/items/:itemId` | Remove; `409` while that item is in flight |
-| `POST .../sessions/:id/items/:itemId/take` | Remove and return the full item (payloads included); `404`/`409` |
-| `POST .../sessions/:id/take` | Remove and return every item not in flight, in order |
-| `PUT .../sessions/:id/order` | `{ itemIds }` must be a complete permutation |
-| `DELETE .../sessions/:id` | Clear; the in-flight item stays |
-| `PUT .../sessions/:id/hold` | `{ held, ttlMs? }` |
+| `GET /api/message-queue` | Full snapshot `{ revision, sessions[], sessionLifecycles }`. `sessions[]` includes active empty sessions so clients can clear a projection with the authoritative directory and generation. |
+| `POST .../sessions/:id/items` | Append `{ directory, item, idempotencyKey?, generation? }`; returns `{ revision, session, itemId }` and arms a dispatch (the session may already be idle) |
+| `DELETE .../sessions/:id/items/:itemId` | Remove `{ directory, generation? }`; `409` while that item is in flight or when the captured directory is stale. |
+| `POST .../sessions/:id/items/:itemId/take` | Remove and return the full item (payloads included); accepts `{ directory, operationId?, requireHead?, generation? }` and returns a durable take receipt. A receipt larger than 50 MiB is rejected before removal. |
+| `POST .../sessions/:id/take` | Remove and return every item not in flight, in order; accepts `{ directory, operationId?, generation? }`. An oversized receipt is rejected before removal. |
+| `POST .../sessions/:id/restore` | Restore `{ directory, items, operationId?, generation? }`; a take operation id is required when lifecycle metadata requires a receipt |
+| `POST .../sessions/:id/take-receipts/:operationId/ack` | Acknowledge a successfully delivered take receipt with `{ directory, generation? }` |
+| `PUT .../sessions/:id/order` | `{ directory, itemIds }`; `itemIds` must be a complete permutation |
+| `DELETE .../sessions/:id` | Clear `{ directory, generation? }`; the in-flight item stays |
+| `PUT .../sessions/:id/hold` | `{ directory, held, ttlMs?, generation?, sequence?, clientToken? }`; active holds reject other tokens, and stale same-token sequences are ignored |
 
 Every mutation broadcasts `openchamber:message-queue.updated` with
 `{ revision, session }` to all connected clients (SSE and WS), so several
@@ -151,10 +179,18 @@ devices on one server see one queue. SSE uses the shared control stream at
 `/api/openchamber/events`; `/api/global/event` carries no OpenChamber events.
 The UI subscribes independently of its OpenCode transport and re-reads the
 snapshot whenever either stream reconnects. The session in that payload always names
-its `directory`, including the broadcast that removes the last item: the UI
+its `directory` and current session `generation`, including the broadcast that
+removes the last item: the UI
 keys its projection by directory, and a broadcast without one left the
 delivered message on screen (a session's directory is remembered until the
 session is deleted or evicted).
+
+The `directory` in every session mutation is the caller's captured session
+directory. The server compares it with the authoritative current directory and
+rejects a stale move with `409` before changing the queue, revision, or take
+receipts. Recreated session incarnations require a matching durable take
+receipt for restore; first-ever restores and receipt-backed recovery remain
+valid.
 
 Limits: 20 items per session, 50 sessions (oldest evicted, never one with an
 item in flight), 200k characters of content; attachment payloads are bounded

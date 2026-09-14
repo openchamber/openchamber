@@ -1972,6 +1972,7 @@ export const dict = {
   'chat.queuedMessage.send': 'envoyer',
   'chat.queuedMessage.removeAria': 'Supprimer de la file d\'attente',
   'chat.queuedMessage.reorderAria': 'Glisser pour réorganiser',
+  'chat.queuedMessage.waiting': 'Sera envoyé lorsque la session se terminera',
   'chat.queuedMessage.toast.queueFailed': 'Impossible de mettre le message en file d\'attente. Il est de retour dans l\'éditeur.',
   'chat.queuedMessage.toast.takeFailed': 'Impossible de charger le message en file d\'attente. Veuillez réessayer.',
   'chat.container.returnToParent.aria': 'Retour à la session parents',

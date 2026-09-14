@@ -560,6 +560,34 @@ describe('ChildStoreManager directory bootstrap scheduler', () => {
   });
 });
 
+describe('ChildStoreManager directory identity', () => {
+  test('shares Windows drive and UNC stores while keeping POSIX case distinct', () => {
+    const manager = new ChildStoreManager();
+    const driveStore = manager.ensureChild('C:/Repo', { bootstrap: false });
+    const uncStore = manager.ensureChild('\\\\Server\\Share\\Repo', { bootstrap: false });
+    const posixUpperStore = manager.ensureChild('/Repo', { bootstrap: false });
+    const posixLowerStore = manager.ensureChild('/repo', { bootstrap: false });
+
+    expect(manager.getChild('c:\\repo')).toBe(driveStore);
+    expect(manager.getChild('//server/share/repo')).toBe(uncStore);
+    expect(manager.getChild('/Repo')).toBe(posixUpperStore);
+    expect(manager.getChild('/repo')).toBe(posixLowerStore);
+    expect(posixUpperStore).not.toBe(posixLowerStore);
+    expect([...manager.children.keys()]).toEqual([
+      'C:/Repo',
+      '//Server/Share/Repo',
+      '/Repo',
+      '/repo',
+    ]);
+
+    manager.update('c:\\repo', () => ({ project: 'canonical-drive' }));
+    expect(manager.getState('C:/Repo')?.project).toBe('canonical-drive');
+    expect(manager.disposeDirectory('C:\\REPO')).toBe(true);
+    expect(manager.getChild('c:/repo')).toBe(undefined);
+    manager.disposeAll();
+  });
+});
+
 describe('ChildStoreManager bootstrap context liveness', () => {
   test('isCurrent stays true after the run settles so deferred recovery work can commit', async () => {
     const manager = new ChildStoreManager();

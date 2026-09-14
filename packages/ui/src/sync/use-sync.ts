@@ -242,7 +242,7 @@ export function useSync() {
         : childStores.ensureChild(targetDirectory, { bootstrap: false })
       const isStale = () => getRuntimeKey() !== runtimeKey
         || syncSessionGenerationByKey.get(key) !== generation
-        || childStores.children.get(targetDirectory) !== targetStore
+        || childStores.getChild(targetDirectory) !== targetStore
       const current = targetStore.getState()
       const materialization = getSessionMaterializationStatus(current, sessionID)
       const cachedReady = materialization.hasMessages && materialization.renderable

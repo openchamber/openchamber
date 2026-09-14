@@ -6,6 +6,14 @@ import { getRuntimeUrlResolver, type RuntimeUrlQuery } from './runtime-url';
 
 export interface RuntimeFetchOptions extends RequestInit {
   query?: RuntimeUrlQuery;
+  /** A captured runtime used only by cleanup that must finish after a switch. */
+  runtimeTarget?: RuntimeFetchTarget;
+}
+
+export interface RuntimeFetchTarget {
+  apiBaseUrl: string;
+  requestHeaders?: Record<string, string>;
+  urlAuthToken?: string;
 }
 
 const shouldResolveApiPath = (input: string): boolean => {
@@ -230,6 +238,18 @@ const resolveRuntimeFetchInput = (input: string | URL | Request, query?: Runtime
   return target === input.url ? input : new Request(target, input);
 };
 
+const resolveCapturedRuntimeFetchInput = (
+  input: string | URL | Request,
+  query: RuntimeUrlQuery | undefined,
+  target: RuntimeFetchTarget,
+): string | URL | Request => {
+  const raw = input instanceof Request ? input.url : input.toString();
+  const url = new URL(raw, `${target.apiBaseUrl.replace(/\/+$/, '')}/`);
+  appendRuntimeQuery(url, query);
+  if (target.urlAuthToken) url.searchParams.set('oc_url_token', target.urlAuthToken);
+  return input instanceof Request ? new Request(url, input) : url.toString();
+};
+
 // ---------------------------------------------------------------------------
 // In-flight read coalescing
 //
@@ -258,7 +278,23 @@ const coalesceReadKey = (method: string, url: string, hasSignal: boolean): strin
 };
 
 export const runtimeFetch = async (input: string | URL | Request, init: RuntimeFetchOptions = {}): Promise<Response> => {
-  const { query, ...requestInit } = init;
+  const { query, runtimeTarget, ...requestInit } = init;
+
+  if (runtimeTarget?.apiBaseUrl) {
+    const resolvedInput = resolveCapturedRuntimeFetchInput(input, query, runtimeTarget);
+    const inputHeaders = resolvedInput instanceof Request ? resolvedInput.headers : undefined;
+    const headers = await mergeHeaders(inputHeaders, requestInit.headers, false);
+    for (const [key, value] of Object.entries(runtimeTarget.requestHeaders ?? {})) headers.set(key, value);
+    const resolvedUrl = resolvedInput instanceof Request ? resolvedInput.url : String(resolvedInput);
+    addRuntimeProxyHeaders(resolvedUrl, headers);
+    const credentials = requestInit.credentials ?? 'include';
+    const request = resolvedInput instanceof Request
+      ? new Request(resolvedInput, { ...requestInit, credentials, headers })
+      : new Request(resolvedInput, { ...requestInit, credentials, headers });
+    const response = await fetch(request);
+    observeRuntimeAuthResponse(request.url, response.status);
+    return response;
+  }
 
   // Resolve the transport once — relay tunnel or network — then apply the SAME
   // read-coalescing to both. On a relay the tunnel is bandwidth/latency-bound, so

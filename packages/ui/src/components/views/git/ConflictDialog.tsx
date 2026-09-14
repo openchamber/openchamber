@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
+import { createMessageQueueTarget } from '@/stores/messageQueueStore';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { getConflictDetails, type MergeConflictDetails } from '@/lib/gitApi';
@@ -130,10 +131,14 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
 
     // Set the visible text in the input and the synthetic parts for when user sends
     setPendingInputText(context.visibleText, 'replace');
+    const target = createMessageQueueTarget(
+      currentSessionId,
+      useSessionUIStore.getState().getDirectoryForSession(currentSessionId) ?? directory,
+    );
     setPendingSyntheticParts([
       { text: context.instructionsText, synthetic: true },
       { text: context.payloadText, synthetic: true },
-    ]);
+    ], target ?? undefined);
 
     onClearState?.();
     onOpenChange(false);

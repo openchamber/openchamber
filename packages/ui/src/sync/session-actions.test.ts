@@ -2,6 +2,7 @@ import { describe, expect, test, beforeEach, mock } from "bun:test"
 import type { PermissionRequest } from "@/types/permission"
 import type { QuestionRequest } from "@/types/question"
 import type { InputState } from "./input-store"
+import { canonicalizePathIdentity } from "@/lib/pathNormalization"
 
 // Mock SDK client that records permission.reply / question.reply calls
 const replyCalls: Array<{ method: string; params: Record<string, unknown> }> = []
@@ -482,14 +483,20 @@ function createStore(
 }
 
 function createChildStores(entries: Array<[string, TestStoreApi<DirectoryStore>]>) {
+  const stores = new Map(entries)
+  const getChild = (directory: string) => {
+    const identity = canonicalizePathIdentity(directory)
+    return entries.find(([entryDirectory]) => canonicalizePathIdentity(entryDirectory) === identity)?.[1]
+  }
+
   return {
-    children: new Map(entries),
+    children: stores,
     ensureChild: (dir: string) => {
-      const store = new Map(entries).get(dir)
+      const store = getChild(dir)
       if (!store) throw new Error(`No store for ${dir}`)
       return store
     },
-    getChild: (dir: string) => new Map(entries).get(dir),
+    getChild,
   } as unknown as import("./child-store").ChildStoreManager
 }
 
@@ -947,6 +954,26 @@ describe("archiving a batch through the server", () => {
     expect(result).toEqual({ archivedIds: ["session-a"], failedIds: [] })
     expect(archiveBatchRequests).toEqual([{ directory: "/test/project", ids: ["session-a"] }])
     expect(replyCalls.filter((call) => call.method === "session.update")).toEqual([])
+  })
+
+  test("reconciles a batch through a Windows directory alias", async () => {
+    const displayDirectory = "C:/Repo"
+    const sessionDirectory = "c:\\repo"
+    const session = { ...liveSession("session-alias"), directory: sessionDirectory }
+    archiveBatchResponse.status = 200
+    archiveBatchResponse.body = {
+      archived: [{ ...session, time: { created: 1, archived: 2 } }],
+      failedIds: [],
+    }
+    const source = createStore({}, { session: [session] })
+    const { archiveSessions, setActionRefs } = await import("./session-actions")
+    setActionRefs(actionSdk, createChildStores([[displayDirectory, source]]), () => displayDirectory)
+
+    const result = await archiveSessions(["session-alias"])
+
+    expect(result).toEqual({ archivedIds: ["session-alias"], failedIds: [] })
+    expect(archiveBatchRequests).toEqual([{ directory: sessionDirectory, ids: ["session-alias"] }])
+    expect(source.getState().session).toEqual([])
   })
 
   test("reports the sessions the server could not archive without losing the rest", async () => {

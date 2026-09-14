@@ -1,5 +1,5 @@
 import type { Session } from '@opencode-ai/sdk/v2';
-import { normalizePath } from '@/lib/pathNormalization';
+import { canonicalizePathIdentity, normalizePath } from '@/lib/pathNormalization';
 
 type Project = {
   id: string;
@@ -37,8 +37,10 @@ const shouldReplaceOwner = (existing: DirectoryOwner | undefined, candidate: Dir
 };
 
 const setOwner = (owners: Map<string, DirectoryOwner>, directory: string, candidate: DirectoryOwner): void => {
-  if (shouldReplaceOwner(owners.get(directory), candidate)) {
-    owners.set(directory, candidate);
+  const identity = canonicalizePathIdentity(directory);
+  if (!identity) return;
+  if (shouldReplaceOwner(owners.get(identity), candidate)) {
+    owners.set(identity, candidate);
   }
 };
 
@@ -51,13 +53,13 @@ const resolveSessionDirectory = (session: Session): string | null => {
 };
 
 const getParentDirectory = (directory: string): string | null => {
-  if (directory === '/' || /^[A-Z]:$/.test(directory)) {
+  if (directory === '/' || /^[A-Z]:\/?$/.test(directory)) {
     return null;
   }
   const separator = directory.lastIndexOf('/');
   if (separator < 0) return null;
   if (separator === 0) return '/';
-  if (separator === 2 && /^[A-Z]:\//.test(directory)) return directory.slice(0, 2);
+  if (separator === 2 && /^[A-Z]:\//.test(directory)) return directory.slice(0, 3);
   return directory.slice(0, separator);
 };
 
@@ -74,9 +76,11 @@ export const createSessionOwnershipIndex = (
   for (const project of projects) {
     const projectRoot = normalizePath(project.normalizedPath);
     if (!projectRoot) continue;
-    const existingProject = projectByRoot.get(projectRoot);
+    const projectRootIdentity = canonicalizePathIdentity(projectRoot);
+    if (!projectRootIdentity) continue;
+    const existingProject = projectByRoot.get(projectRootIdentity);
     if (!existingProject || project.id.localeCompare(existingProject.id) < 0) {
-      projectByRoot.set(projectRoot, project);
+      projectByRoot.set(projectRootIdentity, project);
     }
     setOwner(ownerByDirectory, projectRoot, {
       projectId: project.id,
@@ -89,7 +93,8 @@ export const createSessionOwnershipIndex = (
   if (!isVSCode) {
     for (const [projectPath, worktrees] of availableWorktreesByProject) {
       const projectRoot = normalizePath(projectPath);
-      const project = projectRoot ? projectByRoot.get(projectRoot) : undefined;
+      const projectRootIdentity = projectRoot ? canonicalizePathIdentity(projectRoot) : null;
+      const project = projectRootIdentity ? projectByRoot.get(projectRootIdentity) : undefined;
       if (!project || !projectRoot) continue;
       for (const worktree of worktrees) {
         const directory = normalizePath(worktree.path);
@@ -112,13 +117,15 @@ export const createSessionOwnershipIndex = (
 
   const resolveOwner = (directory: string | null): DirectoryOwner | null => {
     if (!directory) return null;
-    if (resolvedOwners.has(directory)) {
-      return resolvedOwners.get(directory) ?? null;
+    const directoryIdentity = canonicalizePathIdentity(directory);
+    if (!directoryIdentity) return null;
+    if (resolvedOwners.has(directoryIdentity)) {
+      return resolvedOwners.get(directoryIdentity) ?? null;
     }
 
     if (isVSCode) {
-      const owner = ownerByDirectory.get(directory) ?? null;
-      resolvedOwners.set(directory, owner);
+      const owner = ownerByDirectory.get(directoryIdentity) ?? null;
+      resolvedOwners.set(directoryIdentity, owner);
       return owner;
     }
 
@@ -126,12 +133,14 @@ export const createSessionOwnershipIndex = (
     let current: string | null = directory;
     let owner: DirectoryOwner | null = null;
     while (current) {
-      if (resolvedOwners.has(current)) {
-        owner = resolvedOwners.get(current) ?? null;
+      const currentIdentity = canonicalizePathIdentity(current);
+      if (!currentIdentity) break;
+      if (resolvedOwners.has(currentIdentity)) {
+        owner = resolvedOwners.get(currentIdentity) ?? null;
         break;
       }
-      visited.push(current);
-      owner = ownerByDirectory.get(current) ?? null;
+      visited.push(currentIdentity);
+      owner = ownerByDirectory.get(currentIdentity) ?? null;
       if (owner) break;
       current = getParentDirectory(current);
     }
