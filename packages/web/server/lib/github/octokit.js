@@ -1,5 +1,13 @@
+import crypto from 'node:crypto';
 import { Octokit } from '@octokit/rest';
-import { getGitHubAuth, isGhCliActive, isGhCliDisabled } from './auth.js';
+import {
+  getGitHubAuth,
+  getGitHubAuthByAccountId,
+  githubAccountId,
+  githubCliAccountId,
+  isGhCliActive,
+  isGhCliDisabled,
+} from './auth.js';
 import { getGhCliToken } from './gh-cli-credential.js';
 
 // Per-request timeout for every GitHub call. Octokit v22 uses native fetch,
@@ -19,8 +27,8 @@ const timeoutFetch = (url, options = {}) => {
 
 // Conditional-request cache for GET calls: GitHub serves 304 Not Modified for
 // matching If-None-Match WITHOUT counting the request against the REST rate
-// limit, so polling unchanged PRs/checks becomes rate-limit-free. Keyed by
-// token+URL so different identities never share responses.
+// limit, so polling unchanged PRs/checks becomes rate-limit-free. Keyed by a
+// credential digest plus URL so raw tokens do not become cache keys.
 const ETAG_CACHE_MAX_ENTRIES = 300;
 const etagCache = new Map();
 
@@ -35,13 +43,13 @@ const rememberEtag = (key, etag, body, headers) => {
   }
 };
 
-const createConditionalFetch = (token) => async (url, options = {}) => {
+const createConditionalFetch = (cacheIdentity) => async (url, options = {}) => {
   const method = (options.method || 'GET').toUpperCase();
   if (method !== 'GET') {
     return timeoutFetch(url, options);
   }
 
-  const cacheKey = `${token}\n${url}`;
+  const cacheKey = `${cacheIdentity}\n${url}`;
   const cached = etagCache.get(cacheKey);
   const headers = { ...(options.headers || {}) };
   if (cached?.etag) {
@@ -69,16 +77,94 @@ const createConditionalFetch = (token) => async (url, options = {}) => {
 };
 
 /** Create an Octokit instance with per-request timeout + ETag revalidation. */
-export function createOctokit(token) {
-  return new Octokit({ auth: token, request: { fetch: createConditionalFetch(token) } });
+export function createOctokit(token, accountId = '') {
+  const cacheIdentity = `github:${crypto.createHash('sha256')
+    .update(accountId)
+    .update('\0')
+    .update(token)
+    .digest('base64url')}`;
+  const octokit = new Octokit({ auth: token, request: { fetch: createConditionalFetch(cacheIdentity) } });
+  Object.defineProperty(octokit, 'openChamberCacheIdentity', {
+    value: cacheIdentity,
+  });
+  return octokit;
 }
 
-export function getOctokitOrNull() {
-  const auth = getGitHubAuth();
+export function getOctokitCacheIdentity(octokit) {
+  return octokit?.openChamberCacheIdentity || '';
+}
+
+export async function getOctokitOrNull() {
+  const auth = await getGitHubAuth();
   const ghToken = !isGhCliDisabled() ? getGhCliToken() : null;
   const token = isGhCliActive() ? ghToken || auth?.accessToken : auth?.accessToken || ghToken;
   if (!token) {
     return null;
   }
-  return createOctokit(token);
+  const accountId = token === auth?.accessToken ? auth.accountId : '';
+  return createOctokit(token, accountId);
+}
+
+export async function getOctokitForAccountId(accountId, options = {}) {
+  const auth = await getGitHubAuthByAccountId(accountId);
+  if (auth) {
+    const octokit = createOctokit(auth.accessToken, accountId);
+    octokit.hook.error('request', async (error) => {
+      const identity = { provider: 'github', instance: 'github.com', accountId };
+      error.sourceControlIdentity = identity;
+      error.sourceControlPersistedAccount = true;
+      if (error.status === 401) {
+        await options.onUnauthorized?.(identity, true);
+        error.sourceControlInvalidated = true;
+      }
+      throw error;
+    });
+    return {
+      accountId,
+      credentialRevision: auth.credentialRevision,
+      providerUserId: auth.providerUserId,
+      source: auth.source,
+      user: auth.user,
+      octokit,
+    };
+  }
+  if (!accountId.startsWith('github.com#cli:') || isGhCliDisabled()) return null;
+  const token = getGhCliToken();
+  if (!token) return null;
+  const octokit = createOctokit(token, accountId);
+  let response;
+  try {
+    response = await octokit.rest.users.getAuthenticated();
+  } catch (error) {
+    if (error?.status === 401) {
+      const identity = { provider: 'github', instance: 'github.com', accountId };
+      await options.onUnauthorized?.(identity, false);
+      error.sourceControlIdentity = identity;
+      error.sourceControlPersistedAccount = false;
+      error.sourceControlInvalidated = true;
+    }
+    throw error;
+  }
+  if (githubCliAccountId(response.data.id) !== accountId) {
+    await options.onUnauthorized?.({ provider: 'github', instance: 'github.com', accountId }, false);
+    return null;
+  }
+  octokit.hook.error('request', async (error) => {
+    const identity = { provider: 'github', instance: 'github.com', accountId };
+    error.sourceControlIdentity = identity;
+    error.sourceControlPersistedAccount = false;
+    if (error.status === 401) {
+      await options.onUnauthorized?.(identity, false);
+      error.sourceControlInvalidated = true;
+    }
+    throw error;
+  });
+  return {
+    accountId,
+    credentialRevision: 1,
+    providerUserId: githubAccountId(response.data.id),
+    source: 'cli',
+    user: response.data,
+    octokit,
+  };
 }

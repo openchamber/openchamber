@@ -1,6 +1,8 @@
 import { processFile } from '@pierre/diffs';
 import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import type { SourceControlReadContext } from '@/lib/source-control/types';
+import { buildTargetQuery } from '@/lib/walkthrough/api';
 import type { WalkthroughSource } from '@/lib/walkthrough/types';
 
 export type PullRequestSource = Extract<WalkthroughSource, { kind: 'pr' }>;
@@ -26,9 +28,9 @@ export function parsePullRequestDiff(patch: string) {
   });
 }
 
-export async function fetchPullRequestDiff(directory: string, source: PullRequestSource) {
+export async function fetchPullRequestDiff(directory: string, source: PullRequestSource, context: Readonly<SourceControlReadContext>) {
   const response = await runtimeFetch('/api/walkthrough/pr-diff', {
-    query: { directory, source: JSON.stringify(source) },
+    query: buildTargetQuery(directory, { source, context }),
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) {

@@ -1,3 +1,5 @@
+import { digestMutationInput, mutationReceipt } from '../source-control/mutation-executor.js';
+
 const PR_STATUS_CACHE_TTL_MS = 90_000;
 const PR_STATUS_CACHE_MAX_ENTRIES = 200;
 // Upper bound for resolving a single PR status. resolveGitHubPrStatus makes many
@@ -7,20 +9,55 @@ const PR_STATUS_CACHE_MAX_ENTRIES = 200;
 // status on error, and a later poll fills it in.
 const PR_STATUS_RESOLVE_TIMEOUT_MS = 12_000;
 const prStatusCache = new Map();
+const pendingPrStatusWrites = new Map();
 let resolvedAuthLoginPromise = null;
 const PR_CONTEXT_CACHE_TTL_MS = 30_000;
 const PR_CONTEXT_CACHE_MAX_ENTRIES = 50;
 const prContextCache = new Map();
+const pendingPrContextWrites = new Map();
+const GITHUB_OAUTH_INSTANCE = 'github.com';
 
-function invalidatePrContextCache(directory, number) {
+const githubAuthRoutePaths = (suffix) => [
+  `/api/github${suffix}`,
+  `/api/source-control/github${suffix}`,
+];
+const canonicalGitHubRoutePath = (suffix) => `/api/source-control/github${suffix}`;
+const retiredLegacyGitHubGetRoutes = [
+  '/pr/status', '/repo/upstream', '/repo/branches', '/issues/list', '/issues/get',
+  '/issues/comments', '/pulls/list', '/pulls/context',
+];
+const retiredLegacyGitHubPostRoutes = ['/pr/create', '/pr/update', '/pr/merge', '/pr/ready'];
+
+function cacheAuthorityMatches(candidate, authority) {
+  return !authority || (candidate
+    && candidate.cacheIdentity === authority.cacheIdentity
+    && candidate.repositoryId === authority.repositoryId
+    && candidate.bindingRevision === authority.bindingRevision
+    && candidate.primaryRemote === authority.primaryRemote);
+}
+
+function invalidatePrContextCache(directory, number, authority = null) {
   for (const key of prContextCache.keys()) {
     try {
-      const [cachedDirectory, cachedNumber] = JSON.parse(key);
-      if (cachedDirectory === directory && (number == null || cachedNumber === number)) {
+      const parsed = JSON.parse(key);
+      const [cachedDirectory, cachedNumber] = parsed;
+      const authorityMatches = !authority || (parsed.length === 8
+        && parsed[4] === authority.cacheIdentity
+        && parsed[5] === authority.repositoryId
+        && parsed[6] === authority.bindingRevision
+        && parsed[7] === authority.primaryRemote);
+      if (authorityMatches && (directory == null || cachedDirectory === directory) && (number == null || cachedNumber === number)) {
         prContextCache.delete(key);
       }
     } catch {
-      prContextCache.delete(key);
+      if (!authority) prContextCache.delete(key);
+    }
+  }
+  for (const [token, pending] of pendingPrContextWrites) {
+    if (cacheAuthorityMatches(pending, authority)
+      && (directory == null || pending.directory === directory)
+      && (number == null || pending.number === number)) {
+      pendingPrContextWrites.delete(token);
     }
   }
 }
@@ -115,31 +152,223 @@ function withTimeout(promise, timeoutMs, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-function getRequestedRepo(req) {
-  const owner = typeof req.query?.owner === 'string' ? req.query.owner.trim() : '';
-  const repo = typeof req.query?.repo === 'string' ? req.query.repo.trim() : '';
-  return owner && repo ? { owner, repo } : null;
+function readQueryString(req, name) {
+  const value = req.query?.[name];
+  return Object.prototype.toString.call(value) === '[object String]' ? value.trim() : '';
 }
 
-async function resolveRepoForRequest(octokit, directory, requestedRepo) {
-  const { resolveGitHubRepoFromDirectory } = await import('./index.js');
-  const { repo } = await resolveGitHubRepoFromDirectory(directory);
-  if (!requestedRepo) {
-    return repo;
-  }
-  if (repo?.owner === requestedRepo.owner && repo?.repo === requestedRepo.repo) {
-    return requestedRepo;
-  }
+function readPositiveIntegerQuery(req, name) {
+  const value = readQueryString(req, name);
+  if (!/^[1-9]\d*$/.test(value)) return null;
+  const number = Number(value);
+  return Number.isSafeInteger(number) ? number : null;
+}
 
-  const { resolveRepoNetwork } = await import('./repo/fork-detection.js');
-  const network = await resolveRepoNetwork(octokit, directory).catch(() => null);
+const isPlainObject = (value) => Object.prototype.toString.call(value) === '[object Object]';
+const isProviderString = (value) => Object.prototype.toString.call(value) === '[object String]';
+
+function invalidProviderPayload(message) {
+  const error = new Error(message);
+  error.code = 'MALFORMED_PROVIDER_RESPONSE';
+  return error;
+}
+
+function requireProviderArray(value, message) {
+  if (!Array.isArray(value)) throw invalidProviderPayload(message);
+  return value;
+}
+
+function requireGitHubRepoNetwork(value, primaryRepo) {
+  if (value === null) return value;
+  const network = requireProviderArray(value, 'GitHub returned invalid fork metadata');
+  if (network.length === 0) throw invalidProviderPayload('GitHub returned invalid fork metadata');
+  for (const repo of network) {
+    if (!isPlainObject(repo)
+      || !isProviderString(repo.owner) || !repo.owner.trim()
+      || !isProviderString(repo.repo) || !repo.repo.trim()
+      || (repo.source !== 'origin' && repo.source !== 'upstream')) {
+      throw invalidProviderPayload('GitHub returned invalid fork metadata');
+    }
+  }
+  if (primaryRepo && !network.some((repo) => repo.source === 'origin'
+    && repo.owner === primaryRepo.owner && repo.repo === primaryRepo.repo)) {
+    throw invalidProviderPayload('GitHub returned invalid fork metadata');
+  }
+  return network;
+}
+
+function requireGitHubUser(value, message) {
+  if (value == null) return;
+  if (!isPlainObject(value) || !Number.isSafeInteger(value.id) || !isProviderString(value.login) || !value.login.trim()) {
+    throw invalidProviderPayload(message);
+  }
+}
+
+function requireGitHubLabels(value, message) {
+  if (value == null) return;
+  for (const label of requireProviderArray(value, message)) {
+    if (!isPlainObject(label) || !isProviderString(label.name) || !label.name.trim()) {
+      throw invalidProviderPayload(message);
+    }
+  }
+}
+
+function requireGitHubIssue(value, message) {
+  if (!isPlainObject(value)
+    || !Number.isSafeInteger(value.number) || value.number <= 0
+    || !isProviderString(value.title)
+    || !isProviderString(value.html_url) || !value.html_url.trim()
+    || (value.state !== 'open' && value.state !== 'closed')) {
+    throw invalidProviderPayload(message);
+  }
+  requireGitHubUser(value.user, message);
+  requireGitHubLabels(value.labels, message);
+  if (value.assignees != null) {
+    for (const assignee of requireProviderArray(value.assignees, message)) requireGitHubUser(assignee, message);
+  }
+  return value;
+}
+
+function requireGitHubComment(value, message) {
+  if (!isPlainObject(value)
+    || !Number.isSafeInteger(value.id)
+    || !isProviderString(value.html_url) || !value.html_url.trim()
+    || !isProviderString(value.body)) {
+    throw invalidProviderPayload(message);
+  }
+  requireGitHubUser(value.user, message);
+  return value;
+}
+
+function matchesGitHubRepositoryUrl(value, owner, repo) {
+  if (!isProviderString(value) || !value.trim()) return false;
+  const expectedPath = `${owner}/${repo}`.toLowerCase();
+  const raw = value.trim();
+  const scpMatch = raw.match(/^git@github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
+  if (scpMatch) return `${scpMatch[1]}/${scpMatch[2]}`.toLowerCase() === expectedPath;
+
+  try {
+    const url = new URL(raw);
+    if (!['https:', 'ssh:'].includes(url.protocol)
+      || url.host.toLowerCase() !== 'github.com'
+      || url.password || url.search || url.hash
+      || (url.protocol === 'https:' && url.username)
+      || (url.protocol === 'ssh:' && url.username !== 'git')) {
+      return false;
+    }
+    const path = url.pathname.replace(/^\/+|\/+$/g, '').replace(/\.git$/i, '');
+    return path.toLowerCase() === expectedPath;
+  } catch {
+    return false;
+  }
+}
+
+function requireGitHubPullRequest(value, message) {
+  if (!isPlainObject(value)
+    || !Number.isSafeInteger(value.number) || value.number <= 0
+    || !isProviderString(value.title)
+    || !isProviderString(value.html_url) || !value.html_url.trim()
+    || (value.state !== 'open' && value.state !== 'closed')
+    || !isPlainObject(value.base) || !isProviderString(value.base.ref) || !value.base.ref.trim()
+    || !isPlainObject(value.head) || !isProviderString(value.head.ref) || !value.head.ref.trim()) {
+    throw invalidProviderPayload(message);
+  }
+  requireGitHubUser(value.user, message);
+  if (value.head.repo != null) {
+    const repo = value.head.repo;
+    if (!isPlainObject(repo)
+      || !isPlainObject(repo.owner) || !isProviderString(repo.owner.login) || !repo.owner.login.trim()
+      || !isProviderString(repo.name) || !repo.name.trim()
+      || !matchesGitHubRepositoryUrl(repo.html_url, repo.owner.login, repo.name)
+      || (repo.clone_url != null && !matchesGitHubRepositoryUrl(repo.clone_url, repo.owner.login, repo.name))
+      || (repo.ssh_url != null && !matchesGitHubRepositoryUrl(repo.ssh_url, repo.owner.login, repo.name))) {
+      throw invalidProviderPayload(message);
+    }
+  }
+  return value;
+}
+
+function requireGitHubReviewComment(value) {
+  const comment = requireGitHubComment(value, 'GitHub returned an invalid review comment');
+  if (!isProviderString(comment.path) || !comment.path.trim()) {
+    throw invalidProviderPayload('GitHub returned an invalid review comment');
+  }
+  return comment;
+}
+
+function requireGitHubPullFile(value) {
+  if (!isPlainObject(value)
+    || !isProviderString(value.filename) || !value.filename.trim()
+    || !isProviderString(value.status) || !value.status.trim()
+    || !Number.isSafeInteger(value.additions) || value.additions < 0
+    || !Number.isSafeInteger(value.deletions) || value.deletions < 0
+    || !Number.isSafeInteger(value.changes) || value.changes < 0
+    || (value.patch != null && !isProviderString(value.patch))) {
+    throw invalidProviderPayload('GitHub returned an invalid pull request file');
+  }
+  return value;
+}
+
+function requireGitHubCheckRuns(value) {
+  const runs = requireProviderArray(value, 'GitHub returned invalid check runs');
+  for (const run of runs) {
+    if (!isPlainObject(run) || !Number.isSafeInteger(run.id)
+      || !isProviderString(run.name) || !run.name.trim()
+      || !isProviderString(run.status) || !run.status.trim()) {
+      throw invalidProviderPayload('GitHub returned an invalid check run');
+    }
+  }
+  return runs;
+}
+
+function requireGitHubStatuses(value) {
+  const statuses = requireProviderArray(value, 'GitHub returned invalid combined status');
+  for (const status of statuses) {
+    if (!isPlainObject(status) || !isProviderString(status.state) || !status.state.trim()) {
+      throw invalidProviderPayload('GitHub returned an invalid combined status item');
+    }
+  }
+  return statuses;
+}
+
+function requireGitHubWorkflowJobs(value) {
+  const jobs = requireProviderArray(value, 'GitHub returned invalid workflow jobs');
+  for (const job of jobs) {
+    if (!isPlainObject(job) || !Number.isSafeInteger(job.id)
+      || !isProviderString(job.name) || !job.name.trim()) {
+      throw invalidProviderPayload('GitHub returned an invalid workflow job');
+    }
+  }
+  return jobs;
+}
+
+async function resolveRepoForRequest(octokit, directory, requestedRepo, remoteName = 'origin', dependencies = {}) {
+  const resolveDirectoryRepo = dependencies.resolveGitHubRepoFromDirectory
+    ?? (await import('./index.js')).resolveGitHubRepoFromDirectory;
+  const { repo } = await resolveDirectoryRepo(directory, remoteName);
+  if (!repo && dependencies.requireResolvedRepo) {
+    throw new Error(`Unable to resolve GitHub repo from git remote "${remoteName}"`);
+  }
+  const resolveNetwork = dependencies.resolveRepoNetwork
+    ?? (await import('./repo/fork-detection.js')).resolveRepoNetwork;
+  const mustResolveNetwork = Boolean(requestedRepo) || dependencies.strictMetadataErrors;
+  const networkPromise = mustResolveNetwork
+    ? (dependencies.strictMetadataErrors
+        ? resolveNetwork(octokit, directory, remoteName, { strictErrors: true })
+        : resolveNetwork(octokit, directory, remoteName))
+    : Promise.resolve(null);
+  const network = dependencies.strictNetworkErrors
+    ? requireGitHubRepoNetwork(await networkPromise, repo)
+    : await networkPromise.catch(() => null);
+  if (!requestedRepo) return repo;
+  if (repo?.owner === requestedRepo.owner && repo?.repo === requestedRepo.repo) return requestedRepo;
   const allowed = Array.isArray(network)
     ? network.some((item) => item?.owner === requestedRepo.owner && item?.repo === requestedRepo.repo)
     : false;
   return allowed ? requestedRepo : null;
 }
 
-function setPrStatusCache(key, data, fetchedAt) {
+function setPrStatusCache(key, data, fetchedAt, authority = null) {
   // Evict oldest entry when cache exceeds max size
   if (prStatusCache.size >= PR_STATUS_CACHE_MAX_ENTRIES && !prStatusCache.has(key)) {
     const oldest = prStatusCache.entries().next().value;
@@ -147,16 +376,551 @@ function setPrStatusCache(key, data, fetchedAt) {
       prStatusCache.delete(oldest[0]);
     }
   }
-  prStatusCache.set(key, { data, fetchedAt });
+  prStatusCache.set(key, { data, fetchedAt, authority });
 }
 
-export function registerGitHubRoutes(app) {
+export function registerGitHubRoutes(app, options = {}) {
+  const retireLegacyResourceRoute = (_req, res) => res.status(410).json({
+    error: 'Legacy GitHub repository API is retired',
+    code: 'SOURCE_CONTROL_CONTEXT_REQUIRED',
+  });
+  for (const suffix of retiredLegacyGitHubGetRoutes) app.get(`/api/github${suffix}`, retireLegacyResourceRoute);
+  for (const suffix of retiredLegacyGitHubPostRoutes) app.post(`/api/github${suffix}`, retireLegacyResourceRoute);
   let githubLibraries = null;
+  let oauthFlowRegistry = options.oauthFlowRegistry ?? null;
   const getGitHubLibraries = async () => {
     if (!githubLibraries) {
       githubLibraries = await import('./index.js');
     }
     return githubLibraries;
+  };
+  const getOAuthFlowRegistry = async () => {
+    if (oauthFlowRegistry) return oauthFlowRegistry;
+    const { createOAuthFlowRegistry } = await import('../source-control/oauth-flow-registry.js');
+    oauthFlowRegistry = createOAuthFlowRegistry();
+    return oauthFlowRegistry;
+  };
+  const sendOAuthFlowError = (res, error) => {
+    if (error?.code === 'SOURCE_CONTROL_OAUTH_FLOW_BUSY') {
+      return res.status(409).json({ error: 'OAuth flow is busy', code: error.code });
+    }
+    if (error?.code === 'SOURCE_CONTROL_OAUTH_FLOW_UNAVAILABLE') {
+      return res.status(410).json({ error: 'OAuth flow is unavailable', code: error.code });
+    }
+    return null;
+  };
+  const sendAuthStorageError = (res, error) => {
+    if (error?.code?.startsWith('SOURCE_CONTROL_LOCK_')) {
+      return res.status(error.status).json({ error: error.message, code: error.code });
+    }
+    if (error?.code === 'INVALID_GITHUB_AUTH') {
+      return res.status(500).json({ error: error.message, code: error.code });
+    }
+    return null;
+  };
+  const accountIdentity = (accountId) => ({ provider: 'github', instance: 'github.com', accountId });
+  const cliAccountView = (user, current) => ({
+    id: `github.com#cli:${user.id}`,
+    credentialId: `github.com#cli:${user.id}`,
+    credentialRevision: 1,
+    providerUserId: `github.com#${user.id}`,
+    providerUserStatus: 'available',
+    user,
+    current,
+    source: 'gh-cli',
+    status: 'valid',
+  });
+  const invalidateAccount = async (accountId) => {
+    const { markGitHubAuthAccountInvalid } = await getGitHubLibraries();
+    await options.onAccountInvalidated?.(accountIdentity(accountId));
+    await markGitHubAuthAccountInvalid(accountId, 'unauthorized');
+  };
+  const invalidateRequestAccount = async (error) => {
+    const identity = error?.sourceControlIdentity;
+    if (error?.status !== 401 || error?.sourceControlAccountUnavailable || !identity?.accountId) return false;
+    if (error.sourceControlInvalidated) return true;
+    if (error.sourceControlPersistedAccount) await invalidateAccount(identity.accountId);
+    else await options.onAccountInvalidated?.(identity);
+    return true;
+  };
+  const getOctokitForRequest = async (req, exactAccountId = '') => {
+    const accountIdValue = exactAccountId || req.query?.accountId || req.body?.accountId;
+    const accountId = Object.prototype.toString.call(accountIdValue) === '[object String]' ? accountIdValue.trim() : '';
+    const libraries = await getGitHubLibraries();
+    if (!accountId) {
+      const octokit = await libraries.getOctokitOrNull();
+      return octokit ? {
+        octokit,
+        cacheIdentity: libraries.getOctokitCacheIdentity(octokit),
+        user: (await libraries.getGitHubAuth())?.user ?? null,
+      } : null;
+    }
+    const context = await libraries.getOctokitForAccountId(accountId, {
+      onUnauthorized: async (identity, persisted) => {
+        if (persisted) await invalidateAccount(identity.accountId);
+        else await options.onAccountInvalidated?.(identity);
+      },
+    });
+    if (context) {
+      return {
+        ...context,
+        cacheIdentity: libraries.getOctokitCacheIdentity(context.octokit),
+      };
+    }
+    const error = new Error('GitHub account is unavailable');
+    error.status = 401;
+    error.sourceControlAccountUnavailable = true;
+    throw error;
+  };
+  const getOctokitForRead = async (req, trustedContext) => {
+    if (trustedContext) return getOctokitForRequest(req, trustedContext.accountId);
+    const libraries = await getGitHubLibraries();
+    const octokit = await libraries.getOctokitOrNull();
+    return octokit ? {
+      octokit,
+      cacheIdentity: libraries.getOctokitCacheIdentity(octokit),
+      user: (await libraries.getGitHubAuth())?.user ?? null,
+    } : null;
+  };
+  const sendExactAccountError = (res, error) => {
+    const storageError = sendAuthStorageError(res, error);
+    if (storageError) return storageError;
+    if (!error?.sourceControlAccountUnavailable && !(error?.status === 401 && error?.sourceControlIdentity)) return null;
+    return res.status(401).json({ error: 'GitHub account is unavailable' });
+  };
+  const validateReadContext = (req, directory) => options.validateReadContext?.({
+    directory,
+    repositoryId: req.query?.repositoryId,
+    provider: 'github',
+    instance: req.query?.instance,
+    accountId: req.query?.accountId,
+    bindingRevision: Number(req.query?.bindingRevision),
+    primaryRemote: req.query?.primaryRemote,
+  });
+  const isReadContextError = (error) => error?.code?.startsWith('SOURCE_CONTROL_BINDING_')
+    || error?.code?.startsWith('SOURCE_CONTROL_LOCK_')
+    || error?.code === 'INVALID_SOURCE_CONTROL_READ_CONTEXT'
+    || error?.code === 'INVALID_SOURCE_CONTROL_BINDING';
+  const readContextErrorBody = (error) => {
+    const body = { error: error.message, code: error.code };
+    if (error.current !== undefined) body.current = error.current;
+    return body;
+  };
+  const isMutationContextError = (error) => error?.code?.startsWith('SOURCE_CONTROL_BINDING_')
+    || error?.code?.startsWith('SOURCE_CONTROL_LOCK_')
+    || error?.code === 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT'
+    || error?.code === 'INVALID_SOURCE_CONTROL_BINDING';
+
+  const canonicalMutationError = (message, code = 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT', status = 400) => {
+    const error = new Error(message);
+    error.code = code;
+    error.status = status;
+    return error;
+  };
+  const requiredMutationText = (value, name) => {
+    if (!isProviderString(value) || !value.trim()) throw canonicalMutationError(`${name} is required`);
+    return value.trim();
+  };
+  const optionalMutationText = (value, name, trim = false) => {
+    if (value === undefined) return undefined;
+    if (!isProviderString(value)) throw canonicalMutationError(`${name} is invalid`);
+    const normalized = trim ? value.trim() : value;
+    if (trim && !normalized) throw canonicalMutationError(`${name} is invalid`);
+    return normalized;
+  };
+  const sameProject = (left, right) => left?.owner === right?.owner && left?.name === right?.name;
+  const repoProject = (repo) => ({ owner: repo.owner, name: repo.repo });
+  const requireMutationPullRequest = (value, message) => {
+    const pr = requireGitHubPullRequest(value, message);
+    if (!isProviderString(pr.head?.sha) || !pr.head.sha.trim()
+      || Object.prototype.toString.call(pr.draft) !== '[object Boolean]'
+      || Object.prototype.toString.call(pr.merged) !== '[object Boolean]'
+      || !isPlainObject(pr.base?.repo)
+      || !isPlainObject(pr.base.repo.owner)
+      || !isProviderString(pr.base.repo.owner.login) || !pr.base.repo.owner.login.trim()
+      || !isProviderString(pr.base.repo.name) || !pr.base.repo.name.trim()
+      || !matchesGitHubRepositoryUrl(pr.base.repo.html_url, pr.base.repo.owner.login, pr.base.repo.name)) {
+      throw invalidProviderPayload(message);
+    }
+    return pr;
+  };
+  const pullTargetProject = (pr) => ({ owner: pr.base.repo.owner.login, name: pr.base.repo.name });
+  const actualMutationTarget = (context, project, pr = null, expected = null) => {
+    const target = {
+      repositoryId: context.repositoryId,
+      bindingRevision: context.bindingRevision,
+      primaryRemote: context.primaryRemote,
+      project: { id: `${project.owner}/${project.name}`, owner: project.owner, name: project.name },
+    };
+    if (pr) {
+      target.number = pr.number;
+      target.head = pr.head.ref;
+      target.base = pr.base.ref;
+      target.headSha = pr.head.sha;
+    } else {
+      target.head = expected.head;
+      target.base = expected.base;
+    }
+    return target;
+  };
+  const mutationTargetMatches = (expected, pr) => pr.number === expected.number
+    && (expected.head === undefined || pr.head.ref === expected.head)
+    && (expected.base === undefined || pr.base.ref === expected.base)
+    && (expected.headSha === undefined || pr.head.sha === expected.headSha);
+  const definiteFailure = (code) => ({ state: 'failed', result: { failureStatus: 409, failureCode: code } });
+  const reconcileCreateMutation = async (octokit, expectedProject, sourceProject, head, base) => {
+    const response = await octokit.rest.pulls.list({
+      owner: expectedProject.owner,
+      repo: expectedProject.name,
+      state: 'all',
+      head: `${sourceProject.owner}:${head}`,
+      base,
+      per_page: 100,
+    });
+    const candidates = requireProviderArray(response?.data, 'GitHub returned an invalid pull request list')
+      .map((pr) => requireMutationPullRequest(pr, 'GitHub returned an invalid pull request'))
+      .filter((pr) => pr.head.ref === head && pr.base.ref === base)
+      .filter((pr) => sameProject(pullTargetProject(pr), expectedProject))
+      .filter((pr) => pr.head.repo
+        && sameProject({ owner: pr.head.repo.owner.login, name: pr.head.repo.name }, sourceProject));
+    return candidates.length === 1 ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
+  };
+  const reconcileExistingMutation = async (octokit, kind, target) => {
+    const current = await octokit.rest.pulls.get({
+      owner: target.project.owner,
+      repo: target.project.name,
+      pull_number: target.number,
+    });
+    const currentPr = requireMutationPullRequest(current?.data, 'GitHub returned an invalid pull request');
+    if (kind === 'merge') {
+      if (currentPr.merged === true || isProviderString(currentPr.merged_at)) {
+        return { state: 'succeeded', result: { merged: true } };
+      }
+      if (currentPr.state === 'open' && currentPr.merged === false) {
+        return definiteFailure('SOURCE_CONTROL_MUTATION_NOT_APPLIED');
+      }
+    } else if (kind === 'ready') {
+      if (currentPr.draft === false) return { state: 'succeeded', result: { ready: true } };
+      if (currentPr.draft === true && currentPr.state === 'open') {
+        return definiteFailure('SOURCE_CONTROL_MUTATION_NOT_APPLIED');
+      }
+    }
+    return { state: 'outcome-unknown' };
+  };
+  const classifyMutationError = (error) => {
+    const status = error?.response?.status ?? error?.status;
+    if (Number.isSafeInteger(status) && status >= 400 && status <= 499) {
+      if (!Number.isSafeInteger(error.status)) error.status = status;
+      if (!isProviderString(error.code)) error.code = 'GITHUB_MUTATION_REJECTED';
+      return 'failed';
+    }
+    return 'outcome-unknown';
+  };
+  const sendCanonicalMutationError = async (res, error) => {
+    if (error?.status === 401) await invalidateRequestAccount(error);
+    const status = Number.isSafeInteger(error?.status) && error.status >= 400 && error.status <= 599
+      ? error.status
+      : 500;
+    const code = isProviderString(error?.code) && error.code
+      ? error.code
+      : 'GITHUB_MUTATION_FAILED';
+    const message = isMutationContextError(error) || code.startsWith('SOURCE_CONTROL_MUTATION_') || code.startsWith('SOURCE_CONTROL_LOCK_')
+      ? error.message
+      : status === 401 ? 'GitHub account is unavailable' : 'GitHub mutation failed';
+    const body = { error: message, code };
+    if (error?.current !== undefined) body.current = error.current;
+    return res.status(status).json(body);
+  };
+
+  const mutationConflict = () => canonicalMutationError(
+    'Source control mutation idempotency key was already used with different input',
+    'SOURCE_CONTROL_MUTATION_CONFLICT',
+    409,
+  );
+  const normalizeMutationOperation = (kind, req, context, actor, credential) => {
+    if (kind === 'create') {
+      const title = requiredMutationText(req.body?.title, 'title');
+      const body = optionalMutationText(req.body?.body, 'body');
+      if (req.body?.draft !== undefined && Object.prototype.toString.call(req.body.draft) !== '[object Boolean]') {
+        throw canonicalMutationError('draft is invalid');
+      }
+      const draft = req.body?.draft;
+      const remote = optionalMutationText(req.body?.remote, 'remote', true);
+      const headRemote = optionalMutationText(req.body?.headRemote, 'headRemote', true) ?? context.primaryRemote;
+      const head = requiredMutationText(context.target.head, 'target head');
+      const base = requiredMutationText(context.target.base, 'target base');
+      if (context.target.number !== undefined || context.target.headSha !== undefined) {
+        throw canonicalMutationError('Create target is invalid');
+      }
+      return {
+        title, body, draft, remote, headRemote, head, base,
+        digest(target) {
+          const input = { kind, actor, credential, target, title, headRemote };
+          if (body !== undefined) input.body = body;
+          if (draft !== undefined) input.draft = draft;
+          if (remote) input.remote = remote;
+          return digestMutationInput(input);
+        },
+      };
+    }
+
+    if (!Number.isSafeInteger(context.target.number) || context.target.number < 1) {
+      throw canonicalMutationError('target number is required');
+    }
+    if (kind === 'update') {
+      const title = requiredMutationText(req.body?.title, 'title');
+      const body = optionalMutationText(req.body?.body, 'body');
+      return {
+        title, body,
+        digest(target) {
+          const input = { kind, actor, credential, target, title };
+          if (body !== undefined) input.body = body;
+          return digestMutationInput(input);
+        },
+      };
+    }
+    if (kind === 'merge') {
+      const method = requiredMutationText(req.body?.method, 'method');
+      if (!['merge', 'squash', 'rebase'].includes(method)) throw canonicalMutationError('merge method is invalid');
+      return { method, digest: (target) => digestMutationInput({ kind, actor, credential, target, method }) };
+    }
+    if (kind === 'ready') return { digest: (target) => digestMutationInput({ kind, actor, credential, target }) };
+    throw canonicalMutationError('Mutation kind is invalid');
+  };
+  const storedMutationAuthorityMatches = (record, kind, actor, context) => {
+    const target = record?.target;
+    const expected = context.target;
+    return record?.kind === `change-request-${kind}`
+      && record.actor?.provider === actor.provider
+      && record.actor?.instance === actor.instance
+      && record.actor?.accountId === actor.accountId
+      && target?.repositoryId === context.repositoryId
+      && target?.bindingRevision === context.bindingRevision
+      && target?.primaryRemote === context.primaryRemote
+      && target?.project?.id === `${expected.project.owner}/${expected.project.name}`
+      && target?.project?.owner === expected.project.owner
+      && target?.project?.name === expected.project.name
+      && (expected.number === undefined || target?.number === expected.number)
+      && (expected.head === undefined || target?.head === expected.head)
+      && (expected.base === undefined || target?.base === expected.base)
+      && (expected.headSha === undefined || target?.headSha === expected.headSha);
+  };
+
+  const invalidateCanonicalMutationCaches = async (context, accountContext, target) => {
+    const authority = {
+      cacheIdentity: accountContext.cacheIdentity,
+      repositoryId: context.repositoryId,
+      bindingRevision: context.bindingRevision,
+      primaryRemote: context.primaryRemote,
+    };
+    for (const [key, entry] of prStatusCache) {
+      if (cacheAuthorityMatches(entry.authority, authority)) {
+        prStatusCache.delete(key);
+      }
+    }
+    for (const [token, pending] of pendingPrStatusWrites) {
+      if (cacheAuthorityMatches(pending, authority)) pendingPrStatusWrites.delete(token);
+    }
+    invalidatePrContextCache(null, target.number, authority);
+    const { invalidateRepoPullsCache } = await import('./pr-status.js');
+    invalidateRepoPullsCache(target.project.owner, target.project.name, accountContext.octokit);
+  };
+
+  const runCanonicalMutation = async (kind, req, res) => {
+    try {
+      if (!(options.validateMutationContext instanceof Function)
+        || !(options.mutationExecutor?.execute instanceof Function)
+        || !(options.mutationExecutor?.read instanceof Function)) {
+        return res.status(501).json({
+          error: 'Bound source control mutations are unavailable',
+          code: 'SOURCE_CONTROL_MUTATION_UNAVAILABLE',
+        });
+      }
+      const context = await options.validateMutationContext(req.body ?? {});
+      const accountContext = await getOctokitForRequest(req, context.accountId);
+      const octokit = accountContext.octokit;
+      const actor = { provider: 'github', instance: context.instance, accountId: context.accountId };
+      if (accountContext.accountId !== context.accountId
+        || !Number.isSafeInteger(accountContext.credentialRevision) || accountContext.credentialRevision < 1
+        || !isProviderString(accountContext.providerUserId)
+        || !/^github\.com#\d+$/.test(accountContext.providerUserId)) {
+        throw canonicalMutationError('GitHub account is unavailable', 'SOURCE_CONTROL_ACCOUNT_UNAVAILABLE', 401);
+      }
+      const credential = {
+        accountId: accountContext.accountId,
+        credentialRevision: accountContext.credentialRevision,
+      };
+      const operation = normalizeMutationOperation(kind, req, context, actor, credential);
+      const stored = await options.mutationExecutor.read(context.idempotencyKey);
+      const resolveDirectoryRepo = async (...args) => {
+        const resolver = options.resolveGitHubRepoFromDirectory
+          ?? (await import('./index.js')).resolveGitHubRepoFromDirectory;
+        return resolver(...args);
+      };
+      if (stored) {
+        if (!storedMutationAuthorityMatches(stored, kind, actor, context)) throw mutationConflict();
+        const inputDigest = operation.digest(stored.target);
+        if (stored.inputDigest !== inputDigest) throw mutationConflict();
+        const reconcile = async () => {
+          const target = stored.target;
+          const expectedProject = target.project;
+          if (kind === 'create') {
+            const sourceRepo = (await resolveDirectoryRepo(context.directory, operation.headRemote))?.repo;
+            const sourceProject = sourceRepo ? repoProject(sourceRepo) : null;
+            if (!sourceProject) return { state: 'outcome-unknown' };
+            return reconcileCreateMutation(octokit, expectedProject, sourceProject, operation.head, operation.base);
+          }
+          return reconcileExistingMutation(octokit, kind, target);
+        };
+        const execution = await options.mutationExecutor.execute({
+          record: {
+            key: stored.key,
+            inputDigest,
+            kind: stored.kind,
+            actor: stored.actor,
+            target: stored.target,
+          },
+          providerAccountId: accountContext.providerUserId,
+          perform: async () => { throw mutationConflict(); },
+          reconcile,
+          classifyError: classifyMutationError,
+        });
+        await invalidateCanonicalMutationCaches(context, accountContext, execution.record.target);
+        return res.json(mutationReceipt(execution.record, execution.replayed, accountContext.providerUserId));
+      }
+
+      const resolveNetwork = options.resolveRepoNetwork
+        ?? (await import('./repo/fork-detection.js')).resolveRepoNetwork;
+      const primaryResolved = await resolveDirectoryRepo(context.directory, context.primaryRemote);
+      const primaryRepo = primaryResolved?.repo;
+      if (!primaryRepo) throw canonicalMutationError('Unable to resolve trusted GitHub primary remote', 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', 409);
+      const networkPayload = await resolveNetwork(octokit, context.directory, context.primaryRemote, { strictErrors: true });
+      const network = requireGitHubRepoNetwork(networkPayload, primaryRepo);
+      const projects = [repoProject(primaryRepo), ...(network ?? []).map((repo) => repoProject(repo))];
+      const expectedProject = context.target.project;
+      if (!projects.some((project) => sameProject(project, expectedProject))) {
+        throw canonicalMutationError('GitHub mutation target is outside the bound repository network', 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', 409);
+      }
+
+      let target;
+      let perform;
+      let reconcile;
+
+      if (kind === 'create') {
+        const { title, body, draft, remote, headRemote, head, base } = operation;
+        if (remote) {
+          const selected = (await resolveDirectoryRepo(context.directory, remote))?.repo;
+          if (!selected || !sameProject(repoProject(selected), expectedProject)) {
+            throw canonicalMutationError('remote does not match the mutation target', 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', 409);
+          }
+        }
+        const sourceRepo = (await resolveDirectoryRepo(context.directory, headRemote))?.repo;
+        const sourceProject = sourceRepo ? repoProject(sourceRepo) : null;
+        if (!sourceProject || !projects.some((project) => sameProject(project, sourceProject))) {
+          throw canonicalMutationError('GitHub mutation source is outside the bound repository network', 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', 409);
+        }
+        const headRef = sameProject(sourceProject, expectedProject) ? head : `${sourceProject.owner}:${head}`;
+        target = actualMutationTarget(context, expectedProject, null, { head, base });
+        perform = async () => {
+          const createInput = { owner: expectedProject.owner, repo: expectedProject.name, title, head: headRef, base };
+          if (body !== undefined) createInput.body = body;
+          if (draft !== undefined) createInput.draft = draft;
+          const response = await octokit.rest.pulls.create(createInput);
+          const created = requireMutationPullRequest(response?.data, 'GitHub returned an invalid created pull request');
+          const createdSource = created.head.repo
+            ? { owner: created.head.repo.owner.login, name: created.head.repo.name }
+            : null;
+          if (!mutationTargetMatches({ number: created.number, head, base }, created)
+            || !sameProject(pullTargetProject(created), expectedProject)
+            || !sameProject(createdSource, sourceProject)) {
+            throw invalidProviderPayload('GitHub returned a created pull request with an unexpected target');
+          }
+          return {};
+        };
+        reconcile = () => reconcileCreateMutation(octokit, expectedProject, sourceProject, head, base);
+      } else {
+        if (!Number.isSafeInteger(context.target.number) || context.target.number < 1) {
+          throw canonicalMutationError('target number is required');
+        }
+        const response = await octokit.rest.pulls.get({
+          owner: expectedProject.owner, repo: expectedProject.name, pull_number: context.target.number,
+        });
+        const pr = requireMutationPullRequest(response?.data, 'GitHub returned an invalid pull request');
+        if (!sameProject(pullTargetProject(pr), expectedProject) || !mutationTargetMatches(context.target, pr)) {
+          throw canonicalMutationError('GitHub pull request no longer matches the mutation target', 'SOURCE_CONTROL_MUTATION_TARGET_CHANGED', 409);
+        }
+        target = actualMutationTarget(context, expectedProject, pr);
+
+        if (kind === 'update') {
+          const { title, body } = operation;
+          perform = async () => {
+            const updateInput = { owner: expectedProject.owner, repo: expectedProject.name, pull_number: target.number, title };
+            if (body !== undefined) updateInput.body = body;
+            const updated = await octokit.rest.pulls.update(updateInput);
+            const updatedPr = requireMutationPullRequest(updated?.data, 'GitHub returned an invalid updated pull request');
+            if (!sameProject(pullTargetProject(updatedPr), expectedProject) || !mutationTargetMatches(target, updatedPr)) {
+              throw invalidProviderPayload('GitHub returned an updated pull request with an unexpected target');
+            }
+            return {};
+          };
+          reconcile = () => reconcileExistingMutation(octokit, kind, target);
+        } else if (kind === 'merge') {
+          const { method } = operation;
+          perform = async () => {
+            const merged = await octokit.rest.pulls.merge({
+              owner: expectedProject.owner,
+              repo: expectedProject.name,
+              pull_number: target.number,
+              merge_method: method,
+              sha: target.headSha,
+            });
+            const data = merged?.data;
+            if (!isPlainObject(data) || Object.prototype.toString.call(data.merged) !== '[object Boolean]'
+              || (data.message !== undefined && !isProviderString(data.message))) {
+              throw invalidProviderPayload('GitHub returned an invalid merge result');
+            }
+            return { merged: data.merged };
+          };
+          reconcile = () => reconcileExistingMutation(octokit, kind, target);
+        } else {
+          const alreadyReady = pr.draft === false;
+          const nodeId = optionalMutationText(pr.node_id, 'pull request node id', true);
+          if (!alreadyReady && !nodeId) throw invalidProviderPayload('GitHub returned an invalid pull request node id');
+          perform = async () => {
+            if (!alreadyReady) {
+              const ready = await octokit.graphql(
+                `mutation($pullRequestId: ID!) {\n  markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) {\n    pullRequest {\n      id\n      isDraft\n    }\n  }\n}`,
+                { pullRequestId: nodeId },
+              );
+              const result = ready?.markPullRequestReadyForReview?.pullRequest;
+              if (!isPlainObject(result) || result.id !== nodeId || result.isDraft !== false) {
+                throw invalidProviderPayload('GitHub returned an invalid ready-for-review result');
+              }
+            }
+            return { ready: true };
+          };
+          reconcile = () => reconcileExistingMutation(octokit, kind, target);
+        }
+      }
+
+      const execution = await options.mutationExecutor.execute({
+        record: {
+          key: context.idempotencyKey,
+          inputDigest: operation.digest(target),
+          kind: `change-request-${kind}`,
+          actor,
+          target,
+        },
+        providerAccountId: accountContext.providerUserId,
+        perform,
+        reconcile,
+        classifyError: classifyMutationError,
+      });
+      await invalidateCanonicalMutationCaches(context, accountContext, execution.record.target);
+      return res.json(mutationReceipt(execution.record, execution.replayed, accountContext.providerUserId));
+    } catch (error) {
+      return sendCanonicalMutationError(res, error);
+    }
   };
 
   const getGitHubUserSummary = async (octokit) => {
@@ -184,20 +948,46 @@ export function registerGitHubRoutes(app) {
     };
   };
 
-  const isGitHubAuthInvalid = (error) => error?.status === 401 || error?.status === 403;
+  const isGitHubAuthInvalid = (error) => error?.status === 401;
   const isGitHubResourceUnavailable = (error) => error?.status === 403 || error?.status === 404;
 
-  app.get('/api/github/auth/status', async (_req, res) => {
+  app.get('/api/source-control/github/capabilities', (req, res) => {
+    const requestedInstance = typeof req.query?.instance === 'string' ? req.query.instance.trim() : '';
+    if (requestedInstance && requestedInstance !== 'github.com') {
+      return res.status(400).json({ error: 'Unsupported GitHub instance' });
+    }
+    const instance = 'github.com';
+    return res.json({
+      identity: { provider: 'github', instance },
+      authentication: true,
+      authenticationMethods: {
+        device: { available: true },
+        pat: { available: false, reason: 'unsupported' },
+        cli: { available: true },
+      },
+      multipleAccounts: true,
+      projects: true,
+      issues: true,
+      changeRequests: true,
+      draftChangeRequests: true,
+      mergeChangeRequests: true,
+      mergeMethods: ['merge', 'squash', 'rebase'],
+      ci: true,
+    });
+  });
+
+  app.get(githubAuthRoutePaths('/auth/status'), async (_req, res) => {
     try {
-      const { getGitHubAuth, getOctokitOrNull, clearGitHubAuth, getGitHubAuthAccounts, GH_CLI_ACCOUNT_ID, isGhCliActive, isGhCliDisabled, setGhCliActive } = await getGitHubLibraries();
+      const { getGitHubAuth, getOctokitOrNull, getGitHubAuthAccounts, githubCliAccountId, isGhCliActive, isGhCliDisabled, setGhCliActive } = await getGitHubLibraries();
       const { getGhCliToken } = await import('./gh-cli-credential.js');
 
-      const auth = getGitHubAuth();
-      let accounts = getGitHubAuthAccounts();
+      const auth = await getGitHubAuth();
+      let accounts = await getGitHubAuthAccounts();
       const ghCliDisabled = isGhCliDisabled();
       const ghCliActive = isGhCliActive();
       const ghToken = getGhCliToken();
       const usingOwnToken = Boolean(auth?.accessToken);
+      const selectedPersisted = accounts.some((account) => account.current);
       let ghCliUser = null;
 
       if (ghToken !== null && !ghCliDisabled) {
@@ -212,16 +1002,11 @@ export function registerGitHubRoutes(app) {
         setGhCliActive(false);
       }
 
-      const ghCliCurrent = ghToken !== null && !ghCliDisabled && Boolean(ghCliUser) && (ghCliActive || !usingOwnToken);
+      const ghCliCurrent = ghToken !== null && !ghCliDisabled && Boolean(ghCliUser) && (ghCliActive || !selectedPersisted);
       if (ghCliUser) {
         accounts = accounts
           .map((account) => ({ ...account, current: ghCliCurrent ? false : Boolean(account.current) }))
-          .concat({
-            id: GH_CLI_ACCOUNT_ID,
-            user: ghCliUser,
-            current: ghCliCurrent,
-            source: 'gh-cli',
-          });
+          .concat(cliAccountView(ghCliUser, ghCliCurrent));
       }
 
       const buildGhCli = (activeUser = null) => ({
@@ -231,7 +1016,10 @@ export function registerGitHubRoutes(app) {
         ...(!ghCliDisabled && (activeUser || ghCliUser) ? { user: activeUser || ghCliUser } : {}),
       });
 
-      const octokit = getOctokitOrNull();
+      if (selectedPersisted && !usingOwnToken) {
+        return res.json({ connected: false, accounts, ghCli: buildGhCli() });
+      }
+      const octokit = await getOctokitOrNull();
       if (!octokit) {
         return res.json({ connected: false, accounts, ghCli: buildGhCli() });
       }
@@ -241,8 +1029,8 @@ export function registerGitHubRoutes(app) {
         user = await getGitHubUserSummary(octokit);
       } catch (error) {
         if (isGitHubAuthInvalid(error)) {
-          if (usingOwnToken) clearGitHubAuth();
-          return res.json({ connected: false, accounts: getGitHubAuthAccounts(), ghCli: buildGhCli() });
+          if (usingOwnToken) await invalidateAccount(auth.accountId);
+          return res.json({ connected: false, accounts: await getGitHubAuthAccounts(), ghCli: buildGhCli() });
         }
       }
 
@@ -256,18 +1044,30 @@ export function registerGitHubRoutes(app) {
         ghCli: buildGhCli(ghCliCurrent ? mergedUser : null),
       });
     } catch (error) {
+      const lockResponse = sendAuthStorageError(res, error);
+      if (lockResponse) return lockResponse;
       console.error('Failed to get GitHub auth status:', error);
       return res.status(500).json({ error: error.message || 'Failed to get GitHub auth status' });
     }
   });
 
-  app.post('/api/github/auth/gh-cli', async (req, res) => {
+  app.get(githubAuthRoutePaths('/auth/accounts'), async (_req, res) => {
+    try {
+      const { getGitHubAuthAccounts } = await getGitHubLibraries();
+      return res.json({ provider: 'github', instance: 'github.com', accounts: await getGitHubAuthAccounts() });
+    } catch (error) {
+      const lockResponse = sendAuthStorageError(res, error);
+      if (lockResponse) return lockResponse;
+      return res.status(500).json({ error: error?.message || 'Failed to list GitHub accounts' });
+    }
+  });
+
+  app.post(githubAuthRoutePaths('/auth/gh-cli'), async (req, res) => {
     try {
       const { setGhCliDisabled, isGhCliDisabled } = await getGitHubLibraries();
-      const { clearGhCliTokenCache } = await import('./gh-cli-credential.js');
+
       const disabled = Boolean(req.body?.disabled);
       setGhCliDisabled(disabled);
-      clearGhCliTokenCache();
       return res.json({ disabled: isGhCliDisabled() });
     } catch (error) {
       console.error('Failed to update gh CLI setting:', error);
@@ -275,7 +1075,8 @@ export function registerGitHubRoutes(app) {
     }
   });
 
-  app.post('/api/github/auth/start', async (_req, res) => {
+  app.post(githubAuthRoutePaths('/auth/start'), async (_req, res) => {
+    res.set('Cache-Control', 'no-store');
     try {
       const { getGitHubClientId, getGitHubScopes, startDeviceFlow } = await getGitHubLibraries();
       const clientId = getGitHubClientId();
@@ -290,10 +1091,20 @@ export function registerGitHubRoutes(app) {
       const payload = await startDeviceFlow({
         clientId,
         scope,
+        fetch: options.fetch,
+        timeoutMs: options.timeoutMs,
+      });
+      const registry = await getOAuthFlowRegistry();
+      const { flowId } = registry.register({
+        provider: 'github',
+        instance: GITHUB_OAUTH_INSTANCE,
+        deviceCode: payload.device_code,
+        clientId,
+        expiresIn: payload.expires_in,
       });
 
       return res.json({
-        deviceCode: payload.device_code,
+        flowId,
         userCode: payload.user_code,
         verificationUri: payload.verification_uri,
         verificationUriComplete: payload.verification_uri_complete,
@@ -307,27 +1118,30 @@ export function registerGitHubRoutes(app) {
     }
   });
 
-  app.post('/api/github/auth/complete', async (req, res) => {
+  app.post(githubAuthRoutePaths('/auth/complete'), async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    let registry;
+    let flowId = '';
     try {
-      const { getGitHubClientId, exchangeDeviceCode, setGitHubAuth, getGitHubAuthAccounts } = await getGitHubLibraries();
-      const clientId = getGitHubClientId();
-      if (!clientId) {
-        return res.status(400).json({
-          error: 'GitHub OAuth client not configured. Set OPENCHAMBER_GITHUB_CLIENT_ID.',
-        });
+      const { exchangeDeviceCode, setGitHubAuth, getGitHubAuthAccounts } = await getGitHubLibraries();
+      flowId = typeof req.body?.flowId === 'string' ? req.body.flowId.trim() : '';
+      if (!flowId) return res.status(400).json({ error: 'flowId is required' });
+      registry = await getOAuthFlowRegistry();
+      let flow;
+      try {
+        flow = registry.acquire({ flowId, provider: 'github', instance: GITHUB_OAUTH_INSTANCE });
+      } catch (error) {
+        return sendOAuthFlowError(res, error);
       }
-
-      const deviceCode = typeof req.body?.deviceCode === 'string'
-        ? req.body.deviceCode
-        : (typeof req.body?.device_code === 'string' ? req.body.device_code : '');
-
-      if (!deviceCode) {
-        return res.status(400).json({ error: 'deviceCode is required' });
-      }
-
-      const payload = await exchangeDeviceCode({ clientId, deviceCode });
+      const { clientId, deviceCode } = flow;
+      const payload = await exchangeDeviceCode({ clientId, deviceCode, fetch: options.fetch, timeoutMs: options.timeoutMs });
 
       if (payload?.error) {
+        if (payload.error === 'authorization_pending' || payload.error === 'slow_down') {
+          registry.release(flowId);
+        } else {
+          registry.consume(flowId);
+        }
         return res.json({
           connected: false,
           status: payload.error,
@@ -336,6 +1150,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const accessToken = payload?.access_token;
+      registry.consume(flowId);
       if (!accessToken) {
         return res.status(500).json({ error: 'Missing access_token from GitHub' });
       }
@@ -344,33 +1159,50 @@ export function registerGitHubRoutes(app) {
       const octokit = createOctokit(accessToken);
       const user = await getGitHubUserSummary(octokit);
 
-      setGitHubAuth({
+      const credential = await setGitHubAuth({
         accessToken,
         scope: typeof payload.scope === 'string' ? payload.scope : '',
         tokenType: typeof payload.token_type === 'string' ? payload.token_type : 'bearer',
         user,
       });
+      // A connected account is a complete identity waiting to be written: who
+      // it is, what it authenticates with, and how it signs are all known here.
+      // Signing in again renews a credential rather than replacing it, so the
+      // ones this supersedes are named too.
+      if (credential?.credentialId) {
+        const account = { provider: 'github', instance: 'github.com', accountId: credential.credentialId };
+        const superseded = (await getGitHubAuthAccounts()).filter((candidate) =>
+          candidate.providerUserId === credential.providerUserId && candidate.id !== credential.credentialId);
+        options.onAccountConnected?.({
+          account,
+          user,
+          renews: superseded.map((candidate) => ({ ...account, accountId: candidate.id })),
+        });
+      }
 
       return res.json({
         connected: true,
         user,
         scope: typeof payload.scope === 'string' ? payload.scope : '',
-        accounts: getGitHubAuthAccounts(),
+        accounts: await getGitHubAuthAccounts(),
       });
     } catch (error) {
+      if (registry && flowId) registry.release(flowId);
+      const lockResponse = sendAuthStorageError(res, error);
+      if (lockResponse) return lockResponse;
       console.error('Failed to complete GitHub device flow:', error);
       return res.status(500).json({ error: error.message || 'Failed to complete GitHub device flow' });
     }
   });
 
-  app.post('/api/github/auth/activate', async (req, res) => {
+  app.post(githubAuthRoutePaths('/auth/activate'), async (req, res) => {
     try {
-      const { activateGitHubAuth, getGitHubAuth, getOctokitOrNull, clearGitHubAuth, getGitHubAuthAccounts, GH_CLI_ACCOUNT_ID, isGhCliDisabled, setGhCliActive } = await getGitHubLibraries();
+      const { activateGitHubAuth, getGitHubAuth, getOctokitOrNull, getGitHubAuthAccounts, GH_CLI_ACCOUNT_ID, githubCliAccountId, isGhCliDisabled, setGhCliActive } = await getGitHubLibraries();
       const accountId = typeof req.body?.accountId === 'string' ? req.body.accountId : '';
       if (!accountId) {
         return res.status(400).json({ error: 'accountId is required' });
       }
-      if (accountId === GH_CLI_ACCOUNT_ID) {
+      if (accountId === GH_CLI_ACCOUNT_ID || accountId.startsWith('github.com#cli:')) {
         const { getGhCliToken } = await import('./gh-cli-credential.js');
         const ghToken = !isGhCliDisabled() ? getGhCliToken() : null;
         if (!ghToken) {
@@ -379,10 +1211,14 @@ export function registerGitHubRoutes(app) {
 
         const { createOctokit } = await import('./octokit.js');
         const user = await getGitHubUserSummary(createOctokit(ghToken));
+        const cliAccountId = githubCliAccountId(user.id);
+        if (accountId !== GH_CLI_ACCOUNT_ID && accountId !== cliAccountId) {
+          return res.status(404).json({ error: 'GitHub CLI account not found' });
+        }
         setGhCliActive(true);
-        const accounts = getGitHubAuthAccounts()
+        const accounts = (await getGitHubAuthAccounts())
           .map((account) => ({ ...account, current: false }))
-          .concat({ id: GH_CLI_ACCOUNT_ID, user, current: true, source: 'gh-cli' });
+          .concat(cliAccountView(user, true));
         return res.json({
           connected: true,
           user,
@@ -396,13 +1232,13 @@ export function registerGitHubRoutes(app) {
         });
       }
 
-      const activated = activateGitHubAuth(accountId);
+      const activated = await activateGitHubAuth(accountId);
       if (!activated) {
         return res.status(404).json({ error: 'GitHub account not found' });
       }
 
-      const auth = getGitHubAuth();
-      let accounts = getGitHubAuthAccounts();
+      const auth = await getGitHubAuth();
+      let accounts = await getGitHubAuthAccounts();
       if (!auth?.accessToken) {
         return res.json({ connected: false, accounts });
       }
@@ -415,18 +1251,13 @@ export function registerGitHubRoutes(app) {
         try {
           const { createOctokit } = await import('./octokit.js');
           ghCliUser = await getGitHubUserSummary(createOctokit(ghToken));
-          accounts = accounts.concat({
-            id: GH_CLI_ACCOUNT_ID,
-            user: ghCliUser,
-            current: false,
-            source: 'gh-cli',
-          });
+          accounts = accounts.concat(cliAccountView(ghCliUser, false));
         } catch {
           ghCliUser = null;
         }
       }
 
-      const octokit = getOctokitOrNull();
+      const octokit = await getOctokitOrNull();
       if (!octokit) {
         return res.json({ connected: false, accounts, ghCli: { available: ghToken !== null, disabled: ghCliDisabled, active: false, ...(ghCliUser ? { user: ghCliUser } : {}) } });
       }
@@ -436,8 +1267,8 @@ export function registerGitHubRoutes(app) {
         user = await getGitHubUserSummary(octokit);
       } catch (error) {
         if (isGitHubAuthInvalid(error)) {
-          clearGitHubAuth();
-          return res.json({ connected: false, accounts: getGitHubAuthAccounts() });
+          await invalidateAccount(auth.accountId);
+          return res.json({ connected: false, accounts: await getGitHubAuthAccounts() });
         }
       }
 
@@ -454,60 +1285,89 @@ export function registerGitHubRoutes(app) {
         },
       });
     } catch (error) {
+      const lockResponse = sendAuthStorageError(res, error);
+      if (lockResponse) return lockResponse;
       console.error('Failed to activate GitHub account:', error);
       return res.status(500).json({ error: error.message || 'Failed to activate GitHub account' });
     }
   });
 
-  app.delete('/api/github/auth', async (_req, res) => {
+  app.delete(githubAuthRoutePaths('/auth'), async (req, res) => {
     try {
-      const { clearGitHubAuth } = await getGitHubLibraries();
-      const removed = clearGitHubAuth();
+      const {
+        getGitHubAuthAccounts, githubCliAccountId, isGhCliDisabled,
+        setGhCliActive, removeGitHubAuthAccount,
+      } = await getGitHubLibraries();
+      const requested = req.query?.accountId ?? req.body?.accountId;
+      const requestedAccountId = Object.prototype.toString.call(requested) === '[object String]' ? requested : '';
+      if (!requestedAccountId || requestedAccountId.trim() !== requestedAccountId) {
+        return res.status(400).json({ error: 'accountId is required' });
+      }
+      const accounts = await getGitHubAuthAccounts();
+      if (requestedAccountId.startsWith('github.com#cli:')) {
+        const { getGhCliToken } = await import('./gh-cli-credential.js');
+        const token = isGhCliDisabled() ? null : getGhCliToken();
+        if (!token) return res.json({ success: true, removed: false });
+        const { createOctokit } = await import('./octokit.js');
+        const user = await getGitHubUserSummary(createOctokit(token));
+        if (githubCliAccountId(user.id) !== requestedAccountId) {
+          return res.json({ success: true, removed: false });
+        }
+        await options.onAccountRemoved?.(accountIdentity(requestedAccountId));
+        setGhCliActive(false);
+        return res.json({ success: true, removed: true });
+      }
+      if (!accounts.some((account) => account.id === requestedAccountId)) return res.json({ success: true, removed: false });
+      await options.onAccountRemoved?.(accountIdentity(requestedAccountId));
+      const removed = await removeGitHubAuthAccount(requestedAccountId);
       return res.json({ success: true, removed });
     } catch (error) {
+      if (error?.code?.startsWith('SOURCE_CONTROL_LOCK_')) {
+        return res.status(error.status).json({ error: error.message, code: error.code });
+      }
       console.error('Failed to disconnect GitHub:', error);
       return res.status(500).json({ error: error.message || 'Failed to disconnect GitHub' });
     }
   });
 
-  app.get('/api/github/me', async (_req, res) => {
-    try {
-      const { getOctokitOrNull, clearGitHubAuth } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
-      if (!octokit) {
-        return res.status(401).json({ error: 'GitHub not connected' });
-      }
-      let user;
-      try {
-        user = await getGitHubUserSummary(octokit);
-      } catch (error) {
-        if (isGitHubAuthInvalid(error)) {
-          clearGitHubAuth();
-          return res.status(401).json({ error: 'GitHub token expired or revoked' });
-        }
-        throw error;
-      }
-      return res.json(user);
-    } catch (error) {
-      console.error('Failed to fetch GitHub user:', error);
-      return res.status(500).json({ error: error.message || 'Failed to fetch GitHub user' });
-    }
-  });
+  app.get(['/api/github/me'], (_req, res) => res.status(410).json({
+    error: 'GitHub account user route is retired',
+    code: 'SOURCE_CONTROL_ACCOUNT_CONTEXT_REQUIRED',
+  }));
 
   // ================= GitHub PR APIs =================
 
-  app.get('/api/github/pr/status', async (req, res) => {
+  app.get(canonicalGitHubRoutePath('/pr/status'), async (req, res) => {
+    let cacheKey = '';
+    let writeToken = null;
     try {
       const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
       const branch = typeof req.query?.branch === 'string' ? req.query.branch.trim() : '';
-      const remote = typeof req.query?.remote === 'string' ? req.query.remote.trim() : 'origin';
+      const canonical = req.path.startsWith('/api/source-control/');
+      const trustedContext = canonical
+        ? await validateReadContext(req, directory)
+        : null;
+      if (canonical && !trustedContext) {
+        return res.status(501).json({ error: 'Bound source control status is unavailable' });
+      }
+      const remote = trustedContext?.primaryRemote
+        ?? (typeof req.query?.remote === 'string' ? req.query.remote.trim() : 'origin');
       const force = req.query?.force === 'true' || req.query?.force === '1';
       if (!directory || !branch) {
         return res.status(400).json({ error: 'directory and branch are required' });
       }
 
-      // Check cache (skip when force=true to allow manual refresh bypass)
-      const cacheKey = `${directory}::${branch}::${remote}`;
+      // Resolve exact accounts before consulting caches so removed or invalid
+      // credentials can never receive a previously cached response.
+      const accountContext = await getOctokitForRequest(req, trustedContext?.accountId);
+      const octokit = accountContext?.octokit;
+      if (!octokit) {
+        return res.json({ connected: false });
+      }
+
+      cacheKey = trustedContext
+        ? `${directory}::${branch}::${remote}::${accountContext.cacheIdentity}::${trustedContext.repositoryId}::${trustedContext.bindingRevision}`
+        : `${directory}::${branch}::${remote}::${accountContext.cacheIdentity}`;
       const cached = prStatusCache.get(cacheKey);
       if (!force && cached && Date.now() - cached.fetchedAt < PR_STATUS_CACHE_TTL_MS) {
         return res.json(cached.data);
@@ -524,29 +1384,40 @@ export function registerGitHubRoutes(app) {
         return res.status(503).json({ error: 'GitHub rate limited' });
       }
 
+      if (canonical) {
+        writeToken = {};
+        pendingPrStatusWrites.set(writeToken, {
+          cacheIdentity: accountContext.cacheIdentity,
+          repositoryId: trustedContext.repositoryId,
+          bindingRevision: trustedContext.bindingRevision,
+          primaryRemote: trustedContext.primaryRemote,
+        });
+      }
+
       // Intercept res.json to cache successful responses before sending
       // Only caches responses with connected:true — error/edge-case responses are not cached
       const originalJson = res.json.bind(res);
       res.json = (data) => {
-        if (data && data.connected === true) {
+        if (data && data.connected === true && (!canonical || pendingPrStatusWrites.has(writeToken))) {
           // Freshness stamp travels with the payload (and survives cache
           // serves) so clients can refuse to overwrite newer data with a
           // stale cached response.
           if (typeof data.fetchedAt !== 'number') {
             data.fetchedAt = Date.now();
           }
-          setPrStatusCache(cacheKey, data, data.fetchedAt);
+          setPrStatusCache(cacheKey, data, data.fetchedAt, trustedContext ? {
+            directory,
+            cacheIdentity: accountContext.cacheIdentity,
+            repositoryId: trustedContext.repositoryId,
+            bindingRevision: trustedContext.bindingRevision,
+            primaryRemote: trustedContext.primaryRemote,
+          } : null);
         }
         return originalJson(data);
       };
 
-      const { getOctokitOrNull, getGitHubAuth } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
-      if (!octokit) {
-        return res.json({ connected: false });
-      }
-
-      const { resolveGitHubPrStatus } = await import('./pr-status.js');
+      const resolveGitHubPrStatus = options.resolveGitHubPrStatus
+        ?? (await import('./pr-status.js')).resolveGitHubPrStatus;
       const resolvedStatus = await withTimeout(
         resolveGitHubPrStatus({
           octokit,
@@ -592,7 +1463,9 @@ export function registerGitHubRoutes(app) {
             ref: sha,
             per_page: 100,
           });
-          const checkRuns = dedupeCheckRuns(Array.isArray(runs?.data?.check_runs) ? runs.data.check_runs : []);
+          const checkRuns = dedupeCheckRuns(canonical
+            ? requireGitHubCheckRuns(runs?.data?.check_runs)
+            : Array.isArray(runs?.data?.check_runs) ? runs.data.check_runs : []);
           if (checkRuns.length > 0) {
             checks = summarizeCheckRuns(checkRuns);
           }
@@ -607,7 +1480,9 @@ export function registerGitHubRoutes(app) {
               repo: searchRepo.repo,
               ref: sha,
             });
-            const statuses = Array.isArray(combined?.data?.statuses) ? combined.data.statuses : [];
+            const statuses = canonical
+              ? requireGitHubStatuses(combined?.data?.statuses)
+              : Array.isArray(combined?.data?.statuses) ? combined.data.statuses : [];
             checks = summarizeCombinedStatuses(statuses);
           } catch {
             checks = null;
@@ -619,10 +1494,9 @@ export function registerGitHubRoutes(app) {
       let canMerge = false;
       if (!isHistorical) {
         try {
-          const auth = getGitHubAuth();
           // gh-CLI tokens have no persisted user record; resolve the login from
           // the API once (memoized) so permissions still resolve for them.
-          let username = auth?.user?.login;
+          let username = accountContext?.user?.login;
           if (!username) {
             if (!resolvedAuthLoginPromise) {
               resolvedAuthLoginPromise = octokit.rest.users.getAuthenticated()
@@ -671,9 +1545,13 @@ export function registerGitHubRoutes(app) {
         resolvedRemoteName: resolvedStatus.resolvedRemoteName ?? null,
       });
     } catch (error) {
+      if (isReadContextError(error)) {
+        return res.status(error.status ?? 400).json(readContextErrorBody(error));
+      }
+      const accountError = sendExactAccountError(res, error);
+      if (accountError) return accountError;
       if (error?.status === 401) {
-        const { clearGitHubAuth } = await getGitHubLibraries();
-        clearGitHubAuth();
+        await invalidateRequestAccount(error);
         return res.json({ connected: false });
       }
       // Transient failures — a rate limit, or the overall resolve timeout
@@ -685,10 +1563,7 @@ export function registerGitHubRoutes(app) {
       const wasRateLimited = noteIfGitHubRateLimit(error);
       const wasTimeout = error?.code === 'ETIMEDOUT';
       if (wasRateLimited || wasTimeout) {
-        const dir = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
-        const br = typeof req.query?.branch === 'string' ? req.query.branch.trim() : '';
-        const rem = typeof req.query?.remote === 'string' ? req.query.remote.trim() : 'origin';
-        const cached = prStatusCache.get(`${dir}::${br}::${rem}`);
+        const cached = cacheKey ? prStatusCache.get(cacheKey) : null;
         if (cached) {
           return res.json(cached.data);
         }
@@ -708,424 +1583,71 @@ export function registerGitHubRoutes(app) {
       }
       console.error('Failed to load GitHub PR status:', error);
       return res.status(500).json({ error: error.message || 'Failed to load GitHub PR status' });
+    } finally {
+      if (writeToken) pendingPrStatusWrites.delete(writeToken);
     }
   });
 
-  app.post('/api/github/pr/create', async (req, res) => {
+  app.post(canonicalGitHubRoutePath('/pr/create'), (req, res) => runCanonicalMutation('create', req, res));
+
+  app.post(canonicalGitHubRoutePath('/pr/update'), (req, res) => runCanonicalMutation('update', req, res));
+
+  app.post(canonicalGitHubRoutePath('/pr/merge'), (req, res) => runCanonicalMutation('merge', req, res));
+
+  app.post(canonicalGitHubRoutePath('/pr/ready'), (req, res) => runCanonicalMutation('ready', req, res));
+
+  app.get(canonicalGitHubRoutePath('/repo/upstream'), async (req, res) => {
     try {
-      const directory = typeof req.body?.directory === 'string' ? req.body.directory.trim() : '';
-      const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
-      const head = typeof req.body?.head === 'string' ? req.body.head.trim() : '';
-      const requestedBase = typeof req.body?.base === 'string' ? req.body.base.trim() : '';
-      const body = typeof req.body?.body === 'string' ? req.body.body : undefined;
-      const draft = typeof req.body?.draft === 'boolean' ? req.body.draft : undefined;
-      // remote = target repo (where PR is created, e.g., 'upstream' for forks)
-      const remote = typeof req.body?.remote === 'string' ? req.body.remote.trim() : 'origin';
-      // headRemote = source repo (where head branch lives, e.g., 'origin' for forks)
-      const headRemote = typeof req.body?.headRemote === 'string' ? req.body.headRemote.trim() : '';
-      // targetRepo = explicit target repo (alternative to remote, for auto-detected upstream)
-      const targetRepo = req.body?.targetRepo && typeof req.body.targetRepo.owner === 'string' && typeof req.body.targetRepo.repo === 'string'
-        ? { owner: req.body.targetRepo.owner.trim(), repo: req.body.targetRepo.repo.trim() }
+      const directory = readQueryString(req, 'directory');
+      const canonical = req.path.startsWith('/api/source-control/');
+      const trustedContext = canonical
+        ? await validateReadContext(req, directory)
         : null;
-      if (!directory || !title || !head || !requestedBase) {
-        return res.status(400).json({ error: 'directory, title, head, base are required' });
+      if (canonical && !trustedContext) {
+        return res.status(501).json({ error: 'Bound source control read is unavailable' });
       }
-
-      const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
-      if (!octokit) {
-        return res.status(401).json({ error: 'GitHub not connected' });
-      }
-
-      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
-      let repo;
-      if (targetRepo) {
-        repo = targetRepo;
-      } else {
-        const resolved = await resolveGitHubRepoFromDirectory(directory, remote);
-        repo = resolved.repo;
-      }
-      if (!repo) {
-        return res.status(400).json({ error: 'Unable to resolve GitHub repo from git remote' });
-      }
-
-      const normalizeBranchRef = (value, remoteNames = new Set()) => {
-        if (!value) {
-          return value;
-        }
-        let normalized = value.trim();
-        if (normalized.startsWith('refs/heads/')) {
-          normalized = normalized.substring('refs/heads/'.length);
-        }
-        if (normalized.startsWith('heads/')) {
-          normalized = normalized.substring('heads/'.length);
-        }
-        if (normalized.startsWith('remotes/')) {
-          normalized = normalized.substring('remotes/'.length);
-        }
-
-        const slashIndex = normalized.indexOf('/');
-        if (slashIndex > 0) {
-          const maybeRemote = normalized.slice(0, slashIndex);
-          if (remoteNames.has(maybeRemote)) {
-            const withoutRemotePrefix = normalized.slice(slashIndex + 1).trim();
-            if (withoutRemotePrefix) {
-              normalized = withoutRemotePrefix;
-            }
-          }
-        }
-
-        return normalized;
-      };
-
-      // Determine the source remote for the head branch
-      // Priority: 1) explicit headRemote, 2) tracking branch remote, 3) 'origin' if targeting non-origin
-      let sourceRemote = headRemote;
-      const { getStatus, getRemotes } = await import('../git/index.js');
-      
-      // If no explicit headRemote, check the branch's tracking info
-      if (!sourceRemote) {
-        const status = await getStatus(directory).catch(() => null);
-        if (status?.tracking) {
-          // tracking is like "gsxdsm/fix/multi-remote-branch-creation" or "origin/main"
-          const trackingRemote = status.tracking.split('/')[0];
-          if (trackingRemote) {
-            sourceRemote = trackingRemote;
-          }
-        }
-      }
-      
-      // Fallback: if targeting non-origin and no tracking info, try 'origin'
-      if (!sourceRemote && remote !== 'origin') {
-        sourceRemote = 'origin';
-      }
-
-      const remoteNames = new Set([remote]);
-      const remotes = await getRemotes(directory).catch(() => []);
-      for (const item of remotes) {
-        if (item?.name) {
-          remoteNames.add(item.name);
-        }
-      }
-      if (sourceRemote) {
-        remoteNames.add(sourceRemote);
-      }
-
-      const base = normalizeBranchRef(requestedBase, remoteNames);
-      if (!base) {
-        return res.status(400).json({ error: 'Invalid base branch name' });
-      }
-
-      // For fork workflows: we need to determine the correct head reference
-      let headRef = head;
-      let headRepo = null;
-      
-      if (sourceRemote) {
-        // The branch is on a different remote than the target - this is a cross-repo PR
-        const resolved = await resolveGitHubRepoFromDirectory(directory, sourceRemote);
-        headRepo = resolved.repo;
-        if (!headRepo) {
-          return res.status(400).json({
-            error: `Cannot resolve GitHub repo for remote "${sourceRemote}". Check that the remote URL is a valid GitHub repository.`,
-          });
-        }
-        // Always use owner:branch format for cross-repo PRs
-        // GitHub API requires this when head is from a different repo/fork
-        if (headRepo.owner !== repo.owner || headRepo.repo !== repo.repo) {
-          headRef = `${headRepo.owner}:${head}`;
-        }
-      }
-
-      // For cross-repo PRs, verify the branch exists on the head repo first
-      if (headRef.includes(':')) {
-        const [headOwner] = headRef.split(':');
-        const headRepoName = headRepo?.repo || repo.repo;
-        
-        if (headRepoName) {
-          try {
-            await octokit.rest.repos.getBranch({
-              owner: headOwner,
-              repo: headRepoName,
-              branch: head,
-            });
-          } catch (branchError) {
-            if (branchError?.status === 404) {
-              return res.status(400).json({
-                error: `Branch "${head}" not found on ${headOwner}/${headRepoName}. Please push your branch first: git push ${sourceRemote || 'origin'} ${head}`,
-              });
-            }
-            // For other errors, continue - let the PR create attempt handle it
-          }
-        }
-      }
-
-      const created = await octokit.rest.pulls.create({
-        owner: repo.owner,
-        repo: repo.repo,
-        title,
-        head: headRef,
-        base,
-        ...(typeof body === 'string' ? { body } : {}),
-        ...(typeof draft === 'boolean' ? { draft } : {}),
-      });
-
-      const pr = created?.data;
-      if (!pr) {
-        return res.status(500).json({ error: 'Failed to create PR' });
-      }
-
-      // Invalidate PR status cache so subsequent prStatus calls fetch fresh data
-      const headBranch = head.includes(':') ? head.split(':')[1] || head : head;
-      const createCacheKey = `${directory}::${headBranch}::${remote}`;
-      prStatusCache.delete(createCacheKey);
-      if (repo?.owner && repo?.repo) {
-        const { invalidateRepoPullsCache } = await import('./pr-status.js');
-        invalidateRepoPullsCache(repo.owner, repo.repo);
-      }
-
-      return res.json({
-        number: pr.number,
-        title: pr.title,
-        body: pr.body || '',
-        url: pr.html_url,
-        state: pr.state === 'closed' ? 'closed' : 'open',
-        draft: Boolean(pr.draft),
-        base: pr.base?.ref,
-        head: pr.head?.ref,
-        headSha: pr.head?.sha,
-        mergeable: pr.mergeable,
-        mergeableState: pr.mergeable_state,
-      });
-    } catch (error) {
-      console.error('Failed to create GitHub PR:', error);
-      
-      // Check for head validation error (common with fork PRs)
-      const errorMessage = error.message || '';
-      const isHeadValidationError = 
-        errorMessage.includes('Validation Failed') && 
-        errorMessage.includes('"field":"head"') &&
-        errorMessage.includes('"code":"invalid"');
-      
-      if (isHeadValidationError) {
-        return res.status(400).json({ 
-          error: 'Unable to create PR: You must have write access to the source repository. Make sure you have pushed your branch to a repository you own (your fork), and that the branch exists on the remote.' 
-        });
-      }
-      
-      return res.status(500).json({ error: error.message || 'Failed to create GitHub PR' });
-    }
-  });
-
-  app.post('/api/github/pr/update', async (req, res) => {
-    try {
-      const directory = typeof req.body?.directory === 'string' ? req.body.directory.trim() : '';
-      const number = typeof req.body?.number === 'number' ? req.body.number : null;
-      const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
-      const body = typeof req.body?.body === 'string' ? req.body.body : undefined;
-      if (!directory || !number || !title) {
-        return res.status(400).json({ error: 'directory, number, title are required' });
-      }
-
-      const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
-      if (!octokit) {
-        return res.status(401).json({ error: 'GitHub not connected' });
-      }
-
-      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
-      const { repo } = await resolveGitHubRepoFromDirectory(directory);
-      if (!repo) {
-        return res.status(400).json({ error: 'Unable to resolve GitHub repo from git remote' });
-      }
-
-      let updated;
-      try {
-        updated = await octokit.rest.pulls.update({
-          owner: repo.owner,
-          repo: repo.repo,
-          pull_number: number,
-          title,
-          ...(typeof body === 'string' ? { body } : {}),
-        });
-      } catch (error) {
-        if (error?.status === 401) {
-          return res.status(401).json({ error: 'GitHub not connected' });
-        }
-        if (error?.status === 403) {
-          return res.status(403).json({ error: 'Not authorized to edit this PR' });
-        }
-        if (error?.status === 404) {
-          return res.status(404).json({ error: 'PR not found in this repository' });
-        }
-        if (error?.status === 422) {
-          const apiMessage = error?.response?.data?.message;
-          const firstError = Array.isArray(error?.response?.data?.errors) && error.response.data.errors.length > 0
-            ? (error.response.data.errors[0]?.message || error.response.data.errors[0]?.code)
-            : null;
-          const message = [apiMessage, firstError].filter(Boolean).join(' · ') || 'Invalid PR update payload';
-          return res.status(422).json({ error: message });
-        }
-        throw error;
-      }
-
-      const pr = updated?.data;
-      if (!pr) {
-        return res.status(500).json({ error: 'Failed to update PR' });
-      }
-
-      invalidatePrContextCache(directory, number);
-      return res.json({
-        number: pr.number,
-        title: pr.title,
-        body: pr.body || '',
-        url: pr.html_url,
-        state: pr.merged_at ? 'merged' : (pr.state === 'closed' ? 'closed' : 'open'),
-        draft: Boolean(pr.draft),
-        base: pr.base?.ref,
-        head: pr.head?.ref,
-        headSha: pr.head?.sha,
-        mergeable: pr.mergeable,
-        mergeableState: pr.mergeable_state,
-      });
-    } catch (error) {
-      console.error('Failed to update GitHub PR:', error);
-      return res.status(500).json({ error: error.message || 'Failed to update GitHub PR' });
-    }
-  });
-
-  app.post('/api/github/pr/merge', async (req, res) => {
-    try {
-      const directory = typeof req.body?.directory === 'string' ? req.body.directory.trim() : '';
-      const number = typeof req.body?.number === 'number' ? req.body.number : null;
-      const method = typeof req.body?.method === 'string' ? req.body.method : 'merge';
-      if (!directory || !number) {
-        return res.status(400).json({ error: 'directory and number are required' });
-      }
-
-      const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
-      if (!octokit) {
-        return res.status(401).json({ error: 'GitHub not connected' });
-      }
-
-      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
-      const { repo } = await resolveGitHubRepoFromDirectory(directory);
-      if (!repo) {
-        return res.status(400).json({ error: 'Unable to resolve GitHub repo from git remote' });
-      }
-
-      try {
-        const result = await octokit.rest.pulls.merge({
-          owner: repo.owner,
-          repo: repo.repo,
-          pull_number: number,
-          merge_method: method,
-        });
-        invalidatePrContextCache(directory, number);
-        const { invalidateRepoPullsCache } = await import('./pr-status.js');
-        invalidateRepoPullsCache(repo.owner, repo.repo);
-        return res.json({ merged: Boolean(result?.data?.merged), message: result?.data?.message });
-      } catch (error) {
-        if (error?.status === 403) {
-          return res.status(403).json({ error: 'Not authorized to merge this PR' });
-        }
-        if (error?.status === 405 || error?.status === 409) {
-          return res.json({ merged: false, message: error?.message || 'PR not mergeable' });
-        }
-        throw error;
-      }
-    } catch (error) {
-      console.error('Failed to merge GitHub PR:', error);
-      return res.status(500).json({ error: error.message || 'Failed to merge GitHub PR' });
-    }
-  });
-
-  app.post('/api/github/pr/ready', async (req, res) => {
-    try {
-      const directory = typeof req.body?.directory === 'string' ? req.body.directory.trim() : '';
-      const number = typeof req.body?.number === 'number' ? req.body.number : null;
-      if (!directory || !number) {
-        return res.status(400).json({ error: 'directory and number are required' });
-      }
-
-      const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
-      if (!octokit) {
-        return res.status(401).json({ error: 'GitHub not connected' });
-      }
-
-      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
-      const { repo } = await resolveGitHubRepoFromDirectory(directory);
-      if (!repo) {
-        return res.status(400).json({ error: 'Unable to resolve GitHub repo from git remote' });
-      }
-
-      const pr = await octokit.rest.pulls.get({ owner: repo.owner, repo: repo.repo, pull_number: number });
-      const nodeId = pr?.data?.node_id;
-      if (!nodeId) {
-        return res.status(500).json({ error: 'Failed to resolve PR node id' });
-      }
-
-      if (pr?.data?.draft === false) {
-        return res.json({ ready: true });
-      }
-
-      try {
-        await octokit.graphql(
-          `mutation($pullRequestId: ID!) {\n  markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) {\n    pullRequest {\n      id\n      isDraft\n    }\n  }\n}`,
-          { pullRequestId: nodeId }
-        );
-      } catch (error) {
-        if (error?.status === 403) {
-          return res.status(403).json({ error: 'Not authorized to mark PR ready' });
-        }
-        throw error;
-      }
-
-      invalidatePrContextCache(directory, number);
-      {
-        const { invalidateRepoPullsCache } = await import('./pr-status.js');
-        invalidateRepoPullsCache(repo.owner, repo.repo);
-      }
-      return res.json({ ready: true });
-    } catch (error) {
-      console.error('Failed to mark PR ready:', error);
-      return res.status(500).json({ error: error.message || 'Failed to mark PR ready' });
-    }
-  });
-
-  // ================= GitHub Repo APIs =================
-
-  app.get('/api/github/repo/upstream', async (req, res) => {
-    try {
-      const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
       if (!directory) {
         return res.status(400).json({ error: 'directory is required' });
       }
 
-      const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = (await getOctokitForRead(req, trustedContext))?.octokit;
       if (!octokit) {
         return res.json({ connected: false, isFork: false, upstream: null });
       }
 
-      const { resolveRepoNetwork } = await import('./repo/fork-detection.js');
-      const network = await resolveRepoNetwork(octokit, directory);
+      const resolveGitHubRepoFromDirectory = options.resolveGitHubRepoFromDirectory
+        ?? (await import('./index.js')).resolveGitHubRepoFromDirectory;
+      const resolveRepoNetwork = options.resolveRepoNetwork
+        ?? (await import('./repo/fork-detection.js')).resolveRepoNetwork;
+      const remoteName = trustedContext?.primaryRemote ?? 'origin';
+      if (canonical) {
+        const { repo } = await resolveGitHubRepoFromDirectory(directory, remoteName);
+        if (!repo) throw new Error(`Unable to resolve GitHub repo from git remote "${remoteName}"`);
+      }
+      const network = canonical
+        ? await resolveRepoNetwork(octokit, directory, remoteName, { strictErrors: true })
+        : await resolveRepoNetwork(octokit, directory, remoteName);
+      if (canonical) requireGitHubRepoNetwork(network);
 
       if (!network || network.length <= 1) {
         return res.json({ connected: true, isFork: false, upstream: null });
       }
 
       const upstream = network.find((r) => r.source === 'upstream') || null;
-      let defaultBranch = 'main';
+       let defaultBranch = canonical ? null : 'main';
       let defaultBranchSha = null;
       if (upstream) {
         try {
           const metadata = await octokit.rest.repos.get({ owner: upstream.owner, repo: upstream.repo });
-          defaultBranch = metadata?.data?.default_branch || 'main';
+          const metadataDefaultBranch = Object.prototype.toString.call(metadata?.data?.default_branch) === '[object String]'
+             ? metadata.data.default_branch.trim()
+             : '';
+           if (canonical && !metadataDefaultBranch) throw new Error('GitHub returned invalid repository metadata');
+           defaultBranch = metadataDefaultBranch || 'main';
           const ref = await octokit.rest.git.getRef({ owner: upstream.owner, repo: upstream.repo, ref: `heads/${defaultBranch}` });
           defaultBranchSha = ref?.data?.object?.sha || null;
-        } catch {
+        } catch (error) {
+           if (canonical) throw error;
           // Fall back if metadata/ref fetch fails
         }
       }
@@ -1157,39 +1679,75 @@ export function registerGitHubRoutes(app) {
         upstream: upstream ? { owner: upstream.owner, repo: upstream.repo, url: upstream.url, defaultBranch, defaultBranchSha, remoteName: upstreamRemoteName } : null,
       });
     } catch (error) {
+      if (isReadContextError(error)) {
+        return res.status(error.status ?? 400).json(readContextErrorBody(error));
+      }
+      const accountError = sendExactAccountError(res, error);
+      if (accountError) return accountError;
       console.error('Failed to detect upstream repo:', error);
       return res.status(500).json({ error: error.message || 'Failed to detect upstream repo' });
     }
   });
 
-  app.get('/api/github/repo/branches', async (req, res) => {
+  app.get(canonicalGitHubRoutePath('/repo/branches'), async (req, res) => {
     try {
-      const owner = typeof req.query?.owner === 'string' ? req.query.owner.trim() : '';
-      const repo = typeof req.query?.repo === 'string' ? req.query.repo.trim() : '';
+      const directory = readQueryString(req, 'directory');
+      const owner = readQueryString(req, 'owner');
+      const repo = readQueryString(req, 'repo');
+      const canonical = req.path.startsWith('/api/source-control/');
       if (!owner || !repo) {
         return res.status(400).json({ error: 'owner and repo are required' });
       }
-
-      const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const trustedContext = canonical
+        ? await validateReadContext(req, directory)
+        : null;
+      if (canonical && !trustedContext) {
+        return res.status(501).json({ error: 'Bound source control read is unavailable' });
+      }
+      if (canonical && !directory) {
+        return res.status(400).json({ error: 'directory is required' });
+      }
+      const octokit = (await getOctokitForRead(req, trustedContext))?.octokit;
       if (!octokit) {
         return res.json({ branches: [] });
       }
 
+      const selectedRepo = canonical
+        ? await resolveRepoForRequest(octokit, directory, { owner, repo }, trustedContext.primaryRemote, {
+            resolveGitHubRepoFromDirectory: options.resolveGitHubRepoFromDirectory,
+            resolveRepoNetwork: options.resolveRepoNetwork,
+            strictNetworkErrors: true,
+            strictMetadataErrors: true,
+            requireResolvedRepo: true,
+          })
+        : { owner, repo };
+      if (!selectedRepo) return res.json({ branches: [] });
+
       const branches = [];
       let page = 1;
       while (true) {
-        const response = await octokit.rest.repos.listBranches({ owner, repo, per_page: 100, page });
-        if (!response.data || response.data.length === 0) break;
-        for (const branch of response.data) {
-          branches.push(branch.name);
+        const response = await octokit.rest.repos.listBranches({ owner: selectedRepo.owner, repo: selectedRepo.repo, per_page: 100, page });
+        const payload = canonical
+          ? requireProviderArray(response?.data, 'GitHub returned an invalid branch list')
+          : Array.isArray(response?.data) ? response.data : [];
+        if (payload.length === 0) break;
+        for (const branch of payload) {
+          if (canonical && (!isPlainObject(branch) || !isProviderString(branch.name) || !branch.name.trim())) {
+            throw invalidProviderPayload('GitHub returned an invalid branch');
+          }
+          if (isProviderString(branch?.name) && branch.name.trim()) branches.push(branch.name);
         }
-        if (response.data.length < 100) break;
+        if (payload.length < 100) break;
         page++;
       }
 
       return res.json({ branches });
     } catch (error) {
+      if (isReadContextError(error)) {
+        return res.status(error.status ?? 400).json(readContextErrorBody(error));
+      }
+      const accountError = sendExactAccountError(res, error);
+      if (accountError) return accountError;
       console.error('Failed to fetch repo branches:', error);
       return res.status(500).json({ error: error.message || 'Failed to fetch repo branches' });
     }
@@ -1197,29 +1755,43 @@ export function registerGitHubRoutes(app) {
 
   // ================= GitHub Issue APIs =================
 
-  app.get('/api/github/issues/list', async (req, res) => {
+  app.get(canonicalGitHubRoutePath('/issues/list'), async (req, res) => {
     try {
-      const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
-      const page = typeof req.query?.page === 'string' ? Number(req.query.page) : 1;
-      const searchQuery = typeof req.query?.query === 'string' ? req.query.query.trim() : '';
+      const directory = readQueryString(req, 'directory');
+      const requestedPage = readQueryString(req, 'page');
+      const page = requestedPage ? Number(requestedPage) : 1;
+      const searchQuery = readQueryString(req, 'query');
+      const canonical = req.path.startsWith('/api/source-control/');
+      const trustedContext = canonical
+        ? await validateReadContext(req, directory)
+        : null;
+      if (canonical && !trustedContext) {
+        return res.status(501).json({ error: 'Bound source control read is unavailable' });
+      }
       if (!directory) {
         return res.status(400).json({ error: 'directory is required' });
       }
 
-      const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = (await getOctokitForRead(req, trustedContext))?.octokit;
       if (!octokit) {
         return res.json({ connected: false });
       }
 
-      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
-      const { resolveRepoNetwork } = await import('./repo/fork-detection.js');
+      const resolveGitHubRepoFromDirectory = options.resolveGitHubRepoFromDirectory
+        ?? (await import('./index.js')).resolveGitHubRepoFromDirectory;
+      const resolveRepoNetwork = options.resolveRepoNetwork
+        ?? (await import('./repo/fork-detection.js')).resolveRepoNetwork;
+      const remoteName = trustedContext?.primaryRemote ?? 'origin';
 
-      const repoNetwork = await resolveRepoNetwork(octokit, directory);
-      const { repo } = await resolveGitHubRepoFromDirectory(directory);
+      const { repo } = await resolveGitHubRepoFromDirectory(directory, remoteName);
       if (!repo) {
+        if (canonical) throw new Error(`Unable to resolve GitHub repo from git remote "${remoteName}"`);
         return res.json({ connected: true, repo: null, issues: [] });
       }
+      const repoNetwork = canonical
+        ? await resolveRepoNetwork(octokit, directory, remoteName, { strictErrors: true })
+        : await resolveRepoNetwork(octokit, directory, remoteName);
+      if (canonical) requireGitHubRepoNetwork(repoNetwork);
 
       const effectivePage = Number.isFinite(page) && page > 0 ? page : 1;
       const reposToQuery = repoNetwork || [{ ...repo, source: 'origin' }];
@@ -1254,19 +1826,64 @@ export function registerGitHubRoutes(app) {
             per_page: 50,
             page: effectivePage,
           });
+          if (canonical && (!isPlainObject(searchResult?.data)
+            || !Number.isSafeInteger(searchResult.data.total_count)
+            || searchResult.data.total_count < 0)) {
+            throw invalidProviderPayload('GitHub returned an invalid issue search result');
+          }
           const totalCount = searchResult.data.total_count;
-          const items = Array.isArray(searchResult.data.items) ? searchResult.data.items : [];
-          const issues = items
-            .filter((item) => !item?.pull_request)
-            .map((item) => {
-              const repoFullName = (item.repository_url || '').replace('https://api.github.com/repos/', '');
-              const matched = reposToQuery.find((r) => `${r.owner}/${r.repo}` === repoFullName);
-              return mapIssueSummary(item, matched || reposToQuery[0]);
-            });
+          const items = canonical
+            ? requireProviderArray(searchResult.data.items, 'GitHub returned an invalid issue search result')
+            : Array.isArray(searchResult.data.items) ? searchResult.data.items : [];
+          const findRepoForSearchItem = (item) => {
+            const repositoryUrl = Object.prototype.toString.call(item?.repository_url) === '[object String]' ? item.repository_url : '';
+            const match = repositoryUrl.match(/^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/]+)$/);
+            if (!match) return canonical ? null : reposToQuery[0];
+            return reposToQuery.find((repoRef) => repoRef.owner === match[1] && repoRef.repo === match[2])
+              ?? (canonical ? null : reposToQuery[0]);
+          };
+          const issueItems = items.filter((item) => !item?.pull_request);
+          const failedSearches = [];
+          let issues;
+          if (!canonical) {
+            issues = issueItems.map((item) => mapIssueSummary(item, findRepoForSearchItem(item)));
+          } else {
+            const results = await Promise.all(issueItems.map(async (item) => {
+              if (!isPlainObject(item) || !Number.isSafeInteger(item.number) || item.number <= 0) {
+                throw invalidProviderPayload('GitHub returned an invalid issue search item');
+              }
+              const repoRef = findRepoForSearchItem(item);
+              if (!repoRef) throw invalidProviderPayload('GitHub issue search returned an invalid repository URL');
+              try {
+                const issue = await octokit.rest.issues.get({
+                  owner: repoRef.owner,
+                  repo: repoRef.repo,
+                  issue_number: item.number,
+                });
+                return mapIssueSummary(requireGitHubIssue(issue.data, 'GitHub returned an invalid issue'), repoRef);
+              } catch (error) {
+                if (error?.status === 401 || error?.code === 'MALFORMED_PROVIDER_RESPONSE') throw error;
+                failedSearches.push({ repoRef, error });
+                return null;
+              }
+            }));
+            issues = results.filter(Boolean);
+          }
+          if (canonical && issueItems.length > 0 && failedSearches.length === issueItems.length) {
+            throw failedSearches[0].error;
+          }
           const fetchedCount = (effectivePage - 1) * 50 + items.length;
           const hasMore = fetchedCount < totalCount;
-          return res.json({ connected: true, repo, issues, page: effectivePage, hasMore });
+          const response = { connected: true, repo, issues, page: effectivePage, hasMore };
+          if (canonical && failedSearches.length > 0) {
+            response.failedRepos = [...new Map(failedSearches.map(({ repoRef }) => [
+              `${repoRef.owner}/${repoRef.repo}`,
+              { owner: repoRef.owner, repo: repoRef.repo },
+            ])).values()];
+          }
+          return res.json(response);
         } catch (error) {
+          if (canonical || error?.status === 401) throw error;
           console.error('Failed to search GitHub issues:', error);
           return res.json({ connected: true, repo, issues: [], page: effectivePage, hasMore: false });
         }
@@ -1283,49 +1900,92 @@ export function registerGitHubRoutes(app) {
           });
           const link = typeof list?.headers?.link === 'string' ? list.headers.link : '';
           const hasMore = /rel="next"/.test(link);
-          const issues = (Array.isArray(list?.data) ? list.data : [])
+          const payload = canonical
+            ? requireProviderArray(list?.data, 'GitHub returned an invalid issue list')
+            : Array.isArray(list?.data) ? list.data : [];
+          const issues = payload
             .filter((item) => !item?.pull_request)
-            .map((item) => mapIssueSummary(item, repoRef));
+            .map((item) => mapIssueSummary(canonical ? requireGitHubIssue(item, 'GitHub returned an invalid issue') : item, repoRef));
           return { issues, hasMore };
         } catch (error) {
+          if (error?.status === 401 || error?.code === 'MALFORMED_PROVIDER_RESPONSE') throw error;
+          if (canonical) return { error, repoRef };
           console.warn(`Failed to list issues for ${repoRef.owner}/${repoRef.repo}:`, error?.message || error);
           return { issues: [], hasMore: false };
         }
       };
 
       const results = await Promise.all(reposToQuery.map(queryRepo));
-      const allIssues = results.flatMap((r) => r.issues);
-      const anyHasMore = results.some((r) => r.hasMore);
+      const successful = results.filter((result) => !result.error);
+      const failed = results.filter((result) => result.error);
+      if (canonical && successful.length === 0 && failed.length > 0) throw failed[0].error;
+      const allIssues = successful.flatMap((result) => result.issues);
+      const anyHasMore = successful.some((result) => result.hasMore);
 
-      return res.json({ connected: true, repo, issues: allIssues, page: effectivePage, hasMore: anyHasMore });
+      const response = { connected: true, repo, issues: allIssues, page: effectivePage, hasMore: anyHasMore };
+      if (canonical && failed.length > 0) {
+        response.failedRepos = failed.map(({ repoRef }) => ({ owner: repoRef.owner, repo: repoRef.repo }));
+      }
+      return res.json(response);
     } catch (error) {
+      if (isReadContextError(error)) {
+        return res.status(error.status ?? 400).json(readContextErrorBody(error));
+      }
+      const accountError = sendExactAccountError(res, error);
+      if (accountError) return accountError;
       console.error('Failed to list GitHub issues:', error);
       return res.status(500).json({ error: error.message || 'Failed to list GitHub issues' });
     }
   });
 
-  app.get('/api/github/issues/get', async (req, res) => {
+  app.get(canonicalGitHubRoutePath('/issues/get'), async (req, res) => {
     try {
-      const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
-      const number = typeof req.query?.number === 'string' ? Number(req.query.number) : null;
+      const directory = readQueryString(req, 'directory');
+      const requestedNumber = readQueryString(req, 'number');
+      const canonical = req.path.startsWith('/api/source-control/');
+      const number = canonical ? readPositiveIntegerQuery(req, 'number') : requestedNumber ? Number(requestedNumber) : null;
+      const owner = readQueryString(req, 'owner');
+      const repoName = readQueryString(req, 'repo');
+      if (canonical && (!number || Boolean(owner) !== Boolean(repoName))) {
+        return res.status(400).json({ error: 'valid number and complete repository selector are required' });
+      }
+      const trustedContext = canonical
+        ? await validateReadContext(req, directory)
+        : null;
+      if (canonical && !trustedContext) {
+        return res.status(501).json({ error: 'Bound source control read is unavailable' });
+      }
       if (!directory || !number) {
         return res.status(400).json({ error: 'directory and number are required' });
       }
 
-      const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = (await getOctokitForRead(req, trustedContext))?.octokit;
       if (!octokit) {
         return res.json({ connected: false });
       }
 
-      const requestedRepo = getRequestedRepo(req);
-      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
+      const requestedRepo = owner && repoName ? { owner, repo: repoName } : null;
+      const repo = await resolveRepoForRequest(
+        octokit,
+        directory,
+        requestedRepo,
+        trustedContext?.primaryRemote ?? 'origin',
+        {
+          resolveGitHubRepoFromDirectory: options.resolveGitHubRepoFromDirectory,
+          resolveRepoNetwork: options.resolveRepoNetwork,
+          strictNetworkErrors: canonical,
+          strictMetadataErrors: canonical,
+          requireResolvedRepo: canonical,
+        },
+      );
       if (!repo) {
         return res.json({ connected: true, repo: null, issue: null });
       }
 
       const result = await octokit.rest.issues.get({ owner: repo.owner, repo: repo.repo, issue_number: number });
-      const issue = result?.data;
+      const issue = canonical
+        ? requireGitHubIssue(result?.data, 'GitHub returned an invalid issue')
+        : result?.data;
       if (!issue || issue.pull_request) {
         return res.status(400).json({ error: 'Not a GitHub issue' });
       }
@@ -1360,27 +2020,56 @@ export function registerGitHubRoutes(app) {
         },
       });
     } catch (error) {
+      if (isReadContextError(error)) {
+        return res.status(error.status ?? 400).json(readContextErrorBody(error));
+      }
+      const accountError = sendExactAccountError(res, error);
+      if (accountError) return accountError;
       console.error('Failed to fetch GitHub issue:', error);
       return res.status(500).json({ error: error.message || 'Failed to fetch GitHub issue' });
     }
   });
 
-  app.get('/api/github/issues/comments', async (req, res) => {
+  app.get(canonicalGitHubRoutePath('/issues/comments'), async (req, res) => {
     try {
-      const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
-      const number = typeof req.query?.number === 'string' ? Number(req.query.number) : null;
+      const directory = readQueryString(req, 'directory');
+      const requestedNumber = readQueryString(req, 'number');
+      const canonical = req.path.startsWith('/api/source-control/');
+      const number = canonical ? readPositiveIntegerQuery(req, 'number') : requestedNumber ? Number(requestedNumber) : null;
+      const owner = readQueryString(req, 'owner');
+      const repoName = readQueryString(req, 'repo');
+      if (canonical && (!number || Boolean(owner) !== Boolean(repoName))) {
+        return res.status(400).json({ error: 'valid number and complete repository selector are required' });
+      }
+      const trustedContext = canonical
+        ? await validateReadContext(req, directory)
+        : null;
+      if (canonical && !trustedContext) {
+        return res.status(501).json({ error: 'Bound source control read is unavailable' });
+      }
       if (!directory || !number) {
         return res.status(400).json({ error: 'directory and number are required' });
       }
 
-      const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = (await getOctokitForRead(req, trustedContext))?.octokit;
       if (!octokit) {
         return res.json({ connected: false });
       }
 
-      const requestedRepo = getRequestedRepo(req);
-      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
+      const requestedRepo = owner && repoName ? { owner, repo: repoName } : null;
+      const repo = await resolveRepoForRequest(
+        octokit,
+        directory,
+        requestedRepo,
+        trustedContext?.primaryRemote ?? 'origin',
+        {
+          resolveGitHubRepoFromDirectory: options.resolveGitHubRepoFromDirectory,
+          resolveRepoNetwork: options.resolveRepoNetwork,
+          strictNetworkErrors: canonical,
+          strictMetadataErrors: canonical,
+          requireResolvedRepo: canonical,
+        },
+      );
       if (!repo) {
         return res.json({ connected: true, repo: null, comments: [] });
       }
@@ -1391,7 +2080,11 @@ export function registerGitHubRoutes(app) {
         issue_number: number,
         per_page: 100,
       });
-      const comments = (Array.isArray(result?.data) ? result.data : [])
+      const payload = canonical
+        ? requireProviderArray(result?.data, 'GitHub returned an invalid issue comment list')
+        : Array.isArray(result?.data) ? result.data : [];
+      const comments = payload
+        .map((comment) => canonical ? requireGitHubComment(comment, 'GitHub returned an invalid issue comment') : comment)
         .map((comment) => ({
           id: comment.id,
           url: comment.html_url,
@@ -1403,6 +2096,11 @@ export function registerGitHubRoutes(app) {
 
       return res.json({ connected: true, repo, comments });
     } catch (error) {
+      if (isReadContextError(error)) {
+        return res.status(error.status ?? 400).json(readContextErrorBody(error));
+      }
+      const accountError = sendExactAccountError(res, error);
+      if (accountError) return accountError;
       console.error('Failed to fetch GitHub issue comments:', error);
       return res.status(500).json({ error: error.message || 'Failed to fetch GitHub issue comments' });
     }
@@ -1410,29 +2108,44 @@ export function registerGitHubRoutes(app) {
 
   // ================= GitHub Pull Request Context APIs =================
 
-  app.get('/api/github/pulls/list', async (req, res) => {
+  app.get(canonicalGitHubRoutePath('/pulls/list'), async (req, res) => {
     try {
       const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
       const page = typeof req.query?.page === 'string' ? Number(req.query.page) : 1;
       const searchQuery = typeof req.query?.query === 'string' ? req.query.query.trim() : '';
+      const canonical = req.path.startsWith('/api/source-control/');
+      const trustedContext = canonical
+        ? await validateReadContext(req, directory)
+        : null;
+      if (canonical && !trustedContext) {
+        return res.status(501).json({ error: 'Bound source control status is unavailable' });
+      }
       if (!directory) {
         return res.status(400).json({ error: 'directory is required' });
       }
 
-      const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = (await getOctokitForRequest(req, trustedContext?.accountId))?.octokit;
       if (!octokit) {
         return res.json({ connected: false });
       }
 
-      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
-      const { resolveRepoNetwork } = await import('./repo/fork-detection.js');
+      const resolveGitHubRepoFromDirectory = options.resolveGitHubRepoFromDirectory
+        ?? (await import('./index.js')).resolveGitHubRepoFromDirectory;
+      const resolveRepoNetwork = options.resolveRepoNetwork
+        ?? (await import('./repo/fork-detection.js')).resolveRepoNetwork;
+      const remoteName = trustedContext?.primaryRemote ?? 'origin';
 
-      const repoNetwork = await resolveRepoNetwork(octokit, directory);
-      const { repo } = await resolveGitHubRepoFromDirectory(directory);
+      const { repo } = await resolveGitHubRepoFromDirectory(directory, remoteName);
+      if (canonical && !repo) {
+        throw new Error(`Unable to resolve GitHub repo from git remote "${remoteName}"`);
+      }
       if (!repo) {
         return res.json({ connected: true, repo: null, prs: [] });
       }
+      const networkPayload = canonical
+        ? await resolveRepoNetwork(octokit, directory, remoteName, { strictErrors: true })
+        : await resolveRepoNetwork(octokit, directory, remoteName);
+      const repoNetwork = canonical ? requireGitHubRepoNetwork(networkPayload, repo) : networkPayload;
 
       const effectivePage = Number.isFinite(page) && page > 0 ? page : 1;
       const reposToQuery = repoNetwork || [{ ...repo, source: 'origin' }];
@@ -1479,17 +2192,35 @@ export function registerGitHubRoutes(app) {
             per_page: 50,
             page: effectivePage,
           });
-          const totalCount = searchResult.data.total_count;
-          const items = Array.isArray(searchResult.data.items) ? searchResult.data.items : [];
+          const searchData = searchResult?.data;
+          if (canonical && (!isPlainObject(searchData)
+            || !Number.isSafeInteger(searchData.total_count) || searchData.total_count < 0)) {
+            throw invalidProviderPayload('GitHub returned an invalid pull request search result');
+          }
+          const totalCount = searchData?.total_count ?? 0;
+          const items = canonical
+            ? requireProviderArray(searchData?.items, 'GitHub returned an invalid pull request search list')
+            : Array.isArray(searchData?.items) ? searchData.items : [];
           const findRepoForSearchItem = (item) => {
             const repositoryUrl = typeof item?.repository_url === 'string' ? item.repository_url : '';
             const match = repositoryUrl.match(/\/repos\/([^/]+)\/([^/]+)$/);
-            if (!match) return reposToQuery[0];
-            return reposToQuery.find((repoRef) => repoRef.owner === match[1] && repoRef.repo === match[2]) || reposToQuery[0];
+            if (!match) {
+              if (canonical) throw invalidProviderPayload('GitHub returned invalid pull request repository metadata');
+              return reposToQuery[0];
+            }
+            const matched = reposToQuery.find((repoRef) => repoRef.owner === match[1] && repoRef.repo === match[2]);
+            if (!matched && canonical) throw invalidProviderPayload('GitHub returned pull request outside the bound repository network');
+            return matched || reposToQuery[0];
           };
           const prRefs = items
-            .map((item) => ({ number: item.number, repoRef: findRepoForSearchItem(item) }))
+            .map((item) => {
+              if (canonical && (!isPlainObject(item) || !Number.isSafeInteger(item.number) || item.number <= 0)) {
+                throw invalidProviderPayload('GitHub returned an invalid pull request search item');
+              }
+              return { number: item?.number, repoRef: findRepoForSearchItem(item) };
+            })
             .filter((ref) => Number.isFinite(ref.number) && ref.number > 0 && ref.repoRef);
+          const failedSearches = [];
           let prs;
           if (prRefs.length === 0) {
             prs = [];
@@ -1501,17 +2232,30 @@ export function registerGitHubRoutes(app) {
                   repo: repoRef.repo,
                   pull_number: number,
                 });
-                return mapPrSummary(pr.data, repoRef);
-              } catch {
+                return mapPrSummary(canonical
+                  ? requireGitHubPullRequest(pr?.data, 'GitHub returned an invalid pull request')
+                  : pr.data, repoRef);
+              } catch (error) {
+                if (error?.status === 401) throw error;
+                if (canonical) failedSearches.push({ repoRef, error });
                 return null;
               }
             }));
             prs = results.filter(Boolean);
           }
+          if (canonical && prRefs.length > 0 && failedSearches.length === prRefs.length) {
+            throw failedSearches[0].error;
+          }
+          const primarySearchFailure = failedSearches.find(({ repoRef }) => repoRef.owner === repo.owner && repoRef.repo === repo.repo);
+          if (canonical && primarySearchFailure) throw primarySearchFailure.error;
           const fetchedCount = (effectivePage - 1) * 50 + items.length;
           const hasMore = fetchedCount < totalCount;
-          return res.json({ connected: true, repo, prs, page: effectivePage, hasMore });
+          const failedRepos = [...new Map(failedSearches.map(({ repoRef }) => [`${repoRef.owner}/${repoRef.repo}`, repoRef])).values()];
+          const response = { connected: true, repo, prs, page: effectivePage, hasMore };
+          if (canonical && failedRepos.length > 0) response.failedRepos = failedRepos;
+          return res.json(response);
         } catch (error) {
+          if (canonical || error?.status === 401) throw error;
           console.error('Failed to search GitHub PRs:', error);
           throw error;
         }
@@ -1528,23 +2272,42 @@ export function registerGitHubRoutes(app) {
           });
           const link = typeof list?.headers?.link === 'string' ? list.headers.link : '';
           const hasMore = /rel="next"/.test(link);
-          const prs = (Array.isArray(list?.data) ? list.data : []).map((pr) => mapPrSummary(pr, repoRef));
+           const payload = canonical
+             ? requireProviderArray(list?.data, 'GitHub returned an invalid pull request list')
+             : Array.isArray(list?.data) ? list.data : [];
+           const prs = payload.map((pr) => mapPrSummary(canonical
+             ? requireGitHubPullRequest(pr, 'GitHub returned an invalid pull request')
+             : pr, repoRef));
           return { prs, hasMore };
         } catch (error) {
+          if (error?.status === 401) throw error;
+          if (canonical) return { error, repoRef };
           console.warn(`Failed to list PRs for ${repoRef.owner}/${repoRef.repo}:`, error?.message || error);
           throw error;
         }
       };
 
       const results = await Promise.all(reposToQuery.map(queryRepo));
-      const allPrs = results.flatMap((r) => r.prs);
-      const anyHasMore = results.some((r) => r.hasMore);
+      const successful = results.filter((result) => !result.error);
+      const failed = results.filter((result) => result.error);
+      const primaryFailed = failed.find((result) => result.repoRef.owner === repo.owner && result.repoRef.repo === repo.repo);
+      if (canonical && primaryFailed) throw primaryFailed.error;
+      if (canonical && successful.length === 0 && failed.length > 0) throw failed[0].error;
+      const allPrs = successful.flatMap((result) => result.prs);
+      const anyHasMore = successful.some((result) => result.hasMore);
+      const failedRepos = failed.map((result) => result.repoRef);
 
-      return res.json({ connected: true, repo, prs: allPrs, page: effectivePage, hasMore: anyHasMore });
+      const response = { connected: true, repo, prs: allPrs, page: effectivePage, hasMore: anyHasMore };
+      if (canonical && failedRepos.length > 0) response.failedRepos = failedRepos;
+      return res.json(response);
     } catch (error) {
+      if (isReadContextError(error)) {
+        return res.status(error.status ?? 400).json(readContextErrorBody(error));
+      }
+      const accountError = sendExactAccountError(res, error);
+      if (accountError) return accountError;
       if (error?.status === 401) {
-        const { clearGitHubAuth } = await getGitHubLibraries();
-        clearGitHubAuth();
+        await invalidateRequestAccount(error);
         return res.json({ connected: false });
       }
       console.error('Failed to list GitHub pull requests:', error);
@@ -1552,33 +2315,58 @@ export function registerGitHubRoutes(app) {
     }
   });
 
-  app.get('/api/github/pulls/context', async (req, res) => {
+  app.get(canonicalGitHubRoutePath('/pulls/context'), async (req, res) => {
+    let writeToken = null;
     try {
       const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
       const number = typeof req.query?.number === 'string' ? Number(req.query.number) : null;
       const includeDiff = req.query?.diff === '1' || req.query?.diff === 'true';
       const includeCheckDetails = req.query?.checkDetails === '1' || req.query?.checkDetails === 'true';
+      const canonical = req.path.startsWith('/api/source-control/');
+      const owner = readQueryString(req, 'owner');
+      const repoName = readQueryString(req, 'repo');
+      if (canonical && Boolean(owner) !== Boolean(repoName)) {
+        return res.status(400).json({ error: 'complete repository selector is required' });
+      }
+      const trustedContext = canonical
+        ? await validateReadContext(req, directory)
+        : null;
+      if (canonical && !trustedContext) {
+        return res.status(501).json({ error: 'Bound source control status is unavailable' });
+      }
       if (!directory || !number) {
         return res.status(400).json({ error: 'directory and number are required' });
       }
 
-      const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const accountContext = await getOctokitForRequest(req, trustedContext?.accountId);
+      const octokit = accountContext?.octokit;
       if (!octokit) {
         return res.json({ connected: false });
       }
 
-      const requestedRepo = getRequestedRepo(req);
+      const requestedRepo = owner && repoName ? { owner, repo: repoName } : null;
 
       // Short response cache: the checks view, comments view, and the
       // send-to-chat actions request the same context within seconds of each
       // other. Detail-inclusive responses satisfy detail-free requests.
-      const contextCacheKey = JSON.stringify([
-        directory,
-        number,
-        includeDiff,
-        requestedRepo ? `${requestedRepo.owner}/${requestedRepo.repo}` : null,
-      ]);
+      const contextCacheKey = JSON.stringify(trustedContext
+        ? [
+            directory,
+            number,
+            includeDiff,
+            requestedRepo ? `${requestedRepo.owner}/${requestedRepo.repo}` : null,
+            accountContext.cacheIdentity,
+            trustedContext.repositoryId,
+            trustedContext.bindingRevision,
+            trustedContext.primaryRemote,
+          ]
+        : [
+            directory,
+            number,
+            includeDiff,
+            requestedRepo ? `${requestedRepo.owner}/${requestedRepo.repo}` : null,
+            accountContext.cacheIdentity,
+          ]);
       const cachedContext = prContextCache.get(contextCacheKey);
       if (cachedContext
         && Date.now() - cachedContext.fetchedAt < PR_CONTEXT_CACHE_TTL_MS
@@ -1586,9 +2374,21 @@ export function registerGitHubRoutes(app) {
         return res.json(cachedContext.data);
       }
 
+      if (canonical) {
+        writeToken = {};
+        pendingPrContextWrites.set(writeToken, {
+          directory,
+          number,
+          cacheIdentity: accountContext.cacheIdentity,
+          repositoryId: trustedContext.repositoryId,
+          bindingRevision: trustedContext.bindingRevision,
+          primaryRemote: trustedContext.primaryRemote,
+        });
+      }
+
       const originalJson = res.json.bind(res);
       res.json = (data) => {
-        if (data && data.pr) {
+        if (data && data.pr && (!canonical || pendingPrContextWrites.has(writeToken))) {
           if (typeof data.fetchedAt !== 'number') {
             data.fetchedAt = Date.now();
           }
@@ -1604,13 +2404,27 @@ export function registerGitHubRoutes(app) {
         return originalJson(data);
       };
 
-      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
+      const repo = await resolveRepoForRequest(
+        octokit,
+        directory,
+        requestedRepo,
+        trustedContext?.primaryRemote ?? 'origin',
+        {
+          resolveGitHubRepoFromDirectory: options.resolveGitHubRepoFromDirectory,
+          resolveRepoNetwork: options.resolveRepoNetwork,
+          strictNetworkErrors: canonical,
+          strictMetadataErrors: canonical,
+          requireResolvedRepo: canonical,
+        },
+      );
       if (!repo) {
         return res.json({ connected: true, repo: null, pr: null });
       }
 
       const prResp = await octokit.rest.pulls.get({ owner: repo.owner, repo: repo.repo, pull_number: number });
-      const prData = prResp?.data;
+      const prData = canonical
+        ? requireGitHubPullRequest(prResp?.data, 'GitHub returned an invalid pull request')
+        : prResp?.data;
       if (!prData) {
         return res.status(404).json({ error: 'PR not found' });
       }
@@ -1651,7 +2465,12 @@ export function registerGitHubRoutes(app) {
         issue_number: number,
         per_page: 100,
       });
-      const issueComments = (Array.isArray(issueCommentsResp?.data) ? issueCommentsResp.data : []).map((comment) => ({
+      const issueCommentPayload = canonical
+        ? requireProviderArray(issueCommentsResp?.data, 'GitHub returned an invalid issue comment list')
+        : Array.isArray(issueCommentsResp?.data) ? issueCommentsResp.data : [];
+      const issueComments = issueCommentPayload.map((comment) => canonical
+        ? requireGitHubComment(comment, 'GitHub returned an invalid issue comment')
+        : comment).map((comment) => ({
         id: comment.id,
         url: comment.html_url,
         body: comment.body || '',
@@ -1666,7 +2485,12 @@ export function registerGitHubRoutes(app) {
         pull_number: number,
         per_page: 100,
       });
-      const reviewComments = (Array.isArray(reviewCommentsResp?.data) ? reviewCommentsResp.data : []).map((comment) => ({
+      const reviewCommentPayload = canonical
+        ? requireProviderArray(reviewCommentsResp?.data, 'GitHub returned an invalid review comment list')
+        : Array.isArray(reviewCommentsResp?.data) ? reviewCommentsResp.data : [];
+      const reviewComments = reviewCommentPayload.map((comment) => canonical
+        ? requireGitHubReviewComment(comment)
+        : comment).map((comment) => ({
         id: comment.id,
         url: comment.html_url,
         body: comment.body || '',
@@ -1684,7 +2508,10 @@ export function registerGitHubRoutes(app) {
         pull_number: number,
         per_page: 100,
       });
-      const files = (Array.isArray(filesResp?.data) ? filesResp.data : []).map((f) => ({
+      const filePayload = canonical
+        ? requireProviderArray(filesResp?.data, 'GitHub returned an invalid pull request file list')
+        : Array.isArray(filesResp?.data) ? filesResp.data : [];
+      const files = filePayload.map((file) => canonical ? requireGitHubPullFile(file) : file).map((f) => ({
         filename: f.filename,
         status: f.status,
         additions: f.additions,
@@ -1700,7 +2527,9 @@ export function registerGitHubRoutes(app) {
       if (sha) {
         try {
           const runs = await octokit.rest.checks.listForRef({ owner: repo.owner, repo: repo.repo, ref: sha, per_page: 100 });
-          const checkRuns = dedupeCheckRuns(Array.isArray(runs?.data?.check_runs) ? runs.data.check_runs : []);
+          const checkRuns = dedupeCheckRuns(canonical
+            ? requireGitHubCheckRuns(runs?.data?.check_runs)
+            : Array.isArray(runs?.data?.check_runs) ? runs.data.check_runs : []);
           if (checkRuns.length > 0) {
             const parsedJobs = new Map();
             const parsedAnnotations = new Map();
@@ -1733,7 +2562,7 @@ export function registerGitHubRoutes(app) {
                     run_id: runId,
                     per_page: 100,
                   });
-                  const jobs = Array.isArray(jobsResp?.data?.jobs) ? jobsResp.data.jobs : [];
+                  const jobs = requireGitHubWorkflowJobs(jobsResp?.data?.jobs);
                   parsedJobs.set(runId, jobs);
                 } catch {
                   parsedJobs.set(runId, []);
@@ -1865,7 +2694,9 @@ export function registerGitHubRoutes(app) {
         if (!checks) {
           try {
             const combined = await octokit.rest.repos.getCombinedStatusForRef({ owner: repo.owner, repo: repo.repo, ref: sha });
-            const statuses = Array.isArray(combined?.data?.statuses) ? combined.data.statuses : [];
+            const statuses = canonical
+              ? requireGitHubStatuses(combined?.data?.statuses)
+              : Array.isArray(combined?.data?.statuses) ? combined.data.statuses : [];
             checks = summarizeCombinedStatuses(statuses);
           } catch {
             checks = null;
@@ -1881,7 +2712,10 @@ export function registerGitHubRoutes(app) {
           pull_number: number,
           headers: { accept: 'application/vnd.github.v3.diff' },
         });
-        diff = typeof diffResp?.data === 'string' ? diffResp.data : undefined;
+        if (canonical && !isProviderString(diffResp?.data)) {
+          throw invalidProviderPayload('GitHub returned an invalid pull request diff');
+        }
+        diff = isProviderString(diffResp?.data) ? diffResp.data : undefined;
       }
 
       return res.json({
@@ -1896,13 +2730,68 @@ export function registerGitHubRoutes(app) {
         ...(Array.isArray(checkRunsOut) ? { checkRuns: checkRunsOut } : {}),
       });
     } catch (error) {
+      if (isReadContextError(error)) {
+        return res.status(error.status ?? 400).json(readContextErrorBody(error));
+      }
+      const accountError = sendExactAccountError(res, error);
+      if (accountError) return accountError;
       if (error?.status === 401) {
-        const { clearGitHubAuth } = await getGitHubLibraries();
-        clearGitHubAuth();
+        await invalidateRequestAccount(error);
         return res.json({ connected: false });
       }
       console.error('Failed to load GitHub PR context:', error);
       return res.status(500).json({ error: error.message || 'Failed to load GitHub PR context' });
+    } finally {
+      if (writeToken) pendingPrContextWrites.delete(writeToken);
     }
+  });
+
+  return Object.freeze({
+    resolveChangeRequestSource: async ({ context, project, number, expectedHeadSha, requestedRemoteName }) => {
+      const trusted = await options.validateReadContext(context);
+      const account = await getOctokitForRequest({}, trusted.accountId);
+      const target = await resolveRepoForRequest(
+        account.octokit,
+        trusted.directory,
+        { owner: project.owner, repo: project.name },
+        trusted.primaryRemote,
+        {
+          resolveGitHubRepoFromDirectory: options.resolveGitHubRepoFromDirectory,
+          resolveRepoNetwork: options.resolveRepoNetwork,
+          strictNetworkErrors: true,
+          strictMetadataErrors: true,
+          requireResolvedRepo: true,
+        },
+      );
+      if (!target || `${target.owner}/${target.repo}` !== project.id) {
+        throw canonicalMutationError('Change request project does not match the bound fork network', 'SOURCE_CONTROL_CHANGE_REQUEST_STALE', 409);
+      }
+      const payload = requireGitHubPullRequest((await account.octokit.rest.pulls.get({
+        owner: target.owner, repo: target.repo, pull_number: number,
+      }))?.data, 'GitHub returned an invalid pull request');
+      const headSha = String(payload.head?.sha || '').toLowerCase();
+      const headOwner = payload.head?.repo?.owner?.login;
+      const headName = payload.head?.repo?.name;
+      const headRef = payload.head?.ref;
+      const endpoint = payload.head?.repo?.clone_url;
+      if (headSha !== expectedHeadSha.toLowerCase() || !headOwner || !headName || !headRef || !endpoint) {
+        throw canonicalMutationError('Change request head changed', 'SOURCE_CONTROL_CHANGE_REQUEST_STALE', 409);
+      }
+      const parsed = new URL(endpoint);
+      if (parsed.protocol !== 'https:' || parsed.hostname !== 'github.com'
+        || parsed.pathname.replace(/^\//, '').replace(/\.git$/, '') !== `${headOwner}/${headName}`) {
+        throw invalidProviderPayload('GitHub returned an invalid head repository endpoint');
+      }
+      return Object.freeze({
+        context: trusted,
+        sourceProject: { id: `${headOwner}/${headName}`, owner: headOwner, name: headName },
+        targetProject: { id: project.id, owner: target.owner, name: target.repo },
+        classification: headOwner === target.owner && headName === target.repo ? 'same-repository' : 'contributor-fork',
+        headSha,
+        headRef: `refs/heads/${headRef}`,
+        endpoint,
+        requestedRemoteName,
+      });
+    },
   });
 }

@@ -2,6 +2,7 @@ import { stat } from 'node:fs/promises';
 import { getRemotes, getStatus } from '../git/index.js';
 import { resolveGitHubRepoFromDirectory } from './repo/index.js';
 import { noteIfGitHubRateLimit } from './rate-limit.js';
+import { getOctokitCacheIdentity } from './octokit.js';
 
 const directoryExists = async (dir) => {
   if (!dir) return false;
@@ -26,6 +27,10 @@ const normalizeRepoKey = (owner, repo) => {
     return '';
   }
   return `${normalizedOwner}/${normalizedRepo}`;
+};
+const scopedCacheKey = (octokit, key) => {
+  const identity = getOctokitCacheIdentity(octokit);
+  return identity && key ? `${key}::${identity}` : '';
 };
 const parseTrackingRemoteName = (trackingBranch) => {
   const normalized = normalizeText(trackingBranch);
@@ -162,12 +167,13 @@ const buildSourceMatcher = (sourceCandidates) => {
 };
 
 const getRepoDefaultBranch = async (octokit, repo) => {
-  const repoKey = normalizeRepoKey(repo?.owner, repo?.repo);
-  if (!repoKey) {
+  const normalizedRepoKey = normalizeRepoKey(repo?.owner, repo?.repo);
+  const repoKey = scopedCacheKey(octokit, normalizedRepoKey);
+  if (!normalizedRepoKey) {
     return null;
   }
 
-  const cached = defaultBranchCache.get(repoKey);
+  const cached = repoKey ? defaultBranchCache.get(repoKey) : null;
   if (cached && Date.now() - cached.fetchedAt < REPO_DEFAULT_BRANCH_TTL_MS) {
     return cached.defaultBranch;
   }
@@ -176,10 +182,10 @@ const getRepoDefaultBranch = async (octokit, repo) => {
   // calls getRepoMetadata for every candidate before the default-branch loop).
   // This avoids a redundant repos.get per repo — fewer serial GitHub calls means
   // less exposure to secondary-rate-limiting that makes PR status slow.
-  const metaCached = repoMetadataCache.get(repoKey);
+  const metaCached = repoKey ? repoMetadataCache.get(repoKey) : null;
   if (metaCached && Date.now() - metaCached.fetchedAt < REPO_DEFAULT_BRANCH_TTL_MS) {
     const defaultBranch = normalizeText(metaCached.data?.default_branch) || null;
-    defaultBranchCache.set(repoKey, { defaultBranch, fetchedAt: Date.now() });
+    if (repoKey) defaultBranchCache.set(repoKey, { defaultBranch, fetchedAt: Date.now() });
     return defaultBranch;
   }
 
@@ -189,10 +195,12 @@ const getRepoDefaultBranch = async (octokit, repo) => {
       repo: repo.repo,
     });
     const defaultBranch = normalizeText(response?.data?.default_branch) || null;
-    defaultBranchCache.set(repoKey, {
-      defaultBranch,
-      fetchedAt: Date.now(),
-    });
+    if (repoKey) {
+      defaultBranchCache.set(repoKey, {
+        defaultBranch,
+        fetchedAt: Date.now(),
+      });
+    }
     return defaultBranch;
   } catch (error) {
     noteIfGitHubRateLimit(error);
@@ -201,12 +209,13 @@ const getRepoDefaultBranch = async (octokit, repo) => {
 };
 
 const getRepoMetadata = async (octokit, repo) => {
-  const repoKey = normalizeRepoKey(repo?.owner, repo?.repo);
-  if (!repoKey) {
+  const normalizedRepoKey = normalizeRepoKey(repo?.owner, repo?.repo);
+  const repoKey = scopedCacheKey(octokit, normalizedRepoKey);
+  if (!normalizedRepoKey) {
     return null;
   }
 
-  const cached = repoMetadataCache.get(repoKey);
+  const cached = repoKey ? repoMetadataCache.get(repoKey) : null;
   if (cached && Date.now() - cached.fetchedAt < REPO_DEFAULT_BRANCH_TTL_MS) {
     return cached.data;
   }
@@ -217,18 +226,22 @@ const getRepoMetadata = async (octokit, repo) => {
       repo: repo.repo,
     });
     const data = response?.data ?? null;
-    repoMetadataCache.set(repoKey, {
-      data,
-      fetchedAt: Date.now(),
-    });
+    if (repoKey) {
+      repoMetadataCache.set(repoKey, {
+        data,
+        fetchedAt: Date.now(),
+      });
+    }
     return data;
   } catch (error) {
     noteIfGitHubRateLimit(error);
     if (error?.status === 403 || error?.status === 404) {
-      repoMetadataCache.set(repoKey, {
-        data: null,
-        fetchedAt: Date.now(),
-      });
+      if (repoKey) {
+        repoMetadataCache.set(repoKey, {
+          data: null,
+          fetchedAt: Date.now(),
+        });
+      }
       return null;
     }
     throw error;
@@ -344,6 +357,7 @@ const HISTORICAL_PR_FOUND_TTL_MS = 6 * 60 * 60 * 1000;
 const HISTORICAL_PR_ABSENT_TTL_MS = 10 * 60 * 1000;
 const HISTORICAL_PR_CACHE_MAX_ENTRIES = 500;
 const _historicalPrCache = new Map();
+const pendingHistoricalPrWrites = new Map();
 
 const isHistoricalPrCacheFresh = (entry) => {
   if (!entry) {
@@ -364,10 +378,15 @@ const rememberHistoricalPr = (key, pr) => {
   }
 };
 
-export const invalidateRepoPullsCache = (owner, repo) => {
+export const invalidateRepoPullsCache = (owner, repo, octokitOrCacheIdentity = null) => {
+  const requestedIdentity = Object.prototype.toString.call(octokitOrCacheIdentity) === '[object String]'
+    ? octokitOrCacheIdentity
+    : getOctokitCacheIdentity(octokitOrCacheIdentity);
+  const matchesIdentity = (key) => !requestedIdentity || key.split('::').includes(requestedIdentity);
   const prefix = `${normalizeText(owner)}/${normalizeText(repo)}::`;
-  for (const key of repoPullsCache.keys()) {
-    if (key.startsWith(prefix)) {
+  for (const [key, entry] of repoPullsCache) {
+    if (key.startsWith(prefix) && matchesIdentity(key)) {
+      if (entry.token) entry.token.invalidated = true;
       repoPullsCache.delete(key);
     }
   }
@@ -375,21 +394,40 @@ export const invalidateRepoPullsCache = (owner, repo) => {
   const repoNameLower = normalizeText(repo).toLowerCase();
   for (const key of _searchMissCache.keys()) {
     const [repoPart] = key.split('::');
-    if (repoPart && repoPart.split(',').includes(repoNameLower)) {
+    if (repoPart && repoPart.split(',').includes(repoNameLower) && matchesIdentity(key)) {
       _searchMissCache.delete(key);
+    }
+  }
+  for (const [token, key] of pendingSearchMissWrites) {
+    const [repoPart] = key.split('::');
+    if (repoPart && repoPart.split(',').includes(repoNameLower) && matchesIdentity(key)) {
+      pendingSearchMissWrites.delete(token);
     }
   }
   // A merge or close changes the branch's PR history, so drop it too.
   const historicalPrefix = `${normalizeRepoKey(owner, repo)}::`;
   for (const key of _historicalPrCache.keys()) {
-    if (key.startsWith(historicalPrefix)) {
+    if (key.startsWith(historicalPrefix) && matchesIdentity(key)) {
       _historicalPrCache.delete(key);
+    }
+  }
+  for (const [token, key] of pendingHistoricalPrWrites) {
+    if (key.startsWith(historicalPrefix) && matchesIdentity(key)) {
+      pendingHistoricalPrWrites.delete(token);
     }
   }
 };
 
 const getRepoPulls = (octokit, repo, state, { force = false } = {}) => {
-  const key = `${normalizeText(repo.owner)}/${normalizeText(repo.repo)}::${state}`;
+  const key = scopedCacheKey(octokit, `${normalizeText(repo.owner)}/${normalizeText(repo.repo)}::${state}`);
+  if (!key) {
+    return safeListPulls(octokit, {
+      owner: repo.owner,
+      repo: repo.repo,
+      state,
+      per_page: 100,
+    }).then((prs) => ({ fetchedAt: Date.now(), prs, complete: prs.length < 100 }));
+  }
   const cached = repoPullsCache.get(key);
   if (cached?.promise) {
     return cached.promise;
@@ -398,6 +436,7 @@ const getRepoPulls = (octokit, repo, state, { force = false } = {}) => {
     return Promise.resolve(cached);
   }
 
+  const token = { invalidated: false };
   const promise = safeListPulls(octokit, {
     owner: repo.owner,
     repo: repo.repo,
@@ -407,13 +446,15 @@ const getRepoPulls = (octokit, repo, state, { force = false } = {}) => {
     // `complete` means the first page held everything, so a miss is
     // authoritative: this repo has no PR in this state for any branch.
     const entry = { fetchedAt: Date.now(), prs, complete: prs.length < 100 };
-    repoPullsCache.set(key, entry);
+    if (!token.invalidated && repoPullsCache.get(key)?.token === token) {
+      repoPullsCache.set(key, entry);
+    }
     return entry;
   }).catch((error) => {
-    repoPullsCache.delete(key);
+    if (repoPullsCache.get(key)?.token === token) repoPullsCache.delete(key);
     throw error;
   });
-  repoPullsCache.set(key, { promise });
+  repoPullsCache.set(key, { promise, token });
   return promise;
 };
 
@@ -449,6 +490,7 @@ const SEARCH_API_RETRY_MS = 5 * 60 * 1000; // retry after 5 minutes
 const SEARCH_MISS_RETRY_MS = 10 * 60 * 1000;
 const SEARCH_MISS_CACHE_MAX_ENTRIES = 500;
 const _searchMissCache = new Map();
+const pendingSearchMissWrites = new Map();
 
 const rememberSearchMiss = (key) => {
   _searchMissCache.delete(key);
@@ -463,82 +505,89 @@ const rememberSearchMiss = (key) => {
 
 const searchFallbackPr = async ({ octokit, branch, repoNames }) => {
   // Build a repo key to check/store 403 status per-repo
-  const repoKey = [...repoNames].sort().join(',').toLowerCase();
+  const repoKey = scopedCacheKey(octokit, [...repoNames].sort().join(',').toLowerCase());
 
   // Skip if this repo set returned 403 recently
-  const disabledAt = _searchApiDisabledRepos.get(repoKey);
+  const disabledAt = repoKey ? _searchApiDisabledRepos.get(repoKey) : null;
   if (disabledAt && Date.now() - disabledAt < SEARCH_API_RETRY_MS) {
     return null;
   }
 
-  const missKey = `${repoKey}::${normalizeText(branch)}`;
-  const missedAt = _searchMissCache.get(missKey);
+  const missKey = repoKey ? `${repoKey}::${normalizeText(branch)}` : '';
+  const missedAt = missKey ? _searchMissCache.get(missKey) : null;
   if (missedAt && Date.now() - missedAt < SEARCH_MISS_RETRY_MS) {
     return null;
   }
 
-  const normalizedRepoNames = new Set(repoNames.map((name) => normalizeLower(name)).filter(Boolean));
+  const writeToken = missKey ? {} : null;
+  if (writeToken) pendingSearchMissWrites.set(writeToken, missKey);
 
-  // The Search API has a tiny quota, so it is only spent on live branch status.
-  // Closed/merged history is resolved by the cheaper per-head repo queries.
-  let response;
   try {
-    response = await octokit.rest.search.issuesAndPullRequests({
-      q: `is:pr state:open head:${branch}`,
-      per_page: 20,
-    });
-    // If we get here, search API works for this repo — clear the disabled flag
-    _searchApiDisabledRepos.delete(repoKey);
-  } catch (error) {
-    noteIfGitHubRateLimit(error);
-    if (error?.status === 403) {
-      _searchApiDisabledRepos.set(repoKey, Date.now());
-      return null;
-    }
-    if (error?.status === 404) {
-      rememberSearchMiss(missKey);
-      return null;
-    }
-    throw error;
-  }
+    const normalizedRepoNames = new Set(repoNames.map((name) => normalizeLower(name)).filter(Boolean));
 
-  const items = Array.isArray(response?.data?.items) ? response.data.items : [];
-  for (const item of items) {
-    const repo = parseRepoFromApiUrl(item?.repository_url);
-    if (!repo) {
-      continue;
-    }
-    if (normalizedRepoNames.size > 0 && !normalizedRepoNames.has(normalizeLower(repo.repo))) {
-      continue;
-    }
+    // The Search API has a tiny quota, so it is only spent on live branch status.
+    // Closed/merged history is resolved by the cheaper per-head repo queries.
+    let response;
     try {
-      const prResponse = await octokit.rest.pulls.get({
-        owner: repo.owner,
-        repo: repo.repo,
-        pull_number: item.number,
+      response = await octokit.rest.search.issuesAndPullRequests({
+        q: `is:pr state:open head:${branch}`,
+        per_page: 20,
       });
-      const pr = prResponse?.data;
-      if (!pr || normalizeText(pr.head?.ref) !== branch) {
-        continue;
-      }
-      return {
-        repo: {
-          owner: repo.owner,
-          repo: repo.repo,
-          url: `https://github.com/${repo.owner}/${repo.repo}`,
-        },
-        pr,
-      };
+      // If we get here, search API works for this repo — clear the disabled flag
+      if (repoKey) _searchApiDisabledRepos.delete(repoKey);
     } catch (error) {
-      if (error?.status === 403 || error?.status === 404) {
-        continue;
+      noteIfGitHubRateLimit(error);
+      if (error?.status === 403) {
+        if (repoKey) _searchApiDisabledRepos.set(repoKey, Date.now());
+        return null;
+      }
+      if (error?.status === 404) {
+        if (missKey && pendingSearchMissWrites.has(writeToken)) rememberSearchMiss(missKey);
+        return null;
       }
       throw error;
     }
-  }
 
-  rememberSearchMiss(missKey);
-  return null;
+    const items = Array.isArray(response?.data?.items) ? response.data.items : [];
+    for (const item of items) {
+      const repo = parseRepoFromApiUrl(item?.repository_url);
+      if (!repo) {
+        continue;
+      }
+      if (normalizedRepoNames.size > 0 && !normalizedRepoNames.has(normalizeLower(repo.repo))) {
+        continue;
+      }
+      try {
+        const prResponse = await octokit.rest.pulls.get({
+          owner: repo.owner,
+          repo: repo.repo,
+          pull_number: item.number,
+        });
+        const pr = prResponse?.data;
+        if (!pr || normalizeText(pr.head?.ref) !== branch) {
+          continue;
+        }
+        return {
+          repo: {
+            owner: repo.owner,
+            repo: repo.repo,
+            url: `https://github.com/${repo.owner}/${repo.repo}`,
+          },
+          pr,
+        };
+      } catch (error) {
+        if (error?.status === 403 || error?.status === 404) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    if (missKey && pendingSearchMissWrites.has(writeToken)) rememberSearchMiss(missKey);
+    return null;
+  } finally {
+    if (writeToken) pendingSearchMissWrites.delete(writeToken);
+  }
 };
 
 const isTerminalPr = (pr) => Boolean(pr) && (pr.state === 'closed' || Boolean(pr.merged_at));
@@ -590,8 +639,8 @@ const findBranchPrCandidates = async ({ octokit, target, branch, sourceCandidate
     return { open: null, historical: null };
   }
 
-  const historicalKey = `${normalizeRepoKey(target.repo?.owner, target.repo?.repo)}::${branch}`;
-  if (includeHistory && !force && openListWasComplete) {
+  const historicalKey = scopedCacheKey(octokit, `${normalizeRepoKey(target.repo?.owner, target.repo?.repo)}::${branch}`);
+  if (historicalKey && includeHistory && !force && openListWasComplete) {
     const cached = _historicalPrCache.get(historicalKey);
     if (isHistoricalPrCacheFresh(cached)) {
       return { open: null, historical: cached.pr };
@@ -600,33 +649,39 @@ const findBranchPrCandidates = async ({ octokit, target, branch, sourceCandidate
 
   // One query per source owner. With history enabled `state: 'all'` answers
   // both questions at once, so asking for history never costs an extra call.
-  let historical = null;
-  for (const owner of sourceOwners) {
-    const directCandidates = await safeListPulls(octokit, {
-      owner: target.repo.owner,
-      repo: target.repo.repo,
-      state: includeHistory ? 'all' : 'open',
-      head: `${owner}:${branch}`,
-      per_page: 100,
-    });
-    const openMatch = pickPreferred(directCandidates.filter((pr) => !isTerminalPr(pr)));
-    if (openMatch) {
-      return { open: openMatch, historical: null };
+  const historicalWriteToken = historicalKey && includeHistory ? {} : null;
+  if (historicalWriteToken) pendingHistoricalPrWrites.set(historicalWriteToken, historicalKey);
+  try {
+    let historical = null;
+    for (const owner of sourceOwners) {
+      const directCandidates = await safeListPulls(octokit, {
+        owner: target.repo.owner,
+        repo: target.repo.repo,
+        state: includeHistory ? 'all' : 'open',
+        head: `${owner}:${branch}`,
+        per_page: 100,
+      });
+      const openMatch = pickPreferred(directCandidates.filter((pr) => !isTerminalPr(pr)));
+      if (openMatch) {
+        return { open: openMatch, historical: null };
+      }
+      if (includeHistory && !historical) {
+        // Among past PRs for the same head the newest one is the relevant record.
+        historical = directCandidates
+          .filter((pr) => normalizeText(pr?.head?.ref) === branch)
+          .filter((pr) => matcher.matches(pr, target.repo.repo))
+          .filter(isTerminalPr)
+          .sort((left, right) => (right?.number ?? 0) - (left?.number ?? 0))[0] ?? null;
+      }
     }
-    if (includeHistory && !historical) {
-      // Among past PRs for the same head the newest one is the relevant record.
-      historical = directCandidates
-        .filter((pr) => normalizeText(pr?.head?.ref) === branch)
-        .filter((pr) => matcher.matches(pr, target.repo.repo))
-        .filter(isTerminalPr)
-        .sort((left, right) => (right?.number ?? 0) - (left?.number ?? 0))[0] ?? null;
-    }
-  }
 
-  if (includeHistory) {
-    rememberHistoricalPr(historicalKey, historical);
+    if (historicalWriteToken && pendingHistoricalPrWrites.has(historicalWriteToken)) {
+      rememberHistoricalPr(historicalKey, historical);
+    }
+    return { open: null, historical };
+  } finally {
+    if (historicalWriteToken) pendingHistoricalPrWrites.delete(historicalWriteToken);
   }
-  return { open: null, historical };
 };
 
 // Exported for focused unit tests of open-versus-historical branch matching.

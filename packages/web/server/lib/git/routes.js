@@ -1,4 +1,28 @@
-export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
+import { createGitRedactor, redactGitText } from './redaction.js';
+import { redactRemoteUrl } from '../source-control/url-redaction.js';
+import { parsePublicGitIdentityProfile, toPublicGitIdentityProfile } from './identity-storage.js';
+
+const NETWORK_OPERATION_ID = /^[A-Za-z0-9_-]{1,200}$/;
+const isString = (value) => Object.prototype.toString.call(value) === '[object String]';
+const isPlainObject = (value) => value === Object(value)
+  && !Array.isArray(value)
+  && Object.getPrototypeOf(value) === Object.prototype;
+const toGitIdentitySummary = (identity) => identity ? {
+  userName: identity.userName ?? null,
+  userEmail: identity.userEmail ?? null,
+} : null;
+const toGitRemoteSummary = (remote) => ({
+  name: String(remote?.name || ''),
+  fetchUrl: redactRemoteUrl(remote?.fetchUrl),
+  pushUrl: redactRemoteUrl(remote?.pushUrl),
+});
+
+export function registerGitRoutes(app, {
+  networkOperations, managedSshInventory, getSourceControlBinding, contributorProvenance, resolveChangeRequestSource,
+  backfillIdentities,
+  createHttpsCredentialReference, resolveSourceControlAccount, errorRedactionSecrets = [], worktreeBootstrapStore,
+  emitWorktreeChanged,
+} = {}) {
   let gitLibraries = null;
   const getGitLibraries = async () => {
     if (!gitLibraries) {
@@ -40,13 +64,310 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
     behind: 0,
   });
 
+  const sendNetworkOperationError = (req, res, error) => {
+    const code = isString(error?.code) ? error.code : 'UNKNOWN';
+    const storageFailure = code === 'GIT_NETWORK_OPERATION_STORAGE_INVALID';
+    let status = 500;
+    if (Number.isInteger(error?.status)) status = error.status;
+    else if (code === 'GIT_NETWORK_OPERATION_NOT_FOUND') status = 404;
+    else if (!storageFailure && code.includes('INVALID')) status = 400;
+    else if (code.includes('STALE') || code.includes('CHANGED') || code.includes('CONFLICT')) status = 409;
+    else if (code === 'AUTHENTICATION_REQUIRED') status = 401;
+    else if (code === 'ACKNOWLEDGEMENT_REQUIRED') status = 409;
+    else if (code === 'DESTINATION_SELECTION_REQUIRED' || code === 'CONTRIBUTOR_MANAGED_TRANSPORT_REQUIRED') status = 409;
+    else if (code === 'RUNTIME_UNSUPPORTED') status = 501;
+
+    const preservedCodes = [
+      'STALE_REPOSITORY', 'STALE_BINDING', 'STALE_CONFIG', 'REMOTE_CHANGED',
+      'AUTHENTICATION_REQUIRED', 'ACKNOWLEDGEMENT_REQUIRED', 'TIMEOUT', 'RUNTIME_UNSUPPORTED',
+      'DESTINATION_SELECTION_REQUIRED', 'CONTRIBUTOR_MANAGED_TRANSPORT_REQUIRED',
+    ];
+    let publicCode;
+    if (code === 'GIT_NETWORK_OPERATION_NOT_FOUND') publicCode = 'NOT_FOUND';
+    else if (code === 'SOURCE_CONTROL_BINDING_STALE') publicCode = 'STALE_BINDING';
+    else if (code === 'UNSUPPORTED_SOURCE_CONTROL_REPOSITORY') publicCode = 'STALE_REPOSITORY';
+    else if (code === 'GIT_NETWORK_OPERATION_AUTHORITY_CHANGED') publicCode = 'REMOTE_CHANGED';
+    if (!publicCode && !storageFailure && code.includes('INVALID')) publicCode = 'INVALID_REQUEST';
+    if (!publicCode && preservedCodes.includes(code)) publicCode = code;
+    publicCode ??= 'UNKNOWN';
+    const requestPaths = [req.body?.directory, req.body?.destinationPath].filter(isString);
+    const redactor = createGitRedactor({ secrets: [...errorRedactionSecrets, ...requestPaths] });
+    const messages = {
+      NOT_FOUND: 'Git network operation was not found',
+      INVALID_REQUEST: 'Invalid Git network operation request',
+      STALE_REPOSITORY: 'Git repository authority changed',
+      STALE_BINDING: 'Source control binding changed',
+      STALE_CONFIG: 'Git repository configuration changed',
+      REMOTE_CHANGED: 'Git remote or transport binding changed',
+      AUTHENTICATION_REQUIRED: 'Git authentication is required',
+      ACKNOWLEDGEMENT_REQUIRED: 'System Git transport acknowledgement is required',
+      DESTINATION_SELECTION_REQUIRED: 'Contributor push destination selection is required',
+      CONTRIBUTOR_MANAGED_TRANSPORT_REQUIRED: 'Contributor transfers require managed credentials',
+      TIMEOUT: 'Git network operation timed out',
+      RUNTIME_UNSUPPORTED: 'Git network operations are unavailable',
+      UNKNOWN: 'Git network operation request failed',
+    };
+    console.error('Git network operation request failed:', redactor.error(error, messages[publicCode]));
+    return res.status(status).json({ error: messages[publicCode], code: publicCode });
+  };
+  const operationId = (req) => isString(req.params?.id) && NETWORK_OPERATION_ID.test(req.params.id)
+    ? req.params.id : null;
+  const hasEmptyBody = (req) => req.body === undefined
+    || (req.body && Object.getPrototypeOf(req.body) === Object.prototype && Object.keys(req.body).length === 0);
+  app.post('/api/git/managed-ssh-credentials', async (req, res) => {
+    const input = req.body;
+    const keys = input?.operation === 'import' ? ['operation', 'candidateId', 'expectedFingerprint', 'confirmed'] : ['operation'];
+    if (!input || Object.getPrototypeOf(input) !== Object.prototype
+      || !['inventory', 'discover', 'import'].includes(input.operation)
+      || Object.keys(input).length !== keys.length || !keys.every((key) => Object.hasOwn(input, key))
+      || (input.operation === 'import' && (input.confirmed !== true || !isString(input.candidateId)
+        || !/^[A-Za-z0-9_-]{1,200}$/.test(input.candidateId) || !isString(input.expectedFingerprint)
+        || !/^SHA256:[A-Za-z0-9+/]{43}=?$/.test(input.expectedFingerprint)))) {
+      return res.status(400).json({ code: 'INVALID_REQUEST', error: 'Invalid managed SSH inventory request' });
+    }
+    res.set('Cache-Control', 'no-store');
+    if (!managedSshInventory) return res.status(501).json({ code: 'RUNTIME_UNSUPPORTED', error: 'Managed SSH inventory is unavailable' });
+    try {
+      return res.json(await managedSshInventory[input.operation](input));
+    } catch {
+      const errors = {
+        inventory: 'Managed SSH inventory could not be read',
+        discover: 'Managed SSH keys could not be discovered',
+        import: 'Managed SSH key could not be imported',
+      };
+      return res.status(500).json({ code: 'UNKNOWN', error: errors[input.operation] });
+    }
+  });
+  const hasClientContributorAuthority = (body) => body?.contributorFork !== undefined
+    || (body?.changeRequestSource && body?.ensureRemoteUrl !== undefined);
+  const worktreeInputForSource = (input, source) => ({
+    ...input,
+    changeRequestSource: undefined,
+    contributorFork: source.classification === 'contributor-fork',
+    ensureRemoteName: source.requestedRemoteName,
+    ensureRemoteUrl: source.endpoint,
+    expectedRevision: source.headSha,
+  });
+  const rejectLegacyNetworkOperation = async (directory, res) => {
+    if (contributorProvenance?.read instanceof Function) {
+      try {
+        const record = await contributorProvenance.read(directory);
+        if (record.provenance?.kind === 'contributor-fork') {
+          res.status(409).json({
+            error: 'Contributor worktrees require an exact managed destination selection',
+            code: 'DESTINATION_SELECTION_REQUIRED',
+          });
+          return true;
+        }
+      } catch {
+        res.status(500).json({ error: 'Failed to verify contributor worktree provenance', code: 'UNKNOWN' });
+        return true;
+      }
+    }
+    res.status(409).json({
+      error: 'Git network operations require the planned operation API',
+      code: 'GIT_NETWORK_OPERATION_REQUIRED',
+    });
+    return true;
+  };
+
+  app.post('/api/git/network-operations', async (req, res) => {
+    if (!networkOperations) return res.status(501).json({ error: 'Git network operations are unavailable', code: 'RUNTIME_UNSUPPORTED' });
+    try {
+      return res.status(201).json(await networkOperations.plan(req.body));
+    } catch (error) {
+      return sendNetworkOperationError(req, res, error);
+    }
+  });
+
+  app.post('/api/git/contributor-destinations', async (req, res) => {
+    if (!(networkOperations?.issueContributorDestination instanceof Function)) {
+      return res.status(501).json({ error: 'Contributor destination selection is unavailable', code: 'RUNTIME_UNSUPPORTED' });
+    }
+    try {
+      return res.status(201).json(await networkOperations.issueContributorDestination(req.body));
+    } catch (error) {
+      return sendNetworkOperationError(req, res, error);
+    }
+  });
+
+  app.get('/api/git/contributor-destinations', async (req, res) => {
+    const directory = resolveDirectoryQuery(req.query?.directory);
+    if (!directory || !(getSourceControlBinding instanceof Function)
+      || !(contributorProvenance?.read instanceof Function)) {
+      return res.status(501).json({ error: 'Contributor destination selection is unavailable', code: 'RUNTIME_UNSUPPORTED' });
+    }
+    try {
+      const [record, bindingRead] = await Promise.all([
+        contributorProvenance.read(directory), getSourceControlBinding(directory),
+      ]);
+      if (record.provenance?.kind !== 'contributor-fork') {
+        return res.json({ kind: 'ordinary' });
+      }
+      const binding = bindingRead.binding;
+      if (!binding || binding.repositoryId !== record.repositoryId
+        || binding.repositoryId !== bindingRead.repository.repositoryId || binding.revision !== bindingRead.revision) {
+        return res.status(409).json({ error: 'Contributor push destination selection is required', code: 'DESTINATION_SELECTION_REQUIRED' });
+      }
+      const accountCache = new Map();
+      const accountFor = async (provider) => {
+        const key = `${provider.provider}\0${provider.instance}\0${provider.accountId}`;
+        if (!accountCache.has(key)) {
+          accountCache.set(key, resolveSourceControlAccount instanceof Function
+            ? Promise.resolve(resolveSourceControlAccount(provider)).catch(() => null)
+            : Promise.resolve(null));
+        }
+        return accountCache.get(key);
+      };
+      const currentRemotes = new Map(bindingRead.repository.remotes.map((remote) => [remote.name, remote]));
+      const candidates = await Promise.all(binding.remotes
+        .filter((remote) => {
+          const current = currentRemotes.get(remote.name);
+          return remote.mode === 'managed' && remote.credentialId && remote.readiness === 'ready' && current
+            && remote.fetch.fingerprint === current.fetch.fingerprint && remote.push.fingerprint === current.push.fingerprint;
+        })
+        .map(async (remote) => {
+          let classification = 'other';
+          const providers = binding.providers.filter((provider) => provider.primaryRemote === remote.name
+            && provider.readiness === 'ready' && provider.endpoint?.fingerprint === remote.fetch.fingerprint);
+          const boundRepository = providers.some((provider) => provider.provider === record.provenance.provider
+            && provider.instance === record.provenance.instance
+            && provider.accountId === record.provenance.accountId
+            && remote.name === record.provenance.primaryRemote);
+          if (remote.push.fingerprint === record.provenance.endpointFingerprint) {
+            classification = 'contributor-fork';
+          } else if (boundRepository) {
+            classification = 'bound-repository';
+          } else {
+            for (const provider of providers) {
+              const account = await accountFor(provider);
+              const login = String(account?.user?.login || account?.user?.username || '').toLowerCase();
+              if (login && provider.repository?.owner?.toLowerCase() === login) {
+                classification = 'own-fork';
+                break;
+              }
+            }
+          }
+          return {
+            remote: { name: remote.name, endpoint: remote.push },
+            transportMode: 'managed',
+            classification,
+          };
+        }));
+      if (!candidates.length) {
+        return res.status(409).json({ error: 'Contributor push destination selection is required', code: 'DESTINATION_SELECTION_REQUIRED' });
+      }
+      return res.json({
+        kind: 'contributor',
+        repositoryId: binding.repositoryId,
+        bindingRevision: binding.revision,
+        configRevision: bindingRead.repository.configRevision,
+        provenanceRevision: record.revision,
+        candidates,
+      });
+    } catch (error) {
+      return sendNetworkOperationError(req, res, error);
+    }
+  });
+
+  app.get('/api/git/worktrees/checkout-trust', async (req, res) => {
+    const directory = resolveDirectoryQuery(req.query?.directory);
+    if (!directory || !(contributorProvenance?.read instanceof Function)) {
+      return res.status(400).json({ error: 'Contributor worktree is required', code: 'INVALID_REQUEST' });
+    }
+    try {
+      const { inspectContributorCheckoutActions } = await getGitLibraries();
+      const record = await contributorProvenance.read(directory);
+      if (record.provenance?.kind !== 'contributor-fork') {
+        return res.status(409).json({ error: 'Contributor worktree is required', code: 'STALE_CONFIG' });
+      }
+      const inspection = await inspectContributorCheckoutActions(directory, record.provenance);
+      return res.json({
+        state: inspection.state,
+        digest: inspection.digest,
+        actions: inspection.actions.map((action) => ({
+          kind: action.kind,
+          label: action.kind === 'post-checkout-hook' ? 'post-checkout' : action.command,
+        })),
+      });
+    } catch (error) {
+      return sendNetworkOperationError(req, res, error);
+    }
+  });
+
+  app.post('/api/git/worktrees/checkout-trust', async (req, res) => {
+    const directory = resolveDirectoryQuery(req.query?.directory);
+    if (!directory || !isString(req.body?.digest) || !['run', 'skip'].includes(req.body?.decision)
+      || Object.keys(req.body || {}).some((key) => !['digest', 'decision'].includes(key))) {
+      return res.status(400).json({ error: 'Invalid checkout trust decision', code: 'INVALID_REQUEST' });
+    }
+    try {
+      const { inspectContributorCheckoutActions } = await getGitLibraries();
+      const record = await contributorProvenance.read(directory);
+      if (record.provenance?.kind !== 'contributor-fork') {
+        return res.status(409).json({ error: 'Contributor worktree changed', code: 'STALE_CONFIG' });
+      }
+      const result = await networkOperations.decideCheckoutTrust({
+        directory,
+        repositoryId: record.repositoryId,
+        digest: req.body.digest,
+        decision: req.body.decision,
+        headSha: record.provenance.sourceSha,
+        nullRef: '0'.repeat(40),
+        inspect: () => inspectContributorCheckoutActions(directory, record.provenance),
+      });
+      return res.json(result);
+    } catch (error) {
+      return sendNetworkOperationError(req, res, error);
+    }
+  });
+
+  app.post('/api/git/network-operations/:id/execute', async (req, res) => {
+    const id = operationId(req);
+    if (!id || !hasEmptyBody(req)) return res.status(400).json({ error: 'Invalid Git network operation request', code: 'INVALID_REQUEST' });
+    if (!networkOperations) return res.status(501).json({ error: 'Git network operations are unavailable', code: 'RUNTIME_UNSUPPORTED' });
+    try {
+      return res.json(await networkOperations.execute(id));
+    } catch (error) {
+      return sendNetworkOperationError(req, res, error);
+    }
+  });
+
+  app.get('/api/git/network-operations/:id', async (req, res) => {
+    const id = operationId(req);
+    if (!id) return res.status(400).json({ error: 'Invalid Git network operation ID', code: 'INVALID_REQUEST' });
+    if (!networkOperations) return res.status(501).json({ error: 'Git network operations are unavailable', code: 'RUNTIME_UNSUPPORTED' });
+    try {
+      return res.json(await networkOperations.get(id));
+    } catch (error) {
+      return sendNetworkOperationError(req, res, error);
+    }
+  });
+
+  app.post('/api/git/network-operations/:id/cancel', async (req, res) => {
+    const id = operationId(req);
+    if (!id || !hasEmptyBody(req)) return res.status(400).json({ error: 'Invalid Git network operation request', code: 'INVALID_REQUEST' });
+    if (!networkOperations) return res.status(501).json({ error: 'Git network operations are unavailable', code: 'RUNTIME_UNSUPPORTED' });
+    try {
+      return res.json(await networkOperations.cancel(id));
+    } catch (error) {
+      return sendNetworkOperationError(req, res, error);
+    }
+  });
+
+  let identitiesBackfilled = false;
   app.get('/api/git/identities', async (req, res) => {
     const { getProfiles } = await getGitLibraries();
     try {
+      if (!identitiesBackfilled && backfillIdentities instanceof Function) {
+        identitiesBackfilled = true;
+        await backfillIdentities();
+      }
       const profiles = getProfiles();
-      res.json(profiles);
-    } catch (error) {
-      console.error('Failed to list git identity profiles:', error);
+      res.set('Cache-Control', 'no-store');
+      res.json(profiles.map(toPublicGitIdentityProfile));
+    } catch {
+      console.error('Failed to list git identity profiles');
       res.status(500).json({ error: 'Failed to list git identity profiles' });
     }
   });
@@ -54,24 +375,22 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
   app.post('/api/git/identities', async (req, res) => {
     const { createProfile } = await getGitLibraries();
     try {
-      const profile = createProfile(req.body);
-      console.log(`Created git identity profile: ${profile.name} (${profile.id})`);
-      res.json(profile);
-    } catch (error) {
-      console.error('Failed to create git identity profile:', error);
-      res.status(400).json({ error: error.message || 'Failed to create git identity profile' });
+      const profile = createProfile(parsePublicGitIdentityProfile(req.body));
+      res.json(toPublicGitIdentityProfile(profile));
+    } catch {
+      console.error('Failed to create git identity profile');
+      res.status(400).json({ error: 'Failed to create git identity profile' });
     }
   });
 
   app.put('/api/git/identities/:id', async (req, res) => {
     const { updateProfile } = await getGitLibraries();
     try {
-      const profile = updateProfile(req.params.id, req.body);
-      console.log(`Updated git identity profile: ${profile.name} (${profile.id})`);
-      res.json(profile);
-    } catch (error) {
-      console.error('Failed to update git identity profile:', error);
-      res.status(400).json({ error: error.message || 'Failed to update git identity profile' });
+      const profile = updateProfile(req.params.id, parsePublicGitIdentityProfile(req.body, req.params.id));
+      res.json(toPublicGitIdentityProfile(profile));
+    } catch {
+      console.error('Failed to update git identity profile');
+      res.status(400).json({ error: 'Failed to update git identity profile' });
     }
   });
 
@@ -79,11 +398,10 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
     const { deleteProfile } = await getGitLibraries();
     try {
       deleteProfile(req.params.id);
-      console.log(`Deleted git identity profile: ${req.params.id}`);
       res.json({ success: true });
-    } catch (error) {
-      console.error('Failed to delete git identity profile:', error);
-      res.status(400).json({ error: error.message || 'Failed to delete git identity profile' });
+    } catch {
+      console.error('Failed to delete git identity profile');
+      res.status(400).json({ error: 'Failed to delete git identity profile' });
     }
   });
 
@@ -91,21 +409,10 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
     const { getGlobalIdentity } = await getGitLibraries();
     try {
       const identity = await getGlobalIdentity();
-      res.json(identity);
+      res.json(toGitIdentitySummary(identity));
     } catch (error) {
       console.error('Failed to get global git identity:', error);
       res.status(500).json({ error: 'Failed to get global git identity' });
-    }
-  });
-
-  app.get('/api/git/discover-credentials', async (req, res) => {
-    try {
-      const { discoverGitCredentials } = await import('./index.js');
-      const credentials = discoverGitCredentials();
-      res.json(credentials);
-    } catch (error) {
-      console.error('Failed to discover git credentials:', error);
-      res.status(500).json({ error: 'Failed to discover git credentials' });
     }
   });
 
@@ -139,7 +446,8 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       const remote = req.query.remote || 'origin';
 
       const url = await getRemoteUrl(directory, remote);
-      res.json({ url });
+      const displayUrl = url ? redactRemoteUrl(url) : '';
+      res.json({ url: displayUrl || null });
     } catch (error) {
       console.error('Failed to get remote url:', error);
       res.status(500).json({ error: 'Failed to get remote url' });
@@ -155,7 +463,7 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       }
 
       const identity = await getCurrentIdentity(directory);
-      res.json(identity);
+      res.json(toGitIdentitySummary(identity));
     } catch (error) {
       console.error('Failed to get current git identity:', error);
       res.status(500).json({ error: 'Failed to get current git identity' });
@@ -179,14 +487,16 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
   });
 
   app.post('/api/git/set-identity', async (req, res) => {
-    const { getProfile, setLocalIdentity, getGlobalIdentity } = await getGitLibraries();
+    const { getProfile, setLocalIdentity, clearLocalIdentity, getGlobalIdentity } = await getGitLibraries();
     try {
       const directory = req.query.directory;
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const { profileId } = req.body;
+      const body = req.body;
+      const profileId = isPlainObject(body) && Object.keys(body).length === 1 && isString(body.profileId)
+        ? body.profileId.trim() : '';
       if (!profileId) {
         return res.status(400).json({ error: 'profileId is required' });
       }
@@ -194,19 +504,22 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       let profile = null;
 
       if (profileId === 'global') {
+        // The system identity is the absence of an override, not a copy of it:
+        // the repository stops naming an author and reads the machine's, which
+        // is what keeps it following later changes there. A machine with no
+        // author of its own can still say "no override applies here", so this
+        // answers with the author it found, or with none.
+        await clearLocalIdentity(directory);
         const globalIdentity = await getGlobalIdentity();
-        if (!globalIdentity?.userName || !globalIdentity?.userEmail) {
-          return res.status(404).json({ error: 'Global identity is not configured' });
-        }
-        profile = {
-          id: 'global',
-          name: 'Global Identity',
-          userName: globalIdentity.userName,
-          userEmail: globalIdentity.userEmail,
-          sshKey: globalIdentity.sshCommand
-            ? globalIdentity.sshCommand.replace('ssh -i ', '')
-            : null,
-        };
+        const profile = globalIdentity?.userName && globalIdentity?.userEmail
+          ? toPublicGitIdentityProfile({
+            id: 'global',
+            name: globalIdentity.userName,
+            userName: globalIdentity.userName,
+            userEmail: globalIdentity.userEmail,
+          })
+          : null;
+        return res.json({ success: true, profile });
       } else {
         profile = getProfile(profileId);
         if (!profile) {
@@ -214,8 +527,9 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
         }
       }
 
-      await setLocalIdentity(directory, profile);
-      res.json({ success: true, profile });
+      const publicProfile = toPublicGitIdentityProfile(profile);
+      await setLocalIdentity(directory, publicProfile);
+      res.json({ success: true, profile: publicProfile });
     } catch (error) {
       console.error('Failed to set git identity:', error);
       res.status(500).json({ error: error.message || 'Failed to set git identity' });
@@ -573,35 +887,15 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
   });
 
   app.post('/api/git/pull', async (req, res) => {
-    const { pull } = await getGitLibraries();
-    try {
-      const directory = req.query.directory;
-      if (!directory) {
-        return res.status(400).json({ error: 'directory parameter is required' });
-      }
-
-      const result = await pull(directory, req.body);
-      res.json(result);
-    } catch (error) {
-      console.error('Failed to pull:', error);
-      res.status(500).json({ error: error.message || 'Failed to pull from remote' });
-    }
+    const directory = req.query.directory;
+    if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+    await rejectLegacyNetworkOperation(directory, res);
   });
 
   app.post('/api/git/push', async (req, res) => {
-    const { push } = await getGitLibraries();
-    try {
-      const directory = req.query.directory;
-      if (!directory) {
-        return res.status(400).json({ error: 'directory parameter is required' });
-      }
-
-      const result = await push(directory, req.body);
-      res.json(result);
-    } catch (error) {
-      console.error('Failed to push:', error);
-      res.status(500).json({ error: error.message || 'Failed to push to remote' });
-    }
+    const directory = req.query.directory;
+    if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+    await rejectLegacyNetworkOperation(directory, res);
   });
 
   app.get('/api/git/stashes', async (req, res) => {
@@ -677,19 +971,9 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
   });
 
   app.post('/api/git/fetch', async (req, res) => {
-    const { fetch: gitFetch } = await getGitLibraries();
-    try {
-      const directory = req.query.directory;
-      if (!directory) {
-        return res.status(400).json({ error: 'directory parameter is required' });
-      }
-
-      const result = await gitFetch(directory, req.body);
-      res.json(result);
-    } catch (error) {
-      console.error('Failed to fetch:', error);
-      res.status(500).json({ error: error.message || 'Failed to fetch from remote' });
-    }
+    const directory = req.query.directory;
+    if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+    await rejectLegacyNetworkOperation(directory, res);
   });
 
   app.get('/api/git/remotes', async (req, res) => {
@@ -701,7 +985,7 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       }
 
       const remotes = await getRemotes(directory);
-      res.json(remotes);
+      res.json(remotes.map(toGitRemoteSummary));
     } catch (error) {
       console.error('Failed to get remotes:', error);
       res.status(500).json({ error: error.message || 'Failed to get remotes' });
@@ -965,24 +1249,9 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
     }
   });
   app.delete('/api/git/remote-branches', async (req, res) => {
-    const { deleteRemoteBranch } = await getGitLibraries();
-    try {
-      const directory = req.query.directory;
-      if (!directory) {
-        return res.status(400).json({ error: 'directory parameter is required' });
-      }
-
-      const { branch, remote } = req.body;
-      if (!branch) {
-        return res.status(400).json({ error: 'branch is required' });
-      }
-
-      const result = await deleteRemoteBranch(directory, { branch, remote });
-      res.json(result);
-    } catch (error) {
-      console.error('Failed to delete remote branch:', error);
-      res.status(500).json({ error: error.message || 'Failed to delete remote branch' });
-    }
+    const directory = req.query.directory;
+    if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+    await rejectLegacyNetworkOperation(directory, res);
   });
 
   app.post('/api/git/checkout', async (req, res) => {
@@ -1094,6 +1363,19 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       }
 
       const worktrees = await getWorktrees(directory);
+      if (contributorProvenance?.readMany instanceof Function) {
+        const records = await contributorProvenance.readMany(worktrees.map((worktree) => worktree.path));
+        for (let index = 0; index < worktrees.length; index += 1) {
+          const worktree = worktrees[index];
+          const record = records[index];
+          if (record.provenance?.kind === 'contributor-fork') {
+            worktree.provenance = {
+              kind: 'contributor-fork', revision: record.revision,
+              trust: 'untrusted', push: 'destination-selection-required',
+            };
+          }
+        }
+      }
       // A repository always lists at least its primary worktree; an empty
       // list means "not a repository" and has no topology to track.
       if (worktrees.length > 0) {
@@ -1101,6 +1383,9 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       }
       res.json(worktrees);
     } catch (error) {
+      if (error?.code === 'CONTRIBUTOR_PROVENANCE_STORE_INVALID') {
+        return res.status(500).json({ error: 'Failed to verify contributor worktree provenance', code: 'UNKNOWN' });
+      }
       // A directory outside any repository still answers `[]` from getWorktrees.
       // Anything else is a real failure the client must not mistake for "no
       // worktrees", or it would drop the ones it already knows.
@@ -1121,7 +1406,16 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const result = await validateWorktreeCreate(directory, req.body || {});
+      if (hasClientContributorAuthority(req.body)) {
+        return res.status(400).json({ error: 'Invalid contributor worktree request', code: 'INVALID_CONTRIBUTOR_WORKTREE' });
+      }
+      let input = req.body || {};
+      if (input.changeRequestSource) {
+        if (!(resolveChangeRequestSource instanceof Function)) return res.status(501).json({ error: 'Contributor worktrees are unavailable', code: 'RUNTIME_UNSUPPORTED' });
+        const source = await resolveChangeRequestSource(input.changeRequestSource);
+        input = worktreeInputForSource(input, source);
+      }
+      const result = await validateWorktreeCreate(directory, input);
       res.json(result);
     } catch (error) {
       console.error('Failed to validate worktree creation:', error);
@@ -1130,22 +1424,105 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
   });
 
   app.post('/api/git/worktrees', async (req, res) => {
-    const { createWorktree } = await getGitLibraries();
-    if (typeof createWorktree !== 'function') {
+    const { createWorktree, validateWorktreeCreate } = await getGitLibraries();
+    if (typeof createWorktree !== 'function' || typeof validateWorktreeCreate !== 'function') {
       return res.status(501).json({ error: 'Worktree creation is not available' });
     }
-
     try {
       const directory = req.query.directory;
       if (!directory || typeof directory !== 'string') {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const created = await createWorktree(directory, req.body || {});
+      if (hasClientContributorAuthority(req.body)) {
+        return res.status(400).json({ error: 'Invalid contributor worktree request', code: 'INVALID_CONTRIBUTOR_WORKTREE' });
+      }
+      if (!(networkOperations?.hydrateBoundCheckout instanceof Function)
+        || !(worktreeBootstrapStore?.read instanceof Function)
+        || !(worktreeBootstrapStore?.write instanceof Function)) {
+        return res.status(501).json({ error: 'Worktree checkout bootstrap is not available' });
+      }
+      let input = req.body || {};
+      let source = null;
+      if (input.changeRequestSource) {
+        if (!(resolveChangeRequestSource instanceof Function)
+          || !(createHttpsCredentialReference instanceof Function)
+          || !(resolveSourceControlAccount instanceof Function)
+          || !(networkOperations?.transferContributorHead instanceof Function)) {
+          return res.status(501).json({ error: 'Contributor worktrees are unavailable', code: 'RUNTIME_UNSUPPORTED' });
+        }
+        source = await resolveChangeRequestSource(input.changeRequestSource);
+        const headBranch = source.headRef.slice('refs/heads/'.length);
+        const destinationRef = `refs/remotes/${source.requestedRemoteName}/${headBranch}`;
+        input = {
+          ...worktreeInputForSource(input, source),
+          existingBranch: destinationRef.slice('refs/'.length),
+          setUpstream: false,
+        };
+        const validation = await validateWorktreeCreate(directory, input);
+        if (!validation.ok && !validation.errors.every((entry) => entry.code === 'contributor_transfer_unavailable')) {
+          return res.status(409).json(validation);
+        }
+        const account = await resolveSourceControlAccount(source.context);
+        if (account?.credentialId !== source.context.accountId || account?.status !== 'valid'
+          || !Number.isSafeInteger(account?.credentialRevision) || account.credentialRevision < 1
+          || Object.prototype.toString.call(account?.providerUserId) !== '[object String]' || !account.providerUserId) {
+          throw Object.assign(new Error('Contributor credential is unavailable'), { code: 'AUTHENTICATION_REQUIRED', status: 409 });
+        }
+        const credentialId = createHttpsCredentialReference({
+          provider: source.context.provider,
+          instance: source.context.instance,
+          credentialId: account.credentialId,
+          credentialRevision: account.credentialRevision,
+          providerUserId: account.providerUserId,
+        });
+        const transfer = await networkOperations.transferContributorHead({
+          directory,
+          sourceRequest: req.body.changeRequestSource,
+          source,
+          destinationRef,
+          credentialId,
+        });
+        if (transfer.state !== 'succeeded') {
+          const status = transfer.error?.code === 'AUTHENTICATION_REQUIRED' ? 401 : 409;
+          return res.status(status).json({ error: transfer.error?.message || 'Contributor head transfer failed', code: transfer.error?.code || 'UNKNOWN' });
+        }
+        input.contributorTransferComplete = true;
+      }
+      const bindingRead = getSourceControlBinding instanceof Function
+        ? await getSourceControlBinding(directory)
+        : null;
+      const repositoryAuthority = bindingRead?.binding ? {
+        repositoryId: bindingRead.repository.repositoryId,
+        bindingRevision: bindingRead.revision,
+        configRevision: bindingRead.repository.configRevision,
+      } : null;
+      const hydrateCheckout = ({ directory: checkoutDirectory, parentRemoteName }) => networkOperations.hydrateBoundCheckout({
+        directory: checkoutDirectory,
+        parentRemoteName,
+        parentEndpoint: source?.endpoint,
+        repositoryAuthority,
+      });
+      const created = await createWorktree(directory, input, {
+        contributorProvenance,
+        contributorSource: source,
+        hydrateCheckout,
+        bootstrapStore: worktreeBootstrapStore,
+      });
       res.json(created);
     } catch (error) {
       console.error('Failed to create worktree:', error);
-      res.status(500).json({ error: error.message || 'Failed to create worktree' });
+      if (error?.code === 'CONTRIBUTOR_REMOTE_COLLISION') {
+        return res.status(409).json({
+          error: 'Contributor remote name is already used by a different endpoint',
+          code: 'CONTRIBUTOR_REMOTE_COLLISION',
+          remoteName: error.remoteName,
+        });
+      }
+      res.status(Number.isInteger(error?.status) ? error.status : 500).json({
+        error: error.message || 'Failed to create worktree',
+        code: error?.code,
+      });
     }
   });
 
@@ -1180,8 +1557,12 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       if (!directory || typeof directory !== 'string') {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
+      if (!(worktreeBootstrapStore?.read instanceof Function)
+        || !(worktreeBootstrapStore?.write instanceof Function)) {
+        return res.status(501).json({ error: 'Worktree bootstrap storage is not available' });
+      }
 
-      const status = await getWorktreeBootstrapStatus(directory);
+      const status = await getWorktreeBootstrapStatus(directory, { bootstrapStore: worktreeBootstrapStore });
       res.json(status);
     } catch (error) {
       console.error('Failed to get worktree bootstrap status:', error);
@@ -1205,10 +1586,15 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       if (!worktreeDirectory) {
         return res.status(400).json({ error: 'worktree directory is required' });
       }
+      if (!(worktreeBootstrapStore?.remove instanceof Function)) {
+        return res.status(501).json({ error: 'Worktree bootstrap storage is not available' });
+      }
 
       const result = await removeWorktree(directory, {
         directory: worktreeDirectory,
         deleteLocalBranch: req.body?.deleteLocalBranch === true,
+      }, {
+        bootstrapStore: worktreeBootstrapStore,
       });
       res.json({ success: Boolean(result) });
     } catch (error) {

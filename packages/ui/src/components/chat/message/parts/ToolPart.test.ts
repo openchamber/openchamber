@@ -5,6 +5,66 @@ import { readTaskTagSessionIdFromOutput } from './taskSessionIdParser';
 import { parseDiffToUnified, tryParseJsonOutput } from '../toolRenderers';
 import { getStreamingThrottleText } from '../../hooks/useStreamingTextThrottle';
 import { getToolDescriptionFallback } from './toolRenderUtils';
+import { getShellOperationBoundary } from './shellOperationBoundary';
+
+describe('getShellOperationBoundary', () => {
+    const crosses = (command: string) => getShellOperationBoundary('bash', 'agent', command) !== null;
+
+    test('classifies only shell tool aliases, and warns when the command is unavailable', () => {
+        for (const toolName of ['bash', 'shell', 'cmd', 'terminal', 'shell_command', ' BASH ']) {
+            expect(getShellOperationBoundary(toolName, 'agent')).toEqual({
+                initiator: 'agent',
+                verification: 'unverified',
+                boundary: 'outside-managed-boundary',
+            });
+        }
+
+        expect(getShellOperationBoundary('read', 'agent')).toBeNull();
+        expect(getShellOperationBoundary('git', 'agent')).toBeNull();
+    });
+
+    test('warns for commands that reach a Git host or rewrite Git transport', () => {
+        expect(crosses('git push origin main')).toBe(true);
+        expect(crosses('git fetch --all')).toBe(true);
+        expect(crosses('git clone https://example.com/repo.git')).toBe(true);
+        expect(crosses('git remote add fork https://example.com/fork.git')).toBe(true);
+        expect(crosses('git remote set-url origin https://example.com/other.git')).toBe(true);
+        expect(crosses('git config --local credential.helper store')).toBe(true);
+        expect(crosses('git submodule update --init')).toBe(true);
+        expect(crosses('gh auth login')).toBe(true);
+        expect(crosses('glab auth status')).toBe(true);
+        // A local read next to a transfer must not clear the whole command.
+        expect(crosses('git status && git push')).toBe(true);
+        expect(crosses('ls -la | git hash-object -w --stdin')).toBe(true);
+        expect(crosses('/usr/bin/git push')).toBe(true);
+        expect(crosses('GIT_TRACE=1 git push')).toBe(true);
+    });
+
+    test('stays quiet for local reads and for commands that are not about Git', () => {
+        expect(crosses('ls -la')).toBe(false);
+        expect(crosses('bun run type-check')).toBe(false);
+        expect(crosses('git status')).toBe(false);
+        expect(crosses('git log --oneline -5')).toBe(false);
+        expect(crosses('git diff HEAD~1')).toBe(false);
+        expect(crosses('git rev-parse --abbrev-ref HEAD')).toBe(false);
+        expect(crosses('git remote -v')).toBe(false);
+        expect(crosses('git branch --list')).toBe(false);
+        expect(crosses('git -C /repo status')).toBe(false);
+        expect(crosses('ls -la && git log --oneline -5')).toBe(false);
+    });
+
+    test('treats input it cannot read as crossing the boundary', () => {
+        expect(getShellOperationBoundary('bash', 'agent', null)).not.toBeNull();
+        expect(getShellOperationBoundary('bash', 'agent')).not.toBeNull();
+        // An empty string is a command this read and found nothing Git in.
+        expect(crosses('')).toBe(false);
+    });
+
+    test('preserves the authoritative user or agent initiator', () => {
+        expect(getShellOperationBoundary('bash', 'agent')?.initiator).toBe('agent');
+        expect(getShellOperationBoundary('bash', 'user')?.initiator).toBe('user');
+    });
+});
 
 describe('getToolOutput', () => {
     test('prefers state.output for completed tools', () => {

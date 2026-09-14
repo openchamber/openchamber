@@ -107,8 +107,8 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                                     requestAnimationFrame(openIssuePicker);
                                 }}
                             >
-                                <Icon name="github"/>
-                                {t('chat.chatInput.actions.linkGithubIssue')}
+                                <Icon name="git-repository"/>
+                                {t('session.issuePicker.title')}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                                 onSelect={() => {
@@ -116,7 +116,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                                 }}
                             >
                                 <Icon name="git-pull-request"/>
-                                {t('chat.chatInput.actions.linkGithubPr')}
+                                {t('session.changeRequestPicker.title')}
                             </DropdownMenuItem>
                             {showLinearPicker && openLinearPicker ? (
                                 <DropdownMenuItem

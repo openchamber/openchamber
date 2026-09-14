@@ -2,17 +2,22 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import { getSessionMetadata, type SessionMetadataRecord } from './sessionReviewMetadata';
 
 /**
- * Issues and pull requests a user has linked to a session.
+ * Source-control issues and change requests, and tracker issues, a user has
+ * linked to a session.
  *
  * Stored as a **snapshot**, not a reference: identifier or number, title, author
  * and avatar only. Enough to render a row and open the thing, and nothing more.
+ * The body, comments and state of an issue belong to its provider, and mirroring
+ * them here would mean owning their staleness. The stored title can drift from
+ * the real one; that is the accepted cost of a storage that never needs
+ * refreshing.
  *
  * Rides the same session-metadata channel as pinned messages
  * (`contextObligatoryMessages`), so it inherits their persistence and sync for
  * free.
  */
 
-export type LinkedGitHubIssue = {
+export type LinkedRepositoryIssue = {
   /** `owner/repo#number`, unique per session and stable across renames. */
   id: string;
   number: number;
@@ -36,12 +41,12 @@ export type LinkedLinearIssue = {
   linkedAt: number;
 };
 
-export type LinkedIssue = LinkedGitHubIssue | LinkedLinearIssue;
+export type LinkedIssue = LinkedRepositoryIssue | LinkedLinearIssue;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === 'object' && !Array.isArray(value));
 
-const isLinkedGitHubIssue = (value: unknown): value is LinkedGitHubIssue => (
+const isLinkedRepositoryIssue = (value: unknown): value is LinkedRepositoryIssue => (
   isRecord(value)
   && typeof value.id === 'string'
   && value.id.length > 0
@@ -68,7 +73,7 @@ const isLinkedLinearIssue = (value: unknown): value is LinkedLinearIssue => (
 );
 
 const isLinkedIssue = (value: unknown): value is LinkedIssue => (
-  isLinkedGitHubIssue(value) || isLinkedLinearIssue(value)
+  isLinkedRepositoryIssue(value) || isLinkedLinearIssue(value)
 );
 
 export const buildLinkedIssueId = (owner: string, repo: string, number: number): string =>
@@ -92,10 +97,22 @@ export const buildLinkedIssue = (input: {
   kind: 'issue' | 'pull';
   author?: { login?: string; avatarUrl?: string } | null;
   linkedAt: number;
-}): LinkedGitHubIssue => {
-  const match = /github\.com\/([^/]+)\/([^/]+)\//.exec(input.url);
-  const id = match
-    ? buildLinkedIssueId(match[1], match[2], input.number)
+}): LinkedRepositoryIssue => {
+  let project: { owner: string; name: string } | null = null;
+  try {
+    const segments = new URL(input.url).pathname.split('/').filter(Boolean);
+    const threadIndex = segments.findIndex((segment) => (
+      segment === 'issues' || segment === 'pull'
+    ));
+    const projectNameIndex = segments[threadIndex - 1] === '-' ? threadIndex - 2 : threadIndex - 1;
+    const owner = segments.slice(0, projectNameIndex).join('/');
+    const name = segments[projectNameIndex];
+    if (threadIndex > 1 && owner && name) project = { owner, name };
+  } catch {
+    // The URL itself remains a stable fallback id for malformed provider data.
+  }
+  const id = project
+    ? buildLinkedIssueId(project.owner, project.name, input.number)
     : `${input.url}#${input.number}`;
 
   return {

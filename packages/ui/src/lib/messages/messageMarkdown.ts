@@ -46,8 +46,8 @@ function formatContext(payload: ContextPartPayload, originalText: string, fieldL
       return quoteContext(`GitHub PR check, ${payload.label}:`, payload.output, payload.text, fieldLimit, '');
     case 'terminal':
       return quoteContext(`Terminal ${payload.terminalLabel}, lines ${payload.startLine}-${payload.endLine}:`, payload.output, '', fieldLimit, '');
-    case 'github-issue':
-    case 'github-pr':
+    case 'repository-issue':
+    case 'change-request':
     case 'linear-issue':
       return fieldLimit ? excerptMarkdown(originalText, fieldLimit) : originalText;
   }

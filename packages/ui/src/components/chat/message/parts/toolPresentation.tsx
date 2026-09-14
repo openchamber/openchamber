@@ -14,7 +14,7 @@ export const getToolIcon = (toolName: string) => {
     if (tool === 'read' || tool === 'view' || tool === 'file_read' || tool === 'cat') {
         return <Icon name="file-text" className={iconClass} />;
     }
-    if (tool === 'bash' || tool === 'shell' || tool === 'cmd' || tool === 'terminal') {
+    if (tool === 'bash' || tool === 'shell' || tool === 'cmd' || tool === 'terminal' || tool === 'shell_command') {
         return <Icon name="terminal-box" className={iconClass} />;
     }
     if (tool === 'list' || tool === 'ls' || tool === 'dir' || tool === 'list_files') {

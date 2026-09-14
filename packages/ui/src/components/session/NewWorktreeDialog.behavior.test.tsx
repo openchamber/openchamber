@@ -26,7 +26,7 @@ const uiState = { isMobile: false };
 const gitState = { fetchBranches: async () => undefined };
 
 const selectProjectState = <T,>(selector: (state: typeof projectStoreState) => T): T => selector(projectStoreState);
-const selectGitHubAuthState = <T,>(selector: (state: typeof githubAuthState) => T): T => selector(githubAuthState);
+const selectSourceControlAuthEntry = () => githubAuthState;
 const selectLinearAuthState = <T,>(selector: (state: typeof linearAuthState) => T): T => selector(linearAuthState);
 const selectUIState = <T,>(selector: (state: typeof uiState) => T): T => selector(uiState);
 const selectGitState = <T,>(selector: (state: typeof gitState) => T): T => selector(gitState);
@@ -80,8 +80,8 @@ mock.module('@/lib/utils', () => ({ cn: (...values: Array<string | false | null 
 mock.module('@/stores/useProjectsStore', () => ({
   useProjectsStore: selectProjectState,
 }));
-mock.module('@/stores/useGitHubAuthStore', () => ({
-  useGitHubAuthStore: selectGitHubAuthState,
+mock.module('@/stores/useSourceControlAuthStore', () => ({
+  useSourceControlAuthEntry: selectSourceControlAuthEntry,
 }));
 mock.module('@/stores/useLinearAuthStore', () => ({
   useLinearAuthStore: selectLinearAuthState,

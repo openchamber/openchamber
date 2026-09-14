@@ -21,6 +21,7 @@ vi.mock('../small-model/index.js', () => ({
 }));
 const {
   generateWalkthrough,
+  getWalkthrough,
   cancelWalkthroughGeneration,
   isGenerating,
   getGenerationStage,
@@ -40,6 +41,16 @@ const waitFor = async (predicate, { timeout = 2_000, interval = 5 } = {}) => {
 };
 
 const SOURCE = { kind: 'working-tree', scope: 'all' };
+const PR_SOURCE = { kind: 'pr', number: 22 };
+const PR_CONTEXT = {
+  provider: 'github',
+  instance: 'github.com',
+  accountId: 'github.com#7',
+  repositoryId: 'repo-1',
+  bindingRevision: 4,
+  directory: '/repo',
+  primaryRemote: 'upstream',
+};
 
 const PATCH = `diff --git a/src/a.ts b/src/a.ts
 --- a/src/a.ts
@@ -166,6 +177,58 @@ describe('generation jobs', () => {
 
     expect(second.fromCache).toBe(true);
     expect(generateSmallModelText).not.toHaveBeenCalled();
+  });
+
+  it('isolates PR jobs, stages, cancellation, and cache results by bound read context', async () => {
+    const secondContext = { ...PR_CONTEXT, accountId: 'github.com#8' };
+    const getPullRequestDiff = vi.fn(async () => ({ patch: PATCH, meta: {} }));
+    const releases = [];
+    generateSmallModelText.mockImplementation(({ signal }) => new Promise((resolve, reject) => {
+      releases.push(() => resolve({ text: RESPONSE }));
+      signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+    }));
+
+    const first = generateWalkthrough(
+      { directory: '/repo', source: PR_SOURCE, readContext: PR_CONTEXT },
+      { getPullRequestDiff },
+    );
+    await waitFor(() => getGenerationStage('/repo', 'pr:22', PR_CONTEXT) === 'asking');
+    const second = generateWalkthrough(
+      { directory: '/repo', source: PR_SOURCE, readContext: secondContext },
+      { getPullRequestDiff },
+    );
+    await waitFor(() => generateSmallModelText.mock.calls.length === 2);
+
+    expect(getGenerationStage('/repo', 'pr:22', secondContext)).toBe('asking');
+    expect(await cancelWalkthroughGeneration({ directory: '/repo', source: PR_SOURCE, readContext: PR_CONTEXT }))
+      .toMatchObject({ cancelled: true, readContext: PR_CONTEXT });
+    await expect(first).rejects.toThrow('aborted');
+    expect(getGenerationStage('/repo', 'pr:22', secondContext)).toBe('asking');
+
+    releases[1]();
+    const result = await second;
+    expect(result.readContext).toEqual(secondContext);
+
+    generateSmallModelText.mockResolvedValue({ text: RESPONSE });
+    generateSmallModelText.mockClear();
+    const cached = await generateWalkthrough(
+      { directory: '/repo', source: PR_SOURCE, readContext: secondContext },
+      { getPullRequestDiff },
+    );
+    expect(cached).toMatchObject({ fromCache: true, readContext: secondContext });
+    expect(generateSmallModelText).not.toHaveBeenCalled();
+
+    const read = await getWalkthrough(
+      { directory: '/repo', source: PR_SOURCE, readContext: secondContext },
+      { getPullRequestDiff },
+    );
+    expect(read).toMatchObject({ walkthrough: { title: 'Change' }, readContext: secondContext });
+
+    await generateWalkthrough(
+      { directory: '/repo', source: PR_SOURCE, readContext: PR_CONTEXT },
+      { getPullRequestDiff },
+    );
+    expect(generateSmallModelText).toHaveBeenCalledTimes(1);
   });
 });
 

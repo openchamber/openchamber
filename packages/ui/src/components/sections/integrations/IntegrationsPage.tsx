@@ -5,13 +5,16 @@ import { useI18n } from '@/lib/i18n';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { GitHubIntegration } from './GitHubIntegration';
+import { GitLabSettings } from '@/components/sections/openchamber/GitLabSettings';
 import { LinearSettings } from './LinearSettings';
 
 export const IntegrationsPage: React.FC = () => {
   const { t } = useI18n();
   // GitHub sign-in is an OpenChamber server feature; the VS Code extension
   // uses the editor's own GitHub session instead.
+  // Hosting providers are OpenChamber server features; VS Code uses its own Git integration.
   const hasGitHub = !isVSCodeRuntime();
+  const hasGitLab = !isVSCodeRuntime();
   const hasLinear = Boolean(getRegisteredRuntimeAPIs()?.linear);
 
   return (
@@ -28,6 +31,7 @@ export const IntegrationsPage: React.FC = () => {
         contentClassName="space-y-3"
       >
         {hasGitHub ? <GitHubIntegration /> : null}
+        {hasGitLab ? <GitLabSettings /> : null}
         {hasLinear ? <LinearSettings /> : null}
       </SettingsSection>
     </SettingsPageLayout>

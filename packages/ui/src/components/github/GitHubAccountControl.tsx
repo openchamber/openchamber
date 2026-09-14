@@ -9,36 +9,16 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { GitHubAuthStatus } from '@/lib/api/types';
+import type { SourceControlAuthAccount, SourceControlAuthStatus } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
 import { cn } from '@/lib/utils';
-import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { getManagedCredentialSourceLabelKey, GITHUB_SOURCE_CONTROL_IDENTITY } from '@/lib/source-control/identity';
+import { useSourceControlAuthEntry, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 
-type GitHubAccount = NonNullable<GitHubAuthStatus['accounts']>[number];
+type GitHubAccount = SourceControlAuthAccount;
 
 const AVATAR_CLASS = 'flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border border-border/60 bg-muted/80';
 
-const activateAccount = async (
-  github: ReturnType<typeof useRuntimeAPIs>['github'],
-  accountId: string,
-): Promise<GitHubAuthStatus> => {
-  if (github) {
-    return github.authActivate(accountId);
-  }
-  const response = await runtimeFetch('/api/github/auth/activate', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ accountId }),
-  });
-  // SAFETY: the route is ours and answers the auth status shape (plus an
-  // `error` string on failure) on every response; a non-ok status throws below.
-  const body = (await response.json().catch(() => null)) as (GitHubAuthStatus & { error?: string }) | null;
-  if (!response.ok || !body) {
-    throw new Error(body?.error || response.statusText);
-  }
-  return body;
-};
 
 /**
  * The connected GitHub account: an avatar, and a switcher when more than one
@@ -47,30 +27,31 @@ const activateAccount = async (
  */
 export const GitHubAccountControl: React.FC<{ className?: string }> = ({ className }) => {
   const { t } = useI18n();
-  const { github } = useRuntimeAPIs();
-  const status = useGitHubAuthStore((state) => state.status);
-  const setStatus = useGitHubAuthStore((state) => state.setStatus);
+  const { sourceControl } = useRuntimeAPIs();
+  const entry = useSourceControlAuthEntry(GITHUB_SOURCE_CONTROL_IDENTITY);
+  const status: SourceControlAuthStatus | null = entry?.status ?? null;
+  const setStatus = useSourceControlAuthStore((state) => state.setStatus);
   const [isSwitching, setIsSwitching] = React.useState(false);
 
   const switchAccount = React.useCallback(async (accountId: string) => {
     if (!accountId || isSwitching) return;
     setIsSwitching(true);
     try {
-      setStatus(await activateAccount(github, accountId));
+      setStatus(GITHUB_SOURCE_CONTROL_IDENTITY, await sourceControl.authActivate(GITHUB_SOURCE_CONTROL_IDENTITY, accountId));
     } catch (error) {
       console.error('Failed to switch GitHub account:', error);
     } finally {
       setIsSwitching(false);
     }
-  }, [github, isSwitching, setStatus]);
+  }, [isSwitching, setStatus, sourceControl]);
 
-  if (!status?.connected) {
+  if (status?.status !== 'connected') {
     return null;
   }
 
-  const login = status.user?.login ?? null;
-  const avatarUrl = status.user?.avatarUrl ?? null;
-  const accounts: GitHubAccount[] = status.accounts ?? [];
+  const login = status.user.username || null;
+  const avatarUrl = status.user.avatarUrl ?? null;
+  const accounts: GitHubAccount[] = status.accounts;
   const title = login ? t('header.github.connectedWithLogin', { login }) : t('header.github.connected');
   const avatar = avatarUrl ? (
     <img
@@ -112,9 +93,7 @@ export const GitHubAccountControl: React.FC<{ className?: string }> = ({ classNa
         {accounts.map((account) => {
           const accountUser = account.user;
           const isCurrent = Boolean(account.current);
-          const sourceLabel = account.source === 'gh-cli'
-            ? t('header.github.accountSource.cli')
-            : t('header.github.accountSource.oauth');
+          const sourceLabel = t(getManagedCredentialSourceLabelKey(account.source ?? 'oauth'));
           return (
             <DropdownMenuItem
               key={account.id}
@@ -129,7 +108,7 @@ export const GitHubAccountControl: React.FC<{ className?: string }> = ({ classNa
               {accountUser?.avatarUrl ? (
                 <img
                   src={accountUser.avatarUrl}
-                  alt={accountUser.login ? t('header.github.avatarWithLogin', { login: accountUser.login }) : t('header.github.avatar')}
+                  alt={accountUser.username ? t('header.github.avatarWithLogin', { login: accountUser.username }) : t('header.github.avatar')}
                   className="h-6 w-6 rounded-full border border-border/60 bg-muted object-cover"
                   loading="lazy"
                   referrerPolicy="no-referrer"
@@ -141,11 +120,11 @@ export const GitHubAccountControl: React.FC<{ className?: string }> = ({ classNa
               )}
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate typography-ui-label text-foreground">
-                  {accountUser?.name?.trim() || accountUser?.login || 'GitHub'}
+                  {accountUser?.name?.trim() || accountUser.username || 'GitHub'}
                 </span>
-                {accountUser?.login ? (
+                {accountUser.username ? (
                   <span className="truncate typography-micro text-muted-foreground">
-                    <span className="font-mono">{accountUser.login}</span>
+                    <span className="font-mono">{accountUser.username}</span>
                     <span className="mx-1 opacity-50">·</span>
                     <span>{sourceLabel}</span>
                   </span>

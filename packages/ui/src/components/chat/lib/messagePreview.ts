@@ -53,9 +53,9 @@ const contextSummary = (payload: ContextPartPayload, t: Translate): string => {
         }
         case 'chat-quote':
             return t('chat.message.context.chatQuote');
-        case 'github-issue':
+        case 'repository-issue':
             return `#${payload.number} ${payload.title}`;
-        case 'github-pr':
+        case 'change-request':
             return `#${payload.number} ${payload.title}`;
         case 'linear-issue':
             return `${payload.identifier} ${payload.title}`;
@@ -78,8 +78,8 @@ const contextBody = (payload: ContextPartPayload): string => {
         case 'file-quote':
         case 'chat-quote':
             return payload.quote;
-        case 'github-issue':
-        case 'github-pr':
+        case 'repository-issue':
+        case 'change-request':
         case 'linear-issue':
             return '';
     }

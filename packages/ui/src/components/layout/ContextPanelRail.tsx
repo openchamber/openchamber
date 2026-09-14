@@ -35,7 +35,8 @@ import {
 import { cn } from '@/lib/utils';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitStatus } from '@/stores/useGitStore';
-import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { useSourceControlAuthEntry } from '@/stores/useSourceControlAuthStore';
+import { GITHUB_SOURCE_CONTROL_IDENTITY } from '@/lib/source-control/identity';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { ContextRailSurfacesDialog } from './ContextRailSurfacesDialog';
@@ -172,8 +173,8 @@ export const ContextPanelRail: React.FC = () => {
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
   const linearAuthChecked = useLinearAuthStore((state) => state.hasChecked);
   const linearConnected = useLinearAuthStore((state) => state.status?.connected === true);
-  const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
-  const githubConnected = useGitHubAuthStore((state) => state.status?.connected === true);
+  const githubAuthChecked = (useSourceControlAuthEntry(GITHUB_SOURCE_CONTROL_IDENTITY)?.hasChecked ?? false);
+  const githubConnected = (useSourceControlAuthEntry(GITHUB_SOURCE_CONTROL_IDENTITY)?.status?.status === 'connected');
   const { screenWidth } = useDeviceInfo();
   const gitStatus = useGitStatus(directoryKey || null);
 

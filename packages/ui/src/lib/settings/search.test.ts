@@ -75,4 +75,45 @@ describe('settings search', () => {
     expect(results.some((result) => result.id === 'integrations.linear.add-workspace')).toBe(false);
     expect(results.some((result) => result.id === 'integrations.linear.mapping')).toBe(false);
   });
+
+  test('keeps repository controls out of Settings search and indexes account connection controls', () => {
+    const results = buildSettingsSearchResults({
+      query: 'source control account',
+      runtimeCtx,
+      t,
+      getPageTitle: (page) => page,
+    });
+
+    expect(results.some((result) => result.id === 'git.source-control-account')).toBe(false);
+    expect(results.some((result) => result.id.includes('github.com#'))).toBe(false);
+
+    const connectResults = buildSettingsSearchResults({
+      query: 'connect account',
+      runtimeCtx,
+      t,
+      getPageTitle: (page) => page,
+    });
+    expect(connectResults.some((result) => result.id === 'git.github-connect')).toBe(true);
+    expect(connectResults.some((result) => result.id === 'git.gitlab-connect')).toBe(true);
+  });
+
+  test('keeps repository transport and provider controls out of VS Code Settings search', () => {
+    const vscodeCtx = { ...runtimeCtx, isVSCode: true, isWeb: false };
+    const transportResults = buildSettingsSearchResults({
+      query: 'transport',
+      runtimeCtx: vscodeCtx,
+      t,
+      getPageTitle: (page) => page,
+    });
+    const accountResults = buildSettingsSearchResults({
+      query: 'account',
+      runtimeCtx: vscodeCtx,
+      t,
+      getPageTitle: (page) => page,
+    });
+
+    expect(transportResults.some((result) => result.id === 'git.repository-transport')).toBe(false);
+    expect(accountResults.some((result) => result.id === 'git.github-account')).toBe(false);
+    expect(accountResults.some((result) => result.id === 'git.gitlab-account')).toBe(false);
+  });
 });

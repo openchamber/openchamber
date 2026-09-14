@@ -31,7 +31,8 @@ import { readEmbeddedThemeSearchParams } from '@/contexts/theme-embedded-bootstr
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { useSourceControlAuthStore, getSourceControlAuthKey } from '@/stores/useSourceControlAuthStore';
+import { GITHUB_SOURCE_CONTROL_IDENTITY } from '@/lib/source-control/identity';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
@@ -517,7 +518,7 @@ export const useKeyboardShortcuts = () => {
             screenWidth: window.innerWidth,
             tabs: panel?.tabs ?? [],
             linearConnected: useLinearAuthStore.getState().status?.connected === true,
-            githubConnected: useGitHubAuthStore.getState().status?.connected === true,
+            githubConnected: useSourceControlAuthStore.getState().entries[getSourceControlAuthKey(GITHUB_SOURCE_CONTROL_IDENTITY)]?.status?.status === 'connected',
           });
           const target = visibleSurfaces[switchSurfaceDigit - 1];
           if (target) {

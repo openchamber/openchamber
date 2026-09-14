@@ -1,12 +1,15 @@
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { hasSameSourceControlReadContext } from '@/lib/source-control/identity';
+import type { SourceControlReadContext } from '@/lib/source-control/types';
 import {
   WalkthroughError,
   type WalkthroughResult,
-  type WalkthroughSource,
   type WalkthroughStage,
+  type WalkthroughTarget,
 } from './types';
 
 const BASE = '/api/walkthrough';
+const WALKTHROUGH_STAGES: readonly WalkthroughStage[] = ['collecting', 'asking', 'retrying', 'assembling'];
 
 interface ErrorPayload {
   error?: unknown;
@@ -60,47 +63,132 @@ const readJson = async <T>(response: Response): Promise<T> => {
   }
 };
 
+const isPullRequestTarget = (
+  target: WalkthroughTarget,
+): target is Extract<WalkthroughTarget, { source: { kind: 'pr' } }> => target.source.kind === 'pr';
+
+const hasMatchingContext = (
+  result: WalkthroughResult,
+  target: Extract<WalkthroughTarget, { source: { kind: 'pr' } }>,
+): boolean => {
+  const context = result.source?.kind === 'pr' ? result.readContext : undefined;
+  return result.source?.kind === 'pr'
+    && result.source.number === target.source.number
+    && context !== undefined
+    && hasSameSourceControlReadContext(context, target.context);
+};
+
+const readWalkthroughResult = async (
+  response: Response,
+  target: WalkthroughTarget,
+): Promise<WalkthroughResult> => {
+  const result = await readJson<WalkthroughResult>(response);
+  if (isPullRequestTarget(target) && !hasMatchingContext(result, target)) {
+    throw new WalkthroughError('The server returned a walkthrough for a different source-control context');
+  }
+  return result;
+};
+
+interface WalkthroughQuery {
+  [key: string]: string | undefined;
+  directory: string;
+  source: string;
+  provider?: string;
+  instance?: string;
+  accountId?: string;
+  repositoryId?: string;
+  bindingRevision?: string;
+  primaryRemote?: string;
+  model?: string;
+  language?: string;
+}
+
+interface WalkthroughReadContextBody {
+  provider?: SourceControlReadContext['provider'];
+  instance?: string;
+  accountId?: string;
+  repositoryId?: string;
+  bindingRevision?: number;
+  primaryRemote?: string;
+}
+
+interface GenerateWalkthroughBody extends WalkthroughReadContextBody {
+  directory: string;
+  source: WalkthroughTarget['source'];
+  force: boolean;
+  model?: string;
+  language?: string;
+}
+
+interface CancelWalkthroughBody extends WalkthroughReadContextBody {
+  directory: string;
+  source: WalkthroughTarget['source'];
+}
+
+interface WalkthroughProgressResult {
+  stage?: unknown;
+  readContext?: SourceControlReadContext;
+}
+
+const readContextFields = (context: Readonly<SourceControlReadContext>) => ({
+  provider: context.provider,
+  instance: context.instance,
+  accountId: context.accountId,
+  repositoryId: context.repositoryId,
+  bindingRevision: context.bindingRevision,
+  primaryRemote: context.primaryRemote,
+});
+
+export const buildTargetQuery = (directory: string, target: WalkthroughTarget): WalkthroughQuery => {
+  const query: WalkthroughQuery = { directory, source: JSON.stringify(target.source) };
+  if (isPullRequestTarget(target)) {
+    const context = readContextFields(target.context);
+    Object.assign(query, context, { bindingRevision: String(context.bindingRevision) });
+  }
+  return query;
+};
+
 export async function fetchWalkthrough(
   directory: string,
-  source: WalkthroughSource,
+  target: WalkthroughTarget,
   options: { model?: string; language?: string; signal?: AbortSignal } = {}
 ): Promise<WalkthroughResult> {
+  const query = buildTargetQuery(directory, target);
+  if (options.model) query.model = options.model;
+  if (options.language) query.language = options.language;
   const response = await runtimeFetch(BASE, {
-    query: {
-      directory,
-      source: JSON.stringify(source),
-      ...(options.model ? { model: options.model } : {}),
-      ...(options.language ? { language: options.language } : {}),
-    },
+    query,
     signal: options.signal,
   });
   if (!response.ok) {
     return throwFromResponse(response, 'Failed to load walkthrough');
   }
-  return readJson<WalkthroughResult>(response);
+  return readWalkthroughResult(response, target);
 }
 
 export async function generateWalkthrough(
   directory: string,
-  source: WalkthroughSource,
+  target: WalkthroughTarget,
   options: { force?: boolean; model?: string; language?: string; signal?: AbortSignal } = {}
 ): Promise<WalkthroughResult> {
+  const body: GenerateWalkthroughBody = {
+    directory,
+    source: target.source,
+    force: options.force === true,
+  };
+  if (isPullRequestTarget(target)) Object.assign(body, readContextFields(target.context));
+  if (options.model) body.model = options.model;
+  if (options.language) body.language = options.language;
   const response = await runtimeFetch(`${BASE}/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      directory,
-      source,
-      force: options.force === true,
-      ...(options.model ? { model: options.model } : {}),
-      ...(options.language ? { language: options.language } : {}),
-    }),
+    body: JSON.stringify(body),
     signal: options.signal,
   });
   if (!response.ok) {
     return throwFromResponse(response, 'Failed to generate walkthrough');
   }
-  return readJson<WalkthroughResult>(response);
+  return readWalkthroughResult(response, target);
 }
 
 /**
@@ -109,15 +197,24 @@ export async function generateWalkthrough(
  */
 export async function cancelWalkthroughGeneration(
   directory: string,
-  source: WalkthroughSource
+  target: WalkthroughTarget
 ): Promise<void> {
+  const body: CancelWalkthroughBody = { directory, source: target.source };
+  if (isPullRequestTarget(target)) Object.assign(body, readContextFields(target.context));
   const response = await runtimeFetch(`${BASE}/cancel`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ directory, source }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     await throwFromResponse(response, 'Failed to cancel walkthrough generation');
+  }
+  const result = await readJson<{ readContext?: SourceControlReadContext }>(response);
+  if (isPullRequestTarget(target) && (
+    result.readContext === undefined
+    || !hasSameSourceControlReadContext(result.readContext, target.context)
+  )) {
+    throw new WalkthroughError('The server returned a cancellation result for a different source-control context');
   }
 }
 
@@ -127,14 +224,20 @@ export async function cancelWalkthroughGeneration(
  */
 export async function fetchWalkthroughStage(
   directory: string,
-  source: WalkthroughSource,
+  target: WalkthroughTarget,
   signal?: AbortSignal
 ): Promise<WalkthroughStage | null> {
   const response = await runtimeFetch(`${BASE}/progress`, {
-    query: { directory, source: JSON.stringify(source) },
+    query: buildTargetQuery(directory, target),
     signal,
   });
   if (!response.ok) return null;
-  const payload = (await response.json().catch(() => null)) as { stage?: unknown } | null;
-  return typeof payload?.stage === 'string' ? (payload.stage as WalkthroughStage) : null;
+  const payload = await readJson<WalkthroughProgressResult>(response);
+  if (isPullRequestTarget(target) && (
+    payload?.readContext === undefined
+    || !hasSameSourceControlReadContext(payload.readContext, target.context)
+  )) {
+    throw new WalkthroughError('The server returned progress for a different source-control context');
+  }
+  return WALKTHROUGH_STAGES.find((stage) => stage === payload.stage) ?? null;
 }

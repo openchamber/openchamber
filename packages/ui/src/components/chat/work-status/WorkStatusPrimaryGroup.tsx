@@ -5,7 +5,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
 import { useWorktreeBootstrapPending } from '@/hooks/useWorktreeBootstrapPending';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
-import { useFreshestPrVisualSummaryForBranch } from '@/stores/useGitHubPrStatusStore';
+import { useFreshestSourceControlVisualSummaryForBranch } from '@/stores/useGitHubPrStatusStore';
 import { useSessionMessages } from '@/sync/sync-context';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -157,7 +157,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   // Read-only: PR watching is owned by the background tracker. Starting a watch
   // here would multiply GitHub requests per open session, which is exactly the
   // fan-out the PR-status concurrency gate exists to prevent.
-  const prSummary = useFreshestPrVisualSummaryForBranch(gitDirectory, branch);
+  const prSummary = useFreshestSourceControlVisualSummaryForBranch(gitDirectory, branch);
 
   // `getCurrentModel` is an imperative getter: its reference never changes, so
   // calling it in render subscribes to nothing. Subscribe to the selected model

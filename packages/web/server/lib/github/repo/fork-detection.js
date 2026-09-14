@@ -1,8 +1,18 @@
 import { resolveGitHubRepoFromDirectory } from './index.js';
+import { getOctokitCacheIdentity } from '../octokit.js';
 
 const REPO_METADATA_TTL_MS = 5 * 60_000;
 const REPO_METADATA_CACHE_MAX_ENTRIES = 200;
 const repoMetadataCache = new Map();
+
+const isPlainObject = (value) => Object.prototype.toString.call(value) === '[object Object]';
+const isProviderString = (value) => Object.prototype.toString.call(value) === '[object String]';
+
+const isValidRelatedRepo = (value) => isPlainObject(value)
+  && isProviderString(value.owner?.login)
+  && value.owner.login.trim().length > 0
+  && isProviderString(value.name)
+  && value.name.trim().length > 0;
 
 const setRepoMetadataCache = (repoKey, data) => {
   if (repoMetadataCache.size >= REPO_METADATA_CACHE_MAX_ENTRIES && !repoMetadataCache.has(repoKey)) {
@@ -21,11 +31,13 @@ const normalizeRepoKey = (owner, repo) => {
   return `${o}/${r}`;
 };
 
-const getRepoMetadata = async (octokit, repo) => {
-  const repoKey = normalizeRepoKey(repo?.owner, repo?.repo);
-  if (!repoKey) return null;
+const getRepoMetadata = async (octokit, repo, options = {}) => {
+  const identity = getOctokitCacheIdentity(octokit);
+  const normalizedRepoKey = normalizeRepoKey(repo?.owner, repo?.repo);
+  const repoKey = identity && normalizedRepoKey ? `${normalizedRepoKey}::${identity}` : '';
+  if (!normalizedRepoKey) return null;
 
-  const cached = repoMetadataCache.get(repoKey);
+  const cached = repoKey ? repoMetadataCache.get(repoKey) : null;
   if (cached && Date.now() - cached.fetchedAt < REPO_METADATA_TTL_MS) {
     return cached.data;
   }
@@ -36,11 +48,11 @@ const getRepoMetadata = async (octokit, repo) => {
       repo: repo.repo,
     });
     const data = response?.data ?? null;
-    setRepoMetadataCache(repoKey, data);
+    if (repoKey) setRepoMetadataCache(repoKey, data);
     return data;
   } catch (error) {
     if (error?.status === 403 || error?.status === 404) {
-      setRepoMetadataCache(repoKey, null);
+      if (options.strictErrors) throw error;
       return null;
     }
     throw error;
@@ -54,14 +66,29 @@ const getRepoMetadata = async (octokit, repo) => {
  * @param {import('@octokit/rest').Octokit} octokit
  * @param {string} directory
  * @param {string} [remoteName='origin']
+ * @param {{ strictErrors?: boolean }} [options]
  * @returns {Promise<Array<{ owner: string, repo: string, url: string, source: string }> | null>}
  *   Array of repos to query (origin first, then upstream), or null if not a fork.
  */
-export async function resolveRepoNetwork(octokit, directory, remoteName = 'origin') {
-  const { repo } = await resolveGitHubRepoFromDirectory(directory, remoteName).catch(() => ({ repo: null }));
+export async function resolveRepoNetwork(octokit, directory, remoteName = 'origin', options = {}) {
+  const resolved = resolveGitHubRepoFromDirectory(directory, remoteName);
+  const { repo } = options.strictErrors ? await resolved : await resolved.catch(() => ({ repo: null }));
   if (!repo) return null;
 
-  const metadata = await getRepoMetadata(octokit, repo);
+  const metadata = await getRepoMetadata(octokit, repo, options);
+  if (options.strictErrors) {
+    if (!isPlainObject(metadata) || (metadata.fork !== true && metadata.fork !== false)) {
+      throw new Error('GitHub returned invalid repository metadata');
+    }
+    for (const field of ['parent', 'source']) {
+      if (metadata[field] != null && !isValidRelatedRepo(metadata[field])) {
+        throw new Error(`GitHub returned invalid repository ${field} metadata`);
+      }
+    }
+    if (metadata.fork && !isValidRelatedRepo(metadata.parent) && !isValidRelatedRepo(metadata.source)) {
+      throw new Error('GitHub returned invalid fork metadata');
+    }
+  }
   if (!metadata) return [{ ...repo, source: 'origin' }];
 
   const result = [{ ...repo, source: 'origin' }];

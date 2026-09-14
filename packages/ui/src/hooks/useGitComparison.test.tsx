@@ -3,6 +3,11 @@ import { expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import type { GitComparisonSource } from './useGitComparison';
 
+const PR_CONTEXT = {
+  provider: 'github', instance: 'github.com', accountId: 'github.com#7', repositoryId: 'repo-1',
+  bindingRevision: 4, directory: '/repo', primaryRemote: 'origin',
+} as const;
+
 test('comparison reads preserve scope, report failures, retry, and stop while hidden', async () => {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
@@ -45,7 +50,7 @@ test('comparison reads preserve scope, report failures, retry, and stop while hi
   document.body.append(container);
   const root = createRoot(container);
   function Harness() {
-    captured.current = useGitComparison(directory, source, enabled, revision);
+    captured.current = useGitComparison(directory, source, enabled, revision, PR_CONTEXT);
     return null;
   }
   const current = () => {
@@ -131,6 +136,9 @@ test('comparison reads preserve scope, report failures, retry, and stop while hi
     await render();
     expect(requests[9].url.pathname).toBe('/api/walkthrough/pr-diff');
     expect(JSON.parse(requests[9].url.searchParams.get('source') ?? '')).toEqual(source);
+    // The published diff is read through the bound context, never an ambient account.
+    expect(requests[9].url.searchParams.get('accountId')).toBe(PR_CONTEXT.accountId);
+    expect(requests[9].url.searchParams.get('repositoryId')).toBe(PR_CONTEXT.repositoryId);
     const publishedPatch = 'diff --git a/pr.ts b/pr.ts\n--- a/pr.ts\n+++ b/pr.ts\n@@ -1 +1 @@\n-old\n+published\n';
     await finish(9, new Response(publishedPatch, { headers: { 'content-type': 'text/plain' } }));
     expect(current().files?.map((file) => file.path)).toEqual(['pr.ts']);

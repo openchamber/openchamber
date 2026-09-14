@@ -10,15 +10,18 @@ import {
 import { Icon } from "@/components/icon/Icon";
 import type { GitRemote } from '@/lib/gitApi';
 import { useI18n } from '@/lib/i18n';
-import { cn } from '@/lib/utils';
 
-type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;
+type SyncAction = 'fetch' | 'sync' | 'publish' | null;
 
 interface SyncActionsProps {
   syncAction: SyncAction;
   remotes: GitRemote[];
   onFetch: (remote: GitRemote) => void;
   onSync: (remote: GitRemote) => void;
+  onPublish: () => void;
+  onChooseSyncTargets: () => void;
+  currentBranch?: string;
+  hasTracking?: boolean;
   onRemoveRemote?: (remote: GitRemote) => void;
   disabled: boolean;
   removingRemoteName?: string | null;
@@ -34,6 +37,10 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
   remotes = [],
   onFetch,
   onSync,
+  onPublish,
+  onChooseSyncTargets,
+  currentBranch,
+  hasTracking = false,
   onRemoveRemote,
   disabled,
   removingRemoteName = null,
@@ -45,17 +52,21 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
   const { t } = useI18n();
   const skipRemoteSelectRef = React.useRef(false);
   const isRemovingRemote = Boolean(removingRemoteName);
-  const trackingRemote = remotes.find((remote) => remote.name === trackingRemoteName) ?? remotes[0];
+  const trackingRemote = trackingRemoteName
+    ? remotes.find((remote) => remote.name === trackingRemoteName)
+    : undefined;
   const blocksRebaseSync = behindCount > 0 && hasUncommittedChanges;
-  const isPrimaryDisabled = disabled || syncAction !== null || isRemovingRemote || !trackingRemote || blocksRebaseSync;
+  const detached = !currentBranch || currentBranch === 'HEAD';
+  const publish = !hasTracking;
+  const isPrimaryDisabled = disabled || syncAction !== null || isRemovingRemote || detached || (!publish && blocksRebaseSync);
   const isDropdownDisabled = disabled || syncAction !== null || isRemovingRemote || remotes.length === 0;
   const hasKnownSyncWork = aheadCount > 0 || behindCount > 0;
   const primaryLabel = [
-    t('gitView.sync.sync'),
+    t(publish ? 'gitView.publish.title' : 'gitView.sync.sync'),
     behindCount > 0 ? `↓${behindCount}` : null,
     aheadCount > 0 ? `↑${aheadCount}` : null,
   ].filter(Boolean).join(' ');
-  const tooltipLabel = blocksRebaseSync
+  const tooltipLabel = detached ? t('gitView.publish.detached') : publish ? t('gitView.publish.title') : blocksRebaseSync
     ? t('gitView.sync.commitOrStashTooltip')
     : trackingRemote
     ? hasKnownSyncWork
@@ -64,7 +75,9 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
     : t('gitView.sync.noRemoteTooltip');
 
   const handleSync = () => {
+    if (publish) { onPublish(); return; }
     if (!trackingRemote) {
+      onChooseSyncTargets();
       return;
     }
     onSync(trackingRemote);
@@ -74,24 +87,23 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
     <div className="inline-flex items-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] border border-border/60 bg-[var(--surface-elevated)] overflow-hidden">
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="inline-flex" tabIndex={blocksRebaseSync ? 0 : undefined}>
-            <button
+          <span className="inline-flex" tabIndex={blocksRebaseSync || detached ? 0 : undefined}>
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={handleSync}
               disabled={isPrimaryDisabled}
-              className={cn(
-                'inline-flex h-7 items-center gap-1.5 px-2 typography-ui-label font-medium text-foreground',
-                'transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50'
-              )}
-              aria-label={t('gitView.sync.syncChanges')}
+              className="rounded-none"
+              aria-label={t(publish ? 'gitView.publish.title' : 'gitView.sync.syncChanges')}
             >
-              {syncAction === 'sync' ? (
+              {syncAction === 'sync' || syncAction === 'publish' ? (
                 <Icon name="loader-4" className="size-4 animate-spin" />
               ) : (
                 <Icon name="refresh" className="size-4" />
               )}
               <span className="whitespace-nowrap tabular-nums">{primaryLabel}</span>
-            </button>
+            </Button>
           </span>
         </TooltipTrigger>
         <TooltipContent sideOffset={8}>{tooltipLabel}</TooltipContent>
@@ -99,19 +111,27 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button
+          <Button
             type="button"
-            className={cn(
-              'inline-flex h-7 w-6 items-center justify-center border-l border-[var(--interactive-border)] text-muted-foreground',
-              'transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50'
-            )}
+            variant="ghost"
+            size="sm"
+            className="rounded-none border-l border-[var(--interactive-border)] text-muted-foreground"
             disabled={isDropdownDisabled}
             aria-label={t('gitView.sync.moreActionsAria')}
           >
             <Icon name="arrow-down-s" className="size-4" />
-          </button>
+          </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" alignOffset={-40} className="w-[min(360px,calc(100vw-2rem))] max-h-[320px] overflow-y-auto">
+        {/* Anchored to the trailing edge so the menu stays inside the pane instead of running past it. */}
+        <DropdownMenuContent align="end" className="w-[min(360px,calc(100vw-2rem))] max-h-[320px] overflow-y-auto">
+          <DropdownMenuItem disabled={detached} onSelect={onPublish}>
+            <Icon name="arrow-up" className="size-4 text-muted-foreground" />
+            {t('gitView.publish.title')}
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={detached || hasUncommittedChanges} onSelect={onChooseSyncTargets}>
+            <Icon name="refresh" className="size-4 text-muted-foreground" />
+            {t('gitView.publish.syncTitle')}
+          </DropdownMenuItem>
           {remotes.map((remote) => (
             <DropdownMenuItem
               key={remote.name}
@@ -125,7 +145,7 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
               }}
             >
               <div className="flex w-full items-center gap-2">
-                <Icon name="refresh" className="size-4 text-muted-foreground" />
+                <Icon name="download" className="size-4 text-muted-foreground" />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-col">
                     <span className="typography-ui-label text-foreground">

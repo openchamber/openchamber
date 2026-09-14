@@ -2,9 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { buildLinkedIssue, buildLinkedIssueId, buildLinkedLinearIssue, canOpenLinearIssueInContextPanel, getLinkedIssues, withLinkedIssue, type LinkedIssue } from './linkedIssues';
 
-type LinkedGitHubIssue = Exclude<LinkedIssue, { kind: 'linear' }>;
+type LinkedRepositoryIssue = Exclude<LinkedIssue, { kind: 'linear' }>;
 
-const issue = (overrides: Partial<LinkedGitHubIssue> = {}): LinkedGitHubIssue => ({
+const issue = (overrides: Partial<LinkedRepositoryIssue> = {}): LinkedRepositoryIssue => ({
   id: 'owner/repo#12',
   number: 12,
   title: 'Rail badge count',
@@ -53,6 +53,28 @@ describe('buildLinkedIssue', () => {
     expect(built.kind).toBe('pull');
   });
 
+  test('derives the id from a GitLab issue with nested groups', () => {
+    const built = buildLinkedIssue({
+      url: 'https://gitlab.example.com/platform/tools/repo/-/issues/9',
+      number: 9,
+      title: 'Fix',
+      kind: 'issue',
+      linkedAt: 5,
+    });
+    expect(built.id).toBe('platform/tools/repo#9');
+  });
+
+  test('keeps GitLab merge requests distinct from issues with the same number', () => {
+    const built = buildLinkedIssue({
+      url: 'https://gitlab.example.com/platform/tools/repo/-/merge_requests/9',
+      number: 9,
+      title: 'Fix',
+      kind: 'pull',
+      linkedAt: 5,
+    });
+    expect(built.id).toBe('https://gitlab.example.com/platform/tools/repo/-/merge_requests/9#9');
+  });
+
   test('falls back to a url-based id for an unparseable url', () => {
     const built = buildLinkedIssue({
       url: 'https://ghe.internal/x',
@@ -62,6 +84,17 @@ describe('buildLinkedIssue', () => {
       linkedAt: 5,
     });
     expect(built.id).toBe('https://ghe.internal/x#3');
+  });
+
+  test('falls back without throwing for a malformed url', () => {
+    const built = buildLinkedIssue({
+      url: 'not a url',
+      number: 3,
+      title: 'Internal',
+      kind: 'issue',
+      linkedAt: 5,
+    });
+    expect(built.id).toBe('not a url#3');
   });
 
   test('omits author fields when the flow has none', () => {

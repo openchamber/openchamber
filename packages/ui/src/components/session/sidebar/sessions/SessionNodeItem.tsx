@@ -36,7 +36,7 @@ import type { SessionNode } from '../types';
 import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from '../utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
-import { getGitHubPrStatusKey, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
+import { useFreshestSourceControlVisualSummaryForBranch } from '@/stores/useGitHubPrStatusStore';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
@@ -373,13 +373,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const tooltipProjectLabel = secondaryMeta?.projectLabel
     ?? (projectLabelFromStore ? formatProjectLabel(projectLabelFromStore) : null);
   const tooltipBranchLabel = secondaryMeta?.branchLabel ?? node.worktree?.branch ?? null;
-  const prLookupKey = React.useMemo(() => {
-    if (isVSCode) return null;
-    const branch = node.worktree?.branch?.trim();
-    const directory = normalizePath(node.worktree?.path ?? null);
-    return branch && directory ? getGitHubPrStatusKey(directory, branch) : null;
-  }, [isVSCode, node.worktree]);
-  const prSummary = usePrVisualSummary(prLookupKey);
+  const prLookupBranch = isVSCode ? null : node.worktree?.branch?.trim() || null;
+  const prLookupDirectory = isVSCode ? null : normalizePath(node.worktree?.path ?? null);
+  const prSummary = useFreshestSourceControlVisualSummaryForBranch(prLookupDirectory, prLookupBranch);
   const prIconColor = prSummary ? `var(--pr-${prSummary.visualState})` : undefined;
   const sessionGroupingMode = useSessionDisplayStore((state) => state.sessionGroupingMode);
   // In by-worktree grouping the project tree already shows the branch on the

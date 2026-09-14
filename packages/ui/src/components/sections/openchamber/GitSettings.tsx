@@ -3,6 +3,7 @@ import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { setFilesViewShowGitignored, useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
+import { recordDeferredOpenCodeRestart } from '@/lib/opencode/deferredRestart';
 import { useI18n } from '@/lib/i18n';
 import {
   SettingsSection,
@@ -20,6 +21,8 @@ export const GitSettings: React.FC = () => {
   const showGitignored = useFilesViewShowGitignored();
   const gitChangesViewMode = useUIStore((state) => state.gitChangesViewMode);
   const setGitChangesViewMode = useUIStore((state) => state.setGitChangesViewMode);
+  const agentGitAuthorityEnabled = useUIStore((state) => state.agentGitAuthorityEnabled);
+  const setAgentGitAuthorityEnabled = useUIStore((state) => state.setAgentGitAuthorityEnabled);
 
   const [isLoading, setIsLoading] = React.useState(true);
   const viewOptions = React.useMemo(
@@ -64,6 +67,14 @@ export const GitSettings: React.FC = () => {
     }
   }, [setSettingsGitmojiEnabled]);
 
+  // Written immediately, but Git in an agent shell only changes once the
+  // managed OpenCode child is started again with the new environment.
+  const handleAgentGitAuthorityChange = React.useCallback((enabled: boolean) => {
+    setAgentGitAuthorityEnabled(enabled);
+    void updateDesktopSettings({ agentGitAuthorityEnabled: enabled });
+    recordDeferredOpenCodeRestart('cli', { id: 'agent-git-authority' });
+  }, [setAgentGitAuthorityEnabled]);
+
   const handleGitChangesViewModeChange = React.useCallback((mode: 'flat' | 'tree') => {
     if (mode === gitChangesViewMode) {
       return;
@@ -98,6 +109,17 @@ export const GitSettings: React.FC = () => {
             ))}
           </SettingsRadioGroup>
         </SettingsControlGroup>
+
+        {/* A machine fact: it decides how Git behaves in shells this computer
+            runs, so it is deliberately not something a phone can flip. */}
+        <SettingsCheckboxRow
+          settingsItem="git.agent-authority"
+          checked={agentGitAuthorityEnabled}
+          onChange={handleAgentGitAuthorityChange}
+          label={t('settings.openchamber.git.agentAuthority')}
+          ariaLabel={t('settings.openchamber.git.agentAuthorityAria')}
+          info={t('settings.openchamber.git.agentAuthorityInfo')}
+        />
 
         <SettingsCheckboxRow
           settingsItem="git.gitmoji"

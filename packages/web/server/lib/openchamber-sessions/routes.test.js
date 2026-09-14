@@ -14,6 +14,8 @@ const getWorktreeBootstrapStatusMock = vi.fn(async () => ({
   error: null,
   updatedAt: Date.now(),
 }));
+const worktreeBootstrapStore = { read: vi.fn(), write: vi.fn(), remove: vi.fn() };
+const hydrateWorktreeCheckoutMock = vi.fn(async () => ({ status: 'not-needed', submodules: [], lfs: [] }));
 const sessionCreateMock = vi.fn(async () => ({ data: { id: 'ses_123' } }));
 const sessionForkMock = vi.fn(async () => ({ data: { id: 'ses_fork', title: 'Forked session' } }));
 const sessionMessagesMock = vi.fn(async () => ({ data: [] }));
@@ -105,6 +107,8 @@ const createApp = (overrides = {}, options = {}) => {
     buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
     getOpenCodeAuthHeaders: () => ({ Authorization: 'Bearer test' }),
     waitForOpenCodeReady: vi.fn(async () => undefined),
+    worktreeBootstrapStore,
+    hydrateWorktreeCheckout: hydrateWorktreeCheckoutMock,
     ...overrides,
   });
   return { app, calls };
@@ -117,6 +121,7 @@ describe('openchamber session routes', () => {
 
   beforeEach(() => {
     createWorktreeMock.mockClear();
+    hydrateWorktreeCheckoutMock.mockClear();
     getWorktreeBootstrapStatusMock.mockClear();
     getWorktreeBootstrapStatusMock.mockImplementation(async () => ({
       status: 'ready',
@@ -454,6 +459,15 @@ describe('openchamber session routes', () => {
   });
 
   it('creates a worktree before creating a session', async () => {
+    createWorktreeMock.mockImplementationOnce(async (_directory, _input, options) => {
+      await options.hydrateCheckout({ directory: '/repo/worktrees/side-task', parentRemoteName: '' });
+      return {
+        head: 'abc123',
+        name: 'side-task',
+        branch: 'openchamber/side-task',
+        path: '/repo/worktrees/side-task',
+      };
+    });
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(async (url) => {
       if (String(url).includes('/prompt_async')) {
@@ -480,7 +494,19 @@ describe('openchamber session routes', () => {
         branchName: 'openchamber/side-task',
         startRef: 'main',
         setUpstream: false,
+      }, {
+        bootstrapStore: worktreeBootstrapStore,
+        hydrateCheckout: expect.any(Function),
       });
+      expect(hydrateWorktreeCheckoutMock).toHaveBeenCalledWith({
+        directory: '/repo/worktrees/side-task',
+        parentDirectory: '/repo/app',
+        parentRemoteName: '',
+      });
+      expect(getWorktreeBootstrapStatusMock).toHaveBeenCalledWith(
+        '/repo/worktrees/side-task',
+        { bootstrapStore: worktreeBootstrapStore },
+      );
       expect(response.body.directory).toBe('/repo/worktrees/side-task');
       expect(response.body.worktree.path).toBe('/repo/worktrees/side-task');
       expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -555,6 +581,29 @@ describe('openchamber session routes', () => {
         .expect(500, { error: 'Worktree bootstrap failed: branch already exists' });
       const promptCalls = globalThis.fetch.mock.calls.filter(([url]) => String(url).includes('/prompt_async'));
       expect(promptCalls.length).toBe(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('does not treat a missing bootstrap record as ready', async () => {
+    getWorktreeBootstrapStatusMock
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        status: 'failed',
+        phase: 'directory-created',
+        error: 'Bootstrap state is missing',
+        updatedAt: Date.now(),
+      });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ id: 'ses_123' }) }));
+    try {
+      const { app } = createApp();
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', worktree: { name: 'side-task' } })
+        .expect(500, { error: 'Worktree bootstrap failed: Bootstrap state is missing' });
+      expect(globalThis.fetch).not.toHaveBeenCalled();
     } finally {
       globalThis.fetch = originalFetch;
     }

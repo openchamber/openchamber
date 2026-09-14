@@ -3,6 +3,8 @@ import type { GitDiffResponse } from '@/lib/api/types';
 import { getCommitFiles, getGitCommitDiff, getGitRangeDiff, getGitRangeFiles } from '@/lib/gitApi';
 import { useI18n } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import type { SourceControlReadContext } from '@/lib/source-control/types';
+import { sourceControlReadContextParts } from '@/lib/source-control/identity';
 import type { WalkthroughSource } from '@/lib/walkthrough/types';
 import { useGitStore } from '@/stores/useGitStore';
 import { fetchPullRequestDiff } from '@/lib/diff/pullRequestDiff';
@@ -26,13 +28,22 @@ type ComparisonFiles =
   | { key: string; status: 'error'; message: string };
 
 /** File-list authority shared by the stacked desktop view and mobile drill-down. */
-export function useGitComparison(directory: string | null, source: GitComparisonSource | null, enabled = true, revision = '') {
+export function useGitComparison(
+  directory: string | null,
+  source: GitComparisonSource | null,
+  enabled = true,
+  revision = '',
+  readContext: Readonly<SourceControlReadContext> | null = null,
+) {
   const { t } = useI18n();
   const runtimeKey = useGitStore((state) => state.runtimeKey);
-  const key = directory && source ? JSON.stringify([runtimeKey, directory, source]) : null;
+  // A pull request is read through the bound context, so that context is part
+  // of what is being compared: a rebind is a different comparison.
+  const authority = source?.kind === 'pr' && readContext ? JSON.stringify(sourceControlReadContextParts(readContext)) : '';
+  const key = directory && source ? JSON.stringify([runtimeKey, directory, source, authority]) : null;
   const pushScope = gitPushScopeKey(directory ?? '', runtimeKey);
-  const sourceRef = useRef({ key, source, enabled, pushScope });
-  sourceRef.current = { key, source, enabled, pushScope };
+  const sourceRef = useRef({ key, source, enabled, pushScope, readContext, authority });
+  sourceRef.current = { key, source, enabled, pushScope, readContext, authority };
   const [result, setResult] = useState<ComparisonFiles | null>(null);
   const generation = useRef(0);
   const [prCache] = useState(() => new PullRequestSnapshotCache());
@@ -45,19 +56,23 @@ export function useGitComparison(directory: string | null, source: GitComparison
   }), [prCache]);
 
   const read = useCallback(async (force: boolean) => {
-    const { key: targetKey, source: target, enabled: active } = sourceRef.current;
+    const { key: targetKey, source: target, enabled: active, readContext: context, authority: targetAuthority } = sourceRef.current;
     if (!enabled || !active || !key || targetKey !== key || !directory || !target) return;
     const request = ++generation.current;
     const runtime = getRuntimeKey();
     setResult((previous) => previous?.key === key && previous.status === 'ready' ? { ...previous, refreshing: true } : { key, status: 'loading' });
     try {
-      const files: GitComparisonFile[] = target.kind === 'pr'
-        ? await prCache.load(pushScope, target, () => fetchPullRequestDiff(directory, target), force)
-        : target.kind === 'branch'
-        ? (await getGitRangeFiles(directory, { base: target.baseRef, head: target.headRef, includeWorkingTree: true }))
-          .map((file) => ({ ...file, insertions: 0, deletions: 0 }))
-        : (await getCommitFiles(directory, target.hash)).files
+      let files: GitComparisonFile[];
+      if (target.kind === 'pr') {
+        if (!context) throw new Error(t('session.githubPrPicker.empty.notConnected'));
+        files = await prCache.load(pushScope, target, () => fetchPullRequestDiff(directory, target, context), force, targetAuthority);
+      } else if (target.kind === 'branch') {
+        files = (await getGitRangeFiles(directory, { base: target.baseRef, head: target.headRef, includeWorkingTree: true }))
+          .map((file) => ({ ...file, insertions: 0, deletions: 0 }));
+      } else {
+        files = (await getCommitFiles(directory, target.hash)).files
           .map((file) => ({ path: file.path, status: file.changeType, previousPath: file.previousPath, insertions: file.insertions, deletions: file.deletions }));
+      }
       if (generation.current !== request || getRuntimeKey() !== runtime) return;
       setResult((previous) => previous?.key === key && previous.status === 'ready' && previous.files === files
         ? { ...previous, refreshing: false }

@@ -54,7 +54,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return result;
   };
 
-  const isExecutable = (filePath) => {
+  const probeExecutable = (filePath) => {
     try {
       const stat = fs.statSync(filePath);
       if (!stat.isFile()) return false;
@@ -69,6 +69,11 @@ export const createOpenCodeEnvRuntime = (deps) => {
       return false;
     }
   };
+  // Resolution ends in absolute last-resort paths (`/opt/homebrew/bin`, the
+  // Windows installer locations), so what counts as a usable binary has to be
+  // answerable by the caller: otherwise a computer that happens to have
+  // OpenCode installed system-wide cannot be told apart from one that does not.
+  const isExecutable = typeof deps.isExecutable === 'function' ? deps.isExecutable : probeExecutable;
 
   const resolveWindowsExecutablePath = (candidate) => {
     if (process.platform !== 'win32' || typeof candidate !== 'string' || candidate.trim().length === 0) {

@@ -115,6 +115,7 @@ const createRuntime = (settings, options = {}) => {
     readSettingsFromDiskMigrated: async () => settings,
     spawnSync: options.spawnSync,
     homedir: options.homedir,
+    isExecutable: options.isExecutable,
   });
 
   return { runtime, state };
@@ -414,6 +415,10 @@ describe('OpenCode env runtime', () => {
     const shellCalls = [];
     const { runtime } = createRuntime({}, {
       homedir: () => createTempDir('openchamber-empty-home-'),
+      // The shell is there and no OpenCode is, wherever this test runs. The
+      // last-resort candidates are absolute paths, so a computer with OpenCode
+      // installed system-wide would otherwise answer before a probe ever ran.
+      isExecutable: (filePath) => filePath === '/bin/zsh',
       spawnSync: (command, args, options) => {
         shellCalls.push({ command, args, options });
         // What spawnSync reports when `timeout` fires: no status, an error.

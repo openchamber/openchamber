@@ -16,8 +16,8 @@ function contextPreview(payload: ContextPartPayload): string {
             return payload.text.trim() || payload.label.trim() || payload.output;
         case 'terminal':
             return payload.output.trim() || payload.terminalLabel;
-        case 'github-issue':
-        case 'github-pr':
+        case 'repository-issue':
+        case 'change-request':
         case 'linear-issue':
             return payload.title.trim() || payload.url;
     }

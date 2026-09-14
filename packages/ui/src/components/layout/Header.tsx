@@ -340,7 +340,6 @@ export const Header: React.FC = () => {
   const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
 
   const { isMobile } = useDeviceInfo();
-
   const headerRef = React.useRef<HTMLElement | null>(null);
 
   const [isDesktopApp, setIsDesktopApp] = React.useState<boolean>(() => {
@@ -1014,9 +1013,6 @@ export const Header: React.FC = () => {
     currentSessionId,
     sessionDirectory,
   ]);
-
-
-
 
   const handleOpenDraftMiniChat = React.useCallback(() => {
     void invokeDesktop('desktop_open_draft_mini_chat_window', {

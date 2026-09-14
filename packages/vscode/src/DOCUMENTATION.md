@@ -44,7 +44,7 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
     - models metadata fetch helper
   - Read paths are authorized in the requested workspace path space before symlink resolution, matching the web runtime; directly requested outside-workspace paths remain denied.
 
-The webview CSP permits `blob:` only for `worker-src` so shared UI parsers can run bounded local decompression off the main thread. Blob scripts remain disallowed by `script-src`.
+The sidebar installs a script-free CSP bootstrap document before changing webview options, so VS Code does not diagnose the transient blank document as an extension webview without CSP. The final webview CSP permits `blob:` only for `worker-src` so shared UI parsers can run bounded local decompression off the main thread. Blob scripts remain disallowed by `script-src`.
 
 The webview build emits each worker as one self-contained file. VS Code webviews cannot load workers directly from extension resource URLs or load module imports from inside a worker. The shared Shiki client therefore fetches the built worker, starts it from a `blob:` URL, and relies on the worker CSP allowance above.
 
@@ -92,6 +92,13 @@ The webview build emits each worker as one self-contained file. VS Code webviews
   - Owns the persisted VS Code permission auto-accept policy and its GET/PUT bridge contract.
   - Serializes reads and read-modify-write updates, persists a monotonic policy revision, and broadcasts the exact committed snapshot to every active OpenChamber webview. Permission replies remain foreground UI-owned because VS Code does not run the OpenChamber server runtime.
 
+## Git in the webview
+
+VS Code manages Git hosting providers and Git credentials itself, so the extension host exposes only the standard Git operations in `gitService.ts` and `bridge-git-runtime.ts`. Push, pull, fetch and remote-branch deletion run as plain Git commands with whatever credentials the user's Git setup provides. The extension host stores no source-control bindings, provider accounts, transport credentials or author profiles.
+
+The shared UI reads a repository context and binding before every Git network operation and drives push, pull, fetch, sync and remote-branch deletion through the `planNetworkOperation` / `executeNetworkOperation` lifecycle. `webview/api/git-remotes.ts` and `webview/api/source-control.ts` satisfy that contract without a store: they project the repository's remotes, read through `api:git/remotes` and redacted of userinfo, as a `bound` binding whose every remote is a ready System-transport grant. `webview/api/git.ts` keeps planned operations in webview memory and maps `executeNetworkOperation` onto `api:git/push`, `api:git/pull`, `api:git/fetch` and `api:git/remote-branches`; a bridge failure becomes a `failed` snapshot with `TRANSPORT_FAILED` and the Git error text, and sync records per-step results. Plans never reach the extension host, cancellation only affects a plan that has not started, and operation snapshots do not survive a webview reload.
+
+Provider authentication, capabilities, issues, change requests, contributor destinations (`{ kind: 'ordinary' }`), clone, checkout hydration, worktrees created from a change request or with `ensureRemoteUrl`, and transport or auxiliary binding configuration are unsupported in the webview adapters and never reach the OpenCode proxy. The shared Git view therefore hides the repository binding strip in VS Code, and the Git settings page hides provider and managed SSH sections. Author profiles live in webview memory for the lifetime of the view and are not persisted; applying one sends the profile's author fields through the standard `api:git/identity` message.
 - `InlineCommentThreads.ts`
   - Owns the `openchamber.inlineComments` comment controller: the gutter `+` range, the thread opened by `openchamber.addLineComment`, and every thread a submitted comment leaves anchored in the editor until the message goes out.
   - A thread never owns a draft. It mints the draft id, hands the payload to a chat webview with the same routing as Add to Context (the active session panel when one exists, else the sidebar, revealed if needed), and follows the webview's whole-draft-list `inlineComments:sync` snapshots: present means show, absent after having been seen means dispose. A snapshot is tagged with the surface that produced it (a panel id or `sidebar`) and only decides that surface's own threads, because every webview runs its own draft store.

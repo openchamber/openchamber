@@ -10,7 +10,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
 import { NestedRepoPicker } from '@/components/views/git/NestedRepoPicker';
 import { BranchComparisonSelector } from '@/components/views/git/BranchComparisonSelector';
-import { branchRefLabel } from '@/components/views/git/baseBranch';
+import { branchRefLabel, qualifyBaseRef } from '@/components/views/git/baseBranch';
 import { useGitStore, useGitStatus, useIsGitRepo, useGitLoadingStatus } from '@/stores/useGitStore';
 import { useGitBaseBranchStore } from '@/stores/useGitBaseBranchStore';
 import { useBranchComparisonBase } from '@/hooks/useBranchComparisonBase';
@@ -54,11 +54,13 @@ import { fileDiffFromPatch, isBinaryPatch, extractHunkPatch, haveMatchingPatchVe
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { startReviewFlow } from '@/lib/reviewFlow';
 import { WALKTHROUGH_ACTION_CLASS } from '@/components/views/walkthrough/walkthroughAction';
+import type { WalkthroughTarget } from '@/lib/walkthrough/types';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessages } from '@/sync/sync-context';
 import { getFirstChangedModifiedLineFromPatch } from './diffPatchUtils';
 import type { FileDiffMetadata } from '@pierre/diffs';
+import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 
 // Minimum width for side-by-side diff view (px)
 const SIDE_BY_SIDE_MIN_WIDTH = 1100;
@@ -989,15 +991,17 @@ export const DiffView: React.FC<DiffViewProps> = ({
     flushContent = false,
 }) => {
     const { t } = useI18n();
-    const { git, files } = useRuntimeAPIs();
+    const { git, files, sourceControl } = useRuntimeAPIs();
     const rootDirectory = useEffectiveDirectory();
     const runtimeKey = useGitStore((state) => state.runtimeKey);
     // Diffs belong to the repository being diffed: when the root is not
     // itself a repository, operate on the resolved nested repository instead.
     const { rootIsGitRepo, gitDirectory: nestedGitDirectory, nestedRepos: nestedRepoOptions } = useNestedGitDirectory(rootDirectory ?? null, { enabled: visible });
     const effectiveDirectory = nestedGitDirectory ?? rootDirectory;
+    // The binding follows the repository actually being diffed.
+    const binding = useRepositoryBinding(effectiveDirectory, sourceControl);
     const openContextSurface = useUIStore((state) => state.openContextSurface);
-    const requestWalkthroughSource = useWalkthroughStore((state) => state.requestSource);
+    const requestWalkthroughTarget = useWalkthroughStore((state) => state.requestTarget);
     const { screenWidth, isMobile } = useDeviceInfo();
 
     const isGitRepo = useIsGitRepo(effectiveDirectory ?? null);
@@ -1131,7 +1135,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
 
     // ----- Branch scope (all changes on this branch vs its base) -----
     const currentBranch = status?.current ?? null;
-    const prComparison = usePullRequestComparison(effectiveDirectory ?? null, currentBranch, visible && activeDiffScope === 'pr' && !isVSCodeRuntime());
+    const pullRequestContext = binding.contexts[0]?.provider === 'github' ? binding.contexts[0] : null;
+    const prComparison = usePullRequestComparison(effectiveDirectory ?? null, currentBranch, pullRequestContext, visible && activeDiffScope === 'pr' && !isVSCodeRuntime());
     const selectedPr = prComparison.selectedSource;
     const commitComparison = useCommitComparison(effectiveDirectory ?? null, currentBranch, visible && activeDiffScope === 'commit' && !isVSCodeRuntime());
     const selectedCommitHash = commitComparison.selectedCommit?.hash ?? null;
@@ -1166,11 +1171,9 @@ export const DiffView: React.FC<DiffViewProps> = ({
     );
 
     const repositoryDefaultBranch = React.useMemo(() => {
-        const trackingRemote = status?.tracking?.trim().split('/')[0];
-        return (trackingRemote && branches?.defaultBranches?.[trackingRemote])
-            ?? branches?.defaultBranches?.origin
-            ?? null;
-    }, [branches, status?.tracking]);
+        const primaryRemote = binding.contexts[0]?.primaryRemote;
+        return primaryRemote ? branches?.defaultBranches?.[primaryRemote] ?? null : null;
+    }, [binding.contexts, branches]);
     // Offered only while the default branch is known and the current branch is
     // not it (an unknown default must not flash the option on a guess), and
     // only outside VS Code (the extension has no context diff panel).
@@ -1190,7 +1193,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
             currentBranch,
             repositoryDefaultBranch,
             isBranchStatusResolved,
-            branches !== null
+            branches !== null && binding.status === 'ready'
         );
 
     const setBaseOverride = useGitBaseBranchStore((state) => state.setOverride);
@@ -1220,13 +1223,30 @@ export const DiffView: React.FC<DiffViewProps> = ({
         }
     }, [activeDiffScope, branchScopeDefinitelyUnavailable, onDiffScopeChange]);
 
+    // A base is named literally by the range API and must belong to the remote
+    // this repository is bound to, so the chosen or detected one is qualified
+    // before it becomes a comparison.
+    const qualifiedBranchBase = React.useMemo(() => {
+        // A branch is never its own base, checked before the ref is qualified:
+        // afterwards `refs/heads/main` never equals a plain `main`.
+        if (!branchBase || branchBase === currentBranch) return null;
+        const all = branches?.all ?? [];
+        return qualifyBaseRef(branchBase, {
+            localBranches: all.filter((name) => !name.startsWith('remotes/')),
+            remoteBranches: all.filter((name) => name.startsWith('remotes/')).map((name) => name.slice('remotes/'.length)),
+            remoteNames: new Set(binding.read?.repository.remotes.map((remote) => remote.name) ?? []),
+            primaryRemote: binding.contexts[0]?.primaryRemote,
+        });
+    }, [binding.contexts, binding.read, branchBase, branches, currentBranch]);
     const comparisonSource = React.useMemo<GitComparisonSource | null>(() => {
         if (activeDiffScope === 'pr') return selectedPr;
         if (activeDiffScope === 'commit' && selectedCommitHash) return { kind: 'commit', hash: selectedCommitHash };
-        if (activeDiffScope === 'branch' && branchBase && currentBranch) return { kind: 'branch', baseRef: branchBase, headRef: currentBranch };
+        if (activeDiffScope === 'branch' && qualifiedBranchBase && currentBranch) {
+            return { kind: 'branch', baseRef: qualifiedBranchBase, headRef: currentBranch };
+        }
         return null;
-    }, [activeDiffScope, branchBase, currentBranch, selectedCommitHash, selectedPr]);
-    const comparison = useGitComparison(effectiveDirectory ?? null, comparisonSource, visible && !isVSCodeRuntime(), activeDiffScope === 'branch' ? branchRevision : '');
+    }, [activeDiffScope, qualifiedBranchBase, currentBranch, selectedCommitHash, selectedPr]);
+    const comparison = useGitComparison(effectiveDirectory ?? null, comparisonSource, visible && !isVSCodeRuntime(), activeDiffScope === 'branch' ? branchRevision : '', prComparison.readContext);
     const { fetchDiff: loadComparisonDiff } = comparison;
     const commitFiles = activeDiffScope === 'commit' ? comparison.files : null;
     const commitFilesError = activeDiffScope === 'commit' ? comparison.error : null;
@@ -2008,7 +2028,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 );
             }
 
-            if (!branchBase) {
+            if (!qualifiedBranchBase) {
                 return (
                     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
                         <Icon name="git-branch" className="size-6 text-muted-foreground" />
@@ -2050,7 +2070,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                     {activeDiffScope === 'turn' ? t('diffView.state.noLastTurnChanges')
                         : activeDiffScope === 'pr' ? t('walkthrough.blocked.emptyDiff.description')
                         : activeDiffScope === 'commit' ? t('commitComparison.emptyDiff')
-                        : activeDiffScope === 'branch' && branchBase ? t('diffView.branch.empty', { base: branchRefLabel(branchBase) })
+                        : activeDiffScope === 'branch' && qualifiedBranchBase ? t('diffView.branch.empty', { base: branchRefLabel(qualifiedBranchBase) })
                         : t('diffView.state.cleanWorkingTree')}
                 </div>
             );
@@ -2168,7 +2188,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         </span>
                     </Button>
                 )}
-                {changedFiles.length > 0 && showWalkthroughAction && (
+                {changedFiles.length > 0 && showWalkthroughAction && (activeDiffScope !== 'pr' || pullRequestContext) && (
                     <Button
                         variant="outline"
                         size="sm"
@@ -2177,18 +2197,23 @@ export const DiffView: React.FC<DiffViewProps> = ({
                             // while looking at staged changes should review
                             // staged changes, not whatever the panel showed last.
                             const directory = effectiveDirectory ?? '';
-                            requestWalkthroughSource(directory, activeDiffScope === 'pr' && selectedPr ? selectedPr : activeDiffScope === 'commit' && selectedCommitHash ? {
-                                kind: 'commit', hash: selectedCommitHash,
-                            } : activeDiffScope === 'branch' && branchBase && currentBranch ? {
-                                kind: 'branch',
-                                baseRef: branchBase,
-                                headRef: currentBranch,
-                            } : {
-                                kind: 'working-tree',
-                                scope: activeDiffScope === 'staged' || activeDiffScope === 'working'
-                                    ? activeDiffScope
-                                    : 'all',
-                            });
+                            const localSource: WalkthroughTarget = {
+                                source: activeDiffScope === 'commit' && selectedCommitHash ? {
+                                    kind: 'commit', hash: selectedCommitHash,
+                                } : activeDiffScope === 'branch' && qualifiedBranchBase && currentBranch ? {
+                                    kind: 'branch',
+                                    baseRef: qualifiedBranchBase,
+                                    headRef: currentBranch,
+                                } : {
+                                    kind: 'working-tree',
+                                    scope: activeDiffScope === 'staged' || activeDiffScope === 'working'
+                                        ? activeDiffScope
+                                        : 'all',
+                                },
+                            };
+                            requestWalkthroughTarget(directory, activeDiffScope === 'pr' && selectedPr && pullRequestContext
+                                ? { source: selectedPr, context: pullRequestContext }
+                                : localSource);
                             openContextSurface(rootDirectory ?? directory, 'walkthrough');
                         }}
                         className={cn('diff-toolbar__walkthrough-button h-7 flex-shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}

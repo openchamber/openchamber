@@ -1,4 +1,5 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
+import { redactGitText } from '../git/redaction.js';
 import nodeFsPromises from 'node:fs/promises';
 import nodePath from 'node:path';
 
@@ -382,40 +383,6 @@ const deriveCloneDirectoryName = (remoteUrl) => {
   return match?.[1]?.trim() || '';
 };
 
-const resolveCloneGitIdentity = async (gitIdentityId) => {
-  const id = typeof gitIdentityId === 'string' ? gitIdentityId.trim() : '';
-  if (!id) return null;
-  const { getProfile, getGlobalIdentity } = await import('../git/index.js');
-  if (id === 'global') {
-    const globalIdentity = await getGlobalIdentity();
-    if (!globalIdentity?.userName || !globalIdentity?.userEmail) return null;
-    return {
-      id: 'global',
-      name: 'Global Identity',
-      userName: globalIdentity.userName,
-      userEmail: globalIdentity.userEmail,
-      sshKey: globalIdentity.sshCommand ? globalIdentity.sshCommand.replace('ssh -i ', '') : null,
-    };
-  }
-  return getProfile(id) || null;
-};
-
-const escapeCloneSshKeyPath = (sshKeyPath) => {
-  const raw = String(sshKeyPath || '').trim();
-  if (!raw) return '';
-  const normalized = process.platform === 'win32' ? raw.replace(/\\/g, '/') : raw;
-  const dangerousChars = /[`$!"';&|<>(){}[\]*?#~]/;
-  if (dangerousChars.test(normalized)) {
-    throw new Error(`SSH key path contains invalid characters: ${raw}`);
-  }
-  if (process.platform === 'win32') {
-    const driveMatch = normalized.match(/^([A-Za-z]):\//);
-    const unixPath = driveMatch ? `/${driveMatch[1].toLowerCase()}${normalized.slice(2)}` : normalized;
-    return `'${unixPath}'`;
-  }
-  return `'${normalized.replace(/'/g, "'\\''")}'`;
-};
-
 const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProjectDirectory, path, os, fsPromises, normalizeDirectoryPath, managedRoots }) => {
   if (req.query?.allowOutsideWorkspace === 'true') {
     const normalized = normalizeDirectoryPath(targetPath);
@@ -525,6 +492,7 @@ export const registerFsRoutes = (app, dependencies) => {
     resolveGitBinaryForSpawn,
     openchamberUserConfigRoot,
     managedChatsRoot,
+    cloneRepository,
   } = dependencies;
   // Chat worktrees may live outside every project workspace; both managed
   // roots stay valid filesystem targets.
@@ -756,10 +724,17 @@ export const registerFsRoutes = (app, dependencies) => {
   });
 
   app.post('/api/fs/clone', async (req, res) => {
+    if (req.body?.unverifiedConfirmed !== true) {
+      return res.status(409).json({ code: 'GIT_NETWORK_OPERATION_REQUIRED',
+        error: 'Use a planned clone with explicit transport selection, or explicitly confirm unverified System Git.' });
+    }
     try {
       const { remoteUrl, destinationPath, gitIdentityId } = req.body ?? {};
       const remote = typeof remoteUrl === 'string' ? remoteUrl.trim() : '';
       const destination = typeof destinationPath === 'string' ? destinationPath.trim() : '';
+      const selectedGitIdentityId = Object.prototype.toString.call(gitIdentityId) === '[object String]'
+        ? gitIdentityId.trim() || undefined
+        : undefined;
       if (!remote) {
         return res.status(400).json({ error: 'Repository URL is required' });
       }
@@ -802,15 +777,6 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: 'Destination path must include a directory name' });
       }
 
-      const identity = await resolveCloneGitIdentity(gitIdentityId);
-      const gitArgs = ['clone', '--', remote, directoryName];
-      const sshKeyPath = typeof identity?.sshKey === 'string' ? identity.sshKey.trim() : '';
-      if (sshKeyPath) {
-        gitArgs.unshift(`core.sshCommand=ssh -i ${escapeCloneSshKeyPath(sshKeyPath)} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new`);
-        gitArgs.unshift('-c');
-      }
-
-      await fsPromises.mkdir(parentPath, { recursive: true });
       try {
         await fsPromises.access(resolvedDestination);
         return res.status(409).json({ error: 'Destination path already exists' });
@@ -820,47 +786,46 @@ export const registerFsRoutes = (app, dependencies) => {
         }
       }
 
-      const output = await new Promise((resolve, reject) => {
-        const child = spawn(resolveGitBinaryForSpawn(), gitArgs, {
-          cwd: parentPath,
-          windowsHide: true,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          env: {
-            ...process.env,
-            PATH: buildAugmentedPath ? buildAugmentedPath(process.env.PATH || '') : process.env.PATH,
-            GIT_TERMINAL_PROMPT: '0',
-          },
-        });
-
-        let stdout = '';
-        let stderr = '';
-        child.stdout.on('data', (data) => { stdout += data.toString(); });
-        child.stderr.on('data', (data) => { stderr += data.toString(); });
-        child.on('error', reject);
-        child.on('close', (code) => {
-          const combined = `${stdout}\n${stderr}`.trim();
-          if (code === 0) {
-            resolve(combined);
-            return;
-          }
-          const message = combined || `git clone failed with exit code ${code}`;
-          reject(new Error(message));
-        });
+      if (!(cloneRepository instanceof Function)) {
+        return res.status(501).json({ error: 'Repository cloning is unavailable' });
+      }
+      const result = await cloneRepository({
+        remoteUrl: remote,
+        destinationPath: resolvedDestination,
+        gitIdentityId: selectedGitIdentityId,
+        unverifiedConfirmed: true,
       });
-
-      if (identity?.userName && identity?.userEmail) {
-        try {
-          const { setLocalIdentity } = await import('../git/index.js');
-          await setLocalIdentity(resolvedDestination, identity);
-        } catch (error) {
-          console.warn('Failed to apply git identity after clone:', error);
-        }
+      if (result.state === 'partial' && result.completedSteps?.includes('checked-out')) {
+        return res.status(200).json({ success: false, state: 'partial', setupRequired: true,
+          path: resolvedDestination, operationId: result.operationId,
+          error: 'Checkout retained. Open Git setup to finish; do not clone again.' });
+      }
+      if (result.state !== 'succeeded') {
+        const conflict = result.error?.code === 'CONFLICT';
+        const message = conflict
+          ? 'Destination path already exists'
+          : redactGitText(result.error?.message || 'Failed to clone repository', {
+            secrets: [remote, resolvedDestination],
+          });
+        return res.status(conflict ? 409 : 500).json({ error: message });
       }
 
-      return res.json({ success: true, path: resolvedDestination, output });
+      return res.json({
+        success: true,
+        path: resolvedDestination,
+        output: redactGitText(result.output || '', { secrets: [remote, resolvedDestination] }),
+      });
     } catch (error) {
-      console.error('Failed to clone repository:', error);
-      return res.status(500).json({ error: error.message || 'Failed to clone repository' });
+      if (error?.code === 'INVALID_GIT_IDENTITY') {
+        return res.status(400).json({ error: 'Selected Git identity is unavailable' });
+      }
+      if (error?.status === 400 || error?.code === 'INVALID_GIT_NETWORK_OPERATION') {
+        return res.status(400).json({ error: 'Repository URL is invalid' });
+      }
+      if (error?.code === 'CONFLICT' || error?.status === 409) {
+        return res.status(409).json({ error: 'Destination path already exists' });
+      }
+      return res.status(500).json({ error: 'Failed to clone repository' });
     }
   });
 

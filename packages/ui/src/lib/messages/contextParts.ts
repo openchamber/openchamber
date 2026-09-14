@@ -15,6 +15,7 @@
  */
 
 import { z } from 'zod';
+import type { SourceControlProvider } from '@/lib/api/types';
 import type { TextPart } from '@opencode-ai/sdk/v2';
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { appendTerminalContexts } from './terminalContext';
@@ -65,8 +66,8 @@ type PrCheckContext = {
     text: string;
 };
 
-type GitHubIssueContext = {
-    kind: 'github-issue';
+type RepositoryIssueContext = {
+    kind: 'repository-issue';
     number: number;
     title: string;
     url: string;
@@ -90,8 +91,10 @@ type ChatQuoteContext = {
     text: string;
 };
 
-type GitHubPrContext = {
-    kind: 'github-pr';
+type ChangeRequestContext = {
+    kind: 'change-request';
+    /** Absent on messages written before providers other than GitHub existed. */
+    provider?: SourceControlProvider;
     number: number;
     title: string;
     url: string;
@@ -112,8 +115,8 @@ export type ContextPartPayload =
     | PrCheckContext
     | FileQuoteContext
     | ChatQuoteContext
-    | GitHubIssueContext
-    | GitHubPrContext
+    | RepositoryIssueContext
+    | ChangeRequestContext
     | LinearIssueContext;
 
 type OpenCodeCommentMetadata = {
@@ -172,20 +175,19 @@ export function formatContextText(payload: ContextPartPayload): string {
         }
         case 'pr-check':
             return `Attached failed GitHub PR check (${payload.label}):\n\`\`\`\n${payload.output}\n\`\`\`${payload.text ? `\n\n${payload.text}` : ''}`;
-        case 'github-issue':
-        case 'github-pr':
+        case 'repository-issue':
+        case 'change-request':
         case 'linear-issue':
-            // Linked issues/PRs carry server-fetched context text built by
-            // their pickers; there is no default text to derive here.
+            // Linked issues and change requests carry server-fetched context
+            // text built by their pickers; there is no default to derive here.
             return '';
     }
 }
 
 /**
  * Build the synthetic part for one context payload. `text` overrides the
- * derived text; github-issue/github-pr/linear-issue payloads require it
- * because their model-facing context is fetched by the picker, not derived
- * from metadata.
+ * derived text; repository-issue/change-request payloads require it because their
+ * model-facing context is fetched by the picker, not derived from metadata.
  */
 export function createContextPart(payload: ContextPartPayload, text?: string): ContextPart {
     const resolvedText = text ?? formatContextText(payload);
@@ -270,7 +272,7 @@ export function contextPayloadFromDraft(draft: InlineCommentDraft): ContextPartP
 // Read-back: parsing part metadata at the display boundary
 // ---------------------------------------------------------------------------
 
-const contextPayloadSchema = z.discriminatedUnion('kind', [
+const canonicalContextPayloadSchema = z.discriminatedUnion('kind', [
     z.object({
         kind: z.literal('code-comment'),
         source: z.enum(['diff', 'file', 'plan']),
@@ -323,13 +325,14 @@ const contextPayloadSchema = z.discriminatedUnion('kind', [
         text: z.string(),
     }),
     z.object({
-        kind: z.literal('github-issue'),
+        kind: z.literal('repository-issue'),
         number: z.number().int().positive(),
         title: z.string(),
         url: z.string(),
     }),
     z.object({
-        kind: z.literal('github-pr'),
+        kind: z.literal('change-request'),
+        provider: z.enum(['github', 'gitlab']).optional(),
         number: z.number().int().positive(),
         title: z.string(),
         url: z.string(),
@@ -340,6 +343,21 @@ const contextPayloadSchema = z.discriminatedUnion('kind', [
         title: z.string(),
         url: z.string(),
     }),
+]);
+const contextPayloadSchema = z.union([
+    canonicalContextPayloadSchema,
+    z.object({
+        kind: z.literal('github-issue'),
+        number: z.number().int().positive(),
+        title: z.string(),
+        url: z.string(),
+    }).transform(({ number, title, url }): RepositoryIssueContext => ({ kind: 'repository-issue', number, title, url })),
+    z.object({
+        kind: z.literal('github-pr'),
+        number: z.number().int().positive(),
+        title: z.string(),
+        url: z.string(),
+    }).transform(({ number, title, url }): ChangeRequestContext => ({ kind: 'change-request', provider: 'github', number, title, url })),
 ]);
 
 /**
@@ -481,8 +499,8 @@ export function draftFromContextPayload(
                 language: '',
                 text: payload.text,
             };
-        case 'github-issue':
-        case 'github-pr':
+        case 'repository-issue':
+        case 'change-request':
         case 'linear-issue':
             return null;
     }

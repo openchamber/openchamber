@@ -14,6 +14,7 @@
  */
 
 import type { AttachedFile } from '@/stores/types/sessionTypes';
+import type { SourceControlProvider } from '@/lib/api/types';
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import type { QueuedContextPart } from '@/stores/messageQueueStore';
 import { contextPayloadFromDraft, createContextPart, type ContextPartMetadata } from '@/lib/messages/contextParts';
@@ -56,7 +57,7 @@ export interface ComposerContextInput {
     /** Synthetic context produced elsewhere (conflict resolution, and such). */
     syntheticTexts: readonly string[];
     linkedIssue: { number: number; title: string; url: string; contextText: string } | null;
-    linkedPr: { number: number; title: string; url: string; instructions: string; context: string } | null;
+    linkedPr: { provider: SourceControlProvider; number: number; title: string; url: string; instructions: string; context: string } | null;
     linkedLinearIssue: { identifier: string; title: string; url: string; contextText: string } | null;
 }
 
@@ -191,14 +192,14 @@ export function buildComposerContext(
 
     if (input.linkedIssue) {
         const { number, title, url, contextText } = input.linkedIssue;
-        attach(createContextPart({ kind: 'github-issue', number, title, url }, contextText));
+        attach(createContextPart({ kind: 'repository-issue', number, title, url }, contextText));
     }
 
     if (input.linkedPr) {
         // Instructions before context: the model is told how to read the diff
         // before it is given the diff.
-        const { number, title, url, instructions, context: prContext } = input.linkedPr;
-        attach(createContextPart({ kind: 'github-pr', number, title, url }, prContext), instructions);
+        const { provider, number, title, url, instructions, context: prContext } = input.linkedPr;
+        attach(createContextPart({ kind: 'change-request', provider, number, title, url }, prContext), instructions);
     }
 
     if (input.linkedLinearIssue) {

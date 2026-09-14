@@ -16,6 +16,12 @@ mock.module('./rate-limit.js', () => ({
 }));
 
 const { findBranchPrCandidates, invalidateRepoPullsCache } = await import('./pr-status.js');
+const { createOctokit, getOctokitCacheIdentity } = await import('./octokit.js');
+
+const octokitFor = (token, accountId) => ({
+  openChamberCacheIdentity: getOctokitCacheIdentity(createOctokit(token, accountId)),
+  rest: { pulls: { list: listMock } },
+});
 
 const openPr = {
   number: 15,
@@ -47,7 +53,7 @@ const olderMergedPr = {
 };
 
 const call = (overrides = {}) => findBranchPrCandidates({
-  octokit: { rest: { pulls: { list: listMock } } },
+  octokit: octokitFor('test-token', 'test-account'),
   target: { repo: { owner: 'acme', repo: 'app' }, remoteName: 'origin' },
   branch: 'feature',
   sourceCandidates: [{ repo: { owner: 'acme', repo: 'app' } }],
@@ -143,6 +149,106 @@ describe('findBranchPrCandidates', () => {
     expect(open).toBeNull();
     expect(historical?.number).toBe(12);
     expect(listMock.mock.calls.length).toBe(callsAfterFirst);
+  });
+
+  test('does not share cached pull lists across accounts', async () => {
+    listMock.mockResolvedValue({ data: [openPr] });
+    const first = await call({
+      octokit: octokitFor('first-token', 'first-account'),
+      force: false,
+    });
+    expect(first.open?.number).toBe(15);
+
+    listMock.mockResolvedValue({ data: [] });
+    const second = await call({
+      octokit: octokitFor('second-token', 'second-account'),
+      force: false,
+    });
+
+    expect(second.open).toBeNull();
+    expect(listMock).toHaveBeenCalledTimes(3);
+  });
+
+  test('does not share cached pull lists after an account credential changes', async () => {
+    listMock.mockResolvedValue({ data: [openPr] });
+    await call({ octokit: octokitFor('old-token', 'same-account'), force: false });
+
+    listMock.mockResolvedValue({ data: [] });
+    const result = await call({ octokit: octokitFor('new-token', 'same-account'), force: false });
+
+    expect(result.open).toBeNull();
+    expect(listMock).toHaveBeenCalledTimes(3);
+  });
+
+  test('invalidates pull caches for only the requested credential', async () => {
+    const firstOctokit = octokitFor('first-token', 'first-account');
+    const secondOctokit = octokitFor('second-token', 'second-account');
+    listMock.mockResolvedValue({ data: [openPr] });
+    await call({ octokit: firstOctokit, force: false });
+    await call({ octokit: secondOctokit, force: false });
+
+    invalidateRepoPullsCache('acme', 'app', firstOctokit);
+    listMock.mockClear();
+    listMock.mockResolvedValue({ data: [] });
+
+    expect((await call({ octokit: firstOctokit, force: false })).open).toBeNull();
+    expect((await call({ octokit: secondOctokit, force: false })).open?.number).toBe(15);
+    expect(listMock).toHaveBeenCalledTimes(2);
+  });
+
+  test('does not let an invalidated pull-list promise refill its exact cache key', async () => {
+    const firstOctokit = octokitFor('first-token', 'first-account');
+    const secondOctokit = octokitFor('second-token', 'second-account');
+    let releaseFirst;
+    let markFirstStarted;
+    const heldFirst = new Promise((resolve) => { releaseFirst = resolve; });
+    const firstStarted = new Promise((resolve) => { markFirstStarted = resolve; });
+    listMock.mockImplementation(async () => {
+      if (listMock.mock.calls.length === 1) {
+        markFirstStarted();
+        await heldFirst;
+      }
+      return { data: [openPr] };
+    });
+
+    const staleRead = call({ octokit: firstOctokit, force: false, includeHistory: false });
+    await firstStarted;
+    invalidateRepoPullsCache('acme', 'app', firstOctokit);
+    releaseFirst();
+    expect((await staleRead).open?.number).toBe(15);
+
+    await call({ octokit: firstOctokit, force: false, includeHistory: false });
+    await call({ octokit: secondOctokit, force: false, includeHistory: false });
+    await call({ octokit: secondOctokit, force: false, includeHistory: false });
+    expect(listMock).toHaveBeenCalledTimes(3);
+  });
+
+  test('does not remember history resolved after scoped invalidation', async () => {
+    const octokit = octokitFor('first-token', 'first-account');
+    let releaseHistory;
+    let markHistoryStarted;
+    const heldHistory = new Promise((resolve) => { releaseHistory = resolve; });
+    const historyStarted = new Promise((resolve) => { markHistoryStarted = resolve; });
+    let historyCalls = 0;
+    listMock.mockImplementation(async ({ head }) => {
+      if (head) {
+        historyCalls += 1;
+        if (historyCalls === 1) {
+          markHistoryStarted();
+          await heldHistory;
+        }
+      }
+      return { data: [] };
+    });
+
+    const staleRead = call({ octokit, force: true });
+    await historyStarted;
+    invalidateRepoPullsCache('acme', 'app', octokit);
+    releaseHistory();
+    await staleRead;
+
+    await call({ octokit, force: false });
+    expect(historyCalls).toBe(2);
   });
 
   test('a found record outlives the shorter "no history" window', async () => {

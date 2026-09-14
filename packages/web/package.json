@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.1.0",
+    "@gitbeaker/rest": "43.8.0",
     "@octokit/rest": "^22.0.1",
     "@opencode-ai/sdk": "1.18.31",
     "@simplewebauthn/server": "13.3.1",

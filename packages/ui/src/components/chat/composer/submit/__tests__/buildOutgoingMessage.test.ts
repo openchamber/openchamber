@@ -98,7 +98,7 @@ describe('queued messages', () => {
     });
 
     test('the context a message was queued with follows it, before the next message', () => {
-        const metadata = { [CONTEXT_METADATA_KEY]: { kind: 'github-issue' as const, number: 3, title: 'Bug', url: 'https://x/issues/3' } };
+        const metadata = { [CONTEXT_METADATA_KEY]: { kind: 'repository-issue' as const, number: 3, title: 'Bug', url: 'https://x/issues/3' } };
         const result = buildOutgoingMessage(input({
             queued: [
                 { text: 'first', context: [{ kind: 'context', text: 'issue body', metadata }, { kind: 'instruction', text: 'use: deploy' }] },
@@ -213,13 +213,13 @@ describe('synthetic context', () => {
     test('a linked PR sends its instructions before its diff', () => {
         const result = buildOutgoingMessage(input({
             composerText: 'review this',
-            linkedPr: { number: 7, title: 'PR', url: 'https://x/pr/7', instructions: 'how to read it', context: 'the diff' },
+            linkedPr: { provider: 'gitlab', number: 7, title: 'PR', url: 'https://x/pr/7', instructions: 'how to read it', context: 'the diff' },
         }), deps());
         expect(result.additionalParts.map((p) => p.text))
             .toEqual(['how to read it', 'the diff']);
         expect(result.additionalParts.every((p) => p.synthetic)).toBe(true);
         expect(result.additionalParts[1].metadata?.[CONTEXT_METADATA_KEY])
-            .toEqual({ kind: 'github-pr', number: 7, title: 'PR', url: 'https://x/pr/7' });
+            .toEqual({ kind: 'change-request', provider: 'gitlab', number: 7, title: 'PR', url: 'https://x/pr/7' });
     });
 
     test('a linked issue is sent as context', () => {
@@ -230,7 +230,7 @@ describe('synthetic context', () => {
         expect(result.additionalParts).toHaveLength(1);
         expect(result.additionalParts[0].text).toBe('issue body');
         expect(result.additionalParts[0].metadata?.[CONTEXT_METADATA_KEY])
-            .toEqual({ kind: 'github-issue', number: 3, title: 'Bug', url: 'https://x/issues/3' });
+            .toEqual({ kind: 'repository-issue', number: 3, title: 'Bug', url: 'https://x/issues/3' });
     });
 
     test('a linked Linear issue is sent as context', () => {
@@ -294,7 +294,7 @@ describe('full assembly order', () => {
             composerText: 'typed /deploy',
             syntheticTexts: ['synthetic'],
             linkedIssue: { number: 3, title: 'Bug', url: 'https://x/issues/3', contextText: 'issue' },
-            linkedPr: { number: 7, title: 'PR', url: 'https://x/pr/7', instructions: 'pr-how', context: 'pr-diff' },
+            linkedPr: { provider: 'github', number: 7, title: 'PR', url: 'https://x/pr/7', instructions: 'pr-how', context: 'pr-diff' },
             linkedLinearIssue: { identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12', contextText: 'linear' },
         }), deps());
 
@@ -327,7 +327,7 @@ describe('capturing composer context for the queue', () => {
             inlineComments: [commentDraft()],
             syntheticTexts: ['conflict note'],
             linkedIssue: { number: 3, title: 'Bug', url: 'https://x/issues/3', contextText: 'issue' },
-            linkedPr: { number: 7, title: 'PR', url: 'https://x/pr/7', instructions: 'pr-how', context: 'pr-diff' },
+            linkedPr: { provider: 'github', number: 7, title: 'PR', url: 'https://x/pr/7', instructions: 'pr-how', context: 'pr-diff' },
             linkedLinearIssue: { identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12', contextText: 'linear' },
         }), 'use: deploy');
 
@@ -340,7 +340,7 @@ describe('capturing composer context for the queue', () => {
             kind: 'context',
             text: 'pr-diff',
             instructions: 'pr-how',
-            metadata: { [CONTEXT_METADATA_KEY]: { kind: 'github-pr', number: 7, title: 'PR', url: 'https://x/pr/7' } },
+            metadata: { [CONTEXT_METADATA_KEY]: { kind: 'change-request', provider: 'github', number: 7, title: 'PR', url: 'https://x/pr/7' } },
         });
         expect(context.at(-1)).toEqual({ kind: 'instruction', text: 'use: deploy' });
     });
@@ -353,7 +353,7 @@ describe('capturing composer context for the queue', () => {
         const input = contextInput({
             inlineComments: [commentDraft()],
             syntheticTexts: ['conflict note'],
-            linkedPr: { number: 7, title: 'PR', url: 'https://x/pr/7', instructions: 'pr-how', context: 'pr-diff' },
+            linkedPr: { provider: 'github', number: 7, title: 'PR', url: 'https://x/pr/7', instructions: 'pr-how', context: 'pr-diff' },
         });
         const captured: QueuedContextPart[] = buildComposerContext(input, 'use: deploy');
         const direct = buildOutgoingMessage({ ...input, queued: [], composerText: 'use /deploy', composerAttachments: [] }, deps());

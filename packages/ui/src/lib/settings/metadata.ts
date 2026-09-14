@@ -150,7 +150,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Git',
     group: 'projects',
     kind: 'single',
-    keywords: ['git', 'identity', 'identities', 'ssh', 'profiles', 'credentials', 'keys', 'commit', 'gitmoji'],
+    keywords: ['git', 'github', 'gitlab', 'identity', 'identities', 'ssh', 'profiles', 'credentials', 'keys', 'commit', 'gitmoji', 'oauth', 'prs', 'issues'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
