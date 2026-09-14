@@ -1233,6 +1233,7 @@ export const settingsDict = {
   'settings.usage.sidebar.field.displayModeUsage': 'Kullanım',
   'settings.usage.sidebar.field.displayModeRemaining': 'Kalan kota',
   'settings.usage.sidebar.status.notSet': 'Ayarlanmadı',
+  'settings.usage.sidebar.status.unofficial': 'Resmi olmayan',
   'settings.usage.page.empty.selectProvider': 'Kullanım ayrıntılarını görüntülemek için bir provider seçin.',
   'settings.usage.page.header.providerUsage': '{provider} Kullanımı',
   'settings.usage.page.header.refreshing': 'Kullanım yenileniyor...',
