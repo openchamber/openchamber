@@ -2,6 +2,7 @@ import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
+import { SessionStatusIndicator } from '@/components/session/SessionStatusIndicator';
 import { formatSessionCompactDateLabel } from '@/components/session/sidebar/utils';
 import { useSwitcherItems } from '@/components/session/sidebar/shell/useSwitcherItems';
 import { useTabletLayout } from '@/lib/device';
@@ -12,7 +13,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useGlobalSessionStatus } from '@/sync/sync-context';
+import { useSessionDisplayStatus } from '@/sync/sync-context';
 
 const RECENT_SESSIONS_LIMIT = 10;
 /** Matches the metadata popover's width so both header dropdowns read as a pair. */
@@ -31,11 +32,16 @@ const SwitcherRow: React.FC<{
   onSelect: () => void;
 }> = ({ session, meta, active, onSelect }) => {
   const { t } = useI18n();
-  const status = useGlobalSessionStatus(session.id);
+  const displayStatus = useSessionDisplayStatus(session.id);
   const unseenCount = useSessionUnseenCount(session.id);
-  const statusType = status?.type ?? 'idle';
+  const statusType = displayStatus.type;
+  // `reconnecting` (statusUnavailable + preserved busy/retry) is NOT confirmed
+  // active: no spinner/dot. It is distinct from idle, though — the shared
+  // SessionStatusIndicator renders a static cloud-off icon for it. Last-known
+  // data is preserved for when freshness returns.
   const isStreaming = statusType === 'busy' || statusType === 'retry';
-  const showUnreadDot = !isStreaming && unseenCount > 0 && !active;
+  const isReconnecting = statusType === 'reconnecting';
+  const showUnreadDot = !isStreaming && !isReconnecting && unseenCount > 0 && !active;
   const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
   const showActivityDuration = (isStreaming || showUnreadDot) && hasActivityDuration;
   const timeLabel = formatSessionCompactDateLabel(session.time?.updated ?? session.time?.created ?? 0);
@@ -59,15 +65,12 @@ const SwitcherRow: React.FC<{
         ) : null}
       </span>
       {/* Activity sits on the right, before the time — no reserved left gutter. */}
-      {isStreaming || showUnreadDot ? (
-        <span
-          className={cn(
-            'size-1.5 shrink-0 rounded-full',
-            isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
-          )}
-          aria-hidden
-        />
-      ) : null}
+      <SessionStatusIndicator
+        statusType={statusType}
+        showUnread={showUnreadDot}
+        size="sm"
+        className="flex h-3.5 w-3.5 shrink-0 items-center justify-center"
+      />
       {/* The elapsed turn takes the time slot while it matters, then hands it
           back to the relative timestamp. */}
       {showActivityDuration ? (

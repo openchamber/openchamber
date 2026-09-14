@@ -608,6 +608,7 @@ export const dict = {
   'sessions.sidebar.session.status.questionPendingMany': '{count} bekleyen soru',
   'sessions.sidebar.session.status.activeFor': '{duration} süredir aktif',
   'sessions.sidebar.session.status.lastTurnDuration': 'Son tur {duration} sürdü',
+  'sessions.sidebar.session.status.reconnecting': 'Yeniden bağlanıyor...',
   'sessions.sidebar.session.subsessions.collapse': 'Alt session\'ları daralt',
   'sessions.sidebar.session.subsessions.expand': 'Alt session\'ları genişlet',
   'sessions.sidebar.dialogs.deleteSession.title': 'Session silinsin mi?',

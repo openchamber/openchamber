@@ -67,6 +67,7 @@ mock.module("@/components/ui", () => ({
 import { INITIAL_STATE, type State } from "../types"
 import { ChildStoreManager, type DirectoryStore } from "../child-store"
 import { getRuntimeKey } from "@/lib/runtime-switch"
+import { resetGlobalSessionStatus, useGlobalSessionStatusStore } from "../global-session-status"
 import { sessionEvents } from "@/lib/sessionEvents"
 const {
   createEventRoutingIndex,
@@ -375,6 +376,42 @@ describe("resyncBlockingRequestsForDirectory", () => {
     } finally {
       unsubscribe()
       childStores.disposeAll()
+    }
+  })
+
+  test("drops late old-runtime status events and status events while updates are blocked", () => {
+    const childStores = new ChildStoreManager()
+    const store = childStores.ensureChild("/repo", { bootstrap: false })
+    const routingIndex = createEventRoutingIndex()
+    const staleRuntimeKey = "runtime-replaced"
+    // SAFETY: This fixture provides the event fields the global status reducer reads.
+    const busyEvent = (sessionID: string): Event => ({
+      type: "session.status",
+      properties: { sessionID, status: { type: "busy" } },
+    } as Event)
+
+    expect(getRuntimeKey()).not.toBe(staleRuntimeKey)
+
+    try {
+      // Control: the current runtime's event reaches both live owners.
+      handleEvent("/repo", busyEvent("ses_current"), childStores, routingIndex, getRuntimeKey())
+      expect(store.getState().session_status.ses_current?.type).toBe("busy")
+      expect(useGlobalSessionStatusStore.getState().statusById.has("ses_current")).toBe(true)
+
+      // A previous runtime's delayed flush must be dropped before either owner.
+      handleEvent("/repo", busyEvent("ses_old"), childStores, routingIndex, staleRuntimeKey)
+      expect(store.getState().session_status.ses_old).toBe(undefined)
+      expect(useGlobalSessionStatusStore.getState().statusById.has("ses_old")).toBe(false)
+
+      // While a runtime boundary blocks event updates, even the current
+      // runtime's status events wait for the first authoritative snapshot.
+      resetGlobalSessionStatus({ blockEventUpdates: true })
+      handleEvent("/repo", busyEvent("ses_blocked"), childStores, routingIndex, getRuntimeKey())
+      expect(store.getState().session_status.ses_blocked).toBe(undefined)
+      expect(useGlobalSessionStatusStore.getState().statusById.has("ses_blocked")).toBe(false)
+    } finally {
+      childStores.disposeAll()
+      resetGlobalSessionStatus()
     }
   })
 })

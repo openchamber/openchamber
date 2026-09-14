@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test } from "bun:test"
 import { ChildStoreManager } from "./child-store"
 import { setSyncRefs } from "./sync-refs"
 import { useSessionUIStore } from "./session-ui-store"
+import { adoptAuthoritativeSessionDirectoryAfterResync } from "./sync-context"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 
 /**
@@ -116,5 +117,94 @@ describe("adoptAuthoritativeSessionDirectory", () => {
 
     expect(useSessionUIStore.getState().currentSessionId).toBe("ses_other")
     expect(useSessionUIStore.getState().currentSessionDirectory).toBe(before)
+  })
+
+  test("adopts after a successful status resync while the bootstrap is still current", async () => {
+    useSessionUIStore.getState().setCurrentSession(SESSION_ID)
+    useSessionUIStore.setState({ currentSessionDirectory: PARENT })
+    indexSessionIn(manager, WORKTREE)
+
+    let resyncRan = false
+    const cleanup = manager.configure({
+      onBootstrap: async (context) => {
+        await adoptAuthoritativeSessionDirectoryAfterResync(context, async () => {
+          resyncRan = true
+          return { [SESSION_ID]: { type: "busy" } }
+        })
+      },
+    })
+
+    try {
+      manager.requestBootstrap({ directory: WORKTREE, priority: "selected", reason: "selected-session" })
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(resyncRan).toBe(true)
+      expect(useSessionUIStore.getState().currentSessionDirectory).toBe(WORKTREE)
+    } finally {
+      cleanup()
+      manager.disposeAll()
+    }
+  })
+
+  test("adopts even when the status resync reports no snapshot", async () => {
+    useSessionUIStore.getState().setCurrentSession(SESSION_ID)
+    useSessionUIStore.setState({ currentSessionDirectory: PARENT })
+    indexSessionIn(manager, WORKTREE)
+
+    let resyncRan = false
+    const cleanup = manager.configure({
+      onBootstrap: async (context) => {
+        await adoptAuthoritativeSessionDirectoryAfterResync(context, async () => {
+          resyncRan = true
+          return null
+        })
+      },
+    })
+
+    try {
+      manager.requestBootstrap({ directory: WORKTREE, priority: "selected", reason: "selected-session" })
+      await Promise.resolve()
+      await Promise.resolve()
+
+      // A failed status fetch must not lose the directory adoption.
+      expect(resyncRan).toBe(true)
+      expect(useSessionUIStore.getState().currentSessionDirectory).toBe(WORKTREE)
+    } finally {
+      cleanup()
+      manager.disposeAll()
+    }
+  })
+
+  test("does not adopt after the bootstrap becomes stale during status resync", async () => {
+    useSessionUIStore.getState().setCurrentSession(SESSION_ID)
+    useSessionUIStore.setState({ currentSessionDirectory: PARENT })
+    indexSessionIn(manager, WORKTREE)
+
+    let resolveResync!: () => void
+    // `resync` returns a snapshot in production; the helper only awaits it.
+    const resync = new Promise<null>((resolve) => {
+      resolveResync = () => resolve(null)
+    })
+    let bootstrapContext: { isCurrent: () => boolean } | undefined
+    const cleanup = manager.configure({
+      onBootstrap: async (context) => {
+        bootstrapContext = context
+        await adoptAuthoritativeSessionDirectoryAfterResync(context, () => resync)
+      },
+    })
+
+    manager.requestBootstrap({ directory: WORKTREE, priority: "selected", reason: "selected-session" })
+    await Promise.resolve()
+    expect(bootstrapContext?.isCurrent()).toBe(true)
+
+    // The mounted generation goes away while the status resync is in flight.
+    cleanup()
+    resolveResync()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(useSessionUIStore.getState().currentSessionDirectory).toBe(PARENT)
+    manager.disposeAll()
   })
 })
