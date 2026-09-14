@@ -205,6 +205,65 @@ Run daily.
       await cleanup();
     }
   });
+
+  it('waits for prompt_async to persist the user message before reporting success', async () => {
+    const { tempRoot, repoPath, cleanup } = await createTempProject();
+    const originalFetch = globalThis.fetch;
+    let releasePromptRead;
+    try {
+      const projectConfigRuntime = await createProjectConfig(tempRoot);
+      const created = await projectConfigRuntime.upsertScheduledTask('proj', {
+        name: 'wait for prompt',
+        enabled: true,
+        schedule: { kind: 'daily', times: ['09:00'], timezone: 'UTC' },
+        execution: { prompt: 'Run the scheduled check.', providerID: 'openai', modelID: 'gpt-5' },
+      });
+      let messageReads = 0;
+      const taskEvents = [];
+      const client = {
+        session: {
+          create: vi.fn(async () => ({ data: { id: 'ses_scheduled' } })),
+          messages: vi.fn(async () => {
+            messageReads += 1;
+            if (messageReads === 1) return { data: [] };
+            return new Promise((resolve) => {
+              releasePromptRead = () => resolve({
+                data: [{ info: { id: 'msg_user', role: 'user', time: { created: Date.now() } } }],
+              });
+            });
+          }),
+        },
+        command: { list: vi.fn(async () => ({ data: [] })) },
+      };
+      globalThis.fetch = vi.fn(async () => ({ ok: true, text: async () => '' }));
+
+      const runtime = createScheduledTasksRuntime({
+        ...createRuntimeDeps(),
+        projectConfigRuntime,
+        listProjects: async () => [{ id: 'proj', path: repoPath }],
+        createClient: () => client,
+        emitTaskRunEvent: (event) => taskEvents.push(event),
+      });
+      await runtime.syncProject('proj');
+
+      const runPromise = runtime.runNow('proj', created.task.id);
+      await vi.waitFor(() => expect(client.session.messages).toHaveBeenCalledTimes(2));
+      let settled = false;
+      void runPromise.then(() => { settled = true; }, () => { settled = true; });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(settled).toBe(false);
+      expect(taskEvents).toEqual([]);
+
+      releasePromptRead();
+      await expect(runPromise).resolves.toMatchObject({ ok: true, sessionID: 'ses_scheduled' });
+      expect(taskEvents.map((event) => event.status)).toEqual(['running', 'success']);
+      runtime.stop();
+    } finally {
+      releasePromptRead?.();
+      globalThis.fetch = originalFetch;
+      await cleanup();
+    }
+  });
 });
 
 describe('scheduled-tasks runtime syncAllProjects', () => {

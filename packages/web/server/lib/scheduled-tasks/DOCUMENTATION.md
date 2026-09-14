@@ -79,8 +79,10 @@ dispatches still skip disabled tasks, and completion never re-arms a paused task
   - Next-run computation (daily/weekly/cron compatibility)
   - Timer scheduling and queueing
   - Concurrency controls
-  - Session create + prompt_async execution
-  - Emits OpenChamber task-run events
+   - Session create + prompt_async execution
+   - Prompt persistence confirmation after prompt_async acknowledgement
+   - Emits the running task event after the first user message is durable, then
+     emits the terminal task event
 
 - `packages/web/server/lib/scheduled-tasks/loops.js`
   - Discovery of `.agents/loops/*.md` (project scope, ancestors up to the worktree root) and `~/.agents/loops/*.md` (user scope)
