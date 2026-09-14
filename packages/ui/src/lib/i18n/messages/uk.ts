@@ -3301,6 +3301,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.responseSpeed': 'Відповідь',
   'chat.workStatus.telemetry.responseSpeedDescription': 'Як швидко надходив фінальний текст. Без очікування на початок, міркувань і попередніх викликів інструментів. Це оцінка за часовими мітками тексту, а не вимір швидкості на сервері провайдера.',
   'chat.workStatus.telemetry.speed': 'Увесь запит',
+  'chat.workStatus.telemetry.elapsed': 'Час, що минув',
+  'chat.workStatus.telemetry.elapsedDescription': 'Фактичний час від першого повідомлення користувача до фінальної відповіді асистента. Включає очікування моделі, виконання інструментів, компакцію та інші проміжки.',
   'chat.workStatus.telemetry.llmDuration': 'Час моделі',
   'chat.workStatus.telemetry.llmDurationDescription': 'Час усіх кроків моделі, включно з очікуванням відповідей. Час виконання інструментів віднято. Це не лише час генерації тексту.',
   'chat.workStatus.telemetry.toolDuration': 'Час інструментів',

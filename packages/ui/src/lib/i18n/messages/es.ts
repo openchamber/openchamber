@@ -3301,6 +3301,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.responseSpeed': 'Respuesta',
   'chat.workStatus.telemetry.responseSpeedDescription': 'La velocidad a la que llegó el texto final. Excluye la espera inicial, el razonamiento y las llamadas anteriores a herramientas. Es una estimación basada en las marcas de tiempo del texto, no una medición del proveedor.',
   'chat.workStatus.telemetry.speed': 'Solicitud',
+  'chat.workStatus.telemetry.elapsed': 'Tiempo transcurrido',
+  'chat.workStatus.telemetry.elapsedDescription': 'Tiempo de reloj desde el primer mensaje del usuario hasta la respuesta final del asistente. Incluye la espera del modelo, la ejecución de herramientas, la compactación y otros intervalos.',
   'chat.workStatus.telemetry.llmDuration': 'Modelo',
   'chat.workStatus.telemetry.llmDurationDescription': 'Tiempo de todos los pasos del modelo, incluida la espera de respuestas. Se resta la ejecución de herramientas. No es solo el tiempo de generación de texto.',
   'chat.workStatus.telemetry.toolDuration': 'Herramientas',
