@@ -102,15 +102,16 @@ const latestUserMessageID = async ({ client, sessionID, projectPath }) => {
 // prompt_async acknowledges the dispatch before OpenCode persists the user
 // message. Wait for that durable record so a scheduled run cannot report
 // success while its new thread is still empty.
-const waitForPromptLanded = async ({ client, sessionID, projectPath, baselineUserMessageID }) => {
-  const deadline = Date.now() + PROMPT_LANDED_TIMEOUT_MS;
+const waitForPromptLanded = async ({ client, sessionID, projectPath, baselineUserMessageID, timeoutMs = PROMPT_LANDED_TIMEOUT_MS, pollMs = PROMPT_LANDED_POLL_MS }) => {
+  const deadline = Date.now() + timeoutMs;
   for (;;) {
     const latest = await latestUserMessageID({ client, sessionID, projectPath });
-    // A failed lookup is not evidence that the prompt was lost.
-    if (!latest.ok) return true;
-    if (latest.messageID && latest.messageID !== baselineUserMessageID) return true;
-    if (Date.now() >= deadline) return false;
-    await new Promise((resolve) => setTimeout(resolve, PROMPT_LANDED_POLL_MS));
+    if (latest.ok && latest.messageID && latest.messageID !== baselineUserMessageID) return true;
+    // A failed lookup proves nothing about the prompt, so keep polling
+    // through transient errors. Only fail open at the deadline: returning
+    // early here would publish the session inside the race window.
+    if (Date.now() >= deadline) return !latest.ok;
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
 };
 
@@ -297,6 +298,8 @@ export const createScheduledTasksRuntime = (deps) => {
     emitTaskRunEvent,
     setSessionAutoAccept,
     createClient = createOpencodeClient,
+    promptLandedTimeoutMs = PROMPT_LANDED_TIMEOUT_MS,
+    promptLandedPollMs = PROMPT_LANDED_POLL_MS,
     sessionKnowledgeRuntime = null,
     logger = console,
     maxGlobalConcurrency = DEFAULT_GLOBAL_CONCURRENCY,
@@ -666,6 +669,8 @@ export const createScheduledTasksRuntime = (deps) => {
       sessionID,
       projectPath,
       baselineUserMessageID: baseline.messageID,
+      timeoutMs: promptLandedTimeoutMs,
+      pollMs: promptLandedPollMs,
     });
     if (!landed) {
       throw new Error('scheduled task dispatch was accepted but its user message never appeared in the session');

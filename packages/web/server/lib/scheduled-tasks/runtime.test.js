@@ -264,6 +264,93 @@ Run daily.
       await cleanup();
     }
   });
+
+  it('errors the run without a running event when the prompt never lands', async () => {
+    const { tempRoot, repoPath, cleanup } = await createTempProject();
+    const originalFetch = globalThis.fetch;
+    try {
+      const projectConfigRuntime = await createProjectConfig(tempRoot);
+      const created = await projectConfigRuntime.upsertScheduledTask('proj', {
+        name: 'prompt never lands',
+        enabled: true,
+        schedule: { kind: 'daily', times: ['09:00'], timezone: 'UTC' },
+        execution: { prompt: 'Run the scheduled check.', providerID: 'openai', modelID: 'gpt-5' },
+      });
+      const taskEvents = [];
+      const client = {
+        session: {
+          create: vi.fn(async () => ({ data: { id: 'ses_missing_prompt' } })),
+          messages: vi.fn(async () => ({ data: [] })),
+        },
+        command: { list: vi.fn(async () => ({ data: [] })) },
+      };
+      globalThis.fetch = vi.fn(async () => ({ ok: true, text: async () => '' }));
+
+      const runtime = createScheduledTasksRuntime({
+        ...createRuntimeDeps(),
+        projectConfigRuntime,
+        listProjects: async () => [{ id: 'proj', path: repoPath }],
+        createClient: () => client,
+        emitTaskRunEvent: (event) => taskEvents.push(event),
+        promptLandedTimeoutMs: 300,
+        promptLandedPollMs: 25,
+      });
+      await runtime.syncProject('proj');
+
+      const result = await runtime.runNow('proj', created.task.id);
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/never appeared in the session/);
+      expect(taskEvents.some((event) => event.status === 'running')).toBe(false);
+      expect(taskEvents.map((event) => event.status)).toEqual(['error']);
+      runtime.stop();
+    } finally {
+      globalThis.fetch = originalFetch;
+      await cleanup();
+    }
+  });
+
+  it('fails open when message reads keep failing', async () => {
+    const { tempRoot, repoPath, cleanup } = await createTempProject();
+    const originalFetch = globalThis.fetch;
+    try {
+      const projectConfigRuntime = await createProjectConfig(tempRoot);
+      const created = await projectConfigRuntime.upsertScheduledTask('proj', {
+        name: 'unreadable messages',
+        enabled: true,
+        schedule: { kind: 'daily', times: ['09:00'], timezone: 'UTC' },
+        execution: { prompt: 'Run the scheduled check.', providerID: 'openai', modelID: 'gpt-5' },
+      });
+      const taskEvents = [];
+      const client = {
+        session: {
+          create: vi.fn(async () => ({ data: { id: 'ses_unreadable' } })),
+          messages: vi.fn(async () => { throw new Error('store unavailable'); }),
+        },
+        command: { list: vi.fn(async () => ({ data: [] })) },
+      };
+      globalThis.fetch = vi.fn(async () => ({ ok: true, text: async () => '' }));
+
+      const runtime = createScheduledTasksRuntime({
+        ...createRuntimeDeps(),
+        projectConfigRuntime,
+        listProjects: async () => [{ id: 'proj', path: repoPath }],
+        createClient: () => client,
+        emitTaskRunEvent: (event) => taskEvents.push(event),
+        promptLandedTimeoutMs: 300,
+        promptLandedPollMs: 25,
+      });
+      await runtime.syncProject('proj');
+
+      await expect(runtime.runNow('proj', created.task.id))
+        .resolves.toMatchObject({ ok: true, sessionID: 'ses_unreadable' });
+      expect(taskEvents.map((event) => event.status)).toEqual(['running', 'success']);
+      expect(client.session.messages.mock.calls.length).toBeGreaterThan(2);
+      runtime.stop();
+    } finally {
+      globalThis.fetch = originalFetch;
+      await cleanup();
+    }
+  });
 });
 
 describe('scheduled-tasks runtime syncAllProjects', () => {
