@@ -11,6 +11,8 @@ import {
 } from '../sessions/sessionNodeItemUtils';
 import type { SessionNodeRenderExtras } from '../sessions/sessionNodeItemUtils';
 import { SessionTreeItem, type SessionTreeItemProps } from '../sessions/SessionTreeItem';
+import { useRegisterSessionRowOrder } from '../sessions/sessionRowOrder';
+import { buildActivityRowOrderEntries } from '../sessions/sessionRowOrderUtils';
 
 export type ActivityItem = {
   node: SessionNode;
@@ -55,10 +57,7 @@ type Props = {
   | 'setOpenSidebarMenuKey'
   | 'allowReselect'
   | 'onSessionSelected'
-  | 'isSessionSearchOpen'
-  | 'sessionSearchQuery'
-  | 'setSessionSearchQuery'
-  | 'setIsSessionSearchOpen'
+  | 'resetSessionSearch'
   | 'deleteSessionConfirm'
   | 'setDeleteSessionConfirm'
   | 'startFolderRename'
@@ -71,6 +70,27 @@ type RenderExtras = SessionNodeRenderExtras;
 const MAX_VISIBLE_RECENT_SESSIONS = 7;
 
 const RELATIVE_TIME_TICK_INTERVAL_MS = 60_000;
+
+/**
+ * Section rows register their logical document order with the sidebar
+ * selection registry. The section itself renders at most `visibleLimit` items,
+ * and chats rendered through `renderChatsSection` register through their own
+ * managed group instead.
+ */
+const ActivitySectionRowOrder: React.FC<{
+  order: number;
+  items: readonly ActivityItem[];
+  visibleLimit: number;
+  hasSessionSearchQuery: boolean;
+  expandedParents: ReadonlySet<string>;
+}> = ({ order, items, visibleLimit, hasSessionSearchQuery, expandedParents }) => {
+  const entries = React.useMemo(
+    () => buildActivityRowOrderEntries(items, { visibleLimit, hasSessionSearchQuery, expandedParents }),
+    [expandedParents, hasSessionSearchQuery, items, visibleLimit],
+  );
+  useRegisterSessionRowOrder(order, entries);
+  return null;
+};
 
 /**
  * One ticker for the whole Recent list. The rows render their compact
@@ -170,6 +190,14 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
     });
   }, [props.editingId, props.openSidebarMenuKey, relativeTimeTick]);
 
+  // Row-order bases follow the section's index in the full `sections` list
+  // (chats is 0, Recent is 1) even when an empty section is filtered out, so
+  // the registered order never depends on which sections happen to render.
+  const sectionOrderById = React.useMemo(
+    () => new Map(sections.map((section, index) => [section.key, index])),
+    [sections],
+  );
+
   const visibleSections = sections.filter((section) => section.items.length > 0 || section.key === 'chats');
   if (visibleSections.length === 0) {
     return null;
@@ -189,6 +217,15 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
         const remainingCount = section.items.length - visibleItems.length;
         const usesCustomRenderer = section.key === 'chats' && Boolean(props.renderChatsSection);
         const canShowFewer = !usesCustomRenderer && !flatVariant && section.items.length > initialVisibleCount && remainingCount === 0;
+        const rowOrderRegistration = !isCollapsed && !(usesCustomRenderer && !flatVariant) ? (
+          <ActivitySectionRowOrder
+            order={sectionOrderById.get(section.key) ?? 0}
+            items={section.items}
+            visibleLimit={visibleLimit}
+            hasSessionSearchQuery={props.hasSessionSearchQuery}
+            expandedParents={props.expandedParents}
+          />
+        ) : null;
         const getRenderExtras = buildRenderExtras(visibleItems.map((item) => item.node));
         const renderItem = (item: ActivityItem) => (
           <SessionTreeItem
@@ -216,10 +253,7 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
             setOpenSidebarMenuKey={props.setOpenSidebarMenuKey}
             allowReselect={props.allowReselect}
             onSessionSelected={props.onSessionSelected}
-            isSessionSearchOpen={props.isSessionSearchOpen}
-            sessionSearchQuery={props.sessionSearchQuery}
-            setSessionSearchQuery={props.setSessionSearchQuery}
-            setIsSessionSearchOpen={props.setIsSessionSearchOpen}
+            resetSessionSearch={props.resetSessionSearch}
             deleteSessionConfirm={props.deleteSessionConfirm}
             setDeleteSessionConfirm={props.setDeleteSessionConfirm}
             startFolderRename={props.startFolderRename}
@@ -231,6 +265,7 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
         if (flatVariant) {
           return (
             <div key={section.key} className="space-y-0.5">
+              {rowOrderRegistration}
               {visibleItems.map(renderItem)}
               {remainingCount > 0 ? (
                 <button
@@ -247,6 +282,7 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
 
         return (
           <div key={section.key} className="relative">
+            {rowOrderRegistration}
             <div data-sidebar-activity-start={section.key} className="pointer-events-none absolute inset-x-0 top-0 h-px" aria-hidden="true" />
             <div className={cn(
               'relative group/chats',

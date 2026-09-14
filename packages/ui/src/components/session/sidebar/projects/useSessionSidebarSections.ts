@@ -1,7 +1,7 @@
 import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
-import type { SessionGroup, SessionNode, GroupSearchData } from '../types';
+import type { SessionGroup, SessionNode, GroupSearchData, SessionNodeSearchResult } from '../types';
 import { dedupeSessionsById, normalizePath } from '../utils';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SessionFoldersMap } from '@/stores/useSessionFoldersStore';
@@ -66,7 +66,7 @@ type Args = {
   ) => SessionGroup[];
   hasSessionSearchQuery: boolean;
   normalizedSessionSearchQuery: string;
-  filterSessionNodesForSearch: (nodes: SessionNode[], query: string) => SessionNode[];
+  filterSessionNodesForSearch: (nodes: SessionNode[], query: string) => SessionNodeSearchResult;
   buildGroupSearchText: (group: SessionGroup) => string;
   foldersMap: SessionFoldersMap;
   /**
@@ -195,15 +195,10 @@ export const useSessionSidebarSections = (args: Args) => {
       return result;
     }
 
-    const idQuery = normalizedSessionSearchQuery.trim().toLowerCase();
-    const isIdQuery = idQuery.startsWith('ses_');
-    const countNodes = (nodes: SessionNode[]): number => nodes.reduce((total, node) => (
-      total + (!isIdQuery || node.session.id.toLowerCase() === idQuery ? 1 : 0) + countNodes(node.children)
-    ), 0);
+    const isIdQuery = normalizedSessionSearchQuery.trim().toLowerCase().startsWith('ses_');
 
     const addSearchData = (group: SessionGroup) => {
-      const filteredNodes = filterSessionNodesForSearch(group.sessions, normalizedSessionSearchQuery);
-      const matchedSessionCount = countNodes(filteredNodes);
+      const { nodes: filteredNodes, matchedCount: matchedSessionCount } = filterSessionNodesForSearch(group.sessions, normalizedSessionSearchQuery);
       const groupMatches = !isIdQuery && matchesRankQuery([buildGroupSearchText(group)], normalizedSessionSearchQuery);
       const scopeKey = normalizePath(group.directory ?? null);
       const scopeFolders = scopeKey ? (foldersMap[scopeKey] ?? []) : [];

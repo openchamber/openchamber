@@ -32,6 +32,7 @@ import { getSyncSessionMaterializationStatus } from '@/sync/sync-refs';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from '../folders/sessionFolderDnd';
 import { canShowSessionWorktreeMenu, getSessionWorktreeMenuDisabled, nodeContainsSessionId, nodeHasPinnedMembershipChange, selectQuestionBadgeSessionScopes, selectRowBadgeVisibilityClass } from './sessionNodeItemUtils';
+import { useSessionRowOrderRegistry } from './sessionRowOrder';
 import type { SessionNode } from '../types';
 import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from '../utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -427,6 +428,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   );
   const toggleRowSelected = useSessionMultiSelectStore((state) => state.toggleSelected);
   const setRowRange = useSessionMultiSelectStore((state) => state.setRange);
+  // Shift-range order comes from the same render model that decides row
+  // order; virtualization keeps rows unmounted, so the DOM cannot know it.
+  const sessionRowOrderRegistry = useSessionRowOrderRegistry();
 
   const collectNodeDescendantIds = React.useCallback((root: SessionNode): string[] => {
     const out: string[] = [];
@@ -895,10 +899,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       event?.preventDefault();
       event?.stopPropagation();
       if (event?.shiftKey) {
-        const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-session-row]'));
-        const orderedIds = rows
-          .map((el) => el.getAttribute('data-session-row'))
-          .filter((id): id is string => id !== null && id.length > 0);
+        const orderedIds = sessionRowOrderRegistry ? [...sessionRowOrderRegistry.getOrderedIds()] : [];
         const currentAnchor = useSessionMultiSelectStore.getState().anchorId;
         const descendantsById = new Map<string, string[]>();
         descendantsById.set(session.id, collectNodeDescendantIds(node));

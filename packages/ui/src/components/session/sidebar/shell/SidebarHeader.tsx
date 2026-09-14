@@ -320,7 +320,12 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 onKeyDown={(event) => {
                   if (event.key === 'Escape') {
                     event.stopPropagation();
-                    if (hasSessionSearchQuery) {
+                    // Raw typed text decides the Escape action, like the clear
+                    // button: `hasSessionSearchQuery` is the debounced flag and
+                    // is still false within the 120ms window, so branching on
+                    // it would close the panel and leave the typed text to
+                    // reappear on reopen.
+                    if (sessionSearchQuery.length > 0) {
                       setSessionSearchQuery('');
                     } else {
                       setIsSessionSearchOpen(false);

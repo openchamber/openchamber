@@ -42,10 +42,7 @@ type Props = {
   | 'setOpenSidebarMenuKey'
   | 'allowReselect'
   | 'onSessionSelected'
-  | 'isSessionSearchOpen'
-  | 'sessionSearchQuery'
-  | 'setSessionSearchQuery'
-  | 'setIsSessionSearchOpen'
+  | 'resetSessionSearch'
   | 'deleteSessionConfirm'
   | 'setDeleteSessionConfirm'
   | 'startFolderRename'
@@ -148,10 +145,7 @@ export const RecentSessionSection: React.FC<Props> = (props) => {
       setOpenSidebarMenuKey={props.setOpenSidebarMenuKey}
       allowReselect={props.allowReselect}
       onSessionSelected={props.onSessionSelected}
-      isSessionSearchOpen={props.isSessionSearchOpen}
-      sessionSearchQuery={props.sessionSearchQuery}
-      setSessionSearchQuery={props.setSessionSearchQuery}
-      setIsSessionSearchOpen={props.setIsSessionSearchOpen}
+      resetSessionSearch={props.resetSessionSearch}
       deleteSessionConfirm={props.deleteSessionConfirm}
       setDeleteSessionConfirm={props.setDeleteSessionConfirm}
       startFolderRename={props.startFolderRename}
