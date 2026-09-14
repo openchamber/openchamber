@@ -128,6 +128,9 @@ rate; unavailable response timing never falls back to whole-turn speed.
 
 Whole-turn speed uses output plus reasoning tokens from every step, divided by
 elapsed assistant time minus the union of completed and failed tool intervals.
+Compaction summaries are checkpoints, not assistant steps. Providers that
+collate several model requests into one assistant record can supply aggregate
+usage and timing in their namespaced message metadata.
 Waiting for each model response remains included. Invalid or missing inputs
 omit the dependent metric rather than becoming zero; reported zeros remain
 valid. TTFT averages the earliest text/reasoning start delay from every step,
