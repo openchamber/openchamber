@@ -1,6 +1,37 @@
 import type { Theme } from '@/types/theme';
+import type { ActivityColorCategory } from '@/lib/activityColors';
 import { SEMANTIC_TYPOGRAPHY, VSCODE_TYPOGRAPHY } from '@/lib/typography';
 import { isVSCodeRuntime } from '@/lib/desktop';
+
+const ACTIVITY_COLOR_CATEGORIES = [
+  'thinking',
+  'read',
+  'edit',
+  'write',
+  'shell',
+  'search',
+  'web',
+  'question',
+  'agent',
+] as const satisfies readonly Exclude<ActivityColorCategory, 'system'>[];
+
+/**
+ * Default accents for color-coded tool/activity rows, derived from existing
+ * theme tokens so every light/dark theme gets distinct hues with no
+ * hard-coded palette. `system` has no entry: those rows stay neutral.
+ * Themes override any of these via `colors.tools.activity`.
+ */
+const ACTIVITY_COLOR_FALLBACKS = {
+  thinking: 'var(--pr-merged)',
+  read: 'var(--status-info)',
+  edit: 'var(--status-warning)',
+  write: 'var(--status-success)',
+  shell: 'color-mix(in srgb, var(--pr-merged) 62%, var(--status-info) 38%)',
+  search: 'var(--syntax-operator)',
+  web: 'color-mix(in srgb, var(--status-info) 65%, var(--status-success) 35%)',
+  question: 'color-mix(in srgb, var(--pr-merged) 60%, var(--status-warning) 40%)',
+  agent: 'color-mix(in srgb, var(--status-success) 45%, var(--status-warning) 55%)',
+} satisfies Record<(typeof ACTIVITY_COLOR_CATEGORIES)[number], string>;
 
 const hexToRgb = (value: string | undefined | null): string | null => {
   if (!value || typeof value !== 'string') {
@@ -474,6 +505,17 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
       vars.push(`  --tools-edit-line-number: ${this.opacity(theme.colors.surface.mutedForeground, 0.6)};`);
     }
 
+    vars.push(...this.generateActivityColorVars(tools));
+
+    return vars;
+  }
+
+  private generateActivityColorVars(tools: Theme['colors']['tools'] | undefined): string[] {
+    const vars: string[] = [];
+    const activity = tools?.activity;
+    for (const category of ACTIVITY_COLOR_CATEGORIES) {
+      vars.push(`  --tools-activity-${category}: ${activity?.[category] || ACTIVITY_COLOR_FALLBACKS[category]};`);
+    }
     return vars;
   }
 
@@ -494,6 +536,8 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     vars.push(`  --tools-edit-modified: ${theme.colors.status.info};`);
     vars.push(`  --tools-edit-modified-bg: ${this.addTransparency(this.removeTransparency(theme.colors.status.infoBackground), 0.15)};`);
     vars.push(`  --tools-edit-line-number: ${this.opacity(theme.colors.surface.mutedForeground, 0.6)};`);
+
+    vars.push(...this.generateActivityColorVars(undefined));
 
     return vars;
   }

@@ -14,6 +14,7 @@ import { Icon } from "@/components/icon/Icon";
 import { FadeInOnReveal } from '../FadeInOnReveal';
 import { getToolIcon } from './toolPresentation';
 import { getToolMetadata } from '@/lib/toolHelpers';
+import { getActivityColorCategory, getActivityColorStyle } from '@/lib/activityColors';
 import { isExpandableTool, isStandaloneTool, isStaticTool } from './toolRenderUtils';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -558,8 +559,10 @@ const StaticToolRowInner: React.FC<{
     animateTailText: boolean;
 }> = ({ toolName, activities, animateTailText }) => {
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
+    const activityColorCoding = useUIStore((state) => state.activityColorCoding);
     const displayName = getToolMetadata(toolName).displayName;
     const icon = getToolIcon(toolName);
+    const activityColor = activityColorCoding ? getActivityColorStyle(getActivityColorCategory(toolName)) : null;
     const isReadGroup = toolName.toLowerCase() === 'read';
     const runtime = React.useContext(RuntimeAPIContext);
     const mobileActions = useMobileAppActions();
@@ -679,14 +682,14 @@ const StaticToolRowInner: React.FC<{
                 'oc-static-tool-row flex w-full items-center gap-x-1.5 pr-2 pl-px py-1.5 rounded-xl min-w-0'
             )}
         >
-            <div className="inline-flex h-5 items-center flex-shrink-0" style={{ color: 'var(--tools-icon)' }}>
+            <div className="inline-flex h-5 items-center flex-shrink-0" style={{ color: activityColor?.icon ?? 'var(--tools-icon)' }}>
                 {icon}
             </div>
             <MinDurationShineText
                 active={hasRunningActivity}
                 minDurationMs={1000}
                 className={cn(TOOL_ROW_TITLE_CLASS, 'inline-flex items-center flex-shrink-0 opacity-85')}
-                style={{ color: 'var(--tools-title)' }}
+                style={{ color: activityColor?.title ?? 'var(--tools-title)' }}
                 title={displayName}
             >
                 {displayName}

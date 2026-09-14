@@ -72,6 +72,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'appearance.activity-color-coding',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.field.activityColorCoding',
+    descriptionKey: 'settings.openchamber.visual.field.activityColorCodingHint',
+    keywords: ['tools', 'activity', 'color', 'colors', 'theme', 'chat', 'thinking', 'shell'],
+  },
+  {
     id: 'appearance.dock-badge',
     page: 'appearance',
     titleKey: 'settings.openchamber.visual.field.dockBadge',

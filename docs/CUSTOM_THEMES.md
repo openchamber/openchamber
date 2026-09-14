@@ -183,6 +183,17 @@ OpenChamber supports user-defined themes. Drop a JSON file into the themes direc
         "removed": "#D14D41",
         "removedBackground": "#AF302925",
         "lineNumber": "#403E3C"
+      },
+      "activity": {
+        "thinking": "#8B7EC8",
+        "read": "#4385BE",
+        "edit": "#DA702C",
+        "write": "#A0AF54",
+        "shell": "#3d6dc4",
+        "search": "#D14D41",
+        "web": "#2E7F76",
+        "question": "#a06d8a",
+        "agent": "#8f8a3d"
       }
     }
   },
@@ -212,6 +223,10 @@ OpenChamber supports user-defined themes. Drop a JSON file into the themes direc
 ## Surface Alpha Requirement
 
 - `colors.surface.muted` and `colors.surface.elevated` must always use 90 alpha (`...90` in 8-digit hex, e.g. `#1C1B1A90`).
+
+## Tool/Activity Color Coding
+
+The chat tints each tool or reasoning row's icon and title with a per-category accent when the "Color-code tools & activity" setting is on. The UI generates a `--tools-activity-<category>` variable per category from existing theme tokens (`pr.merged`, `status.*`, `syntax.*`), so themes need no extra keys. To take full control, provide `colors.tools.activity` with any of: `thinking`, `read`, `edit`, `write`, `shell`, `search`, `web`, `question`, `agent` (todo/plan/MCP/unknown tools stay neutral). Pick hues that stay distinct in both light and dark variants of your theme.
 
 ## Validation
 
