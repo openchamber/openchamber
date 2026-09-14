@@ -186,6 +186,41 @@ export function aggregateLiveSessionStatuses(states: Iterable<LiveStateSlice>): 
   return statuses
 }
 
+/**
+ * Merge derived-only global status entries (parents kept presentation-active by
+ * a busy/retrying background child) into the aggregated raw directory status
+ * map consumed by group busy indicators.
+ *
+ * Raw authoritative statuses take precedence: a session the raw map reports as
+ * busy/retry is never overwritten. The synthetic derived busy only fills the
+ * gap where the raw map is absent or reports the session idle — mirroring
+ * `useSessionActivity`, which treats a derived-busy parent as working even
+ * while its own raw status is idle. Returns `raw` unchanged when there is
+ * nothing to merge, preserving reference identity for downstream memoization;
+ * a derived entry never persists on its own — it exists only while the global
+ * status index still holds it, which ends when the last active child settles or
+ * the runtime resets.
+ */
+export function mergeDerivedSessionStatuses(
+  raw: Record<string, SessionStatus>,
+  derived: Record<string, SessionStatus>,
+): Record<string, SessionStatus> {
+  let merged: Record<string, SessionStatus> | null = null
+  for (const sessionId of Object.keys(derived)) {
+    const rawStatus = raw[sessionId]
+    if (rawStatus && rawStatus.type !== 'idle') {
+      continue
+    }
+    const derivedStatus = derived[sessionId]
+    if (!merged) {
+      merged = { ...raw }
+    }
+    merged[sessionId] = derivedStatus
+  }
+
+  return merged ?? raw
+}
+
 export function findLiveSession(states: Iterable<LiveStateSlice>, sessionID?: string | null): Session | undefined {
   if (!sessionID) {
     return undefined
