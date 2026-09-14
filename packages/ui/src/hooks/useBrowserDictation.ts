@@ -22,6 +22,7 @@ export function useBrowserDictation(options: UseDictationOptions = {}): UseDicta
     const [partialTranscript, setPartialTranscript] = useState('');
     const [duration, setDuration] = useState(0);
     const [errorReason, setErrorReason] = useState<string | null>(null);
+    const [meterAvailable, setMeterAvailable] = useState(true);
     const sessionRef = useRef<BrowserRecognitionSession | null>(null);
     const statusRef = useRef<DictationStatus>('idle');
     const textRef = useRef('');
@@ -57,6 +58,7 @@ export function useBrowserDictation(options: UseDictationOptions = {}): UseDicta
         textRef.current = '';
         setPartialTranscript('');
         setDuration(0);
+        setMeterAvailable(true);
         transition('recording');
         const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         let recognition: SpeechRecognition;
@@ -86,12 +88,21 @@ export function useBrowserDictation(options: UseDictationOptions = {}): UseDicta
         sessionRef.current = session;
         const language = useConfigStore.getState().sttLanguage.trim();
         // Keep recognition.start in the user gesture, before awaiting mic permission.
-        session.start(language && language.toLowerCase() !== 'auto' ? language : navigator.language || 'en-US');
+        const claimed = session.start(language && language.toLowerCase() !== 'auto' ? language : navigator.language || 'en-US');
+        if (!claimed) {
+            // Another owner (the composer or the settings preview) is recording.
+            // Refuse rather than capture side by side.
+            sessionRef.current = null;
+            setErrorReason('busy');
+            transition('failed');
+            return;
+        }
         if (sessionRef.current !== session) return;
         try {
             await meter.start();
         } catch {
-            fail('audio-capture');
+            // Level metering is best-effort; recognition continues without a waveform.
+            setMeterAvailable(false);
         }
     }, [meter, transition]);
 
@@ -134,15 +145,24 @@ export function useBrowserDictation(options: UseDictationOptions = {}): UseDicta
     // No buffered audio exists to replay. The UI offers salvage or discard instead.
     const retryFailedDictation = useCallback(async () => null, []);
     const discardFailedDictation = useCallback(() => { void cancelDictation(); }, [cancelDictation]);
-    const error = errorReason === 'unsupported'
-        ? t('settings.voice.page.browserTest.unavailable')
-        : errorReason ? t('settings.voice.page.browserTest.error', { code: errorReason }) : null;
+    const error = !errorReason ? null
+        : errorReason === 'unsupported' ? t('settings.voice.page.browserTest.unavailable')
+        : errorReason === 'not-allowed' || errorReason === 'service-not-allowed'
+            ? t('settings.voice.page.browserTest.error.permission')
+        : errorReason === 'busy' ? t('settings.voice.page.browserTest.error.busy')
+        : errorReason === 'network' ? t('settings.voice.page.browserTest.error.network')
+        : errorReason === 'no-speech' ? t('settings.voice.page.browserTest.error.noSpeech')
+        : errorReason === 'audio-capture' ? t('settings.voice.page.browserTest.error.audioCapture')
+        : errorReason === 'timeout' ? t('settings.voice.page.browserTest.error.timeout')
+        : errorReason === 'start-failed' || errorReason === 'stop-failed'
+            ? t('settings.voice.page.browserTest.error.startFailed')
+        : t('settings.voice.page.browserTest.error', { code: errorReason });
     useEffect(() => {
         if (error) optionsRef.current.onError?.(new Error(error));
     }, [error]);
 
     return { status, isRecording: status === 'recording', isProcessing: status === 'uploading',
-        partialTranscript, subscribeLevel: meter.subscribeLevel, duration, error, errorReason,
+        partialTranscript, subscribeLevel: meter.subscribeLevel, meterAvailable, duration, error, errorReason,
         startDictation, confirmDictation, cancelDictation, retryFailedDictation,
         acceptPartialTranscript, discardFailedDictation };
 }

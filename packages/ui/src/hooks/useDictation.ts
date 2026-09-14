@@ -33,6 +33,8 @@ export interface UseDictationResult {
     partialTranscript: string;
     /** Subscribe to the normalized (0..1) mic level for the waveform. */
     subscribeLevel: (listener: DictationLevelListener) => () => void;
+    /** False when level metering failed and recording continues without a waveform. Browser engine only. */
+    meterAvailable?: boolean;
     duration: number;
     error: string | null;
     errorReason: string | null;

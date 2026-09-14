@@ -182,7 +182,7 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   } else {
     localStorage.removeItem('dictationEnabled');
   }
-  if (settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible' || settings.sttProvider === 'browser') {
+  if (settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible' || settings.sttProvider === 'web-speech') {
     localStorage.setItem('sttProvider', settings.sttProvider);
   } else {
     localStorage.removeItem('sttProvider');

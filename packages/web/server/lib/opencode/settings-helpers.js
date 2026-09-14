@@ -925,12 +925,14 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.sttProvider === 'string') {
       const provider = candidate.sttProvider.trim();
-      if (provider === 'local' || provider === 'openai-compatible' || provider === 'browser') {
+      if (provider === 'local' || provider === 'openai-compatible' || provider === 'web-speech') {
         result.sttProvider = provider;
       } else if (provider === 'server') {
         // Legacy provider migration: 'server' was the OpenAI-compatible endpoint.
         result.sttProvider = 'openai-compatible';
-      } else if (provider === 'wasm') {
+      } else if (provider === 'browser' || provider === 'wasm') {
+        // Legacy provider migration: 'browser' and 'wasm' were the local engine.
+        // 'web-speech' is the distinct opt-in to browser-vendor recognition.
         result.sttProvider = 'local';
       }
     }

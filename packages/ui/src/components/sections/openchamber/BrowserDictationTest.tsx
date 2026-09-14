@@ -12,6 +12,7 @@ export function BrowserDictationTest() {
     const dictation = useBrowserDictation({ onTranscript: setResult });
     const active = dictation.isRecording || dictation.isProcessing;
     const supported = isBrowserDictationSupported();
+    const shownTranscript = active || dictation.status === 'failed' ? dictation.partialTranscript : result;
 
     return (
         <SettingsControlGroup title={t('settings.voice.page.browserTest.title')}
@@ -44,10 +45,14 @@ export function BrowserDictationTest() {
                     </span>
                 </div>
                 {dictation.isRecording && <DictationWaveform subscribeLevel={dictation.subscribeLevel} className="block h-8 w-full max-w-[24rem]" />}
-                <textarea readOnly rows={3} value={active || dictation.status === 'failed' ? dictation.partialTranscript : result}
+                {dictation.isRecording && !dictation.meterAvailable && (
+                    <p className={SETTINGS_HELPER_CLASS}>{t('settings.voice.page.browserTest.error.audioCapture')}</p>
+                )}
+                <textarea readOnly rows={3} value={shownTranscript}
                     aria-label={t('settings.voice.page.browserTest.transcript')}
                     placeholder={t('settings.voice.page.browserTest.transcript')}
                     className="block w-full max-w-[24rem] resize-y rounded-md border border-input bg-transparent px-3 py-2 typography-ui-label text-foreground placeholder:text-muted-foreground" />
+                <p className="sr-only" role="status">{shownTranscript}</p>
                 {dictation.error && <p role="alert" className="typography-meta text-[var(--status-error)]">{dictation.error}</p>}
             </>}
         </SettingsControlGroup>

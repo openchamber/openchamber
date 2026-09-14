@@ -81,10 +81,11 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ workStatusSectionOrder: 'bad' }).workStatusSectionOrder).toBeUndefined();
     expect(helpers.sanitizeSettingsUpdate({ workStatusSectionOrder: [] }).workStatusSectionOrder).toEqual([]);
   });
-  it('accepts the browser STT provider and maps legacy wasm to local', () => {
+  it('accepts the web-speech STT provider and maps legacy browser and wasm to local', () => {
     const helpers = createTestHelpers();
-    expect(helpers.sanitizeSettingsUpdate({ sttProvider: 'browser' }).sttProvider).toBe('browser');
+    expect(helpers.sanitizeSettingsUpdate({ sttProvider: 'web-speech' }).sttProvider).toBe('web-speech');
     expect(helpers.sanitizeSettingsUpdate({ sttProvider: 'local' }).sttProvider).toBe('local');
+    expect(helpers.sanitizeSettingsUpdate({ sttProvider: 'browser' }).sttProvider).toBe('local');
     expect(helpers.sanitizeSettingsUpdate({ sttProvider: 'wasm' }).sttProvider).toBe('local');
     expect(helpers.sanitizeSettingsUpdate({ sttProvider: 'server' }).sttProvider).toBe('openai-compatible');
   });

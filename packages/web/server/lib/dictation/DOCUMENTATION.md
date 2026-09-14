@@ -33,13 +33,20 @@ response carries `X-Speech-Model` and `X-Speech-Language`.
 
 ## Ownership
 
-Browser STT is client-owned and does not use this server protocol. The
-`useBrowserDictation` hook owns a `BrowserRecognitionSession`, waits for the
-final result on confirmation, and aborts on cancel, provider change, or
-unmount. Its microphone capture is level-only, without PCM encoding or
-upload. Fatal recognition errors retain text for recovery and release the
-microphone. The Voice settings preview uses the same engine without sending
-results to chat. Recognition is available in supported secure web browsers,
+Browser STT is client-owned and does not use this server protocol. The stored
+`sttProvider` value is `web-speech`, a deliberate opt-in kept distinct from
+the legacy `browser` alias, which still means the local engine. Each client
+resolves the choice on its own: capable secure browsers run recognition, and
+every other runtime falls back to the server engine, so selecting Browser on
+the web never removes dictation elsewhere. The `useBrowserDictation` hook owns
+a `BrowserRecognitionSession`, confirms only finalized transcripts, and aborts
+on cancel, provider change, or unmount. Only one session may capture per page,
+so the composer and the settings preview refuse to record side by side. Result
+boundaries from the service are kept raw; only the seam between automatic
+restarts gains a separator. Microphone capture is level-only, best-effort, and
+never uploaded. Fatal recognition errors retain text for recovery and release
+the microphone. The Voice settings preview uses the same engine without
+sending results to chat. Recognition runs in supported secure web browsers,
 including hosted mobile browsers, but not Electron, VS Code, or Capacitor
 shells. Browser recognition may send audio to the browser vendor's service.
 

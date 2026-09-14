@@ -128,10 +128,12 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     // The dictation server (WebSocket + STT worker) lives in the OpenChamber
     // web server; the VS Code bridge has no server process for it. Browser
     // STT runs entirely in the client, so it needs the Web Speech API instead
-    // of the capture stack.
+    // of the capture stack. A stored 'web-speech' choice resolves per client:
+    // capable browsers use recognition, every other runtime falls back to the
+    // server engine, so one client's choice never removes another's microphone.
     const [captureSupported] = React.useState(() => isDictationCaptureSupported());
     const [browserRecognitionSupported] = React.useState(isBrowserDictationSupported);
-    const browserStt = sttProvider === 'browser';
+    const browserStt = sttProvider === 'web-speech' && browserRecognitionSupported;
     const supported = !isVSCodeRuntime() && (browserStt ? browserRecognitionSupported : captureSupported);
 
     const pendingActionRef = React.useRef<'insert' | 'send' | null>(null);

@@ -45,7 +45,7 @@ interface OpenChamberDefaults {
     defaultFileViewerPreview?: boolean;
     zenModel?: string;
     messageStreamTransport?: 'auto' | 'ws' | 'sse';
-    sttProvider?: 'local' | 'openai-compatible' | 'browser';
+    sttProvider?: 'local' | 'openai-compatible' | 'web-speech';
     sttServerUrl?: string;
     sttModel?: string;
     sttLocalModel?: string;
@@ -1125,7 +1125,7 @@ interface ConfigStore {
     openaiCompatibleTtsModel: string;
     // STT (dictation) settings
     dictationEnabled: boolean;
-    sttProvider: 'local' | 'openai-compatible' | 'browser';
+    sttProvider: 'local' | 'openai-compatible' | 'web-speech';
     sttServerUrl: string;
     sttApiKey: string;
     sttModel: string;
@@ -1153,7 +1153,7 @@ interface ConfigStore {
     setOpenaiCompatibleVoice: (voice: string) => void;
     setOpenaiCompatibleTtsModel: (model: string) => void;
     setDictationEnabled: (enabled: boolean) => void;
-    setSttProvider: (provider: 'local' | 'openai-compatible' | 'browser') => void;
+    setSttProvider: (provider: 'local' | 'openai-compatible' | 'web-speech') => void;
     setSttServerUrl: (url: string) => void;
     setSttApiKey: (apiKey: string) => void;
     setSttModel: (model: string) => void;
@@ -1414,14 +1414,16 @@ export const useConfigStore = create<ConfigStore>()(
                     return true;
                 })(),
                 // STT provider: 'local' (server-side sherpa-onnx), 'openai-compatible',
-                // or 'browser' (Web Speech API, runs entirely in the client).
+                // or 'web-speech' (Web Speech API where the client supports it,
+                // server-side local where it does not).
                 sttProvider: (() => {
                     if (typeof window !== 'undefined') {
                         const saved = localStorage.getItem('sttProvider');
-                        if (saved === 'local' || saved === 'openai-compatible' || saved === 'browser') return saved;
+                        if (saved === 'local' || saved === 'openai-compatible' || saved === 'web-speech') return saved;
                         // Migrate legacy providers: 'server' used an OpenAI-compatible
-                        // endpoint; 'wasm' maps to the local default.
+                        // endpoint; 'browser' and 'wasm' map to the local default.
                         if (saved === 'server') return 'openai-compatible' as const;
+                        if (saved === 'browser' || saved === 'wasm') return 'local' as const;
                     }
                     return 'local' as const;
                 })(),
@@ -3158,7 +3160,7 @@ export const useConfigStore = create<ConfigStore>()(
                     updateDesktopSettings({ dictationEnabled: enabled }).catch(() => {});
                 },
 
-                setSttProvider: (provider: 'local' | 'openai-compatible' | 'browser') => {
+                setSttProvider: (provider: 'local' | 'openai-compatible' | 'web-speech') => {
                     set({ sttProvider: provider });
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('sttProvider', provider);
