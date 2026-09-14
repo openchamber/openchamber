@@ -45,6 +45,7 @@ import { messagesBefore, messagesFrom } from "./message-ordering"
 import { deleteChatDirectory } from "@/lib/chatDirectories"
 import { createChatDraftIdentity } from "@/lib/chatDraftPersistence"
 import { cancelSessionTitleGeneration } from "./session-title-generation"
+import { clearQuestionSubmission, releaseQuestionSubmission } from "./question-submission-state"
 
 const MESSAGE_REFETCH_LIMIT = 100
 const SEND_CONFIRMATION_REFETCH_LIMIT = 30
@@ -891,6 +892,7 @@ export async function createSession(
   parentID?: string | null,
   metadata?: Record<string, unknown>,
   selectionTransition?: "submitted-draft",
+  shouldSelect?: () => boolean,
 ): Promise<Session | null> {
   const runtimeKey = getRuntimeKey()
   try {
@@ -923,7 +925,10 @@ export async function createSession(
       }
       getImperativeSessionMessageLoader()?.initializeCreatedSession({ directory: sessionDirectory, sessionID: session.id })
     }
-    useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory, selectionTransition)
+    const sessionUI = useSessionUIStore.getState()
+    if (!shouldSelect || shouldSelect()) {
+      sessionUI.setCurrentSession(session.id, sessionDirectory, selectionTransition)
+    }
     useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
     useGlobalSessionsStore.getState().upsertSession(session)
     return session
@@ -1710,7 +1715,7 @@ export async function optimisticSend(input: {
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
   appendSubmissions?: () => void
   onOptimisticInsert?: () => void
-  onMessageID?: (messageID: string) => void
+  onMessageID?: (messageID: string) => void | Promise<void>
   beforeOptimisticInsert?: () => void
   /** The actual API call — receives the optimistic messageID so the server can use the same ID */
   send: (messageID: string) => Promise<void>
@@ -1730,6 +1735,8 @@ export async function optimisticSend(input: {
 
   assertRuntimeUnchanged()
   await waitForConnectionOrThrow()
+  const messageID = ascendingId("msg")
+  await input.onMessageID?.(messageID)
   input.beforeOptimisticInsert?.()
   assertRuntimeUnchanged()
   input.appendSubmissions?.()
@@ -1769,8 +1776,6 @@ export async function optimisticSend(input: {
     }
   }
 
-  const messageID = ascendingId("msg")
-  input.onMessageID?.(messageID)
   const textPartId = ascendingId("prt")
 
   const optimisticParts: Part[] = [
@@ -2092,12 +2097,20 @@ export async function dismissOpenPermissionsForSession(sessionId: string): Promi
 // Questions
 // ---------------------------------------------------------------------------
 
+function throwIfQuestionRuntimeChanged(runtimeKey: string, sessionId: string, requestId: string): void {
+  if (!isStaleRuntime(runtimeKey)) return
+  releaseQuestionSubmission({ runtimeKey, sessionID: sessionId, requestID: requestId })
+  throw new Error("runtime changed")
+}
+
 export async function respondToQuestion(
   sessionId: string,
   requestId: string,
   answers: string[] | string[][],
 ): Promise<void> {
+  const runtimeKey = getRuntimeKey()
   await waitForConnectionOrThrow()
+  throwIfQuestionRuntimeChanged(runtimeKey, sessionId, requestId)
   const directory = resolveDirectoryForBlockingRequest("question", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
@@ -2112,6 +2125,7 @@ export async function respondToQuestion(
       answers: normalizedAnswers,
       ...(directory ? { directory } : {}),
     })
+    throwIfQuestionRuntimeChanged(runtimeKey, sessionId, requestId)
     if (assertSdkData(result, "question.reply") !== true) {
       throw new Error("Question reply failed")
     }
@@ -2123,10 +2137,13 @@ export async function respondToQuestion(
     // (issues #2911, #2448). The later SSE event is a no-op (the reducer only
     // removes when present).
     removeQuestionRequestFromChildStores(sessionId, requestId)
+    clearQuestionSubmission({ runtimeKey, sessionID: sessionId, requestID: requestId })
   } catch (error) {
+    throwIfQuestionRuntimeChanged(runtimeKey, sessionId, requestId)
     if (isQuestionRequestNotFoundError(error)) {
       removeQuestionRequestFromChildStores(sessionId, requestId)
       recoverStaleBlockingRequest(sessionId)
+      clearQuestionSubmission({ runtimeKey, sessionID: sessionId, requestID: requestId })
     }
     throw error
   }
@@ -2136,7 +2153,9 @@ export async function rejectQuestion(
   sessionId: string,
   requestId: string,
 ): Promise<void> {
+  const runtimeKey = getRuntimeKey()
   await waitForConnectionOrThrow()
+  throwIfQuestionRuntimeChanged(runtimeKey, sessionId, requestId)
   const directory = resolveDirectoryForBlockingRequest("question", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
@@ -2145,6 +2164,7 @@ export async function rejectQuestion(
       requestID: requestId,
       ...(directory ? { directory } : {}),
     })
+    throwIfQuestionRuntimeChanged(runtimeKey, sessionId, requestId)
     if (assertSdkData(result, "question.reject") !== true) {
       throw new Error("Question rejection failed")
     }
@@ -2153,10 +2173,13 @@ export async function rejectQuestion(
     // respondToQuestion for the lost-SSE-event rationale — issues #2911,
     // #2448). The later SSE `question.rejected` event is a no-op.
     removeQuestionRequestFromChildStores(sessionId, requestId)
+    clearQuestionSubmission({ runtimeKey, sessionID: sessionId, requestID: requestId })
   } catch (error) {
+    throwIfQuestionRuntimeChanged(runtimeKey, sessionId, requestId)
     if (isQuestionRequestNotFoundError(error)) {
       removeQuestionRequestFromChildStores(sessionId, requestId)
       recoverStaleBlockingRequest(sessionId)
+      clearQuestionSubmission({ runtimeKey, sessionID: sessionId, requestID: requestId })
     }
     throw error
   }
@@ -2241,11 +2264,11 @@ export async function dismissOpenQuestionsForSession(sessionId: string): Promise
  *
  * 1. Abort if session is busy
  * 2. Extract text from the target message for prompt restoration
- * 3. Optimistically set revert marker so messages hide immediately
- * 4. Call the runtime revert endpoint and merge returned session
- * 5. Set pendingInputText so the reverted message text appears in the input
+ * 3. Call the runtime revert endpoint and merge returned session
+ * 4. Set pendingInputText so the reverted message text appears in the input
  */
 export async function revertToMessage(sessionId: string, messageId: string): Promise<void> {
+  const expectedRuntimeKey = getRuntimeKey()
   const { store, directory } = dirStoreForSession(sessionId)
   const state = store.getState()
 
@@ -2287,88 +2310,30 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     submittedContextParts = parts
   }
 
-  // Optimistically set only the revert marker. Keep messages and parts in the
-  // local store; visible-message selectors derive the displayed timeline from
-  // session.revert. This matches the server model and preserves reverted
-  // messages for the restore dock without maintaining a separate shadow copy.
-  const prevRevert = (() => {
-    const s = state.session.find((s) => s.id === sessionId)
-    return (s as Session & { revert?: unknown })?.revert
-  })()
-  const sessions = [...state.session]
-  const sessionIdx = sessions.findIndex((s) => s.id === sessionId)
-
-  const patch: Record<string, unknown> = {}
-
-  if (sessionIdx >= 0) {
-    sessions[sessionIdx] = { ...sessions[sessionIdx], revert: { messageID: messageId } } as Session
-    patch.session = sessions
-  }
-
-  store.setState(patch)
-
-  // Save input store state before mutations — if the API fails we need to
-  // roll back both text and attachments to their previous values.
-  const prevInputAttachments = [...useInputStore.getState().attachedFiles]
-  const prevInputText = useInputStore.getState().pendingInputText
-  const prevInputMode = useInputStore.getState().pendingInputMode
   const draftTarget: InlineCommentDraftTarget | null = directory
     ? { directory, sessionKey: sessionId }
     : null
-  const prevDrafts = draftTarget ? useInlineCommentDraftStore.getState().getDrafts(draftTarget) : []
-
-  // Restore reverted message text and file attachments to input
-  if (messageText) {
-    useInputStore.setState({
-      pendingInputText: messageText,
-      pendingInputMode: "replace" as const,
-    })
+  // Descendants go first because OpenCode also restores file snapshots during
+  // revert. All sessions share a directory, so the parent's snapshot must win.
+  await cascadeRevertToDescendants(sessionId, targetMessage.time.created)
+  const revertedSession = await opencodeClient.revertSession(sessionId, messageId, undefined, directory)
+  const current = store.getState()
+  const updated = [...current.session]
+  const idx = updated.findIndex((s) => s.id === sessionId)
+  if (idx >= 0) {
+    updated[idx] = revertedSession
+    store.setState({ session: updated })
   }
-
-  // Restore file/image attachments from the target message.
-  // Clear existing attachments first — previous revert's attachments
-  // must not carry over, even when the current message has no files.
-  restoreFilePartsToInput(submittedFileParts)
-  if (draftTarget) restoreContextPartsToInput(submittedContextParts, draftTarget)
-
-  // Call SDK and merge authoritative result into store
-  try {
-    // Descendants go first because OpenCode also restores file snapshots during
-    // revert. All sessions share a directory, so the parent's snapshot must win.
-    await cascadeRevertToDescendants(sessionId, targetMessage.time.created)
-    const revertedSession = await opencodeClient.revertSession(sessionId, messageId, undefined, directory)
-    const current = store.getState()
-    const updated = [...current.session]
-    const idx = updated.findIndex((s) => s.id === sessionId)
-    if (idx >= 0) {
-      updated[idx] = revertedSession
-      store.setState({ session: updated })
+  // A late ACK must not overwrite the composer now visible for another owner.
+  if (!isStaleRuntime(expectedRuntimeKey) && useSessionUIStore.getState().currentSessionId === sessionId) {
+    if (messageText) {
+      useInputStore.setState({ pendingInputText: messageText, pendingInputMode: "replace" as const })
     }
-    if (directory) {
-      sessionEvents.requestGitRefresh({ directory })
-    }
-  } catch (err) {
-    // Rollback: restore removed messages + revert marker
-    const current = store.getState()
-    const rollback = [...current.session]
-    const idx = rollback.findIndex((s) => s.id === sessionId)
-    if (idx >= 0) {
-      rollback[idx] = { ...rollback[idx], revert: prevRevert } as Session
-    }
-    store.setState({
-      session: rollback,
-    })
-    // Rollback input store: restore previous text and attachments
-    useInputStore.setState({
-      pendingInputText: prevInputText,
-      pendingInputMode: prevInputMode,
-      attachedFiles: prevInputAttachments,
-    })
-    if (draftTarget) {
-      useInlineCommentDraftStore.getState().clearDrafts(draftTarget)
-      useInlineCommentDraftStore.getState().restoreDrafts(draftTarget, prevDrafts)
-    }
-    throw err
+    restoreFilePartsToInput(submittedFileParts)
+    if (draftTarget) restoreContextPartsToInput(submittedContextParts, draftTarget)
+  }
+  if (directory) {
+    sessionEvents.requestGitRefresh({ directory })
   }
 }
 

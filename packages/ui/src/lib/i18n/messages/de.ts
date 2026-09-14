@@ -1991,6 +1991,8 @@ export const dict = {
   'chat.revert.toast.undo': 'Zurückgesetzt auf {preview}',
   'chat.revert.toast.redo': 'Wiederholt',
   'chat.revert.toast.restored': 'Alle Nachrichten wiederhergestellt',
+  'chat.revert.toast.failed': 'Nachricht konnte nicht zurückgesetzt werden',
+  'chat.chatInput.actions.abortConfirmationHint': 'Zum Anhalten erneut Esc drücken',
   'chat.toast.opencodeRestartInterrupted.title': 'Chat unterbrochen',
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode wurde neu gestartet, während noch eine Antwort lief. Senden Sie eine Nachricht, um fortzufahren.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Sitzung öffnen',

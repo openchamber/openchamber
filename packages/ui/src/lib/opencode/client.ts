@@ -70,6 +70,14 @@ type SdkResult<T> = {
   response?: { status?: number };
 };
 
+type SendRequest = (request: Request) => Promise<Response>;
+
+const sdkRequestOptions = (sendRequest?: SendRequest) => (
+  sendRequest
+    ? { fetch: (input: RequestInfo | URL, init?: RequestInit) => sendRequest(new Request(input, init)) }
+    : undefined
+);
+
 type DirectoryAvailability = "available" | "missing" | "unknown";
 const directoryProbeErrorSchema = z.object({ reason: z.string().optional(), isDirectory: z.boolean().optional() });
 
@@ -874,6 +882,7 @@ class OpencodeService {
     }>;
     messageId?: string;
     agentMentions?: Array<{ name: string; source?: { value: string; start: number; end: number } }>;
+    sendRequest?: SendRequest;
     delivery?: 'steer';
     format?: {
       type: 'json_schema';
@@ -984,7 +993,7 @@ class OpencodeService {
         ...(params.delivery ? { delivery: params.delivery } : {}),
         ...(params.format ? { format: params.format } : {}),
         parts,
-      });
+      }, sdkRequestOptions(params.sendRequest));
       if (result.response instanceof Response) {
         response = result.response;
       } else if (result.error) {
@@ -1043,6 +1052,7 @@ class OpencodeService {
     variant?: string;
     files?: Array<FileInputLite>;
     messageId?: string;
+    sendRequest?: SendRequest;
     directory?: string | null;
   }): Promise<string> {
     this.assertRuntimeUnchanged(params.runtimeKey);
@@ -1069,7 +1079,7 @@ class OpencodeService {
       variant: params.variant,
       ...(parts.length > 0 ? { parts } : {}),
       messageID: tempMessageId,
-    });
+    }, sdkRequestOptions(params.sendRequest));
 
     unwrapSdkOptional(response, 'session.command');
     return tempMessageId;

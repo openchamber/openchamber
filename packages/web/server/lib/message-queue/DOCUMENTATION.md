@@ -67,7 +67,7 @@ context text. This optional field needs no queue-file migration.
 
 `<data-dir>/message-queue.json` (`OPENCHAMBER_DATA_DIR` or
 `~/.config/openchamber`): `{ version, revision, sessions: { [sessionId]:
-{ directory, items } } }`, written atomically (temp file + rename) through a
+{ directory, items, manualClaims } } }`, written atomically (temp file + rename) through a
 serialized write chain. A missing file is an empty queue. A malformed file is
 a failure, not an empty queue: it is moved aside as
 `message-queue.json.corrupt-<timestamp>` before the runtime starts empty, so
@@ -75,9 +75,15 @@ the next write cannot overwrite the user's data. A failed read leaves writes
 disabled until a later load succeeds. `revision` is a global monotonic counter
 bumped on every mutation; clients use it to reject stale snapshots.
 
-In-memory only, deliberately: the in-flight item (`sendingId`), retry
-backoff, abort timestamps, and holds. A restart has no in-flight sends; a
-persisted "sending" flag would strand a message forever.
+Version 2 persists started manual claims by exact queue item ID with their token,
+optimistic `messageID`, and `dispatched` flag. Start and dispatch wait for the
+serialized atomic write before returning or contacting OpenCode. Loading restores
+pending ownership before arming delivery. Version 1 files have no operation state
+and remain readable. Invalid operation records fail loading rather than restoring
+possibly accepted items as retryable. Automatic sends, retry backoff, abort
+timestamps, and holds remain transient. This is process-restart durability, not
+a power-loss guarantee: the existing atomic writer does not fsync the file or directory.
+Delivery waits for pending writes and retries failed writes before sending again.
 
 ## Delivery loop
 
@@ -85,12 +91,15 @@ persisted "sending" flag would strand a message forever.
    load and on every hub `connect` it arms every session that has items.
 2. `session.status` for a queued session: `idle` arms a short quiet timer
    (500 ms, coalescing the burst around a turn boundary), `busy`/`retry`
-   clears it. A `message.updated` for a completed assistant reply arms as
+   clears it unless a manual claim needs reconciliation. A `message.updated` for a completed assistant reply arms as
    well, so a missed idle event cannot strand the queue. `session.deleted`
    drops the session's queue. An assistant `MessageAbortedError` records an
    abort.
-3. `tick(sessionId)` bails when the queue is empty, an item is in flight, or
-   the session is held. It re-arms after a 2 s post-abort hold (the UI's
+3. `tick(sessionId)` only delivers the head. An unresolved head blocks both
+   automatic delivery and the start of a later manual batch. An unstarted manual
+   claim may expire after five seconds. A started claim is reconciled independently
+   of browser presence, even while held or busy, using the policy below.
+   Delivery re-arms after a 2 s post-abort hold (the UI's
    old behavior: a stop is not immediately followed by the next prompt) or
    while the head item is in retry backoff.
 4. Idleness is re-verified against OpenCode before sending, because
@@ -120,6 +129,42 @@ persisted "sending" flag would strand a message forever.
    2 s → 60 s (doubling per consecutive failure of that item), and re-arms.
 6. The next item goes out after the next busy → idle cycle.
 
+## Manual send recovery
+
+The composer generates its optimistic message ID before awaiting the start route.
+Start binds the token's exact ordered queue prefix to that ID. Repeated starts
+with the same identity are safe; a different identity or stale token is rejected.
+The SDK still builds prompt and command requests, including every batch part.
+For server-owned manual sends only, its per-request fetch sends that body through
+`manual-send/dispatch`. The queue runtime validates ownership and persists
+`dispatched: true` before forwarding through its existing OpenCode URL/auth helper.
+It never forwards the same claim twice. A resumed browser cannot send after release.
+
+Every five seconds, one reconciliation per queued session looks up the exact
+`GET /session/:id/message/:messageID`. A matching user record acknowledges only
+that operation's queue IDs, even when the session is busy. A 404 alone is not enough
+to release. Release requires `dispatched: false` and two consecutive successful
+idle/absent observations at least five seconds apart. Busy, malformed responses,
+and failed reads reset confirmation. Restart also resets confirmation.
+
+Once dispatch may have reached OpenCode, idle and absence cannot prove rejection.
+The claim remains pending and reconciliation continues without resending. A crash
+between persisting dispatch and upstream I/O can therefore retain an unsent claim.
+If that pre-upstream persistence write itself fails, the still-current in-memory
+claim is restored to `dispatched: false`, so a later definite rejection or normal
+reconciliation can release it once persistence recovers. This conservative gap needs
+upstream operation fencing to recover automatically; there is no TTL-based release.
+Definite upstream rejection releases the exact claim; ambiguous dispatch returns 503
+and leaves it protected. OpenCode acceptance remains success even if the local ACK
+write fails, and the disk claim can reconcile on restart.
+
+Automatic delivery's existing ambiguous-error retry and transient in-flight state
+are unchanged by this manual-send protocol. It does not provide exactly-once
+delivery for automatic sends across transport failure or process restart. Older
+browsers without a message ID cannot start a claim and must reload; older servers
+cannot safely implement this protocol. Downgrading with pending version-2 claims
+is unsupported.
+
 ## Holds
 
 Auto-review is driven from the UI and bounces the original session through
@@ -139,11 +184,16 @@ allowlists.
 | `GET /api/message-queue` | Full snapshot `{ revision, sessions[] }` |
 | `POST .../sessions/:id/items` | Append `{ directory, item }`; returns `{ revision, session, itemId }` and arms a dispatch (the session may already be idle) |
 | `DELETE .../sessions/:id/items/:itemId` | Remove; `409` while that item is in flight |
-| `POST .../sessions/:id/items/:itemId/take` | Remove and return the full item (payloads included); `404`/`409` |
+| `POST .../sessions/:id/items/:itemId/take` | Remove and return the full item (payloads included) for editing; `404`/`409` |
 | `POST .../sessions/:id/take` | Remove and return every item not in flight, in order |
 | `PUT .../sessions/:id/order` | `{ itemIds }` must be a complete permutation |
 | `DELETE .../sessions/:id` | Clear; the in-flight item stays |
 | `PUT .../sessions/:id/hold` | `{ held, ttlMs? }` |
+| `POST .../sessions/:id/manual-send` | Claim eligible `{ itemIds }` and return full payloads without removal; already-pending IDs are omitted |
+| `POST .../sessions/:id/manual-send/start` | Durably bind `{ itemIds, token, messageID }`; exact repeats are idempotent |
+| `POST .../sessions/:id/manual-send/dispatch` | Forward the SDK `{ itemIds, token, endpoint, body }` once, only while its exact claim is current |
+| `POST .../sessions/:id/manual-send/ack` | Remove exactly the tokenized acknowledged items; repeats after a lost response are idempotent |
+| `POST .../sessions/:id/manual-send/fail` | Release exactly the tokenized, definitely rejected items for retry |
 
 Every mutation broadcasts `openchamber:message-queue.updated` with
 `{ revision, session }` to all connected clients (SSE and WS), so several
@@ -156,7 +206,7 @@ keys its projection by directory, and a broadcast without one left the
 delivered message on screen (a session's directory is remembered until the
 session is deleted or evicted).
 
-Limits: 20 items per session, 50 sessions (oldest evicted, never one with an
+Limits: 20 items per session (additional enqueue is rejected, never evicting the pending head), 50 sessions (oldest evicted, never one with an
 item in flight), 200k characters of content; attachment payloads are bounded
 by the route family's 50 MB JSON limit.
 

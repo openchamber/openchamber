@@ -90,7 +90,7 @@ export const RevertedMessageDock: React.FC<RevertedMessageDockProps> = React.mem
     }, [revertMessageID, firstRevertedMessageId]);
 
     const handleRestore = React.useCallback(async (messageId: string) => {
-        if (!sessionId || restoringId) return;
+        if (!sessionId || restoringId || forkingId) return;
         setRestoringId(messageId);
         try {
             const messageIndex = userMessages.findIndex((message) => message.id === messageId);
@@ -100,20 +100,24 @@ export const RevertedMessageDock: React.FC<RevertedMessageDockProps> = React.mem
             } else {
                 await handleSlashRedo(sessionId, { fullUnrevert: true });
             }
+        } catch {
+            // The store reports revert failures once.
         } finally {
             setRestoringId(null);
         }
-    }, [handleSlashRedo, revertToMessage, restoringId, sessionId, userMessages]);
+    }, [forkingId, handleSlashRedo, revertToMessage, restoringId, sessionId, userMessages]);
 
     const handleFork = React.useCallback(async (messageId: string) => {
-        if (!sessionId || forkingId) return;
+        if (!sessionId || restoringId || forkingId) return;
         setForkingId(messageId);
         try {
             await forkFromMessage(sessionId, messageId);
+        } catch {
+            // The store reports fork failures once.
         } finally {
             setForkingId(null);
         }
-    }, [forkFromMessage, forkingId, sessionId]);
+    }, [forkFromMessage, forkingId, restoringId, sessionId]);
 
     if (!sessionId || items.length === 0) return null;
 
@@ -147,6 +151,8 @@ export const RevertedMessageDock: React.FC<RevertedMessageDockProps> = React.mem
                                     variant="secondary"
                                     size="xs"
                                     disabled={Boolean(restoringId || forkingId)}
+                                    aria-busy={forkingId === item.id || undefined}
+                                    className={forkingId === item.id ? 'disabled:opacity-100' : undefined}
                                     onClick={() => { void handleFork(item.id); }}
                                 >
                                     {forkingId === item.id ? (
@@ -161,6 +167,8 @@ export const RevertedMessageDock: React.FC<RevertedMessageDockProps> = React.mem
                                     variant="secondary"
                                     size="xs"
                                     disabled={Boolean(restoringId || forkingId)}
+                                    aria-busy={restoringId === item.id || undefined}
+                                    className={restoringId === item.id ? 'disabled:opacity-100' : undefined}
                                     onClick={() => { void handleRestore(item.id); }}
                                 >
                                     {restoringId === item.id ? (

@@ -15,7 +15,7 @@ import fs from 'fs';
 import path from 'path';
 
 const QUEUE_FILE_NAME = 'message-queue.json';
-const QUEUE_FILE_VERSION = 1;
+const QUEUE_FILE_VERSION = 2;
 
 const MAX_SESSIONS = 50;
 const MAX_ITEMS_PER_SESSION = 20;
@@ -33,6 +33,8 @@ const RETRY_MAX_DELAY_MS = 60_000;
 // UI; it expires unless the UI keeps re-asserting it.
 const HOLD_DEFAULT_TTL_MS = 5 * 60 * 1000;
 const HOLD_MAX_TTL_MS = 10 * 60 * 1000;
+const MANUAL_CLAIM_START_TTL_MS = 5_000;
+const MANUAL_CONFIRM_MS = 5_000;
 const FETCH_TIMEOUT_MS = 15_000;
 const MESSAGE_TAIL_LIMIT = 2;
 
@@ -225,10 +227,15 @@ export function createMessageQueueRuntime({
   let revision = 0;
   let loadPromise = null;
   let writePromise = Promise.resolve();
+  let durableRevision = 0;
   let stopped = false;
 
-  /** In-memory only — a restart has no in-flight sends. */
-  const sending = new Map(); // sessionId → itemId
+  /** Automatic sends are transient; manual operations are restored from disk. */
+  const sending = new Map(); // sessionId → Set<itemId>
+  // Started manual claims retain their exact identity across process restarts.
+  const manualClaims = new Map(); // sessionId → Map<itemId, claim>
+  const reconciling = new Set();
+  const absentSince = new Map(); // token → first consecutive idle/absent observation
   const timers = new Map(); // sessionId → timeout
   const failures = new Map(); // sessionId → { itemId, failures, nextAttemptAt }
   const abortedAt = new Map(); // sessionId → timestamp
@@ -244,7 +251,11 @@ export function createMessageQueueRuntime({
     version: QUEUE_FILE_VERSION,
     revision,
     sessions: Object.fromEntries(
-      Array.from(queues.entries()).map(([sessionId, queue]) => [sessionId, { directory: queue.directory, items: queue.items }]),
+      Array.from(queues.entries()).map(([sessionId, queue]) => [sessionId, {
+        directory: queue.directory,
+        items: queue.items,
+        manualClaims: Object.fromEntries([...(manualClaims.get(sessionId) ?? [])].filter(([, claim]) => claim.started)),
+      }]),
     ),
   });
 
@@ -275,7 +286,16 @@ export function createMessageQueueRuntime({
       const directory = asNonEmptyString(entry.directory);
       const items = (asList(entry.items) ?? []).map(parseStoredItem).filter(Boolean);
       if (!directory || items.length === 0) continue;
-      sessions[sessionId] = { directory, items };
+      const claims = {};
+      if ((stored.version === 2 || entry.manualClaims !== undefined) && !asRecord(entry.manualClaims)) throw new Error('Invalid persisted manual claims');
+      for (const [itemId, value] of Object.entries(entry.manualClaims ?? {})) {
+        const claim = asRecord(value);
+        if (!items.some((item) => item.id === itemId) || !claim || !asNonEmptyString(claim.token)
+          || !/^msg_[A-Za-z0-9_-]+$/.test(asNonEmptyString(claim.messageID)) || claim.started !== true
+          || ![true, false].includes(claim.dispatched)) throw new Error('Invalid persisted manual claim');
+        claims[itemId] = { token: claim.token, messageID: claim.messageID, started: true, dispatched: claim.dispatched };
+      }
+      sessions[sessionId] = { directory, items, claims };
     }
     return { sessions, revision: asCount(stored.revision) ?? 0 };
   };
@@ -284,8 +304,16 @@ export function createMessageQueueRuntime({
     if (!loadPromise) {
       loadPromise = readFile()
         .then((stored) => {
-          for (const [sessionId, entry] of Object.entries(stored.sessions)) queues.set(sessionId, entry);
+          for (const [sessionId, entry] of Object.entries(stored.sessions)) {
+            queues.set(sessionId, { directory: entry.directory, items: entry.items });
+            const claims = new Map(Object.entries(entry.claims));
+            if (claims.size > 0) {
+              manualClaims.set(sessionId, claims);
+              sending.set(sessionId, new Set(claims.keys()));
+            }
+          }
           revision = Math.max(revision, stored.revision);
+          durableRevision = revision;
         })
         .catch((error) => {
           // A read failure keeps the in-memory (empty) queue but must not be
@@ -300,28 +328,34 @@ export function createMessageQueueRuntime({
 
   const persist = () => {
     const payload = JSON.stringify(serialize());
-    writePromise = writePromise
+    const writingRevision = revision;
+    const write = writePromise
       .then(async () => {
         await fs.promises.mkdir(dataDir, { recursive: true });
         const tmpPath = `${filePath}.${process.pid}.tmp`;
         await fs.promises.writeFile(tmpPath, payload, 'utf8');
         await fs.promises.rename(tmpPath, filePath);
-      })
-      .catch((error) => {
-        console.warn('[message-queue] failed to persist queue:', error?.message ?? error);
+        durableRevision = writingRevision;
       });
-    return writePromise;
+    writePromise = write.catch((error) => {
+      console.warn('[message-queue] failed to persist queue:', error?.message ?? error);
+    });
+    return write;
   };
 
   // --- snapshots -----------------------------------------------------------
 
   const sessionSnapshot = (sessionId) => {
     const queue = queues.get(sessionId);
+    const sendingIds = [...(sending.get(sessionId) ?? [])];
     return {
       sessionId,
       directory: queue?.directory ?? directories.get(sessionId) ?? '',
       items: (queue?.items ?? []).map(toPublicItem),
-      sendingId: sending.get(sessionId) ?? null,
+      // `sendingId` remains the automatic head-send compatibility field. Newer
+      // clients use `sendingIds` because a manual composer batch may be pending.
+      sendingId: sendingIds[0] ?? null,
+      sendingIds,
     };
   };
 
@@ -338,11 +372,14 @@ export function createMessageQueueRuntime({
   };
 
   /** Every mutation goes through here: bump, persist, broadcast. */
-  const commit = (sessionId) => {
+  const commit = (sessionId, durable = false) => {
     revision += 1;
-    void persist();
+    const write = persist();
+    // The chain logs failures; callers at dispatch boundaries must also see them.
+    void write.catch(() => undefined);
     broadcast(sessionId);
-    return { revision, session: sessionSnapshot(sessionId) };
+    const result = { revision, session: sessionSnapshot(sessionId) };
+    return durable ? write.then(() => result) : result;
   };
 
   const setQueueItems = (sessionId, directory, items) => {
@@ -541,10 +578,88 @@ export function createMessageQueueRuntime({
     return false;
   };
 
+  const releaseSending = (sessionId, itemIds) => {
+    const currentSending = sending.get(sessionId);
+    if (!currentSending) return;
+    for (const itemId of itemIds) currentSending.delete(itemId);
+    if (currentSending.size === 0) sending.delete(sessionId);
+  };
+
+  const releaseManualClaim = (sessionId, itemIds, token) => {
+    const claims = manualClaims.get(sessionId);
+    if (!claims) return;
+    const released = [];
+    for (const itemId of itemIds) {
+      const claim = claims.get(itemId);
+      if (claim && claim.token === token) {
+        claims.delete(itemId);
+        released.push(itemId);
+      }
+    }
+    if (claims.size === 0) manualClaims.delete(sessionId);
+    releaseSending(sessionId, released);
+    absentSince.delete(token);
+  };
+
+  const releaseExpiredUnstartedClaims = (sessionId) => {
+    const claims = manualClaims.get(sessionId);
+    if (!claims) return;
+    const abandoned = [...claims]
+      .filter(([, claim]) => !claim.started && claim.expiresAt <= now())
+      .map(([itemId]) => itemId);
+    if (abandoned.length === 0) return;
+    for (const itemId of abandoned) claims.delete(itemId);
+    if (claims.size === 0) manualClaims.delete(sessionId);
+    releaseSending(sessionId, abandoned);
+    commit(sessionId);
+  };
+
   async function tick(sessionId) {
     if (stopped) return;
+    await writePromise;
+    if (durableRevision < revision) {
+      try { await persist(); } catch { armDispatch(sessionId, MANUAL_CONFIRM_MS); return; }
+    }
+    if (stopped) return;
     const queue = queues.get(sessionId);
-    if (!queue || queue.items.length === 0 || sending.has(sessionId) || isHeld(sessionId)) return;
+    if (!queue || queue.items.length === 0) return;
+    releaseExpiredUnstartedClaims(sessionId);
+
+    const head = queue.items[0];
+    if (sending.get(sessionId)?.has(head.id)) {
+      const claim = manualClaims.get(sessionId)?.get(head.id);
+      if (!claim) return;
+      if (!claim.started) {
+        armDispatch(sessionId, claim.expiresAt - now());
+        return;
+      }
+      if (reconciling.has(sessionId)) return;
+      reconciling.add(sessionId);
+      try {
+        let absent = false;
+        const record = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/message/${encodeURIComponent(claim.messageID)}`, { directory: queue.directory })
+          .catch((error) => { if (error.status === 404) absent = true; return null; });
+        const info = asRecord(asRecord(record)?.info);
+        const accepted = info?.id === claim.messageID && info?.sessionID === sessionId && info?.role === 'user';
+        const idle = !accepted && absent ? await isSessionIdle(sessionId, queue.directory) : null;
+        // Dispatch, fail, ACK, or a new owner may have won while these reads ran.
+        if (manualClaims.get(sessionId)?.get(head.id) !== claim || stopped) return;
+        const ids = [...manualClaims.get(sessionId)].filter(([, entry]) => entry.token === claim.token && entry.messageID === claim.messageID).map(([id]) => id);
+        if (accepted) {
+          await ackManualSend(sessionId, ids, claim.token);
+        } else if (!claim.dispatched && absent && idle === true) {
+          const since = absentSince.get(claim.token);
+          if (since !== undefined && now() - since >= MANUAL_CONFIRM_MS) {
+            await failManualSend(sessionId, ids, claim.token);
+          } else if (since === undefined) absentSince.set(claim.token, now());
+        } else absentSince.delete(claim.token);
+      } finally {
+        reconciling.delete(sessionId);
+        armDispatch(sessionId, MANUAL_CONFIRM_MS);
+      }
+      return;
+    }
+    if (isHeld(sessionId)) return;
 
     const abortHoldUntil = (abortedAt.get(sessionId) ?? 0) + abortHoldMs;
     if (abortHoldUntil > now()) {
@@ -552,7 +667,6 @@ export function createMessageQueueRuntime({
       return;
     }
 
-    const head = queue.items[0];
     const failure = failures.get(sessionId);
     if (failure && failure.itemId !== head.id) failures.delete(sessionId);
     else if (failure && failure.nextAttemptAt > now()) {
@@ -570,17 +684,18 @@ export function createMessageQueueRuntime({
 
     // Re-read after the awaits — the user may have edited the queue meanwhile.
     const current = queues.get(sessionId);
+    const currentSending = sending.get(sessionId) ?? new Set();
     const item = current?.items[0];
-    if (!item || item.id !== head.id || sending.has(sessionId)) return;
+    if (!item || item.id !== head.id || currentSending.has(item.id) || isHeld(sessionId) || stopped) return;
 
-    sending.set(sessionId, item.id);
+    sending.set(sessionId, new Set([...currentSending, item.id]));
     broadcast(sessionId);
     try {
       await sendItem(sessionId, current.directory, item);
       const after = queues.get(sessionId);
       if (after) setQueueItems(sessionId, after.directory, after.items.filter((entry) => entry.id !== item.id));
       failures.delete(sessionId);
-      sending.delete(sessionId);
+      releaseSending(sessionId, [item.id]);
       commit(sessionId);
       try {
         onPromptSent?.(sessionId);
@@ -589,7 +704,7 @@ export function createMessageQueueRuntime({
       }
       console.log(`[message-queue] sent queued message to ${sessionId}`);
     } catch (error) {
-      sending.delete(sessionId);
+      releaseSending(sessionId, [item.id]);
       const count = (failure?.itemId === item.id ? failure.failures : 0) + 1;
       const nextAttemptAt = now() + retryDelayMs(count);
       failures.set(sessionId, { itemId: item.id, failures: count, nextAttemptAt });
@@ -601,7 +716,7 @@ export function createMessageQueueRuntime({
 
   const reconcileAll = () => {
     for (const sessionId of queues.keys()) {
-      if (!timers.has(sessionId)) armDispatch(sessionId, dispatchQuietMs);
+      armDispatch(sessionId, dispatchQuietMs);
     }
   };
 
@@ -624,7 +739,8 @@ export function createMessageQueueRuntime({
       ...parsed,
     };
     const existing = queues.get(sessionId);
-    const items = [...(existing?.items ?? []), item].slice(-MAX_ITEMS_PER_SESSION);
+    if ((existing?.items.length ?? 0) >= MAX_ITEMS_PER_SESSION) throw httpError('queue is full', 409);
+    const items = [...(existing?.items ?? []), item];
     queues.set(sessionId, { directory, items });
     directories.set(sessionId, directory);
     if (queues.size > MAX_SESSIONS) {
@@ -649,7 +765,7 @@ export function createMessageQueueRuntime({
   const remove = async (sessionIdInput, itemId) => {
     const sessionId = requireSessionId(sessionIdInput);
     await load();
-    if (sending.get(sessionId) === itemId) throw httpError('message is being sent', 409);
+    if (sending.get(sessionId)?.has(itemId)) throw httpError('message is being sent', 409);
     const queue = queues.get(sessionId);
     if (!queue || !queue.items.some((item) => item.id === itemId)) {
       return { revision, session: sessionSnapshot(sessionId) };
@@ -662,7 +778,7 @@ export function createMessageQueueRuntime({
   const take = async (sessionIdInput, itemId) => {
     const sessionId = requireSessionId(sessionIdInput);
     await load();
-    if (sending.get(sessionId) === itemId) throw httpError('message is being sent', 409);
+    if (sending.get(sessionId)?.has(itemId)) throw httpError('message is being sent', 409);
     const queue = queues.get(sessionId);
     const item = queue?.items.find((entry) => entry.id === itemId);
     if (!queue || !item) throw httpError('queued message not found', 404);
@@ -676,11 +792,170 @@ export function createMessageQueueRuntime({
     await load();
     const queue = queues.get(sessionId);
     if (!queue) return { revision, session: sessionSnapshot(sessionId), items: [] };
-    const sendingId = sending.get(sessionId) ?? null;
-    const items = queue.items.filter((item) => item.id !== sendingId);
+    const sendingIds = sending.get(sessionId) ?? new Set();
+    const items = queue.items.filter((item) => !sendingIds.has(item.id));
     if (items.length === 0) return { revision, session: sessionSnapshot(sessionId), items: [] };
-    setQueueItems(sessionId, queue.directory, queue.items.filter((item) => item.id === sendingId));
+    setQueueItems(sessionId, queue.directory, queue.items.filter((item) => sendingIds.has(item.id)));
     return { ...commit(sessionId), items };
+  };
+
+  const parseItemIds = (itemIds) => {
+    if (!asList(itemIds) || itemIds.length === 0 || itemIds.some((id) => !asNonEmptyString(id))) {
+      throw new TypeError('itemIds must be a non-empty list of ids');
+    }
+    if (new Set(itemIds).size !== itemIds.length) throw new TypeError('itemIds must not contain duplicates');
+    return itemIds;
+  };
+
+  /**
+   * Hands complete payloads to a foreground composer without removing them.
+   * The subsequent acknowledgement removes only the entries OpenCode accepted;
+   * rejection releases this temporary claim for retry.
+   */
+  const beginManualSend = async (sessionIdInput, itemIdsInput) => {
+    const sessionId = requireSessionId(sessionIdInput);
+    const itemIds = parseItemIds(itemIdsInput);
+    await load();
+    const queue = queues.get(sessionId);
+    if (!queue) throw httpError('queued message not found', 404);
+    const byId = new Map(queue.items.map((item) => [item.id, item]));
+    if (itemIds.some((itemId) => !byId.has(itemId))) throw httpError('queued message not found', 404);
+    const currentSending = sending.get(sessionId) ?? new Set();
+    // The composer reads the projection before this request. Filter again at
+    // the authority so an automatic head claim that won that race is never
+    // included in the manual outgoing batch.
+    const claimableIds = queue.items.filter((item) => itemIds.includes(item.id) && !currentSending.has(item.id)).map((item) => item.id);
+    if (claimableIds.length === 0) return { revision, session: sessionSnapshot(sessionId), items: [] };
+    const token = `manual-${now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const claims = manualClaims.get(sessionId) ?? new Map();
+    const expiresAt = now() + MANUAL_CLAIM_START_TTL_MS;
+    for (const itemId of claimableIds) claims.set(itemId, { token, started: false, expiresAt });
+    manualClaims.set(sessionId, claims);
+    sending.set(sessionId, new Set([...currentSending, ...claimableIds]));
+    return { ...commit(sessionId), token, items: claimableIds.map((itemId) => byId.get(itemId)) };
+  };
+
+  const startManualSend = async (sessionIdInput, itemIdsInput, token, messageID) => {
+    const sessionId = requireSessionId(sessionIdInput);
+    const itemIds = parseItemIds(itemIdsInput);
+    if (!asNonEmptyString(token)) throw new TypeError('token is required');
+    if (!/^msg_[A-Za-z0-9_-]+$/.test(asNonEmptyString(messageID))) throw new TypeError('messageID is required');
+    await load();
+    const claims = manualClaims.get(sessionId);
+    if (!claims || itemIds.some((itemId) => claims.get(itemId)?.token !== token)) {
+      throw httpError('manual claim is not current', 409);
+    }
+    const prefix = queues.get(sessionId)?.items.slice(0, itemIds.length) ?? [];
+    if (prefix.length !== itemIds.length || prefix.some((item, index) => item.id !== itemIds[index])) {
+      throw httpError('earlier queued message is unresolved', 409);
+    }
+    if ([...claims].some(([id, claim]) => claim.token === token && !itemIds.includes(id))) throw httpError('start must bind the exact claim', 409);
+    for (const itemId of itemIds) {
+      const claim = claims.get(itemId);
+      if (claim.started && claim.messageID !== messageID) throw httpError('manual claim identity differs', 409);
+      if (!claim.started && claim.expiresAt <= now()) throw httpError('manual claim expired', 409);
+    }
+    clearTimer(sessionId);
+    for (const itemId of itemIds) {
+      const claim = claims.get(itemId);
+      claim.started = true;
+      claim.messageID = messageID;
+      claim.dispatched ??= false;
+    }
+    try {
+      const result = await commit(sessionId, true);
+      return { ...result, token };
+    } finally {
+      armDispatch(sessionId, MANUAL_CONFIRM_MS);
+    }
+  };
+
+  const dispatchManualSend = async (sessionIdInput, itemIdsInput, token, endpoint, bodyInput) => {
+    const sessionId = requireSessionId(sessionIdInput);
+    const itemIds = parseItemIds(itemIdsInput);
+    const body = asRecord(bodyInput);
+    if (!['prompt_async', 'command'].includes(endpoint) || !body || (!asList(body.parts) && endpoint === 'prompt_async')) throw new TypeError('invalid manual send request');
+    await load();
+    const claims = manualClaims.get(sessionId);
+    if (!claims || itemIds.some((id) => {
+      const claim = claims.get(id);
+      return !claim?.started || claim.token !== token || claim.messageID !== body.messageID || claim.dispatched;
+    }) || [...claims].some(([id, claim]) => claim.token === token && !itemIds.includes(id))) {
+      throw httpError('manual dispatch is not current or already dispatched', 409);
+    }
+    const queue = queues.get(sessionId);
+    if (queue.items.slice(0, itemIds.length).some((item, index) => item.id !== itemIds[index])) throw httpError('earlier queued message is unresolved', 409);
+    // This write precedes upstream I/O. A crash or timeout after it is ambiguous,
+    // even if a later idle snapshot does not yet contain the message.
+    const owners = itemIds.map((id) => claims.get(id));
+    for (const claim of owners) claim.dispatched = true;
+    absentSince.delete(token);
+    try {
+      await commit(sessionId, true);
+    } catch (error) {
+      // The upstream request has not started. Restore only this still-current
+      // ownership so a later definite rejection or reconciliation can release it.
+      for (const [index, id] of itemIds.entries()) {
+        if (manualClaims.get(sessionId)?.get(id) === owners[index]) owners[index].dispatched = false;
+      }
+      throw error;
+    }
+    if (stopped || itemIds.some((id, index) => manualClaims.get(sessionId)?.get(id) !== owners[index])) {
+      throw httpError('manual dispatch owner changed', 409);
+    }
+    try {
+      await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/${endpoint}`, { directory: queue.directory, method: 'POST', body });
+    } catch (error) {
+      if ([400, 401, 403, 404, 422].includes(error.status)) {
+        for (const id of itemIds) {
+          if (claims.get(id)?.token === token) claims.get(id).dispatched = false;
+        }
+        await failManualSend(sessionId, itemIds, token);
+        throw error;
+      }
+      throw httpError('manual dispatch outcome is unknown', 503);
+    } finally {
+      armDispatch(sessionId, MANUAL_CONFIRM_MS);
+    }
+    // Upstream acceptance must not become a client rejection if local ACK
+    // persistence fails. The retained disk claim reconciles by message ID.
+    await ackManualSend(sessionId, itemIds, token).catch(() => undefined);
+  };
+
+  const ackManualSend = async (sessionIdInput, itemIdsInput, token) => {
+    const sessionId = requireSessionId(sessionIdInput);
+    const itemIds = parseItemIds(itemIdsInput);
+    await load();
+    if (!asNonEmptyString(token)) throw new TypeError('token is required');
+    const currentSending = sending.get(sessionId);
+    const claims = manualClaims.get(sessionId);
+    const queue = queues.get(sessionId);
+    const queuedIds = new Set(queue?.items.map((item) => item.id) ?? []);
+    if (itemIds.every((itemId) => !queuedIds.has(itemId))) {
+      return { revision, session: sessionSnapshot(sessionId) };
+    }
+    if (!currentSending || !claims || itemIds.some((itemId) => claims.get(itemId)?.token !== token)) {
+      throw httpError('message is not being sent', 409);
+    }
+    if (queue) setQueueItems(sessionId, queue.directory, queue.items.filter((item) => !itemIds.includes(item.id)));
+    releaseManualClaim(sessionId, itemIds, token);
+    failures.delete(sessionId);
+    return commit(sessionId, true);
+  };
+
+  const failManualSend = async (sessionIdInput, itemIdsInput, token) => {
+    const sessionId = requireSessionId(sessionIdInput);
+    const itemIds = parseItemIds(itemIdsInput);
+    await load();
+    if (!asNonEmptyString(token)) throw new TypeError('token is required');
+    const claims = manualClaims.get(sessionId);
+    if (!claims || itemIds.some((itemId) => claims.get(itemId)?.token !== token)) {
+      throw httpError('message is not being sent', 409);
+    }
+    if (itemIds.some((itemId) => claims.get(itemId).dispatched)) throw httpError('manual dispatch outcome is unresolved', 409);
+    releaseManualClaim(sessionId, itemIds, token);
+    armDispatch(sessionId, MANUAL_CONFIRM_MS);
+    return commit(sessionId, true);
   };
 
   const reorder = async (sessionIdInput, itemIds) => {
@@ -691,6 +966,7 @@ export function createMessageQueueRuntime({
     await load();
     const queue = queues.get(sessionId);
     if (!queue) return { revision, session: sessionSnapshot(sessionId) };
+    if (sending.has(sessionId)) throw httpError('message is being sent', 409);
     const byId = new Map(queue.items.map((item) => [item.id, item]));
     if (itemIds.length !== byId.size || new Set(itemIds).size !== itemIds.length || itemIds.some((id) => !byId.has(id))) {
       throw new TypeError('itemIds must list every queued message exactly once');
@@ -706,9 +982,9 @@ export function createMessageQueueRuntime({
     if (!queue) return { revision, session: sessionSnapshot(sessionId) };
     // Never drop a message already handed to OpenCode: its send resolves and
     // must find its entry.
-    const sendingId = sending.get(sessionId) ?? null;
-    setQueueItems(sessionId, queue.directory, queue.items.filter((item) => item.id === sendingId));
-    clearTimer(sessionId);
+    const sendingIds = sending.get(sessionId) ?? new Set();
+    setQueueItems(sessionId, queue.directory, queue.items.filter((item) => sendingIds.has(item.id)));
+    if (!manualClaims.has(sessionId)) clearTimer(sessionId);
     return commit(sessionId);
   };
 
@@ -718,7 +994,7 @@ export function createMessageQueueRuntime({
     if (held) {
       const ttl = Math.min(asCount(ttlMs) || HOLD_DEFAULT_TTL_MS, HOLD_MAX_TTL_MS);
       holds.set(sessionId, now() + ttl);
-      clearTimer(sessionId);
+      if (!manualClaims.has(sessionId)) clearTimer(sessionId);
       return { held: true, expiresAt: holds.get(sessionId) };
     }
     holds.delete(sessionId);
@@ -736,6 +1012,9 @@ export function createMessageQueueRuntime({
     if (deletedSessionId) {
       if (!queues.has(deletedSessionId)) return;
       queues.delete(deletedSessionId);
+      for (const claim of manualClaims.get(deletedSessionId)?.values() ?? []) absentSince.delete(claim.token);
+      manualClaims.delete(deletedSessionId);
+      sending.delete(deletedSessionId);
       clearTimer(deletedSessionId);
       failures.delete(deletedSessionId);
       commit(deletedSessionId);
@@ -747,7 +1026,7 @@ export function createMessageQueueRuntime({
     if (status) {
       if (!queues.has(status.sessionId)) return;
       if (status.type === 'idle') armDispatch(status.sessionId);
-      else clearTimer(status.sessionId);
+      else if (!manualClaims.has(status.sessionId)) clearTimer(status.sessionId);
       return;
     }
 
@@ -798,6 +1077,11 @@ export function createMessageQueueRuntime({
     remove,
     take,
     takeAll,
+    beginManualSend,
+    startManualSend,
+    dispatchManualSend,
+    ackManualSend,
+    failManualSend,
     reorder,
     clear,
     setHold,
@@ -837,6 +1121,47 @@ export function registerMessageQueueRoutes(app, runtime) {
       res.json(await runtime.takeAll(req.params.sessionId));
     } catch (error) {
       respondError(res, error, 'Failed to take queued messages');
+    }
+  });
+
+  app.post('/api/message-queue/sessions/:sessionId/manual-send', async (req, res) => {
+    try {
+      res.json(await runtime.beginManualSend(req.params.sessionId, req.body?.itemIds));
+    } catch (error) {
+      respondError(res, error, 'Failed to begin queued message send');
+    }
+  });
+
+  app.post('/api/message-queue/sessions/:sessionId/manual-send/start', async (req, res) => {
+    try {
+      res.json(await runtime.startManualSend(req.params.sessionId, req.body?.itemIds, req.body?.token, req.body?.messageID));
+    } catch (error) {
+      respondError(res, error, 'Failed to start queued message send');
+    }
+  });
+
+  app.post('/api/message-queue/sessions/:sessionId/manual-send/dispatch', async (req, res) => {
+    try {
+      await runtime.dispatchManualSend(req.params.sessionId, req.body?.itemIds, req.body?.token, req.body?.endpoint, req.body?.body);
+      res.status(204).end();
+    } catch (error) {
+      respondError(res, error, 'Failed to dispatch queued message');
+    }
+  });
+
+  app.post('/api/message-queue/sessions/:sessionId/manual-send/ack', async (req, res) => {
+    try {
+      res.json(await runtime.ackManualSend(req.params.sessionId, req.body?.itemIds, req.body?.token));
+    } catch (error) {
+      respondError(res, error, 'Failed to acknowledge queued message send');
+    }
+  });
+
+  app.post('/api/message-queue/sessions/:sessionId/manual-send/fail', async (req, res) => {
+    try {
+      res.json(await runtime.failManualSend(req.params.sessionId, req.body?.itemIds, req.body?.token));
+    } catch (error) {
+      respondError(res, error, 'Failed to release queued message send');
     }
   });
 

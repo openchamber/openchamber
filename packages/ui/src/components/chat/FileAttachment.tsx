@@ -128,12 +128,13 @@ FileAttachmentButton.displayName = 'FileAttachmentButton';
 interface ImagePreviewProps {
   file: AttachedFile;
   onRemove: () => void;
+  disabled?: boolean;
   onShowPopup?: (content: ToolPopupContent) => void;
   gallery?: NonNullable<ToolPopupContent['image']>['gallery'];
   index?: number;
 }
 
-const ImagePreview = memo(({ file, onRemove, onShowPopup, gallery, index = 0 }: ImagePreviewProps) => {
+const ImagePreview = memo(({ file, onRemove, disabled = false, onShowPopup, gallery, index = 0 }: ImagePreviewProps) => {
   const { t } = useI18n();
   const isLocalImagePreview =
     file.source !== 'server' &&
@@ -194,9 +195,11 @@ const ImagePreview = memo(({ file, onRemove, onShowPopup, gallery, index = 0 }: 
         <span
           onClick={(e) => {
             e.stopPropagation();
+            if (disabled) return;
             onRemove();
           }}
-          className="flex items-center justify-center h-5 w-5 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
+          className={cn('flex items-center justify-center h-5 w-5 flex-shrink-0 rounded-full transition-colors', disabled ? 'cursor-default opacity-50' : 'cursor-pointer hover:bg-[var(--interactive-hover)]')}
+          aria-disabled={disabled}
           aria-label={t('chat.fileAttachment.actions.removeNamed', { name: displayName })}
         >
           <Icon name="close" className="h-4 w-4 text-muted-foreground" />
@@ -229,8 +232,10 @@ const ImagePreview = memo(({ file, onRemove, onShowPopup, gallery, index = 0 }: 
       <button
         onClick={(event) => {
           event.stopPropagation();
+          if (disabled) return;
           onRemove();
         }}
+        disabled={disabled}
         className="absolute top-1 right-1 h-5 w-5 rounded-md bg-background/80 text-foreground hover:bg-background flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         // Inline: the mobile stylesheet floors every button at 36px, which
         // would swallow a 64px thumbnail; the thumbnail itself is the target.
@@ -276,9 +281,10 @@ const useFileDetails = (file: AttachedFile) => {
 interface FileChipProps {
   file: AttachedFile;
   onRemove: () => void;
+  disabled?: boolean;
 }
 
-const FileChip = memo(({ file, onRemove }: FileChipProps) => {
+const FileChip = memo(({ file, onRemove, disabled = false }: FileChipProps) => {
   const { t } = useI18n();
   const { displayName, fileSize, extension } = useFileDetails(file);
 
@@ -301,9 +307,11 @@ const FileChip = memo(({ file, onRemove }: FileChipProps) => {
         data-remove-button
         onClick={(e) => {
           e.stopPropagation();
+          if (disabled) return;
           onRemove();
         }}
-        className="flex items-center justify-center h-5 w-5 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-md transition-colors cursor-pointer"
+        className={cn('flex items-center justify-center h-5 w-5 flex-shrink-0 rounded-md transition-colors', disabled ? 'cursor-default opacity-50' : 'cursor-pointer hover:bg-[var(--interactive-hover)]')}
+        aria-disabled={disabled}
         aria-label={t('chat.fileAttachment.actions.removeNamed', { name: displayName })}
       >
         <Icon name="close" className="h-3.5 w-3.5 text-muted-foreground" />
@@ -314,7 +322,7 @@ const FileChip = memo(({ file, onRemove }: FileChipProps) => {
 
 FileChip.displayName = 'FileChip';
 
-const VSCodeFileChip = memo(({ file, onRemove }: FileChipProps) => {
+const VSCodeFileChip = memo(({ file, onRemove, disabled = false }: FileChipProps) => {
   const { t } = useI18n();
   const { displayName, extension } = useFileDetails(file);
 
@@ -338,9 +346,11 @@ const VSCodeFileChip = memo(({ file, onRemove }: FileChipProps) => {
         data-remove-button
         onClick={(e) => {
           e.stopPropagation();
+          if (disabled) return;
           onRemove();
         }}
-        className="flex items-center justify-center h-5 w-5 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
+        className={cn('flex items-center justify-center h-5 w-5 flex-shrink-0 rounded-full transition-colors', disabled ? 'cursor-default opacity-50' : 'cursor-pointer hover:bg-[var(--interactive-hover)]')}
+        aria-disabled={disabled}
         aria-label={t('chat.fileAttachment.activeEditor.remove')}
         title={t('chat.fileAttachment.activeEditor.remove')}
       >
@@ -359,9 +369,10 @@ VSCodeFileChip.displayName = 'VSCodeFileChip';
 interface AttachedFilesListProps {
   onShowPopup?: (content: ToolPopupContent) => void;
   className?: string;
+  disabled?: boolean;
 }
 
-export const AttachedVSCodeFileChips = memo(({ onShowPopup }: AttachedFilesListProps) => {
+export const AttachedVSCodeFileChips = memo(({ onShowPopup, disabled = false }: AttachedFilesListProps) => {
   const attachedFiles = useInputStore((state) => state.attachedFiles);
   const removeAttachedFile = useInputStore((state) => state.removeAttachedFile);
 
@@ -381,10 +392,10 @@ export const AttachedVSCodeFileChips = memo(({ onShowPopup }: AttachedFilesListP
   return (
     <div className="flex items-center gap-2 flex-wrap">
       {images.map((file, index) => (
-        <ImagePreview key={file.id} file={file} onRemove={() => removeAttachedFile(file.id)} onShowPopup={onShowPopup} gallery={imageGallery} index={index} />
+        <ImagePreview key={file.id} file={file} onRemove={() => removeAttachedFile(file.id)} disabled={disabled} onShowPopup={onShowPopup} gallery={imageGallery} index={index} />
       ))}
       {otherFiles.map((file) => (
-        <VSCodeFileChip key={file.id} file={file} onRemove={() => removeAttachedFile(file.id)} />
+        <VSCodeFileChip key={file.id} file={file} onRemove={() => removeAttachedFile(file.id)} disabled={disabled} />
       ))}
     </div>
   );
@@ -392,7 +403,7 @@ export const AttachedVSCodeFileChips = memo(({ onShowPopup }: AttachedFilesListP
 
 AttachedVSCodeFileChips.displayName = 'AttachedVSCodeFileChips';
 
-export const AttachedFilesList = memo(({ onShowPopup, className }: AttachedFilesListProps) => {
+export const AttachedFilesList = memo(({ onShowPopup, className, disabled = false }: AttachedFilesListProps) => {
   const attachedFiles = useInputStore((state) => state.attachedFiles);
   const removeAttachedFile = useInputStore((state) => state.removeAttachedFile);
 
@@ -419,6 +430,7 @@ export const AttachedFilesList = memo(({ onShowPopup, className }: AttachedFiles
               key={file.id}
               file={file}
               onRemove={() => removeAttachedFile(file.id)}
+              disabled={disabled}
               onShowPopup={onShowPopup}
               gallery={imageGallery}
               index={index}
@@ -435,6 +447,7 @@ export const AttachedFilesList = memo(({ onShowPopup, className }: AttachedFiles
               key={file.id}
               file={file}
               onRemove={() => removeAttachedFile(file.id)}
+              disabled={disabled}
             />
           ))}
         </div>
@@ -445,7 +458,7 @@ export const AttachedFilesList = memo(({ onShowPopup, className }: AttachedFiles
 
 AttachedFilesList.displayName = 'AttachedFilesList';
 
-export const ActiveEditorFileSuggestion = memo(() => {
+export const ActiveEditorFileSuggestion = memo(({ disabled = false }: { disabled?: boolean }) => {
   const { t } = useI18n();
   const activeEditorFile = useInputStore((s) => s.activeEditorFile);
   const attachedFiles = useInputStore((s) => s.attachedFiles)
@@ -482,11 +495,12 @@ export const ActiveEditorFileSuggestion = memo(() => {
   const displayName = fileName;
 
   const handleAddFile = () => {
+    if (disabled) return;
     addVSCodeFileAttachment(filePath, fileName, fileSize);
   };
 
   const handlePinSelection = async () => {
-    if (!selection) return;
+    if (!selection || disabled) return;
     const blob = new Blob([selection.text], { type: 'text/plain' });
     const file = new File([blob], selectionLabel, { type: 'text/plain' });
     await addVSCodeSelectionAttachment(filePath, file);
@@ -511,7 +525,8 @@ export const ActiveEditorFileSuggestion = memo(() => {
             title={t('chat.fileAttachment.activeEditor.pinSelection')}
             aria-label={t('chat.fileAttachment.activeEditor.pinSelection')}
             onClick={() => { void handlePinSelection(); }}
-            className="flex items-center justify-center h-5 w-5 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
+            disabled={disabled}
+            className="flex items-center justify-center h-5 w-5 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer disabled:cursor-default disabled:opacity-50"
           >
             <Icon name="pushpin-2" className="h-4 w-4" />
           </button>
@@ -530,7 +545,8 @@ export const ActiveEditorFileSuggestion = memo(() => {
             title={t('chat.fileAttachment.activeEditor.addFile', { name: displayName })}
             aria-label={t('chat.fileAttachment.activeEditor.addFile', { name: displayName })}
             onClick={handleAddFile}
-            className="flex items-center justify-center h-5 w-5 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
+            disabled={disabled}
+            className="flex items-center justify-center h-5 w-5 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer disabled:cursor-default disabled:opacity-50"
           >
             <Icon name="add" className="h-4 w-4" />
           </button>

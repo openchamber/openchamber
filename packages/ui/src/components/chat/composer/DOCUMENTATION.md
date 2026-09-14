@@ -245,6 +245,23 @@ and the send path reading the same grammar.
   them after loading that identity's draft. Selection alone is not enough:
   the deferred chat column can still show the source composer. Ordinary
   pending text insertions keep their existing path in `ChatInput`.
+   Remote prompt sends keep their exact text, confirmed-mention, and attachment
+  snapshot visible until `sendMessage` acknowledges it. The temporary sending
+  lock belongs to that same identity, survives composer remounts and runtime
+  A-to-B-to-A switches, transfers only from a submitted draft to its
+  materialized session, and never follows ordinary navigation. ACK clears only
+  its exact submitted operation; a rejection leaves it intact. The retained
+  attachment chips and attachment entry points stay disabled while that
+  operation is pending. Linked issue/PR replacement and removal follow the
+  same lock, while opening the captured reference in a browser remains available.
+  ACK clears only the exact linked-reference objects it sent, so a newer context
+  selection belongs to the next submission. The
+  existing restore path is a narrow fallback for external rewrites that emptied
+  the draft while the request was in flight.
+  Revert follows the same acknowledgement boundary: the source message's text,
+  files, and context chips stay untouched until the server confirms the revert.
+  A late confirmation restores them only when that runtime/session still owns
+  the visible composer.
 - `state/useDraftTarget.ts` — the draft can target a directory that does not
   exist yet (a worktree being created). It must survive not appearing in the
   branch list, or the selector snaps back to the project root mid-creation. It

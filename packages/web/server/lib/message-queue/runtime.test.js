@@ -48,6 +48,10 @@ const createOpenCode = () => {
     }
     if (pathname === '/session/status') return Response.json(state.statuses);
     if (pathname.endsWith('/message')) return Response.json(state.tail);
+    if (pathname.includes('/message/')) {
+      const record = state.tail.find((entry) => entry.info.id === pathname.split('/').at(-1));
+      return record ? Response.json(record) : new Response('not found', { status: 404 });
+    }
     if (pathname === '/command') return Response.json(state.commands);
     if (method === 'POST' && (pathname.endsWith('/prompt_async') || pathname.endsWith('/command'))) {
       state.sent.push({ path: pathname, body: JSON.parse(init.body) });
@@ -58,7 +62,7 @@ const createOpenCode = () => {
   return { state, fetchImpl };
 };
 
-const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs } = {}) => {
+const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, now } = {}) => {
   let eventHandler = () => {};
   let statusHandler = () => {};
   const broadcasts = [];
@@ -79,6 +83,7 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
     abortHoldMs: 50,
   };
   if (retryDelayMs) options.retryDelayMs = retryDelayMs;
+  if (now) options.now = now;
   const runtime = createMessageQueueRuntime(options);
   return {
     runtime,
@@ -144,12 +149,12 @@ describe('message queue runtime', () => {
 
     await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'first', text: 'first' }));
     await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'second', text: 'second' }));
-    await settle();
+    await settle(100);
     expect(openCode.state.sent).toHaveLength(0);
 
     openCode.state.statuses = {};
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
+    await settle(100);
 
     expect(openCode.state.sent).toHaveLength(1);
     expect(openCode.state.sent[0].path).toBe(`/session/${SESSION}/prompt_async`);
@@ -299,6 +304,422 @@ describe('message queue runtime', () => {
     expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(0);
   });
 
+  it('keeps manually dispatched items until their exact acknowledgement', async () => {
+    const { runtime, openCode } = createRuntime();
+    openCode.state.statuses = { [SESSION]: { type: 'busy' } };
+    runtime.start();
+    const first = await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'first' }));
+    const second = await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'second' }));
+
+    const dispatched = await runtime.beginManualSend(SESSION, [first.itemId, second.itemId]);
+    expect(dispatched.items.map((entry) => entry.id)).toEqual([first.itemId, second.itemId]);
+    expect(runtime.sessionSnapshot(SESSION)).toMatchObject({
+      items: [{ id: first.itemId }, { id: second.itemId }],
+      sendingIds: [first.itemId, second.itemId],
+    });
+    await expect(runtime.beginManualSend(SESSION, [first.itemId])).resolves.toMatchObject({ items: [] });
+
+    await runtime.failManualSend(SESSION, [first.itemId], dispatched.token);
+    expect(runtime.sessionSnapshot(SESSION)).toMatchObject({
+      items: [{ id: first.itemId }, { id: second.itemId }],
+      sendingIds: [second.itemId],
+    });
+
+    await runtime.ackManualSend(SESSION, [second.itemId], dispatched.token);
+    expect(runtime.sessionSnapshot(SESSION)).toMatchObject({
+      items: [{ id: first.itemId }],
+      sendingIds: [],
+    });
+  });
+
+  it('accepts a repeated manual acknowledgement after its response was lost', async () => {
+    const { runtime } = createRuntime();
+    runtime.start();
+    const { itemId } = await runtime.enqueue(SESSION, DIRECTORY, item());
+    const dispatched = await runtime.beginManualSend(SESSION, [itemId]);
+
+    await runtime.ackManualSend(SESSION, [itemId], dispatched.token);
+    await expect(runtime.ackManualSend(SESSION, [itemId], dispatched.token)).resolves.toMatchObject({
+      session: { items: [], sendingIds: [] },
+    });
+  });
+
+  it('claims only entries that are not already in flight', async () => {
+    const { runtime } = createRuntime();
+    runtime.start();
+    const first = await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'in flight' }));
+    const second = await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'claim me' }));
+    await runtime.beginManualSend(SESSION, [first.itemId]);
+
+    const dispatched = await runtime.beginManualSend(SESSION, [first.itemId, second.itemId]);
+    expect(dispatched.items.map((entry) => entry.id)).toEqual([second.itemId]);
+    expect(runtime.sessionSnapshot(SESSION).sendingIds).toEqual([first.itemId, second.itemId]);
+  });
+
+  it('releases an abandoned pre-dispatch manual claim and progresses the queue', async () => {
+    let timestamp = 1;
+    const { runtime, openCode } = createRuntime({ now: () => timestamp });
+    runtime.start();
+    await runtime.load();
+    const first = await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'abandoned' }));
+    const second = await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'next' }));
+    const claim = await runtime.beginManualSend(SESSION, [first.itemId]);
+
+    timestamp += 5_000;
+    runtime.processPayload({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle(100);
+
+    expect(openCode.state.sent).toHaveLength(1);
+    expect(openCode.state.sent[0].body.parts[0]).toEqual({ type: 'text', text: 'follow up' });
+    expect(runtime.sessionSnapshot(SESSION).items.map((entry) => entry.id)).toEqual([second.itemId]);
+    expect(runtime.sessionSnapshot(SESSION).sendingIds).toEqual([]);
+
+    await expect(runtime.startManualSend(SESSION, [first.itemId], claim.token, 'msg_abandoned')).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('publishes expired unstarted ownership even when the session remains busy', async () => {
+    let timestamp = 1_000;
+    const { runtime, openCode, broadcasts, connect } = createRuntime({ now: () => timestamp });
+    runtime.start();
+    openCode.state.statuses = { [SESSION]: { type: 'busy' } };
+    const first = await runtime.enqueue(SESSION, DIRECTORY, item());
+    await runtime.beginManualSend(SESSION, [first.itemId]);
+    timestamp += 5_000;
+    connect();
+    await settle();
+    expect(broadcasts.at(-1).properties.session.sendingIds).toEqual([]);
+    expect(openCode.state.sent).toEqual([]);
+    runtime.stop();
+    await runtime.flush();
+  });
+
+  it('blocks automatic and manual delivery behind an unresolved started claim', async () => {
+    const { runtime, openCode, emit } = createRuntime();
+    runtime.start();
+    const first = await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'protected' }));
+    const second = await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'next' }));
+    const claim = await runtime.beginManualSend(SESSION, [first.itemId]);
+    await runtime.startManualSend(SESSION, [first.itemId], claim.token, 'msg_protected');
+
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+
+    expect(openCode.state.sent).toHaveLength(0);
+    expect(runtime.sessionSnapshot(SESSION)).toMatchObject({
+      items: [{ id: first.itemId }, { id: second.itemId }],
+      sendingIds: [first.itemId],
+    });
+    const later = await runtime.beginManualSend(SESSION, [second.itemId]);
+    await expect(runtime.startManualSend(SESSION, [second.itemId], later.token, 'msg_later')).rejects.toMatchObject({ status: 409 });
+    runtime.stop();
+  });
+
+  it('reconciles abandonment after start using repeated idle and exact message absence, fencing a resumed browser', async () => {
+    let timestamp = 1_000;
+    const { runtime, openCode, connect } = createRuntime({ now: () => timestamp });
+    runtime.start();
+    const first = await runtime.enqueue(SESSION, DIRECTORY, item({ text: 'first' }));
+    const second = await runtime.enqueue(SESSION, DIRECTORY, item({ text: 'second' }));
+    const ids = [first.itemId];
+    const claim = await runtime.beginManualSend(SESSION, ids);
+    await runtime.startManualSend(SESSION, ids, claim.token, 'msg_abandoned');
+    timestamp += 60_000;
+    connect();
+    await settle();
+    expect(runtime.sessionSnapshot(SESSION).sendingIds).toEqual(ids);
+    expect(openCode.state.sent).toHaveLength(0);
+    timestamp += 5_000;
+    connect();
+    await settle();
+    expect(runtime.sessionSnapshot(SESSION).sendingIds).toEqual([]);
+    expect(runtime.sessionSnapshot(SESSION).items.map((entry) => entry.id)).toEqual([first.itemId, second.itemId]);
+    await expect(runtime.dispatchManualSend(SESSION, ids, claim.token, 'prompt_async', { messageID: 'msg_abandoned', parts: [] })).rejects.toMatchObject({ status: 409 });
+    connect();
+    await settle();
+    expect(openCode.state.sent.map((entry) => entry.body.parts[0].text)).toEqual(['first']);
+    runtime.stop();
+  });
+
+  it('reconciles an accepted response lost to the browser without resending the exact batch', async () => {
+    const { runtime, openCode, connect } = createRuntime();
+    runtime.start();
+    const first = await runtime.enqueue(SESSION, DIRECTORY, item());
+    const second = await runtime.enqueue(SESSION, DIRECTORY, item());
+    const ids = [first.itemId, second.itemId];
+    const claim = await runtime.beginManualSend(SESSION, ids);
+    await runtime.startManualSend(SESSION, ids, claim.token, 'msg_accepted');
+    openCode.state.tail = [{ info: { id: 'msg_accepted', sessionID: SESSION, role: 'user' } }];
+    connect();
+    await settle();
+    expect(runtime.sessionSnapshot(SESSION).items).toEqual([]);
+    expect(openCode.state.sent).toEqual([]);
+    await expect(runtime.ackManualSend(SESSION, ids, claim.token)).resolves.toMatchObject({ session: { items: [] } });
+    runtime.stop();
+  });
+
+  it('durably binds start to one exact identity and restores pending ownership before restart delivery', async () => {
+    const first = createRuntime();
+    const { runtime, dataDir } = first;
+    const queued = await runtime.enqueue(SESSION, DIRECTORY, item());
+    const ids = [queued.itemId];
+    const claim = await runtime.beginManualSend(SESSION, ids);
+    await runtime.startManualSend(SESSION, ids, claim.token, 'msg_restart');
+    await expect(runtime.startManualSend(SESSION, ids, claim.token, 'msg_other')).rejects.toMatchObject({ status: 409 });
+    await expect(runtime.startManualSend(SESSION, ids, claim.token, 'msg_restart')).resolves.toMatchObject({ token: claim.token });
+    // No explicit flush: the successful start itself must wait for durability.
+    const stored = JSON.parse(fs.readFileSync(path.join(dataDir, 'message-queue.json'), 'utf8'));
+    expect(stored.sessions[SESSION].manualClaims[queued.itemId]).toMatchObject({ token: claim.token, messageID: 'msg_restart' });
+    runtime.stop();
+    const second = createRuntime({ dataDir });
+    await second.runtime.load();
+    expect(second.runtime.sessionSnapshot(SESSION).sendingIds).toEqual(ids);
+    second.openCode.state.tail = [{ info: { id: 'msg_restart', sessionID: SESSION, role: 'user' } }];
+    second.runtime.start();
+    await settle();
+    expect(second.runtime.sessionSnapshot(SESSION).items).toEqual([]);
+    expect(second.openCode.state.sent).toEqual([]);
+    second.runtime.stop();
+  });
+
+  it('never retries a dispatched but ambiguous claim, including after restart and idle/absent confirmations', async () => {
+    let timestamp = 1_000;
+    const { runtime, openCode, dataDir } = createRuntime({ now: () => timestamp });
+    runtime.start();
+    const first = await runtime.enqueue(SESSION, DIRECTORY, item());
+    const ids = [first.itemId];
+    const claim = await runtime.beginManualSend(SESSION, ids);
+    await runtime.startManualSend(SESSION, ids, claim.token, 'msg_ambiguous');
+    openCode.state.failNext = /prompt_async$/;
+    const body = { messageID: 'msg_ambiguous', parts: [{ type: 'text', text: 'one batch' }] };
+    await expect(runtime.dispatchManualSend(SESSION, ids, claim.token, 'prompt_async', body)).rejects.toMatchObject({ status: 503 });
+    await expect(runtime.failManualSend(SESSION, ids, claim.token)).rejects.toMatchObject({ status: 409 });
+    runtime.stop();
+    const second = createRuntime({ dataDir, openCode, now: () => timestamp });
+    second.runtime.start();
+    await second.runtime.load();
+    timestamp += 60_000;
+    second.connect();
+    await settle();
+    timestamp += 60_000;
+    second.connect();
+    await settle();
+    expect(second.runtime.sessionSnapshot(SESSION).sendingIds).toEqual(ids);
+    await expect(second.runtime.dispatchManualSend(SESSION, ids, claim.token, 'prompt_async', body)).rejects.toMatchObject({ status: 409 });
+    expect(openCode.fetchImpl.mock.calls.filter(([url, init]) => init.method === 'POST' && url.includes('/prompt_async'))).toHaveLength(1);
+    // A later authoritative record resolves the retained operation, even busy.
+    openCode.state.statuses = { [SESSION]: { type: 'busy' } };
+    openCode.state.tail = [{ info: { id: body.messageID, sessionID: SESSION, role: 'user' } }];
+    second.connect();
+    await settle();
+    expect(second.runtime.sessionSnapshot(SESSION).items).toEqual([]);
+    second.runtime.stop();
+  });
+
+  it('forwards an exact manual batch once and rejects stale settlement against a newer owner', async () => {
+    const { runtime, openCode } = createRuntime();
+    const first = await runtime.enqueue(SESSION, DIRECTORY, item());
+    const ids = [first.itemId];
+    const old = await runtime.beginManualSend(SESSION, ids);
+    await runtime.startManualSend(SESSION, ids, old.token, 'msg_old');
+    await runtime.failManualSend(SESSION, ids, old.token);
+    const claim = await runtime.beginManualSend(SESSION, ids);
+    await runtime.startManualSend(SESSION, ids, claim.token, 'msg_new');
+    await expect(runtime.startManualSend(SESSION, ids, old.token, 'msg_old')).rejects.toMatchObject({ status: 409 });
+    await expect(runtime.failManualSend(SESSION, ids, old.token)).rejects.toMatchObject({ status: 409 });
+    await expect(runtime.ackManualSend(SESSION, ids, old.token)).rejects.toMatchObject({ status: 409 });
+    const body = { messageID: 'msg_new', model: { providerID: 'p', modelID: 'm' }, parts: [{ type: 'text', text: 'full batch' }] };
+    await runtime.dispatchManualSend(SESSION, ids, claim.token, 'prompt_async', body);
+    expect(openCode.state.sent).toEqual([{ path: `/session/${SESSION}/prompt_async`, body }]);
+    expect(runtime.sessionSnapshot(SESSION).items).toEqual([]);
+    await expect(runtime.dispatchManualSend(SESSION, ids, claim.token, 'prompt_async', body)).rejects.toMatchObject({ status: 409 });
+    expect(openCode.state.sent).toHaveLength(1);
+    runtime.stop();
+  });
+
+  it('resets absence confirmation on fetch failure or busy and never treats elapsed time alone as proof', async () => {
+    let timestamp = 1_000;
+    const { runtime, openCode, connect } = createRuntime({ now: () => timestamp });
+    runtime.start();
+    const first = await runtime.enqueue(SESSION, DIRECTORY, item());
+    const ids = [first.itemId];
+    const claim = await runtime.beginManualSend(SESSION, ids);
+    await runtime.startManualSend(SESSION, ids, claim.token, 'msg_absent');
+    connect();
+    await settle();
+    timestamp += 10_000;
+    openCode.state.failNext = /\/message\/msg_absent$/;
+    connect();
+    await settle();
+    timestamp += 10_000;
+    connect();
+    await settle();
+    expect(runtime.sessionSnapshot(SESSION).sendingIds).toEqual(ids);
+    openCode.state.statuses = { [SESSION]: { type: 'busy' } };
+    timestamp += 10_000;
+    connect();
+    await settle();
+    openCode.state.statuses = {};
+    timestamp += 10_000;
+    connect();
+    await settle();
+    expect(runtime.sessionSnapshot(SESSION).sendingIds).toEqual(ids);
+    expect(openCode.state.sent).toEqual([]);
+    runtime.stop();
+  });
+
+  it('fails closed when the start operation cannot be persisted', async () => {
+    const { runtime, dataDir, openCode } = createRuntime();
+    const first = await runtime.enqueue(SESSION, DIRECTORY, item());
+    const ids = [first.itemId];
+    const claim = await runtime.beginManualSend(SESSION, ids);
+    await runtime.flush();
+    const queuePath = path.join(dataDir, 'message-queue.json');
+    fs.unlinkSync(queuePath);
+    fs.mkdirSync(queuePath);
+    await expect(runtime.startManualSend(SESSION, ids, claim.token, 'msg_disk')).rejects.toThrow();
+    expect(openCode.state.sent).toEqual([]);
+    runtime.stop();
+  });
+
+  it('releases a definitely unsent dispatch claim after its fence write recovers', async () => {
+    const { runtime, dataDir, openCode } = createRuntime();
+    const first = await runtime.enqueue(SESSION, DIRECTORY, item());
+    const ids = [first.itemId];
+    const claim = await runtime.beginManualSend(SESSION, ids);
+    await runtime.startManualSend(SESSION, ids, claim.token, 'msg_fence_write');
+    const queuePath = path.join(dataDir, 'message-queue.json');
+    fs.unlinkSync(queuePath);
+    fs.mkdirSync(queuePath);
+
+    await expect(runtime.dispatchManualSend(SESSION, ids, claim.token, 'prompt_async', {
+      messageID: 'msg_fence_write',
+      parts: [],
+    })).rejects.toThrow();
+    expect(openCode.state.sent).toEqual([]);
+
+    fs.rmdirSync(queuePath);
+    await expect(runtime.failManualSend(SESSION, ids, claim.token)).resolves.toMatchObject({
+      session: { items: [{ id: first.itemId }], sendingIds: [] },
+    });
+    expect(openCode.state.sent).toEqual([]);
+    runtime.stop();
+  });
+
+  it('does not deliver after a failed release write could restore the old claim on restart', async () => {
+    const { runtime, dataDir, openCode, connect } = createRuntime();
+    runtime.start();
+    const first = await runtime.enqueue(SESSION, DIRECTORY, item());
+    const ids = [first.itemId];
+    const claim = await runtime.beginManualSend(SESSION, ids);
+    await runtime.startManualSend(SESSION, ids, claim.token, 'msg_disk_release');
+    const queuePath = path.join(dataDir, 'message-queue.json');
+    fs.unlinkSync(queuePath);
+    fs.mkdirSync(queuePath);
+    await expect(runtime.failManualSend(SESSION, ids, claim.token)).rejects.toThrow();
+    connect();
+    await settle();
+    expect(openCode.state.sent).toEqual([]);
+    runtime.stop();
+  });
+
+  it('keeps the pending head when enqueue exceeds the per-session limit', async () => {
+    const { runtime } = createRuntime();
+    const first = await runtime.enqueue(SESSION, DIRECTORY, item());
+    const claim = await runtime.beginManualSend(SESSION, [first.itemId]);
+    await runtime.startManualSend(SESSION, [first.itemId], claim.token, 'msg_capacity');
+    for (let index = 1; index < 20; index += 1) await runtime.enqueue(SESSION, DIRECTORY, item());
+    await expect(runtime.enqueue(SESSION, DIRECTORY, item())).rejects.toMatchObject({ status: 409 });
+    expect(runtime.sessionSnapshot(SESSION).items[0].id).toBe(first.itemId);
+    runtime.stop();
+    await runtime.flush();
+  });
+
+  it('reconciles after browser abandonment using only its own timer', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const { runtime, openCode } = createRuntime();
+    const first = await runtime.enqueue(SESSION, DIRECTORY, item());
+    const ids = [first.itemId];
+    const claim = await runtime.beginManualSend(SESSION, ids);
+    await runtime.startManualSend(SESSION, ids, claim.token, 'msg_timer');
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(runtime.sessionSnapshot(SESSION).sendingIds).toEqual(ids);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await runtime.flush();
+    expect(runtime.sessionSnapshot(SESSION).sendingIds).toEqual([]);
+    expect(openCode.state.sent).toEqual([]);
+    runtime.stop();
+  });
+
+  it('releases definite upstream rejection without affecting later queued items', async () => {
+    const { runtime, openCode } = createRuntime();
+    const first = await runtime.enqueue(SESSION, DIRECTORY, item());
+    const second = await runtime.enqueue(SESSION, DIRECTORY, item());
+    const ids = [first.itemId];
+    const claim = await runtime.beginManualSend(SESSION, ids);
+    await runtime.startManualSend(SESSION, ids, claim.token, 'msg_rejected');
+    openCode.fetchImpl.mockImplementationOnce(async () => new Response('invalid model', { status: 400 }));
+    await expect(runtime.dispatchManualSend(SESSION, ids, claim.token, 'prompt_async', { messageID: 'msg_rejected', parts: [] })).rejects.toMatchObject({ status: 400 });
+    expect(runtime.sessionSnapshot(SESSION)).toMatchObject({ items: [{ id: first.itemId }, { id: second.itemId }], sendingIds: [] });
+    runtime.stop();
+  });
+
+  it('refuses malformed version-2 operation state without overwriting it', async () => {
+    const { runtime, dataDir } = createRuntime();
+    const stored = { version: 2, revision: 1, sessions: { [SESSION]: { directory: DIRECTORY, items: [{ id: 'queued-stored', createdAt: 1, ...item() }] } } };
+    const bytes = JSON.stringify(stored);
+    const queuePath = path.join(dataDir, 'message-queue.json');
+    fs.writeFileSync(queuePath, bytes);
+    await expect(runtime.load()).rejects.toThrow('manual claims');
+    await expect(runtime.enqueue(SESSION, DIRECTORY, item())).rejects.toThrow();
+    expect(fs.readFileSync(queuePath, 'utf8')).toBe(bytes);
+    runtime.stop();
+  });
+
+  it('keeps a concurrent manual claim when automatic delivery succeeds', async () => {
+    const { runtime, openCode, emit } = createRuntime();
+    runtime.start();
+    let release;
+    openCode.fetchImpl.mockImplementationOnce(async () => Response.json({}))
+      .mockImplementationOnce(async () => Response.json([]))
+      .mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve(new Response(null, { status: 204 })); }));
+    const first = await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'automatic' }));
+    const second = await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'manual' }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+
+    await runtime.beginManualSend(SESSION, [second.itemId]);
+    release();
+    await settle();
+
+    expect(runtime.sessionSnapshot(SESSION)).toMatchObject({
+      items: [{ id: second.itemId }],
+      sendingIds: [second.itemId],
+    });
+    expect(runtime.sessionSnapshot(SESSION).items.some((entry) => entry.id === first.itemId)).toBe(false);
+  });
+
+  it('keeps a concurrent manual claim when automatic delivery fails', async () => {
+    const { runtime, openCode, emit } = createRuntime({ retryDelayMs: () => 60_000 });
+    runtime.start();
+    let release;
+    openCode.fetchImpl.mockImplementationOnce(async () => Response.json({}))
+      .mockImplementationOnce(async () => Response.json([]))
+      .mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve(new Response('boom', { status: 500 })); }));
+    const first = await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'automatic' }));
+    const second = await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'manual' }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+
+    await runtime.beginManualSend(SESSION, [second.itemId]);
+    release();
+    await settle();
+
+    expect(runtime.sessionSnapshot(SESSION)).toMatchObject({
+      items: [{ id: first.itemId }, { id: second.itemId }],
+      sendingIds: [second.itemId],
+    });
+  });
+
   it('take hands back the full payload and leaves the rest queued', async () => {
     const { runtime } = createRuntime();
     runtime.start();
@@ -357,7 +778,7 @@ describe('message queue runtime', () => {
 
     expect(openCode.state.sent).toHaveLength(1);
     expect(runtime.snapshot().sessions).toEqual([]);
-    expect(broadcasts.at(-1).properties.session).toEqual({ sessionId: SESSION, directory: DIRECTORY, items: [], sendingId: null });
+    expect(broadcasts.at(-1).properties.session).toEqual({ sessionId: SESSION, directory: DIRECTORY, items: [], sendingId: null, sendingIds: [] });
   });
 
   it('reorders only with a complete permutation', async () => {

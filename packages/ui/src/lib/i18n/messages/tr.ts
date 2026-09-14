@@ -2160,6 +2160,8 @@ export const dict = {
   'chat.revert.toast.undo': 'Geri alındı: {preview}',
   'chat.revert.toast.redo': 'Yinelendi',
   'chat.revert.toast.restored': 'Tüm mesajlar geri yüklendi',
+  'chat.revert.toast.failed': 'Mesaj geri alınamadı',
+  'chat.chatInput.actions.abortConfirmationHint': 'Durdurmak için tekrar Esc tuşuna basın',
   'chat.toast.opencodeRestartInterrupted.title': 'Sohbet kesildi',
   'chat.toast.opencodeRestartInterrupted.description': 'Yanıt hâlâ çalışırken OpenCode yeniden başlatıldı. Devam etmek için bir mesaj gönder.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Session\'ı aç',

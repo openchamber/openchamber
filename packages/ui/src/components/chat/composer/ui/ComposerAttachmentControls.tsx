@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils';
 
 type ComposerAttachmentControlsProps = {
     isVSCode: boolean;
+    disabled?: boolean;
     footerIconButtonClass: string;
     iconSizeClass: string;
     handlePickLocalFiles: () => void;
@@ -38,6 +39,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
     const { t } = useI18n();
     const {
         isVSCode,
+        disabled = false,
         footerIconButtonClass,
         iconSizeClass,
         handlePickLocalFiles,
@@ -56,6 +58,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                         type="button"
                         className={footerIconButtonClass}
                         onClick={props.onOpenMobileSheet}
+                        disabled={disabled}
                         // Same guard as PermissionAutoAcceptButton: keep the tap
                         // from dismissing the keyboard. On Android's
                         // resizes-content viewport the keyboard-close relayout
@@ -76,6 +79,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                         type="button"
                         className={footerIconButtonClass}
                         onClick={handlePickLocalFiles}
+                        disabled={disabled}
                         title={t('chat.chatInput.actions.attachFiles')}
                         aria-label={t('chat.chatInput.actions.attachFiles')}
                     >
@@ -87,6 +91,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                             <button
                                 type="button"
                                 className={footerIconButtonClass}
+                                disabled={disabled}
                                 title={t('chat.chatInput.actions.addAttachment')}
                                 aria-label={t('chat.chatInput.actions.addAttachment')}
                             >
@@ -148,6 +153,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
     );
 }, (prev, next) => (
     prev.isVSCode === next.isVSCode
+    && prev.disabled === next.disabled
     && prev.footerIconButtonClass === next.footerIconButtonClass
     && prev.iconSizeClass === next.iconSizeClass
     && prev.showLinearPicker === next.showLinearPicker

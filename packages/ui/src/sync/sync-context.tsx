@@ -34,6 +34,7 @@ import { touchStreamingSession, updateChangedStreamingSessions, updateStreamingS
 import { countSyncPerformance } from "./performance-diagnostics"
 import { runBackgroundNetworkTask } from "@/lib/background-network"
 import { setActionRefs } from "./session-actions"
+import { clearQuestionSubmission } from "./question-submission-state"
 import { setSyncRefs, getAllSyncSessions } from "./sync-refs"
 import { useSessionUIStore } from "./session-ui-store"
 import { stripSessionDiffSnapshots } from "./sanitize"
@@ -1794,6 +1795,9 @@ export function handleEvent(
 
   if (payload.type === "question.replied" || payload.type === "question.rejected") {
     const props = payload.properties as { sessionID?: string; requestID?: string }
+    if (props.sessionID && props.requestID) {
+      clearQuestionSubmission({ runtimeKey: expectedRuntimeKey, sessionID: props.sessionID, requestID: props.requestID })
+    }
     const toastKey = getQuestionToastKey(props.sessionID, props.requestID)
     if (toastKey) {
       pendingQuestionToastIds.delete(toastKey)

@@ -25,6 +25,7 @@ export interface LinkedReferenceRowProps {
     removeLabel: string;
     onReopenPicker: () => void;
     onRemove: () => void;
+    disabled?: boolean;
 }
 
 export function LinkedReferenceRow(props: LinkedReferenceRowProps) {
@@ -39,6 +40,7 @@ export function LinkedReferenceRow(props: LinkedReferenceRowProps) {
         removeLabel,
         onReopenPicker,
         onRemove,
+        disabled = false,
     } = props;
 
     return (
@@ -49,7 +51,8 @@ export function LinkedReferenceRow(props: LinkedReferenceRowProps) {
             <button
                 type="button"
                 onClick={onReopenPicker}
-                className="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:opacity-80 transition-opacity"
+                disabled={disabled}
+                className="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:opacity-80 transition-opacity disabled:cursor-default disabled:hover:opacity-100"
             >
                 {author?.avatarUrl ? (
                     <img
@@ -86,7 +89,8 @@ export function LinkedReferenceRow(props: LinkedReferenceRowProps) {
                 <button
                     type="button"
                     onClick={onRemove}
-                    className="flex items-center justify-center h-5 w-5 hover:bg-[var(--interactive-hover)] rounded-md transition-colors"
+                    disabled={disabled}
+                    className="flex items-center justify-center h-5 w-5 hover:bg-[var(--interactive-hover)] rounded-md transition-colors disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent"
                     aria-label={removeLabel}
                     title={removeLabel}
                 >

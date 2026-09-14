@@ -12,6 +12,14 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
+import {
+  beginQuestionSubmission,
+  getQuestionSubmission,
+  releaseQuestionSubmission,
+  updateQuestionSubmission,
+  useQuestionSubmissionStore,
+} from '@/sync/question-submission-state';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useI18n } from '@/lib/i18n';
 import { serializeQuestionAsJson, serializeQuestionAsMarkdown } from './questionSerializers';
 import { QUESTION_CUSTOM_TEXTAREA_MIN_HEIGHT, getQuestionCustomTextareaHeight } from './questionTextareaSizing';
@@ -101,13 +109,19 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
     return Boolean(sourceSession?.parentID && sourceSession.parentID === currentSessionId);
   }, [question.sessionID, currentSessionId, sessions]);
   const [activeTab, setActiveTab] = React.useState<TabKey>('0');
-  const [isResponding, setIsResponding] = React.useState(false);
-  const [hasResponded, setHasResponded] = React.useState(false);
+  const runtimeKey = getRuntimeKey();
+  const submissionKey = `${runtimeKey}\u0000${question.sessionID}\u0000${question.id}`;
+  const isResponding = useQuestionSubmissionStore((state) => state.submissions.get(submissionKey)?.pending ?? false);
 
   const [selectedOptions, setSelectedOptions] = React.useState<Record<number, string[]>>({});
+  const selectedOptionsRef = React.useRef<Record<number, string[]>>({});
   const [customMode, setCustomMode] = React.useState<Record<number, boolean>>({});
   const customTextRef = React.useRef<Record<number, string>>({});
   const [customTextFilled, setCustomTextFilled] = React.useState<Record<number, boolean>>({});
+
+  const updateRetrySubmission = React.useCallback((index: number, answer: string[], customAnswer?: string) => {
+    updateQuestionSubmission({ runtimeKey, sessionID: question.sessionID, requestID: question.id }, index, answer, customAnswer);
+  }, [question.id, question.sessionID, runtimeKey]);
 
   const questions = React.useMemo(() => question.questions ?? [], [question.questions]);
   const isSummaryTab = activeTab === SUMMARY_TAB;
@@ -121,12 +135,36 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
 
   React.useEffect(() => {
     setActiveTab('0');
-    setSelectedOptions({});
-    setCustomMode({});
-    customTextRef.current = {};
-    setCustomTextFilled({});
-    setHasResponded(false);
-  }, [question.id]);
+    const submitted = getQuestionSubmission({ runtimeKey, sessionID: question.sessionID, requestID: question.id });
+    if (!submitted) {
+      selectedOptionsRef.current = {};
+      setSelectedOptions({});
+      setCustomMode({});
+      customTextRef.current = {};
+      setCustomTextFilled({});
+      return;
+    }
+
+    const selected: Record<number, string[]> = {};
+    const customMode: Record<number, boolean> = {};
+    const customText: Record<number, string> = {};
+    const customTextFilled: Record<number, boolean> = {};
+    for (let index = 0; index < submitted.answers.length; index += 1) {
+      const custom = submitted.customAnswers[index];
+      if (custom !== undefined) {
+        customMode[index] = true;
+        customText[index] = custom;
+        customTextFilled[index] = custom.trim().length > 0;
+      } else {
+        selected[index] = submitted.answers[index] ?? [];
+      }
+    }
+    selectedOptionsRef.current = selected;
+    setSelectedOptions(selected);
+    setCustomMode(customMode);
+    customTextRef.current = customText;
+    setCustomTextFilled(customTextFilled);
+  }, [question.id, question.sessionID, runtimeKey]);
 
   const tabs = React.useMemo(() => {
     const questionTabs = questions.map((q, index) => ({
@@ -216,53 +254,58 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
       setCustomMode((prev) => ({ ...prev, [activeIndex]: false }));
       setCustomTextFilled((prev) => (prev[activeIndex] ? { ...prev, [activeIndex]: false } : prev));
 
-      setSelectedOptions((prev) => {
-        const current = prev[activeIndex] ?? [];
-        if (isMultiple) {
-          const exists = current.includes(label);
-          const next = exists ? current.filter((item) => item !== label) : [...current, label];
-          return { ...prev, [activeIndex]: next };
-        }
-        return { ...prev, [activeIndex]: [label] };
-      });
+      const current = selectedOptionsRef.current[activeIndex] ?? [];
+      const next = isMultiple
+        ? (current.includes(label) ? current.filter((item) => item !== label) : [...current, label])
+        : [label];
+      updateRetrySubmission(activeIndex, next);
+      selectedOptionsRef.current = { ...selectedOptionsRef.current, [activeIndex]: next };
+      setSelectedOptions(selectedOptionsRef.current);
     },
-    [activeIndex, activeQuestion, isMultiple]
+    [activeIndex, activeQuestion, isMultiple, updateRetrySubmission]
   );
 
   const handleSelectCustom = React.useCallback(() => {
     setCustomMode((prev) => ({ ...prev, [activeIndex]: true }));
-    setSelectedOptions((prev) => ({ ...prev, [activeIndex]: [] }));
-    const hasValue = (customTextRef.current[activeIndex] ?? '').trim().length > 0;
+    selectedOptionsRef.current = { ...selectedOptionsRef.current, [activeIndex]: [] };
+    setSelectedOptions(selectedOptionsRef.current);
+    const value = customTextRef.current[activeIndex] ?? '';
+    updateRetrySubmission(activeIndex, value.trim() ? [value.trim()] : [], value);
+    const hasValue = value.trim().length > 0;
     setCustomTextFilled((prev) => (prev[activeIndex] === hasValue ? prev : { ...prev, [activeIndex]: hasValue }));
-  }, [activeIndex]);
+  }, [activeIndex, updateRetrySubmission]);
 
   const handleCustomValueChange = React.useCallback((value: string) => {
     customTextRef.current[activeIndex] = value;
+    updateRetrySubmission(activeIndex, value.trim() ? [value.trim()] : [], value);
     const hasValue = value.trim().length > 0;
     setCustomTextFilled((prev) => (prev[activeIndex] === hasValue ? prev : { ...prev, [activeIndex]: hasValue }));
-  }, [activeIndex]);
+  }, [activeIndex, updateRetrySubmission]);
 
   const handleConfirm = React.useCallback(async () => {
     if (!requiredSatisfied) return;
 
-    setIsResponding(true);
+    const answers = buildAnswersPayload();
+    const customAnswers = Object.fromEntries(
+      Object.keys(customMode)
+        .filter((index) => customMode[Number(index)])
+        .map((index) => [Number(index), customTextRef.current[Number(index)] ?? '']),
+    );
+    const identity = { runtimeKey, sessionID: question.sessionID, requestID: question.id };
+    if (!beginQuestionSubmission(identity, answers, customAnswers)) return;
     try {
-      const answers = buildAnswersPayload();
       await respondToQuestion(question.sessionID, question.id, answers);
-      setHasResponded(true);
     } catch (error) {
       if (sessionActions.isQuestionRequestNotFoundError(error)) {
         toast.info(t('chat.questionCard.noLongerPending'));
-        setHasResponded(true);
       } else {
+        releaseQuestionSubmission(identity);
         toast.error(t('chat.questionCard.submitFailed'), {
           description: t('chat.questionCard.tryAgain'),
         });
       }
-    } finally {
-      setIsResponding(false);
     }
-  }, [buildAnswersPayload, question.id, question.sessionID, requiredSatisfied, respondToQuestion, t]);
+  }, [buildAnswersPayload, customMode, question.id, question.sessionID, requiredSatisfied, respondToQuestion, runtimeKey, t]);
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -281,23 +324,21 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   );
 
   const handleDismiss = React.useCallback(async () => {
-    setIsResponding(true);
+    const identity = { runtimeKey, sessionID: question.sessionID, requestID: question.id };
+    if (!beginQuestionSubmission(identity, [])) return;
     try {
       await rejectQuestion(question.sessionID, question.id);
-      setHasResponded(true);
     } catch (error) {
       if (sessionActions.isQuestionRequestNotFoundError(error)) {
         toast.info(t('chat.questionCard.noLongerPending'));
-        setHasResponded(true);
       } else {
+        releaseQuestionSubmission(identity);
         toast.error(t('chat.questionCard.dismissFailed'), {
           description: t('chat.questionCard.tryAgain'),
         });
       }
-    } finally {
-      setIsResponding(false);
     }
-  }, [question.id, question.sessionID, rejectQuestion, t]);
+  }, [question.id, question.sessionID, rejectQuestion, runtimeKey, t]);
 
   const handleCopyMarkdown = React.useCallback(async () => {
     const text = serializeQuestionAsMarkdown(question);
@@ -319,7 +360,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
     toast.error(t('chat.questionCard.copyFailed'));
   }, [question, t]);
 
-  if (hasResponded || questions.length === 0) {
+  if (questions.length === 0) {
     return null;
   }
 
@@ -564,7 +605,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
 
             {isResponding ? (
               <div className="ml-auto">
-                <div className="animate-spin h-3 w-3 border border-primary border-t-transparent rounded-full" />
+                <Icon name="loader-4" className="h-3 w-3 animate-spin text-primary" />
               </div>
             ) : null}
           </div>

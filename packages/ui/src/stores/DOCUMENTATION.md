@@ -127,8 +127,22 @@ session events newer than that snapshot survive reconciliation.
 Mutations are optimistic and then settled on the server's copy; failed
 round-trips re-read instead of guessing. Empty legacy events without a directory
 clear all projections of their session in that runtime. Projection items carry
-attachment metadata only, so `popToInput()` and `takeForSend()` asynchronously
-remove the message on the server and retrieve its complete captured payload.
+attachment metadata only, so `popToInput()` asynchronously removes the message
+on the server and retrieves its complete captured payload. A manual send instead
+claims items on the server and keeps them visible until the matching OpenCode
+acknowledgement; failure releases only those claims. `sendingIds` drives the
+per-item pending state and prevents duplicate sends or mutation while pending.
+Claims carry a server token. `optimisticSend.onMessageID` is awaited before
+optimistic insertion, binding the exact ID to the claim before dispatch. Server
+mode forwards the SDK-generated request through the queue's token-checked dispatch
+route; VS Code retains its direct SDK path. Unresolved earlier claims block later
+delivery. The server persists started ownership and reconciles by exact message ID.
+If OpenCode accepted the prompt but its acknowledgement request is ambiguous,
+the client retries the idempotent acknowledgement once. If both attempts remain
+ambiguous, the claim stays pending rather than being released or retried as a prompt. A
+queue event or resync reflects the server's independent reconciliation. Its
+confirmation policy, restart guarantees, and remaining ambiguous-dispatch gap
+are defined in `packages/web/server/lib/message-queue/DOCUMENTATION.md`.
 
 `lib/messages/queuedMessagePreview.ts` derives the queue row from typed text,
 then attached comments/context, then the first filename. The store sends a

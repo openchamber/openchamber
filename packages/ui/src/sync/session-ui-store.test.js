@@ -16,6 +16,7 @@ import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { createContextPart } from '@/lib/messages/contextParts';
+import { createPendingDraftWorktreeRequest, resolvePendingDraftWorktreeRequest } from '@/lib/worktrees/pendingDraftWorktree';
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -839,6 +840,7 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
   });
 
   test('draft send snapshots the draft; switching to another project mid-flight still targets the materialized session', async () => {
+    const materializedSessions = [];
     useProjectsStore.setState({
       projects: [
         { id: 'project-alpha', path: '/projects/alpha', label: 'Alpha' },
@@ -869,7 +871,10 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
       undefined,
       undefined,
       'normal',
-      { draftSnapshot },
+      {
+        draftSnapshot,
+        onSessionMaterialized: (sessionId, directory) => materializedSessions.push({ sessionId, directory }),
+      },
     );
 
     // A sidebar switch while the send is still in flight must not reroute it.
@@ -883,7 +888,133 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
     expect(sendMessageCalls).toHaveLength(1);
     expect(sendMessageCalls[0].id).toBe('session-materialized');
     expect(sendMessageCalls[0].directory).toBe('/projects/alpha');
-    expect(useSessionDisplayStore.getState().singleProjectId).toBe('project-alpha');
+    expect(sendMessageCalls[0].runtimeKey).toBe(getRuntimeKey());
+    expect(materializedSessions).toEqual([
+      { sessionId: 'session-materialized', directory: '/projects/alpha' },
+    ]);
+    expect(useSessionUIStore.getState().currentSessionId).toBe('session-project-b');
+    expect(useSessionDisplayStore.getState().singleProjectId).toBe('project-beta');
+  });
+
+  test('materializing a submitted draft does not close a newer draft', async () => {
+    let resolveCreateSession;
+    let markCreateStarted;
+    const createStarted = new Promise((resolve) => { markCreateStarted = resolve; });
+    opencodeClient.createSession = (_params, directory) => new Promise((resolve) => {
+      resolveCreateSession = () => resolve({ id: 'session-materialized', directory });
+      markCreateStarted();
+    });
+    const submittedDraft = {
+      draftId: 41,
+      open: true,
+      target: 'project',
+      directoryOverride: '/projects/alpha',
+      parentID: null,
+      title: 'Submitted draft',
+    };
+    useSessionUIStore.setState({ newSessionDraft: submittedDraft });
+
+    const sendPromise = useSessionUIStore.getState().sendMessage(
+      'submitted message',
+      'provider-a',
+      'model-a',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'normal',
+      { draftSnapshot: submittedDraft },
+    );
+    await createStarted;
+    const newerDraft = {
+      ...submittedDraft,
+      draftId: 42,
+      directoryOverride: '/projects/beta',
+      title: 'Newer draft',
+    };
+    useSessionUIStore.setState({ newSessionDraft: newerDraft });
+
+    resolveCreateSession();
+    await sendPromise;
+
+    expect(useSessionUIStore.getState().newSessionDraft).toEqual(newerDraft);
+  });
+
+  test('materializing a submitted draft does not close a changed draft with the same id', async () => {
+    let resolveCreateSession;
+    let markCreateStarted;
+    const createStarted = new Promise((resolve) => { markCreateStarted = resolve; });
+    opencodeClient.createSession = (_params, directory) => new Promise((resolve) => {
+      resolveCreateSession = () => resolve({ id: 'session-materialized', directory });
+      markCreateStarted();
+    });
+    const submittedDraft = {
+      draftId: 51,
+      open: true,
+      target: 'project',
+      selectedProjectId: 'project-alpha',
+      directoryOverride: '/projects/alpha',
+      parentID: null,
+    };
+    useSessionUIStore.setState({ newSessionDraft: submittedDraft });
+
+    const sendPromise = useSessionUIStore.getState().sendMessage(
+      'submitted message',
+      'provider-a',
+      'model-a',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'normal',
+      { draftSnapshot: submittedDraft },
+    );
+    await createStarted;
+    const changedDraft = {
+      ...submittedDraft,
+      selectedProjectId: 'project-beta',
+      directoryOverride: '/projects/beta',
+    };
+    useSessionUIStore.setState({ newSessionDraft: changedDraft });
+
+    resolveCreateSession();
+    await sendPromise;
+
+    expect(useSessionUIStore.getState().newSessionDraft).toEqual(changedDraft);
+  });
+
+  test('materializing a pending worktree draft keeps the operation as the UI owner', async () => {
+    const requestId = createPendingDraftWorktreeRequest();
+    const submittedDraft = {
+      draftId: 61,
+      open: true,
+      target: 'project',
+      selectedProjectId: 'project-alpha',
+      directoryOverride: '/projects/alpha',
+      pendingWorktreeRequestId: requestId,
+      parentID: null,
+    };
+    useSessionUIStore.setState({ newSessionDraft: submittedDraft });
+
+    const sendPromise = useSessionUIStore.getState().sendMessage(
+      'submitted message',
+      'provider-a',
+      'model-a',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'normal',
+      { draftSnapshot: submittedDraft },
+    );
+    resolvePendingDraftWorktreeRequest(requestId, '/worktrees/ready');
+    await sendPromise;
+
+    expect(sendMessageCalls[0].directory).toBe('/worktrees/ready');
+    expect(useSessionUIStore.getState().currentSessionId).toBe('session-materialized');
   });
 
   test('existing-session send keeps the submit-time target even when selection changes', async () => {
@@ -987,6 +1118,49 @@ describe('routeMessage skill invocation', () => {
     expect(sendCommandCalls).toHaveLength(1);
     expect(sendCommandCalls[0].command).toBe('grill-with-docs');
     expect(sendMessageCalls).toHaveLength(0);
+  });
+
+  test('carries the claimed optimistic identity through the real SDK prompt and command requests', async () => {
+    opencodeClient.sendMessage = originalSendMessage;
+    opencodeClient.sendCommand = originalSendCommand;
+    const sdkTransport = opencodeClient.getSdkClient().client;
+    const previousConfig = sdkTransport.getConfig();
+    sdkTransport.setConfig({ baseUrl: 'https://opencode.test' });
+    useSkillsStore.setState({ skills: [{ name: 'queue-skill', path: '/skills/queue-skill/SKILL.md', scope: 'user', source: 'opencode' }] });
+    try {
+      for (const content of ['queued batch', '/queue-skill argument']) {
+        let claimedID;
+        const requests = [];
+        const route = await routeMessage({
+          sessionId: 'session-queue', directory: '/skills/project', content,
+          providerID: 'provider-a', modelID: 'model-a',
+          onMessageID: async (messageID) => { claimedID = messageID; },
+          sendRequest: async (request) => {
+            requests.push({ url: request.url, method: request.method, body: await request.json() });
+            return new Response(null, { status: 204 });
+          },
+        });
+        expect(requests).toHaveLength(1);
+        expect(requests[0].body.messageID).toBe(claimedID);
+        expect(requests[0].method).toBe('POST');
+        expect(new URL(requests[0].url).searchParams.get('directory')).toBe('/skills/project');
+        expect(new URL(requests[0].url).pathname.endsWith(route === 'command' ? '/command' : '/prompt_async')).toBe(true);
+      }
+    } finally {
+      sdkTransport.setConfig(previousConfig);
+    }
+  });
+
+  test('does not insert or dispatch a queued prompt when binding its identity is rejected', async () => {
+    let inserts = 0;
+    setOptimisticRefs(() => { inserts += 1; }, () => {});
+    await expect(routeMessage({
+      sessionId: 'session-queue', directory: '/skills/project', content: 'queued',
+      providerID: 'provider-a', modelID: 'model-a',
+      onMessageID: async () => { throw new Error('claim expired'); },
+    })).rejects.toThrow('claim expired');
+    expect(inserts).toBe(0);
+    expect(sendMessageCalls).toEqual([]);
   });
 
   test('forwards trailing arguments to the skill command', async () => {

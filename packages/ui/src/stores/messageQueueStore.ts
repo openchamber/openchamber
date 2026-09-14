@@ -12,6 +12,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { normalizePath } from '@/lib/pathNormalization';
 import { getQueuedMessagePreview } from '@/lib/messages/queuedMessagePreview';
+import { isAmbiguousSendFailure } from '@/sync/send-failure-classification';
 
 export type FollowUpBehavior = 'steer' | 'queue';
 
@@ -20,6 +21,18 @@ const DEFAULT_FOLLOW_UP_BEHAVIOR: FollowUpBehavior = 'queue';
 export const isFollowUpBehavior = (value: unknown): value is FollowUpBehavior => (
     value === 'steer' || value === 'queue'
 );
+
+export const shouldReleaseQueuedSendAfterFailure = (error: Error) => !isAmbiguousSendFailure(error);
+
+export const acknowledgeAcceptedQueuedSend = async (acknowledge: () => Promise<void>) => {
+    try {
+        await acknowledge();
+    } catch (error) {
+        // OpenCode has accepted the prompt. ACK is bookkeeping and must not
+        // turn that success into a retryable command failure.
+        console.warn('[queue] failed to acknowledge queued message send:', error);
+    }
+};
 
 export const normalizeFollowUpBehavior = (
     value: unknown,
@@ -194,6 +207,7 @@ const serverSessionSchema = z.object({
     directory: z.string(),
     items: z.array(serverItemSchema),
     sendingId: z.string().nullable(),
+    sendingIds: z.array(z.string()).optional(),
 });
 
 const serverSnapshotSchema = z.object({
@@ -208,6 +222,8 @@ const serverSessionResponseSchema = z.object({
 
 const serverTakeResponseSchema = serverSessionResponseSchema.extend({ item: serverItemSchema });
 const serverTakeAllResponseSchema = serverSessionResponseSchema.extend({ items: z.array(serverItemSchema) });
+const serverManualSendResponseSchema = serverSessionResponseSchema.extend({ token: z.string(), items: z.array(serverItemSchema) });
+const serverManualSendStartResponseSchema = serverSessionResponseSchema.extend({ token: z.string() });
 
 type ServerQueueSession = z.infer<typeof serverSessionSchema>;
 type ServerQueueItem = z.infer<typeof serverItemSchema>;
@@ -281,7 +297,7 @@ type ServerQueueItemInput = {
 
 type ServerQueueRequestBody =
     | { directory: string; item: ServerQueueItemInput }
-    | { itemIds: string[] }
+    | { itemIds: string[]; token?: string; messageID?: string }
     | { held: boolean };
 
 const toServerAttachment = (attachment: AttachedFile): ServerQueueAttachmentInput => {
@@ -321,6 +337,14 @@ const requestJson = async <T,>(schema: z.ZodType<T>, path: string, init?: Reques
     const parsed = schema.safeParse(await response.json());
     if (!parsed.success) throw new Error('Invalid message queue response');
     return parsed.data;
+};
+
+const retryRequestJsonOnce = async <T,>(schema: z.ZodType<T>, path: string, init?: RequestInit): Promise<T> => {
+    try {
+        return await requestJson(schema, path, init);
+    } catch {
+        return await requestJson(schema, path, init);
+    }
 };
 
 const jsonInit = (method: string, body?: ServerQueueRequestBody): RequestInit => {
@@ -379,6 +403,12 @@ interface MessageQueueActions {
      * message not already being delivered — and returns it in full.
      */
     takeForSend: (target: MessageQueueTarget, messageId?: string) => Promise<QueuedMessage[]>;
+    /** Server-owned queue: claim items for a manual composer send until its ACK. */
+    beginManualSend: (target: MessageQueueTarget, messageIds: string[]) => Promise<{ token: string; items: QueuedMessage[] }>;
+    startManualSend: (target: MessageQueueTarget, messageIds: string[], token: string, messageID: string) => Promise<void>;
+    dispatchManualSend: (target: MessageQueueTarget, messageIds: string[], token: string, request: Request) => Promise<Response>;
+    ackManualSend: (target: MessageQueueTarget, messageIds: string[], token: string) => Promise<void>;
+    failManualSend: (target: MessageQueueTarget, messageIds: string[], token: string) => Promise<void>;
     clearQueue: (target: MessageQueueTarget) => void;
     /** Drops the local projection only (the session is gone); never a server call. */
     forgetQueue: (target: MessageQueueTarget) => void;
@@ -493,8 +523,9 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         const queuedMessages = queue.length > 0
                             ? { ...state.queuedMessages, [key]: queue }
                             : withoutKey(state.queuedMessages, key);
-                        const sendingIds = session.sendingId
-                            ? { ...state.sendingIds, [key]: [session.sendingId] }
+                        const sending = session.sendingIds ?? (session.sendingId ? [session.sendingId] : []);
+                        const sendingIds = sending.length > 0
+                            ? { ...state.sendingIds, [key]: sending }
                             : withoutKey(state.sendingIds, key);
                         return { queuedMessages, sendingIds };
                     });
@@ -663,6 +694,85 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         return taken;
                     },
 
+                    beginManualSend: async (target, messageIds) => {
+                        if (!isServerOwnedMessageQueue()) {
+                            const sendable = get().getSendableQueue(target);
+                            const requested = new Set(messageIds);
+                            const items = sendable.filter((message) => requested.has(message.id));
+                            if (items.length !== messageIds.length) return { token: '', items: [] };
+                            for (const item of items) get().markSending(target, item.id);
+                            return { token: `local-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`, items };
+                        }
+                        const result = await requestJson(
+                            serverManualSendResponseSchema,
+                            `${sessionPath(target.sessionId)}/manual-send`,
+                            jsonInit('POST', { itemIds: messageIds }),
+                        );
+                        applyServerSession(result.session, result.revision, target.runtimeKey);
+                        return { token: result.token, items: result.items.map(toQueuedMessage) };
+                    },
+
+                    startManualSend: async (target, messageIds, token, messageID) => {
+                        if (!isServerOwnedMessageQueue()) return;
+                        const result = await retryRequestJsonOnce(
+                            serverManualSendStartResponseSchema,
+                            `${sessionPath(target.sessionId)}/manual-send/start`,
+                            jsonInit('POST', { itemIds: messageIds, token, messageID }),
+                        );
+                        applyServerSession(result.session, result.revision, target.runtimeKey);
+                    },
+
+                    dispatchManualSend: async (target, messageIds, token, request) => {
+                        if (getRuntimeKey() !== target.runtimeKey) throw new Error('Queue runtime changed');
+                        const endpoint = new URL(request.url).pathname.split('/').at(-1);
+                        if (request.method !== 'POST' || !['prompt_async', 'command'].includes(endpoint ?? '')) {
+                            throw new Error('Unsupported queued send request');
+                        }
+                        // Carry the SDK-generated body, including the optimistic ID and
+                        // complete batch parts. The queue server owns the upstream fence.
+                        const body = await request.json();
+                        if (getRuntimeKey() !== target.runtimeKey) throw new Error('Queue runtime changed');
+                        return runtimeFetch(`${sessionPath(target.sessionId)}/manual-send/dispatch`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ itemIds: messageIds, token, endpoint, body }),
+                            signal: request.signal,
+                        });
+                    },
+
+                    ackManualSend: async (target, messageIds, token) => {
+                        if (!isServerOwnedMessageQueue()) {
+                            for (const messageId of messageIds) {
+                                get().removeFromQueue(target, messageId);
+                                get().clearSending(target, messageId);
+                            }
+                            return;
+                        }
+                        const result = await retryRequestJsonOnce(
+                            serverSessionResponseSchema,
+                            `${sessionPath(target.sessionId)}/manual-send/ack`,
+                            jsonInit('POST', { itemIds: messageIds, token }),
+                        );
+                        applyServerSession(result.session, result.revision, target.runtimeKey);
+                    },
+
+                    failManualSend: async (target, messageIds, token) => {
+                        if (!isServerOwnedMessageQueue()) {
+                            for (const messageId of messageIds) get().clearSending(target, messageId);
+                            return;
+                        }
+                        try {
+                            const result = await requestJson(
+                                serverSessionResponseSchema,
+                                `${sessionPath(target.sessionId)}/manual-send/fail`,
+                                jsonInit('POST', { itemIds: messageIds, token }),
+                            );
+                            applyServerSession(result.session, result.revision, target.runtimeKey);
+                        } catch {
+                            await refreshSession(target);
+                        }
+                    },
+
                     clearQueue: (target) => {
                         const key = getMessageQueueKey(target);
                         set((state) => {
@@ -806,7 +916,8 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                                         if (isNewerThanSnapshot(key)) continue;
                                         appliedRevisions.set(key, snapshot.revision);
                                         if (session.items.length > 0) queuedMessages[key] = session.items.map(toQueuedMessage);
-                                        if (session.sendingId) sendingIds[key] = [session.sendingId];
+                                        const sending = session.sendingIds ?? (session.sendingId ? [session.sendingId] : []);
+                                        if (sending.length > 0) sendingIds[key] = sending;
                                     }
                                     return { queuedMessages, sendingIds };
                                 });

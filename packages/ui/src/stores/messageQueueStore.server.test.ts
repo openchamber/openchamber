@@ -29,6 +29,8 @@ const {
   createMessageQueueTarget,
   getMessageQueueKey,
   useMessageQueueStore,
+  acknowledgeAcceptedQueuedSend,
+  shouldReleaseQueuedSendAfterFailure,
 } = await import("./messageQueueStore")
 
 type ServerItem = MessageQueueUpdatedEvent["properties"]["session"]["items"][number]
@@ -40,6 +42,7 @@ type ServerReply = {
   sessions?: ServerSession[]
   item?: ServerItem
   items?: ServerItem[]
+  token?: string
 }
 
 const json = (value: ServerReply, status = 200) => new Response(JSON.stringify(value), { status })
@@ -400,6 +403,94 @@ describe("server-owned message queue", () => {
     expect(taken?.attachments?.[0]?.dataUrl).toBe("data:text/plain;base64,aGk=")
     expect(taken?.attachments?.[0]?.file.size).toBe(2)
     expect(useMessageQueueStore.getState().queuedMessages[key]).toBe(undefined)
+  })
+
+  test("manual send retains claimed items until OpenCode acknowledges them", async () => {
+    applyMessageQueueUpdatedEvent(updated(7, session([serverItem("q1", "first"), serverItem("q2", "second")])), "runtime-a")
+    respond = (call) => {
+      if (call.path.endsWith("/manual-send")) return json({ revision: 8, session: session([serverItem("q1", "first"), serverItem("q2", "second")], "q1"), token: "manual-test", items: [serverItem("q1", "first")] })
+      return json({ revision: 9, session: session([serverItem("q2", "second")]) })
+    }
+
+    const claimed = await useMessageQueueStore.getState().beginManualSend(target, ["q1"])
+    expect(claimed.items.map((message) => message.id)).toEqual(["q1"])
+    expect(useMessageQueueStore.getState().queuedMessages[key]?.map((message) => message.id)).toEqual(["q1", "q2"])
+    expect(useMessageQueueStore.getState().sendingIds[key]).toEqual(["q1"])
+
+    await useMessageQueueStore.getState().ackManualSend(target, ["q1"], claimed.token)
+    expect(calls.map((call) => call.path)).toEqual([
+      "/api/message-queue/sessions/session-1/manual-send",
+      "/api/message-queue/sessions/session-1/manual-send/ack",
+    ])
+    expect(useMessageQueueStore.getState().queuedMessages[key]?.map((message) => message.id)).toEqual(["q2"])
+  })
+
+  test("manual send failure releases only its claimed entries", async () => {
+    applyMessageQueueUpdatedEvent(updated(7, session([serverItem("q1", "first"), serverItem("q2", "second")], "q1")), "runtime-a")
+    applyMessageQueueUpdatedEvent(updated(8, session([serverItem("q1", "first"), serverItem("q2", "second")], "q2")), "runtime-a")
+    respond = () => json({ revision: 9, session: session([serverItem("q1", "first"), serverItem("q2", "second")], "q2") })
+
+    await useMessageQueueStore.getState().failManualSend(target, ["q1"], "manual-test")
+    expect(useMessageQueueStore.getState().queuedMessages[key]?.map((message) => message.id)).toEqual(["q1", "q2"])
+    expect(useMessageQueueStore.getState().sendingIds[key]).toEqual(["q2"])
+  })
+
+  test("retries start with the same optimistic message identity", async () => {
+    respond = () => calls.length === 1
+      ? new Response("lost", { status: 503 })
+      : json({ revision: 8, token: "manual-test", session: session([serverItem("q1", "queued")], "q1") })
+    await useMessageQueueStore.getState().startManualSend(target, ["q1"], "manual-test", "msg_exact")
+    expect(calls).toHaveLength(2)
+    for (const call of calls) expect(call.body).toEqual({ itemIds: ["q1"], token: "manual-test", messageID: "msg_exact" })
+  })
+
+  test("forwards the SDK batch through the token fence without retrying dispatch", async () => {
+    const body = { messageID: "msg_exact", model: { providerID: "p", modelID: "m" }, parts: [
+      { type: "text", text: "first" }, { type: "text", text: "second", synthetic: true },
+    ] }
+    respond = () => new Response("ambiguous", { status: 503 })
+    const response = await useMessageQueueStore.getState().dispatchManualSend(target, ["q1", "q2"], "manual-test", new Request("https://opencode.test/session/session-1/prompt_async?directory=/repo", {
+      method: "POST", body: JSON.stringify(body),
+    }))
+    expect(response.status).toBe(503)
+    expect(calls).toEqual([{ path: "/api/message-queue/sessions/session-1/manual-send/dispatch", method: "POST", body: {
+      itemIds: ["q1", "q2"], token: "manual-test", endpoint: "prompt_async", body,
+    } }])
+  })
+
+  test("manual send skips entries already sending and retries a lost acknowledgement request", async () => {
+    applyMessageQueueUpdatedEvent(updated(7, session([serverItem("q1", "automatic"), serverItem("q2", "manual")], "q1")), "runtime-a")
+    respond = (call) => {
+      if (call.path.endsWith("/manual-send")) return json({ revision: 8, session: session([serverItem("q1", "automatic"), serverItem("q2", "manual")], "q1"), token: "manual-test", items: [serverItem("q2", "manual")] })
+      if (calls.filter((entry) => entry.path.endsWith("/manual-send/ack")).length === 1) return new Response("lost", { status: 503 })
+      return json({ revision: 9, session: session([serverItem("q1", "automatic")], "q1") })
+    }
+
+    const claimed = await useMessageQueueStore.getState().beginManualSend(target, ["q2"])
+    expect(claimed.items.map((message) => message.id)).toEqual(["q2"])
+    await useMessageQueueStore.getState().ackManualSend(target, ["q2"], claimed.token)
+
+    expect(calls.filter((call) => call.path.endsWith("/manual-send/ack"))).toHaveLength(2)
+    expect(useMessageQueueStore.getState().queuedMessages[key]?.map((message) => message.id)).toEqual(["q1"])
+    expect(useMessageQueueStore.getState().sendingIds[key]).toEqual(["q1"])
+  })
+
+  test("the server projection exposes only non-pending entries to a composer batch", () => {
+    applyMessageQueueUpdatedEvent(updated(7, session([serverItem("q1", "automatic"), serverItem("q2", "manual")], "q1")), "runtime-a")
+
+    expect(useMessageQueueStore.getState().getSendableQueue(target).map((message) => message.id)).toEqual(["q2"])
+  })
+
+  test("ambiguous sends retain their claim while an ACK failure stays post-send bookkeeping", async () => {
+    expect(shouldReleaseQueuedSendAfterFailure(new TypeError("Failed to fetch"))).toBe(false)
+    expect(shouldReleaseQueuedSendAfterFailure(new Error("request rejected"))).toBe(true)
+
+    let acknowledgements = 0
+    await acknowledgeAcceptedQueuedSend(async () => {
+      acknowledgements += 1
+      throw new Error("queue ACK unavailable")
+    })
+    expect(acknowledgements).toBe(1)
   })
 
   test("takeForSend without an id takes everything the server is not already sending", async () => {

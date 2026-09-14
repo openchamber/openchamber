@@ -28,6 +28,8 @@ const STORAGE_KEY = 'openchamber.chatDrafts.v2';
 const MAX_DRAFTS = 50;
 const storage = getDeferredSafeStorage();
 const deletionListeners = new Set<(identity: ChatDraftIdentity) => void>();
+type AcceptedDraft = ChatDraftSnapshot & { identity: ChatDraftIdentity };
+const acceptedDraftListeners = new Set<(draft: AcceptedDraft) => void>();
 let cachedRawEnvelope: string | null | undefined;
 let cachedEnvelope: PersistedChatDraftEnvelope | undefined;
 
@@ -122,4 +124,13 @@ export const clearChatDraft = (identity: ChatDraftIdentity, notify = false): voi
 export const subscribeChatDraftDeletion = (listener: (identity: ChatDraftIdentity) => void): (() => void) => {
   deletionListeners.add(listener);
   return () => deletionListeners.delete(listener);
+};
+
+export const notifyAcceptedChatDraft = (draft: AcceptedDraft): void => {
+  acceptedDraftListeners.forEach((listener) => listener(draft));
+};
+
+export const subscribeAcceptedChatDraft = (listener: (draft: AcceptedDraft) => void): (() => void) => {
+  acceptedDraftListeners.add(listener);
+  return () => acceptedDraftListeners.delete(listener);
 };

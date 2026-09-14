@@ -12,7 +12,7 @@ const source: ChatDraftIdentity = { runtimeKey: 'runtime-a', directory: '/repo',
 const fork: ChatDraftIdentity = { ...source, sessionId: 'fork' };
 const replayFile = { url: 'data:text/plain;base64,aGVsbG8=', mimeType: 'text/plain', filename: 'replay.txt' };
 
-function renderComposer(persistEnabled: boolean) {
+function renderComposer(persistEnabled: boolean, submittedDraftSessionId: string | null = null) {
     const dom = installHookTestDom();
     const originalRaf = globalThis.requestAnimationFrame;
     const originalCancelRaf = globalThis.cancelAnimationFrame;
@@ -25,20 +25,30 @@ function renderComposer(persistEnabled: boolean) {
     globalThis.cancelAnimationFrame = (id) => { frames.delete(id); };
     const root = createRoot(dom.container);
     const restored: string[] = [];
-    const result = { text: '', mentions: new Set<string>(), restored };
+    const result = {
+        text: '',
+        mentions: new Set<string>(),
+        restored,
+        // SAFETY: Probe assigns both fields before renderComposer returns.
+        controls: null as ReturnType<typeof useComposerDraft> | null,
+        // SAFETY: Probe assigns both fields before renderComposer returns.
+        setMessage: null as ((text: string) => void) | null,
+    };
 
     function Probe({ identity }: { identity: ChatDraftIdentity }) {
         const [message, setMessage] = React.useState('source draft @source.ts');
         const messageRef = React.useRef(message);
         const confirmedMentionsRef = React.useRef(new Set(['source.ts']));
         React.useEffect(() => { messageRef.current = message; }, [message]);
-        useComposerDraft({
+        result.controls = useComposerDraft({
             message, messageRef, setMessage, confirmedMentionsRef, identity, persistEnabled,
             initialDraft: { text: '', identity: source },
+            submittedDraftSessionId,
             onDraftRestored: (reason) => { result.restored.push(reason); },
         });
         result.text = message;
         result.mentions = confirmedMentionsRef.current;
+        result.setMessage = setMessage;
         return null;
     }
 
@@ -157,6 +167,123 @@ describe('fork composer restoration', () => {
             });
             expect(composer.result.text).toBe('');
             expect(useInputStore.getState().attachedFiles).toEqual([]);
+        } finally {
+            composer.teardown();
+        }
+    });
+});
+
+describe('submitted draft acknowledgement', () => {
+    test('clears only the submitted snapshot after a new-session draft materializes', () => {
+        const draft: ChatDraftIdentity = { runtimeKey: 'runtime-a', directory: '/repo', sessionId: null };
+        const materialized: ChatDraftIdentity = { ...draft, sessionId: 'created-session' };
+        const composer = renderComposer(true, 'created-session');
+        try {
+            composer.render(draft);
+            act(() => composer.result.setMessage?.('source draft @source.ts'));
+            composer.render(materialized);
+            const controls = composer.result.controls;
+            expect(controls).not.toBeNull();
+
+            let cleared = false;
+            act(() => {
+                cleared = controls!.clearSubmittedDraft(draft, 'source draft @source.ts', new Set());
+            });
+
+            expect(cleared).toBe(true);
+            expect(composer.result.text).toBe('');
+            expect(readChatDraft(materialized)).toEqual({ text: '', confirmedMentions: new Set() });
+            expect(readChatDraft(draft)).toEqual({ text: '', confirmedMentions: new Set() });
+        } finally {
+            composer.teardown();
+        }
+    });
+
+    test('does not clear text typed after a submitted snapshot', () => {
+        const composer = renderComposer(true);
+        try {
+            const controls = composer.result.controls;
+            expect(controls).not.toBeNull();
+            act(() => composer.result.setMessage?.('newer text'));
+            const cleared = controls!.clearSubmittedDraft(source, 'source draft @source.ts', new Set(['source.ts']));
+
+            expect(cleared).toBe(false);
+            expect(composer.result.text).toBe('newer text');
+        } finally {
+            composer.teardown();
+        }
+    });
+
+    test('clears an accepted draft from its materialized owner without waiting for transfer effects', () => {
+        const draft: ChatDraftIdentity = { runtimeKey: 'runtime-a', directory: '/repo', sessionId: null };
+        const materialized: ChatDraftIdentity = { ...draft, sessionId: 'created-session' };
+        const composer = renderComposer(true, 'created-session');
+        try {
+            composer.render(draft);
+            act(() => composer.result.setMessage?.('source draft @source.ts'));
+            composer.render(materialized);
+            const controls = composer.result.controls;
+
+            let cleared = false;
+            act(() => {
+                cleared = controls!.clearSubmittedDraft(draft, 'source draft @source.ts', new Set(), materialized);
+            });
+
+            expect(cleared).toBe(true);
+            expect(composer.result.text).toBe('');
+            expect(readChatDraft(materialized).text).toBe('');
+        } finally {
+            composer.teardown();
+        }
+    });
+
+    test('clears the exact accepted draft after the composer remounts', () => {
+        const original = renderComposer(true);
+        const oldControls = original.result.controls;
+        original.teardown();
+
+        const remounted = renderComposer(true);
+        try {
+            expect(remounted.result.text).toBe('source draft @source.ts');
+            act(() => {
+                oldControls!.clearSubmittedDraft(source, 'source draft @source.ts', new Set(['source.ts']));
+            });
+            expect(remounted.result.text).toBe('');
+        } finally {
+            remounted.teardown();
+        }
+    });
+
+    test('preserves newer text when an accepted draft settles after remount', () => {
+        const original = renderComposer(true);
+        const oldControls = original.result.controls;
+        original.teardown();
+
+        const remounted = renderComposer(true);
+        try {
+            act(() => remounted.result.setMessage?.('newer text'));
+            act(() => {
+                oldControls!.clearSubmittedDraft(source, 'source draft @source.ts', new Set(['source.ts']));
+            });
+            expect(remounted.result.text).toBe('newer text');
+            expect(readChatDraft(source).text).toBe('newer text');
+        } finally {
+            remounted.teardown();
+        }
+    });
+
+    test('does not cancel another session draft write when an accepted draft settles', async () => {
+        const composer = renderComposer(true);
+        try {
+            const controls = composer.result.controls;
+            composer.render(fork);
+            act(() => composer.result.setMessage?.('fork draft'));
+            act(() => {
+                controls!.clearSubmittedDraft(source, 'source draft @source.ts', new Set(['source.ts']));
+            });
+
+            await act(async () => { await new Promise((resolve) => setTimeout(resolve, 550)); });
+            expect(readChatDraft(fork).text).toBe('fork draft');
         } finally {
             composer.teardown();
         }

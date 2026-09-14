@@ -8,6 +8,10 @@ const replyCalls: Array<{ method: string; params: Record<string, unknown> }> = [
 const scopedClientDirectories: string[] = []
 const registeredSessionDirectories: Array<{ sessionID: string; directory: string }> = []
 let sessionRevertResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
+let pendingSessionRevert: Promise<Session> | null = null
+let visibleSessionId: string | null = null
+type DraftFixture = { code: string }
+const inlineDrafts = new Map<string, DraftFixture[]>()
 let questionReplyError: unknown | null = null
 let questionRejectError: unknown | null = null
 let permissionReplyError: unknown | null = null
@@ -204,6 +208,7 @@ mock.module("@/lib/opencode/client", () => ({
         method: "session.revert",
         params: { sessionID: sessionId, messageID: messageId, partID: partId, directory },
       })
+      if (pendingSessionRevert) return pendingSessionRevert
       if (sessionRevertResult.error || failingRevertSessionIds.has(sessionId)) {
         const status = sessionRevertResult.response?.status
         throw new Error(`session.revert failed${status ? ` (${status})` : ""}: rejected`)
@@ -247,7 +252,7 @@ mock.module("./session-ui-store", () => ({
         if (sessionId === "session-b") return "/other/project"
         return null
       },
-      currentSessionId: null,
+      get currentSessionId() { return visibleSessionId },
       setCurrentSession: (sessionId: string | null, directoryHint?: string | null) => {
         selectedSessions.push({ sessionId, directoryHint })
       },
@@ -294,17 +299,19 @@ mock.module("./input-store", () => ({
 mock.module("@/stores/useInlineCommentDraftStore", () => ({
   useInlineCommentDraftStore: {
     getState: () => ({
-      getDrafts: () => [],
-      clearDrafts: () => {},
-      restoreDrafts: () => {},
-      addDraft: () => {},
+      getDrafts: (target: { directory: string; sessionKey: string }) => inlineDrafts.get(`${target.directory}:${target.sessionKey}`) ?? [],
+      clearDrafts: (target: { directory: string; sessionKey: string }) => inlineDrafts.delete(`${target.directory}:${target.sessionKey}`),
+      addDraft: (target: { directory: string; sessionKey: string }, draft: DraftFixture) => {
+        const key = `${target.directory}:${target.sessionKey}`
+        inlineDrafts.set(key, [...(inlineDrafts.get(key) ?? []), draft])
+      },
     }),
   },
 }))
 
 mock.module("@/lib/messages/contextParts", () => ({
-  draftFromContextPayload: () => null,
-  readContextPart: () => null,
+  draftFromContextPayload: (payload: { draft?: DraftFixture }) => payload.draft ?? null,
+  readContextPart: (part: Part & { metadata?: { contextDraft?: DraftFixture } }) => part.metadata?.contextDraft ? { draft: part.metadata.contextDraft } : null,
 }))
 
 mock.module("@/stores/useGlobalSessionsStore", () => ({
@@ -1436,6 +1443,31 @@ describe("updateSessionTitle live state", () => {
 })
 
 describe("optimisticSend target directory", () => {
+  test("awaits the exact optimistic identity before inserting or dispatching", async () => {
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    const store = createStore({})
+    setActionRefs(actionSdk, createChildStores([["/target/project", store]]), () => "/target/project")
+    const inserted: string[] = []
+    const sent: string[] = []
+    const identities: string[] = []
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    setOptimisticRefs((input) => { inserted.push(input.message.id) }, () => {})
+    const pending = optimisticSend({
+      sessionId: "session-queued", content: "queued", providerID: "p", modelID: "m",
+      onMessageID: async (id) => { identities.push(id); await gate },
+      send: async (id) => { sent.push(id) },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(identities).toHaveLength(1)
+    expect(inserted).toEqual([])
+    expect(sent).toEqual([])
+    release()
+    await pending
+    expect(inserted).toEqual(identities)
+    expect(sent).toEqual(identities)
+  })
+
   beforeEach(() => {
     replyCalls.length = 0
     scopedClientDirectories.length = 0
@@ -1894,6 +1926,9 @@ describe("respondToPermission passes directory", () => {
     replyCalls.length = 0
     scopedClientDirectories.length = 0
     sessionRevertResult = {}
+    pendingSessionRevert = null
+    visibleSessionId = "session-a"
+    inlineDrafts.clear()
   })
 
   test("passes directory from child store when permission is found", async () => {
@@ -2157,6 +2192,8 @@ describe("revertToMessage passes session directory", () => {
     replyCalls.length = 0
     scopedClientDirectories.length = 0
     sessionRevertResult = {}
+    pendingSessionRevert = null
+    visibleSessionId = "session-a"
     sessionMessageRecords.clear()
     failingRevertSessionIds.clear()
     Object.assign(inputState, {
@@ -2193,7 +2230,7 @@ describe("revertToMessage passes session directory", () => {
     expect(inputState.pendingInputText).toBe("edit this")
   })
 
-  test("rolls back optimistic revert when the SDK returns an error", async () => {
+  test("leaves local state untouched when the SDK rejects the revert", async () => {
     const session = { id: "session-a", time: { created: 1 } } as Session
     const targetMessage = { id: "msg_2", sessionID: "session-a", role: "user", time: { created: 2 } } as Message
     const targetPart = { id: "prt_2", messageID: "msg_2", type: "text", text: "edit this" } as Part
@@ -2218,6 +2255,85 @@ describe("revertToMessage passes session directory", () => {
     expect(thrown).toBeInstanceOf(Error)
     expect((thrown as Error).message).toContain("session.revert failed (500)")
     expect((sessionStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert).toBe(undefined)
+    expect(inputState.pendingInputText).toBe("previous draft")
+  })
+
+  test("waits for acknowledgement before changing the marker or composer", async () => {
+    const session = { id: "session-a", time: { created: 1 } } as Session
+    const targetMessage = { id: "msg_2", sessionID: "session-a", role: "user", time: { created: 2 } } as Message
+    const targetPart = { id: "prt_2", messageID: "msg_2", type: "text", text: "edit this" } as Part
+    const sessionStore = createStore({}, {
+      session: [session],
+      message: { "session-a": [targetMessage] },
+      part: { "msg_2": [targetPart] },
+    })
+    let acknowledge!: (session: Session) => void
+    pendingSessionRevert = new Promise((resolve) => { acknowledge = resolve })
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", sessionStore]]), () => "/test/project")
+
+    const reverting = revertToMessage("session-a", "msg_2")
+    await Promise.resolve()
+    expect((sessionStore.getState().session[0] as Session & { revert?: unknown }).revert).toBe(undefined)
+    expect(inputState.pendingInputText).toBe("previous draft")
+
+    acknowledge({ id: "session-a", time: { created: 1 }, revert: { messageID: "msg_2" } } as Session)
+    await reverting
+    expect(inputState.pendingInputText).toBe("edit this")
+  })
+
+  test("keeps inline context drafts until acknowledgement then restores the message context", async () => {
+    const session = { id: "session-a", time: { created: 1 } } as Session
+    const targetMessage = { id: "msg_2", sessionID: "session-a", role: "user", time: { created: 2 } } as Message
+    const targetContextPart = {
+      id: "part-context",
+      sessionID: "session-a",
+      messageID: "msg_2",
+      type: "text",
+      text: "",
+      synthetic: true,
+      metadata: { contextDraft: { code: "target context" } },
+    } as Part
+    const sessionStore = createStore({}, {
+      session: [session],
+      message: { "session-a": [targetMessage] },
+      part: { "msg_2": [targetContextPart] },
+    })
+    const target = { directory: "/test/project", sessionKey: "session-a" }
+    inlineDrafts.set(`${target.directory}:${target.sessionKey}`, [{ code: "current context" }])
+    let acknowledge!: (session: Session) => void
+    pendingSessionRevert = new Promise((resolve) => { acknowledge = resolve })
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", sessionStore]]), () => "/test/project")
+
+    const reverting = revertToMessage("session-a", "msg_2")
+    await Promise.resolve()
+    expect(inlineDrafts.get(`${target.directory}:${target.sessionKey}`)).toEqual([{ code: "current context" }])
+
+    acknowledge({ id: "session-a", time: { created: 1 }, revert: { messageID: "msg_2" } } as Session)
+    await reverting
+    expect(inlineDrafts.get(`${target.directory}:${target.sessionKey}`)).toEqual([{ code: "target context" }])
+  })
+
+  test("does not restore into a composer after switching sessions before acknowledgement", async () => {
+    const session = { id: "session-a", time: { created: 1 } } as Session
+    const targetMessage = { id: "msg_2", sessionID: "session-a", role: "user", time: { created: 2 } } as Message
+    const targetPart = { id: "prt_2", messageID: "msg_2", type: "text", text: "edit this" } as Part
+    const sessionStore = createStore({}, {
+      session: [session],
+      message: { "session-a": [targetMessage] },
+      part: { "msg_2": [targetPart] },
+    })
+    let acknowledge!: (session: Session) => void
+    pendingSessionRevert = new Promise((resolve) => { acknowledge = resolve })
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", sessionStore]]), () => "/test/project")
+
+    const reverting = revertToMessage("session-a", "msg_2")
+    await Promise.resolve()
+    visibleSessionId = "session-b"
+    acknowledge({ id: "session-a", time: { created: 1 }, revert: { messageID: "msg_2" } } as Session)
+    await reverting
     expect(inputState.pendingInputText).toBe("previous draft")
   })
 
@@ -2569,6 +2685,81 @@ describe("question dismissal clears pending state without the SSE echo (issues #
     scopedClientDirectories.length = 0
     questionReplyError = null
     questionRejectError = null
+  })
+
+  test("rejects a reply after runtime switches during the connection wait without clearing either runtime's question state", async () => {
+    const question = buildQuestion("q-1", "session-a")
+    const store = createStore({}, {
+      session: [sessionFixture("session-a")],
+      question: { "session-a": [question] },
+    })
+    const { beginQuestionSubmission, getQuestionSubmission, resetQuestionSubmissionStateForTests } = await import("./question-submission-state")
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    resetQuestionSubmissionStateForTests()
+    switchRuntimeEndpoint({ apiBaseUrl: "http://question-runtime-a.test", runtimeKey: "question-runtime-a" })
+    const oldIdentity = { runtimeKey: "question-runtime-a", sessionID: "session-a", requestID: "q-1" }
+    const newIdentity = { runtimeKey: "question-runtime-b", sessionID: "session-a", requestID: "q-1" }
+    beginQuestionSubmission(oldIdentity, [["old answer"]])
+    beginQuestionSubmission(newIdentity, [["new answer"]])
+
+    const { setActionRefs, respondToQuestion } = await import("./session-actions")
+    setActionRefs(actionsSdk(), createChildStores([["/test/project", store]]), () => "/test/project")
+
+    const reply = respondToQuestion("session-a", "q-1", [["old answer"]])
+    switchRuntimeEndpoint({ apiBaseUrl: "http://question-runtime-b.test", runtimeKey: "question-runtime-b" })
+
+    await expect(reply).rejects.toThrow("runtime changed")
+    expect(replyCalls).toEqual([])
+    expect(store.getState().question["session-a"]?.map((item) => item.id)).toEqual(["q-1"])
+    expect(getQuestionSubmission(oldIdentity)).toEqual({ answers: [["old answer"]], customAnswers: {}, pending: false })
+    expect(getQuestionSubmission(newIdentity)).toEqual({ answers: [["new answer"]], customAnswers: {}, pending: true })
+  })
+
+  test("rejects a dismissal after runtime switches during the connection wait without clearing either runtime's question state", async () => {
+    const question = buildQuestion("q-1", "session-a")
+    const store = createStore({}, {
+      session: [sessionFixture("session-a")],
+      question: { "session-a": [question] },
+    })
+    const { beginQuestionSubmission, getQuestionSubmission, resetQuestionSubmissionStateForTests } = await import("./question-submission-state")
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    resetQuestionSubmissionStateForTests()
+    switchRuntimeEndpoint({ apiBaseUrl: "http://question-reject-runtime-a.test", runtimeKey: "question-reject-runtime-a" })
+    const oldIdentity = { runtimeKey: "question-reject-runtime-a", sessionID: "session-a", requestID: "q-1" }
+    const newIdentity = { runtimeKey: "question-reject-runtime-b", sessionID: "session-a", requestID: "q-1" }
+    beginQuestionSubmission(oldIdentity, [])
+    beginQuestionSubmission(newIdentity, [])
+
+    const { setActionRefs, rejectQuestion } = await import("./session-actions")
+    setActionRefs(actionsSdk(), createChildStores([["/test/project", store]]), () => "/test/project")
+
+    const rejection = rejectQuestion("session-a", "q-1")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://question-reject-runtime-b.test", runtimeKey: "question-reject-runtime-b" })
+
+    await expect(rejection).rejects.toThrow("runtime changed")
+    expect(replyCalls).toEqual([])
+    expect(store.getState().question["session-a"]?.map((item) => item.id)).toEqual(["q-1"])
+    expect(getQuestionSubmission(oldIdentity)).toEqual({ answers: [], customAnswers: {}, pending: false })
+    expect(getQuestionSubmission(newIdentity)).toEqual({ answers: [], customAnswers: {}, pending: true })
+  })
+
+  test("clears the matching submitted-answer shadow when the reply is acknowledged", async () => {
+    const question = buildQuestion("q-1", "session-a")
+    const store = createStore({}, {
+      session: [sessionFixture("session-a")],
+      question: { "session-a": [question] },
+    })
+    const { beginQuestionSubmission, getQuestionSubmission, resetQuestionSubmissionStateForTests } = await import("./question-submission-state")
+    resetQuestionSubmissionStateForTests()
+    const identity = { runtimeKey, sessionID: "session-a", requestID: "q-1" }
+    beginQuestionSubmission(identity, [["Yes"]])
+
+    const { setActionRefs, respondToQuestion } = await import("./session-actions")
+    setActionRefs(actionsSdk(), createChildStores([["/test/project", store]]), () => "/test/project")
+
+    await respondToQuestion("session-a", "q-1", [["Yes"]])
+
+    expect(getQuestionSubmission(identity)).toBeNull()
   })
 
   test("rejectQuestion clears the question from the child store on success", async () => {
