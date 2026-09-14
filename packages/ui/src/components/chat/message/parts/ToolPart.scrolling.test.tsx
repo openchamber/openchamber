@@ -88,7 +88,7 @@ test('expanded bash output follows growth until the reader scrolls up', async ()
         <SyncProvider sdk={sdk} directory="">
           <I18nProvider>
             <ThemeSystemContext.Provider value={themeContext}>
-              <ToolPart part={part} isExpanded isMobile={false} onToggle={() => {}} />
+              <ToolPart part={part} isExpanded expandedTools={new Set()} isMobile={false} onToggle={() => {}} />
             </ThemeSystemContext.Provider>
           </I18nProvider>
         </SyncProvider>,

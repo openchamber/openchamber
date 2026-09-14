@@ -7,22 +7,41 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 ## High-level flow
 
 - Message parts are rendered from `MessageBody.tsx`.
-- There are two tool rendering paths:
-  - **Static grouped tools** -> `StaticToolRow` in `ProgressiveGroup.tsx`
+- Tool rendering has two callers that must stay aligned:
+  - **Flat message path** -> `MessageBody.tsx`
+  - **Activity path** -> `ProgressiveGroup.tsx` via `TurnActivity`
+- Both paths consume `projectToolSegmentRows` from `toolSegmentProjection.ts` for tool segment projection.
+- Rendered tool rows are one of:
+  - **Context tool groups** -> `ContextToolGroupRow.tsx`
+  - **Static tools** -> `StaticToolRow` in `ProgressiveGroup.tsx`
   - **Expandable tools** -> `ToolPart.tsx`
 - Shared tool icon mapping is centralized in `toolPresentation.tsx` (`getToolIcon`).
 
 ## Which file controls what
 
 - `ProgressiveGroup.tsx`
-  - Renders grouped Activity rows and grouped static tools.
+  - Renders grouped Activity rows, context tool groups, and static tools.
   - Contains `StaticToolRow`.
   - Contains static tool short description logic (`getToolShortDescription`).
-  - If you want to change how `read/grep/perplexity/webfetch/...` look in compact/grouped mode, edit here.
+  - Flushes tool segments through `projectToolSegmentRows` and flushes again on reasoning/justification boundaries.
+  - If you want to change how non-context static tools such as `perplexity/webfetch/...` look in compact mode, edit here.
+
+- `ContextToolGroupRow.tsx`
+  - Presentation row for consecutive runs of two or more context tools.
+  - Renders a controlled, default-collapsed disclosure. Its header contains only the arrow, localized active/done/error title, and counts; expanded content contains ordered lightweight child rows.
+  - Receives `isExpanded` and `onToggle` from its caller. It must not own local expansion state or inspect/render tool output.
+  - Uses projected child rows only; it must not re-own whitelist, status, counts, ordering, or hint extraction.
+
+- `toolSegmentProjection.ts`
+  - Pure presentation projection for consecutive tool segments.
+  - Exports `projectToolSegmentRows` and row types used by both flat and Activity paths.
+  - Owns context-run boundaries and flush behavior, status aggregation, counts, ordered child hints/states, keys, and render signatures.
+  - Does not render React, generate i18n copy, choose theme/icon styling, subscribe to stores, or define turn/source models.
 
 - `ToolPart.tsx`
   - Renders expandable tool rows (bash/edit/write/question/task + fallback).
   - Controls expandable header title/description/diff stats/timer and expanded output body.
+  - Always loads an available Agent Task child session, including finalized tasks with metadata, then calls `projectTaskSummary`. It does not flatten child messages or reimplement live-versus-fallback source priority, context boundaries, preview accounting, or nested group keys.
   - If you want to change expandable tool layout, edit here.
 
 - `taskToolModel.ts`
@@ -30,6 +49,13 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - `part.state.metadata.sessionId` is the only live identity contract between a Task and its child session.
   - A running Task may briefly have no `sessionId`; render it as waiting until the authoritative part update arrives. Never match parallel children by order, title, timestamp, or status.
   - Part-level metadata and output parsing exist only for older persisted records and never override state metadata.
+- `taskSummaryProjection.ts`
+  - Pure Agent Task summary projection Module. Its `projectTaskSummary` Interface is the sole seam for Task summary source priority, preserved live-message boundaries, namespaced nested keys, ordinary-row mapping, context grouping, preview selection, hidden action accounting, and render signatures.
+  - Receives original child session messages and metadata fallback together. Renderable live rows win over metadata fallback. Fallback metadata is projected as independent ordinary rows because it does not retain separators.
+   - Live `read`, `grep`, `glob`, exact local `search`, and `list` use `projectToolSegmentRows`: one canonical action remains an ordinary task entry; contiguous runs of two or more become the existing `ContextToolGroupRow`. Hidden reasoning within consecutive assistant messages does not interrupt a context run. Non-empty text, nested `task`, `todowrite`, `todoread`, and every non-assistant message are hard non-rendered separators. Assistant message IDs are not separators.
+  - Projects groups before the six-display-row preview. Hidden count is the number of original actions represented by hidden rows, so a hidden context group contributes all of its children. Expansion state remains owned by the parent message's `expandedTools`; this Module owns no state.
+  - Live identities include child message ID and part index even when a supplied part ID exists, so duplicate supplied IDs cannot collide. Fallback metadata identities include their ordered fallback index; fallback order is append-only for a task summary.
+  - Ordinary rows normalize source statuses to `active`, `error`, or `done`. Terminal failure statuses (`error`, `failed`, `aborted`, `timeout`, `cancelled`) render as errors, and a non-empty tool error message becomes the row label before title/path metadata.
 
 - `toolPresentation.tsx`
   - Shared icon mapping for tool names (`getToolIcon`).
@@ -40,7 +66,8 @@ Use this doc when you ask an agent to change tool/header/description behavior.
     - `isExpandableTool`
     - `isStaticTool`
     - `isStandaloneTool`
-    - `getStaticGroupToolName`
+    - `getContextToolSummaryKind`
+   - Owns exact canonical context classification (`read`, `grep`, `glob`, local `search`, `list`); qualified and indexed aliases remain ordinary tools.
   - If a tool should switch between static vs expandable, change it here.
 
 - `ReasoningPart.tsx`
@@ -169,12 +196,42 @@ tool patch is parsed while the turn streams.
 - Every other tool, including search/fetch, OpenCode built-ins, custom tools, plugins, and MCP tools, is **expandable** and renders through `ToolPart`.
 - The managed `openchamber` plugin tool uses the expandable path and hides its broad protocol input. The plugin supplies the selected action's human description as the native tool title; the UI renders that metadata without owning an action map. The full versioned result envelope renders through the same neutral JSON summary/tree/raw views as other tools, without a tool-specific output card.
 - Selecting a JSON summary, tree, or raw view saves that mode in the persisted UI settings. New and refreshed JSON tool outputs read the saved mode across sessions; missing or invalid preferences use Summary.
+- Consecutive runs of two or more canonical context tools render through `ContextToolGroupRow` instead of their singleton presentation.
 - `ToolPart` defers expanded content after a user toggle, preventing large tool input/output payloads from mounting during the initial chat render.
 - The rich tool diff preview lives in `ToolPartDiffPreview.tsx` and is lazy-loaded from `ToolPart`. It is the only tool-card piece that imports the `@pierre/diffs` + Shiki rendering stack, keeping that stack out of the eager chat startup graph. While its chunk loads (first rendered diff only) the plain-text patch from `PlainDiffFallback.tsx` renders as the Suspense fallback, mirroring the preview's error fallback. Patches over 256 KiB or 2,000 lines skip rich parsing and use a bounded plain-text preview; navigation keeps the original patch. `ToolPart` itself must not statically import `@pierre/diffs` runtime modules or `@/lib/shiki/appThemeRegistry`.
 - The `@pierre/diffs` stack is knowingly unprotected against the JS/TS `template-call` backtracking that OOM'd the renderer in openchamber/openchamber#2587. Our own markdown Shiki worker sanitizes every grammar it loads (`@/lib/shiki/sanitizeTemplateCallGrammar`), but the diff worker pool runs `preferredHighlighter: 'shiki-wasm'` (`DiffWorkerProvider.tsx`) and resolves its languages by id through `@pierre/diffs`' own registry — `langs` accepts `SupportedLanguages` strings only, so there is no seam to hand it a pre-sanitized `LanguageRegistration`. A pathological template literal inside a rendered diff can therefore still hang that pool's Oniguruma engine. The available levers are upstream (a `langs` overload accepting grammar objects) or switching that pool to the JS regex engine; neither is done.
 - Running bash output falls back to `state.metadata.output` until canonical `state.output` arrives. Its output viewport grows with the content up to `46vh`, then scrolls and follows new output until the user scrolls up; following resumes when the user returns to the bottom. Live output appends or replaces rewritten snapshots as plain text without worker highlighting; finalized output normalizes ANSI terminal controls with a bounded synthetic-cell budget, bypasses the throttle, and receives the normal one-time highlighted rendering.
 - Thinking/Justification duration is hidden in `sorted` mode (handled in `ReasoningPart.tsx` + `JustificationBlock.tsx`).
 - Reasoning streaming presentation derives from the live stream phase (`streaming`/`cooldown`), never from missing persisted timing: a cached part without `time.end` is not live, and a part whose `time.end` is set never streams (issue #2020).
+
+## Context Tool Group
+
+- `ContextToolGroup` is a tool segment presentation projection. It is not a turn model, source model, SDK part, sync-store state, runtime API, or server API.
+- `toolRenderUtils.ts` owns the narrow canonical context classifier: exactly `read`, `grep`, `glob`, OpenChamber's evidenced local `search` alias, and `list` after trim/lowercase only. The sampled upstream canonical set was `read`, `grep`, `glob`, and `list`; this local alias does not admit web/provider tools such as `websearch`, `codesearch`, `search_web`, or `web-search`, nor qualified/indexed names such as `plugin.search` or `search:2`.
+- `projectToolSegmentRows` consumes that classifier and owns context-run boundaries, status, counts, child order, keys, and render signatures in both flat and Activity rendering.
+- A consecutive canonical context run renders as a default-collapsed `ContextToolGroupRow` only when it contains two or more tools. A single canonical context tool keeps its existing singleton presentation (`read` remains static; `grep`, `glob`, local `search`, and `list` remain expandable).
+- `grep`, `glob`, and exact local `search` count as `search`; `read` counts as `read`; `list` counts as `list`.
+- `bash`, `edit`, `write`, `apply_patch`, `task`, `webfetch`, `skill`, todo tools, and unknown tools do not enter context groups.
+- In flat and Activity rendering, a context run continues only across consecutive assistant messages when its canonical tools are consecutive in the rendered activity sequence. Any non-assistant message immediately flushes the run; actual text, reasoning, justification, non-tool, or non-context-tool boundaries also flush it. Agent Task summary projection is the explicit hidden-reasoning exception described below.
+- Group status is projected centrally: active/error/done, with error taking precedence over active.
+- The collapsed header always retains active/error status, with error taking precedence. Expanded child rows retain projected source order and show only tool kind, hint, and active/error state; never render full `state.output`.
+- A multi-tool group key is anchored to the first child (`context-tool-group:<first-child-id>`). Both flat and Activity paths read and toggle that key through the message-owned `expandedTools`. Streaming from one context tool to two changes from a singleton row to a group; this one remount is intentional because a singleton has no group state.
+- Agent Task group keys are additionally namespaced by the parent task part ID (`task-summary:<task-part-id>:context-tool-group:<first-child-id>`) so two tasks in one message cannot collide. Every live child identity includes its message ID and part index, with a supplied part ID retained only as an optional informative suffix.
+- `renderSignature` is the memo/comparator contract for render-relevant projected data; update it whenever row-visible child data changes.
+- In flat and Activity rendering, `bash`, `shell`, `edit`, `write`, and `apply_patch` remain their ordinary `ToolPart` disclosures. Inside an Agent Task summary they remain lightweight independent task-entry rows; they never render a nested `ToolPart` disclosure.
+
+### Hidden Reasoning Boundary
+
+- This boundary applies only to flat and Activity projection. Activity receives full segment parts, flushes tool segments when reasoning appears, and only then decides whether to render the reasoning row based on `showReasoningTraces`. Flat projection does not cross non-tool part boundaries because its tool segment loop only advances across consecutive `part.type === 'tool'` entries. Do not filter hidden reasoning before either projection in a way that would let `read -> hidden reasoning -> grep` merge into one context group.
+- Agent Task summary projection is the explicit exception: hidden reasoning inside consecutive assistant messages does not flush its context-tool run. A non-assistant message, non-empty assistant text, nested `task`/todo tool, or ordinary non-context action still flushes that run.
+
+### i18n, Theme, Icons, Tests
+
+- New visible text for context groups must use `useI18n()` / `t(...)` and be present in every main locale dictionary.
+- Use theme/status CSS variables such as `--tools-*` and `--status-*`; do not add hardcoded colors or Tailwind status color classes.
+- Use the shared `Icon` component; never import `@remixicon/react` directly.
+- Keep projection behavior covered in `toolSegmentProjection.test.ts` and locale coverage in `contextToolGroup.test.ts`.
+- Keep executable coverage in the projection, locale, and `ContextToolGroupRow.test.tsx` static-render tests. Manually review native trigger interaction semantics that server rendering cannot exercise: click, Enter, Space, focus, and state retention while appending children.
 
 ## "I want to change description for Perplexity" (example recipe)
 
@@ -197,7 +254,9 @@ Why: only navigation tools use the compact static path; all other tools need obs
 ## Safe editing checklist
 
 - Do not duplicate icon logic; keep it in `toolPresentation.tsx`.
-- For static tool copy changes, prefer `ProgressiveGroup.tsx` first.
+- Do not duplicate context grouping rules; keep whitelist/flush/status/counts/child hints/render signatures in `projectToolSegmentRows`.
+- For non-context static tool copy changes, prefer `ProgressiveGroup.tsx` first.
+- For context group row copy, use i18n keys consumed by `ContextToolGroupRow.tsx`.
 - For expanded output changes, edit `ToolPart.tsx`.
 - After edits run:
   - `bun run type-check`

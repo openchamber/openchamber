@@ -516,6 +516,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return next;
     }, [collapsedTools, defaultOpenToolIds, expandedTools]);
 
+    const toggleToolStateRef = React.useRef({ defaultOpenToolIds, effectiveExpandedTools });
+    React.useLayoutEffect(() => {
+        toggleToolStateRef.current = { defaultOpenToolIds, effectiveExpandedTools };
+    }, [defaultOpenToolIds, effectiveExpandedTools]);
+
     const agentMention = React.useMemo(() => {
         if (!isUser) {
             return undefined;
@@ -743,8 +748,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     }, [sessionId, message.info.id]);
 
     const handleToggleTool = React.useCallback((toolId: string) => {
-        const isDefaultOpen = defaultOpenToolIds.has(toolId);
-        const isCurrentlyExpanded = effectiveExpandedTools.has(toolId);
+        const { defaultOpenToolIds: currentDefaultOpenToolIds, effectiveExpandedTools: currentExpandedTools } = toggleToolStateRef.current;
+        const isDefaultOpen = currentDefaultOpenToolIds.has(toolId);
+        const isCurrentlyExpanded = currentExpandedTools.has(toolId);
 
         if (isDefaultOpen) {
             setCollapsedTools((prev) => {
@@ -789,7 +795,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             writeCollapsedToolsCache(message.info.id, next);
             return next;
         });
-    }, [defaultOpenToolIds, effectiveExpandedTools, message.info.id]);
+    }, [message.info.id]);
 
     const hasEverStreamedRef = React.useRef(false);
 

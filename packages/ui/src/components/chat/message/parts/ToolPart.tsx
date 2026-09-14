@@ -24,6 +24,7 @@ import type { ToolPopupContent } from '../types';
 import { PlainDiffFallback } from './PlainDiffFallback';
 import { isToolDiffPreviewOversized } from './toolDiffPreview';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
+import { sessionEvents } from '@/lib/sessionEvents';
 
 import {
     formatEditOutput,
@@ -43,13 +44,10 @@ import { ToolRevealOnMount } from './ToolRevealOnMount';
 import { getToolIcon } from './toolPresentation';
 import { useDurationTickerNow } from '@/hooks/useDurationTicker';
 import {
-    buildTaskSummaryEntriesFromSession,
-    normalizeTaskSummaryEntries,
     parseTaskMetadataBlock,
     prepareTaskToolOutput,
     readTaskSessionIdFromOutput,
     readTaskSessionIdFromRecord,
-    type TaskToolSummaryEntry,
 } from './taskToolModel';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { useI18n } from '@/lib/i18n';
@@ -73,16 +71,22 @@ import { ApplyPatchFileButtons } from './ApplyPatchFileButtons';
 import { openApplyPatchFileInEditor } from './applyPatchEditorAction';
 
 type ToolJsonViewMode = 'summary' | 'formatted' | 'raw';
+import { ContextToolGroupRow } from './ContextToolGroupRow';
+import { projectTaskSummary } from './taskSummaryProjection';
+import type { TaskSummaryEntryPresentation, TaskSummaryRow } from './taskSummaryProjection';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
 const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
+
+const GIT_REFRESH_MUTATING_TOOLS = new Set(['edit', 'multiedit', 'apply_patch', 'write', 'create', 'file_write']);
 
 type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number }; attachments?: Array<FilePart> };
 
 interface ToolPartProps {
     part: ToolPartType;
     isExpanded: boolean;
+    expandedTools: ReadonlySet<string>;
     onToggle: (toolId: string) => void;
     isMobile: boolean;
     alwaysShowActions?: boolean;
@@ -805,28 +809,6 @@ const ToolScrollableTextOutput: React.FC<{
 
 ToolScrollableTextOutput.displayName = 'ToolScrollableTextOutput';
 
-const getTaskSummaryLabel = (entry: TaskToolSummaryEntry): string => {
-    const title = entry.state?.title;
-    if (typeof title === 'string' && title.trim().length > 0) {
-        return title;
-    }
-
-    const input = entry.state?.input;
-    if (input && typeof input === 'object') {
-        const pathCandidate = input.filePath ?? input.file_path ?? input.path;
-        if (typeof pathCandidate === 'string' && pathCandidate.trim().length > 0) {
-            return pathCandidate.trim();
-        }
-
-        const urlCandidate = input.url;
-        if (typeof urlCandidate === 'string' && urlCandidate.trim().length > 0) {
-            return urlCandidate.trim();
-        }
-    }
-
-    return '';
-};
-
 const FILE_PATH_LABEL_TOOLS = new Set([
     'read',
     'view',
@@ -862,43 +844,21 @@ const shouldRenderGitPathLabel = (toolName: string, label: string): boolean => {
     return /^[A-Za-z0-9_-]+$/.test(baseName);
 };
 
-const getTaskSummaryEntryRenderSignature = (entry: TaskToolSummaryEntry): string => {
-    const toolName = normalizeToolName(entry.tool);
-    const status = entry.state?.status ?? '';
-    const label = getTaskSummaryLabel(entry);
-    return `${entry.id ?? ''}\u0001${toolName}\u0001${status}\u0001${label}`;
-};
-
-const areTaskSummaryEntriesRenderEqual = (
-    prevEntries: TaskToolSummaryEntry[],
-    nextEntries: TaskToolSummaryEntry[],
-): boolean => {
-    if (prevEntries === nextEntries) return true;
-    if (prevEntries.length !== nextEntries.length) return false;
-    for (let index = 0; index < prevEntries.length; index += 1) {
-        if (getTaskSummaryEntryRenderSignature(prevEntries[index]) !== getTaskSummaryEntryRenderSignature(nextEntries[index])) {
-            return false;
-        }
-    }
-    return true;
-};
-
 const TaskSummaryEntryRow = React.memo(({
     entry,
     isMobile,
     animateTailText,
     showToolFileIcons,
 }: {
-    entry: TaskToolSummaryEntry;
+    entry: TaskSummaryEntryPresentation;
     isMobile: boolean;
     animateTailText: boolean;
     showToolFileIcons: boolean;
 }) => {
-    const normalizedToolName = normalizeToolName(entry.tool);
-    const toolName = normalizedToolName.length > 0 ? normalizedToolName : 'tool';
-    const label = getTaskSummaryLabel(entry);
+    const toolName = entry.toolName;
+    const label = entry.label;
     const hasLabel = label.trim().length > 0;
-    const status = entry.state?.status;
+    const state = entry.state;
     const displayName = getToolMetadata(toolName).displayName;
 
     return (
@@ -917,10 +877,10 @@ const TaskSummaryEntryRow = React.memo(({
                     {displayName}
                 </span>
                 {hasLabel ? (
-                    status !== 'error' && shouldRenderGitPathLabel(toolName, label) ? (
-                        renderAnimatedPathWithIcon(label, animateTailText, true, showToolFileIcons, 'typography-meta')
+                    state !== 'error' && shouldRenderGitPathLabel(toolName, label) ? (
+                        renderAnimatedPathWithIcon(label, animateTailText, true, showToolFileIcons)
                     ) : (
-                        status === 'error' ? (
+                        state === 'error' ? (
                             <span className={cn(
                                 'typography-meta flex-1 min-w-0 text-[var(--status-error)]',
                                 isMobile ? 'whitespace-normal break-words' : 'truncate',
@@ -946,42 +906,58 @@ const TaskSummaryEntryRow = React.memo(({
     return prev.isMobile === next.isMobile
         && prev.animateTailText === next.animateTailText
         && prev.showToolFileIcons === next.showToolFileIcons
-        && getTaskSummaryEntryRenderSignature(prev.entry) === getTaskSummaryEntryRenderSignature(next.entry);
+        && prev.entry.toolName === next.entry.toolName
+        && prev.entry.state === next.entry.state
+        && prev.entry.label === next.entry.label;
 });
 
 TaskSummaryEntryRow.displayName = 'TaskSummaryEntryRow';
 
-const TaskSummaryEntriesList = React.memo(({
-    entries,
-    isExpanded,
+const TaskSummaryRowsList = React.memo(({
+    rows,
+    hiddenActionCount,
     isMobile,
     animateTailText,
     showToolFileIcons,
+    expandedTools,
+    onToggleTool,
 }: {
-    entries: TaskToolSummaryEntry[];
-    isExpanded: boolean;
+    rows: TaskSummaryRow[];
+    hiddenActionCount: number;
     isMobile: boolean;
     animateTailText: boolean;
     showToolFileIcons: boolean;
+    expandedTools: ReadonlySet<string>;
+    onToggleTool: (toolId: string) => void;
 }) => {
-    const visibleEntries = isExpanded ? entries : entries.slice(-6);
-    const hiddenCount = Math.max(0, entries.length - visibleEntries.length);
-    const visibleStartIndex = entries.length - visibleEntries.length;
-
     return (
-        <ToolScrollableSection maxHeightClass={isExpanded ? 'max-h-[40vh]' : 'max-h-56'} className="pt-0" disableHorizontal>
+        <ToolScrollableSection maxHeightClass="max-h-[40vh]" disableHorizontal>
             <div className="w-full min-w-0 space-y-1">
-                {hiddenCount > 0 ? (
-                    <div className="typography-micro text-muted-foreground/70">+{hiddenCount} more…</div>
+                {hiddenActionCount > 0 ? (
+                    <div className="typography-micro text-muted-foreground/70">+{hiddenActionCount} more…</div>
                 ) : null}
 
-                {visibleEntries.map((entry, idx) => {
-                    const absoluteIndex = isExpanded ? idx : visibleStartIndex + idx;
-                    const rowKey = entry.id ?? `${getTaskSummaryEntryRenderSignature(entry)}:${absoluteIndex}`;
+                {rows.map((row) => {
+                    if (row.type === 'context-tool-group') {
+                        return (
+                            <ContextToolGroupRow
+                                key={row.key}
+                                rowKey={row.key}
+                                status={row.status}
+                                counts={row.counts}
+                                children={row.children}
+                                renderSignature={row.renderSignature}
+                                animateTailText={animateTailText}
+                                isExpanded={expandedTools.has(row.key)}
+                                onToggleTool={onToggleTool}
+                            />
+                        );
+                    }
+
                     return (
                         <TaskSummaryEntryRow
-                            key={rowKey}
-                            entry={entry}
+                            key={row.key}
+                            entry={row.entry}
                             isMobile={isMobile}
                             animateTailText={animateTailText}
                             showToolFileIcons={showToolFileIcons}
@@ -992,18 +968,20 @@ const TaskSummaryEntriesList = React.memo(({
         </ToolScrollableSection>
     );
 }, (prev, next) => {
-    return prev.isExpanded === next.isExpanded
+    return prev.hiddenActionCount === next.hiddenActionCount
         && prev.isMobile === next.isMobile
         && prev.animateTailText === next.animateTailText
         && prev.showToolFileIcons === next.showToolFileIcons
-        && areTaskSummaryEntriesRenderEqual(prev.entries, next.entries);
+        && prev.expandedTools === next.expandedTools
+        && prev.onToggleTool === next.onToggleTool
+        && prev.rows.length === next.rows.length
+        && prev.rows.every((row, index) => row.key === next.rows[index]?.key && row.renderSignature === next.rows[index]?.renderSignature);
 });
 
-TaskSummaryEntriesList.displayName = 'TaskSummaryEntriesList';
+TaskSummaryRowsList.displayName = 'TaskSummaryRowsList';
 
 const TaskToolSummary: React.FC<{
-    entries: TaskToolSummaryEntry[];
-    isExpanded: boolean;
+    projection: { rows: TaskSummaryRow[]; hiddenActionCount: number };
     isMobile: boolean;
     output?: string;
     sessionId?: string;
@@ -1011,7 +989,9 @@ const TaskToolSummary: React.FC<{
     input?: Record<string, unknown>;
     animateTailText?: boolean;
     isActive?: boolean;
-}> = ({ entries, isExpanded, isMobile, output, sessionId, onShowPopup, input, animateTailText = true, isActive = false }) => {
+    expandedTools: ReadonlySet<string>;
+    onToggleTool: (toolId: string) => void;
+}> = ({ projection, isMobile, output, sessionId, onShowPopup, input, animateTailText = true, isActive = false, expandedTools, onToggleTool }) => {
     const { t } = useI18n();
     const currentDirectory = useEffectiveDirectory();
     const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
@@ -1022,6 +1002,9 @@ const TaskToolSummary: React.FC<{
     const trimmedOutput = prepareTaskToolOutput(output);
     const hasOutput = trimmedOutput.length > 0;
     const [isOutputExpanded, setIsOutputExpanded] = React.useState(false);
+    const agentType = typeof input?.subagent_type === 'string'
+        ? input.subagent_type
+        : 'subagent';
 
     const handleOpenSession = (event: React.MouseEvent) => {
         event.stopPropagation();
@@ -1043,11 +1026,7 @@ const TaskToolSummary: React.FC<{
         }
     };
 
-    const agentType = typeof input?.subagent_type === 'string'
-        ? input.subagent_type
-        : 'subagent';
-
-    if (entries.length === 0 && !hasOutput && !sessionId) {
+    if (projection.rows.length === 0 && !hasOutput && !sessionId) {
         return (
             <div className="relative pr-2 pb-2 pt-2 space-y-2 pl-[1.4375rem]">
                 <div className="typography-meta text-muted-foreground/70">
@@ -1065,13 +1044,15 @@ const TaskToolSummary: React.FC<{
                 'before:top-[-0.25rem] before:bottom-0'
             )}
         >
-            {entries.length > 0 ? (
-                <TaskSummaryEntriesList
-                    entries={entries}
-                    isExpanded={isExpanded}
+            {projection.rows.length > 0 ? (
+                <TaskSummaryRowsList
+                    rows={projection.rows}
+                    hiddenActionCount={projection.hiddenActionCount}
                     isMobile={isMobile}
                     animateTailText={animateTailText}
                     showToolFileIcons={showToolFileIcons}
+                    expandedTools={expandedTools}
+                    onToggleTool={onToggleTool}
                 />
             ) : null}
 
@@ -1088,7 +1069,7 @@ const TaskToolSummary: React.FC<{
             )}
 
             {hasOutput ? (
-                <div className={cn('space-y-1', (entries.length > 0 || sessionId) && 'pt-1')}
+                <div className={cn('space-y-1', (projection.rows.length > 0 || sessionId) && 'pt-1')}
                 >
                     <button
                         type="button"
@@ -1698,6 +1679,7 @@ ToolExpandedContent.displayName = 'ToolExpandedContent';
 const ToolPartContent: React.FC<ToolPartProps> = ({
     part,
     isExpanded,
+    expandedTools,
     onToggle,
     isMobile,
     onShowPopup,
@@ -1720,12 +1702,14 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
     const [activeLatched, setActiveLatched] = React.useState<boolean>(!isFinalized);
     const previousPartIdRef = React.useRef<string | undefined>(part.id);
+    const lastGitRefreshSignatureRef = React.useRef<string>('');
 
     React.useEffect(() => {
         if (previousPartIdRef.current === part.id) {
             return;
         }
         previousPartIdRef.current = part.id;
+        lastGitRefreshSignatureRef.current = '';
         // Reset latch only when tool identity changes.
         setActiveLatched(!isFinalized);
     }, [isFinalized, part.id]);
@@ -1735,6 +1719,18 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             setActiveLatched(true);
         }
     }, [isFinalized]);
+
+    React.useEffect(() => {
+        if (!isFinalized || isError || !currentDirectory || !GIT_REFRESH_MUTATING_TOOLS.has(normalizedPartTool)) {
+            return;
+        }
+        const signature = `${part.id}:${status ?? 'unknown'}`;
+        if (lastGitRefreshSignatureRef.current === signature) {
+            return;
+        }
+        lastGitRefreshSignatureRef.current = signature;
+        sessionEvents.requestGitRefresh({ directory: currentDirectory });
+    }, [currentDirectory, isError, isFinalized, normalizedPartTool, part.id, status]);
 
     const expandedContentRef = React.useRef<HTMLDivElement>(null);
 
@@ -1820,25 +1816,21 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         return parseTaskMetadataBlock(taskOutputString);
     }, [taskOutputString]);
 
-    const metadataTaskSummaryEntries = React.useMemo<TaskToolSummaryEntry[]>(() => {
+    const metadataTaskSummaryEntries = React.useMemo<unknown[]>(() => {
         if (!isTaskTool) {
             return [];
         }
         const candidateSummary = (metadata as { summary?: unknown; entries?: unknown; tools?: unknown; calls?: unknown } | undefined);
-        const normalized = normalizeTaskSummaryEntries(
-            candidateSummary?.summary ?? candidateSummary?.entries ?? candidateSummary?.tools ?? candidateSummary?.calls
-        );
+        const rawEntries = candidateSummary?.summary ?? candidateSummary?.entries ?? candidateSummary?.tools ?? candidateSummary?.calls;
 
-        if (normalized.length > 0) {
-            return normalized;
+        if (Array.isArray(rawEntries) && rawEntries.length > 0) {
+            return rawEntries;
         }
 
         return parsedTaskMetadata.summaryEntries;
     }, [isTaskTool, metadata, parsedTaskMetadata.summaryEntries]);
 
-    const hasFinalMetadataTaskSummary = isFinalized && metadataTaskSummaryEntries.length > 0;
-
-    const taskSessionId = React.useMemo<string | undefined>(() => {
+    const explicitTaskSessionId = React.useMemo<string | undefined>(() => {
         if (!isTaskTool) {
             return undefined;
         }
@@ -1861,20 +1853,11 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         return readTaskSessionIdFromOutput(taskOutputString);
     }, [isTaskTool, metadata, parsedTaskMetadata.sessionId, partMetadata, taskOutputString]);
 
-    const childSessionLookupId = hasFinalMetadataTaskSummary ? '' : (taskSessionId ?? '');
+    const taskSessionId = explicitTaskSessionId;
+    const childSessionLookupId = taskSessionId ?? '';
 
     const childSessionMessages = useSessionMessageRecords(childSessionLookupId, currentDirectory);
     useEnsureSessionMessages(childSessionLookupId, currentDirectory);
-
-    const childSessionTaskSummaryEntries = React.useMemo<TaskToolSummaryEntry[]>(() => {
-        if (!isTaskTool || !taskSessionId) {
-            return [];
-        }
-        if (!Array.isArray(childSessionMessages) || childSessionMessages.length === 0) {
-            return [];
-        }
-        return buildTaskSummaryEntriesFromSession(childSessionMessages);
-    }, [childSessionMessages, isTaskTool, taskSessionId]);
 
     React.useEffect(() => {
         if (typeof time?.end === 'number' || typeof pinnedTime.end === 'number') {
@@ -1902,12 +1885,12 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const isActive = !isFinalized && activeLatched;
     const shouldTreatAsFinalized = isFinalized;
 
-    const taskSummaryEntries = React.useMemo<TaskToolSummaryEntry[]>(() => {
-        if (childSessionTaskSummaryEntries.length > 0) {
-            return childSessionTaskSummaryEntries;
-        }
-        return metadataTaskSummaryEntries;
-    }, [childSessionTaskSummaryEntries, metadataTaskSummaryEntries]);
+    const taskSummaryProjection = React.useMemo(() => projectTaskSummary({
+        taskPartId: part.id,
+        childSessionMessages: isTaskTool && taskSessionId ? childSessionMessages : [],
+        fallbackEntries: metadataTaskSummaryEntries,
+        expanded: isExpanded,
+    }), [childSessionMessages, isExpanded, isTaskTool, metadataTaskSummaryEntries, part.id, taskSessionId]);
     const diffStats = React.useMemo(() => {
         return (normalizedPartTool === 'edit' || normalizedPartTool === 'multiedit' || normalizedPartTool === 'apply_patch')
             ? parseDiffStats(metadata)
@@ -2074,7 +2057,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
     const iconStyle = !isTaskTool && isError ? TOOL_ERROR_ICON_STYLE : TOOL_NORMAL_ICON_STYLE;
     const titleStyle = !isTaskTool && isError ? TOOL_ERROR_TITLE_STYLE : TOOL_NORMAL_TITLE_STYLE;
-    const shouldRenderTaskSummary = useDeferredExpandedContent(isTaskTool && (taskSummaryEntries.length > 0 || isActive || shouldTreatAsFinalized || !!taskSessionId));
+    const shouldRenderTaskSummary = useDeferredExpandedContent(isTaskTool && (taskSummaryProjection.rows.length > 0 || isActive || shouldTreatAsFinalized || !!taskSessionId));
     const shouldRenderExpandedContent = useDeferredExpandedContent(!isTaskTool && isExpanded);
 
     if (!shouldTreatAsFinalized && !isActive && !isTaskTool) {
@@ -2253,8 +2236,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             {}
             {shouldRenderTaskSummary ? (
                 <TaskToolSummary
-                    entries={taskSummaryEntries}
-                    isExpanded={isExpanded}
+                    projection={taskSummaryProjection}
                     isMobile={isMobile}
                     output={taskOutputString}
                     sessionId={taskSessionId}
@@ -2262,6 +2244,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                     input={input}
                     animateTailText={animateTailText}
                     isActive={isActive}
+                    expandedTools={expandedTools}
+                    onToggleTool={onToggle}
                 />
             ) : null}
 
@@ -2368,6 +2352,8 @@ const ToolPart: React.FC<ToolPartProps> = (props) => {
 export default React.memo(ToolPart, (prev, next) => {
     return areRenderRelevantPartsEqual([prev.part], [next.part])
         && prev.isExpanded === next.isExpanded
+        && prev.expandedTools === next.expandedTools
+        && prev.onToggle === next.onToggle
         && prev.isMobile === next.isMobile
         && prev.alwaysShowActions === next.alwaysShowActions
         && prev.onShowPopup === next.onShowPopup
