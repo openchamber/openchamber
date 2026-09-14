@@ -5,7 +5,7 @@ import { generateBranchName } from '@/lib/git/branchNameGenerator';
 import { useI18n } from '@/lib/i18n';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import type { ProjectRef } from '@/lib/projectContextApi';
-import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
+import { createWorktreeSessionForNewBranch, type WorktreeSessionSelection } from '@/lib/worktreeSessionCreator';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useInputStore } from '@/sync/input-store';
@@ -111,18 +111,32 @@ export const useProjectTodoSend = (options: {
 
         let sessionId: string | null = null;
         let directoryHint: string | null = projectRef.path;
+        let worktreeSelection: WorktreeSessionSelection | null = null;
 
         if (pendingSendTarget.kind === 'worktree') {
           if (!canCreateWorktree) {
             toast.error(t('rightSidebar.contextNotesTodo.toast.worktreeRequiresGitRepo'));
             return;
           }
-          const created = await createWorktreeSessionForNewBranch(projectRef.path, generateBranchName());
+          const created = await createWorktreeSessionForNewBranch(
+            projectRef.path,
+            generateBranchName(),
+            undefined,
+            {
+              overrides: {
+                providerID: execution.providerID,
+                modelID: execution.modelID,
+                variant: execution.variant,
+                agentName: execution.agent.trim() || undefined,
+              },
+            },
+          );
           if (!created?.id) {
             return;
           }
           sessionId = created.id;
           directoryHint = created.path;
+          worktreeSelection = created.selection;
         } else {
           const session = await createSession(undefined, projectRef.path, null);
           if (!session?.id) {
@@ -139,29 +153,38 @@ export const useProjectTodoSend = (options: {
         }
 
         const selectionState = useSelectionStore.getState();
-        selectionState.saveSessionModelSelection(sessionId, execution.providerID, execution.modelID);
-        if (execution.agent.trim()) {
-          selectionState.saveSessionAgentSelection(sessionId, execution.agent);
-          selectionState.saveAgentModelForSession(sessionId, execution.agent, execution.providerID, execution.modelID);
-          selectionState.saveAgentModelVariantForSession(
-            sessionId,
-            execution.agent,
-            execution.providerID,
-            execution.modelID,
-            execution.variant || undefined,
-          );
+        if (!worktreeSelection) {
+          selectionState.saveSessionModelSelection(sessionId, execution.providerID, execution.modelID);
+          if (execution.agent.trim()) {
+            selectionState.saveSessionAgentSelection(sessionId, execution.agent);
+            selectionState.saveAgentModelForSession(sessionId, execution.agent, execution.providerID, execution.modelID);
+            selectionState.saveAgentModelVariantForSession(
+              sessionId,
+              execution.agent,
+              execution.providerID,
+              execution.modelID,
+              execution.variant || undefined,
+            );
+          }
         }
+
+        const messageSelection = worktreeSelection ?? {
+          providerID: execution.providerID,
+          modelID: execution.modelID,
+          variant: execution.variant || undefined,
+          agentName: execution.agent.trim() || undefined,
+        };
 
         setCurrentSession(sessionId, directoryHint);
         await sendMessage(
           visiblePrompt,
-          execution.providerID,
-          execution.modelID,
-          execution.agent.trim() || undefined,
+          messageSelection.providerID,
+          messageSelection.modelID,
+          messageSelection.agentName,
           undefined,
           undefined,
           syntheticParts,
-          execution.variant || undefined,
+          messageSelection.variant,
         );
 
         toast.success(

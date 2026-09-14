@@ -106,6 +106,26 @@ mock.module("@/stores/useConfigStore", () => ({
       currentModelId: "model",
       currentVariantSelection: { override: configVariantOverride, inherited: "high" },
       agents: [],
+      providers: [
+        {
+          id: "provider",
+          models: [{ id: "model" }],
+        },
+      ],
+      settingsDefaultAgent: undefined,
+      settingsDefaultModel: undefined,
+      settingsDefaultVariant: undefined,
+      currentVariant: undefined,
+      getVisibleAgents: () => [{ name: "build" }],
+      getModelMetadata: (providerID: string, modelID: string) =>
+        [
+          {
+            id: "provider",
+            models: [{ id: "model" }],
+          },
+        ]
+          .find((provider) => provider.id === providerID)
+          ?.models.find((model) => model.id === modelID),
       activateDirectory: mock(async () => undefined),
       applyDefaultModelAgentSelection: mock(() => undefined),
     }),
@@ -322,6 +342,7 @@ mock.module("@/lib/git/branchNameGenerator", () => ({
 mock.module("@/lib/openchamberConfig", () => ({
   getWorktreeSetupCommands: async () => [],
   getWorktreeSetupWaitEnabled: async () => false,
+  substituteCommandVariables: (command: string) => command,
 }))
 mock.module("@/lib/sharedTrustConfirmation", () => ({
   resolveWorktreeSetupCommands: async () => [],
@@ -329,6 +350,22 @@ mock.module("@/lib/sharedTrustConfirmation", () => ({
 
 mock.module("@/lib/worktrees/worktreeBootstrap", () => ({
   waitForWorktreeBootstrap: async () => undefined,
+  clearWorktreeBootstrapState: () => undefined,
+  markWorktreeBootstrapPending: () => undefined,
+  setWorktreeBootstrapState: () => undefined,
+  startWorktreeBootstrapWatcher: () => undefined,
+}))
+
+mock.module("@/lib/gitApi", () => ({
+  checkIsGitRepository: async () => true,
+  deleteRemoteBranch: async () => undefined,
+  git: {},
+  previewGitWorktree: async () => null,
+}))
+mock.module("@/lib/worktrees/worktreeStatus", () => ({
+  getRootBranch: async () => "main",
+  invalidateResolvedProjectRootCache: () => undefined,
+  resolveProjectRoot: async (directory: string) => directory,
 }))
 
 mock.module("@/lib/worktrees/worktreeCreate", () => ({
@@ -590,6 +627,66 @@ describe("assistant answer worktree routing", () => {
 
     useSessionUIStore.setState({
       availableWorktreesByProject: new Map([["/repo", [sourceWorktree]]]),
+      worktreeMetadata: new Map([["source-session", sourceWorktree]]),
+      createSession: async (_title, directory) => {
+        createdDirectory = directory
+        return {
+          id: "created-session",
+          slug: "created-session",
+          projectID: "project",
+          directory: directory ?? "",
+          title: "Created session",
+          version: "1",
+          time: { created: 1, updated: 1 },
+        }
+      },
+      sendMessage: async () => undefined,
+    })
+
+    try {
+      await createFromAssistantMessage({
+        sessionId: "source-session",
+        directory: "/worktrees/source",
+        text: "Implement the plan",
+      }, {
+        providerID: "provider",
+        modelID: "model",
+        variant: "",
+        agent: "build",
+        instructions: "Follow the answer",
+        createWorktree: true,
+      })
+    } finally {
+      useSessionUIStore.setState({
+        createSession: originalCreateSession,
+        sendMessage: originalSendMessage,
+        worktreeMetadata: originalWorktreeMetadata,
+      })
+      projects = []
+    }
+
+    expect(createdWorktreeProjects).toEqual([{ id: "project", path: "/repo" }])
+    expect(createdDirectory).toBe("/worktrees/generated-branch")
+  })
+
+  test("prefers recorded worktree metadata when the topology map misses the source worktree", async () => {
+    projects = [{ id: "project", path: "/repo", label: "Repo" }]
+    createdWorktreeProjects.length = 0
+    const sourceWorktree = {
+      path: "/worktrees/source",
+      projectDirectory: "/repo",
+      branch: "source",
+      label: "source",
+    }
+    const state = useSessionUIStore.getState()
+    const createFromAssistantMessage = state.createSessionFromAssistantMessage
+    const originalCreateSession = state.createSession
+    const originalSendMessage = state.sendMessage
+    const originalWorktreeMetadata = state.worktreeMetadata
+    let createdDirectory: string | null | undefined
+
+    useSessionUIStore.setState({
+      availableWorktreesByProject: new Map(),
       worktreeMetadata: new Map([["source-session", sourceWorktree]]),
       createSession: async (_title, directory) => {
         createdDirectory = directory

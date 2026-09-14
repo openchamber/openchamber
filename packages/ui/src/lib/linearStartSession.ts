@@ -4,7 +4,7 @@ import type { I18nKey, I18nParams } from '@/lib/i18n';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { modelVariantNames } from '@/lib/modelVariants';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
-import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
+import { createWorktreeSessionForNewBranch, type WorktreeSessionSelection } from '@/lib/worktreeSessionCreator';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { buildLinkedLinearIssue } from '@/lib/linkedIssues';
 import { resolveLinearMappedProjectPath } from '@/lib/linearProjectMapping';
@@ -132,7 +132,11 @@ export async function startLinearIssueSession(args: {
     const sessionTitle = `${issue.identifier} ${issue.title}`.trim();
     const login = issue.assignee?.displayName || issue.assignee?.name;
 
-    const { sessionId, sessionDirectory } = await (async () => {
+    const { sessionId, sessionDirectory, worktreeSelection } = await (async (): Promise<{
+      sessionId: string;
+      sessionDirectory: string;
+      worktreeSelection: WorktreeSessionSelection | null;
+    }> => {
       if (createInWorktree) {
         const preferred = `issue-${issue.identifier}-${generateBranchSlug()}`;
         const created = await createWorktreeSessionForNewBranch(
@@ -144,14 +148,14 @@ export async function startLinearIssueSession(args: {
         if (!created?.id) {
           throw new Error('Failed to create worktree session');
         }
-        return { sessionId: created.id, sessionDirectory: created.path };
+        return { sessionId: created.id, sessionDirectory: created.path, worktreeSelection: created.selection };
       }
 
       const session = await sessionActions.createSession(sessionTitle, projectDirectory, null);
       if (!session?.id) {
         throw new Error('Failed to create session');
       }
-      return { sessionId: session.id, sessionDirectory: session.directory ?? projectDirectory };
+      return { sessionId: session.id, sessionDirectory: session.directory ?? projectDirectory, worktreeSelection: null };
     })();
 
     void sessionActions.updateSessionTitle(sessionId, sessionTitle).catch(() => undefined);
@@ -174,15 +178,18 @@ export async function startLinearIssueSession(args: {
     const configState = useConfigStore.getState();
     const lastUsedProvider = useSelectionStore.getState().lastUsedProvider;
     const defaultModel = resolveDefaultModelSelection();
-    const providerID = defaultModel?.providerID || configState.currentProviderId || lastUsedProvider?.providerID;
-    const modelID = defaultModel?.modelID || configState.currentModelId || lastUsedProvider?.modelID;
-    const agentName = resolveDefaultAgentName() || configState.currentAgentName || undefined;
+    const fallbackProviderID = defaultModel?.providerID || configState.currentProviderId || lastUsedProvider?.providerID;
+    const fallbackModelID = defaultModel?.modelID || configState.currentModelId || lastUsedProvider?.modelID;
+    const fallbackAgentName = resolveDefaultAgentName() || configState.currentAgentName || undefined;
+    const providerID = worktreeSelection?.providerID ?? fallbackProviderID;
+    const modelID = worktreeSelection?.modelID ?? fallbackModelID;
+    const agentName = worktreeSelection?.agentName ?? fallbackAgentName;
     if (!providerID || !modelID) {
       toast.error(t('session.linearIssuePicker.error.noModelSelected'));
       return true;
     }
 
-    const variant = resolveDefaultVariant(providerID, modelID);
+    const variant = worktreeSelection ? worktreeSelection.variant : resolveDefaultVariant(providerID, modelID);
     const visiblePromptText = await renderMagicPrompt('linear.issue.review.visible', {
       identifier: issue.identifier,
     });
