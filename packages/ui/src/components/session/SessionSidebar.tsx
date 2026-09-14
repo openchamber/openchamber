@@ -340,7 +340,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   );
 
   const handleSaveProjectEdit = React.useCallback((data: {
-    label: string;
+    label: string | null;
     icon: string | null;
     color: string | null;
     iconBackground: string | null;
