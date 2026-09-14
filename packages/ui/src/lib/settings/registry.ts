@@ -342,6 +342,7 @@ export const SETTINGS_REGISTRY = {
   showTurnChangedFiles: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('showTurnChangedFiles', (v) => useUIStore.getState().setShowTurnChangedFiles(v)) }),
   showExpandedBashTools: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('showExpandedBashTools', (v) => useUIStore.getState().setShowExpandedBashTools(v)) }),
   showExpandedEditTools: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('showExpandedEditTools', (v) => useUIStore.getState().setShowExpandedEditTools(v)) }),
+  showExpandedTodoTools: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('showExpandedTodoTools', (v) => useUIStore.getState().setShowExpandedTodoTools(v)) }),
   toolJsonViewMode: field({ scope: 'profile', parse: parseOneOf(['summary', 'formatted', 'raw']), ui: uiStore('toolJsonViewMode', (v) => useUIStore.getState().setToolJsonViewMode(v)) }),
   timeFormatPreference: field({ scope: 'profile', parse: parseOneOf(['auto', '12h', '24h']), ui: uiStore('timeFormatPreference', (v) => useUIStore.getState().setTimeFormatPreference(v)) }),
   weekStartPreference: field({ scope: 'profile', parse: parseOneOf(['auto', 'sunday', 'monday']), ui: uiStore('weekStartPreference', (v) => useUIStore.getState().setWeekStartPreference(v)) }),
