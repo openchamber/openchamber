@@ -65,6 +65,7 @@ import { BranchIntegrationSection, type OperationLogEntry } from './git/BranchIn
 import { deriveBaseBranch } from './git/baseBranch';
 import { getFreshestPrStatusForBranch, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { createGitIndexMutationQueue, type GitIndexMutationDirection, type GitIndexMutationQueue } from './git/gitIndexMutationQueue';
+import { pushCommittedChanges } from './git/commitAndPush';
 import type { GitRemote } from '@/lib/gitApi';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { cn } from '@/lib/utils';
@@ -1237,29 +1238,18 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
         }
 
         setSyncAction('sync');
-        const trackingPrefix = `${remote.name}/`;
-        const trackedBranch = status?.tracking?.startsWith(trackingPrefix)
-          ? status.tracking.slice(trackingPrefix.length)
-          : undefined;
-
-        await git.gitFetch(gitDirectory, { remote: remote.name });
-        const afterFetch = await git.getGitStatus(gitDirectory);
-        if ((afterFetch.behind ?? 0) > 0) {
-          if ((afterFetch.files?.length ?? 0) > 0) {
-            toast.error(t('gitView.toast.commitOrStashBeforeSync'));
-            await refreshStatusAndBranches(false);
-            return;
-          }
-          await git.gitPull(gitDirectory, { remote: remote.name, branch: trackedBranch, rebase: true });
-        }
-
-        const afterPull = await git.getGitStatus(gitDirectory);
-        let result: Awaited<ReturnType<typeof git.gitPush>> | undefined;
-        if ((afterPull.ahead ?? 0) > 0) {
-          result = await git.gitPush(gitDirectory);
-        }
-        toast.success(t('gitView.toast.pushedToUpstream', { name: getPushedRemoteName(result) }));
-        triggerFireworks();
+        await pushCommittedChanges({
+          git,
+          directory: gitDirectory,
+          remote,
+          status,
+          dirtyWorktreeError: t('gitView.toast.commitOrStashBeforeSync'),
+          onPushed: (result) => {
+            if (result.pushed.length === 0) return;
+            toast.success(t('gitView.toast.pushedToUpstream', { name: getPushedRemoteName(result) }));
+            triggerFireworks();
+          },
+        });
         await refreshStatusAndBranches(false);
       } else {
         await refreshStatusAndBranches(false);
