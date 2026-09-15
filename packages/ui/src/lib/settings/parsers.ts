@@ -12,6 +12,7 @@
 import { z, type ZodType } from 'zod';
 
 import type { ProjectEntry } from '@/lib/api/types';
+import type { NotificationSoundEventSounds } from '@/lib/notificationSound';
 import { createProjectIdFromPath } from '@/lib/projectId';
 import { normalizePath } from '@/lib/pathNormalization';
 
@@ -83,6 +84,11 @@ export const parseOneOf = <const T extends readonly [string, ...string[]]>(optio
 );
 
 export const parseFiniteNumber = fromSchema(finiteNumber);
+
+/** A finite number clamped to [min, max]. */
+export const parseNumberInRange = (min: number, max: number): SettingsParser<number> => fromSchema(
+  finiteNumber.transform((value) => Math.max(min, Math.min(max, value))),
+);
 
 export const parseIntegerInRange = (min: number, max: number): SettingsParser<number> => fromSchema(
   finiteNumber.transform((value) => Math.max(min, Math.min(max, Math.round(value)))),
@@ -206,6 +212,26 @@ export const parseNotificationTemplates = fromSchema(
       subtask: subtask ?? DEFAULT_NOTIFICATION_TEMPLATES.subtask,
     };
   }).pipe(z.custom<NotificationTemplates>((value) => value !== undefined)),
+);
+
+/**
+ * Partial event→sound-id map for notification sounds. Only known event keys
+ * with non-empty string values are kept; unknown events and empty values are
+ * dropped. `undefined` when nothing valid remains (missing events fall back to
+ * the default sound at playback time).
+ */
+export const parseNotificationSoundEventSounds = fromSchema(
+  looseObject.transform((record) => {
+    const knownEvents = ['completion', 'error', 'question', 'permission', 'subtask'] as const;
+    const sanitized: Partial<Record<(typeof knownEvents)[number], string>> = {};
+    for (const event of knownEvents) {
+      const value = record[event];
+      if (typeof value === 'string' && value.length > 0) {
+        sanitized[event] = value;
+      }
+    }
+    return Object.keys(sanitized).length > 0 ? sanitized : undefined;
+  }).pipe(z.custom<NotificationSoundEventSounds>((value) => value !== undefined)),
 );
 
 const stringMap = looseObject.transform((record) => Object.fromEntries(
