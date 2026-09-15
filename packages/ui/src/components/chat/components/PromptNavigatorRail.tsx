@@ -26,11 +26,11 @@ const PREVIEW_MAX_CHARS = 160;
 // The whole gutter is one hover/click target: the cursor's vertical position
 // maps to the nearest tick, so tick density never demands pointer precision.
 // When the centered message column extends under the full-width gutter (narrow
-// windows), the hit zone shrinks so it can't swallow clicks on the right edge
+// windows), the hit zone shrinks so it can't swallow clicks on the left edge
 // of user bubbles (expand/collapse).
 const GUTTER_WIDTH_PX = 28;
 const GUTTER_NARROW_WIDTH_PX = 12;
-const GUTTER_RIGHT_OFFSET_PX = 6;
+const GUTTER_LEFT_OFFSET_PX = 6;
 // The rail shows at most a window of ticks; hovering the gutter edges
 // carousels the window through the rest of the prompts.
 const MAX_VISIBLE_TICKS = 30;
@@ -119,8 +119,8 @@ export function PromptNavigatorRail({
             }
             const containerRect = container.getBoundingClientRect();
             const columnRect = column.getBoundingClientRect();
-            const fullGutterLeft = containerRect.right - GUTTER_RIGHT_OFFSET_PX - GUTTER_WIDTH_PX;
-            setIsNarrowGutter(columnRect.right > fullGutterLeft);
+            const fullGutterRight = containerRect.left + GUTTER_LEFT_OFFSET_PX + GUTTER_WIDTH_PX;
+            setIsNarrowGutter(columnRect.left < fullGutterRight);
         };
         measure();
         const observer = new ResizeObserver(measure);
@@ -518,17 +518,17 @@ export function PromptNavigatorRail({
         <nav
             ref={navRef}
             aria-label={t('chat.promptNavigator.aria')}
-            className="pointer-events-none absolute right-1.5 top-1/2 z-20 -translate-y-1/2"
+            className="pointer-events-none absolute left-1.5 top-1/2 z-20 -translate-y-1/2"
         >
-            <div className="pointer-events-auto flex flex-col items-end">
+            <div className="pointer-events-auto flex flex-col items-start">
                 {canLoadEarlier ? (
                     <button
                         type="button"
                         tabIndex={-1}
                         className={cn(
                             // Nudge so the icon centers over the tick column
-                            // (ticks sit at right-1 with a 10px base width).
-                            '-mr-px mb-1.5 flex size-5 shrink-0 items-center justify-center rounded-full',
+                            // (ticks sit at left-1 with a 10px base width).
+                            '-ml-px mb-1.5 flex size-5 shrink-0 items-center justify-center rounded-full',
                             'text-[var(--surface-mutedForeground)] transition-colors',
                             'hover:bg-[var(--interactive-hover)]/60 hover:text-[var(--surface-foreground)]',
                             isLoadingOlder ? 'cursor-wait opacity-70' : undefined,
@@ -595,7 +595,7 @@ export function PromptNavigatorRail({
                                         aria-selected={isHighlighted}
                                         aria-current={isActive ? 'true' : undefined}
                                         aria-label={prompt.preview.trim() || emptyPreviewLabel}
-                                        className="pointer-events-none absolute right-1 flex items-center justify-end"
+                                        className="pointer-events-none absolute left-1 flex items-center justify-start"
                                         style={{ top: `${index * TICK_PITCH_PX}px`, height: `${TICK_PITCH_PX}px` }}
                                     >
                                         <span
@@ -619,7 +619,7 @@ export function PromptNavigatorRail({
                         <div
                             ref={panelRef}
                             className={cn(
-                                'pointer-events-auto absolute right-full top-1/2 z-30 mr-3 -translate-y-1/2',
+                                'pointer-events-auto absolute left-full top-1/2 z-30 ml-3 -translate-y-1/2',
                                 'w-[min(20rem,calc(100vw-6rem))] overflow-hidden rounded-xl',
                                 'border border-[var(--interactive-border)]/60 bg-[var(--surface-elevated)] py-1 shadow-md',
                             )}
