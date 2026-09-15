@@ -24,6 +24,7 @@ import { ProjectContextPanel } from './RightSidebarTabs';
 import { SidebarFilesTree } from './SidebarFilesTree';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useBrowserFaviconStore } from '@/stores/useBrowserFaviconStore';
@@ -39,6 +40,7 @@ import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync } from '@/lib/run
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getActiveRelayDescriptor } from '@/lib/relay/runtime-tunnel';
 import { Icon } from "@/components/icon/Icon";
+import { GuestIcon } from './GuestRailIcon';
 import {
   EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST,
   EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
@@ -199,6 +201,12 @@ const getTabLabel = (
   return getModeLabel(tab.mode, t);
 };
 
+const ContextGuestIcon: React.FC<{ mode: ContextPanelMode }> = ({ mode }) => {
+  const surfaces = useGuestSurfaces();
+  const surface = surfaces.find((entry) => entry.mode === mode);
+  return <GuestIcon icon={surface?.icon ?? 'window'} iconSrc={surface?.iconSrc} className="h-3.5 w-3.5" />;
+};
+
 const getTabIcon = (
   tab: { mode: ContextPanelMode; targetPath: string | null },
   faviconByOrigin: Record<string, string> = {},
@@ -250,7 +258,7 @@ const getTabIcon = (
   }
 
   if (isPluginContextPanelMode(tab.mode)) {
-    return <Icon name="window" className="h-3.5 w-3.5" />;
+    return <ContextGuestIcon mode={tab.mode} />;
   }
 
   if (tab.mode === 'browser') {

@@ -40,7 +40,7 @@ import { guestMay, isGuestActive } from '@/lib/guests/capabilities';
 import { guestFileOperation } from '@/lib/guests/files';
 import { guestGenerate } from '@/lib/guests/generate';
 import { registerGuestResolver, type GuestResolveOutcome } from '@/lib/guests/resolve';
-import { resolveGuestFrameUrl } from '@/lib/guests/frame-url';
+import { useGuestFrameUrl } from '@/lib/guests/useGuestFrameUrl';
 import { useGuestItemStore } from '@/lib/guests/item-store';
 import { fetchHostLinearIssueGet } from '@/lib/guests/host-linear-request';
 import { loadGuestServiceStatus, proxyGuestServiceRequest } from '@/lib/guests/service';
@@ -206,32 +206,16 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     item,
   }), [currentTheme, directory, item, locale, oauthStatus, sessionSnapshot, surface]);
 
-  const frameKey = `${guestId}:service-${guest?.service?.granted ? '1' : '0'}`;
+  const frameKey = `${guestId}:${guest?.version ?? ''}:${guestEnabled}:service-${guest?.service?.granted ? '1' : '0'}`;
 
-  // Minted per mount (and per remount via frameKey): the token in this URL is
-  // scoped to the guest's files and short-lived, so it is never reused.
+  // Scoped auth is minted per mount/version/grant and renewed if an existing
+  // iframe navigates after expiry. Healthy documents retain their local state.
   // The attach dialog may load its own page; the rail always loads panel.entry.
   // A page-less guest has no entry and never gets a frame.
   const guestEntry = guest ? (surface === 'page' ? guest.pageEntry ?? null : surface === 'dialog' && guest.attachEntry ? guest.attachEntry : guest.entry ?? null) : null;
-  const [src, setSrc] = React.useState('');
-  React.useEffect(() => {
-    if (!guestEntry) {
-      setSrc('');
-      return;
-    }
-    let cancelled = false;
-    setSrc('');
-    resolveGuestFrameUrl(guestId, guestEntry)
-      .then((url) => {
-        if (!cancelled) setSrc(url);
-      })
-      .catch(() => {
-        // Leave src empty: the pane shows its failed state instead of an unauthenticated frame.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [guestEntry, guestId, frameKey]);
+  const { src, recoverExpiredNavigation, acknowledgeHandshake } = useGuestFrameUrl({
+    guestId, entry: guestEntry, instanceKey: frameKey, enabled: guestEnabled,
+  });
 
   const readyRef = React.useRef(ready);
   readyRef.current = ready;
@@ -328,9 +312,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     }
   }, [guest, guestEnabled, onDismiss]);
 
-  // Remount when service grant flips so the guest leaves its "unavailable" empty state.
-  // Resolve the frame from the ref on every message: a key remount replaces the
-  // element without changing `src`, so a captured contentWindow would go stale.
+  // Resolve the frame from the ref on every message: auth recovery, version
+  // changes and service grants can replace the element and its contentWindow.
 
   React.useEffect(() => {
     const subscriptions = new Map<string, () => void>();
@@ -361,6 +344,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       }
 
       if (message.type === 'hello') {
+        acknowledgeHandshake();
         clearSubscriptions();
         pushHostState();
         registerResolver();
@@ -573,7 +557,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       runtimeUnsubscribe();
       window.removeEventListener('message', onMessage);
     };
-  }, [frameKey, guestEnabled, postToGuest, pushHostState, refreshOauth, registerResolver, setOauthStatus, src, stopOauthPoll]);
+  }, [acknowledgeHandshake, frameKey, guestEnabled, postToGuest, pushHostState, refreshOauth, registerResolver, setOauthStatus, src, stopOauthPoll]);
 
   // The OAuth poll outlives listener re-attachment: it only stops when the
   // frame goes away, otherwise a parent re-render mid-authorization would
@@ -631,6 +615,10 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         surface === 'dialog' ? 'bg-transparent' : 'bg-[var(--surface-background)]',
       )}
       onLoad={() => {
+        // A kept-alive iframe can navigate again after its scoped URL token
+        // expires. Recover on navigation, never by periodically reloading a
+        // healthy extension and discarding its in-memory state.
+        if (recoverExpiredNavigation()) return;
         pushHostState();
         registerResolver();
       }}

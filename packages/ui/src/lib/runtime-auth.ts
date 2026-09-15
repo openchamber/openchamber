@@ -257,12 +257,12 @@ const postUrlAuthTokenMint = async (apiBaseUrl: string | null | undefined, scope
  * guest iframe URL is readable by the guest's own script, so every mount gets a
  * fresh token that is worthless outside `/api/guests/<id>/`.
  */
-export const mintGuestFrameUrlAuthToken = async (guestId: string): Promise<string> => {
+export const mintGuestFrameUrlAuthToken = async (guestId: string): Promise<MintedUrlAuthToken> => {
   const minted = await postUrlAuthTokenMint(null, `guest:${guestId}`);
   if (!minted.token) {
     throw new Error('Guest URL auth token response was invalid');
   }
-  return minted.token;
+  return minted;
 };
 
 const mintRuntimeUrlAuthToken = (apiBaseUrl?: string | null): Promise<string> => {

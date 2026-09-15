@@ -56,6 +56,8 @@ Public author pages live in `packages/docs/content/docs/sdk.mdx`, `sdk/host.mdx`
 
 ## Host hole
 
+`lib/guests/useGuestFrameUrl.ts` owns iframe URL lifetime. It retains the scoped token's expiry, renews on an expired navigation, and remints after enable/version/runtime changes. Expiry alone never reloads a healthy document. Recovery is bounded until the guest's next `hello`; mint failure leaves the existing load-failed UI rather than mounting an unauthenticated URL. Late mint responses from a retired owner are discarded. Guest capability grants and provider OAuth are separate from this host file-loading authorization.
+
 `GET /api/guests` plus `PluginPane` on the desktop/web rail. The iframe URL carries a token minted for `guest:<id>` scope (`resolveGuestFrameUrl`), valid only for `GET /api/guests/<id>/*`; the session-wide URL token never enters a guest frame. Settings → Extensions installs a folder, a local `.zip`, or an https git / zip URL into that OpenChamber instance's data dir (`extensions.json`). Settings → Integrations shows a host card for each installed guest that declared `integration`. OAuth and pasted tokens live in `guest-auth.json`. Host Linear uses `linear-auth.json`. VS Code and mobile set the catalog to `unsupported`. That is not an empty success. A guest must ship a classic IIFE (`panel/main.js`). No runtime compiles guest TypeScript. The iframe cannot load ESM.
 
 **Folder install** stores the realpath in `extensions.json` with `source: "path"`. Uninstall drops the catalog row and extension-owned storage. The user's folder stays.
