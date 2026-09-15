@@ -143,11 +143,16 @@ const isLoopbackAddress = (value) => {
  * set, the inputs and the description differ. Generating them from one template
  * keeps the transport, metadata and failure handling identical, which is what
  * the caller depends on.
+ *
+ * The action schema carries `oneOf` only. A node combining `enum` and `oneOf`
+ * is valid JSON Schema, but some OpenAI-compatible gateways reject it and
+ * answer with an empty completion instead of an error, and the `oneOf` branches
+ * are what carry the per-action descriptions the model reads.
  */
-const createToolEntry = ({ name, description, actions, definitions, parameters }) => String.raw`    ${name}: {
+const createToolEntry = ({ name, description, definitions, parameters }) => String.raw`    ${name}: {
       description: ${JSON.stringify(description)},
       args: {
-        action: { type: "string", enum: ${JSON.stringify(actions)}, oneOf: ${JSON.stringify(definitions.map((entry) => ({ const: entry.action, description: entry.description })))}, description: "OpenChamber action to perform" },
+        action: { type: "string", oneOf: ${JSON.stringify(definitions.map((entry) => ({ const: entry.action, description: entry.description })))}, description: "OpenChamber action to perform" },
         parameters: { type: "object", properties: ${JSON.stringify(parameters)}, additionalProperties: false, description: "Inputs for the action; use an empty object when none are needed" },
       },
       async execute(input, context) {
@@ -221,7 +226,6 @@ const createPluginSource = ({ includeControl, includeWeb, includeMemory }) => {
     entries.push(createToolEntry({
       name: 'openchamber',
       description: CONTROL_TOOL_DESCRIPTION,
-      actions: OPENCHAMBER_AGENT_TOOL_ACTIONS,
       definitions: OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS,
       parameters: CONTROL_PARAMETER_PROPERTIES,
     }));
@@ -230,7 +234,6 @@ const createPluginSource = ({ includeControl, includeWeb, includeMemory }) => {
     entries.push(createToolEntry({
       name: 'openchamber_web',
       description: WEB_TOOL_DESCRIPTION,
-      actions: OPENCHAMBER_WEB_ACTIONS,
       definitions: OPENCHAMBER_WEB_ACTION_DEFINITIONS,
       parameters: WEB_PARAMETER_PROPERTIES,
     }));
@@ -239,7 +242,6 @@ const createPluginSource = ({ includeControl, includeWeb, includeMemory }) => {
     entries.push(createToolEntry({
       name: 'openchamber_memory',
       description: MEMORY_TOOL_DESCRIPTION,
-      actions: OPENCHAMBER_MEMORY_ACTIONS,
       definitions: OPENCHAMBER_MEMORY_ACTION_DEFINITIONS,
       parameters: MEMORY_PARAMETER_PROPERTIES,
     }));
