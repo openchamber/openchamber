@@ -152,6 +152,25 @@ export function createGlobalMessageStreamWsBridge({
       return;
     }
 
+    if (status.type === 'unavailable') {
+      if (!status.everConnected) {
+        // OpenCode never became reachable during this cycle: keep today's
+        // initial-error contract so the client gets a definitive failure.
+        closeClientsWithInitialError({
+          message: status.buildUrlFailed ? 'OpenCode service unavailable' : 'Failed to connect to OpenCode event stream',
+          closeReason: status.buildUrlFailed ? 'OpenCode service unavailable' : 'Failed to connect to OpenCode event stream',
+          triggerHealthCheckFor: !status.buildUrlFailed,
+        });
+        return;
+      }
+
+      // The reader has stopped retrying. Connected clients stay parked until
+      // an explicit restart; report the transition once instead of logging
+      // every failed attempt.
+      console.warn('Message stream WS proxy error:', status.error?.error ?? status.error);
+      return;
+    }
+
     if (status.type === 'error' && status.error?.type === 'stream_error') {
       console.warn('Message stream WS proxy error:', status.error.error);
     }
@@ -190,6 +209,19 @@ export function createGlobalMessageStreamWsBridge({
 
     clients.add(socket);
     clientLastEventIds.set(socket, requestedLastEventId);
+
+    // A hub that parked before it ever connected has nothing to dial, so
+    // report the same failure as the initial-error path instead of leaving
+    // the client waiting for a `ready` frame that cannot arrive.
+    if (globalHub.isParked() && !globalHub.hasConnected()) {
+      closeClientsWithInitialError({
+        message: 'OpenCode service unavailable',
+        closeReason: 'OpenCode service unavailable',
+        triggerHealthCheckFor: false,
+      });
+      return;
+    }
+
     globalHub.start();
     if (globalHub.isConnected()) {
       markReady(socket, requestedLastEventId);

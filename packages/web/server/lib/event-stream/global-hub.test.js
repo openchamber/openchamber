@@ -159,4 +159,53 @@ describe('createGlobalMessageStreamHub', () => {
       warnSpy.mockRestore();
     }
   });
+
+  it('parks after consecutive build URL failures and reports a terminal unavailable status', async () => {
+    const statuses = [];
+    const parked = [];
+    let buildCalls = 0;
+    let fetchCalls = 0;
+    const hub = createGlobalMessageStreamHub({
+      buildOpenCodeUrl() {
+        buildCalls += 1;
+        throw new Error('OpenCode port is not available');
+      },
+      getOpenCodeAuthHeaders: () => ({}),
+      upstreamReconnectDelayMs: 0,
+      upstreamBuildUrlFailureLimit: 3,
+      fetchImpl: async () => {
+        fetchCalls += 1;
+        throw new Error('fetch should not run while the URL cannot be built');
+      },
+    });
+    hub.subscribeStatus((status) => {
+      statuses.push(status);
+      if (status.type === 'unavailable') {
+        parked.push(status);
+      }
+    });
+
+    try {
+      hub.start();
+      await waitForAssertion(() => {
+        expect(hub.isParked()).toBe(true);
+      });
+
+      expect(buildCalls).toBe(3);
+      expect(fetchCalls).toBe(0);
+      expect(statuses.filter((status) => status.type === 'initial-error')).toHaveLength(2);
+      expect(parked).toHaveLength(1);
+      expect(parked[0]).toEqual(expect.objectContaining({
+        type: 'unavailable',
+        buildUrlFailed: true,
+        everConnected: false,
+        error: expect.objectContaining({ type: 'build_url_failed' }),
+      }));
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(buildCalls).toBe(3);
+    } finally {
+      hub.stop();
+    }
+  });
 });

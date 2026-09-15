@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createGlobalUiEventBroadcaster, createMessageStreamWsRuntime } from './runtime.js';
 import { createGlobalMessageStreamHub } from './global-hub.js';
@@ -87,6 +87,39 @@ class FakeSocket extends EventEmitter {
     this.closeCalls.push({ code, reason });
     this.emit('close');
   }
+}
+
+// A stream that delivers one block, then blocks until the test calls `end()`,
+// so the caller controls exactly when the reader reconnects.
+function createManualSseResponse({ block }) {
+  const encoder = new TextEncoder();
+  let sent = false;
+  let release;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+
+  return {
+    end: release,
+    response: {
+      ok: true,
+      status: 200,
+      body: {
+        getReader() {
+          return {
+            async read() {
+              if (!sent) {
+                sent = true;
+                return { value: encoder.encode(block), done: false };
+              }
+              await held;
+              return { value: undefined, done: true };
+            },
+          };
+        },
+      },
+    },
+  };
 }
 
 function createSseResponse({ blocks = [], signal, holdOpen = false }) {
@@ -568,5 +601,185 @@ describe('message stream websocket runtime', () => {
 
     socket.close();
     await runtime.close();
+  });
+
+  it('parks a post-connected global upstream with one warning instead of per-attempt logs', async () => {
+    const server = new EventEmitter();
+    const wsClients = new Set();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let port = 4096;
+    let buildCalls = 0;
+    let fetchCalls = 0;
+
+    const firstStream = createManualSseResponse({
+      block: 'id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n',
+    });
+
+    const runtime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade() {
+        throw new Error('upgrade should not be used in this test');
+      },
+      buildOpenCodeUrl: (path) => {
+        buildCalls += 1;
+        if (port === null) {
+          throw new Error('OpenCode port is not available');
+        }
+        return `http://127.0.0.1:${port}${path}`;
+      },
+      getOpenCodeAuthHeaders: () => ({}),
+      processForwardedEventPayload() {},
+      wsClients,
+      upstreamReconnectDelayMs: 0,
+      upstreamBuildUrlFailureLimit: 2,
+      fetchImpl: async (_url) => {
+        fetchCalls += 1;
+        return firstStream.response;
+      },
+    });
+
+    const socket = new FakeSocket();
+    try {
+      runtime.wsServer.emit('connection', socket, { url: '/api/global/event/ws' });
+      await expect.poll(() => socket.sent.some((frame) => frame.eventId === 'evt-1')).toBe(true);
+
+      port = null;
+      firstStream.end();
+      const proxyWarnings = () => warnSpy.mock.calls.filter(([message]) => message === 'Message stream WS proxy error:');
+      await expect.poll(() => proxyWarnings().length).toBe(1);
+
+      expect(fetchCalls).toBe(1);
+      expect(buildCalls).toBe(3);
+      expect(socket.readyState).toBe(1);
+      expect(socket.closeCalls).toEqual([]);
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(buildCalls).toBe(3);
+      expect(proxyWarnings()).toHaveLength(1);
+    } finally {
+      socket.close();
+      await runtime.close();
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('tells a new global client that OpenCode is unavailable while the hub is parked', async () => {
+    const server = new EventEmitter();
+    const wsClients = new Set();
+    let buildCalls = 0;
+
+    const hub = createGlobalMessageStreamHub({
+      buildOpenCodeUrl() {
+        buildCalls += 1;
+        throw new Error('OpenCode port is not available');
+      },
+      getOpenCodeAuthHeaders: () => ({}),
+      upstreamReconnectDelayMs: 0,
+      upstreamBuildUrlFailureLimit: 2,
+      fetchImpl: async () => {
+        throw new Error('fetch should not run while the URL cannot be built');
+      },
+    });
+
+    const runtime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade() {
+        throw new Error('upgrade should not be used in this test');
+      },
+      globalEventHub: hub,
+      buildOpenCodeUrl: () => {
+        throw new Error('OpenCode port is not available');
+      },
+      getOpenCodeAuthHeaders: () => ({}),
+      processForwardedEventPayload() {},
+      wsClients,
+      upstreamReconnectDelayMs: 0,
+      fetchImpl: async () => {
+        throw new Error('fetch should not run while the URL cannot be built');
+      },
+    });
+
+    const parkedClient = new FakeSocket();
+    const lateClient = new FakeSocket();
+    try {
+      runtime.wsServer.emit('connection', parkedClient, { url: '/api/global/event/ws' });
+      await expect.poll(() => parkedClient.readyState).toBe(3);
+      expect(parkedClient.sent).toEqual([{ type: 'error', message: 'OpenCode service unavailable' }]);
+
+      await expect.poll(() => hub.isParked()).toBe(true);
+      expect(buildCalls).toBe(2);
+
+      runtime.wsServer.emit('connection', lateClient, { url: '/api/global/event/ws' });
+      await expect.poll(() => lateClient.readyState).toBe(3);
+      expect(lateClient.sent).toEqual([{ type: 'error', message: 'OpenCode service unavailable' }]);
+      expect(buildCalls).toBe(2);
+    } finally {
+      parkedClient.close();
+      lateClient.close();
+      hub.stop();
+      await runtime.close();
+    }
+  });
+
+  it('closes a directory websocket once when the upstream URL stays unavailable', async () => {
+    const server = new EventEmitter();
+    const wsClients = new Set();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let port = 4096;
+    let buildCalls = 0;
+
+    const firstStream = createManualSseResponse({
+      block: 'id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n',
+    });
+
+    const runtime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade() {
+        throw new Error('upgrade should not be used in this test');
+      },
+      buildOpenCodeUrl: (path) => {
+        buildCalls += 1;
+        if (port === null) {
+          throw new Error('OpenCode port is not available');
+        }
+        return `http://127.0.0.1:${port}${path}`;
+      },
+      getOpenCodeAuthHeaders: () => ({}),
+      processForwardedEventPayload() {},
+      wsClients,
+      upstreamReconnectDelayMs: 0,
+      upstreamBuildUrlFailureLimit: 2,
+      fetchImpl: async () => firstStream.response,
+    });
+
+    const socket = new FakeSocket();
+    try {
+      runtime.wsServer.emit('connection', socket, { url: '/api/event/ws?directory=%2Fproj' });
+      await expect.poll(() => socket.sent.some((frame) => frame.eventId === 'evt-1')).toBe(true);
+
+      port = null;
+      firstStream.end();
+      await expect.poll(() => socket.readyState).toBe(3);
+
+      expect(socket.sent).toContainEqual({ type: 'error', message: 'OpenCode service unavailable' });
+      expect(socket.closeCalls).toEqual([{ code: 1011, reason: 'OpenCode service unavailable' }]);
+      const proxyWarnings = () => warnSpy.mock.calls.filter(([message]) => message === 'Message stream WS proxy error:');
+      expect(proxyWarnings()).toHaveLength(1);
+      expect(buildCalls).toBe(3);
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(buildCalls).toBe(3);
+      expect(proxyWarnings()).toHaveLength(1);
+    } finally {
+      socket.close();
+      await runtime.close();
+      warnSpy.mockRestore();
+    }
   });
 });
