@@ -41,6 +41,7 @@ import type { ComposerEditorViewStore } from './viewStore';
 import { composerEditorTheme, composerSelectionExtension } from './theme';
 import { handleComposerHostMouseDown } from './hostMouseDown';
 import { restoreDeferredEnterModifiers } from '../keyboardPolicy';
+import { getComposerHeightLimit } from './heightLimit';
 
 export interface ComposerSelection {
     start: number;
@@ -435,12 +436,14 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                     getComputedStyle(view.contentDOM).lineHeight || '',
                 );
                 if (!Number.isFinite(lineHeight) || lineHeight <= 0) return;
-                let cap = lineHeight * maxLines;
-                if (boundEl && branch) {
-                    const chrome = branch.offsetHeight - view.scrollDOM.offsetHeight;
-                    const available = boundEl.clientHeight - chrome - boundGapPx;
-                    if (available > 0) cap = Math.min(cap, available);
-                }
+                const cap = getComposerHeightLimit({
+                    maxLinesHeight: lineHeight * maxLines,
+                    boundHeight: boundEl?.clientHeight,
+                    surroundingHeight: branch
+                        ? branch.offsetHeight - view.scrollDOM.offsetHeight
+                        : undefined,
+                    boundGapPx,
+                });
                 const next = `${cap}px`;
                 // The scroller growing re-fires the observer with an unchanged
                 // result; writing only on change keeps that loop silent.
