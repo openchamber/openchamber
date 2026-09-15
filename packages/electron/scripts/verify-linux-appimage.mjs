@@ -13,7 +13,7 @@ const ELF_MACHINE = { x64: 62, arm64: 183 };
 // sherpa-onnx-node loads this Node-API addon from its platform-specific prebuilt
 // package in the separate server worker, so verify its architecture here rather
 // than Electron-rebuilding it with the source-built modules.
-const REQUIRED_NATIVE_MODULES = ['pty.node', 'sherpa-onnx.node'];
+export const REQUIRED_NATIVE_MODULES = ['pty.node', 'sherpa-onnx.node'];
 
 /** electron-builder AppImage arch token: x64 → x86_64, arm64 → arm64 */
 export const linuxAppImageArchSuffix = (architecture) => (
@@ -51,7 +51,7 @@ export const assertElfArchitecture = (filePath, expectedArchitecture, label) => 
   }
 };
 
-const collectFiles = (root, predicate) => {
+export const collectFiles = (root, predicate) => {
   const matches = [];
   const visit = (directory) => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
@@ -64,7 +64,7 @@ const collectFiles = (root, predicate) => {
   return matches;
 };
 
-const defaultCliVersion = (binaryPath) => {
+export const defaultCliVersion = (binaryPath) => {
   const result = spawnSync(binaryPath, ['--version'], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
