@@ -32,6 +32,7 @@ import {
   normalizeAuthEntry,
   buildResult,
   toUsageWindow,
+  resolveBusinessError,
   resolveWindowSeconds,
   normalizeTimestamp
 } from '../utils/index.js';
@@ -102,6 +103,16 @@ export const fetchQuota = async () => {
     }
 
     const payload = await response.json();
+    const businessError = resolveBusinessError(payload);
+    if (businessError) {
+      return buildResult({
+        providerId,
+        providerName,
+        ok: false,
+        configured: true,
+        error: businessError
+      });
+    }
     const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
 
     const tokensLimit = limits.find((limit) => limit?.type === 'TOKENS_LIMIT');

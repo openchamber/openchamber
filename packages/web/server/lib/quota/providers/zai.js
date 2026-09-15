@@ -5,6 +5,7 @@ import {
   buildResult,
   toUsageWindow,
   toNumber,
+  resolveBusinessError,
   resolveWindowSeconds,
   resolveWindowLabel,
   normalizeTimestamp
@@ -69,6 +70,16 @@ export const fetchQuota = async () => {
     }
 
     const payload = await response.json();
+    const businessError = resolveBusinessError(payload);
+    if (businessError) {
+      return buildResult({
+        providerId,
+        providerName,
+        ok: false,
+        configured: true,
+        error: businessError
+      });
+    }
     const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
     const windows = {};
     // The API renamed TOKENS_LIMIT to CREDIT_LIMIT; field semantics stayed the same,

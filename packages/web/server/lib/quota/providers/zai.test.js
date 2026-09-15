@@ -84,4 +84,19 @@ describe('Z.ai quota provider', () => {
       valueLabel: '65 / 60k credits',
     });
   });
+
+  it('surfaces business-layer auth errors returned with HTTP 200', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
+      code: 401,
+      success: false,
+      msg: 'token expired or incorrect',
+    })));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.error).toBe('token expired or incorrect');
+    expect(result.usage).toBeNull();
+  });
 });
