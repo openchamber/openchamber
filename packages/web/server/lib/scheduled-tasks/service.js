@@ -149,6 +149,15 @@ export const createScheduledTaskService = (dependencies) => {
       throw new OpenChamberControlError(result.error || 'Task already running', 409);
     }
     if (result.skipped) throw new OpenChamberControlError('Task not found or disabled', 404);
+    if (result.status === 'denied') {
+      throw new OpenChamberControlError(result.error || 'Task denied by preflight policy', 403, {
+        task: result.task,
+        denied: true,
+        ...(typeof result.persistError === 'string' && result.persistError.trim()
+          ? { persistError: result.persistError.trim() }
+          : {}),
+      });
+    }
     if (!result.ok) {
       throw new OpenChamberControlError(result.error || 'Task run failed', 500, { task: result.task });
     }

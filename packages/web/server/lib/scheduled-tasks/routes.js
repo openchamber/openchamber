@@ -123,7 +123,14 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     try {
       return res.json({ ok: true, ...await scheduledTaskService.run(projectID, taskID) });
     } catch (error) {
-      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message, ...(error.task ? { task: error.task } : {}) });
+      if (error?.statusCode) {
+        return res.status(error.statusCode).json({
+          error: error.message,
+          ...(error.task ? { task: error.task } : {}),
+          ...(error.denied ? { denied: true } : {}),
+          ...(error.persistError ? { persistError: error.persistError } : {}),
+        });
+      }
       console.error('[ScheduledTasks] failed to run task:', error);
       return res.status(500).json({ error: 'Failed to run scheduled task' });
     }
