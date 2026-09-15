@@ -11,6 +11,8 @@ const DEFAULT_MAX_RUN_MS = 30 * 60 * 1000;
 const JITTER_MAX_MS = 2_000;
 const TASK_TITLE_MAX_LENGTH = 120;
 const TASK_DUE_SLACK_MS = 5_000;
+const PROMPT_LANDED_TIMEOUT_MS = 5_000;
+const PROMPT_LANDED_POLL_MS = 150;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 const buildTaskKey = (projectID, taskID) => `${projectID}:${taskID}`;
@@ -70,6 +72,47 @@ const safeErrorMessage = (error, maxLength = 2_000) => {
     return 'Unknown error';
   }
   return trimmed.length > maxLength ? trimmed.slice(0, maxLength) : trimmed;
+};
+
+const latestUserMessageID = async ({ client, sessionID, projectPath }) => {
+  if (!client?.session?.messages) {
+    return { ok: false, messageID: null };
+  }
+
+  try {
+    const response = await client.session.messages({ sessionID, directory: projectPath, limit: 100 });
+    if (response?.error || !Array.isArray(response?.data)) {
+      return { ok: false, messageID: null };
+    }
+
+    let latest = null;
+    for (const message of response.data) {
+      const info = message?.info;
+      if (info?.role !== 'user' || !info.id) continue;
+      if (!latest || (info.time?.created || 0) >= (latest.time?.created || 0)) {
+        latest = info;
+      }
+    }
+    return { ok: true, messageID: latest?.id || null };
+  } catch {
+    return { ok: false, messageID: null };
+  }
+};
+
+// prompt_async acknowledges the dispatch before OpenCode persists the user
+// message. Wait for that durable record so a scheduled run cannot report
+// success while its new thread is still empty.
+const waitForPromptLanded = async ({ client, sessionID, projectPath, baselineUserMessageID, timeoutMs = PROMPT_LANDED_TIMEOUT_MS, pollMs = PROMPT_LANDED_POLL_MS }) => {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const latest = await latestUserMessageID({ client, sessionID, projectPath });
+    if (latest.ok && latest.messageID && latest.messageID !== baselineUserMessageID) return true;
+    // A failed lookup proves nothing about the prompt, so keep polling
+    // through transient errors. Only fail open at the deadline: returning
+    // early here would publish the session inside the race window.
+    if (Date.now() >= deadline) return !latest.ok;
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
 };
 
 export const parseScheduledCommandPrompt = (prompt) => {
@@ -254,6 +297,9 @@ export const createScheduledTasksRuntime = (deps) => {
     waitForOpenCodeReady,
     emitTaskRunEvent,
     setSessionAutoAccept,
+    createClient = createOpencodeClient,
+    promptLandedTimeoutMs = PROMPT_LANDED_TIMEOUT_MS,
+    promptLandedPollMs = PROMPT_LANDED_POLL_MS,
     sessionKnowledgeRuntime = null,
     logger = console,
     maxGlobalConcurrency = DEFAULT_GLOBAL_CONCURRENCY,
@@ -561,7 +607,7 @@ export const createScheduledTasksRuntime = (deps) => {
 
     const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
     const authHeaders = getOpenCodeAuthHeaders();
-    const client = createOpencodeClient({
+    const client = createClient({
       baseUrl,
       headers: authHeaders,
     });
@@ -575,17 +621,6 @@ export const createScheduledTasksRuntime = (deps) => {
       throw new Error('failed to create session');
     }
 
-    try {
-      emitTaskRunEvent?.({
-        projectID,
-        taskID: task.id,
-        ranAt: startedAt,
-        status: 'running',
-        sessionID,
-      });
-    } catch {
-    }
-
     if (task.execution.permissionAutoAccept && typeof setSessionAutoAccept === 'function') {
       // Enroll before the prompt goes out so the very first permission request
       // is already auto-approved. Enrollment failure must not kill the run —
@@ -597,6 +632,7 @@ export const createScheduledTasksRuntime = (deps) => {
       }
     }
 
+    const baseline = await latestUserMessageID({ client, sessionID, projectPath });
     const scheduledCommand = await resolveScheduledCommand({ client, projectPath, task });
 
     if (task.execution.goalEnabled) {
@@ -626,6 +662,32 @@ export const createScheduledTasksRuntime = (deps) => {
         projectPath,
         task,
       });
+    }
+
+    const landed = await waitForPromptLanded({
+      client,
+      sessionID,
+      projectPath,
+      baselineUserMessageID: baseline.messageID,
+      timeoutMs: promptLandedTimeoutMs,
+      pollMs: promptLandedPollMs,
+    });
+    if (!landed) {
+      throw new Error('scheduled task dispatch was accepted but its user message never appeared in the session');
+    }
+
+    // Do not publish the session to the UI until its first user message is
+    // durable. The UI refreshes global sessions from this event, and an early
+    // refresh can cache the newly created session as an empty transcript.
+    try {
+      emitTaskRunEvent?.({
+        projectID,
+        taskID: task.id,
+        ranAt: startedAt,
+        status: 'running',
+        sessionID,
+      });
+    } catch {
     }
 
     const finishedAt = Date.now();

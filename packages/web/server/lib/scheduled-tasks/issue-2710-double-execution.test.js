@@ -16,11 +16,19 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 const sdk = vi.hoisted(() => ({
   sessionCreates: [],
+  messageSeq: 0,
   createOpencodeClient: () => ({
     session: {
       create: async () => {
         sdk.sessionCreates.push(Date.now());
         return { data: { id: `sess-${sdk.sessionCreates.length}` } };
+      },
+      // The runtime waits for the dispatched prompt to persist before
+      // reporting success. Each read returns a new user message so the wait
+      // resolves on the first poll instead of hanging on fake timers.
+      messages: async () => {
+        sdk.messageSeq += 1;
+        return { data: [{ info: { id: `msg-${sdk.messageSeq}`, role: 'user', time: { created: Date.now() } } }] };
       },
     },
     command: { list: async () => ({ data: [] }) },
