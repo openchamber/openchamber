@@ -6,12 +6,13 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { fetchUpdateNotes } from './changelog/update-notes.js';
 
+import { resolveNpmRegistryRequest } from './npm-registry-config.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PACKAGE_NAME = '@openchamber/web';
 const PACKAGE_PATH_SEGMENTS = PACKAGE_NAME.split('/');
-const NPM_REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}`;
 const GITHUB_RELEASES_URL = 'https://github.com/openchamber/openchamber/releases';
 const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/openchamber/openchamber/releases';
 let cachedDetectedPm = null;
@@ -686,8 +687,9 @@ export function getCurrentVersion() {
  */
 async function getLatestVersion() {
   try {
-    const response = await fetch(NPM_REGISTRY_URL, {
-      headers: { Accept: 'application/json' },
+    const request = resolveNpmRegistryRequest(PACKAGE_NAME);
+    const response = await fetch(request.url, {
+      headers: { Accept: 'application/json', ...request.headers },
       signal: AbortSignal.timeout(10000),
     });
 
