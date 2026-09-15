@@ -33,6 +33,8 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useI18n } from '@/lib/i18n';
 import { useLocalTTS } from '@/hooks/useLocalTTS';
 import { disposePreviewAudio } from './voicePreviewAudio';
+import { BrowserDictationTest } from './BrowserDictationTest';
+import { isBrowserDictationSupported } from '@/hooks/useBrowserDictation';
 
 const LOCAL_STT_MODELS = [
     {
@@ -533,6 +535,8 @@ export const VoiceSettings: React.FC = () => {
     const setSttLocalModel = useConfigStore((state) => state.setSttLocalModel);
     const sttLanguage = useConfigStore((state) => state.sttLanguage);
     const setSttLanguage = useConfigStore((state) => state.setSttLanguage);
+    const browserSttSupported = isBrowserDictationSupported();
+    const webSpeechSelected = sttProvider === 'web-speech';
     const setShowMessageTTSButtons = useConfigStore((state) => state.setShowMessageTTSButtons);
     const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
     const setDictationEnabled = useConfigStore((state) => state.setDictationEnabled);
@@ -1189,6 +1193,7 @@ export const VoiceSettings: React.FC = () => {
                                 <ul className="space-y-1">
                                     <li><strong>{t('settings.voice.page.provider.local')}</strong> {t('settings.voice.page.tooltip.sttLocal')}</li>
                                     <li><strong>{t('settings.voice.page.provider.server')}</strong> {t('settings.voice.page.tooltip.sttServer')}</li>
+                                    <li><strong>{t('settings.voice.page.provider.browser')}</strong> {t(browserSttSupported ? 'settings.voice.page.tooltip.sttBrowser' : 'settings.voice.page.browserTest.unavailable')}</li>
                                 </ul>
                             )}
                         >
@@ -1200,9 +1205,16 @@ export const VoiceSettings: React.FC = () => {
                                 options={[
                                     { value: 'local', label: t('settings.voice.page.provider.local') },
                                     { value: 'openai-compatible', label: t('settings.voice.page.provider.server') },
+                                    { value: 'web-speech', label: t('settings.voice.page.provider.browser'), disabled: !browserSttSupported },
                                 ]}
                             />
                         </SettingsControlGroup>
+
+                        {webSpeechSelected && browserSttSupported && <BrowserDictationTest />}
+
+                        {webSpeechSelected && !browserSttSupported && (
+                            <p className={SETTINGS_HELPER_CLASS}>{t('settings.voice.page.browserFallback')}</p>
+                        )}
 
                         {sttProvider === 'local' && (
                             <div className="space-y-1.5">
@@ -1275,20 +1287,22 @@ export const VoiceSettings: React.FC = () => {
                                         />
                                     </div>
                                 </div>
-                                <div className="space-y-1.5">
-                                    <span className="flex items-center gap-1.5">
-                                        <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.voice.page.field.language')}</span>
-                                        <SettingsInfoHint>{t('settings.voice.page.field.sttLanguageHint')}</SettingsInfoHint>
-                                    </span>
-                                    <div className="relative max-w-[8rem]">
-                                        <input
-                                            type="text"
-                                            value={sttLanguage}
-                                            onChange={(e) => setSttLanguage(e.target.value)}
-                                            placeholder="auto"
-                                            className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
-                                        />
-                                    </div>
+                            </div>
+                        )}
+                        {(sttProvider === 'openai-compatible' || (webSpeechSelected && browserSttSupported)) && (
+                            <div className="space-y-1.5">
+                                <span className="flex items-center gap-1.5">
+                                    <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.voice.page.field.language')}</span>
+                                    <SettingsInfoHint>{t('settings.voice.page.field.sttLanguageHint')}</SettingsInfoHint>
+                                </span>
+                                <div className="relative max-w-[8rem]">
+                                    <input
+                                        type="text"
+                                        value={sttLanguage}
+                                        onChange={(e) => setSttLanguage(e.target.value)}
+                                        placeholder="auto"
+                                        className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                    />
                                 </div>
                             </div>
                         )}

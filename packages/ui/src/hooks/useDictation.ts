@@ -33,6 +33,8 @@ export interface UseDictationResult {
     partialTranscript: string;
     /** Subscribe to the normalized (0..1) mic level for the waveform. */
     subscribeLevel: (listener: DictationLevelListener) => () => void;
+    /** False when level metering failed and recording continues without a waveform. Browser engine only. */
+    meterAvailable?: boolean;
     duration: number;
     error: string | null;
     errorReason: string | null;
@@ -228,6 +230,10 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
 
         try {
             await audio.start();
+            if (statusRef.current !== 'recording') {
+                await audio.stop();
+                return;
+            }
             startDurationTracking();
             // Open the stream eagerly so audio uploads while the user speaks
             // and only the tail is left to transcribe on stop.
@@ -297,6 +303,7 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
 
         try {
             await audio.stop();
+            if (statusRef.current !== 'recording') return null;
             setStatus('uploading');
             statusRef.current = 'uploading';
 
@@ -306,8 +313,10 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
             }
 
             const result = await senderRef.current!.finish(finalSeq);
+            if (statusRef.current !== 'uploading') return null;
             return handleSuccess(result.text);
         } catch (err) {
+            if (!['recording', 'uploading'].includes(statusRef.current)) return null;
             handleFailure(err);
             return null;
         } finally {
