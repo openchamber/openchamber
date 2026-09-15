@@ -878,6 +878,7 @@ interface UIStore {
   favoriteModels: Array<{ providerID: string; modelID: string }>;
   hiddenModels: Array<{ providerID: string; modelID: string }>;
   providerOrder: string[];
+  disabledProviders: string[];
   collapsedModelProviders: string[];
   recentModels: Array<{ providerID: string; modelID: string }>;
   recentAgents: string[];
@@ -1092,6 +1093,8 @@ interface UIStore {
     overModelID: string,
   ) => void;
   setProviderOrder: (orderedProviderIDs: string[]) => void;
+  setDisabledProviders: (providerIDs: string[]) => void;
+  toggleProviderDisabled: (providerID: string) => void;
   toggleHiddenModel: (providerID: string, modelID: string) => void;
   isHiddenModel: (providerID: string, modelID: string) => boolean;
   hideAllModels: (providerID: string, modelIDs: string[]) => void;
@@ -1270,6 +1273,7 @@ export const useUIStore = create<UIStore>()(
         favoriteModels: [],
         hiddenModels: [],
         providerOrder: [],
+        disabledProviders: [],
         collapsedModelProviders: [],
         recentModels: [],
         recentAgents: [],
@@ -2338,6 +2342,31 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
+        setDisabledProviders: (providerIDs) => {
+          set((state) => {
+            const next = Array.from(new Set(
+              providerIDs.filter((id) => typeof id === 'string' && id.length > 0),
+            ));
+            const current = state.disabledProviders;
+            if (current.length === next.length && current.every((id, index) => id === next[index])) {
+              return state;
+            }
+            return { disabledProviders: next };
+          });
+        },
+
+        toggleProviderDisabled: (providerID) => {
+          const normalizedProviderID = typeof providerID === 'string' ? providerID.trim() : '';
+          if (!normalizedProviderID) {
+            return;
+          }
+          set((state) => ({
+            disabledProviders: state.disabledProviders.includes(normalizedProviderID)
+              ? state.disabledProviders.filter((id) => id !== normalizedProviderID)
+              : [...state.disabledProviders, normalizedProviderID],
+          }));
+        },
+
         toggleHiddenModel: (providerID, modelID) => {
           set((state) => {
             const exists = state.hiddenModels.some(
@@ -3036,6 +3065,7 @@ export const useUIStore = create<UIStore>()(
           favoriteModels: state.favoriteModels,
           hiddenModels: state.hiddenModels,
           providerOrder: state.providerOrder,
+          disabledProviders: state.disabledProviders,
           collapsedModelProviders: state.collapsedModelProviders,
           recentModels: state.recentModels,
           recentAgents: state.recentAgents,

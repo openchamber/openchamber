@@ -19,7 +19,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { handleDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { mergeModelMetadataWithLiveModel } from '@/lib/modelMetadata';
-import { getModelDisplayName as getSharedModelDisplayName } from '@/lib/modelDisplay';
+import { orderProvidersByUserOrder } from '@/lib/providerOrdering';
+import { getModelDisplayName as getSharedModelDisplayName, sortModelsByDisplayName } from '@/lib/modelDisplay';
 import { cn } from '@/lib/utils';
 import { useModelPickerSectionsStore } from '@/stores/useModelPickerSectionsStore';
 import type { ModelMetadata } from '@/types';
@@ -370,6 +371,8 @@ interface ModelPickerListProps {
   reorderFavoriteAriaLabel?: string;
   reorderFavoriteTitle?: string;
   providerOrder?: string[];
+  /** Providers the user disabled in Settings; hidden from the picker entirely. */
+  disabledProviderIds?: string[];
   onReorderProvider?: (orderedProviderIDs: string[]) => void;
   reorderProviderTitle?: string;
   footerContent?: React.ReactNode | ((activeEntry: ModelPickerEntry | undefined) => React.ReactNode);
@@ -411,6 +414,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   reorderFavoriteAriaLabel,
   reorderFavoriteTitle,
   providerOrder,
+  disabledProviderIds,
   onReorderProvider,
   reorderProviderTitle,
   footerContent,
@@ -479,15 +483,17 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     return matchesQuery(getModelDisplayName(model), providerName, modelID);
   }), [allowedProviderSet, isHidden, isModelAllowed, matchesQuery, providerById, recentModels]);
 
+  const disabledProviderSet = React.useMemo(
+    () => (disabledProviderIds && disabledProviderIds.length > 0 ? new Set(disabledProviderIds) : null),
+    [disabledProviderIds],
+  );
+
   const orderedProviders = React.useMemo(() => {
-    if (!providerOrder || providerOrder.length === 0) return providers;
-    const rank = new Map(providerOrder.map((id, index) => [id, index] as const));
-    const ranked = providers
-      .filter((provider) => rank.has(provider.id))
-      .sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
-    const unranked = providers.filter((provider) => !rank.has(provider.id));
-    return [...ranked, ...unranked];
-  }, [providerOrder, providers]);
+    const enabled = disabledProviderSet
+      ? providers.filter((provider) => !disabledProviderSet.has(provider.id))
+      : providers;
+    return orderProvidersByUserOrder(enabled, providerOrder ?? []);
+  }, [disabledProviderSet, providerOrder, providers]);
 
   const filteredProviders = React.useMemo(() => orderedProviders
     .filter((provider) => !allowedProviderSet || allowedProviderSet.has(provider.id))
@@ -499,7 +505,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
         if (isModelAllowed && !isModelAllowed(provider.id, modelID)) return false;
         return matchesQuery(getModelDisplayName(model), provider.name || provider.id, modelID);
       });
-      return { ...provider, models: filteredModels };
+      return { ...provider, models: sortModelsByDisplayName(filteredModels) };
     })
     .filter((provider) => provider.models.length > 0), [allowedProviderSet, isHidden, isModelAllowed, matchesQuery, orderedProviders]);
 

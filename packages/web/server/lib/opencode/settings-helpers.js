@@ -1,6 +1,12 @@
-import { createRequire } from 'node:module';
+import {createRequire} from 'node:module';
 
-import { isAgentMemoryFeatureAvailable } from '../agent-memory/feature-flag.js';
+import {isAgentMemoryFeatureAvailable} from '../agent-memory/feature-flag.js';
+import {
+  DEFAULT_INPUT_HISTORY_LIMIT,
+  DEFAULT_INPUT_HISTORY_SCOPE,
+  isInputHistoryLimit,
+  isInputHistoryScope,
+} from './input-history-scope.js';
 
 // Generated from packages/ui/src/lib/settings/registry.ts by
 // `bun run settings-registry:generate`; `registry.test.ts` fails when stale.
@@ -17,8 +23,8 @@ const isPersistableSettingsKey = (key) => {
   const field = settingsRegistry.fields[key];
   if (!field) return false;
   if (field.computed || field.local) return false;
-  if (field.owner === 'desktop-shell') return false;
-  return true;
+  return field.owner !== 'desktop-shell';
+
 };
 
 /** Keys accepted on write but never returned by a read. */
@@ -27,12 +33,6 @@ const SECRET_SETTINGS_KEYS = Object.freeze(
     .filter(([, field]) => field.secret === true)
     .map(([key]) => key),
 );
-import {
-  DEFAULT_INPUT_HISTORY_LIMIT,
-  DEFAULT_INPUT_HISTORY_SCOPE,
-  isInputHistoryLimit,
-  isInputHistoryScope,
-} from './input-history-scope.js';
 
 export const createSettingsHelpers = (dependencies) => {
   const {
@@ -217,8 +217,7 @@ export const createSettingsHelpers = (dependencies) => {
     // Accept empty-string to clear (we persist an empty string sentinel so the running
     // process can reliably drop a previously applied OPENCODE_BINARY override).
     if (typeof candidate.opencodeBinary === 'string') {
-      const normalized = normalizeDirectoryPath(candidate.opencodeBinary).trim();
-      result.opencodeBinary = normalized;
+      result.opencodeBinary = normalizeDirectoryPath(candidate.opencodeBinary).trim();
     }
     if (typeof candidate.workStatusPanelEnabled === 'boolean') {
       result.workStatusPanelEnabled = candidate.workStatusPanelEnabled;
@@ -402,6 +401,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (Array.isArray(candidate.providerOrder)) {
       result.providerOrder = normalizeStringArray(candidate.providerOrder);
     }
+    if (Array.isArray(candidate.disabledProviders)) {
+      result.disabledProviders = normalizeStringArray(candidate.disabledProviders);
+    }
     if (typeof candidate.sessionRecapEnabled === 'boolean') {
       result.sessionRecapEnabled = candidate.sessionRecapEnabled;
     }
@@ -472,8 +474,7 @@ export const createSettingsHelpers = (dependencies) => {
       result.autoDeleteEnabled = candidate.autoDeleteEnabled;
     }
     if (typeof candidate.autoDeleteAfterDays === 'number' && Number.isFinite(candidate.autoDeleteAfterDays)) {
-      const normalizedDays = Math.max(1, Math.min(365, Math.round(candidate.autoDeleteAfterDays)));
-      result.autoDeleteAfterDays = normalizedDays;
+      result.autoDeleteAfterDays = Math.max(1, Math.min(365, Math.round(candidate.autoDeleteAfterDays)));
     }
     if (candidate.sessionRetentionAction === 'archive' || candidate.sessionRetentionAction === 'delete') {
       result.sessionRetentionAction = candidate.sessionRetentionAction;
@@ -505,8 +506,7 @@ export const createSettingsHelpers = (dependencies) => {
       result.managedLocalTunnelConfigPath = trimmed.length > 0 ? normalizeOptionalPath(trimmed) : null;
     }
     if (typeof candidate.managedRemoteTunnelHostname === 'string') {
-      const hostname = normalizeManagedRemoteTunnelHostname(candidate.managedRemoteTunnelHostname);
-      result.managedRemoteTunnelHostname = hostname;
+      result.managedRemoteTunnelHostname = normalizeManagedRemoteTunnelHostname(candidate.managedRemoteTunnelHostname);
     }
     if (candidate.managedRemoteTunnelToken === null) {
       result.managedRemoteTunnelToken = null;
@@ -979,17 +979,15 @@ export const createSettingsHelpers = (dependencies) => {
         ? current.securityScopedBookmarks
         : [];
 
-    const next = {
+    return {
       ...current,
       ...changes,
       securityScopedBookmarks: Array.from(
-        new Set(
-          baseBookmarks.filter((entry) => typeof entry === 'string' && entry.length > 0)
-        )
+          new Set(
+              baseBookmarks.filter((entry) => typeof entry === 'string' && entry.length > 0)
+          )
       ),
     };
-
-    return next;
   };
 
   const formatSettingsResponse = (settings) => {

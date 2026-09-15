@@ -439,6 +439,7 @@ export const SETTINGS_REGISTRY = {
   recentAgents: field({ scope: 'profile', parse: parseStringSet, ui: uiStore('recentAgents', setUi('recentAgents'), { autoSave: false }) }),
   recentEfforts: field({ scope: 'profile', parse: parseRecentEfforts, ui: uiStore('recentEfforts', setUi('recentEfforts'), { autoSave: false }) }),
   providerOrder: field({ scope: 'profile', parse: parseStringSet, ui: uiStore('providerOrder', (v) => useUIStore.getState().setProviderOrder(v)) }),
+  disabledProviders: field({ scope: 'profile', parse: parseStringSet, ui: uiStore('disabledProviders', (v) => useUIStore.getState().setDisabledProviders(v)) }),
 
   // ── Sessions and summaries (profile) ──
   sessionRecapEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionRecapEnabled', (v) => useUIStore.getState().setSessionRecapEnabled(v)) }),
