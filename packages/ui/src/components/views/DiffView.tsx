@@ -1768,6 +1768,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
             )) {
                 return;
             }
+            event.preventDefault();
             if (changedFiles.length === 0) return;
             const delta = event.key === 'ArrowDown' ? 1 : -1;
             const index = displayFile ? changedFiles.findIndex((file) => file.path === displayFile) : -1;
@@ -1776,7 +1777,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 : index + delta;
             const next = changedFiles[nextIndex];
             if (!next) return;
-            event.preventDefault();
             handleSelectFileAndScroll(next.path);
         };
         window.addEventListener('keydown', handleKeyDown);
