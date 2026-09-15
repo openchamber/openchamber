@@ -19,6 +19,7 @@ import { getAttachedSessionDirectory } from '@/sync/session-worktree-contract';
 import { useStreamingStore } from '@/sync/streaming';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getImeTraceSnapshot } from '@/lib/imeTrace';
 
 export interface DebugMessageInfo {
   messageId: string;
@@ -517,6 +518,16 @@ export const debugUtils = {
     return { ...result, report } as const;
   },
 
+  getImeTrace() {
+    return getImeTraceSnapshot();
+  },
+
+  async copyImeTrace() {
+    const report = JSON.stringify(getImeTraceSnapshot(), null, 2);
+    const result = await this.copyTextToClipboard(report);
+    return { ...result, report } as const;
+  },
+
    checkLastMessage() {
     const info = this.getLastAssistantMessage();
     if (!info) return false;
@@ -826,6 +837,8 @@ if (typeof window !== 'undefined') {
     console.log('  __opencodeDebug.getStreamingState() - Get streaming state info');
     console.log('  __opencodeDebug.analyzeMessageCompletionConsistency(opts?) - Compare time.completed vs part timings');
     console.log('  __opencodeDebug.checkCompletionStatus() - Check completion status of last message');
+    console.log('  __opencodeDebug.getImeTrace() - Get privacy-safe IME trace metadata');
+    console.log('  __opencodeDebug.copyImeTrace() - Copy privacy-safe IME trace metadata');
   }
 
   window.addEventListener('error', (event) => {

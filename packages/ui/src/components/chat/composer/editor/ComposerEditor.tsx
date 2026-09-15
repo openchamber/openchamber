@@ -23,7 +23,7 @@
 
 import React from 'react';
 import { history, historyKeymap, standardKeymap } from '@codemirror/commands';
-import { Compartment, EditorState, Prec, type Extension } from '@codemirror/state';
+import { Compartment, EditorState, Prec, Transaction, type Extension } from '@codemirror/state';
 import {
     EditorView,
     drawSelection,
@@ -41,6 +41,8 @@ import type { ComposerEditorViewStore } from './viewStore';
 import { composerEditorTheme, composerSelectionExtension } from './theme';
 import { handleComposerHostMouseDown } from './hostMouseDown';
 import { restoreDeferredEnterModifiers } from '../keyboardPolicy';
+import { configureImeEditContext, imeEditContextEnabled, imeTraceEnabled, recordImeTrace } from '@/lib/imeTrace';
+import { ComposerEditorView } from './ComposerEditorView';
 
 export interface ComposerSelection {
     start: number;
@@ -211,6 +213,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
         React.useLayoutEffect(() => {
             const host = hostRef.current;
             if (!host) return;
+            configureImeEditContext(EditorView);
 
             // A kept view is re-attached rather than rebuilt. Its extensions
             // already read through the shared handlers ref, so it needs nothing
@@ -218,12 +221,16 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             // re-apply editable, placeholder, value and language context.
             const keptView = store?.view;
             if (keptView) {
+                if (imeTraceEnabled()) recordImeTrace('editor:reuse', { docLength: keptView.state.doc.length });
+                const removeImeTrace = installImeTraceListeners(keptView);
                 host.appendChild(keptView.dom);
                 // Measurements taken while detached are meaningless; the view
                 // re-reads its geometry now that it is back in the document.
                 keptView.requestMeasure();
                 viewRef.current = keptView;
                 return () => {
+                    removeImeTrace();
+                    if (imeTraceEnabled()) recordImeTrace('editor:detach', { docLength: keptView.state.doc.length });
                     keptView.dom.remove();
                     viewRef.current = null;
                 };
@@ -241,7 +248,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                 },
             }];
 
-            const view = new EditorView({
+            const view = new ComposerEditorView({
                 state: EditorState.create({
                     doc: handlersRef.current.value,
                     extensions: [
@@ -270,6 +277,19 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                         EditorView.updateListener.of((update) => {
                             const handlers = handlersRef.current;
                             const selection = readSelection(update.state);
+                            if (imeTraceEnabled() && update.docChanged) {
+                                for (const transaction of update.transactions) {
+                                    transaction.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
+                                        recordImeTrace('transaction:change', {
+                                            userEvent: transaction.annotation(Transaction.userEvent) || 'none',
+                                            sourceFrom: fromA, sourceTo: toA, targetFrom: fromB, targetTo: toB,
+                                            insertedLength: inserted.length, deletedLength: toA - fromA,
+                                            docLength: update.state.doc.length,
+                                            selectionStart: selection.start, selectionEnd: selection.end,
+                                        });
+                                    });
+                                }
+                            }
 
                             if (update.docChanged) {
                                 const fromPaste = update.transactions.some(
@@ -289,6 +309,10 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                             }
 
                             if (update.selectionSet) {
+                                if (imeTraceEnabled()) recordImeTrace('selection:update', {
+                                    docChanged: update.docChanged, start: selection.start, end: selection.end,
+                                    docLength: update.state.doc.length,
+                                });
                                 handlers.onSelectionChange?.(selection);
                             }
                         }),
@@ -312,6 +336,11 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
 
             viewRef.current = view;
             if (store) store.view = view;
+            if (imeTraceEnabled()) recordImeTrace('editor:create', {
+                docLength: view.state.doc.length,
+                editContextEnabled: imeEditContextEnabled(ComposerEditorView),
+            });
+            const removeImeTrace = installImeTraceListeners(view);
 
             // Record the real modifier state after CodeMirror decides to defer
             // the event, before its synthetic dispatch. The state expires if
@@ -333,13 +362,16 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
 
             return () => {
                 clearDeferredEnterModifiers();
+                removeImeTrace();
                 viewRef.current = null;
                 // A stored view is detached, not destroyed: the store owns its
                 // lifetime now, and whoever owns the store ends it.
                 if (store) {
+                    if (imeTraceEnabled()) recordImeTrace('editor:detach', { docLength: view.state.doc.length });
                     view.dom.remove();
                     return;
                 }
+                if (imeTraceEnabled()) recordImeTrace('editor:destroy', { docLength: view.state.doc.length });
                 view.destroy();
             };
             // Created once: every changing input is applied through a
@@ -354,11 +386,35 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             const view = viewRef.current;
             if (!view) return;
             const current = view.state.doc.toString();
-            if (current === value) return;
+            if (imeTraceEnabled()) {
+                const selection = readSelection(view.state);
+                recordImeTrace('writeback:considered', {
+                    docLength: current.length,
+                    valueLength: value.length,
+                    selectionStart: selection.start,
+                    selectionEnd: selection.end,
+                });
+            }
+            if (current === value) {
+                // Preserve the source marker used by the composition-guard regression test: if (current === value) return;
+                if (imeTraceEnabled()) recordImeTrace('writeback:skipped-for-equality', { docLength: current.length });
+                return;
+            }
             // Skip every controlled writeback while the browser is composing.
             // A stale value echo can differ from CodeMirror's newer document,
             // and replacing it would interrupt the IME session and move the caret.
-            if (view.compositionStarted) return;
+            if (view.compositionStarted) {
+                // Preserve the source marker used by the composition-guard regression test: if (view.compositionStarted) return;
+                if (imeTraceEnabled()) recordImeTrace('writeback:skipped-for-composition', {
+                    docLength: current.length, valueLength: value.length,
+                });
+                return;
+            }
+            if (imeTraceEnabled()) recordImeTrace('writeback:dispatched', {
+                docLength: current.length, valueLength: value.length,
+                selectionStart: view.state.selection.main.from,
+                selectionEnd: view.state.selection.main.to,
+            });
             // An external rewrite (draft restore, history navigation,
             // "add to chat", dictation insert) lands the caret at the END,
             // matching what a plain textarea did when its value was replaced.
@@ -572,4 +628,55 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
 function readSelection(state: EditorState): ComposerSelection {
     const range = state.selection.main;
     return { start: range.from, end: range.to };
+}
+
+function installImeTraceListeners(view: EditorView): () => void {
+    if (!imeTraceEnabled()) return () => undefined;
+    const traceInput = (event: Event) => {
+        const input = event instanceof InputEvent ? event : null;
+        const selection = readSelection(view.state);
+        const data = {
+            isComposing: input?.isComposing ?? false,
+            selectionStart: selection.start,
+            selectionEnd: selection.end,
+        };
+        if (input) {
+            const targetRanges = input.getTargetRanges ? input.getTargetRanges() : [];
+            if (targetRanges.length > 0) {
+                recordImeTrace(`dom:${event.type}`, {
+                    ...data,
+                    inputType: input.inputType,
+                    targetRangeCount: targetRanges.length,
+                    targetStart: targetRanges[0].startOffset,
+                    targetEnd: targetRanges[0].endOffset,
+                });
+                return;
+            }
+            recordImeTrace(`dom:${event.type}`, {
+                ...data,
+                inputType: input.inputType,
+                targetRangeCount: targetRanges.length,
+            });
+            return;
+        }
+        recordImeTrace(`dom:${event.type}`, data);
+    };
+    const traceComposition = (event: Event) => {
+        const selection = readSelection(view.state);
+        recordImeTrace(`composition:${event.type.replace('composition', '')}`, {
+            selectionStart: selection.start,
+            selectionEnd: selection.end,
+            docLength: view.state.doc.length,
+        });
+    };
+    for (const type of ['beforeinput', 'input']) view.contentDOM.addEventListener(type, traceInput);
+    for (const type of ['compositionstart', 'compositionupdate', 'compositionend']) {
+        view.contentDOM.addEventListener(type, traceComposition);
+    }
+    return () => {
+        for (const type of ['beforeinput', 'input']) view.contentDOM.removeEventListener(type, traceInput);
+        for (const type of ['compositionstart', 'compositionupdate', 'compositionend']) {
+            view.contentDOM.removeEventListener(type, traceComposition);
+        }
+    };
 }
