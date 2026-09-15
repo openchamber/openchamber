@@ -14,7 +14,6 @@ process.env.OPENCHAMBER_DATA_DIR = temporaryQuotaDataDirectory;
 const ORIGINAL_FS = { ...fs };
 const AUTH = JSON.stringify({
   openai: { access: 'test-token' },
-  crof: { key: 'test-token' },
   'cline-pass': { key: 'test-token' },
   neuralwatt: { key: 'test-token' },
   'opencode-go': { key: 'test-token' },
@@ -288,53 +287,6 @@ describe('OpenRouter quota provider (VS Code parity)', () => {
       assert.equal(result.error, 'No quota data in response');
     });
   }
-});
-
-
-describe('Crof quota provider (VS Code parity)', () => {
-  test('reports credits balance as valueLabel with null percent', async () => {
-    stubFetchReturning(() => Promise.resolve(mockResponse({ usable_requests: 450, credits: 12.3456 })));
-
-    const result = await fetchQuotaForProvider('crof');
-
-    assert.equal(result.ok, true);
-    assert.equal(result.providerId, 'crof');
-    assert.equal(result.usage!.windows.credits!.usedPercent, null);
-    assert.equal(result.usage!.windows.credits!.valueLabel, '$12.35');
-  });
-
-  test('tolerates missing credits field', async () => {
-    stubFetchReturning(() => Promise.resolve(mockResponse({ usable_requests: 0 })));
-
-    const result = await fetchQuotaForProvider('crof');
-
-    assert.equal(result.ok, true);
-    assert.equal(result.usage!.windows.credits!.valueLabel, undefined);
-    assert.equal(result.usage!.windows.credits!.usedPercent, null);
-  });
-
-  test('maps 401 to session-expired with CrofAI branding', async () => {
-    stubFetchFailing(async () => ({}), { ok: false, status: 401 });
-
-    const result = await fetchQuotaForProvider('crof');
-
-    assert.equal(result.ok, false);
-    assert.equal(result.configured, true);
-    assert.equal(result.error, 'Session expired — please re-authenticate with CrofAI');
-  });
-
-  test('reports invalid-response on JSON parse failure', async () => {
-    globalThis.fetch = (async () => ({
-      ok: true,
-      status: 200,
-      json: async () => { throw new SyntaxError('Unexpected token'); },
-    }) as unknown as Response) as typeof fetch;
-
-    const result = await fetchQuotaForProvider('crof');
-
-    assert.equal(result.ok, false);
-    assert.equal(result.error, 'Invalid response from provider');
-  });
 });
 
 describe('ClinePass quota provider (VS Code parity)', () => {
