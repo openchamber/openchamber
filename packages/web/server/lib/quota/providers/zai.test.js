@@ -74,14 +74,14 @@ describe('Z.ai quota provider', () => {
       remainingPercent: 99,
       windowSeconds: 5 * 60 * 60,
       resetAt: 1787257978907,
-      valueLabel: '65 / 12k credits',
+      valueLabel: '65 / 12k credits (1%)',
     });
     expect(windows.weekly).toMatchObject({
       usedPercent: 1,
       remainingPercent: 99,
       windowSeconds: 7 * 24 * 60 * 60,
       resetAt: 1787844668997,
-      valueLabel: '65 / 60k credits',
+      valueLabel: '65 / 60k credits (1%)',
     });
   });
 });

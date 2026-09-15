@@ -21,11 +21,19 @@ const formatCreditAmount = (value) => {
   return `${Math.round(value / 100) / 10}k`;
 };
 
+// Append the window's percentage so credit-bearing accounts keep a relative
+// indicator: the usage renderer shows valueLabel instead of the bare percent.
 const formatCreditValueLabel = (limit) => {
   const used = toNumber(limit?.currentValue);
   const total = toNumber(limit?.usage);
   if (used === null || total === null) return null;
-  return `${formatCreditAmount(used)} / ${formatCreditAmount(total)} credits`;
+  const percentage = typeof limit?.percentage === 'number'
+    ? limit.percentage
+    : total > 0
+      ? Math.round((used / total) * 100)
+      : null;
+  const base = `${formatCreditAmount(used)} / ${formatCreditAmount(total)} credits`;
+  return percentage === null ? base : `${base} (${percentage}%)`;
 };
 
 export const isConfigured = () => {
