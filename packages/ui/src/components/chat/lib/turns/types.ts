@@ -131,6 +131,7 @@ export interface TurnGroupingContext {
     userMessageCreatedAt?: number;
     userMessageVariant?: string;
     isWorking: boolean;
+    activitySettled: boolean;
     isGroupExpanded?: boolean;
     toggleGroup?: () => void;
 }
