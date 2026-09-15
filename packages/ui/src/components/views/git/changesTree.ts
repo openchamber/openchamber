@@ -2,33 +2,39 @@ import type { GitStatus } from '@/lib/api/types';
 
 export const TREE_INDENT_PX = 14;
 
-export type ChangesTreeDirectoryNode = {
+type TreePathEntry = {
+  path: string;
+};
+
+type GitStatusFile = GitStatus['files'][number];
+
+export type ChangesTreeDirectoryNode<TEntry extends TreePathEntry = GitStatusFile> = {
   id: string;
   path: string;
   name: string;
-  children: Map<string, ChangesTreeDirectoryNode>;
-  directFiles: GitStatus['files'];
-  files: GitStatus['files'];
+  children: Map<string, ChangesTreeDirectoryNode<TEntry>>;
+  directFiles: TEntry[];
+  files: TEntry[];
 };
 
-export type FlattenedTreeRow =
+export type FlattenedTreeRow<TEntry extends TreePathEntry = GitStatusFile> =
   | {
       key: string;
       kind: 'directory';
       depth: number;
-      directory: ChangesTreeDirectoryNode;
+      directory: ChangesTreeDirectoryNode<TEntry>;
     }
   | {
       key: string;
       kind: 'file';
       depth: number;
-      file: GitStatus['files'][number];
+      file: TEntry;
     };
 
 const normalizePathForTree = (value: string): string =>
   value.replace(/\\/g, '/').replace(/^\/+/, '').trim();
 
-const createDirectoryNode = (path: string, name: string): ChangesTreeDirectoryNode => ({
+const createDirectoryNode = <TEntry extends TreePathEntry>(path: string, name: string): ChangesTreeDirectoryNode<TEntry> => ({
   id: `dir:${path}`,
   path,
   name,
@@ -37,8 +43,8 @@ const createDirectoryNode = (path: string, name: string): ChangesTreeDirectoryNo
   files: [],
 });
 
-export const buildChangesTree = (entries: GitStatus['files']): ChangesTreeDirectoryNode => {
-  const root = createDirectoryNode('', '');
+export const buildChangesTree = <TEntry extends TreePathEntry>(entries: TEntry[]): ChangesTreeDirectoryNode<TEntry> => {
+  const root = createDirectoryNode<TEntry>('', '');
 
   for (const file of entries) {
     const normalized = normalizePathForTree(file.path);
@@ -62,7 +68,7 @@ export const buildChangesTree = (entries: GitStatus['files']): ChangesTreeDirect
           continue;
         }
 
-        const created = createDirectoryNode(currentPath, segment);
+        const created = createDirectoryNode<TEntry>(currentPath, segment);
         created.files.push(file);
         current.children.set(segment, created);
         current = created;
@@ -75,13 +81,13 @@ export const buildChangesTree = (entries: GitStatus['files']): ChangesTreeDirect
   return root;
 };
 
-export const flattenChangesTree = (
-  root: ChangesTreeDirectoryNode,
+export const flattenChangesTree = <TEntry extends TreePathEntry>(
+  root: ChangesTreeDirectoryNode<TEntry>,
   expandedDirectories: Set<string>,
-): FlattenedTreeRow[] => {
-  const rows: FlattenedTreeRow[] = [];
+): FlattenedTreeRow<TEntry>[] => {
+  const rows: FlattenedTreeRow<TEntry>[] = [];
 
-  const walk = (node: ChangesTreeDirectoryNode, depth: number) => {
+  const walk = (node: ChangesTreeDirectoryNode<TEntry>, depth: number) => {
     const directories = Array.from(node.children.values()).sort((a, b) => a.path.localeCompare(b.path));
     for (const directory of directories) {
       rows.push({

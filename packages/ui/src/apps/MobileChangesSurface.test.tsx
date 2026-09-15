@@ -42,7 +42,7 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
           ? Response.json({ error: 'Branch diff failed' }, { status: 500 })
           : Response.json({ diff: 'Binary files a/branch.png and b/branch.png differ' });
       case '/api/git/log': return Response.json({ all: commits, latest: commits[0], total: commits.length });
-      case '/api/git/commit-files': return Response.json({ files: [{ path: `commit-${url.searchParams.get('hash')?.[0]}.png`, previousPath: 'old.png', changeType: 'R', insertions: 0, deletions: 0, isBinary: true }] });
+      case '/api/git/commit-files': return Response.json({ files: [{ path: `commit-${url.searchParams.get('commitHash')?.[0]}.png`, originalPath: 'old.png', status: 'R', kind: 'file', insertions: 0, deletions: 0, isBinary: true }] });
       case '/api/git/commit-diff': return Response.json({ diff: 'Binary files a/old.png and b/commit.png differ' });
       case '/api/git/file-diff': return Response.json({ path: 'working.png', original: '', modified: '', isBinary: true });
       case '/api/github/pr/status': return Response.json({ connected: true, repo: { owner: 'upstream', repo: 'project' },

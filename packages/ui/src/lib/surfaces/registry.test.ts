@@ -9,6 +9,8 @@ import {
 const baseOptions = {
   railOrder: [],
   planModeEnabled: true,
+  reviewLayout: 'separate',
+  isMobile: false,
   isVSCode: false,
   screenWidth: 1200,
   tabs: [],
@@ -96,5 +98,30 @@ describe('getVisibleContextRailSurfaces', () => {
     };
     expect(getVisibleContextRailSurfaces({ ...baseOptions, extras: [hello] }).some((s) => s.id === 'plugin:hello')).toBe(true);
     expect(getVisibleContextRailSurfaces({ ...baseOptions, extras: [hello], isVSCode: true }).some((s) => s.id === 'plugin:hello')).toBe(false);
+  });
+
+  test('hides the diff launcher only for combined desktop review', () => {
+    const existingTabs = [{ mode: 'diff' as const }];
+
+    expect(
+      getVisibleContextRailSurfaces({
+        ...baseOptions,
+        reviewLayout: 'combined',
+        isMobile: false,
+        isVSCode: false,
+        tabs: existingTabs,
+      }).some((surface) => surface.id === 'diff'),
+    ).toBe(false);
+    expect(existingTabs).toEqual([{ mode: 'diff' }]);
+  });
+
+  test('keeps the diff launcher for separate, mobile, and VS Code review', () => {
+    expect(getVisibleContextRailSurfaces(baseOptions).some((surface) => surface.id === 'diff')).toBe(true);
+    expect(
+      getVisibleContextRailSurfaces({ ...baseOptions, reviewLayout: 'combined', isMobile: true }).some((surface) => surface.id === 'diff'),
+    ).toBe(true);
+    expect(
+      getVisibleContextRailSurfaces({ ...baseOptions, reviewLayout: 'combined', isVSCode: true }).some((surface) => surface.id === 'diff'),
+    ).toBe(true);
   });
 });

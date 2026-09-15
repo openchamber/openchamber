@@ -173,6 +173,7 @@ export const ContextPanelRail: React.FC = () => {
   const workStatusPanelVisible = useUIStore((state) => state.workStatusPanelVisible);
   const contextRailOrder = useUIStore((state) => state.contextRailOrder);
   const contextRailHiddenSurfaces = useUIStore((state) => state.contextRailHiddenSurfaces);
+  const gitReviewLayout = useUIStore((state) => state.gitReviewLayout);
   const setContextRailOrder = useUIStore((state) => state.setContextRailOrder);
   const openContextSurface = useUIStore((state) => state.openContextSurface);
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
@@ -182,7 +183,7 @@ export const ContextPanelRail: React.FC = () => {
   const linearConnected = useLinearAuthStore((state) => state.status?.connected === true);
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
   const githubConnected = useGitHubAuthStore((state) => state.status?.connected === true);
-  const { screenWidth } = useDeviceInfo();
+  const { isMobile, screenWidth } = useDeviceInfo();
   const gitStatus = useGitStatus(directoryKey || null);
 
   const surfaceSwitchPrefix = React.useMemo(
@@ -278,6 +279,8 @@ export const ContextPanelRail: React.FC = () => {
       railOrder: contextRailOrder,
       hiddenSurfaces: contextRailHiddenSurfaces,
       planModeEnabled,
+      reviewLayout: gitReviewLayout,
+      isMobile,
       isVSCode: isVSCodeRuntime(),
       screenWidth,
       tabs,
@@ -285,7 +288,18 @@ export const ContextPanelRail: React.FC = () => {
       githubConnected,
       extras: guestSurfaces,
     });
-  }, [contextRailHiddenSurfaces, contextRailOrder, githubConnected, guestSurfaces, linearConnected, planModeEnabled, screenWidth, tabs]);
+  }, [
+    contextRailHiddenSurfaces,
+    contextRailOrder,
+    gitReviewLayout,
+    githubConnected,
+    guestSurfaces,
+    isMobile,
+    linearConnected,
+    planModeEnabled,
+    screenWidth,
+    tabs,
+  ]);
 
   // A surface whose integration disconnected closes rather than lingering as
   // an active panel with no rail icon.
