@@ -196,7 +196,7 @@ const runPromptAsync = async ({ baseUrl, authHeaders, sessionID, directory, payl
   }
 };
 
-const createSession = async ({ baseUrl, authHeaders, directory, title }) => {
+const createSession = async ({ baseUrl, authHeaders, directory, title, agent }) => {
   const sessionUrl = new URL(`${baseUrl}/session`);
   sessionUrl.searchParams.set('directory', directory);
   const response = await fetch(sessionUrl.toString(), {
@@ -207,7 +207,11 @@ const createSession = async ({ baseUrl, authHeaders, directory, title }) => {
       'content-type': 'application/json',
       accept: 'application/json',
     },
-    body: JSON.stringify({ directory, ...(title ? { title } : {}) }),
+    body: JSON.stringify({
+      directory,
+      ...(title ? { title } : {}),
+      ...(agent ? { agent } : {}),
+    }),
   });
 
   if (!response.ok) {
@@ -725,6 +729,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       authHeaders,
       directory: sessionDirectory,
       ...(title ? { title } : {}),
+      ...(agent ? { agent } : {}),
     });
 
     let dispatch = { model, agent, variant, promptDispatched: false, dispatchedAsCommand: false };
