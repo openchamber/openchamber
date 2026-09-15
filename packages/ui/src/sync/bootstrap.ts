@@ -132,8 +132,8 @@ export function bootstrapDirectory(input: DirectoryBootstrapInput) {
       return "failed"
     }
   })()
-  // Initialization has its own completion and network capacity. A slow config,
-  // MCP server, or directory cannot hold the session-list scheduler's slot.
+  // Initialization has its own completion and network capacity. A slow config
+  // or directory cannot hold the session-list scheduler's slot.
   const environment = initializeDirectory(input)
   return { sessions, environment }
 }
@@ -200,7 +200,11 @@ async function initializeDirectory(input: DirectoryBootstrapInput): Promise<Boot
   ])
   const enrichment = Promise.allSettled([
     read(() => sdk.command.list({ directory }).then((x) => commit({ command: unwrap(x, "command.list") }))),
-    read(() => sdk.mcp.status({ directory }).then((x) => commit({ mcp: unwrap(x, "mcp.status") }))),
+    // MCP status is deliberately not read here. Reading it initializes the
+    // directory's whole stdio server fleet as an OpenCode side effect, and the
+    // sidebar declares bootstrap demand for every known project directory, so
+    // this read launched one full fleet per project at startup. The MCP
+    // surfaces fetch status on demand through their own store instead.
     read(() => sdk.lsp.status({ directory }).then((x) => commit({ lsp: unwrap(x, "lsp.status") }))),
     read(() =>
       sdk.vcs.get({ directory }).then((x) => {
