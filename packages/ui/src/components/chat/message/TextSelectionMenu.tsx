@@ -24,8 +24,11 @@ import { collectSelectionOverlayRects } from '@/lib/selectionOverlayRects';
 import {
   DESKTOP_MENU_FALLBACK_HEIGHT_PX,
   DESKTOP_MENU_FALLBACK_WIDTH_PX,
+  DESKTOP_MENU_SELECTION_GAP_PX,
+  DESKTOP_MENU_SIDE_MARGIN_PX,
   getDesktopClampedX,
   getDesktopClampedY,
+  getDesktopSelectionAnchorY,
 } from './selectionMenuPosition';
 
 interface TextSelectionMenuProps {
@@ -49,6 +52,17 @@ interface SelectionPayload {
 const normalizeDistilledInsight = (insight: string): string => (
   insight.trim().replace(/^[-*+]\s+/, '').slice(0, PROJECT_NOTE_BODY_MAX_LENGTH)
 );
+
+// The browser finalizes the selection just after mouseup, so the menu waits a
+// beat before it reads it.
+const REVEAL_DELAY_MS = 10;
+// A mouseup that closes the second click of a multi-click can still be followed
+// by a third one. Showing the menu between those clicks moves a button under the
+// pointer, where it swallows the click that would have grown the selection, so
+// the menu waits for the sequence to end instead.
+const MULTI_CLICK_REVEAL_DELAY_MS = 300;
+// Distance kept between the menu and the top edge of its container.
+const CONTAINER_TOP_MARGIN_PX = 4;
 
 export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerRef }) => {
   const { t } = useI18n();
@@ -215,6 +229,20 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
       : getDesktopClampedY(anchorY, window.innerHeight, menuHeightRef.current)
   ), []);
 
+  // Topmost screen Y the desktop menu may occupy. Staying inside the message
+  // also keeps a menu near the top of the chat clear of the app header, which
+  // is a window drag zone on the desktop shell. A message scrolled past the top
+  // of the viewport bounds nothing, so the viewport margin is the floor.
+  const getMenuMinTop = React.useCallback(() => {
+    const container = containerRef.current;
+    const containerTop = (container ? container.getBoundingClientRect().top : 0) + CONTAINER_TOP_MARGIN_PX;
+    return Math.max(containerTop, DESKTOP_MENU_SIDE_MARGIN_PX);
+  }, [containerRef]);
+
+  const getDesktopAnchorY = React.useCallback((selection: { top: number; bottom: number }) => (
+    getClampedY(getDesktopSelectionAnchorY(selection, menuHeightRef.current, getMenuMinTop()))
+  ), [getClampedY, getMenuMinTop]);
+
   const addMarkdownToChat = React.useCallback((markdownText: string) => {
     const markdownBlock = wrapMarkdownSelectionForChat(markdownText);
     setPendingInputText(markdownBlock, 'append');
@@ -244,8 +272,8 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
       ? rect.left + rect.width / 2
       : getClampedX(rect.left + rect.width / 2);
     const menuY = isMobile
-      ? rect.top - 10
-      : getClampedY(rect.top - 10);
+      ? rect.top - DESKTOP_MENU_SELECTION_GAP_PX
+      : getDesktopAnchorY(rect);
 
     setSelectedText(plainText);
     setSelectedTextMarkdown(markdownText);
@@ -267,7 +295,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
         openRafRef.current = null;
       });
     }
-  }, [addMarkdownToChat, getClampedX, getClampedY, hideMenu, isMobile, position.show]);
+  }, [addMarkdownToChat, getClampedX, getDesktopAnchorY, hideMenu, isMobile, position.show]);
 
   React.useLayoutEffect(() => {
     if (!position.show || isMobile || !menuRef.current) {
@@ -288,34 +316,17 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     if (heightChanged) {
       menuHeightRef.current = measuredHeight;
     }
+    const selectionRect = pendingSelectionRef.current?.rect;
     setPosition((prev) => ({
       ...prev,
       x: getClampedX(prev.x),
-      y: getClampedY(prev.y),
+      y: selectionRect ? getDesktopAnchorY(selectionRect) : getClampedY(prev.y),
     }));
     // Entering comment mode and typing into the comment box both grow the
-    // popup, so remeasuring on those keeps the cached height (and the Y clamp
-    // built from it) honest.
-  }, [commentMode, commentText, getClampedX, getClampedY, isMobile, position.show]);
-
-  // The desktop popup hangs above its anchor, so a tall comment box near the
-  // top of the chat can climb over the app header. On the desktop shell the
-  // header is a window drag zone, which makes the overlapped part of the
-  // textarea untouchable, so the popup is pushed down until its top edge stays
-  // inside the chat container.
-  React.useLayoutEffect(() => {
-    if (!position.show || isMobile || !menuRef.current) {
-      return;
-    }
-
-    const container = containerRef.current;
-    const minTop = (container ? container.getBoundingClientRect().top : 0) + 4;
-    const menuTop = menuRef.current.getBoundingClientRect().top;
-    if (menuTop < minTop) {
-      const delta = minTop - menuTop;
-      setPosition((prev) => ({ ...prev, y: prev.y + delta }));
-    }
-  }, [containerRef, isMobile, position.show, position.y, commentMode, commentText]);
+    // popup, so remeasuring on those keeps the cached height honest along with
+    // the placement built from it. A taller popup can stop fitting above the
+    // selection and has to move below it.
+  }, [commentMode, commentText, getClampedX, getClampedY, getDesktopAnchorY, isMobile, position.show]);
 
   React.useEffect(() => {
     if (!position.show || isMobile) {
@@ -409,19 +420,24 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     };
 
     // Track when dragging stops
-    const handleMouseUp = () => {
+    const handleMouseUp = (event: MouseEvent) => {
       isDraggingRef.current = false;
       // Check if we have a pending selection to show
       if (pendingSelectionRef.current) {
         if (mouseUpTimeoutRef.current !== null) {
           window.clearTimeout(mouseUpTimeoutRef.current);
         }
-        // Small delay to ensure selection is finalized
+        const delay = event.detail >= 2 ? MULTI_CLICK_REVEAL_DELAY_MS : REVEAL_DELAY_MS;
         mouseUpTimeoutRef.current = window.setTimeout(() => {
           mouseUpTimeoutRef.current = null;
           // The click that opened the comment input cleared the selection on
           // purpose; the input must survive this deferred check.
           if (commentModeRef.current) {
+            return;
+          }
+          // A fresh drag can start inside the multi-click delay, and it owns
+          // the selection now.
+          if (isDraggingRef.current) {
             return;
           }
           const selection = window.getSelection();
@@ -430,7 +446,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
           } else {
             hideMenu();
           }
-        }, 10);
+        }, delay);
       }
     };
 

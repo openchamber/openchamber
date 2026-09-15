@@ -2,9 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import {
   DESKTOP_MENU_FALLBACK_HEIGHT_PX,
   DESKTOP_MENU_FALLBACK_WIDTH_PX,
+  DESKTOP_MENU_SELECTION_GAP_PX,
   DESKTOP_MENU_SIDE_MARGIN_PX,
   getDesktopClampedX,
   getDesktopClampedY,
+  getDesktopSelectionAnchorY,
 } from '../selectionMenuPosition';
 
 const VIEWPORT_WIDTH = 1024;
@@ -42,6 +44,45 @@ describe('getDesktopClampedY (issue #2257)', () => {
   test('falls back to the viewport middle when the viewport is shorter than the menu', () => {
     const tinyViewportHeight = MENU_HEIGHT;
     expect(getDesktopClampedY(10, tinyViewportHeight, MENU_HEIGHT)).toBe(tinyViewportHeight / 2);
+  });
+});
+
+// Regression coverage for issue #3416: the popup used to be pushed straight
+// down when it did not fit above the selection, which painted it over the
+// selected line. Triple-clicking the first line of a message then landed the
+// third click on a toolbar button instead of the text.
+describe('getDesktopSelectionAnchorY (issue #3416)', () => {
+  // A single line of chat text, and the container top the popup stays below.
+  const LINE = { top: 200, bottom: 226 };
+  const FITS_ABOVE = LINE.top - DESKTOP_MENU_SELECTION_GAP_PX - MENU_HEIGHT;
+  const ABOVE_ANCHOR = LINE.top - DESKTOP_MENU_SELECTION_GAP_PX;
+  const BELOW_ANCHOR = LINE.bottom + DESKTOP_MENU_SELECTION_GAP_PX + MENU_HEIGHT;
+
+  test('anchors above the selection when the popup fits there', () => {
+    expect(getDesktopSelectionAnchorY(LINE, MENU_HEIGHT, FITS_ABOVE)).toBe(ABOVE_ANCHOR);
+    expect(getDesktopSelectionAnchorY(LINE, MENU_HEIGHT, 0)).toBe(ABOVE_ANCHOR);
+  });
+
+  test('flips below the selection when the popup does not fit above it', () => {
+    // The first line of a message: its container starts at the line itself, so
+    // nothing fits in the gap above.
+    expect(getDesktopSelectionAnchorY(LINE, MENU_HEIGHT, LINE.top + 4)).toBe(BELOW_ANCHOR);
+    expect(getDesktopSelectionAnchorY(LINE, MENU_HEIGHT, FITS_ABOVE + 1)).toBe(BELOW_ANCHOR);
+  });
+
+  test('flips a popup that grew taller than the room above the selection', () => {
+    const tallMenu = MENU_HEIGHT * 4;
+    expect(getDesktopSelectionAnchorY(LINE, tallMenu, FITS_ABOVE)).toBe(
+      LINE.bottom + DESKTOP_MENU_SELECTION_GAP_PX + tallMenu,
+    );
+  });
+
+  test('never returns an anchor that paints the popup over the selection', () => {
+    for (const minTop of [-500, 0, 150, FITS_ABOVE, FITS_ABOVE + 1, LINE.top, LINE.bottom, 400]) {
+      const anchorY = getDesktopSelectionAnchorY(LINE, MENU_HEIGHT, minTop);
+      const menuTop = anchorY - MENU_HEIGHT;
+      expect(menuTop < LINE.bottom && anchorY > LINE.top).toBe(false);
+    }
   });
 });
 
