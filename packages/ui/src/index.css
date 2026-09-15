@@ -408,9 +408,7 @@ div[data-chat-input-footer="true"] {
 /* Safari/WebKit fixes for buttons and SVG icons */
 /* Remixicon puts fill="currentColor" on root SVG which WebKit renders as background */
 button svg.remixicon,
-[role="button"] svg.remixicon,
-button svg,
-[role="button"] svg {
+[role="button"] svg.remixicon {
   background: none !important;
   background-color: transparent !important;
   /* Override inline fill attribute on SVG root */
@@ -419,18 +417,18 @@ button svg,
   shape-rendering: geometricPrecision;
 }
 
-/* GPU acceleration for non-spinning SVGs */
-button svg:not(.animate-spin),
-[role="button"] svg:not(.animate-spin) {
+/* GPU acceleration for SVGs without animated transforms */
+button svg:not(.animate-spin):not(.activity-spinner),
+[role="button"] svg:not(.animate-spin):not(.activity-spinner) {
   transform: translateZ(0);
   -webkit-transform: translateZ(0);
 }
 
 /* Fix SVG elements inside buttons - remove any rect/circle backgrounds */
-button svg rect,
-button svg circle,
-[role="button"] svg rect,
-[role="button"] svg circle {
+button svg.remixicon rect,
+button svg.remixicon circle,
+[role="button"] svg.remixicon rect,
+[role="button"] svg.remixicon circle {
   fill: none !important;
 }
 
@@ -438,9 +436,7 @@ button svg circle,
 button svg.remixicon path,
 button svg.remixicon circle[fill],
 [role="button"] svg.remixicon path,
-[role="button"] svg.remixicon circle[fill],
-button svg path,
-[role="button"] svg path {
+[role="button"] svg.remixicon circle[fill] {
   fill: currentColor !important;
 }
 
@@ -1765,6 +1761,21 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
 
 .animate-busy-pulse {
   animation: oc-busy-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes activity-spin {
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Running-session spinner (opt-in). steps() throttles to 20 value changes per
+   second; identical frames in between produce no new compositor output.
+   Technique from VS Code's codicon-modifier-spin. */
+.activity-spinner {
+  animation: activity-spin 1.5s steps(30) infinite;
+  transform-box: fill-box;
+  transform-origin: center center;
 }
 
 @keyframes navrail-dot-wave {

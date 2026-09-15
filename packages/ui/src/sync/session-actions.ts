@@ -39,6 +39,7 @@ import { getRuntimeKey } from "@/lib/runtime-switch"
 import { markAmbiguousTransportFailure } from "@/lib/relay/transport-error"
 import { getErrorStatus, isAmbiguousSendFailure } from "./send-failure-classification"
 import { getStaleRunningToolMessageID } from "./materialization"
+import { promoteRestoredSessionOrdering } from "./session-ordering"
 import { normalizePath } from "@/lib/pathNormalization"
 import { mergeMessages } from "./optimistic"
 import { messagesBefore, messagesFrom } from "./message-ordering"
@@ -1573,6 +1574,7 @@ export async function unarchiveSession(sessionId: string, expectedRuntimeKey = g
     }
     useGlobalSessionsStore.getState().upsertSession(restored)
     if (sessionDirectory) registerSessionDirectory(sessionId, sessionDirectory)
+    promoteRestoredSessionOrdering(sessionId)
     return true
   } catch (error) {
     console.error("[session-actions] unarchiveSession failed", error)

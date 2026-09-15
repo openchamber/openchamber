@@ -40,6 +40,21 @@ cache. Live busy and retry state comes from `global-session-status`, never from
 the global cache or persisted history. A failed global or directory fetch keeps
 existing data; it is never treated as an authoritative empty list.
 
+Activity indicators default to a dot plus a per-session counter. The local
+Appearance setting `animatedActivityIndicators` is off by default. Enabling it
+swaps running dots for the 20 fps stepped `SessionActivityIndicator` spinner
+across runtimes, even when the OS requests reduced motion. The counter/timer
+behavior is unchanged. Aggregate rows show the indicator without a counter.
+
+Full-app active records remain in the collection when their directory is no
+longer in known topology, such as a deleted worktree. Grouping first uses exact
+configured project/worktree ownership. It may then use authoritative OpenCode
+project metadata only when that project's canonical worktree maps to a
+configured project root. This fallback changes display ownership, not the
+session's real directory used for routing. Records with no resolved owner have
+no guaranteed project group. VS Code keeps exact workspace-directory scope and
+does not use the fallback. The mobile sheet uses this same ownership resolver.
+
 Web and desktop show managed Chats before optional Recent activity. Chats use
 their shared managed root for folders and never expose worktree actions. Project
 display can be all projects or one selected project. The mobile sessions sheet
@@ -103,6 +118,7 @@ matching and ordering. Search does not fetch sessions or broaden list membership
 - Opening the root-session `Move to worktree` submenu force-refreshes the owning project's worktree topology so externally created worktrees appear without a full reload. While that refresh runs, the menu keeps the last known primary/linked topology visible; if the refresh fails, the stale topology remains and the load failure state stays explicit. Failure cleanup never removes or manages an existing destination worktree.
 - CLI/server-created sessions use the low-frequency OpenChamber control event stream to refresh only the created session directory. The same event retriggers bounded worktree discovery so a newly created external worktree gains ownership without a view reload; it does not re-enable broad session or streaming subscriptions.
 - Recent membership includes active root sessions immediately even when their last committed `time.updated` falls outside the 48-hour window. Children and archived sessions remain excluded, and inactive roots remain timestamp-based. The active-ID subscription is disabled while the sidebar is hidden and ignores retry/status detail changes, avoiding streaming-frequency rerenders.
+- A successful restore on the current runtime promotes only the session's ephemeral list-order rank. It does not change timestamps or live status, and it resets on a runtime switch. Restore does not change Recent's existing active/48-hour membership rule.
 - Structural updates rebuild grouped nodes only for projects whose local sessions, worktrees, repository state, or branch changed; unchanged project sections preserve references so memoized group/session descendants skip the update wave.
 - Empty successful lists, unresolved loads, and failed loads are separate UI states. Failed groups expose Retry and retain prior data.
 - List loading and workspace initialization have separate states. The spinner follows only the list queue; config, MCP, LSP, and live-state recovery cannot keep a successful empty list spinning. A core initialization failure has a separate localized notice and reuses the retry/native-access actions without clearing loaded sessions.

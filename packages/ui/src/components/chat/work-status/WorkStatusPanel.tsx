@@ -12,6 +12,7 @@ import { WorkStatusTelemetrySection } from './WorkStatusTelemetrySection';
 import { WorkStatusSubagentsSection } from './WorkStatusSubagentsSection';
 import { WorkStatusTasksSection } from './WorkStatusTasksSection';
 import { WorkStatusMcpSection } from './WorkStatusMcpSection';
+import { WorkStatusGitGraphSection } from './WorkStatusGitGraphSection';
 import { WorkStatusPinnedSection } from './WorkStatusPinnedSection';
 import { WorkStatusContextSection } from './WorkStatusContextSection';
 import { WorkStatusSectionsDialog } from './WorkStatusSectionsDialog';
@@ -176,6 +177,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
     subagents: <WorkStatusSubagentsSection sessionId={sessionId} directory={directory} />,
     tasks: <WorkStatusTasksSection sessionId={sessionId} directory={directory} />,
     mcp: <WorkStatusMcpSection directory={directory} />,
+    gitGraph: <WorkStatusGitGraphSection directory={directory} panelVisible={visible} />,
     pinned: <WorkStatusPinnedSection sessionId={sessionId} directory={directory} />,
     contextSources: <WorkStatusContextSection sessionId={sessionId} directory={directory} />,
   } satisfies Record<Exclude<WorkStatusSectionId, 'session' | 'repository'>, React.ReactNode>;

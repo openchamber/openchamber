@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { I18nProvider } from '@/lib/i18n';
 import { useSessionActions } from '../sessions/useSessionActions';
+import { createSessionOwnershipIndex } from '../sessions/sessionOwnership';
 import { useSessionGrouping } from './useSessionGrouping';
 import type { SessionNode } from '../types';
 
@@ -99,5 +100,40 @@ describe('useSessionGrouping malformed hierarchy fallbacks', () => {
 
     handleDeleteSession(session('root'));
     handleDeleteSession(session('root'), { hardDelete: true });
+  });
+
+  test('keeps active unknown-directory sessions in their resolved project root group', () => {
+    type GroupingCapture = { buildGroupedSessions?: ReturnType<typeof useSessionGrouping>['buildGroupedSessions'] };
+    const state: GroupingCapture = {};
+    const restored = { ...session('restored'), directory: '/deleted/worktree', time: { created: 1, updated: 1 } };
+    const ownership = createSessionOwnershipIndex(
+      [restored],
+      [{ id: 'configured-workspace', normalizedPath: '/workspace' }],
+      new Map(),
+      false,
+      [],
+      [{ id: 'project', worktree: '/workspace' }],
+    );
+    const Harness = () => {
+      state.buildGroupedSessions = useSessionGrouping({
+        homeDirectory: null,
+        worktreeMetadata: new Map(),
+        pinnedSessionIds: new Set(),
+        sessionOrderRanks: new Map(),
+        gitBranches: new Map(),
+        isVSCode: false,
+        sessionOwners: ownership.bySessionId,
+      }).buildGroupedSessions;
+      return null;
+    };
+
+    renderToStaticMarkup(React.createElement(I18nProvider, null, React.createElement(Harness)));
+    const buildGroupedSessions = state.buildGroupedSessions;
+    if (!buildGroupedSessions) throw new Error('grouping callback was not mounted');
+
+    const groups = buildGroupedSessions([restored], '/workspace', [], null, false);
+
+    expect(groups.find((group) => group.isMain)?.sessions.map((node) => node.session.id)).toEqual(['restored']);
+    expect(groups.some((group) => group.isArchivedBucket)).toBe(false);
   });
 });

@@ -22,6 +22,7 @@ type Args = {
   sessionOrderRanks: ReadonlyMap<string, number>;
   gitBranches: Map<string, string | null>;
   isVSCode: boolean;
+  sessionOwners?: ReadonlyMap<string, { scopeDirectory: string }>;
 };
 
 const isArchivedSession = (session: Session): boolean => Boolean(session.time?.archived);
@@ -160,12 +161,20 @@ export const useSessionGrouping = (args: Args) => {
         // Worktrees aren't registered in VS Code, so the desktop directory-match
         // below would otherwise dump these sessions into the archived bucket.
         if (args.isVSCode) return normalizedProjectRoot ?? '__project_root__';
+        const resolvedScope = args.sessionOwners?.get(session.id)?.scopeDirectory;
+        if (resolvedScope) {
+          if (resolvedScope === normalizedProjectRoot) return normalizedProjectRoot ?? '__project_root__';
+          if (worktreeByPath.has(resolvedScope)) return resolvedScope;
+        }
         const metadataPath = normalizePath(args.worktreeMetadata.get(session.id)?.path ?? null);
         const normalizedDir = metadataPath ?? resolveGlobalSessionDirectory(session);
-        if (!normalizedDir) return archivedKey;
+        // Active sessions have already passed project ownership. An unavailable
+        // worktree directory is still owned by this configured project, not an
+        // archive; only archived records use the archive bucket.
+        if (!normalizedDir) return normalizedProjectRoot ?? '__project_root__';
         if (normalizedDir !== normalizedProjectRoot && worktreeByPath.has(normalizedDir)) return normalizedDir;
         if (normalizedDir === normalizedProjectRoot) return normalizedProjectRoot ?? '__project_root__';
-        return archivedKey;
+        return normalizedProjectRoot ?? '__project_root__';
       };
 
       roots.forEach((node) => {
@@ -285,7 +294,7 @@ export const useSessionGrouping = (args: Args) => {
 
       return groups;
     },
-    [args.homeDirectory, args.worktreeMetadata, args.sessionOrderRanks, args.isVSCode, t],
+    [args.homeDirectory, args.worktreeMetadata, args.sessionOrderRanks, args.gitBranches, args.isVSCode, args.sessionOwners, t],
   );
 
   return {

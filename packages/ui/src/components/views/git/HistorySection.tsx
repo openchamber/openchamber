@@ -15,16 +15,22 @@ import { Button } from '@/components/ui/button';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
 import { HistoryCommitRow } from './HistoryCommitRow';
-import type { GitLogEntry, CommitFileEntry } from '@/lib/api/types';
+import type { GitLogEntry, GitCommitHoverDetailsCache } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
-import { assignLanes } from './gitGraph';
-import type { LanedCommit } from './gitGraph';
+import { GitCommitHoverPopover } from './GitCommitHoverPopover';
+import {
+  buildGitHistoryViewModels,
+  type GitHistoryGraphItem,
+  type GitHistoryItemViewModel,
+  type GitHistoryGraphRef,
+} from './gitGraph';
+import type { GitCommitDetailsController } from './gitCommitDetailsController';
 
 const LOG_SIZE_OPTIONS = [
   { labelKey: 'gitView.history.logSize25', value: 25 },
   { labelKey: 'gitView.history.logSize50', value: 50 },
   { labelKey: 'gitView.history.logSize100', value: 100 },
-];
+] as const;
 
 interface HistorySectionProps {
   mode?: 'history' | 'graph';
@@ -32,12 +38,12 @@ interface HistorySectionProps {
   isLogLoading: boolean;
   logMaxCount: number;
   onLogMaxCountChange: (count: number) => void;
-  expandedCommitHashes: Set<string>;
-  onToggleCommit: (hash: string) => void;
-  commitFilesMap: Map<string, CommitFileEntry[]>;
-  loadingCommitHashes: Set<string>;
+  commitDetailsController?: GitCommitDetailsController;
   onCopyHash: (hash: string) => void;
   directory: string | undefined;
+  hoverRemoteName?: string | null;
+  hoverRemoteUrl?: string | null;
+  hoverDetailsCache?: GitCommitHoverDetailsCache | null;
   showHeader?: boolean;
   contentMaxHeightClassName?: string;
   branchDivider?: {
@@ -55,12 +61,12 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
   isLogLoading,
   logMaxCount,
   onLogMaxCountChange,
-  expandedCommitHashes,
-  onToggleCommit,
-  commitFilesMap,
-  loadingCommitHashes,
+  commitDetailsController,
   onCopyHash,
   directory,
+  hoverRemoteName = null,
+  hoverRemoteUrl = null,
+  hoverDetailsCache = null,
   showHeader = true,
   contentMaxHeightClassName = 'max-h-[50vh]',
   branchDivider = null,
@@ -70,20 +76,96 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
   const { t } = useI18n();
   const [isOpen, setIsOpen] = React.useState(true);
   const isGraphMode = mode === 'graph';
+  const hoverCoordinator = React.useMemo(() => GitCommitHoverPopover.createCoordinator(), []);
+  const [, forceExpandedRefresh] = React.useReducer((count: number) => count + 1, 0);
 
-  const laned: LanedCommit[] = React.useMemo(
-    () => (isGraphMode && log ? assignLanes(log.all) : []),
-    [isGraphMode, log]
+  React.useEffect(() => {
+    if (!commitDetailsController) {
+      return;
+    }
+
+    return commitDetailsController.subscribeExpanded(() => {
+      forceExpandedRefresh();
+    });
+  }, [commitDetailsController]);
+
+  const historyItems = React.useMemo<GitHistoryGraphItem[]>(
+    () => (log?.all ?? []).map((entry) => {
+      const references: GitHistoryGraphRef[] = entry.refs
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .map((value) => {
+          const isHead = value.startsWith('HEAD -> ');
+          const isTag = value.startsWith('tag: ');
+          const label = isHead ? value.slice('HEAD -> '.length) : isTag ? value.slice('tag: '.length) : value;
+          const kind = isTag ? 'tag' : value.includes('/') ? 'remote' : 'local';
+          const category = isTag
+            ? 'tags'
+            : value.includes('/')
+              ? 'remote-branches'
+              : 'branches';
+
+          return {
+            id: label,
+            name: label,
+            revision: entry.hash,
+            kind,
+            category,
+          };
+        });
+
+        return {
+          id: entry.hash,
+          displayId: entry.hash.slice(0, 8),
+          parentIds: entry.parents,
+          subject: entry.message,
+          message: entry.body || entry.message,
+          author: entry.author_name,
+          authorEmail: entry.author_email,
+          timestamp: entry.date,
+          references,
+          statistics: {
+            files: entry.filesChanged,
+          insertions: entry.insertions,
+          deletions: entry.deletions,
+        },
+      };
+    }),
+    [log],
   );
 
-  const maxLanes = React.useMemo(
-    () => Math.max(1, ...laned.map((l) => l.lane + 1)),
-    [laned]
+  const refs = React.useMemo(() => {
+    const current = historyItems
+      .flatMap((item) => item.references ?? [])
+      .find((ref) => ref.id !== 'HEAD' && ref.category === 'branches');
+
+    return {
+      current: current ?? null,
+      upstream: null,
+      base: null,
+    };
+  }, [historyItems]);
+
+  const viewModels: GitHistoryItemViewModel[] = React.useMemo(
+    () => (isGraphMode
+      ? buildGitHistoryViewModels(historyItems, refs, {
+          showIncoming: false,
+          showOutgoing: false,
+          mergeBase: null,
+        })
+      : []),
+    [historyItems, isGraphMode, refs],
   );
 
-  const lanedByHash = React.useMemo(
-    () => new Map(laned.map((l) => [l.commit.hash, l])),
-    [laned]
+  const maxColumns = React.useMemo(
+    () => Math.max(1, ...viewModels.map((viewModel) => Math.max(viewModel.inputSwimlanes.length, viewModel.outputSwimlanes.length, 1))),
+    [viewModels],
+  );
+
+  const viewModelByHash = React.useMemo(
+    () => new Map(viewModels.map((viewModel) => [viewModel.historyItem.id, viewModel])),
+    [viewModels],
   );
 
   // Early return AFTER all hooks
@@ -110,24 +192,42 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
     : <Icon name="arrow-up" className="size-3.5" />;
 
   const renderCommitList = (entries: GitLogEntry[]) => (
-    <ul className="divide-y divide-border/60">
-      {entries.map((entry) => (
-        <HistoryCommitRow
-          key={entry.hash}
-          entry={entry}
-          mode={mode}
-          laned={isGraphMode ? lanedByHash.get(entry.hash) : undefined}
-          totalLanes={isGraphMode ? maxLanes : undefined}
-          isExpanded={expandedCommitHashes.has(entry.hash)}
-          onToggle={() => onToggleCommit(entry.hash)}
-          files={commitFilesMap.get(entry.hash) ?? []}
-          isLoadingFiles={loadingCommitHashes.has(entry.hash)}
-          onCopyHash={onCopyHash}
-          directory={directory}
-          onConflict={onConflict}
-          onActionSuccess={onActionSuccess}
-        />
-      ))}
+    <ul className="divide-y divide-border/60" data-history-commit-list={mode}>
+      {entries.map((entry) => {
+        const comparison = directory ? {
+          directory,
+          commitHash: entry.hash,
+          parentHash: entry.parents[0] ?? null,
+        } : undefined;
+
+        return (
+          <HistoryCommitRow
+            key={entry.hash}
+            entry={entry}
+            mode={mode}
+            viewModel={isGraphMode ? viewModelByHash.get(entry.hash) : undefined}
+            totalColumns={isGraphMode ? maxColumns : undefined}
+            isExpanded={comparison ? (commitDetailsController?.isExpanded(comparison) ?? false) : false}
+            onToggle={() => {
+              if (comparison) {
+                commitDetailsController?.toggleExpanded(comparison);
+              }
+            }}
+            files={[]}
+            isLoadingFiles={false}
+            onCopyHash={onCopyHash}
+            directory={directory}
+            hoverCoordinator={hoverCoordinator}
+            hoverRemoteName={hoverRemoteName}
+            hoverRemoteUrl={hoverRemoteUrl}
+            hoverDetailsCache={hoverDetailsCache}
+            onConflict={onConflict}
+            onActionSuccess={onActionSuccess}
+            commitComparison={comparison}
+            commitDetailsController={commitDetailsController}
+          />
+        );
+      })}
     </ul>
   );
 
@@ -236,7 +336,7 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
                 <SelectContent>
                   {LOG_SIZE_OPTIONS.map((option) => (
                     <SelectItem key={option.value} value={String(option.value)}>
-                      {t(option.labelKey as never)}
+                      {t(option.labelKey)}
                     </SelectItem>
                   ))}
                 </SelectContent>

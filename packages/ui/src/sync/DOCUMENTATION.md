@@ -416,6 +416,15 @@ directory store through the authoritative `session.updated` event the server
 publishes for the update; until then it remains fully visible through the
 global store (sidebar, switcher) and addressable by ID (message loading).
 
+The full-app collection retains active records whose directory is absent from
+the current topology. Display grouping first resolves exact configured
+project/worktree ownership. If that fails, authoritative OpenCode project
+metadata may resolve the record only when its canonical worktree maps to a
+configured project root. The fallback never replaces the session's real
+directory for requests. An unresolved record has no guaranteed project group.
+VS Code keeps exact workspace-directory scope without this fallback. Mobile
+uses the same resolver as the full-app sidebar.
+
 Archive and delete actions capture the active runtime key when they start and
 recheck it before every store reconciliation, so a response
 produced by the previous runtime is rejected instead of mutating the current
@@ -458,6 +467,12 @@ metadata and the next authoritative load reconciles it.
 ### Missing worktree directories
 
 Existing sessions keep their directory when a worktree disappears. Session activation makes no directory-availability probe, and terminal failures and archive restoration never move sessions. Manual movement still goes through `moveSessionToDirectory`. Worktree deletion still archives its sessions before removing the worktree. Missing-worktree groups stay visible with a warning so users can choose either action.
+
+After a restore succeeds while its captured runtime is still current, the
+action promotes the session through the ordering-only restore entry point. That
+rank is ephemeral and resets with runtime ordering. It does not alter server
+timestamps, synthesize activity, or change live status. Recent keeps its
+existing active/48-hour membership rule.
 
 ## The golden rule
 

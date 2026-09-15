@@ -27,6 +27,10 @@ const SECTION_CLASS = cn(
 
 const HEADING_CLASS = 'text-xs font-semibold text-foreground';
 
+type WorkStatusSectionDomProps = React.HTMLAttributes<HTMLElement> & {
+  [key: `data-${string}`]: string | undefined;
+};
+
 export const WorkStatusSection: React.FC<{
   title: string;
   /** Aggregate for the whole section; belongs on the heading, not on a row. */
@@ -57,26 +61,29 @@ export const WorkStatusCollapsibleSection: React.FC<{
   /** Stable key for persisting expanded state. */
   id: string;
   title: string;
+  sectionProps?: WorkStatusSectionDomProps;
   icon?: IconName;
   /** For glyphs that live outside the sprite, such as the MCP mark. */
   iconNode?: React.ReactNode;
   iconColor?: string;
   /** Shown on the header while collapsed and expanded alike. */
   summary?: React.ReactNode;
+  /** Extra header controls rendered beside, not inside, the toggle button. */
+  headerControls?: React.ReactNode;
   /** An independent header action, such as refreshing this section's data. */
   action?: React.ReactNode;
   defaultExpanded?: boolean;
   /** Optional preview that stays below the heading while the section is folded. */
   collapsedContent?: React.ReactNode;
   children: React.ReactNode;
-}> = ({ id, title, icon, iconNode, iconColor, summary, action, defaultExpanded = false, collapsedContent, children }) => {
+}> = ({ id, title, sectionProps, icon, iconNode, iconColor, summary, headerControls, action, defaultExpanded = false, collapsedContent, children }) => {
   const stored = useUIStore(
     React.useCallback((state) => state.workStatusExpandedSections[id], [id]),
   );
   const setExpandedInStore = useUIStore((state) => state.setWorkStatusSectionExpanded);
   const expanded = stored ?? defaultExpanded;
   return (
-    <section className={SECTION_CLASS}>
+    <section {...sectionProps} className={cn(SECTION_CLASS, sectionProps?.className)}>
       <div data-work-status-heading className="mb-0.5 flex h-6 items-center gap-1">
         <button
           type="button"
@@ -107,6 +114,7 @@ export const WorkStatusCollapsibleSection: React.FC<{
             <span className="min-w-0 max-w-[60%] truncate text-right text-xs text-muted-foreground tabular-nums">{summary}</span>
           ) : null}
         </button>
+        {expanded ? headerControls : null}
         {action}
       </div>
       {expanded ? children : collapsedContent}
@@ -181,12 +189,12 @@ export const WorkStatusRow: React.FC<RowProps> = ({
 
 type WorkStatusTone = 'default' | 'muted' | 'success' | 'error' | 'warning' | 'info';
 
-const TONE_COLOR: Record<Exclude<WorkStatusTone, 'default' | 'muted'>, string> = {
+const TONE_COLOR = {
   success: 'var(--status-success)',
   error: 'var(--status-error)',
   warning: 'var(--status-warning)',
   info: 'var(--status-info)',
-};
+} satisfies Record<Exclude<WorkStatusTone, 'default' | 'muted'>, string>;
 
 export const WorkStatusValue: React.FC<{
   children: React.ReactNode;
