@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createGlobalMessageStreamHub } from './global-hub.js';
+import { createInstancePathMapping, setActiveInstancePathMapping } from '../opencode/path-mapping.js';
 
 it('bounds a contiguous replay suffix by UTF-8 bytes and event count', async () => {
   const blocks = Array.from({ length: 8 }, (_, i) => `id: e${i}\ndata: ${JSON.stringify({ type: 'message', properties: { text: '界'.repeat(40) } })}\n\n`);
@@ -157,6 +158,41 @@ describe('createGlobalMessageStreamHub', () => {
     } finally {
       hub.stop();
       warnSpy.mockRestore();
+    }
+  });
+
+  it('routes event directories through the active docker instance mapping (toHost)', async () => {
+    setActiveInstancePathMapping(createInstancePathMapping({
+      rules: [{ hostPrefix: 'C:\\proj\\foo', remotePrefix: '/workspace' }],
+      fallbackRemote: '/workspace',
+    }));
+    const received = [];
+    const hub = createGlobalMessageStreamHub({
+      buildOpenCodeUrl: (pathname) => `http://127.0.0.1:4096${pathname}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      upstreamReconnectDelayMs: 100,
+      fetchImpl: async () => createSseResponse({
+        blocks: [
+          'id: evt-a\ndata: {"type":"session.created","directory":"/workspace","properties":{}}\n\n',
+          'id: evt-b\ndata: {"type":"session.updated","directory":"global","properties":{}}\n\n',
+        ],
+      }),
+    });
+
+    hub.subscribeEvent((event) => {
+      received.push(event.directory);
+    });
+
+    try {
+      hub.start();
+      await waitForAssertion(() => {
+        expect(received).toContain('C:\\proj\\foo');
+      });
+      expect(received).toContain('global');
+      expect(received).not.toContain('/workspace');
+    } finally {
+      hub.stop();
+      setActiveInstancePathMapping(null);
     }
   });
 });

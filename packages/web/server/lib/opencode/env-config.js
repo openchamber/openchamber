@@ -1,5 +1,7 @@
 import { isIP } from 'node:net';
 
+import { parsePathMappingRules } from './path-mapping.js';
+
 const MAX_HOSTNAME_LENGTH = 253;
 const HOSTNAME_LABEL_RE = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$/;
 // All-numeric dotted values must be a real IPv4 address; otherwise typo'd IPs
@@ -24,6 +26,7 @@ export const isValidOpenCodeHostname = (value) => {
 export const resolveOpenCodeEnvConfig = (options = {}) => {
   const env = options.env && typeof options.env === 'object' ? options.env : {};
   const logger = options.logger ?? console;
+  const platform = options.platform ?? process.platform;
 
   const configuredOpenCodePort = (() => {
     const raw =
@@ -94,10 +97,19 @@ export const resolveOpenCodeEnvConfig = (options = {}) => {
     return trimmed;
   })();
 
+  // Host<->remote path mapping for external OpenCode servers (e.g. a Docker
+  // container mounting a host project directory). Parsed for diagnostics here;
+  // the runtime translator in path-mapping.js reads the same variable lazily.
+  const pathMappingRules = parsePathMappingRules(
+    typeof env.OPENCODE_PATH_MAP === 'string' ? env.OPENCODE_PATH_MAP : '',
+    { logger, platform },
+  ).rules;
+
   return {
     configuredOpenCodePort,
     configuredOpenCodeHost,
     effectivePort,
     configuredOpenCodeHostname,
+    pathMappingRules,
   };
 };

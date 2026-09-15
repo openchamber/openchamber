@@ -616,11 +616,11 @@ export const invalidateSettingsCache = (): void => {
   _serverKnownSettings = {};
 };
 
-export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adoptTheme?: boolean }): Promise<void> => {
+export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adoptTheme?: boolean }): Promise<DesktopSettings | null> => {
   const bootstrap = options?.bootstrap !== false;
   const adoptTheme = options?.adoptTheme ?? bootstrap;
   if (typeof window === 'undefined') {
-    return;
+    return null;
   }
   ensureSettingsRuntimeLifecycle();
   const context = captureSettingsRuntimeContext();
@@ -671,11 +671,11 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
     return { ...settings, ..._pendingSettingsChanges };
   };
 
-  const applySettings = async (loadedSettings: DesktopSettings) => {
-    if (!isSettingsRuntimeContextCurrent(context)) return;
+  const applySettings = async (loadedSettings: DesktopSettings): Promise<DesktopSettings | null> => {
+    if (!isSettingsRuntimeContextCurrent(context)) return null;
     let settings = overlayPendingChanges(_settingsMutationTracker.reconcile(loadedSettings, operation));
     await waitForHydration();
-    if (!isSettingsRuntimeContextCurrent(context)) return;
+    if (!isSettingsRuntimeContextCurrent(context)) return null;
     settings = withoutStaleDeviceFields(
       overlayPendingChanges(_settingsMutationTracker.reconcile(loadedSettings, operation)),
       context.runtimeKey,
@@ -696,18 +696,20 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
     }
 
     dispatchSettingsSynced(settings, bootstrap, adoptTheme);
+    return settings;
   };
 
   try {
     const webSettings = await fetchWebSettings(context);
     if (webSettings && isSettingsRuntimeContextCurrent(context)) {
-      await applySettings(webSettings);
+      return await applySettings(webSettings);
     }
   } catch (error) {
     console.warn('Failed to synchronise settings:', error);
   } finally {
     _settingsMutationTracker.finish(operation);
   }
+  return null;
 };
 
 // Coalesce rapid updateDesktopSettings calls into a single PUT

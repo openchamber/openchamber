@@ -11,6 +11,7 @@ import {
 import { createRealpathCache } from '../path-realpath-cache.js';
 import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS } from '../event-stream/upstream-reader.js';
 import { recordStartupPerformance } from './startup-performance.js';
+import { getPathMapping } from './path-mapping.js';
 import { getWorktreeBootstrapStatus } from '../git/service.js';
 
 const DEFAULT_SSE_HEARTBEAT_INTERVAL_MS = 20_000;
@@ -105,7 +106,7 @@ const createOpenCodeProxyAgentResolver = (resolveTarget) => {
   };
 };
 
-export const createDirectoryQueryCanonicalizer = ({ realpath, ...cacheOptions } = {}) => {
+export const createDirectoryQueryCanonicalizer = ({ realpath, pathMapping, ...cacheOptions } = {}) => {
   const realpathCache = createRealpathCache({ fallbackOnError: true, realpath, ...cacheOptions });
 
   return async (requestUrl) => {
@@ -120,11 +121,13 @@ export const createDirectoryQueryCanonicalizer = ({ realpath, ...cacheOptions } 
     }
 
     const canonicalDirectory = await realpathCache.resolve(directory);
-    if (!canonicalDirectory || canonicalDirectory === directory) {
+    const resolvedDirectory = canonicalDirectory || directory;
+    const upstreamDirectory = pathMapping?.enabled ? pathMapping.toRemote(resolvedDirectory) : resolvedDirectory;
+    if (!upstreamDirectory || upstreamDirectory === directory) {
       return requestUrl;
     }
 
-    url.searchParams.set('directory', canonicalDirectory);
+    url.searchParams.set('directory', upstreamDirectory);
     return `${url.pathname}${url.search}`;
   };
 };
@@ -140,7 +143,9 @@ export const normalizeForwardedDirectoryHeaders = (headers) => {
   }
 
   try {
-    headers['x-opencode-directory'] = decodeURIComponent(rawDirectory);
+    // The client speaks host paths; an external OpenCode server in another
+    // filesystem namespace needs the remote counterpart.
+    headers['x-opencode-directory'] = getPathMapping().toRemote(decodeURIComponent(rawDirectory));
   } catch {
     // Leave malformed values untouched; upstream will reject invalid paths.
   }
@@ -235,10 +240,17 @@ const sanitizeSessionListItem = (session) => {
     return session;
   }
 
+  const pathMapping = getPathMapping();
   const sanitized = {};
   for (const key of SESSION_LIST_ALLOWED_FIELDS) {
     if (key in session) {
-      sanitized[key] = session[key];
+      // OpenCode reports session directories as remote-side paths; restore the
+      // host view so the UI keeps comparing against its host-side projects.
+      if ((key === 'directory' || key === 'path') && typeof session[key] === 'string') {
+        sanitized[key] = pathMapping.toHost(session[key]);
+      } else {
+        sanitized[key] = session[key];
+      }
     }
   }
 
@@ -307,6 +319,15 @@ export const registerOpenCodeProxy = (app, deps) => {
   const FALLBACK_PROXY_TARGET = 'http://127.0.0.1:3902';
   const canonicalizeDirectoryQuery = createDirectoryQueryCanonicalizer({
     realpath: fs?.promises?.realpath?.bind(fs.promises),
+    // Live view: the path mapping is process-mutable (an active Docker-backed
+    // instance installs its own mapping after proxy setup), so the
+    // canonicalizer must resolve the CURRENT mapping per request instead of a
+    // setup-time snapshot.
+    pathMapping: {
+      get enabled() { return getPathMapping().enabled; },
+      toRemote: (value) => getPathMapping().toRemote(value),
+      toHost: (value) => getPathMapping().toHost(value),
+    },
   });
 
   const hasParsedBodyValue = (body) => {
@@ -844,11 +865,15 @@ export const registerOpenCodeProxy = (app, deps) => {
         );
         const extraSessions = [];
         let successfulProjectReads = 0;
+        const pathMapping = getPathMapping();
         for (const dir of projectDirs) {
           const candidates = Array.from(new Set([
             dir,
             dir.replace(/\\/g, '/'),
             dir.replace(/\//g, '\\'),
+            // With a path mapping, OpenCode knows the project under its remote
+            // path only, so that spelling must be probed as well.
+            ...(pathMapping.enabled ? [pathMapping.toRemote(dir)] : []),
           ]));
           for (const candidateDir of candidates) {
             const encoded = encodeURIComponent(candidateDir);
@@ -930,7 +955,7 @@ export const registerOpenCodeProxy = (app, deps) => {
           const rawDirectory = req.headers['x-opencode-directory'];
           if (typeof rawDirectory === 'string') {
             try {
-              proxyReq.setHeader('x-opencode-directory', decodeURIComponent(rawDirectory));
+              proxyReq.setHeader('x-opencode-directory', getPathMapping().toRemote(decodeURIComponent(rawDirectory)));
             } catch {
               proxyReq.setHeader('x-opencode-directory', rawDirectory);
             }

@@ -233,6 +233,10 @@ mock.module('@/components/desktop/DesktopHostSwitcher', () => ({
   DesktopHostSwitcherInline: () => 'host-switcher',
 }));
 
+mock.module('@/components/desktop/DockerInstanceSection', () => ({
+  DockerInstancesWebEntry: () => null,
+}));
+
 mock.module('@/lib/i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
 }));

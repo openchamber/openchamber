@@ -3,6 +3,11 @@ export const createOpenCodeNetworkRuntime = (deps) => {
     state,
     getOpenCodeAuthHeaders,
     configuredOpenCodeHostname = '127.0.0.1',
+    // When an OpenChamber-managed Docker instance is the active upstream,
+    // this resolves to `{ origin, instanceId }` and every OpenCode-bound URL
+    // targets the instance's published loopback endpoint instead of the
+    // local/external server. Null restores the default resolution.
+    resolveUpstreamOverride = null,
   } = deps;
 
   const resolveConnectHostname = () => {
@@ -84,12 +89,16 @@ export const createOpenCodeNetworkRuntime = (deps) => {
   };
 
   const buildOpenCodeUrl = (path, prefixOverride) => {
-    if (!state.openCodePort) {
-      throw new Error('OpenCode port is not available');
-    }
     const normalizedPath = path.startsWith('/') ? path : `/${path}`;
     const prefix = normalizeApiPrefix(prefixOverride !== undefined ? prefixOverride : '');
     const fullPath = `${prefix}${normalizedPath}`;
+    const override = resolveUpstreamOverride ? resolveUpstreamOverride() : null;
+    if (override?.origin) {
+      return `${override.origin}${fullPath}`;
+    }
+    if (!state.openCodePort) {
+      throw new Error('OpenCode port is not available');
+    }
     const base = state.openCodeBaseUrl ?? `http://${resolveConnectHostname()}:${state.openCodePort}`;
     return `${base}${fullPath}`;
   };
