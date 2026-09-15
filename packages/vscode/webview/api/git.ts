@@ -164,16 +164,13 @@ export const createVSCodeGitAPI = (): GitAPI => ({
     files: string[],
     options?: { zenModel?: string; providerId?: string; modelId?: string }
   ): Promise<{ message: GeneratedCommitMessage }> => {
-    // This requires AI integration - stubbed for now
-    void directory; // Unused for now
-    void files; // Unused for now
-    void options; // Unused for now
-    return {
-      message: {
-        subject: '',
-        highlights: [],
-      },
-    };
+    return sendBridgeMessage<{ message: GeneratedCommitMessage }>('api:git/commit-message', {
+      directory,
+      files,
+      zenModel: options?.zenModel,
+      providerId: options?.providerId,
+      modelId: options?.modelId,
+    });
   },
 
   generatePullRequestDescription: async (

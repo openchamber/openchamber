@@ -18,6 +18,7 @@
   "command.newSession.title": "Nouvelle session",
   "command.showSettings.title": "Paramètres",
   "command.attachExplorerToChat.title": "Joindre au chat OpenChamber",
+  "command.generateCommitMessage.title": "Générer le message de commit",
   "configuration.apiUrl.description": "URL d’un serveur API OpenCode externe. Laissez vide pour démarrer automatiquement une instance locale.",
   "configuration.opencodeBinary.description": "Chemin absolu facultatif vers le binaire CLI opencode. Utile si la recherche PATH échoue. Nécessite de recharger la fenêtre ou de redémarrer l’API pour être pris en compte."
 }

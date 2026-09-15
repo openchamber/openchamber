@@ -1,6 +1,11 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BRIDGE_ZEN_DEFAULT_MODEL, chooseBridgeGitGenerationModel } from './bridge-git-generation-model';
+import {
+  BRIDGE_ZEN_DEFAULT_MODEL,
+  catalogModelRefsFromListPayload,
+  chooseBridgeGitGenerationModel,
+  pickCatalogGitGenerationFallback,
+} from './bridge-git-generation-model';
 
 const catalogOf = (...refs: string[]) => {
   const set = new Set(refs);
@@ -43,7 +48,7 @@ describe('chooseBridgeGitGenerationModel', () => {
         { smallModelUseDefault: useDefault, smallModelOverride: 'openai/gpt-4.1-mini' },
         hasModel,
       );
-      assert.deepEqual(choice, { providerID: 'zen', modelID: BRIDGE_ZEN_DEFAULT_MODEL });
+      assert.deepEqual(choice, { providerID: 'opencode', modelID: 'big-pickle' });
     }
   });
 
@@ -55,32 +60,96 @@ describe('chooseBridgeGitGenerationModel', () => {
         { smallModelUseDefault: false, smallModelOverride: override },
         hasModel,
       );
-      assert.deepEqual(choice, { providerID: 'zen', modelID: BRIDGE_ZEN_DEFAULT_MODEL });
+      assert.deepEqual(choice, { providerID: 'opencode', modelID: 'big-pickle' });
     }
   });
 
-  test('the removed gitProviderId/gitModelId pair is no longer read', () => {
-    const choice = chooseBridgeGitGenerationModel(
-      {},
-      { gitProviderId: 'openai', gitModelId: 'gpt-4.1-mini' },
-      catalogOf('openai/gpt-4.1-mini'),
-    );
-    assert.deepEqual(choice, { providerID: 'zen', modelID: BRIDGE_ZEN_DEFAULT_MODEL });
-  });
-
-  test('zen fallback prefers the request zen model, then settings, then the default', () => {
+  test('uses OpenCode big-pickle when zen is absent and no catalog fallback is given', () => {
     const none = () => false;
     assert.deepEqual(
       chooseBridgeGitGenerationModel({ zenModel: ' gpt-5-mini ' }, { zenModel: 'other' }, none),
-      { providerID: 'zen', modelID: 'gpt-5-mini' },
+      { providerID: 'opencode', modelID: 'big-pickle' },
     );
     assert.deepEqual(
       chooseBridgeGitGenerationModel({}, { zenModel: 'other' }, none),
-      { providerID: 'zen', modelID: 'other' },
+      { providerID: 'opencode', modelID: 'big-pickle' },
     );
     assert.deepEqual(
       chooseBridgeGitGenerationModel({}, {}, none),
-      { providerID: 'zen', modelID: BRIDGE_ZEN_DEFAULT_MODEL },
+      { providerID: 'opencode', modelID: 'big-pickle' },
+    );
+  });
+
+  test('uses a catalog model when zen is not in the catalog', () => {
+    const fallback = { providerID: 'opencode', modelID: 'ling-3.0-flash-fin-free' };
+    const choice = chooseBridgeGitGenerationModel(
+      {},
+      {},
+      catalogOf('opencode/ling-3.0-flash-fin-free'),
+      fallback,
+    );
+    assert.deepEqual(choice, fallback);
+  });
+
+  test('keeps zen when the catalog has it, even if a catalog fallback exists', () => {
+    const choice = chooseBridgeGitGenerationModel(
+      {},
+      {},
+      catalogOf(`zen/${BRIDGE_ZEN_DEFAULT_MODEL}`, 'opencode/ling-3.0-flash-fin-free'),
+      { providerID: 'opencode', modelID: 'ling-3.0-flash-fin-free' },
+    );
+    assert.deepEqual(choice, { providerID: 'zen', modelID: BRIDGE_ZEN_DEFAULT_MODEL });
+  });
+});
+
+describe('pickCatalogGitGenerationFallback', () => {
+  test('prefers OpenCode big-pickle over other catalog rows', () => {
+    assert.deepEqual(
+      pickCatalogGitGenerationFallback([
+        'anthropic/claude-sonnet-4',
+        'opencode/deepseek-v4-flash-free',
+        'opencode/ling-3.0-flash-fin-free',
+        'opencode/big-pickle',
+      ]),
+      { providerID: 'opencode', modelID: 'big-pickle' },
+    );
+  });
+
+  test('uses an OpenCode catalog row when big-pickle is absent', () => {
+    assert.deepEqual(
+      pickCatalogGitGenerationFallback([
+        'anthropic/claude-sonnet-4',
+        'opencode/ling-3.0-flash-fin-free',
+      ]),
+      { providerID: 'opencode', modelID: 'ling-3.0-flash-fin-free' },
+    );
+  });
+
+  test('returns null for an empty catalog', () => {
+    assert.equal(pickCatalogGitGenerationFallback([]), null);
+  });
+});
+
+describe('catalogModelRefsFromListPayload', () => {
+  test('reads the nested v2 { location, data } list used by the live SDK', () => {
+    assert.deepEqual(
+      catalogModelRefsFromListPayload({
+        location: { directory: '/repo' },
+        data: [
+          { id: 'ling-3.0-flash-fin-free', providerID: 'opencode' },
+          { id: 'claude-sonnet-4', providerID: 'anthropic' },
+        ],
+      }),
+      ['opencode/ling-3.0-flash-fin-free', 'anthropic/claude-sonnet-4'],
+    );
+  });
+
+  test('also accepts a bare model array from an unwrapped SDK list', () => {
+    assert.deepEqual(
+      catalogModelRefsFromListPayload([
+        { id: 'big-pickle', providerID: 'opencode' },
+      ]),
+      ['opencode/big-pickle'],
     );
   });
 });

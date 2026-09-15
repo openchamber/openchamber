@@ -34,6 +34,7 @@ Plus everything from the shared OpenChamber UI: branchable timeline, smart tool 
 | `OpenChamber: Settings` | Open extension settings |
 | `OpenChamber: Restart API Connection` | Restart the OpenCode API process |
 | `OpenChamber: Show OpenCode Status` | Debug info for development or bug reports |
+| `OpenChamber: Generate Commit Message` | Fill VS Code's Source Control commit box from staged changes, or unstaged if nothing is staged |
 
 ### Right-click menu
 

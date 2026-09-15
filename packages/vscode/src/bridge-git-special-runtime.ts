@@ -2,8 +2,27 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import * as gitService from './gitService';
-import { chooseBridgeGitGenerationModel, type BridgeGitGenerationPayloadModel } from './bridge-git-generation-model';
+import {
+  chooseBridgeGitGenerationModel,
+  catalogModelRefsFromListPayload,
+  pickCatalogGitGenerationFallback,
+  type BridgeGitGenerationPayloadModel,
+  type GitGenerationCatalogListPayload,
+} from './bridge-git-generation-model';
 import type { BridgeContext, BridgeResponse } from './bridge';
+import { readMagicPromptOverrides } from './bridge-settings-runtime';
+import {
+  COMMIT_DIFF_FILE_LIMIT,
+  COMMIT_DIFF_TOTAL_CHAR_LIMIT,
+  COMMIT_STYLE_SAMPLE_COUNT,
+  buildCommitGenerationPrompt,
+  formatRecentCommitSubjects,
+  parseGeneratedCommitMessage,
+  commitPathUsesStagedDiff,
+  selectCommitFilePaths,
+  type GeneratedCommitMessage,
+  type GitStatusFileLike,
+} from './git-commit-message';
 
 type BridgeMessageInput = {
   id: string;
@@ -24,6 +43,11 @@ const BRIDGE_GIT_MODEL_CATALOG_CACHE_TTL_MS = 30 * 1000;
 
 let bridgeGitModelCatalogCache: Set<string> | null = null;
 let bridgeGitModelCatalogCacheAt = 0;
+
+export const resetBridgeGitModelCatalogCache = (): void => {
+  bridgeGitModelCatalogCache = null;
+  bridgeGitModelCatalogCacheAt = 0;
+};
 
 const sleep = (ms: number) => new Promise<void>((resolve) => {
   setTimeout(resolve, ms);
@@ -81,26 +105,11 @@ const fetchBridgeGitModelCatalog = async (
   }
 
   const client = createBridgeGitClient(apiUrl, authHeaders);
-  const payload = unwrapBridgeSdkData(
+  const payload = unwrapBridgeSdkData<GitGenerationCatalogListPayload>(
     await client.v2.model.list(undefined, { signal: AbortSignal.timeout(8_000) }),
     'model.list'
   );
-  const refs = new Set<string>();
-  if (Array.isArray(payload)) {
-    for (const item of payload) {
-      if (!item || typeof item !== 'object') {
-        continue;
-      }
-      const record = item as Record<string, unknown>;
-      const providerID = typeof record.providerID === 'string' ? record.providerID.trim() : '';
-      const modelID = typeof record.id === 'string'
-        ? record.id.trim()
-        : (typeof record.modelID === 'string' ? record.modelID.trim() : '');
-      if (providerID && modelID) {
-        refs.add(`${providerID}/${modelID}`);
-      }
-    }
-  }
+  const refs = new Set(catalogModelRefsFromListPayload(payload));
 
   bridgeGitModelCatalogCache = refs;
   bridgeGitModelCatalogCacheAt = now;
@@ -127,7 +136,8 @@ const resolveBridgeGitGenerationModel = async (
     return catalog.has(`${providerID}/${modelID}`);
   };
 
-  return chooseBridgeGitGenerationModel(payloadModel, settings, hasModel);
+  const catalogFallback = catalog ? pickCatalogGitGenerationFallback(catalog) : null;
+  return chooseBridgeGitGenerationModel(payloadModel, settings, hasModel, catalogFallback);
 };
 
 const extractTextFromMessageParts = (parts: unknown): string => {
@@ -220,7 +230,13 @@ const generateBridgeTextWithSessionFlow = async ({
           continue;
         }
         const info = message.info as Record<string, unknown> | undefined;
-        if (info?.role !== 'assistant' || info?.finish !== 'stop') {
+        if (!info || info.role !== 'assistant') {
+          continue;
+        }
+        if (info.finish === 'error') {
+          throw new Error(`Generation failed: ${formatBridgeSdkError(info.error)}`);
+        }
+        if (info.finish !== 'stop') {
           continue;
         }
 
@@ -243,6 +259,131 @@ const generateBridgeTextWithSessionFlow = async ({
   }
 };
 
+const nullDevicePath = process.platform === 'win32' ? 'NUL' : '/dev/null';
+
+const collectRecentCommitSubjects = async (directory: string): Promise<string> => {
+  try {
+    const log = await gitService.getGitLog(directory, { maxCount: COMMIT_STYLE_SAMPLE_COUNT });
+    const messages = (Array.isArray(log?.all) ? log.all : [])
+      .map((entry) => (typeof entry?.message === 'string' ? entry.message : ''));
+    return formatRecentCommitSubjects(messages);
+  } catch {
+    return '(recent commits unavailable)';
+  }
+};
+
+const collectSelectedFileDiffs = async (
+  directory: string,
+  files: string[],
+  statusFiles: GitStatusFileLike[],
+  execGit: SpecialGitDeps['execGit'],
+): Promise<string> => {
+  const statusByPath = new Map(statusFiles.map((file) => [file.path, file]));
+  const limited = files.slice(0, COMMIT_DIFF_FILE_LIMIT);
+  const chunks = await Promise.all(limited.map(async (filePath) => {
+    try {
+      if (commitPathUsesStagedDiff(statusByPath.get(filePath))) {
+        const staged = await gitService.getGitDiff(directory, filePath, true).catch(() => null);
+        if (typeof staged?.diff === 'string' && staged.diff.trim()) return staged.diff;
+        return `--- ${filePath} (no textual diff available)`;
+      }
+
+      const unstaged = await gitService.getGitDiff(directory, filePath, false).catch(() => null);
+      if (typeof unstaged?.diff === 'string' && unstaged.diff.trim()) return unstaged.diff;
+
+      const noIndex = await execGit(
+        ['diff', '--no-color', '--no-index', '--', nullDevicePath, filePath],
+        directory,
+      );
+      if (noIndex.stdout.trim()) return noIndex.stdout;
+      return `--- ${filePath} (no textual diff available)`;
+    } catch {
+      return `--- ${filePath} (diff unavailable)`;
+    }
+  }));
+
+  let total = '';
+  for (const chunk of chunks) {
+    if (total.length + chunk.length > COMMIT_DIFF_TOTAL_CHAR_LIMIT) {
+      total += '\n[remaining diffs truncated]';
+      break;
+    }
+    total += (total ? '\n\n' : '') + chunk;
+  }
+  if (files.length > limited.length) {
+    total += `\n[${files.length - limited.length} more selected files omitted]`;
+  }
+  return total;
+};
+
+export const generateBridgeCommitMessage = async ({
+  directory,
+  files,
+  apiUrl,
+  authHeaders,
+  settings,
+  visiblePromptOverride,
+  instructionsPromptOverride,
+  payloadModel,
+  execGit,
+}: {
+  directory: string;
+  files?: string[];
+  apiUrl: string;
+  authHeaders?: Record<string, string>;
+  settings: Record<string, unknown>;
+  visiblePromptOverride?: string;
+  instructionsPromptOverride?: string;
+  payloadModel?: BridgeGitGenerationPayloadModel;
+  execGit: SpecialGitDeps['execGit'];
+}): Promise<GeneratedCommitMessage> => {
+  let selectedFiles = Array.isArray(files)
+    ? files.map((file) => file.trim()).filter(Boolean)
+    : [];
+  const status = await gitService.getGitStatus(directory, { mode: 'light' });
+  if (selectedFiles.length === 0) {
+    selectedFiles = selectCommitFilePaths(status.files);
+  }
+  if (selectedFiles.length === 0) {
+    throw new Error('No files provided to generate commit message');
+  }
+
+  const [recentCommits, diffs] = await Promise.all([
+    collectRecentCommitSubjects(directory),
+    collectSelectedFileDiffs(directory, selectedFiles, status.files, execGit),
+  ]);
+  if (!diffs.trim()) {
+    throw new Error('No diffs available for selected files');
+  }
+
+  const { system, prompt } = buildCommitGenerationPrompt(
+    selectedFiles,
+    recentCommits,
+    diffs,
+    visiblePromptOverride ?? '',
+    instructionsPromptOverride ?? '',
+  );
+  const { providerID, modelID } = await resolveBridgeGitGenerationModel(
+    payloadModel ?? {},
+    settings,
+    apiUrl,
+    authHeaders,
+  );
+  const raw = await generateBridgeTextWithSessionFlow({
+    apiUrl,
+    directory,
+    prompt: `${system}\n\n${prompt}`,
+    providerID,
+    modelID,
+    authHeaders,
+  });
+  const parsed = parseGeneratedCommitMessage(raw);
+  if (!parsed) {
+    throw new Error('No commit message returned by generator');
+  }
+  return parsed;
+};
+
 const parseJsonObjectSafe = (value: string): Record<string, unknown> | null => {
   try {
     const parsed = JSON.parse(value) as unknown;
@@ -261,6 +402,47 @@ export async function handleSpecialGitBridgeMessage(
   const { id, type, payload } = message;
 
   switch (type) {
+    case 'api:git/commit-message': {
+      const { directory, files, providerId, modelId, zenModel: payloadZenModel } = (payload || {}) as {
+        directory?: string;
+        files?: unknown;
+        providerId?: string;
+        modelId?: string;
+        zenModel?: string;
+      };
+      if (!directory) {
+        return { id, type, success: false, error: 'Directory is required' };
+      }
+
+      const selectedFiles = Array.isArray(files)
+        ? files.filter((file): file is string => typeof file === 'string' && file.trim().length > 0)
+        : undefined;
+
+      try {
+        const apiUrl = ctx?.manager?.getApiUrl();
+        if (!apiUrl) {
+          return { id, type, success: false, error: 'OpenCode API unavailable' };
+        }
+
+        const promptOverrides = readMagicPromptOverrides().overrides;
+        const generated = await generateBridgeCommitMessage({
+          directory,
+          files: selectedFiles,
+          apiUrl,
+          authHeaders: ctx?.manager?.getOpenCodeAuthHeaders(),
+          settings: deps.readSettings(ctx),
+          visiblePromptOverride: promptOverrides['git.commit.generate.visible'],
+          instructionsPromptOverride: promptOverrides['git.commit.generate.instructions'],
+          payloadModel: { providerId, modelId, zenModel: payloadZenModel },
+          execGit: deps.execGit,
+        });
+        return { id, type, success: true, data: { message: generated } };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: message };
+      }
+    }
+
     case 'api:git/pr-description': {
       const { directory, base, head, context, providerId, modelId, zenModel: payloadZenModel } = (payload || {}) as {
         directory?: string;

@@ -16,8 +16,16 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
   - Standard Git message handlers.
 
 - `bridge-git-special-runtime.ts`
-  - Specialized Git flows (`pr-description`, `conflict-details`) and generation helpers.
-  - Generation model choice lives in `bridge-git-generation-model.ts`: request model first, then the user's small-model override (`smallModelUseDefault === false` plus `smallModelOverride` as `provider/model`) when the catalog has it, then the zen fallback. The old `gitProviderId`/`gitModelId` pair is no longer read.
+  - Specialized Git flows (`commit-message`, `pr-description`, `conflict-details`) and generation helpers.
+  - Generation model choice lives in `bridge-git-generation-model.ts`: request model first, then the user's small-model override (`smallModelUseDefault === false` plus `smallModelOverride` as `provider/model`) when the catalog has it, then zen when the catalog has it, then an OpenCode catalog model (`big-pickle`, then any other `opencode/*` row). If the catalog is empty or the lookup failed, use `opencode/big-pickle`. Never send `zen/gpt-5-nano` unless the catalog has that row. Vanilla OpenCode has no zen provider; that request dies and the SCM spinner waits out the generation timeout. The old `gitProviderId`/`gitModelId` pair is no longer read.
+  - Commit message generation reuses the same throwaway `"Git Generation"` OpenCode session as PR text. Prompt templates stay aligned with `git.commit.generate.*` in `packages/ui/src/lib/magicPrompts.ts`, including on-disk magic-prompt overrides.
+
+- `git-commit-message.ts`
+  - Pure parse/format/file-selection helpers for commit generation (no `vscode` import).
+  - A path with a meaningful index status uses only the staged (`--cached`) diff. Extra working-tree hunks stay out of the prompt.
+
+- `scmCommitMessage.ts`
+  - Source Control title-bar command. Resolves the git repo, prefers staged files then unstaged/untracked, writes the result into `Repository.inputBox` only if that box still matches the value captured when generation started. Light theme reuses `icon.svg`. Dark theme uses `icon-scm-titlebar.svg` (`#C5C5C5`) because that slot does not theme `currentColor` and `icon-titlebar.svg` is mint. A blank icon over SSH/DevPod is [vscode-remote-release#11686](https://github.com/microsoft/vscode-remote-release/issues/11686), not a missing asset.
 
 - `bridge-git-process-runtime.ts`
   - Git process execution and environment setup (`execGit`), including SSH agent socket resolution.
@@ -196,6 +204,7 @@ Handlers with no reachable caller in the VS Code webview.
 | `api:git/merge`, `api:git/merge/abort`, `api:git/merge/continue`, `api:git/rebase`, `api:git/rebase/abort`, `api:git/rebase/continue`, `api:git/conflict-details` | `GitView` only |
 | `api:git/push`, `api:git/pull`, `api:git/fetch` | `GitView` and `MobileChangesSurface` only |
 | `api:git/diff`, `api:git/file-diff` | `DiffView` only |
+| `api:git/commit-message` | Wired from `webview/api/git.ts`. GitView is still unmounted, so no VS Code webview UI calls it. The SCM title-bar command uses the same generator on the extension host. |
 | `api:git/pr-description` | `views/git/PullRequestSection.tsx` only |
 | `api:git/identity` | `git` settings page is VS Code-gated |
 | `api:github/pr:create`, `api:github/pr:merge`, `api:github/pr:ready`, `api:github/pr:update` | `views/git/PullRequestSection.tsx` only. `api:github/pr:status` stays reachable through `useGitHubPrStatusStore` in the sidebar |
