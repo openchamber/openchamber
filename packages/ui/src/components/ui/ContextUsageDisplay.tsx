@@ -3,9 +3,10 @@ import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Icon } from "@/components/icon/Icon";
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { formatMoney } from '@/lib/money';
 import { clampPercent, resolveUsageTone } from '@/lib/quota';
+import { formatContextUsageValues } from './contextUsageFormat';
 
 interface ContextUsageDisplayProps {
   totalTokens: number;
@@ -18,6 +19,8 @@ interface ContextUsageDisplayProps {
   isMobile?: boolean;
   hideIcon?: boolean;
   showPercentIcon?: boolean;
+  showTokenCount?: boolean;
+  staticProgressbar?: boolean;
   className?: string;
   valueClassName?: string;
   percentIconClassName?: string;
@@ -36,6 +39,8 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
   isMobile = false,
   hideIcon = false,
   showPercentIcon = false,
+  showTokenCount = false,
+  staticProgressbar = false,
   className,
   valueClassName,
   percentIconClassName,
@@ -44,6 +49,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
 }) => {
   const { t } = useI18n();
   const [mobileTooltipOpen, setMobileTooltipOpen] = React.useState(false);
+  const intlLocale = getCurrentIntlLocale();
   const colorPct = typeof colorPercentage === 'number' ? colorPercentage : percentage;
   const progressPct = clampPercent(percentage) ?? 0;
   const progressTone = resolveUsageTone(colorPct);
@@ -86,6 +92,15 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
   ];
 
   const isInteractive = !isMobile && typeof onClick === 'function';
+  const { tokens: formattedTokens, percentage: formattedPercentage } = formatContextUsageValues(
+    totalTokens,
+    percentage,
+    intlLocale,
+  );
+  const accessibleValue = t('contextUsage.aria.value', {
+    tokens: formattedTokens,
+    percentage: formattedPercentage,
+  });
 
   const contextContent = (
     <>
@@ -96,10 +111,11 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
             <svg
               viewBox={`0 0 ${circularProgressSize} ${circularProgressSize}`}
               className={cn('h-3.5 w-3.5 -rotate-90', percentIconClassName)}
-              role="progressbar"
-              aria-valuenow={Math.round(progressPct)}
-              aria-valuemin={0}
-              aria-valuemax={100}
+              aria-hidden={staticProgressbar || undefined}
+              role={staticProgressbar ? undefined : 'progressbar'}
+              aria-valuenow={staticProgressbar ? undefined : Math.round(progressPct)}
+              aria-valuemin={staticProgressbar ? undefined : 0}
+              aria-valuemax={staticProgressbar ? undefined : 100}
             >
               <circle
                 cx={circularProgressSize / 2}
@@ -122,7 +138,9 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
                 className="transition-[stroke-dashoffset,stroke] duration-300"
               />
             </svg>
-            <span className="text-foreground">{Math.min(percentage, 999).toFixed(1)}%</span>
+            <span className="whitespace-nowrap text-foreground">
+              {showTokenCount ? `${formattedTokens} (${formattedPercentage})` : `${Math.min(percentage, 999).toFixed(1)}%`}
+            </span>
           </>
         ) : (
           <>
@@ -150,7 +168,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
     <button
       type="button"
       className={sharedClassName}
-      aria-label={t('contextUsage.aria.label')}
+      aria-label={showTokenCount ? accessibleValue : t('contextUsage.aria.label')}
       aria-pressed={pressed}
       onClick={onClick}
     >
@@ -159,7 +177,14 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
   ) : (
     <div
       className={sharedClassName}
+      data-focus-ring={staticProgressbar ? 'accent' : undefined}
+      role={staticProgressbar ? 'progressbar' : undefined}
       aria-label={t('contextUsage.aria.label')}
+      aria-valuenow={staticProgressbar ? Math.round(progressPct) : undefined}
+      aria-valuemin={staticProgressbar ? 0 : undefined}
+      aria-valuemax={staticProgressbar ? 100 : undefined}
+      aria-valuetext={staticProgressbar ? accessibleValue : undefined}
+      tabIndex={staticProgressbar ? 0 : undefined}
       onClick={isMobile ? () => setMobileTooltipOpen(true) : undefined}
     >
       {contextContent}
