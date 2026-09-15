@@ -875,6 +875,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
 
+        if (explicitAgentSwitchRef.current === currentAgentName) {
+            return;
+        }
+
         const restoreKey = [
             currentSessionId,
             latestLoadedUserChoice.id,
@@ -971,6 +975,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         }
 
         if (!contextHydrated || providers.length === 0 || agents.length === 0) {
+            return;
+        }
+
+        if (explicitAgentSwitchRef.current === currentAgentName) {
             return;
         }
 
