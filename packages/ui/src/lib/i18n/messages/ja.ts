@@ -3273,6 +3273,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.attention.revert': 'リバート実行中',
   'chat.workStatus.attention.bisect': '二分探索実行中',
   'chat.workStatus.subagent.done': '完了',
+  'chat.workStatus.subagent.failed': '失敗',
+  'chat.workStatus.subagent.failedSummary': '{count}件が失敗',
   'chat.workStatus.subagent.untitled': 'サブエージェント',
   'chat.workStatus.mcp.toggle': '{name} を切り替え',
   'chat.workStatus.mcp.needsAuth': 'サインイン',

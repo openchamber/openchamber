@@ -3274,6 +3274,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.attention.revert': 'Триває відкат',
   'chat.workStatus.attention.bisect': 'Триває bisect',
   'chat.workStatus.subagent.done': 'Готово',
+  'chat.workStatus.subagent.failed': 'Помилка',
+  'chat.workStatus.subagent.failedSummary': 'Помилок: {count}',
   'chat.workStatus.subagent.untitled': 'Сабагент',
   'chat.workStatus.mcp.toggle': 'Перемкнути {name}',
   'chat.workStatus.mcp.needsAuth': 'Увійти',

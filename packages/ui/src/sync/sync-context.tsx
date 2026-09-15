@@ -63,6 +63,7 @@ import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
 import { recordSessionError, summarizeOpenCodeError, type OpenCodeSessionErrorPayload } from "./session-error-log"
+import { clearSessionFailure, recordSessionFailure } from "./session-failure-store"
 import {
   applyGlobalSessionStatusEvent,
   applyGlobalSessionStatusEvents,
@@ -1813,6 +1814,7 @@ export function handleEvent(
     const errorSummary = payload.type === "session.error" ? summarizeOpenCodeError(props.error) : null
     if (errorSummary && sessionID) {
       recordSessionError({ sessionId: sessionID, directory: resolvedDirectory ?? null, ...errorSummary })
+      recordSessionFailure({ sessionId: sessionID, directory: resolvedDirectory ?? null, ...errorSummary })
     }
     // Skip subtask sessions — only top-level sessions generate notifications
     const storeState = getDirectoryEventState(store, batch)
@@ -1830,6 +1832,20 @@ export function handleEvent(
           : { type: "turn-complete" as const }),
       })
     }
+  }
+
+  if (payload.type === "session.status") {
+    // SAFETY: session.status payloads are normalized by the event pipeline and
+    // always carry the SDK session ID plus a status discriminator.
+    const props = payload.properties as { sessionID?: string; status?: { type?: string } }
+    if (props.sessionID && props.status?.type === "busy") {
+      clearSessionFailure(resolvedDirectory ?? null, props.sessionID)
+    }
+  }
+
+  if (payload.type === "session.deleted") {
+    const sessionID = getSessionIdFromPayload(payload)
+    if (sessionID) clearSessionFailure(resolvedDirectory ?? null, sessionID)
   }
 
   // Sync-layer parent resync: when a child session goes idle, recover
