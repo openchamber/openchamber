@@ -8,9 +8,11 @@ interface TurnAssistantBlockProps {
 }
 
 const TurnAssistantBlock: React.FC<TurnAssistantBlockProps> = ({ assistantMessages, renderMessage }) => {
+    const visibleAssistantMessages = assistantMessages.filter((message) => message.info.summary !== true);
+
     return (
         <div className="relative z-0">
-            {assistantMessages.map((message) => renderMessage(message))}
+            {visibleAssistantMessages.map((message) => renderMessage(message))}
         </div>
     );
 };
