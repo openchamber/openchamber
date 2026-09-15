@@ -23,7 +23,7 @@ describe('telemetry settings migration', () => {
       await useUIStore.persist.rehydrate();
       expect(useUIStore.getState().workStatusHiddenSections).toEqual(['mcp']);
       expect(useUIStore.getState().workStatusHiddenSectionsExplicit).toBe(false);
-      expect(useUIStore.persist.getOptions().version).toBe(21);
+      expect(useUIStore.persist.getOptions().version).toBe(22);
     });
   }
 
