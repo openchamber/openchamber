@@ -24,6 +24,7 @@ export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'opencode-go', name: 'OpenCode Go' },
   { id: 'deepseek', name: 'DeepSeek' },
   { id: 'exe-dev', name: 'exe.dev' },
+  { id: 'fireworks-ai', name: 'Fireworks AI' },
   { id: 'hyper', name: 'Charm Hyper' },
   { id: 'neuralwatt', name: 'NeuralWatt' },
   { id: 'xai', name: 'xAI' },
