@@ -26,7 +26,7 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.authorizationFailed': '{name} authorization timed out.',
     'settings.integrations.guests.toast.clientRequired': 'Save a client ID first.',
     'settings.integrations.guests.toast.tokenRequired': 'Paste an API token first.',
-    'settings.integrations.guests.toast.tokenInvalid': 'That API token was refused.',
+    'settings.integrations.guests.toast.tokenInvalid': "The extension's token check failed. Check the token's permissions and the extension's verification URL.",
   },
   de: {
     'settings.integrations.guests.title': 'Erweiterungskonten',
@@ -54,7 +54,7 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.authorizationFailed': 'Autorisierung von {name} ist abgelaufen.',
     'settings.integrations.guests.toast.clientRequired': 'Zuerst eine Client-ID speichern.',
     'settings.integrations.guests.toast.tokenRequired': 'Zuerst einen API-Token einfügen.',
-    'settings.integrations.guests.toast.tokenInvalid': 'Dieser API-Token wurde abgelehnt.',
+    'settings.integrations.guests.toast.tokenInvalid': 'Die Token-Prüfung der Erweiterung ist fehlgeschlagen. Prüfe die Token-Berechtigungen und die Prüf-URL der Erweiterung.',
   },
   fr: {
     'settings.integrations.guests.title': 'Comptes d’extensions',
@@ -82,7 +82,7 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.authorizationFailed': 'L’autorisation {name} a expiré.',
     'settings.integrations.guests.toast.clientRequired': 'Enregistrez d’abord un ID client.',
     'settings.integrations.guests.toast.tokenRequired': 'Collez d’abord un jeton API.',
-    'settings.integrations.guests.toast.tokenInvalid': 'Ce jeton API a été refusé.',
+    'settings.integrations.guests.toast.tokenInvalid': "La vérification du jeton par l'extension a échoué. Vérifiez les permissions du jeton et l'URL de vérification de l'extension.",
   },
   es: {
     'settings.integrations.guests.title': 'Cuentas de extensiones',
@@ -110,7 +110,7 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.authorizationFailed': 'La autorización de {name} se agotó.',
     'settings.integrations.guests.toast.clientRequired': 'Guarda primero un ID de cliente.',
     'settings.integrations.guests.toast.tokenRequired': 'Primero pega un token de API.',
-    'settings.integrations.guests.toast.tokenInvalid': 'Ese token de API fue rechazado.',
+    'settings.integrations.guests.toast.tokenInvalid': 'Falló la comprobación del token de la extensión. Revisa los permisos del token y la URL de verificación de la extensión.',
   },
   ja: {
     'settings.integrations.guests.title': '拡張機能のアカウント',
@@ -138,7 +138,7 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.authorizationFailed': '{name} の認可がタイムアウトしました。',
     'settings.integrations.guests.toast.clientRequired': '先にクライアント ID を保存してください。',
     'settings.integrations.guests.toast.tokenRequired': '先に API トークンを貼ってください。',
-    'settings.integrations.guests.toast.tokenInvalid': 'その API トークンは拒否されました。',
+    'settings.integrations.guests.toast.tokenInvalid': '拡張機能によるトークン検証に失敗しました。トークンの権限と拡張機能の検証 URL を確認してください。',
   },
   ko: {
     'settings.integrations.guests.title': '확장 계정',
@@ -166,7 +166,7 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.authorizationFailed': '{name} 권한 부여가 시간 초과되었습니다.',
     'settings.integrations.guests.toast.clientRequired': '먼저 클라이언트 ID를 저장하세요.',
     'settings.integrations.guests.toast.tokenRequired': '먼저 API 토큰을 붙여 넣으세요.',
-    'settings.integrations.guests.toast.tokenInvalid': '그 API 토큰이 거부되었습니다.',
+    'settings.integrations.guests.toast.tokenInvalid': '확장의 토큰 확인에 실패했습니다. 토큰 권한과 확장의 확인 URL을 확인하세요.',
   },
   pl: {
     'settings.integrations.guests.title': 'Konta rozszerzeń',
@@ -194,7 +194,7 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.authorizationFailed': 'Autoryzacja {name} wygasła.',
     'settings.integrations.guests.toast.clientRequired': 'Najpierw zapisz ID klienta.',
     'settings.integrations.guests.toast.tokenRequired': 'Najpierw wklej token API.',
-    'settings.integrations.guests.toast.tokenInvalid': 'Ten token API został odrzucony.',
+    'settings.integrations.guests.toast.tokenInvalid': 'Sprawdzenie tokenu przez rozszerzenie nie powiodło się. Sprawdź uprawnienia tokenu i adres URL weryfikacji rozszerzenia.',
   },
   'pt-BR': {
     'settings.integrations.guests.title': 'Contas de extensões',
@@ -222,7 +222,7 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.authorizationFailed': 'A autorização de {name} expirou.',
     'settings.integrations.guests.toast.clientRequired': 'Salve um ID de cliente primeiro.',
     'settings.integrations.guests.toast.tokenRequired': 'Cole um token de API primeiro.',
-    'settings.integrations.guests.toast.tokenInvalid': 'Esse token de API foi recusado.',
+    'settings.integrations.guests.toast.tokenInvalid': 'A verificação do token pela extensão falhou. Confira as permissões do token e a URL de verificação da extensão.',
   },
   uk: {
     'settings.integrations.guests.title': 'Облікові записи розширень',
@@ -250,7 +250,7 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.authorizationFailed': 'Час на дозвіл {name} вичерпано.',
     'settings.integrations.guests.toast.clientRequired': 'Спочатку збережи client ID.',
     'settings.integrations.guests.toast.tokenRequired': 'Спочатку встав API-токен.',
-    'settings.integrations.guests.toast.tokenInvalid': 'Цей API-токен відхилено.',
+    'settings.integrations.guests.toast.tokenInvalid': 'Перевірка токена розширенням не вдалася. Перевірте права токена та адресу перевірки, задану розширенням.',
   },
   'zh-CN': {
     'settings.integrations.guests.title': '扩展账户',
@@ -278,7 +278,7 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.authorizationFailed': '{name} 授权超时。',
     'settings.integrations.guests.toast.clientRequired': '请先保存客户端 ID。',
     'settings.integrations.guests.toast.tokenRequired': '请先粘贴 API 令牌。',
-    'settings.integrations.guests.toast.tokenInvalid': '该 API 令牌被拒绝。',
+    'settings.integrations.guests.toast.tokenInvalid': '扩展的令牌验证失败。请检查令牌权限以及扩展配置的验证 URL。',
   },
   'zh-TW': {
     'settings.integrations.guests.title': '擴充功能帳戶',
@@ -306,7 +306,7 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.authorizationFailed': '{name} 授權逾時。',
     'settings.integrations.guests.toast.clientRequired': '請先儲存用戶端 ID。',
     'settings.integrations.guests.toast.tokenRequired': '請先貼上 API 權杖。',
-    'settings.integrations.guests.toast.tokenInvalid': '該 API 權杖被拒絕。',
+    'settings.integrations.guests.toast.tokenInvalid': '擴充功能的權杖驗證失敗。請檢查權杖權限及擴充功能設定的驗證 URL。',
   },
   tr: {
     'settings.integrations.guests.title': 'Uzantı hesapları',
@@ -334,6 +334,6 @@ export const guestIntegrationsI18n = {
     'settings.integrations.guests.toast.authorizationFailed': '{name} yetkilendirmesi zaman aşımına uğradı.',
     'settings.integrations.guests.toast.clientRequired': 'Önce bir istemci kimliği kaydet.',
     'settings.integrations.guests.toast.tokenRequired': 'Önce bir API jetonu yapıştır.',
-    'settings.integrations.guests.toast.tokenInvalid': 'Bu API jetonu reddedildi.',
+    'settings.integrations.guests.toast.tokenInvalid': 'Eklentinin token doğrulaması başarısız oldu. Token izinlerini ve eklentinin doğrulama URL adresini kontrol edin.',
   },
 } as const;
