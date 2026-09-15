@@ -30,6 +30,7 @@ import { readConfigLayers } from '../../opencode/shared.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
+  resolveApiKeyFileReference,
   buildResult,
   toUsageWindow,
   resolveWindowSeconds,
@@ -46,7 +47,7 @@ function getApiKey() {
   const apiKeyFromAuth = entry?.key ?? entry?.token;
 
   if (apiKeyFromAuth) {
-    return apiKeyFromAuth;
+    return resolveApiKeyFileReference(apiKeyFromAuth);
   }
 
   try {
@@ -55,7 +56,7 @@ function getApiKey() {
     for (const alias of aliases) {
       const providerConfig = mergedConfig?.provider?.[alias];
       if (providerConfig?.options?.apiKey) {
-        return providerConfig.options.apiKey;
+        return resolveApiKeyFileReference(providerConfig.options.apiKey);
       }
     }
   } catch {

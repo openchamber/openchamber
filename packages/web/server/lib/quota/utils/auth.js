@@ -34,6 +34,20 @@ export const getAuthEntry = (auth, aliases) => {
   return null;
 };
 
+// OpenCode config accepts `{file:/path}` apiKey references and resolves them for
+// chat traffic; raw references reaching a quota provider mean the key never loads.
+export const resolveApiKeyFileReference = (value) => {
+  if (typeof value !== 'string') return value;
+  const match = value.trim().match(/^\{file:(.+)\}$/);
+  if (!match) return value;
+  try {
+    const resolved = fs.readFileSync(match[1].trim(), 'utf8').trim();
+    return resolved || value;
+  } catch {
+    return value;
+  }
+};
+
 export const normalizeAuthEntry = (entry) => {
   if (!entry) return null;
   if (typeof entry === 'string') {
