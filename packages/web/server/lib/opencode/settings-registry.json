@@ -287,6 +287,9 @@
     "showExpandedEditTools": {
       "scope": "profile"
     },
+    "showExpandedTodoTools": {
+      "scope": "profile"
+    },
     "toolJsonViewMode": {
       "scope": "profile"
     },

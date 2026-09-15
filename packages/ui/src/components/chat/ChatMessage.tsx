@@ -60,6 +60,7 @@ const EDIT_TOOL_NAMES = new Set([
     'create',
     'file_write',
 ]);
+const TODO_TOOL_NAMES = new Set(['todowrite', 'todoread']);
 
 const normalizeToolName = (toolName: unknown): string => {
     if (typeof toolName !== 'string') return '';
@@ -173,13 +174,14 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     }
 
     const providers = useConfigStore((state) => state.providers);
-    const { showReasoningTraces, stickyUserHeader, chatRenderMode, showExpandedBashTools, showExpandedEditTools } = useUIStore(
+    const { showReasoningTraces, stickyUserHeader, chatRenderMode, showExpandedBashTools, showExpandedEditTools, showExpandedTodoTools } = useUIStore(
         useShallow((state) => ({
             showReasoningTraces: state.showReasoningTraces,
             stickyUserHeader: state.stickyUserHeader,
             chatRenderMode: state.chatRenderMode,
             showExpandedBashTools: state.showExpandedBashTools,
             showExpandedEditTools: state.showExpandedEditTools,
+            showExpandedTodoTools: state.showExpandedTodoTools,
         }))
     );
 
@@ -480,7 +482,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     }, [isUser, turnGroupingContext?.activityParts]);
 
     const defaultOpenToolIds = React.useMemo(() => {
-        if (!showExpandedBashTools && !showExpandedEditTools) {
+        if (!showExpandedBashTools && !showExpandedEditTools && !showExpandedTodoTools) {
             return new Set<string>();
         }
 
@@ -497,11 +499,15 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             }
             if (showExpandedEditTools && EDIT_TOOL_NAMES.has(toolName)) {
                 next.add(toolId);
+                continue;
+            }
+            if (showExpandedTodoTools && TODO_TOOL_NAMES.has(toolName)) {
+                next.add(toolId);
             }
         }
 
         return next;
-    }, [showExpandedBashTools, showExpandedEditTools, toolParts, turnActivityToolParts]);
+    }, [showExpandedBashTools, showExpandedEditTools, showExpandedTodoTools, toolParts, turnActivityToolParts]);
 
     const effectiveExpandedTools = React.useMemo(() => {
         if (defaultOpenToolIds.size === 0 && collapsedTools.size === 0) {

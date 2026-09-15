@@ -414,6 +414,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setShowExpandedBashTools = useUIStore(state => state.setShowExpandedBashTools);
     const showExpandedEditTools = useUIStore(state => state.showExpandedEditTools);
     const setShowExpandedEditTools = useUIStore(state => state.setShowExpandedEditTools);
+    const showExpandedTodoTools = useUIStore(state => state.showExpandedTodoTools);
+    const setShowExpandedTodoTools = useUIStore(state => state.setShowExpandedTodoTools);
     const timeFormatPreference = useUIStore(state => state.timeFormatPreference);
     const setTimeFormatPreference = useUIStore(state => state.setTimeFormatPreference);
     const weekStartPreference = useUIStore(state => state.weekStartPreference);
@@ -632,6 +634,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setShowExpandedEditTools(enabled);
         void updateDesktopSettings({ showExpandedEditTools: enabled });
     }, [setShowExpandedEditTools]);
+
+    const handleShowExpandedTodoToolsChange = React.useCallback((enabled: boolean) => {
+        setShowExpandedTodoTools(enabled);
+        void updateDesktopSettings({ showExpandedTodoTools: enabled });
+    }, [setShowExpandedTodoTools]);
 
     const handleTimeFormatPreferenceChange = React.useCallback((value: 'auto' | '12h' | '24h') => {
         setTimeFormatPreference(value);
@@ -1871,6 +1878,13 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             onChange={handleShowExpandedEditToolsChange}
                                             label={t('settings.openchamber.visual.field.editTools')}
                                             ariaLabel={t('settings.openchamber.visual.field.showExpandedEditToolsAria')}
+                                        />
+                                        <SettingsCheckboxRow
+                                            checked={showExpandedTodoTools}
+                                            onChange={handleShowExpandedTodoToolsChange}
+                                            label={t('settings.openchamber.visual.field.todoList')}
+                                            ariaLabel={t('settings.openchamber.visual.field.showExpandedTodoToolsAria')}
+                                            settingsItem="chat.expanded-tools-todo"
                                         />
                                     </SettingsSection>
                                 )}
