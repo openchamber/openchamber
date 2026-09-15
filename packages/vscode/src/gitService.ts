@@ -8,8 +8,9 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { spawn, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { execGit as executeGit } from './bridge-git-process-runtime';
 import type { API as GitAPI, Repository, GitExtension, Status } from './git.d';
 
 let gitApi: GitAPI | null = null;
@@ -308,39 +309,7 @@ function cleanBranchName(branch: string): string {
  * Execute a raw git command and return the output
  */
 async function execGit(args: string[], cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  return new Promise((resolve) => {
-    const normalizedCwd = normalizePath(cwd);
-    const gitPath = gitApi?.git.path || 'git';
-
-    buildGitEnv().then((env) => {
-      const proc = spawn(gitPath, args, {
-        cwd: normalizedCwd,
-        env,
-        windowsHide: true,
-      });
-
-      let stdout = '';
-      let stderr = '';
-
-      proc.stdout?.on('data', (data) => {
-        stdout += data.toString();
-      });
-
-      proc.stderr?.on('data', (data) => {
-        stderr += data.toString();
-      });
-
-      proc.on('close', (exitCode) => {
-        resolve({ stdout, stderr, exitCode: exitCode ?? 0 });
-      });
-
-      proc.on('error', (error) => {
-        resolve({ stdout: '', stderr: error.message, exitCode: 1 });
-      });
-    }).catch((error) => {
-      resolve({ stdout: '', stderr: error instanceof Error ? error.message : String(error), exitCode: 1 });
-    });
-  });
+  return executeGit(args, normalizePath(cwd), { binary: gitApi?.git.path || 'git' });
 }
 
 function isValidCommitHash(hash: string): boolean {
