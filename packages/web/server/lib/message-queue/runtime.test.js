@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMessageQueueRuntime, parseQueuedItemInput } from './runtime.js';
+import { createPathMapping, setActivePathMapping } from '../opencode/path-mapping.js';
 
 const SESSION = 'ses_queue_test_1';
 const DIRECTORY = '/repo';
@@ -24,6 +25,7 @@ const makeDataDir = () => {
 
 afterEach(() => {
   vi.useRealTimers();
+  setActivePathMapping(null);
   for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -50,7 +52,7 @@ const createOpenCode = () => {
     if (pathname.endsWith('/message')) return Response.json(state.tail);
     if (pathname === '/command') return Response.json(state.commands);
     if (method === 'POST' && (pathname.endsWith('/prompt_async') || pathname.endsWith('/command'))) {
-      state.sent.push({ path: pathname, body: JSON.parse(init.body) });
+      state.sent.push({ url, path: pathname, body: JSON.parse(init.body) });
       return new Response(null, { status: 204 });
     }
     return new Response('not found', { status: 404 });
@@ -189,6 +191,20 @@ describe('message queue runtime', () => {
     emit({ type: 'message.updated', properties: { info: { role: 'assistant', sessionID: SESSION, time: { created: 1, completed: 2 } } } });
     await settle();
     expect(openCode.state.sent).toHaveLength(1);
+  });
+
+  it('translates mapped directories before dispatching to OpenCode', async () => {
+    setActivePathMapping(createPathMapping({
+      platform: 'linux',
+      rules: [{ hostPrefix: '/repo', remotePrefix: '/workspace', compareKey: '/repo' }],
+    }));
+    const { runtime, openCode, emit } = createRuntime();
+    runtime.start();
+    await runtime.enqueue(SESSION, '/repo/app', item());
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } }, '/repo/app');
+    await settle();
+    expect(openCode.state.sent).toHaveLength(1);
+    expect(openCode.state.sent[0].url).toContain('directory=%2Fworkspace%2Fapp');
   });
 
   it('treats an unreachable OpenCode as unknown, not idle', async () => {

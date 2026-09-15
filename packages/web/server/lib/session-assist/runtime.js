@@ -2,6 +2,8 @@
 // is no backfill. Clients hide results whose forMessageID is no longer current.
 import fs from 'fs';
 import os from 'os';
+
+import { getPathMapping } from '../opencode/path-mapping.js';
 import path from 'path';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { readMergedSettingsSync } from '../opencode/settings-files.js';
@@ -106,6 +108,10 @@ export const createSessionAssistRuntime = ({
   const generateAssist = async (sessionId, directory, signal) => {
     const targets = getTargets();
     if (!targets.recap && !targets.suggestion) return;
+    // OpenCode reports session directories under its own (possibly remote)
+    // spelling; upstream calls carry the mapped path while small-model
+    // helpers keep the host path for local config reads.
+    const remoteDirectory = getPathMapping().toRemote(directory);
     const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
     const client = createOpencodeClient({ baseUrl, headers: getOpenCodeAuthHeaders(), throwOnError: true });
     const requestOptions = () => ({ signal: AbortSignal.any([signal, AbortSignal.timeout(FETCH_TIMEOUT_MS)]) });
@@ -113,14 +119,14 @@ export const createSessionAssistRuntime = ({
       signal.throwIfAborted();
       if (buildOpenCodeUrl('/', '').replace(/\/$/, '') !== baseUrl) throw new Error('Session assist runtime changed');
     };
-    const { data: session } = await client.session.get({ sessionID: sessionId, directory }, requestOptions());
+    const { data: session } = await client.session.get({ sessionID: sessionId, directory: remoteDirectory }, requestOptions());
     checkCurrent();
     // Reverted history is not the active conversation. A new prompt clears
     // the revert boundary before its next idle event.
     if (session?.id !== sessionId || session.parentID || session.revert?.messageID || session.time?.archived) return;
     const context = await loadAssistContext({
       signal,
-      readPage: (page) => client.session.messages({ sessionID: sessionId, directory, ...page }, requestOptions()),
+      readPage: (page) => client.session.messages({ sessionID: sessionId, directory: remoteDirectory, ...page }, requestOptions()),
     });
     checkCurrent();
     if (!context) return;
@@ -160,12 +166,12 @@ export const createSessionAssistRuntime = ({
     if (recap && scriptMismatch(recap)) recap = '';
     if (suggestion && scriptMismatch(suggestion)) suggestion = '';
     if (!recap && !suggestion) return;
-    const { data: latest } = await client.session.messages({ sessionID: sessionId, directory, limit: 1 }, requestOptions());
+    const { data: latest } = await client.session.messages({ sessionID: sessionId, directory: remoteDirectory, limit: 1 }, requestOptions());
     checkCurrent();
     if (latest?.at(-1)?.info.id !== last.id) return;
     // Never fall back to the pre-generation metadata snapshot after a failed
     // fresh read: doing so overwrites dismissals and unrelated metadata.
-    const { data: freshSession } = await client.session.get({ sessionID: sessionId, directory }, requestOptions());
+    const { data: freshSession } = await client.session.get({ sessionID: sessionId, directory: remoteDirectory }, requestOptions());
     checkCurrent();
     if (freshSession?.id !== sessionId || freshSession.revert?.messageID || freshSession.time?.archived || freshSession.directory !== session.directory) return;
     const enabled = getTargets();
@@ -175,7 +181,7 @@ export const createSessionAssistRuntime = ({
     const currentMetadata = freshSession.metadata ?? {};
     const currentNamespace = currentMetadata.openchamber ?? {};
     await client.session.update({
-      sessionID: sessionId, directory,
+      sessionID: sessionId, directory: remoteDirectory,
       metadata: {
         ...currentMetadata,
         openchamber: {

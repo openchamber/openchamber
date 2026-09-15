@@ -1,4 +1,5 @@
 import { GOAL_OBJECTIVE_CHAR_LIMIT, writeObjective } from './objectives.js';
+import { getPathMapping } from '../opencode/path-mapping.js';
 
 const TRIM_MARKER = '\n\n[… objective trimmed for the auditor — the full prompt was delivered in the chat message …]\n\n';
 
@@ -99,7 +100,7 @@ export const createSessionGoal = async ({
     updatedAt: now,
   };
   const url = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}`);
-  url.searchParams.set('directory', directory);
+  url.searchParams.set('directory', getPathMapping().toRemote(directory));
   const response = await fetch(url.toString(), {
     method: 'PATCH',
     headers: {

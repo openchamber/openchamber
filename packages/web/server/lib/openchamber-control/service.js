@@ -3,6 +3,12 @@ import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { OpenChamberControlError, asControlError } from './error.js';
 import { OPENCHAMBER_ALL_ACTIONS } from './actions.js';
 import { writeScreenshot } from './screenshots.js';
+import { getPathMapping } from '../opencode/path-mapping.js';
+
+// Directory spelling OpenCode knows for a project: host paths are translated
+// on the way out, session-directories coming back from OpenCode are restored
+// to host spelling on the way in.
+const toUpstreamDirectory = (directory) => getPathMapping().toRemote(directory);
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
 const MAX_WAIT_TIMEOUT_SECONDS = 86_400;
@@ -198,7 +204,7 @@ export const createOpenChamberControlService = (dependencies) => {
   };
 
   const sessionStatus = async (client, sessionID, directory) => {
-    const response = await client.session.status({ directory });
+    const response = await client.session.status({ directory: toUpstreamDirectory(directory) });
     const statuses = response?.data;
     if (!statuses || typeof statuses !== 'object' || Array.isArray(statuses)) {
       throw new OpenChamberControlError('Invalid session status response', 500);
@@ -208,11 +214,12 @@ export const createOpenChamberControlService = (dependencies) => {
 
   const sessionMessages = async (client, sessionID, directory, role, limit) => {
     const fetchLimit = limit === undefined ? undefined : Math.max(100, limit * 4);
-    let response = await client.session.messages({ sessionID, directory, ...(fetchLimit ? { limit: fetchLimit } : {}) });
+    const upstreamDirectory = toUpstreamDirectory(directory);
+    let response = await client.session.messages({ sessionID, directory: upstreamDirectory, ...(fetchLimit ? { limit: fetchLimit } : {}) });
     let raw = Array.isArray(response?.data) ? response.data : [];
     let messages = extractTextMessages(raw, role);
     if (limit !== undefined && messages.length < limit && raw.length >= fetchLimit) {
-      response = await client.session.messages({ sessionID, directory });
+      response = await client.session.messages({ sessionID, directory: upstreamDirectory });
       raw = Array.isArray(response?.data) ? response.data : [];
       messages = extractTextMessages(raw, role);
     }
@@ -255,7 +262,9 @@ export const createOpenChamberControlService = (dependencies) => {
       const response = await client.experimental?.session?.list?.({});
       const sessions = Array.isArray(response?.data) ? response.data : [];
       const session = sessions.find((item) => item?.id === sessionID);
-      return asNonEmptyString(session?.directory) || null;
+      // OpenCode reports the session's remote-side directory; restore the host
+      // spelling so downstream host-side validation matches.
+      return asNonEmptyString(getPathMapping().toHost(session?.directory)) || null;
     } catch {
       return null;
     }
@@ -517,17 +526,25 @@ export const createOpenChamberControlService = (dependencies) => {
         const client = await getClient();
         if (action === 'session.list') {
           const limit = positiveInteger(input.limit, 10, 'limit');
-          const response = await client.session.list(directory ? { directory } : {});
+          const response = await client.session.list(directory ? { directory: toUpstreamDirectory(directory) } : {});
           let sessions = Array.isArray(response?.data) ? response.data : [];
           if (input.all !== true) sessions = sessions.filter((session) => !session?.time?.archived);
           sessions = sessions.slice(0, limit);
+          // OpenCode reports remote-side directories; restore the host view so
+          // control clients see the same paths as the session-list proxy.
+          sessions = sessions.map((session) => {
+            const sessionDirectory = asNonEmptyString(session?.directory);
+            return sessionDirectory
+              ? { ...session, directory: getPathMapping().toHost(sessionDirectory) }
+              : session;
+          });
           if (input.withStatus === true) {
             const cache = new Map();
             sessions = await Promise.all(sessions.map(async (session) => {
               const sessionDirectory = asNonEmptyString(session?.directory);
               if (!sessionDirectory) return { ...session, status: { type: 'unknown' } };
               if (!cache.has(sessionDirectory)) {
-                const statusRequest = client.session.status({ directory: sessionDirectory }).catch(() => null);
+                const statusRequest = client.session.status({ directory: toUpstreamDirectory(sessionDirectory) }).catch(() => null);
                 cache.set(sessionDirectory, statusRequest);
               }
               const statusResponse = await cache.get(sessionDirectory);

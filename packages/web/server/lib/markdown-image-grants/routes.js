@@ -1,6 +1,7 @@
 import express from 'express';
 import { constants as fsConstants } from 'node:fs';
 import { mintOutsideFileGrant } from '../fs/routes.js';
+import { getPathMapping } from '../opencode/path-mapping.js';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_IMAGE_SOURCES = 12;
@@ -192,17 +193,18 @@ const markdownImageSources = (message) => {
 };
 
 const fetchMessage = async ({ sessionId, messageId, directory, buildOpenCodeUrl, getOpenCodeAuthHeaders }) => {
+  const upstreamDirectory = getPathMapping().toRemote(directory);
   const url = new URL(buildOpenCodeUrl(
     `/session/${encodeURIComponent(sessionId)}/message/${encodeURIComponent(messageId)}`,
     '',
   ));
-  url.searchParams.set('directory', directory);
+  url.searchParams.set('directory', upstreamDirectory);
   const response = await fetch(url, {
     headers: {
       accept: 'application/json',
       // Percent-encoded to match the SDK wire format; raw non-ASCII values
       // are rejected by OpenCode.
-      'x-opencode-directory': encodeURIComponent(directory),
+      'x-opencode-directory': encodeURIComponent(upstreamDirectory),
       ...getOpenCodeAuthHeaders(),
     },
     signal: AbortSignal.timeout(10_000),
