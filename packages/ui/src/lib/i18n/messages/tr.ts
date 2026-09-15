@@ -1279,6 +1279,7 @@ export const dict = {
   'contextRail.surface.chat.description': 'Yan yana açılan session',
   'contextRail.surface.notes': 'Proje bilgisi',
   'contextRail.editorTree.toggle': 'Dosya ağacını aç/kapat',
+  'contextRail.editor.toggle': 'Dosya düzenleyiciyi aç/kapat',
   'contextPanel.browser.open': 'Tarayıcı panelini aç',
   'contextPanel.browser.addressAria': 'Tarayıcı adresi',
   'contextPanel.browser.history.label': 'Son adresler',

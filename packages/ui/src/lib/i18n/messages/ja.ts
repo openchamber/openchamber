@@ -1300,6 +1300,7 @@ export const dict: Record<I18nKey, string> = {
   'contextRail.surface.chat.description': '並べて開いたセッション',
   'contextRail.surface.notes': 'プロジェクトナレッジ',
   'contextRail.editorTree.toggle': 'ファイルツリーの表示切替',
+  'contextRail.editor.toggle': 'ファイルエディターの表示切替',
   'contextPanel.browser.open': 'ブラウザパネルを開く',
   'contextPanel.browser.addressAria': 'ブラウザアドレス',
   'contextPanel.browser.history.label': '最近のアドレス',

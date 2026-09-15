@@ -1304,6 +1304,7 @@ export const dict: Record<I18nKey, string> = {
   'contextRail.surface.chat.description': '나란히 연 세션',
   'contextRail.surface.notes': '프로젝트 지식',
   'contextRail.editorTree.toggle': '파일 트리 표시 전환',
+  'contextRail.editor.toggle': '파일 편집기 표시 전환',
   'contextPanel.browser.open': '브라우저 패널 열기',
   'contextPanel.browser.addressAria': '브라우저 주소',
   'contextPanel.browser.history.label': '최근 주소',

@@ -1303,6 +1303,7 @@ export const dict = {
   'contextRail.surface.chat.description': 'Session opened side by side',
   'contextRail.surface.notes': 'Project knowledge',
   'contextRail.editorTree.toggle': 'Toggle file tree',
+  'contextRail.editor.toggle': 'Toggle file editor',
   'contextPanel.browser.open': 'Open browser panel',
   'contextPanel.browser.addressAria': 'Browser address',
   'contextPanel.browser.history.label': 'Recent addresses',

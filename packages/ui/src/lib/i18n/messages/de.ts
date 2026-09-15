@@ -3223,6 +3223,7 @@ export const dict = {
   'contextRail.surface.chat.description': 'Chatkontext',
   'contextRail.surface.notes': 'Projektwissen',
   'contextRail.editorTree.toggle': 'Editorbaum umschalten',
+  'contextRail.editor.toggle': 'Dateieditor umschalten',
   'sidebarFilesTree.actions.collapseAllTitle': 'Alle einklappen',
   'filesView.editor.cannotPreviewBinary': 'Binärdatei kann nicht in der Vorschau angezeigt werden',
   'filesView.editor.binaryFileDescription': 'Diese Datei ist binär und kann nicht als Text angezeigt werden.',

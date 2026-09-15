@@ -1642,6 +1642,7 @@ export const dict: Record<I18nKey, string> = {
   'contextRail.surface.chat.description': 'Sesja otwarta obok',
   'contextRail.surface.notes': 'Wiedza o projekcie',
   'contextRail.editorTree.toggle': 'Przełącz drzewo plików',
+  'contextRail.editor.toggle': 'Przełącz edytor plików',
   'contextPanel.browser.open': 'Otwórz panel przeglądarki',
   'contextPanel.browser.addressAria': 'Adres przeglądarki',
   'contextPanel.browser.history.label': 'Ostatnie adresy',

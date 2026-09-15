@@ -25,6 +25,9 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   per mode in `useUIStore.contextPanelByDirectory[dir].widthFractionByMode`;
   `widthByMode` retains the last pixel size until the available area is known.
   Every surface, including walkthrough, restores both values on reload.
+  The file surface uses two width keys. It uses `file` when an editor shows,
+  and `file-tree` when only the file tree shows (no file open, or editor
+  hidden). `getContextPanelWidthKey` selects the key.
 - Rail order is user-reorderable and persisted globally in
   `useUIStore.contextRailOrder`; `sortContextSurfaces` applies it on top of the
   registry's default order and appends any missing surfaces.

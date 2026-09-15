@@ -1316,6 +1316,7 @@ export const dict: Record<I18nKey, string> = {
   'contextRail.surface.chat.description': '並排開啟的工作階段',
   'contextRail.surface.notes': '專案知識',
   'contextRail.editorTree.toggle': '切換檔案樹',
+  'contextRail.editor.toggle': '切換檔案編輯器',
   'contextPanel.browser.open': '開啟瀏覽器面板',
   'contextPanel.browser.addressAria': '瀏覽器網址',
   'contextPanel.browser.history.label': '最近造訪的網址',

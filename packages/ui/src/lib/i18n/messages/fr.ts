@@ -1121,6 +1121,7 @@ export const dict = {
   'contextRail.surface.chat.description': 'Session ouverte côte à côte',
   'contextRail.surface.notes': 'Connaissances du projet',
   'contextRail.editorTree.toggle': 'Afficher/masquer l’arborescence de fichiers',
+  'contextRail.editor.toggle': 'Afficher/masquer l’éditeur de fichiers',
   'contextPanel.browser.open': 'Ouvrir le panneau du navigateur',
   'contextPanel.browser.addressAria': 'Adresse du navigateur',
   'contextPanel.browser.history.label': 'Adresses récentes',

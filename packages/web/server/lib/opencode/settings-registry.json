@@ -608,6 +608,10 @@
       "scope": "device",
       "local": true
     },
+    "contextEditorVisible": {
+      "scope": "device",
+      "local": true
+    },
     "contextEditorTreeWidth": {
       "scope": "device",
       "local": true

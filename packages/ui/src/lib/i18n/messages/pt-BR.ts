@@ -1304,6 +1304,7 @@ export const dict: Record<I18nKey, string> = {
   "contextRail.surface.chat.description": "Sessão aberta lado a lado",
   "contextRail.surface.notes": "Conhecimento do projeto",
   "contextRail.editorTree.toggle": "Alternar árvore de arquivos",
+  "contextRail.editor.toggle": "Alternar editor de arquivos",
   "contextPanel.browser.open": "Abrir painel do navegador",
   "contextPanel.browser.addressAria": "Endereço do navegador",
   "contextPanel.browser.history.label": "Endereços recentes",
