@@ -10,6 +10,7 @@ import { buildResult } from '../utils/index.js';
 import * as claude from './claude/index.js';
 import * as clinePass from './cline-pass.js';
 import * as codex from './codex.js';
+import * as commandCode from './command-code.js';
 import * as copilot from './copilot.js';
 import * as crof from './crof.js';
 import * as cursor from './cursor.js';
@@ -32,6 +33,12 @@ import * as opencodeGo from './opencode-go.js';
 import * as xai from './xai.js';
 
 const registry = {
+  'command-code': {
+    providerId: commandCode.providerId,
+    providerName: commandCode.providerName,
+    isConfigured: commandCode.isConfigured,
+    fetchQuota: commandCode.fetchQuota
+  },
   claude: {
     providerId: claude.providerId,
     providerName: claude.providerName,
