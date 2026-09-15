@@ -1,6 +1,8 @@
 /** Settings → Extensions. Not OpenCode Plugins. */
 export const extensionsSettingsI18n = {
   en: {
+    'settings.extensions.request.noResponse': 'No HTTP response was received. Check the connection to this instance.',
+    'settings.extensions.request.invalidResponse': 'Unexpected server response (HTTP {status}).',
     'settings.page.extensions.title': 'Extensions',
     'settings.page.extensions.description': 'Extensions from a folder, ZIP, or git URL — panels, attach menus, integrations, and local services. Not OpenCode plugins.',
     'settings.extensions.section.installed': 'Installed',
@@ -111,6 +113,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.toast.swapFailed': 'Could not replace the installed files. The previous version was kept.',
   },
   de: {
+    'settings.extensions.request.noResponse': 'Keine HTTP-Antwort erhalten. Prüfe die Verbindung zu dieser Instanz.',
+    'settings.extensions.request.invalidResponse': 'Unerwartete Serverantwort (HTTP {status}).',
     'settings.page.extensions.title': 'Erweiterungen',
     'settings.page.extensions.description': 'Erweiterungen aus Ordner, ZIP oder Git-URL — Panels, Anheften-Menüs, Integrationen und lokale Dienste. Keine OpenCode-Plugins.',
     'settings.extensions.section.installed': 'Installiert',
@@ -221,6 +225,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.toast.swapFailed': 'Die installierten Dateien konnten nicht ersetzt werden. Die vorherige Version wurde beibehalten.',
   },
   fr: {
+    'settings.extensions.request.noResponse': "Aucune réponse HTTP reçue. Vérifiez la connexion à cette instance.",
+    'settings.extensions.request.invalidResponse': 'Réponse inattendue du serveur (HTTP {status}).',
     'settings.page.extensions.title': 'Extensions',
     'settings.page.extensions.description': 'Extensions depuis un dossier, une archive ZIP ou une URL git — panneaux, menus d’attache, intégrations et services locaux. Ce ne sont pas des plugins OpenCode.',
     'settings.extensions.section.installed': 'Installées',
@@ -331,6 +337,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.toast.swapFailed': 'Impossible de remplacer les fichiers installés. La version précédente a été conservée.',
   },
   es: {
+    'settings.extensions.request.noResponse': 'No se recibió una respuesta HTTP. Revisa la conexión con esta instancia.',
+    'settings.extensions.request.invalidResponse': 'Respuesta inesperada del servidor (HTTP {status}).',
     'settings.page.extensions.title': 'Extensiones',
     'settings.page.extensions.description': 'Extensiones desde una carpeta, un ZIP o una URL de git: paneles, menús de adjuntar, integraciones y servicios locales. No son plugins de OpenCode.',
     'settings.extensions.section.installed': 'Instaladas',
@@ -441,6 +449,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.toast.swapFailed': 'No se pudieron reemplazar los archivos instalados. Se conservó la versión anterior.',
   },
   ja: {
+    'settings.extensions.request.noResponse': 'HTTP 応答を受信できませんでした。このインスタンスへの接続を確認してください。',
+    'settings.extensions.request.invalidResponse': '予期しないサーバー応答です (HTTP {status})。',
     'settings.page.extensions.title': '拡張機能',
     'settings.page.extensions.description': 'フォルダ、ZIP、git URL から入れる拡張機能です。パネル、アタッチメニュー、連携、ローカルサービス。OpenCode のプラグインとは別物です。',
     'settings.extensions.section.installed': 'インストール済み',
@@ -551,6 +561,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.toast.swapFailed': 'インストール済みファイルを置き換えられませんでした。以前のバージョンを保持しています。',
   },
   ko: {
+    'settings.extensions.request.noResponse': 'HTTP 응답을 받지 못했습니다. 이 인스턴스와의 연결을 확인하세요.',
+    'settings.extensions.request.invalidResponse': '예상하지 못한 서버 응답입니다 (HTTP {status}).',
     'settings.page.extensions.title': '확장',
     'settings.page.extensions.description': '폴더, ZIP, git URL에서 넣는 확장입니다. 패널, 첨부 메뉴, 연동, 로컬 서비스. OpenCode 플러그인과는 다릅니다.',
     'settings.extensions.section.installed': '설치됨',
@@ -661,6 +673,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.toast.swapFailed': '설치된 파일을 교체하지 못했습니다. 이전 버전을 유지했습니다.',
   },
   pl: {
+    'settings.extensions.request.noResponse': 'Nie otrzymano odpowiedzi HTTP. Sprawdź połączenie z tą instancją.',
+    'settings.extensions.request.invalidResponse': 'Nieoczekiwana odpowiedź serwera (HTTP {status}).',
     'settings.page.extensions.title': 'Rozszerzenia',
     'settings.page.extensions.description': 'Rozszerzenia z folderu, pliku ZIP albo adresu git — panele, menu dołączania, integracje i lokalne usługi. To nie są wtyczki OpenCode.',
     'settings.extensions.section.installed': 'Zainstalowane',
@@ -771,6 +785,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.toast.swapFailed': 'Nie udało się zastąpić zainstalowanych plików. Zachowano poprzednią wersję.',
   },
   'pt-BR': {
+    'settings.extensions.request.noResponse': 'Nenhuma resposta HTTP foi recebida. Verifique a conexão com esta instância.',
+    'settings.extensions.request.invalidResponse': 'Resposta inesperada do servidor (HTTP {status}).',
     'settings.page.extensions.title': 'Extensões',
     'settings.page.extensions.description': 'Extensões a partir de uma pasta, um ZIP ou uma URL git — painéis, menus de anexar, integrações e serviços locais. Não são plugins do OpenCode.',
     'settings.extensions.section.installed': 'Instaladas',
@@ -881,6 +897,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.toast.swapFailed': 'Não foi possível substituir os arquivos instalados. A versão anterior foi mantida.',
   },
   uk: {
+    'settings.extensions.request.noResponse': 'HTTP-відповідь не надійшла. Перевірте з’єднання з цим інстансом.',
+    'settings.extensions.request.invalidResponse': 'Неочікувана відповідь сервера (HTTP {status}).',
     'settings.page.extensions.title': 'Розширення',
     'settings.page.extensions.description': 'Розширення з теки, ZIP або git URL — панелі, attach-меню, інтеграції та локальні сервіси. Це не плагіни OpenCode.',
     'settings.extensions.section.installed': 'Встановлені',
@@ -991,6 +1009,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.toast.swapFailed': 'Не вдалося замінити встановлені файли. Попередню версію збережено.',
   },
   'zh-CN': {
+    'settings.extensions.request.noResponse': '未收到 HTTP 响应。请检查与此实例的连接。',
+    'settings.extensions.request.invalidResponse': '服务器返回了意外响应 (HTTP {status})。',
     'settings.page.extensions.title': '扩展',
     'settings.page.extensions.description': '从文件夹、ZIP 或 git URL 安装的扩展：面板、附加菜单、集成和本地服务。和 OpenCode 插件不是一回事。',
     'settings.extensions.section.installed': '已安装',
@@ -1101,6 +1121,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.toast.swapFailed': '无法替换已安装的文件。已保留之前的版本。',
   },
   'zh-TW': {
+    'settings.extensions.request.noResponse': '未收到 HTTP 回應。請檢查與此執行個體的連線。',
+    'settings.extensions.request.invalidResponse': '伺服器傳回非預期的回應 (HTTP {status})。',
     'settings.page.extensions.title': '擴充功能',
     'settings.page.extensions.description': '從資料夾、ZIP 或 git URL 安裝的擴充功能：面板、附加選單、整合與本機服務。和 OpenCode 外掛不是同一件事。',
     'settings.extensions.section.installed': '已安裝',
@@ -1211,6 +1233,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.toast.swapFailed': '無法取代已安裝的檔案。已保留先前的版本。',
   },
   tr: {
+    'settings.extensions.request.noResponse': 'HTTP yanıtı alınamadı. Bu örnekle bağlantıyı kontrol edin.',
+    'settings.extensions.request.invalidResponse': 'Beklenmeyen sunucu yanıtı (HTTP {status}).',
     'settings.page.extensions.title': 'Uzantılar',
     'settings.page.extensions.description': 'Klasörden, ZIP’ten veya git URL’sinden yüklenen uzantılar — paneller, ekleme menüleri, entegrasyonlar ve yerel servisler. OpenCode eklentileri değil.',
     'settings.extensions.section.installed': 'Yüklü',

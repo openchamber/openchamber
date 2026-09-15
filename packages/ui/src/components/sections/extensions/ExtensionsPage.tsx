@@ -27,6 +27,7 @@ import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { approveGuestCapabilities, installGuest, setGuestEnabled, uninstallGuest, uploadGuestZip, type InstallGuestErrorCode } from '@/lib/guests/install';
 import { closeGuestTabsById } from '@/lib/guests/tabs';
 import { loadGuestCatalog } from '@/lib/guests/load-catalog';
+import { describeGuestRequestFailure } from '@/lib/guests/request-failure';
 import { checkGuestUpdates, updateGuest, type UpdateGuestErrorCode } from '@/lib/guests/updates';
 import type { GuestSource, InstalledGuest } from '@/lib/guests/types';
 import { useGuestsStore } from '@/lib/guests/store';
@@ -386,6 +387,7 @@ export const ExtensionsPage: React.FC = () => {
   const { t } = useI18n();
   const guests = useGuestsStore((state) => state.guests);
   const status = useGuestsStore((state) => state.status);
+  const catalogFailure = useGuestsStore((state) => state.failure);
   const unsupported = status === 'unsupported';
   const [installValue, setInstallValue] = React.useState('');
   const [busy, setBusy] = React.useState(false);
@@ -482,9 +484,12 @@ export const ExtensionsPage: React.FC = () => {
           result.required
             ? t('settings.extensions.toast.hostTooOld', { version: result.required })
             : t('settings.extensions.toast.failed'),
+          { description: result.diagnostic ? describeGuestRequestFailure(result.diagnostic, t) : undefined },
         );
       } else {
-        toast.error(t(errorToastKey(result.code)));
+        toast.error(t(errorToastKey(result.code)), {
+          description: result.diagnostic ? describeGuestRequestFailure(result.diagnostic, t) : undefined,
+        });
       }
       return false;
     }
@@ -685,8 +690,11 @@ export const ExtensionsPage: React.FC = () => {
           </Button>
         )}
       >
-        {status === 'error' ? (
-          <p className="typography-meta text-destructive">{t('settings.extensions.toast.loadFailed')}</p>
+        {status === 'error' || catalogFailure ? (
+          <p className="typography-meta whitespace-pre-line text-destructive">
+            {t('settings.extensions.toast.loadFailed')}
+            {catalogFailure ? `\n${describeGuestRequestFailure(catalogFailure, t)}` : ''}
+          </p>
         ) : null}
         {unsupported ? (
           <p className="typography-meta text-muted-foreground">{t('settings.extensions.unsupported')}</p>
