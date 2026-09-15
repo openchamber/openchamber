@@ -44,6 +44,7 @@ import type { UsageWindow } from '@/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 import { useSessionListSync } from '@/components/session/sidebar/list/useSessionListSync';
+import { useGitRefreshCoordinator } from '@/hooks/useGitRefreshCoordinator';
 
 const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
 
@@ -77,6 +78,7 @@ const normalizePath = (value?: string | null): string | null => {
 type VSCodeView = 'sessions' | 'chat' | 'settings';
 
 export const VSCodeLayout: React.FC = () => {
+  useGitRefreshCoordinator();
   const { t } = useI18n();
   const runtimeApis = useRuntimeAPIs();
   useUpdatePolling();

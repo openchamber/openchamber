@@ -542,6 +542,10 @@ type UiNotificationPayload = {
   desktopStdoutActive?: unknown
 }
 
+type GitChangedPayload = {
+  directory?: unknown
+}
+
 const asOptionalString = (value: unknown): string | undefined => {
   if (typeof value !== "string") return undefined
   const trimmed = value.trim()
@@ -605,6 +609,28 @@ const handleUiNotificationEvent = (payload: Event, fallbackDirectory: string): b
   }).catch((error) => {
     console.warn("[notifications] failed to dispatch UI notification", error)
   })
+
+  return true
+}
+
+const handleGitChangedEvent = (payload: Event): boolean => {
+  if ((payload as { type?: unknown }).type !== "openchamber:git-changed") {
+    return false
+  }
+
+  // VS Code does not consume OpenChamber server events; its webview git refreshes
+  // come from the runtime wrapper path instead. Web, desktop, and mobile ride the
+  // existing shared server event stream here.
+  const properties = (payload as { properties?: unknown }).properties
+  if (!properties || typeof properties !== "object") {
+    return true
+  }
+
+  const gitChanged = properties as GitChangedPayload
+  const directory = asOptionalString(gitChanged.directory)
+  if (directory) {
+    sessionEvents.requestGitRefresh({ directory })
+  }
 
   return true
 }
@@ -1632,6 +1658,10 @@ export function handleEvent(
   }
 
   if (handleUiNotificationEvent(payload, directory)) {
+    return
+  }
+
+  if (handleGitChangedEvent(payload)) {
     return
   }
 

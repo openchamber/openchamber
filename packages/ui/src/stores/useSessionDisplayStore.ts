@@ -18,6 +18,9 @@ type SessionDisplayStore = {
   /** Project/recent zone headers stick to the top while their zone scrolls. */
   stickyZoneHeaders: boolean;
   toggleStickyZoneHeaders: () => void;
+  /** Running-session indicators show a stepped spinner instead of the static dot. Display-only; default off for performance (see faa9c243). */
+  animatedActivityIndicators: boolean;
+  setAnimatedActivityIndicators: (enabled: boolean) => void;
   showRecentSection: boolean;
   // VS Code only: the compact webview keeps archived buckets inline because it
   // has no room for the full Archive page. Web/desktop ignore this flag and
@@ -49,6 +52,9 @@ export const migrateSessionDisplayState = (
     // single row layout. Drop the stale key from persisted state.
     delete state.displayMode;
   }
+  if (version < 6) {
+    state.animatedActivityIndicators = false;
+  }
   return state;
 };
 
@@ -63,6 +69,8 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       setSessionGroupingMode: (mode) => set({ sessionGroupingMode: mode }),
       stickyZoneHeaders: true,
       toggleStickyZoneHeaders: () => set((state) => ({ stickyZoneHeaders: !state.stickyZoneHeaders })),
+      animatedActivityIndicators: false,
+      setAnimatedActivityIndicators: (enabled) => set({ animatedActivityIndicators: enabled }),
       showRecentSection: true,
       // Default to HIDDEN so the pre-hydration state matches the quiet/safe
       // option: archived sessions must never flash visible on startup and then
@@ -77,11 +85,12 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
     }),
     {
       name: 'session-display-mode',
-      version: 5,
+      version: 6,
       // v1→v2 adds projectSortOrder using the canonical manual ordering.
       // v2→v3 replaces the previously shipped recent default with manual.
       // v3→v4 removes displayMode (single sidebar row layout).
       // v4→v5 adds the independent all-projects/single-project view mode.
+      // v5→v6 adds the opt-in animated activity indicator (default off).
       migrate: migrateSessionDisplayState,
     },
   ),

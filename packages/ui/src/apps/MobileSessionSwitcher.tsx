@@ -2,6 +2,7 @@ import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
+import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import { formatSessionCompactDateLabel } from '@/components/session/sidebar/utils';
 import { useSwitcherItems } from '@/components/session/sidebar/shell/useSwitcherItems';
 import { useTabletLayout } from '@/lib/device';
@@ -60,12 +61,12 @@ const SwitcherRow: React.FC<{
       </span>
       {/* Activity sits on the right, before the time — no reserved left gutter. */}
       {isStreaming || showUnreadDot ? (
-        <span
-          className={cn(
-            'size-1.5 shrink-0 rounded-full',
-            isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
-          )}
-          aria-hidden
+        <SessionActivityIndicator
+          state={isStreaming ? 'running' : 'unread'}
+          label={isStreaming
+            ? t('sessions.sidebar.session.status.active')
+            : t('sessions.sidebar.session.status.unread')}
+          className="shrink-0"
         />
       ) : null}
       {/* The elapsed turn takes the time slot while it matters, then hands it

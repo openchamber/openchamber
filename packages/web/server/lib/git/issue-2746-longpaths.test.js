@@ -48,6 +48,38 @@ const canRunGit = () => {
   }
 };
 
+if (!('poll' in expect)) {
+  expect.poll = (reader, { timeout = 1_000, interval = 25 } = {}) => {
+    const waitForMatch = async (predicate) => {
+      const deadline = Date.now() + timeout;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const value = await reader();
+        if (predicate(value)) {
+          return value;
+        }
+        if (Date.now() >= deadline) {
+          throw new Error(`Timed out after ${timeout}ms while polling`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, interval));
+      }
+    };
+
+    return {
+      async toBe(expected) {
+        const value = await waitForMatch((current) => Object.is(current, expected));
+        expect(value).toBe(expected);
+      },
+      not: {
+        async toBe(expected) {
+          const value = await waitForMatch((current) => !Object.is(current, expected));
+          expect(value).not.toBe(expected);
+        },
+      },
+    };
+  };
+}
+
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });

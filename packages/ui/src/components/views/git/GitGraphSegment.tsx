@@ -1,149 +1,185 @@
-import React from 'react';
-import type { LanedCommit } from './gitGraph';
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
 
-const LANE_WIDTH = 8;
+// Adapted from VS Code's SVG SCM history renderer:
+// https://github.com/microsoft/vscode/blob/main/src/vs/workbench/contrib/scm/browser/scmHistory.ts
+
+import React from 'react';
+import {
+  getHistoryItemColumn,
+  getHistoryItemMaxColumns,
+  getHistoryItemSecondaryParentColumns,
+  type GitHistoryItemViewModel,
+} from './gitGraph';
+
+const SWIMLANE_HEIGHT = 22;
+const SWIMLANE_WIDTH = 11;
+const SWIMLANE_CURVE_RADIUS = 5;
+const CIRCLE_RADIUS = 4;
+const CIRCLE_STROKE_WIDTH = 2;
 
 interface GitGraphSegmentProps {
-  laned: LanedCommit;
-  totalLanes: number;
-  isExpanded: boolean;
+  viewModel: GitHistoryItemViewModel;
+  totalColumns?: number;
 }
 
-/**
- * Renders the git graph lane column using an HTML Canvas element.
- *
- * Layout isolation pattern:
- *   A plain <div> (no replaced-element intrinsic sizing) owns all layout via
- *   `height: 100%` + self-stretch on the parent. The <canvas> is absolutely
- *   positioned inside it (`inset: 0`) so it fills the div without affecting
- *   the flex layout measurement. Canvas intrinsic height (default 150px) never
- *   leaks into the row height calculation.
- *
- *   useLayoutEffect reads the div's offsetHeight (stable, no replaced-element
- *   quirks) and sets the canvas drawing-buffer size + draws.
- */
-export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({
-  laned,
-  totalLanes,
-  isExpanded,
-}) => {
-  const { lane, color, connectors } = laned;
-  const effectiveLanes = Math.max(totalLanes, lane + 1);
-  const w = effectiveLanes * LANE_WIDTH + LANE_WIDTH / 2;
+function verticalPath(x: number, y1: number, y2: number): string {
+  return `M ${x} ${y1} V ${y2}`;
+}
 
-  const containerRef = React.useRef<HTMLDivElement>(null);
-  const canvasRef = React.useRef<HTMLCanvasElement>(null);
+function GraphPath({ d, color, strokeWidth = 0.75 }: { d: string; color: string; strokeWidth?: number }) {
+  return (
+    <path
+      d={d}
+      fill="none"
+      stroke={color}
+      strokeLinecap="round"
+      strokeWidth={strokeWidth}
+      aria-hidden="true"
+      role="presentation"
+    />
+  );
+}
 
-  React.useLayoutEffect(() => {
-    const container = containerRef.current;
-    const canvas = canvasRef.current;
-    if (!container || !canvas) return;
+export const GitGraphSegment: React.FC<GitGraphSegmentProps> = ({ viewModel, totalColumns }) => {
+  const historyItem = viewModel.historyItem;
+  const inputSwimlanes = viewModel.inputSwimlanes;
+  const outputSwimlanes = viewModel.outputSwimlanes;
+  const inputIndex = inputSwimlanes.findIndex((node) => node.id === historyItem.id);
+  const circleIndex = getHistoryItemColumn(viewModel);
+  const columnCount = Math.max(totalColumns ?? 0, getHistoryItemMaxColumns(viewModel));
+  const circleColor = outputSwimlanes[circleIndex]?.color
+    ?? inputSwimlanes[circleIndex]?.color
+    ?? viewModel.nodeColor;
+  const secondaryParentColumns = getHistoryItemSecondaryParentColumns(viewModel);
 
-    const h = container.offsetHeight;
-    if (h === 0) return;
+  const paths: React.ReactNode[] = [];
+  let outputSwimlaneIndex = 0;
 
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
+  for (let index = 0; index < inputSwimlanes.length; index++) {
+    const color = inputSwimlanes[index].color;
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, w, h);
-
-    const dotCy = h / 2;
-    const dotCx = lane * LANE_WIDTH + LANE_WIDTH / 2;
-
-    const styles = getComputedStyle(canvas);
-    const fallbackColor = styles.getPropertyValue('--surface-muted-foreground').trim() || styles.color;
-
-    const resolveColor = (value: string): string => {
-      if (!value.startsWith('var(')) return value;
-      const varName = value.slice(4, -1).trim();
-      return styles.getPropertyValue(varName).trim() || fallbackColor;
-    };
-
-    // Straight lines first so bezier curves render on top
-    const sorted = [...connectors].sort((a, b) => {
-      const isBezier = (t: string) => t === 'branch-out' || t === 'merge-in';
-      return (isBezier(a.type) ? 1 : 0) - (isBezier(b.type) ? 1 : 0);
-    });
-
-    for (const seg of sorted) {
-      const x1 = seg.fromLane * LANE_WIDTH + LANE_WIDTH / 2;
-      const x2 = seg.toLane * LANE_WIDTH + LANE_WIDTH / 2;
-      const lineAlpha = seg.type === 'passing'
-        ? 0.72
-        : seg.type === 'branch-out' || seg.type === 'merge-in'
-          ? 0.95
-          : 1;
-
-      ctx.beginPath();
-      ctx.strokeStyle = resolveColor(seg.color);
-      ctx.globalAlpha = lineAlpha;
-      ctx.lineWidth = 1.25;
-      ctx.lineCap = 'round';
-
-      switch (seg.type) {
-        case 'passing':
-        case 'commit-lane':
-          ctx.moveTo(x1, 0);
-          ctx.lineTo(x1, h);
-          break;
-        case 'top-stub':
-          ctx.moveTo(x1, 0);
-          ctx.lineTo(x1, dotCy);
-          break;
-        case 'bottom-stub':
-          ctx.moveTo(x1, dotCy);
-          ctx.lineTo(x1, h);
-          break;
-        case 'branch-out': {
-          const mid = (dotCy + h) / 2;
-          ctx.moveTo(dotCx, dotCy);
-          ctx.bezierCurveTo(dotCx, mid, x2, mid, x2, h);
-          break;
-        }
-        case 'merge-in': {
-          const mid = dotCy / 2;
-          ctx.moveTo(x1, 0);
-          ctx.bezierCurveTo(x1, mid, dotCx, mid, dotCx, dotCy);
-          break;
-        }
-        default:
-          continue;
+    if (inputSwimlanes[index].id === historyItem.id) {
+      if (index !== circleIndex) {
+        const d = [
+          `M ${SWIMLANE_WIDTH * (index + 1)} 0`,
+          `A ${SWIMLANE_WIDTH} ${SWIMLANE_WIDTH} 0 0 1 ${SWIMLANE_WIDTH * index} ${SWIMLANE_WIDTH}`,
+          `H ${SWIMLANE_WIDTH * (circleIndex + 1)}`,
+        ].join(' ');
+        paths.push(<GraphPath key={`input-${index}`} d={d} color={color} />);
+      } else {
+        outputSwimlaneIndex++;
       }
-      ctx.stroke();
-      ctx.globalAlpha = 1;
+      continue;
     }
 
-    // Dot — drawn last, always on top
-    const bg = styles.getPropertyValue('--background').trim() || styles.getPropertyValue('--surface-background').trim();
-    ctx.beginPath();
-    ctx.arc(dotCx, dotCy, 4, 0, Math.PI * 2);
-    ctx.fillStyle = resolveColor(color);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(dotCx, dotCy, 5, 0, Math.PI * 2);
-    ctx.strokeStyle = bg || fallbackColor;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-  }, [laned, lane, color, connectors, totalLanes, isExpanded, w]);
+    if (
+      outputSwimlaneIndex < outputSwimlanes.length
+      && inputSwimlanes[index].id === outputSwimlanes[outputSwimlaneIndex].id
+    ) {
+      if (index === outputSwimlaneIndex) {
+        paths.push(
+          <GraphPath
+            key={`straight-${index}`}
+            d={verticalPath(SWIMLANE_WIDTH * (index + 1), 0, SWIMLANE_HEIGHT)}
+            color={color}
+          />,
+        );
+      } else {
+        const d = [
+          `M ${SWIMLANE_WIDTH * (index + 1)} 0`,
+          'V 6',
+          `A ${SWIMLANE_CURVE_RADIUS} ${SWIMLANE_CURVE_RADIUS} 0 0 1 ${(SWIMLANE_WIDTH * (index + 1)) - SWIMLANE_CURVE_RADIUS} ${SWIMLANE_HEIGHT / 2}`,
+          `H ${(SWIMLANE_WIDTH * (outputSwimlaneIndex + 1)) + SWIMLANE_CURVE_RADIUS}`,
+          `A ${SWIMLANE_CURVE_RADIUS} ${SWIMLANE_CURVE_RADIUS} 0 0 0 ${SWIMLANE_WIDTH * (outputSwimlaneIndex + 1)} ${(SWIMLANE_HEIGHT / 2) + SWIMLANE_CURVE_RADIUS}`,
+          `V ${SWIMLANE_HEIGHT}`,
+        ].join(' ');
+        paths.push(<GraphPath key={`curve-${index}-${outputSwimlaneIndex}`} d={d} color={color} />);
+      }
+
+      outputSwimlaneIndex++;
+    }
+  }
+
+  for (const parentColumn of secondaryParentColumns) {
+    const d = [
+      `M ${SWIMLANE_WIDTH * parentColumn} ${SWIMLANE_HEIGHT / 2}`,
+      `A ${SWIMLANE_WIDTH} ${SWIMLANE_WIDTH} 0 0 1 ${SWIMLANE_WIDTH * (parentColumn + 1)} ${SWIMLANE_HEIGHT}`,
+      `M ${SWIMLANE_WIDTH * parentColumn} ${SWIMLANE_HEIGHT / 2}`,
+      `H ${SWIMLANE_WIDTH * (circleIndex + 1)}`,
+    ].join(' ');
+    paths.push(
+      <GraphPath
+        key={`parent-${parentColumn}`}
+        d={d}
+        color={outputSwimlanes[parentColumn]?.color ?? circleColor}
+      />,
+    );
+  }
+
+  if (inputIndex !== -1) {
+    paths.push(
+      <GraphPath
+        key="to-circle"
+        d={verticalPath(SWIMLANE_WIDTH * (circleIndex + 1), 0, SWIMLANE_HEIGHT / 2)}
+        color={inputSwimlanes[inputIndex].color}
+      />,
+    );
+  }
+
+  if (historyItem.parentIds.length > 0) {
+    paths.push(
+      <GraphPath
+        key="from-circle"
+        d={verticalPath(SWIMLANE_WIDTH * (circleIndex + 1), SWIMLANE_HEIGHT / 2, SWIMLANE_HEIGHT)}
+        color={circleColor}
+      />,
+    );
+  }
+
+  const circleX = SWIMLANE_WIDTH * (circleIndex + 1);
+  const circleY = SWIMLANE_WIDTH;
+  const width = SWIMLANE_WIDTH * (columnCount + 1);
 
   return (
-    // This div owns the layout: height: 100% fills the self-stretch parent,
-    // width is fixed to the lane count. No replaced-element intrinsic sizing.
-    <div
-      ref={containerRef}
-      style={{ width: w, height: '100%', position: 'relative', flexShrink: 0, overflow: 'hidden' }}
+    <svg
+      width={width}
+      height={SWIMLANE_HEIGHT}
+      viewBox={`0 0 ${width} ${SWIMLANE_HEIGHT}`}
+      className="block shrink-0 overflow-visible"
+      aria-hidden="true"
+      role="presentation"
     >
-      {/* Canvas is absolutely inset so it matches the div exactly and never
-          contributes its own intrinsic height (150px default) to flex layout. */}
-      <canvas
-        ref={canvasRef}
-        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block' }}
-      />
-    </div>
+      {paths}
+      {viewModel.kind === 'HEAD' ? (
+        <>
+          <circle cx={circleX} cy={circleY} r={CIRCLE_RADIUS + 3} fill={circleColor} strokeWidth={CIRCLE_STROKE_WIDTH} />
+          <circle cx={circleX} cy={circleY} r={CIRCLE_STROKE_WIDTH} fill="var(--background)" stroke={circleColor} strokeWidth={CIRCLE_RADIUS} />
+        </>
+      ) : viewModel.kind === 'incoming-changes' || viewModel.kind === 'outgoing-changes' ? (
+        <>
+          <circle cx={circleX} cy={circleY} r={CIRCLE_RADIUS + 3} fill={circleColor} strokeWidth={CIRCLE_STROKE_WIDTH} />
+          <circle cx={circleX} cy={circleY} r={CIRCLE_RADIUS + 1} fill="var(--background)" stroke={circleColor} strokeWidth={CIRCLE_STROKE_WIDTH + 1} />
+          <circle
+            cx={circleX}
+            cy={circleY}
+            r={CIRCLE_RADIUS + 1}
+            fill="none"
+            stroke={circleColor}
+            strokeDasharray="4,2"
+            strokeWidth={CIRCLE_STROKE_WIDTH - 1}
+          />
+        </>
+      ) : historyItem.parentIds.length > 1 ? (
+        <>
+          <circle cx={circleX} cy={circleY} r={CIRCLE_RADIUS + 2} fill={circleColor} stroke={circleColor} strokeWidth={CIRCLE_STROKE_WIDTH} />
+          <circle cx={circleX} cy={circleY} r={CIRCLE_RADIUS - 1} fill="var(--background)" stroke={circleColor} strokeWidth={CIRCLE_STROKE_WIDTH} />
+        </>
+      ) : (
+        <circle cx={circleX} cy={circleY} r={CIRCLE_RADIUS + 1} fill={circleColor} stroke="var(--background)" strokeWidth={CIRCLE_STROKE_WIDTH} />
+      )}
+    </svg>
   );
 };

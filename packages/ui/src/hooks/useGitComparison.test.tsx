@@ -87,11 +87,13 @@ test('comparison reads preserve scope, report failures, retry, and stop while hi
     expect(current().files).toEqual([]);
     expect(current().error).toBeNull();
 
-    source = { kind: 'commit', hash: 'a'.repeat(40) };
+    source = { kind: 'commit', hash: 'a'.repeat(40), parentHash: 'b'.repeat(40) };
     await render();
     expect(current().files).toBeNull();
     expect(requests[4].url.pathname).toBe('/api/git/commit-files');
-    await finish(4, Response.json({ files: [{ path: 'new.ts', previousPath: 'old.ts', changeType: 'R', insertions: 1, deletions: 1, isBinary: false }] }));
+    expect(requests[4].url.searchParams.get('commitHash')).toBe('a'.repeat(40));
+    expect(requests[4].url.searchParams.get('parentHash')).toBe('b'.repeat(40));
+    await finish(4, Response.json({ files: [{ path: 'new.ts', originalPath: 'old.ts', status: 'R', kind: 'file', insertions: 1, deletions: 1, isBinary: false }] }));
     const commitPatch = current().fetchDiff('new.ts', 20);
     await act(async () => { await Promise.resolve(); });
     expect(requests[5].url.pathname).toBe('/api/git/commit-diff');
