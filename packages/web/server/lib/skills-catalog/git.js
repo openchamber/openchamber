@@ -1,6 +1,8 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 
+import { buildSshCommand, getGitBinary } from '../git/service.js';
+
 const execFileAsync = promisify(execFile);
 
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -21,6 +23,8 @@ export async function runGit(args, options = {}) {
   const cwd = options.cwd;
   const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : DEFAULT_TIMEOUT_MS;
   const maxBuffer = Number.isFinite(options.maxBuffer) ? options.maxBuffer : DEFAULT_MAX_BUFFER;
+  const execute = options.execFileAsync ?? execFileAsync;
+  const resolveGitBinaryForSpawn = options.resolveGitBinaryForSpawn ?? getGitBinary;
 
   const identity = options.identity || null;
   const normalizedArgs = Array.isArray(args) ? args.slice() : [];
@@ -35,14 +39,14 @@ export async function runGit(args, options = {}) {
     const sshKeyPath = String(identity.sshKey).trim();
     if (sshKeyPath) {
       // Avoid interactive host key prompts; still safe against changed keys.
-      const sshCommand = `ssh -i ${sshKeyPath} -o BatchMode=yes -o StrictHostKeyChecking=accept-new`;
+      const sshCommand = `${buildSshCommand(sshKeyPath)} -o BatchMode=yes -o StrictHostKeyChecking=accept-new`;
       normalizedArgs.unshift(`core.sshCommand=${sshCommand}`);
       normalizedArgs.unshift('-c');
     }
   }
 
   try {
-    const { stdout, stderr } = await execFileAsync('git', normalizedArgs, {
+    const { stdout, stderr } = await execute(resolveGitBinaryForSpawn(), normalizedArgs, {
       cwd,
       env,
       windowsHide: true,
@@ -62,14 +66,27 @@ export async function runGit(args, options = {}) {
       stdout,
       stderr,
       message,
-      code: typeof err?.code === 'number' ? err.code : null,
+      code: err?.code ?? null,
       signal: typeof err?.signal === 'string' ? err.signal : null,
     };
   }
 }
 
-export async function assertGitAvailable() {
-  const result = await runGit(['--version'], { timeoutMs: 5_000 });
+export const runWithGitCloneReservation = ({
+  destination,
+  label,
+  queueTimeoutMs,
+  gitExecutionService,
+}, task) => {
+  const coordinator = gitExecutionService?.coordinator;
+  if (coordinator?.runClone) {
+    return coordinator.runClone({ destination, label, queueTimeoutMs }, task);
+  }
+  return task({ releaseNetwork: () => {} });
+};
+
+export async function assertGitAvailable(runGitCommand = runGit) {
+  const result = await runGitCommand(['--version'], { timeoutMs: 5_000 });
   if (!result.ok) {
     return { ok: false, error: { kind: 'gitUnavailable', message: 'Git is not available in PATH' } };
   }

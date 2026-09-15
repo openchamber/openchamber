@@ -6,24 +6,29 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 const TEMP_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'walkthrough-language-'));
 process.env.OPENCHAMBER_DATA_DIR = TEMP_DATA_DIR;
 
-vi.mock('../git/service.js', () => ({
-  getRepositoryRoot: vi.fn(async () => '/repo'),
-  getDiff: vi.fn(),
-  getRangeDiff: vi.fn(),
-  getUntrackedDiffs: vi.fn(async () => []),
-  listUntrackedPaths: vi.fn(async () => []),
-}));
-vi.mock('../small-model/index.js', () => ({
-  describeSmallModel: vi.fn(),
-  generateSmallModelText: vi.fn(),
-}));
+const getRepositoryRoot = vi.fn(async () => '/repo');
+const getDiff = vi.fn();
+const getRangeDiff = vi.fn();
+const getUntrackedDiffs = vi.fn(async () => []);
+const listUntrackedPaths = vi.fn(async () => []);
+const describeSmallModel = vi.fn();
+const generateSmallModelText = vi.fn();
+const walkthroughDeps = {
+  getRepositoryRoot,
+  describeSmallModel,
+  generateSmallModelText,
+  git: { getDiff, getRangeDiff, getUntrackedDiffs, listUntrackedPaths },
+};
 
 const { normalizeLanguage, languageName } = await import('./languages.js');
 const { buildPrompt } = await import('./prompt.js');
 const { buildCacheKey } = await import('./store.js');
-const { generateWalkthrough, getWalkthrough } = await import('./index.js');
-const { describeSmallModel, generateSmallModelText } = await import('../small-model/index.js');
-const { getDiff } = await import('../git/service.js');
+const {
+  generateWalkthrough: generateWalkthroughImpl,
+  getWalkthrough: getWalkthroughImpl,
+} = await import('./index.js');
+const generateWalkthrough = (options) => generateWalkthroughImpl(options, walkthroughDeps);
+const getWalkthrough = (options) => getWalkthroughImpl(options, walkthroughDeps);
 
 const SOURCE = { kind: 'working-tree', scope: 'all' };
 
@@ -218,7 +223,7 @@ describe('generating in a language', () => {
   });
 
   it('treats an unknown language as English rather than failing the request', async () => {
-    const result = await generateWalkthrough({ directory: '/repo', source: SOURCE, language: 'kl' });
+    const result = await generateWalkthrough({ directory: '/repo', source: SOURCE, force: true, language: 'kl' });
 
     expect(result.language).toBe('en');
     expect(generateSmallModelText.mock.calls[0][0].system).not.toMatch(/Write all prose/);

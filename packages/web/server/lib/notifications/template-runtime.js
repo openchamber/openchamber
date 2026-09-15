@@ -5,7 +5,7 @@ export const createNotificationTemplateRuntime = (deps) => {
     readSettingsFromDisk,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
-    resolveGitBinaryForSpawn,
+    gitExecutionService,
   } = deps;
 
   const NOTIFICATION_BODY_MAX_CHARS = 1000;
@@ -305,18 +305,28 @@ export const createNotificationTemplateRuntime = (deps) => {
       }
     }
 
-    if (worktreeDir) {
+    if (worktreeDir && gitExecutionService?.getStatus) {
       try {
-        const { simpleGit } = await import('simple-git');
-        const git = simpleGit({
-          baseDir: worktreeDir,
-          spawnOptions: { windowsHide: true },
-          binary: resolveGitBinaryForSpawn(),
+        const controller = new AbortController();
+        let resolveTimeout;
+        const timeoutPromise = new Promise((resolve) => {
+          resolveTimeout = resolve;
         });
-        branch = await Promise.race([
-          git.revparse(['--abbrev-ref', 'HEAD']),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('git timeout')), 3000)),
-        ]).catch(() => '');
+        const timeout = setTimeout(() => {
+          controller.abort('Git status timed out');
+          resolveTimeout(null);
+        }, 3000);
+        const statusPromise = Promise.resolve().then(() => gitExecutionService.getStatus(worktreeDir, {
+          mode: 'light',
+          signal: controller.signal,
+          queueTimeoutMs: 3000,
+        }));
+        try {
+          const status = await Promise.race([statusPromise, timeoutPromise]);
+          branch = status?.current ?? '';
+        } finally {
+          clearTimeout(timeout);
+        }
       } catch {
       }
     }
