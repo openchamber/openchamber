@@ -286,6 +286,10 @@
       "scope": "profile",
       "perSurface": true
     },
+    "chatMessageWidthMode": {
+      "scope": "profile",
+      "perSurface": true
+    },
     "showSplitAssistantMessageActions": {
       "scope": "profile"
     },

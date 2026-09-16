@@ -203,7 +203,7 @@ const ChatSectionContent: React.FC = () => {
                 'collapsibleUserMessages',
                 'stickyUserHeader',
                 'promptNavigatorEnabled',
-                'wideChatLayout',
+                'chatMessageWidth',
                 'codeBlockLineWrap',
                 'splitAssistantMessageActions',
                 'subagentReadOnlyBanner',

@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { z } from 'zod';
 
 import { isAgentMemoryFeatureAvailable } from '../agent-memory/feature-flag.js';
 
@@ -7,6 +8,7 @@ import { isAgentMemoryFeatureAvailable } from '../agent-memory/feature-flag.js';
 // The server is plain ESM without a bundler, so the snapshot is read with
 // `createRequire` (import attributes differ across the Node versions we run on).
 const settingsRegistry = createRequire(import.meta.url)('./settings-registry.json');
+const chatMessageWidthSchema = z.string().trim().pipe(z.enum(['narrow', 'wide', 'fluid']));
 
 /**
  * Whether a client may persist this key through PUT /api/config/settings:
@@ -686,6 +688,10 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
       result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
+    }
+    const chatMessageWidth = chatMessageWidthSchema.safeParse(candidate.chatMessageWidthMode);
+    if (chatMessageWidth.success) {
+      result.chatMessageWidthMode = chatMessageWidth.data;
     }
     if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
       result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;

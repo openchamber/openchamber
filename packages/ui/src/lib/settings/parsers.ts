@@ -375,6 +375,17 @@ export const parseProjects = fromSchema(
 
 const followUpBehaviorSchema = z.enum(['steer', 'queue']);
 
+const chatMessageWidthSchema = trimmed.pipe(z.enum(['narrow', 'wide', 'fluid']));
+
+/** Explicit modes win; older snapshots may only carry the per-surface boolean. */
+export const parseChatMessageWidthMode: SettingsParser<'narrow' | 'wide' | 'fluid'> = (value, raw) => {
+  const direct = chatMessageWidthSchema.safeParse(value);
+  if (direct.success) return direct.data;
+  const legacy = z.boolean().safeParse(raw.wideChatLayoutEnabled);
+  if (!legacy.success) return undefined;
+  return legacy.data ? 'wide' : 'narrow';
+};
+
 /** Legacy `queueModeEnabled` → `followUpBehavior`; 'immediate' collapses onto 'steer'. */
 export const parseFollowUpBehavior: SettingsParser<'steer' | 'queue'> = (value, raw) => {
   const direct = followUpBehaviorSchema.safeParse(value);

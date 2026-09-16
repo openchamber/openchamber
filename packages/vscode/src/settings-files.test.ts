@@ -108,6 +108,23 @@ describe('scope helpers', () => {
 });
 
 describe('round trip', () => {
+  test('a canonical width write preserves other surfaces and their legacy widths', () => {
+    const previous = {
+      wideChatLayoutEnabled: { value: false, updatedAt: 10, surfaces: { desktop: { value: true, updatedAt: 20 } } },
+      chatMessageWidthMode: { updatedAt: 0, surfaces: { mobile: { value: 'narrow', updatedAt: 30 } } },
+    };
+    const next = buildPreferencesFields(previous, {
+      ...flattenPreferences(previous, 'vscode'),
+      chatMessageWidthMode: 'fluid',
+    }, 40, { surface: 'vscode', changedKeys: ['chatMessageWidthMode'] });
+    const parsed = parsePreferencesDocument(serializePreferencesDocument(next));
+    assert.ok(parsed.ok);
+    assert.equal(flattenPreferences(parsed.fields, 'vscode').chatMessageWidthMode, 'fluid');
+    assert.equal(flattenPreferences(parsed.fields, 'mobile').chatMessageWidthMode, 'narrow');
+    assert.deepEqual(flattenPreferences(parsed.fields, 'desktop'), { wideChatLayoutEnabled: true });
+    assert.deepEqual(parsed.fields.wideChatLayoutEnabled, previous.wideChatLayoutEnabled);
+  });
+
   test('serialize then parse yields the same fields, and flatten yields the values', () => {
     const fields = seedPreferencesFrom({ themeId: 'nord', defaultModel: 'zen/gpt-5', opencodeBinary: '/bin/oc' }, 42);
     assert.deepEqual(fields, {

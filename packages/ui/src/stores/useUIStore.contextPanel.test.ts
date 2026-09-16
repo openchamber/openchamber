@@ -990,3 +990,26 @@ describe('useUIStore openAgentBrowserTab', () => {
     expect(state?.activeTabId).toBe(shownId);
   });
 });
+
+describe('useUIStore persistence migrations', () => {
+  for (const version of [18, 19, 20, 21]) {
+    test(`migrates legacy chat width from version ${version}`, async () => {
+      const { migrate, version: currentVersion } = useUIStore.persist.getOptions();
+      expect(currentVersion).toBe(22);
+      for (const enabled of [true, false]) {
+        const migrated = await migrate?.({ wideChatLayoutEnabled: enabled, enterToSend: true }, version);
+        expect(migrated).toMatchObject({ chatMessageWidthMode: enabled ? 'wide' : 'narrow', enterToSend: true });
+        expect(Object.keys(migrated ?? {})).not.toContain('wideChatLayoutEnabled');
+      }
+    });
+  }
+
+  for (const mode of ['narrow', 'wide', 'fluid']) {
+    test(`preserves explicit ${mode} width during migration`, async () => {
+      const migrate = useUIStore.persist.getOptions().migrate;
+      const migrated = await migrate?.({ chatMessageWidthMode: mode, wideChatLayoutEnabled: true }, 21);
+      expect(migrated).toMatchObject({ chatMessageWidthMode: mode });
+      expect(Object.keys(migrated ?? {})).not.toContain('wideChatLayoutEnabled');
+    });
+  }
+});

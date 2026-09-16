@@ -284,6 +284,7 @@ const settingsEndpointForSurface = (): string => `/api/config/settings?${SETTING
 
 /** Copy a parsed snapshot into the live stores. Omitted keys stay as they are. */
 const applyDesktopUiPreferences = (settings: DesktopSettings): void => {
+  // The registry parser has already mapped legacy booleans to canonical modes.
   applySettingsToStores(settings);
 };
 

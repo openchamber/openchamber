@@ -232,7 +232,7 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
 
 ## Native Features Owned Here
 
-- Floating Mini Chat windows.
+- Floating Mini Chat windows use the same message-width setting as the main window.
 - Mini Chat loads from the resolved local UI origin in HMR development, not the
   API server origin. Bundled mode keeps `openchamber-ui://` assets. Native zoom
   targets the focused window directly; composer focus adjusts interface scale,
