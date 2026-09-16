@@ -28,6 +28,60 @@ const hasValidFolderSnapshotShape = (snapshot) => (
   && snapshot.collapsedFolderIds.every((folderId) => typeof folderId === 'string')
 );
 
+// POST bodies are whole-device maps from clients that may never have seen the
+// current server state (bootstrap-only hydration, long-open tabs, clock skew),
+// so absence of a scope or folder is not deletion. Merge per scope instead of
+// replacing the file: keep what the writer never saw, let the incoming
+// version win per folder id, and keep updatedAt monotonic.
+const mergeSnapshots = (current, incoming) => {
+  const currentMap = isObjectRecord(current.foldersMap) ? current.foldersMap : {};
+  const incomingMap = isObjectRecord(incoming.foldersMap) ? incoming.foldersMap : {};
+  const mergedScopes = {};
+  for (const scope of new Set([...Object.keys(currentMap), ...Object.keys(incomingMap)])) {
+    const currentFolders = currentMap[scope];
+    const incomingFolders = incomingMap[scope];
+    if (!Array.isArray(incomingFolders) || incomingFolders.length === 0) {
+      if (Array.isArray(currentFolders) && currentFolders.length > 0) {
+        mergedScopes[scope] = currentFolders;
+      }
+      continue;
+    }
+    if (!Array.isArray(currentFolders) || currentFolders.length === 0) {
+      mergedScopes[scope] = incomingFolders;
+      continue;
+    }
+    const foldersById = new Map(currentFolders.map((folder) => [folder.id, folder]));
+    const idByName = new Map(currentFolders.map((folder) => [folder.name.toLowerCase(), folder.id]));
+    for (const folder of incomingFolders) {
+      // Devices that auto-create archive folders for the same scope produce
+      // same-name folders with different ids; union their session lists.
+      const twinId = idByName.get(folder.name.toLowerCase());
+      if (twinId !== undefined && twinId !== folder.id && foldersById.has(twinId)) {
+        const twin = foldersById.get(twinId);
+        foldersById.delete(twinId);
+        foldersById.set(folder.id, {
+          ...folder,
+          sessionIds: [...new Set([...twin.sessionIds, ...folder.sessionIds])],
+        });
+        continue;
+      }
+      foldersById.set(folder.id, folder);
+    }
+    mergedScopes[scope] = [...foldersById.values()];
+  }
+  const collapsedFolderIds = [
+    ...new Set([
+      ...(Array.isArray(current.collapsedFolderIds) ? current.collapsedFolderIds : []),
+      ...(Array.isArray(incoming.collapsedFolderIds) ? incoming.collapsedFolderIds : []),
+    ]),
+  ];
+  const updatedAt = Math.max(
+    Number.isFinite(current.updatedAt) ? current.updatedAt : 0,
+    Number.isFinite(incoming.updatedAt) ? incoming.updatedAt : 0,
+  );
+  return { version: 1, foldersMap: mergedScopes, collapsedFolderIds, updatedAt };
+};
+
 export const registerSessionFoldersRoutes = (app, dependencies) => {
   const {
     fsPromises,
@@ -95,23 +149,20 @@ export const registerSessionFoldersRoutes = (app, dependencies) => {
           if (error && error.code === 'ENOENT') return null;
           throw error;
         });
+        let outgoing = body;
         if (currentRaw) {
           try {
             const current = JSON.parse(currentRaw);
-            const currentUpdatedAt = hasValidFolderSnapshotShape(current)
-              && typeof current.updatedAt === 'number'
-              && Number.isFinite(current.updatedAt)
-              ? current.updatedAt
-              : 0;
-            if (currentUpdatedAt >= body.updatedAt) {
-              return res.json({ success: true, ignored: true });
+            if (hasValidFolderSnapshotShape(current)) {
+              outgoing = mergeSnapshots(current, body);
             }
           } catch { /* A valid new snapshot repairs malformed prior state. */ }
         }
 
+        const outgoingSerialized = JSON.stringify(outgoing, null, 2);
         await ensureDir();
         tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-        await fsPromises.writeFile(tmp, serialized, 'utf8');
+        await fsPromises.writeFile(tmp, outgoingSerialized, 'utf8');
         await fsPromises.rename(tmp, filePath);
         saved = true;
         return res.json({ success: true });
