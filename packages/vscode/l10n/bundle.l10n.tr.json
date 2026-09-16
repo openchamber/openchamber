@@ -26,5 +26,15 @@
   "Failed to start OpenCode: {0}": "OpenCode başlatılamadı: {0}",
   "New Session": "Yeni Oturum",
   "Session": "Oturum",
-  "Agent Manager": "Agent Yöneticisi"
+  "Agent Manager": "Agent Yöneticisi",
+  "OpenChamber: Generate Commit Message": "OpenChamber: Commit mesajı oluştur",
+  "Select a repository": "Bir depo seçin",
+  "OpenChamber: Git extension not found": "OpenChamber: Git eklentisi bulunamadı",
+  "OpenChamber: No Git repository found": "OpenChamber: Git deposu bulunamadı",
+  "OpenChamber: No changes to generate a commit message for": "OpenChamber: Commit mesajı oluşturmak için değişiklik yok",
+  "OpenChamber: Generating commit message...": "OpenChamber: Commit mesajı oluşturuluyor...",
+  "OpenChamber: OpenCode is not ready": "OpenChamber: OpenCode hazır değil",
+  "OpenChamber: Commit message generation already in progress": "OpenChamber: Commit mesajı oluşturma zaten devam ediyor",
+  "OpenChamber: Left your commit message unchanged": "OpenChamber: Commit mesajınız değiştirilmedi",
+  "OpenChamber: Failed to generate commit message - {0}": "OpenChamber: Commit mesajı oluşturulamadı - {0}"
 }

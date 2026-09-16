@@ -37,6 +37,7 @@
   "activationEvents": [
     "onCommand:openchamber.openSidebar",
     "onCommand:openchamber.attachExplorerToChat",
+    "onCommand:openchamber.generateCommitMessage",
     "onView:openchamber.chatView"
   ],
   "contributes": {
@@ -157,6 +158,15 @@
         "command": "openchamber.attachExplorerToChat",
         "category": "OpenChamber",
         "title": "%command.attachExplorerToChat.title%"
+      },
+      {
+        "command": "openchamber.generateCommitMessage",
+        "category": "OpenChamber",
+        "title": "%command.generateCommitMessage.title%",
+        "icon": {
+          "light": "assets/icon.svg",
+          "dark": "assets/icon-scm-titlebar.svg"
+        }
       }
     ],
     "submenus": [
@@ -166,6 +176,13 @@
       }
     ],
     "menus": {
+      "scm/title": [
+        {
+          "command": "openchamber.generateCommitMessage",
+          "when": "scmProvider == git",
+          "group": "navigation@0"
+        }
+      ],
       "comments/commentThread/context": [
         {
           "command": "openchamber.submitLineComment",

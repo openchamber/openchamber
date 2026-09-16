@@ -26,5 +26,15 @@
   "Failed to start OpenCode: {0}": "Failed to start OpenCode: {0}",
   "New Session": "New Session",
   "Session": "Session",
-  "Agent Manager": "Agent Manager"
+  "Agent Manager": "Agent Manager",
+  "OpenChamber: Generate Commit Message": "OpenChamber: Generate Commit Message",
+  "Select a repository": "Select a repository",
+  "OpenChamber: Git extension not found": "OpenChamber: Git extension not found",
+  "OpenChamber: No Git repository found": "OpenChamber: No Git repository found",
+  "OpenChamber: No changes to generate a commit message for": "OpenChamber: No changes to generate a commit message for",
+  "OpenChamber: Generating commit message...": "OpenChamber: Generating commit message...",
+  "OpenChamber: OpenCode is not ready": "OpenChamber: OpenCode is not ready",
+  "OpenChamber: Commit message generation already in progress": "OpenChamber: Commit message generation already in progress",
+  "OpenChamber: Left your commit message unchanged": "OpenChamber: Left your commit message unchanged",
+  "OpenChamber: Failed to generate commit message - {0}": "OpenChamber: Failed to generate commit message - {0}"
 }
