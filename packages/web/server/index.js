@@ -113,6 +113,7 @@ import { createDevServerScanner } from './lib/dev-servers/routes.js';
 import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
 import { createSystemPromptRuntime } from './lib/system-prompt/runtime.js';
+import { createResolvedModelRuntime } from './lib/resolved-model/runtime.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
@@ -302,6 +303,7 @@ const readCustomThemesFromDisk = (...args) => themeRuntime.readCustomThemesFromD
 let notificationTemplateRuntime = null;
 let agentToolRuntime = null;
 let systemPromptRuntime = null;
+let resolvedModelRuntime = null;
 
 const createTimeoutSignal = (...args) => notificationTemplateRuntime.createTimeoutSignal(...args);
 const formatProjectLabel = (...args) => notificationTemplateRuntime.formatProjectLabel(...args);
@@ -951,6 +953,7 @@ globalMessageStreamHub.subscribeEvent((event) => {
   sessionGoalRuntime.processPayload(payload, directory);
   contextObligatoryRuntime.processPayload(payload, directory);
   linearSessionStatusRuntime.processPayload(payload);
+  resolvedModelRuntime?.processPayload(payload);
 });
 
 const processForwardedEventPayload = (payload, emitSyntheticEvent) => {
@@ -1092,6 +1095,7 @@ const bootstrapRuntime = createBootstrapRuntime({
   registerNotificationRoutes,
   registerOpenChamberRoutes,
   registerAgentToolRoutes: (app, options) => options.agentToolRuntime.registerRoutes(app, options.express),
+  registerResolvedModelCallbackRoutes: (app, options) => options.resolvedModelRuntime?.registerCallbackRoutes(app, options.express),
   express,
 });
 const tunnelWiringRuntime = createTunnelWiringRuntime({
@@ -1221,6 +1225,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
     // A restart reloads plugins: provider ports, credentials and the provider
     // list itself can all differ from what was cached.
     resetOpenCodeRuntimeProviders();
+    resolvedModelRuntime?.reset();
     try {
       messageStreamRuntime?.rebindUpstream();
     } catch (error) {
@@ -1258,6 +1263,11 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
     if (settings?.optimizeSystemPrompt === true) {
       const configContent = managedEnv.OPENCODE_CONFIG_CONTENT ?? process.env.OPENCODE_CONFIG_CONTENT;
       Object.assign(managedEnv, await systemPromptRuntime.prepareManagedOpenCodeEnv(configContent));
+    }
+
+    if (resolvedModelRuntime) {
+      const configContent = managedEnv.OPENCODE_CONFIG_CONTENT ?? process.env.OPENCODE_CONFIG_CONTENT;
+      Object.assign(managedEnv, await resolvedModelRuntime.prepareManagedOpenCodeEnv(configContent));
     }
     return managedEnv;
   },
@@ -1326,6 +1336,23 @@ const emitSessionCreatedEvent = (event) => {
           ...(event.projectID ? { projectId: event.projectID } : {}),
           ...(event.title ? { title: event.title } : {}),
         },
+      });
+    } catch {
+      uiOpenChamberEventClients.delete(client);
+    }
+  }
+};
+/**
+ * The requested provider alias resolved to a real backing model, as reported
+ * by the managed resolved-model plugin. Sessions without proxy-fronted
+ * providers never emit this, so the UI simply has nothing to show.
+ */
+const emitResolvedModelEvent = (entry) => {
+  for (const client of uiOpenChamberEventClients) {
+    try {
+      writeSseEvent(client, {
+        type: 'openchamber:resolved-model',
+        properties: entry,
       });
     } catch {
       uiOpenChamberEventClients.delete(client);
@@ -1532,6 +1559,18 @@ async function main(options = {}) {
     fsPromises,
     path,
     dataDir: OPENCHAMBER_DATA_DIR,
+  });
+  resolvedModelRuntime = createResolvedModelRuntime({
+    crypto,
+    fsPromises,
+    path,
+    dataDir: OPENCHAMBER_DATA_DIR,
+    env: process.env,
+    getActivePort: () => {
+      const address = server?.address?.();
+      return typeof address === 'object' && address ? address.port : null;
+    },
+    onModelResolved: emitResolvedModelEvent,
   });
 
   // Pairing transports advertised to the create-device dialog. LAN reachability is
@@ -1843,6 +1882,7 @@ async function main(options = {}) {
     getCachedZenModels,
     setAutoAcceptSession,
     agentToolRuntime,
+    resolvedModelRuntime,
     desktopUpdater,
   });
   uiAuthController = bootstrapResult.uiAuthController;
@@ -1975,6 +2015,7 @@ async function main(options = {}) {
     writeSseEvent,
     permissionAutoAcceptRuntime,
     messageQueueRuntime,
+    resolvedModelRuntime,
   });
 
   const startupPipelineResult = await startupPipelineRuntime.run({

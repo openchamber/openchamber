@@ -19,6 +19,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
 import { ModelPickerList, type ModelPickerEntry } from '@/components/model-picker/ModelPickerList';
+import { ResolvedModelBadge } from './ResolvedModelBadge';
 import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
 import { isDesktopShell } from '@/lib/desktop';
 import { getAgentColor } from '@/lib/agentColors';
@@ -2952,6 +2953,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 >
                     {!inlineMobileSelection && renderVariantSelector()}
                     {renderModelSelector()}
+                    {/* Desktop only: the compact mobile row has no space, and
+                        the resolved model is a secondary detail. */}
+                    {!isMobile && <ResolvedModelBadge sessionId={currentSessionId} />}
                     {inlineMobileSelection && renderVariantSelector()}
                     {!selection && renderAgentSelector()}
                 </div>

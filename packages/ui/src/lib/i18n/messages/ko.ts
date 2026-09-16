@@ -2570,6 +2570,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.reorderFavoriteAria': '즐겨찾기 순서 변경',
   'chat.modelControls.reorderFavoriteTitle': '드래그하여 즐겨찾기 순서 변경',
   'chat.modelControls.reorderProviderTitle': '드래그하여 공급자 순서 변경',
+  'chat.modelControls.resolvedModel.tooltip': '공급자의 게이트웨이가 별칭을 해석한 뒤 실제로 제공한 모델',
+  'chat.modelControls.resolvedModel.ariaLabel': '해석된 모델: {model}',
   'chat.modelControls.permissionLabel.custom': '사용자 지정',
   'chat.modelControls.permissionLabel.allow': '허용',
   'chat.modelControls.permissionLabel.deny': '거부',

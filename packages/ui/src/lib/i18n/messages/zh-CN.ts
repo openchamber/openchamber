@@ -2536,6 +2536,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.reorderFavoriteAria': '重新排序收藏',
   'chat.modelControls.reorderFavoriteTitle': '拖动以重新排序收藏',
   'chat.modelControls.reorderProviderTitle': '拖动以重新排序提供商',
+  'chat.modelControls.resolvedModel.tooltip': '提供商网关解析别名后实际使用的模型',
+  'chat.modelControls.resolvedModel.ariaLabel': '解析后的模型：{model}',
   'chat.modelControls.permissionLabel.custom': '自定义',
   'chat.modelControls.permissionLabel.allow': '允许',
   'chat.modelControls.permissionLabel.deny': '拒绝',

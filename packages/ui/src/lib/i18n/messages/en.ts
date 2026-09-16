@@ -2570,6 +2570,8 @@ export const dict = {
   'chat.modelControls.reorderFavoriteAria': 'Reorder favorite',
   'chat.modelControls.reorderFavoriteTitle': 'Drag to reorder favorite',
   'chat.modelControls.reorderProviderTitle': 'Drag to reorder provider',
+  'chat.modelControls.resolvedModel.tooltip': 'The model your provider actually served, after its gateway resolved the alias',
+  'chat.modelControls.resolvedModel.ariaLabel': 'Resolved model: {model}',
   'chat.modelControls.permissionLabel.custom': 'Custom',
   'chat.modelControls.permissionLabel.allow': 'Allow',
   'chat.modelControls.permissionLabel.deny': 'Deny',

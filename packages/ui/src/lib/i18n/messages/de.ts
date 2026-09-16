@@ -2344,6 +2344,8 @@ export const dict = {
   'chat.modelControls.reorderFavoriteAria': 'Favorit neu anordnen',
   'chat.modelControls.reorderFavoriteTitle': 'Ziehen, um Favorit neu anzuordnen',
   'chat.modelControls.reorderProviderTitle': 'Ziehen, um Anbieter neu anzuordnen',
+  'chat.modelControls.resolvedModel.tooltip': 'Das Modell, das dein Anbieter tatsächlich verwendet hat, nachdem sein Gateway den Alias aufgelöst hat',
+  'chat.modelControls.resolvedModel.ariaLabel': 'Aufgelöstes Modell: {model}',
   'chat.modelControls.permissionLabel.custom': 'Benutzerdefiniert',
   'chat.modelControls.permissionLabel.allow': 'Erlauben',
   'chat.modelControls.permissionLabel.deny': 'Ablehnen',

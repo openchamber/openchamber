@@ -52,6 +52,7 @@ import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { applyMessageQueueUpdatedEvent, useMessageQueueStore } from "@/stores/messageQueueStore"
 import { subscribeMessageQueueSync } from "./message-queue-sync"
+import { subscribeResolvedModelSync } from "./resolved-model-sync"
 import {
   processVSCodePermissionAutoAccept,
   processVSCodeReconciledPermissionAutoAccept,
@@ -2534,6 +2535,7 @@ export function SyncProvider(props: {
   // Abort controller owned by the pipeline closure. Cleanup aborts + flushes.
   useEffect(() => {
     const unsubscribeQueueEvents = subscribeMessageQueueSync(runtimeKey)
+    const unsubscribeResolvedModelEvents = subscribeResolvedModelSync(runtimeKey)
     const resyncAfterStreamGap = (reason: SessionMaterializationReason) => {
       for (const dir of childStores.children.keys()) triggerDirectoryResync(dir, reason)
     }
@@ -2617,6 +2619,7 @@ export function SyncProvider(props: {
       }
       pipeline.cleanup()
       unsubscribeQueueEvents()
+      unsubscribeResolvedModelEvents()
     }
   }, [props.sdk, childStores, routingIndex, messageStreamTransport, runtimeKey, triggerDirectoryResync])
 

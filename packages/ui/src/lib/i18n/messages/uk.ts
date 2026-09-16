@@ -2536,6 +2536,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.modelControls.reorderFavoriteAria": "Змінити порядок вибраного",
   "chat.modelControls.reorderFavoriteTitle": "Перетягніть, щоб змінити порядок вибраного",
   "chat.modelControls.reorderProviderTitle": "Перетягніть, щоб змінити порядок провайдера",
+  "chat.modelControls.resolvedModel.tooltip": "Модель, яку постачальник фактично використав після того, як його шлюз розв’язав псевдонім",
+  "chat.modelControls.resolvedModel.ariaLabel": "Визначена модель: {model}",
   "chat.modelControls.permissionLabel.custom": "Custom",
   "chat.modelControls.permissionLabel.allow": "Дозволити",
   "chat.modelControls.permissionLabel.deny": "Заборонити",
