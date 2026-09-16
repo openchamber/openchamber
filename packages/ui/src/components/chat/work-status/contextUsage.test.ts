@@ -1,7 +1,20 @@
 import { describe, expect, test } from 'bun:test';
-import { computeContextUsage, DEFAULT_CONTEXT_LIMIT } from './contextUsage';
+import {
+  computeContextUsage,
+  DEFAULT_CONTEXT_LIMIT,
+  resolveSessionContextSnapshot,
+} from './contextUsage';
+import type { ModelMetadata } from '@/types';
 
-const assistant = (tokens: Record<string, unknown>, id = 'msg') => ({ id, role: 'assistant', tokens });
+type TestTokens = {
+  total?: number;
+  input?: number;
+  output?: number;
+  reasoning?: number;
+  cache?: { read?: number; write?: number };
+};
+
+const assistant = (tokens: TestTokens, id = 'msg') => ({ id, role: 'assistant', tokens });
 
 describe('computeContextUsage', () => {
   test('sums every token bucket of the newest reporting assistant message', () => {
@@ -80,5 +93,71 @@ describe('computeContextUsage', () => {
       100_000,
     );
     expect(usage?.totalTokens).toBe(5_000);
+  });
+});
+
+describe('resolveSessionContextSnapshot', () => {
+  const providers = [
+    { id: 'provider-a', models: [{ id: 'model-a', limit: { context: 100_000, output: 4_000 } }] },
+    { id: 'provider-b', models: [{ id: 'model-b', limit: { context: 200_000, output: 8_000 } }] },
+  ];
+  const noMetadata = new Map<string, ModelMetadata>();
+
+  test('keeps usage and limits on the same reporting message during a model change', () => {
+    const snapshot = resolveSessionContextSnapshot([
+      { id: 'a', role: 'assistant', providerID: 'provider-a', modelID: 'model-a', tokens: { total: 20_000 } },
+      { id: 'b-pending', role: 'assistant', providerID: 'provider-b', modelID: 'model-b' },
+    ], providers, noMetadata);
+
+    expect(snapshot).toEqual({
+      messageID: 'a',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+      totalTokens: 20_000,
+      contextLimit: 100_000,
+      outputLimit: 4_000,
+      percent: 20,
+    });
+  });
+
+  test('uses metadata until the live provider list is available', () => {
+    const metadata = new Map<string, ModelMetadata>([[
+      'provider-a/model-a',
+      { id: 'model-a', providerId: 'provider-a', limit: { context: 160_000, output: 12_000 } },
+    ]]);
+
+    expect(resolveSessionContextSnapshot([
+      { role: 'assistant', providerID: 'PROVIDER-A', modelID: 'model-a', tokens: { total: 40_000 } },
+    ], [], metadata)).toEqual({
+      providerID: 'PROVIDER-A',
+      modelID: 'model-a',
+      totalTokens: 40_000,
+      contextLimit: 160_000,
+      outputLimit: 12_000,
+      percent: 25,
+    });
+  });
+
+  test('waits for model data instead of guessing a context limit', () => {
+    expect(resolveSessionContextSnapshot([
+      { role: 'assistant', providerID: 'provider-a', modelID: 'model-a', tokens: { total: 40_000 } },
+    ], [], noMetadata)).toBeNull();
+  });
+
+  test('prefers live limits and falls back only for a resolved model without limits', () => {
+    const metadata = new Map<string, ModelMetadata>([[
+      'provider-a/model-a',
+      { id: 'model-a', providerId: 'provider-a', limit: { context: 160_000, output: 12_000 } },
+    ]]);
+    const messages = [
+      { role: 'assistant', providerID: 'provider-a', modelID: 'model-a', tokens: { total: 20_000 } },
+    ];
+
+    expect(resolveSessionContextSnapshot(messages, providers, metadata)?.contextLimit).toBe(100_000);
+    expect(resolveSessionContextSnapshot(
+      messages,
+      [{ id: 'provider-a', models: [{ id: 'model-a' }] }],
+      noMetadata,
+    )?.contextLimit).toBe(DEFAULT_CONTEXT_LIMIT);
   });
 });
