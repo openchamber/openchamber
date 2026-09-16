@@ -58,20 +58,19 @@ const knownScopesOnly = (scopes) => {
 const gitOriginSchema = z.object({
   url: z.string().min(1).refine((entry) => !entry.includes('\0')),
   ref: z.string().min(1).max(256).refine((entry) => !entry.includes('\0')).optional(),
+  gitIdentityId: z.string().trim().min(1).max(128).optional(),
 });
 
-/** @returns {Record<string, { url: string, ref?: string }>} */
+/** @returns {Record<string, { url: string, ref?: string, gitIdentityId?: string }>} */
 const knownGitOriginsOnly = (origins) => {
-  /** @type {Record<string, { url: string, ref?: string }>} */
+  /** @type {Record<string, { url: string, ref?: string, gitIdentityId?: string }>} */
   const cleaned = {};
   for (const [installPath, raw] of Object.entries(origins)) {
     const parsed = gitOriginSchema.safeParse(raw);
     if (!parsed.success) {
       continue;
     }
-    cleaned[installPath] = parsed.data.ref
-      ? { url: parsed.data.url, ref: parsed.data.ref }
-      : { url: parsed.data.url };
+    cleaned[installPath] = parsed.data;
   }
   return cleaned;
 };
@@ -175,8 +174,9 @@ const writeExtensionStoreUnlocked = async (
     }
     // An origin only means something for a git copy that is still installed.
     const origin = source === 'git' ? gitOrigins[entry] : undefined;
-    if (origin && typeof origin.url === 'string' && origin.url) {
-      origins[entry] = origin.ref ? { url: origin.url, ref: origin.ref } : { url: origin.url };
+    const parsedOrigin = gitOriginSchema.safeParse(origin);
+    if (parsedOrigin.success) {
+      origins[entry] = parsedOrigin.data;
     }
   }
   const grants = {};

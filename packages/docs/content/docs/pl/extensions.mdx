@@ -20,6 +20,7 @@ Rozszerzenia działają w OpenChamber w wersji web i desktop. VS Code i aplikacj
    - pełną ścieżkę do folderu na tym komputerze
    - ścieżkę do pliku `.zip`
    - link https do repozytorium git lub pliku zip
+   - adres Git SSH, np. `git@github.com:owner/extension.git`
 3. Jeśli rozszerzenie prosi o uprawnienia, okno dialogowe je wymienia. Wybierz **Zezwól i włącz** albo **Usuń**, żeby je wycofać.
 
 Możesz też upuścić `.zip` na pole albo wybrać go przyciskiem archiwum obok; archiwum jest wysyłane na serwer OpenChamber, więc działa to także dla zdalnej instancji. Na desktopie przycisk folderu otwiera systemowe okno wyboru, a upuszczony folder instaluje się z jego ścieżki.
@@ -27,6 +28,12 @@ Możesz też upuścić `.zip` na pole albo wybrać go przyciskiem archiwum obok;
 Ikona rozszerzenia pojawia się na pasku. Jeśli jej nie ma, zajrzyj do [Rozwiązywania problemów](/troubleshooting/).
 
 Instalacja z folderu działa bezpośrednio z tego folderu, więc ktoś, kto tworzy rozszerzenie, może edytować i przeładowywać. Zip lub URL jest najpierw kopiowany do folderu danych OpenChamber; oryginalny plik zostaje nietknięty.
+
+## Prywatne repozytoria i tożsamości Git
+
+Instalacja SSH obsługuje `git@github.com:owner/extension.git` i `ssh://git@github.com/owner/extension.git`, opcjonalnie z `#branch-or-tag`. W menu odcisku palca obok pola wybierz tożsamość globalną lub zapisany profil Git. Wybór jest zachowany do sprawdzania i instalowania aktualizacji; zmiana klucza działa od następnej operacji.
+
+Tożsamość globalna używa konfiguracji Git/SSH i agenta SSH użytkownika uruchamiającego wybrany serwer OpenChamber. Dla instancji zdalnej klucz musi być dostępny na tym serwerze. Klucze chronione hasłem odblokuj najpierw w agencie SSH procesu serwera. HTTPS używa poświadczeń HTTPS Git i nie przełącza się automatycznie na SSH. Hosty Git muszą wskazywać publiczne adresy; lokalne aliasy SSH i cele w sieciach prywatnych nie są obsługiwane.
 
 ## Co rozszerzenie może robić
 

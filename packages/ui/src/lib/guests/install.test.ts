@@ -16,17 +16,35 @@ describe('parseInstallInput', () => {
     });
   });
 
+  test('accepts SSH URL and scp-style Git addresses', () => {
+    for (const url of ['git@github.com:acme/panel.git', 'git@github.com:acme/panel.git#main', 'ssh://git@github.com/acme/panel.git', 'ssh://git@example.com:2222/acme/panel.git']) {
+      expect(parseInstallInput(url)).toEqual({ ok: true, request: { url } });
+    }
+    expect(parseInstallInput('C:\\projects\\panel')).toEqual({ ok: true, request: { path: 'C:\\projects\\panel' } });
+  });
+
   test('refuses empty, http, and other schemes', () => {
     expect(parseInstallInput('')).toEqual({ ok: false, code: 'invalid-path' });
     expect(parseInstallInput('   ')).toEqual({ ok: false, code: 'invalid-path' });
     expect(parseInstallInput('http://github.com/acme/panel.git')).toEqual({ ok: false, code: 'invalid-url' });
     expect(parseInstallInput('file:///tmp/panel')).toEqual({ ok: false, code: 'invalid-url' });
-    expect(parseInstallInput('git@github.com:acme/panel.git')).toEqual({ ok: false, code: 'invalid-path' });
     expect(parseInstallInput('relative/panel')).toEqual({ ok: false, code: 'invalid-path' });
   });
 });
 
 describe('installation diagnostics', () => {
+  test('sends the selected identity for Git URLs, not local folders', async () => {
+    const fetch = spyOn(globalThis, 'fetch').mockImplementation(async (_input, options) => {
+      const body = JSON.parse(String(options?.body));
+      if (body.url) expect(body.gitIdentityId).toBe('work');
+      else expect(body.gitIdentityId).toBeUndefined();
+      return Response.json({ error: 'clone-failed' }, { status: 400 });
+    });
+    try {
+      await installGuest('git@github.com:acme/panel.git', { gitIdentityId: 'work' });
+      await installGuest('/tmp/panel', { gitIdentityId: 'work' });
+    } finally { fetch.mockRestore(); }
+  });
   for (const status of [401, 403, 404, 500, 502]) test(`preserves HTTP ${status} without copying the response body`, async () => {
     const fetch = spyOn(globalThis, 'fetch').mockResolvedValue(new Response('private server details', { status }));
     try {

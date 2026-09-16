@@ -6,7 +6,7 @@ import { parseManifestJson } from '@openchamber/sdk/schemas';
 import { requestedGuestCapabilities } from '@openchamber/sdk';
 
 import { inspectGuestPackage, invalidateGuestCatalog, listInstalledGuests } from './catalog.js';
-import { cloneGitRepository, gitNetworkArgs, runGit } from './clone.js';
+import { cloneGitRepository, prepareGuestGitNetwork, runGit } from './clone.js';
 import { unwrapGuestRoot } from './extract-zip.js';
 import { guestCopiesDir, isCopiedGuestRoot } from './persist.js';
 import { stopGuestService } from './service.js';
@@ -78,10 +78,10 @@ export const compareSemver = (a, b) => {
  * clone's own credentials-free remote is used; nothing is written. Every
  * failure is `{ available: false, error }`; nothing throws to the route.
  *
- * @param {{ guest: { version?: string, packageRoot: string }, origin: { url: string, ref?: string }, gitBinary?: string, timeoutMs?: number }} input
+ * @param {{ guest: { version?: string, packageRoot: string }, origin: { url: string, ref?: string, gitIdentityId?: string }, gitBinary?: string, timeoutMs?: number, lookup?: Parameters<typeof import('./clone.js').publicAddressesOf>[1] }} input
  * @returns {Promise<{ available: true, version: string, requested: string[] } | { available: false, version?: string, error?: string }>}
  */
-export const checkGuestUpdate = async ({ guest, origin, gitBinary, timeoutMs = CHECK_TIMEOUT_MS }) => {
+export const checkGuestUpdate = async ({ guest, origin, gitBinary, timeoutMs = CHECK_TIMEOUT_MS, lookup }) => {
   if (!origin?.url) {
     return { available: false, error: 'not-git' };
   }
@@ -91,13 +91,13 @@ export const checkGuestUpdate = async ({ guest, origin, gitBinary, timeoutMs = C
   const cwd = guest.packageRoot;
   // The fetch is a network operation like the clone: no redirects, and the
   // connection pinned to the addresses the public hostname resolves to now.
-  const network = await gitNetworkArgs(origin.url);
+  const network = await prepareGuestGitNetwork(origin.url, { gitIdentityId: origin.gitIdentityId, lookup }).catch(() => null);
   if (!network) {
     return { available: false, error: 'fetch-failed' };
   }
   const fetched = await runGit(
-    [...network, 'fetch', '--depth', '1', '--', 'origin', origin.ref ?? 'HEAD'],
-    { gitBinary, cwd, timeoutMs },
+    [...network.args, 'fetch', '--depth', '1', '--', 'origin', origin.ref ?? 'HEAD'],
+    { gitBinary, cwd, timeoutMs, env: network.env },
   );
   if (!fetched.ok) {
     return { available: false, error: 'fetch-failed' };
@@ -224,7 +224,7 @@ const exists = async (target) => {
  *
  * @returns {Promise<{ ok: true, id: string } | { ok: false, code: string, required?: string }>}
  */
-export const updateGuest = async ({ guest, origin, persistPath, openchamberVersion, gitBinary }) => {
+export const updateGuest = async ({ guest, origin, persistPath, openchamberVersion, gitBinary, lookup }) => {
   if (guest.source !== 'git' || !origin?.url || !isCopiedGuestRoot(guest.packageRoot, persistPath)) {
     return { ok: false, code: 'not-git' };
   }
@@ -233,7 +233,7 @@ export const updateGuest = async ({ guest, origin, persistPath, openchamberVersi
   const staging = path.join(copies, `.tmp-${guest.id}-${crypto.randomBytes(6).toString('hex')}`);
   let packageRoot;
   try {
-    const cloned = await cloneGitRepository(origin.url, staging, { gitBinary, ref: origin.ref });
+    const cloned = await cloneGitRepository(origin.url, staging, { gitBinary, ref: origin.ref, gitIdentityId: origin.gitIdentityId, lookup });
     if (!cloned.ok) {
       await removeDir(staging);
       return cloned;

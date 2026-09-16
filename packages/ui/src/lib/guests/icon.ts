@@ -3,7 +3,7 @@ import { isGuestPackageSvgIcon } from '@openchamber/sdk';
 import { iconSpriteData } from '@/components/icon/sprite';
 import type { IconName } from '@/components/icon/icons';
 
-export const FALLBACK_GUEST_ICON = 'window' satisfies IconName;
+export const FALLBACK_GUEST_ICON: IconName = 'puzzle';
 
 /** Product marks in `scripts/generate-icon-sprite.mjs`. Guests name Remixicon or a package SVG. */
 const HOST_PRODUCT_ICONS = new Set([

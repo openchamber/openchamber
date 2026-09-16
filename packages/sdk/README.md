@@ -46,6 +46,8 @@ A complete three-file example is on the [Build an extension](https://openchamber
 
 ## Manifest
 
+Git installs also accept SSH addresses such as `git@github.com:owner/extension.git` and `ssh://git@github.com/owner/extension.git`. The fingerprint menu in Settings → Extensions selects Global Identity or a Git identity on the active server. That identity is reused for update checks and updates. On a remote instance, SSH keys and any unlocked SSH agent must be available to the server process, not just your desktop. See [Extensions](https://docs.openchamber.dev/extensions/) for details.
+
 ```json
 {
   "name": "@acme/hello",

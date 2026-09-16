@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 import dns from 'node:dns/promises';
 import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
 
 const CLONE_TIMEOUT_MS = 60_000;
 
@@ -99,6 +101,34 @@ const isHttpsGitUrl = (value) => {
   }
 };
 
+/** SSH URLs and scp-style addresses, with no shell syntax in their components. */
+const parseSshGitUrl = (value) => {
+  if (/[\s\\\0]/.test(value)) return null;
+  let hostname;
+  let username;
+  let repository;
+  let port;
+  if (value.slice(0, 6).toLowerCase() === 'ssh://') {
+    try {
+      const url = new URL(value);
+      if (url.password || url.search || url.hash) return null;
+      hostname = url.hostname;
+      username = url.username;
+      repository = url.pathname;
+      port = url.port;
+      if (port && (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535)) return null;
+    } catch { return null; }
+  } else {
+    const match = /^(?:([A-Za-z0-9_][A-Za-z0-9_.-]*)@)?([A-Za-z0-9][A-Za-z0-9.-]*):(.+)$/.exec(value);
+    if (!match) return null;
+    [, username = '', hostname, repository] = match;
+  }
+  if (!/^[A-Za-z0-9.-]+$/.test(hostname) && !net.isIP(hostname.replace(/^\[|\]$/g, ''))) return null;
+  if (!isPublicHostname(hostname) || (username && !/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(username))) return null;
+  if (!/^\/?[A-Za-z0-9_.~][A-Za-z0-9_./~-]*$/.test(repository) || repository.split('/').includes('..')) return null;
+  return port ? { hostname, port } : { hostname };
+};
+
 export const isHttpsZipUrl = (value) => {
   if (!isHttpsGitUrl(value)) {
     return false;
@@ -126,15 +156,16 @@ export const isGitRef = (value) => (
 /**
  * `https://host/org/panel.git#v1.2.0` → `{ url, ref }`. The fragment pins a
  * branch or tag; without it the clone follows the remote default branch. A
- * fragment that is not a usable ref, or a URL that is not public https, is
+ * fragment that is not a usable ref, or a URL that is not public HTTPS/SSH, is
  * `null` (the install route answers `invalid-url`).
  * @param {string} value
  */
 export const parseGitInstallUrl = (value) => {
   const hashAt = value.indexOf('#');
-  const url = hashAt === -1 ? value : value.slice(0, hashAt);
+  const rawUrl = hashAt === -1 ? value : value.slice(0, hashAt);
+  const url = rawUrl.replace(/^ssh:\/\//i, 'ssh://');
   const ref = hashAt === -1 ? '' : value.slice(hashAt + 1);
-  if (!isHttpsGitUrl(url)) {
+  if (!isHttpsGitUrl(url) && !parseSshGitUrl(url)) {
     return null;
   }
   if (hashAt !== -1 && !isGitRef(ref)) {
@@ -149,7 +180,7 @@ export const parseGitInstallUrl = (value) => {
  * timeout (the child is killed). Never rejects. `stdout` is captured only
  * when `capture` is set so a clone's progress is not buffered.
  */
-export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT_MS, capture = false } = {}) => (
+export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT_MS, capture = false, env = {} } = {}) => (
   new Promise((resolve) => {
     let child;
     try {
@@ -158,8 +189,10 @@ export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT
         args,
         {
           cwd,
+          windowsHide: true,
           env: {
             ...process.env,
+            ...env,
             GIT_TERMINAL_PROMPT: '0',
             GIT_ASKPASS: 'echo',
           },
@@ -199,7 +232,7 @@ export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT
 );
 
 /**
- * Clone `source` into `dest`. `source` is an https URL in production. Tests pass a local repo path.
+ * Clone `source` into `dest`. Production uses HTTPS/SSH; tests may use a local repo path.
  * `gitBinary` comes from the host's git resolver: on Windows and in the packaged desktop app a bare
  * `git` is often not on PATH. `ref` pins a branch or tag (`--branch`); a shallow clone of a tag
  * works the same way as of a branch.
@@ -214,21 +247,51 @@ const httpsHostname = (value) => {
   }
 };
 
-export const cloneGitRepository = async (source, dest, { gitBinary = 'git', timeoutMs = CLONE_TIMEOUT_MS, ref, lookup } = {}) => {
+const quoteSshPath = (value) => {
+  const expanded = value.startsWith('~/') ? path.join(os.homedir(), value.slice(2)) : value;
+  const normalized = process.platform === 'win32' ? expanded.replace(/\\/g, '/') : expanded;
+  return `'${normalized.replace(/'/g, "'\\''")}'`;
+};
+
+/** Resolve identity on the server for every clone/fetch, so key rotation takes effect. */
+export const prepareGuestGitNetwork = async (source, { gitIdentityId, lookup } = {}) => {
+  let sshCommand = process.env.GIT_SSH_COMMAND?.trim() || '';
+  if (gitIdentityId && gitIdentityId !== 'global') {
+    const { getProfile } = await import('../git/identity-storage.js');
+    const profile = getProfile(gitIdentityId);
+    if (!profile) return null;
+    if (profile.sshKey) sshCommand = `ssh -i ${quoteSshPath(profile.sshKey)} -o IdentitiesOnly=yes`;
+  }
+  const ssh = parseSshGitUrl(source);
+  if (ssh) {
+    const addresses = await publicAddressesOf(ssh.hostname, lookup);
+    if (!addresses) return null;
+    if (!sshCommand) {
+      const { getGlobalIdentity } = await import('../git/index.js');
+      const globalIdentity = await getGlobalIdentity();
+      sshCommand = globalIdentity.sshCommand || (process.env.GIT_SSH ? quoteSshPath(process.env.GIT_SSH) : 'ssh');
+    }
+    sshCommand += ` -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o Hostname=${addresses[0].address} -o HostKeyAlias=${ssh.hostname.replace(/^\[|\]$/g, '')} -o ProxyCommand=none -o ProxyJump=none`;
+    return { args: [], env: { GIT_SSH_COMMAND: sshCommand, GIT_SSH_VARIANT: 'ssh' } };
+  }
+  const args = await gitNetworkArgs(source, lookup);
+  if (!args) return null;
+  return sshCommand ? { args, env: { GIT_SSH_COMMAND: sshCommand } } : { args };
+};
+
+export const cloneGitRepository = async (source, dest, { gitBinary = 'git', timeoutMs = CLONE_TIMEOUT_MS, ref, lookup, gitIdentityId } = {}) => {
   if (ref !== undefined && !isGitRef(ref)) {
     return { ok: false, code: 'clone-failed' };
   }
-  // Install and update only ever pass a public https URL here (the route
-  // checks the shape); tests clone local paths, which have no host to pin.
-  const network = await gitNetworkArgs(source, lookup);
+  const network = await prepareGuestGitNetwork(source, { lookup, gitIdentityId }).catch(() => null);
   if (!network) {
     return { ok: false, code: 'clone-failed' };
   }
-  const args = [...network, 'clone', '--depth', '1'];
+  const args = [...network.args, 'clone', '--depth', '1'];
   if (ref) {
     args.push('--branch', ref);
   }
   args.push('--', source, dest);
-  const result = await runGit(args, { gitBinary, timeoutMs });
+  const result = await runGit(args, { gitBinary, timeoutMs, env: network.env });
   return result.ok ? { ok: true } : { ok: false, code: 'clone-failed' };
 };

@@ -53,6 +53,7 @@ import {
 } from './contextPanelEmbeddedChat';
 const PluginPane = React.lazy(() => import('./PluginPane').then((module) => ({ default: module.PluginPane })));
 import { useGuestsStore } from '@/lib/guests/store';
+import { FALLBACK_GUEST_ICON } from '@/lib/guests/icon';
 import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
 import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
 import { isVimEditorEventTarget } from '@/lib/editorFocus';
@@ -204,7 +205,7 @@ const getTabLabel = (
 const ContextGuestIcon: React.FC<{ mode: ContextPanelMode }> = ({ mode }) => {
   const surfaces = useGuestSurfaces();
   const surface = surfaces.find((entry) => entry.mode === mode);
-  return <GuestIcon icon={surface?.icon ?? 'window'} iconSrc={surface?.iconSrc} className="h-3.5 w-3.5" />;
+  return <GuestIcon icon={surface?.icon ?? FALLBACK_GUEST_ICON} iconSrc={surface?.iconSrc} className="h-3.5 w-3.5" />;
 };
 
 const getTabIcon = (

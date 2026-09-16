@@ -20,6 +20,7 @@ Erweiterungen laufen in OpenChamber Web und Desktop. VS Code und die Mobile-App 
    - den absoluten Pfad eines Ordners auf diesem Computer
    - den Pfad einer `.zip`-Datei
    - einen https-Link zu einem Git-Repository oder einer Zip-Datei
+   - eine SSH-Git-Adresse wie `git@github.com:owner/extension.git`
 3. Wenn die Erweiterung Berechtigungen anfragt, listet ein Dialog sie auf. Wähle **Erlauben und aktivieren** oder **Entfernen**, um sie wieder zu entfernen.
 
 Du kannst auch eine `.zip` auf das Feld ziehen oder sie über die Archiv-Schaltfläche daneben auswählen; das Archiv wird auf den OpenChamber-Server hochgeladen, das funktioniert also auch bei einer entfernten Instanz. Auf dem Desktop öffnet die Ordner-Schaltfläche eine native Dateiauswahl, und ein abgelegter Ordner wird über seinen Pfad installiert.
@@ -27,6 +28,12 @@ Du kannst auch eine `.zip` auf das Feld ziehen oder sie über die Archiv-Schaltf
 Das Symbol der Erweiterung erscheint in der Leiste. Falls nicht, sieh unter [Fehlerbehebung](/troubleshooting/) nach.
 
 Eine Installation aus einem Ordner läuft direkt aus diesem Ordner, sodass jemand, der eine Erweiterung entwickelt, bearbeiten und neu laden kann. Eine Zip-Datei oder eine URL wird zuerst in den Datenordner von OpenChamber kopiert; die Originaldatei bleibt unberührt.
+
+## Private Repositories und Git-Identitäten
+
+SSH-Installationen akzeptieren `git@github.com:owner/extension.git` und `ssh://git@github.com/owner/extension.git`, optional mit `#branch-or-tag`. Wähle im Fingerabdruck-Menü neben dem Eingabefeld die globale oder eine gespeicherte Git-Identität. Die Auswahl bleibt für Update-Prüfungen und Updates erhalten. Ein geänderter Schlüssel wird beim nächsten Vorgang verwendet.
+
+Die globale Identität nutzt Git/SSH-Konfiguration und SSH-Agent des Benutzers, der den ausgewählten OpenChamber-Server ausführt. Bei einer Remote-Instanz muss der Schlüssel dort verfügbar sein. Entsperre geschützte Schlüssel vorher im SSH-Agent dieses Serverprozesses. HTTPS nutzt die HTTPS-Zugangsdaten von Git und wechselt nicht automatisch zu SSH. Git-Hosts müssen öffentliche Adressen haben; lokale SSH-Aliase und private Netzwerkziele werden nicht unterstützt.
 
 ## Was eine Erweiterung darf
 

@@ -20,6 +20,7 @@ description: 在 OpenChamber 中安装第三方扩展，批准它们可以做什
    - 这台电脑上某个文件夹的绝对路径
    - 一个 `.zip` 文件的路径
    - 指向 git 仓库或 zip 文件的 https 链接
+   - SSH Git 地址，例如 `git@github.com:owner/extension.git`
 3. 如果扩展请求权限，会有一个对话框列出这些权限。选择 **允许并启用**，或选择 **移除** 把它撤掉。
 
 也可以把 `.zip` 拖到字段上，或者用旁边的压缩包按钮选择；压缩包会上传到 OpenChamber 服务器，所以远程实例也能用。在桌面版上，文件夹按钮会打开系统选择窗口，拖入的文件夹则按其路径安装。
@@ -27,6 +28,12 @@ description: 在 OpenChamber 中安装第三方扩展，批准它们可以做什
 扩展的图标会出现在侧栏上。如果没有出现，请看 [故障排除](/troubleshooting/)。
 
 从文件夹安装的扩展直接在该文件夹中运行，所以开发扩展的人可以边改边重新加载。zip 或 URL 会先复制到 OpenChamber 自己的数据文件夹；原始文件不会被改动。
+
+## 私有仓库和 Git 身份
+
+SSH 安装支持 `git@github.com:owner/extension.git` 和 `ssh://git@github.com/owner/extension.git`，可以添加 `#branch-or-tag`。在输入框旁的指纹菜单中选择全局身份或已保存的 Git 身份。更新检查和安装更新会沿用该选择，身份中的密钥变更会在下次操作时生效。
+
+全局身份使用运行所选 OpenChamber 服务器的用户的 Git/SSH 配置和 SSH agent。对于远程实例，密钥必须在该服务器上可用。有密码的密钥需要先在服务器进程使用的 SSH agent 中解锁。HTTPS 使用 Git 的 HTTPS 凭据，不会自动切换为 SSH。Git 主机必须解析为公共地址；不支持本地 SSH 别名或私有网络目标。
 
 ## 扩展可以做什么
 

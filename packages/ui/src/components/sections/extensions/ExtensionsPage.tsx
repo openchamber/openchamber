@@ -28,6 +28,10 @@ import { approveGuestCapabilities, installGuest, setGuestEnabled, uninstallGuest
 import { closeGuestTabsById } from '@/lib/guests/tabs';
 import { loadGuestCatalog } from '@/lib/guests/load-catalog';
 import { describeGuestRequestFailure } from '@/lib/guests/request-failure';
+import { getGitIdentities, getGlobalGitIdentity } from '@/lib/gitApi';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import type { GitIdentityProfile } from '@/stores/useGitIdentitiesStore';
+import { IdentityDropdown } from '@/components/views/git/GitHeader';
 import { checkGuestUpdates, updateGuest, type UpdateGuestErrorCode } from '@/lib/guests/updates';
 import type { GuestSource, InstalledGuest } from '@/lib/guests/types';
 import { useGuestsStore } from '@/lib/guests/store';
@@ -58,7 +62,7 @@ const errorToastKey = (code: InstallGuestErrorCode): I18nKey => {
  * holds that has to travel to the host.
  */
 type InstallSource =
-  | { kind: 'input'; input: string }
+  | { kind: 'input'; input: string; gitIdentityId?: string }
   | { kind: 'file'; file: File };
 
 const isZipFile = (file: File): boolean => file.name.toLowerCase().endsWith('.zip');
@@ -388,6 +392,14 @@ export const ExtensionsPage: React.FC = () => {
   const guests = useGuestsStore((state) => state.guests);
   const status = useGuestsStore((state) => state.status);
   const catalogFailure = useGuestsStore((state) => state.failure);
+  const runtimeKey = useGuestsStore((state) => state.runtimeKey);
+  const [identityData, setIdentityData] = React.useState<{
+    runtimeKey: string;
+    profiles: GitIdentityProfile[];
+    global: Awaited<ReturnType<typeof getGlobalGitIdentity>>;
+  } | null>(null);
+  const [identityLoadFailed, setIdentityLoadFailed] = React.useState(false);
+  const [selectedGitIdentityId, setSelectedGitIdentityId] = React.useState('global');
   const unsupported = status === 'unsupported';
   const [installValue, setInstallValue] = React.useState('');
   const [busy, setBusy] = React.useState(false);
@@ -405,6 +417,33 @@ export const ExtensionsPage: React.FC = () => {
   React.useEffect(() => {
     void loadGuestCatalog();
   }, []);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setIdentityData(null);
+    setIdentityLoadFailed(false);
+    setSelectedGitIdentityId('global');
+    setReinstall(null);
+    setApproval(null);
+    checkedOnOpen.current = false;
+    if (unsupported) return;
+    void Promise.all([getGitIdentities(), getGlobalGitIdentity()]).then(([profiles, global]) => {
+      if (!cancelled) setIdentityData({ runtimeKey, profiles, global });
+    }).catch(() => {
+      if (!cancelled) setIdentityLoadFailed(true);
+    });
+    return () => { cancelled = true; };
+  }, [runtimeKey, unsupported]);
+
+  const identities = React.useMemo<GitIdentityProfile[]>(() => {
+    const data = identityData?.runtimeKey === runtimeKey ? identityData : null;
+    return [{
+      id: 'global', name: t('settings.gitIdentities.editor.title.globalIdentity'),
+      userName: data?.global?.userName ?? '', userEmail: data?.global?.userEmail ?? '',
+      icon: 'fingerprint', color: 'info',
+    }, ...(data?.profiles.filter((profile) => profile.id !== 'global') ?? [])];
+  }, [identityData, runtimeKey, t]);
+  const selectedGitIdentity = identities.find((profile) => profile.id === selectedGitIdentityId) ?? identities[0];
 
   // One quiet check per page open, once the catalog is in. The server
   // answers from its hour cache, so this is cheap on a revisit.
@@ -508,14 +547,16 @@ export const ExtensionsPage: React.FC = () => {
   };
 
   const runInstall = async (source: InstallSource, options: { replace?: boolean } = {}) => {
+    const requestRuntimeKey = getRuntimeKey();
     if (source.kind === 'input') {
       setInstallValue(source.input);
     }
     setBusy(true);
     const result = source.kind === 'file'
       ? await uploadGuestZip(source.file, options)
-      : await installGuest(source.input, options);
+      : await installGuest(source.input, { ...options, gitIdentityId: source.gitIdentityId });
     setBusy(false);
+    if (getRuntimeKey() !== requestRuntimeKey) return;
     await finishInstall(result, source, { allowConflictDialog: !options.replace });
   };
 
@@ -525,7 +566,7 @@ export const ExtensionsPage: React.FC = () => {
       toast.error(t('settings.extensions.toast.invalidPath'));
       return;
     }
-    await runInstall({ kind: 'input', input: trimmed });
+    await runInstall({ kind: 'input', input: trimmed, gitIdentityId: selectedGitIdentity.id });
   };
 
   const browseFolder = async () => {
@@ -797,6 +838,15 @@ export const ExtensionsPage: React.FC = () => {
                   </Button>
                 </div>
               </div>
+              <div className="shrink-0" data-settings-item="extensions.gitIdentity">
+                <IdentityDropdown
+                  activeProfile={selectedGitIdentity}
+                  identities={identities}
+                  onSelect={(profile) => setSelectedGitIdentityId(profile.id)}
+                  isApplying={busy || (!identityData && !identityLoadFailed)}
+                  iconOnly
+                />
+              </div>
               <Button
                 type="button"
                 size="sm"
@@ -809,6 +859,7 @@ export const ExtensionsPage: React.FC = () => {
               </Button>
             </div>
           </SettingsStackedField>
+          {identityLoadFailed ? <p className="typography-meta text-destructive">{t('settings.extensions.identity.loadFailed')}</p> : null}
         </SettingsSection>
       )}
 

@@ -16,6 +16,7 @@ Extensions run on OpenChamber web and desktop. VS Code and the mobile app do not
    - the absolute path of a folder on this computer
    - the path of a `.zip` file
    - an https link to a git repository or a zip file
+   - an SSH Git address, such as `git@github.com:owner/extension.git`
 3. If the extension asks for any permissions, a dialog lists them. Choose **Allow and enable**, or **Remove** to take it back out.
 
 You can also drop a `.zip` onto the field, or pick one with the archive button next to it; the archive is uploaded to the OpenChamber server, so this works for a remote instance too. On desktop the folder button opens a native picker, and a dropped folder installs from its path.
@@ -23,6 +24,12 @@ You can also drop a `.zip` onto the field, or pick one with the archive button n
 The extension's icon appears on the rail. If it does not, see [Troubleshooting](/troubleshooting/).
 
 A folder install runs straight from that folder, so someone developing an extension can edit and reload. A zip or a URL is copied into OpenChamber's own data folder first; the original file is not touched.
+
+## Private repositories and Git identities
+
+SSH installs accept `git@github.com:owner/extension.git` and `ssh://git@github.com/owner/extension.git`, with an optional `#branch-or-tag`. Choose Global Identity or a saved Git identity from the fingerprint menu beside the install field. The selection is kept for update checks and updates; changing that identity's key applies to the next operation.
+
+Global Identity uses the Git/SSH configuration and SSH agent of the user running the selected OpenChamber server. On a remote instance, the key must be available there. Unlock passphrase-protected keys in that server process's SSH agent first. HTTPS URLs use Git's HTTPS credentials rather than automatically switching to SSH. Git hosts must resolve to public addresses; local SSH host aliases and private-network targets are not supported.
 
 ## What an extension may do
 

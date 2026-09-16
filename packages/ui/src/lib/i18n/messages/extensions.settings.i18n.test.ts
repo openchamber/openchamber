@@ -5,6 +5,8 @@ import { extensionsSettingsI18n } from './extensions.settings.i18n';
 const locales = ['en', 'de', 'fr', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
 
 const requiredKeys = [
+  'settings.extensions.identity.title',
+  'settings.extensions.identity.loadFailed',
   'settings.extensions.request.noResponse',
   'settings.extensions.request.invalidResponse',
   'settings.page.extensions.title',

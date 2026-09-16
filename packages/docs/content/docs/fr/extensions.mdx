@@ -20,6 +20,7 @@ Les extensions fonctionnent dans OpenChamber web et desktop. VS Code et l'app mo
    - le chemin absolu d'un dossier sur cet ordinateur
    - le chemin d'un fichier `.zip`
    - un lien https vers un dépôt git ou un fichier zip
+   - une adresse Git SSH comme `git@github.com:owner/extension.git`
 3. Si l'extension demande des autorisations, une boîte de dialogue les liste. Choisis **Autoriser et activer**, ou **Supprimer** pour la retirer.
 
 Tu peux aussi déposer un `.zip` sur le champ ou le choisir avec le bouton archive à côté ; l'archive est envoyée au serveur OpenChamber, donc cela fonctionne aussi avec une instance distante. Sur desktop, le bouton dossier ouvre un sélecteur natif, et un dossier déposé s'installe depuis son chemin.
@@ -27,6 +28,12 @@ Tu peux aussi déposer un `.zip` sur le champ ou le choisir avec le bouton archi
 L'icône de l'extension apparaît dans la barre. Si ce n'est pas le cas, consulte [Dépannage](/troubleshooting/).
 
 Une installation depuis un dossier s'exécute directement depuis ce dossier, donc quelqu'un qui développe une extension peut modifier et recharger. Un zip ou une URL est d'abord copié dans le dossier de données d'OpenChamber ; le fichier d'origine n'est pas touché.
+
+## Dépôts privés et identités Git
+
+Les installations SSH acceptent `git@github.com:owner/extension.git` et `ssh://git@github.com/owner/extension.git`, avec un suffixe `#branch-or-tag` facultatif. Choisissez l'identité globale ou une identité Git enregistrée dans le menu empreinte à côté du champ. Ce choix est conservé pour vérifier et installer les mises à jour. Un changement de clé s'applique à l'opération suivante.
+
+L'identité globale utilise la configuration Git/SSH et l'agent SSH de l'utilisateur qui exécute le serveur OpenChamber sélectionné. Sur une instance distante, la clé doit être disponible sur ce serveur. Déverrouillez d'abord les clés protégées dans l'agent SSH de ce processus. HTTPS utilise les identifiants HTTPS de Git sans basculer automatiquement vers SSH. Les hôtes Git doivent résoudre vers des adresses publiques ; les alias SSH locaux et les destinations de réseaux privés ne sont pas pris en charge.
 
 ## Ce qu'une extension peut faire
 

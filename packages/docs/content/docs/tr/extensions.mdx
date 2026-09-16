@@ -20,6 +20,7 @@ Uzantılar OpenChamber web ve masaüstünde çalışır. VS Code ve mobil uygula
    - bu bilgisayardaki bir klasörün tam yolu
    - bir `.zip` dosyasının yolu
    - bir git deposuna ya da zip dosyasına giden https bağlantısı
+   - `git@github.com:owner/extension.git` gibi bir SSH Git adresi
 3. Uzantı izin istiyorsa bir iletişim kutusu bunları listeler. **İzin ver ve etkinleştir** seçeneğini seçin ya da geri çıkarmak için **Kaldır** deyin.
 
 Alana bir `.zip` de bırakabilir ya da yanındaki arşiv düğmesiyle seçebilirsiniz; arşiv OpenChamber sunucusuna yüklenir, bu yüzden uzak bir örnekte de çalışır. Masaüstünde klasör düğmesi sistemin seçim penceresini açar ve bırakılan bir klasör kendi yolundan kurulur.
@@ -27,6 +28,12 @@ Alana bir `.zip` de bırakabilir ya da yanındaki arşiv düğmesiyle seçebilir
 Uzantının simgesi rayda görünür. Görünmüyorsa [Sorun giderme](/troubleshooting/) sayfasına bakın.
 
 Klasörden kurulum doğrudan o klasörden çalışır, bu yüzden uzantı geliştiren biri düzenleyip yeniden yükleyebilir. Zip ya da URL önce OpenChamber'ın kendi veri klasörüne kopyalanır; özgün dosyaya dokunulmaz.
+
+## Özel depolar ve Git kimlikleri
+
+SSH kurulumu `git@github.com:owner/extension.git` ve `ssh://git@github.com/owner/extension.git` adreslerini ve isteğe bağlı `#branch-or-tag` ekini destekler. Alanın yanındaki parmak izi menüsünden genel kimliği veya kayıtlı bir Git kimliğini seçin. Bu seçim güncelleme kontrollerinde ve güncellemelerde korunur; anahtar değişikliği sonraki işlemde uygulanır.
+
+Genel kimlik, seçili OpenChamber sunucusunu çalıştıran kullanıcının Git/SSH ayarlarını ve SSH agent bağlantısını kullanır. Uzak örnekte anahtar o sunucuda bulunmalıdır. Parolalı anahtarları önce sunucu sürecinin SSH agent bağlantısında açın. HTTPS, Git HTTPS kimlik bilgilerini kullanır ve otomatik olarak SSH biçimine geçmez. Git sunucuları genel IP adreslerine çözülmelidir; yerel SSH takma adları ve özel ağ hedefleri desteklenmez.
 
 ## Uzantı neler yapabilir
 

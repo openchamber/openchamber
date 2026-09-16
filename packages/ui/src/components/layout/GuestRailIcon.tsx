@@ -3,6 +3,8 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { cn } from '@/lib/utils';
+import { useGuestIconSource } from '@/lib/guests/useGuestIconSource';
+import { FALLBACK_GUEST_ICON } from '@/lib/guests/icon';
 
 import { cssMaskUrl, GUEST_RAIL_ICON_MASK_SIZE } from './guestRailIconMask';
 
@@ -15,7 +17,9 @@ type GuestRailIconProps = {
 
 /** Guest SVG as a currentColor silhouette. `<img>` cannot inherit the rail token. */
 export const GuestRailIcon: React.FC<GuestRailIconProps> = ({ src, className }) => {
-  const mask = cssMaskUrl(src);
+  const resolvedSrc = useGuestIconSource(src);
+  if (!resolvedSrc) return <Icon name={FALLBACK_GUEST_ICON} className={className} />;
+  const mask = cssMaskUrl(resolvedSrc);
   return (
     <span
       aria-hidden="true"

@@ -48,7 +48,7 @@ type UninstallGuestResult =
   | { ok: true }
   | { ok: false; code: InstallGuestErrorCode };
 
-type InstallGuestRequest = ({ path: string } | { url: string }) & { replace?: boolean };
+type InstallGuestRequest = ({ path: string } | { url: string }) & { replace?: boolean; gitIdentityId?: string };
 
 type ParseInstallInputResult =
   | { ok: true; request: InstallGuestRequest }
@@ -60,6 +60,9 @@ export const parseInstallInput = (raw: string): ParseInstallInputResult => {
     return { ok: false, code: 'invalid-path' };
   }
   if (value.slice(0, 8).toLowerCase() === 'https://') {
+    return { ok: true, request: { url: value } };
+  }
+  if (value.slice(0, 6).toLowerCase() === 'ssh://' || /^(?:[A-Za-z0-9_][A-Za-z0-9_.-]*@)?[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z0-9.-]+:[^\s]+$/.test(value)) {
     return { ok: true, request: { url: value } };
   }
   const windowsPath = /^[a-zA-Z]:[\\/]/.test(value);
@@ -97,6 +100,7 @@ const readInstallError = async (
 
 export type InstallGuestOptions = {
   replace?: boolean;
+  gitIdentityId?: string;
 };
 
 const readInstallResponse = async (response: Response, path: GuestRequestFailure['path']): Promise<InstallGuestResult> => {
@@ -120,9 +124,9 @@ export const installGuest = async (
   if (!parsed.ok) {
     return parsed;
   }
-  const body = options.replace
-    ? { ...parsed.request, replace: true as const }
-    : parsed.request;
+  const body: InstallGuestRequest = { ...parsed.request };
+  if (options.replace) body.replace = true;
+  if ('url' in body && options.gitIdentityId) body.gitIdentityId = options.gitIdentityId;
   try {
     const response = await runtimeFetch('/api/guests', {
       method: 'POST',

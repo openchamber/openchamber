@@ -213,7 +213,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   // The attach dialog may load its own page; the rail always loads panel.entry.
   // A page-less guest has no entry and never gets a frame.
   const guestEntry = guest ? (surface === 'page' ? guest.pageEntry ?? null : surface === 'dialog' && guest.attachEntry ? guest.attachEntry : guest.entry ?? null) : null;
-  const { src, recoverExpiredNavigation, acknowledgeHandshake } = useGuestFrameUrl({
+  const { src, srcDoc, status: frameStatus, recoverExpiredNavigation, acknowledgeHandshake } = useGuestFrameUrl({
     guestId, entry: guestEntry, instanceKey: frameKey, enabled: guestEnabled,
   });
 
@@ -557,7 +557,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       runtimeUnsubscribe();
       window.removeEventListener('message', onMessage);
     };
-  }, [acknowledgeHandshake, frameKey, guestEnabled, postToGuest, pushHostState, refreshOauth, registerResolver, setOauthStatus, src, stopOauthPoll]);
+  }, [acknowledgeHandshake, frameKey, guestEnabled, postToGuest, pushHostState, refreshOauth, registerResolver, setOauthStatus, src, srcDoc, stopOauthPoll]);
 
   // The OAuth poll outlives listener re-attachment: it only stops when the
   // frame goes away, otherwise a parent re-render mid-authorization would
@@ -591,10 +591,10 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     return null;
   }
 
-  if (!guest || !src) {
+  if (!guest || (!src && !srcDoc)) {
     return (
       <div className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">
-        {t('contextPanel.plugin.loadFailed')}
+        {t(guest && frameStatus === 'loading' ? 'common.loading' : 'contextPanel.plugin.loadFailed')}
       </div>
     );
   }
@@ -608,7 +608,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       ref={iframeRef}
       key={frameKey}
       title={guest.name}
-      src={src}
+      src={src || undefined}
+      srcDoc={srcDoc}
       sandbox="allow-scripts"
       className={cn(
         'h-full w-full min-h-0 min-w-0 border-0 overflow-hidden',

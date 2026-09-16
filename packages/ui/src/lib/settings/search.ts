@@ -1096,6 +1096,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
   },
   {
+    id: 'extensions.gitIdentity',
+    page: 'extensions',
+    titleKey: 'settings.extensions.identity.title',
+    descriptionKey: 'settings.extensions.add.info',
+    keywords: ['ssh', 'key', 'identity', 'git', 'private', 'clone', 'extension'],
+    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
+  },
+  {
     id: 'extensions.updates.check',
     page: 'extensions',
     titleKey: 'settings.extensions.updates.check',

@@ -10,9 +10,13 @@ type GuestFrameOptions = {
   enabled: boolean;
 };
 
+type FrameState =
+  | { key: string; status: 'loading' | 'error' }
+  | { key: string; status: 'ready'; source: GuestFrameUrl };
+
 /** Keep a loaded document alive; renew scoped auth only when it navigates again. */
 export const useGuestFrameUrl = ({ guestId, entry, instanceKey, enabled }: GuestFrameOptions) => {
-  const [source, setSource] = React.useState<(GuestFrameUrl & { key: string }) | null>(null);
+  const [state, setState] = React.useState<FrameState | null>(null);
   const [reloadGeneration, setReloadGeneration] = React.useState(0);
   const recoveryAttempted = React.useRef(false);
   const [runtimeKey, setRuntimeKey] = React.useState(getRuntimeKey);
@@ -27,27 +31,31 @@ export const useGuestFrameUrl = ({ guestId, entry, instanceKey, enabled }: Guest
   }, [key]);
 
   React.useEffect(() => {
-    setSource(null);
+    setState({ key, status: 'loading' });
     if (!entry || !enabled) return;
     let cancelled = false;
-    void resolveGuestFrameUrl(guestId, entry)
+    const abort = new AbortController();
+    void resolveGuestFrameUrl(guestId, entry, abort.signal)
       .then((next) => {
-        if (!cancelled) setSource({ ...next, key });
+        if (!cancelled) setState({ key, status: 'ready', source: next });
       })
       .catch(() => {
-        // Leave the source empty so the owner shows its existing failure state.
+        if (!cancelled) setState({ key, status: 'error' });
       });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; abort.abort(); };
   }, [enabled, entry, guestId, key, reloadGeneration]);
 
-  const current = source?.key === key ? source : null;
+  const current = state?.key === key && state.status === 'ready' ? state.source : null;
   const recoverExpiredNavigation = (): boolean => {
     if (!current) return true;
+    if (current.kind === 'document') return false;
     if (Date.now() < current.expiresAt) return false;
-    setSource(null);
     if (!recoveryAttempted.current) {
+      setState({ key, status: 'loading' });
       recoveryAttempted.current = true;
       setReloadGeneration((generation) => generation + 1);
+    } else {
+      setState({ key, status: 'error' });
     }
     return true;
   };
@@ -56,5 +64,11 @@ export const useGuestFrameUrl = ({ guestId, entry, instanceKey, enabled }: Guest
     recoveryAttempted.current = false;
   }, []);
 
-  return { src: current?.url ?? '', recoverExpiredNavigation, acknowledgeHandshake };
+  return {
+    src: current?.kind === 'url' ? current.url : '',
+    srcDoc: current?.kind === 'document' ? current.html : undefined,
+    status: state?.key === key ? state.status : 'loading',
+    recoverExpiredNavigation,
+    acknowledgeHandshake,
+  };
 };

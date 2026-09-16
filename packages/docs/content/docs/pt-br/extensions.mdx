@@ -20,6 +20,7 @@ As extensões funcionam no OpenChamber web e desktop. O VS Code e o app móvel a
    - o caminho absoluto de uma pasta neste computador
    - o caminho de um arquivo `.zip`
    - um link https para um repositório git ou um arquivo zip
+   - um endereço Git SSH, como `git@github.com:owner/extension.git`
 3. Se a extensão pedir permissões, um diálogo lista todas. Escolha **Permitir e ativar**, ou **Remover** para tirá-la de volta.
 
 Você também pode arrastar um `.zip` para o campo ou escolher um com o botão de arquivo ao lado; o arquivo é enviado ao servidor do OpenChamber, então isso funciona também com uma instância remota. No desktop, o botão de pasta abre um seletor nativo, e uma pasta arrastada é instalada a partir do seu caminho.
@@ -27,6 +28,12 @@ Você também pode arrastar um `.zip` para o campo ou escolher um com o botão d
 O ícone da extensão aparece na barra. Se não aparecer, veja [Solução de problemas](/troubleshooting/).
 
 Uma instalação por pasta roda direto daquela pasta, então quem desenvolve uma extensão pode editar e recarregar. Um zip ou uma URL é copiado primeiro para a pasta de dados do OpenChamber; o arquivo original não é tocado.
+
+## Repositórios privados e identidades Git
+
+Instalações SSH aceitam `git@github.com:owner/extension.git` e `ssh://git@github.com/owner/extension.git`, com `#branch-or-tag` opcional. Escolha a identidade global ou uma identidade Git salva no menu de impressão digital ao lado do campo. A seleção é mantida para verificar e instalar atualizações; mudanças na chave valem na próxima operação.
+
+A identidade global usa a configuração Git/SSH e o agente SSH do usuário que executa o servidor OpenChamber selecionado. Em uma instância remota, a chave precisa estar disponível naquele servidor. Desbloqueie chaves protegidas por senha no agente SSH do processo do servidor antes de instalar. HTTPS usa as credenciais HTTPS do Git, sem trocar automaticamente para SSH. Os hosts Git devem resolver para endereços públicos; aliases SSH locais e destinos de redes privadas não são aceitos.
 
 ## O que uma extensão pode fazer
 
