@@ -2,6 +2,7 @@ import { getRuntimeUrlResolver } from './runtime-url';
 import { subscribeRuntimeEndpointChanged } from './runtime-switch';
 import { isVSCodeRuntime } from './desktop';
 import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@/stores/messageQueueStore';
+import { resolvedModelUpdatedEventSchema, type ResolvedModelUpdatedEvent } from '@/stores/resolvedModelStore';
 import { z } from 'zod';
 
 type ScheduledTaskRanEvent = {
@@ -60,6 +61,7 @@ type AgentMemoryChangedEvent = {
 type OpenChamberEvent =
   | { type: 'event-stream-ready' }
   | MessageQueueUpdatedEvent
+  | ResolvedModelUpdatedEvent
   | ScheduledTaskRanEvent
   | SessionCreatedEvent
   | WorktreeChangedEvent
@@ -155,6 +157,14 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
 
   if (envelope.type === 'openchamber:message-queue.updated') {
     const parsed = messageQueueUpdatedEventSchema.safeParse(envelope);
+    if (parsed.success) {
+      for (const listener of listeners) listener(parsed.data);
+    }
+    return;
+  }
+
+  if (envelope.type === 'openchamber:resolved-model') {
+    const parsed = resolvedModelUpdatedEventSchema.safeParse(envelope);
     if (parsed.success) {
       for (const listener of listeners) listener(parsed.data);
     }

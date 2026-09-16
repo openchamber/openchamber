@@ -2268,6 +2268,8 @@ export const dict = {
   'chat.modelControls.reorderFavoriteAria': 'Réorganiser les favoris',
   'chat.modelControls.reorderFavoriteTitle': 'Faites glisser pour réorganiser les favoris',
   'chat.modelControls.reorderProviderTitle': 'Faites glisser pour réorganiser le fournisseur',
+  'chat.modelControls.resolvedModel.tooltip': 'Le modèle réellement servi par votre fournisseur, une fois l’alias résolu par sa passerelle',
+  'chat.modelControls.resolvedModel.ariaLabel': 'Modèle résolu : {model}',
   'chat.modelControls.permissionLabel.custom': 'Personnalisé',
   'chat.modelControls.permissionLabel.allow': 'Permettre',
   'chat.modelControls.permissionLabel.deny': 'Refuser',

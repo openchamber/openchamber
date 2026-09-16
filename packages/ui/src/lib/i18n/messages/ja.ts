@@ -2569,6 +2569,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.reorderFavoriteAria': 'お気に入りを並び替え',
   'chat.modelControls.reorderFavoriteTitle': 'ドラッグしてお気に入りを並び替え',
   'chat.modelControls.reorderProviderTitle': 'ドラッグしてプロバイダーを並び替え',
+  'chat.modelControls.resolvedModel.tooltip': 'プロバイダーのゲートウェイが別名を解決した後に実際に提供されたモデル',
+  'chat.modelControls.resolvedModel.ariaLabel': '解決済みモデル: {model}',
   'chat.modelControls.permissionLabel.custom': 'カスタム',
   'chat.modelControls.permissionLabel.allow': '許可',
   'chat.modelControls.permissionLabel.deny': '拒否',

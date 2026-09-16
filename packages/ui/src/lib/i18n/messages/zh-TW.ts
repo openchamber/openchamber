@@ -2540,6 +2540,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.reorderFavoriteAria': '重新排序最愛',
   'chat.modelControls.reorderFavoriteTitle': '拖曳以重新排序最愛',
   'chat.modelControls.reorderProviderTitle': '拖曳以重新排序供應商',
+  'chat.modelControls.resolvedModel.tooltip': '供應商閘道解析別名後實際使用的模型',
+  'chat.modelControls.resolvedModel.ariaLabel': '解析後的模型：{model}',
   'chat.modelControls.permissionLabel.custom': '自訂',
   'chat.modelControls.permissionLabel.allow': '允許',
   'chat.modelControls.permissionLabel.deny': '拒絕',

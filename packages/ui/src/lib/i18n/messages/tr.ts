@@ -2505,6 +2505,8 @@ export const dict = {
   'chat.modelControls.reorderFavoriteAria': 'Favoriyi yeniden sırala',
   'chat.modelControls.reorderFavoriteTitle': 'Yeniden sıralamak için favoriyi sürükleyin',
   'chat.modelControls.reorderProviderTitle': 'Yeniden sıralamak için provider\'ı sürükleyin',
+  'chat.modelControls.resolvedModel.tooltip': 'Sağlayıcı ağ geçidi takma adı çözümledikten sonra gerçekte sunduğu model',
+  'chat.modelControls.resolvedModel.ariaLabel': 'Çözümlenen model: {model}',
   'chat.modelControls.permissionLabel.custom': 'Özel',
   'chat.modelControls.permissionLabel.allow': 'İzin ver',
   'chat.modelControls.permissionLabel.deny': 'Reddet',

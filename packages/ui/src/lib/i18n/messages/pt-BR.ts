@@ -2536,6 +2536,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.modelControls.reorderFavoriteAria": "Reordenar favorito",
   "chat.modelControls.reorderFavoriteTitle": "Arraste para reordenar favorito",
   "chat.modelControls.reorderProviderTitle": "Arraste para reordenar provedor",
+  "chat.modelControls.resolvedModel.tooltip": "O modelo que seu provedor realmente usou, depois que o gateway resolveu o alias",
+  "chat.modelControls.resolvedModel.ariaLabel": "Modelo resolvido: {model}",
   "chat.modelControls.permissionLabel.custom": "Personalizado",
   "chat.modelControls.permissionLabel.allow": "Permitir",
   "chat.modelControls.permissionLabel.deny": "Negar",

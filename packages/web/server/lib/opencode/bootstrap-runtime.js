@@ -8,6 +8,7 @@ export const createBootstrapRuntime = (dependencies) => {
     registerNotificationRoutes,
     registerOpenChamberRoutes,
     registerAgentToolRoutes = () => {},
+    registerResolvedModelCallbackRoutes = () => {},
     express,
   } = dependencies;
 
@@ -63,6 +64,7 @@ export const createBootstrapRuntime = (dependencies) => {
       getCachedZenModels,
       setAutoAcceptSession,
       agentToolRuntime,
+      resolvedModelRuntime,
       desktopUpdater,
     } = options;
 
@@ -93,6 +95,8 @@ export const createBootstrapRuntime = (dependencies) => {
     registerCommonRequestMiddleware(app, { express, verboseRequestLogs });
 
     registerAgentToolRoutes(app, { express, agentToolRuntime });
+
+    registerResolvedModelCallbackRoutes(app, { express, resolvedModelRuntime });
 
     registerAuthAndAccessRoutes(app, {
       express,
