@@ -3,19 +3,23 @@ import { cn } from '@/lib/utils';
 import type { SessionNode } from '../types';
 import { useI18n } from '@/lib/i18n';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
-import { Icon } from "@/components/icon/Icon";
 import {
   collectSubtreeContainingId,
   computeNodeStructureKey,
   resolveMenuOpenSessionId,
 } from '../sessions/sessionNodeItemUtils';
 import type { SessionNodeRenderExtras } from '../sessions/sessionNodeItemUtils';
+import { getSessionFolderOwnerKey, getSessionSelectionScopeKey } from '../sessions/sessionFolderIdentity';
 import { SessionTreeItem, type SessionTreeItemProps } from '../sessions/SessionTreeItem';
+import { useRegisterSessionRowOrder } from '../sessions/sessionRowOrder';
+import { buildActivityRowOrderEntries, buildActivitySessionRowKeys } from '../sessions/sessionRowOrderUtils';
+import { SidebarActivityHeaderPresentation } from '../projects/groupHeaderPresentation';
 
 export type ActivityItem = {
   node: SessionNode;
   projectId: string | null;
   groupDirectory: string | null;
+  selectionScopeKey?: string | null;
   secondaryMeta: {
     projectLabel?: string | null;
     branchLabel?: string | null;
@@ -55,10 +59,7 @@ type Props = {
   | 'setOpenSidebarMenuKey'
   | 'allowReselect'
   | 'onSessionSelected'
-  | 'isSessionSearchOpen'
-  | 'sessionSearchQuery'
-  | 'setSessionSearchQuery'
-  | 'setIsSessionSearchOpen'
+  | 'resetSessionSearch'
   | 'deleteSessionConfirm'
   | 'setDeleteSessionConfirm'
   | 'startFolderRename'
@@ -71,6 +72,28 @@ type RenderExtras = SessionNodeRenderExtras;
 const MAX_VISIBLE_RECENT_SESSIONS = 7;
 
 const RELATIVE_TIME_TICK_INTERVAL_MS = 60_000;
+
+/**
+ * Section rows register their logical document order with the sidebar
+ * selection registry. The section itself renders at most `visibleLimit` items,
+ * and chats rendered through `renderChatsSection` register through their own
+ * managed group instead.
+ */
+const ActivitySectionRowOrder: React.FC<{
+  order: number;
+  items: readonly ActivityItem[];
+  sectionKey: string;
+  visibleLimit: number;
+  hasSessionSearchQuery: boolean;
+  expandedParents: ReadonlySet<string>;
+}> = ({ order, items, sectionKey, visibleLimit, hasSessionSearchQuery, expandedParents }) => {
+  const entries = React.useMemo(
+    () => buildActivityRowOrderEntries(items, { visibleLimit, hasSessionSearchQuery, expandedParents, sectionKey }),
+    [expandedParents, hasSessionSearchQuery, items, sectionKey, visibleLimit],
+  );
+  useRegisterSessionRowOrder(order, entries);
+  return null;
+};
 
 /**
  * One ticker for the whole Recent list. The rows render their compact
@@ -170,6 +193,14 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
     });
   }, [props.editingId, props.openSidebarMenuKey, relativeTimeTick]);
 
+  // Row-order bases follow the section's index in the full `sections` list
+  // (chats is 0, Recent is 1) even when an empty section is filtered out, so
+  // the registered order never depends on which sections happen to render.
+  const sectionOrderById = React.useMemo(
+    () => new Map(sections.map((section, index) => [section.key, index])),
+    [sections],
+  );
+
   const visibleSections = sections.filter((section) => section.items.length > 0 || section.key === 'chats');
   if (visibleSections.length === 0) {
     return null;
@@ -186,13 +217,26 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
           visibleCountBySection.get(section.key) ?? initialVisibleCount,
         );
         const visibleItems = section.items.slice(0, visibleLimit);
+        const visibleItemRowKeys = buildActivitySessionRowKeys(section.items, { visibleLimit, sectionKey: section.key });
         const remainingCount = section.items.length - visibleItems.length;
         const usesCustomRenderer = section.key === 'chats' && Boolean(props.renderChatsSection);
         const canShowFewer = !usesCustomRenderer && !flatVariant && section.items.length > initialVisibleCount && remainingCount === 0;
+        const rowOrderRegistration = !isCollapsed && !(usesCustomRenderer && !flatVariant) ? (
+          <ActivitySectionRowOrder
+            order={sectionOrderById.get(section.key) ?? 0}
+            items={section.items}
+            sectionKey={section.key}
+            visibleLimit={visibleLimit}
+            hasSessionSearchQuery={props.hasSessionSearchQuery}
+            expandedParents={props.expandedParents}
+          />
+        ) : null;
         const getRenderExtras = buildRenderExtras(visibleItems.map((item) => item.node));
-        const renderItem = (item: ActivityItem) => (
+        const renderItem = (item: ActivityItem, index: number) => {
+          const rowKey = visibleItemRowKeys[index] ?? item.node.session.id;
+          return (
           <SessionTreeItem
-            key={item.node.session.id}
+            key={rowKey}
             node={item.node}
             pinnedSessionIds={pinnedSessionIds}
             expandedParents={props.expandedParents}
@@ -205,10 +249,13 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
             openSidebarMenuKey={props.openSidebarMenuKey}
             mobileVariant={props.mobileVariant}
             alwaysShowActions={props.alwaysShowActions}
-            groupDirectory={item.groupDirectory}
-            projectId={item.projectId}
-            secondaryMeta={item.secondaryMeta}
+             groupDirectory={item.groupDirectory}
+             projectId={item.projectId}
+             folderOwnerKey={getSessionFolderOwnerKey(item.projectId, item.groupDirectory)}
+             selectionScopeKey={item.selectionScopeKey ?? getSessionSelectionScopeKey(item.projectId, item.groupDirectory)}
+             secondaryMeta={item.secondaryMeta}
             renderContext="recent"
+            rowKey={rowKey}
             renderExtras={getRenderExtras(item.node)}
             setEditingId={props.setEditingId}
             setEditTitle={props.setEditTitle}
@@ -216,21 +263,20 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
             setOpenSidebarMenuKey={props.setOpenSidebarMenuKey}
             allowReselect={props.allowReselect}
             onSessionSelected={props.onSessionSelected}
-            isSessionSearchOpen={props.isSessionSearchOpen}
-            sessionSearchQuery={props.sessionSearchQuery}
-            setSessionSearchQuery={props.setSessionSearchQuery}
-            setIsSessionSearchOpen={props.setIsSessionSearchOpen}
+            resetSessionSearch={props.resetSessionSearch}
             deleteSessionConfirm={props.deleteSessionConfirm}
             setDeleteSessionConfirm={props.setDeleteSessionConfirm}
             startFolderRename={props.startFolderRename}
             setCopiedSessionId={props.setCopiedSessionId}
             startSessionWorktreeMenuLoad={props.startSessionWorktreeMenuLoad}
           />
-        );
+          );
+        };
 
         if (flatVariant) {
           return (
             <div key={section.key} className="space-y-0.5">
+              {rowOrderRegistration}
               {visibleItems.map(renderItem)}
               {remainingCount > 0 ? (
                 <button
@@ -247,38 +293,20 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
 
         return (
           <div key={section.key} className="relative">
+            {rowOrderRegistration}
             <div data-sidebar-activity-start={section.key} className="pointer-events-none absolute inset-x-0 top-0 h-px" aria-hidden="true" />
-            <div className={cn(
-              'relative group/chats',
-              '-ml-2.5 -mr-2',
-              !isCollapsed && 'mb-1',
-              stickyZoneHeaders && 'sticky top-0 z-20 bg-sidebar',
-            )} data-sidebar-sticky-header={stickyZoneHeaders ? 'true' : undefined}>
-              <button
-                type="button"
-                onClick={() => toggleSection(section.key)}
-                className={cn('group flex w-full items-center gap-1.5 py-1 pl-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', section.key === 'chats' ? 'pr-10' : 'pr-3.5')}
-                aria-expanded={!isCollapsed}
-              >
-                <span className="inline-flex h-3.5 w-3.5 items-center justify-center">
-                  <Icon name={section.key === 'chats' ? 'chat-4' : 'history'} className={cn('h-3.5 w-3.5 text-muted-foreground/80', 'group-hover:hidden')} />
-                  <span className="hidden h-3.5 w-3.5 items-center justify-center text-muted-foreground group-hover:inline-flex">
-                    {isCollapsed ? <Icon name="arrow-right-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-down-s" className="h-3.5 w-3.5" />}
-                  </span>
-                </span>
-                <span className="typography-ui-label font-semibold lowercase text-foreground">{section.title}</span>
-              </button>
-              {section.key === 'chats' && props.onNewChat ? (
-                <button
-                  type="button"
-                  onClick={(event) => { event.stopPropagation(); props.onNewChat?.(); }}
-                  className={cn('absolute right-0.5 top-1/2 z-10 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', props.alwaysShowActions ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover/chats:opacity-100 group-hover/chats:pointer-events-auto group-focus-within/chats:opacity-100 group-focus-within/chats:pointer-events-auto')}
-                  aria-label={t('sessions.sidebar.header.actions.newSession')}
-                >
-                  <Icon name="add" className="h-4 w-4" />
-                </button>
-              ) : null}
-            </div>
+            <SidebarActivityHeaderPresentation
+              title={section.title}
+              icon={section.key === 'chats' ? 'chat-4' : 'history'}
+              isCollapsed={isCollapsed}
+              onToggle={() => toggleSection(section.key)}
+              showNewChat={section.key === 'chats' && Boolean(props.onNewChat)}
+              onNewChat={props.onNewChat}
+              alwaysShowActions={props.alwaysShowActions}
+              isSticky={stickyZoneHeaders}
+              className={cn('-ml-2.5 -mr-2', !isCollapsed && 'mb-1')}
+              isChats={section.key === 'chats'}
+            />
             {!isCollapsed ? (
               <div className={cn('space-y-0.5')}>
                 {usesCustomRenderer ? props.renderChatsSection?.(section.items) : visibleItems.map(renderItem)}

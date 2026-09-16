@@ -1,7 +1,8 @@
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionNode } from '../types';
+import { getSessionSelectionScopeKey } from '../sessions/sessionFolderIdentity';
 
-export type RecentSessionLocation = {
+type RecentSessionLocation = {
   projectId: string | null;
   groupDirectory: string | null;
   projectLabel: string | null;
@@ -14,6 +15,7 @@ type RecentActivitySection = {
     node: SessionNode;
     projectId: string | null;
     groupDirectory: string | null;
+    selectionScopeKey: string | null;
     secondaryMeta: { projectLabel?: string | null; branchLabel?: string | null } | null;
   }>;
 };
@@ -83,6 +85,10 @@ export const deriveRecentActivitySections = ({
       node: getSessionNode?.(session) ?? { session, children: [], worktree: null },
       projectId: location?.projectId ?? null,
       groupDirectory: location?.groupDirectory ?? session.directory ?? null,
+      selectionScopeKey: getSessionSelectionScopeKey(
+        location?.projectId ?? null,
+        location?.groupDirectory ?? session.directory ?? null,
+      ),
       secondaryMeta: location ? {
         projectLabel: location.projectLabel,
         branchLabel: location.branchLabel,

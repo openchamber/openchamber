@@ -12,7 +12,7 @@ const renderedRows: SessionNodeItemProps[] = [];
 mock.module('./SessionNodeItem', () => ({
   SessionNodeItem: (props: SessionNodeItemProps) => {
     renderedRows.push(props);
-    return null;
+    return <>{props.children}</>;
   },
 }));
 
@@ -69,8 +69,8 @@ describe('SessionTreeItem public behavior', () => {
       const [menuKey, setMenuKey] = React.useState<string | null>(null);
       const [copiedSessionId, setCopiedSessionId] = React.useState<string | null>(null);
       const rows = [
-        { renderContext: 'project' as const, groupDirectory: '/workspace' },
-        { renderContext: 'recent' as const, groupDirectory: '/workspace' },
+        { renderContext: 'project' as const, groupDirectory: '/workspace', selectionScopeKey: '/workspace', rowKey: 'project:session:same-session' },
+        { renderContext: 'recent' as const, groupDirectory: '/workspace', selectionScopeKey: '/workspace', rowKey: 'activity:active-now:same-session:0:session:same-session' },
       ];
       return <>{rows.map((context) => <SessionTreeItem
         key={context.renderContext}
@@ -89,10 +89,7 @@ describe('SessionTreeItem public behavior', () => {
         openSidebarMenuKey={menuKey}
         setOpenSidebarMenuKey={setMenuKey}
         allowReselect={false}
-        isSessionSearchOpen={false}
-        sessionSearchQuery=""
-        setSessionSearchQuery={noop}
-        setIsSessionSearchOpen={noop}
+        resetSessionSearch={noop}
         deleteSessionConfirm={null}
         setDeleteSessionConfirm={noop}
         startFolderRename={noop}
@@ -107,6 +104,15 @@ describe('SessionTreeItem public behavior', () => {
     try {
       await act(async () => root.render(<I18nProvider><Harness /></I18nProvider>));
       expect(renderedRows).toHaveLength(2);
+      expect(renderedRows.map((row) => row.rowKey)).toEqual([
+        'project:session:same-session',
+        'activity:active-now:same-session:0:session:same-session',
+      ]);
+      expect(renderedRows.map((row) => row.dragKey)).toEqual([
+        'project:session:same-session',
+        'activity:active-now:same-session:0:session:same-session',
+      ]);
+      expect(renderedRows.map((row) => row.selectionScopeKey)).toEqual(['/workspace', '/workspace']);
 
       await act(async () => renderedRows[0]?.handleSessionDoubleClick(sharedSession.id, sharedSession.title));
       expect(renderedRows).toHaveLength(4);
@@ -117,6 +123,80 @@ describe('SessionTreeItem public behavior', () => {
       expect(renderedRows).toHaveLength(6);
       expect(renderedRows.slice(-2).map((row) => row.openSidebarMenuKey))
         .toEqual(['recent:active:same-session', 'recent:active:same-session']);
+    } finally {
+      await act(async () => root.unmount());
+      renderedRows.length = 0;
+      dom.restore();
+    }
+  });
+
+  test('derives distinct drag keys for normal tree and duplicate child occurrences', async () => {
+    const dom = installHookTestDom();
+    const root = createRoot(dom.container);
+    const noop = () => undefined;
+    const duplicateChild = (id: string): SessionNodeItemProps['node'] => ({
+      session: session(id),
+      children: [],
+      worktree: null,
+    });
+    const rootNode: SessionNodeItemProps['node'] = {
+      session: session('normal-root'),
+      children: [duplicateChild('normal-child'), duplicateChild('normal-child')],
+      worktree: null,
+    };
+    const rootRowKey = 'project:main:folder:/workspace\u0000folder-a:session:normal-root';
+
+    try {
+      await act(async () => root.render(
+        <I18nProvider>
+          <SessionTreeItem
+            node={rootNode}
+            pinnedSessionIds={new Set()}
+            expandedParents={new Set()}
+            hasSessionSearchQuery={false}
+            normalizedSessionSearchQuery=""
+            notifyOnSubtasks={false}
+            editingId={null}
+            setEditingId={noop}
+            editTitle=""
+            setEditTitle={noop}
+            toggleParent={noop}
+            copiedSessionId={null}
+            openSidebarMenuKey={null}
+            setOpenSidebarMenuKey={noop}
+            allowReselect={false}
+            resetSessionSearch={noop}
+            deleteSessionConfirm={null}
+            setDeleteSessionConfirm={noop}
+            startFolderRename={noop}
+            setCopiedSessionId={noop}
+            startSessionWorktreeMenuLoad={noopStartSessionWorktreeMenuLoad}
+            mobileVariant={false}
+            alwaysShowActions={false}
+            rowKey={rootRowKey}
+          />
+        </I18nProvider>,
+      ));
+
+      const rows = renderedRows.map((row) => ({
+        id: row.node.session.id,
+        rowKey: row.rowKey,
+        dragKey: row.dragKey,
+      }));
+      expect(rows).toEqual([
+        { id: 'normal-root', rowKey: rootRowKey, dragKey: rootRowKey },
+        {
+          id: 'normal-child',
+          rowKey: `${rootRowKey}/child:normal-child`,
+          dragKey: `${rootRowKey}/child:normal-child`,
+        },
+        {
+          id: 'normal-child',
+          rowKey: `${rootRowKey}/child:normal-child:1`,
+          dragKey: `${rootRowKey}/child:normal-child:1`,
+        },
+      ]);
+      expect(new Set(rows.map((row) => `session-drag:${row.dragKey}`)).size).toBe(3);
     } finally {
       await act(async () => root.unmount());
       renderedRows.length = 0;

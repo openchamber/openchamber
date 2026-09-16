@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { getSessionFolderIdentityKey } from '@/lib/sessionFolderIdentity';
 
 const storage = new Map<string, string>();
 let storageSetCount = 0;
@@ -84,6 +85,113 @@ describe('useSessionFoldersStore folder assignments', () => {
     expect(storageSetCount).toBe(0);
   });
 
+  test('reconciles archived membership in one idempotent scope batch', async () => {
+    const archivedScope = '__archived__:/workspace';
+    const archivedFolder = {
+      id: 'worktree-folder',
+      name: 'Worktree',
+      sessionIds: ['archived-1', 'archived-1', 'restored', 'manual-id'],
+      createdAt: 1,
+      parentId: null,
+    };
+    const duplicateFolder = {
+      id: 'duplicate-folder',
+      name: 'worktree',
+      sessionIds: ['archived-2', 'duplicate-unknown'],
+      createdAt: 2,
+      parentId: null,
+    };
+    const ordinaryFolder = {
+      id: 'ordinary-folder',
+      name: 'Ordinary',
+      sessionIds: ['restored'],
+      createdAt: 3,
+      parentId: null,
+    };
+    useSessionFoldersStore.setState({
+      foldersMap: {
+        [archivedScope]: [archivedFolder, duplicateFolder],
+        '/workspace': [ordinaryFolder],
+      },
+      collapsedFolderIds: new Set([getSessionFolderIdentityKey(archivedScope, archivedFolder.id)]),
+    });
+    const beforeOrdinaryFolders = useSessionFoldersStore.getState().foldersMap['/workspace'];
+
+    useSessionFoldersStore.getState().reconcileArchivedFolders(archivedScope, [
+      { name: 'Worktree', sessionIds: ['archived-1', ' archived-1 ', 'archived-2'] },
+      { name: 'Project root', sessionIds: ['archived-3'] },
+      { name: 'Empty assignment', sessionIds: [] },
+    ], ['archived-1', 'archived-2', 'archived-3', 'restored']);
+    await waitForPersist();
+
+    const afterFirstReconcile = useSessionFoldersStore.getState().foldersMap;
+    const reconciledFolders = afterFirstReconcile[archivedScope] ?? [];
+    expect(reconciledFolders).toHaveLength(3);
+    expect(reconciledFolders[0]?.id).toBe('worktree-folder');
+    expect(reconciledFolders[1]?.id).toBe('duplicate-folder');
+    expect(reconciledFolders[2]?.id).toBeTruthy();
+    expect(reconciledFolders[0]?.sessionIds).toEqual(['archived-1', 'manual-id', 'archived-2']);
+    expect(reconciledFolders[1]?.sessionIds).toEqual(['duplicate-unknown']);
+    expect(reconciledFolders[2]?.name).toBe('Project root');
+    expect(reconciledFolders[2]?.sessionIds).toEqual(['archived-3']);
+    expect(useSessionFoldersStore.getState().collapsedFolderIds).toEqual(new Set([
+      getSessionFolderIdentityKey(archivedScope, archivedFolder.id),
+    ]));
+    expect(afterFirstReconcile['/workspace']).toBe(beforeOrdinaryFolders);
+    expect(afterFirstReconcile['/workspace']?.[0]?.sessionIds).toEqual(['restored']);
+
+    storageSetCount = 0;
+    const beforeNoOp = useSessionFoldersStore.getState().foldersMap;
+    useSessionFoldersStore.getState().reconcileArchivedFolders(archivedScope, [
+      { name: 'Worktree', sessionIds: ['archived-1', 'archived-2'] },
+      { name: 'Project root', sessionIds: ['archived-3'] },
+    ], ['archived-1', 'archived-2', 'archived-3', 'restored']);
+    await waitForPersist();
+
+    expect(useSessionFoldersStore.getState().foldersMap).toBe(beforeNoOp);
+    expect(storageSetCount).toBe(0);
+  });
+
+  test('does not reconcile ordinary scopes and keeps archived folder definitions during cleanup', async () => {
+    const archivedScope = '__archived__:/workspace';
+    const archivedFolder = {
+      id: 'archived-folder',
+      name: 'Archived',
+      sessionIds: ['session-1'],
+      createdAt: 1,
+      parentId: null,
+    };
+    const ordinaryFolder = {
+      id: 'ordinary-folder',
+      name: 'Ordinary',
+      sessionIds: ['session-1'],
+      createdAt: 2,
+      parentId: null,
+    };
+    useSessionFoldersStore.setState({
+      foldersMap: {
+        [archivedScope]: [archivedFolder],
+        '/workspace': [ordinaryFolder],
+      },
+      collapsedFolderIds: new Set(),
+    });
+
+    const beforeOrdinary = useSessionFoldersStore.getState().foldersMap['/workspace'];
+    const beforeArchived = useSessionFoldersStore.getState().foldersMap[archivedScope];
+    useSessionFoldersStore.getState().reconcileArchivedFolders('/workspace', [
+      { name: 'Should not exist', sessionIds: ['session-2'] },
+    ], ['session-1', 'session-2']);
+    expect(useSessionFoldersStore.getState().foldersMap).toBeDefined();
+    expect(useSessionFoldersStore.getState().foldersMap['/workspace']).toBe(beforeOrdinary);
+
+    useSessionFoldersStore.getState().removeSessionEverywhere('runtime-a', 'session-1');
+    await waitForPersist();
+
+    expect(useSessionFoldersStore.getState().foldersMap[archivedScope]).not.toBe(beforeArchived);
+    expect(useSessionFoldersStore.getState().foldersMap[archivedScope]?.[0]?.sessionIds).toEqual([]);
+    expect(useSessionFoldersStore.getState().foldersMap[archivedScope]?.[0]?.id).toBe('archived-folder');
+  });
+
   test('bulk cross-scope move clears the former folder membership before assigning the target', () => {
     const store = useSessionFoldersStore.getState();
     const source = store.createFolder('/workspace/project', 'Source');
@@ -95,6 +203,32 @@ describe('useSessionFoldersStore folder assignments', () => {
 
     expect(useSessionFoldersStore.getState().getFoldersForScope('/workspace/project')[0]?.sessionIds).toEqual([]);
     expect(useSessionFoldersStore.getState().getFoldersForScope('/workspace/project-worktree')[0]?.sessionIds).toEqual(['ses_1', 'ses_2']);
+  });
+
+  test('keeps collapse state independent when folder ids repeat across scopes', async () => {
+    const sharedFolder = { id: 'shared', name: 'Shared', sessionIds: [], createdAt: 1 };
+    useSessionFoldersStore.setState({
+      foldersMap: {
+        '/workspace/project': [sharedFolder],
+        '/workspace/project-worktree': [sharedFolder],
+      },
+      collapsedFolderIds: new Set(),
+    });
+
+    const store = useSessionFoldersStore.getState();
+    store.toggleFolderCollapse('/workspace/project', sharedFolder.id);
+
+    expect(useSessionFoldersStore.getState().collapsedFolderIds).toEqual(new Set([
+      getSessionFolderIdentityKey('/workspace/project', sharedFolder.id),
+    ]));
+
+    store.toggleFolderCollapse('/workspace/project-worktree', sharedFolder.id);
+    expect(useSessionFoldersStore.getState().collapsedFolderIds).toEqual(new Set([
+      getSessionFolderIdentityKey('/workspace/project', sharedFolder.id),
+      getSessionFolderIdentityKey('/workspace/project-worktree', sharedFolder.id),
+    ]));
+
+    await waitForPersist();
   });
 
   test('restores independent folder snapshots across runtime switches', async () => {

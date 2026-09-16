@@ -4,7 +4,9 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
+import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionNode } from '../types';
+import { getSessionFolderIdentityKey } from './sessionFolderIdentity';
 
 /**
  * Per-row render extras precomputed once per group render and threaded down to
@@ -152,11 +154,15 @@ export const selectFolderRootNodes = (
       if (!node) return false;
 
       const visited = new Set<string>();
+      // SAFETY: upstream session records may carry the optional parentID field
+      // even though the generated SDK Session type does not declare it.
       let parentID = (node.session as SessionNode['session'] & { parentID?: string | null }).parentID ?? null;
       while (parentID && !visited.has(parentID)) {
         if (assignedSessionIds.has(parentID) && nodeBySessionId.has(parentID)) return false;
         visited.add(parentID);
         const parentNode = nodeBySessionId.get(parentID);
+        // SAFETY: the same upstream optional parentID field is read only after
+        // the parent node has been resolved from the typed session map.
         parentID = (parentNode?.session as (SessionNode['session'] & { parentID?: string | null }) | undefined)?.parentID ?? null;
       }
       return true;
@@ -166,6 +172,18 @@ export const selectFolderRootNodes = (
 type FolderHierarchyEntry = {
   id: string;
   parentId?: string | null;
+  scopeKey?: string | null;
+};
+
+const getFolderHierarchyKey = (folder: FolderHierarchyEntry): string => (
+  folder.scopeKey ? getSessionFolderIdentityKey(folder.scopeKey, folder.id) : folder.id
+);
+
+const getFolderParentKey = (folder: FolderHierarchyEntry): string | null => {
+  if (!folder.parentId) return null;
+  return folder.scopeKey
+    ? getSessionFolderIdentityKey(folder.scopeKey, folder.parentId)
+    : folder.parentId;
 };
 
 /**
@@ -173,31 +191,36 @@ type FolderHierarchyEntry = {
  * component from a deterministic root. The persisted parent links stay as-is.
  */
 export const normalizeFolderRoots = <T extends FolderHierarchyEntry>(folders: readonly T[]): T[] => {
-  const folderById = new Map(folders.map((folder) => [folder.id, folder]));
+  const folderByKey = new Map(folders.map((folder) => [getFolderHierarchyKey(folder), folder]));
   const childrenByParentId = new Map<string, T[]>();
   for (const folder of folders) {
-    if (!folder.parentId || !folderById.has(folder.parentId)) continue;
-    const children = childrenByParentId.get(folder.parentId) ?? [];
+    const parentKey = getFolderParentKey(folder);
+    if (!parentKey || !folderByKey.has(parentKey)) continue;
+    const children = childrenByParentId.get(parentKey) ?? [];
     children.push(folder);
-    childrenByParentId.set(folder.parentId, children);
+    childrenByParentId.set(parentKey, children);
   }
 
   const visited = new Set<string>();
   const roots: T[] = [];
   const addRoot = (folder: T): void => {
-    if (visited.has(folder.id)) return;
+    const folderKey = getFolderHierarchyKey(folder);
+    if (visited.has(folderKey)) return;
     roots.push(folder);
-    const stack = [folder.id];
+    const stack = [folder];
     while (stack.length > 0) {
-      const id = stack.pop();
-      if (!id || visited.has(id)) continue;
-      visited.add(id);
-      for (const child of childrenByParentId.get(id) ?? []) stack.push(child.id);
+      const current = stack.pop();
+      if (!current) continue;
+      const currentKey = getFolderHierarchyKey(current);
+      if (visited.has(currentKey)) continue;
+      visited.add(currentKey);
+      for (const child of childrenByParentId.get(currentKey) ?? []) stack.push(child);
     }
   };
 
   folders.forEach((folder) => {
-    if (!folder.parentId || !folderById.has(folder.parentId)) addRoot(folder);
+    const parentKey = getFolderParentKey(folder);
+    if (!parentKey || !folderByKey.has(parentKey)) addRoot(folder);
   });
   folders.forEach(addRoot);
   return roots;
@@ -218,66 +241,104 @@ export const selectFolderIdsForProjection = (
   options: FolderProjectionOptions,
 ): Set<string> => {
   const isIdQuery = options.searchQuery.trim().toLowerCase().startsWith('ses_');
-  const entryById = new Map(entries.map((entry) => [entry.id, entry]));
+  const entryByKey = new Map(entries.map((entry) => [getFolderHierarchyKey(entry), entry]));
   const childIdsByParentId = new Map<string, string[]>();
   const malformedIds = new Set<string>();
   for (const entry of entries) {
-    if (entry.parentId && !entryById.has(entry.parentId)) {
-      malformedIds.add(entry.id);
+    const entryKey = getFolderHierarchyKey(entry);
+    const parentKey = getFolderParentKey(entry);
+    if (parentKey && !entryByKey.has(parentKey)) {
+      malformedIds.add(entryKey);
       continue;
     }
-    if (entry.parentId) {
-      const children = childIdsByParentId.get(entry.parentId) ?? [];
-      children.push(entry.id);
-      childIdsByParentId.set(entry.parentId, children);
+    if (parentKey) {
+      const children = childIdsByParentId.get(parentKey) ?? [];
+      children.push(entryKey);
+      childIdsByParentId.set(parentKey, children);
     }
 
     const visitedParents = new Set<string>();
-    let currentId: string | null | undefined = entry.id;
-    while (currentId) {
-      if (visitedParents.has(currentId)) {
-        malformedIds.add(entry.id);
+    let currentKey: string | null = entryKey;
+    while (currentKey) {
+      if (visitedParents.has(currentKey)) {
+        malformedIds.add(entryKey);
         break;
       }
-      visitedParents.add(currentId);
-      currentId = entryById.get(currentId)?.parentId;
+      visitedParents.add(currentKey);
+      currentKey = getFolderParentKey(entryByKey.get(currentKey) ?? entry);
     }
   }
 
   const keptIds = new Set<string>();
   const visitingIds = new Set<string>();
-  const shouldKeep = (folderId: string): boolean => {
-    if (keptIds.has(folderId)) return true;
-    if (visitingIds.has(folderId)) return false;
+  const shouldKeep = (folderKey: string): boolean => {
+    if (keptIds.has(folderKey)) return true;
+    if (visitingIds.has(folderKey)) return false;
 
-    const entry = entryById.get(folderId);
+    const entry = entryByKey.get(folderKey);
     if (!entry) return false;
-    visitingIds.add(folderId);
+    visitingIds.add(folderKey);
 
-    let keep = malformedIds.has(folderId);
+    let keep = malformedIds.has(folderKey);
+    if (!keep && !options.searchQuery) keep = true;
+    if (!keep && !isIdQuery && matchesRankQuery([entry.name], options.searchQuery)) keep = true;
     if (!keep && options.archivedBucket && entry.nodeCount === 0) {
-      // Preserve the archived empty-folder rule: search does not make an
-      // empty folder visible unless a descendant has archived content.
-      keep = (childIdsByParentId.get(folderId) ?? []).some(shouldKeep);
+      // Preserve the archived empty-folder rule for non-matching folders:
+      // search does not expose them unless a descendant has archived content.
+      // A matching folder name is an explicit result and is kept above.
+      keep = (childIdsByParentId.get(folderKey) ?? []).some(shouldKeep);
     } else {
-      if (!keep && !options.searchQuery) keep = true;
-      if (!keep && (entry.nodeCount > 0 || (!isIdQuery && matchesRankQuery([entry.name], options.searchQuery)))) keep = true;
-      if (!keep) keep = (childIdsByParentId.get(folderId) ?? []).some(shouldKeep);
+      if (!keep && entry.nodeCount > 0) keep = true;
+      if (!keep) keep = (childIdsByParentId.get(folderKey) ?? []).some(shouldKeep);
     }
 
-    visitingIds.delete(folderId);
-    if (keep) keptIds.add(folderId);
+    visitingIds.delete(folderKey);
+    if (keep) keptIds.add(folderKey);
     return keep;
   };
 
-  entries.forEach((entry) => shouldKeep(entry.id));
-  return new Set(entries.filter((entry) => keptIds.has(entry.id)).map((entry) => entry.id));
+  entries.forEach((entry) => shouldKeep(getFolderHierarchyKey(entry)));
+  return new Set(entries
+    .map((entry) => getFolderHierarchyKey(entry))
+    .filter((folderKey) => keptIds.has(folderKey)));
 };
 
-const sessionObjectVersions = new WeakMap<object, number>();
+/** Row count at which a large archived session group switches to virtualization. */
+const SESSION_GROUP_VIRTUALIZE_THRESHOLD = 50;
+
+type SessionGroupVirtualizationMode = 'none' | 'roots';
+
+/**
+ * Pick the group's virtualization mode at the shared row threshold. Archived
+ * buckets virtualize whole root subtrees; all other groups stay in normal flow.
+ */
+export const selectSessionGroupVirtualizationMode = (input: {
+  isArchivedBucket: boolean;
+  rootCount: number;
+  threshold?: number;
+}): SessionGroupVirtualizationMode => {
+  const threshold = input.threshold ?? SESSION_GROUP_VIRTUALIZE_THRESHOLD;
+  if (input.isArchivedBucket && input.rootCount >= threshold) return 'roots';
+  return 'none';
+};
+
+/**
+ * The scroll element a group virtualizer should use: the locally resolved one
+ * wins once set (it may come from the ancestor walk when no ref is threaded),
+ * otherwise the element threaded in by the scroller. Readiness can therefore
+ * be true on the same commit that turns virtualization on whenever the parent
+ * has already mounted its scroller, instead of waiting a commit for the
+ * layout-effect state update.
+ */
+export const selectSessionGroupScrollElement = <T>(input: {
+  providedScrollElement: T | null;
+  resolvedScrollElement: T | null;
+}): T | null => input.resolvedScrollElement ?? input.providedScrollElement;
+
+const sessionObjectVersions = new WeakMap<Session, number>();
 let nextSessionObjectVersion = 1;
 
-const getSessionObjectVersion = (session: object): number => {
+const getSessionObjectVersion = (session: Session): number => {
   const existing = sessionObjectVersions.get(session);
   if (existing !== undefined) return existing;
   const version = nextSessionObjectVersion;
@@ -321,8 +382,11 @@ export const nodeHasPinnedMembershipChange = (
       return true;
     }
 
+    // SAFETY: sidebar fixtures and upstream payloads may omit directory even
+    // though the generated Session type marks it as required.
     const prevDirectory = (previous.session as SessionNode['session'] & { directory?: string | null }).directory
       ?? prevGroupDirectory;
+    // SAFETY: mirror the same defensive directory read for the next snapshot.
     const nextDirectory = (current.session as SessionNode['session'] & { directory?: string | null }).directory
       ?? nextGroupDirectory;
     const prevKey = getPinnedSessionKey(runtimeKey, prevDirectory ?? '', previous.session.id);

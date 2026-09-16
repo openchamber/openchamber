@@ -1,4 +1,5 @@
 import React from 'react';
+import type { Session } from '@opencode-ai/sdk/v2';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
@@ -7,13 +8,14 @@ import { BulkSessionDeleteConfirmDialog, type BulkDeleteSessionsConfirmState } f
 import { useSidebarBulkActions } from './useSidebarBulkActions';
 
 type Props = {
-  getFolderScopesForProject: (projectId: string) => readonly { scopeKey: string; directory: string | null }[];
+  getFolderScopesForSelectionScope: (selectionScope: string) => readonly { scopeKey: string; directory: string | null }[];
+  selectedSessionsById: ReadonlyMap<string, Session>;
   isInlineEditing: boolean;
   startFolderRename: (scopeKey: string, folder: { id: string; name: string }) => void;
 };
 
 /** Owns the sidebar selection projection and its destructive confirmation. */
-export function SessionBulkActions({ getFolderScopesForProject, isInlineEditing, startFolderRename }: Props): React.ReactNode {
+export function SessionBulkActions({ getFolderScopesForSelectionScope, selectedSessionsById, isInlineEditing, startFolderRename }: Props): React.ReactNode {
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = React.useState<BulkDeleteSessionsConfirmState>(null);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
@@ -28,7 +30,8 @@ export function SessionBulkActions({ getFolderScopesForProject, isInlineEditing,
     isInlineEditing,
     showDeletionDialog,
     foldersMap,
-    getFolderScopesForProject,
+    selectedSessionsById,
+    getFolderScopesForSelectionScope,
     addSessionsToFolder,
     removeSessionsFromFolders,
     createFolderAndStartRename: (scopeKey) => {

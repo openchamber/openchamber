@@ -11,22 +11,38 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core';
 import { Icon } from "@/components/icon/Icon";
+import { getSessionFolderIdentityKey } from '../sessions/sessionFolderIdentity';
+import { isArchivedFolderScope } from '@/lib/sessionFolderIdentity';
+
+export type SessionFolderDropTarget = {
+  folderId: string;
+  scopeKey: string;
+  ownerKey: string;
+};
 
 export const DraggableSessionRow: React.FC<{
   sessionId: string;
+  /** Optional row occurrence key for lists that can render one session twice. */
+  dragKey?: string;
+  /** Project id, or the managed-Chats directory owner for this row. */
+  ownerKey: string | null;
   sessionDirectory: string | null;
   sessionTitle: string;
+  archivedBucket?: boolean;
   children: React.ReactNode;
-}> = ({ sessionId, sessionDirectory, sessionTitle, children }) => {
+}> = ({ sessionId, dragKey, ownerKey, sessionDirectory, sessionTitle, archivedBucket = false, children }) => {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: `session-drag:${sessionId}`,
-    data: { type: 'session', sessionId, sessionDirectory, sessionTitle },
+    id: `session-drag:${dragKey ?? sessionId}`,
+    disabled: archivedBucket,
+    data: { type: 'session', sessionId, ownerKey, sessionDirectory, sessionTitle, archivedBucket },
   });
 
   const handlePointerDown = React.useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       e.stopPropagation();
       if (listeners?.onPointerDown) {
+        // SAFETY: @dnd-kit exposes its pointer listener as a generic synthetic listener;
+        // this branch is only reached for the pointer sensor listener.
         (listeners.onPointerDown as (event: React.PointerEvent) => void)(e);
       }
     },
@@ -47,24 +63,29 @@ export const DraggableSessionRow: React.FC<{
 
 export const DroppableFolderWrapper: React.FC<{
   folderId: string;
+  scopeKey: string;
+  ownerKey: string | null;
+  disabled?: boolean;
   children: (
     droppableRef: (node: HTMLElement | null) => void,
     isOver: boolean,
   ) => React.ReactNode;
-}> = ({ folderId, children }) => {
+}> = ({ folderId, scopeKey, ownerKey, disabled = false, children }) => {
   const { setNodeRef, isOver } = useDroppable({
-    id: `folder-drop:${folderId}`,
-    data: { type: 'folder', folderId },
+    id: `folder-drop:${getSessionFolderIdentityKey(scopeKey, folderId)}`,
+    disabled: disabled || isArchivedFolderScope(scopeKey),
+    data: { type: 'folder', folderId, scopeKey, ownerKey },
   });
   return <>{children(setNodeRef, isOver)}</>;
 };
 
 export const SessionFolderDndScope: React.FC<{
   scopeKey: string | null;
+  ownerKey?: string | null;
   hasFolders: boolean;
-  onSessionDroppedOnFolder: (sessionId: string, folderId: string) => void;
+  onSessionDroppedOnFolder: (sessionId: string, target: SessionFolderDropTarget, sourceOwnerKey: string) => void;
   children: React.ReactNode;
-}> = ({ scopeKey, hasFolders, onSessionDroppedOnFolder, children }) => {
+}> = ({ scopeKey, ownerKey = null, hasFolders, onSessionDroppedOnFolder, children }) => {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
   );
@@ -83,11 +104,40 @@ export const SessionFolderDndScope: React.FC<{
     setActiveDragHeight(null);
     const { active, over } = event;
     if (!over) return;
-    const activeData = active.data.current as { type?: string; sessionId?: string } | undefined;
-    const overData = over.data.current as { type?: string; folderId?: string } | undefined;
-    if (activeData?.type === 'session' && activeData.sessionId && overData?.type === 'folder' && overData.folderId) {
-      onSessionDroppedOnFolder(activeData.sessionId, overData.folderId);
-    }
+    // SAFETY: DnD data is written by DraggableSessionRow in this module and is
+    // validated by the discriminant/required-field checks below before use.
+    const activeData = active.data.current as {
+      type?: string;
+      sessionId?: string;
+      ownerKey?: string | null;
+      archivedBucket?: boolean;
+    } | undefined;
+    // SAFETY: DnD data is written by DroppableFolderWrapper in this module and
+    // is validated by the discriminant/required-field checks below before use.
+    const overData = over.data.current as {
+      type?: string;
+      folderId?: string;
+      scopeKey?: string;
+      ownerKey?: string | null;
+    } | undefined;
+    if (
+      activeData?.type !== 'session'
+      || !activeData.sessionId
+      || !activeData.ownerKey
+      || (ownerKey && activeData.ownerKey !== ownerKey)
+      || overData?.type !== 'folder'
+      || !overData.folderId
+      || !overData.scopeKey
+      || !overData.ownerKey
+      || activeData.archivedBucket === true
+      || isArchivedFolderScope(overData.scopeKey)
+      || activeData.ownerKey !== overData.ownerKey
+    ) return;
+    onSessionDroppedOnFolder(activeData.sessionId, {
+      folderId: overData.folderId,
+      scopeKey: overData.scopeKey,
+      ownerKey: overData.ownerKey,
+    }, activeData.ownerKey);
   };
 
   return (
@@ -95,14 +145,16 @@ export const SessionFolderDndScope: React.FC<{
       sensors={sensors}
       collisionDetection={closestCenter}
       onDragStart={(event) => {
+        // SAFETY: the active item is created by DraggableSessionRow and the
+        // discriminant/required-field checks guard the values used here.
         const data = event.active.data.current as { type?: string; sessionId?: string; sessionTitle?: string } | undefined;
         if (data?.type === 'session' && data.sessionId) {
           setActiveDragId(data.sessionId);
           setActiveDragTitle(data.sessionTitle ?? 'Session');
           const width = event.active.rect.current.initial?.width;
           const height = event.active.rect.current.initial?.height;
-          setActiveDragWidth(typeof width === 'number' ? width : null);
-          setActiveDragHeight(typeof height === 'number' ? height : null);
+          setActiveDragWidth(width ?? null);
+          setActiveDragHeight(height ?? null);
         }
       }}
       onDragCancel={() => {

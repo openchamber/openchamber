@@ -11,6 +11,9 @@ kept at this root in `types.ts` and `utils.tsx`.
 - `sessions/` owns session rows, row actions, expansion, ownership, and activity indicators.
 - `recent/` owns Recent and managed Chats activity projections.
 - `folders/` owns folder DnD, bulk actions, archived folders, and folder UI.
+  Archived folders are directory-derived read-only projections. Their membership
+  is reconciled in batches after global sessions and worktree topology are
+  complete, so archived rows and targets do not expose session-folder DnD.
 - Root session right-click and overflow menus expose `Move to worktree`: a submenu
   listing the canonical primary and linked worktree destinations, with the current
   target disabled and a separate `New worktree...` action. Opening the submenu
@@ -83,6 +86,48 @@ count toward the result total.
 ID search does not include archived sessions. `ArchiveView` applies the same
 exact-ID rule to its own archived list. Other queries keep each view's existing
 matching and ordering. Search does not fetch sessions or broaden list membership.
+
+## Selection order
+
+Selection order and bulk scope come from the render model, not the DOM. Each
+rendered list registers its rows with `sessions/sessionRowOrder.tsx` in the
+order it renders them, with managed Chats and Recent sections above the project
+sections, in that order, and shift-range selection and Ctrl/Cmd+A read that
+registry. Rows that virtualization keeps unmounted are included because the
+entries come from the model, registration runs in layout effects so the registry
+matches the committed tree before any click, and registering never triggers a
+render. Every entry also carries a stable `rowKey` for its rendered occurrence.
+The session ID remains the API identity, so selecting the same session twice
+still produces one bulk action. Bulk archive/delete classification instead
+reads authoritative session metadata for every selected ID, including IDs not
+present in the current registry; missing metadata is conservatively treated as
+active rather than permitting a hard-delete path.
+Shift-range selection first filters entries to the clicked row's scope, then
+resolves both ends by `rowKey`; if the stored anchor is missing, it falls back
+to the first row in that scope. Session row renderers and the registry must use
+the same key. DnD `dragKey` remains a separate occurrence identity.
+
+## Row virtualization
+
+Normal project rendering keeps its existing per-group behavior. An unsearched
+archived bucket with 50+ roots uses `@tanstack/react-virtual` to keep whole
+root subtrees together with their expanded children; smaller groups and the
+non-search active flow stay in normal document order, including the incremental
+Show more control.
+
+A searched list does not mount one virtualizer per project or group.
+`SessionProjectCollection` builds `projects/sessionSearchRowModel.ts`, and
+`SessionProjectScroller` mounts one `@tanstack/react-virtual` instance against
+the actual `ScrollableOverlay`. The model contains activity, project, group,
+folder, empty, and session rows in document order. It also supplies the
+complete selection registry, so offscreen rows remain selectable.
+
+Search has no result cap or Show more batching. Before the overlay's real scroll
+element is available, the global search list mounts no result rows and keeps an
+estimated content height. Once the element resolves, it mounts only the
+viewport window plus overscan. Search disables project/group sorting DnD while
+active, but keeps session-to-folder actions and folder controls available for
+mounted rows. The selection registry still carries every model row.
 
 ## Loading rules
 

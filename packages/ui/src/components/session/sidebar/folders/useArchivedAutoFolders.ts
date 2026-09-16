@@ -1,9 +1,8 @@
 import React from 'react';
-import {
-  getArchivedScopeKey,
-  resolveArchivedFolderName,
-} from '../utils';
+import { resolveArchivedFolderName } from '../utils';
+import { getArchivedScopeKey } from '@/lib/sessionFolderIdentity';
 import type { SessionOwnershipIndex } from '../sessions/sessionOwnership';
+import { useSessionFoldersStore, type ArchivedFolderAssignment } from '@/stores/useSessionFoldersStore';
 
 type ProjectForArchivedFolders = {
   id: string;
@@ -39,8 +38,6 @@ export const useArchivedAutoFolders = (args: Args): void => {
     isWorktreeTopologyLoading,
     unresolvedWorktreeProjectPaths,
     foldersMap,
-    createFolder,
-    addSessionToFolder,
   } = args;
 
   React.useEffect(() => {
@@ -54,22 +51,35 @@ export const useArchivedAutoFolders = (args: Args): void => {
       }
       const scopeKey = getArchivedScopeKey(project.normalizedPath);
       const projectArchivedSessions = ownership.archivedSessionsByProject.get(project.id) ?? [];
-      const existingFolders = foldersMap[scopeKey] ?? [];
-      const folderByName = new Map(existingFolders.map((folder) => [folder.name.toLowerCase(), folder]));
+      const knownSessionIds = new Set<string>();
+      for (const session of [
+        ...(ownership.sessionsByProject.get(project.id) ?? []),
+        ...projectArchivedSessions,
+      ]) {
+        const sessionId = session.id.trim();
+        if (sessionId) knownSessionIds.add(sessionId);
+      }
 
+      const assignmentsByName = new Map<string, ArchivedFolderAssignment & { sessionIds: string[] }>();
+      const assignedSessionIds = new Set<string>();
       projectArchivedSessions.forEach((session) => {
+        const sessionId = session.id.trim();
+        if (!sessionId || assignedSessionIds.has(sessionId)) return;
         const folderName = resolveArchivedFolderName(session, project.normalizedPath);
-        const key = folderName.toLowerCase();
-        let folder = folderByName.get(key);
-        if (!folder) {
-          folder = createFolder(scopeKey, folderName);
-          folderByName.set(key, folder);
-        }
-
-        if (!folder.sessionIds.includes(session.id)) {
-          addSessionToFolder(scopeKey, folder.id, session.id);
-        }
+        const normalizedFolderName = folderName.trim();
+        if (!normalizedFolderName) return;
+        const key = normalizedFolderName.toLowerCase();
+        const assignment = assignmentsByName.get(key) ?? { name: normalizedFolderName, sessionIds: [] };
+        assignment.sessionIds.push(sessionId);
+        assignmentsByName.set(key, assignment);
+        assignedSessionIds.add(sessionId);
       });
+
+      useSessionFoldersStore.getState().reconcileArchivedFolders(
+        scopeKey,
+        [...assignmentsByName.values()],
+        [...knownSessionIds],
+      );
     });
   }, [
     normalizedProjects,
@@ -80,7 +90,5 @@ export const useArchivedAutoFolders = (args: Args): void => {
     isWorktreeTopologyLoading,
     unresolvedWorktreeProjectPaths,
     foldersMap,
-    createFolder,
-    addSessionToFolder,
   ]);
 };

@@ -83,10 +83,11 @@ describe('deriveRecentActivitySections', () => {
     expect(sections).toEqual([{
       key: 'active-now',
       items: [{
-        node: { session: matching, children: [], worktree: null },
-        projectId: 'app',
-        groupDirectory: '/workspace/app/worktrees/release',
-        secondaryMeta: { projectLabel: 'App', branchLabel: 'release' },
+         node: { session: matching, children: [], worktree: null },
+         projectId: 'app',
+         groupDirectory: '/workspace/app/worktrees/release',
+         selectionScopeKey: 'app',
+         secondaryMeta: { projectLabel: 'App', branchLabel: 'release' },
       }],
     }]);
   });

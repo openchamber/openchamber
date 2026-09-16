@@ -7,13 +7,19 @@ import { useSessionActions, type DeleteSessionConfirmState } from './useSessionA
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { SessionDeleteConfirmDialog } from '../shell/ConfirmDialogs';
+import { getSessionChildRowKeys } from './sessionRowOrderUtils';
+import { getSessionFolderIdentityKey } from './sessionFolderIdentity';
 
 type Context = {
   groupDirectory?: string | null;
   projectId?: string | null;
+  folderOwnerKey?: string | null;
+  selectionScopeKey?: string | null;
   archivedBucket?: boolean;
   secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null;
   renderContext?: 'project' | 'recent';
+  rowKey?: string;
+  dragKey?: string;
 };
 
 type SessionTreeItemRenderProps = Context & Pick<SessionNodeItemProps,
@@ -43,14 +49,17 @@ export type SessionTreeItemProps = SessionTreeItemRenderProps & Pick<SessionNode
 > & {
   allowReselect: boolean;
   onSessionSelected?: (sessionId: string) => void;
-  isSessionSearchOpen: boolean;
-  sessionSearchQuery: string;
-  setSessionSearchQuery: (value: string) => void;
-  setIsSessionSearchOpen: (open: boolean) => void;
+  resetSessionSearch: () => void;
   deleteSessionConfirm: DeleteSessionConfirmState;
   setDeleteSessionConfirm: (value: DeleteSessionConfirmState) => void;
   startFolderRename: (scopeKey: string, folder: { id: string; name: string }) => void;
   setCopiedSessionId: (sessionId: string | null) => void;
+  /**
+   * When false, only this row renders; global search rows own their children
+   * as separate virtual items. Descendant bookkeeping
+   * (`descendantIds`, subtree actions) still reads `node.children`.
+   */
+  renderChildren?: boolean;
 };
 
 const EMPTY_SUBTREE_CONTAINS_EDITING: Set<string> = new Set();
@@ -62,9 +71,13 @@ export function SessionTreeItem({
   depth = 0,
   groupDirectory,
   projectId,
+  folderOwnerKey,
+  selectionScopeKey,
   archivedBucket = false,
   secondaryMeta,
   renderContext = 'project',
+  rowKey,
+  dragKey,
   renderExtras,
   pinnedSessionIds,
   expandedParents,
@@ -80,10 +93,7 @@ export function SessionTreeItem({
   setOpenSidebarMenuKey,
   allowReselect,
   onSessionSelected,
-  isSessionSearchOpen,
-  sessionSearchQuery,
-  setSessionSearchQuery,
-  setIsSessionSearchOpen,
+  resetSessionSearch,
   deleteSessionConfirm,
   setDeleteSessionConfirm,
   startFolderRename,
@@ -92,6 +102,7 @@ export function SessionTreeItem({
   startSessionWorktreeMenuLoad,
   mobileVariant,
   alwaysShowActions,
+  renderChildren = true,
 }: SessionTreeItemProps): React.ReactNode {
   const createFolder = useSessionFoldersStore((state) => state.createFolder);
   const toggleFolderCollapse = useSessionFoldersStore((state) => state.toggleFolderCollapse);
@@ -116,7 +127,12 @@ export function SessionTreeItem({
   );
   const createFolderAndStartRename = React.useCallback((scopeKey: string, parentId?: string | null) => {
     if (!scopeKey) return null;
-    if (parentId && useSessionFoldersStore.getState().collapsedFolderIds.has(parentId)) toggleFolderCollapse(parentId);
+    if (parentId) {
+      const parentKey = getSessionFolderIdentityKey(scopeKey, parentId);
+      if (useSessionFoldersStore.getState().collapsedFolderIds.has(parentKey)) {
+        toggleFolderCollapse(scopeKey, parentId);
+      }
+    }
     const folder = createFolder(scopeKey, 'New folder', parentId);
     startFolderRename(scopeKey, folder);
     return folder;
@@ -125,10 +141,7 @@ export function SessionTreeItem({
     mobileVariant,
     allowReselect,
     onSessionSelected,
-    isSessionSearchOpen,
-    sessionSearchQuery,
-    setSessionSearchQuery,
-    setIsSessionSearchOpen,
+    resetSessionSearch,
     descendantIds,
     showDeletionDialog,
     setDeleteSessionConfirm,
@@ -141,9 +154,16 @@ export function SessionTreeItem({
     setCopiedSessionId,
   });
   const childRenderExtrasFor = renderExtras?.childRenderExtrasFor;
+  const currentRowKey = rowKey ?? node.session.id;
+  const childRowKeys = React.useMemo(
+    () => getSessionChildRowKeys(currentRowKey, node.children),
+    [currentRowKey, node.children],
+  );
   const childContext: Context = {
     groupDirectory: node.session.directory ?? groupDirectory,
     projectId,
+    folderOwnerKey,
+    selectionScopeKey,
     archivedBucket,
     renderContext,
   };
@@ -178,19 +198,25 @@ export function SessionTreeItem({
         pinnedSessionIds={pinnedSessionIds}
       node={node}
       depth={depth}
-      groupDirectory={groupDirectory}
-      projectId={projectId}
-      archivedBucket={archivedBucket}
-      secondaryMeta={secondaryMeta}
-      renderContext={renderContext}
+       groupDirectory={groupDirectory}
+       projectId={projectId}
+       folderOwnerKey={folderOwnerKey}
+       selectionScopeKey={selectionScopeKey}
+       archivedBucket={archivedBucket}
+       secondaryMeta={secondaryMeta}
+       renderContext={renderContext}
+       rowKey={currentRowKey}
+       dragKey={dragKey ?? currentRowKey}
       subtreeContainsEditing={renderExtras?.subtreeContainsEditing ?? EMPTY_SUBTREE_CONTAINS_EDITING}
       menuOpenSessionId={renderExtras?.menuOpenSessionId ?? null}
       nodeStructureKey={renderExtras?.nodeStructureKey ?? ''}
       relativeTimeTick={renderExtras?.relativeTimeTick}
     >
-      {node.children.map((child) => (
+      {renderChildren ? node.children.map((child, index) => {
+        const childRowKey = childRowKeys[index] ?? `${currentRowKey}/child:${child.session.id}`;
+        return (
         <SessionTreeItem
-          key={child.session.id}
+          key={childRowKey}
            node={child}
            pinnedSessionIds={pinnedSessionIds}
           expandedParents={expandedParents}
@@ -207,10 +233,7 @@ export function SessionTreeItem({
            setOpenSidebarMenuKey={setOpenSidebarMenuKey}
            allowReselect={allowReselect}
            onSessionSelected={onSessionSelected}
-           isSessionSearchOpen={isSessionSearchOpen}
-           sessionSearchQuery={sessionSearchQuery}
-           setSessionSearchQuery={setSessionSearchQuery}
-           setIsSessionSearchOpen={setIsSessionSearchOpen}
+           resetSessionSearch={resetSessionSearch}
            deleteSessionConfirm={deleteSessionConfirm}
            setDeleteSessionConfirm={setDeleteSessionConfirm}
             startFolderRename={startFolderRename}
@@ -218,11 +241,14 @@ export function SessionTreeItem({
             startSessionWorktreeMenuLoad={startSessionWorktreeMenuLoad}
            mobileVariant={mobileVariant}
            alwaysShowActions={alwaysShowActions}
-           depth={depth + 1}
-          {...childContext}
-          renderExtras={childRenderExtrasFor?.(child)}
+            depth={depth + 1}
+            rowKey={childRowKey}
+            dragKey={childRowKey}
+            {...childContext}
+           renderExtras={childRenderExtrasFor?.(child)}
         />
-      ))}
+        );
+      }) : null}
     </SessionNodeItem>
     {deleteSessionConfirm?.session.id === node.session.id ? <SessionDeleteConfirmDialog
       value={deleteSessionConfirm}

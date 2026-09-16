@@ -15,7 +15,7 @@ interface SessionFolderItemProps<TSessionNode> {
    * indentation.
    */
   displayName?: string;
-  sessions: TSessionNode[];
+  sessions: readonly TSessionNode[];
   /** Sub-folders that belong directly to this folder */
   subFolderItems?: React.ReactNode;
   isCollapsed: boolean;
@@ -24,6 +24,8 @@ interface SessionFolderItemProps<TSessionNode> {
   onRename: (name: string) => void;
   onDelete: () => void;
   children?: React.ReactNode;
+  /** Render only the header when the caller owns session rows separately. */
+  renderBody?: boolean;
   groupDirectory?: string | null;
   projectId?: string | null;
   mobileVariant?: boolean;
@@ -58,6 +60,7 @@ const SessionFolderItemBase = <TSessionNode,>({
   onRename,
   onDelete,
   children,
+  renderBody = true,
   mobileVariant = false,
   alwaysShowActions = mobileVariant,
   isRenaming = false,
@@ -322,7 +325,7 @@ const SessionFolderItemBase = <TSessionNode,>({
       </div>
 
       {/* Folder body */}
-      {!isCollapsed ? (
+      {!isCollapsed && renderBody ? (
         <div className="pb-1">
           {/* Sub-folders first */}
           {subFolderItems}

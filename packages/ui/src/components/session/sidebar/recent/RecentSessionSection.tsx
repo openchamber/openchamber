@@ -1,15 +1,15 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { useI18n } from '@/lib/i18n';
-import { formatDirectoryName } from '@/lib/utils';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { SidebarActivitySections } from './SidebarActivitySections';
-import { deriveRecentActivitySections, type RecentSessionLocation } from './activitySections';
+import { deriveRecentActivitySections } from './activitySections';
+import { buildRecentSessionLocations } from './recentSessionLocations';
 import type { ActivityItem } from './SidebarActivitySections';
 import { buildActiveSessionNode } from '../list/sessionCollection';
 import type { SessionTreeItemProps } from '../sessions/SessionTreeItem';
 import type { SessionNode } from '../types';
-import { formatProjectLabel, normalizePath } from '../utils';
+import { getSessionSelectionScopeKey } from '../sessions/sessionFolderIdentity';
 
 type Props = {
   projects: { id: string; label?: string; normalizedPath: string }[];
@@ -32,6 +32,7 @@ type Props = {
   mobileVariant: boolean;
   alwaysShowActions: boolean;
   chatSessions: Session[];
+  chatSelectionScopeKey?: string | null;
   renderChatsSection: (items: ActivityItem[]) => React.ReactNode;
   onNewChat: () => void;
   showRecentSection: boolean;
@@ -42,10 +43,7 @@ type Props = {
   | 'setOpenSidebarMenuKey'
   | 'allowReselect'
   | 'onSessionSelected'
-  | 'isSessionSearchOpen'
-  | 'sessionSearchQuery'
-  | 'setSessionSearchQuery'
-  | 'setIsSessionSearchOpen'
+  | 'resetSessionSearch'
   | 'deleteSessionConfirm'
   | 'setDeleteSessionConfirm'
   | 'startFolderRename'
@@ -70,33 +68,13 @@ export const RecentSessionSection: React.FC<Props> = (props) => {
     showRecentSection,
   } = props;
   const { t } = useI18n();
-  const sessionLocationById = React.useMemo(() => {
-    const locations = new Map<string, RecentSessionLocation>();
-    for (const session of sessions) {
-      const directory = normalizePath(session.directory ?? null);
-      if (!directory) continue;
-      let owner: Props['projects'][number] | null = null;
-      let ownerLength = -1;
-      for (const project of projects) {
-        const projectPath = normalizePath(project.normalizedPath);
-        if (projectPath && (directory === projectPath || directory.startsWith(`${projectPath}/`)) && projectPath.length > ownerLength) {
-          owner = project;
-          ownerLength = projectPath.length;
-        }
-      }
-      if (!owner) continue;
-      const worktree = availableWorktreesByProject.get(owner.normalizedPath)?.find((entry) => normalizePath(entry.path) === directory);
-      const projectLabel = formatProjectLabel(owner.label?.trim() || formatDirectoryName(owner.normalizedPath, homeDirectory) || owner.normalizedPath);
-      const branch = worktree?.branch?.trim() || gitBranches.get(directory)?.trim() || null;
-      locations.set(session.id, {
-        projectId: owner.id,
-        groupDirectory: directory,
-        projectLabel,
-        branchLabel: branch && branch !== 'HEAD' && branch !== projectLabel ? branch : null,
-      });
-    }
-    return locations;
-  }, [availableWorktreesByProject, sessions, gitBranches, homeDirectory, projects]);
+  const sessionLocationById = React.useMemo(() => buildRecentSessionLocations({
+    sessions,
+    projects,
+    availableWorktreesByProject,
+    gitBranches,
+    homeDirectory,
+  }), [availableWorktreesByProject, gitBranches, homeDirectory, projects, sessions]);
   const getSessionLocation = React.useCallback(
     (sessionId: string) => sessionLocationById.get(sessionId) ?? null,
     [sessionLocationById],
@@ -119,11 +97,12 @@ export const RecentSessionSection: React.FC<Props> = (props) => {
         node: getSessionNode(session),
         projectId: null,
         groupDirectory: session.directory ?? null,
+        selectionScopeKey: props.chatSelectionScopeKey ?? getSessionSelectionScopeKey(null, session.directory ?? null),
         secondaryMeta: null,
       })),
     },
     ...(showRecentSection ? recentSections.map((section) => ({ ...section, title: t('sessions.sidebar.activity.recentTitle') })) : []),
-  ], [chatSessions, getSessionNode, recentSections, showRecentSection, t]);
+  ], [chatSessions, getSessionNode, props.chatSelectionScopeKey, recentSections, showRecentSection, t]);
   return (
     <SidebarActivitySections
       sections={sections}
@@ -148,10 +127,7 @@ export const RecentSessionSection: React.FC<Props> = (props) => {
       setOpenSidebarMenuKey={props.setOpenSidebarMenuKey}
       allowReselect={props.allowReselect}
       onSessionSelected={props.onSessionSelected}
-      isSessionSearchOpen={props.isSessionSearchOpen}
-      sessionSearchQuery={props.sessionSearchQuery}
-      setSessionSearchQuery={props.setSessionSearchQuery}
-      setIsSessionSearchOpen={props.setIsSessionSearchOpen}
+      resetSessionSearch={props.resetSessionSearch}
       deleteSessionConfirm={props.deleteSessionConfirm}
       setDeleteSessionConfirm={props.setDeleteSessionConfirm}
       startFolderRename={props.startFolderRename}

@@ -25,14 +25,27 @@ import { useSessionGrouping } from '../projects/useSessionGrouping';
 import { useStickyProjectHeaders } from '../projects/useStickyProjectHeaders';
 import { SessionBulkActions } from '../folders/SessionBulkActions';
 import { RecentSessionSection } from '../recent/RecentSessionSection';
+import { deriveRecentActivitySections } from '../recent/activitySections';
+import { buildRecentSessionLocations } from '../recent/recentSessionLocations';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import type { useSessionProjectViewState } from '../projects/useSessionProjectViewState';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import type { DeleteSessionConfirmState } from '../sessions/useSessionActions';
 import { useExpandedParents } from '../sessions/useExpandedParents';
 import { SessionGroupSection } from '../projects/SessionGroupSection';
+import { SessionRowOrderProvider } from '../sessions/sessionRowOrder';
 import { CHAT_DRAFT_PROJECT_ID, getChatsRootForHome, getChatsRootFromDirectory } from '@/lib/chatDirectories';
+import { getProjectFolderScopesFromTopology, getSessionFolderOwnerKey, getSessionFolderScopes } from '../sessions/sessionFolderIdentity';
 import { isCapacitorApp } from '@/lib/platform';
+import { isArchivedFolderScope } from '@/lib/sessionFolderIdentity';
+import type { ProjectSection } from '../projects/sessionProjectRender';
+import {
+  buildSessionSearchRowModel,
+  type SessionSearchActivitySection,
+  type SessionSearchOwnerScopeAuthority,
+  type SessionSearchOwnerScopeMap,
+  type SessionSearchRowModel,
+} from '../projects/sessionSearchRowModel';
 
 const PR_NO_PR_RETRY_MS = 5 * 60_000;
 
@@ -44,6 +57,54 @@ const isRootSession = (session: Session): boolean => {
   // SAFETY: OpenCode attaches parentID to hierarchical session records,
   // although the SDK's base Session type does not currently declare it.
   return !(session as Session & { parentID?: string | null }).parentID;
+};
+
+const getActiveFolderScopeKeys = (
+  scopes: readonly { scopeKey: string }[],
+): readonly string[] => Object.freeze([...new Set(
+  scopes
+    .map((scope) => scope.scopeKey)
+    .filter((scopeKey) => scopeKey.length > 0 && !isArchivedFolderScope(scopeKey)),
+)]);
+
+const buildActiveFolderScopesByOwner = ({
+  projectSections,
+  chatGroup,
+  isWorktreeTopologyLoading,
+  unresolvedWorktreeProjectPaths,
+}: {
+  projectSections: readonly ProjectSection[];
+  chatGroup: SessionGroup | null;
+  isWorktreeTopologyLoading: boolean;
+  unresolvedWorktreeProjectPaths: ReadonlySet<string>;
+}): SessionSearchOwnerScopeMap => {
+  const unresolvedPaths = new Set(
+    [...unresolvedWorktreeProjectPaths].map((path) => normalizePath(path) ?? path),
+  );
+  const scopesByOwner = new Map<string, SessionSearchOwnerScopeAuthority>();
+
+  for (const section of projectSections) {
+    const ownerKey = getSessionFolderOwnerKey(section.project.id, section.project.normalizedPath);
+    if (!ownerKey) continue;
+    const projectPath = normalizePath(section.project.normalizedPath);
+    const incomplete = isWorktreeTopologyLoading || (projectPath !== null && unresolvedPaths.has(projectPath));
+    const scopeKeys = incomplete
+      ? Object.freeze([])
+      : getActiveFolderScopeKeys(getProjectFolderScopesFromTopology(projectSections, ownerKey));
+    scopesByOwner.set(ownerKey, { scopeKeys, complete: !incomplete });
+  }
+
+  if (chatGroup) {
+    const ownerKey = getSessionFolderOwnerKey(null, chatGroup.directory);
+    if (ownerKey) {
+      scopesByOwner.set(ownerKey, {
+        scopeKeys: getActiveFolderScopeKeys(getSessionFolderScopes(chatGroup)),
+        complete: true,
+      });
+    }
+  }
+
+  return scopesByOwner;
 };
 
 type Project = {
@@ -100,10 +161,7 @@ type SessionProjectCollectionProps = {
     rowActions: {
       allowReselect: boolean;
       onSessionSelected?: (sessionId: string) => void;
-      isSessionSearchOpen: boolean;
-      sessionSearchQuery: string;
-      setSessionSearchQuery: (value: string) => void;
-      setIsSessionSearchOpen: (open: boolean) => void;
+      resetSessionSearch: () => void;
     };
     alwaysShowActions: boolean;
     notifyOnSubtasks: boolean;
@@ -159,6 +217,32 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     sessionOrderRanks: collection.sessionOrderRanks,
     sessions: collection.rootSessions,
   });
+  const [collapsedSearchActivitySections, setCollapsedSearchActivitySections] = React.useState<Set<'chats' | 'active-now'>>(new Set());
+  const toggleSearchActivitySection = React.useCallback((key: 'chats' | 'active-now') => {
+    setCollapsedSearchActivitySections((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+  const recentActivitySectionsForSearch = React.useMemo<SessionSearchActivitySection[]>(() => {
+    const sessionLocationById = buildRecentSessionLocations({
+      sessions: recentSessions,
+      projects: topology.projects,
+      availableWorktreesByProject: topology.availableWorktreesByProject,
+      gitBranches: topology.gitBranches,
+      homeDirectory: view.homeDirectory,
+    });
+    const getSessionLocation = (sessionId: string) => sessionLocationById.get(sessionId) ?? null;
+    const getSessionNode = (session: Session) => buildActiveSessionNode(collection.childrenMap, session);
+    return deriveRecentActivitySections({
+      sessions: recentSessions,
+      getSessionLocation,
+      getSessionNode,
+      query: view.hasSessionSearchQuery ? view.normalizedSessionSearchQuery : '',
+    });
+  }, [collection.childrenMap, recentSessions, topology.availableWorktreesByProject, topology.gitBranches, topology.projects, view.hasSessionSearchQuery, view.homeDirectory, view.normalizedSessionSearchQuery]);
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [editTitle, setEditTitle] = React.useState('');
   const [openSidebarMenuKey, setOpenSidebarMenuKey] = React.useState<string | null>(null);
@@ -226,7 +310,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     () => chatGroup ? [chatGroup] : EMPTY_STANDALONE_GROUPS,
     [chatGroup],
   );
-  const { projectSections, groupSearchDataByGroup, sectionsForRender, flatSectionsForRender, searchMatchCount } = useSessionSidebarSections({
+  const { projectSections, groupSearchDataByGroup, sectionsForRender, flatSectionsForRender } = useSessionSidebarSections({
     normalizedProjects: topology.projects,
     getSessionsForProject,
     getArchivedSessionsForProject,
@@ -243,14 +327,17 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     foldersMap,
     standaloneGroups,
   });
+  const activeFolderScopesByOwner = React.useMemo(
+    () => buildActiveFolderScopesByOwner({
+      projectSections,
+      chatGroup,
+      isWorktreeTopologyLoading: view.isWorktreeTopologyLoading,
+      unresolvedWorktreeProjectPaths: view.unresolvedWorktreeProjectPaths,
+    }),
+    [chatGroup, projectSections, view.isWorktreeTopologyLoading, view.unresolvedWorktreeProjectPaths],
+  );
 
   const onSearchMatchCountChange = view.onSearchMatchCountChange;
-  React.useEffect(() => {
-    onSearchMatchCountChange(searchMatchCount);
-  }, [onSearchMatchCountChange, searchMatchCount]);
-  // Unmounting means nothing is listed any more, so the header must not keep
-  // showing the last count it was told about.
-  React.useEffect(() => () => onSearchMatchCountChange(0), [onSearchMatchCountChange]);
 
   // Second bootstrap-demand owner: the layout-level useSessionListSync keeps
   // every known directory alive at background priority even when the sidebar
@@ -277,17 +364,18 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       ? { ...section, groups: section.groups.filter((group) => !group.isArchivedBucket) }
       : section
   )), [source, view.showInlineArchived]);
-  const getFolderScopesForProject = React.useCallback((projectId: string) => {
-    const section = flatSectionsForRender.find((entry) => entry.project.id === projectId);
-    return section?.groups.find((group) => !group.isArchivedBucket)?.folderScopes ?? [];
-  }, [flatSectionsForRender]);
+  const getFolderScopesForSelectionScope = React.useCallback((selectionScope: string) => {
+    if (chatGroup && getSessionFolderOwnerKey(null, chatGroup.directory) === selectionScope) {
+      return getSessionFolderScopes(chatGroup);
+    }
+    return getProjectFolderScopesFromTopology(projectSections, selectionScope);
+  }, [chatGroup, projectSections]);
   const projectHeaderSentinelRefs = React.useRef<Map<string, HTMLDivElement | null>>(new Map());
-  const stuckProjectHeaders = useStickyProjectHeaders({
-    enabled: view.stickyZoneHeaders,
-    isDesktopShellRuntime: view.isDesktopShellRuntime,
-    projectSections,
-    projectHeaderSentinelRefs,
-  });
+  const scrollContainerRef = React.useRef<HTMLElement | null>(null);
+  const [stickyHeaderRefreshKey, setStickyHeaderRefreshKey] = React.useState(0);
+  const onSearchRowsMounted = React.useCallback(() => {
+    setStickyHeaderRefreshKey((value) => value + 1);
+  }, []);
   useArchivedAutoFolders({
     enabled: true,
     normalizedProjects: topology.projects,
@@ -357,6 +445,69 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       selectedSingleProjectId = projectSections[0]?.project.id ?? null;
     }
   }
+  const searchRowModel = React.useMemo<SessionSearchRowModel>(() => {
+    if (!view.hasSessionSearchQuery) {
+      return {
+        rows: [],
+        entries: [],
+        projectSections: [],
+        hasResults: false,
+        hasRecentRows: false,
+        folderRows: [],
+        searchMatchCount: 0,
+        activeFolderScopesByOwner,
+      };
+    }
+    return buildSessionSearchRowModel({
+      sections: orderedSectionsForRender,
+      chatGroup,
+      groupSearchDataByGroup,
+      foldersMap,
+      normalizedQuery: view.normalizedSessionSearchQuery,
+      collapsedProjects: projectView.collapsedProjects,
+      collapsedActivitySections: collapsedSearchActivitySections,
+      showOnlyMainWorkspace: view.showOnlyMainWorkspace,
+      activeProjectId: view.activeProjectId,
+      singleProjectMode,
+      singleProjectId: selectedSingleProjectId,
+      showRecentSection: showRecentSection && !singleProjectMode,
+      recentSections: recentActivitySectionsForSearch,
+      pinnedSessionIds: collection.pinnedSessionIds,
+      sessionOrderIndex,
+      activeFolderScopesByOwner,
+    });
+  }, [
+    chatGroup,
+    collection.pinnedSessionIds,
+    collapsedSearchActivitySections,
+    activeFolderScopesByOwner,
+    foldersMap,
+    groupSearchDataByGroup,
+    orderedSectionsForRender,
+    projectView.collapsedProjects,
+    recentActivitySectionsForSearch,
+    sessionOrderIndex,
+    selectedSingleProjectId,
+    showRecentSection,
+    singleProjectMode,
+    view.activeProjectId,
+    view.hasSessionSearchQuery,
+    view.normalizedSessionSearchQuery,
+    view.showOnlyMainWorkspace,
+  ]);
+  const stuckProjectHeaders = useStickyProjectHeaders({
+    enabled: view.stickyZoneHeaders,
+    isDesktopShellRuntime: view.isDesktopShellRuntime,
+    projectHeaderSentinelRefs,
+    scrollContainerRef,
+    refreshKey: `${stickyHeaderRefreshKey}:${view.hasSessionSearchQuery ? 'search' : 'normal'}:${projectSections.length}:${orderedSectionsForRender.length}`,
+  });
+  React.useEffect(() => {
+    onSearchMatchCountChange(searchRowModel.searchMatchCount);
+  }, [onSearchMatchCountChange, searchRowModel.searchMatchCount]);
+  // Unmounting means nothing is listed any more, so the header must not keep
+  // showing the last count it was told about.
+  React.useEffect(() => () => onSearchMatchCountChange(0), [onSearchMatchCountChange]);
   const groupProps = React.useMemo(() => ({
     hasSessionSearchQuery: view.hasSessionSearchQuery,
     normalizedSessionSearchQuery: view.normalizedSessionSearchQuery,
@@ -379,10 +530,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     toggleParent,
     allowReselect: rowActions.allowReselect,
     onSessionSelected: rowActions.onSessionSelected,
-    isSessionSearchOpen: rowActions.isSessionSearchOpen,
-    sessionSearchQuery: rowActions.sessionSearchQuery,
-    setSessionSearchQuery: rowActions.setSessionSearchQuery,
-    setIsSessionSearchOpen: rowActions.setIsSessionSearchOpen,
+    resetSessionSearch: rowActions.resetSessionSearch,
     deleteSessionConfirm,
     setDeleteSessionConfirm,
     startFolderRename,
@@ -443,7 +591,9 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       groupKey="managed-chats"
       projectId={null}
       hideGroupLabel
+      rowOrderBase={0}
       visibleSessionCount={visibleSessionCountByGroup.get('managed-chats')}
+      sessionBatchSize={20}
       scrollContainerRef={undefined}
       openSidebarMenuKey={openSidebarMenuKey}
       setOpenSidebarMenuKey={setOpenSidebarMenuKey}
@@ -463,28 +613,26 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       hasSessionSearchQuery={view.hasSessionSearchQuery}
       normalizedSessionSearchQuery={view.normalizedSessionSearchQuery}
       isDesktopShellRuntime={view.isDesktopShellRuntime}
-      sessions={recentSessions}
-      childrenMap={collection.childrenMap}
-      pinnedSessionIds={collection.pinnedSessionIds}
-      recentSessions={recentSessions}
+       sessions={recentSessions}
+       childrenMap={collection.childrenMap}
+       pinnedSessionIds={collection.pinnedSessionIds}
+       recentSessions={recentSessions}
       expandedParents={expandedParents}
       notifyOnSubtasks={notifyOnSubtasks}
       editingId={editingId}
       editTitle={editTitle}
       copiedSessionId={copiedSessionId}
       openSidebarMenuKey={openSidebarMenuKey}
-      mobileVariant={view.mobileVariant}
-      alwaysShowActions={alwaysShowActions}
-      setEditingId={setEditingId}
+       mobileVariant={view.mobileVariant}
+       alwaysShowActions={alwaysShowActions}
+       chatSelectionScopeKey={chatGroup?.directory ?? null}
+       setEditingId={setEditingId}
       setEditTitle={setEditTitle}
       toggleParent={toggleParent}
       setOpenSidebarMenuKey={setOpenSidebarMenuKey}
       allowReselect={rowActions.allowReselect}
       onSessionSelected={rowActions.onSessionSelected}
-      isSessionSearchOpen={rowActions.isSessionSearchOpen}
-      sessionSearchQuery={rowActions.sessionSearchQuery}
-      setSessionSearchQuery={rowActions.setSessionSearchQuery}
-      setIsSessionSearchOpen={rowActions.setIsSessionSearchOpen}
+      resetSessionSearch={rowActions.resetSessionSearch}
       deleteSessionConfirm={deleteSessionConfirm}
       setDeleteSessionConfirm={setDeleteSessionConfirm}
       startFolderRename={startFolderRename}
@@ -507,8 +655,8 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     expandedParents,
     notifyOnSubtasks,
     openSidebarMenuKey,
-    recentSessions,
-    rowActions,
+     recentSessions,
+     rowActions,
     showRecentSection,
     singleProjectMode,
     handleOpenNewChat,
@@ -519,8 +667,9 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     topology.gitBranches,
     topology.isVSCode,
     topology.projects,
-    collection.chatSessions,
-    view.hasSessionSearchQuery,
+     collection.chatSessions,
+     chatGroup?.directory,
+     view.hasSessionSearchQuery,
     view.homeDirectory,
     view.isDesktopShellRuntime,
     view.mobileVariant,
@@ -535,6 +684,11 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     topContent: recentSection,
     topContentHasSearchMatches,
     hasSharedSessions: Boolean(recentSection),
+    searchRowModel,
+    onSearchRowsMounted,
+    searchRowsMountVersion: stickyHeaderRefreshKey,
+    toggleActivitySection: toggleSearchActivitySection,
+    onNewChat: handleOpenNewChat,
     sectionsForRender: orderedSectionsForRender,
     projectSections,
     activeProjectId: view.activeProjectId,
@@ -545,6 +699,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     projectRepoStatus: topology.projectRepoStatus,
     stuckProjectHeaders,
     projectHeaderSentinelRefs,
+    scrollContainerRef,
     state: { editingId, openSidebarMenuKey, setOpenSidebarMenuKey, visibleSessionCountByGroup },
     groupProps,
   }), [
@@ -559,8 +714,13 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     view.emptyState,
     view.searchEmptyState,
     visibleSessionCountByGroup,
-    recentSection,
-    topContentHasSearchMatches,
+      recentSection,
+      searchRowModel,
+      onSearchRowsMounted,
+      stickyHeaderRefreshKey,
+      toggleSearchActivitySection,
+     handleOpenNewChat,
+     topContentHasSearchMatches,
     singleProjectMode,
     selectedSingleProjectId,
   ]);
@@ -618,7 +778,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     scrollerActions.renderProjectStatusIndicator,
     setSingleProjectId,
   ]);
-  return <>
+  return <SessionRowOrderProvider>
     <SidebarTerminalActivity />
     <ProjectSessionSelectionEffect
       projectSections={projectSections}
@@ -638,11 +798,18 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     />
     <SessionProjectScroller model={scrollerModel} view={scrollerView} actions={scrollerActionSet} />
     <SessionBulkActions
-      getFolderScopesForProject={getFolderScopesForProject}
+      getFolderScopesForSelectionScope={getFolderScopesForSelectionScope}
+      selectedSessionsById={collection.sessionById}
       isInlineEditing={editingId !== null}
       startFolderRename={startFolderRename}
     />
-  </>;
+  </SessionRowOrderProvider>;
 };
 
-export const SessionProjectCollection: React.FC<SessionProjectCollectionProps> = (props) => props.view.isVisible ? <VisibleSessionProjects {...props} /> : null;
+// The sidebar memoizes topology/view/actions, so the default shallow
+// comparator is the intended boundary: a prop change that can alter the tree
+// re-renders it, while an unrelated sidebar render (a raw search keystroke
+// before the debounce) bails out.
+export const SessionProjectCollection = React.memo(function SessionProjectCollection(props: SessionProjectCollectionProps) {
+  return props.view.isVisible ? <VisibleSessionProjects {...props} /> : null;
+});

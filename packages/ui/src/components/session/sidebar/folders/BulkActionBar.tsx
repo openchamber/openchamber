@@ -11,13 +11,15 @@ import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
 import { useI18n } from '@/lib/i18n';
+import type { SidebarFolderTarget } from './useSidebarBulkActions';
+import { getSessionFolderIdentityKey } from '../sessions/sessionFolderIdentity';
 
 type Props = {
   selectedCount: number;
   scopeKey: string | null;
-  scopeFolders: SessionFolder[];
+  scopeFolders: readonly { scopeKey: string; folder: SessionFolder }[];
   archivedBucket: boolean;
-  onMoveToFolder: (folderId: string) => void;
+  onMoveToFolder: (target: SidebarFolderTarget) => void;
   onCreateFolderAndMove: () => void;
   onRemoveFromFolder: () => void;
   canRemoveFromFolder: boolean;
@@ -76,8 +78,8 @@ export const BulkActionBar: React.FC<Props> = ({
                   {t('sessions.sidebar.folders.none')}
                 </DropdownMenuItem>
               ) : (
-                scopeFolders.map((folder) => (
-                  <DropdownMenuItem key={folder.id} onClick={() => onMoveToFolder(folder.id)}>
+                scopeFolders.map(({ scopeKey, folder }) => (
+                  <DropdownMenuItem key={getSessionFolderIdentityKey(scopeKey, folder.id)} onClick={() => onMoveToFolder({ scopeKey, folderId: folder.id })}>
                     <span className="flex-1 truncate">{folder.name}</span>
                   </DropdownMenuItem>
                 ))
