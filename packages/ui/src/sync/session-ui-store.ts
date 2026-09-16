@@ -167,17 +167,27 @@ export async function routeMessage(params: {
     const [head, ...tail] = params.content.split(" ")
     const cmdName = head.slice(1)
 
-    const dirState = getDirectoryState(requestDirectory)
-    const syncCommands = dirState?.command ?? []
     const storeCommands = useCommandsStore.getState().commands
 
     // OpenCode registers every skill as a command (source: "skill"), but the
-    // commands store filters skills out and the synced command list is only
-    // hydrated at bootstrap. Consult the live skills store so a skill selected
-    // from the slash menu keeps its invocation semantics (#1605).
-    const matchedCommand = syncCommands.find((c) => c.name === cmdName)
-      || storeCommands.find((c) => c.name === cmdName)
+    // commands store filters skills out. Consult the live skills store so a
+    // skill selected from the slash menu keeps its invocation semantics
+    // (#1605). The command list is no longer pre-warmed at bootstrap (it
+    // initializes the directory's whole MCP fleet), so a name matched by
+    // neither store gets one live lookup before the input falls through to a
+    // plain prompt.
+    let matchedCommand = storeCommands.find((c) => c.name === cmdName)
     const matchedSkill = useSkillsStore.getState().skills.find((s) => s.name === cmdName)
+
+    if (!matchedCommand && !matchedSkill) {
+      try {
+        matchedCommand = (await opencodeClient.listCommandsWithDetails(requestDirectory))
+          .find((c) => c.name === cmdName)
+      } catch {
+        // Command dispatch remains authoritative on the server; treating the
+        // input as a plain prompt is the pre-existing fallthrough.
+      }
+    }
 
     if (matchedCommand || matchedSkill) {
       // Pinned project knowledge is the only additional part that does not
@@ -1672,9 +1682,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       const tokenBudget = uiState.sessionGoalDefaultBudgetEnabled ? uiState.sessionGoalDefaultBudget : null
       let objective = goalArm.objectiveOverride?.trim() || content
       if (!goalArm.objectiveOverride && content.startsWith("/")) {
-        const directoryCommands = getDirectoryState(goalDirectory ?? undefined)?.command ?? []
-        const storedCommands = useCommandsStore.getState().commands
-        const knownCommands = [...directoryCommands, ...storedCommands]
+        const knownCommands = [...useCommandsStore.getState().commands]
         objective = expandSlashCommandGoalObjective(content, knownCommands)
         if (objective === content) {
           try {

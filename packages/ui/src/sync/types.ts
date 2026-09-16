@@ -1,6 +1,5 @@
 import type {
   Agent,
-  Command,
   Config,
   LspStatus,
   Message,
@@ -41,7 +40,6 @@ export type ProjectMeta = {
 export type State = {
   status: "loading" | "partial" | "complete"
   agent: Agent[]
-  command: Command[]
   project: string
   projectMeta: ProjectMeta | undefined
   icon: string | undefined
@@ -135,7 +133,6 @@ export const INITIAL_STATE: State = {
   path: { state: "", config: "", worktree: "", directory: "", home: "" },
   status: "loading",
   agent: [],
-  command: [],
   session: [],
   sessionTotal: 0,
   sessionListSource: "empty",

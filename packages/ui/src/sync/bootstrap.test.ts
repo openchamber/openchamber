@@ -103,17 +103,19 @@ describe("bootstrapDirectory", () => {
     expect(input.store.getState().session_status).toBe(statuses)
   })
 
-  test("never reads MCP status during directory initialization", async () => {
+  test("never reads MCP-initializing endpoints during directory initialization", async () => {
     // Reading MCP status initializes the directory's entire stdio server
-    // fleet, and the sidebar declares bootstrap demand for every known
-    // project directory, so a bootstrap-time read spawned a fleet per
-    // project at startup. MCP surfaces fetch on demand instead.
+    // fleet, and listing commands enumerates MCP prompts, which touches the
+    // same state. The sidebar declares bootstrap demand for every known
+    // project directory, so either read spawned a fleet per project at
+    // startup. MCP and command surfaces fetch on demand instead.
     const requests: URL[] = []
     const input = inputFor(createSdk((url) => { requests.push(url); return undefined }))
     const bootstrap = bootstrapDirectory(input)
     expect(await bootstrap.sessions).toBe("complete")
     expect(await bootstrap.environment).toBe("complete")
     expect(requests.some((url) => url.pathname === "/mcp")).toBe(false)
+    expect(requests.some((url) => url.pathname === "/command")).toBe(false)
   })
 
   test("rejects stale work before starting either phase", async () => {
@@ -172,7 +174,7 @@ describe("bootstrapDirectory", () => {
       const bootstrap = bootstrapDirectory(input)
       expect(await bootstrap.sessions).toBe("complete")
       expect(await bootstrap.environment).toBe("complete")
-      expect(requests).toHaveLength(9)
+      expect(requests).toHaveLength(8)
       expect(new Set(requests.map((url) => url.searchParams.get("directory")))).toEqual(new Set([directory]))
       expect(input.store.getState().path.directory).toBe(directory)
       expect(input.store.getState().config.instructions).toEqual([directory])

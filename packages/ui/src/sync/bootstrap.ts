@@ -199,12 +199,13 @@ async function initializeDirectory(input: DirectoryBootstrapInput): Promise<Boot
     ),
   ])
   const enrichment = Promise.allSettled([
-    read(() => sdk.command.list({ directory }).then((x) => commit({ command: unwrap(x, "command.list") }))),
-    // MCP status is deliberately not read here. Reading it initializes the
-    // directory's whole stdio server fleet as an OpenCode side effect, and the
-    // sidebar declares bootstrap demand for every known project directory, so
-    // this read launched one full fleet per project at startup. The MCP
-    // surfaces fetch status on demand through their own store instead.
+    // MCP status and the command list are deliberately not read here. Reading
+    // MCP state initializes the directory's whole stdio server fleet as an
+    // OpenCode side effect, and listing commands enumerates MCP prompts,
+    // which touches that same state. The sidebar declares bootstrap demand
+    // for every known project directory, so either read launched one full
+    // fleet per project at startup. Both surfaces fetch on demand through
+    // their own stores (useMcpStore, useCommandsStore) instead.
     read(() => sdk.lsp.status({ directory }).then((x) => commit({ lsp: unwrap(x, "lsp.status") }))),
     read(() =>
       sdk.vcs.get({ directory }).then((x) => {
