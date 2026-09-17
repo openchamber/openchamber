@@ -110,8 +110,8 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
       if (failReads) throw new Error('Refresh unavailable');
       if (options.contextLines === 3) normalReads += 1;
       const full = (options.contextLines ?? 3) > 3;
-      const response = { diff: makePatch(full, full ? fullVersion : currentVersion) };
-      if (deferVersions) return new Promise<{ diff: string }>((resolve) => {
+      const response = { diff: makePatch(full, full ? fullVersion : currentVersion), submodule: null };
+      if (deferVersions) return new Promise<{ diff: string; submodule: null }>((resolve) => {
         if (full) releaseFull = () => resolve(response);
         else releaseCanonical = () => resolve(response);
       });

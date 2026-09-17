@@ -1,5 +1,5 @@
 import React, { act } from 'react';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { plugin } from 'bun';
 import { pathToFileURL } from 'node:url';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -104,6 +104,11 @@ function Harness({ record, retired = false, changedFiles, isLatestTurn = true }:
         </SyncProvider>
     </RuntimeAPIContext.Provider>;
 }
+
+// The first test pays for loading the real message body and for its first
+// render. Under the full parallel suite that crossed the 5 second default on
+// Windows; later tests take well under a second.
+setDefaultTimeout(30_000);
 
 describe('live Activity with the real message body', () => {
     let root: Root;

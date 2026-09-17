@@ -16,6 +16,43 @@ function quotePosixShell(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
+/**
+ * `echo` in batch treats `& | < > ( ) ^` as syntax and `%var%` as expansion,
+ * so a line of the log preamble is escaped before it becomes an `echo`.
+ */
+const escapeBatchEchoLine = (line) => {
+  if (!line) return 'echo.';
+  return `echo ${line.replace(/%/g, '%%').replace(/[&|<>()^]/g, '^$&')}`;
+};
+
+/**
+ * The Windows update runs as a batch file, one command per line, so the
+ * `if ... else` block and the multi-line log preamble keep their structure.
+ */
+const buildWindowsUpdateScript = ({ logPreamble, updateCmd, restartCmd }) => [
+  '@echo off',
+  ...logPreamble.split('\n').map(escapeBatchEchoLine),
+  // `timeout` refuses redirected stdin, which is what a detached child has;
+  // a ping to loopback waits about two seconds without a console.
+  'ping -n 3 127.0.0.1 >nul',
+  // npm, pnpm and yarn are .cmd shims on Windows. Without `call`, a batch
+  // file hands control to them for good and the restart below never runs.
+  // Read from a file, cmd expands `%x%` and drops a lone `%`, so a `%` in a
+  // host or UI password would change the restart command. Doubling keeps it.
+  `call ${updateCmd.replace(/%/g, '%%')}`,
+  'if %ERRORLEVEL% EQU 0 (',
+  '  echo Update successful, restarting OpenChamber...',
+  `  ${restartCmd ? restartCmd.replace(/%/g, '%%') : 'echo Service manager will restart OpenChamber.'}`,
+  ') else (',
+  '  echo Update failed',
+  ')',
+  // The restart command carries the server's own flags, `--ui-password`
+  // included, so the file does not outlive the run. Deleting the running
+  // batch file on its last line is safe: cmd has already read it.
+  'del "%~f0"',
+  '',
+].join('\r\n');
+
 export const registerOpenChamberRoutes = (app, dependencies) => {
   const {
     fs,
@@ -300,6 +337,26 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         `logPath=${updateLogPath}`,
       ].join('\n');
 
+      const shell = isWindows ? (process.env.ComSpec || 'cmd.exe') : 'sh';
+      const shellFlag = isWindows ? '/c' : '-c';
+      // cmd.exe /c takes one command line: a newline inside it ends the
+      // command, so a multi-line script passed as the argument ran nothing
+      // and exited 0, and the server shut itself down believing the update
+      // was under way (#3084). Batch runs from a file instead, written before
+      // the client is told to expect a restart.
+      const windowsScriptPath = path.join(openchamberDataDir, 'update-install.cmd');
+      if (isWindows) {
+        try {
+          fs.mkdirSync(path.dirname(windowsScriptPath), { recursive: true });
+          fs.writeFileSync(windowsScriptPath, buildWindowsUpdateScript({ logPreamble, updateCmd, restartCmd }), 'utf8');
+        } catch (scriptError) {
+          console.error('Failed to write the update script, update not started:', scriptError);
+          return res.status(500).json({
+            error: `Could not write the update script at ${windowsScriptPath}: ${scriptError instanceof Error ? scriptError.message : String(scriptError)}`,
+          });
+        }
+      }
+
       res.json({
         success: true,
         message: 'Update starting, server will restart shortly',
@@ -314,21 +371,8 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
           console.log(`Running: ${updateCmd}`);
           console.log(logPreamble);
 
-          const shell = isWindows ? (process.env.ComSpec || 'cmd.exe') : 'sh';
-          const shellFlag = isWindows ? '/c' : '-c';
           const script = isWindows
-            ? `
-            echo ${quoteCmd(logPreamble)}
-            timeout /t 2 /nobreak >nul
-            ${updateCmd}
-            if %ERRORLEVEL% EQU 0 (
-              echo Update successful, restarting OpenChamber...
-              ${restartCmd || 'echo Service manager will restart OpenChamber.'}
-            ) else (
-              echo Update failed
-              exit /b 1
-            )
-            `
+            ? windowsScriptPath
           : `
             printf '%s\n' ${quotePosix(logPreamble)}
             sleep 2
@@ -350,10 +394,24 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
           console.warn('Failed to open update log file, continuing without log capture:', logError);
         }
 
+        if (isWindows) {
+          // On Windows the detached child inherits this process's listening
+          // socket, and keeps the port for as long as the batch runs. The
+          // restart inside that batch then fails with "port already in use",
+          // and the update ends with no server. Closing the listener first
+          // leaves nothing to inherit; the process exits right after anyway.
+          try {
+            server.close();
+          } catch (closeError) {
+            console.warn('Failed to close the listener before the update script:', closeError);
+          }
+        }
+
         const child = spawnChild(shell, [shellFlag, script], {
           detached: true,
           stdio: logFd !== null ? ['ignore', logFd, logFd] : 'ignore',
           env: process.env,
+          windowsHide: true,
         });
         child.unref();
 

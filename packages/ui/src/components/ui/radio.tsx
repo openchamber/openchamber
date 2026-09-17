@@ -65,7 +65,7 @@ export const Radio = React.memo<RadioProps>(function Radio({
       <span
         aria-hidden
         className={cn(
-          'block h-[5px] w-[5px] rounded-full bg-white',
+          'block h-[5px] w-[5px] rounded-full bg-primary-foreground',
           !checked && 'opacity-0',
           iconClassName,
         )}

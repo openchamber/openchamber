@@ -36,6 +36,14 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
   - Returns `{ searchFilesystemFiles(rootPath, options) }`.
   - Supports fuzzy matching, hidden-file handling, and optional `git check-ignore` filtering.
 
+Both search and directory listing discard `git check-ignore` stderr at spawn.
+They consume stdout for ignore matches. Never create an unread stderr pipe:
+Git diagnostics can fill it and block the child indefinitely, so repeated
+searches accumulate live Git processes. `git-process.test.js` exercises both
+paths with real OS pipes, twelve concurrent checks, and 2 MiB of diagnostics
+per child. Successful completion must preserve ignore filtering and reap all
+twelve children.
+
 ## Composition contract with `index.js`
 - `index.js` provides composition-time dependencies only (platform primitives + callbacks such as `resolveProjectDirectory`, `normalizeDirectoryPath`, and `buildAugmentedPath`).
 - `index.js` no longer owns FS route handlers or FS exec job state.

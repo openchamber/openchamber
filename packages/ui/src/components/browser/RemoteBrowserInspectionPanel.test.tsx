@@ -34,9 +34,12 @@ const theme = getDefaultTheme(false);
 const themeContext: ThemeContextValue = {
   currentTheme: theme,
   availableThemes: [theme],
+  customThemeIds: [],
   setTheme: () => undefined,
   customThemesLoading: false,
   reloadCustomThemes: async () => undefined,
+  importTheme: async () => theme,
+  deleteImportedTheme: async () => undefined,
   isSystemPreference: false,
   setSystemPreference: () => undefined,
   themeMode: theme.metadata.variant,

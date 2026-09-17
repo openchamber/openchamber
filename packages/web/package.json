@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/web",
-  "version": "1.23.1",
+  "version": "1.24.0",
   "private": false,
   "type": "module",
   "main": "./server/index.js",
@@ -13,10 +13,11 @@
   },
   "scripts": {
     "dev": "bun run build:watch",
-    "dev:server": "OPENCHAMBER_RELAY_HOST=${OPENCHAMBER_RELAY_HOST:-off} bun server/index.js --port ${OPENCHAMBER_PORT:-3001}",
-    "dev:server:watch": "node ./scripts/dev-server-watch.mjs",
-    "build": "vite build",
-    "build:watch": "vite build --watch",
+    "dev:server": "bun ../../scripts/build-builtin-extensions.mjs && OPENCHAMBER_RELAY_HOST=${OPENCHAMBER_RELAY_HOST:-off} bun server/index.js --port ${OPENCHAMBER_PORT:-3001}",
+    "dev:server:watch": "bun ../../scripts/build-builtin-extensions.mjs && node ./scripts/dev-server-watch.mjs",
+    "build": "bun ../../scripts/build-builtin-extensions.mjs && vite build",
+    "build:watch": "bun ../../scripts/build-builtin-extensions.mjs && vite build --watch",
+    "prepack": "bun ../../scripts/build-builtin-extensions.mjs",
     "type-check": "tsc --noEmit",
     "lint": "eslint \"./src/**/*.{ts,tsx}\" --config ../../eslint.config.js",
     "test": "vitest run",
@@ -25,7 +26,8 @@
   "dependencies": {
     "@clack/prompts": "^1.1.0",
     "@octokit/rest": "^22.0.1",
-    "@opencode-ai/sdk": "1.18.30",
+    "@openchamber/sdk": "workspace:*",
+    "@opencode-ai/sdk": "1.18.31",
     "@simplewebauthn/server": "13.3.1",
     "bun-pty": "^0.4.5",
     "compression": "^1.8.1",

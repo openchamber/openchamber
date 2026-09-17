@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
 import { sortContextSurfaces } from '@/lib/surfaces/registry';
 
 /**
@@ -30,9 +31,12 @@ export const ContextRailSurfacesDialog: React.FC<{
   const setSurfaceVisible = useUIStore((state) => state.setContextRailSurfaceVisible);
   const setHiddenSurfaces = useUIStore((state) => state.setContextRailHiddenSurfaces);
 
+  // Include installed guests and runtime-filtered surfaces in the user's rail
+  // order so a choice made on desktop stays editable on other runtimes.
+  const guestSurfaces = useGuestSurfaces();
   const surfaces = React.useMemo(
-    () => sortContextSurfaces(contextRailOrder).filter((surface) => surface.id !== 'server-browser' || serverBrowserEnabled),
-    [contextRailOrder, serverBrowserEnabled],
+    () => sortContextSurfaces(contextRailOrder, guestSurfaces).filter((surface) => surface.id !== 'server-browser' || serverBrowserEnabled),
+    [contextRailOrder, guestSurfaces, serverBrowserEnabled],
   );
 
   const allVisible = surfaces.every((surface) => !hidden.includes(surface.id));
@@ -53,8 +57,8 @@ export const ContextRailSurfacesDialog: React.FC<{
               settingsItem={`layout.context-rail.surface.${surface.id}`}
               checked={!hidden.includes(surface.id)}
               onChange={(checked) => setSurfaceVisible(surface.id, checked)}
-              label={t(surface.labelKey)}
-              ariaLabel={t(surface.labelKey)}
+              label={surface.label ?? t(surface.labelKey)}
+              ariaLabel={surface.label ?? t(surface.labelKey)}
             />
           ))}
         </div>

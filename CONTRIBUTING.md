@@ -264,7 +264,7 @@ See [AGENTS.md](./AGENTS.md) for detailed architecture reference.
 
 You can still help:
 
-- Report bugs or UX issues — even "this felt confusing" is valuable feedback
+- Report bugs or UX issues — even "this felt confusing" is valuable feedback. Write issues in English (machine translation is fine); reports in other languages wait until someone translates them
 - Test on different devices, browsers, or OS versions
 - Suggest features or improvements via issues
 - Help others in Discord

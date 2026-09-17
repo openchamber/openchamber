@@ -2,6 +2,7 @@ import React from 'react';
 
 import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { createScrollSpy } from '@/components/chat/lib/scroll/scrollSpy';
+import { retireScrollContent } from '@/components/chat/lib/scroll/retireScrollContent';
 import { useViewportStore } from '@/sync/viewport-store';
 import { useUIStore } from '@/stores/useUIStore';
 import type { TimelineRevealGate } from '@/components/chat/timelineRevealGate';
@@ -327,10 +328,14 @@ export const useChatTimelineScroll = ({
 
     // ── list callbacks ──────────────────────────────────────────────────────
     const registerList = React.useCallback((list: TimelineListHandle | null) => {
+        const previousNode = scrollRef.current;
         listRef.current = list;
         const node = (list?.getScrollableNode() as HTMLDivElement | null) ?? null;
         scrollRef.current = node;
         setScrollNode(node);
+        if (previousNode && previousNode !== node) {
+            retireScrollContent(previousNode, () => scrollRef.current === previousNode);
+        }
     }, []);
 
     const onIsAtEndChange = React.useCallback((isAtEnd: boolean) => {

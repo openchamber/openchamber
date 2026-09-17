@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { getBackgroundNetworkState, runBackgroundNetworkTask } from "./background-network"
+import { getBackgroundNetworkState, runBackgroundNetworkTask, runSessionListNetworkTask } from "./background-network"
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void
-  let reject!: (reason?: unknown) => void
+  let reject!: (reason?: Error) => void
   const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
   return { promise, resolve, reject }
 }
@@ -38,5 +38,53 @@ describe("runBackgroundNetworkTask", () => {
     expect(getBackgroundNetworkState().active).toBe(0)
     const value = await runBackgroundNetworkTask(() => Promise.resolve(42))
     expect(value).toBe(42)
+  })
+
+  test("a blocked background read and a blocked directory leave capacity for other session lists", async () => {
+    const background = deferred<void>()
+    const directory = deferred<void>()
+    const backgroundRead = runBackgroundNetworkTask(() => background.promise)
+    const directoryRead = runSessionListNetworkTask(() => directory.promise)
+    try {
+      for (let index = 0; index < 24; index += 1) {
+        expect(await runSessionListNetworkTask(async () => index)).toBe(index)
+        const state = getBackgroundNetworkState()
+        expect(state.active + state.sessionLists.active).toBeLessThanOrEqual(3)
+      }
+    } finally {
+      background.resolve()
+      directory.resolve()
+      await Promise.all([backgroundRead, directoryRead])
+    }
+    expect(getBackgroundNetworkState().sessionLists.active).toBe(0)
+  })
+
+  test("session-list failures release their own capacity", async () => {
+    await expect(runSessionListNetworkTask(async () => { throw new Error("offline") })).rejects.toThrow("offline")
+    expect(getBackgroundNetworkState().sessionLists.active).toBe(0)
+    expect(await runSessionListNetworkTask(async () => "recovered")).toBe("recovered")
+  })
+
+  test("active-session recovery runs before queued metadata without increasing concurrency", async () => {
+    const blocked = Array.from({ length: getBackgroundNetworkState().limit }, () => deferred<void>())
+    const occupied = blocked.map((task) => runBackgroundNetworkTask(() => task.promise))
+    const order: string[] = []
+    const metadata = runBackgroundNetworkTask(async () => { order.push("metadata") })
+    const activeSession = runBackgroundNetworkTask(async () => { order.push("active-session") }, "active-session")
+    for (const task of blocked) task.resolve()
+    await Promise.all([...occupied, metadata, activeSession])
+    expect(order).toEqual(["active-session", "metadata"])
+  })
+
+  test("two blocked background reads cannot consume the reserved session-list capacity", async () => {
+    const blocked = Array.from({ length: getBackgroundNetworkState().limit }, () => deferred<void>())
+    const reads = blocked.map((task) => runBackgroundNetworkTask(() => task.promise))
+    try {
+      expect(await runSessionListNetworkTask(async () => "loaded")).toBe("loaded")
+      expect(getBackgroundNetworkState().active).toBe(2)
+    } finally {
+      for (const task of blocked) task.resolve()
+      await Promise.all(reads)
+    }
   })
 })

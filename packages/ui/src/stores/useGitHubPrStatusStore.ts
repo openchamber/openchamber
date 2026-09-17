@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { persist } from 'zustand/middleware';
 import type { GitHubPullRequestStatus, RuntimeAPIs } from '@/lib/api/types';
 import { mapWithConcurrency } from '@/lib/concurrency';
@@ -699,6 +700,7 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
           return;
         }
 
+        const requestPrStatus = params.github.prStatus.bind(params.github);
         try {
           set((prev) => ({
             ...prev,
@@ -706,18 +708,19 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
             totalRequestCount: prev.totalRequestCount + 1,
           }));
           await acquirePrStatusNetworkSlot();
-          let next: GitHubPullRequestStatus;
+          let next: GitHubPullRequestStatus | null;
           try {
-            if (!isCurrent()) return;
-            // Failed requests need the same non-forced cooldown as successful
-            // refreshes. Record only work that reaches the network slot so a
-            // stale queued request cannot suppress its replacement.
-            lastRefreshBySignature.set(signature, Date.now());
-            next = await params.github.prStatus(params.directory, params.branch, params.remoteName ?? undefined, { force: options?.force });
+            next = await runBackgroundNetworkTask(async () => {
+              if (!isCurrent()) return null;
+              // Keep PR reads inside the aggregate HTTP budget as well as the
+              // PR-specific cap. Separate caps otherwise occupy every socket.
+              lastRefreshBySignature.set(signature, Date.now());
+              return requestPrStatus(params.directory, params.branch, params.remoteName ?? undefined, { force: options?.force });
+            });
           } finally {
             releasePrStatusNetworkSlot();
           }
-          if (!isCurrent()) return;
+          if (!next || !isCurrent()) return;
           set((prev) => {
             const nextEntries = { ...prev.entries };
             signatureKeys.forEach((signatureKey) => {

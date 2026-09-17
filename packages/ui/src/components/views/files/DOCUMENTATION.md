@@ -14,7 +14,7 @@ rebuild the Git index.
 
 Desktop `FilesView` in editor-only mode neither loads nor constructs its unused
 tree. Mobile retains its tree. The context panel passes actual visibility,
-including both the panel's open state and its active tab, to each file surface.
+including the panel's open state, its active tab, and the editor toggle, to each file surface.
 Hidden surfaces retain drafts, loaded content and scroll state. They stop
 directory and file metadata polling; reopening checks freshness once before
 normal polling resumes. Autosave is independent of visibility.
@@ -27,3 +27,10 @@ Sidebar root/runtime changes remount the scoped tree. Its bounded module cache
 provides continuity between mounts; request cancellation for collapsed paths
 stops queued batches, while already-started reads may populate the same-scope
 cache. Runtime changes and unmount invalidate those active reads.
+
+Sidebar rows use browser `content-visibility: auto` to skip layout and paint for
+offscreen row contents without unmounting them. The explicit row height follows
+the meta line height, the icon minimum and vertical padding, so remembered
+offscreen dimensions cannot retain an old font size. Expanded child lists
+sit outside each row's containment, so expansion, scrolling, focus and menus keep
+their existing DOM structure. Reopening still refreshes directory contents.

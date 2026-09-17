@@ -4,6 +4,7 @@ import {
   applyGlobalSessionStatusEvent,
   applyGlobalSessionStatusEvents,
   applyGlobalSessionStatusSnapshot,
+  getDirectoryOwnedSessionIds,
   useGlobalSessionStatusStore,
   replaceGlobalSessionStatusById,
 } from "./global-session-status"
@@ -18,6 +19,18 @@ beforeEach(() => {
 
 describe("global session status index", () => {
   const activeSessionIds = (): ReadonlySet<string> => useGlobalSessionStatusStore.getState().activeSessionIds
+
+  test("a parent directory snapshot cannot settle a worktree session merely contained in its list", () => {
+    const sessions = ["/repo", "/tree"].map((directory) => ({
+      id: directory, slug: directory, directory, projectID: "project", title: "Session", version: "1",
+      time: { created: 1, updated: 1 },
+    }))
+    applyGlobalSessionStatusSnapshot("/tree", { "/tree": { type: "busy" } })
+    const ownedIds = getDirectoryOwnedSessionIds("/repo", sessions)
+    expect(ownedIds).toEqual(["/repo"])
+    applyGlobalSessionStatusSnapshot("/repo", {}, ownedIds)
+    expect(activeSessionIds().has("/tree")).toBe(true)
+  })
 
   test("preserves full retry status details from live events", () => {
     applyGlobalSessionStatusEvent("/repo", {

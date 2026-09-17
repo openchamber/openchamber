@@ -30,6 +30,7 @@ import {
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
   SETTINGS_SELECT_SIZE,
 } from '@/components/sections/shared/SettingsSection';
+import { resolveBehaviorPrompt, type BehaviorPromptSource } from './behaviorPrompt';
 
 const agentsMdResponseSchema = z.object({
   content: z.string(),
@@ -125,6 +126,7 @@ export const BehaviorPage: React.FC = () => {
         ]);
 
         let nextSettings: BehaviorSettingsState = DEFAULT_BEHAVIOR_SETTINGS;
+        let settingsGlobalBehaviorPrompt: string | undefined;
         if (data) {
           nextSettings = {
             ...nextSettings,
@@ -134,18 +136,27 @@ export const BehaviorPage: React.FC = () => {
             responseStyleCustomInstructions: data.responseStyleCustomInstructions ?? '',
           };
           if (data.globalBehaviorPrompt !== undefined) {
-            nextSettings = { ...nextSettings, prompt: data.globalBehaviorPrompt };
+            settingsGlobalBehaviorPrompt = data.globalBehaviorPrompt;
           }
         }
 
+        // AGENTS.md is the source of truth OpenCode reads at runtime, so an
+        // existing file is authoritative even when it is empty. The persisted
+        // copy (globalBehaviorPrompt) is only a fallback for a missing file or
+        // a failed read.
+        let promptSource: BehaviorPromptSource = { kind: 'missing' };
         if (agentsMdRes.ok) {
           const agentsData = agentsMdResponseSchema.parse(await agentsMdRes.json());
           if (abort.signal.aborted) return;
           setAgentsMdPath(agentsData.path ?? 'AGENTS.md');
-          if (!nextSettings.prompt.trim()) {
-            nextSettings = { ...nextSettings, prompt: agentsData.content };
+          if (agentsData.exists) {
+            promptSource = { kind: 'file', content: agentsData.content };
           }
         }
+        nextSettings = {
+          ...nextSettings,
+          prompt: resolveBehaviorPrompt(promptSource, settingsGlobalBehaviorPrompt),
+        };
 
         setPrompt(nextSettings.prompt);
         setOptimizeSystemPrompt(nextSettings.optimizeSystemPrompt);

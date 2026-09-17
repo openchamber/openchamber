@@ -1,6 +1,6 @@
 import express from 'express';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
-import { createWorktree, getWorktreeBootstrapStatus } from '../git/index.js';
+import { createWorktree, getWorktreeBootstrapStatus, resolvePrimaryWorktreeRoot } from '../git/index.js';
 import { expandSnippets } from '../opencode/snippets.js';
 import { expandCommandGoalObjective, parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
@@ -75,12 +75,25 @@ const resolveVariant = (providers, providerID, modelID, variant) => {
   if (!normalized) return undefined;
   const provider = providers.find((entry) => entry?.id === providerID);
   const model = providerModels(provider).find((entry) => entry?.id === modelID);
+  if (!model) return normalized;
   return model?.variants && Object.prototype.hasOwnProperty.call(model.variants, normalized)
     ? normalized
     : undefined;
 };
 
 const parseConfigModel = (value) => splitModel(value);
+
+const resolveProjectDefaults = (settings, directory, projectId) => {
+  const projects = Array.isArray(settings?.projects) ? settings.projects : [];
+  const matchedProject = projectId
+    ? projects.find((entry) => entry?.id === projectId) || null
+    : projects.find((entry) => entry?.path === directory) || null;
+  return {
+    defaultAgent: asNonEmptyString(matchedProject?.defaultAgent),
+    defaultModel: asNonEmptyString(matchedProject?.defaultModel),
+    defaultVariant: asNonEmptyString(matchedProject?.defaultVariant),
+  };
+};
 
 const buildDirectoryHeaders = (directory) => ({
   // OpenCode rejects non-ASCII header values; the official SDK sends this
@@ -121,11 +134,15 @@ const fetchSelectionInputs = async ({ buildOpenCodeUrl, authHeaders, directory, 
   };
 };
 
-const resolveDefaultSelection = ({ agents, providers, settings, opencodeDefaultAgent, opencodeDefaultModel }) => {
+const resolveDefaultSelection = ({ agents, providers, settings, projectDefaults, opencodeDefaultAgent, opencodeDefaultModel }) => {
   const primaryAgents = agents.filter((agent) => isPrimaryAgentMode(agent?.mode) && agent?.hidden !== true);
   let resolvedAgent = null;
+  const projectDefaultAgent = asNonEmptyString(projectDefaults?.defaultAgent);
   const settingsDefaultAgent = asNonEmptyString(settings?.defaultAgent);
-  if (settingsDefaultAgent) {
+  if (projectDefaultAgent) {
+    resolvedAgent = agents.find((agent) => agent?.name === projectDefaultAgent) || null;
+  }
+  if (!resolvedAgent && settingsDefaultAgent) {
     resolvedAgent = agents.find((agent) => agent?.name === settingsDefaultAgent) || null;
   }
   if (!resolvedAgent && opencodeDefaultAgent) {
@@ -140,20 +157,24 @@ const resolveDefaultSelection = ({ agents, providers, settings, opencodeDefaultA
 
   let model = null;
   let variant;
+  const projectDefaultModel = parseConfigModel(projectDefaults?.defaultModel);
   const settingsDefaultModel = parseConfigModel(settings?.defaultModel);
-  if (settingsDefaultModel && hasProviderModel(providers, settingsDefaultModel.providerID, settingsDefaultModel.modelID)) {
+  if (projectDefaultModel) {
+    model = projectDefaultModel;
+    variant = resolveVariant(providers, model.providerID, model.modelID, projectDefaults?.defaultVariant);
+  }
+  if (!model && settingsDefaultModel) {
     model = settingsDefaultModel;
     variant = resolveVariant(providers, model.providerID, model.modelID, settings?.defaultVariant);
   }
 
-  if (!model && resolvedAgent?.model?.providerID && resolvedAgent?.model?.modelID
-    && hasProviderModel(providers, resolvedAgent.model.providerID, resolvedAgent.model.modelID)) {
+  if (!model && resolvedAgent?.model?.providerID && resolvedAgent?.model?.modelID) {
     model = { providerID: resolvedAgent.model.providerID, modelID: resolvedAgent.model.modelID };
     variant = resolveVariant(providers, model.providerID, model.modelID, resolvedAgent.variant);
   }
 
   const opencodeModel = parseConfigModel(opencodeDefaultModel);
-  if (!model && opencodeModel && hasProviderModel(providers, opencodeModel.providerID, opencodeModel.modelID)) {
+  if (!model && opencodeModel) {
     model = opencodeModel;
   }
 
@@ -304,9 +325,15 @@ const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated
 
   const directory = asNonEmptyString(payload?.directory);
   const validated = await validateDirectoryPath(directory);
-  return validated.ok
-    ? { ok: true, directory: validated.directory }
-    : { ok: false, status: 400, error: validated.error || 'Invalid directory' };
+  if (!validated.ok) return { ok: false, status: 400, error: validated.error || 'Invalid directory' };
+  const settings = await readSettingsFromDiskMigrated();
+  const projects = sanitizeProjects(settings?.projects || []);
+  let project = projects.find((entry) => entry.path === validated.directory);
+  if (!project && projects.length > 0) {
+    const { root } = await resolvePrimaryWorktreeRoot(validated.directory);
+    project = projects.find((entry) => entry.path === root);
+  }
+  return { ok: true, directory: validated.directory, ...(project ? { projectId: project.id } : {}) };
 };
 
 const PROMPT_LANDED_TIMEOUT_MS = 5_000;
@@ -468,6 +495,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     authHeaders,
     sessionID,
     directory,
+    projectId,
     prompt,
     goalInput,
     requestedModel,
@@ -495,7 +523,10 @@ export const createOpenChamberSessionService = (dependencies) => {
         directory,
         readSettingsFromDiskMigrated,
       });
-      const defaults = resolveDefaultSelection(inputs);
+      const defaults = resolveDefaultSelection({
+        ...inputs,
+        projectDefaults: resolveProjectDefaults(inputs.settings, directory, projectId),
+      });
       if (!model) {
         model = defaults.model;
         if (variant == null) variant = defaults.variant;
@@ -735,6 +766,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         authHeaders,
         sessionID,
         directory: sessionDirectory,
+        projectId: resolvedDirectory.projectId,
         prompt,
         goalInput,
         requestedModel: model,
@@ -838,6 +870,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         authHeaders,
         sessionID: targetSessionID,
         directory,
+        projectId: resolvedDirectory.projectId,
         prompt,
         goalInput,
         requestedModel,

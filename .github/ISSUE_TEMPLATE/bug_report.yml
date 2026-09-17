@@ -3,6 +3,19 @@ description: Report something broken
 title: "[Bug] "
 labels: [bug]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Please write in English. The maintainers skim every report, and one in another language waits until someone translates it. Machine translation is fine.
+
+  - type: checkboxes
+    id: language
+    attributes:
+      label: Language
+      options:
+        - label: This report is written in English
+          required: true
+
   - type: textarea
     id: what
     attributes:
@@ -28,8 +41,11 @@ body:
   - type: input
     id: version
     attributes:
-      label: Version (if known)
-      placeholder: "e.g. 1.2.3"
+      label: Version
+      description: Settings > About shows it.
+      placeholder: "e.g. 1.23.0"
+    validations:
+      required: true
 
   - type: textarea
     id: screenshots

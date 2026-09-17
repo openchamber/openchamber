@@ -14,6 +14,8 @@ import { ElectronSshManager } from './ssh-manager.mjs';
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
+import { stopEmbeddedServer } from './server-shutdown.mjs';
+import { createShellEnvironmentLoader } from './shell-environment.mjs';
 import { resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
 import { probeDirectHostWithRetry } from './host-probe-policy.mjs';
@@ -272,6 +274,7 @@ const state = {
   quitInProgress: false,
   quitConfirmationPending: false,
   backgroundShutdownComplete: false,
+  backgroundShutdownPromise: null,
   sshShutdownPromise: null,
   installingUpdate: false,
   pendingUpdate: null,
@@ -364,14 +367,18 @@ const quitConfirmationMessage = () => {
 };
 
 const shutdownBackgroundServices = () => {
-  if (state.backgroundShutdownComplete) return;
-  state.backgroundShutdownComplete = true;
-  setDesktopKeepAwakeActive(false);
-  if (state.installingUpdate) return;
-  killSidecar();
-  setImmediate(() => {
-    void shutdownSshSessions();
-  });
+  if (!state.backgroundShutdownPromise) {
+    setDesktopKeepAwakeActive(false);
+    shellEnvironmentAbort.abort();
+    state.backgroundShutdownPromise = Promise.all([
+      loadShellEnv().catch(() => {}),
+      killSidecar(),
+      shutdownSshSessions(),
+    ]).finally(() => {
+      state.backgroundShutdownComplete = true;
+    });
+  }
+  return state.backgroundShutdownPromise;
 };
 
 const shutdownSshSessions = async () => {
@@ -389,10 +396,10 @@ const shutdownSshSessions = async () => {
   await state.sshShutdownPromise;
 };
 
-const prepareForQuit = ({ installingUpdate = false } = {}) => {
+const prepareForQuit = () => {
   state.quitRequested = true;
   state.quitConfirmed = true;
-  state.installingUpdate = installingUpdate;
+  state.installingUpdate = false;
   state.quitConfirmationPending = false;
 
   if (state.trayController) {
@@ -416,20 +423,21 @@ const prepareForQuit = ({ installingUpdate = false } = {}) => {
 
   setDesktopKeepAwakeActive(false);
 
-  if (installingUpdate) {
-    state.backgroundShutdownComplete = true;
-    return;
-  }
-
-  shutdownBackgroundServices();
+  return shutdownBackgroundServices();
 };
 
-const performConfirmedQuit = () => {
+const performConfirmedQuit = async ({ relaunch = false } = {}) => {
   if (state.quitInProgress) return;
   state.quitInProgress = true;
 
-  prepareForQuit();
-  app.exit(0);
+  try {
+    await prepareForQuit();
+  } catch (error) {
+    log.warn('[electron] background shutdown failed:', error);
+  } finally {
+    if (relaunch) app.relaunch();
+    app.exit(0);
+  }
 };
 
 // Hard-stop signals (`Ctrl+C` on `electron:dev`, an external `kill`/SIGTERM,
@@ -439,12 +447,7 @@ const performConfirmedQuit = () => {
 // reaper remains the backstop for an unhandled hard crash (SIGKILL).
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.on(signal, () => {
-    try {
-      shutdownBackgroundServices();
-    } catch (error) {
-      log.warn(`[electron] ${signal} shutdown failed:`, error);
-    }
-    app.exit(0);
+    void performConfirmedQuit();
   });
 }
 
@@ -1315,37 +1318,6 @@ const mapUpdaterProgressEvent = (payload) => ({
   data: payload.data,
 });
 
-const SHELL_ENV_TIMEOUT_MS = 5_000;
-let cachedShellEnv = null;
-let shellEnvProbed = false;
-
-const isNushell = (shell) => {
-  const name = path.basename(shell).toLowerCase();
-  return name === 'nu' || name === 'nu.exe';
-};
-
-const parseShellEnv = (buf) => {
-  const result = {};
-  for (const line of buf.toString('utf8').split('\0')) {
-    if (!line) continue;
-    const idx = line.indexOf('=');
-    if (idx <= 0) continue;
-    result[line.slice(0, idx)] = line.slice(idx + 1);
-  }
-  return result;
-};
-
-const probeShellEnv = (shell, mode) => {
-  const result = spawnSync(shell, [mode, '-c', 'env -0'], {
-    stdio: ['ignore', 'pipe', 'ignore'],
-    timeout: SHELL_ENV_TIMEOUT_MS,
-    windowsHide: true,
-  });
-  if (result.error || result.status !== 0) return null;
-  const env = parseShellEnv(result.stdout);
-  return Object.keys(env).length > 0 ? env : null;
-};
-
 const queryWindowsRegistryValue = (key, name) => {
   const result = spawnSync('reg.exe', ['query', key, '/v', name], {
     encoding: 'utf8',
@@ -1386,19 +1358,9 @@ const loadWindowsEnv = () => {
 };
 
 // Finder-launched apps on macOS inherit a minimal PATH (no /opt/homebrew, mise, asdf, etc.).
-// Probe the user's login shell once so the sidecar sees the same PATH / tool env as `$SHELL -il`.
-const loadShellEnv = () => {
-  if (shellEnvProbed) return cachedShellEnv;
-  shellEnvProbed = true;
-  if (process.platform === 'win32') {
-    cachedShellEnv = loadWindowsEnv();
-    return cachedShellEnv;
-  }
-  const shell = process.env.SHELL || '/bin/sh';
-  if (isNushell(shell)) return null;
-  cachedShellEnv = probeShellEnv(shell, '-il') || probeShellEnv(shell, '-l');
-  return cachedShellEnv;
-};
+// Probe once without blocking the splash; the backend awaits this environment.
+const shellEnvironmentAbort = new AbortController();
+const loadShellEnv = createShellEnvironmentLoader({ loadWindowsEnv, signal: shellEnvironmentAbort.signal });
 
 // Merge the user's login-shell env (PATH, etc.) into this process before we
 import { pathLooksUserConfigured, mergePathValues } from '@openchamber/web/server/lib/opencode/path-utils.js';
@@ -1407,12 +1369,12 @@ import { clearAppImageArgv0FromProcessEnv } from '@openchamber/web/server/lib/in
 // import/start the server in-process. The server and its children (opencode
 // CLI, git, etc.) inherit process.env directly now — there is no sidecar
 // subprocess to hand a custom env to.
-const inheritUserShellEnv = () => {
+const inheritUserShellEnv = async () => {
   // Clear before probing/merging so login-shell snapshots and children never
   // inherit the AppImage path as argv[0] via zsh's ARGV0 parameter (#2588).
   clearAppImageArgv0FromProcessEnv();
 
-  const shellEnv = loadShellEnv();
+  const shellEnv = await loadShellEnv();
   if (!shellEnv) return;
 
   const homeDir = os.homedir();
@@ -1433,15 +1395,15 @@ const inheritUserShellEnv = () => {
   }
 };
 
-const shouldSkipLocalServer = () => {
-  inheritUserShellEnv();
+const shouldSkipLocalServer = async () => {
+  await inheritUserShellEnv();
   return process.env.OPENCHAMBER_SKIP_LOCAL_SERVER === '1';
 };
 
 const spawnLocalServer = async () => {
   const serverStartedAt = performance.now();
   recordElectronStartupPerformance('electron.server.start');
-  inheritUserShellEnv();
+  await inheritUserShellEnv();
 
   const settings = readSettingsRoot();
   const storedPort = Number.isFinite(settings.desktopLocalPort) ? settings.desktopLocalPort : null;
@@ -1511,6 +1473,9 @@ const spawnLocalServer = async () => {
     attachSignals: false,
     exitOnShutdown: false,
     apiOnly: false,
+    builtInExtensionsDir: app.isPackaged
+      ? path.join(app.getAppPath().endsWith('.asar') ? `${app.getAppPath()}.unpacked` : app.getAppPath(), 'node_modules/@openchamber/web/server/built-in-extensions')
+      : undefined,
     onDesktopNotification: (payload) => maybeShowNativeNotification(payload),
     getIsWindowFocused: isAnyWindowFocused,
     getDesktopRuntimeConfig: () => ({
@@ -1626,17 +1591,16 @@ Stop-ProcessTree $targetPid $true
   child.unref();
 };
 
-const killSidecar = () => {
+const killSidecar = async () => {
   const handle = state.serverHandle;
   state.serverHandle = null;
   state.sidecarUrl = null;
   if (!handle) return;
 
-  try {
-    launchDetachedOpenCodeKiller(handle.getOpenCodeProcessInfo?.());
-  } catch (error) {
-    log.warn('[electron] failed to launch OpenCode killer:', error);
-  }
+  await stopEmbeddedServer(handle, {
+    launchFallback: launchDetachedOpenCodeKiller,
+    warn: (error) => log.warn('[electron] embedded server shutdown failed:', error),
+  });
 };
 
 const macosMajorVersion = () => {
@@ -2355,9 +2319,7 @@ const openDevToolsForMenuTarget = () => {
 };
 
 const relaunchFromMenu = () => {
-  prepareForQuit();
-  app.relaunch();
-  app.exit(0);
+  void performConfirmedQuit({ relaunch: true });
 };
 
 const nextWindowLabel = () => {
@@ -2952,7 +2914,7 @@ const resolveInitialUrl = async () => {
   const hmrApiUrl = `http://127.0.0.1:${hmrApiPort}`;
   const hmrUiUrl = `http://127.0.0.1:${hmrUiPort}`;
   const usePackagedUi = shouldUsePackagedUi();
-  const skipLocalServer = shouldSkipLocalServer();
+  const skipLocalServer = await shouldSkipLocalServer();
   const startupProbePlan = resolveStartupUrlProbePlan({
     development: isDev,
     packagedUi: usePackagedUi,
@@ -3152,9 +3114,9 @@ const installDownloadedUpdate = () => new Promise((resolve, reject) => {
 
   // Defer so the renderer's invoke channel is idle before the app starts
   // shutting down.
-  setImmediate(() => {
+  setImmediate(async () => {
     try {
-      killSidecar();
+      await shutdownBackgroundServices();
       autoUpdater.quitAndInstall();
     } catch (error) {
       fail(error);
@@ -3805,6 +3767,10 @@ const closeAllDevTunnels = () => {
 
 const handleInvoke = async (browserWindow, command, args = {}) => {
   switch (command) {
+    case 'desktop_pick_theme_file': {
+      const { pickThemeFile } = await import('./theme-file-picker.mjs');
+      return pickThemeFile({ showDialog: (options) => dialog.showOpenDialog(browserWindow || undefined, options) });
+    }
     case 'desktop_start_window_drag':
       return null;
 
@@ -4571,13 +4537,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       // Without this, relaunch can race with the renderer's pending invoke and
       // the restart appears to do nothing from the UI side.
       setImmediate(() => {
-        try {
-          prepareForQuit();
-          app.relaunch();
-          app.exit(0);
-        } catch (err) {
-          log.error('[electron] desktop_restart failed', err);
-        }
+        void performConfirmedQuit({ relaunch: true });
       });
       return null;
     }
@@ -5520,7 +5480,7 @@ app.whenReady().then(async () => {
     state.requestHeaders = sanitizeRuntimeRequestHeaders(requestHeaders || {});
     // Serverless background startup re-probes the remote when a window is
     // eventually opened instead of trusting reachability from login time.
-    state.startupResolved = !shouldSkipLocalServer();
+    state.startupResolved = !(await shouldSkipLocalServer());
     state.initScript = buildInitScript(localOrigin, state.bootOutcome, apiBaseUrl, clientToken, state.requestHeaders);
     log.info('[electron] started in background without window');
     return;
@@ -5544,6 +5504,7 @@ app.whenReady().then(async () => {
     emitToAllWindows('openchamber:system-resume', { timestamp: Date.now() });
   });
 }).catch((error) => {
+  if (state.quitInProgress) return;
   log.error('[electron] startup failed:', error);
   app.exit(1);
 });

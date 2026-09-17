@@ -23,6 +23,8 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { onHostSurfaceSeen } from '@/lib/surfaceAttention';
+import { markSessionViewed } from '@/sync/notification-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { SyncProvider } from '@/sync/sync-context';
 import { SyncAppEffects } from './AppEffects';
@@ -62,6 +64,14 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
   useRootScrollLock();
   useRouter();
   useGlobalSessionsPolling(panelType !== 'agentManager');
+
+  // Same as the window-focus effect in App.tsx: when the user can see this
+  // webview again, the selected session counts as seen. VS Code learns that from
+  // the extension host, not from a DOM focus event.
+  React.useEffect(() => onHostSurfaceSeen(() => {
+    const sessionId = useSessionUIStore.getState().currentSessionId;
+    if (sessionId) markSessionViewed(sessionId);
+  }), []);
 
   React.useEffect(() => {
     document.documentElement.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);

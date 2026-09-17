@@ -19,9 +19,12 @@ const themeView = (theme: Theme, client: RemoteSurfaceDevTools) => {
   const context: ThemeContextValue = {
     currentTheme: theme,
     availableThemes: [theme],
+    customThemeIds: [],
     setTheme: () => undefined,
     customThemesLoading: false,
     reloadCustomThemes: async () => undefined,
+    importTheme: async () => theme,
+    deleteImportedTheme: async () => undefined,
     isSystemPreference: false,
     setSystemPreference: () => undefined,
     themeMode: theme.metadata.variant,

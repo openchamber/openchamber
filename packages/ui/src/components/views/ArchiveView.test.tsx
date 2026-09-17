@@ -62,6 +62,9 @@ test('archive search uses exact IDs and preserves title search and archive membe
       input.dispatchEvent(new browser.Event('input', { bubbles: true }));
       input.dispatchEvent(new browser.Event('change', { bubbles: true }));
     });
+    await act(async () => {
+      input.dispatchEvent(new browser.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
     return [...document.querySelectorAll('[role="button"] > span:first-child')].map((row) => row.textContent);
   };
   expect(await search(id)).toEqual(['Release notes']);

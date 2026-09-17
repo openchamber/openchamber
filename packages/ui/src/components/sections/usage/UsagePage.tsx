@@ -46,7 +46,6 @@ export const UsagePage: React.FC = () => {
   const fetchAllQuotas = useQuotaStore((state) => state.fetchAllQuotas);
   const isLoading = useQuotaStore((state) => state.isLoading);
   const lastUpdated = useQuotaStore((state) => state.lastUpdated);
-  const error = useQuotaStore((state) => state.error);
   const refreshErrors = useQuotaStore((state) => state.refreshErrors);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
   const setDropdownProviderIds = useQuotaStore((state) => state.setDropdownProviderIds);
@@ -193,10 +192,14 @@ export const UsagePage: React.FC = () => {
         <p className="typography-ui-label text-foreground pb-8">{t('settings.usage.page.state.noData')}</p>
       )}
 
-      {(error || selectedProviderError) && (
+      {/* Only the selected provider's own failure belongs in its panel. The
+          store's global `error` is whichever provider failed first and has no
+          UI consumer left; shown here it labeled DeepSeek with Claude's
+          rate-limit message. */}
+      {selectedProviderError && (
         <div className="mb-8 rounded-lg border border-[var(--status-error-border)] bg-[var(--status-error-background)] px-4 py-3">
           <p className="typography-ui-label font-medium text-[var(--status-error)]">{t('settings.usage.page.state.refreshFailedTitle')}</p>
-          <p className="typography-meta text-[var(--status-error)]/80 mt-1">{selectedProviderError ?? error}</p>
+          <p className="typography-meta text-[var(--status-error)]/80 mt-1">{selectedProviderError}</p>
         </div>
       )}
 

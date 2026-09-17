@@ -340,7 +340,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     ),
     React.useCallback(
       () => bootstrapDirectories.map((directory) => (
-        `${directory}\u0000${childStores.getBootstrapState(directory) ?? ''}\u0000${childStores.getBootstrapFailure(directory) ?? ''}`
+        `${directory}\u0000${childStores.getBootstrapState(directory) ?? ''}\u0000${childStores.getBootstrapFailure(directory) ?? ''}\u0000${childStores.getInitializationState(directory) ?? ''}\u0000${childStores.getInitializationFailure(directory) ?? ''}`
       )).join('\u0001'),
       [bootstrapDirectories, childStores],
     ),
@@ -351,10 +351,13 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     return state === 'queued' || state === 'running';
   });
   const failedBootstrapDirectory = bootstrapDirectories.find(
-    (directory) => childStores.getBootstrapState(directory) === 'failed',
+    (directory) => childStores.getBootstrapState(directory) === 'failed' || childStores.getInitializationState(directory) === 'failed',
   ) ?? null;
+  const sessionListFailed = failedBootstrapDirectory !== null && childStores.getBootstrapState(failedBootstrapDirectory) === 'failed';
   const bootstrapFailure = failedBootstrapDirectory
-    ? childStores.getBootstrapFailure(failedBootstrapDirectory)
+    ? sessionListFailed
+      ? childStores.getBootstrapFailure(failedBootstrapDirectory)
+      : childStores.getInitializationFailure(failedBootstrapDirectory)
     : undefined;
   const canGrantBootstrapAccess = bootstrapFailure === 'os-permission' && canRequestNativeDirectoryAccess();
   const [isRequestingBootstrapAccess, setIsRequestingBootstrapAccess] = React.useState(false);
@@ -923,7 +926,9 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     <span className="inline-flex flex-wrap items-center gap-1.5">
       {bootstrapFailure === 'os-permission'
         ? t('sessions.sidebar.group.empty.permissionDenied')
-        : t('sessions.sidebar.group.empty.loadFailed')}
+        : sessionListFailed
+          ? t('sessions.sidebar.group.empty.loadFailed')
+          : t('sessions.sidebar.group.empty.initializationFailed')}
       {canGrantBootstrapAccess ? (
         <Button
           variant="link"
@@ -1227,7 +1232,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                       mode: 'session',
                     });
                   }}
-                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   aria-label={t('sessions.sidebar.group.actions.deleteArchivedInGroupAria', { label: group.label })}
                 >
                   <Icon name="delete-bin" className="h-4 w-4" />
@@ -1251,7 +1256,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                       worktree: group.worktree,
                     });
                   }}
-                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   aria-label={t('sessions.sidebar.group.actions.deleteGroupAria', { label: group.label })}
                 >
                   <Icon name="delete-bin" className="h-4 w-4" />
@@ -1273,7 +1278,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                     if (mobileVariant) setSessionSwitcherOpen(false);
                     openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: group.directory });
                   }}
-                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   aria-label={t('sessions.sidebar.group.actions.newDraftInGroupAria', { label: group.label })}
                  >
                    <Icon name="add" className="h-4 w-4" />

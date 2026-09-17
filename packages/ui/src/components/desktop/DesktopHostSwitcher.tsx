@@ -763,7 +763,7 @@ export function DesktopHostSwitcherDialog({
               className={cn(
                 'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
                 'hover:text-foreground hover:bg-interactive-hover',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
               )}
               onClick={() => void probeAll(allHosts)}
               disabled={!desktopAvailable || isLoading || isProbing}

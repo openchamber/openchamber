@@ -116,11 +116,11 @@ const SourceCard: React.FC<{
       onClick={onSelect}
       aria-pressed={isActive}
       className={cn(
-        'w-full min-h-24 text-left rounded-lg border bg-[var(--surface-elevated)] p-3.5 flex gap-3 items-start transition-colors',
+        'oc-surface-elevated w-full min-h-24 text-left rounded-lg border bg-surface-elevated p-3.5 flex gap-3 items-start transition-colors',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         isActive
-          ? 'border-primary'
-          : 'border-[var(--surface-subtle)] hover:border-[var(--interactive-border-hover)]'
+          ? 'border-border bg-interactive-selection text-interactive-selection-foreground'
+          : 'border-border hover:border-interactive-border-hover'
       )}
     >
       <span className="min-w-0 flex-1 block">

@@ -315,12 +315,32 @@ function startInstalledInstance(directory, port) {
   });
 }
 
-function packageWeb() {
-  step('Building web bundle', () => run('bun', ['run', '--cwd', 'packages/web', 'build']));
-  const packOutput = step('Creating web package archive', () => run('npm', ['pack', '--pack-destination', repoRoot], { cwd: path.join(repoRoot, 'packages/web'), capture: true }));
+function packWorkspace(label, workspaceDir) {
+  // bun rewrites the workspace link to @openchamber/sdk; npm pack would ship `workspace:*`.
+  const packOutput = step(label, () => run('bun', ['pm', 'pack', '--destination', repoRoot], { cwd: path.join(repoRoot, workspaceDir), capture: true }));
+  // bun prints the archive as an absolute path (npm printed a bare file name).
   const packageName = packOutput.split('\n').find((line) => line.trim().endsWith('.tgz'))?.trim();
-  if (!packageName) throw new Error('Archive creation failed: npm pack did not print a .tgz file.');
-  return path.join(repoRoot, packageName);
+  if (!packageName) throw new Error(`Archive creation failed: bun pm pack did not print a .tgz file for ${workspaceDir}.`);
+  return path.isAbsolute(packageName) ? packageName : path.join(repoRoot, packageName);
+}
+
+/**
+ * The web package depends on @openchamber/sdk at the app's version. Until that
+ * version is on npm (it ships with the release), an install has to take the
+ * SDK from a tarball built here, so both archives travel together and the
+ * target's package.json gets an override pointing at the SDK tarball.
+ */
+function packageWeb() {
+  step('Building SDK', () => run('bun', ['run', '--cwd', 'packages/sdk', 'build']));
+  const sdkFile = packWorkspace('Creating SDK package archive', 'packages/sdk');
+  step('Building web bundle', () => run('bun', ['run', '--cwd', 'packages/web', 'build']));
+  const webFile = packWorkspace('Creating web package archive', 'packages/web');
+  return { webFile, sdkFile };
+}
+
+/** Node one-liner that points the SDK dependency at a tarball; runs locally and over ssh. */
+function sdkOverrideScript(sdkPath) {
+  return `node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.overrides={...(p.overrides||{}),'@openchamber/sdk':'file:${sdkPath}'};fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\\n')"`;
 }
 
 async function selectRemoteDeployment(config, options) {
@@ -360,7 +380,7 @@ async function deployWeb(options, config) {
     throw new Error('Invalid deployment mode. Use global or testing. Use remote-deploy-web for configured remote deployments.');
   }
 
-  const packageFile = packageWeb();
+  const { webFile: packageFile, sdkFile } = packageWeb();
 
   if (deploymentMode === 'testing') {
     const testingDir = path.join(os.homedir(), TESTING_DIR);
@@ -368,6 +388,7 @@ async function deployWeb(options, config) {
     step('Preparing testing install directory', () => {
       resetDirectory(testingDir);
       run('bun', ['init', '-y'], { cwd: testingDir });
+      run('sh', ['-c', sdkOverrideScript(sdkFile)], { cwd: testingDir, label: 'point @openchamber/sdk at the local archive' });
     });
     step('Installing testing package', () => run('bun', ['add', packageFile], { cwd: testingDir }));
     step(`Starting testing instance on ${TESTING_PORT}`, () => startInstalledInstance(testingDir, TESTING_PORT));
@@ -379,6 +400,7 @@ async function deployWeb(options, config) {
     run('bun', ['remove', '-g', '@openchamber/web'], { allowFail: true, label: 'remove @openchamber/web' });
     run('bun', ['remove', '-g', 'openchamber'], { allowFail: true, label: 'remove openchamber' });
   });
+  // A global install cannot carry an override, so it needs the SDK on npm (published with each release).
   step('Installing package globally', () => run('bun', ['add', '-g', packageFile]));
   step(`Starting global instance on ${GLOBAL_PORT}`, () => {
     const cliPath = installedGlobalWebCli();
@@ -389,7 +411,8 @@ async function deployWeb(options, config) {
 
 async function deployRemoteWeb(options, config) {
   const remote = await selectRemoteDeployment(config, options);
-  const packageFile = packageWeb();
+  const { webFile: packageFile, sdkFile } = packageWeb();
+  const sdkBase = path.basename(sdkFile);
   const host = remote.host;
   const dir = remote.dir;
   const port = String(remote.port);
@@ -404,9 +427,10 @@ async function deployRemoteWeb(options, config) {
   step('Copying package to remote', () => {
     run('ssh', [host, `mkdir -p ~/${dir}/releases && rm -f ~/${dir}/releases/*.tgz`]);
     run('scp', ['-q', packageFile, `${host}:~/${dir}/releases/${packageBase}`]);
+    run('scp', ['-q', sdkFile, `${host}:~/${dir}/releases/${sdkBase}`]);
   });
   step('Resetting remote install state', () => run('ssh', [host, `cd ~/${dir} && rm -f package.json package-lock.json pnpm-lock.yaml bun.lockb && rm -rf node_modules`]));
-  step('Preparing remote package manifest', () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; if command -v bun >/dev/null 2>&1; then bun init -y; else npm init -y; fi`]));
+  step('Preparing remote package manifest', () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; if command -v bun >/dev/null 2>&1; then bun init -y; else npm init -y; fi; ${sdkOverrideScript(`./releases/${sdkBase}`)}`]));
   step('Installing remote package', () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; if command -v bun >/dev/null 2>&1; then bun add ./releases/${packageBase}; else npm install ./releases/${packageBase}; fi`]));
   step(`Starting remote instance on ${host}:${port}`, () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; PASSWORD_VALUE=$(grep '^export OPENCHAMBER_UI_PASSWORD=' ~/.bashrc 2>/dev/null | sed -E 's/.*=["“]?([^"”]+)["”]?/\\1/' || true); if [ -n "$PASSWORD_VALUE" ]; then export OPENCHAMBER_UI_PASSWORD="$PASSWORD_VALUE"; fi; if [ ${quote(apiOnly)} = 'true' ]; then export OPENCHAMBER_API_ONLY=true; fi; if command -v bun >/dev/null 2>&1; then OPENCHAMBER_HOST=${quote(bindHost)} bun ./node_modules/@openchamber/web/bin/cli.js --port ${quote(port)} >/dev/null 2>&1; else OPENCHAMBER_HOST=${quote(bindHost)} node ./node_modules/@openchamber/web/bin/cli.js --port ${quote(port)} >/dev/null 2>&1; fi; sleep 0.5; if command -v lsof >/dev/null 2>&1; then lsof -ti :${quote(port)} >/dev/null 2>&1 || exit 1; fi`]));
   log.success(`Remote deployment ready: ${host}:${port}`);

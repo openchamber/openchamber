@@ -31,6 +31,8 @@ describe('VS Code webview settings API', () => {
       const api = createVSCodeSettingsAPI();
 
       const failedLoad = api.load();
+      // The first message after acquire is the webview:ready notification; the request follows it.
+      assert.deepEqual(messages.shift(), { type: 'webview:ready' });
       const failedRequest = messages.shift();
       assert.ok(failedRequest);
       testWindow.dispatchEvent(new MessageEvent('message', {

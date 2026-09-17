@@ -8,8 +8,10 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { spawn, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { execGit as executeGit } from './bridge-git-process-runtime';
+import { readSubmoduleState, resolveGitPathTarget, type GitPathUnavailable, type GitSubmoduleState } from './gitPathDiff';
 import type { API as GitAPI, Repository, GitExtension, Status } from './git.d';
 
 let gitApi: GitAPI | null = null;
@@ -308,39 +310,7 @@ function cleanBranchName(branch: string): string {
  * Execute a raw git command and return the output
  */
 async function execGit(args: string[], cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  return new Promise((resolve) => {
-    const normalizedCwd = normalizePath(cwd);
-    const gitPath = gitApi?.git.path || 'git';
-
-    buildGitEnv().then((env) => {
-      const proc = spawn(gitPath, args, {
-        cwd: normalizedCwd,
-        env,
-        windowsHide: true,
-      });
-
-      let stdout = '';
-      let stderr = '';
-
-      proc.stdout?.on('data', (data) => {
-        stdout += data.toString();
-      });
-
-      proc.stderr?.on('data', (data) => {
-        stderr += data.toString();
-      });
-
-      proc.on('close', (exitCode) => {
-        resolve({ stdout, stderr, exitCode: exitCode ?? 0 });
-      });
-
-      proc.on('error', (error) => {
-        resolve({ stdout: '', stderr: error.message, exitCode: 1 });
-      });
-    }).catch((error) => {
-      resolve({ stdout: '', stderr: error instanceof Error ? error.message : String(error), exitCode: 1 });
-    });
-  });
+  return executeGit(args, normalizePath(cwd), { binary: gitApi?.git.path || 'git' });
 }
 
 function isValidCommitHash(hash: string): boolean {
@@ -2246,21 +2216,29 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
 // ============== Diff Operations ==============
 
 /**
- * Get diff for a file
+ * Get diff for a status path. A path that no longer resolves, or a nested
+ * repository, is reported as unavailable rather than as an empty diff.
  */
 export async function getGitDiff(
   directory: string, 
   filePath: string, 
   staged = false,
   contextLines?: number
-): Promise<{ diff: string }> {
+): Promise<{ kind: 'diff'; diff: string; submodule: GitSubmoduleState | null } | GitPathUnavailable> {
+  const target = await resolveGitPathTarget(execGit, directory, filePath);
+  if (target.kind === 'unavailable') return target;
+
   const args = ['diff'];
   if (staged) args.push('--cached');
   if (typeof contextLines === 'number') args.push(`-U${contextLines}`);
-  args.push('--', filePath);
+  args.push('--', target.repoPath);
 
   const result = await execGit(args, directory);
-  return { diff: result.stdout };
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.trim() || 'Failed to get Git diff');
+  }
+  const submodule = target.kind === 'submodule' ? await readSubmoduleState(execGit, directory, target) : null;
+  return { kind: 'diff', diff: result.stdout, submodule };
 }
 
 /**
@@ -2334,7 +2312,22 @@ export async function getGitFileDiff(
   directory: string, 
   filePath: string, 
   staged = false
-): Promise<{ original: string; modified: string; path: string }> {
+): Promise<{ kind: 'file-diff'; original: string; modified: string; path: string; submodule: GitSubmoduleState | null } | GitPathUnavailable> {
+  const target = await resolveGitPathTarget(execGit, directory, filePath);
+  if (target.kind === 'unavailable') return target;
+  if (target.kind === 'submodule') {
+    // Git's own text form of a gitlink; `submodule` carries what text cannot.
+    const submodule = await readSubmoduleState(execGit, directory, target);
+    const describeCommit = (commit: string | null) => (commit ? `Subproject commit ${commit}\n` : '');
+    return {
+      kind: 'file-diff',
+      original: describeCommit(submodule.headCommit),
+      modified: describeCommit(staged ? submodule.indexCommit : submodule.worktreeCommit),
+      path: filePath,
+      submodule,
+    };
+  }
+
   const repo = await getRepository(directory);
   
   if (repo) {
@@ -2364,14 +2357,14 @@ export async function getGitFileDiff(
         modified = Buffer.from(modifiedBytes).toString('utf8');
       }
       
-      return { original, modified, path: filePath };
+      return { kind: 'file-diff', original, modified, path: filePath, submodule: null };
     } catch (error) {
       console.error('[GitService] Failed to get file diff:', error);
     }
   }
 
   // Fallback: return empty content
-  return { original: '', modified: '', path: filePath };
+  return { kind: 'file-diff', original: '', modified: '', path: filePath, submodule: null };
 }
 
 /**

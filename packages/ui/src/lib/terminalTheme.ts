@@ -1,5 +1,6 @@
 import type { Theme } from '@/types/theme';
 import type { GhosttyColor, GhosttyTheme } from '@/lib/ghostty/core';
+import { withOpacity } from './theme/color';
 
 export interface TerminalTheme {
   background: string;
@@ -40,7 +41,7 @@ export function convertThemeToXterm(theme: Theme): TerminalTheme {
 
     selectionBackground: colors.interactive.selection,
     selectionForeground: colors.interactive.selectionForeground,
-    selectionInactiveBackground: colors.interactive.selection + '50',
+    selectionInactiveBackground: withOpacity(colors.interactive.selection, 0.31),
 
     black: colors.surface.muted,
     red: colors.status.error,

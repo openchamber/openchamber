@@ -2,21 +2,13 @@ import React, { act } from 'react';
 import { describe, expect, mock, test } from 'bun:test';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
-import { create } from 'zustand';
 
 type GitHubSelection = {
   type: 'issue';
   item: { number: number; title: string };
 };
 
-type WorktreeState = {
-  availableWorktreesByProject: Map<string, Array<{ name: string }>>;
-};
-
 const project = { id: 'project-a', path: '/workspace/project-a' };
-const useWorktreeStore = create<WorktreeState>(() => ({
-  availableWorktreesByProject: new Map(),
-}));
 let selectGitHubItem: ((selection: GitHubSelection) => void) | null = null;
 
 const projectStoreState = { getActiveProject: () => project };
@@ -33,12 +25,23 @@ const selectGitState = <T,>(selector: (state: typeof gitState) => T): T => selec
 
 const passthrough = ({ children }: React.PropsWithChildren) => <div>{children}</div>;
 
+const actualDialog = await import('@/components/ui/dialog');
+const actualDropdownMenu = await import('@/components/ui/dropdown-menu');
+const actualCommand = await import('@/components/ui/command');
+const actualSessionUIStore = await import('@/sync/session-ui-store');
+const actualSessionActions = await import('@/sync/session-actions');
+const actualWorktreeManager = await import('@/lib/worktrees/worktreeManager');
+const actualBranchNameGenerator = await import('@/lib/git/branchNameGenerator');
+
 mock.module('@/components/ui/dialog', () => ({
+  ...actualDialog,
   Dialog: ({ children, open }: React.PropsWithChildren<{ open: boolean }>) => open ? <>{children}</> : null,
   DialogContent: passthrough,
   DialogHeader: passthrough,
   DialogTitle: passthrough,
+  DialogDescription: passthrough,
   DialogFooter: passthrough,
+  DialogTrigger: passthrough,
 }));
 
 mock.module('@/components/ui/input', () => ({
@@ -56,18 +59,29 @@ mock.module('@/components/ui', () => ({
 }));
 
 mock.module('@/components/ui/dropdown-menu', () => ({
+  ...actualDropdownMenu,
   DropdownMenu: passthrough,
-  DropdownMenuContent: passthrough,
   DropdownMenuTrigger: passthrough,
+  DropdownMenuContent: passthrough,
+  DropdownMenuLabel: passthrough,
+  DropdownMenuItem: passthrough,
+  DropdownMenuRadioGroup: passthrough,
+  DropdownMenuRadioItem: passthrough,
+  DropdownMenuSeparator: passthrough,
+  DropdownMenuSub: passthrough,
+  DropdownMenuSubTrigger: passthrough,
+  DropdownMenuSubContent: passthrough,
 }));
 
 mock.module('@/components/ui/command', () => ({
+  ...actualCommand,
   Command: passthrough,
   CommandEmpty: passthrough,
   CommandGroup: passthrough,
   CommandInput: () => null,
   CommandItem: passthrough,
   CommandList: passthrough,
+  CommandShortcut: passthrough,
   CommandSeparator: () => null,
 }));
 
@@ -77,23 +91,35 @@ mock.module('@/components/icon/Icon', () => ({ Icon: () => null }));
 mock.module('@/components/ui/dropdown-trigger', () => ({ dropdownTriggerVariants: () => '' }));
 mock.module('@/lib/utils', () => ({ cn: (...values: Array<string | false | null | undefined>) => values.filter(Boolean).join(' ') }));
 
+const actualProjectsStore = await import('@/stores/useProjectsStore');
+const actualGitHubAuthStore = await import('@/stores/useGitHubAuthStore');
+const actualLinearAuthStore = await import('@/stores/useLinearAuthStore');
+const actualUIStore = await import('@/stores/useUIStore');
+const actualGitStore = await import('@/stores/useGitStore');
+
 mock.module('@/stores/useProjectsStore', () => ({
+  ...actualProjectsStore,
   useProjectsStore: selectProjectState,
 }));
 mock.module('@/stores/useGitHubAuthStore', () => ({
+  ...actualGitHubAuthStore,
   useGitHubAuthStore: selectGitHubAuthState,
 }));
 mock.module('@/stores/useLinearAuthStore', () => ({
+  ...actualLinearAuthStore,
   useLinearAuthStore: selectLinearAuthState,
 }));
 mock.module('@/stores/useUIStore', () => ({
+  ...actualUIStore,
   useUIStore: selectUIState,
 }));
 mock.module('@/sync/session-ui-store', () => ({
+  ...actualSessionUIStore,
   materializeOpenDraftSession: async () => null,
-  useSessionUIStore: useWorktreeStore,
+  useSessionUIStore: actualSessionUIStore.useSessionUIStore,
 }));
 mock.module('@/sync/session-actions', () => ({
+  ...actualSessionActions,
   createSession: async () => null,
   updateSessionTitle: async () => undefined,
 }));
@@ -101,11 +127,13 @@ mock.module('@/hooks/useRuntimeAPIs', () => ({
   useRuntimeAPIs: () => ({ github: {}, git: null, linear: null }),
 }));
 mock.module('@/stores/useGitStore', () => ({
+  ...actualGitStore,
   useGitBranches: () => ({ all: ['main'] }),
   useGitLoadingBranches: () => false,
   useGitStore: selectGitState,
 }));
 mock.module('@/lib/worktrees/worktreeManager', () => ({
+  ...actualWorktreeManager,
   validateWorktreeCreate: async () => ({ ok: true, errors: [] }),
 }));
 mock.module('@/lib/worktrees/worktreeCreate', () => ({ createWorktreeWithDefaults: async () => null }));
@@ -118,7 +146,10 @@ mock.module('@/lib/sharedTrustConfirmation', () => ({
   resolveWorktreeSetupCommands: async () => [],
 }));
 mock.module('@/lib/worktrees/worktreeStatus', () => ({ getRootBranch: async () => 'main' }));
-mock.module('@/lib/git/branchNameGenerator', () => ({ generateBranchSlug: () => 'draft-name' }));
+mock.module('@/lib/git/branchNameGenerator', () => ({
+  ...actualBranchNameGenerator,
+  generateBranchSlug: () => 'draft-name',
+}));
 
 mock.module('./GitHubIntegrationDialog', () => ({
   GitHubIntegrationDialog: ({ onSelect }: { onSelect: (selection: GitHubSelection) => void }) => {
@@ -185,7 +216,7 @@ describe('NewWorktreeDialog behavior', () => {
   test('preserves selected issue values when available worktree names change', async () => {
     const dom = installDom();
     const root = createRoot(dom.container);
-    useWorktreeStore.setState({ availableWorktreesByProject: new Map() });
+    actualSessionUIStore.useSessionUIStore.setState({ availableWorktreesByProject: new Map() });
 
     try {
       await act(async () => root.render(
@@ -205,9 +236,11 @@ describe('NewWorktreeDialog behavior', () => {
       expect(worktreeInput?.value).toBe('issue-42-draft-name');
       expect(dom.container.textContent).toContain('Keep the selected issue');
 
-      await act(async () => useWorktreeStore.setState({
+      // SAFETY: Test minimal worktree metadata stub for availableWorktreesByProject
+      const worktreeStub = { name: 'newly-created-worktree' } as import('@/types/worktree').WorktreeMetadata;
+      await act(async () => actualSessionUIStore.useSessionUIStore.setState({
         availableWorktreesByProject: new Map([
-          [project.path, [{ name: 'newly-created-worktree' }]],
+          [project.path, [worktreeStub]],
         ]),
       }));
 
@@ -216,6 +249,7 @@ describe('NewWorktreeDialog behavior', () => {
       expect(dom.container.textContent).toContain('Keep the selected issue');
     } finally {
       await act(async () => root.unmount());
+      actualSessionUIStore.useSessionUIStore.setState({ availableWorktreesByProject: new Map() });
       selectGitHubItem = null;
       dom.restore();
     }
