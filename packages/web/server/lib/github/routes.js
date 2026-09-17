@@ -438,11 +438,17 @@ export function registerGitHubRoutes(app) {
         return res.json(cached.data);
       }
 
-      // If GitHub recently rate-limited us, don't pile on more calls that will
-      // also fail. Serve whatever we last cached (even if stale); otherwise
-      // report a transient failure so the client keeps its last-known status.
+      // Resolve the checkout's host up front: the rate-limit gate and the
+      // octokit both key off it, and this is a cheap local git read.
+      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
+      const { repo: hostRepo } = await resolveGitHubRepoFromDirectory(directory, remote).catch(() => ({ repo: null }));
+
+      // If GitHub recently rate-limited us on this host, don't pile on more
+      // calls that will also fail. Serve whatever we last cached (even if
+      // stale); otherwise report a transient failure so the client keeps its
+      // last-known status.
       const { isGitHubRateLimited } = await import('./rate-limit.js');
-      if (isGitHubRateLimited()) {
+      if (isGitHubRateLimited(hostRepo?.host)) {
         if (cached) {
           return res.json(cached.data);
         }
@@ -466,7 +472,7 @@ export function registerGitHubRoutes(app) {
       };
 
       const { getOctokitOrNull, getGitHubAuth } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(hostRepo?.host);
       if (!octokit) {
         return res.json({ connected: false });
       }
@@ -598,7 +604,14 @@ export function registerGitHubRoutes(app) {
     } catch (error) {
       if (error?.status === 401) {
         const { clearGitHubAuth } = await getGitHubLibraries();
-        clearGitHubAuth();
+        // A 401 against an enterprise host means that host's gh token is bad,
+        // not the stored github.com account. Only clear github.com auth when
+        // the errored request actually hit github.com, so a GHE 401 can't
+        // wipe a valid login.
+        const { hostFromError } = await import('./rate-limit.js');
+        if (hostFromError(error) === 'github.com') {
+          clearGitHubAuth();
+        }
         return res.json({ connected: false });
       }
       // Transient failures — a rate limit, or the overall resolve timeout
@@ -697,19 +710,16 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
+      // Resolve the checkout before creating the octokit: it supplies the
+      // instance host. targetRepo (the fork upstream) carries only owner/repo,
+      // so the host always comes from the checkout, never from the PR target.
+      const resolved = await resolveGitHubRepoFromDirectory(directory, remote);
+      const octokit = getOctokitOrNull(resolved?.repo?.host);
       if (!octokit) {
         return res.status(401).json({ error: 'GitHub not connected' });
       }
-
-      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
-      let repo;
-      if (targetRepo) {
-        repo = targetRepo;
-      } else {
-        const resolved = await resolveGitHubRepoFromDirectory(directory, remote);
-        repo = resolved.repo;
-      }
+      const repo = targetRepo ?? resolved?.repo;
       if (!repo) {
         return res.status(400).json({ error: 'Unable to resolve GitHub repo from git remote' });
       }
@@ -892,13 +902,12 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
+      const { repo } = await resolveGitHubRepoFromDirectory(directory);
+      const octokit = getOctokitOrNull(repo?.host);
       if (!octokit) {
         return res.status(401).json({ error: 'GitHub not connected' });
       }
-
-      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
-      const { repo } = await resolveGitHubRepoFromDirectory(directory);
       if (!repo) {
         return res.status(400).json({ error: 'Unable to resolve GitHub repo from git remote' });
       }
@@ -968,13 +977,12 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
+      const { repo } = await resolveGitHubRepoFromDirectory(directory);
+      const octokit = getOctokitOrNull(repo?.host);
       if (!octokit) {
         return res.status(401).json({ error: 'GitHub not connected' });
       }
-
-      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
-      const { repo } = await resolveGitHubRepoFromDirectory(directory);
       if (!repo) {
         return res.status(400).json({ error: 'Unable to resolve GitHub repo from git remote' });
       }
@@ -1014,13 +1022,12 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
+      const { repo } = await resolveGitHubRepoFromDirectory(directory);
+      const octokit = getOctokitOrNull(repo?.host);
       if (!octokit) {
         return res.status(401).json({ error: 'GitHub not connected' });
       }
-
-      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
-      const { repo } = await resolveGitHubRepoFromDirectory(directory);
       if (!repo) {
         return res.status(400).json({ error: 'Unable to resolve GitHub repo from git remote' });
       }
@@ -1069,12 +1076,15 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
+      const { resolveRepoNetwork } = await import('./repo/fork-detection.js');
+
+      const { repo } = await resolveGitHubRepoFromDirectory(directory).catch(() => ({ repo: null }));
+      const octokit = getOctokitOrNull(repo?.host);
       if (!octokit) {
         return res.json({ connected: false, isFork: false, upstream: null });
       }
 
-      const { resolveRepoNetwork } = await import('./repo/fork-detection.js');
       const network = await resolveRepoNetwork(octokit, directory);
 
       if (!network || network.length <= 1) {
@@ -1131,12 +1141,23 @@ export function registerGitHubRoutes(app) {
     try {
       const owner = typeof req.query?.owner === 'string' ? req.query.owner.trim() : '';
       const repo = typeof req.query?.repo === 'string' ? req.query.repo.trim() : '';
+      const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
       if (!owner || !repo) {
         return res.status(400).json({ error: 'owner and repo are required' });
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      // Never trust a client-supplied host: it would pick which token the
+      // server sends where. Derive the host from the checkout's git remote
+      // (a fork and its upstream always share one instance). An absent
+      // directory keeps the github.com default so existing callers are unchanged.
+      let host;
+      if (directory) {
+        const { resolveGitHubRepoFromDirectory } = await import('./index.js');
+        const resolved = await resolveGitHubRepoFromDirectory(directory).catch(() => ({ repo: null }));
+        host = resolved?.repo?.host;
+      }
+      const octokit = getOctokitOrNull(host);
       if (!octokit) {
         return res.json({ branches: [] });
       }
@@ -1174,17 +1195,17 @@ export function registerGitHubRoutes(app) {
     }
     try {
       const { getOctokitOrNull, resolveGitHubRepoFromDirectory } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const { repo } = await resolveGitHubRepoFromDirectory(directory);
+      if (!repo) {
+        return res.json({ connected: true, repo: null, items: [], cursor: null, hasMore: false, total: 0 });
+      }
+      const octokit = getOctokitOrNull(repo?.host);
       if (!octokit) {
         return res.json({ connected: false });
       }
       const { isGitHubRateLimited } = await import('./rate-limit.js');
-      if (isGitHubRateLimited()) {
+      if (isGitHubRateLimited(repo?.host)) {
         return res.status(503).json({ error: 'GitHub rate limited' });
-      }
-      const { repo } = await resolveGitHubRepoFromDirectory(directory);
-      if (!repo) {
-        return res.json({ connected: true, repo: null, items: [], cursor: null, hasMore: false, total: 0 });
       }
       const { resolveRepoNetwork } = await import('./repo/fork-detection.js');
       const repos = (await resolveRepoNetwork(octokit, directory)) || [{ ...repo, source: 'origin' }];
@@ -1200,7 +1221,14 @@ export function registerGitHubRoutes(app) {
     } catch (error) {
       if (error?.status === 401) {
         const { clearGitHubAuth } = await getGitHubLibraries();
-        clearGitHubAuth();
+        // A 401 against an enterprise host means that host's gh token is bad,
+        // not the stored github.com account. Only clear github.com auth when
+        // the errored request actually hit github.com, so a GHE 401 can't
+        // wipe a valid login.
+        const { hostFromError } = await import('./rate-limit.js');
+        if (hostFromError(error) === 'github.com') {
+          clearGitHubAuth();
+        }
         return res.json({ connected: false });
       }
       const { isGraphqlRateLimitError } = await import('./pr-summaries.js');
@@ -1226,12 +1254,14 @@ export function registerGitHubRoutes(app) {
     }
     try {
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
+      const { repo: hostRepo } = await resolveGitHubRepoFromDirectory(directory).catch(() => ({ repo: null }));
+      const octokit = getOctokitOrNull(hostRepo?.host);
       if (!octokit) {
         return res.json({ connected: false });
       }
       const { isGitHubRateLimited } = await import('./rate-limit.js');
-      if (isGitHubRateLimited()) {
+      if (isGitHubRateLimited(hostRepo?.host)) {
         return res.status(503).json({ error: 'GitHub rate limited' });
       }
       // Only the project's own repo network, like every other per-item route.
@@ -1244,7 +1274,14 @@ export function registerGitHubRoutes(app) {
     } catch (error) {
       if (error?.status === 401) {
         const { clearGitHubAuth } = await getGitHubLibraries();
-        clearGitHubAuth();
+        // A 401 against an enterprise host means that host's gh token is bad,
+        // not the stored github.com account. Only clear github.com auth when
+        // the errored request actually hit github.com, so a GHE 401 can't
+        // wipe a valid login.
+        const { hostFromError } = await import('./rate-limit.js');
+        if (hostFromError(error) === 'github.com') {
+          clearGitHubAuth();
+        }
         return res.json({ connected: false });
       }
       const { isGraphqlRateLimitError } = await import('./pr-summaries.js');
@@ -1267,7 +1304,9 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
+      const { repo: ctxRepo } = await resolveGitHubRepoFromDirectory(directory).catch(() => ({ repo: null }));
+      const octokit = getOctokitOrNull(ctxRepo?.host);
       if (!octokit) {
         return res.json({ connected: false });
       }
@@ -1328,7 +1367,9 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
+      const { repo: ctxRepo } = await resolveGitHubRepoFromDirectory(directory).catch(() => ({ repo: null }));
+      const octokit = getOctokitOrNull(ctxRepo?.host);
       if (!octokit) {
         return res.json({ connected: false });
       }
@@ -1374,19 +1415,19 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
-      if (!octokit) {
-        return res.json({ connected: false });
-      }
-
       const { resolveGitHubRepoFromDirectory } = await import('./index.js');
       const { resolveRepoNetwork } = await import('./repo/fork-detection.js');
 
-      const repoNetwork = await resolveRepoNetwork(octokit, directory);
       const { repo } = await resolveGitHubRepoFromDirectory(directory);
       if (!repo) {
         return res.json({ connected: true, repo: null, prs: [] });
       }
+      const octokit = getOctokitOrNull(repo.host);
+      if (!octokit) {
+        return res.json({ connected: false });
+      }
+
+      const repoNetwork = await resolveRepoNetwork(octokit, directory);
 
       const effectivePage = Number.isFinite(page) && page > 0 ? page : 1;
       const reposToQuery = repoNetwork || [{ ...repo, source: 'origin' }];
@@ -1488,7 +1529,14 @@ export function registerGitHubRoutes(app) {
     } catch (error) {
       if (error?.status === 401) {
         const { clearGitHubAuth } = await getGitHubLibraries();
-        clearGitHubAuth();
+        // A 401 against an enterprise host means that host's gh token is bad,
+        // not the stored github.com account. Only clear github.com auth when
+        // the errored request actually hit github.com, so a GHE 401 can't
+        // wipe a valid login.
+        const { hostFromError } = await import('./rate-limit.js');
+        if (hostFromError(error) === 'github.com') {
+          clearGitHubAuth();
+        }
         return res.json({ connected: false });
       }
       console.error('Failed to list GitHub pull requests:', error);
@@ -1507,7 +1555,9 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
+      const { repo: ctxRepo } = await resolveGitHubRepoFromDirectory(directory).catch(() => ({ repo: null }));
+      const octokit = getOctokitOrNull(ctxRepo?.host);
       if (!octokit) {
         return res.json({ connected: false });
       }
@@ -1842,7 +1892,14 @@ export function registerGitHubRoutes(app) {
     } catch (error) {
       if (error?.status === 401) {
         const { clearGitHubAuth } = await getGitHubLibraries();
-        clearGitHubAuth();
+        // A 401 against an enterprise host means that host's gh token is bad,
+        // not the stored github.com account. Only clear github.com auth when
+        // the errored request actually hit github.com, so a GHE 401 can't
+        // wipe a valid login.
+        const { hostFromError } = await import('./rate-limit.js');
+        if (hostFromError(error) === 'github.com') {
+          clearGitHubAuth();
+        }
         return res.json({ connected: false });
       }
       console.error('Failed to load GitHub PR context:', error);

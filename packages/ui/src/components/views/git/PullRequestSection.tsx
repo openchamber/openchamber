@@ -318,7 +318,7 @@ function useDetectedUpstreamRepo(directory: string, github: GitHubAPI | undefine
         }
 
         try {
-          const branches = await github.repoBranches(result.upstream.owner, result.upstream.repo);
+          const branches = await github.repoBranches(result.upstream.owner, result.upstream.repo, directory);
           if (!cancelled) {
             setUpstreamBranches(branches);
           }
