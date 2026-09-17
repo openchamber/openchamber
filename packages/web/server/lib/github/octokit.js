@@ -68,17 +68,46 @@ const createConditionalFetch = (token) => async (url, options = {}) => {
   return response;
 };
 
-/** Create an Octokit instance with per-request timeout + ETag revalidation. */
-export function createOctokit(token) {
-  return new Octokit({ auth: token, request: { fetch: createConditionalFetch(token) } });
+/**
+ * Create an Octokit instance with per-request timeout + ETag revalidation.
+ *
+ * `host` targets a specific GitHub Enterprise API root. github.com (or omitted)
+ * keeps Octokit's default `api.github.com` base URL.
+ */
+export function createOctokit(token, host) {
+  const options = { auth: token, request: { fetch: createConditionalFetch(token) } };
+  if (host && host !== 'github.com') {
+    options.baseUrl = `https://${host}/api/v3`;
+  }
+  return new Octokit(options);
 }
 
-export function getOctokitOrNull() {
-  const auth = getGitHubAuth();
-  const ghToken = !isGhCliDisabled() ? getGhCliToken() : null;
-  const token = isGhCliActive() ? ghToken || auth?.accessToken : auth?.accessToken || ghToken;
+/**
+ * Pick the token for a host. github.com (or an omitted host) keeps the
+ * existing gh-token/stored-token fallback. An enterprise host must NOT fall
+ * back to the stored OAuth token: that token is always a github.com credential
+ * (the device flow is hardcoded to github.com), so sending it to another
+ * instance's API root 401s there and can leak the token to whatever host a
+ * local remote names. Only the host-pinned gh token belongs on an enterprise
+ * host.
+ */
+export function selectTokenForHost(host, { ghToken, storedToken, ghCliActive }) {
+  if (!host || host === 'github.com') {
+    return ghCliActive ? ghToken || storedToken : storedToken || ghToken;
+  }
+  return ghToken;
+}
+
+export function getOctokitOrNull(host) {
+  const storedToken = getGitHubAuth()?.accessToken;
+  const ghToken = !isGhCliDisabled() ? getGhCliToken(host) : null;
+  const token = selectTokenForHost(host, {
+    ghToken,
+    storedToken,
+    ghCliActive: isGhCliActive(),
+  });
   if (!token) {
     return null;
   }
-  return createOctokit(token);
+  return createOctokit(token, host);
 }
