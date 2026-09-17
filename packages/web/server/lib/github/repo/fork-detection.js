@@ -14,15 +14,16 @@ const setRepoMetadataCache = (repoKey, data) => {
   repoMetadataCache.set(repoKey, { data, fetchedAt: Date.now() });
 };
 
-const normalizeRepoKey = (owner, repo) => {
+const normalizeRepoKey = (owner, repo, host) => {
   const o = typeof owner === 'string' ? owner.trim().toLowerCase() : '';
   const r = typeof repo === 'string' ? repo.trim().toLowerCase() : '';
   if (!o || !r) return '';
-  return `${o}/${r}`;
+  const h = String(host ?? '').trim().toLowerCase();
+  return `${h || 'github.com'}::${o}/${r}`;
 };
 
 const getRepoMetadata = async (octokit, repo) => {
-  const repoKey = normalizeRepoKey(repo?.owner, repo?.repo);
+  const repoKey = normalizeRepoKey(repo?.owner, repo?.repo, repo?.host);
   if (!repoKey) return null;
 
   const cached = repoMetadataCache.get(repoKey);
@@ -65,17 +66,17 @@ export async function resolveRepoNetwork(octokit, directory, remoteName = 'origi
   if (!metadata) return [{ ...repo, source: 'origin' }];
 
   const result = [{ ...repo, source: 'origin' }];
-  const seenKeys = new Set([normalizeRepoKey(repo.owner, repo.repo)]);
+  const seenKeys = new Set([normalizeRepoKey(repo.owner, repo.repo, repo.host)]);
 
   const parent = metadata?.parent;
   if (parent?.owner?.login && parent?.name) {
-    const key = normalizeRepoKey(parent.owner.login, parent.name);
+    const key = normalizeRepoKey(parent.owner.login, parent.name, repo.host);
     if (!seenKeys.has(key)) {
       seenKeys.add(key);
       result.push({
         owner: parent.owner.login,
         repo: parent.name,
-        url: parent.html_url || `https://github.com/${parent.owner.login}/${parent.name}`,
+        url: parent.html_url || `https://${repo.host || 'github.com'}/${parent.owner.login}/${parent.name}`,
         source: 'upstream',
       });
     }
@@ -83,13 +84,13 @@ export async function resolveRepoNetwork(octokit, directory, remoteName = 'origi
 
   const source = metadata?.source;
   if (source?.owner?.login && source?.name) {
-    const key = normalizeRepoKey(source.owner.login, source.name);
+    const key = normalizeRepoKey(source.owner.login, source.name, repo.host);
     if (!seenKeys.has(key)) {
       seenKeys.add(key);
       result.push({
         owner: source.owner.login,
         repo: source.name,
-        url: source.html_url || `https://github.com/${source.owner.login}/${source.name}`,
+        url: source.html_url || `https://${repo.host || 'github.com'}/${source.owner.login}/${source.name}`,
         source: 'upstream',
       });
     }

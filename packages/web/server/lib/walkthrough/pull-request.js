@@ -10,7 +10,12 @@ import { resolveGitHubRepoFromDirectory } from '../github/repo/index.js';
  * base branch is not part of it.
  */
 export async function getPullRequestDiff(directory, number, sourceRepo, { allowEmpty = false } = {}) {
-  const octokit = getOctokitOrNull();
+  // The host comes from the local checkout, not the pull request: sourceRepo
+  // carries only owner/repo (the upstream for a fork), never the enterprise
+  // host. Resolve the directory first so the Octokit pairs that host with the
+  // token for that host instead of defaulting to github.com.
+  const { repo: dirRepo } = await resolveGitHubRepoFromDirectory(directory);
+  const octokit = getOctokitOrNull(dirRepo?.host);
   if (!octokit) {
     throw Object.assign(new Error('Connect a GitHub account to review pull requests'), {
       statusCode: 401,
@@ -20,8 +25,7 @@ export async function getPullRequestDiff(directory, number, sourceRepo, { allowE
 
   // The resolver returns `{ repo, remoteUrl }`, not the repo itself. Reading
   // `.owner` off the wrapper made this check fail for every repository.
-  const resolved = sourceRepo ? { repo: sourceRepo } : await resolveGitHubRepoFromDirectory(directory);
-  const { repo } = resolved;
+  const { repo } = sourceRepo ? { repo: sourceRepo } : { repo: dirRepo };
   if (!repo?.owner || !repo?.repo) {
     throw Object.assign(new Error('This directory has no GitHub remote'), {
       statusCode: 400,

@@ -192,9 +192,10 @@ export const createWebGitHubAPI = ({ urls }: WebGitHubAPIOptions): GitHubAPI => 
     return body;
   },
 
-  async repoBranches(owner: string, repo: string): Promise<string[]> {
+  async repoBranches(owner: string, repo: string, directory?: string): Promise<string[]> {
+    const directoryParam = directory ? `&directory=${encodeURIComponent(directory)}` : '';
     const response = await runtimeFetch(
-      `/api/github/repo/branches?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`,
+      `/api/github/repo/branches?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}${directoryParam}`,
       { method: 'GET', headers: { Accept: 'application/json' } }
     );
     const body = await jsonOrNull<{ branches?: string[]; error?: string }>(response);
