@@ -411,3 +411,26 @@ describe('Escaped brackets versus display math', () => {
     expect(renderMarkdownSync('Before\n\n\\[\nx = y\n\\]\n\nAfter')).toContain('katex');
   });
 });
+
+describe('Dollar-delimited math', () => {
+  test('renders standalone single-dollar inline math without leaving delimiters behind', () => {
+    const html = renderMarkdownSync('Canonical $k$-mers use a scale factor $c=200$.');
+
+    expect(html).toContain('katex');
+    expect(html).not.toContain('$k$');
+    expect(html).not.toContain('$c=200$');
+  });
+
+  test('keeps double-dollar display math as a display block', () => {
+    const html = renderMarkdownSync('$$x = y$$');
+
+    expect(html).toContain('katex-display');
+  });
+
+  test('does not treat currency as inline math', () => {
+    const html = renderMarkdownSync('Price moved from $50 to $72 overnight.');
+
+    expect(html).toContain('$50 to $72');
+    expect(html).not.toContain('katex');
+  });
+});

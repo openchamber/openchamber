@@ -283,9 +283,9 @@ const streamBlocks = (text: string, live: boolean): MarkdownBlock[] => {
 // backslash escapes and strips the slash before any HTML post-process can see
 // them. Registering them as tokenizers also makes them code-safe for free
 // (marked tokenizes code spans/fences first, so these never fire inside code).
-// Single-dollar `$...$` is intentionally NOT supported — it collides with
-// currency text ($50, US$ 680); only `$$...$$` survives as display math (see
-// renderMathExpressions). This mirrors KaTeX auto-render's default delimiters.
+// Standalone single-dollar `$...$` inline math is also recognized here, but the
+// tokenizer deliberately skips `$$...$$` display blocks and text that spans
+// across a second dollar sign, so currency like `$50 to $72` stays literal.
 type MathToken = { type: string; raw: string; text: string };
 
 const renderKatex = (math: string, raw: string, displayMode: boolean): string => {
@@ -300,13 +300,22 @@ const inlineMathExtension = {
   name: 'inlineMath',
   level: 'inline' as const,
   start(src: string) {
-    const index = src.indexOf('\\(');
-    return index < 0 ? undefined : index;
+    const parenIndex = src.indexOf('\\(');
+    let dollarIndex = -1;
+    for (let i = 0; i < src.length; i += 1) {
+      if (src[i] !== '$') continue;
+      if (src[i - 1] === '\\' || src[i - 1] === '$' || src[i + 1] === '$') continue;
+      dollarIndex = i;
+      break;
+    }
+    if (parenIndex < 0) return dollarIndex < 0 ? undefined : dollarIndex;
+    if (dollarIndex < 0) return parenIndex;
+    return Math.min(parenIndex, dollarIndex);
   },
   tokenizer(src: string): MathToken | undefined {
-    const match = /^\\\(([\s\S]+?)\\\)/.exec(src);
+    const match = /^(?:\\\(([\s\S]+?)\\\)|\$([^\s\$](?:[^\$]*?[^\s\$])?)\$(?!\$))/.exec(src);
     if (!match) return undefined;
-    return { type: 'inlineMath', raw: match[0], text: match[1] ?? '' };
+    return { type: 'inlineMath', raw: match[0], text: match[1] ?? match[2] ?? '' };
   },
   renderer(token: Tokens.Generic) {
     const math = token as MathToken;
@@ -450,12 +459,10 @@ const imageLabelParser = createParser('label');
 // Math (KaTeX) — post-process the parsed HTML, skipping code/pre/kbd content
 // ---------------------------------------------------------------------------
 
-// Only `$$...$$` (display) is handled here. Single-dollar `$...$` inline math is
-// deliberately omitted: it parses currency text ($50, US$ 680, "$50M to $72M")
-// as math and corrupts it. Inline math is supported via `\(...\)` (see the
-// marked extensions above). `$$` survives marked untouched (no backslash), so
-// post-processing the parsed HTML — skipping code via renderMathExpressions —
-// stays correct and code-safe.
+// Only `$$...$$` (display) is handled here. Inline math is resolved during
+// marked lexing via `\(...\)` and standalone single-dollar delimiters; `$$`
+// survives marked untouched (no backslash), so post-processing the parsed HTML
+// — skipping code via renderMathExpressions — stays correct and code-safe.
 const renderMathInText = (text: string): string =>
   text.replace(/\$\$([\s\S]*?)\$\$/g, (_match, math: string) => {
     try {
