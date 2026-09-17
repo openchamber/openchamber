@@ -27,6 +27,7 @@ import type {
 } from '@/lib/api/types';
 import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { useI18n } from '@/lib/i18n';
+import { GitHubPrSearchIncompleteNotice } from './GitHubPrSearchIncompleteNotice';
 
 type GitHubTab = 'issues' | 'prs';
 
@@ -81,6 +82,7 @@ export function GitHubIntegrationDialog({
   const [validations, setValidations] = React.useState<Map<string, ValidationResult>>(new Map());
   const [page, setPage] = React.useState(1);
   const [hasMore, setHasMore] = React.useState(false);
+  const [incomplete, setIncomplete] = React.useState(false);
 
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 350);
 
@@ -92,6 +94,7 @@ export function GitHubIntegrationDialog({
     setError(null);
     setPage(1);
     setHasMore(false);
+    setIncomplete(false);
     
     try {
       if (activeTab === 'issues' && github.issuesList) {
@@ -113,6 +116,7 @@ export function GitHubIntegrationDialog({
           setPrs(result.prs ?? []);
           setPage(result.page ?? 1);
           setHasMore(Boolean(result.hasMore));
+          setIncomplete(Boolean(result.incomplete));
         }
       }
     } catch (err) {
@@ -136,6 +140,7 @@ export function GitHubIntegrationDialog({
     setError(null);
     setPage(1);
     setHasMore(false);
+    setIncomplete(false);
 
     const apiCall = activeTab === 'issues' && github.issuesList
       ? github.issuesList(projectDirectory, { page: 1, query: debouncedSearchQuery.trim() })
@@ -168,6 +173,7 @@ export function GitHubIntegrationDialog({
             setPrs(result.prs ?? []);
             setPage(result.page ?? 1);
             setHasMore(Boolean(result.hasMore));
+            setIncomplete(Boolean(result.incomplete));
           }
         }
       })
@@ -209,6 +215,7 @@ export function GitHubIntegrationDialog({
           setPrs(prev => [...prev, ...(result.prs ?? [])]);
           setPage(result.page ?? nextPage);
           setHasMore(Boolean(result.hasMore));
+          setIncomplete((prev) => prev || Boolean(result.incomplete));
         }
       }
     } catch {
@@ -232,6 +239,7 @@ export function GitHubIntegrationDialog({
       setValidations(new Map());
       setPage(1);
       setHasMore(false);
+      setIncomplete(false);
       return;
     }
     
@@ -438,6 +446,11 @@ export function GitHubIntegrationDialog({
               {/* PRs List */}
               {!loading && !error && activeTab === 'prs' && (
                 <div className="space-y-0.5 min-h-full">
+                  {incomplete ? (
+                    <div className="px-2 py-1.5">
+                      <GitHubPrSearchIncompleteNotice />
+                    </div>
+                  ) : null}
                   {prs.length > 0 ? (
                     prs.map(pr => {
                       const blocked = isPrBlocked(pr);
@@ -462,9 +475,11 @@ export function GitHubIntegrationDialog({
                             <div className="min-w-0 flex-1">
                               <span className="typography-small line-clamp-1">{pr.title}</span>
                               <div className="flex items-center gap-2 mt-0.5">
-                                <span className="typography-micro text-muted-foreground">
-                                  {pr.head} → {pr.base}
-                                </span>
+                                {pr.head || pr.base ? (
+                                  <span className="typography-micro text-muted-foreground">
+                                    {pr.head} → {pr.base}
+                                  </span>
+                                ) : null}
                                 {pr.sourceRepo?.source === 'upstream' ? (
                                   <span className="typography-micro px-1 py-0.5 rounded bg-status-info/10 text-status-info">
                                     {pr.sourceRepo.owner}/{pr.sourceRepo.repo}
@@ -481,7 +496,7 @@ export function GitHubIntegrationDialog({
                         </button>
                       );
                     })
-                  ) : (
+                  ) : incomplete ? null : (
                     <div className="flex items-center justify-center h-[300px] text-center typography-small text-muted-foreground">
                       {t('session.githubIntegration.empty.noPullRequestsFound')}
                     </div>

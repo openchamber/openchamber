@@ -1,3 +1,5 @@
+import { mapPullRequestSummary, summarizeSearchPullRequests } from './pr-search.js';
+
 const PR_STATUS_CACHE_TTL_MS = 90_000;
 const PR_STATUS_CACHE_MAX_ENTRIES = 200;
 // Upper bound for resolving a single PR status. resolveGitHubPrStatus makes many
@@ -1437,37 +1439,6 @@ export function registerGitHubRoutes(app) {
       const effectivePage = Number.isFinite(page) && page > 0 ? page : 1;
       const reposToQuery = repoNetwork || [{ ...repo, source: 'origin' }];
 
-      const mapPrSummary = (pr, repoRef) => {
-        const mergedState = pr.merged_at ? 'merged' : (pr.state === 'closed' ? 'closed' : 'open');
-        const headRepo = pr.head?.repo
-          ? {
-              owner: pr.head.repo.owner?.login,
-              repo: pr.head.repo.name,
-              url: pr.head.repo.html_url,
-              cloneUrl: pr.head.repo.clone_url,
-              sshUrl: pr.head.repo.ssh_url,
-            }
-          : null;
-        return {
-          number: pr.number,
-          title: pr.title,
-          url: pr.html_url,
-          state: mergedState,
-          draft: Boolean(pr.draft),
-          base: pr.base?.ref,
-          head: pr.head?.ref,
-          headSha: pr.head?.sha,
-          mergeable: pr.mergeable,
-          mergeableState: pr.mergeable_state,
-          author: pr.user ? { login: pr.user.login, id: pr.user.id, avatarUrl: pr.user.avatar_url } : null,
-          headLabel: pr.head?.label,
-          headRepo: headRepo && headRepo.owner && headRepo.repo && headRepo.url
-            ? headRepo
-            : null,
-          sourceRepo: { owner: repoRef.owner, repo: repoRef.repo, source: repoRef.source },
-        };
-      };
-
       if (searchQuery) {
         const repoQualifiers = reposToQuery
           .map((r) => `repo:${r.owner}/${r.repo}`)
@@ -1481,36 +1452,22 @@ export function registerGitHubRoutes(app) {
           });
           const totalCount = searchResult.data.total_count;
           const items = Array.isArray(searchResult.data.items) ? searchResult.data.items : [];
-          const findRepoForSearchItem = (item) => {
-            const repositoryUrl = typeof item?.repository_url === 'string' ? item.repository_url : '';
-            const match = repositoryUrl.match(/\/repos\/([^/]+)\/([^/]+)$/);
-            if (!match) return reposToQuery[0];
-            return reposToQuery.find((repoRef) => repoRef.owner === match[1] && repoRef.repo === match[2]) || reposToQuery[0];
-          };
-          const prRefs = items
-            .map((item) => ({ number: item.number, repoRef: findRepoForSearchItem(item) }))
-            .filter((ref) => Number.isFinite(ref.number) && ref.number > 0 && ref.repoRef);
-          let prs;
-          if (prRefs.length === 0) {
-            prs = [];
-          } else {
-            const results = await Promise.all(prRefs.map(async ({ number, repoRef }) => {
-              try {
-                const pr = await octokit.rest.pulls.get({
-                  owner: repoRef.owner,
-                  repo: repoRef.repo,
-                  pull_number: number,
-                });
-                return mapPrSummary(pr.data, repoRef);
-              } catch {
-                return null;
-              }
-            }));
-            prs = results.filter(Boolean);
-          }
+          const { prs, incomplete } = await summarizeSearchPullRequests({
+            octokit,
+            items,
+            reposToQuery,
+            incompleteResults: searchResult.data.incomplete_results === true,
+          });
           const fetchedCount = (effectivePage - 1) * 50 + items.length;
           const hasMore = fetchedCount < totalCount;
-          return res.json({ connected: true, repo, prs, page: effectivePage, hasMore });
+          return res.json({
+            connected: true,
+            repo,
+            prs,
+            page: effectivePage,
+            hasMore,
+            ...(incomplete ? { incomplete: true } : {}),
+          });
         } catch (error) {
           console.error('Failed to search GitHub PRs:', error);
           throw error;
@@ -1528,7 +1485,7 @@ export function registerGitHubRoutes(app) {
           });
           const link = typeof list?.headers?.link === 'string' ? list.headers.link : '';
           const hasMore = /rel="next"/.test(link);
-          const prs = (Array.isArray(list?.data) ? list.data : []).map((pr) => mapPrSummary(pr, repoRef));
+          const prs = (Array.isArray(list?.data) ? list.data : []).map((pr) => mapPullRequestSummary(pr, repoRef));
           return { prs, hasMore };
         } catch (error) {
           console.warn(`Failed to list PRs for ${repoRef.owner}/${repoRef.repo}:`, error?.message || error);

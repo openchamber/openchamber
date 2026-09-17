@@ -12,7 +12,7 @@ import { useDebouncedValue } from './useDebouncedValue';
 
 type PullRequestList =
   | { key: string; status: 'loading' }
-  | { key: string; status: 'ready'; prs: GitHubPullRequestSummary[]; page: number; hasMore: boolean; error: string | null }
+  | { key: string; status: 'ready'; prs: GitHubPullRequestSummary[]; page: number; hasMore: boolean; error: string | null; incomplete: boolean }
   | { key: string; status: 'error'; message: string };
 const NO_PULL_REQUESTS: GitHubPullRequestSummary[] = [];
 
@@ -82,7 +82,15 @@ export function usePullRequestComparison(directory: string | null, branch: strin
       const repo = result.repo;
       const prs = result.prs.map((pr) => ({ ...pr, sourceRepo: pr.sourceRepo ?? { owner: repo.owner, repo: repo.repo, source: 'repository' } }));
       const merged = new Map([...(previous?.prs ?? []), ...prs].map((pr) => [`${pr.sourceRepo?.owner}/${pr.sourceRepo?.repo}#${pr.number}`, pr]));
-      setList({ key, status: 'ready', prs: [...merged.values()], page, hasMore: Boolean(result.hasMore), error: null });
+      setList({
+        key,
+        status: 'ready',
+        prs: [...merged.values()],
+        page,
+        hasMore: Boolean(result.hasMore),
+        error: null,
+        incomplete: Boolean(previous?.incomplete || result.incomplete),
+      });
     } catch (error) {
       if (requestId.current === id && getRuntimeKey() === runtime && owner.current.key === key && owner.current.enabled) {
         const message = error instanceof Error ? error.message : t('session.githubPrPicker.toast.loadMoreFailed');
@@ -106,6 +114,7 @@ export function usePullRequestComparison(directory: string | null, branch: strin
     loading: enabled && (!current || current.status === 'loading' || search !== query.trim()),
     loadingMore,
     hasMore: current?.status === 'ready' && current.hasMore,
+    incomplete: current?.status === 'ready' && current.incomplete,
     error: current?.status === 'error' ? current.message : current?.status === 'ready' ? current.error : null,
     refresh: () => refresh(),
     loadMore: () => current?.status === 'ready' && current.hasMore && !loadingMore ? refresh(current) : Promise.resolve(),

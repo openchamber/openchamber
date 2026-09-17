@@ -9,6 +9,7 @@ import { useI18n } from '@/lib/i18n';
 import { useTabletLayout } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import type { usePullRequestComparison } from '@/hooks/usePullRequestComparison';
+import { GitHubPrSearchIncompleteNotice } from '@/components/session/GitHubPrSearchIncompleteNotice';
 
 export function PullRequestComparisonSelector({ comparison, mobile = false }: {
   comparison: ReturnType<typeof usePullRequestComparison>;
@@ -43,15 +44,17 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
       <span>{comparison.error}</span>
       <Button variant="outline" size="sm" onClick={() => void comparison.refresh()}>{t('diffView.actions.retry')}</Button>
     </div> : <CommandList className={mobile ? 'max-h-[min(45dvh,24rem)]' : undefined}>
+      {comparison.incomplete ? <div className="px-3 py-2"><GitHubPrSearchIncompleteNotice /></div> : null}
       <CommandEmpty>{t('session.githubPrPicker.empty.noPullRequestsFound')}</CommandEmpty>
       <CommandGroup>
         {open && comparison.prs.map((pr) => {
           const key = `${pr.sourceRepo?.owner}/${pr.sourceRepo?.repo}#${pr.number}`;
+          const branch = pr.head || pr.base ? `${pr.head} → ${pr.base}` : null;
           return <CommandItem key={key} value={key} className={mobile ? 'min-h-11' : undefined}
             onSelect={() => { comparison.select(pr); changeOpen(false); }}>
             <div className="min-w-0 flex-1">
               <div className="truncate typography-ui-label" title={pr.title}>#{pr.number} {pr.title}</div>
-              <div className="truncate typography-meta text-muted-foreground">{pr.sourceRepo?.owner}/{pr.sourceRepo?.repo} · {pr.head} → {pr.base}</div>
+              <div className="truncate typography-meta text-muted-foreground">{pr.sourceRepo?.owner}/{pr.sourceRepo?.repo}{branch ? ` · ${branch}` : ''}</div>
             </div>
             {selected?.number === pr.number && selected.sourceRepo?.owner === pr.sourceRepo?.owner && selected.sourceRepo?.repo === pr.sourceRepo?.repo
               && <Icon name="check" className="size-3.5" />}
