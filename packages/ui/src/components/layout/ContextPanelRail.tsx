@@ -177,6 +177,7 @@ export const ContextPanelRail: React.FC = () => {
   const openContextSurface = useUIStore((state) => state.openContextSurface);
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
+  const serverBrowserEnabled = useUIStore((state) => state.serverBrowserEnabled);
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
   const linearAuthChecked = useLinearAuthStore((state) => state.hasChecked);
   const linearConnected = useLinearAuthStore((state) => state.status?.connected === true);
@@ -278,6 +279,7 @@ export const ContextPanelRail: React.FC = () => {
       railOrder: contextRailOrder,
       hiddenSurfaces: contextRailHiddenSurfaces,
       planModeEnabled,
+      serverBrowserEnabled,
       isVSCode: isVSCodeRuntime(),
       screenWidth,
       tabs,
@@ -285,7 +287,7 @@ export const ContextPanelRail: React.FC = () => {
       githubConnected,
       extras: guestSurfaces,
     });
-  }, [contextRailHiddenSurfaces, contextRailOrder, githubConnected, guestSurfaces, linearConnected, planModeEnabled, screenWidth, tabs]);
+  }, [contextRailHiddenSurfaces, contextRailOrder, githubConnected, guestSurfaces, linearConnected, planModeEnabled, screenWidth, serverBrowserEnabled, tabs]);
 
   // A surface whose integration disconnected closes rather than lingering as
   // an active panel with no rail icon.

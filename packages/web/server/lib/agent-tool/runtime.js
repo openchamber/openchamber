@@ -29,7 +29,7 @@ const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
  * in the other tool's schema, which is both misleading and paid for in context
  * on every call.
  */
-const WEB_PARAMETER_NAMES = ['url', 'selector', 'text', 'value', 'submit', 'direction', 'viewport', 'label'];
+const WEB_PARAMETER_NAMES = ['url', 'selector', 'text', 'value', 'submit', 'direction', 'viewport', 'label', 'tabId', 'preferBackend'];
 // `title` is shared with the control tool, so it is not listed here — only the
 // names memory alone introduces are kept out of the other schemas.
 const MEMORY_ONLY_PARAMETER_NAMES = ['body', 'scope', 'memoryId', 'type'];
@@ -87,6 +87,8 @@ const ALL_PARAMETER_PROPERTIES = {
   direction: { type: 'string', enum: ['up', 'down', 'top', 'bottom'], description: 'Scroll direction for browser.scroll' },
   viewport: { type: 'string', enum: ['mobile', 'tablet', 'desktop', 'fill'], description: 'Page layout size; snapshots report which one is in effect' },
   label: { type: 'string', description: 'Short name for a browser.capture image, such as before-fix' },
+  tabId: { type: 'string', description: 'Target tab id from browser.tabs; defaults to the visible tab' },
+  preferBackend: { type: 'string', enum: ['server-chrome'], description: "Force the server-hosted browser backend ('server-chrome') instead of a connected client window" },
   body: { type: 'string', description: 'Full text of the memory; state it so it still makes sense in a session that has none of this conversation' },
   scope: { type: 'string', enum: ['global', 'project', 'both'], description: 'global is about the user and applies everywhere; project is about this codebase. both is only valid for memory.list' },
   memoryId: { type: 'string', description: 'Memory ID from a memory.list or memory.read result' },
@@ -120,12 +122,14 @@ const asNonEmptyString = (value) => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
-const createResult = ({ ok, action, data, error, exitCode }) => ({
+const createResult = ({ ok, action, data, error, exitCode, target }) => ({
   schemaVersion: TOOL_SCHEMA_VERSION,
   ok,
   action: action || 'unknown',
   ...(data !== undefined ? { data } : {}),
   ...(error ? { error } : {}),
+  // A scoped failure keeps naming the tab it targeted.
+  ...(target ? { target } : {}),
   ...(Number.isInteger(exitCode) ? { exitCode } : {}),
 });
 
@@ -187,7 +191,7 @@ const createToolEntry = ({ name, description, actions, definitions, parameters }
               authorization: "Bearer " + token,
               "content-type": "application/json",
             },
-            body: JSON.stringify({ input: args, contextDirectory: context.directory, tool: ${JSON.stringify(name)} }),
+            body: JSON.stringify({ input: args, contextDirectory: context.directory, openCodeSessionId: typeof context.sessionID === "string" ? context.sessionID : undefined, tool: ${JSON.stringify(name)} }),
             signal: context.abort,
           })
           const output = await response.text()
@@ -311,7 +315,7 @@ export const createAgentToolRuntime = (dependencies) => {
       return createResult({ ok: false, action, error: { message: 'OpenChamber control service is unavailable', kind: 'runtime' } });
     }
     try {
-      const data = await executeAction(action, { ...payload.input, action }, payload.contextDirectory, options);
+      const data = await executeAction(action, { ...payload.input, action }, payload.contextDirectory, { ...options, openCodeSessionId: payload.openCodeSessionId });
       return createResult({ ok: true, action, data });
     } catch (error) {
       return createResult({
@@ -327,6 +331,7 @@ export const createAgentToolRuntime = (dependencies) => {
           message: error instanceof Error ? error.message : String(error),
           kind: Number(error?.statusCode) >= 400 && Number(error?.statusCode) < 499 ? 'usage' : 'runtime',
         },
+        target: error?.target && typeof error.target === 'object' ? error.target : undefined,
       });
     }
   };

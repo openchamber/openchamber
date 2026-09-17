@@ -315,4 +315,172 @@ describe('browser capture', () => {
     await service.execute('browser.capture', { label: 'before' }, directory);
     expect(request).toHaveBeenCalledWith('browser.capture', { label: 'before' }, expect.anything());
   });
+
+  it('carries the target the client posted through the rebuilt capture result', async () => {
+    const { service, directory } = await createBrowserService({
+      base64: pixel,
+      mime: 'image/png',
+      target: { directory: '/repo', tabId: 'tab-9' },
+    });
+
+    const result = await service.execute('browser.capture', {}, directory);
+
+    expect(result.target).toEqual({ directory: '/repo', tabId: 'tab-9' });
+  });
+
+  it('names the target when saving the screenshot fails', async () => {
+    // An empty base64 makes writeScreenshot reject without touching the disk.
+    const { service, directory } = await createBrowserService({
+      base64: '',
+      mime: 'image/png',
+      target: { directory: '/repo', tabId: 'tab-9' },
+    });
+
+    let caught = null;
+    try {
+      await service.execute('browser.capture', {}, directory);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught?.message).toContain('no image');
+    expect(caught?.target).toEqual({ directory: '/repo', tabId: 'tab-9' });
+  });
+
+  it('names the request target on a save failure when the client posted none', async () => {
+    const { service, directory } = await createBrowserService({ base64: '', mime: 'image/png' });
+
+    let caught = null;
+    try {
+      await service.execute('browser.capture', { directory }, directory);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught?.message).toContain('no image');
+    expect(caught?.target).toEqual({ directory });
+  });
+});
+
+describe('browser target scope', () => {
+  const createScopedService = () => {
+    const request = vi.fn(async () => ({ ok: true }));
+    const { service } = createService({ browserControl: { request } });
+    return { service, request };
+  };
+
+  it.each([
+    ['C:\\proj\\', 'C:/proj'],
+    ['/a//b', '/a/b'],
+    ['//host/share/', '//host/share'],
+    ['/', '/'],
+    ['/repo/', '/repo'],
+  ])('canonicalizes %s to the client directory key %s', async (directory, expected) => {
+    const { service, request } = createScopedService();
+    await service.execute('browser.snapshot', { directory });
+    expect(request).toHaveBeenCalledWith('browser.snapshot', {}, expect.objectContaining({
+      target: { directory: expected },
+    }));
+  });
+
+  it('moves tabId out of parameters into the target', async () => {
+    const { service, request } = createScopedService();
+    await service.execute('browser.snapshot', { directory: '/repo', tabId: 'tab-1' });
+    expect(request.mock.calls[0][1]).toEqual({});
+    expect(request.mock.calls[0][2].target).toEqual({ directory: '/repo', tabId: 'tab-1' });
+  });
+
+  it('adds the OpenCode session id to the target when present', async () => {
+    const { service, request } = createScopedService();
+    await service.execute('browser.snapshot', { directory: '/repo' }, undefined, { openCodeSessionId: 'ses_1' });
+    expect(request.mock.calls[0][2].target).toEqual({ directory: '/repo', openCodeSessionId: 'ses_1' });
+  });
+
+  it('rejects a browser action with no resolvable directory before any emission', async () => {
+    const { service, request } = createScopedService();
+    let caught = null;
+    try {
+      await service.execute('browser.snapshot', {});
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught?.message).toBe('directory is required');
+    expect(caught?.statusCode).toBe(400);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('attaches the resolved target to a scoped validation failure', async () => {
+    const { service, request } = createScopedService();
+    let caught = null;
+    try {
+      await service.execute('browser.click', {}, '/repo');
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught?.message).toBe('browser.click requires selector or text');
+    expect(caught?.target).toEqual({ directory: '/repo' });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('attaches the full scoped target, tabId included, to a validation failure', async () => {
+    const { service, request } = createScopedService();
+    let caught = null;
+    try {
+      await service.execute('browser.click', { directory: '/repo', tabId: 'tab-7' });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught?.message).toBe('browser.click requires selector or text');
+    expect(caught?.target).toEqual({ directory: '/repo', tabId: 'tab-7' });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('forwards browser.tabs to the browser broker with directory and OpenCode session scope', async () => {
+    const { service, request } = createScopedService();
+    request.mockResolvedValue({
+      tabs: [{ tabId: 'tab-a', url: 'http://a/', title: 'A', active: true }],
+      target: { directory: '/repo', openCodeSessionId: 'agent-a' },
+    });
+
+    const result = await service.execute(
+      'browser.tabs',
+      { directory: '/repo' },
+      undefined,
+      { openCodeSessionId: 'agent-a' },
+    );
+
+    expect(request).toHaveBeenCalledWith('browser.tabs', {}, expect.objectContaining({
+      target: { directory: '/repo', openCodeSessionId: 'agent-a' },
+    }));
+    expect(result).toEqual({
+      tabs: [{ tabId: 'tab-a', url: 'http://a/', title: 'A', active: true }],
+      target: { directory: '/repo', openCodeSessionId: 'agent-a' },
+    });
+  });
+
+  it('propagates a valid preferBackend into the request target', async () => {
+    const { service, request } = createScopedService();
+
+    await service.execute('browser.open', { directory: '/repo', url: 'http://a/', preferBackend: 'server-chrome' });
+
+    expect(request.mock.calls[0][2].target).toEqual({ directory: '/repo', preferBackend: 'server-chrome' });
+    expect(request.mock.calls[0][1]).toEqual({ url: 'http://a/' });
+  });
+
+  it.each([
+    'electron-webview',
+    'chromium',
+  ])('rejects preferBackend %s with a scoped 400 before any emission', async (preferBackend) => {
+    const { service, request } = createScopedService();
+
+    let caught = null;
+    try {
+      await service.execute('browser.open', { directory: '/repo', url: 'http://a/', preferBackend });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught?.message).toBe("preferBackend must be 'server-chrome'");
+    expect(caught?.statusCode).toBe(400);
+    expect(caught?.target).toEqual({ directory: '/repo' });
+    expect(request).not.toHaveBeenCalled();
+  });
 });

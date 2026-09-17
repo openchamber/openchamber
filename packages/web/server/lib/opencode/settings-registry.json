@@ -120,6 +120,12 @@
     "agentWebToolEnabled": {
       "scope": "instance"
     },
+    "serverBrowserEnabled": {
+      "scope": "instance"
+    },
+    "serverBrowserDebugPort": {
+      "scope": "instance"
+    },
     "agentMemoryToolEnabled": {
       "scope": "instance"
     },

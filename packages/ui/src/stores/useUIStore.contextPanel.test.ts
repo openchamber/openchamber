@@ -212,7 +212,7 @@ describe('useUIStore context panel tabs', () => {
             [directory]: {
               isOpen: true,
               expanded: false,
-              widthByMode: { walkthrough: 800 },
+              widthByMode: { walkthrough: 800, 'server-browser': 720 },
               widthFractionByMode: {
                 diff: 0,
                 file: 1.25,
@@ -220,6 +220,7 @@ describe('useUIStore context panel tabs', () => {
                 plan: '0.4',
                 chat: 0.4,
                 walkthrough: 0.8,
+                'server-browser': 0.6,
               },
               touchedAt: 1,
               activeTabId: null,
@@ -237,8 +238,9 @@ describe('useUIStore context panel tabs', () => {
       await useUIStore.persist.rehydrate();
 
       const panel = useUIStore.getState().contextPanelByDirectory[directory];
-      expect(panel?.widthFractionByMode).toEqual({ chat: 0.4, walkthrough: 0.8 });
+      expect(panel?.widthFractionByMode).toEqual({ chat: 0.4, walkthrough: 0.8, 'server-browser': 0.6 });
       expect(panel?.widthByMode.walkthrough).toBe(800);
+      expect(panel?.widthByMode['server-browser']).toBe(720);
     } finally {
       useUIStore.persist.setOptions(originalPersistOptions);
     }

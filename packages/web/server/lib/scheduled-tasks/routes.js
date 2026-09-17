@@ -150,6 +150,7 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     // the same server at once. Recording it on the connection keeps the answer
     // current without any enable/disable setting to go stale.
     res.openchamberBrowserCapable = req.query?.browser === '1';
+    res.openchamberClientId = typeof req.query?.clientId === 'string' && req.query.clientId ? req.query.clientId : null;
 
     const clients = getOpenChamberEventClients();
     clients.add(res);

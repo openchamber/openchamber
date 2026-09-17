@@ -46,6 +46,7 @@ export const reconnectAppForTransportSwitch = (): void => {
 };
 
 export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedDetail): void => {
+  useUIStore.setState({ serverBrowserEnabled: false, serverBrowserDebugPort: 0 });
   useSessionUIStore.getState().prepareForRuntimeSwitch(detail.previousRuntimeKey);
   if (detail.previousRuntimeKey) {
     useAutoReviewStore.getState().stopRunningRunsForRuntime(detail.previousRuntimeKey);

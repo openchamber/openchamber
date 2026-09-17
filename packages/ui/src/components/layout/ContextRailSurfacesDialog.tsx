@@ -27,18 +27,19 @@ export const ContextRailSurfacesDialog: React.FC<{
   const { t } = useI18n();
   const contextRailOrder = useUIStore((state) => state.contextRailOrder);
   const hidden = useUIStore((state) => state.contextRailHiddenSurfaces);
+  const serverBrowserEnabled = useUIStore((state) => state.serverBrowserEnabled);
   const setSurfaceVisible = useUIStore((state) => state.setContextRailSurfaceVisible);
   const setHiddenSurfaces = useUIStore((state) => state.setContextRailHiddenSurfaces);
 
-  // The full registry in the user's rail order — including surfaces a runtime
-  // filter currently drops, so a choice made on desktop is editable anywhere.
+  // Include installed guests and runtime-filtered surfaces in the user's rail
+  // order so a choice made on desktop stays editable on other runtimes.
   const guestSurfaces = useGuestSurfaces();
   const surfaces = React.useMemo(
-    () => sortContextSurfaces(contextRailOrder, guestSurfaces),
-    [contextRailOrder, guestSurfaces],
+    () => sortContextSurfaces(contextRailOrder, guestSurfaces).filter((surface) => surface.id !== 'server-browser' || serverBrowserEnabled),
+    [contextRailOrder, guestSurfaces, serverBrowserEnabled],
   );
 
-  const allVisible = hidden.length === 0;
+  const allVisible = surfaces.every((surface) => !hidden.includes(surface.id));
   const noneVisible = surfaces.every((surface) => hidden.includes(surface.id));
 
   return (

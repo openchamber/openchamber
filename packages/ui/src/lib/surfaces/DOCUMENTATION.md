@@ -12,6 +12,7 @@ edge (`components/layout/ContextPanelRail.tsx`) and rendered by
 Full-screen extension pages are separate from this rail registry. `contributes.page` appears in one sidebar-header menu and uses `useUIStore.openGuestPageId`, the same mutually exclusive main-page lifecycle as Archive and Scheduled tasks. It mounts `PluginPane` with `surface="page"`, closes on runtime switch/uninstall/disable, and is not persisted. `openContextSurface` and the guest's `openSurface` cannot open a full-screen page. The entry-point restrictions below describe context-rail surfaces only.
 
 - A surface maps 1:1 to a `ContextPanelMode` tab mode in `useUIStore`.
+  Browser owns local browser tabs; server-browser owns server-hosted Chrome.
   Built-in modes stay a closed list. Installed guests add `plugin:${id}`
   surfaces through `extras` on `sortContextSurfaces` /
   `getVisibleContextRailSurfaces`. Do not copy guest types out of
@@ -45,8 +46,33 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   Linear unless a workspace is connected, hides the pull-request surface
   unless GitHub is connected (OAuth or `gh` CLI — signed in from Settings →
   Integrations), and hides `has-content` surfaces
-  until a tab of their mode exists. Both consumers use it so the digit shown
+  until a tab of their mode exists, and hides server-browser until the
+  server-browser feature is enabled. Both consumers use it so the digit shown
   on a rail badge always maps to the same surface the shortcut opens.
+
+## Mobile browser
+
+The dedicated mobile shell opens server Chrome from the Server browser tab
+in `apps/MobileWorkspaceDrawer.tsx`, independently of the desktop registry.
+Hosted mobile and Capacitor both use `RemoteBrowserPane` and its authenticated
+runtime transport. They offer no local Chrome option. The tab requires the
+server-browser feature setting and a selected directory.
+The runtime reset clears the previous server's browser setting before loading
+the destination settings. Transport changes for the same paired device keep it.
+
+`apps/MobileBrowserSurface.tsx` mounts the viewer only while its workspace tab
+is visible. Closing the workspace, choosing another tab, opening an app-level
+overlay, disabling the feature, or changing server or directory unmounts it and
+releases the viewer connection.
+The browser toolbar opens Chrome DevTools, the only visible inspector. If
+DevTools cannot load or connect, its error UI offers Console and network as a
+recovery action.
+Scope changes also return the workspace to Changes. The selection cache in
+`apps/mobileBrowserSelection.ts` stores only genuine session and target IDs,
+scoped by runtime identity and directory. Those IDs are attachment hints;
+the server determines whether they still exist when the user reopens the tab.
+The shared viewer also pauses its connection while the app is backgrounded and
+reattaches the selected page when it becomes visible again.
 
 ## Adding a surface
 
@@ -81,7 +107,10 @@ chat/palette go through the `openContext*` actions in `useUIStore`.
   positions). Chat tab records stay open, but only the active chat iframe is
   mounted while the panel is open. A selected chat restores its state from
   the session stores. A closed panel mounts no chat iframe.
-  Singleton surfaces (git, pr, linear, notes, plan, context) remount on switch. These
+  Server-browser is a singleton remote surface. Its inner target strip manages
+  actual Chrome pages and saved server selections; it has no outer browser tab
+  strip or address field. Singleton surfaces (git, pr, linear, notes, plan,
+  context) remount on switch. These
   surfaces must restore their state from stores or snapshots.
 - Portalled menus and dialogs handle their own Escape key. The panel's capture
   handler ignores their events so dismissing an overlay does not close the panel.

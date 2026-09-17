@@ -383,6 +383,10 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     return unsupportedWebRouteResponse('Preview proxy');
   }
 
+  if (normalizedPathname === '/api/browser/runtime-status') {
+    return unsupportedWebRouteResponse('Server browser');
+  }
+
   if (normalizedPathname === '/api/config/themes' || normalizedPathname.startsWith('/api/config/themes/')) {
     return unsupportedWebRouteResponse('Theme import and management');
   }

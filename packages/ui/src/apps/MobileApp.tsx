@@ -527,6 +527,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
               <ErrorBoundary>
                 <MobileWorkspaceDrawer
                   open={workspaceOpen}
+                  browserVisible={activeSurface === null && openPlan === null}
                   onClose={closeWorkspace}
                   tab={workspaceTab}
                   onTabChange={setWorkspaceTab}
@@ -549,6 +550,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
         ) : (
           <MobileWorkspaceDrawer
             open={workspaceOpen}
+            browserVisible={activeSurface === null && openPlan === null}
             onClose={closeWorkspace}
             tab={workspaceTab}
             onTabChange={setWorkspaceTab}

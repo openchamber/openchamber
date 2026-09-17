@@ -16,6 +16,14 @@ import { isWindowsArm64 } from '@/lib/platform';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
 import { getRuntimeKey, isTransientRuntimeKey } from '@/lib/runtime-switch';
+import {
+  mergeSavedServerBrowserSelections,
+  savedServerBrowserSelectionsSchema,
+  type SavedServerBrowserSelection,
+} from './contextPanelServerBrowser';
+
+export type { SavedServerBrowserSelection } from './contextPanelServerBrowser';
+
 import { sanitizeWorkStatusSectionOrder, type WorkStatusSectionId } from '@/components/chat/work-status/sections';
 
 export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'branch' | 'commit' | 'pr';
@@ -25,7 +33,7 @@ export type { ContextPanelMode };
 export const clampContextEditorTreeWidth = (width: number): number =>
   Math.min(480, Math.max(200, Math.round(width)));
 
-const contextPanelModeSchema = z.enum(['diff', 'walkthrough', 'file', 'context', 'plan', 'chat', 'browser', 'git', 'pr', 'linear', 'notes', 'terminal']);
+const contextPanelModeSchema = z.enum(['diff', 'walkthrough', 'file', 'context', 'plan', 'chat', 'browser', 'server-browser', 'git', 'pr', 'linear', 'notes', 'terminal']);
 const persistedPanelWidthsSchema = z.object({
   widthByMode: z.record(z.string(), z.number().finite().optional().catch(undefined)).catch({}),
   widthFractionByMode: z.record(z.string(), z.number().positive().max(1).optional().catch(undefined)).catch({}),
@@ -137,6 +145,10 @@ type ContextPanelTab = {
   readOnly: boolean;
   stagedDiff: boolean;
   diffScope: PendingDiffScope | null;
+  backend?: 'server-chrome';
+  browserSessionId?: string;
+  serverTargetId?: string;
+  savedSelections?: SavedServerBrowserSelection[];
   touchedAt: number;
 };
 
@@ -152,6 +164,10 @@ type ContextPanelTabDescriptor = {
   readOnly?: boolean;
   stagedDiff?: boolean;
   diffScope?: PendingDiffScope | null;
+  backend?: 'server-chrome';
+  browserSessionId?: string;
+  serverTargetId?: string;
+  savedSelections?: SavedServerBrowserSelection[];
 };
 
 type ContextPanelDirectoryState = {
@@ -328,7 +344,7 @@ const normalizeContextPanelTabDedupeKey = (
   targetPath: string | null,
   dedupeKey: string | null | undefined,
 ): string => {
-  if (mode === 'diff') {
+  if (mode === 'diff' || mode === 'server-browser') {
     return mode;
   }
 
@@ -347,18 +363,26 @@ const buildContextPanelTabID = (mode: ContextPanelMode, dedupeKey: string): stri
 };
 
 const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPanelTab => {
+  const mode = descriptor.mode === 'browser' && descriptor.backend === 'server-chrome'
+    ? 'server-browser'
+    : descriptor.mode;
   const normalizedTargetPath = normalizeContextTargetPath(descriptor.targetPath);
   const normalizedTargetDirectory = descriptor.mode === 'terminal'
     ? normalizeContextTargetDirectory(descriptor.targetDirectory)
     : null;
   const dedupeKey = normalizeContextPanelTabDedupeKey(
-    descriptor.mode,
+    mode,
     normalizedTargetPath,
     descriptor.dedupeKey,
   );
+  const backend = mode === 'server-browser'
+    ? 'server-chrome'
+    : undefined;
+  const browserSessionId = backend ? descriptor.browserSessionId?.trim() || undefined : undefined;
+  const serverTargetId = backend ? descriptor.serverTargetId?.trim() || undefined : undefined;
   return {
-    id: buildContextPanelTabID(descriptor.mode, dedupeKey),
-    mode: descriptor.mode,
+    id: buildContextPanelTabID(mode, dedupeKey),
+    mode,
     targetPath: normalizedTargetPath,
     targetDirectory: normalizedTargetDirectory,
     projectPlanId: typeof descriptor.projectPlanId === 'string' && descriptor.projectPlanId.trim()
@@ -371,6 +395,13 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     readOnly: descriptor.readOnly === true,
     stagedDiff: descriptor.stagedDiff === true,
     diffScope: normalizePendingDiffScope(descriptor.diffScope) ?? (descriptor.stagedDiff === true ? 'staged' : 'working'),
+    ...(backend ? { backend } : {}),
+    ...(browserSessionId ? { browserSessionId } : {}),
+    ...(serverTargetId ? { serverTargetId } : {}),
+    savedSelections: backend ? mergeSavedServerBrowserSelections([
+      ...(descriptor.savedSelections ?? []),
+      { browserSessionId, serverTargetId, targetPath: normalizedTargetPath, touchedAt: Date.now() },
+    ]) : undefined,
     touchedAt: Date.now(),
   };
 };
@@ -433,6 +464,10 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       readOnly?: unknown;
       stagedDiff?: unknown;
       diffScope?: unknown;
+      backend?: unknown;
+      browserSessionId?: unknown;
+      serverTargetId?: unknown;
+      savedSelections?: unknown;
       touchedAt?: unknown;
     };
 
@@ -445,7 +480,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
 
     // State is shared with the desktop and web surfaces, which do have a
     // browser; inside VS Code such a tab would have no surface to belong to.
-    if (dropBrowserTabs && candidate.mode === 'browser') {
+    if (dropBrowserTabs && (candidate.mode === 'browser' || candidate.mode === 'server-browser')) {
       continue;
     }
 
@@ -472,11 +507,20 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       typeof candidate.dedupeKey === 'string' ? candidate.dedupeKey : null,
     );
     const id = buildContextPanelTabID(candidate.mode, dedupeKey);
-    if (!id || seen.has(id)) {
+    if (!id || (seen.has(id) && candidate.mode !== 'server-browser')) {
       continue;
     }
 
     seen.add(id);
+    const backend = candidate.mode === 'server-browser' || (candidate.mode === 'browser' && candidate.backend === 'server-chrome')
+      ? 'server-chrome'
+      : undefined;
+    const browserSessionId = backend && typeof candidate.browserSessionId === 'string'
+      ? candidate.browserSessionId.trim() || undefined
+      : undefined;
+    const serverTargetId = backend && typeof candidate.serverTargetId === 'string'
+      ? candidate.serverTargetId.trim() || undefined
+      : undefined;
     result.push({
       id,
       mode: candidate.mode,
@@ -490,6 +534,10 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       readOnly: candidate.readOnly === true,
       stagedDiff: candidate.stagedDiff === true,
       diffScope: normalizePendingDiffScope(candidate.diffScope) ?? (candidate.stagedDiff === true ? 'staged' : 'working'),
+      ...(backend ? { backend } : {}),
+      ...(browserSessionId ? { browserSessionId } : {}),
+      ...(serverTargetId ? { serverTargetId } : {}),
+      savedSelections: backend ? savedServerBrowserSelectionsSchema.parse(candidate.savedSelections) : undefined,
       touchedAt: typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
         ? candidate.touchedAt
         : Date.now(),
@@ -497,6 +545,26 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
   }
 
   return result;
+};
+
+const consolidateServerBrowserTabs = (
+  tabs: ContextPanelTab[],
+  activeTabId: string | null,
+) => {
+  const serverTabs = tabs.filter((tab) => tab.mode === 'server-browser' || tab.backend === 'server-chrome');
+  if (serverTabs.length === 0) return { tabs, activeTabId };
+  const selected = serverTabs.find((tab) => tab.id === activeTabId)
+    ?? serverTabs.reduce((latest, tab) => tab.touchedAt >= latest.touchedAt ? tab : latest);
+  const savedSelections = mergeSavedServerBrowserSelections(serverTabs.flatMap((tab) => [
+    ...(tab.savedSelections ?? []),
+    { browserSessionId: tab.browserSessionId, serverTargetId: tab.serverTargetId, targetPath: tab.targetPath, touchedAt: tab.touchedAt },
+  ]));
+  const singleton: ContextPanelTab = { ...selected, id: 'server-browser', mode: 'server-browser', dedupeKey: 'server-browser', savedSelections };
+  const firstServerTab = serverTabs[0];
+  return {
+    tabs: tabs.flatMap((tab) => tab === firstServerTab ? [singleton] : serverTabs.includes(tab) ? [] : [tab]),
+    activeTabId: serverTabs.some((tab) => tab.id === activeTabId) ? singleton.id : activeTabId,
+  };
 };
 
 const resolveActiveContextPanelTabID = (tabs: ContextPanelTab[], activeTabId: string | null): string | null => {
@@ -513,8 +581,9 @@ const resolveActiveContextPanelTabID = (tabs: ContextPanelTab[], activeTabId: st
 
 const touchContextPanelState = (prev?: ContextPanelDirectoryState): ContextPanelDirectoryState => {
   if (prev) {
-    const tabs = sanitizeContextPanelTabs(prev.tabs);
-    const activeTabId = resolveActiveContextPanelTabID(tabs, prev.activeTabId);
+    const consolidated = consolidateServerBrowserTabs(sanitizeContextPanelTabs(prev.tabs), prev.activeTabId);
+    const { tabs } = consolidated;
+    const activeTabId = resolveActiveContextPanelTabID(tabs, consolidated.activeTabId);
     return {
       ...prev,
       tabs,
@@ -563,6 +632,12 @@ const upsertContextPanelTab = (
           stagedDiff: nextTab.stagedDiff,
           diffScope: nextTab.diffScope,
           readOnly: nextTab.readOnly,
+          backend: nextTab.backend ?? tab.backend,
+          browserSessionId: nextTab.browserSessionId ?? tab.browserSessionId,
+          serverTargetId: nextTab.serverTargetId ?? tab.serverTargetId,
+          savedSelections: nextTab.mode === 'server-browser' ? mergeSavedServerBrowserSelections([
+            ...(tab.savedSelections ?? []), ...(nextTab.savedSelections ?? []),
+          ]) : tab.savedSelections,
           touchedAt: Date.now(),
         }
       : tab));
@@ -676,9 +751,40 @@ const setContextPanelTabTargetPath = (
   targetPath: string,
 ): ContextPanelDirectoryState => ({
   ...current,
-  tabs: current.tabs.map((tab) =>
-    tab.id === tabID ? { ...tab, targetPath } : tab,
-  ),
+  tabs: current.tabs.map((tab) => {
+    if (tab.id !== tabID || tab.targetPath === targetPath) return tab;
+    return {
+      ...tab,
+      targetPath,
+      savedSelections: tab.mode === 'server-browser' ? mergeSavedServerBrowserSelections([
+        ...(tab.savedSelections ?? []),
+        { browserSessionId: tab.browserSessionId, serverTargetId: tab.serverTargetId, targetPath, touchedAt: Date.now() },
+      ]) : tab.savedSelections,
+    };
+  }),
+});
+
+const setContextPanelTabServerBrowser = (
+  current: ContextPanelDirectoryState,
+  tabID: string,
+  fields: { browserSessionId?: string | null; serverTargetId?: string | null; targetPath?: string | null },
+): ContextPanelDirectoryState => ({
+  ...current,
+  tabs: current.tabs.map((tab) => {
+    if (tab.id !== tabID || tab.mode !== 'server-browser') return tab;
+    const browserSessionId = fields.browserSessionId === undefined ? tab.browserSessionId : fields.browserSessionId?.trim() || undefined;
+    const serverTargetId = fields.serverTargetId === undefined ? tab.serverTargetId : fields.serverTargetId?.trim() || undefined;
+    const targetPath = fields.targetPath === undefined ? tab.targetPath : fields.targetPath;
+    if (browserSessionId === tab.browserSessionId && serverTargetId === tab.serverTargetId && targetPath === tab.targetPath) return tab;
+    const touchedAt = Date.now();
+    return {
+      ...tab, browserSessionId, serverTargetId, targetPath, touchedAt,
+      savedSelections: mergeSavedServerBrowserSelections([
+        ...(tab.savedSelections ?? []),
+        { browserSessionId, serverTargetId, targetPath, touchedAt },
+      ]),
+    };
+  }),
 });
 
 const sanitizeContextPanelByDirectory = (
@@ -711,8 +817,11 @@ const sanitizeContextPanelByDirectory = (
       label?: unknown;
     };
 
-    let tabs = sanitizeContextPanelTabs(candidate.tabs);
-    let activeTabId = typeof candidate.activeTabId === 'string' ? candidate.activeTabId : null;
+    const consolidated = consolidateServerBrowserTabs(
+      sanitizeContextPanelTabs(candidate.tabs),
+      typeof candidate.activeTabId === 'string' ? candidate.activeTabId : null,
+    );
+    let { tabs, activeTabId } = consolidated;
 
     // Legacy single-tab state can name a saved project plan, but it carries
     // no owner and cannot be migrated into an openable saved-plan tab — that
@@ -742,6 +851,9 @@ const sanitizeContextPanelByDirectory = (
       const fraction = savedWidths.widthFractionByMode[mode];
       if (pixels !== undefined) widthByMode[mode] = clampContextPanelWidth(pixels);
       if (fraction !== undefined) widthFractionByMode[mode] = fraction;
+    }
+    if (tabs.some((tab) => tab.mode === 'server-browser') && widthByMode['server-browser'] === undefined) {
+      widthByMode['server-browser'] = widthByMode.browser;
     }
 
     next[directory] = {
@@ -964,6 +1076,8 @@ interface UIStore {
   showOpenCodeUpdateNotifications: boolean;
   agentControlToolEnabled: boolean;
   agentWebToolEnabled: boolean;
+  serverBrowserEnabled: boolean;
+  serverBrowserDebugPort: number;
   agentMemoryToolEnabled: boolean;
   /**
    * Whether this build has agent memory at all. Server-owned and not
@@ -1020,9 +1134,15 @@ interface UIStore {
   openContextFileAtLine: (directory: string, filePath: string, line: number, column?: number) => void;
   openContextOverview: (directory: string) => void;
   openContextPreview: (directory: string, url: string) => void;
-  openContextBrowser: (directory: string, url?: string, options?: { reveal?: boolean }) => void;
+  openContextBrowser: (directory: string, url?: string, options?: { reveal?: boolean }) => string | null;
   openNewContextBrowserTab: (directory: string) => void;
+  openNewContextServerBrowserTab: (directory: string) => void;
   setContextPanelTabTargetPath: (directory: string, tabID: string, targetPath: string) => void;
+  setContextPanelTabServerBrowser: (
+    directory: string,
+    tabID: string,
+    fields: { browserSessionId?: string | null; serverTargetId?: string | null; targetPath?: string | null },
+  ) => void;
   setActiveContextPanelTab: (directory: string, tabID: string) => void;
   reorderContextPanelTabs: (directory: string, activeTabID: string, overTabID: string) => void;
   closeContextPanelTab: (directory: string, tabID: string) => void;
@@ -1166,6 +1286,8 @@ interface UIStore {
   setShowOpenCodeUpdateNotifications: (value: boolean) => void;
   setAgentControlToolEnabled: (value: boolean) => void;
   setAgentWebToolEnabled: (value: boolean) => void;
+  setServerBrowserEnabled: (value: boolean) => void;
+  setServerBrowserDebugPort: (value: number) => void;
   setAgentMemoryToolEnabled: (value: boolean) => void;
   setAgentMemoryFeatureAvailable: (value: boolean) => void;
   markAgentMemoryViewed: (key: string, viewedAt: number) => void;
@@ -1343,6 +1465,8 @@ export const useUIStore = create<UIStore>()(
         showOpenCodeUpdateNotifications: !isWindowsArm64(),
         agentControlToolEnabled: true,
         agentWebToolEnabled: true,
+        serverBrowserEnabled: false,
+        serverBrowserDebugPort: 0,
         agentMemoryToolEnabled: false,
         agentMemoryFeatureAvailable: false,
         agentMemoryViewedAt: {},
@@ -1430,6 +1554,7 @@ export const useUIStore = create<UIStore>()(
           }
 
           const state = get();
+          if (mode === 'server-browser' && (!state.serverBrowserEnabled || isVSCodeRuntime())) return;
           const panelState = state.contextPanelByDirectory[normalizedDirectory];
           const tabs = panelState?.tabs ?? [];
           const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? null;
@@ -1484,6 +1609,8 @@ export const useUIStore = create<UIStore>()(
           if (!normalizedDirectory) {
             return;
           }
+          const isServerBrowser = tab.mode === 'server-browser' || (tab.mode === 'browser' && tab.backend === 'server-chrome');
+          if (isServerBrowser && (!get().serverBrowserEnabled || isVSCodeRuntime())) return;
 
           const nextTab = tab.mode === 'terminal'
             ? {
@@ -1597,16 +1724,29 @@ export const useUIStore = create<UIStore>()(
             label: null,
           });
         },
-        openContextBrowser: (directory, url = '', options) => {
+        openNewContextServerBrowserTab: (directory) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           if (!normalizedDirectory || isVSCodeRuntime()) return;
+          get().openContextPanelTab(normalizedDirectory, {
+            mode: 'server-browser',
+            label: null,
+            backend: 'server-chrome',
+          });
+        },
+        openContextBrowser: (directory, url = '', options): string | null => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          if (!normalizedDirectory || isVSCodeRuntime()) return null;
           const targetUrl = typeof url === 'string' && url.trim().length > 0 ? url.trim() : '';
+          const dedupeKey = targetUrl || 'browser';
           get().openContextPanelTab(normalizedDirectory, {
             mode: 'browser',
             targetPath: targetUrl,
-            dedupeKey: targetUrl || 'browser',
+            dedupeKey,
             label: null,
           }, options);
+          // The id is derived from the dedupe key, not generated, so the
+          // caller can name the exact tab the upsert created or activated.
+          return buildContextPanelTabID('browser', dedupeKey);
         },
 
         setContextPanelTabTargetPath: (directory, tabID, targetPath) => {
@@ -1620,6 +1760,22 @@ export const useUIStore = create<UIStore>()(
               contextPanelByDirectory: {
                 ...state.contextPanelByDirectory,
                 [normalizedDirectory]: setContextPanelTabTargetPath(current, normalizedTabID, targetPath),
+              },
+            };
+          });
+        },
+
+        setContextPanelTabServerBrowser: (directory, tabID, fields) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedTabID = (tabID || '').trim();
+          if (!normalizedDirectory || !normalizedTabID) return;
+          set((state) => {
+            const current = state.contextPanelByDirectory[normalizedDirectory];
+            if (!current) return state;
+            return {
+              contextPanelByDirectory: {
+                ...state.contextPanelByDirectory,
+                [normalizedDirectory]: setContextPanelTabServerBrowser(current, normalizedTabID, fields),
               },
             };
           });
@@ -2661,6 +2817,12 @@ export const useUIStore = create<UIStore>()(
         setAgentWebToolEnabled: (value) => {
           set({ agentWebToolEnabled: value });
         },
+        setServerBrowserEnabled: (value) => {
+          set({ serverBrowserEnabled: value });
+        },
+        setServerBrowserDebugPort: (value) => {
+          set({ serverBrowserDebugPort: value });
+        },
         setAgentMemoryToolEnabled: (value) => {
           set({ agentMemoryToolEnabled: value });
         },
@@ -2978,6 +3140,8 @@ export const useUIStore = create<UIStore>()(
           delete state.rightSidebarWidth;
           delete state.rightSidebarTab;
 
+          // v20 -> v21 aggregates the old server-chrome browser tabs into one
+          // surface before the sanitizer applies per-mode limits.
           state.contextPanelByDirectory = sanitizeContextPanelByDirectory(state.contextPanelByDirectory);
 
           if (version < 5) {
@@ -3129,6 +3293,8 @@ export const useUIStore = create<UIStore>()(
           showOpenCodeUpdateNotifications: state.showOpenCodeUpdateNotifications,
           agentControlToolEnabled: state.agentControlToolEnabled,
           agentWebToolEnabled: state.agentWebToolEnabled,
+          serverBrowserEnabled: state.serverBrowserEnabled,
+          serverBrowserDebugPort: state.serverBrowserDebugPort,
           agentMemoryToolEnabled: state.agentMemoryToolEnabled,
           agentMemoryViewedAt: state.agentMemoryViewedAt,
           projectContextSidebarWidth: state.projectContextSidebarWidth,

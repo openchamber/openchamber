@@ -17,6 +17,7 @@ export type BuiltInContextSurfaceId =
   | 'notes'
   | 'context'
   | 'browser'
+  | 'server-browser'
   | 'chat';
 
 export type ContextSurfaceId = BuiltInContextSurfaceId | `plugin:${string}`;
@@ -151,6 +152,15 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     availability: 'always',
   },
   {
+    id: 'server-browser',
+    descriptionKey: 'contextRail.surface.server-browser.description',
+    defaultWidthFraction: 0.45,
+    mode: 'server-browser',
+    icon: 'server',
+    labelKey: 'contextPanel.browser.remote.tabLabel',
+    availability: 'always',
+  },
+  {
     id: 'chat',
     descriptionKey: 'contextRail.surface.chat.description',
     defaultWidthFraction: 0.45,
@@ -215,6 +225,7 @@ type VisibleRailSurfacesOptions = {
       shortcuts, which share this filter). */
   hiddenSurfaces?: readonly string[];
   planModeEnabled: boolean;
+  serverBrowserEnabled: boolean;
   isVSCode: boolean;
   screenWidth: number;
   tabs: readonly { mode: ContextPanelMode }[];
@@ -258,7 +269,10 @@ export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOption
     // remote dev servers — all of which need a Chromium host the extension does
     // not have. Offering the surface anyway would promise the panel people see
     // on the desktop.
-    if (surface.id === 'browser' && options.isVSCode) {
+    if ((surface.id === 'browser' || surface.id === 'server-browser') && options.isVSCode) {
+      return false;
+    }
+    if (surface.id === 'server-browser' && !options.serverBrowserEnabled) {
       return false;
     }
     if (surface.id === 'linear' && !options.linearConnected) {

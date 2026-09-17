@@ -15,13 +15,15 @@ type ToolbarButtonProps = {
   onClick: () => void;
   disabled?: boolean;
   pressed?: boolean;
+  buttonRef?: React.Ref<HTMLButtonElement>;
 };
 
-const ToolbarButton: React.FC<ToolbarButtonProps> = ({ icon, label, onClick, disabled, pressed }) => (
+const ToolbarButton: React.FC<ToolbarButtonProps> = ({ icon, label, onClick, disabled, pressed, buttonRef }) => (
   <Tooltip>
     <TooltipTrigger asChild>
       <Button
         type="button"
+        ref={buttonRef}
         variant={pressed ? 'secondary' : 'ghost'}
         size="xs"
         className={cn(
@@ -41,7 +43,7 @@ const ToolbarButton: React.FC<ToolbarButtonProps> = ({ icon, label, onClick, dis
   </Tooltip>
 );
 
-export type BrowserToolbarProps = {
+type BrowserToolbarProps = {
   address: string;
   /** Addresses already visited in this project, offered while typing. */
   suggestions?: readonly BrowserHistoryEntry[];
@@ -51,13 +53,16 @@ export type BrowserToolbarProps = {
   onBack: () => void;
   onForward: () => void;
   onReload: () => void;
-  onOpenExternal: () => void;
+  onOpenExternal?: () => void;
   canGoBack: boolean;
   canGoForward: boolean;
   isLoading: boolean;
   /** These need a real Chromium host; hidden without one. */
   onAnnotate?: () => void;
   onOpenDevTools?: () => void;
+  devToolsLabel?: string;
+  devToolsPressed?: boolean;
+  devToolsButtonRef?: React.Ref<HTMLButtonElement>;
   isAnnotating?: boolean;
   onHardReload?: () => void;
   onZoomIn?: () => void;
@@ -68,7 +73,13 @@ export type BrowserToolbarProps = {
   onClearCookies?: () => void;
   onClearCache?: () => void;
   onToggleDeviceBar?: () => void;
+
   isDeviceBarOpen?: boolean;
+
+  /** Shows the agent-control indicator next to the address bar. */
+
+  agentControlling?: boolean;
+
 };
 
 export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
@@ -86,6 +97,9 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
   isLoading,
   onAnnotate,
   onOpenDevTools,
+  devToolsLabel,
+  devToolsPressed,
+  devToolsButtonRef,
   isAnnotating,
   onHardReload,
   onZoomIn,
@@ -95,7 +109,11 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
   onClearCookies,
   onClearCache,
   onToggleDeviceBar,
+
   isDeviceBarOpen,
+
+  agentControlling = false,
+
 }) => {
   const { t } = useI18n();
   const [isAddressFocused, setIsAddressFocused] = React.useState(false);
@@ -146,7 +164,7 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
       <ToolbarButton icon="arrow-left" label={t('contextPanel.browser.back')} onClick={onBack} disabled={!canGoBack} />
       <ToolbarButton icon="arrow-right" label={t('contextPanel.browser.forward')} onClick={onForward} disabled={!canGoForward} />
       <ToolbarButton
-        icon="refresh"
+        icon={isLoading ? 'stop' : 'refresh'}
         label={isLoading ? t('contextPanel.browser.stop') : t('contextPanel.browser.reload')}
         onClick={onReload}
       />
@@ -187,6 +205,15 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
           />
         </div>
       </form>
+      {agentControlling ? (
+        <span
+          role="status"
+          className="flex shrink-0 select-none items-center gap-1.5 rounded-full border border-[var(--status-info)] px-2 py-0.5 typography-micro text-[var(--status-info)]"
+        >
+          <span className="size-1.5 rounded-full bg-[var(--status-info)]" aria-hidden="true" />
+          {t('contextPanel.browser.agentControlling')}
+        </span>
+      ) : null}
       {onZoomOut && onZoomIn ? (
         <div className="flex shrink-0 items-center">
           <ToolbarButton icon="subtract" label={t('contextPanel.browser.zoomOut')} onClick={onZoomOut} />
@@ -233,9 +260,12 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
         />
       ) : null}
       {onOpenDevTools ? (
-        <ToolbarButton icon="terminal-box" label={t('contextPanel.browser.devTools')} onClick={onOpenDevTools} />
+        <ToolbarButton icon="terminal-box" label={devToolsLabel ?? t('contextPanel.browser.devTools')}
+          onClick={onOpenDevTools} pressed={devToolsPressed} buttonRef={devToolsButtonRef} />
       ) : null}
-      <ToolbarButton icon="external-link" label={t('contextPanel.browser.openExternal')} onClick={onOpenExternal} />
+      {onOpenExternal ? (
+        <ToolbarButton icon="external-link" label={t('contextPanel.browser.openExternal')} onClick={onOpenExternal} />
+      ) : null}
     </div>
   );
 };

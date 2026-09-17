@@ -26,6 +26,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     killProcessOnPort,
     waitForPortRelease,
     getServer,
+    shutdownServerBrowser,
     getUiAuthController,
     setUiAuthController,
     getActiveTunnelController,
@@ -73,6 +74,14 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       } catch {
       } finally {
         setMessageStreamRuntime(null);
+      }
+    }
+
+    if (shutdownServerBrowser) {
+      try {
+        await shutdownServerBrowser();
+      } catch (error) {
+        console.warn('Error shutting down the server browser:', error);
       }
     }
 
