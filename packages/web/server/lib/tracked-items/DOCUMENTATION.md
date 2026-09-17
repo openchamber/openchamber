@@ -14,8 +14,8 @@ Server-owned live state of the pull requests, merge requests and issues that con
 
 - Only items shown by at least one visible connection are asked. Cadence by state: open PR/MR 60 s (30 s while checks are pending), issues and closed PRs 5 min, open Linear issues 2 min, settled Linear issues 5 min, merged never, unknown 60 s. A connection turning visible refreshes its items older than 15 s.
 - An agent turn finishing (`session.idle` / idle `session.status` on the global event hub) refreshes open items after a 3 s settle.
-- Batches per provider and reading account: GitHub (`fetchPrSummaries` with the bound account or the current github.com account, up to 100), GitLab per instance (`resources.liveSummaries` with the bound or current account, up to 50), Linear (`getLinearIssueSummaries`, up to 50). `readers.js` maps each to `ok` / `disconnected` / `unavailable`.
-- A failed or rate-limited provider keeps the last known states and is left alone with exponential backoff (30 s to 15 min); GitHub also honours the shared rate-limit cooldown. No account on a host waits 2 min before asking again.
+- Batches per provider, instance and reading account: GitHub per host (`fetchPrSummaries` with the bound account on github.com or the host's current account, up to 100), GitLab per instance (`resources.liveSummaries` with the bound or current account, up to 50), Linear (`getLinearIssueSummaries`, up to 50). `readers.js` maps each to `ok` / `disconnected` / `unavailable`. A GitHub item's instance is its host (missing means github.com), so the same owner/repo on github.com and an enterprise host never shares a batch, a cooldown or a login.
+- A failed or rate-limited provider keeps the last known states and is left alone with exponential backoff (30 s to 15 min); GitHub also honours the per-host rate-limit cooldown. No account on a host waits 2 min before asking again.
 
 ## Persistence
 

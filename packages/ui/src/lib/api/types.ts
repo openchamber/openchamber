@@ -1435,6 +1435,8 @@ export type GitHubUserSummary = {
 type GitHubRepoRef = {
   owner: string;
   repo: string;
+  /** GitHub Enterprise host (e.g. "ghe.example.com"); github.com when absent. */
+  host?: string;
   url: string;
 };
 
@@ -1584,7 +1586,7 @@ export type GitHubPullRequestStatus = {
   resolvedRemoteName?: string | null;
 };
 
-export type GitHubPullRequestRef = GitHubRepoSelector & { number: number };
+export type GitHubPullRequestRef = GitHubRepoSelector & { number: number; host?: string };
 
 /** Live fields of a known PR, refreshed in batches for list surfaces. */
 export type GitHubPullRequestLiveSummary = GitHubPullRequestRef & {

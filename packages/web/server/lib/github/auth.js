@@ -353,7 +353,7 @@ export function setGhCliDisabled(disabled) {
 }
 
 export function isGhCliActive() {
-  const settings = readSettingsFile();
+    const settings = readSettingsFile();
   return !settings?.ghCliDisabled && Boolean(settings?.ghCliActive);
 }
 

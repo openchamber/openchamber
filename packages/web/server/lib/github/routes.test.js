@@ -316,12 +316,45 @@ describe('GET /api/source-control/github/references', () => {
     const graphqlCalls = () => fetch.mock.calls.filter(([url]) => String(url).endsWith('/graphql')).length;
     const before = graphqlCalls();
     await request(app).get('/api/source-control/github/references/status')
-      .query({ ...readContext(project), pulls: 'example/project#4,someone/else#4' })
-      .expect(400);
-    await request(app).get('/api/source-control/github/references/status')
       .query({ ...readContext(project), pulls: 'example/project#x' })
       .expect(400);
     expect(graphqlCalls()).toBe(before);
+
+    // A ref's host rides on the wire as `owner/repo#number@host`; the default
+    // github.com host reads exactly like a host-less ref.
+    const hosted = await request(app).get('/api/source-control/github/references/status')
+      .query({ ...readContext(project), pulls: 'example/project#4@github.com,example/project#9@github.com' })
+      .expect(200);
+    expect(hosted.body.statuses).toEqual(res.body.statuses);
+
+    // A mixed-host request groups by host: the untrusted host's group drops (no
+    // credential exists for it) while the github.com group still answers in
+    // full — one failed group never erases another.
+    const ghe = serveGitHub(() => response({ data: {
+      a0: { pullRequest: {
+        number: 4,
+        title: 'PR 4',
+        state: 'OPEN',
+        isDraft: false,
+        mergeable: 'CONFLICTING',
+        mergeStateStatus: 'DIRTY',
+        headRefOid: 'sha-4',
+        commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [
+          { __typename: 'CheckRun', databaseId: 1, name: 'test', status: 'COMPLETED', conclusion: 'FAILURE', startedAt: null, checkSuite: { app: { databaseId: 1 } } },
+        ] } } } }] },
+      } },
+    } }));
+    const mixed = await request(app).get('/api/source-control/github/references/status')
+      .query({ ...readContext(project), pulls: 'example/project#4@github.com,example/project#9@untrusted.example.invalid' })
+      .expect(200);
+    expect(mixed.body.statuses).toEqual([{
+      owner: 'example',
+      repo: 'project',
+      number: 4,
+      checks: expect.objectContaining({ state: 'failure', failure: 1, total: 1 }),
+      mergeable: false,
+      mergeableState: 'dirty',
+    }]);
   });
 
   it('fails instead of answering an empty page', async () => {
@@ -333,6 +366,106 @@ describe('GET /api/source-control/github/references', () => {
       .expect(500);
 
     expect(res.body).not.toHaveProperty('items');
+  });
+});
+
+describe('GitHub Enterprise references on a trusted enterprise checkout', () => {
+  let app;
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-github-refs-ghe-'));
+  const project = path.join(dataDir, 'project');
+  const ghConfigDir = path.join(dataDir, 'gh-config');
+  const binDirectory = path.join(dataDir, 'bin');
+  const previousConfigDir = process.env.GH_CONFIG_DIR;
+  const previousPath = process.env.PATH;
+
+  beforeAll(async () => {
+    process.env.OPENCHAMBER_DATA_DIR = dataDir;
+    process.env.GH_CONFIG_DIR = ghConfigDir;
+    fs.mkdirSync(project);
+    fs.mkdirSync(binDirectory, { recursive: true });
+    fs.mkdirSync(ghConfigDir, { recursive: true });
+    fs.writeFileSync(path.join(binDirectory, 'gh'), '#!/bin/sh\necho gho_ghe\n', { mode: 0o755 });
+    execFileSync('git', ['init', '-q', project]);
+    execFileSync('git', ['-C', project, 'remote', 'add', 'origin', 'https://github.example.com/example/project.git']);
+    fs.writeFileSync(path.join(ghConfigDir, 'hosts.yml'), 'github.example.com:\n  user: ghe-user\n  oauth_token: gho_ghe\n');
+    const { setGitHubAuth, setGhCliDisabled, setGhCliActive } = await import('./auth.js');
+    ({ accountId } = await setGitHubAuth({ accessToken: 'fake-test-token', user: { id: 7, login: 'tester' } }));
+    setGhCliDisabled(false);
+    setGhCliActive(true);
+    process.env.PATH = `${binDirectory}${path.delimiter}${previousPath}`;
+    app = express();
+    registerGitHubRoutes(app, routeOptions());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  afterAll(() => {
+    if (previousDataDir === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+    else process.env.OPENCHAMBER_DATA_DIR = previousDataDir;
+    if (previousConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
+    else process.env.GH_CONFIG_DIR = previousConfigDir;
+    process.env.PATH = previousPath;
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  // The checkout lives on github.example.com, so its network is the checkout host's
+  // too: a pull ref on that host is bound to that network like a github.com pull
+  // is on a github.com checkout.
+  it('rejects a GitHub Enterprise ref outside the bound repo network on the checkout host', async () => {
+    const fetch = vi.fn(async (url) => {
+      const endpoint = new URL(url);
+      if (endpoint.pathname === '/api/v3/repos/example/project') return response({ full_name: 'example/project', fork: false });
+      throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+
+    const res = await request(app).get('/api/source-control/github/references/status')
+      .query({ ...readContext(project), pulls: 'someone/else#5@github.example.com' })
+      .expect(400);
+    expect(res.body).toEqual({ error: 'Repository is not part of this project' });
+
+    // The rejected ref's group never reaches the summaries.
+    expect(fetch.mock.calls.some(([url]) => String(url).includes('/graphql'))).toBe(false);
+  });
+
+  it("resolves a detail request naming an enterprise host with that host's Octokit, even when the same repo also exists on github.com", async () => {
+    const fetch = vi.fn(async (url) => {
+      const endpoint = new URL(url);
+      if (endpoint.pathname === '/api/v3/repos/example/project') return response({ full_name: 'example/project', fork: false });
+      if (endpoint.pathname === '/api/graphql') {
+        return response({ data: { repository: { issueOrPullRequest: {
+          __typename: 'PullRequest',
+          number: 4,
+          state: 'OPEN',
+          reviewDecision: 'APPROVED',
+          headCommit: { nodes: [] },
+          reviewRequests: { nodes: [] },
+          additions: 1,
+          deletions: 2,
+          changedFiles: 1,
+          comments: { totalCount: 0, nodes: [] },
+          reviews: { nodes: [] },
+          reviewThreads: { nodes: [] },
+          commits: { totalCount: 0, nodes: [] },
+        } } } });
+      }
+      throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+
+    const detail = await request(app).get('/api/source-control/github/references/detail')
+      .query({ ...readContext(project), owner: 'example', repo: 'project', number: '4', host: 'github.example.com' })
+      .expect(200);
+    expect(detail.body).toEqual({
+      connected: true,
+      detail: expect.objectContaining({ number: 4, comments: [], pull: expect.objectContaining({ reviewDecision: 'approved', additions: 1 }) }),
+    });
+    // Only the named host was used: the request never touched github.com.
+    expect(fetch.mock.calls.every(([url]) => String(url).startsWith('https://github.example.com/'))).toBe(true);
+    expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/api/graphql'))).toHaveLength(1);
   });
 });
 

@@ -189,6 +189,19 @@ describe('findBranchPrCandidates', () => {
     expect(listMock).toHaveBeenCalledTimes(2);
   });
 
+  test('invalidates only the exact owner/repo `::` segment, not one that merely contains it', async () => {
+    listMock.mockResolvedValue({ data: [openPr] });
+    call({ target: { repo: { owner: 'xfoo', repo: 'bar' } }, remoteName: 'origin' });
+
+    // The match splits on `::` and compares whole segments, so invalidating
+    // `foo/bar` never drops `xfoo/bar` — an unanchored `includes("foo/bar::")`
+    // would have.
+    listMock.mockClear();
+    invalidateRepoPullsCache('foo', 'bar');
+    expect((await call({ target: { repo: { owner: 'xfoo', repo: 'bar' } }, remoteName: 'origin' })).open?.number).toBe(openPr.number);
+    expect(listMock).not.toHaveBeenCalled();
+  });
+
   test('does not let an invalidated pull-list promise refill its exact cache key', async () => {
     const firstOctokit = octokitFor('first-token', 'first-account');
     const secondOctokit = octokitFor('second-token', 'second-account');
