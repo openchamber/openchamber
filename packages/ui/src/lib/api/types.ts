@@ -892,6 +892,8 @@ export type GitHubUserSummary = {
 type GitHubRepoRef = {
   owner: string;
   repo: string;
+  /** GitHub Enterprise host (e.g. "ghe.example.com"); github.com when absent. */
+  host?: string;
   url: string;
 };
 
@@ -1040,7 +1042,7 @@ export type GitHubPullRequestStatus = {
   resolvedRemoteName?: string | null;
 };
 
-export type GitHubPullRequestRef = GitHubRepoSelector & { number: number };
+export type GitHubPullRequestRef = GitHubRepoSelector & { number: number; host?: string };
 
 /** Live fields of a known PR, refreshed in batches for list surfaces. */
 export type GitHubPullRequestLiveSummary = GitHubPullRequestRef & {
@@ -1517,7 +1519,7 @@ export interface GitHubAPI {
   issueGet(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueGetResult>;
   issueComments(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueCommentsResult>;
   repoUpstream(directory: string): Promise<GitHubRepoUpstreamResult>;
-  repoBranches(owner: string, repo: string): Promise<string[]>;
+  repoBranches(owner: string, repo: string, directory?: string): Promise<string[]>;
 }
 
 export interface RemoteClientRecord {

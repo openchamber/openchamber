@@ -688,6 +688,16 @@ describe("open PR live summaries", () => {
     expect(useGitHubPrStatusStore.getState().entries[origin]?.status?.pr?.state).toBe("closed")
   })
 
+  test("the live summary ref carries the repo host for per-host routing", async () => {
+    const key = getGitHubPrStatusKey("/repo", "feature")
+    seed(key, openStatus({ repo: { owner: "acme", repo: "app", host: "ghe.acme.com", url: "https://ghe.acme.com/acme/app" } }))
+    const { github, calls } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), issueSummaries: [], summaries: [liveSummary()] }))
+
+    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], github, { minAgeMs: 0 })
+
+    expect(calls).toEqual([[{ owner: "acme", repo: "app", host: "ghe.acme.com", number: 7 }]])
+  })
+
   test("skips closed, missing, watched and recently checked entries", async () => {
     const closed = getGitHubPrStatusKey("/repo", "closed")
     const none = getGitHubPrStatusKey("/repo", "none")

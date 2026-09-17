@@ -168,6 +168,50 @@ describe('findBranchPrCandidates', () => {
     expect(listMock.mock.calls.some((entry) => entry[0]?.state === 'all')).toBe(true);
     expect(listMock.mock.calls.length).toBeGreaterThan(callsAfterFirst + 1);
   });
+
+  test('invalidating with a mixed-case repo name clears the shared open list cache', async () => {
+    // GitHub Enterprise repos routinely carry mixed case (e.g. octocat/Hello-World).
+    // Cache keys are lowercased by repoCacheKey, so an invalidation search must
+    // lowercase too — otherwise a just-created PR stays hidden for the TTL.
+    listMock.mockImplementation(async () => ({ data: [] }));
+
+    await call({ target: { repo: { owner: 'octocat', repo: 'Hello-World' }, remoteName: 'origin' } });
+    const callsAfterFirst = listMock.mock.calls.length;
+
+    await call({ force: false, target: { repo: { owner: 'octocat', repo: 'Hello-World' }, remoteName: 'origin' } });
+    expect(listMock.mock.calls.length).toBe(callsAfterFirst);
+
+    invalidateRepoPullsCache('octocat', 'Hello-World');
+    await call({ force: false, target: { repo: { owner: 'octocat', repo: 'Hello-World' }, remoteName: 'origin' } });
+    // The cache was actually dropped, so the shared open list is re-fetched.
+    expect(listMock.mock.calls.length).toBeGreaterThan(callsAfterFirst);
+    expect(listMock.mock.calls.slice(callsAfterFirst).some((entry) => entry[0]?.state === 'open')).toBe(true);
+  });
+
+  test('invalidating one repo never clears a same-prefixed neighbor', async () => {
+    // Cache keys are `host::owner/repo::…`, so `foo/bar` must match the exact
+    // `owner/repo` segment and not the substring inside `xfoo/bar`.
+    listMock.mockImplementation(async () => ({ data: [] }));
+
+    await call({ force: false, target: { repo: { owner: 'foo', repo: 'bar' }, remoteName: 'origin' } });
+    await call({ force: false, target: { repo: { owner: 'xfoo', repo: 'bar' }, remoteName: 'origin' } });
+    const callsAfterWarm = listMock.mock.calls.length;
+
+    invalidateRepoPullsCache('foo', 'bar');
+
+    await call({ force: false, target: { repo: { owner: 'foo', repo: 'bar' }, remoteName: 'origin' } });
+    await call({ force: false, target: { repo: { owner: 'xfoo', repo: 'bar' }, remoteName: 'origin' } });
+
+    // foo/bar was dropped (open list re-fetched) and its remembered history
+    // re-queried: two new calls. xfoo/bar is untouched and fully served from
+    // cache: zero new calls.
+    expect(listMock.mock.calls.length).toBe(callsAfterWarm + 2);
+    const newOpenFetches = listMock.mock.calls
+      .slice(callsAfterWarm)
+      .filter(([args]) => args?.state === 'open' && args?.owner === 'foo' && args?.repo === 'bar');
+    expect(newOpenFetches).toHaveLength(1);
+    expect(listMock.mock.calls.slice(callsAfterWarm).some(([args]) => args?.owner === 'xfoo')).toBe(false);
+  });
 });
 
 describe('isHistoricalPrOfCheckout', () => {

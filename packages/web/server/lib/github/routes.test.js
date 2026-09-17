@@ -7,6 +7,10 @@ import express from 'express';
 import request from 'supertest';
 import { registerGitHubRoutes } from './routes.js';
 
+// The summaries host-routing test below puts a real (fake) `gh` binary on PATH
+// so a trusted enterprise host can take a host-pinned token and gh's calls can
+// be asserted; the file otherwise runs with gh CLI disabled.
+
 const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-github-pulls-'));
 const previousDataDir = process.env.OPENCHAMBER_DATA_DIR;
 const repository = path.join(testDir, 'project');
@@ -308,6 +312,149 @@ describe('POST /api/github/pr/summaries', () => {
     expect(res.body.issueSummaries).toEqual([
       { owner: 'example', repo: 'project', number: 3, title: 'Bug', state: 'completed' },
     ]);
+  });
+
+  it('routes summaries per ref host, skipping hosts with no trustworthy credentials', async () => {
+    // A trusted enterprise host via a temp gh config (hosts.yml stored login);
+    // an enterprise token in the environment that must NOT reach the untrusted
+    // gitlab.com host. gh CLI is re-enabled for this request so the enterprise
+    // group can take the (mocked) host-pinned gh token; the stored OAuth token
+    // still covers github.com.
+    const { setGhCliDisabled } = await import('./auth.js');
+    const ghConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-gh-hosts-'));
+    fs.writeFileSync(path.join(ghConfigDir, 'hosts.yml'), [
+      'github.acme.com:',
+      '  users:',
+      '    admin:',
+      '      oauth_token: gho_acme',
+    ].join('\n'));
+    const previousConfigDir = process.env.GH_CONFIG_DIR;
+    const previousToken = process.env.GH_ENTERPRISE_TOKEN;
+    process.env.GH_CONFIG_DIR = ghConfigDir;
+    process.env.GH_ENTERPRISE_TOKEN = 'env-enterprise-token';
+    setGhCliDisabled(false);
+
+    // A real (fake) `gh` binary on PATH, so a trusted enterprise host can take
+    // a host-pinned token and we can assert which hosts gh was asked about —
+    // without module mocking. Each call appends its pinned GH_HOST to a file.
+    const ghBin = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-gh-bin-'));
+    const ghInvoked = path.join(ghBin, 'invoked-hosts.txt');
+    fs.writeFileSync(path.join(ghBin, 'gh'), [
+      '#!/bin/sh',
+      `printf '%s\\n' "$GH_HOST" >> '${ghInvoked}'`,
+      'printf \'gh-token-%s\\n\' "$GH_HOST"',
+      '',
+    ].join('\n'));
+    fs.chmodSync(path.join(ghBin, 'gh'), 0o755);
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${ghBin}${path.delimiter}${previousPath}`;
+
+    try {
+      const fetch = vi.fn(async (url) => {
+        const endpoint = new URL(String(url));
+        if (endpoint.hostname === 'api.github.com') {
+          return response({
+            data: { a0: { pullRequest: { number: 7, title: 'Fix', state: 'OPEN', isDraft: false, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', headRefOid: 'a', commits: { nodes: [] } } } },
+          });
+        }
+        if (endpoint.hostname === 'github.acme.com') {
+          return response({
+            data: { a0: { pullRequest: { number: 9, title: 'Enterprise', state: 'OPEN', isDraft: false, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', headRefOid: 'b', commits: { nodes: [] } } } },
+          });
+        }
+        throw new Error(`Unexpected host ${endpoint.hostname}`);
+      });
+      vi.stubGlobal('fetch', fetch);
+
+      const res = await summaries([
+        { owner: 'example', repo: 'project', number: 7 },
+        { owner: 'acme', repo: 'enterprise', number: 9, host: 'github.acme.com' },
+        { owner: 'example', repo: 'project', number: 5, host: 'gitlab.com' },
+      ]);
+
+      expect(res.status).toBe(200);
+      expect(res.body.connected).toBe(true);
+      // Both trusted groups answered; the untrusted gitlab.com group is absent.
+      expect(res.body.summaries.map((s) => s.number)).toEqual([7, 9]);
+      // Each trusted group used its own host, and no request ever went to the
+      // untrusted host (nor was gh asked for its token).
+      const hosts = fetch.mock.calls.map(([url]) => new URL(String(url)).hostname);
+      expect(hosts).toEqual(expect.arrayContaining(['api.github.com', 'github.acme.com']));
+      expect(hosts).not.toContain('gitlab.com');
+      const invoked = fs.existsSync(ghInvoked)
+        ? fs.readFileSync(ghInvoked, 'utf8').split('\n').filter(Boolean)
+        : [];
+      expect(invoked).toContain('github.acme.com');
+      expect(invoked).not.toContain('gitlab.com');
+    } finally {
+      process.env.PATH = previousPath;
+      fs.rmSync(ghBin, { recursive: true, force: true });
+      setGhCliDisabled(true);
+      if (previousToken === undefined) delete process.env.GH_ENTERPRISE_TOKEN;
+      else process.env.GH_ENTERPRISE_TOKEN = previousToken;
+      if (previousConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
+      else process.env.GH_CONFIG_DIR = previousConfigDir;
+      fs.rmSync(ghConfigDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not clear the stored github.com login on an enterprise 401', async () => {
+    const { setGhCliDisabled } = await import('./auth.js');
+    const ghConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-gh-hosts-'));
+    fs.writeFileSync(path.join(ghConfigDir, 'hosts.yml'), 'github.acme.com:\n  users:\n    admin:\n      oauth_token: gho_acme\n');
+    // A real (fake) `gh` binary so the trusted enterprise host can take a
+    // host-pinned token without a module mock (same pattern as the host-routing
+    // test above).
+    const ghBin = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-gh-bin-'));
+    const ghInvoked = path.join(ghBin, 'invoked-hosts.txt');
+    fs.writeFileSync(path.join(ghBin, 'gh'), [
+      '#!/bin/sh',
+      `printf '%s\\n' "$GH_HOST" >> '${ghInvoked}'`,
+      'printf \'gh-token-%s\\n\' "$GH_HOST"',
+      '',
+    ].join('\n'));
+    fs.chmodSync(path.join(ghBin, 'gh'), 0o755);
+    const previousPath = process.env.PATH;
+    const previousConfigDir = process.env.GH_CONFIG_DIR;
+    process.env.GH_CONFIG_DIR = ghConfigDir;
+    process.env.PATH = `${ghBin}${path.delimiter}${previousPath}`;
+    setGhCliDisabled(false);
+
+    try {
+      vi.stubGlobal('fetch', vi.fn(async () => Response.json({ message: 'Bad credentials' }, { status: 401 })));
+      const res = await summaries([{ owner: 'acme', repo: 'enterprise', number: 9, host: 'github.acme.com' }]);
+
+      expect(res.status).toBe(200);
+      expect(res.body.connected).toBe(false);
+      // A GHE 401 is that host's stale gh token, not the github.com account:
+      // the stored login must survive. auth.js pins its storage path at first
+      // import, which this file does under the first describe's testDir.
+      const authFile = path.join(testDir, 'github-auth.json');
+      expect(fs.existsSync(authFile)).toBe(true);
+      expect(fs.readFileSync(authFile, 'utf8')).toContain('fake-test-token');
+    } finally {
+      setGhCliDisabled(true);
+      if (previousConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
+      else process.env.GH_CONFIG_DIR = previousConfigDir;
+      process.env.PATH = previousPath;
+      fs.rmSync(ghConfigDir, { recursive: true, force: true });
+      fs.rmSync(ghBin, { recursive: true, force: true });
+    }
+  });
+
+  it('clears the stored github.com login on a github.com 401 and reseeds', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ message: 'Bad credentials' }, { status: 401 })));
+    const res = await summaries([{ owner: 'example', repo: 'project', number: 7 }]);
+
+    expect(res.status).toBe(200);
+    expect(res.body.connected).toBe(false);
+    // A github.com 401 is the stored login turning bad; only github.com clears
+    // it (guarded by hostFromError), matching the pre-existing behavior. The
+    // auth file lives under testDir (auth.js pins its path at first import).
+    expect(fs.existsSync(path.join(testDir, 'github-auth.json'))).toBe(false);
+    // Re-seed so later tests still have a stored login.
+    const { setGitHubAuth } = await import('./auth.js');
+    setGitHubAuth({ accessToken: 'fake-test-token', accountId: 'test' });
   });
 
   // Last in the file: the rate-limit cooldown it records is process-global.

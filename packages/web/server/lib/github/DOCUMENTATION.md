@@ -40,12 +40,18 @@
 
 ### Octokit
 
-- `getOctokitOrNull()`: current Octokit or `null`.
+- `getOctokitOrNull(host)`: current Octokit, targeting the given Enterprise host when provided, or `null`. Caches and rate-limit cooldowns key off this host so one instance never leaks data or failures into another. Refuses (returns `null`) a host the server never authenticated with before any token lookup — see "Host trust" below.
 
 ### Repo
 
-- `parseGitHubRemoteUrl(raw)`: parse SSH or HTTPS remote URL into `{ owner, repo, url }`.
-- `resolveGitHubRepoFromDirectory(directory, remoteName)`: resolve GitHub repo from a local git remote.
+- `parseGitHubRemoteUrl(raw)`: parse an SSH or HTTPS remote URL (for any host, including GitHub Enterprise) into `{ owner, repo, host, url }`.
+- `resolveGitHubRepoFromDirectory(directory, remoteName)`: resolve GitHub repo from a local git remote. A remote whose host the server never authenticated with resolves to `repo: null` (the same shape as a non-GitHub remote), so every route skips it and no token is minted for that host.
+
+## Host trust
+
+- The token the server holds for a non-github.com host is the gh CLI's host-pinned credential (`GH_ENTERPRISE_TOKEN` / `GITHUB_ENTERPRISE_TOKEN`). It must never be sent to a host the user never authenticated with, otherwise an arbitrary git remote would receive it. `isTrustedGitHubHost(host)` (in `host-trust.js`) is that gate: it never throws or touches the network, and nothing here talks to a host.
+- `github.com` (and an omitted host) is always trusted. The server's own `GH_HOST` is trusted. Any other host is trusted only when gh has a stored login for it: a top-level key equal to the host in `$GH_CONFIG_DIR/hosts.yml` (falling back to `~/.config/gh/hosts.yml`) carrying an `oauth_token` (directly or under a `users` submap). An unreadable or malformed file means "not trusted" (fail closed).
+- The gate is two layers. `resolveGitHubRepoFromDirectory` refuses unapproved hosts at the single choke point every remote resolution passes through (so `resolveRemoteCandidates` skips them too, and routes report `connected: true, repo: null` for GitLab-style remotes). `getOctokitOrNull(host)` re-checks before ANY token lookup as defense in depth, so a direct caller with a client-supplied host can never mint a token for an untrusted host.
 
 ## Auth storage and config
 
@@ -81,7 +87,8 @@ that page, so callers cannot mistake a partial page for a complete one.
 - It reads local git status and remotes first.
 - It ranks remotes in this order: explicit remote, tracking remote, `origin`, `upstream`, then the rest.
 - It resolves those remotes into GitHub repos.
-- It expands each repo through `parent` and `source` so PRs in upstream repos can still be found.
+- **Requests are scoped to one host.** The route pins Octokit to the requested remote's host, so candidate remotes are deduplicated and filtered by host: a same-named repo on another instance is a different repository, not a fork-network member, and is never queried through the wrong host's Octokit. The route threads that host into the resolver, so an explicit remote that fails to resolve cannot drag a differently-hosted repo into the request.
+- It expands each repo through `parent` and `source` so PRs in upstream repos can still be found. Parent/source candidates inherit the requesting repo's host.
 - It skips PR lookup when the current branch matches that repo's default branch.
 - It first searches for **open** PRs by likely source owner plus exact head branch.
 - If that fails, it falls back to broader GitHub search for open PRs on the branch name.
@@ -93,9 +100,17 @@ that page, so callers cannot mistake a partial page for a complete one.
 - The route skips the checks summary and the merge-permission lookup for a closed/merged PR: neither is actionable, and both cost extra GitHub calls.
 - `403` and `404` during repo lookups are treated as expected gaps, not hard errors.
 
+## Rate limiting
+
+- GitHub rate-limit (primary or secondary) surfaces as a thrown `403`/`429`; Octokit is used without the throttling plugin, so the module tracks it explicitly instead.
+- The route gate (`isGitHubRateLimited(host)`) short-circuits PR-status work on a host until its cooldown passes, serving the last cached status (even stale) or a `503` — so a burst does not pile more failing calls onto an instance.
+- **Cooldowns are keyed per host** (`rate-limit.js`): an enterprise instance exhausting its quota does not pause `github.com` polling, or vice versa. `github.com` and `api.github.com` share one key.
+- When the host is not passed explicitly, it is derived from the Octokit error's request URL.
+
 ## Batched live summaries
 
 - `POST /api/github/pr/summaries` takes `refs` (PRs) and `issueRefs` (issues), up to `100` `{ owner, repo, number }` in total, and answers `{ connected, fetchedAt, summaries, issueSummaries }`. An issue reads `open`, `completed`, or `not_planned` (GitHub's `NOT_PLANNED` and `DUPLICATE` close reasons); a PR number asked as an issue is simply absent.
+- Each ref may carry an optional `host` naming the instance it lives on (missing means github.com); refs are grouped by host and each group answers with its own octokit and its own rate-limit gate. A host with no trustworthy credentials (unapproved, or no stored login) is skipped — its refs are absent, never an error — and `connected` is true as long as at least one group had an octokit.
 - It sends one GraphQL document per `25` PRs, one after another. Each alias reads state, draft, title, head sha, `mergeable`, `mergeStateStatus` (lowercased, same values as REST `mergeable_state`) and up to `100` check contexts of the head commit. GitHub prices such a document at one point of the GraphQL budget (measured), which is separate from the REST limit.
 - Checks go through the same summarizers as the REST routes (`checks-summary.js`), so sidebar, chat and Git view count the same runs. Do not switch to the rollup's `state` or `checkRunCountsByState`: both still count a failed run that a later re-run superseded, which paints a green PR as failing. A closed/merged PR gets `checks: null`.
 - A PR GitHub cannot resolve (deleted, lost access) is left out of `summaries`: absence means unknown, never closed. Partial GraphQL answers keep the resolved aliases.
@@ -213,5 +228,6 @@ that page, so callers cannot mistake a partial page for a complete one.
 - Prefer shared state over per-component fetches.
 - Prefer event-shaped refreshes over blind frequent polling.
 - Prefer correctness for fork and multi-remote setups over assuming `origin` is enough.
+- A request is scoped to one host at a time: the client probes other hosts via separate requests (the Git view passes a remote). Keep host-wide dedup/keys (`repoCacheKey`, rate-limit cooldowns) host-aware so one instance's data or failure never leaks into another's.
 - Device flow handles GitHub `authorization_pending` at caller level.
-- Repo parser supports `git@github.com:`, `ssh://git@github.com/`, and `https://github.com/`.
+- Repo parser supports scp, `ssh://`, and `https://` remotes for any host, including GitHub Enterprise; `getOctokitOrNull(host)` pairs each Enterprise host with that host's gh token. Remotes on hosts the server never authenticated with are refused before any token is looked up ("Host trust" above), so a gitlab.com (or arbitrary) remote resolves to `repo: null` instead of receiving an enterprise token.

@@ -82,6 +82,26 @@ describe('parseSummaryRefs', () => {
     ]);
   });
 
+  test('keeps the same owner/repo/number distinct across hosts', () => {
+    expect(parseSummaryRefs([
+      { owner: 'acme', repo: 'app', number: 7 },
+      { owner: 'acme', repo: 'app', number: 7, host: 'github.acme.com' },
+      { owner: 'acme', repo: 'app', number: 7, host: 'gitlab.com' },
+    ])).toEqual([
+      { owner: 'acme', repo: 'app', number: 7 },
+      { owner: 'acme', repo: 'app', number: 7, host: 'github.acme.com' },
+      { owner: 'acme', repo: 'app', number: 7, host: 'gitlab.com' },
+    ]);
+  });
+
+  test('accepts an optional host and trims it', () => {
+    expect(parseSummaryRefs([
+      { owner: 'acme', repo: 'app', number: 7, host: ' github.acme.com ' },
+    ])).toEqual([
+      { owner: 'acme', repo: 'app', number: 7, host: 'github.acme.com' },
+    ]);
+  });
+
   test('rejects malformed payloads', () => {
     expect(parseSummaryRefs(null)).toBe(null);
     expect(parseSummaryRefs([{ owner: 'acme', repo: 'app', number: 0 }])).toBe(null);

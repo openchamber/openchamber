@@ -1,6 +1,7 @@
 import { Octokit } from '@octokit/rest';
 import { getGitHubAuth, isGhCliActive, isGhCliDisabled } from './auth.js';
 import { getGhCliToken } from './gh-cli-credential.js';
+import { isTrustedGitHubHost } from './host-trust.js';
 
 // Per-request timeout for every GitHub call. Octokit v22 uses native fetch,
 // which has no built-in timeout — without this, a stuck connection hangs until
@@ -68,17 +69,59 @@ const createConditionalFetch = (token) => async (url, options = {}) => {
   return response;
 };
 
-/** Create an Octokit instance with per-request timeout + ETag revalidation. */
-export function createOctokit(token) {
-  return new Octokit({ auth: token, request: { fetch: createConditionalFetch(token) } });
+/**
+ * Create an Octokit instance with per-request timeout + ETag revalidation.
+ *
+ * `host` targets a specific GitHub Enterprise API root. github.com (or omitted)
+ * keeps Octokit's default `api.github.com` base URL.
+ */
+export function createOctokit(token, host) {
+  const options = { auth: token, request: { fetch: createConditionalFetch(token) } };
+  // Compare the host case-insensitively: a remote written `git@GitHub.com:…`
+  // is still github.com, and must not take the enterprise baseUrl whose /api/v3
+  // root github.com does not serve.
+  const normalizedHost = String(host ?? '').trim().toLowerCase();
+  if (normalizedHost && normalizedHost !== 'github.com') {
+    options.baseUrl = `https://${host}/api/v3`;
+  }
+  return new Octokit(options);
 }
 
-export function getOctokitOrNull() {
-  const auth = getGitHubAuth();
-  const ghToken = !isGhCliDisabled() ? getGhCliToken() : null;
-  const token = isGhCliActive() ? ghToken || auth?.accessToken : auth?.accessToken || ghToken;
+/**
+ * Pick the token for a host. github.com (or an omitted host) keeps the
+ * existing gh-token/stored-token fallback. An enterprise host must NOT fall
+ * back to the stored OAuth token: that token is always a github.com credential
+ * (the device flow is hardcoded to github.com), so sending it to another
+ * instance's API root 401s there and can leak the token to whatever host a
+ * local remote names. Only the host-pinned gh token belongs on an enterprise
+ * host.
+ */
+export function selectTokenForHost(host, { ghToken, storedToken, ghCliActive }) {
+  const normalizedHost = String(host ?? '').trim().toLowerCase();
+  if (!normalizedHost || normalizedHost === 'github.com') {
+    return ghCliActive ? ghToken || storedToken : storedToken || ghToken;
+  }
+  return ghToken;
+}
+
+export function getOctokitOrNull(host) {
+  // Never mint a token for a host the user never authenticated with: the only
+  // credential for an enterprise host is gh's host-pinned token, and sending
+  // it to an arbitrary remote host would leak it there. This gate runs before
+  // ANY token lookup, so a direct caller with a client-supplied host cannot
+  // bypass repo resolution. github.com (and an omitted host) is always fine.
+  if (host && host !== 'github.com' && !isTrustedGitHubHost(host)) {
+    return null;
+  }
+  const storedToken = getGitHubAuth()?.accessToken;
+  const ghToken = !isGhCliDisabled() ? getGhCliToken(host) : null;
+  const token = selectTokenForHost(host, {
+    ghToken,
+    storedToken,
+    ghCliActive: isGhCliActive(),
+  });
   if (!token) {
     return null;
   }
-  return createOctokit(token);
+  return createOctokit(token, host);
 }

@@ -67,6 +67,8 @@ const summaryRefsSchema = z.array(z.object({
   owner: githubName,
   repo: githubName,
   number: z.number().int().positive(),
+  // Optional host: which instance the ref lives on. Missing means github.com.
+  host: z.string().trim().max(255).optional(),
 })).max(MAX_SUMMARY_REFS);
 
 /**
@@ -80,7 +82,10 @@ export function parseSummaryRefs(value) {
   }
   const refs = new Map();
   for (const ref of parsed.data) {
-    refs.set(`${ref.owner.toLowerCase()}/${ref.repo.toLowerCase()}#${ref.number}`, ref);
+    // The same owner/repo/number can exist on github.com and an enterprise
+    // instance; host keeps those apart.
+    const host = (ref.host ?? '').trim().toLowerCase() || 'github.com';
+    refs.set(`${host}::${ref.owner.toLowerCase()}/${ref.repo.toLowerCase()}#${ref.number}`, ref);
   }
   return [...refs.values()];
 }

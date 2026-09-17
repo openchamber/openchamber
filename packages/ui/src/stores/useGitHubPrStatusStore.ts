@@ -425,7 +425,7 @@ const getLiveSummaryRef = (entry: PrStatusEntry | undefined): GitHubPullRequestR
   if (!entry || entry.watchers > 0 || !pr || pr.state !== 'open' || !repo) {
     return null;
   }
-  return { owner: repo.owner, repo: repo.repo, number: pr.number };
+  return { owner: repo.owner, repo: repo.repo, host: repo.host ?? undefined, number: pr.number };
 };
 
 const sameChecks = (left: GitHubPullRequestStatus['checks'], right: GitHubPullRequestStatus['checks']): boolean => (
