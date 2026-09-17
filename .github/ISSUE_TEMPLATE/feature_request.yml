@@ -3,6 +3,19 @@ description: Suggest an improvement
 title: "[Feature Request] "
 labels: [enhancement]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Please write in English. The maintainers skim every request, and one in another language waits until someone translates it. Machine translation is fine.
+
+  - type: checkboxes
+    id: language
+    attributes:
+      label: Language
+      options:
+        - label: This request is written in English
+          required: true
+
   - type: textarea
     id: request
     attributes:

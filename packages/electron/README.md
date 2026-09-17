@@ -10,6 +10,24 @@ Desktop starts the OpenChamber web server in the same Electron main process. The
 
 `main.mjs` imports `@openchamber/web/server/index.js` and calls `startWebUiServer()`. The Electron window then loads the UI from the local server in development, or from packaged `resources/web-dist` assets in packaged builds.
 
+The foreground window loads its HTML splash before resolving the backend.
+Login-shell environment discovery runs asynchronously so the splash can paint
+while shell startup files run. Startup callers share one probe and await its
+result before reading shell-provided server flags or importing the backend.
+The probe tries interactive login, then login-only on failure, with a five-second
+timeout per attempt. Failure preserves the inherited process environment.
+Confirmed quit cancels an in-flight probe and waits for its process to exit.
+
+Quit, relaunch, and update installation await the in-process server's `stop()`
+before exiting Electron. This lets the backend release its terminals, managed
+OpenCode process, and guest services. `server-shutdown.mjs` bounds the server
+wait to ten seconds and uses the detached OpenCode killer only if normal
+shutdown fails or times out. An external OpenCode server remains externally
+owned. Closing to the tray does not stop the backend.
+
+See [process ownership and the #3589 investigation](./process-lifecycle.md)
+for the launch paths, controlled reproductions, and Windows validation limits.
+
 Same-origin session-chat iframes complete an authenticated parent-frame handshake before creating their SDK client. The parent supplies its active in-memory endpoint and credentials; when relay is active it also supplies the public relay descriptor without any pairing grant, because Electron preload and IPC are unavailable inside the iframe. The iframe establishes its own transport and rebinds its SDK before rendering. Additional windows retain their own per-window runtime bootstrap instead of being overwritten by the main window. Credentials are never placed in iframe URLs, and other child pages do not receive this runtime state.
 
 The preload bridge exposes desktop-only APIs to the web UI through `window.__OPENCHAMBER_DESKTOP__`. Privileged commands are checked in `main.mjs`, not only in the UI.
@@ -22,6 +40,7 @@ The preload bridge exposes desktop-only APIs to the web UI through `window.__OPE
 | `electron-host-probe.mjs` | Chromium direct-host probes, identity checks, attempt deadlines, and response cleanup |
 | `host-probe-policy.mjs` | Selector fast attempt and unreachable-only retry policy |
 | `startup-url-selection.mjs` | Pure bundled/HMR startup probe and loopback connection-limit policy |
+| `shell-environment.mjs` | Asynchronous login-shell environment discovery and shared one-shot probe |
 | `preload.mjs` | Safe bridge from the rendered UI to Electron IPC |
 | `ssh-manager.mjs` | SSH host import, connection lifecycle, tunnel/port forwarding helpers |
 | `scripts/electron-dev.mjs` | Desktop dev launcher with Vite HMR support |
@@ -89,6 +108,8 @@ bun run lint:electron
 
 ## Packaging
 
+Built-in SDK extensions are built by the web build into `@openchamber/web/server/built-in-extensions`. Electron Builder unpacks that directory from ASAR, and `main.mjs` supplies its physical path to the backend. This keeps both iframe assets and future Node service entries usable. Sources and the registry live in `packages/extensions`; user data remains in the instance data directory.
+
 From the repo root:
 
 ```bash
@@ -133,7 +154,7 @@ The package supports macOS, Windows, and Linux desktop features. Linux AppImage 
 
 On Windows and Linux, the General setting persisted as `desktopMinimizeToTrayEnabled` keeps the app running in the tray when the main window is **closed**. Minimize — the in-app control, the native title-bar button, and the taskbar — always performs a normal window minimize, so the taskbar entry stays available.
 
-The macOS menu bar item is enabled by default and can be disabled in General settings. The setting applies after restart; while disabled, Desktop does not create the native tray controller or start the renderer subscriptions, polling, quota refresh, or IPC updates that feed it.
+The macOS menu bar item is enabled by default and can be disabled in General settings. The setting applies after restart. While disabled, Desktop skips the native tray controller, tray-specific subscriptions, polling, and quota refresh. Dock badges remain independent: unread activity, session membership, and badge preferences still update the Dock through the shared IPC command. Turning off the Dock badge clears its count without enabling the menu bar item.
 
 ## Bundled OpenCode CLI
 
@@ -178,6 +199,10 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
 - Multiple native windows.
 - Native notifications.
 - User-confirmed local folder selection. The shared UI supplies the requested directory as the picker `defaultPath`; confirmation is required before filesystem access is retried.
+- Theme-file selection uses the local `~/.vscode/extensions` directory when present.
+  The local-page-gated `desktop_pick_theme_file` command returns only the selected
+  filename, bounded text, and byte size. Its host stays local when the renderer
+  connects to a remote API server; remote pages receive no native picker privileges.
 - One-click open/reveal/open-in-app actions.
 - Desktop host switcher and deep-link imports.
 - Local and remote instance handling.

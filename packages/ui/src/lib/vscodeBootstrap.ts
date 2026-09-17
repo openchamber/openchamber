@@ -4,7 +4,7 @@
  * early VS Code detection during store module initialization.
  */
 export interface VSCodeBootstrapConfig {
-  workspaceFolder?: unknown;
+  workspaceFolder?: string;
   workspaceFolders?: unknown;
 }
 
@@ -13,6 +13,10 @@ export const getVSCodeBootstrapConfig = (): VSCodeBootstrapConfig | null => {
     return null;
   }
   return (window as unknown as { __VSCODE_CONFIG__?: VSCodeBootstrapConfig }).__VSCODE_CONFIG__ ?? null;
+};
+
+export const getVSCodeBootstrapWorkspaceFolder = (): string | null => {
+  return getVSCodeBootstrapConfig()?.workspaceFolder?.trim() || null;
 };
 
 export const isVSCodeBootstrapPresent = (

@@ -11,6 +11,7 @@ import {
 } from '../sessions/sessionNodeItemUtils';
 import type { SessionNodeRenderExtras } from '../sessions/sessionNodeItemUtils';
 import { SessionTreeItem, type SessionTreeItemProps } from '../sessions/SessionTreeItem';
+import { CrossfadeZoneHeader } from '../projects/CrossfadeZoneHeaders';
 
 export type ActivityItem = {
   node: SessionNode;
@@ -247,8 +248,7 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
 
         return (
           <div key={section.key} className="relative">
-            <div data-sidebar-activity-start={section.key} className="pointer-events-none absolute inset-x-0 top-0 h-px" aria-hidden="true" />
-            <div className={cn(
+            <CrossfadeZoneHeader className={cn(
               'relative group/chats',
               '-ml-2.5 -mr-2',
               !isCollapsed && 'mb-1',
@@ -257,7 +257,7 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
               <button
                 type="button"
                 onClick={() => toggleSection(section.key)}
-                className={cn('group flex w-full items-center gap-1.5 py-1 pl-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', section.key === 'chats' ? 'pr-10' : 'pr-3.5')}
+                className={cn('group flex w-full items-center gap-1.5 py-1 pl-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', section.key === 'chats' ? 'pr-10' : 'pr-3.5')}
                 aria-expanded={!isCollapsed}
               >
                 <span className="inline-flex h-3.5 w-3.5 items-center justify-center">
@@ -272,13 +272,13 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
                 <button
                   type="button"
                   onClick={(event) => { event.stopPropagation(); props.onNewChat?.(); }}
-                  className={cn('absolute right-0.5 top-1/2 z-10 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', props.alwaysShowActions ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover/chats:opacity-100 group-hover/chats:pointer-events-auto group-focus-within/chats:opacity-100 group-focus-within/chats:pointer-events-auto')}
+                  className={cn('absolute right-0.5 top-1/2 z-10 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', props.alwaysShowActions ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover/chats:opacity-100 group-hover/chats:pointer-events-auto group-focus-within/chats:opacity-100 group-focus-within/chats:pointer-events-auto')}
                   aria-label={t('sessions.sidebar.header.actions.newSession')}
                 >
                   <Icon name="add" className="h-4 w-4" />
                 </button>
               ) : null}
-            </div>
+            </CrossfadeZoneHeader>
             {!isCollapsed ? (
               <div className={cn('space-y-0.5')}>
                 {usesCustomRenderer ? props.renderChatsSection?.(section.items) : visibleItems.map(renderItem)}

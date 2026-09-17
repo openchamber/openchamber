@@ -27,6 +27,9 @@ function getVSCodeAPI(): VSCodeAPI {
   if (!vscodeApi) {
     const acquired = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : undefined;
     vscodeApi = acquired ?? noopVSCodeApi;
+    // A reload or move between windows replaces the document without disposing
+    // its host panel. Retire the previous document's streams before any request.
+    vscodeApi.postMessage({ type: 'webview:ready' });
   }
   return vscodeApi;
 }

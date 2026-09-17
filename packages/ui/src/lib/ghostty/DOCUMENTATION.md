@@ -14,8 +14,11 @@ This directory is OpenChamber's browser adapter for the official `libghostty-vt`
 
 `components/terminal/TerminalViewport.tsx` is the only React consumer. React stays out of the render loop: the surface schedules its own frames.
 
+The viewport owns the desktop Copy/Paste context menu. Its trigger accepts only the native event forwarded by `surface.onContextMenu`, so mouse-reporting applications retain right clicks and the surface's Shift override still applies. Touch-owned viewports keep their existing gestures. Copy snapshots the selection when the menu opens; Paste uses `surface.pasteFromClipboard` for bracketed-paste encoding and native-paste deduplication. The viewport invalidates pending clipboard reads on session changes, hide and unmount. Clipboard read failures show a translated error with a keyboard-paste fallback.
+
 ## Invariants
 
+- On macOS, unshifted Option+Left/Right sends ESC+b/f and Option+Backspace sends Ctrl+W at legacy prompts. `core.encodeMacWordShortcut` checks the active screen and Kitty keyboard flags before translating; alternate-screen and Kitty-enabled programs receive the original keys. `surface.ts` consumes the matching keyup for translated shortcuts. Other platforms, extra modifiers and Option character input retain normal encoding.
 - The grid is measured after the faces that will render are loaded (`document.fonts.load` for every style plus the bundled symbols font). A face that finishes loading later triggers a re-measure through `loadingdone`. Never size the grid from a fallback face on purpose.
 - Generic keywords Chromium's canvas parser rejects (`ui-monospace`, `system-ui`) are stripped before any `context.font` assignment; an invalid shorthand silently no-ops and the grid would be measured with the previous font.
 - The canvas context is created with `willReadFrequently: true`, which pins it to the software rasterizer. Gecko otherwise picks acceleration per canvas, and its GPU text path on macOS skips CoreText smoothing: a terminal created after page load drew thin, pencil-like glyphs while the first one stayed on the software path (confirmed: `gfx.canvas.accelerated=false` in Zen removed the symptom). The backing store is also sized to the mount at DPR before the first paint, so the compositor never sees the default 300×150 store stretched.

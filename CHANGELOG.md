@@ -2,6 +2,120 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [1.24.0] - 2026-09-17
+
+### New
+
+- **Extensions:** Add third-party tools to web and desktop, with their own panels, pages, and chat actions. Get started with [using extensions](https://docs.openchamber.dev/extensions/) or [building your own](https://docs.openchamber.dev/sdk/). A catalog of our own and community-made extensions is coming soon to the OpenChamber website (thanks to @AlexKutas).
+- **Themes:** Browse VS Code themes from Open VSX or import a theme file in Settings. Choose individual color variants and remove imported themes from the theme picker.
+- Projects: Choose a default agent for new chats in each project, including chats in its worktrees (thanks to @MltStephane).
+- Files: Keep the file tree open while the editor is closed, so you can browse your project alongside the chat (thanks to @cmdaltctr).
+
+### Improvements
+
+- Desktop: The app window opens much faster.
+- Sessions: Sticky sidebar headers now fade smoothly between sections as you scroll, keeping the current section's name and actions within reach.
+- Themes: Menu text and selected items are easier to read, and code block backgrounds blend better with the rest of the app.
+- Chat: Agent labels and icons use more distinct colors from your theme, making agents easier to tell apart.
+- Appearance: The loading screen fades into the app without the logo changing colors between loading steps.
+
+### Fixes
+
+- Chat: Switching chats or starting a new one no longer loses your draft attachments or moves them to another chat.
+- Chat: Your chosen model no longer resets while models are loading. Thinking levels, including Default, are remembered after a reload.
+- Chat: Fixed growing memory use when switching between conversations.
+- Chat: Completed subagent results display formatted Markdown again (thanks to @bashrusakh).
+- Chat: The selection menu opens above or below the text you select, keeping it accessible for copying (thanks to @yulia-ivashko).
+- Context: Fixed incorrect percentages after compaction. The counter shows a dash until the next response reports usage (thanks to @yulia-ivashko).
+- Git: Fixed blank diffs for submodules and repeated errors for nested repositories. Changes now shows submodule status and identifies separate repositories (thanks to @yulia-ivashko).
+- Settings/Behavior: Instructions edited outside the app appear when you reopen settings, including when the file was cleared (thanks to @bashrusakh).
+- Desktop: Fixed background OpenCode and tool processes left behind after quitting the app, restarting OpenCode, or a failed start.
+- Files: Fixed file searches getting stuck in some repositories.
+- Files: Escape closes an open menu while keeping the file panel open.
+- macOS: The Dock's unread badge keeps updating when the menu bar icon is disabled.
+- Mobile: Theme import fits above the keyboard, and long theme lists stay clear of the status bar and home indicator.
+
+### Misc
+
+- Usage: Removed Crof usage tracking after the service shut down (thanks to @kydorn).
+- Tooling: Updated Bun to 1.4.2 for local development, CI, and Docker images (thanks to @osztenkurden).
+
+## [1.23.2] - 2026-09-14
+
+### New
+
+- Chat: Reorder sections in the work status panel. Your preferred order is saved across devices.
+
+### Improvements
+
+- **Performance:** The app becomes ready to use sooner, with faster session lists across projects and worktrees and less background work competing with opening a chat.
+- Sessions: Press Enter to search in the sidebar, archive, and mobile session list. Typing stays responsive in large lists, and clearing the field resets results immediately.
+
+### Fixes
+
+- **Sessions:** Archiving or deleting a parent in Mobile, Recent, or Chats includes nested subagents, including those below an archived subagent (thanks to @yulia-ivashko and @alexandrereyes).
+- Sessions: Archived subagents stay out of the active list when an older refresh finishes (thanks to @yulia-ivashko and @alexandrereyes).
+- Sessions: Empty worktrees stop showing a loading spinner once their session list has loaded.
+- Sessions: Show more in Chats reveals the next batch and follows the same display limit as project sessions.
+- Projects: Renaming keeps every typed letter and preserves the project's default model and thinking setting (thanks to @yulia-ivashko).
+- Windows: Updating the web app installs the new version and brings the server back online (thanks to @yulia-ivashko).
+- Editor: Escape returns Vim to Normal mode while keeping the file editor open (thanks to @yulia-ivashko).
+- Git: The repository picker appears again for projects containing nested repositories.
+- Usage: Quotas load on startup when opening the web app through its server or running the desktop development app.
+- Settings/Usage: Each provider shows only its own errors, and balance-only cards no longer show an empty usage bar (thanks to @yulia-ivashko).
+- Chat: Turn stats hide implausible token speeds caused by unreliable timing measurements (thanks to @yulia-ivashko).
+- Chat: Text and buttons from the message box no longer show through the dictation overlay.
+
+## [1.23.1] - 2026-09-11
+
+### New
+
+- **Diff review:** Review the changes in a published pull request directly in Changes, on desktop and mobile.
+- Sessions: Ask AI to rename a session based on its recent conversation from the session menu or mobile actions.
+- Settings/Sessions: Limit retention cleanup to archived sessions, with the retention period starting when each session was archived.
+- Chat: Paste or drop non-image files into a message, with file references added to the draft automatically.
+
+### Improvements
+
+- **Chat:** Visual refinements across the message box, attachments, menus, and panels give the conversation more room and a more consistent look on desktop and mobile.
+- Chat: Attachments and linked issues sit inside the message box, with model and agent controls grouped together on mobile. Queued messages start collapsed.
+- Chat: Recaps retain the substance of recent work after short closing exchanges, and follow-up suggestions can stay quiet when there's nothing useful to add.
+- Sessions: Markdown exports include attached quotes and comments with their source.
+- App: Hidden Files, Changes, terminal, and walkthrough panels pause background work while you're using another panel.
+- Chat: Inline code colors follow the selected theme.
+- Mobile: A dot on the workspace button marks uncommitted changes.
+- Chat: Removed the extra changed-files dropdown under answers in non-Git folders.
+
+### Fixes
+
+- Sessions: Default model, agent, and thinking choices survive restarts and instance switches, with faster loading in the model and agent pickers (thanks to @alvins82).
+- Chat: Model favorites save from the first change, including when you reload immediately (thanks to @alvins82).
+- Chat: Reading older messages keeps your place as earlier history loads, and a growing message box keeps the latest message in view.
+- Chat: Reasoning and shell output keep scrolling with incoming text until you scroll up yourself.
+- Chat: File lists under answers use the turn's direct edits, reducing unrelated files from other sessions. Long lists collapse after four files (thanks to @yulia-ivashko).
+- Chat: Queued messages containing only quotes or comments show a preview of their attached context.
+- Chat: Slash commands stay available when switching projects.
+- Chat: Session recaps disappear without making the conversation jump when you send a message.
+- Files: Large text files can be edited and saved in full without cutting off their contents or changing line endings.
+- Sessions: Retention cleanup protects child sessions that should be kept and avoids false failures when deleting session families.
+- Sessions: Pressing Enter saves a renamed session.
+- Worktrees: New sessions pick up the project's settings after checkout, fixing missing configuration in freshly created worktrees.
+- Worktrees: Worktrees added or removed in another window, by an agent, or from a terminal appear in the sidebar on the next Git refresh (thanks to @yulia-ivashko).
+- Projects: Deeply nested projects can save settings, notes, plans, and memory without file-name errors (thanks to @yulia-ivashko).
+- Scheduled tasks: A project that fails to load no longer stops tasks in other projects from starting (thanks to @yulia-ivashko).
+- Scheduled tasks: Run now works for paused tasks while their schedule stays paused.
+- Terminal: Right-click opens Copy and Paste actions again.
+- Terminal: On macOS, Option+Left/Right moves by word and Option+Backspace deletes the previous word at shell prompts.
+- Terminal: Attaching selected output to chat puts the cursor in the message box.
+- Shortcuts: Cmd/Ctrl number shortcuts for sessions and panels work while typing in chat.
+- Desktop: After an AppImage update, OpenCode starts from the current app bundle, fixing stale paths and incorrect upgrade offers (thanks to @yulia-ivashko).
+- Sessions: Long tab titles fade before the buttons when you hover over a tab.
+
+### Misc
+
+- MCP: Removed OpenChamber's automatic reconnects, which could repeatedly start failed local servers. Failed connections now need manual reconnection.
+- Desktop: Updated Electron to 43.7.0.
+
 ## [1.23.0] - 2026-09-09
 
 ### New

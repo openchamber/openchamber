@@ -14,7 +14,7 @@ export const resolveProjectForDirectory = (
   for (const p of projects) {
     const pp = normalizeProjectPath(p.path);
     if (!pp) continue;
-    if (nd !== pp && !nd.startsWith(`${pp}/`)) continue;
+    if (nd !== pp && !nd.startsWith(pp.endsWith('/') ? pp : `${pp}/`)) continue;
     if (!best || pp.length > (normalizeProjectPath(best.path)?.length ?? 0)) best = p;
   }
   return best;
@@ -34,7 +34,7 @@ const resolveProjectFromWorktreeDirectory = (
     for (const wt of worktrees) {
       const wp = normalizeProjectPath(wt.path);
       if (!wp) continue;
-      if (nd !== wp && !nd.startsWith(`${wp}/`)) continue;
+      if (nd !== wp && !nd.startsWith(wp.endsWith('/') ? wp : `${wp}/`)) continue;
       if (wp.length > bestLen) {
         bestLen = wp.length;
         matchedWorktree = wt;

@@ -32,6 +32,8 @@ export type FetchPermissionResult =
 import { getRuntimeUrlResolver } from "@/lib/runtime-url";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { getRuntimeKey } from "@/lib/runtime-switch";
+import { normalizePath } from "@/lib/pathNormalization";
+import { sessionStatusSnapshotSchema } from "./session-status";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
 import { markStartupTrace } from "@/lib/startupTrace";
 import {
@@ -227,7 +229,9 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
         return runtimeFetch(input, init);
       }
       const timeout = createTimeoutSignal(requestTimeoutMs);
-      const callerSignal = init?.signal;
+      const callerSignal = init?.signal !== undefined
+        ? init.signal
+        : input instanceof Request ? input.signal : undefined;
       const supportsAny = typeof AbortSignal !== 'undefined'
         && typeof (AbortSignal as { any?: unknown }).any === 'function';
       let signal: AbortSignal;
@@ -258,16 +262,27 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
       } else {
         signal = timeout.signal;
       }
+      const cleanup = () => {
+        detachFallback?.();
+        timeout.cleanup();
+      };
+      let responseHasBody = false;
       try {
-        return await runtimeFetch(input, { ...init, signal });
+        const response = await runtimeFetch(input, { ...init, signal });
+        responseHasBody = response.body !== null;
+        return response;
       } catch (error) {
         if (timeout.signal.aborted && !callerSignal?.aborted) {
           throw new Error(`OpenCode request timed out after ${requestTimeoutMs}ms`);
         }
         throw error;
       } finally {
-        detachFallback?.();
-        timeout.cleanup();
+        // The SDK consumes JSON after fetch resolves. Keep cancellation and the
+        // deadline alive through body delivery, including on older WebViews
+        // using the manual signal composition. Retention is bounded by the
+        // request deadline, just like native AbortSignal.timeout.
+        if (!responseHasBody || signal.aborted) cleanup();
+        else signal.addEventListener('abort', cleanup, { once: true });
       }
     },
   });
@@ -370,9 +385,8 @@ class OpencodeService {
   reconnectToRuntimeBaseUrl(): void {
     const runtimeBase = resolveRuntimeBaseUrl();
     const nextBaseUrl = ensureAbsoluteBaseUrl(runtimeBase || DEFAULT_BASE_URL);
-    if (nextBaseUrl === this.baseUrl) {
-      return;
-    }
+    // An explicit reconnect can change the instance or transport behind the
+    // same URL. Its SDK client and in-flight directory requests are obsolete.
     this.baseUrl = nextBaseUrl;
     this.client = createRuntimeOpencodeClient({ baseUrl: this.baseUrl });
     this.scopedClients.clear();
@@ -410,23 +424,7 @@ class OpencodeService {
   }
 
   private normalizeCandidatePath(path?: string | null): string | null {
-    if (typeof path !== 'string') {
-      return null;
-    }
-
-    const trimmed = path.trim();
-    if (!trimmed) {
-      return null;
-    }
-
-    // Normalize backslashes and uppercase the Windows drive letter so that
-    // d:\MyProject and D:\MyProject resolve to the same canonical form.
-    const normalized = trimmed
-      .replace(/\\/g, '/')
-      .replace(/^([a-z]):/, (_, letter: string) => letter.toUpperCase() + ':');
-    const withoutTrailingSlash = normalized.length > 1 ? normalized.replace(/\/+$/, '') : normalized;
-
-    return withoutTrailingSlash || null;
+    return normalizePath(path);
   }
 
   private deriveHomeDirectory(path: string): { homeDirectory: string; username?: string } {
@@ -446,7 +444,7 @@ class OpencodeService {
         return { homeDirectory, username: segments[0] };
       }
 
-      return { homeDirectory: drive, username: undefined };
+      return { homeDirectory: `${drive}/`, username: undefined };
     }
 
     const absolute = path.startsWith('/');
@@ -1167,15 +1165,13 @@ class OpencodeService {
     directory: string | null | undefined
   ): Promise<Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }> | null> {
     try {
-      const trimmedDirectory = typeof directory === "string" ? directory.trim() : "";
+      const trimmedDirectory = this.normalizeCandidatePath(directory);
       const result = await this.client.session.status(trimmedDirectory ? { directory: trimmedDirectory } : undefined);
-      if (result.error || !result.data || typeof result.data !== "object") {
+      if (result.error) {
         return null;
       }
-      return result.data as Record<
-        string,
-        { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }
-      >;
+      const parsed = sessionStatusSnapshotSchema.safeParse(result.data);
+      return parsed.success ? parsed.data : null;
     } catch {
       return null;
     }
@@ -1584,7 +1580,7 @@ class OpencodeService {
     try {
       return await request;
     } finally {
-      this.configProvidersInFlight.delete(key);
+      if (this.configProvidersInFlight.get(key) === request) this.configProvidersInFlight.delete(key);
     }
   }
 
@@ -1655,7 +1651,7 @@ class OpencodeService {
     try {
       return await request;
     } finally {
-      this.listAgentsInFlight.delete(key);
+      if (this.listAgentsInFlight.get(key) === request) this.listAgentsInFlight.delete(key);
     }
   }
 
@@ -1663,10 +1659,11 @@ class OpencodeService {
   // all SSE event ingestion via the SDK's global.event() async iterator.
 
   // Command Management
-  async listCommandsWithDetails(directory?: string | null): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string; template?: string }>> {
+  async listCommandsWithDetails(directory?: string | null, signal?: AbortSignal): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string; template?: string }>> {
     const requestDirectory = this.normalizeCandidatePath(directory ?? null) ?? this.currentDirectory;
     const response = await this.client.command.list(
-      requestDirectory ? { directory: requestDirectory } : undefined
+      requestDirectory ? { directory: requestDirectory } : undefined,
+      { signal },
     );
     const commands = unwrapSdkData(response, 'command.list');
     // Return full command details including template

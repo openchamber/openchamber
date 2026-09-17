@@ -125,6 +125,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this._lastActiveEditorFilePayload = null;
     void this._broadcastActiveEditorFile();
 
+    webviewView.onDidChangeVisibility(() => {
+      if (this._view === webviewView) this.notifyViewerStateChanged();
+    });
+
     webviewView.onDidDispose(() => {
       for (const [streamId, stream] of this._sseStreams) {
         if (stream.view !== webviewView) continue;
@@ -146,6 +150,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
 
     webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string }) => {
+      if (message.type === 'webview:ready') {
+        for (const [streamId, stream] of this._sseStreams) {
+          if (stream.view !== webviewView) continue;
+          stream.controller.abort();
+          this._sseStreams.delete(streamId);
+        }
+        if (this._view === webviewView) {
+          this._clearPendingMessages();
+          this._sendCachedState();
+        }
+        return;
+      }
+
       if (message.type === 'bridge:ack' && typeof message._msgId === 'string') {
         this._confirmMessage(message._msgId);
         return;
@@ -415,15 +432,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     return true;
   }
 
-  public notifyWindowFocusChanged(focused: boolean): void {
+  /** Tells the webview whether the user can see it: VS Code focused and the view shown. */
+  public notifyViewerStateChanged(): void {
     if (!this._view) {
       return;
     }
 
     this._view.webview.postMessage({
       type: 'command',
-      command: 'windowFocusChanged',
-      payload: { focused },
+      command: 'viewerStateChanged',
+      payload: { windowFocused: vscode.window.state.focused, surfaceVisible: this._view.visible },
     });
   }
 
@@ -506,7 +524,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       status: this._cachedStatus,
       error: this._cachedError,
     });
-    this.notifyWindowFocusChanged(vscode.window.state.focused);
+    this.notifyViewerStateChanged();
   }
 
   private _scheduleBroadcast(): void {

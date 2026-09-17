@@ -434,6 +434,54 @@ describe('openNewSessionDraft project binding', () => {
     expect(draft.directoryOverride).toBeNull();
   });
 
+  test('paints a project default before discovery and does not undo a later manual choice', async () => {
+    const original = useConfigStore.getState();
+    let finishActivation;
+    const activation = new Promise((resolve) => { finishActivation = resolve; });
+    useConfigStore.setState({
+      activateDirectory: () => activation,
+      providers: [], agents: [], settingsDefaultsLoaded: false,
+      settingsDefaultModel: 'global/model', isConnected: false,
+    });
+    useProjectsStore.setState({ projects: [{ ...projectA, defaultModel: 'project/model', defaultVariant: 'high' }, projectB] });
+    try {
+      useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectA.id });
+      expect(useConfigStore.getState().currentProviderId).toBe('project');
+      expect(useConfigStore.getState().currentModelId).toBe('model');
+      expect(useConfigStore.getState().currentVariant).toBe('high');
+      useConfigStore.setState({ currentProviderId: 'manual', currentModelId: 'chosen', selectionSource: 'manual' });
+      finishActivation();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(useConfigStore.getState().currentProviderId).toBe('manual');
+      expect(useConfigStore.getState().currentModelId).toBe('chosen');
+    } finally {
+      finishActivation();
+      useConfigStore.setState(original);
+    }
+  });
+
+  test('an old draft activation cannot replace a newer draft default', async () => {
+    const original = useConfigStore.getState();
+    let finishActivation;
+    const activation = new Promise((resolve) => { finishActivation = resolve; });
+    useConfigStore.setState({ activateDirectory: () => activation, providers: [], agents: [], isConnected: false });
+    useProjectsStore.setState({ projects: [
+      { ...projectA, defaultModel: 'alpha/model' },
+      { ...projectB, defaultModel: 'beta/model' },
+    ] });
+    try {
+      useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectA.id });
+      useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectB.id });
+      expect(useConfigStore.getState().currentProviderId).toBe('beta');
+      finishActivation();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(useConfigStore.getState().currentProviderId).toBe('beta');
+    } finally {
+      finishActivation();
+      useConfigStore.setState(original);
+    }
+  });
+
   test('defaults an implicit draft to Chat when current directory is unmatched', () => {
     useDirectoryStore.getState().setDirectory('/external/worktree', { showOverlay: false });
 

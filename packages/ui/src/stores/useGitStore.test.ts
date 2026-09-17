@@ -82,7 +82,7 @@ const createGitApi = (getGitStatus: GitAPI['getGitStatus']): GitAPI => ({
   getGitBranches: async () => ({ all: [], current: 'main', branches: {} }),
   getGitLog: async () => ({ all: [], latest: null, total: 0 }),
   getCurrentGitIdentity: async () => null,
-  getGitFileDiff: async (_directory, options) => ({ original: '', modified: '', path: options.path }),
+  getGitFileDiff: async (_directory, options) => ({ original: '', modified: '', path: options.path, submodule: null }),
 });
 
 describe('useGitStore', () => {
@@ -113,12 +113,12 @@ describe('useGitStore', () => {
       expect(pending.length).toBe(2);
       expect(useGitStore.getState().getDirectoryState('/repo')?.diffCache.size).toBe(0);
     } finally {
-      for (const { path, request } of pending) request.resolve({ path, original: 'before', modified: 'after' });
+      for (const { path, request } of pending) request.resolve({ path, original: 'before', modified: 'after', submodule: null });
       await prefetch;
     }
     // Late responses were discarded, but their real completion frees capacity.
     expect(useGitStore.getState().getDirectoryState('/repo')?.diffCache.size).toBe(0);
-    git.getGitFileDiff = async (_directory, { path }) => ({ path, original: 'fresh', modified: 'fresh' });
+    git.getGitFileDiff = async (_directory, { path }) => ({ path, original: 'fresh', modified: 'fresh', submodule: null });
     await useGitStore.getState().prefetchDiffs('/repo', git, paths);
     expect(useGitStore.getState().getDirectoryState('/repo')?.diffCache.size).toBe(4);
   }, 40_000);
@@ -149,7 +149,7 @@ describe('useGitStore', () => {
       await Promise.all(directories.map((directory) => useGitStore.getState().prefetchDiffs(directory, git, paths)));
       expect(calls.length).toBe(6);
     } finally {
-      request.resolve({ path: 'one.ts', original: '', modified: '' });
+      request.resolve({ path: 'one.ts', original: '', modified: '', submodule: null });
       await Promise.all(batches);
     }
     for (const directory of directories) expect(useGitStore.getState().getDirectoryState(directory)?.diffCache.size).toBe(0);
@@ -186,11 +186,11 @@ describe('useGitStore', () => {
       calls += 1;
       if (path === 'one.ts') return request.promise;
       if (path === 'two.ts') throw new Error('failed read');
-      return { path, original: '', modified: 'fresh' };
+      return { path, original: '', modified: 'fresh', submodule: null };
     };
     const first = useGitStore.getState().prefetchDiffs('/repo', git, paths);
     await useGitStore.getState().prefetchDiffs('/repo', git, paths);
-    request.resolve({ path: 'one.ts', original: '', modified: 'fresh' });
+    request.resolve({ path: 'one.ts', original: '', modified: 'fresh', submodule: null });
     await first;
     expect(calls).toBe(3);
     const cache = useGitStore.getState().getDirectoryState('/repo')?.diffCache;
@@ -414,7 +414,7 @@ describe('useGitStore', () => {
   });
 
   test('rejects direct diff commits captured for another runtime', () => {
-    useGitStore.getState().setDiff('/repo', 'stale.ts', { original: 'a', modified: 'b' }, 'runtime-a');
+    useGitStore.getState().setDiff('/repo', 'stale.ts', { original: 'a', modified: 'b', submodule: null }, 'runtime-a');
     expect(useGitStore.getState().getDiff('/repo', 'stale.ts')).toBe(null);
   });
 
@@ -423,7 +423,7 @@ describe('useGitStore', () => {
       { 'src/index.ts': { insertions: 1, deletions: 1 } },
       [{ path: 'src/index.ts', index: ' ', working_dir: 'M' }],
     ));
-    useGitStore.getState().setDiff('/repo', 'src/index.ts', { original: 'old', modified: 'stale' });
+    useGitStore.getState().setDiff('/repo', 'src/index.ts', { original: 'old', modified: 'stale', submodule: null });
 
     useGitStore.getState().clearDiffCache('/repo');
 
@@ -435,8 +435,8 @@ describe('useGitStore', () => {
       { path: 'src/first.ts', index: ' ', working_dir: 'M' },
       { path: 'src/second.ts', index: ' ', working_dir: 'M' },
     ]));
-    useGitStore.getState().setDiff('/repo', 'src/first.ts', { original: 'a', modified: 'b' });
-    useGitStore.getState().setDiff('/repo', 'src/second.ts', { original: 'c', modified: 'd' });
+    useGitStore.getState().setDiff('/repo', 'src/first.ts', { original: 'a', modified: 'b', submodule: null });
+    useGitStore.getState().setDiff('/repo', 'src/second.ts', { original: 'c', modified: 'd', submodule: null });
 
     useGitStore.getState().clearDiffCache('/repo', ['src/first.ts']);
 

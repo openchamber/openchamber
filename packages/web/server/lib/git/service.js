@@ -510,12 +510,43 @@ const resolveGitInternalPath = async (repoRoot, git, gitPath) => {
   return path.resolve(repoRoot, resolved.trim());
 };
 
+const GITLINK_MODE = '160000';
+
+// Paths from `git status` can stop resolving: the file was removed after the
+// listing, or the entry is a nested repository git reports as `dir/`. Callers
+// tell these apart by `code`, and diff routes send the code to clients as is.
+const GIT_PATH_NOT_FOUND = 'path_not_found';
+const GIT_PATH_IS_NESTED_REPOSITORY = 'nested_repository';
+
+const createGitPathError = (code, filePath) => {
+  const message = code === GIT_PATH_IS_NESTED_REPOSITORY
+    ? `Path is a separate Git repository: ${filePath}`
+    : `Path not found in working tree, index, or HEAD: ${filePath}`;
+  return Object.assign(new Error(message), { code });
+};
+
+// Mode of the exact entry at `repoPath`, or null. `cat-file -e` cannot answer
+// this: a gitlink's commit lives in the submodule's object store, so git exits 1
+// without stderr, which simple-git reports as success.
+const readGitEntryMode = async (repoRoot, args, repoPath) => {
+  const result = await runGitCommand(repoRoot, args);
+  if (!result.success) return null;
+  for (const record of result.stdout.split('\0')) {
+    const tab = record.indexOf('\t');
+    if (tab !== -1 && record.slice(tab + 1) === repoPath) {
+      return record.slice(0, record.indexOf(' '));
+    }
+  }
+  return null;
+};
+
 const resolveGitFileContext = async (directoryPath, git, filePath, repoRootOverride = null) => {
   const repoRoot = repoRootOverride || await resolveGitRepositoryRoot(directoryPath, git);
   const candidates = Array.from(new Set([
     path.resolve(repoRoot, filePath),
     path.resolve(directoryPath, filePath),
   ]));
+  let nestedRepository = false;
 
   for (const absolutePath of candidates) {
     if (!isInsideOrSameDirectory(repoRoot, absolutePath)) {
@@ -526,20 +557,60 @@ const resolveGitFileContext = async (directoryPath, git, filePath, repoRootOverr
     const worktreeEntry = await fsp.lstat(absolutePath).catch(() => null);
     const isSymbolicLink = worktreeEntry?.isSymbolicLink() ?? false;
     const existsInWorktree = worktreeEntry?.isFile() || isSymbolicLink;
-    const existsInIndex = await git.raw(['cat-file', '-e', `:${repoPath}`]).then(() => true).catch(() => false);
-    const existsInHead = await git.raw(['cat-file', '-e', `HEAD:${repoPath}`]).then(() => true).catch(() => false);
+    const indexMode = await readGitEntryMode(repoRoot, ['ls-files', '--stage', '-z', '--', `:(literal)${repoPath}`], repoPath);
+    const headMode = await readGitEntryMode(repoRoot, ['ls-tree', '-z', 'HEAD', '--', repoPath], repoPath);
 
-    if (existsInWorktree || existsInIndex || existsInHead) {
+    if (existsInWorktree || indexMode || headMode) {
       return {
         absolutePath,
         repoPath,
         repoRoot,
         isSymbolicLink,
+        isSubmodule: indexMode === GITLINK_MODE || headMode === GITLINK_MODE,
       };
+    }
+
+    if (worktreeEntry?.isDirectory() && await fsp.lstat(path.join(absolutePath, '.git')).then(() => true, () => false)) {
+      nestedRepository = true;
     }
   }
 
-  throw new Error('Invalid file path');
+  throw createGitPathError(nestedRepository ? GIT_PATH_IS_NESTED_REPOSITORY : GIT_PATH_NOT_FOUND, filePath);
+};
+
+/**
+ * What a submodule entry records, since its text patch cannot show everything:
+ * with only untracked files inside, `git status` marks it modified while
+ * `git diff` prints nothing.
+ */
+const readSubmoduleState = async (repoRoot, fileContext) => {
+  const status = await runGitCommand(repoRoot, ['status', '--porcelain=v2', '-z', '--', `:(literal)${fileContext.repoPath}`]);
+  if (!status.success) {
+    throw new Error(status.message || 'Failed to read submodule status');
+  }
+  // Changed: "1 XY S<c><m><u> mH mI mW hH hI path" ("2" adds rename fields
+  // after hI). Unmerged: "u XY S<c><m><u> m1 m2 m3 mW h1 h2 h3 path", with no
+  // stage-0 index entry. A clean submodule has no record, so HEAD and the index
+  // record the same commit.
+  const record = status.stdout.split('\0').find((entry) => /^[12u] /.test(entry))?.split(' ');
+  const hasConflict = record?.[0] === 'u';
+  const readHead = async () => (await runGitCommand(repoRoot, ['rev-parse', '--verify', '--quiet', `HEAD:${fileContext.repoPath}`])).stdout.trim();
+  const head = record && !hasConflict ? record[6] : await readHead();
+  const index = hasConflict ? '' : (record ? record[7] : head);
+  const flags = record ? record[2] : 'S...';
+  // Without its own `.git`, rev-parse would answer for the parent repository.
+  const initialized = await fsp.lstat(path.join(fileContext.absolutePath, '.git')).then(() => true, () => false);
+  const worktree = initialized ? await runGitCommand(fileContext.absolutePath, ['rev-parse', '--verify', 'HEAD']) : null;
+  const commitOrNull = (value) => (value && !/^0+$/.test(value) ? value : null);
+
+  return {
+    headCommit: commitOrNull(head),
+    indexCommit: commitOrNull(index),
+    worktreeCommit: worktree?.success ? worktree.stdout.trim() : null,
+    hasTrackedChanges: flags[2] === 'M',
+    hasUntrackedFiles: flags[3] === 'U',
+    hasConflict,
+  };
 };
 
 const cleanBranchName = (branch) => {
@@ -2481,11 +2552,29 @@ const getNoIndexDiff = async (repoRoot, repoPath, contextLines) => {
 };
 
 export async function getDiff(directory, { path: filePath, staged = false, contextLines = 3 } = {}) {
-  const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
+  const context = await createRepositoryGitContext(directory);
+  const fileContext = filePath
+    ? await resolveGitFileContext(context.directoryPath, context.directoryGit, filePath, context.repoRoot)
+    : null;
+  return readDiff(context, fileContext, { staged, contextLines });
+}
 
+/**
+ * `getDiff` for one path, plus what a submodule records. A submodule patch is
+ * empty when only untracked files changed inside it, so callers need the state
+ * to show anything truthful.
+ */
+export async function getPathDiff(directory, { path: filePath, staged = false, contextLines = 3 } = {}) {
+  const context = await createRepositoryGitContext(directory);
+  const fileContext = await resolveGitFileContext(context.directoryPath, context.directoryGit, filePath, context.repoRoot);
+  const diff = await readDiff(context, fileContext, { staged, contextLines });
+  if (!fileContext.isSubmodule) return { diff, submodule: null };
+  return { diff, submodule: await readSubmoduleState(context.repoRoot, fileContext) };
+}
+
+async function readDiff({ repoRoot, git }, fileContext, { staged, contextLines }) {
   try {
     const args = ['diff', '--no-color', '--full-index'];
-    const fileContext = filePath ? await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot) : null;
 
     if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
       args.push(`-U${Math.max(0, contextLines)}`);
@@ -2682,7 +2771,7 @@ export async function getRangeDiff(directory, { base, head, path: filePath, cont
       const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
       paths.push(fileContext.repoPath);
     } catch (error) {
-      if (error.message !== 'Invalid file path') throw error;
+      if (error.code !== GIT_PATH_NOT_FOUND) throw error;
       // A committed deletion is absent from HEAD, the index, and the working
       // tree. It is still a valid range path when it exists at the merge base.
       const mergeBase = (await git.raw(['merge-base', baseRef, headRef])).trim();
@@ -2907,7 +2996,22 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
   const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
   const isImage = isImageFile(filePath);
   const mimeType = isImage ? getImageMimeType(filePath) : null;
-  const { absolutePath, repoPath, isSymbolicLink } = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+  const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+  const { absolutePath, repoPath, isSymbolicLink } = fileContext;
+
+  if (fileContext.isSubmodule) {
+    // Git's own text form of a gitlink, so a plain two-pane view still shows
+    // the recorded commits; `submodule` carries what the text cannot.
+    const submodule = await readSubmoduleState(repoRoot, fileContext);
+    const describeCommit = (commit) => (commit ? `Subproject commit ${commit}\n` : '');
+    return {
+      original: describeCommit(submodule.headCommit),
+      modified: describeCommit(staged ? submodule.indexCommit : submodule.worktreeCommit),
+      path: filePath,
+      isBinary: false,
+      submodule,
+    };
+  }
 
   if (!isImage && !isSymbolicLink) {
     const isBinaryBySniff = await looksBinaryBySniff(absolutePath);
@@ -3346,26 +3450,45 @@ export async function push(directory, options = {}) {
     );
   };
 
-  const normalizePushResult = (result) => {
+  const remote = String(options.remote || '').trim();
+  const status = await git.status();
+  const config = await git.listConfig();
+  const remotes = await git.getRemotes(true);
+  const remoteName = remote
+    || config.all[`branch.${status.current}.pushremote`]
+    || config.all['remote.pushdefault']
+    || config.all[`branch.${status.current}.remote`]
+    || (remotes.length === 1 ? remotes[0].name : 'origin');
+
+  const pushTo = async (target, branch, pushOptions) => {
+    // simple-git drops forced updates and puts no-ops in `pushed`. Read Git's
+    // porcelain status flags so feedback reflects actual remote ref changes.
+    let output = '';
+    git.outputHandler((_command, stdout) => {
+      stdout.on('data', (chunk) => { output += chunk.toString(); });
+    });
+    const result = await git.push(target, branch, pushOptions);
+    const pushed = [];
+    for (const line of output.split(/\r?\n/)) {
+      const match = /^([ *+\-])\t([^:]*):([^\t]+)\t/.exec(line);
+      if (match) {
+        pushed.push({ local: match[2], remote: remoteName });
+      }
+    }
     return {
       success: true,
-      pushed: result.pushed,
-      repo: result.repo,
-      ref: result.ref,
+      pushed,
+      repo: result.repo || directory,
+      ref: result.ref || null,
     };
   };
 
-  const remote = String(options.remote || '').trim();
-
   if (!remote && !options.branch) {
     try {
-      await git.push();
-      return {
-        success: true,
-        pushed: [],
-        repo: directory,
-        ref: null,
-      };
+      const pushOptions = status.current && !status.tracking
+        ? buildUpstreamOptions(options.options)
+        : options.options || {};
+      return await pushTo(undefined, undefined, pushOptions);
     } catch (error) {
       if (!looksLikeMissingUpstream(error)) {
         const message = describePushError(error);
@@ -3374,17 +3497,13 @@ export async function push(directory, options = {}) {
       }
 
       try {
-        const status = await git.status();
         const branch = status.current;
-        const remotes = await git.getRemotes(true);
-        const fallbackRemote = remotes.find((entry) => entry.name === 'origin')?.name || remotes[0]?.name;
-        if (!branch || !fallbackRemote) {
+        if (!branch || !remoteName) {
           const message = describePushError(error);
           throw new Error(message);
         }
 
-        const result = await git.push(fallbackRemote, branch, buildUpstreamOptions(options.options));
-        return normalizePushResult(result);
+        return await pushTo(remoteName, branch, buildUpstreamOptions(options.options));
       } catch (fallbackError) {
         const message = describePushError(fallbackError);
         console.error('Failed to push (including upstream fallback):', fallbackError);
@@ -3393,26 +3512,14 @@ export async function push(directory, options = {}) {
     }
   }
 
-  const remoteName = remote || 'origin';
-
   // If caller didn't specify a branch, this is the common "Push"/"Commit & Push" path.
   // When there's no upstream yet (typical for freshly-created worktree branches), publish it on first push.
-  if (!options.branch) {
-    try {
-      const status = await git.status();
-      if (status.current && !status.tracking) {
-        const result = await git.push(remoteName, status.current, buildUpstreamOptions(options.options));
-        return normalizePushResult(result);
-      }
-    } catch (error) {
-      // If we can't read status, fall back to the regular push path below.
-      console.warn('Failed to read git status before push:', error);
-    }
+  if (!options.branch && status.current && !status.tracking) {
+    return pushTo(remoteName, status.current, buildUpstreamOptions(options.options));
   }
 
   try {
-    const result = await git.push(remoteName, options.branch, options.options || {});
-    return normalizePushResult(result);
+    return await pushTo(remoteName, options.branch, options.options || {});
   } catch (error) {
     // Last-resort fallback: retry with upstream if the error suggests it's missing.
     if (!looksLikeMissingUpstream(error)) {
@@ -3422,15 +3529,13 @@ export async function push(directory, options = {}) {
     }
 
     try {
-      const status = await git.status();
       const branch = options.branch || status.current;
       if (!branch) {
         console.error('Failed to push: missing branch name for upstream setup:', error);
         throw error;
       }
 
-      const result = await git.push(remoteName, branch, buildUpstreamOptions(options.options));
-      return normalizePushResult(result);
+      return await pushTo(remoteName, branch, buildUpstreamOptions(options.options));
     } catch (fallbackError) {
       const message = describePushError(fallbackError);
       console.error('Failed to push (including upstream fallback):', fallbackError);

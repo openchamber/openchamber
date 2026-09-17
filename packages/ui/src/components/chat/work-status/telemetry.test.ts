@@ -143,6 +143,22 @@ describe('turn telemetry', () => {
     expect(stats?.tokensPerSecond).toBeNull();
   });
 
+  test('hides a throughput the measured window cannot have produced', () => {
+    // A tool that runs for all but 1 ms of its step (seen in real data) leaves
+    // a residual LLM window that turns 100 tokens into 100,000 tok/s.
+    const residual = turn(assistant({ time: { created: 1000, completed: 1560 } }), [tool(1000, 1559)]);
+    expect(getLatestCompletedTurnStats(residual)?.tokensPerSecond).toBeNull();
+    expect(getLatestCompletedTurnStats(residual)?.totalLlmDurationMs).toBe(1);
+
+    const finalText = turn(assistant({ tokens: { ...assistant().tokens, output: 400 } }),
+      [{ ...text(1000), text: 'Final answer', time: { start: 1000, end: 1002 } }]);
+    expect(getLatestCompletedTurnStats(finalText)?.responseTokensPerSecond).toBeNull();
+
+    // A fast but possible rate still shows.
+    const quick = turn(assistant({ time: { created: 1000, completed: 1100 }, tokens: { ...assistant().tokens, output: 200 } }));
+    expect(getLatestCompletedTurnStats(quick)?.tokensPerSecond).toBe(2000);
+  });
+
   test('separates final text delivery from whole-turn throughput on the measured tool-heavy shape', () => {
     const records = turn(assistant({
       time: { created: 1000, completed: 38438 },

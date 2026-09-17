@@ -81,7 +81,7 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
               disabled={isPrimaryDisabled}
               className={cn(
                 'inline-flex h-7 items-center gap-1.5 px-2 typography-ui-label font-medium text-foreground',
-                'transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50'
+                'transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50'
               )}
               aria-label={t('gitView.sync.syncChanges')}
             >
@@ -103,7 +103,7 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
             type="button"
             className={cn(
               'inline-flex h-7 w-6 items-center justify-center border-l border-[var(--interactive-border)] text-muted-foreground',
-              'transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50'
+              'transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50'
             )}
             disabled={isDropdownDisabled}
             aria-label={t('gitView.sync.moreActionsAria')}

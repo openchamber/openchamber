@@ -1,4 +1,5 @@
 import React from 'react';
+import { isVimEditorEventTarget } from '@/lib/editorFocus';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { activateAdjacentSessionTab, activateSessionTabByIndex, closeSessionTabAndActivateNeighbour } from '@/lib/sessionTabs';
@@ -25,6 +26,9 @@ import {
   type ShortcutActionId,
 } from '@/lib/shortcuts';
 import { ShortcutRegistry } from '@/lib/shortcuts/registry';
+import { enabledGuestSurfaces } from '@/lib/guests/surfaces';
+import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+import { useGuestsStore } from '@/lib/guests/store';
 import { getVisibleContextRailSurfaces } from '@/lib/surfaces/registry';
 import { readEmbeddedThemeSearchParams } from '@/contexts/theme-embedded-bootstrap';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -408,6 +412,7 @@ export const useKeyboardShortcuts = () => {
         target?.closest('[role="dialog"]')
         || target?.closest('[data-btw-composer="true"]')
         || isTerminalEventTarget(target)
+        || isVimEditorEventTarget(target)
         || dropdownOpen
       ) {
         resetAbortPriming();
@@ -516,6 +521,7 @@ export const useKeyboardShortcuts = () => {
             tabs: panel?.tabs ?? [],
             linearConnected: useLinearAuthStore.getState().status?.connected === true,
             githubConnected: useGitHubAuthStore.getState().status?.connected === true,
+            extras: enabledGuestSurfaces(useGuestsStore.getState().guests, getRuntimeUrlResolver().authenticatedAsset),
           });
           const target = visibleSurfaces[switchSurfaceDigit - 1];
           if (target) {

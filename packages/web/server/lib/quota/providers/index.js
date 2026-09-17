@@ -11,7 +11,6 @@ import * as claude from './claude/index.js';
 import * as clinePass from './cline-pass.js';
 import * as codex from './codex.js';
 import * as copilot from './copilot.js';
-import * as crof from './crof.js';
 import * as cursor from './cursor.js';
 import * as deepseek from './deepseek.js';
 import * as exeDev from './exe-dev.js';
@@ -49,12 +48,6 @@ const registry = {
     providerName: codex.providerName,
     isConfigured: codex.isConfigured,
     fetchQuota: codex.fetchQuota
-  },
-  crof: {
-    providerId: crof.providerId,
-    providerName: crof.providerName,
-    isConfigured: crof.isConfigured,
-    fetchQuota: crof.fetchQuota
   },
   cursor: {
     providerId: cursor.providerId,

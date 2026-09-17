@@ -7,6 +7,7 @@ import type {
   GetGitRangeFilesOptions,
   GetGitCommitDiffOptions,
   GitFileDiffResponse,
+  GitPathDiffResponse,
   GetGitFileDiffOptions,
   GitBranch,
   GitUnpushedBranchCounts,
@@ -44,6 +45,7 @@ import { getRuntimeUrlResolver } from './runtime-url';
 import { getRuntimeKey } from './runtime-switch';
 import { notifyGitStatusInvalidated, subscribeGitStatusInvalidations } from './gitStatusInvalidation';
 import { notifyGitPush } from './gitPushEvents';
+import { GitPathUnavailableError, gitPathUnavailableBodySchema, gitSubmoduleStateSchema } from './api/git-path-diff';
 
 const API_BASE = '/api/git';
 const gitRangeDiffSchema = z.object({ diff: z.string() });
@@ -59,6 +61,24 @@ const gitLogEntrySchema = z.object({
   insertions: z.number(), deletions: z.number(), parents: z.array(z.string()),
 });
 const gitLogSchema = z.object({ all: z.array(gitLogEntrySchema), latest: gitLogEntrySchema.nullable(), total: z.number() });
+
+// Servers before #3586 send no `submodule`; that means "not known to be one".
+const gitPathDiffSchema = z.object({ diff: z.string(), submodule: gitSubmoduleStateSchema.nullable().default(null) });
+const gitFileDiffSchema = z.object({
+  original: z.string(),
+  modified: z.string(),
+  path: z.string(),
+  isBinary: z.boolean().optional(),
+  submodule: gitSubmoduleStateSchema.nullable().default(null),
+});
+
+async function pathDiffResponseError(response: Response, fallback: string): Promise<Error> {
+  const parsed = gitPathUnavailableBodySchema.safeParse(await response.json().catch(() => null));
+  if (parsed.success && (response.status === 404 || response.status === 422)) {
+    return new GitPathUnavailableError(parsed.data.error, parsed.data.code);
+  }
+  return new Error(`${fallback}: ${response.statusText}`);
+}
 
 async function rangeResponseError(response: Response, fallback: string): Promise<Error> {
   const parsed = gitRangeErrorSchema.safeParse(await response.json().catch(() => null));
@@ -168,7 +188,7 @@ export class GitDirectoriesUnsupportedError extends Error {
 }
 
 export async function listGitDirectories(root: string): Promise<string[]> {
-  const response = await runtimeFetch('/api/fs/git-dirs', { query: { path: root } });
+  const response = await runtimeFetch('/api/fs/git-dirs', { query: { path: root, directory: root } });
   if (response.status === 501) {
     throw new GitDirectoriesUnsupportedError();
   }
@@ -281,7 +301,7 @@ export async function getGitCommitSummaries(
   };
 }
 
-export async function getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitDiffResponse> {
+export async function getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitPathDiffResponse> {
   const { path, staged, contextLines } = options;
   if (!path) {
     throw new Error('path is required to fetch git diff');
@@ -296,10 +316,10 @@ export async function getGitDiff(directory: string, options: GetGitDiffOptions):
   );
 
   if (!response.ok) {
-    throw new Error(`Failed to get git diff: ${response.statusText}`);
+    throw await pathDiffResponseError(response, 'Failed to get git diff');
   }
 
-  return response.json();
+  return gitPathDiffSchema.parse(await response.json());
 }
 
 export async function getGitRangeDiff(
@@ -392,10 +412,10 @@ export async function getGitFileDiff(directory: string, options: GetGitFileDiffO
   );
 
   if (!response.ok) {
-    throw new Error(`Failed to get git file diff: ${response.statusText}`);
+    throw await pathDiffResponseError(response, 'Failed to get git file diff');
   }
 
-  return response.json();
+  return gitFileDiffSchema.parse(await response.json());
 }
 
 export async function revertGitFile(

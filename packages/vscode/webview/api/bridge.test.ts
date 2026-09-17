@@ -2,7 +2,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
 describe('VS Code webview bridge requests', () => {
-  test('rejects immediately when signal is already aborted', async () => {
+  test('announces the document once before requests and skips already aborted requests', async () => {
     const originalWindow = globalThis.window;
     const originalAcquire = (globalThis as typeof globalThis & { acquireVsCodeApi?: unknown }).acquireVsCodeApi;
     const messages: unknown[] = [];
@@ -21,7 +21,7 @@ describe('VS Code webview bridge requests', () => {
         }),
       });
 
-      const { sendBridgeMessageWithOptions, startSseProxy } = await import('./bridge');
+      const { sendBridgeMessageWithOptions, startSseProxy, postBridgeNotification } = await import('./bridge');
       const controller = new AbortController();
       controller.abort();
 
@@ -38,7 +38,8 @@ describe('VS Code webview bridge requests', () => {
       assert.equal(messages.length, 0);
 
       const startPromise = startSseProxy({ path: '/global/event', streamId: 'sse_webview_1_1' });
-      const request = messages[0] as { id: string; payload?: { streamId?: string } };
+      assert.deepEqual(messages[0], { type: 'webview:ready' });
+      const request = messages[1] as { id: string; payload?: { streamId?: string } };
       assert.equal(request.payload?.streamId, 'sse_webview_1_1');
       globalThis.window.dispatchEvent(new MessageEvent('message', {
         data: {
@@ -49,6 +50,9 @@ describe('VS Code webview bridge requests', () => {
         },
       }));
       assert.equal((await startPromise).streamId, 'sse_webview_1_1');
+      assert.equal(messages.length, 2);
+      postBridgeNotification('test:notification', { value: 1 });
+      assert.deepEqual(messages.slice(2), [{ type: 'test:notification', payload: { value: 1 } }]);
     } finally {
       Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
       Object.defineProperty(globalThis, 'acquireVsCodeApi', { configurable: true, value: originalAcquire });

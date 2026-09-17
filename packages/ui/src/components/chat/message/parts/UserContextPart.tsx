@@ -47,7 +47,7 @@ const ContextCard: React.FC<{
         const comment = text.trim();
         return (
             <div
-                className="my-1 flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 border-l-2 border-[var(--interactive-border)] pl-3 text-xs text-[var(--surface-mutedForeground)]"
+                className="my-1 flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 border-l-2 border-[var(--interactive-border)] pl-3 text-xs text-muted-foreground"
                 onClick={onExpand}
                 title={title}
             >
@@ -69,14 +69,14 @@ const ContextCard: React.FC<{
                 onClick={hasBody ? () => setExpanded((value) => !value) : undefined}
                 title={title}
             >
-                <div className="flex items-center gap-1.5 text-xs text-[var(--surface-mutedForeground)]">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <Icon name={icon} className="h-3.5 w-3.5 shrink-0" />
                     <span className="truncate">{summary}</span>
                 </div>
                 {hasBody ? (
                     <div
                         className={cn(
-                            'mt-1 whitespace-pre-wrap break-words text-[var(--surface-mutedForeground)]',
+                            'mt-1 whitespace-pre-wrap break-words text-muted-foreground',
                             mono ? 'font-mono text-xs leading-5' : 'text-sm',
                             !expanded && 'line-clamp-4'
                         )}
@@ -186,6 +186,8 @@ const UserContextPart: React.FC<{
         case 'github-issue':
         case 'github-pr':
         case 'linear-issue':
+        case 'guest-issue':
+        case 'guest-pr':
             // Rendered as link attachments by normalizeUserDisplayParts.
             return null;
     }

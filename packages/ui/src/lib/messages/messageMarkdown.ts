@@ -49,6 +49,8 @@ function formatContext(payload: ContextPartPayload, originalText: string, fieldL
     case 'github-issue':
     case 'github-pr':
     case 'linear-issue':
+    case 'guest-issue':
+    case 'guest-pr':
       return fieldLimit ? excerptMarkdown(originalText, fieldLimit) : originalText;
   }
 }

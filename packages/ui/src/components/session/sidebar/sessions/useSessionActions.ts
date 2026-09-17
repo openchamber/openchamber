@@ -6,6 +6,7 @@ import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { streamPerfMark } from '@/stores/utils/streamDebug';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { collectSessionSubtreeIds, runSessionSubtreeAction } from './sessionSubtreeActions';
 
 export type DeleteSessionSource = {
   archivedBucket?: boolean;
@@ -209,50 +210,13 @@ export const useSessionActions = (args: Args) => {
       // collection for direct-execute (no-dialog) callers.
       const effectiveDescendantIds = precomputed?.descendantIds
         ?? descendantIds;
-      if (effectiveDescendantIds.length === 0) {
-        const success = shouldHardDelete
-          ? await deleteSession(session.id)
-          : await archiveSession(session.id);
-        if (success) {
-          toast.success(shouldHardDelete
-            ? t('sessions.sidebar.session.delete.success')
-            : t('sessions.sidebar.session.archive.success'));
-        } else {
-          toast.error(shouldHardDelete
-            ? t('sessions.sidebar.session.delete.error')
-            : t('sessions.sidebar.session.archive.error'));
-        }
-        return;
-      }
-
-      const ids = [session.id, ...effectiveDescendantIds];
-      if (shouldHardDelete) {
-        // Delete root + all descendants individually. If the server
-        // cascade-deletes some children before we get to them, 404 is
-        // treated as success by deleteSession and no rollback occurs.
-        const { deletedIds, failedIds } = await deleteSessions(ids);
-        if (failedIds.length === 0) {
-          const totalDeleted = deletedIds.length;
-          toast.success(totalDeleted === 1
-            ? t('sessions.sidebar.bulkActions.deletedSingle', { count: totalDeleted })
-            : t('sessions.sidebar.bulkActions.deletedPlural', { count: totalDeleted }));
-        } else {
-          toast.error(t('sessions.sidebar.session.delete.error'));
-        }
-        return;
-      }
-
-      const { archivedIds, failedIds } = await archiveSessions(ids);
-      if (archivedIds.length > 0) {
-        toast.success(archivedIds.length === 1
-          ? t('sessions.sidebar.bulkActions.archivedSingle', { count: archivedIds.length })
-          : t('sessions.sidebar.bulkActions.archivedPlural', { count: archivedIds.length }));
-      }
-      if (failedIds.length > 0) {
-        toast.error(failedIds.length === 1
-          ? t('sessions.sidebar.bulkActions.failedArchiveSingle', { count: failedIds.length })
-          : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }));
-      }
+      await runSessionSubtreeAction(
+        shouldHardDelete ? 'delete' : 'archive',
+        session,
+        effectiveDescendantIds,
+        { archiveSession, archiveSessions, deleteSession, deleteSessions },
+        t,
+      );
     },
     [archiveSession, archiveSessions, deleteSession, deleteSessions, descendantIds, t],
   );
@@ -260,7 +224,7 @@ export const useSessionActions = (args: Args) => {
   const handleDeleteSession = React.useCallback(
     (session: Session, source?: DeleteSessionSource) => {
       const shouldHardDelete = source?.archivedBucket === true || source?.hardDelete === true;
-      const effectiveDescendantIds = [...descendantIds];
+      const effectiveDescendantIds = collectSessionSubtreeIds(session.id, descendantIds, shouldHardDelete);
       if (!showDeletionDialog || source?.skipConfirm === true) {
         void executeDeleteSession(session, source, { descendantIds: effectiveDescendantIds });
         return;

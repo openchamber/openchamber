@@ -111,6 +111,16 @@ export class SessionEditorPanelProvider {
   }
 
   public createOrShowNewSession(): void {
+    // Without an open workspace folder there is no directory to start the
+    // session against; opening a draft would fall back to the last session's
+    // directory in shared UI state (the bug this fixes). Mirror the sidebar
+    // flow's guard and tell the user instead.
+    const firstFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!firstFolder) {
+      vscode.window.showInformationMessage('OpenChamber: No folder is open. Open a folder to start a new session.');
+      return;
+    }
+
     // Generate unique panel ID for new session drafts
     const panelId = `new_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     this._createPanel(panelId, t('New Session'), null);
@@ -180,9 +190,18 @@ export class SessionEditorPanelProvider {
       if (event.webviewPanel.active) {
         this._lastActivePanelId = panelId;
       }
+      this._postViewerState(state);
     }, null, this._context.subscriptions);
 
     panel.webview.onDidReceiveMessage(async (message: BridgeRequest) => {
+      if (message.type === 'webview:ready') {
+        for (const controller of state.sseStreams.values()) {
+          controller.abort();
+        }
+        state.sseStreams.clear();
+        this._sendCachedStateToPanel(state);
+      }
+
       // Any inbound message proves the webview script is running, which is the
       // only readiness signal this panel has. Flush whatever was held for it.
       state.webviewReady = true;
@@ -193,6 +212,8 @@ export class SessionEditorPanelProvider {
           payload: { ...pending, targetSessionId: state.sessionId ?? undefined },
         });
       }
+
+      if (message.type === 'webview:ready') return;
 
       // Editor comment threads mirror the composer's drafts, so the webview
       // reports every change. One-way notification, no response expected.
@@ -295,14 +316,19 @@ export class SessionEditorPanelProvider {
     }
   }
 
-  public notifyWindowFocusChanged(focused: boolean): void {
+  /** Tells each panel's webview whether the user can see it: VS Code focused and the panel shown. */
+  public notifyViewerStateChanged(): void {
     for (const entry of this._panels.values()) {
-      entry.panel.webview.postMessage({
-        type: 'command',
-        command: 'windowFocusChanged',
-        payload: { focused },
-      });
+      this._postViewerState(entry);
     }
+  }
+
+  private _postViewerState(entry: SessionPanelState): void {
+    entry.panel.webview.postMessage({
+      type: 'command',
+      command: 'viewerStateChanged',
+      payload: { windowFocused: vscode.window.state.focused, surfaceVisible: entry.panel.visible },
+    });
   }
 
   private _getActivePanelEntry(): SessionPanelState | null {
@@ -448,11 +474,7 @@ export class SessionEditorPanelProvider {
       status: this._cachedStatus,
       error: this._cachedError,
     });
-    entry.panel.webview.postMessage({
-      type: 'command',
-      command: 'windowFocusChanged',
-      payload: { focused: vscode.window.state.focused },
-    });
+    this._postViewerState(entry);
   }
 
   private _postCommandToPanels(command: string, payload: unknown): void {

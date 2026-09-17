@@ -75,4 +75,26 @@ describe('settings search', () => {
     expect(results.some((result) => result.id === 'integrations.linear.add-workspace')).toBe(false);
     expect(results.some((result) => result.id === 'integrations.linear.mapping')).toBe(false);
   });
+
+  test('finds guest extension panels on the integrations page', () => {
+    const results = buildSettingsSearchResults({
+      query: 'gitlab',
+      runtimeCtx,
+      t,
+      getPageTitle: (page) => page,
+    });
+
+    expect(results.some((result) => result.id === 'integrations.guests')).toBe(true);
+  });
+
+  test('hides guest extension panels in VS Code', () => {
+    const results = buildSettingsSearchResults({
+      query: 'clickup',
+      runtimeCtx: { ...runtimeCtx, isVSCode: true },
+      t,
+      getPageTitle: (page) => page,
+    });
+
+    expect(results.some((result) => result.id === 'integrations.guests')).toBe(false);
+  });
 });

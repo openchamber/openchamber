@@ -13,7 +13,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
 
@@ -27,6 +27,7 @@ interface ModelSelectorProps {
     placeholder?: string;
     tooltipsEnabled?: boolean;
     dropdownPortalToBody?: boolean;
+    directory?: string;
     /**
      * Drop the model name and the chevron, leaving the provider logo. For
      * headers that run out of room before they run out of controls — the logo
@@ -47,10 +48,16 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     tooltipsEnabled = true,
     dropdownPortalToBody = false,
     compact = false,
+    directory,
 }) => {
     const { t } = useI18n();
-    const { isReady, isUnavailable } = useOpenCodeReadiness();
-    const providers = useConfigStore((state) => state.providers) as ModelPickerProvider[];
+    const { isReady, isUnavailable } = useOpenCodeReadiness('models', directory);
+    const providers: ModelPickerProvider[] = useConfigStore((state) => directory === undefined
+        ? state.providers : selectProvidersForDirectory(state, directory));
+    const loadProviders = useConfigStore((state) => state.loadProviders);
+    React.useEffect(() => {
+        if (directory !== undefined) void loadProviders({ directory });
+    }, [directory, loadProviders]);
     const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
     const isMobile = useUIStore((state) => state.isMobile);
     const hiddenModels = useUIStore((state) => state.hiddenModels);
@@ -101,6 +108,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     }), [placeholder, t]);
 
     const selectedModel = providerId && modelId ? { providerID: providerId, modelID: modelId } : null;
+    const displayReady = isReady || Boolean(selectedModel);
     // Show the model's display name (as in the picker list), not the raw provider/model id.
     const triggerLabel = React.useMemo(() => {
         if (!providerId || !modelId) {
@@ -149,7 +157,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     )}
                 >
                     <div className="flex min-w-0 items-center gap-2">
-                        {!isReady ? (
+                        {!displayReady ? (
                             <>
                                 <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
                                 <span className="typography-meta text-muted-foreground">{isUnavailable ? t('common.unavailable') : t('common.loading')}</span>
@@ -159,7 +167,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                         ) : (
                             <Icon name="pencil-ai" className="h-3 w-3 text-muted-foreground" />
                         )}
-                        {isReady ? <span className="typography-meta font-medium text-foreground truncate">{triggerLabel}</span> : null}
+                        {displayReady ? <span className="typography-meta font-medium text-foreground truncate">{triggerLabel}</span> : null}
                     </div>
                     <Icon name="arrow-down-s" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
                 </button>
@@ -186,9 +194,9 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     )}
                     // The name is gone from the trigger, so it has to stay
                     // reachable somewhere.
-                    title={compact && isReady ? triggerLabel : undefined}
+                    title={compact && displayReady ? triggerLabel : undefined}
                 >
-                    {!isReady ? (
+                    {!displayReady ? (
                         <>
                             <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground flex-shrink-0" />
                             {!compact && (

@@ -217,6 +217,9 @@
     "sidebarShowRecentSection": {
       "scope": "profile"
     },
+    "workStatusSectionOrder": {
+      "scope": "profile"
+    },
     "workStatusPanelEnabled": {
       "scope": "profile"
     },
@@ -602,6 +605,10 @@
       "local": true
     },
     "contextEditorTreeVisible": {
+      "scope": "device",
+      "local": true
+    },
+    "contextEditorVisible": {
       "scope": "device",
       "local": true
     },

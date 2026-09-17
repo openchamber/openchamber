@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
+import { execFileSync } from 'node:child_process';
 
 import { ElectronSshManager } from './ssh-manager.mjs';
 
@@ -50,6 +51,57 @@ afterEach(async () => {
 });
 
 describe('ElectronSshManager', () => {
+  for (const scenario of ['explicit XDG with spaces', 'unset XDG', 'missing XDG with home fallback']) {
+    test.skipIf(process.platform === 'win32')(`executes remote discovery, install and launch with ${scenario}`, async () => {
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber ssh paths-'));
+      tempDirs.push(home);
+      const xdg = path.join(home, 'cache directory');
+      const cache = scenario === 'unset XDG' ? path.join(home, '.cache') : xdg;
+      const bin = scenario === 'missing XDG with home fallback'
+        ? path.join(home, '.bun', 'bin')
+        : path.join(cache, '.bun', 'bin');
+      fs.mkdirSync(bin, { recursive: true });
+      const executable = (file, script) => {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+      };
+      executable(path.join(bin, 'bun'), 'printf "%s\\n" "$@" > "$HOME/install-args"');
+      executable(path.join(bin, 'opencode'), 'printf "1.2.3\\n"');
+      executable(path.join(bin, 'openchamber'), `
+if [ "$1" = "--version" ]; then printf '1.2.3\\n'; exit 0; fi
+printf '%s' "$PATH" > "$HOME/launch-path"
+printf '%s' "$OPENCODE_BINARY" > "$HOME/launch-opencode"
+printf '4321\\n'`);
+      // An earlier candidate with a different version must not win discovery.
+      executable(path.join(home, '.openchamber', 'npm-global', 'bin', 'openchamber'), 'printf "0.9.0\\n"');
+      const tools = path.join(home, 'tools');
+      executable(path.join(tools, 'npm'), 'exit 88');
+      const env = { HOME: home, PATH: `${tools}:/usr/bin:/bin` };
+      if (scenario !== 'unset XDG') env.XDG_CACHE_HOME = xdg;
+      const manager = new ElectronSshManager({
+        settingsFilePath: path.join(home, 'settings.json'),
+        appVersion: '1.2.3',
+        emit: () => undefined,
+      });
+      manager.runRemoteCommand = async (_parsed, _controlPath, script) =>
+        execFileSync('/bin/sh', ['-c', script], { env, encoding: 'utf8', timeout: 5000 });
+      manager.remoteServerRunning = async () => true;
+      const parsed = { destination: 'user@example.test', args: [] };
+
+      await manager.installOpenChamberManaged(parsed, '/unused.sock', '1.2.3', 'auto');
+      expect(fs.readFileSync(path.join(home, 'install-args'), 'utf8')).toBe('add\n-g\n@openchamber/web@1.2.3\n');
+      const result = await manager.ensureRemoteServer({
+        id: 'ssh-paths', auth: {}, remoteOpenchamber: { mode: 'managed', installMethod: 'auto' },
+      }, parsed, '/unused.sock');
+      expect(result.remoteBinPath).toBe(path.join(bin, 'openchamber'));
+      expect(result.remotePort).toBe(4321);
+      expect(fs.readFileSync(path.join(home, 'launch-opencode'), 'utf8')).toBe(path.join(bin, 'opencode'));
+      const launchPath = fs.readFileSync(path.join(home, 'launch-path'), 'utf8').split(':');
+      expect(launchPath).toContain(path.join(cache, '.bun', 'bin'));
+      expect(launchPath).toContain(path.join(home, '.bun', 'bin'));
+    });
+  }
+
   test('runs Windows SSH commands without ControlMaster and hides the process window', async () => {
     const calls = [];
     const manager = new ElectronSshManager({

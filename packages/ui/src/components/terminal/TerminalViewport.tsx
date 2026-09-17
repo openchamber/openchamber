@@ -1,5 +1,8 @@
 import React from 'react';
+import { toast } from 'sonner';
 
+import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
 import { loadMonoFont } from '@/lib/fontLoader';
 import type { MonoFontOption } from '@/lib/fontOptions';
@@ -29,6 +32,7 @@ export type TerminalSurface = Pick<
   | 'refresh'
   | 'focus'
   | 'getSelection'
+  | 'pasteFromClipboard'
   | 'getSelectionPosition'
   | 'scrollLines'
   | 'selectWordAt'
@@ -130,6 +134,11 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
   const visibleRef = React.useRef(isVisible);
   const labelsRef = React.useRef({ input: '', scrollbar: '' });
   const [ready, setReady] = React.useState(0);
+  const allowedContextEventRef = React.useRef<MouseEvent | null>(null);
+  const clipboardLifetimeRef = React.useRef(0);
+  const restoreMenuFocusRef = React.useRef(false);
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const [menuSelection, setMenuSelection] = React.useState('');
   inputRef.current = onInput;
   resizeRef.current = onResize;
   provisionalSizeCallbackRef.current = onProvisionalSize;
@@ -175,6 +184,12 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
           onResize: (cols, rows) => resizeRef.current(cols, rows),
           onLinkActivate: (text) => {
             void openExternalUrl(text);
+          },
+          onContextMenu: (event) => {
+            // Only the surface can decide whether a terminal application owns
+            // this click. The React trigger must ignore all other events.
+            allowedContextEventRef.current = event;
+            setMenuSelection(surface?.getSelection() ?? '');
           },
         });
       } catch (error) {
@@ -228,6 +243,36 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
   React.useEffect(() => {
     surfaceRef.current?.setVisible(isVisible);
   }, [isVisible, ready]);
+
+  React.useEffect(() => {
+    setMenuOpen(false);
+    allowedContextEventRef.current = null;
+    clipboardLifetimeRef.current += 1;
+    return () => { clipboardLifetimeRef.current += 1; };
+  }, [sessionKey, isVisible, ready]);
+
+  const copySelection = async () => {
+    if (!menuSelection) return;
+    try {
+      const result = await copyTextToClipboard(menuSelection);
+      if (!result.ok) toast.error(t('terminalView.toast.copyFailed'));
+    } catch {
+      toast.error(t('terminalView.toast.copyFailed'));
+    }
+  };
+
+  const pasteClipboard = async () => {
+    const surface = surfaceRef.current;
+    if (!surface || !visibleRef.current) return;
+    const lifetime = clipboardLifetimeRef.current;
+    const isCurrent = () => surfaceRef.current === surface
+      && visibleRef.current && clipboardLifetimeRef.current === lifetime;
+    try {
+      await surface.pasteFromClipboard(() => navigator.clipboard.readText(), isCurrent);
+    } catch {
+      if (isCurrent()) toast.error(t('terminalView.toast.pasteFailed'));
+    }
+  };
 
   React.useEffect(() => {
     const surface = surfaceRef.current;
@@ -366,11 +411,39 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
   }), []);
 
   return (
-    <div
-      ref={containerRef}
-      data-terminal-owner="main"
-      className={cn('terminal-viewport-container relative h-full w-full overflow-hidden touch-none', className)}
-    />
+    <ContextMenu
+      disabled={enableTouchScroll || !isVisible}
+      open={menuOpen && isVisible}
+      onOpenChange={(open, details) => {
+        restoreMenuFocusRef.current = !open
+          && (details.reason === 'item-press' || details.reason === 'escape-key');
+        setMenuOpen(open);
+      }}
+    >
+      <ContextMenuTrigger
+        onContextMenu={(event) => {
+          if (event.nativeEvent !== allowedContextEventRef.current) event.preventBaseUIHandler();
+          allowedContextEventRef.current = null;
+        }}
+        onTouchStart={(event) => event.preventBaseUIHandler()}
+        render={<div
+          ref={containerRef}
+          data-terminal-owner="main"
+          className={cn('terminal-viewport-container relative h-full w-full overflow-hidden touch-none', className)}
+        />}
+      />
+      <ContextMenuContent finalFocus={() => {
+        if (restoreMenuFocusRef.current && visibleRef.current) surfaceRef.current?.focus();
+        return false;
+      }}>
+        <ContextMenuItem disabled={!menuSelection} onClick={() => { void copySelection(); }}>
+          {t('terminalView.actions.copy')}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => { void pasteClipboard(); }}>
+          {t('terminalView.actions.paste')}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 });
 

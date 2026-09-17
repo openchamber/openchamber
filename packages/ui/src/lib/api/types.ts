@@ -182,6 +182,27 @@ export interface GitDiffResponse {
   diff: string;
 }
 
+/**
+ * What a submodule entry records. Its patch alone cannot say everything: a
+ * submodule that only gained untracked files is modified in status while its
+ * patch is empty. Commits are null where nothing is recorded, and
+ * `worktreeCommit` is null when the submodule is not checked out.
+ */
+export interface GitSubmoduleState {
+  headCommit: string | null;
+  indexCommit: string | null;
+  worktreeCommit: string | null;
+  hasTrackedChanges: boolean;
+  hasUntrackedFiles: boolean;
+  /** Unmerged: the index holds conflicting commits and no single recorded one. */
+  hasConflict: boolean;
+}
+
+/** Working-tree or staged diff for one status path. `submodule` is null for ordinary paths. */
+export interface GitPathDiffResponse extends GitDiffResponse {
+  submodule: GitSubmoduleState | null;
+}
+
 export interface GetGitDiffOptions {
   path: string;
   staged?: boolean;
@@ -224,6 +245,7 @@ export interface GitFileDiffResponse {
   modified: string;
   path: string;
   isBinary?: boolean;
+  submodule: GitSubmoduleState | null;
 }
 
 export interface GetGitFileDiffOptions {
@@ -536,7 +558,7 @@ interface GitWorktreeAPI {
 export interface GitAPI {
   checkIsGitRepository(directory: string): Promise<boolean>;
   getGitStatus(directory: string, options?: { mode?: 'light'; fresh?: boolean }): Promise<GitStatus>;
-  getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitDiffResponse>;
+  getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitPathDiffResponse>;
   getGitFileDiff(directory: string, options: GetGitFileDiffOptions): Promise<GitFileDiffResponse>;
   getGitRangeDiff?(directory: string, options: GetGitRangeDiffOptions): Promise<GitDiffResponse>;
   getGitRangeFiles?(directory: string, options: GetGitRangeFilesOptions): Promise<GitRangeFileEntry[]>;
@@ -704,6 +726,7 @@ export interface ProjectEntry {
   } | null;
   iconBackground?: string | null;
   color?: string | null;
+  defaultAgent?: string;
   defaultModel?: string;
   /** Variant of `defaultModel`, when that model exposes any. */
   defaultVariant?: string;
@@ -1440,6 +1463,10 @@ export interface ClientAuthAPI {
 }
 
 export interface RuntimeAPIs {
+  /** Native local picker. Web/mobile fall back to their browser file input; VS Code does not import themes. */
+  themeFiles?: {
+    pick(): Promise<{ status: 'unsupported' } | { status: 'picked'; file: { name: string; size: number; text: string } | null }>;
+  };
   runtime: RuntimeDescriptor;
   terminal: TerminalAPI;
   git: GitAPI;

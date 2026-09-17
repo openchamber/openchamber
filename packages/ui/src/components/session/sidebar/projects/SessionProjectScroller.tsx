@@ -12,15 +12,14 @@ import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSo
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { formatDirectoryName, formatPathForDisplay } from '@/lib/utils';
 import type { SessionGroup } from '../types';
-import { ProjectHeaderIdentity, SortableGroupItem, SortableProjectItem } from './sortableItems';
+import { SortableGroupItem, SortableProjectItem } from './sortableItems';
 import { SessionGroupSection, type SessionGroupSectionProps } from './SessionGroupSection';
 import { buildGroupRenderDescriptors, resolveSearchResultPlacement, selectRenderedProjectSections, type ProjectSection } from './sessionProjectRender';
 import { formatProjectLabel } from '../utils';
 import { useI18n } from '@/lib/i18n';
 import type { ProjectSortOrder } from '@/stores/useSessionDisplayStore';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
-import { Icon } from '@/components/icon/Icon';
-import { DirectoryActionIndicator } from '../sessions/DirectoryActionIndicator';
+import { CrossfadeZoneHeaders } from './CrossfadeZoneHeaders';
 
 type SessionProjectScrollerState = Pick<SessionGroupSectionProps,
   | 'editingId'
@@ -82,7 +81,6 @@ type SessionProjectScrollerModel = {
    * below would drop a matching chat and claim there is nothing to show.
    */
   topContentHasSearchMatches?: boolean;
-  hasSharedSessions?: boolean;
   sectionsForRender: ProjectSection[];
   projectSections: ProjectSection[];
   activeProjectId: string | null;
@@ -91,8 +89,6 @@ type SessionProjectScrollerModel = {
   emptyState: React.ReactNode;
   searchEmptyState: React.ReactNode;
   projectRepoStatus: Map<string, boolean | null>;
-  stuckProjectHeaders: Set<string>;
-  projectHeaderSentinelRefs: React.MutableRefObject<Map<string, HTMLDivElement | null>>;
   state: SessionProjectScrollerState;
   groupProps: SessionProjectScrollerGroupProps;
 };
@@ -104,7 +100,6 @@ type SessionProjectScrollerView = {
   hasSessionSearchQuery: boolean;
   normalizedSessionSearchQuery: string;
   hideDirectoryControls: boolean;
-  isDesktopShellRuntime: boolean;
   stickyZoneHeaders: boolean;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
@@ -133,10 +128,6 @@ type Props = {
   actions: SessionProjectScrollerActions;
 };
 
-const TOP_FADE_MAX_SIZE = 48;
-const TOP_FADE_MIN_SIZE = 32;
-const TOP_FADE_CLEAR_MAX_SIZE = 24;
-
 const getProjectLabel = (project: ProjectSection['project'], homeDirectory: string | null): string => (
   formatProjectLabel(
     project.label?.trim()
@@ -150,7 +141,7 @@ function SessionProjectScrollerComponent(props: Props): React.ReactNode {
   const { t } = useI18n();
   const { model, view, actions } = props;
   const isInlineEditing = model.state.editingId !== null;
-  const enableStickyFade = view.isDesktopShellRuntime && view.stickyZoneHeaders && !model.singleProjectMode;
+  const [isProjectDragging, setIsProjectDragging] = React.useState(false);
   const projectSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -163,81 +154,11 @@ function SessionProjectScrollerComponent(props: Props): React.ReactNode {
   // can resolve the scrolling ancestor synchronously (no getComputedStyle
   // walk) and skip the cost of a style recalc on every render.
   const scrollContainerRef = React.useRef<HTMLElement | null>(null);
-  // Keep per-scroll measurements out of React state so the interaction guard
-  // can read the current fade boundary without rerendering the sidebar.
-  const topFadeSizeRef = React.useRef(0);
-  // Update the viewport-owned fade on every scroll, but cross the React
-  // render boundary only when the sticky identity overlay appears or hides.
-  const syncTopFade = React.useCallback((scroller: HTMLElement) => {
-    const hasTopScroll = scroller.scrollTop > 1;
-    const topFadeSize = hasTopScroll
-      ? Math.min(TOP_FADE_MIN_SIZE + scroller.scrollTop, TOP_FADE_MAX_SIZE)
-      : 0;
-    topFadeSizeRef.current = topFadeSize;
-    const fadeRoot = scroller.closest<HTMLElement>('.oc-sticky-fade-root');
-    fadeRoot?.style.setProperty('--scroll-shadow-top-size', `${topFadeSize}px`);
-    fadeRoot?.style.setProperty(
-      '--scroll-shadow-top-clear-size',
-      `${Math.min(Math.max(topFadeSize - 8, 0), TOP_FADE_CLEAR_MAX_SIZE)}px`,
-    );
-  }, []);
-  const blockObscuredInteraction = React.useCallback((
-    event: React.MouseEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>,
-  ) => {
-    // SAFETY: React's mouse and pointer events are dispatched from Elements.
-    if ((event.target as Element).closest('[data-overlay-scrollbar-thumb], [data-sidebar-sticky-header]')) return;
-    const eventY = event.clientY - event.currentTarget.getBoundingClientRect().top;
-    if (eventY >= topFadeSizeRef.current) return;
-    event.preventDefault();
-    event.stopPropagation();
-  }, []);
   const renderedSections = selectRenderedProjectSections(
     model.sectionsForRender,
     model.singleProjectMode,
     model.singleProjectId,
   );
-  const hasProjectScroller = model.projectSections.length > 0 && renderedSections.length > 0;
-  const [isRecentHeaderStuck, setIsRecentHeaderStuck] = React.useState(false);
-  React.useLayoutEffect(() => {
-    const root = scrollContainerRef.current;
-    const recentStart = root?.querySelector<HTMLElement>('[data-sidebar-activity-start="active-now"]');
-    if (!enableStickyFade || !hasProjectScroller || !root || !recentStart) {
-      setIsRecentHeaderStuck(false);
-      return;
-    }
-
-    // Observe the section boundary, not its sticky header. Scrolling within a
-    // section must not rerender the list or scan its session rows.
-    setIsRecentHeaderStuck(recentStart.getBoundingClientRect().top < root.getBoundingClientRect().top);
-    const observer = new IntersectionObserver((entries) => {
-      const entry = entries[0];
-      if (!entry) return;
-      const rootTop = entry.rootBounds?.top ?? root.getBoundingClientRect().top;
-      setIsRecentHeaderStuck(!entry.isIntersecting && entry.boundingClientRect.top < rootTop);
-    }, { root, threshold: 0 });
-    observer.observe(recentStart);
-    return () => observer.disconnect();
-  }, [enableStickyFade, hasProjectScroller, model.topContent]);
-  React.useLayoutEffect(() => {
-    if (enableStickyFade && hasProjectScroller && scrollContainerRef.current) {
-      syncTopFade(scrollContainerRef.current);
-    }
-  }, [enableStickyFade, hasProjectScroller, syncTopFade]);
-  let stuckProject: ProjectSection['project'] | null = null;
-  for (const section of model.projectSections) {
-    if (model.stuckProjectHeaders.has(section.project.id)) {
-      stuckProject = section.project;
-    }
-  }
-  // The IntersectionObserver reports the stuck header asynchronously, a frame or
-  // two after the synchronous fade has already hidden the real header — which
-  // otherwise leaves a one-frame gap where the title blinks out with no crisp
-  // replacement. Seed the overlay with the topmost rendered project so it is
-  // ready in the same frame; the observer then corrects it. When shared sessions
-  // lead the list, the activity fallback below owns the top instead of a project.
-  const leadingProject =
-    stuckProject ?? (model.hasSharedSessions ? null : renderedSections[0]?.project ?? null);
-  const leadingProjectLabel = leadingProject ? getProjectLabel(leadingProject, view.homeDirectory) : null;
   const projectPickerOptions = React.useMemo(() => model.projectSections.map((section) => ({
     id: section.project.id,
     projectLabel: getProjectLabel(section.project, view.homeDirectory),
@@ -248,40 +169,32 @@ function SessionProjectScrollerComponent(props: Props): React.ReactNode {
     projectIconBackground: section.project.iconBackground,
   })), [model.projectSections, view.homeDirectory]);
 
-  if (model.projectSections.length === 0) {
-    return <ScrollableOverlay useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className="space-y-1 pb-1 pl-2.5 pr-2">{model.topContent}{model.emptyState}</ScrollableOverlay>;
-  }
-
-  if (model.sectionsForRender.length === 0) {
-    const placement = resolveSearchResultPlacement(model.topContentHasSearchMatches === true);
-    return <ScrollableOverlay useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className="space-y-1 pb-1 pl-2.5 pr-2">
-      {placement === 'top-content' ? model.topContent : model.searchEmptyState}
-    </ScrollableOverlay>;
-  }
-
   return (
     // [overflow-anchor:none] — the browser's native scroll anchoring otherwise
     // latches onto content BELOW a growing session group (e.g. the "Show more"
     // button) and holds it in place, which makes newly revealed sessions look
     // like they insert upward. With anchoring off, scrollTop stays put and new
     // rows appear below naturally.
-    <div
-      className="oc-sticky-fade-root relative flex min-h-0 flex-1"
-      // SAFETY: this custom property configures the viewport-owned edge fade.
-      style={enableStickyFade ? { '--scroll-shadow-top-size': '0px' } as React.CSSProperties : undefined}
-      onPointerDownCapture={enableStickyFade ? blockObscuredInteraction : undefined}
-      onClickCapture={enableStickyFade ? blockObscuredInteraction : undefined}
-      onContextMenuCapture={enableStickyFade ? blockObscuredInteraction : undefined}
-    >
+    <div className="relative flex min-h-0 flex-1">
+      <CrossfadeZoneHeaders
+        enabled={view.stickyZoneHeaders}
+        suspended={isProjectDragging}
+        layoutKey={renderedSections.map((section) => section.project.id).join(':')}
+        scrollRef={scrollContainerRef}
+      >
       <ScrollableOverlay
         ref={scrollContainerRef}
         useScrollShadow
-        hideTopScrollShadow={!enableStickyFade}
+        hideTopScrollShadow
         scrollShadowSize={96}
         outerClassName="flex-1 min-h-0"
-        className="oc-sidebar-scroller oc-sticky-fade-scroller space-y-1.5 pb-1 pl-2.5 pr-2 [overflow-anchor:none]"
-        onScroll={enableStickyFade ? (event) => syncTopFade(event.currentTarget) : undefined}
+        className="oc-sidebar-scroller space-y-1.5 pb-1 pl-2.5 pr-2 [overflow-anchor:none]"
       >
+      {model.projectSections.length === 0 ? <>{model.topContent}{model.emptyState}</> : model.sectionsForRender.length === 0 ? (
+        resolveSearchResultPlacement(model.topContentHasSearchMatches === true) === 'top-content'
+          ? model.topContent
+          : model.searchEmptyState
+      ) : <>
       {model.topContent}
       {view.showOnlyMainWorkspace ? (
         <div className="space-y-[0.6rem] py-1">
@@ -307,7 +220,10 @@ function SessionProjectScrollerComponent(props: Props): React.ReactNode {
         <DndContext
           sensors={projectSensors}
           collisionDetection={closestCenter}
+          onDragStart={() => setIsProjectDragging(true)}
+          onDragCancel={() => setIsProjectDragging(false)}
           onDragEnd={(event) => {
+             setIsProjectDragging(false);
              if (isInlineEditing) return;
             // Drag only allowed in manual sort mode - indices from visual order don't match store order in other modes
             if (view.projectSortOrder !== 'manual') return;
@@ -342,7 +258,6 @@ function SessionProjectScrollerComponent(props: Props): React.ReactNode {
                   projectIconBackground={project.iconBackground}
                   isCollapsed={isCollapsed}
                   isRepo={Boolean(isRepo)}
-                  isDesktopShell={view.isDesktopShellRuntime}
                   hideDirectoryControls={view.hideDirectoryControls}
                   mobileVariant={view.mobileVariant}
                   alwaysShowActions={view.alwaysShowActions}
@@ -367,7 +282,6 @@ function SessionProjectScrollerComponent(props: Props): React.ReactNode {
                   onManageWorktrees={() => actions.openWorktreesPage(projectKey)}
                   onRenameStart={() => actions.openProjectEditDialog(projectKey)}
                   onClose={() => actions.removeProject(projectKey)}
-                  sentinelRef={(el) => { model.projectHeaderSentinelRefs.current.set(projectKey, el); }}
                   showCreateButtons
                  >
                   {!isCollapsed ? (
@@ -425,34 +339,9 @@ function SessionProjectScrollerComponent(props: Props): React.ReactNode {
           <DragOverlay dropAnimation={null} />
         </DndContext>
       )}
+      </>}
       </ScrollableOverlay>
-      {enableStickyFade && (leadingProject || model.hasSharedSessions) ? (
-        <div
-          className="oc-sticky-fade-overlay pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center gap-1.5 py-1 pl-4 pr-5"
-          aria-hidden="true"
-        >
-          {leadingProject && leadingProjectLabel ? (
-            <>
-              <ProjectHeaderIdentity
-                id={leadingProject.id}
-                projectLabel={leadingProjectLabel}
-                projectIcon={leadingProject.icon}
-                projectColor={leadingProject.color}
-                projectIconImage={leadingProject.iconImage}
-                projectIconBackground={leadingProject.iconBackground}
-              />
-              <DirectoryActionIndicator directory={leadingProject.normalizedPath} className="ml-auto" />
-            </>
-          ) : (
-            <>
-              <Icon name={isRecentHeaderStuck ? 'history' : 'chat-4'} className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/80" />
-              <span className="truncate typography-ui-label font-semibold lowercase text-foreground">
-                {isRecentHeaderStuck ? t('sessions.sidebar.activity.recentTitle') : t('sessions.sidebar.activity.chatsTitle')}
-              </span>
-            </>
-          )}
-        </div>
-      ) : null}
+      </CrossfadeZoneHeaders>
     </div>
   );
 }

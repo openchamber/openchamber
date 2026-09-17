@@ -11,7 +11,7 @@ import type { SessionTreeItemProps } from '../sessions/SessionTreeItem';
 import { useArchivedAutoFolders } from '../folders/useArchivedAutoFolders';
 import { ProjectSessionSelectionEffect } from '../projects/useProjectSessionSelection';
 import type { WorktreeMetadata } from '@/types/worktree';
-import { useRecentSessionCollection, useSessionProjectCollection } from './sessionCollection';
+import { buildActiveSessionNode, useRecentSessionCollection, useSessionProjectCollection } from './sessionCollection';
 import { buildSessionBootstrapDemands } from './sessionBootstrapDemands';
 import { useChildStoreManager } from '@/sync/sync-context';
 import { createSessionOwnershipIndex } from '../sessions/sessionOwnership';
@@ -22,7 +22,6 @@ import { normalizePath } from '../utils';
 import type { SessionGroup } from '../types';
 import { SessionProjectScroller } from '../projects/SessionProjectScroller';
 import { useSessionGrouping } from '../projects/useSessionGrouping';
-import { useStickyProjectHeaders } from '../projects/useStickyProjectHeaders';
 import { SessionBulkActions } from '../folders/SessionBulkActions';
 import { RecentSessionSection } from '../recent/RecentSessionSection';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
@@ -135,8 +134,8 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const { getOrderedGroups, setGroupOrderByProject, toggleGroup, toggleProject } = projectViewActions;
   const collection = useSessionProjectCollection({ knownDirectories: topology.knownDirectories, isVSCode: topology.isVSCode, isVisible: true });
   const [visibleSessionCountByGroup, setVisibleSessionCountByGroup] = React.useState<Map<string, number>>(new Map());
-  const showMoreGroupSessions = React.useCallback((groupId: string, currentVisibleCount: number) => {
-    setVisibleSessionCountByGroup((current) => new Map(current).set(groupId, currentVisibleCount + 7));
+  const showMoreGroupSessions = React.useCallback((groupId: string, currentVisibleCount: number, increment = 7) => {
+    setVisibleSessionCountByGroup((current) => new Map(current).set(groupId, currentVisibleCount + increment));
   }, []);
   const resetGroupSessionLimit = React.useCallback((groupId: string) => {
     setVisibleSessionCountByGroup((current) => {
@@ -219,7 +218,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       draftTarget: 'chat',
       sessions: collection.chatSessions
         .filter((session) => !session.time?.archived && isRootSession(session))
-        .map((session) => ({ session, children: (collection.childrenMap.get(session.id) ?? []).filter((child) => !child.time?.archived).map((child) => ({ session: child, children: [], worktree: null })), worktree: null })),
+        .map((session) => buildActiveSessionNode(collection.childrenMap, session)),
     };
   }, [collection.chatSessions, collection.childrenMap, topology.isVSCode, view.homeDirectory]);
   const standaloneGroups = React.useMemo<SessionGroup[]>(
@@ -281,13 +280,6 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     const section = flatSectionsForRender.find((entry) => entry.project.id === projectId);
     return section?.groups.find((group) => !group.isArchivedBucket)?.folderScopes ?? [];
   }, [flatSectionsForRender]);
-  const projectHeaderSentinelRefs = React.useRef<Map<string, HTMLDivElement | null>>(new Map());
-  const stuckProjectHeaders = useStickyProjectHeaders({
-    enabled: view.stickyZoneHeaders,
-    isDesktopShellRuntime: view.isDesktopShellRuntime,
-    projectSections,
-    projectHeaderSentinelRefs,
-  });
   useArchivedAutoFolders({
     enabled: true,
     normalizedProjects: topology.projects,
@@ -443,12 +435,13 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       groupKey="managed-chats"
       projectId={null}
       hideGroupLabel
-      sessionBatchSize={20}
+      sessionBatchSize={undefined}
+      visibleSessionCount={visibleSessionCountByGroup.get('managed-chats')}
       scrollContainerRef={undefined}
       openSidebarMenuKey={openSidebarMenuKey}
       setOpenSidebarMenuKey={setOpenSidebarMenuKey}
     />;
-  }, [chatGroup, groupActions, groupProps, openSidebarMenuKey]);
+  }, [chatGroup, groupActions, groupProps, openSidebarMenuKey, visibleSessionCountByGroup]);
   const handleOpenNewChat = React.useCallback(() => {
     useUIStore.getState().closeMainSurfaces();
     if (view.mobileVariant) scrollerActions.setSessionSwitcherOpen(false);
@@ -534,7 +527,6 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const scrollerModel = React.useMemo(() => ({
     topContent: recentSection,
     topContentHasSearchMatches,
-    hasSharedSessions: Boolean(recentSection),
     sectionsForRender: orderedSectionsForRender,
     projectSections,
     activeProjectId: view.activeProjectId,
@@ -543,8 +535,6 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     emptyState: view.emptyState,
     searchEmptyState: view.searchEmptyState,
     projectRepoStatus: topology.projectRepoStatus,
-    stuckProjectHeaders,
-    projectHeaderSentinelRefs,
     state: { editingId, openSidebarMenuKey, setOpenSidebarMenuKey, visibleSessionCountByGroup },
     groupProps,
   }), [
@@ -553,7 +543,6 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     openSidebarMenuKey,
     projectSections,
     orderedSectionsForRender,
-    stuckProjectHeaders,
     topology.projectRepoStatus,
     view.activeProjectId,
     view.emptyState,
@@ -571,7 +560,6 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     hasSessionSearchQuery: view.hasSessionSearchQuery,
     normalizedSessionSearchQuery: view.normalizedSessionSearchQuery,
     hideDirectoryControls: view.hideDirectoryControls,
-    isDesktopShellRuntime: view.isDesktopShellRuntime,
     stickyZoneHeaders: view.stickyZoneHeaders,
     mobileVariant: view.mobileVariant,
     alwaysShowActions,
@@ -581,7 +569,6 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     view.homeDirectory,
     view.hasSessionSearchQuery,
     view.hideDirectoryControls,
-    view.isDesktopShellRuntime,
     view.mobileVariant,
     alwaysShowActions,
     view.normalizedSessionSearchQuery,

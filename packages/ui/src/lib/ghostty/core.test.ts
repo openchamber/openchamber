@@ -7,6 +7,10 @@ import { loadGhosttyRuntime } from './runtime';
 
 const WHITE: GhosttyColor = { r: 255, g: 255, b: 255 };
 const BLACK: GhosttyColor = { r: 0, g: 0, b: 0 };
+const optionKey = (key: string, modifiers: KeyboardEventInit = {}) => ({
+  key, code: key, altKey: true, ctrlKey: false, metaKey: false, shiftKey: false,
+  isComposing: false, repeat: false, getModifierState: () => false, ...modifiers,
+});
 
 function codepointView(codepoints: ReadonlyArray<number>): DataView {
   const view = new DataView(new ArrayBuffer(codepoints.length * 4));
@@ -154,5 +158,58 @@ describe('GhosttyTerminalCore', () => {
     expect(core.encodePaste('hello')).toBe('hello');
     core.write('\x1b[?2004h');
     expect(core.encodePaste('hello')).toBe('\x1b[200~hello\x1b[201~');
+  });
+
+  test('maps macOS Option word editing to legacy shell commands, including key repeats', async () => {
+    const core = await createCore();
+    for (const repeat of [false, true]) {
+      expect(core.encodeMacWordShortcut(optionKey('ArrowLeft', { repeat }), 'MacIntel')).toBe('\x1bb');
+      expect(core.encodeMacWordShortcut(optionKey('ArrowRight', { repeat }), 'MacIntel')).toBe('\x1bf');
+      expect(core.encodeMacWordShortcut(optionKey('Backspace', { repeat }), 'MacIntel')).toBe('\x17');
+    }
+    // zsh can enable application cursor keys at the prompt without being a TUI.
+    core.write('\x1b[?1h');
+    expect(core.encodeMacWordShortcut(optionKey('ArrowLeft'), 'MacIntel')).toBe('\x1bb');
+  });
+
+  test('leaves other platforms, modifiers, Option characters and IME to normal key handling', async () => {
+    const core = await createCore();
+    for (const platform of ['Win32', 'Linux x86_64']) {
+      for (const key of ['ArrowLeft', 'ArrowRight', 'Backspace']) {
+        expect(core.encodeMacWordShortcut(optionKey(key), platform)).toBeNull();
+      }
+    }
+    for (const modifiers of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: false }, { isComposing: true }]) {
+      expect(core.encodeMacWordShortcut(optionKey('Backspace', modifiers), 'MacIntel')).toBeNull();
+    }
+    for (const key of ['∂', 'Dead', 'ArrowUp', 'ArrowDown', 'Delete']) {
+      expect(core.encodeMacWordShortcut(optionKey(key), 'MacIntel')).toBeNull();
+    }
+    expect(core.encodeKey(optionKey('ArrowLeft'))).toBe('\x1b[1;3D');
+    expect(core.encodeKey(optionKey('Backspace'))).toBe('\x1b\x7f');
+    expect(core.encodeKey(optionKey('ArrowLeft', { altKey: false, ctrlKey: true }))).toBe('\x1b[1;5D');
+  });
+
+  test('preserves alternate-screen keys and restores word editing on return to the prompt', async () => {
+    const core = await createCore();
+    core.write('\x1b[?1049h');
+    for (const key of ['ArrowLeft', 'ArrowRight', 'Backspace']) {
+      expect(core.encodeMacWordShortcut(optionKey(key), 'MacIntel')).toBeNull();
+    }
+    expect(core.encodeKey(optionKey('ArrowRight'))).toBe('\x1b[1;3C');
+    core.write('\x1b[?1049l');
+    expect(core.encodeMacWordShortcut(optionKey('ArrowRight'), 'MacIntel')).toBe('\x1bf');
+  });
+
+  test('honors negotiated Kitty keyboard flags on the primary screen and their reset', async () => {
+    const core = await createCore();
+    core.write('\x1b[>11u');
+    for (const key of ['ArrowLeft', 'ArrowRight', 'Backspace']) {
+      expect(core.encodeMacWordShortcut(optionKey(key), 'MacIntel')).toBeNull();
+    }
+    expect(core.encodeKey(optionKey('Backspace'))).toBe('\x1b[127;3u');
+    expect(core.encodeKey(optionKey('Backspace'), 'release')).toBe('\x1b[127;3:3u');
+    core.write('\x1b[<u');
+    expect(core.encodeMacWordShortcut(optionKey('Backspace'), 'MacIntel')).toBe('\x17');
   });
 });

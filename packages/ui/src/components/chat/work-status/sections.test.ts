@@ -6,9 +6,22 @@ import {
   getWorkStatusPanelPresentation,
   isWorkStatusSectionVisible,
   sanitizeWorkStatusHiddenSections,
+  sanitizeWorkStatusSectionOrder,
 } from './sections';
 
 describe('section registry', () => {
+  test('restores defaults for missing or empty saved order', () => {
+    for (const value of [undefined, null, []]) {
+      expect(sanitizeWorkStatusSectionOrder(value)).toEqual([...WORK_STATUS_SECTION_IDS]);
+    }
+  });
+
+  test('preserves chosen positions and appends missing sections once', () => {
+    const order = sanitizeWorkStatusSectionOrder(['pinned', 'repository', 'pinned', 'obsolete', 'session']);
+    expect(order).toEqual(['pinned', 'repository', 'session', 'usage', 'telemetry', 'subagents', 'tasks', 'mcp', 'contextSources']);
+    expect(sanitizeWorkStatusSectionOrder(JSON.parse(JSON.stringify(order)))).toEqual(order);
+  });
+
   test('every section has a label, and every label a section', () => {
     // One list drives the panel and the dialog; a mismatch means a section the
     // user cannot switch, or a switch for nothing.

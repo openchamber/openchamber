@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
 type ConfigResponse = { data: Record<string, unknown> };
+type ProvidersResponse = { data: { providers: []; default: { default: string } } };
+const providerResolvers: Array<(response: ProvidersResponse) => void> = [];
 
 (mock as unknown as { restore?: () => void }).restore?.();
 
@@ -29,6 +31,7 @@ const pathGetMock = mock(async () => {
 mock.module('@opencode-ai/sdk/v2', () => ({
   createOpencodeClient: mock(() => ({
     config: {
+      providers: () => new Promise<ProvidersResponse>((resolve) => { providerResolvers.push(resolve); }),
       get: mock(() => {
         configCalls += 1;
         return new Promise<ConfigResponse>((resolve) => {
@@ -96,6 +99,48 @@ beforeEach(() => {
   runtimeFetchCalls.length = 0;
   runtimeFetchResults.length = 0;
   fsHomeResponses.length = 0;
+});
+
+test('same-URL reconnect isolates provider requests and old completion cannot delete new deduplication', async () => {
+  const oldClient = opencodeClient.getSdkClient();
+  const oldRequest = opencodeClient.getProvidersForConfig('/same/path');
+  opencodeClient.reconnectToRuntimeBaseUrl();
+  expect(opencodeClient.getSdkClient()).not.toBe(oldClient);
+  const newRequest = opencodeClient.getProvidersForConfig('/same/path');
+  expect(providerResolvers).toHaveLength(2);
+  providerResolvers[0]({ data: { providers: [], default: { default: 'old' } } });
+  await oldRequest;
+  const joinedRequest = opencodeClient.getProvidersForConfig('/same/path');
+  expect(providerResolvers).toHaveLength(2);
+  providerResolvers[1]({ data: { providers: [], default: { default: 'new' } } });
+  expect((await newRequest).default.default).toBe('new');
+  expect((await joinedRequest).default.default).toBe('new');
+});
+
+test('Windows drive roots remain absolute in directory selection and SDK client identity', () => {
+  const previous = opencodeClient.getDirectory();
+  try {
+    opencodeClient.setDirectory('c:\\');
+    expect(opencodeClient.getDirectory()).toBe('C:/');
+    expect(opencodeClient.getScopedSdkClient('c:\\')).toBe(opencodeClient.getScopedSdkClient('C:/'));
+    expect(opencodeClient.getScopedSdkClient('C:/')).not.toBe(opencodeClient.getScopedSdkClient('C:'));
+  } finally {
+    opencodeClient.setDirectory(previous);
+  }
+});
+
+test('Windows separators and UNC representations share SDK clients without lowercasing directory names', () => {
+  expect(opencodeClient.getScopedSdkClient('c:\\Users\\Developer\\Project\\'))
+    .toBe(opencodeClient.getScopedSdkClient('C:/Users/Developer/Project'));
+  expect(opencodeClient.getScopedSdkClient('\\\\Server\\Share\\Project\\'))
+    .toBe(opencodeClient.getScopedSdkClient('//Server/Share/Project'));
+  expect(opencodeClient.getScopedSdkClient('/repo/Project'))
+    .not.toBe(opencodeClient.getScopedSdkClient('/repo/project'));
+});
+
+test('a drive-root system-info fallback stays absolute', async () => {
+  pathGetResults.push({ data: { directory: 'C:/' } });
+  expect((await opencodeClient.getSystemInfo()).homeDirectory).toBe('C:/');
 });
 
 describe('opencodeClient directory availability', () => {

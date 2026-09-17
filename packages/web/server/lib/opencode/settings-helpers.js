@@ -233,6 +233,11 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.workStatusHiddenSectionsExplicit === 'boolean') {
       result.workStatusHiddenSectionsExplicit = candidate.workStatusHiddenSectionsExplicit;
     }
+    if (Array.isArray(candidate.workStatusSectionOrder)) {
+      result.workStatusSectionOrder = [
+        ...new Set(candidate.workStatusSectionOrder.filter((entry) => typeof entry === 'string' && entry.length > 0)),
+      ];
+    }
     if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
       result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
     }

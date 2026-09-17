@@ -217,7 +217,7 @@ export const PlansSection: React.FC<{
           type="button"
           onClick={handleTriggerImport}
           disabled={isImporting}
-          className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-border/70 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-border/70 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
           aria-label={t('rightSidebar.contextNotesTodo.plans.importFromFile')}
           title={t('rightSidebar.contextNotesTodo.plans.importFromFile')}
         >
@@ -239,7 +239,7 @@ export const PlansSection: React.FC<{
                 <button
                   type="button"
                   onClick={() => handleOpenPlan(plan)}
-                  className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-md px-1.5 py-1 text-left hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-md px-1.5 py-1 text-left hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <span className="flex min-w-0 items-center gap-2">
                     <span className="min-w-0 truncate typography-ui-label text-foreground">{plan.title}</span>
@@ -257,7 +257,7 @@ export const PlansSection: React.FC<{
                   type="button"
                   onClick={() => void handleMovePlan(plan)}
                   disabled={movingPlanId === plan.id}
-                  className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                   title={plan.source === 'shared'
                     ? t('rightSidebar.contextNotesTodo.plans.makePersonal')
                     : t('rightSidebar.contextNotesTodo.plans.share')}
@@ -271,7 +271,7 @@ export const PlansSection: React.FC<{
                   type="button"
                   onClick={() => void handleTogglePinned(plan.id, !pinnedPlanIds.has(plan.id))}
                   className={cn(
-                    'inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                    'inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     pinnedPlanIds.has(plan.id) ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
                   )}
                   aria-pressed={pinnedPlanIds.has(plan.id)}
@@ -288,7 +288,7 @@ export const PlansSection: React.FC<{
                   type="button"
                   onClick={() => void handleDeletePlan(plan.id)}
                   disabled={deletingPlanId === plan.id}
-                  className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                   title={t('rightSidebar.contextNotesTodo.plans.deletePlan')}
                   aria-label={t('rightSidebar.contextNotesTodo.plans.deletePlanWithTitle', { title: plan.title })}
                 >

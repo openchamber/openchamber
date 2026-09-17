@@ -37,11 +37,14 @@ import {
   unstageFiles,
   applyHunk,
   getDiff,
+  getPathDiff,
+  revertFile,
   getUntrackedDiffs,
   getFileDiff,
   validateWorktreeCreate,
   parseBranchCreationSource,
   getRangeFiles,
+  push,
 } from './service.js';
 
 // ---------------------------------------------------------------------------
@@ -508,6 +511,131 @@ describe('symlink diffs', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Status paths that are not plain files (#3586)
+// ---------------------------------------------------------------------------
+
+describe.runIf(canRunGit())('diffs for status paths that are not plain files', () => {
+  const callDiffRoute = async (endpoint, query) => {
+    const routes = new Map();
+    registerGitRoutes({ get: (url, handler) => routes.set(url, handler), post() {}, put() {}, delete() {} });
+    let status = 200;
+    let body;
+    await routes.get(`/api/git/${endpoint}`)({ query }, {
+      status(value) { status = value; return this; },
+      json(value) { body = value; },
+    });
+    return { status, body };
+  };
+
+  const createRepositoryWithSubmodule = () => {
+    const { repository } = createRepositoryWithRemote();
+    const library = createTempDir();
+    runGit(library, ['init', '-b', 'main']);
+    runGit(library, ['config', 'user.email', 'test@example.com']);
+    runGit(library, ['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(library, 'lib.txt'), 'lib\n');
+    runGit(library, ['add', '.']);
+    runGit(library, ['commit', '-m', 'lib']);
+    runGit(repository, ['-c', 'protocol.file.allow=always', 'submodule', 'add', library, 'sub']);
+    runGit(repository, ['commit', '-m', 'add submodule']);
+    return { repository, recorded: runGit(repository, ['rev-parse', 'HEAD:sub']).trim() };
+  };
+
+  it('answers 404 with a code when a listed file is gone before its diff is requested', async () => {
+    const { repository } = createRepositoryWithRemote();
+    for (const endpoint of ['diff', 'file-diff']) {
+      const { status, body } = await callDiffRoute(endpoint, { directory: repository, path: 'removed.txt' });
+      expect(status).toBe(404);
+      expect(body).toEqual({ code: 'path_not_found', error: 'Path not found in working tree, index, or HEAD: removed.txt' });
+    }
+  });
+
+  it('answers 422 for a nested repository that status lists as a directory', async () => {
+    const { repository } = createRepositoryWithRemote();
+    const nested = path.join(repository, 'nested');
+    fs.mkdirSync(nested);
+    runGit(nested, ['init', '-b', 'main']);
+    fs.writeFileSync(path.join(nested, 'inner.txt'), 'inner\n');
+    expect((await getStatus(repository)).files).toContainEqual(expect.objectContaining({ path: 'nested/' }));
+
+    for (const endpoint of ['diff', 'file-diff']) {
+      const { status, body } = await callDiffRoute(endpoint, { directory: repository, path: 'nested/' });
+      expect(status).toBe(422);
+      expect(body.code).toBe('nested_repository');
+    }
+    await expect(revertFile(repository, 'nested/')).rejects.toMatchObject({ code: 'nested_repository' });
+    expect(fs.existsSync(path.join(nested, 'inner.txt'))).toBe(true);
+  });
+
+  it('describes a submodule whose checked-out commit moved', async () => {
+    const { repository, recorded } = createRepositoryWithSubmodule();
+    const submodulePath = path.join(repository, 'sub');
+    runGit(submodulePath, ['config', 'user.email', 'test@example.com']);
+    runGit(submodulePath, ['config', 'user.name', 'Test']);
+    runGit(submodulePath, ['commit', '--allow-empty', '-m', 'moved']);
+    const moved = runGit(submodulePath, ['rev-parse', 'HEAD']).trim();
+    const submodule = { headCommit: recorded, indexCommit: recorded, worktreeCommit: moved, hasTrackedChanges: false, hasUntrackedFiles: false, hasConflict: false };
+
+    const patch = await callDiffRoute('diff', { directory: repository, path: 'sub' });
+    expect(patch.status).toBe(200);
+    expect(patch.body.diff).toContain(`+Subproject commit ${moved}`);
+    expect(patch.body.submodule).toEqual(submodule);
+
+    const split = await callDiffRoute('file-diff', { directory: repository, path: 'sub' });
+    expect(split.body).toEqual({
+      original: `Subproject commit ${recorded}\n`,
+      modified: `Subproject commit ${moved}\n`,
+      path: 'sub',
+      isBinary: false,
+      submodule,
+    });
+  });
+
+  it('reports a submodule merge conflict instead of an unchanged commit', async () => {
+    const { repository } = createRepositoryWithRemote();
+    const library = createTempDir();
+    runGit(library, ['init', '-b', 'main']);
+    runGit(library, ['config', 'user.email', 'test@example.com']);
+    runGit(library, ['config', 'user.name', 'Test']);
+    runGit(library, ['commit', '--allow-empty', '-m', 'base']);
+    runGit(library, ['checkout', '-b', 'left']);
+    runGit(library, ['commit', '--allow-empty', '-m', 'left']);
+    runGit(library, ['checkout', '-b', 'right', 'main']);
+    runGit(library, ['commit', '--allow-empty', '-m', 'right']);
+    runGit(library, ['checkout', 'main']);
+    runGit(repository, ['-c', 'protocol.file.allow=always', 'submodule', 'add', library, 'sub']);
+    runGit(repository, ['commit', '-m', 'add submodule']);
+    const submodulePath = path.join(repository, 'sub');
+    for (const [branch, commit] of [['other', 'right'], ['next', 'left']]) {
+      if (branch === 'other') runGit(repository, ['checkout', '-b', 'other']);
+      else runGit(repository, ['checkout', 'next']);
+      runGit(submodulePath, ['checkout', commit]);
+      runGit(repository, ['add', 'sub']);
+      runGit(repository, ['commit', '-m', `move to ${commit}`]);
+    }
+    expect(() => runGit(repository, ['merge', 'other'])).toThrow();
+
+    const { submodule } = await getPathDiff(repository, { path: 'sub' });
+    expect(submodule).toMatchObject({
+      headCommit: runGit(repository, ['rev-parse', 'HEAD:sub']).trim(),
+      indexCommit: null,
+      hasConflict: true,
+    });
+  });
+
+  it('reports untracked files inside a submodule even though its patch is empty', async () => {
+    const { repository, recorded } = createRepositoryWithSubmodule();
+    fs.writeFileSync(path.join(repository, 'sub', 'scratch.txt'), 'scratch\n');
+
+    const result = await getPathDiff(repository, { path: 'sub' });
+    expect(result).toEqual({
+      diff: '',
+      submodule: { headCommit: recorded, indexCommit: recorded, worktreeCommit: recorded, hasTrackedChanges: false, hasUntrackedFiles: true, hasConflict: false },
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // getStatus
 // ---------------------------------------------------------------------------
 
@@ -602,6 +730,96 @@ describe('getStatus', () => {
     } finally {
       process.chdir(previousCwd);
     }
+  });
+});
+
+describe('push', () => {
+  it('publishes the current branch with an upstream and leaves other local branches alone', async () => {
+    if (!canRunGit()) return;
+
+    const remote = createTempDir();
+    const repo = createTempDir();
+    runGit(remote, ['init', '--bare']);
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    runGit(repo, ['remote', 'add', 'fork', remote]);
+    runGit(repo, ['branch', 'unrelated']);
+    runGit(repo, ['checkout', '-b', 'feature']);
+    fs.writeFileSync(path.join(repo, 'feature.txt'), 'published\n');
+    runGit(repo, ['add', 'feature.txt']);
+    runGit(repo, ['commit', '-m', 'Add feature']);
+
+    const published = await push(repo, { remote: 'fork' });
+    expect(published.pushed).toEqual([{ local: 'refs/heads/feature', remote: 'fork' }]);
+
+    expect(runGit(repo, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']).trim()).toBe('fork/feature');
+    expect(runGit(remote, ['rev-parse', 'refs/heads/feature']).trim()).toBe(runGit(repo, ['rev-parse', 'HEAD']).trim());
+    expect(() => runGit(remote, ['rev-parse', 'refs/heads/unrelated'])).toThrow();
+    expect(() => runGit(remote, ['rev-parse', 'refs/heads/main'])).toThrow();
+
+    expect((await push(repo)).pushed).toEqual([]);
+    fs.appendFileSync(path.join(repo, 'feature.txt'), 'next commit\n');
+    runGit(repo, ['commit', '-am', 'Update feature']);
+    expect((await push(repo)).pushed).toEqual([{ local: 'refs/heads/feature', remote: 'fork' }]);
+    expect(runGit(remote, ['rev-parse', 'feature']).trim()).toBe(runGit(repo, ['rev-parse', 'HEAD']).trim());
+
+    runGit(repo, ['reset', '--hard', 'HEAD~1']);
+    await expect(push(repo)).rejects.toThrow();
+    expect((await push(repo, { options: ['--force-with-lease'] })).pushed)
+      .toEqual([{ local: 'refs/heads/feature', remote: 'fork' }]);
+    expect(runGit(remote, ['rev-parse', 'feature']).trim()).toBe(runGit(repo, ['rev-parse', 'HEAD']).trim());
+  });
+
+  it.each(['remote.pushDefault', 'branch.next.pushRemote'])('preserves the %s destination independently of the fetch remote', async (key) => {
+    const { repository, remote: upstream } = createRepositoryWithRemote({ remoteName: 'upstream', defaultBranch: 'next' });
+    const fork = createTempDir();
+    runGit(fork, ['init', '--bare']);
+    runGit(repository, ['remote', 'add', 'fork', fork]);
+    runGit(repository, ['branch', '--set-upstream-to=upstream/next']);
+    if (key === 'branch.next.pushRemote') runGit(repository, ['config', 'remote.pushDefault', 'upstream']);
+    runGit(repository, ['config', key, 'fork']);
+    const upstreamHead = runGit(upstream, ['rev-parse', 'next']).trim();
+    fs.appendFileSync(path.join(repository, 'README.md'), 'fork change\n');
+    runGit(repository, ['commit', '-am', 'Change for fork']);
+
+    expect((await push(repository)).pushed).toEqual([{ local: 'refs/heads/next', remote: 'fork' }]);
+    expect(runGit(fork, ['rev-parse', 'next']).trim()).toBe(runGit(repository, ['rev-parse', 'HEAD']).trim());
+    expect(runGit(upstream, ['rev-parse', 'next']).trim()).toBe(upstreamHead);
+    expect(readBranchConfig(repository, 'next', 'remote')).toBe('upstream');
+    expect((await push(repository)).pushed).toEqual([]);
+  });
+
+  it.each(['remote.pushDefault', 'branch.next.pushRemote'])('uses %s for first publication without an upstream', async (key) => {
+    const { repository, remote: origin } = createRepositoryWithRemote();
+    const fork = createTempDir();
+    runGit(fork, ['init', '--bare']);
+    runGit(repository, ['remote', 'add', 'fork', fork]);
+    runGit(repository, ['config', key, 'fork']);
+    runGit(repository, ['config', 'push.autoSetupRemote', 'false']);
+
+    expect((await push(repository)).pushed).toEqual([{ local: 'refs/heads/next', remote: 'fork' }]);
+    expect(readBranchConfig(repository, 'next', 'remote')).toBe('fork');
+    expect(() => runGit(origin, ['rev-parse', 'refs/heads/next'])).toThrow();
+  });
+
+  it('lets an explicit push remote override configured destinations', async () => {
+    const { repository, remote: origin } = createRepositoryWithRemote({ defaultBranch: 'next' });
+    const fork = createTempDir();
+    runGit(fork, ['init', '--bare']);
+    runGit(repository, ['remote', 'add', 'fork', fork]);
+    runGit(repository, ['branch', '--set-upstream-to=origin/next']);
+    runGit(repository, ['config', 'branch.next.pushRemote', 'fork']);
+    fs.appendFileSync(path.join(repository, 'README.md'), 'origin change\n');
+    runGit(repository, ['commit', '-am', 'Change for origin']);
+
+    expect((await push(repository, { remote: 'origin' })).pushed)
+      .toEqual([{ local: 'refs/heads/next', remote: 'origin' }]);
+    expect(runGit(origin, ['rev-parse', 'next']).trim()).toBe(runGit(repository, ['rev-parse', 'HEAD']).trim());
+    expect(() => runGit(fork, ['rev-parse', 'next'])).toThrow();
   });
 });
 

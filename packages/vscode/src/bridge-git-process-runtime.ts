@@ -1,8 +1,9 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { spawn, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { spawnOwnedProcess } from './owned-process';
 
 const execFileAsync = promisify(execFile);
 const gpgconfCandidates = ['gpgconf', '/opt/homebrew/bin/gpgconf', '/usr/local/bin/gpgconf'];
@@ -13,7 +14,7 @@ const isSocketPath = async (candidate: string): Promise<boolean> => {
   }
   try {
     const stat = await fs.promises.stat(candidate);
-    return typeof stat.isSocket === 'function' && stat.isSocket();
+    return stat.isSocket();
   } catch {
     return false;
   }
@@ -73,33 +74,50 @@ const buildGitEnv = async (): Promise<NodeJS.ProcessEnv> => {
   return env;
 };
 
-export const execGit = async (args: string[], cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+const activeProcesses = new Set<ReturnType<typeof spawnOwnedProcess>>();
+let shutdown: Promise<void> | null = null;
+
+export const stopGitProcesses = (): Promise<void> => {
+  if (!shutdown) shutdown = (async () => {
+    const results = await Promise.allSettled([...activeProcesses].map((process) => process.terminate()));
+    for (const result of results) {
+      if (result.status === 'rejected') console.warn('Failed to stop a Git process:', result.reason);
+    }
+  })();
+  return shutdown;
+};
+
+export const execGit = async (
+  args: string[], cwd: string, options: { binary?: string; timeoutMs?: number } = {},
+): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
   const env = await buildGitEnv();
-  return new Promise((resolve) => {
-    const proc = spawn('git', args, {
-      cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env,
-      windowsHide: true,
+  if (shutdown) return { stdout: '', stderr: 'Git runtime is shutting down', exitCode: 1 };
+  const process = spawnOwnedProcess(options.binary ?? 'git', args, { cwd, env });
+  activeProcesses.add(process);
+  let stdout = '';
+  let stderr = '';
+  let timedOut = false;
+  let termination: Promise<void> | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  process.child.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
+  process.child.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
+  try {
+    const exit = await new Promise<Awaited<typeof process.closed>>((resolve, reject) => {
+      void process.closed.then(resolve);
+      if (options.timeoutMs && options.timeoutMs > 0) {
+        timer = setTimeout(() => {
+          timedOut = true;
+          termination = process.terminate();
+          void termination.catch(reject);
+        }, options.timeoutMs);
+      }
     });
-
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout?.on('data', (data) => {
-      stdout += data.toString();
-    });
-
-    proc.stderr?.on('data', (data) => {
-      stderr += data.toString();
-    });
-
-    proc.on('close', (code) => {
-      resolve({ stdout, stderr, exitCode: code ?? 0 });
-    });
-
-    proc.on('error', (error) => {
-      resolve({ stdout: '', stderr: error instanceof Error ? error.message : String(error), exitCode: 1 });
-    });
-  });
+    await termination;
+    if (timedOut) return { stdout, stderr: `Git command timed out after ${options.timeoutMs}ms`, exitCode: 1 };
+    if (exit.error) return { stdout, stderr: exit.error.message, exitCode: 1 };
+    return { stdout, stderr: stderr || (exit.signal ? `Git terminated by ${exit.signal}` : ''), exitCode: exit.code ?? 1 };
+  } finally {
+    clearTimeout(timer);
+    void process.closed.then(() => activeProcesses.delete(process));
+  }
 };

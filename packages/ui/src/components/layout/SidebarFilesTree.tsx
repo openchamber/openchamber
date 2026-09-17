@@ -427,7 +427,13 @@ const FileRow: React.FC<FileRowProps> = ({
     <ContextMenu open={rightClickOpen} onOpenChange={setRightClickOpen}>
       <ContextMenuTrigger render={(
         <div
-          className="group relative flex items-center"
+          className="group relative flex items-center typography-meta"
+          style={{
+            contentVisibility: 'auto',
+            // Keep skipped rows the same size after font changes. Expanded
+            // child lists remain outside this single-line row's containment.
+            blockSize: 'calc(max(1lh, 1rem) + 0.5rem)',
+          }}
           onContextMenu={handleContextMenu}
           onDragEnter={handleExternalDragOver}
           onDragOver={handleExternalDragOver}

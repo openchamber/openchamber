@@ -1,10 +1,35 @@
 import React from 'react';
 import { Icon } from "@/components/icon/Icon";
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { resolveGuestToolIcon } from '@/lib/guests/icon';
+import type { GuestToolRule } from '@/lib/guests/tool-presentation';
+import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 
-export const getToolIcon = (toolName: string) => {
+/**
+ * Icon for a tool row, dialog header, or error fallback. An extension rule
+ * with an icon wins: a package SVG drawn as a currentColor mask, or a
+ * Remixicon the sprite knows; otherwise the built-in mapping runs on the
+ * normalized name, and an unknown tool gets the generic wrench.
+ */
+export const getToolIcon = (toolName: string, presentation?: GuestToolRule | null) => {
     const iconClass = 'h-3.5 w-3.5 flex-shrink-0';
+    const guestIcon = presentation
+        ? resolveGuestToolIcon(presentation.guestId, presentation.icon, getRuntimeUrlResolver().authenticatedAsset)
+        : null;
+    if (guestIcon) {
+        return <GuestIcon icon={guestIcon.icon} iconSrc={guestIcon.iconSrc} className={iconClass} />;
+    }
     const tool = toolName.toLowerCase();
 
+    if (tool === 'reasoning') {
+        return <Icon name="brain-ai-3" className={iconClass} />;
+    }
+    if (tool === 'image-preview') {
+        return <Icon name="file-image" className={iconClass} />;
+    }
+    if (tool === 'mermaid-preview') {
+        return <Icon name="file-list-2" className={iconClass} />;
+    }
     if (tool === 'edit' || tool === 'multiedit' || tool === 'apply_patch' || tool === 'str_replace' || tool === 'str_replace_based_edit_tool') {
         return <Icon name="pencil" className={iconClass} />;
     }

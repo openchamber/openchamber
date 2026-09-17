@@ -82,7 +82,7 @@ const markdownHighlight = () => syntaxHighlighting(HighlightStyle.define([
   { tag: t.monospace, backgroundColor: 'var(--surface-muted)' },
   { tag: t.quote, color: 'var(--markdown-blockquote, currentColor)', fontStyle: 'italic' },
   { tag: t.list, color: 'color-mix(in srgb, var(--muted-foreground) 40%, var(--foreground) 60%)' },
-  { tag: t.heading, color: 'var(--markdown-heading1, currentColor)' },
+  { tag: t.heading, color: 'var(--syntax-foreground)' },
 ]));
 
 export function languageByExtension(filePath: string): Extension | null {
