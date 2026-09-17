@@ -169,6 +169,8 @@ export type SessionMaterializationReason =
   | "transport-switch"
   | "stale-status-resync"
   | "settled-running-tool"
+  | "settled-error"
+  | "settled-unanswered-turn"
 
 export type DirectoryEventResult = boolean | {
   changed: boolean
