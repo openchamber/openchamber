@@ -4519,6 +4519,16 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         }
       }
       if (applyUpdate) {
+        // A previous restart click may still be installing. Squirrel accepts
+        // one quitAndInstall() per app session, so a second call throws
+        // SQRLUpdaterErrorInvalidState, and installDownloadedUpdate()'s
+        // fail() path would roll the quit state back while the first install
+        // is still shutting the app down. Treat the duplicate click as part
+        // of the same restart instead of starting a second install.
+        if (state.installingUpdate) {
+          log.info('[electron] desktop_restart ignored, update install already in flight');
+          return null;
+        }
         // Match the working updater pattern closely: only bypass the macOS
         // hide-on-close / quit-confirmation guards, leave the rest of the
         // updater-driven quit/install sequence alone.
