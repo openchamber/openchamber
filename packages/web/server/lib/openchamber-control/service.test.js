@@ -5,6 +5,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 
 import { createOpenChamberControlService } from './service.js';
+import { createPathMapping, setActivePathMapping } from '../opencode/path-mapping.js';
 
 const createService = (overrides = {}) => {
   const client = {
@@ -57,6 +58,17 @@ describe('OpenChamber control service', () => {
       defaultModel: 'provider/model',
       favoriteModels: [],
     }));
+  });
+
+  it('translates mapped directories before calling the OpenCode SDK', async () => {
+    setActivePathMapping(createPathMapping({
+      platform: 'linux',
+      rules: [{ hostPrefix: '/repo', remotePrefix: '/workspace', compareKey: '/repo' }],
+    }));
+    const { service, client } = createService();
+    await service.execute('session.status', { sessionId: 'ses_1', directory: '/repo/app' });
+    expect(client.session.status).toHaveBeenCalledWith({ directory: '/workspace/app' });
+    setActivePathMapping(null);
   });
 
   it('maps schedule creation into the shared scheduled-task service', async () => {

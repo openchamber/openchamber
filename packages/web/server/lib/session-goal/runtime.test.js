@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSessionGoalRuntime } from './runtime.js';
+import { createPathMapping, setActivePathMapping } from '../opencode/path-mapping.js';
 
 const SESSION_ID = 'ses_parent';
 const CHILD_ID = 'ses_child';
@@ -28,7 +29,7 @@ const jsonResponse = (body, status = 200) => new Response(JSON.stringify(body), 
 
 const requestPath = (input) => new URL(typeof input === 'string' ? input : input.url).pathname;
 
-const startIdleTick = async (fetchImpl) => {
+const startIdleTick = async (fetchImpl, directory = DIRECTORY) => {
   const getSmallModelService = vi.fn();
   vi.stubGlobal('fetch', fetchImpl);
   const runtime = createSessionGoalRuntime({
@@ -40,7 +41,7 @@ const startIdleTick = async (fetchImpl) => {
   });
   runtime.processPayload({
     type: 'session.status',
-    properties: { sessionID: SESSION_ID, status: { type: 'idle' }, directory: DIRECTORY },
+    properties: { sessionID: SESSION_ID, status: { type: 'idle' }, directory },
   });
   await vi.runOnlyPendingTimersAsync();
   return { runtime, getSmallModelService };
@@ -124,6 +125,7 @@ describe('session goal live activity gate', () => {
   });
 
   afterEach(() => {
+    setActivePathMapping(null);
     vi.unstubAllGlobals();
     vi.useRealTimers();
   });
@@ -143,6 +145,27 @@ describe('session goal live activity gate', () => {
 
     await vi.advanceTimersByTimeAsync(60_000);
     expect(paths).toHaveLength(2);
+    runtime.stop();
+  });
+
+  it('translates mapped directories in OpenCode requests', async () => {
+    setActivePathMapping(createPathMapping({
+      platform: 'linux',
+      rules: [{ hostPrefix: '/repo', remotePrefix: '/workspace', compareKey: '/repo' }],
+    }));
+    const calls = [];
+    const { runtime } = await startIdleTick(vi.fn(async (input) => {
+      const url = new URL(typeof input === 'string' ? input : input.url);
+      calls.push(url.pathname + url.search);
+      if (url.pathname === `/session/${SESSION_ID}`) return jsonResponse(session);
+      if (url.pathname === '/session/status') return jsonResponse({ [SESSION_ID]: { type: 'busy' } });
+      throw new Error(`Unexpected request: ${url.pathname}`);
+    }), '/repo/app');
+
+    const goalRequest = calls.find((entry) => entry.startsWith(`/session/${SESSION_ID}?`));
+    expect(goalRequest).toContain('directory=%2Fworkspace%2Fapp');
+    const statusRequest = calls.find((entry) => entry.startsWith('/session/status'));
+    expect(statusRequest).toContain('directory=%2Fworkspace%2Fapp');
     runtime.stop();
   });
 
