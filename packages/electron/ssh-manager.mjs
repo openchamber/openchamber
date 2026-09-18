@@ -3,6 +3,7 @@ import fsp from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
@@ -94,6 +95,38 @@ const readJsonRoot = (settingsFilePath) => {
   } catch {
     return {};
   }
+};
+
+// Settings JSON is external input. Decode the managed-server port map into its
+// domain shape once, here, so callers never branch on raw JSON values.
+// A config tag is only meaningful in the exact shape persistManagedServerPort
+// writes; anything else in the JSON is treated as absent.
+const parseManagedServerConfigTag = (value) => (/^[0-9a-f]{24}$/.test(value) ? value : null);
+
+const managedServerEntries = (root) => {
+  const value = root?.desktopSshManagedServers;
+  if (!value || Array.isArray(value)) return {};
+  const entries = {};
+  for (const [id, entry] of Object.entries(value)) {
+    const port = Number(entry?.port);
+    if (!Number.isFinite(port) || port <= 0) continue;
+    const updatedAtMs = Number(entry?.updatedAtMs);
+    const parsed = { port, updatedAtMs: Number.isFinite(updatedAtMs) ? updatedAtMs : 0 };
+    const configTag = parseManagedServerConfigTag(entry?.configTag);
+    if (configTag) parsed.configTag = configTag;
+    entries[id] = parsed;
+  }
+  return entries;
+};
+
+// Fingerprint of the config baked into a managed server's process: the UI
+// password it requires and the interface it binds. An adopted daemon whose
+// persisted tag no longer matches the instance config runs stale settings, so
+// the connect restarts it instead of silently reusing it. The tag is a
+// truncated hash: the settings file never gains a plaintext secret.
+const managedServerConfigTag = (instance, openchamberPassword) => {
+  const bindHost = instance?.remoteOpenchamber?.bindHost === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1';
+  return createHash('sha256').update(`${openchamberPassword ?? ''}\n${bindHost}`).digest('hex').slice(0, 24);
 };
 
 const writeJsonRoot = async (settingsFilePath, root) => {
@@ -422,6 +455,11 @@ export class ElectronSshManager {
     this.connectAttempts = new Map();
     this.connecting = new Map();
     this.sshAuth = new WeakMap();
+    // Test seam: how long to wait for a stopped managed server to disappear
+    // before starting its replacement on a fresh port.
+    this.managedServerStopWaitMs = Number.isFinite(options.managedServerStopWaitMs)
+      ? options.managedServerStopWaitMs
+      : 5000;
   }
 
   usesControlMaster() {
@@ -766,6 +804,16 @@ export class ElectronSshManager {
       root.desktopDefaultHostId = LOCAL_HOST_ID;
     }
 
+    // Managed-server ports are only meaningful for instances that still exist.
+    const managedServers = managedServerEntries(root);
+    if (Object.keys(managedServers).length > 0) {
+      const pruned = {};
+      for (const [id, entry] of Object.entries(managedServers)) {
+        if (nextIds.has(id)) pruned[id] = entry;
+      }
+      root.desktopSshManagedServers = pruned;
+    }
+
     await writeJsonRoot(this.settingsFilePath, root);
   }
 
@@ -939,6 +987,28 @@ export class ElectronSshManager {
       instance.localForward.preferredLocalPort = localPort;
     }
     root.desktopSshInstances = instances;
+    await writeJsonRoot(this.settingsFilePath, root);
+  }
+
+  // Ports of managed servers we started are runtime state, not user config, so
+  // they live in their own root key: a renderer save of desktopSshInstances
+  // rewrites that array from known fields and would silently drop the port.
+  readManagedServerEntry(instanceId) {
+    return managedServerEntries(readJsonRoot(this.settingsFilePath))[instanceId] ?? null;
+  }
+
+  readManagedServerPort(instanceId) {
+    return this.readManagedServerEntry(instanceId)?.port ?? null;
+  }
+
+  async persistManagedServerPort(instanceId, remotePort, configTag) {
+    if (!Number.isFinite(remotePort) || remotePort <= 0) return;
+    const root = readJsonRoot(this.settingsFilePath);
+    const managedServers = managedServerEntries(root);
+    const record = { port: remotePort, updatedAtMs: nowMillis() };
+    if (configTag) record.configTag = configTag;
+    managedServers[instanceId] = record;
+    root.desktopSshManagedServers = managedServers;
     await writeJsonRoot(this.settingsFilePath, root);
   }
 
@@ -1250,21 +1320,89 @@ export class ElectronSshManager {
     }
 
     this.setStatus(instance.id, 'server_detecting', 'Detecting managed OpenChamber server');
-    let remotePort = instance.remoteOpenchamber.preferredPort || null;
-    let startedByUs = false;
-    if (remotePort && !(await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredOpenChamberPassword(instance)))) {
-      remotePort = null;
+    const openchamberPassword = this.configuredOpenChamberPassword(instance);
+    const preferredPort = Number.isFinite(instance.remoteOpenchamber.preferredPort)
+      ? Number(instance.remoteOpenchamber.preferredPort)
+      : null;
+    const persistedEntry = this.readManagedServerEntry(instance.id);
+    const persistedPort = persistedEntry?.port ?? null;
+    const persistedConfigTag = persistedEntry?.configTag ?? null;
+    const configTag = managedServerConfigTag(instance, openchamberPassword);
+
+    const candidatePorts = [];
+    for (const candidate of [preferredPort, persistedPort]) {
+      if (Number.isFinite(candidate) && !candidatePorts.includes(candidate)) candidatePorts.push(candidate);
     }
+
+    let remotePort = null;
+    let runningVersion = null;
+    // A daemon answering on our own persisted port was started by an earlier
+    // session of this app, so this session adopts its lifecycle: disconnect
+    // stops it when keepRunning is off, and a version mismatch restarts it
+    // below. A daemon on the user's preferred port may be externally managed
+    // and is reused untouched at any version.
+    let adoptedByUs = false;
+    for (const candidate of candidatePorts) {
+      let info = null;
+      try {
+        info = await this.probeRemoteSystemInfo(parsed, controlPath, candidate, openchamberPassword);
+      } catch {
+        continue;
+      }
+      remotePort = candidate;
+      // Missing/empty version means an older or health-only responder: reuse
+      // it rather than restart blind. A truthy mismatch is restarted below.
+      runningVersion = info?.openchamberVersion || null;
+      adoptedByUs = candidate === persistedPort && candidate !== preferredPort;
+      break;
+    }
+
+    // An adopted daemon can predate the binary update installed above, or run
+    // with config (UI password, bind host) that has since been edited; restart
+    // it so the forwarded server matches this app version and current config.
+    // The replacement is started on a fresh port, so a daemon that refuses to
+    // stop cannot block the connect — it is left behind rather than failing
+    // loudly. A daemon reporting 'unknown' can never version-match, so version-
+    // restarting it would loop on every connect; leave it running instead.
+    // Entries predating config tags are adopted as-is and backfilled below.
+    const versionMismatch = Boolean(runningVersion) && runningVersion !== 'unknown' && runningVersion !== this.appVersion;
+    const configMismatch = !versionMismatch
+      && persistedConfigTag !== null
+      && persistedConfigTag !== configTag;
+    if (adoptedByUs && (versionMismatch || configMismatch)) {
+      this.setStatus(
+        instance.id,
+        'server_starting',
+        versionMismatch
+          ? `Restarting managed OpenChamber server ${runningVersion} to ${this.appVersion}`
+          : 'Restarting managed OpenChamber server (configuration changed)',
+      );
+      await this.stopRemoteServerBestEffort(parsed, controlPath, remotePort, binary.binPath);
+      const stopDeadline = nowMillis() + this.managedServerStopWaitMs;
+      while (nowMillis() < stopDeadline && (await this.remoteServerRunning(parsed, controlPath, remotePort, openchamberPassword))) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      remotePort = null;
+    } else if (adoptedByUs && remotePort && persistedConfigTag === null) {
+      // Entry predates config tags: adopt the daemon as-is and record the
+      // fingerprint so a later config edit is detected instead of ignored.
+      await this.persistManagedServerPort(instance.id, remotePort, configTag);
+    }
+
+    let startedByUs = false;
     if (!remotePort) {
       this.setStatus(instance.id, 'server_starting', 'Starting managed OpenChamber server');
-      const desiredPort = instance.remoteOpenchamber.preferredPort || randomPortCandidate(instance.id);
+      const desiredPort = preferredPort || randomPortCandidate(instance.id);
       remotePort = await this.startRemoteServerManaged(parsed, controlPath, instance, desiredPort, binary.binPath);
       startedByUs = true;
+      if (remotePort !== persistedPort) {
+        await this.persistManagedServerPort(instance.id, remotePort, configTag);
+      }
     }
-    if (!(await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredOpenChamberPassword(instance)))) {
+    if (!(await this.remoteServerRunning(parsed, controlPath, remotePort, openchamberPassword))) {
       throw new Error('Managed OpenChamber server failed to become reachable');
     }
-    return { remotePort, startedByUs, remoteBinPath: binary.binPath };
+    return { remotePort, startedByUs: startedByUs || adoptedByUs, remoteBinPath: binary.binPath };
   }
 
   async disconnectInternal(id, reportIdle) {
