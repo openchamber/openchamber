@@ -3,12 +3,14 @@
 @import "./styles/design-system.css";
 @import "./styles/typography.css";
 @import "./styles/mobile.css";
-/* Load KaTeX styles eagerly with the main bundle. Importing them inside the
-   lazy MarkdownRendererImpl chunk meant a stylesheet was injected late on the
-   first markdown render of a session; that late injection triggered a style
-   recalc during which the layered `.chat-message-column` width clamp briefly
-   lost, flashing message text to full width before it snapped back. */
-@import "katex/dist/katex.min.css";
+/* KaTeX styles are loaded eagerly through `styles/katex-css` (a JS import) at
+   every app entry point. Keeping them eager avoids a late stylesheet injection
+   on the first markdown render, whose style recalc briefly lost the layered
+   `.chat-message-column` width clamp and flashed message text to full width.
+   A JS import is required because Lightning CSS inlines a CSS `@import`
+   without resolving the relative `url(fonts/...)` references, leaving the
+   KaTeX font files unbundled (openchamber/openchamber#1880). */
+@source "./**/*.{ts,tsx,css}";
 @source "./**/*.{ts,tsx,css}";
 
 /* KaTeX theme overrides for light/dark mode */
