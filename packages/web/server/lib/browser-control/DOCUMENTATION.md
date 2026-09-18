@@ -48,3 +48,6 @@ itself; it can only ask and wait.
   and a missing one silently turns every answer into an agent-visible timeout.
 - Request payload limits are sized for a page snapshot (visible text plus every
   interactive element), not for a control message.
+- Clipboard contents never cross this broker. A page writes directly to the host
+  clipboard and native paste reads from it, so neither request nor result payloads
+  contain the copied value.
